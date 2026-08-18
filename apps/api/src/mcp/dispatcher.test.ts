@@ -2,6 +2,7 @@ import { assert, describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Schema, Tracer } from "effect"
 import type { InternalRpcToolNotFoundError } from "@maple/domain/internal-rpc"
 import { McpToolExecutor, listMcpTools } from "./dispatcher"
+import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "./expected-failures"
 import { mapleToolCatalog, toInputSchema } from "./tools/registry"
 import type { McpToolRuntimeRequirements } from "./tools/runtime-requirements"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -137,6 +138,46 @@ describe("MCP dispatcher", () => {
 				expect(dispatchSpan.attributes.get("result.isError")).toBe(true)
 			}),
 		)
+
+		// Expected 4xx (bad parameters, bad credentials) must not be Error spans —
+		// only 5xx is, per CLAUDE.md. Prod was recording `@maple/mcp/decode-error`
+		// and `McpAuthInvalidError` as Error status + exception events.
+		it.effect("records an expected 4xx as span attributes and a Warn log, not an error", () =>
+			Effect.gen(function* () {
+				const executor = yield* makeValidationExecutor
+				const { spans, tracer } = makeRecordingTracer()
+
+				yield* executor.execute(TENANT, "inspect_trace", {}, "mcp").pipe(Effect.withTracer(tracer))
+
+				const dispatchSpan = spans.find((s) => s.name === "McpToolDispatcher.call")
+				assert.isDefined(dispatchSpan)
+				expect(dispatchSpan.attributes.get("error.type")).toBe("@maple/mcp/decode-error")
+				expect(dispatchSpan.attributes.get("http.response.status_code")).toBe(400)
+
+				// The inner registry span still FAILS with the decode error (the typed
+				// error stays in the error channel); the SDK exporter is what turns it
+				// into an Ok span, keyed off the identifier list below.
+				const registrySpan = spans.find((s) => s.name === "McpToolRegistry.execute")
+				assert.isDefined(registrySpan)
+				expect(MCP_ANTICIPATED_ERROR_IDENTIFIERS).toContain("@maple/mcp/decode-error")
+			}),
+		)
+
+		it("lists both MCP auth failures as anticipated so their spans export as Ok", () => {
+			// `@maple/domain/anticipated-errors` derives its set from domain HTTP
+			// exports and cannot see these apps/api classes.
+			expect(MCP_ANTICIPATED_ERROR_IDENTIFIERS).toEqual(
+				expect.arrayContaining([
+					"@maple/mcp/errors/McpAuthMissingError",
+					"@maple/mcp/errors/McpAuthInvalidError",
+				]),
+			)
+			// Genuine failures must keep their Error spans.
+			expect(MCP_ANTICIPATED_ERROR_IDENTIFIERS).not.toContain(
+				"@maple/mcp/errors/McpAuthUnavailableError",
+			)
+			expect(MCP_ANTICIPATED_ERROR_IDENTIFIERS).not.toContain("@maple/mcp/errors/McpQueryError")
+		})
 
 		it.effect("records result.isError as false for a call that succeeds", () =>
 			Effect.gen(function* () {

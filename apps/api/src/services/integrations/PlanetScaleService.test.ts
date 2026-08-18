@@ -1,5 +1,6 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { ConfigProvider, Effect, Fiber, Layer, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
@@ -166,6 +167,53 @@ describe("PlanetScaleService", () => {
 			const second = yield* service.pollAllOrgs()
 			assert.strictEqual(second.skipped, 1)
 			assert.strictEqual(second.refreshed, 0)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
+	// A PlanetScale slowdown timed out the inventory listing for 5+ orgs at once and
+	// each failed on the first stall. The listing now gets two extra attempts before
+	// the tick gives up.
+	it.effect("retries a timed-out inventory listing before failing the org", () => {
+		const testDb = createTestDb(trackedDbs)
+		let databaseListAttempts = 0
+		// The connect flow lists databases too; only the poll under test may hang.
+		let hangDatabaseListings = false
+		const baseStub = stubApi({ databases: [], branchesByDatabase: {} })
+		const stub = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+			// Only the databases listing hangs; the OAuth/token calls must still answer.
+			if (hangDatabaseListings && /\/databases\?/.test(url)) {
+				databaseListAttempts += 1
+				return new Promise<Response>(() => {})
+			}
+			return baseStub(input, init)
+		}) as typeof fetch
+		globalThis.fetch = stub
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const service = yield* PlanetScaleService
+			hangDatabaseListings = true
+
+			// `it.effect` runs on TestClock, so the 15s request timeout and the jittered
+			// backoff between attempts only elapse when the clock is advanced.
+			const poll = yield* Effect.forkChild(service.pollAllOrgs())
+			// Give the fiber a real macrotask to reach (and re-reach) the pending fetch
+			// before each virtual advance — the stubbed request never settles, so only
+			// the timeout can move it along.
+			for (let tick = 0; tick < 12; tick++) {
+				yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 10)))
+				yield* TestClock.adjust("20 seconds")
+			}
+			const summary = yield* Fiber.join(poll)
+
+			assert.strictEqual(summary.failures, 1)
+			// 1 initial attempt + REQUEST_TIMEOUT_RETRIES.
+			assert.strictEqual(databaseListAttempts, 3)
 		}).pipe(
 			Effect.provideService(FetchHttpClient.Fetch, stub),
 			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
