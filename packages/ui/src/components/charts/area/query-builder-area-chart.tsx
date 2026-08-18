@@ -8,6 +8,7 @@ import {
 	splitAtFirstPartial,
 	trimEmptyTrailingBuckets,
 } from "../../plot/partial-buckets"
+import { dashedGridY } from "../../plot/plot-grid"
 import { focusCrosshair, focusDot } from "../../plot/plot-focus"
 import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
 import { roundCapDasharray, useChartId, verticalGradient } from "../../plot/plot-paint"
@@ -288,6 +289,7 @@ export function QueryBuilderAreaChart({
 		return defineChart({
 			gradients,
 			marks: [
+				dashedGridY(),
 				...thresholdRules(thresholds ?? [], { labelX: plotRows.at(-1)?.date }),
 				...visible.map((entry) => band(solid, entry, false)),
 				...(hasDashed ? visible.map((entry) => band(dashed, entry, true)) : []),

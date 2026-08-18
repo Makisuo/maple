@@ -75,7 +75,10 @@ const OVERVIEW_CHARTS: OverviewChartConfig[] = [
 		chartId: "latency-line",
 		title: "Latency",
 		layout: { x: 0, y: 4, w: 6, h: 4 },
-		legend: "visible",
+		// No `legend` — every tile here is a `WidgetShell`, whose header hosts the
+		// series chips in the top-right. `"visible"` would move them under the plot
+		// (bottom-left) and shorten it, which is the dashboard-builder default for a
+		// standalone chart, not for a card with a header.
 		tooltip: "visible",
 	},
 	{

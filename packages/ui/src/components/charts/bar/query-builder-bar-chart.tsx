@@ -3,6 +3,7 @@ import * as React from "react"
 
 import { formatBucketLabel, formatValueByUnit } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
+import { dashedGridY } from "../../plot/plot-grid"
 import { findFirstPartialIndex, trimEmptyTrailingBuckets } from "../../plot/partial-buckets"
 import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
 import { PlotTooltipBody, cursorTooltip, type PlotTooltipSeries } from "../../plot/plot-tooltip"
@@ -354,6 +355,7 @@ export function QueryBuilderBarChart({
 
 		return defineChart({
 			marks: [
+				dashedGridY(),
 				// The label rides the PADDED domain's right edge, not the last
 				// bucket's timestamp: on this chart that timestamp is the last
 				// column's centre, so an end-anchored label would print across the

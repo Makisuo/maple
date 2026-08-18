@@ -4,6 +4,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { QueryBuilderAreaChart } from "../../charts/area/query-builder-area-chart"
 import { QueryBuilderBarChart } from "../../charts/bar/query-builder-bar-chart"
+import { LatencyLineChart } from "../../charts/line/latency-line-chart"
+import { QueryBuilderLineChart } from "../../charts/line/query-builder-line-chart"
 import { PlotLegendSlotContext, type PlotLegendItem } from "../plot-frame"
 
 // jsdom has no ResizeObserver and lays nothing out; the charts only need the
@@ -117,6 +119,40 @@ describe("the hoisted legend slot", () => {
 		)
 		expect(hostLabels(container)).toHaveLength(3)
 		rerender(<LegendHost>{null}</LegendHost>)
+		expect(hostLabels(container)).toEqual([])
+	})
+
+	it("hoists the fixed-metric charts too, rather than only the query-builder ones", () => {
+		// The overview's Latency tile. Its three percentiles are fixed, not
+		// query-derived, so it never went through `useTimeseriesModel` and its
+		// publish was unconditional.
+		const { container } = render(
+			<LegendHost>
+				<LatencyLineChart />
+			</LegendHost>,
+		)
+		expect(hostLabels(container)).toEqual(["P99", "P95", "P50"])
+	})
+
+	it("keeps a fixed-metric chart quiet while it draws its own legend", () => {
+		// The duplicate this fixes: P99/P95/P50 in the card header AND again in a
+		// strip under the plot.
+		const { container } = render(
+			<LegendHost>
+				<LatencyLineChart legend="visible" />
+			</LegendHost>,
+		)
+		expect(hostLabels(container)).toEqual([])
+	})
+
+	it("keeps the query-builder line quiet while it draws a right-hand legend", () => {
+		// `legend` reached the strip but not the model, so the header published
+		// anyway — the stats-table scenario printed its series in both places.
+		const { container } = render(
+			<LegendHost>
+				<QueryBuilderLineChart data={rows} legend="right" />
+			</LegendHost>,
+		)
 		expect(hostLabels(container)).toEqual([])
 	})
 

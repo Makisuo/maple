@@ -8,13 +8,20 @@ import {
 	useFixedMetricModel,
 	type FixedMetricSeries,
 } from "../../plot/fixed-metrics"
+import { dashedGridY } from "../../plot/plot-grid"
 import { splitAtFirstPartial } from "../../plot/partial-buckets"
 import { focusCrosshair, focusDot } from "../../plot/plot-focus"
 import { PlotFrame, usePlotLegendSlot } from "../../plot/plot-frame"
 import { roundCapDasharray, useChartId, verticalGradient } from "../../plot/plot-paint"
 import { maybeTooltip, type PlotTooltipSeries } from "../../plot/plot-tooltip"
 import { usePlotColors, type PlotColorToken } from "../../plot/theme"
-import { asFiniteNumber, timeseriesXAxis, timeseriesYAxis, type TimeseriesRow } from "../../plot/timeseries"
+import {
+	hoistsLegend,
+	asFiniteNumber,
+	timeseriesXAxis,
+	timeseriesYAxis,
+	type TimeseriesRow,
+} from "../../plot/timeseries"
 import type { ServiceChartProps } from "../_shared/chart-types"
 import { apdexTimeSeriesData } from "../_shared/sample-data"
 
@@ -54,9 +61,13 @@ export const ApdexAreaChart = memo(function ApdexAreaChart({
 		[colors],
 	)
 
-	// The card header's series chips. A no-op outside a `WidgetShell` — the
-	// service pages draw their own always-on legend, so nothing duplicates.
-	usePlotLegendSlot(series)
+	// The card header's series chips, top-right of the tile. A no-op outside a
+	// `WidgetShell` — the service pages draw their own always-on legend.
+	//
+	// `hoistsLegend` is the gate, not an unconditional publish: a chart already
+	// drawing the strip under its plot would otherwise print its series twice,
+	// once bottom-left and once in the header. See `hoistsLegend`.
+	usePlotLegendSlot(hoistsLegend(legend) ? series : null)
 
 	const tooltipSeries = useMemo<PlotTooltipSeries<TimeseriesRow>[]>(
 		() => [
@@ -127,6 +138,7 @@ export const ApdexAreaChart = memo(function ApdexAreaChart({
 				...(hasDashed ? [verticalGradient(fadedGradientId, color, 0.15, 0)] : []),
 			],
 			marks: [
+				dashedGridY(),
 				band(solid, gradientId, FILL_OPACITY),
 				...(hasDashed ? [band(dashed, fadedGradientId, FILL_OPACITY)] : []),
 				edge(solid, false),

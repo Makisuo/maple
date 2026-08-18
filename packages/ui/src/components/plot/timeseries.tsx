@@ -576,7 +576,9 @@ export function timeseriesYAxis(options: TimeseriesYAxisOptions) {
 			// from the plot's pixel height, so the domain computed above and the
 			// axis drawn would agree only at some window sizes.
 			nice: logScale ? false : NICE_TICK_COUNT,
-			grid: true,
+			// No `grid` — the built-in one is solid and nothing dashes it. Every
+			// chart on this axis emits `dashedGridY()` as its first mark instead;
+			// see `plot-grid.ts`.
 			axis: {
 				line: false,
 				// There is no `allowDecimals`; integer-only data supplies its tick

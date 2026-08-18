@@ -3,6 +3,7 @@ import { curveMonotoneX } from "d3-shape"
 import * as React from "react"
 
 import { cn } from "../../../lib/utils"
+import { dashedGridY } from "../../plot/plot-grid"
 import { splitAtFirstPartial } from "../../plot/partial-buckets"
 import { focusCrosshair, focusDot } from "../../plot/plot-focus"
 import { PlotFrame } from "../../plot/plot-frame"
@@ -38,7 +39,10 @@ export function QueryBuilderLineChart({
 	showPoints,
 	thresholds,
 }: QueryBuilderLineChartProps) {
-	const model = useTimeseriesModel({ data, unit })
+	// `legend` is threaded in, not dropped: it is what tells the model whether to
+	// publish into a host header. Without it the tile printed its series twice —
+	// once in the card header, once in the strip this chart draws itself.
+	const model = useTimeseriesModel({ data, unit, legend })
 	const {
 		rows,
 		visible,
@@ -86,6 +90,7 @@ export function QueryBuilderLineChart({
 
 		return defineChart({
 			marks: [
+				dashedGridY(),
 				// `labelX` anchors the label at the last bucket; without it
 				// `thresholdRules` draws the rule and omits the text, which is how a
 				// widget that names a threshold "SLO" ended up with an anonymous

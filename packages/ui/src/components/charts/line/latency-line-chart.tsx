@@ -9,13 +9,20 @@ import {
 	useFixedMetricModel,
 	type FixedMetricSeries,
 } from "../../plot/fixed-metrics"
+import { dashedGridY } from "../../plot/plot-grid"
 import { splitAtFirstPartial } from "../../plot/partial-buckets"
 import { focusCrosshair, focusDot } from "../../plot/plot-focus"
 import { PlotFrame, usePlotLegendSlot } from "../../plot/plot-frame"
 import { roundCapDasharray } from "../../plot/plot-paint"
 import { maybeTooltip, type PlotTooltipSeries } from "../../plot/plot-tooltip"
 import { usePlotColors, type PlotColorToken } from "../../plot/theme"
-import { asFiniteNumber, timeseriesXAxis, timeseriesYAxis, type TimeseriesRow } from "../../plot/timeseries"
+import {
+	hoistsLegend,
+	asFiniteNumber,
+	timeseriesXAxis,
+	timeseriesYAxis,
+	type TimeseriesRow,
+} from "../../plot/timeseries"
 import type { ServiceChartProps } from "../_shared/chart-types"
 import { latencyTimeSeriesData } from "../_shared/sample-data"
 
@@ -64,9 +71,13 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 		[colors],
 	)
 
-	// The card header's series chips. A no-op outside a `WidgetShell` — the
-	// service pages draw their own always-on legend, so nothing duplicates.
-	usePlotLegendSlot(series)
+	// The card header's series chips, top-right of the tile. A no-op outside a
+	// `WidgetShell` — the service pages draw their own always-on legend.
+	//
+	// `hoistsLegend` is the gate, not an unconditional publish: a chart already
+	// drawing the strip under its plot would otherwise print its series twice,
+	// once bottom-left and once in the header. See `hoistsLegend`.
+	usePlotLegendSlot(hoistsLegend(legend) ? series : null)
 
 	const tooltipSeries = useMemo<PlotTooltipSeries<TimeseriesRow>[]>(
 		() =>
@@ -108,6 +119,7 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 			// what keeps plot rects aligned across a grid. See `PlotOverlayProps`.
 			margin: yAxisWidth == null ? undefined : { left: yAxisWidth },
 			marks: [
+				dashedGridY(),
 				...series.map((entry) => line(solid, entry, false)),
 				...(dashed.length > 0 ? series.map((entry) => line(dashed, entry, true)) : []),
 				...series.map((entry) =>

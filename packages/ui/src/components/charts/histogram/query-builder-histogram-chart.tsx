@@ -5,6 +5,7 @@ import * as React from "react"
 
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
+import { dashedGridY } from "../../plot/plot-grid"
 import { PlotFrame, UNBOUNDED_FOCUS_DISTANCE } from "../../plot/plot-frame"
 import { integerTickValues, logYScale, niceLinearDomain } from "../../plot/plot-scales"
 import { cursorTooltip } from "../../plot/plot-tooltip"
@@ -161,7 +162,6 @@ function useCountAxis(maxCount: number, useLogY: boolean) {
 				baseline: 1,
 				y: {
 					scale: logYScale(maxCount),
-					grid: true,
 					axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
 				},
 			}
@@ -174,7 +174,6 @@ function useCountAxis(maxCount: number, useLogY: boolean) {
 			baseline: 0,
 			y: {
 				scale: scaleLinear().domain(domain),
-				grid: true,
 				axis: {
 					line: false,
 					ticks: {
@@ -237,6 +236,7 @@ function NumericHistogram({
 		() =>
 			defineChart({
 				marks: [
+					dashedGridY(),
 					// `rectY` does not exist at 0.14.0 — `@tanstack/charts/rect` exports
 					// only `rect` and `cell` — so the baseline is an explicit `y1`
 					// channel rather than an implied zero. Not a downgrade here: a log
@@ -347,6 +347,7 @@ function CategoricalHistogram({
 		() =>
 			defineChart({
 				marks: [
+					dashedGridY(),
 					barY(bins, {
 						x: (bin: PrebucketedBin) => bin.name,
 						// An EXPLICIT baseline, not the implied `y` one. `barY`'s implicit
