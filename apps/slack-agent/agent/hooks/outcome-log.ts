@@ -1,4 +1,8 @@
 import { defineHook, type HookContext } from "eve/hooks"
+import {
+	CONNECTION_SEARCH_TOOL_NAME,
+	extractConnectionSearchFailures,
+} from "#lib/connection-search-failures.js"
 import { emitAgentLog } from "#lib/telemetry-log.js"
 
 /**
@@ -40,6 +44,20 @@ export default defineHook({
 		},
 		"action.result"(event, ctx) {
 			const { result, status, error } = event.data
+			// Checked before the `failed` gate on purpose: a connection whose tools
+			// fail to load is a SUCCESSFUL connection_search to eve, so this is the
+			// only place the failure is observable (see #lib/connection-search-failures).
+			if (result.kind === "tool-result" && result.toolName === CONNECTION_SEARCH_TOOL_NAME) {
+				for (const failure of extractConnectionSearchFailures(result.output)) {
+					emitAgentLog("error", "connection_unavailable", {
+						"maple.agent.event": "connection_unavailable",
+						"maple.agent.connection": failure.connection,
+						"maple.agent.error_message": failure.error,
+						"session.id": ctx.session.id,
+						"maple.slack.team_id": teamIdOf(ctx),
+					})
+				}
+			}
 			const failed = status === "failed" || result.isError === true
 			if (!failed) return
 			const [kind, name] =

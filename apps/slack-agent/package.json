@@ -22,6 +22,7 @@
 		"@opentelemetry/api-logs": "^0.205.0",
 		"@opentelemetry/exporter-logs-otlp-http": "^0.205.0",
 		"@opentelemetry/exporter-trace-otlp-http": "^0.205.0",
+		"@opentelemetry/instrumentation-undici": "^0.16.0",
 		"@opentelemetry/resources": "^2.0.0",
 		"@opentelemetry/sdk-logs": "^0.205.0",
 		"@opentelemetry/sdk-node": "^0.205.0",
