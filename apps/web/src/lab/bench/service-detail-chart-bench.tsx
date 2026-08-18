@@ -8,8 +8,6 @@ import {
 	type InteractionBenchHarness,
 } from "@/lab/bench/interaction-bench"
 
-export type ServiceDetailBenchSyncMode = "recharts" | "cursor"
-
 declare global {
 	interface Window {
 		__serviceDetailBench?: InteractionBenchHarness
@@ -77,14 +75,27 @@ const SERVICE_DETAIL_ITEMS = [
 	},
 ]
 
-export function ServiceDetailChartBench({ syncMode }: { syncMode?: ServiceDetailBenchSyncMode }) {
+/**
+ * The service-detail chart grid on synthetic rows, for the linked-cursor perf
+ * spec.
+ *
+ * There is no `syncMode` arm any more. It existed to A/B the linked cursor
+ * against Recharts' `syncId` event bus; these four charts are TanStack now, the
+ * bus is gone from `MetricsGrid`, and the storm baseline it measured lives on in
+ * `/lab/bench/infra`, whose charts are still Recharts.
+ */
+export function ServiceDetailChartBench() {
 	const recorder = useMemo(() => createReactRecorder(), [])
 
 	useMountEffect(() => {
 		const bench = startInteractionBench({
 			recorder,
+			// `[data-chart-host]` is the per-chart wrapper `PlotFrame` emits — the
+			// TanStack analogue of `.recharts-wrapper`, which matched nothing here
+			// once the grid was ported and silently made every arm "ready" with zero
+			// charts on screen.
 			isReady: () =>
-				document.querySelectorAll("[data-testid='service-detail-chart-bench'] .recharts-wrapper")
+				document.querySelectorAll("[data-testid='service-detail-chart-bench'] [data-chart-host]")
 					.length === SERVICE_DETAIL_ITEMS.length,
 		})
 		window.__serviceDetailBench = bench.harness
@@ -100,13 +111,8 @@ export function ServiceDetailChartBench({ syncMode }: { syncMode?: ServiceDetail
 			data-testid="service-detail-chart-bench"
 			className="min-h-screen bg-background p-6 text-foreground"
 		>
-			<Profiler id={`service-detail-${syncMode ?? "default"}`} onRender={recorder.onRender}>
-				<MetricsGrid
-					items={SERVICE_DETAIL_ITEMS}
-					syncMode={syncMode}
-					syncId="service-detail-bench"
-					yAxisWidth={72}
-				/>
+			<Profiler id="service-detail" onRender={recorder.onRender}>
+				<MetricsGrid items={SERVICE_DETAIL_ITEMS} syncId="service-detail-bench" yAxisWidth={72} />
 			</Profiler>
 		</div>
 	)

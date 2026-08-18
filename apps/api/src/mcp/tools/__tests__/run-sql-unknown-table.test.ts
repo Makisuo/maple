@@ -22,9 +22,9 @@ describe("withTableListOnUnknownTable", () => {
 		expect(withTableListOnUnknownTable(err("Unknown table maple.foo")).message).toContain(
 			"Available tables:",
 		)
-		expect(
-			withTableListOnUnknownTable(err("Table maple.foo does not exist")).message,
-		).toContain("Available tables:")
+		expect(withTableListOnUnknownTable(err("Table maple.foo does not exist")).message).toContain(
+			"Available tables:",
+		)
 	})
 
 	// Every other warehouse failure already carries a message the agent can act on;

@@ -1,23 +1,27 @@
+import { useMemo } from "react"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Schema } from "effect"
 import { formatDistanceToNow, format } from "date-fns"
-import { Bar, BarChart } from "recharts"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ErrorState } from "@/components/common/error-state"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
+import { barY, defineChart } from "@tanstack/charts"
+import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { scalePoint } from "@tanstack/charts-scales/point"
 import {
-	ChartContainer,
-	ChartTooltip,
-	ChartTooltipContent,
-	type ChartConfig,
-	ChartGrid,
-	ChartXAxis,
-	ChartYAxis,
-} from "@maple/ui/components/ui/chart"
+	PlotFrame,
+	PlotTooltipBody,
+	createTooltipFocusStore,
+	cursorTooltip,
+	dashedGridY,
+	resolvePlotColor,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
+import { useTheme } from "@maple/ui/hooks/use-theme"
 import {
 	formatBucketLabel,
 	formatDuration,
@@ -269,47 +273,11 @@ function ErrorDetailContent() {
 					className={`space-y-2 transition-opacity ${timeseriesResult.waiting ? "opacity-60" : ""}`}
 				>
 					<h3 className="text-sm font-semibold">Error Frequency</h3>
-					<ChartContainer config={chartConfig} className="h-[160px] w-full">
-						<BarChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-							<ChartGrid />
-							<ChartXAxis
-								dataKey="bucket"
-								tickMargin={4}
-								minTickGap={50}
-								tickFormatter={(value) =>
-									formatBucketLabel(
-										value,
-										{ rangeMs, bucketSeconds: dataBucketSeconds },
-										"tick",
-									)
-								}
-							/>
-							<ChartYAxis
-								tickMargin={4}
-								width={40}
-								tickFormatter={(value) => formatNumber(value)}
-							/>
-							<ChartTooltip
-								content={
-									<ChartTooltipContent
-										labelFormatter={(value) =>
-											formatBucketLabel(
-												value,
-												{ rangeMs, bucketSeconds: dataBucketSeconds },
-												"tooltip",
-											)
-										}
-									/>
-								}
-							/>
-							<Bar
-								dataKey="count"
-								fill="var(--color-count)"
-								radius={[2, 2, 0, 0]}
-								isAnimationActive={false}
-							/>
-						</BarChart>
-					</ChartContainer>
+					<ErrorFrequencyChart
+						chartData={chartData}
+						rangeMs={rangeMs}
+						dataBucketSeconds={dataBucketSeconds}
+					/>
 				</div>
 			)
 		})
@@ -455,9 +423,100 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 	)
 }
 
-const chartConfig: ChartConfig = {
-	count: {
-		label: "Errors",
-		color: "var(--color-severity-error)",
-	},
+/**
+ * Error counts per bucket.
+ *
+ * Its own component because the chart is assembled inside a `Result.builder`
+ * callback, which is not a component body — the hooks below cannot live there.
+ */
+function ErrorFrequencyChart({
+	chartData,
+	rangeMs,
+	dataBucketSeconds,
+}: {
+	chartData: Array<{ bucket: string; count: number }>
+	rangeMs: number
+	dataBucketSeconds: number | undefined
+}) {
+	const focusStore = useMemo(() => createTooltipFocusStore(), [])
+	const { theme } = useTheme()
+	// `theme` is an invalidation key, not a read: the body reads computed style,
+	// which the theme class changes underneath it. Canvas holds literals, so
+	// without this a light/dark flip leaves the bars in the old palette.
+	// oxlint-disable-next-line react-hooks/exhaustive-deps
+	const color = useMemo(() => resolvePlotColor("--severity-error", "#ef4444"), [theme])
+
+	const axisContext = useMemo(
+		() => ({ rangeMs, bucketSeconds: dataBucketSeconds }),
+		[rangeMs, dataBucketSeconds],
+	)
+
+	const tooltipSeries = useMemo<PlotTooltipSeries<(typeof chartData)[number]>[]>(
+		() => [
+			{
+				label: "Errors",
+				color,
+				value: (point) => point.count,
+				format: (value: number) => formatNumber(value),
+			},
+		],
+		[color],
+	)
+
+	const definition = useMemo(
+		() =>
+			defineChart({
+				marks: [
+					dashedGridY(),
+					barY(chartData, {
+						x: (point: { bucket: string }) => point.bucket,
+						y: (point: { count: number }) => point.count,
+						fill: color,
+						radius: 2,
+					}),
+				],
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 4,
+							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						},
+						tickLabels: { thin: { minGap: 12 } },
+					},
+				},
+				y: {
+					scale: scaleLinear,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 4, format: (value: number) => formatNumber(value) },
+					},
+				},
+				margin: { top: 4, right: 0, bottom: 0, left: 40 },
+				focus: "group-x",
+				focusRing: false,
+				tooltip: cursorTooltip(focusStore.anchor),
+			}),
+		[chartData, color, axisContext, focusStore],
+	)
+
+	return (
+		<div className="h-[160px] w-full">
+			<PlotFrame
+				definition={definition}
+				ariaLabel="Error frequency"
+				className="h-full w-full"
+				renderTooltipBody={({ points }) => (
+					<PlotTooltipBody
+						points={points}
+						series={tooltipSeries}
+						focusStore={focusStore}
+						heading={(point) => formatBucketLabel(point.bucket, axisContext, "tooltip")}
+					/>
+				)}
+			/>
+		</div>
+	)
 }

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { PLOT_SELECTOR } from "./plot-locator"
 
 test("@cross-browser sustained dashboard interactions stay responsive without replay capture", async ({
 	page,
@@ -17,7 +18,7 @@ test("@cross-browser sustained dashboard interactions stay responsive without re
 	await page.waitForFunction(() => window.__serviceDetailBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
-	const overviewPlot = page.locator("[data-linked-cursor-chart] .recharts-cartesian-grid").first()
+	const overviewPlot = page.locator(`[data-linked-cursor-chart] :is(${PLOT_SELECTOR})`).first()
 	const overviewBounds = await overviewPlot.boundingBox()
 	if (!overviewBounds) throw new Error("Overview plot did not become interactive")
 	await page.mouse.move(
@@ -29,7 +30,7 @@ test("@cross-browser sustained dashboard interactions stay responsive without re
 	await page.waitForFunction(() => window.__serviceDetailBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
-	const detailPlot = page.locator("[data-linked-cursor-chart] .recharts-cartesian-grid").first()
+	const detailPlot = page.locator(`[data-linked-cursor-chart] :is(${PLOT_SELECTOR})`).first()
 	const detailBounds = await detailPlot.boundingBox()
 	if (!detailBounds) throw new Error("Service detail plot did not become interactive")
 	await page.mouse.move(detailBounds.x + 2, detailBounds.y + detailBounds.height / 2)

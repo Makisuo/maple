@@ -424,4 +424,4 @@ export const buildDiscordEmbedsFromTemplate = (
  * types from here. They now live in `./delivery/context`; the collapse onto one
  * canonical notification value is a later stage.
  */
-export type { DispatchContext, DispatchResult } from "./delivery/context"
+export type { DispatchContext } from "./delivery/context"

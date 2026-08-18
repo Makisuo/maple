@@ -205,7 +205,7 @@ export function formatErrorRate(rate: number): string {
  * Infer the bucket interval in seconds from consecutive data points.
  * Expects data with a `bucket` string timestamp field.
  */
-export function inferBucketSeconds(data: Array<{ bucket: string }>): number | undefined {
+export function inferBucketSeconds(data: ReadonlyArray<{ bucket: string }>): number | undefined {
 	if (data.length < 2) return undefined
 	const t0 = toEpochMs(data[0].bucket)
 	const t1 = toEpochMs(data[1].bucket)

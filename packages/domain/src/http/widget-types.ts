@@ -8,6 +8,7 @@
 // would collide in the `http/index.ts` barrel.
 export {
 	chartFamilyForChartId,
+	DEFAULT_HEATMAP_COLOR_SCALE,
 	DEFAULT_LIST_LIMIT,
 	defaultWidgetLayout,
 	HEATMAP_COLOR_SCALES,

@@ -83,4 +83,4 @@ export function getServerFunction(endpoint: string): ServerFunction | undefined 
 // `toWidgetRequest` moved to `@maple/widgets/dashboard` so the share API lowers
 // a stored data source through the exact function the browser does. Re-exported
 // here because this file is where the web app has always looked for it.
-export { toWidgetRequest, type WidgetRequest } from "@maple/widgets/dashboard"
+export { toWidgetRequest } from "@maple/widgets/dashboard"

@@ -1,9 +1,19 @@
-import { lazy } from "react"
-import type { ChartRegistryEntry } from "./_shared/chart-types"
+import { lazy, type ComponentType, type LazyExoticComponent } from "react"
+import type {
+	ChartCategory,
+	PlotProps,
+	QueryBuilderAreaChartProps,
+	QueryBuilderBarChartProps,
+	QueryBuilderFunnelChartProps,
+	QueryBuilderHbarChartProps,
+	QueryBuilderHeatmapChartProps,
+	QueryBuilderHistogramChartProps,
+	QueryBuilderLineChartProps,
+	QueryBuilderPieChartProps,
+	ServiceChartProps,
+	ThroughputAreaChartProps,
+} from "./_shared/chart-types"
 import {
-	defaultBarData,
-	areaTimeSeriesData,
-	lineTimeSeriesData,
 	latencyTimeSeriesData,
 	throughputTimeSeriesData,
 	apdexTimeSeriesData,
@@ -15,22 +25,50 @@ import {
 	hbarSampleData,
 } from "./_shared/sample-data"
 
-export const chartRegistry: ChartRegistryEntry[] = [
-	// Bar Charts
-	{
-		id: "default-bar",
-		name: "Default Bar",
-		description: "Bar chart with dotted SVG pattern background",
-		category: "bar",
-		component: lazy(() =>
-			import("./bar/default-bar-chart").then((m) => ({ default: m.DefaultBarChart })),
-		),
-		sampleData: defaultBarData,
-		tags: ["bar", "basic", "dotted", "pattern"],
-	},
+/**
+ * One registry entry, carrying its chart's EXACT props type.
+ *
+ * The entry used to be a single interface whose `component` was
+ * `ComponentType<BaseChartProps>`, and that erasure is what forced every chart
+ * to accept every prop: a heterogeneous list can only be typed uniformly if all
+ * its members share one signature. Discriminating on `kind` lets each entry keep
+ * its own signature, so the widget factory's `switch` narrows to a component
+ * that only accepts the settings its chart can actually honour.
+ *
+ * `component` stays assignable to `ComponentType<PlotProps>` for callers that
+ * only ever pass `data` — the gallery thumbnails and the chart picker — because
+ * props are contravariant and every extra field is optional. Those callers need
+ * no switch; see `previewComponent` below.
+ */
+interface ChartEntry<TKind extends string, TProps extends PlotProps> {
+	kind: TKind
+	id: string
+	name: string
+	description: string
+	category: ChartCategory
+	component: LazyExoticComponent<ComponentType<TProps>>
+	sampleData: Record<string, unknown>[]
+	tags: string[]
+}
 
+export type ChartRegistryEntry =
+	| ChartEntry<"line", QueryBuilderLineChartProps>
+	| ChartEntry<"area", QueryBuilderAreaChartProps>
+	| ChartEntry<"bar", QueryBuilderBarChartProps>
+	| ChartEntry<"pie", QueryBuilderPieChartProps>
+	| ChartEntry<"histogram", QueryBuilderHistogramChartProps>
+	| ChartEntry<"heatmap", QueryBuilderHeatmapChartProps>
+	| ChartEntry<"funnel", QueryBuilderFunnelChartProps>
+	| ChartEntry<"hbar", QueryBuilderHbarChartProps>
+	| ChartEntry<"service", ServiceChartProps>
+	| ChartEntry<"throughput", ThroughputAreaChartProps>
+
+export type ChartKind = ChartRegistryEntry["kind"]
+
+export const chartRegistry: ChartRegistryEntry[] = [
 	// Query Builder Bar
 	{
+		kind: "bar",
 		id: "query-builder-bar",
 		name: "Bar",
 		description: "Bar chart driven by the query builder",
@@ -46,6 +84,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 
 	// Horizontal (ranked) Bars
 	{
+		kind: "hbar",
 		id: "query-builder-hbar",
 		name: "Horizontal Bar",
 		description: "Ranked categories as horizontal bars, each a share of the total",
@@ -59,21 +98,9 @@ export const chartRegistry: ChartRegistryEntry[] = [
 		tags: ["hbar", "horizontal", "bar", "ranked", "top", "breakdown", "query-builder"],
 	},
 
-	// Area Charts
-	{
-		id: "gradient-area",
-		name: "Gradient Area",
-		description: "Stacked area chart with gradient fills",
-		category: "area",
-		component: lazy(() =>
-			import("./area/gradient-area-chart").then((m) => ({ default: m.GradientAreaChart })),
-		),
-		sampleData: areaTimeSeriesData,
-		tags: ["area", "gradient", "stacked"],
-	},
-
 	// Query Builder Area
 	{
+		kind: "area",
 		id: "query-builder-area",
 		name: "Area",
 		description: "Area chart driven by the query builder",
@@ -89,17 +116,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 
 	// Line Charts
 	{
-		id: "dotted-line",
-		name: "Dotted Line",
-		description: "Line chart with dashed stroke",
-		category: "line",
-		component: lazy(() =>
-			import("./line/dotted-line-chart").then((m) => ({ default: m.DottedLineChart })),
-		),
-		sampleData: lineTimeSeriesData,
-		tags: ["line", "dotted", "dashed"],
-	},
-	{
+		kind: "line",
 		id: "query-builder-line",
 		name: "Line",
 		description: "Line chart driven by the query builder",
@@ -115,6 +132,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 
 	// Service Charts
 	{
+		kind: "service",
 		id: "latency-line",
 		name: "Latency Line",
 		description: "P99/P95/P50 latency percentiles over time",
@@ -126,6 +144,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 		tags: ["line", "latency", "percentile", "service"],
 	},
 	{
+		kind: "throughput",
 		id: "throughput-area",
 		name: "Throughput Area",
 		description: "Request throughput over time",
@@ -137,6 +156,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 		tags: ["area", "throughput", "service"],
 	},
 	{
+		kind: "service",
 		id: "apdex-area",
 		name: "Apdex Area",
 		description: "Apdex score over time (0-1)",
@@ -146,6 +166,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 		tags: ["area", "apdex", "service"],
 	},
 	{
+		kind: "service",
 		id: "error-rate-area",
 		name: "Error Rate Area",
 		description: "Error rate percentage over time",
@@ -159,6 +180,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 
 	// Pie Charts
 	{
+		kind: "pie",
 		id: "query-builder-pie",
 		name: "Pie",
 		description: "Categorical distribution as a pie or donut",
@@ -174,6 +196,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 
 	// Histograms
 	{
+		kind: "histogram",
 		id: "query-builder-histogram",
 		name: "Histogram",
 		description: "Distribution of values across buckets",
@@ -189,6 +212,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 
 	// Heatmaps
 	{
+		kind: "heatmap",
 		id: "query-builder-heatmap",
 		name: "Heatmap",
 		description: "2D density visualization across two dimensions",
@@ -204,6 +228,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 
 	// Funnels
 	{
+		kind: "funnel",
 		id: "query-builder-funnel",
 		name: "Funnel",
 		description: "Stage-by-stage conversion as descending bars",
@@ -218,8 +243,30 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	},
 ]
 
+/**
+ * Ids that were REMOVED, and what they resolve to now.
+ *
+ * `default-bar`, `gradient-area` and `dotted-line` were Recharts demos that
+ * existed only as the chart picker's thumbnails — the widget a card actually
+ * created was always the `query-builder-*` entry beside it. They were also
+ * reachable as persisted `display.chartId` values, because the old "Chart Style"
+ * dropdown wrote them and `v1-to-v2` preserves whatever `chartId` a widget
+ * already has.
+ *
+ * So deleting the entries outright would blank every dashboard tile still
+ * carrying one, and would send `toPanelType` down its `"line"` fallback for what
+ * is really an area widget. Redirecting is what makes the deletion invisible:
+ * the style is gone, the widget it described is not.
+ */
+const REMOVED_CHART_IDS = new Map([
+	["default-bar", "query-builder-bar"],
+	["gradient-area", "query-builder-area"],
+	["dotted-line", "query-builder-line"],
+])
+
 export function getChartById(id: string): ChartRegistryEntry | undefined {
-	return chartRegistry.find((c) => c.id === id)
+	const resolved = REMOVED_CHART_IDS.get(id) ?? id
+	return chartRegistry.find((c) => c.id === resolved)
 }
 
 // `getChartsByCategory` and `searchCharts` lived here with no callers in any app

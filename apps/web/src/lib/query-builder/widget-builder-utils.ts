@@ -121,7 +121,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		listLimit: "",
 		listColumns: TRACE_DEFAULT_COLUMNS as ListColumnDraft[],
 		listRootOnly: true,
-		heatmapColorScale: "blues",
+		heatmapColorScale: undefined,
 		heatmapScaleType: "linear",
 		markdownContent: "",
 		...definition.initialState?.(widget),

@@ -107,9 +107,9 @@ describe("MCP dispatcher", () => {
 				const executor = yield* makeValidationExecutor
 				const { spans, tracer } = makeRecordingTracer()
 
-				yield* executor.execute(TENANT, "inspect_trace", {}, "workflow").pipe(
-					Effect.withTracer(tracer),
-				)
+				yield* executor
+					.execute(TENANT, "inspect_trace", {}, "workflow")
+					.pipe(Effect.withTracer(tracer))
 
 				const executorSpan = spans.find((s) => s.name === "McpToolExecutor.execute")
 				assert.isDefined(executorSpan)
@@ -126,9 +126,9 @@ describe("MCP dispatcher", () => {
 				// Empty input fails schema decoding, which the dispatcher converts into
 				// an in-band `isError` result rather than an error-channel failure — so
 				// span STATUS stays Ok and only this attribute records the outcome.
-				const result = yield* executor.execute(TENANT, "inspect_trace", {}, "mcp").pipe(
-					Effect.withTracer(tracer),
-				)
+				const result = yield* executor
+					.execute(TENANT, "inspect_trace", {}, "mcp")
+					.pipe(Effect.withTracer(tracer))
 				expect(result.isError).toBe(true)
 
 				const dispatchSpan = spans.find((s) => s.name === "McpToolDispatcher.call")
@@ -145,9 +145,9 @@ describe("MCP dispatcher", () => {
 
 				// `describe_warehouse_tables` reads a static catalog — no warehouse — so it
 				// reaches a real result under the empty runtime context.
-				yield* executor.execute(TENANT, "describe_warehouse_tables", {}, "rpc").pipe(
-					Effect.withTracer(tracer),
-				)
+				yield* executor
+					.execute(TENANT, "describe_warehouse_tables", {}, "rpc")
+					.pipe(Effect.withTracer(tracer))
 
 				const dispatchSpan = spans.find((s) => s.name === "McpToolDispatcher.call")
 				assert.isDefined(dispatchSpan)

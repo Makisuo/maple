@@ -111,8 +111,7 @@
 			"@base-ui/react": "^1.6.0",
 			"@xyflow/react": "^12.11.0",
 			"class-variance-authority": "^0.7.1",
-			"clsx": "^2.1.1",
-			"recharts": "^3.9.0"
+			"clsx": "^2.1.1"
 		}
 	},
 	"patchedDependencies": {

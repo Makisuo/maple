@@ -188,13 +188,13 @@ describe("MCP HTTP authorization", () => {
 		}
 	})
 
-	it("negotiates down when the client declares a newer Mcp-Protocol-Version header on initialize", async () => {
-		// Regression test for the eve/@ai-sdk/mcp client (used by apps/slack-agent), which
-		// defaults to a newer protocol version than this server implements and sends it as
-		// the `Mcp-Protocol-Version` header on the very first `initialize` request — before
-		// any negotiation has happened. `effect`'s McpServer.layerHttp rejects a header that
-		// isn't in its declared `protocols` list outright, even for `initialize`, where the
-		// header is only the client's preference and negotiation should happen via the body.
+	it("negotiates a newer client protocol version down instead of rejecting it", async () => {
+		// Regression: the Slack agent's MCP client advertises `2025-11-25` in the
+		// `Mcp-Protocol-Version` header on the very first `initialize` request —
+		// where per the MCP spec that header is only the client's preference and
+		// negotiation belongs in the body. McpServer rejected it with a bare 400
+		// before parsing the body — and eve reads 400 as "wrong transport", retries
+		// over SSE, and gets 405 from a POST-only route. The bot never connected once.
 		const db = createTestDb(createdDbs)
 		const base = Layer.mergeAll(db.layer, Env.layer.pipe(Layer.provide(testConfig())))
 		const services = Layer.mergeAll(
@@ -207,34 +207,25 @@ describe("MCP HTTP authorization", () => {
 		const key = await Effect.runPromise(
 			Effect.gen(function* () {
 				const apiKeys = yield* ApiKeysService
-				return yield* apiKeys.create(orgId, userId, {
-					name: "Newer protocol version test",
-					kind: "mcp",
-					scopes: ["mcp:tools"],
-					metadataJson: {
-						source: "maple_mcp_oauth",
-						roles: ["org:member"],
-						clientId: "client_test",
-						resource: "https://api.example.com/mcp",
-					},
-				})
+				return yield* apiKeys.create(orgId, userId, { name: "Newer protocol test", kind: "mcp" })
 			}).pipe(Effect.provide(services)),
 		)
 		const routes = McpLive.pipe(Layer.provideMerge(services))
 		const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true })
+		const headers = (extra: Record<string, string> = {}) => ({
+			authorization: `Bearer ${key.secret}`,
+			accept: "application/json, text/event-stream",
+			"content-type": "application/json",
+			host: "api.example.com",
+			"x-forwarded-proto": "https",
+			"mcp-protocol-version": "2025-11-25",
+			...extra,
+		})
 		try {
-			const response = await handler(
-				new Request("http://internal-worker.invalid/mcp", {
+			const initialized = await handler(
+				new Request("https://api.example.com/mcp", {
 					method: "POST",
-					headers: {
-						authorization: `Bearer ${key.secret}`,
-						accept: "application/json, text/event-stream",
-						"content-type": "application/json",
-						host: "internal-worker.invalid",
-						"x-forwarded-host": "api.example.com",
-						"x-forwarded-proto": "https",
-						"mcp-protocol-version": "2025-11-25",
-					},
+					headers: headers(),
 					body: JSON.stringify({
 						jsonrpc: "2.0",
 						id: 1,
@@ -248,12 +239,35 @@ describe("MCP HTTP authorization", () => {
 				}),
 				Context.empty() as never,
 			)
-			const body = await response.clone().json()
-			expect({ status: response.status, protocolVersion: body.result?.protocolVersion }).toEqual({
+			const initializedBody = await initialized.clone().json()
+			expect({
+				status: initialized.status,
+				protocolVersion: initializedBody.result?.protocolVersion,
+			}).toEqual({
 				status: 200,
 				protocolVersion: "2025-06-18",
 			})
-			expect(response.headers.get("mcp-session-id")).not.toBeNull()
+
+			const sessionId = initialized.headers.get("mcp-session-id")
+			expect(sessionId).not.toBeNull()
+
+			// The client keeps sending its own version on follow-ups; McpServer
+			// re-checks the header on every post-initialize request because
+			// v2025_06_18 sets `requiresVersionHeader`, so this must pass too.
+			const called = await handler(
+				new Request("https://api.example.com/mcp", {
+					method: "POST",
+					headers: headers({ "mcp-session-id": sessionId! }),
+					body: JSON.stringify({
+						jsonrpc: "2.0",
+						id: 2,
+						method: "tools/call",
+						params: { name: "inspect_trace", arguments: {} },
+					}),
+				}),
+				Context.empty() as never,
+			)
+			expect(called.status).toBe(200)
 		} finally {
 			await dispose()
 		}

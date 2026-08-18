@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { QueryBuilderHbarChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { pickValueField, toBreakdownRows, type BreakdownRow } from "../_shared/breakdown-rows"
@@ -46,7 +46,7 @@ const MORE_ROW_H = 16
 // empty one. Gallery thumbnails pass their sample rows in explicitly via `data`.
 const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
 
-export function QueryBuilderHbarChart({ data, className, unit }: BaseChartProps) {
+export function QueryBuilderHbarChart({ data, className, unit }: QueryBuilderHbarChartProps) {
 	const source: ReadonlyArray<Record<string, unknown>> = Array.isArray(data) ? data : EMPTY_ROWS
 
 	const valueField = React.useMemo(() => pickValueField(source), [source])
