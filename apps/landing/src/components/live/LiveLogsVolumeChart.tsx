@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import { barY, defineChart, stack } from "@tanstack/charts"
-import { scaleTime } from "d3-scale"
+import { scaleLinear, scaleTime } from "d3-scale"
 import { PlotFrame, dashedGridY, usePlotColors } from "@maple/ui/components/plot"
 
 import {
@@ -61,6 +61,31 @@ export default function LiveLogsVolumeChart() {
 		[],
 	)
 
+	/**
+	 * The stacked ceiling, pinned rather than inferred.
+	 *
+	 * The interactive renderer infers a y domain from the data, but the PRERENDER
+	 * path does not: `createChartScene` resolves scales through a resolver that
+	 * throws `Chart scale "y" requires a configured scale` when `options.scale` is
+	 * absent (`dist/scene.js:33-38`). The app never server-renders a chart, so
+	 * only this one — inside Astro's static build — ever takes that path, and the
+	 * chart is correct in a browser right up until the site is built.
+	 *
+	 * Summed per bucket, not a max over cells: the bars are stacked, so the tallest
+	 * column is a bucket's TOTAL, and a max over individual segments would clip the
+	 * stack.
+	 */
+	const yMax = useMemo(() => {
+		const totals = new Map<number, number>()
+		for (const cell of cells) {
+			totals.set(cell.date.getTime(), (totals.get(cell.date.getTime()) ?? 0) + cell.value)
+		}
+		const peak = Math.max(0, ...totals.values())
+		// An empty or all-zero series still needs a non-degenerate domain — a
+		// `[0, 0]` scale maps every value to NaN.
+		return peak > 0 ? peak : 1
+	}, [cells])
+
 	const definition = useMemo(
 		() =>
 			defineChart({
@@ -94,6 +119,8 @@ export default function LiveLogsVolumeChart() {
 					},
 				},
 				y: {
+					scale: scaleLinear().domain([0, yMax]),
+					nice: true,
 					axis: {
 						line: false,
 						ticks: { size: 0, padding: 4, format: (value: number) => formatNumber(value) },
@@ -103,7 +130,7 @@ export default function LiveLogsVolumeChart() {
 				tooltip: false,
 				focus: false,
 			}),
-		[cells, colors],
+		[cells, colors, yMax],
 	)
 
 	return (
@@ -129,7 +156,11 @@ export default function LiveLogsVolumeChart() {
 				 * container, measuring itself before first paint.
 				 */}
 				<div className="w-full" style={{ height: HEIGHT }}>
-					<PlotFrame definition={definition} ariaLabel="Log volume by severity" className="h-full" />
+					<PlotFrame
+						definition={definition}
+						ariaLabel="Log volume by severity"
+						className="h-full"
+					/>
 				</div>
 			</div>
 			<div className="border-border bg-bg-elevated text-fg-muted flex justify-between border-t px-3.5 py-2.5 text-[10px] uppercase tracking-wider">
