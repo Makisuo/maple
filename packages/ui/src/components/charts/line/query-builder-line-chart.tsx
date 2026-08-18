@@ -1,26 +1,37 @@
+import { d3Curve, defineChart, dot, lineY } from "@tanstack/charts"
+import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { curveMonotoneX } from "d3-shape"
+import { scaleTime } from "d3-scale"
 import * as React from "react"
-import { Line, LineChart } from "recharts"
 
-import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
-import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
-import type { BaseChartProps } from "../_shared/chart-types"
-import { QueryBuilderLegend, responsiveLegendHeight } from "../_shared/query-builder-legend"
-import { useTimeseriesSeriesPresentation } from "../_shared/use-series-presentation"
-import { thresholdReferenceLines } from "../_shared/threshold-lines"
-import { findNearestSeriesKey } from "../_shared/nearest-series"
-import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
 import {
-	type ChartConfig,
-	ChartContainer,
-	ChartLegend,
-	ChartTooltip,
-	ChartTooltipContent,
-	ChartGrid,
-	ChartXAxis,
-	ChartYAxis,
-} from "../../ui/chart"
-import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
+	formatBucketLabel,
+	formatValueByUnit,
+	inferBucketSeconds,
+	inferRangeMs,
+	parseBucketMs,
+} from "../../../lib/format"
+import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
+import { cn } from "../../../lib/utils"
+import { splitAtFirstPartial } from "../../plot/partial-buckets"
+import { focusCrosshair, focusDot } from "../../plot/plot-focus"
+import { PlotFrame } from "../../plot/plot-frame"
+import { roundCapDasharray } from "../../plot/plot-paint"
+import { integerTickValues, linearYDomain, logYScale } from "../../plot/plot-scales"
+import {
+	PlotTooltipBody,
+	createTooltipFocusStore,
+	cursorTooltip,
+	type PlotTooltipSeries,
+} from "../../plot/plot-tooltip"
+import { usePlotChromeColors, useResolvedSeriesColors } from "../../plot/theme"
+import { thresholdRules } from "../../plot/threshold-rules"
+import { useSeriesVisibility } from "../../plot/series-visibility"
+import { computeSeriesStats } from "../../plot/series-stats"
+import type { BaseChartProps } from "../_shared/chart-types"
+import { QueryBuilderLegend } from "../_shared/query-builder-legend"
+import { hasOnlyIntegerValues, isolatedPointIndexes, pointsFit } from "../_shared/sparse-series"
 
 // No sample-data fallback: substituting fixtures for real rows made every
 // misconfigured or mis-fed chart (a share page handing over an envelope where an
@@ -35,17 +46,25 @@ const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
 // result set from locking up the browser.
 const HARD_SERIES_LIMIT = 60
 
-function asFiniteNumber(value: unknown): number {
-	const parsed = typeof value === "number" ? value : Number(value)
-	if (!Number.isFinite(parsed)) {
-		return 0
-	}
+/** Used when a series colour token resolves to nothing. */
+const SERIES_FALLBACK_COLOR = "#6366f1"
 
-	return parsed
+const STROKE_WIDTH = 2
+
+/** One normalised row: the bucket, its parsed date, and every series value. */
+interface TimeseriesRow extends Record<string, unknown> {
+	bucket: string
+	/**
+	 * Precomputed, because `scaleTime` takes Dates and building one per accessor
+	 * call would allocate on every scale pass.
+	 */
+	date: Date
+	partial?: boolean
 }
 
-function formatBucketTime(value: unknown): string {
-	return typeof value === "string" ? value : ""
+function asFiniteNumber(value: unknown): number {
+	const parsed = typeof value === "number" ? value : Number(value)
+	return Number.isFinite(parsed) ? parsed : 0
 }
 
 export function QueryBuilderLineChart({
@@ -61,327 +80,290 @@ export function QueryBuilderLineChart({
 	softMax,
 	fitYAxisToData,
 	showPoints,
-	syncId,
 	thresholds,
 }: BaseChartProps) {
-	const { chartData, seriesDefinitions } = React.useMemo(() => {
+	const { rows, seriesDefinitions } = React.useMemo(() => {
 		const source = Array.isArray(data) ? data : EMPTY_ROWS
 		const rawSeriesKeys: string[] = []
-		const seenSeriesKeys = new Set<string>()
+		const seen = new Set<string>()
 
 		for (const row of source) {
 			for (const key of Object.keys(row)) {
-				if (key === "bucket" || seenSeriesKeys.has(key)) continue
-				seenSeriesKeys.add(key)
+				if (key === "bucket" || key === "partial" || seen.has(key)) continue
+				seen.add(key)
 				rawSeriesKeys.push(key)
 			}
 		}
 
-		const seriesDefinitions = rawSeriesKeys.slice(0, HARD_SERIES_LIMIT).map((rawKey, index) => ({
+		const definitions = rawSeriesKeys.slice(0, HARD_SERIES_LIMIT).map((rawKey, index) => ({
 			rawKey,
 			chartKey: `s${index + 1}`,
 		}))
 
-		const chartData = source.map((row) => {
-			const next: Record<string, unknown> = {
-				bucket: row.bucket,
-			} satisfies Record<string, unknown>
-
-			for (const definition of seriesDefinitions) {
+		const normalised = source.flatMap((row): TimeseriesRow[] => {
+			const bucket = typeof row.bucket === "string" ? row.bucket : ""
+			const epochMs = parseBucketMs(bucket)
+			// A row with no parseable bucket has no position on a time axis. Dropping
+			// it is the only honest option: Recharts placed it on a categorical slot,
+			// which silently invented an x position for it.
+			if (epochMs == null) return []
+			const next: TimeseriesRow = { bucket, date: new Date(epochMs) }
+			if (row.partial === true) next.partial = true
+			for (const definition of definitions) {
 				next[definition.chartKey] = asFiniteNumber(row[definition.rawKey])
 			}
-
-			return next
+			return [next]
 		})
 
-		return {
-			chartData,
-			seriesDefinitions,
-		}
+		return { rows: normalised, seriesDefinitions: definitions }
 	}, [data])
 
-	const valueKeys = React.useMemo(() => seriesDefinitions.map((d) => d.chartKey), [seriesDefinitions])
-
-	const {
-		data: incompleteData,
-		hasIncomplete,
-		incompleteKeys,
-	} = useIncompleteSegments(chartData, valueKeys)
-
-	const bucketSeconds = React.useMemo(
-		() =>
-			inferBucketSeconds(
-				chartData
-					.map((row) => ({ bucket: formatBucketTime(row.bucket) }))
-					.filter((row) => row.bucket.length > 0),
-			),
-		[chartData],
+	const allKeys = React.useMemo(
+		() => seriesDefinitions.map((definition) => definition.chartKey),
+		[seriesDefinitions],
 	)
 
-	const processedData = React.useMemo(() => {
-		if (unit !== "requests_per_sec" || !bucketSeconds) return incompleteData
-		return incompleteData.map((row) => {
-			const next: Record<string, unknown> = { bucket: row.bucket } satisfies Record<string, unknown>
-			for (const key of Object.keys(row)) {
-				if (key === "bucket") continue
-				const val = row[key]
-				next[key] = typeof val === "number" ? val / bucketSeconds : val
-			}
+	const bucketSeconds = React.useMemo(() => inferBucketSeconds(rows), [rows])
+
+	/** Rates are stored per bucket and displayed per second. */
+	const scaledRows = React.useMemo(() => {
+		if (unit !== "requests_per_sec" || !bucketSeconds) return rows
+		return rows.map((row) => {
+			const next: TimeseriesRow = { bucket: row.bucket, date: row.date }
+			if (row.partial) next.partial = true
+			for (const key of allKeys) next[key] = asFiniteNumber(row[key]) / bucketSeconds
 			return next
 		})
-	}, [incompleteData, unit, bucketSeconds])
+	}, [rows, unit, bucketSeconds, allKeys])
 
-	const axisContext = React.useMemo(
-		() => ({
-			rangeMs: inferRangeMs(chartData),
-			bucketSeconds,
-		}),
-		[chartData, bucketSeconds],
-	)
-
-	const chartConfig = React.useMemo(() => {
-		const colors = resolveSeriesColors(seriesDefinitions.map((d) => d.rawKey))
-		const base = seriesDefinitions.reduce((config, definition) => {
-			config[definition.chartKey] = {
-				label: definition.rawKey,
-				color: colors.get(definition.rawKey),
-			}
-			return config
-		}, {} as ChartConfig)
-		return extendConfigWithIncomplete(base, incompleteKeys)
-	}, [seriesDefinitions, incompleteKeys])
-
-	const labelByChartKey = React.useMemo(() => {
-		return new Map(seriesDefinitions.map((definition) => [definition.chartKey, definition.rawKey]))
+	const colorTokens = React.useMemo(() => {
+		const byRawKey = resolveSeriesColors(seriesDefinitions.map((d) => d.rawKey))
+		return new Map(
+			seriesDefinitions.map((d) => [d.chartKey, byRawKey.get(d.rawKey) ?? SERIES_FALLBACK_COLOR]),
+		)
 	}, [seriesDefinitions])
 
-	const [hiddenSeries, setHiddenSeries] = React.useState<ReadonlySet<string>>(() => new Set())
+	// Tokens, resolved to literals. `resolveSeriesColors` hands back
+	// `var(--chart-3)` and friends, which paint on SVG and resolve to NOTHING on
+	// canvas — PlotFrame's dev assertion throws on one that slips through.
+	const colors = useResolvedSeriesColors(colorTokens, SERIES_FALLBACK_COLOR)
 
-	const toggleSeries = React.useCallback((key: string) => {
-		setHiddenSeries((prev) => {
-			const next = new Set(prev)
-			if (next.has(key)) next.delete(key)
-			else next.add(key)
-			return next
-		})
-	}, [])
+	const chromeColors = usePlotChromeColors()
+
+	/**
+	 * Stats over ALL series, including hidden ones.
+	 *
+	 * Computed BEFORE the visibility filter, deliberately: a hidden series keeps
+	 * its legend row and its numbers so it can be brought back. See
+	 * `useSeriesVisibility` for the rest of that ordering.
+	 */
+	const stats = React.useMemo(() => computeSeriesStats(scaledRows, allKeys), [scaledRows, allKeys])
+
+	const series = React.useMemo(
+		() =>
+			seriesDefinitions.map((definition) => ({
+				key: definition.chartKey,
+				label: definition.rawKey,
+				color: colors.get(definition.chartKey) ?? SERIES_FALLBACK_COLOR,
+			})),
+		[seriesDefinitions, colors],
+	)
+
+	const { hidden, toggle, visible } = useSeriesVisibility(series)
+	const visibleKeys = React.useMemo(() => visible.map((entry) => entry.key), [visible])
 
 	const containerRef = React.useRef<HTMLDivElement>(null)
 	const { width: containerWidth, height: containerHeight } = useContainerSize(containerRef)
 
-	const { seriesStats, legendSeries, pointsMode, shouldDot, integerOnlyData } =
-		useTimeseriesSeriesPresentation({
-			data: processedData,
-			valueKeys,
-			seriesDefinitions,
-			chartConfig,
-			showPoints,
-			plotWidthPx: containerWidth,
-		})
-
-	const variant = showStats ? "stats" : "compact"
-	const showLegendBlock = legend === "visible" || legend === "right"
-	const legendPosition = legend === "right" ? "right" : "bottom"
-	const legendHeight = responsiveLegendHeight(variant, seriesDefinitions.length, containerHeight)
-
-	// Per-series active-point pixel Y, captured by each Line's active dot during
-	// render (Recharts draws graphical items before the tooltip in the same
-	// commit). Hidden series get no active dot, so they're filtered out below.
-	const seriesYByKeyRef = React.useRef<Record<string, number>>({})
-	const resolveHighlightKey = React.useCallback(
-		(coordinate: { x?: number; y?: number } | undefined) => {
-			if (seriesDefinitions.length <= 1) return undefined
-			const visibleKeys = seriesDefinitions
-				.map((d) => d.chartKey)
-				.filter((key) => !hiddenSeries.has(key))
-			return findNearestSeriesKey(seriesYByKeyRef.current, visibleKeys, coordinate?.y, 24)
-		},
-		[seriesDefinitions, hiddenSeries],
+	const axisContext = React.useMemo(
+		() => ({ rangeMs: inferRangeMs(scaledRows), bucketSeconds }),
+		[scaledRows, bucketSeconds],
 	)
 
-	// "Fit Y-axis to data": lower bound follows the data minimum (with padding)
-	// instead of being pinned at 0/auto. Ignored when softMin or logScale set.
-	const fitDomainMin = React.useMemo(() => {
-		if (!fitYAxisToData || softMin != null || logScale) return undefined
-		let min = Number.POSITIVE_INFINITY
-		let max = Number.NEGATIVE_INFINITY
-		for (const row of processedData) {
-			for (const key of valueKeys) {
-				const value = row[key]
-				if (typeof value !== "number" || !Number.isFinite(value)) continue
-				if (value < min) min = value
-				if (value > max) max = value
-			}
+	/** Which points carry a dot — every one, only the isolated ones, or none. */
+	const dotIndexes = React.useMemo<ReadonlyMap<string, ReadonlySet<number>>>(() => {
+		if (showPoints === false) return new Map()
+		// Auto: dots on every point only when they fit the width, otherwise only on
+		// the isolated points a line cannot show at all.
+		if (showPoints === true || pointsFit(containerWidth, scaledRows.length)) {
+			const every = new Set(scaledRows.map((_, index) => index))
+			return new Map(visibleKeys.map((key) => [key, every]))
 		}
-		if (!Number.isFinite(min) || !Number.isFinite(max)) return undefined
-		const padding = max > min ? (max - min) * 0.1 : Math.abs(min) * 0.1 || 1
-		return min - padding
-	}, [fitYAxisToData, softMin, logScale, processedData, valueKeys])
+		return isolatedPointIndexes(scaledRows, visibleKeys)
+	}, [showPoints, scaledRows, containerWidth, visibleKeys])
 
-	const yDomainMin = softMin ?? fitDomainMin ?? (logScale ? 1 : "auto")
-	const yDomainMax = softMax ?? "auto"
+	const focusStore = React.useMemo(() => createTooltipFocusStore<TimeseriesRow>(), [])
+
+	const tooltipSeries = React.useMemo<PlotTooltipSeries<TimeseriesRow>[]>(
+		() =>
+			visible.map((entry) => ({
+				label: entry.label,
+				color: entry.color,
+				value: (row: TimeseriesRow) => {
+					const value = row[entry.key]
+					return typeof value === "number" ? value : null
+				},
+				format: (value: number) => formatValueByUnit(value, unit),
+			})),
+		[visible, unit],
+	)
+
+	const definition = React.useMemo(() => {
+		// The dashed tail is a SECOND mark over an overlapping slice, not a dash
+		// pattern on the first: `strokeDasharray` on `lineY` is a scalar, not a
+		// per-datum channel, so one mark cannot change style mid-line.
+		const { solid, dashed } = splitAtFirstPartial(scaledRows, visibleKeys)
+
+		const domain = linearYDomain({
+			rows: scaledRows,
+			keys: visibleKeys,
+			fitYAxisToData: fitYAxisToData && softMin == null && !logScale,
+			softMin,
+			softMax,
+			thresholds,
+		})
+		const integerOnly = hasOnlyIntegerValues(scaledRows, visibleKeys) && unit == null
+
+		// `curve` takes a ChartCurve, not a string. Linear is the default shape, so
+		// only monotone needs one built.
+		const curve = curveType === "monotone" ? d3Curve(curveMonotoneX) : undefined
+		// `lineY` hard-codes a round cap, which eats the gap — see `roundCapDasharray`.
+		const partialDash = roundCapDasharray(4, 4, STROKE_WIDTH)
+		const line = (rowSlice: readonly TimeseriesRow[], entry: (typeof visible)[number], dash: boolean) =>
+			lineY(rowSlice, {
+				id: dash ? `${entry.key}-partial` : entry.key,
+				x: (row: TimeseriesRow) => row.date,
+				y: (row: TimeseriesRow) => asFiniteNumber(row[entry.key]),
+				stroke: entry.color,
+				strokeWidth: STROKE_WIDTH,
+				curve,
+				strokeDasharray: dash ? partialDash : undefined,
+			})
+
+		return defineChart({
+			marks: [
+				...thresholdRules(thresholds ?? []),
+				...visible.map((entry) => line(solid, entry, false)),
+				...(dashed.length > 0 ? visible.map((entry) => line(dashed, entry, true)) : []),
+				...visible.flatMap((entry) => {
+					const indexes = dotIndexes.get(entry.key)
+					if (!indexes || indexes.size === 0) return []
+					const points = scaledRows.filter((_, index) => indexes.has(index))
+					return [
+						dot(points, {
+							x: (row: TimeseriesRow) => row.date,
+							y: (row: TimeseriesRow) => asFiniteNumber(row[entry.key]),
+							r: 2.5,
+							fill: entry.color,
+						}),
+					]
+				}),
+				...visible.map((entry) =>
+					focusDot(
+						scaledRows,
+						(row: TimeseriesRow) => row.date,
+						(row: TimeseriesRow) => asFiniteNumber(row[entry.key]),
+						entry.color,
+						chromeColors,
+					),
+				),
+				focusCrosshair(chromeColors),
+			],
+			x: {
+				// A d3 TIME scale over the precomputed `row.date`. A point scale over
+				// bucket strings — which is what the categorical Recharts axis was —
+				// puts ticks on arbitrary buckets ("08:25 PM") instead of clock
+				// boundaries. `scaleTime`, not `scaleUtc`: the labels below render in
+				// local time, and only local ticks land on locally round boundaries.
+				//
+				// The bare FACTORY, so the domain is inferred. That is safe even though
+				// the solid and dashed marks each cover a slice: a continuous domain is
+				// min/max over the union, and the slices overlap at the bridge row.
+				scale: scaleTime,
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 8,
+						spacing: 72,
+						format: (value: Date) => formatBucketLabel(value.toISOString(), axisContext, "tick"),
+					},
+				},
+			},
+			y: {
+				// The domain lives on the SCALE — `ChartAxisOptions` has no `domain`
+				// field, and an instance is what pins it (a bare factory infers, which
+				// is how the zero anchor gets lost).
+				scale: logScale ? logYScale(domain[1]) : scaleLinear().domain(domain),
+				nice: !logScale,
+				grid: true,
+				axis: {
+					line: false,
+					// There is no `allowDecimals`; integer-only data supplies its tick
+					// values outright so counts never render as "1.5". `undefined` leaves
+					// the library to choose.
+					ticks: {
+						size: 0,
+						padding: 6,
+						values: integerOnly && !logScale ? integerTickValues(domain) : undefined,
+						format: (value: number) => formatValueByUnit(value, unit),
+					},
+				},
+			},
+			focus: "group-x",
+			focusRing: false,
+			tooltip: tooltip === "hidden" ? false : cursorTooltip(focusStore.anchor),
+		})
+	}, [
+		scaledRows,
+		visible,
+		visibleKeys,
+		dotIndexes,
+		chromeColors,
+		axisContext,
+		focusStore,
+		curveType,
+		unit,
+		logScale,
+		softMin,
+		softMax,
+		fitYAxisToData,
+		thresholds,
+		tooltip,
+	])
+
+	const showLegendBlock = legend === "visible" || legend === "right"
+	const legendNode = showLegendBlock ? (
+		<QueryBuilderLegend
+			series={series}
+			stats={stats}
+			hidden={hidden}
+			onToggle={toggle}
+			unit={unit}
+			layout={legend === "right" ? "right" : "bottom"}
+			variant={showStats ? "stats" : "compact"}
+			maxHeight={legend === "right" ? containerHeight : undefined}
+		/>
+	) : undefined
 
 	return (
 		<div ref={containerRef} className={cn("h-full w-full", className)}>
-			<ChartContainer
-				config={chartConfig}
-				className="h-full w-full aspect-auto"
-				hoistLegend={!showLegendBlock}
-			>
-				<LineChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
-					<ChartGrid />
-					<ChartXAxis
-						dataKey="bucket"
-						tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
-					/>
-					<ChartYAxis
-						allowDecimals={!integerOnlyData}
-						scale={logScale ? "log" : "auto"}
-						domain={[yDomainMin, yDomainMax]}
-						allowDataOverflow={
-							logScale || softMin != null || softMax != null || fitDomainMin != null
+			<PlotFrame
+				className="h-full w-full"
+				ariaLabel="Time series"
+				definition={definition}
+				legend={legendNode}
+				renderTooltipBody={({ points }) => (
+					<PlotTooltipBody
+						points={points}
+						series={tooltipSeries}
+						focusStore={focusStore}
+						heading={(row: TimeseriesRow) =>
+							formatBucketLabel(row.bucket, axisContext, "tooltip")
 						}
-						tickFormatter={(value) => formatValueByUnit(asFiniteNumber(value), unit)}
 					/>
-
-					{tooltip !== "hidden" && (
-						<ChartTooltip
-							content={
-								<ChartTooltipContent
-									resolveHighlightKey={resolveHighlightKey}
-									labelFormatter={(_, payload) => {
-										if (!payload?.[0]?.payload?.bucket) return ""
-										const bucket = payload[0].payload.bucket
-										return formatBucketLabel(bucket, axisContext, "tooltip")
-									}}
-									formatter={(value, name, item) => {
-										const nameStr = String(name)
-										const isIncomplete = nameStr.endsWith("_incomplete")
-										const baseKey = isIncomplete
-											? nameStr.replace(/_incomplete$/, "")
-											: nameStr
-										if (isIncomplete && item.payload?.[baseKey] != null) return null
-										if (!isIncomplete && value == null) return null
-										const label = labelByChartKey.get(baseKey) ?? baseKey
-										return (
-											<span className="flex items-center gap-2">
-												<span
-													className="shrink-0 size-2.5 rounded-[2px]"
-													style={{ backgroundColor: item.color }}
-												/>
-												<span className="text-muted-foreground">{label}</span>
-												<span className="font-mono font-medium">
-													{formatValueByUnit(asFiniteNumber(value), unit)}
-												</span>
-											</span>
-										)
-									}}
-								/>
-							}
-						/>
-					)}
-
-					{showLegendBlock && legendPosition === "bottom" && (
-						<ChartLegend
-							verticalAlign="bottom"
-							height={legendHeight}
-							content={
-								<QueryBuilderLegend
-									series={legendSeries}
-									stats={seriesStats}
-									hidden={hiddenSeries}
-									onToggle={toggleSeries}
-									unit={unit}
-									layout="bottom"
-									variant={variant}
-								/>
-							}
-						/>
-					)}
-					{showLegendBlock && legendPosition === "right" && (
-						<ChartLegend
-							layout="vertical"
-							verticalAlign="middle"
-							align="right"
-							width={showStats ? 224 : 160}
-							content={
-								<QueryBuilderLegend
-									series={legendSeries}
-									stats={seriesStats}
-									hidden={hiddenSeries}
-									onToggle={toggleSeries}
-									unit={unit}
-									layout="right"
-									variant={variant}
-									maxHeight={containerHeight}
-								/>
-							}
-						/>
-					)}
-
-					{thresholdReferenceLines(thresholds)}
-
-					{seriesDefinitions.map((definition) => (
-						<Line
-							key={definition.chartKey}
-							type={curveType ?? "linear"}
-							dataKey={definition.chartKey}
-							stroke={`var(--color-${definition.chartKey})`}
-							strokeWidth={2}
-							dot={
-								// `false` skips the per-point pass entirely; the render function
-								// draws only the points `shouldDot` picks (all, or the isolated ones).
-								pointsMode === "none"
-									? false
-									: (props) =>
-											shouldDot(definition.chartKey, props.index) ? (
-												<circle
-													className="recharts-dot"
-													cx={props.cx}
-													cy={props.cy}
-													r={2.5}
-													fill={`var(--color-${definition.chartKey})`}
-												/>
-											) : null
-							}
-							hide={hiddenSeries.has(definition.chartKey)}
-							isAnimationActive={false}
-							activeDot={(props: { cx?: number; cy?: number }) => {
-								if (typeof props.cy === "number") {
-									seriesYByKeyRef.current[definition.chartKey] = props.cy
-								}
-								return (
-									<circle
-										className="recharts-dot"
-										cx={props.cx}
-										cy={props.cy}
-										r={4}
-										fill={`var(--color-${definition.chartKey})`}
-										stroke="#fff"
-										strokeWidth={2}
-									/>
-								)
-							}}
-						/>
-					))}
-					{hasIncomplete &&
-						seriesDefinitions.map((definition) => (
-							<Line
-								key={`${definition.chartKey}_incomplete`}
-								type={curveType ?? "linear"}
-								dataKey={`${definition.chartKey}_incomplete`}
-								stroke={`var(--color-${definition.chartKey})`}
-								strokeWidth={2}
-								strokeDasharray="4 4"
-								dot={false}
-								connectNulls
-								legendType="none"
-								hide={hiddenSeries.has(definition.chartKey)}
-								isAnimationActive={false}
-							/>
-						))}
-				</LineChart>
-			</ChartContainer>
+				)}
+			/>
 		</div>
 	)
 }

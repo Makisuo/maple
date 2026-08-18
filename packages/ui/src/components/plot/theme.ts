@@ -78,3 +78,38 @@ export type PlotChromeColors = Readonly<Record<keyof typeof PLOT_CHROME_TOKENS, 
 export function usePlotChromeColors(): PlotChromeColors {
 	return usePlotColors(PLOT_CHROME_TOKENS)
 }
+
+/**
+ * Resolve a DYNAMIC set of colour tokens — one per series, where the series are
+ * whatever the query happened to return.
+ *
+ * `usePlotColors` takes a fixed, module-scope token map, which is right for a
+ * chart whose series are known at build time (p50/p95/p99). A query-builder
+ * chart's series are not: `resolveSeriesColors` assigns `var(--chart-3)` and
+ * friends per result set, and every one of those has to be resolved to a literal
+ * before it reaches a definition, because the canvas 2D context cannot read
+ * `var()`.
+ *
+ * `tokensByKey` must be memoized by the caller — this re-resolves whenever its
+ * identity changes, and re-reading computed style per frame is the cost
+ * `usePlotColors` exists to avoid.
+ */
+export function useResolvedSeriesColors(
+	tokensByKey: ReadonlyMap<string, string>,
+	fallback: string,
+): ReadonlyMap<string, string> {
+	const { theme } = useTheme()
+
+	return useMemo(
+		() => {
+			const resolved = new Map<string, string>()
+			for (const [key, token] of tokensByKey) {
+				resolved.set(key, resolvePlotColor(token, fallback))
+			}
+			return resolved
+		},
+		// `theme` is an INVALIDATION KEY — see `usePlotColors`.
+		// oxlint-disable-next-line react-hooks/exhaustive-deps
+		[tokensByKey, fallback, theme],
+	)
+}

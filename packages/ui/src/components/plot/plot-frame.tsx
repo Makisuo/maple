@@ -169,6 +169,36 @@ function createPlotRectStore(): PlotRectStore & { set: (next: ChartBounds) => vo
 	}
 }
 
+/**
+ * Whether this environment can actually paint to a canvas.
+ *
+ * The canvas renderer calls `getContext("2d")` during mount and THROWS when it
+ * comes back null. That is not only a test concern — jsdom has no 2D context, so
+ * every canvas chart would take a component test down with it — but the same
+ * hole exists anywhere a 2D context is unavailable. Probing once and degrading
+ * to the SVG renderer keeps the chart rendering instead of throwing, and the two
+ * renderers take the identical definition, so nothing else changes.
+ *
+ * Lazy and cached: `document` may not exist at module-eval time under SSR, and
+ * the answer cannot change within a document.
+ */
+let canvasSupport: boolean | null = null
+
+function supportsCanvas2d(): boolean {
+	if (canvasSupport !== null) return canvasSupport
+	if (typeof document === "undefined") {
+		// Server render: no canvas, and the SVG renderer is the one with complete
+		// server output anyway.
+		return false
+	}
+	try {
+		canvasSupport = document.createElement("canvas").getContext("2d") != null
+	} catch {
+		canvasSupport = false
+	}
+	return canvasSupport
+}
+
 export interface PlotFrameProps<TDatum, TXValue extends ChartValue, TYValue extends ChartValue> {
 	definition: DomChartDefinition<TDatum, TXValue, TYValue>
 	ariaLabel: string
@@ -257,7 +287,7 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 		[rectStore],
 	)
 
-	const ChartComponent = renderer === "canvas" ? CanvasChart : SvgChart
+	const ChartComponent = renderer === "canvas" && supportsCanvas2d() ? CanvasChart : SvgChart
 
 	return (
 		<PlotRectContext value={rectStore}>
