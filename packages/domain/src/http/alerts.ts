@@ -333,6 +333,17 @@ export class AlertDestinationDocument extends Schema.Class<AlertDestinationDocum
 	memberUserIds: Schema.NullOr(Schema.Array(Schema.String)),
 	lastTestedAt: Schema.NullOr(IsoDateTimeString),
 	lastTestError: Schema.NullOr(Schema.String),
+	/**
+	 * Delivery-health state, so the UI can say "we stopped trying, and why"
+	 * instead of showing a silently dead destination as merely `enabled: false`.
+	 * `optionalKey` because these arrived after the document shipped — an older
+	 * writer that omits them still decodes.
+	 */
+	consecutiveFailures: Schema.optionalKey(Schema.Number),
+	lastFailureAt: Schema.optionalKey(Schema.NullOr(IsoDateTimeString)),
+	/** Non-null only when Maple auto-disabled the destination. */
+	disabledAt: Schema.optionalKey(Schema.NullOr(IsoDateTimeString)),
+	disabledReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
 	// Postgres txid of the write, present only on create/update responses so the

@@ -36,7 +36,17 @@ export const makeDeliveryError = (message: string, destinationType?: AlertDestin
  */
 const readErrorBody = (response: Response) =>
 	Effect.tryPromise({ try: () => response.text(), catch: () => null }).pipe(
-		Effect.map((text) => (text ?? "").replace(/\s+/g, " ").trim().slice(0, 500)),
+		Effect.map((text) => {
+			const detail = (text ?? "").replace(/\s+/g, " ").trim().slice(0, 500)
+			if (detail.length > 0) return detail
+			// An empty body used to render as `"<Provider> delivery failed with 400"`
+			// with nothing after it, which reads like we dropped the reason rather
+			// than the provider never having sent one. Saying so — with the
+			// content-type the provider did declare — is the difference between
+			// "our bug" and "ask the provider".
+			const contentType = response.headers.get("content-type")
+			return contentType ? `<empty body> (content-type: ${contentType})` : "<empty body>"
+		}),
 		Effect.orElseSucceed(() => ""),
 	)
 
@@ -176,6 +186,11 @@ export const runHttpTransport = <Config, Prepared>(
 			yield* Effect.annotateCurrentSpan({
 				"maple.delivery.failure_tag": failure._tag,
 				"maple.delivery.retryable": failure.error.retryable,
+				// Which destination, not just which provider: a flat rate of
+				// identical `retry: "never"` failures is one broken row, and the
+				// error issue is only triageable if the span names it.
+				"maple.delivery.destination_id": input.context.destination.id,
+				"maple.delivery.destination_type": transport.type,
 			})
 			return yield* Effect.fail(failure)
 		}

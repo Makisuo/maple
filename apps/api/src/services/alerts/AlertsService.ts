@@ -56,7 +56,7 @@ import {
 	alertRuleStates,
 	type AlertRuleStateRow,
 } from "@maple/db"
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import {
 	Array as Arr,
 	Cause,
@@ -87,7 +87,7 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { makeDbExecute } from "@/platform/db-execute"
-import { dateToMs } from "@/platform/time"
+import { dateToMs, msToDate } from "@/platform/time"
 import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
@@ -144,6 +144,19 @@ interface DeliveryAttemptFailure {
 }
 
 const MAX_DELIVERY_ATTEMPTS = 5
+/**
+ * Consecutive *terminal* delivery failures after which a destination is
+ * auto-disabled.
+ *
+ * A `retry: "never"` failure is already not retried within its own delivery —
+ * but that only bounds one incident. Nothing used to bound the destination, so
+ * a webhook whose provider answers 400 forever kept being handed every new
+ * incident, failing, and losing the alert silently. Three in a row is enough to
+ * separate "this one payload was refused" from "this destination is dead".
+ */
+const DESTINATION_DISABLE_AFTER_FAILURES = 3
+/** Bound on the stored `disabled_reason`; it is a provider sentence, not a log. */
+const DISABLED_REASON_MAX_LENGTH = 500
 const ALERT_TEST_DELIVERY_CONCURRENCY = 5
 const ALERT_CHECK_INGEST_CONCURRENCY = 4
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
@@ -1353,6 +1366,104 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				)
 			})
 
+			/**
+			 * A delivery got through: the destination is alive, so the terminal-failure
+			 * streak is over. Guarded on `> 0` so the overwhelmingly common case (a
+			 * healthy destination) costs no write.
+			 */
+			const clearDestinationFailureStreak = Effect.fn(
+				"AlertsService.clearDestinationFailureStreak",
+			)(function* (destinationId: AlertDestinationRow["id"], currentTime: number) {
+				yield* dbExecute((db) =>
+					db
+						.update(alertDestinations)
+						.set({
+							consecutiveFailures: 0,
+							lastFailureAt: null,
+							updatedAt: msToDate(currentTime),
+						})
+						.where(
+							and(
+								eq(alertDestinations.id, destinationId),
+								gte(alertDestinations.consecutiveFailures, 1),
+							),
+						),
+				)
+			})
+
+			/**
+			 * Count a terminal (`retry: "never"`) failure against the destination and
+			 * disable it once the streak reaches the threshold.
+			 *
+			 * The increment and the disable are two statements on purpose: the
+			 * increment is conditional on the row still being enabled, which makes it
+			 * idempotent against two workers finishing failed deliveries at once —
+			 * whoever crosses the threshold second finds `enabled = false` and counts
+			 * nothing.
+			 */
+			const noteTerminalDestinationFailure = Effect.fn(
+				"AlertsService.noteTerminalDestinationFailure",
+			)(function* (
+				row: AlertDeliveryEventRow,
+				destinationType: string | null,
+				currentTime: number,
+				failure: DeliveryAttemptFailure,
+			) {
+				const counted = yield* dbExecute((db) =>
+					db
+						.update(alertDestinations)
+						.set({
+							consecutiveFailures: sql`${alertDestinations.consecutiveFailures} + 1`,
+							lastFailureAt: msToDate(currentTime),
+							updatedAt: msToDate(currentTime),
+						})
+						.where(
+							and(
+								eq(alertDestinations.id, row.destinationId),
+								eq(alertDestinations.enabled, true),
+							),
+						)
+						.returning({ consecutiveFailures: alertDestinations.consecutiveFailures }),
+				)
+
+				const streak = counted[0]?.consecutiveFailures
+				if (streak === undefined || streak < DESTINATION_DISABLE_AFTER_FAILURES) return
+
+				const reason = failure.message.slice(0, DISABLED_REASON_MAX_LENGTH)
+				yield* dbExecute((db) =>
+					db
+						.update(alertDestinations)
+						.set({
+							enabled: false,
+							disabledAt: msToDate(currentTime),
+							disabledReason: reason,
+							updatedAt: msToDate(currentTime),
+						})
+						.where(eq(alertDestinations.id, row.destinationId)),
+				)
+
+				// The in-product signal is the setup audit: a disabled destination
+				// makes every rule that selects it fail CFG-ALERT-03 ("will evaluate
+				// and breach but deliver to nobody"), and `disabledReason` names the
+				// provider sentence on the destination itself. There is no org-level
+				// notification channel that does not itself go through a destination,
+				// so this log is the operator-side signal — same shape as the dead
+				// push token path in `MobilePushService`.
+				yield* Effect.logWarning(
+					"Alert destination auto-disabled after repeated terminal delivery failures",
+				).pipe(
+					Effect.annotateLogs({
+						workerId,
+						orgId: row.orgId,
+						destinationId: row.destinationId,
+						destinationType: destinationType ?? "",
+						consecutiveFailures: streak,
+						failureKind: failure.kind,
+						reason,
+					}),
+				)
+			})
+
 			const processQueuedDeliveries = Effect.fn("AlertsService.processQueuedDeliveries")(function* () {
 				const currentTime = yield* now
 				const rows = yield* dbExecute((db) =>
@@ -1418,6 +1529,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					yield* Metric.update(AlertingMetrics.deliveriesAttemptedTotal, 1)
 
 					const destinationRow = destinationMap.get(row.destinationId)
+					// On the span before anything can fail, so a delivery error issue
+					// names the destination it was aimed at without a DB round-trip.
+					yield* Effect.annotateCurrentSpan({
+						"maple.delivery.destination_id": row.destinationId,
+						...(destinationRow
+							? { "maple.delivery.destination_type": destinationRow.type }
+							: undefined),
+					})
 					if (!destinationRow) {
 						failureCount += 1
 						yield* Metric.update(AlertingMetrics.deliveriesFailedTotal, 1)
@@ -1516,6 +1635,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						errorMessage: null,
 					})
 
+					yield* clearDestinationFailureStreak(row.destinationId, currentTime)
+
 					if (row.incidentId) {
 						yield* dbExecute((db) =>
 							db
@@ -1576,6 +1697,18 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							currentTime + (yield* computeRetryDelayMs(row.attemptNumber)),
 							row.deliveryKey,
 							row.attemptNumber + 1,
+						)
+					}
+
+					// A terminal failure is never retried for this delivery, so without
+					// this the destination would keep receiving (and losing) every
+					// future incident.
+					if (!failure.retryable) {
+						yield* noteTerminalDestinationFailure(
+							row,
+							destinationMap.get(row.destinationId)?.type ?? null,
+							currentTime,
+							failure,
 						)
 					}
 
