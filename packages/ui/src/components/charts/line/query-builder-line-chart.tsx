@@ -7,6 +7,7 @@ import {
 	asFiniteNumber,
 	cursorTooltip,
 	dashedGridY,
+	findFirstPartialIndex,
 	focusCrosshair,
 	focusDot,
 	roundCapDasharray,
@@ -14,6 +15,7 @@ import {
 	thresholdRules,
 	timeseriesXAxis,
 	timeseriesYAxis,
+	trimEmptyTrailingBuckets,
 	useTimeseriesModel,
 	type TimeseriesRow,
 } from "../../plot"
@@ -40,23 +42,39 @@ export function QueryBuilderLineChart({
 	const model = useTimeseriesModel({ data, unit })
 	const { rows, visible, visibleKeys, chromeColors, axisContext, focusStore, containerWidth } = model
 
+	/**
+	 * The buckets this chart actually draws.
+	 *
+	 * A trailing in-flight bucket that reported nothing is dropped — see
+	 * `trimEmptyTrailingBuckets`. Everything downstream has to agree on that, and
+	 * that is the part that was missed here: the lines were built from the trimmed
+	 * slices while the focus dots were still built over `rows`, and a mark's
+	 * channels feed scale inference. So the x axis kept running out to a bucket
+	 * nothing painted, and that phantom slot stayed hoverable with a zero-value
+	 * tooltip past the end of the data. The area and bar siblings already do this.
+	 */
+	const plotRows = React.useMemo(() => {
+		const first = findFirstPartialIndex(rows)
+		return first === -1 ? rows : trimEmptyTrailingBuckets(rows, visibleKeys, first)
+	}, [rows, visibleKeys])
+
 	/** Which points carry a dot — every one, only the isolated ones, or none. */
 	const dotIndexes = React.useMemo<ReadonlyMap<string, ReadonlySet<number>>>(() => {
 		if (showPoints === false) return new Map()
 		// Auto: dots on every point only when they fit the width, otherwise only on
 		// the isolated points a line cannot show at all.
-		if (showPoints === true || pointsFit(containerWidth, rows.length)) {
-			const every = new Set(rows.map((_, index) => index))
+		if (showPoints === true || pointsFit(containerWidth, plotRows.length)) {
+			const every = new Set(plotRows.map((_, index) => index))
 			return new Map(visibleKeys.map((key) => [key, every]))
 		}
-		return isolatedPointIndexes(rows, visibleKeys)
-	}, [showPoints, rows, containerWidth, visibleKeys])
+		return isolatedPointIndexes(plotRows, visibleKeys)
+	}, [showPoints, plotRows, containerWidth, visibleKeys])
 
 	const definition = React.useMemo(() => {
 		// The dashed tail is a SECOND mark over an overlapping slice, not a dash
 		// pattern on the first: `strokeDasharray` on `lineY` is a scalar, not a
 		// per-datum channel, so one mark cannot change style mid-line.
-		const { solid, dashed } = splitAtFirstPartial(rows, visibleKeys)
+		const { solid, dashed } = splitAtFirstPartial(plotRows, visibleKeys)
 
 		// `curve` takes a ChartCurve, not a string. Linear is the default shape, so
 		// only monotone needs one built.
@@ -83,7 +101,7 @@ export function QueryBuilderLineChart({
 				// dashed line indistinguishable from every other one. The label mark
 				// is `decorative`, so it paints without emitting a hoverable datum
 				// into the shared tooltip.
-				...thresholdRules(thresholds ?? [], { labelX: rows.at(-1)?.date }),
+				...thresholdRules(thresholds ?? [], { labelX: plotRows.at(-1)?.date }),
 				...visible.map((entry) => line(solid, entry, false)),
 				...(dashed.length > 0 ? visible.map((entry) => line(dashed, entry, true)) : []),
 				...visible.flatMap((entry) => {
@@ -94,7 +112,7 @@ export function QueryBuilderLineChart({
 					// renderer never ran there — and it matters more than it looks: a
 					// dashboard tile's partial tail is one bucket wide, so a dot at each
 					// end fills the dashes in and the tail reads as a solid line.
-					// `solid` is a prefix of `rows`, so the indexes still line up.
+					// `solid` is a prefix of `plotRows`, so the indexes still line up.
 					const points = solid.filter((_, index) => indexes.has(index))
 					return [
 						dot(points, {
@@ -106,8 +124,10 @@ export function QueryBuilderLineChart({
 					]
 				}),
 				...visible.map((entry) =>
+					// `plotRows`, not `rows`: a focus dot over a bucket no line draws is
+					// what kept the dropped in-flight slot on the axis and hoverable.
 					focusDot(
-						rows,
+						plotRows,
 						(row: TimeseriesRow) => row.date,
 						(row: TimeseriesRow) => asFiniteNumber(row[entry.key]),
 						entry.color,
@@ -118,7 +138,7 @@ export function QueryBuilderLineChart({
 			],
 			x: timeseriesXAxis(axisContext),
 			y: timeseriesYAxis({
-				rows,
+				rows: plotRows,
 				visibleKeys,
 				unit,
 				logScale,
@@ -132,7 +152,7 @@ export function QueryBuilderLineChart({
 			tooltip: tooltip === "hidden" ? false : cursorTooltip(focusStore.anchor),
 		})
 	}, [
-		rows,
+		plotRows,
 		visible,
 		visibleKeys,
 		dotIndexes,

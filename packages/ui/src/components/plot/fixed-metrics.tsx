@@ -4,6 +4,7 @@ import * as React from "react"
 import { formatBucketLabel, inferBucketSeconds, inferRangeMs, parseBucketMs } from "../../lib/format"
 import { cn } from "../../lib/utils"
 import { useChartTooltipSuppressed } from "./floating-tooltip"
+import { findFirstPartialIndex, trimEmptyTrailingBuckets } from "./partial-buckets"
 import {
 	PlotTooltipBody,
 	createTooltipFocusStore,
@@ -11,7 +12,7 @@ import {
 	type TooltipFocusStore,
 } from "./plot-tooltip"
 import { usePlotChromeColors, type PlotChromeColors } from "./theme"
-import type { TimeseriesAxisContext, TimeseriesRow } from "./timeseries"
+import { rowsDomainMs, type TimeseriesAxisContext, type TimeseriesRow } from "./timeseries"
 
 /**
  * The shared spine of a FIXED-METRIC time-series chart — latency percentiles,
@@ -78,8 +79,63 @@ export function normaliseFixedRows(
 	return rows
 }
 
+/**
+ * "This bucket reported nothing", decided per ROW rather than per series.
+ *
+ * `totalCount` is the span count the bucket was built from, and the server's
+ * gap-fill writes it as `0` on the buckets it synthesizes — so it says what no
+ * plotted column can. Reading the columns instead is what let these four panels
+ * disagree: they share one row array but each trimmed on its own keys, and
+ * `mergeExactThroughput` overlays exact SpanMetrics throughput that materializes
+ * ahead of the percentile path. A trailing bucket with `throughput > 0` and
+ * `p95 === 0` was kept by throughput and dropped by latency, so the two cards
+ * ended their series at different times on the same grid.
+ *
+ * It also stops a real `0` being mistaken for missing: an hour with no errors is
+ * a reading of `errorRate: 0`, not an absent one.
+ *
+ * `undefined` when the rows do not carry the column — a dashboard tile fed from
+ * the query builder — so the caller keeps the value-key default.
+ */
+function reportedNothingPredicate(
+	rows: readonly TimeseriesRow[],
+): ((row: TimeseriesRow) => boolean) | undefined {
+	if (!rows.some((row) => typeof row.totalCount === "number")) return undefined
+	return (row: TimeseriesRow) => {
+		const count = row.totalCount
+		return typeof count === "number" ? count === 0 : true
+	}
+}
+
+/** See the `plotRows` memo — the row-level predicate is what decides emptiness. */
+const EMPTY_VALUE_KEYS: ReadonlyArray<string> = []
+
 export interface FixedMetricModel {
+	/**
+	 * Every bucket the query returned, in-flight tail included.
+	 *
+	 * The tooltip and the per-column probes (`hasSampling`, `hasTraced`) want the
+	 * full set. Anything that becomes a MARK wants `plotRows` — see below.
+	 */
 	rows: TimeseriesRow[]
+	/**
+	 * The buckets this chart actually draws.
+	 *
+	 * A trailing in-flight bucket that reported nothing is dropped — see
+	 * `trimEmptyTrailingBuckets`. Everything downstream has to agree on that, and
+	 * that is the part the TanStack port missed here: the marks were built from
+	 * the trimmed slices while the focus dots were still built over `rows`, and a
+	 * mark's channels feed scale inference whether or not it paints. So the x axis
+	 * kept running out to a bucket nothing drew, and the series read as cut off
+	 * short of its own axis.
+	 */
+	plotRows: readonly TimeseriesRow[]
+	/**
+	 * Pass to `splitAtFirstPartial` so the solid/dashed split agrees with the trim
+	 * that produced `plotRows` — otherwise it re-trims on the caller's value keys
+	 * and the panels drift apart again.
+	 */
+	trimOptions: { isEmpty?: (row: TimeseriesRow) => boolean }
 	bucketSeconds: number | undefined
 	axisContext: TimeseriesAxisContext
 	chromeColors: PlotChromeColors
@@ -99,18 +155,51 @@ export function useFixedMetricModel(
 	data: ReadonlyArray<Record<string, unknown>> | undefined,
 ): FixedMetricModel {
 	const rows = React.useMemo(() => normaliseFixedRows(data), [data])
-	const bucketSeconds = React.useMemo(() => inferBucketSeconds(rows), [rows])
+
+	const trimOptions = React.useMemo(() => ({ isEmpty: reportedNothingPredicate(rows) }), [rows])
+
+	const plotRows = React.useMemo(() => {
+		const first = findFirstPartialIndex(rows)
+		if (first === -1) return rows
+		// `EMPTY_VALUE_KEYS`: the row-level predicate decides this, and when the
+		// rows carry no `totalCount` an empty key list makes `every` vacuously true
+		// — which would trim the whole tail. Fall back to nothing rather than to
+		// the wrong answer; a query-builder row array reaches its own charts, not
+		// this hook.
+		if (!trimOptions.isEmpty) return rows
+		return trimEmptyTrailingBuckets(rows, EMPTY_VALUE_KEYS, first, trimOptions)
+	}, [rows, trimOptions])
+
+	// The bucket size and the label granularity describe the range actually
+	// DRAWN. Inferring them from the untrimmed rows would format ticks for a
+	// window whose tail nothing paints.
+	const bucketSeconds = React.useMemo(() => inferBucketSeconds(plotRows), [plotRows])
 	const axisContext = React.useMemo(
-		() => ({ rangeMs: inferRangeMs(rows), bucketSeconds }),
-		[rows, bucketSeconds],
+		() => ({
+			rangeMs: inferRangeMs(plotRows),
+			bucketSeconds,
+			// The DRAWN span, so an edge tick label clamps inward instead of
+			// overhanging the plot and pushing the margin solver — see `timeseriesXAxis`.
+			domainMs: rowsDomainMs(plotRows),
+		}),
+		[plotRows, bucketSeconds],
 	)
 	const chromeColors = usePlotChromeColors()
 	const focusStore = React.useMemo(() => createTooltipFocusStore(), [])
 	const suppressed = useChartTooltipSuppressed()
 
 	return React.useMemo(
-		() => ({ rows, bucketSeconds, axisContext, chromeColors, focusStore, suppressed }),
-		[rows, bucketSeconds, axisContext, chromeColors, focusStore, suppressed],
+		() => ({
+			rows,
+			plotRows,
+			trimOptions,
+			bucketSeconds,
+			axisContext,
+			chromeColors,
+			focusStore,
+			suppressed,
+		}),
+		[rows, plotRows, trimOptions, bucketSeconds, axisContext, chromeColors, focusStore, suppressed],
 	)
 }
 

@@ -64,7 +64,7 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 	yAxisWidth,
 }: ServiceChartProps) {
 	const model = useFixedMetricModel(data ?? latencyTimeSeriesData)
-	const { rows, axisContext, chromeColors, focusStore, suppressed } = model
+	const { plotRows, trimOptions, axisContext, chromeColors, focusStore, suppressed } = model
 
 	const colors = usePlotColors(LATENCY_TOKENS)
 
@@ -101,7 +101,9 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 		// per-datum channel, so one mark cannot change style mid-line. This is what
 		// replaces the `key`/`key_incomplete` twin-column rewrite Recharts needed,
 		// where a `<Line dataKey>` string could not change style mid-series.
-		const { solid, dashed } = splitAtFirstPartial(rows, VALUE_KEYS)
+		// `plotRows`, not `rows`: everything inside this definition becomes a mark,
+		// and a mark's channels feed scale inference whether or not it paints.
+		const { solid, dashed } = splitAtFirstPartial(plotRows, VALUE_KEYS, trimOptions)
 		// `lineY` hard-codes a round cap, which eats the gap — see `roundCapDasharray`.
 		const partialDash = roundCapDasharray(4, 4, STROKE_WIDTH)
 
@@ -126,7 +128,9 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 				...(dashed.length > 0 ? series.map((entry) => line(dashed, entry, true)) : []),
 				...series.map((entry) =>
 					focusDot(
-						rows,
+						// `plotRows`: a focus dot over a bucket no line draws is what kept
+						// the dropped in-flight slot on the axis and hoverable.
+						plotRows,
 						(row: TimeseriesRow) => row.date,
 						(row: TimeseriesRow) => asFiniteNumber(row[entry.key]),
 						entry.color,
@@ -136,12 +140,22 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 				focusCrosshair(chromeColors),
 			],
 			x: timeseriesXAxis(axisContext),
-			y: timeseriesYAxis({ rows, visibleKeys: VALUE_KEYS, format: formatLatency }).y,
+			y: timeseriesYAxis({ rows: plotRows, visibleKeys: VALUE_KEYS, format: formatLatency }).y,
 			focus: "group-x",
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),
 		})
-	}, [rows, series, chromeColors, axisContext, focusStore, tooltip, suppressed, yAxisWidth])
+	}, [
+		plotRows,
+		trimOptions,
+		series,
+		chromeColors,
+		axisContext,
+		focusStore,
+		tooltip,
+		suppressed,
+		yAxisWidth,
+	])
 
 	return (
 		<PlotFrame

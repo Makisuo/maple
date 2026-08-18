@@ -55,7 +55,7 @@ export const ApdexAreaChart = memo(function ApdexAreaChart({
 	yAxisWidth,
 }: ServiceChartProps) {
 	const model = useFixedMetricModel(data ?? apdexTimeSeriesData)
-	const { rows, axisContext, chromeColors, focusStore, suppressed } = model
+	const { plotRows, trimOptions, axisContext, chromeColors, focusStore, suppressed } = model
 
 	const colors = usePlotColors(APDEX_TOKENS)
 	const gradientPrefix = useChartId("apdex")
@@ -92,7 +92,9 @@ export const ApdexAreaChart = memo(function ApdexAreaChart({
 		// The in-flight tail is a SECOND pair of marks over an overlapping slice —
 		// `areaY` has no `strokeDasharray` at all and `lineY`'s is a scalar, so no
 		// single mark can change style mid-series.
-		const { solid, dashed } = splitAtFirstPartial(rows, VALUE_KEYS)
+		// `plotRows`, not `rows`: everything inside this definition becomes a mark,
+		// and a mark's channels feed scale inference whether or not it paints.
+		const { solid, dashed } = splitAtFirstPartial(plotRows, VALUE_KEYS, trimOptions)
 		const partialDash = roundCapDasharray(4, 4, STROKE_WIDTH)
 		const gradientId = `${gradientPrefix}-fill`
 		const fadedGradientId = `${gradientPrefix}-fill-partial`
@@ -147,19 +149,32 @@ export const ApdexAreaChart = memo(function ApdexAreaChart({
 				...(hasDashed ? [band(dashed, fadedGradientId, FILL_OPACITY)] : []),
 				edge(solid, false),
 				...(hasDashed ? [edge(dashed, true)] : []),
-				focusDot(rows, (row: TimeseriesRow) => row.date, value, color, chromeColors),
+				// `plotRows`: a focus dot over a bucket no band draws is what kept the
+				// dropped in-flight slot on the axis and hoverable.
+				focusDot(plotRows, (row: TimeseriesRow) => row.date, value, color, chromeColors),
 				focusCrosshair(chromeColors),
 			],
 			x: timeseriesXAxis(axisContext),
 			// Apdex is a 0–1 score: the axis is the SCALE, not the data extent, so
 			// both bounds are pinned and a good hour does not silently rescale into
 			// looking like a bad one.
-			y: timeseriesYAxis({ rows, visibleKeys: VALUE_KEYS, softMin: 0, softMax: 1 }).y,
+			y: timeseriesYAxis({ rows: plotRows, visibleKeys: VALUE_KEYS, softMin: 0, softMax: 1 }).y,
 			focus: "group-x",
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),
 		})
-	}, [rows, colors, gradientPrefix, chromeColors, axisContext, focusStore, tooltip, suppressed, yAxisWidth])
+	}, [
+		plotRows,
+		trimOptions,
+		colors,
+		gradientPrefix,
+		chromeColors,
+		axisContext,
+		focusStore,
+		tooltip,
+		suppressed,
+		yAxisWidth,
+	])
 
 	return (
 		<PlotFrame

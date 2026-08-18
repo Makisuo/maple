@@ -88,7 +88,15 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 	yAxisWidth,
 }: ThroughputAreaChartProps) {
 	const model = useFixedMetricModel(data ?? throughputTimeSeriesData)
-	const { rows: sourceRows, bucketSeconds, axisContext, chromeColors, focusStore, suppressed } = model
+	const {
+		plotRows: sourceRows,
+		trimOptions,
+		bucketSeconds,
+		axisContext,
+		chromeColors,
+		focusStore,
+		suppressed,
+	} = model
 
 	const colors = usePlotColors(THROUGHPUT_TOKENS)
 	const gradientPrefix = useChartId("throughput")
@@ -96,6 +104,15 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 	const perSecond = rateMode === "per_second"
 	const rateLabel = perSecond ? "/s" : bucketIntervalLabel(bucketSeconds)
 
+	/**
+	 * `model.plotRows` is the source, so the trailing in-flight buckets that
+	 * reported nothing are already gone before anything derives from them. Every
+	 * mark below — the bands, the error line, the `tracedLine` reference drawn
+	 * across the WHOLE range, the focus dots — is built from this array, and a
+	 * mark's channels feed scale inference whether or not it paints. Deriving from
+	 * the untrimmed rows is what let the x axis run out past the last bucket
+	 * anything drew.
+	 */
 	const rows = useMemo(
 		() => deriveRows(sourceRows, perSecond && bucketSeconds ? bucketSeconds : 1),
 		[sourceRows, perSecond, bucketSeconds],
@@ -193,7 +210,7 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 		// The in-flight tail is a SECOND set of marks over an overlapping slice —
 		// `areaY` has no `strokeDasharray` at all and `lineY`'s is a scalar, so no
 		// single mark can change style mid-series.
-		const { solid, dashed } = splitAtFirstPartial(rows, PARTIAL_KEYS)
+		const { solid, dashed } = splitAtFirstPartial(rows, PARTIAL_KEYS, trimOptions)
 		const hasDashed = dashed.length > 0
 		const gradientId = `${gradientPrefix}-fill`
 		const fadedGradientId = `${gradientPrefix}-fill-partial`
@@ -273,6 +290,9 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 				...(hasErrors ? [errorLine(solid, false)] : []),
 				...(hasErrors && hasDashed ? [errorLine(dashed, true)] : []),
 				...(hasTraced ? [tracedLine] : []),
+				// `rows` is already the TRIMMED set (derived from `model.plotRows`): a
+				// focus dot over a bucket no band draws still feeds scale inference, and
+				// that is what kept the dropped in-flight slot on the axis and hoverable.
 				focusDot(rows, at, value(THROUGHPUT_KEY), colors.throughput, chromeColors),
 				...(hasErrors ? [focusDot(rows, at, value(ERROR_KEY), colors.error, chromeColors)] : []),
 				focusCrosshair(chromeColors),
@@ -291,6 +311,7 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 		})
 	}, [
 		rows,
+		trimOptions,
 		colors,
 		gradientPrefix,
 		chromeColors,

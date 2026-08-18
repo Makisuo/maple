@@ -42,6 +42,27 @@ export function findFirstPartialIndex(
 }
 
 /**
+ * Decides whether a trailing bucket carried a reading.
+ *
+ * The default reads the plotted columns and calls a row empty when all of them
+ * are null or zero. That is a GUESS, and it is wrong in one direction: `0` is a
+ * real answer for an error rate or an apdex score, so a genuinely quiet bucket
+ * is indistinguishable from one the source never reported.
+ *
+ * A caller that has the row-level answer — a `totalCount`, a `hasData` flag,
+ * anything the pipeline stamps per bucket rather than per series — should pass
+ * it instead, and then this stops guessing. See `useFixedMetricModel`, where
+ * one predicate over `totalCount` also makes the four service-overview panels
+ * agree on where the data ends; deciding it per series is what let latency and
+ * throughput trim to different buckets on the same card grid.
+ */
+export type BucketEmptyPredicate<T> = (row: T) => boolean
+
+export interface TrimTrailingOptions<T> {
+	isEmpty?: BucketEmptyPredicate<T>
+}
+
+/**
  * Drops trailing in-flight buckets that carry nothing.
  *
  * The current interval is usually queried before any of its data has landed, so
@@ -56,14 +77,17 @@ export function trimEmptyTrailingBuckets<T extends PartialCandidateRow>(
 	rows: readonly T[],
 	valueKeys: ReadonlyArray<string>,
 	firstPartialIndex: number,
+	options?: TrimTrailingOptions<T>,
 ): readonly T[] {
 	if (firstPartialIndex < 0) return rows
 
-	const isEmptyRow = (row: T): boolean =>
-		valueKeys.every((key) => {
-			const value = (row as Record<string, unknown>)[key]
-			return value === null || value === undefined || value === 0
-		})
+	const isEmptyRow =
+		options?.isEmpty ??
+		((row: T): boolean =>
+			valueKeys.every((key) => {
+				const value = (row as Record<string, unknown>)[key]
+				return value === null || value === undefined || value === 0
+			}))
 
 	let end = rows.length
 	while (end > firstPartialIndex && end > 1 && isEmptyRow(rows[end - 1])) {
@@ -100,12 +124,12 @@ export interface PartialSplit<T> {
 export function splitAtFirstPartial<T extends PartialCandidateRow>(
 	rows: readonly T[],
 	valueKeys: ReadonlyArray<string>,
-	options?: { now?: number },
+	options?: { now?: number } & TrimTrailingOptions<T>,
 ): PartialSplit<T> {
 	const first = findFirstPartialIndex(rows, options)
 	if (first === -1) return { solid: rows, dashed: [], hasPartial: false }
 
-	const trimmed = trimEmptyTrailingBuckets(rows, valueKeys, first)
+	const trimmed = trimEmptyTrailingBuckets(rows, valueKeys, first, options)
 	// Every in-flight bucket was empty: the series ends at the last complete one
 	// and there is no dashed segment to draw.
 	if (trimmed.length <= first) return { solid: trimmed, dashed: [], hasPartial: false }

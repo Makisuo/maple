@@ -181,6 +181,21 @@ export interface TimeseriesSeries {
 export interface TimeseriesAxisContext {
 	rangeMs: number
 	bucketSeconds: number | undefined
+	/**
+	 * `[first, last]` epoch ms of the buckets actually DRAWN, when the caller
+	 * knows them. Lets `timeseriesXAxis` clamp a tick label sitting on a domain
+	 * edge instead of letting it overhang — see the `anchor` there.
+	 */
+	domainMs?: readonly [number, number]
+}
+
+/** `[first, last]` epoch ms of `rows`, or `undefined` when there is no span. */
+export function rowsDomainMs(rows: ReadonlyArray<{ date: Date }>): readonly [number, number] | undefined {
+	if (rows.length === 0) return undefined
+	const first = rows[0].date.getTime()
+	const last = rows[rows.length - 1].date.getTime()
+	if (!Number.isFinite(first) || !Number.isFinite(last)) return undefined
+	return [Math.min(first, last), Math.max(first, last)]
 }
 
 export interface TimeseriesModelOptions {
@@ -314,7 +329,11 @@ export function useTimeseriesModel({ data, unit, mapSeries }: TimeseriesModelOpt
 	const { width: containerWidth, height: containerHeight } = useContainerSize(containerRef)
 
 	const axisContext = React.useMemo(
-		() => ({ rangeMs: inferRangeMs(scaledRows), bucketSeconds }),
+		() => ({
+			rangeMs: inferRangeMs(scaledRows),
+			bucketSeconds,
+			domainMs: rowsDomainMs(scaledRows),
+		}),
 		[scaledRows, bucketSeconds],
 	)
 
@@ -396,8 +415,59 @@ export function timeseriesXAxis(axisContext: TimeseriesAxisContext) {
 			// none — and a thinned time axis reads unevenly (01:00, 02:00, 03:30). A
 			// gap wide enough to be legible, left to fire only where a long label or a
 			// narrow tile still collides.
-			tickLabels: { thin: { minGap: 12 } },
+			tickLabels: { thin: { minGap: 12 }, anchor: edgeTickAnchor(axisContext) },
 		},
+	}
+}
+
+/**
+ * Keeps the end tick labels inside the plot instead of overhanging it.
+ *
+ * A tick label is centred on its tick, so one near a domain edge hangs half its
+ * width past the plot. The layout solver measures that overhang and reserves it
+ * as margin (`includeLabelMargin` in the library's `scene.js`), which pulls the
+ * plot's edge inward by half a label — measured at 49px on a 672px card for
+ * "Aug 19, 12:00 AM", against 4px when no tick lands near the edge. The series
+ * then stops well short of where its own axis labels run, which is what reads as
+ * a chart that has been cut off.
+ *
+ * Whether it bites is pure tick PHASE, which is why it looks intermittent: a
+ * 6-day window ending at midnight puts a 2-day tick on the last bucket, while a
+ * 7-day one lands the ticks a day inside and nothing overhangs.
+ *
+ * The threshold is HALF A LABEL, not one bucket: the tick that triggered this in
+ * production sat two hours inside a six-day domain — a rounding error in bucket
+ * terms, and still 45px of overhang. Half a label is converted to a fraction of
+ * the domain against a NOMINAL plot width rather than a measured one, because
+ * the measurement is the solver's output and reading it here would make the
+ * layout depend on its own result. Over-estimating is the safe direction (it
+ * anchors a label that would have just fitted) and the error is bounded: label
+ * candidates are `spacing: 104` apart and a label is ~90px, so at most one tick
+ * per edge can ever fall inside the threshold.
+ */
+const NOMINAL_PLOT_WIDTH = 600
+/** Half the advance width of one character of the 11px mono tick label. */
+const HALF_CHAR_PX = 2.8
+/** A label can never be wide enough to claim this much of the domain. */
+const MAX_EDGE_FRACTION = 0.2
+
+function edgeTickAnchor(axisContext: TimeseriesAxisContext) {
+	const domain = axisContext.domainMs
+	if (!domain) return undefined
+	const spanMs = domain[1] - domain[0]
+	if (spanMs <= 0) return undefined
+
+	return ({ value }: { value: Date }): "start" | "middle" | "end" => {
+		const at = value.getTime()
+		if (!Number.isFinite(at)) return "middle"
+
+		const label = formatBucketLabel(value.toISOString(), axisContext, "tick")
+		const fraction = Math.min(MAX_EDGE_FRACTION, (label.length * HALF_CHAR_PX) / NOMINAL_PLOT_WIDTH)
+		const slackMs = spanMs * fraction
+
+		if (at >= domain[1] - slackMs) return "end"
+		if (at <= domain[0] + slackMs) return "start"
+		return "middle"
 	}
 }
 

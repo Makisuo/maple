@@ -201,3 +201,54 @@ describe("the shared x axis' label spacing", () => {
 		expect(axis.axis.tickLabels.thin.minGap).toBeGreaterThanOrEqual(12)
 	})
 })
+
+/**
+ * The overhang that read as "the axis is wider than the chart".
+ *
+ * A centred label on a tick sitting at the domain edge hangs half its width past
+ * the plot; the layout solver reserves that as margin and the series ends ~50px
+ * short of where its own labels run. Measured in the browser at 49px of right
+ * gap on a 672px card, against 4px once the edge label is anchored inward.
+ */
+describe("the shared x axis' edge tick labels", () => {
+	const DAY = 86_400_000
+	// The production shape: a six-day window ending at midnight, which is the
+	// phase that puts a two-day tick candidate on the last bucket.
+	const start = Date.UTC(2026, 7, 13)
+	const end = Date.UTC(2026, 7, 19)
+	const context = { rangeMs: end - start, bucketSeconds: 3600, domainMs: [start, end] as const }
+
+	const anchorAt = (ms: number) =>
+		timeseriesXAxis(context).axis.tickLabels.anchor?.({ value: new Date(ms) })
+
+	it("right-anchors a label on the last bucket so it cannot overhang", () => {
+		expect(anchorAt(end)).toBe("end")
+	})
+
+	it("left-anchors one on the first bucket", () => {
+		expect(anchorAt(start)).toBe("start")
+	})
+
+	/**
+	 * The tick that triggered this in production sat TWO HOURS inside a six-day
+	 * domain — negligible in bucket terms, and still 45px of overhang. A
+	 * bucket-sized threshold missed it; the threshold is half a label.
+	 */
+	it("right-anchors one a rounding error inside the domain", () => {
+		expect(anchorAt(end - 2 * 3_600_000)).toBe("end")
+	})
+
+	it("leaves an interior label centred on its tick", () => {
+		expect(anchorAt(start + 3 * DAY)).toBe("middle")
+	})
+
+	/**
+	 * Without a domain there is nothing to measure against, and the library's
+	 * centred default is right — the query-builder charts that predate this pass
+	 * no `domainMs` and must be untouched.
+	 */
+	it("does not anchor at all when the drawn domain is unknown", () => {
+		const axis = timeseriesXAxis({ rangeMs: 6 * DAY, bucketSeconds: 3600 })
+		expect(axis.axis.tickLabels.anchor).toBeUndefined()
+	})
+})

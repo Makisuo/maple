@@ -230,7 +230,7 @@ export function parseBucketMs(value: unknown): number | null {
 /**
  * Infer the total time range in milliseconds from an array of data points with a `bucket` key.
  */
-export function inferRangeMs(data: Array<Record<string, unknown>>): number {
+export function inferRangeMs(data: ReadonlyArray<Record<string, unknown>>): number {
 	const bucketTimes = data
 		.map((row) => parseBucketMs(row.bucket))
 		.filter((value): value is number => value != null)

@@ -77,7 +77,7 @@ export const ErrorRateAreaChart = memo(function ErrorRateAreaChart({
 	yAxisWidth,
 }: ServiceChartProps) {
 	const model = useFixedMetricModel(data ?? errorRateTimeSeriesData)
-	const { rows, axisContext, chromeColors, focusStore, suppressed } = model
+	const { plotRows, trimOptions, axisContext, chromeColors, focusStore, suppressed } = model
 
 	const colors = usePlotColors(ERROR_RATE_TOKENS)
 	const gradientPrefix = useChartId("errorRate")
@@ -111,7 +111,9 @@ export const ErrorRateAreaChart = memo(function ErrorRateAreaChart({
 	)
 
 	const definition = useMemo(() => {
-		const { solid, dashed } = splitAtFirstPartial(rows, VALUE_KEYS)
+		// `plotRows`, not `rows`: everything inside this definition becomes a mark,
+		// and a mark's channels feed scale inference whether or not it paints.
+		const { solid, dashed } = splitAtFirstPartial(plotRows, VALUE_KEYS, trimOptions)
 		const partialDash = roundCapDasharray(4, 4, STROKE_WIDTH)
 		const gradientId = `${gradientPrefix}-fill`
 		const fadedGradientId = `${gradientPrefix}-fill-partial`
@@ -161,22 +163,35 @@ export const ErrorRateAreaChart = memo(function ErrorRateAreaChart({
 				...(hasDashed ? [band(dashed, fadedGradientId)] : []),
 				edge(solid, false),
 				...(hasDashed ? [edge(dashed, true)] : []),
-				focusDot(rows, (row: TimeseriesRow) => row.date, value, color, chromeColors),
+				// `plotRows`: a focus dot over a bucket no band draws is what kept the
+				// dropped in-flight slot on the axis and hoverable.
+				focusDot(plotRows, (row: TimeseriesRow) => row.date, value, color, chromeColors),
 				focusCrosshair(chromeColors),
 			],
 			x: timeseriesXAxis(axisContext),
 			y: timeseriesYAxis({
-				rows,
+				rows: plotRows,
 				visibleKeys: VALUE_KEYS,
 				softMin: 0,
-				softMax: errorRateCeiling(rows),
+				softMax: errorRateCeiling(plotRows),
 				format: formatErrorRate,
 			}).y,
 			focus: "group-x",
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),
 		})
-	}, [rows, colors, gradientPrefix, chromeColors, axisContext, focusStore, tooltip, suppressed, yAxisWidth])
+	}, [
+		plotRows,
+		trimOptions,
+		colors,
+		gradientPrefix,
+		chromeColors,
+		axisContext,
+		focusStore,
+		tooltip,
+		suppressed,
+		yAxisWidth,
+	])
 
 	return (
 		<PlotFrame
