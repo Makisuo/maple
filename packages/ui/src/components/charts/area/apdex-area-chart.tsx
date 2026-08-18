@@ -78,11 +78,7 @@ export const ApdexAreaChart = memo(function ApdexAreaChart({
 					dataKey="bucket"
 					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
 				/>
-				<ChartYAxis
-					domain={[0, 1]}
-					tickMargin={8}
-					width={yAxisWidth ?? 50}
-				/>
+				<ChartYAxis domain={[0, 1]} tickMargin={8} width={yAxisWidth ?? 50} />
 				{tooltip !== "hidden" && (
 					<ChartTooltip
 						content={

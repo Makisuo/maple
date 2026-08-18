@@ -65,11 +65,7 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 					dataKey="bucket"
 					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
 				/>
-				<ChartYAxis
-					tickMargin={8}
-					width={yAxisWidth ?? 70}
-					tickFormatter={(v) => formatLatency(v)}
-				/>
+				<ChartYAxis tickMargin={8} width={yAxisWidth ?? 70} tickFormatter={(v) => formatLatency(v)} />
 				{tooltip !== "hidden" && (
 					<ChartTooltip
 						content={

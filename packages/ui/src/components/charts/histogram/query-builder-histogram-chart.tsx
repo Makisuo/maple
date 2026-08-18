@@ -2,7 +2,15 @@ import * as React from "react"
 import { Bar, BarChart } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
-import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartGrid, ChartXAxis, ChartYAxis } from "../../ui/chart"
+import {
+	type ChartConfig,
+	ChartContainer,
+	ChartTooltip,
+	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
+} from "../../ui/chart"
 import { formatValueByUnit, formatNumber } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
 
