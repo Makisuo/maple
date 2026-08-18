@@ -51,7 +51,9 @@ export const createLocalUiWorker = ({
 					destinations: [logsDestination?.slug ?? "maple"],
 				},
 				traces: {
-					enabled: true,
+					// Off: CF marks every non-2xx `fetch` span Error, so bot 404s
+					// (/wp-admin, /.git/config) flooded error issues with "Unknown Error".
+					enabled: false,
 					destinations: [tracesDestination?.slug ?? "maple"],
 				},
 			},

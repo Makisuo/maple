@@ -37,7 +37,10 @@ export interface FingerprintInputs {
 //   JS/Java/Go/Ruby: `file.ext:123` style
 //   Python:          `File "path", line 123, in function`
 const FRAME_LINE_RE = /:\d+|line \d+/
-const LINE_NUM_OR_HEX_RE = /:\d+|line \d+|0x[0-9a-fA-F]+/g
+// Volatile tokens stripped from a frame line. The last two alternatives mirror
+// MSG_REDACT_RE: trace/span/request ids embedded in a stack line would otherwise
+// split one bug into one issue per occurrence.
+const LINE_NUM_OR_HEX_RE = /:\d+|line \d+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}/g
 const MSG_REDACT_RE = /[0-9a-fA-F]{8,}|[0-9]+/g
 
 // Display-only candidate keys for the human label (NOT used by the fingerprint).
