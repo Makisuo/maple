@@ -94,7 +94,12 @@ function fmtPercent(fraction: number, digits = 1): string {
 // the Value and Percent columns come to TABLE_FIXED_W, and anything narrower
 // than that leaves the flex-1 name column at zero width — a legend of coloured
 // squares and numbers with no labels, which is worse than the chips it replaced.
-const TABLE_LEGEND_RATIO = 0.46
+//
+// The RATIO is not a taste number either: it is `PlotFrame`'s own side-legend
+// ceiling. A wider one here is silently clipped back to it, and the table then
+// overflows its slot by the difference and grows a horizontal scrollbar across
+// the last column.
+const TABLE_LEGEND_RATIO = 0.45
 const TABLE_FIXED_W = 116
 const TABLE_LEGEND_MIN_W = TABLE_FIXED_W + 52
 const TABLE_LEGEND_MAX_W = 240
@@ -603,21 +608,35 @@ export function QueryBuilderPieChart({
 	)
 
 	/**
-	 * The TABLE legend is composed here rather than handed to `PlotFrame.legend`,
-	 * because the frame's slot stacks below the plot and this form sits beside it.
-	 * The chip form goes through the slot, where the frame re-measures itself: it
-	 * observes its own inner box, so a strip that rewraps to a second row shrinks
-	 * the plot with no arithmetic here.
+	 * The side TABLE legend, at a width this chart computes rather than one the
+	 * frame picks: below `TABLE_FIXED_W` the Value and Percent columns leave the
+	 * name column at zero, so the width is a property of the columns and only
+	 * this file knows them. The frame's own cap bounds it from outside.
+	 */
+	const statsTable = (
+		// `maxWidth` as well as `width`: the ratio above and the frame's cap agree,
+		// but they are rounded independently, and a sub-pixel disagreement is enough
+		// to overflow the slot. This makes the frame's cap the one that wins.
+		<div style={{ width: tableLegendW, maxWidth: "100%" }}>
+			<PlotStatsLegend
+				series={legendSeries}
+				highlighted={highlighted}
+				onHighlight={highlight}
+				active={activeName}
+				onActiveChange={setActiveName}
+				label="Share by category"
+			/>
+		</div>
+	)
+
+	/**
+	 * BOTH legend forms go through `PlotFrame.legend` — the frame lays either one
+	 * out, and it is the frame that re-measures the plot afterwards by observing
+	 * its own inner box, so a chip strip that rewraps to a second row shrinks the
+	 * plot with no arithmetic here.
 	 */
 	return (
-		<div
-			ref={containerRef}
-			className={cn(
-				"flex h-full w-full select-none",
-				tableLegend ? "flex-row items-stretch gap-3" : "flex-col",
-				className,
-			)}
-		>
+		<div ref={containerRef} className={cn("flex h-full w-full flex-col select-none", className)}>
 			<PlotFrame
 				// `min-h-12` is a FLOOR, not a size: below ~48px there is no pie left,
 				// and a card that short should overflow visibly rather than reserve a
@@ -631,7 +650,8 @@ export function QueryBuilderPieChart({
 				// on every pointer move, so crossing five slices costs five commits
 				// rather than one per pixel.
 				onFocusChange={(point) => setActiveName(point?.datum.name ?? null)}
-				legend={chipLegend ? chipStrip : undefined}
+				legend={tableLegend ? statsTable : chipLegend ? chipStrip : undefined}
+				legendPlacement={tableLegend ? "right" : "bottom"}
 				overlay={
 					donut === true ? (
 						<DonutCenterTotal total={total} unit={unit} innerRadius={innerRadius} />
@@ -666,18 +686,6 @@ export function QueryBuilderPieChart({
 					)
 				}}
 			/>
-			{tableLegend ? (
-				<div className="shrink-0 overflow-y-auto" style={{ width: tableLegendW }}>
-					<PlotStatsLegend
-						series={legendSeries}
-						highlighted={highlighted}
-						onHighlight={highlight}
-						active={activeName}
-						onActiveChange={setActiveName}
-						label="Share by category"
-					/>
-				</div>
-			) : null}
 		</div>
 	)
 }

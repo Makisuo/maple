@@ -208,6 +208,33 @@ describe("query-builder pie: legend", () => {
 		const labels = [...container.querySelectorAll("button")].map((node) => node.textContent ?? "")
 		expect(labels).toEqual(["GET /a", "GET /b", "GET /c"])
 	})
+
+	it("hands BOTH legend forms to the frame's slot", () => {
+		// The side table used to be composed outside `PlotFrame`, because the
+		// frame's slot could only stack below the plot. It goes through the slot
+		// now, so the pie owns no layout of its own on either path.
+		for (const mode of ["right", "visible"] as const) {
+			const { container, unmount } = render(<QueryBuilderPieChart data={rows} legend={mode} />)
+			const host = container.querySelector("[data-chart-host]")
+			const key = container.querySelector("div[aria-label='Share by category']")
+			if (!(host instanceof HTMLElement)) throw new Error("expected the plot frame's host")
+			if (!(key instanceof HTMLElement)) throw new Error("expected the legend")
+			expect(host.contains(key)).toBe(true)
+			unmount()
+		}
+	})
+
+	it("asks the frame for a side legend, not a stacked one", () => {
+		const { container } = render(<QueryBuilderPieChart data={rows} legend="right" />)
+		const row = container.querySelector("[data-chart-legend-row]")
+		if (!(row instanceof HTMLElement)) throw new Error("expected the frame's legend row")
+		expect(row.contains(container.querySelector("div[aria-label='Share by category']"))).toBe(true)
+	})
+
+	it("stacks the chips under the plot, with no legend row", () => {
+		const { container } = render(<QueryBuilderPieChart data={rows} legend="visible" />)
+		expect(container.querySelector("[data-chart-legend-row]")).toBeNull()
+	})
 })
 
 describe("query-builder pie: the donut centre is not a hover target", () => {

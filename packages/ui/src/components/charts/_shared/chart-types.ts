@@ -43,17 +43,28 @@ export interface CartesianPlotProps extends PlotChromeProps {
 	/** Adds the per-series Min/Max/Mean/Last table to the legend block. */
 	seriesStats?: boolean
 	unit?: string
-	rateMode?: "per_second"
 	logScale?: boolean
 	softMin?: number
 	softMax?: number
-	/**
-	 * Lower-bound the y-axis at the data's minimum (with padding) instead of
-	 * pinning it to zero. Ignored when `softMin` or `logScale` are set.
-	 */
-	fitYAxisToData?: boolean
 	/** Horizontal lines marking danger-zone values. */
 	thresholds?: ChartThreshold[]
+}
+
+/**
+ * Lower-bound the y-axis at the data's minimum (with padding) instead of
+ * pinning it to zero. Ignored when `softMin` or `logScale` are set.
+ *
+ * This sits BELOW `CartesianPlotProps` because bar is cartesian and cannot
+ * honour it: a bar encodes its value as the area between the baseline and its
+ * top, so lifting the floor makes the ratio between two bars a lie. While it
+ * lived on the shared tier the bar branch of the widget factory spread it in
+ * and the chart silently dropped it, so a bar widget carrying
+ * `yAxis.fitYAxisToData` — reachable from the v2 API, MCP `add_dashboard_widget`
+ * or an imported dashboard — kept a zero-anchored axis while the line beside it,
+ * same config, zoomed. Declared as a mixin, passing it to bar fails to compile.
+ */
+export interface FitYAxisPlotProps {
+	fitYAxisToData?: boolean
 }
 
 /**
@@ -109,12 +120,12 @@ export interface PlotOverlayProps {
  * both.
  * ------------------------------------------------------------------------- */
 
-export interface QueryBuilderLineChartProps extends CartesianPlotProps {
+export interface QueryBuilderLineChartProps extends CartesianPlotProps, FitYAxisPlotProps {
 	curveType?: "linear" | "monotone"
 	showPoints?: boolean
 }
 
-export interface QueryBuilderAreaChartProps extends CartesianPlotProps {
+export interface QueryBuilderAreaChartProps extends CartesianPlotProps, FitYAxisPlotProps {
 	stacked?: boolean
 	curveType?: "linear" | "monotone"
 	showPoints?: boolean

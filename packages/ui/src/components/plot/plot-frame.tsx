@@ -23,7 +23,7 @@ import {
 } from "react"
 
 import { cn } from "../../lib/utils"
-import { assertResolvedColors } from "./plot-colors-guard"
+import { warnUnresolvedColors } from "./plot-colors-guard"
 
 // The tooltip shell theming. Imported HERE rather than from `plot-tooltip.tsx`
 // because a chart can build its own tooltip config without going through
@@ -326,6 +326,17 @@ export interface PlotLegendItem {
 	key: string
 	label: ReactNode
 	color?: string
+	/**
+	 * Draw the swatch as a dashed outline rather than a filled square, matching
+	 * the stroke the series is painted with.
+	 *
+	 * Carried rather than rendered here — the host strip owns the chip — but it
+	 * has to be carried, because a header that draws every series solid states
+	 * something FALSE about a chart whose error line is dashed. That mismatch is
+	 * why the fixed-metric charts refused to hoist at all while they had an error
+	 * series, and kept an under-plot strip nobody wanted on a dashboard tile.
+	 */
+	dashed?: boolean
 }
 
 /**
@@ -363,8 +374,19 @@ const NO_LEGEND_ITEMS: readonly PlotLegendItem[] = []
  *
  * Pass `null` when the chart draws its own legend, so the header does not
  * duplicate what the plot already shows.
+ *
+ * Returns whether the items were HOISTED — a slot was open and was handed a
+ * list. That is what lets a chart decide whether to also draw its own strip,
+ * which is a different answer in the two places the same chart renders: inside a
+ * dashboard tile the strip duplicates the card header, and on the service detail
+ * page, where no shell opens a slot, dropping it loses the legend outright.
+ *
+ * Derived from the context and the argument, never from the published state:
+ * the publish runs in an effect, so a value read back out of it would be a frame
+ * late and would flash the strip on first paint before withdrawing it. Both
+ * inputs here are known during render.
  */
-export function usePlotLegendSlot(items: readonly PlotLegendItem[] | null): void {
+export function usePlotLegendSlot(items: readonly PlotLegendItem[] | null): boolean {
 	const slot = use(PlotLegendSlotContext)
 	useEffect(() => {
 		if (!slot) return
@@ -373,6 +395,10 @@ export function usePlotLegendSlot(items: readonly PlotLegendItem[] | null): void
 		// would otherwise keep the old chart's series in its header.
 		return () => slot.setItems(NO_LEGEND_ITEMS)
 	}, [slot, items])
+	// `null` means the caller declined to hoist, so it is `false` even under an
+	// open slot — the slot received an empty list, and an empty header is not a
+	// legend the chart can rely on.
+	return slot !== null && items !== null
 }
 
 /**
@@ -502,7 +528,7 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 	const rectStore = useMemo(createPlotRectStore, [])
 	const scalesStore = useMemo(createPlotScalesStore, [])
 
-	if (import.meta.env.DEV) assertResolvedColors(definition, ariaLabel)
+	if (import.meta.env.DEV) warnUnresolvedColors(definition, ariaLabel)
 
 	/**
 	 * Positions the plot anchor imperatively and publishes the rect.

@@ -68,6 +68,12 @@ function renderChart({ entry, display, data, className, legend }: RenderArgs): R
 	// The axis block every cartesian chart reads. Spread rather than repeated so
 	// a new axis setting reaches line, area and bar together — the three that
 	// share a y scale — instead of reaching whichever branch was remembered.
+	//
+	// `fitYAxisToData` is NOT in here: bar cannot honour it (its value is the area
+	// from the baseline, so lifting the floor lies about bar-to-bar ratios), and
+	// while the shared block carried it the bar branch spread it in and the chart
+	// dropped it in silence. It is passed per branch below, and the bar branch now
+	// fails to compile if it is added back.
 	const cartesian = {
 		data,
 		className,
@@ -79,14 +85,18 @@ function renderChart({ entry, display, data, className, legend }: RenderArgs): R
 		logScale: yAxis?.logScale,
 		softMin: yAxis?.softMin,
 		softMax: yAxis?.softMax,
-		fitYAxisToData: yAxis?.fitYAxisToData,
 	}
 
 	switch (entry.kind) {
 		case "line": {
 			const Chart = entry.component
 			return (
-				<Chart {...cartesian} curveType={display.curveType} showPoints={presentation?.showPoints} />
+				<Chart
+					{...cartesian}
+					fitYAxisToData={yAxis?.fitYAxisToData}
+					curveType={display.curveType}
+					showPoints={presentation?.showPoints}
+				/>
 			)
 		}
 		case "area": {
@@ -94,6 +104,7 @@ function renderChart({ entry, display, data, className, legend }: RenderArgs): R
 			return (
 				<Chart
 					{...cartesian}
+					fitYAxisToData={yAxis?.fitYAxisToData}
 					stacked={display.stacked}
 					curveType={display.curveType}
 					showPoints={presentation?.showPoints}
