@@ -59,3 +59,22 @@ export function usePlotColors<TKey extends string>(
 		[tokens, theme],
 	)
 }
+
+/**
+ * Chrome colours every chart needs, resolved once per theme.
+ *
+ * Module scope, not an inline literal: `usePlotColors` memoizes on this object's
+ * identity, so a fresh literal per render would re-read computed style on every
+ * frame.
+ */
+export const PLOT_CHROME_TOKENS = {
+	border: ["--border", "#3f3f46"],
+	background: ["--background", "#0c0a09"],
+} as const satisfies Record<string, readonly [PlotColorToken, string]>
+
+export type PlotChromeColors = Readonly<Record<keyof typeof PLOT_CHROME_TOKENS, string>>
+
+/** The chrome colours, re-resolved whenever the theme flips. */
+export function usePlotChromeColors(): PlotChromeColors {
+	return usePlotColors(PLOT_CHROME_TOKENS)
+}

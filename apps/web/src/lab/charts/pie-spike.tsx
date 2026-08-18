@@ -6,15 +6,16 @@ import { focusGroupAngle, pie, polar, radialArc } from "@tanstack/charts/polar"
 import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo, useState, type ReactNode } from "react"
 
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { muteColor } from "@maple/ui/components/plot/color-scale"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 import {
-	ChartStatsLegend,
 	MUTED_COLOR_AMOUNT,
-	useChartLegendHighlight,
-	type LegendSeriesSpec,
-} from "@/lab/bench/tanstack/chart-legend"
-import { usePlotChromeColors } from "@/lab/bench/tanstack/chart-shared"
-import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-import { muteColor } from "@/lab/charts/color-scale"
+	type PlotLegendSeries,
+	PlotStatsLegend,
+	usePlotLegendHighlight,
+} from "@maple/ui/components/plot/plot-legend"
+import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
 
 /**
  * No index signature. `pie()` returns `Omit<TDatum, PieDerivedField> & …`, and
@@ -194,13 +195,13 @@ function PieFigure({
 			// focus state. `focusGroupAngle` is the polar-specific strategy.
 			focus: focusGroupAngle,
 			focusRing: false,
-			tooltip: { use: tooltip, className: "maple-bench-tooltip" },
+			tooltip: { use: tooltip, className: "maple-plot-tooltip" },
 		})
 	}, [rows, colorFor, donut, activeName])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Share by category"
 			definition={definition}
@@ -269,11 +270,11 @@ export const PieLegendSpike = memo(function PieLegendSpike({
 }) {
 	const colorFor = useSliceColor(rows)
 
-	const { highlighted, highlight } = useChartLegendHighlight()
+	const { highlighted, highlight } = usePlotLegendHighlight()
 	const [activeName, setActiveName] = useState<string | null>(null)
 	const chromeColors = usePlotChromeColors()
 
-	const legendSeries = useMemo<LegendSeriesSpec[]>(() => {
+	const legendSeries = useMemo<PlotLegendSeries[]>(() => {
 		const total = rows.reduce((sum, row) => sum + row.value, 0)
 		return rows.map((row) => ({
 			key: row.name,
@@ -309,7 +310,7 @@ export const PieLegendSpike = memo(function PieLegendSpike({
 				onActiveNameChange={setActiveName}
 			/>
 			<div className="w-56 shrink-0 overflow-auto">
-				<ChartStatsLegend
+				<PlotStatsLegend
 					series={legendSeries}
 					highlighted={highlighted}
 					onHighlight={highlight}

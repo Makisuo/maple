@@ -13,8 +13,7 @@ import { overviewBenchRows } from "@/lab/bench/tanstack/bench-data"
 import { TanstackErrorRateAreaChart } from "@/lab/bench/tanstack/error-rate-area"
 import { TanstackLatencyLineChart } from "@/lab/bench/tanstack/latency-line"
 import { TanstackThroughputAreaChart } from "@/lab/bench/tanstack/throughput-area"
-import type { TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-
+import { type TanstackRenderer } from "@/lab/bench/tanstack/renderer-arm"
 export type ChartRenderer = "recharts" | TanstackRenderer
 
 declare global {

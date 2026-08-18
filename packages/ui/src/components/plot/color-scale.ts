@@ -1,4 +1,4 @@
-import type { PlotColorToken } from "@maple/ui/components/plot/theme"
+import type { PlotColorToken } from "./theme"
 import { scaleSequential, scaleSequentialLog, type ScaleSequentialBase } from "d3-scale"
 
 /**

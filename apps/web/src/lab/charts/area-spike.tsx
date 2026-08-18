@@ -5,27 +5,26 @@ import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { scaleTime } from "d3-scale"
 import { memo, useMemo, type ReactNode } from "react"
 
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { muteColor } from "@maple/ui/components/plot/color-scale"
+import { focusCrosshair, focusDot } from "@maple/ui/components/plot/plot-focus"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 import {
-	ChartSeriesLegend,
 	MUTED_COLOR_AMOUNT,
 	MUTED_OPACITY,
-	useChartLegendHighlight,
-	type LegendSeriesSpec,
-} from "@/lab/bench/tanstack/chart-legend"
+	type PlotLegendSeries,
+	PlotSeriesLegend,
+	usePlotLegendHighlight,
+} from "@maple/ui/components/plot/plot-legend"
+import { roundCapDasharray, useChartId, verticalGradient } from "@maple/ui/components/plot/plot-paint"
 import {
+	PlotTooltipBody,
+	type PlotTooltipSeries,
 	createTooltipFocusStore,
 	cursorTooltip,
-	focusCrosshair,
-	focusDot,
-	roundCapDasharray,
-	TooltipBody,
-	useChartId,
-	usePlotChromeColors,
-	verticalGradient,
-	type TooltipSeriesSpec,
-} from "@/lab/bench/tanstack/chart-shared"
-import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-import { muteColor } from "@/lab/charts/color-scale"
+} from "@maple/ui/components/plot/plot-tooltip"
+import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
+
 import {
 	errorThroughput,
 	splitAtFirstPartial,
@@ -120,7 +119,7 @@ function AreaFigure({
 
 	const axisContext = useMemo(() => timeseriesAxisContext(rows), [rows])
 
-	const tooltipSeries = useMemo<TooltipSeriesSpec<TimeseriesSpikeRow>[]>(
+	const tooltipSeries = useMemo<PlotTooltipSeries<TimeseriesSpikeRow>[]>(
 		() =>
 			series.map((s) => ({
 				label: s.label,
@@ -234,14 +233,14 @@ function AreaFigure({
 	}, [rows, series, mutedIds, incomplete, idPrefix, axisContext, focusStore, chromeColors])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Request volume"
 			definition={definition}
 			legend={legend}
 			renderTooltipBody={({ points }) => (
-				<TooltipBody
+				<PlotTooltipBody
 					points={points}
 					series={tooltipSeries}
 					focusStore={focusStore}
@@ -308,11 +307,11 @@ export const AreaLegendSpike = memo(function AreaLegendSpike({
 }) {
 	const series = useThroughputSeries()
 
-	const legendSeries = useMemo<LegendSeriesSpec[]>(
+	const legendSeries = useMemo<PlotLegendSeries[]>(
 		() => series.map((s) => ({ key: s.id, label: s.label, color: s.color })),
 		[series],
 	)
-	const { highlighted, highlight } = useChartLegendHighlight()
+	const { highlighted, highlight } = usePlotLegendHighlight()
 
 	const mutedIds = useMemo(
 		() =>
@@ -329,7 +328,7 @@ export const AreaLegendSpike = memo(function AreaLegendSpike({
 			series={series}
 			mutedIds={mutedIds}
 			legend={
-				<ChartSeriesLegend
+				<PlotSeriesLegend
 					series={legendSeries}
 					highlighted={highlighted}
 					onHighlight={highlight}

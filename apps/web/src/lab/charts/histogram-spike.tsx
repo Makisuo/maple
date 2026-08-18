@@ -8,8 +8,9 @@ import { memo, useMemo } from "react"
 
 import { histogramSampleData } from "@maple/ui/components/charts/_shared/sample-data"
 
-import { cursorTooltip } from "@/lab/bench/tanstack/chart-shared"
-import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
+import { cursorTooltip } from "@maple/ui/components/plot/plot-tooltip"
 
 /**
  * One raw observation. No index signature, deliberately — `binX` returns
@@ -199,8 +200,8 @@ export const HistogramSpike = memo(function HistogramSpike({
 	}
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Value distribution"
 			definition={definition}

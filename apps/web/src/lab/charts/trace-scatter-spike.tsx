@@ -8,8 +8,13 @@ import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { scaleLog } from "d3-scale"
 import { memo, useMemo } from "react"
 
-import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-import { createSequentialColorScale, DENSITY_RAMP_TOKENS, rampStops } from "@/lab/charts/color-scale"
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import {
+	DENSITY_RAMP_TOKENS,
+	createSequentialColorScale,
+	rampStops,
+} from "@maple/ui/components/plot/color-scale"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 
 /**
  * No index signature. `hexbin` returns
@@ -253,13 +258,13 @@ export const TraceScatterSpike = memo(function TraceScatterSpike({
 			},
 			focus: "nearest",
 			focusRing: true,
-			tooltip: { use: tooltip, className: "maple-bench-tooltip" },
+			tooltip: { use: tooltip, className: "maple-plot-tooltip" },
 		})
 	}, [rows, colorScale, timeDomain])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Span duration by time, hex-binned by density"
 			definition={definition}

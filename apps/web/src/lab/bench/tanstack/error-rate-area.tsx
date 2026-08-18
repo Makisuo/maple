@@ -7,18 +7,17 @@ import { memo, useMemo } from "react"
 import { overviewBenchRows, type OverviewBenchRow } from "./bench-data"
 import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
 
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { focusCrosshair, focusDot } from "@maple/ui/components/plot/plot-focus"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
+import { useChartId, verticalGradient } from "@maple/ui/components/plot/plot-paint"
 import {
+	PlotTooltipBody,
+	type PlotTooltipSeries,
 	createTooltipFocusStore,
 	cursorTooltip,
-	focusCrosshair,
-	focusDot,
-	TooltipBody,
-	useChartId,
-	usePlotChromeColors,
-	verticalGradient,
-	type TooltipSeriesSpec,
-} from "./chart-shared"
-import { TanstackChartFrame, type TanstackRenderer } from "./tanstack-chart"
+} from "@maple/ui/components/plot/plot-tooltip"
+import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
 
 const ERROR_RATE_TOKENS = {
 	error: ["--chart-error", "#ef4444"],
@@ -51,7 +50,7 @@ export const TanstackErrorRateAreaChart = memo(function TanstackErrorRateAreaCha
 	const { error: color } = usePlotColors(ERROR_RATE_TOKENS)
 	const chromeColors = usePlotChromeColors()
 
-	const tooltipSeries = useMemo<TooltipSeriesSpec<OverviewBenchRow>[]>(
+	const tooltipSeries = useMemo<PlotTooltipSeries<OverviewBenchRow>[]>(
 		() => [
 			{
 				label: "Error Rate",
@@ -124,13 +123,13 @@ export const TanstackErrorRateAreaChart = memo(function TanstackErrorRateAreaCha
 	}, [color, gradientId, axisContext, focusStore, chromeColors])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Error rate"
 			definition={definition}
 			renderTooltipBody={({ points }) => (
-				<TooltipBody
+				<PlotTooltipBody
 					points={points}
 					series={tooltipSeries}
 					focusStore={focusStore}

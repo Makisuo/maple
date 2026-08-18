@@ -1,4 +1,4 @@
-import { cn } from "@maple/ui/lib/utils"
+import { cn } from "../../lib/utils"
 import { createContext, Fragment, use, useCallback, useMemo, useState, type ReactNode } from "react"
 
 /**
@@ -16,7 +16,7 @@ import { createContext, Fragment, use, useCallback, useMemo, useState, type Reac
  * `packages/ui/src/components/charts/_shared/query-builder-legend.tsx` — the
  * legend every production chart on the other side of the lab renders.
  */
-export interface LegendSeriesSpec {
+export interface PlotLegendSeries {
 	/** Stable id, matching the id the spike gives the series' mark. */
 	key: string
 	label: string
@@ -39,8 +39,8 @@ export interface LegendSeriesSpec {
 	secondary?: string
 }
 
-interface ChartLegendState {
-	series: readonly LegendSeriesSpec[]
+interface PlotLegendState {
+	series: readonly PlotLegendSeries[]
 	/** The PINNED series — a click — or `null` when nothing is pinned. */
 	highlighted: string | null
 	/**
@@ -52,29 +52,45 @@ interface ChartLegendState {
 	 * too. A chart that only wants the pinned behaviour omits `active` entirely.
 	 */
 	active: string | null
+	/**
+	 * The series a click has REMOVED from the chart.
+	 *
+	 * Distinct from `highlighted` because the two mean opposite things to the
+	 * plot: highlighting fades the others and leaves every scale alone, while
+	 * hiding drops a series from the rows BEFORE the definition is built, so
+	 * stacks and the y domain recompute. Hiding is the production behaviour;
+	 * highlighting suits charts where removing a slice renormalises the picture
+	 * (pie, treemap). A chart picks one by supplying `onToggle` or not.
+	 */
+	hidden: ReadonlySet<string>
 }
 
-interface ChartLegendActions {
+interface PlotLegendActions {
 	highlight: (key: string) => void
 	setActive: (key: string | null) => void
+	/** `null` when the chart opted out of hiding — see `PlotLegendState.hidden`. */
+	toggle: ((key: string) => void) | null
 }
 
-interface ChartLegendMeta {
+interface PlotLegendMeta {
 	/** Names the group for assistive tech — "Latency percentiles", not "Legend". */
 	label: string
 }
 
-interface ChartLegendContextValue {
-	state: ChartLegendState
-	actions: ChartLegendActions
-	meta: ChartLegendMeta
+interface PlotLegendContextValue {
+	state: PlotLegendState
+	actions: PlotLegendActions
+	meta: PlotLegendMeta
 }
 
-const ChartLegendContext = createContext<ChartLegendContextValue | null>(null)
+/** Stable identity: a fresh `new Set()` per render would break the memo below. */
+const EMPTY_HIDDEN: ReadonlySet<string> = new Set()
 
-function useChartLegend(): ChartLegendContextValue {
-	const value = use(ChartLegendContext)
-	if (!value) throw new Error("ChartLegend parts must render inside <ChartLegend.Provider>")
+const PlotLegendContext = createContext<PlotLegendContextValue | null>(null)
+
+function usePlotLegendContext(): PlotLegendContextValue {
+	const value = use(PlotLegendContext)
+	if (!value) throw new Error("PlotLegend parts must render inside <PlotLegend.Provider>")
 	return value
 }
 
@@ -92,7 +108,7 @@ function useChartLegend(): ChartLegendContextValue {
  * stroke opacity, or a muted fill — which only the spike can set. The legend
  * renders the same state and calls back into it.
  */
-export function useChartLegendHighlight(): {
+export function usePlotLegendHighlight(): {
 	highlighted: string | null
 	highlight: (key: string) => void
 } {
@@ -105,18 +121,27 @@ export function useChartLegendHighlight(): {
 	return { highlighted, highlight }
 }
 
-function ChartLegendProvider({
+function PlotLegendProvider({
 	series,
 	highlighted,
 	onHighlight,
+	hidden,
+	onToggle,
 	active = null,
 	onActiveChange,
 	label,
 	children,
 }: {
-	series: readonly LegendSeriesSpec[]
+	series: readonly PlotLegendSeries[]
 	highlighted: string | null
 	onHighlight: (key: string) => void
+	/**
+	 * Supply BOTH to make a click HIDE rather than pin. The set is owned by the
+	 * chart, because the chart is what has to filter its rows with it before
+	 * building the definition — see `useSeriesVisibility`.
+	 */
+	hidden?: ReadonlySet<string>
+	onToggle?: (key: string) => void
 	/**
 	 * The hovered series, OWNED BY THE CHART so both sides share one value:
 	 * pointing at a slice lights its legend row, and pointing at a legend row
@@ -133,16 +158,16 @@ function ChartLegendProvider({
 
 	// The provider is the only place that knows how either state is managed, so a
 	// chart backed by URL state or a store composes the same parts unchanged.
-	const value = useMemo<ChartLegendContextValue>(
+	const value = useMemo<PlotLegendContextValue>(
 		() => ({
-			state: { series, highlighted, active },
-			actions: { highlight: onHighlight, setActive },
+			state: { series, highlighted, active, hidden: hidden ?? EMPTY_HIDDEN },
+			actions: { highlight: onHighlight, setActive, toggle: onToggle ?? null },
 			meta: { label },
 		}),
-		[series, highlighted, active, onHighlight, setActive, label],
+		[series, highlighted, active, hidden, onHighlight, setActive, onToggle, label],
 	)
 
-	return <ChartLegendContext value={value}>{children}</ChartLegendContext>
+	return <PlotLegendContext value={value}>{children}</PlotLegendContext>
 }
 
 /**
@@ -153,8 +178,8 @@ function ChartLegendProvider({
  * toward the `showValues`/`interactive`/`horizontal` pile the composition rules
  * exist to prevent.
  */
-function ChartLegendRow({ children, className }: { children: ReactNode; className?: string }) {
-	const { meta, actions } = useChartLegend()
+function PlotLegendRow({ children, className }: { children: ReactNode; className?: string }) {
+	const { meta, actions } = usePlotLegendContext()
 	return (
 		<div
 			aria-label={meta.label}
@@ -170,8 +195,8 @@ function ChartLegendRow({ children, className }: { children: ReactNode; classNam
 }
 
 /** The vertical list, matching `QueryBuilderLegend`'s `layout="right"`. */
-function ChartLegendColumn({ children, className }: { children: ReactNode; className?: string }) {
-	const { meta, actions } = useChartLegend()
+function PlotLegendColumn({ children, className }: { children: ReactNode; className?: string }) {
+	const { meta, actions } = usePlotLegendContext()
 	return (
 		<div
 			aria-label={meta.label}
@@ -190,15 +215,15 @@ function ChartLegendColumn({ children, className }: { children: ReactNode; class
  * composition rules bless, where the parent has to hand each child its own datum.
  * Omitting it renders the default `Item`.
  */
-function ChartLegendItems({ children }: { children?: (series: LegendSeriesSpec) => ReactNode }) {
-	const { state } = useChartLegend()
+function PlotLegendItems({ children }: { children?: (series: PlotLegendSeries) => ReactNode }) {
+	const { state } = usePlotLegendContext()
 	return (
 		<>
 			{state.series.map((entry) =>
 				children ? (
 					<Fragment key={entry.key}>{children(entry)}</Fragment>
 				) : (
-					<ChartLegendItem key={entry.key} seriesKey={entry.key} />
+					<PlotLegendItem key={entry.key} seriesKey={entry.key} />
 				),
 			)}
 		</>
@@ -206,8 +231,8 @@ function ChartLegendItems({ children }: { children?: (series: LegendSeriesSpec) 
 }
 
 /** One clickable series row. Reads everything but its identity from context. */
-function ChartLegendItem({ seriesKey }: { seriesKey: string }) {
-	const { state, actions } = useChartLegend()
+function PlotLegendItem({ seriesKey }: { seriesKey: string }) {
+	const { state, actions } = usePlotLegendContext()
 	const entry = state.series.find((candidate) => candidate.key === seriesKey)
 	if (!entry) return null
 
@@ -216,33 +241,44 @@ function ChartLegendItem({ seriesKey }: { seriesKey: string }) {
 	// pointer is on is what the eye is following, pinned or not.
 	const hovering = state.active !== null
 	const isActive = state.active === entry.key
-	const isMuted = hovering ? !isActive : state.highlighted !== null && !isHighlighted
+	const hides = actions.toggle !== null
+	const isHidden = state.hidden.has(entry.key)
+	// A hidden row is dimmed unconditionally — it is not "less emphasised", it is
+	// not on the chart at all — so highlight muting only applies to visible rows.
+	const isMuted = isHidden || (hovering ? !isActive : state.highlighted !== null && !isHighlighted)
 
 	return (
 		<button
 			type="button"
 			// `aria-pressed`, not a bare button: the control is a toggle, and the
-			// pressed state is the only thing that tells a screen reader which series
-			// is pinned. `opacity-40` says nothing out loud.
-			aria-pressed={isHighlighted}
-			onClick={() => actions.highlight(entry.key)}
+			// pressed state is the only thing that tells a screen reader what the
+			// click did. `opacity-40` says nothing out loud.
+			//
+			// Which state it reports follows which mode the chart chose: pressed
+			// means "shown" for a hiding legend and "pinned" for a highlighting one.
+			aria-pressed={hides ? !isHidden : isHighlighted}
+			onClick={() => (actions.toggle ? actions.toggle(entry.key) : actions.highlight(entry.key))}
 			// `onFocus` alongside `onPointerEnter`, as production does: tabbing the
-			// legend should light the same slice a mouse would.
+			// legend should light the same series a mouse would.
 			onPointerEnter={() => actions.setActive(entry.key)}
 			onFocus={() => actions.setActive(entry.key)}
 			className={cn(
 				"flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted/50",
 				isMuted && "opacity-40",
+				// Struck through as well as dimmed: opacity alone reads as "muted by
+				// someone else's highlight", and the two states have to be told apart
+				// at a glance when both are on screen.
+				isHidden && "line-through",
 				// Emphasis is carried by the OTHERS fading, as it is in the chart —
 				// brightening the picked row as well would double the contrast step and
 				// make a two-series legend look broken.
-				(isActive || (!hovering && isHighlighted)) && "bg-muted/50",
+				!isHidden && (isActive || (!hovering && isHighlighted)) && "bg-muted/50",
 			)}
 		>
-			<ChartLegendSwatch color={entry.color} dashed={entry.dashed} />
+			<PlotLegendSwatch color={entry.color} dashed={entry.dashed} />
 			<span className="truncate">{entry.label}</span>
 			{entry.value === undefined ? null : (
-				<ChartLegendValue value={entry.value} secondary={entry.secondary} />
+				<PlotLegendValue value={entry.value} secondary={entry.secondary} />
 			)}
 		</button>
 	)
@@ -256,7 +292,7 @@ function ChartLegendItem({ seriesKey }: { seriesKey: string }) {
  * `tabular-nums` columns aligned with each other. Matches `QueryBuilderLegend`'s
  * stats cells — `font-mono tabular-nums`, muted secondary.
  */
-function ChartLegendValue({ value, secondary }: { value: string; secondary?: string }) {
+function PlotLegendValue({ value, secondary }: { value: string; secondary?: string }) {
 	return (
 		<span className="ml-auto flex shrink-0 items-baseline gap-2 font-mono tabular-nums">
 			<span className="text-foreground">{value}</span>
@@ -272,7 +308,7 @@ function ChartLegendValue({ value, secondary }: { value: string; secondary?: str
  * `size-2.5`. The two are different sizes in production too; a legend swatch sits
  * in a dense row and a tooltip swatch does not.
  */
-function ChartLegendSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
+function PlotLegendSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
 	return (
 		<span
 			className={cn("size-2 shrink-0 rounded-[2px]", dashed && "border border-dashed")}
@@ -281,52 +317,64 @@ function ChartLegendSwatch({ color, dashed }: { color: string; dashed?: boolean 
 	)
 }
 
-function ChartLegendLabel({ children }: { children: ReactNode }) {
+function PlotLegendLabel({ children }: { children: ReactNode }) {
 	return <span className="truncate">{children}</span>
 }
 
-export const ChartLegend = {
-	Provider: ChartLegendProvider,
-	Row: ChartLegendRow,
-	Column: ChartLegendColumn,
-	Items: ChartLegendItems,
-	Item: ChartLegendItem,
-	Swatch: ChartLegendSwatch,
-	Label: ChartLegendLabel,
-	Value: ChartLegendValue,
+export const PlotLegend = {
+	Provider: PlotLegendProvider,
+	Row: PlotLegendRow,
+	Column: PlotLegendColumn,
+	Items: PlotLegendItems,
+	Item: PlotLegendItem,
+	Swatch: PlotLegendSwatch,
+	Label: PlotLegendLabel,
+	Value: PlotLegendValue,
 }
 
 /**
  * The assembled bottom-strip legend every spike passes to
- * `TanstackChartFrame.legend`.
+ * `PlotFrame.legend`.
  *
  * An explicit variant, not a configured one: a chart that wants the vertical form
  * composes `Provider` → `Column` → `Items` itself rather than reaching for a
  * `layout` prop here.
  */
-export function ChartSeriesLegend({
+export function PlotSeriesLegend({
 	series,
 	highlighted,
 	onHighlight,
+	hidden,
+	onToggle,
+	active,
+	onActiveChange,
 	label,
 }: {
-	series: readonly LegendSeriesSpec[]
+	series: readonly PlotLegendSeries[]
 	highlighted: string | null
 	onHighlight: (key: string) => void
+	hidden?: ReadonlySet<string>
+	onToggle?: (key: string) => void
+	active?: string | null
+	onActiveChange?: (key: string | null) => void
 	label: string
 }) {
 	if (series.length === 0) return null
 	return (
-		<ChartLegend.Provider
+		<PlotLegend.Provider
 			series={series}
 			highlighted={highlighted}
 			onHighlight={onHighlight}
+			hidden={hidden}
+			onToggle={onToggle}
+			active={active}
+			onActiveChange={onActiveChange}
 			label={label}
 		>
-			<ChartLegend.Row>
-				<ChartLegend.Items />
-			</ChartLegend.Row>
-		</ChartLegend.Provider>
+			<PlotLegend.Row>
+				<PlotLegend.Items />
+			</PlotLegend.Row>
+		</PlotLegend.Provider>
 	)
 }
 
@@ -334,12 +382,12 @@ export function ChartSeriesLegend({
  * The vertical stats key that sits BESIDE a chart rather than under it — what
  * `QueryBuilderPieChart` renders as `legend="right"`.
  *
- * A separate variant from `ChartSeriesLegend`, not a `layout` prop on it: the two
+ * A separate variant from `PlotSeriesLegend`, not a `layout` prop on it: the two
  * differ in which container part they compose (`Column` vs `Row`) and in whether
  * the series carry figures at all. Same provider, same items, same click
  * behaviour.
  */
-export function ChartStatsLegend({
+export function PlotStatsLegend({
 	series,
 	highlighted,
 	onHighlight,
@@ -347,7 +395,7 @@ export function ChartStatsLegend({
 	onActiveChange,
 	label,
 }: {
-	series: readonly LegendSeriesSpec[]
+	series: readonly PlotLegendSeries[]
 	highlighted: string | null
 	onHighlight: (key: string) => void
 	active?: string | null
@@ -356,7 +404,7 @@ export function ChartStatsLegend({
 }) {
 	if (series.length === 0) return null
 	return (
-		<ChartLegend.Provider
+		<PlotLegend.Provider
 			series={series}
 			highlighted={highlighted}
 			onHighlight={onHighlight}
@@ -364,10 +412,10 @@ export function ChartStatsLegend({
 			onActiveChange={onActiveChange}
 			label={label}
 		>
-			<ChartLegend.Column className="pl-0">
-				<ChartLegend.Items />
-			</ChartLegend.Column>
-		</ChartLegend.Provider>
+			<PlotLegend.Column className="pl-0">
+				<PlotLegend.Items />
+			</PlotLegend.Column>
+		</PlotLegend.Provider>
 	)
 }
 

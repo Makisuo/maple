@@ -6,13 +6,14 @@ import { tooltip } from "@tanstack/charts/tooltip"
 import { scaleBand } from "@tanstack/charts-scales/band"
 import { memo, useMemo } from "react"
 
-import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
 import {
-	createSequentialColorScale,
 	HEATMAP_RAMP_TOKENS,
-	rampStops,
 	type SequentialScaleType,
-} from "@/lab/charts/color-scale"
+	createSequentialColorScale,
+	rampStops,
+} from "@maple/ui/components/plot/color-scale"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 
 /**
  * No index signature — same trap as `PieSpikeRow`. `cell`'s channel type is
@@ -402,7 +403,7 @@ export const HeatmapSpike = memo(function HeatmapSpike({
 			},
 			focus: "nearest",
 			focusRing: false,
-			tooltip: { use: tooltip, className: "maple-bench-tooltip" },
+			tooltip: { use: tooltip, className: "maple-plot-tooltip" },
 		})
 	}, [model, colorScale, chrome])
 
@@ -441,8 +442,8 @@ export const HeatmapSpike = memo(function HeatmapSpike({
 	}
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Request count by hour and latency bucket"
 			definition={definition}

@@ -7,16 +7,16 @@ import { memo, useMemo } from "react"
 import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
 
 import { overviewBenchRows, type OverviewBenchRow } from "./bench-data"
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { focusCrosshair, focusDot } from "@maple/ui/components/plot/plot-focus"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 import {
+	PlotTooltipBody,
+	type PlotTooltipSeries,
 	createTooltipFocusStore,
 	cursorTooltip,
-	focusCrosshair,
-	focusDot,
-	TooltipBody,
-	usePlotChromeColors,
-	type TooltipSeriesSpec,
-} from "./chart-shared"
-import { TanstackChartFrame, type TanstackRenderer } from "./tanstack-chart"
+} from "@maple/ui/components/plot/plot-tooltip"
+import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
 
 const LATENCY_TOKENS = {
 	p99: ["--chart-p99", "#f97316"],
@@ -56,7 +56,7 @@ export const TanstackLatencyLineChart = memo(function TanstackLatencyLineChart({
 		[colors],
 	)
 
-	const tooltipSeries = useMemo<TooltipSeriesSpec<OverviewBenchRow>[]>(
+	const tooltipSeries = useMemo<PlotTooltipSeries<OverviewBenchRow>[]>(
 		() =>
 			series.map((s) => ({
 				label: s.label,
@@ -128,13 +128,13 @@ export const TanstackLatencyLineChart = memo(function TanstackLatencyLineChart({
 	}, [series, axisContext, focusStore, chromeColors])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Latency percentiles"
 			definition={definition}
 			renderTooltipBody={({ points }) => (
-				<TooltipBody
+				<PlotTooltipBody
 					points={points}
 					series={tooltipSeries}
 					focusStore={focusStore}

@@ -4,15 +4,16 @@ import { treemap } from "@tanstack/charts/hierarchy/treemap"
 import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo, type ReactNode } from "react"
 
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { muteColor } from "@maple/ui/components/plot/color-scale"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 import {
-	ChartSeriesLegend,
 	MUTED_COLOR_AMOUNT,
-	useChartLegendHighlight,
-	type LegendSeriesSpec,
-} from "@/lab/bench/tanstack/chart-legend"
-import { usePlotChromeColors } from "@/lab/bench/tanstack/chart-shared"
-import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-import { muteColor } from "@/lab/charts/color-scale"
+	type PlotLegendSeries,
+	PlotSeriesLegend,
+	usePlotLegendHighlight,
+} from "@maple/ui/components/plot/plot-legend"
+import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
 
 /**
  * One warehouse row: span count for a `(service, operation)` pair — the shape
@@ -251,15 +252,15 @@ function TreemapFigure({
 			guides: false,
 			focus: "nearest",
 			focusRing: false,
-			tooltip: { use: tooltip, className: "maple-bench-tooltip" },
+			tooltip: { use: tooltip, className: "maple-plot-tooltip" },
 		})
 	}, [rows, colors, serviceColor, labelColorFor])
 
 	const total = useMemo(() => rows.reduce((sum, row) => sum + row.spanCount, 0), [rows])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Span volume by service and operation"
 			definition={definition}
@@ -319,9 +320,9 @@ export const TreemapLegendSpike = memo(function TreemapLegendSpike({
 }) {
 	const { colors, serviceColor } = useTreemapColors(rows)
 
-	const legendSeries = useMemo<LegendSeriesSpec[]>(() => {
+	const legendSeries = useMemo<PlotLegendSeries[]>(() => {
 		const seen = new Set<string>()
-		const items: LegendSeriesSpec[] = []
+		const items: PlotLegendSeries[] = []
 		for (const row of rows) {
 			if (seen.has(row.service)) continue
 			seen.add(row.service)
@@ -330,7 +331,7 @@ export const TreemapLegendSpike = memo(function TreemapLegendSpike({
 		return items
 	}, [rows, serviceColor])
 
-	const { highlighted, highlight } = useChartLegendHighlight()
+	const { highlighted, highlight } = usePlotLegendHighlight()
 	const chromeColors = usePlotChromeColors()
 
 	const emphasisedServiceColor = useMemo(() => {
@@ -362,7 +363,7 @@ export const TreemapLegendSpike = memo(function TreemapLegendSpike({
 			serviceColor={emphasisedServiceColor}
 			labelColorFor={labelColorFor}
 			legend={
-				<ChartSeriesLegend
+				<PlotSeriesLegend
 					series={legendSeries}
 					highlighted={highlighted}
 					onHighlight={highlight}

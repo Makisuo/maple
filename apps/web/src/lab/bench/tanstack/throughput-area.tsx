@@ -8,18 +8,17 @@ import { overviewBenchRows, type OverviewBenchRow } from "./bench-data"
 
 import { usePlotColors, type PlotColorToken } from "@maple/ui/components/plot/theme"
 
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { focusCrosshair, focusDot } from "@maple/ui/components/plot/plot-focus"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
+import { useChartId, verticalGradient } from "@maple/ui/components/plot/plot-paint"
 import {
+	PlotTooltipBody,
+	type PlotTooltipSeries,
 	createTooltipFocusStore,
 	cursorTooltip,
-	focusCrosshair,
-	focusDot,
-	TooltipBody,
-	useChartId,
-	usePlotChromeColors,
-	verticalGradient,
-	type TooltipSeriesSpec,
-} from "./chart-shared"
-import { TanstackChartFrame, type TanstackRenderer } from "./tanstack-chart"
+} from "@maple/ui/components/plot/plot-tooltip"
+import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
 
 /** The overview row plus the two per-second series this chart derives. */
 interface ThroughputBenchRow extends OverviewBenchRow {
@@ -72,7 +71,7 @@ export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaC
 	const colors = usePlotColors(THROUGHPUT_TOKENS)
 	const chromeColors = usePlotChromeColors()
 
-	const tooltipSeries = useMemo<TooltipSeriesSpec<ThroughputBenchRow>[]>(
+	const tooltipSeries = useMemo<PlotTooltipSeries<ThroughputBenchRow>[]>(
 		() => [
 			{
 				label: "Throughput",
@@ -175,13 +174,13 @@ export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaC
 	}, [rows, colors, gradientId, axisContext, focusStore, chromeColors])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Request volume"
 			definition={definition}
 			renderTooltipBody={({ points }) => (
-				<TooltipBody
+				<PlotTooltipBody
 					points={points}
 					series={tooltipSeries}
 					focusStore={focusStore}

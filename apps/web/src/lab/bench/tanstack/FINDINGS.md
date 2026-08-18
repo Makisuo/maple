@@ -5,6 +5,26 @@
 
 Supersedes the 2026-08-05 spike, which ported the same three charts to 0.6.4 and was reverted.
 
+> **Status (2026-08-18): the recommendation below was OVERRIDDEN and the migration is under way.**
+>
+> §9 concludes "Perf: go. Timing: not yet. Keep this bench, don't migrate." That call was made on
+> version risk — 0.14.0 is pre-alpha and shipped 8 minor releases in the 10 days before the test —
+> and it was overruled deliberately, with Recharts scheduled for full removal from the repo. The
+> compensating controls are an exact version pin (no caret, in both `apps/web` and `packages/ui`)
+> and a mandatory re-read of `node_modules/@tanstack/charts/dist` on every bump.
+>
+> Everything below stays as written. It is the record of what was measured and what the library
+> actually does, and the bug numbers are referenced from the production code. Two things have
+> changed since it was written:
+>
+> - The foundation moved out of this directory into `packages/ui/src/components/plot/`
+>   (`TanstackChartFrame` → `PlotFrame`, `chart-shared.tsx` split into `plot-tooltip` / `plot-focus`
+>   / `plot-paint`, `chart-legend.tsx` → `plot-legend.tsx`). Paths quoted below are historical.
+> - The a11y note in §6 understated the library: keyboard point navigation is ON BY DEFAULT and
+>   `tabIndex` is computed by the adapter (`dist/adapter-shared.js:11` opts out only on
+>   `keyboard: false`, `focus: false`, or a free-mode cursor). The real gap is the per-datum
+>   accessibility tree, which the library does not offer at all.
+
 Reproduce: `bun run --cwd apps/web test:perf:tanstack`
 Look: `/lab/bench/tanstack?renderer=recharts|tanstack-svg|tanstack-canvas`
 
@@ -119,29 +139,29 @@ Two things fell out of building it:
 Ten TanStack charts (seven when the table below was measured), eight of them beside the production
 implementation they'd replace. All render with zero page errors. Ring sweep for the pies, horizontal sweep for the rest, 180 steps.
 
-| chart                       | React ms | commits | verdict                                 |
-| --------------------------- | -------- | ------- | --------------------------------------- |
-| pie — production            | 22.1     | 18      |                                         |
-| **pie — tanstack**          | **4.5**  | **9**   | cheaper, but both trivial — **no case** |
-| histogram — production      | 202.0    | 382     |                                         |
-| **histogram — tanstack**    | **6.3**  | **11**  | **32× less React work — the real win**  |
-| heatmap — production        | 15.4     | 14      |                                         |
+| chart                       | React ms | commits | verdict                                        |
+| --------------------------- | -------- | ------- | ---------------------------------------------- |
+| pie — production            | 22.1     | 18      |                                                |
+| **pie — tanstack**          | **4.5**  | **9**   | cheaper, but both trivial — **no case**        |
+| histogram — production      | 202.0    | 382     |                                                |
+| **histogram — tanstack**    | **6.3**  | **11**  | **32× less React work — the real win**         |
+| heatmap — production        | 15.4     | 14      |                                                |
 | **heatmap — tanstack**      | **2.6**  | **5**   | cheaper, and −325 lines — **stale, see below** |
-| line — production           | 228.0    | 410     |                                         |
-| **line — tanstack**         | **39.8** | **61**  | **5.7× less React work**                |
-| area — production           | 225.0    | 410     |                                         |
-| **area — tanstack**         | **38.8** | **64**  | **5.8× less React work**                |
-| stacked bar — production    | 195.6    | 374     |                                         |
-| **stacked bar — tanstack**  | **20.6** | **24**  | **9.5× less React work**                |
-| line + partial — prod       | 222.7    | 410     |                                         |
-| **line + partial — ts**     | **36.7** | **61**  | dashed tail is free                     |
-| area + partial — prod       | 216.5    | 410     |                                         |
-| **area + partial — ts**     | **48.5** | **64**  | dashed tail is free                     |
-| box plot — NEW              | 8.5      | 14      | no prior implementation                 |
-| trace scatter — NEW         | 59.3     | 169     | 5,000 spans → ~1,900 hex bins           |
-| sankey — NEW                | 8.5      | 17      | no prior implementation                 |
-| treemap — NEW               | 5.7      | 9       | no prior implementation                 |
-| stacked bar + partial — NEW | 22.7     | 24      | recharts bars have no equivalent        |
+| line — production           | 228.0    | 410     |                                                |
+| **line — tanstack**         | **39.8** | **61**  | **5.7× less React work**                       |
+| area — production           | 225.0    | 410     |                                                |
+| **area — tanstack**         | **38.8** | **64**  | **5.8× less React work**                       |
+| stacked bar — production    | 195.6    | 374     |                                                |
+| **stacked bar — tanstack**  | **20.6** | **24**  | **9.5× less React work**                       |
+| line + partial — prod       | 222.7    | 410     |                                                |
+| **line + partial — ts**     | **36.7** | **61**  | dashed tail is free                            |
+| area + partial — prod       | 216.5    | 410     |                                                |
+| **area + partial — ts**     | **48.5** | **64**  | dashed tail is free                            |
+| box plot — NEW              | 8.5      | 14      | no prior implementation                        |
+| trace scatter — NEW         | 59.3     | 169     | 5,000 spans → ~1,900 hex bins                  |
+| sankey — NEW                | 8.5      | 17      | no prior implementation                        |
+| treemap — NEW               | 5.7      | 9       | no prior implementation                        |
+| stacked bar + partial — NEW | 22.7     | 24      | recharts bars have no equivalent               |
 
 21 arms, 41.2s, **zero dropped frames and zero long tasks on every one**. Re-measured after the
 2026-08-18 rendering fixes below, which changed the box-plot fixture and the trace-scatter domain,
@@ -190,10 +210,10 @@ arithmetic. States apply in array order and merge, so the cascade is literally:
 
 ```ts
 states: [
-  { when: { focus: "unmatched" }, style: { opacity: 0.28 } },  // field recedes
-  { when: { focus: "x" },         style: { opacity: 1 } },     // column returns
-  { when: { focus: "y" },         style: { opacity: 1 } },     // row returns
-  { when: { focus: "primary" },   style: { stroke, strokeWidth: 1.5, inset: 0, radius: radius + 1 } },
+	{ when: { focus: "unmatched" }, style: { opacity: 0.28 } }, // field recedes
+	{ when: { focus: "x" }, style: { opacity: 1 } }, // column returns
+	{ when: { focus: "y" }, style: { opacity: 1 } }, // row returns
+	{ when: { focus: "primary" }, style: { stroke, strokeWidth: 1.5, inset: 0, radius: radius + 1 } },
 ]
 ```
 
@@ -220,7 +240,7 @@ What was established, in order:
    root (`dist/react/RendererChart.js`), so the plumbing was live.
 3. **`initial: true` is wrong under SSR** — a genuine trap worth keeping. The gate is
    `animate = !reduced && (initial ? motion.initial && (!adoptedRoot || motion.initial === "always")
-   : …)`. This app server-renders, the renderer ADOPTS that markup, and an adopted root therefore
+: …)`. This app server-renders, the renderer ADOPTS that markup, and an adopted root therefore
    skips the entry animation entirely. `"always"` is the documented opt-in.
 4. **Even with `"always"`, reduced-motion off, and the sweep stretched to a nine-second window, no
    `cell` rect ever received an `opacity` attribute and `data-ts-motion-role` was never set.** No
@@ -228,7 +248,7 @@ What was established, in order:
    `opacity: 0 → target` enter track, but the only role with real entrance choreography is `"bar"`
    (gated on `timingContext.role === "bar"`).
 
-`states[].transition` went out with it: state easing is applied *by* the motion renderer, so with no
+`states[].transition` went out with it: state easing is applied _by_ the motion renderer, so with no
 animating renderer mounted it is configuration that cannot take effect. **Hover feedback in this
 chart is instant**, where production eases it over 100ms in CSS. That is the one place the port
 still feels less finished than the thing it replaces, and it is not fixable from our side today.
@@ -239,8 +259,8 @@ Retest when the pre-alpha label drops. If `cell` gains an enter track the wave i
 ### Two ways a full-plot background rect does not work
 
 The reference's nicest structural idea is a **two-layer cell** — a neutral track under the coloured
-inner — which is also how production draws grout (`--heatmap-grout`) so a hole reads as a hole *in a
-surface*. Neither route to a single panel behind the plot works:
+inner — which is also how production draws grout (`--heatmap-grout`) so a hole reads as a hole _in a
+surface_. Neither route to a single panel behind the plot works:
 
 - `rect` with `x1: firstCategory, x2: lastCategory`. A band scale's `map()` returns the band
   **centre**, so the rect spans centre-to-centre — measured at `x: 206.64, w: 867.46` against a plot

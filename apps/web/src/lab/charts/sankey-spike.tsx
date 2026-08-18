@@ -7,14 +7,15 @@ import { text } from "@tanstack/charts/text"
 import { tooltip } from "@tanstack/charts/tooltip"
 import { memo, useMemo, type ReactNode } from "react"
 
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { muteColor } from "@maple/ui/components/plot/color-scale"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 import {
-	ChartSeriesLegend,
 	MUTED_COLOR_AMOUNT,
-	useChartLegendHighlight,
-	type LegendSeriesSpec,
-} from "@/lab/bench/tanstack/chart-legend"
-import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-import { muteColor } from "@/lab/charts/color-scale"
+	type PlotLegendSeries,
+	PlotSeriesLegend,
+	usePlotLegendHighlight,
+} from "@maple/ui/components/plot/plot-legend"
 
 /**
  * The service-map edge shape the query engine already returns —
@@ -341,13 +342,13 @@ function SankeyFigure({
 			// are ordinary cartesian marks in pixel coordinates.
 			focus: "nearest",
 			focusRing: false,
-			tooltip: { use: tooltip, className: "maple-bench-tooltip" },
+			tooltip: { use: tooltip, className: "maple-plot-tooltip" },
 		})
 	}, [nodes, edges, colors, strokeForEdge])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Service call flow"
 			definition={definition}
@@ -424,11 +425,11 @@ export const SankeyLegendSpike = memo(function SankeyLegendSpike({
 }) {
 	const colors = usePlotColors(FLOW_TOKENS)
 
-	const legendSeries = useMemo<LegendSeriesSpec[]>(
+	const legendSeries = useMemo<PlotLegendSeries[]>(
 		() => FLOW_BANDS.map((band) => ({ key: band.key, label: band.label, color: colors[band.token] })),
 		[colors],
 	)
-	const { highlighted, highlight } = useChartLegendHighlight()
+	const { highlighted, highlight } = usePlotLegendHighlight()
 
 	const mutedBands = useMemo(
 		() =>
@@ -447,7 +448,7 @@ export const SankeyLegendSpike = memo(function SankeyLegendSpike({
 			className={className}
 			mutedBands={mutedBands}
 			legend={
-				<ChartSeriesLegend
+				<PlotSeriesLegend
 					series={legendSeries}
 					highlighted={highlighted}
 					onHighlight={highlight}

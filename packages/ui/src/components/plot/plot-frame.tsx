@@ -1,31 +1,48 @@
-import { cn } from "@maple/ui/lib/utils"
+/// <reference types="vite/client" />
 import { CanvasChart, Chart as SvgChart } from "@tanstack/charts/react/tooltip"
 import type { ChartTooltipBodyRenderContext } from "@tanstack/charts/react/tooltip"
-import type { ChartPoint, ChartValue, DomChartDefinition } from "@tanstack/charts"
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import type { ChartBounds, ChartPoint, ChartScene, ChartValue, DomChartDefinition } from "@tanstack/charts"
+import {
+	createContext,
+	use,
+	useCallback,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+	type ReactNode,
+} from "react"
 
-import "./tooltip.css"
+import { cn } from "../../lib/utils"
+import { assertResolvedColors } from "./plot-colors-guard"
 
-export type TanstackRenderer = "tanstack-svg" | "tanstack-canvas"
+// The tooltip shell theming. Imported HERE rather than from `plot-tooltip.tsx`
+// because a chart can build its own tooltip config without going through
+// `cursorTooltip` (polar, hexbin, sankey and treemap all do) but no chart can
+// skip the frame.
+import "./plot-tooltip.css"
+
+export type PlotRenderer = "svg" | "canvas"
 
 /**
  * Only the HEIGHT is measured, and that is the documented shape.
  *
- * An earlier revision of this file measured both axes and passed both to
- * `<Chart>`, with a comment claiming the component "has no intrinsic sizing".
- * That was wrong, and it caused the mount flash: `width` is optional, and the
- * host renders `width: width === undefined ? "100%" : width`
- * (`dist/react/RendererChart.js`), so omitting it makes the chart follow its
- * container. The renderer then installs its OWN `ResizeObserver` on the
- * container (`dist/renderer.js:151`) and — this is the part that matters —
- * `adapter.mount()` runs inside a layout effect and `createScene()` reads
- * `container.getBoundingClientRect().width` synchronously there
- * (`dist/renderer.js:659`), so the first paint is already correctly sized.
+ * An earlier revision measured both axes and passed both to `<Chart>`, with a
+ * comment claiming the component "has no intrinsic sizing". That was wrong, and
+ * it caused a mount flash: `width` is optional, and the host renders
+ * `width: width === undefined ? "100%" : width` (`dist/react/RendererChart.js`),
+ * so omitting it makes the chart follow its container. The renderer then
+ * installs its OWN `ResizeObserver` on the container (`dist/renderer.js:151`)
+ * and — this is the part that matters — `adapter.mount()` runs inside a layout
+ * effect and `createScene()` reads `container.getBoundingClientRect().width`
+ * synchronously there (`dist/renderer.js:659`), so the first paint is already
+ * correctly sized.
  *
  * Taking that over meant gating the chart behind our own observer, whose first
  * record only arrives during a LATER frame's rendering steps: mount → paint an
  * empty card → observer fires → re-render → paint the chart. Two blank frames
- * minimum, twenty-one of them on the gallery, each with its own commit.
+ * minimum, each with its own commit.
  *
  * The guide is explicit — omit `width` to follow the container, and choose
  * `height` OR `aspectRatio` but never both:
@@ -46,7 +63,7 @@ function useMeasuredHeight() {
 		if (!node) return
 
 		// Round: sub-pixel churn would rebuild the whole scene on every container
-		// reflow and pollute the React commit counts this bench measures.
+		// reflow and pollute React commit counts.
 		const apply = (next: number) => {
 			const rounded = Math.round(next)
 			setHeight((prev) => (prev === rounded ? prev : rounded))
@@ -78,15 +95,97 @@ function useMeasuredHeight() {
  */
 const FALLBACK_HEIGHT = 320
 
-export interface TanstackChartFrameProps<TDatum, TXValue extends ChartValue, TYValue extends ChartValue> {
-	renderer: TanstackRenderer
+/**
+ * The resolved plot rect — the region inside the axes — published for consumers
+ * that have to align to it.
+ *
+ * A STORE, not state. `onRender` fires outside React's render phase on every
+ * scene update, so calling `setState` there would add a commit per pointer tick
+ * to the hottest path in the chart layer. `useSyncExternalStore` costs nothing
+ * for the charts that never read it, and the anchor element below is positioned
+ * imperatively so the perf specs' locator needs no subscriber at all.
+ */
+export interface PlotRect {
+	x: number
+	y: number
+	width: number
+	height: number
+}
+
+export interface PlotRectStore {
+	subscribe: (listener: () => void) => () => void
+	getSnapshot: () => PlotRect | null
+}
+
+const PlotRectContext = createContext<PlotRectStore | null>(null)
+
+/**
+ * The plot rect of the nearest enclosing `PlotFrame`, or `null` outside one.
+ *
+ * This is the replacement for Recharts' `usePlotArea()`. The difference that
+ * matters: Recharts handed it to you inside the chart's React tree during
+ * render; here it arrives from a render callback, so a consumer is always one
+ * store notification behind the scene it describes.
+ */
+export function usePlotRect(): PlotRect | null {
+	const store = use(PlotRectContext)
+	return useSyncExternalStore(
+		store?.subscribe ?? noopSubscribe,
+		store?.getSnapshot ?? nullSnapshot,
+		nullSnapshot,
+	)
+}
+
+const noopSubscribe = () => () => {}
+const nullSnapshot = () => null
+
+function createPlotRectStore(): PlotRectStore & { set: (next: ChartBounds) => void } {
+	let snapshot: PlotRect | null = null
+	const listeners = new Set<() => void>()
+
+	return {
+		subscribe: (listener) => {
+			listeners.add(listener)
+			return () => {
+				listeners.delete(listener)
+			}
+		},
+		// Returns the CACHED object, never a fresh literal — `useSyncExternalStore`
+		// compares snapshots by identity and would loop forever on a new one.
+		getSnapshot: () => snapshot,
+		set: (next) => {
+			if (
+				snapshot &&
+				snapshot.x === next.x &&
+				snapshot.y === next.y &&
+				snapshot.width === next.width &&
+				snapshot.height === next.height
+			) {
+				return
+			}
+			snapshot = { x: next.x, y: next.y, width: next.width, height: next.height }
+			for (const listener of listeners) listener()
+		},
+	}
+}
+
+export interface PlotFrameProps<TDatum, TXValue extends ChartValue, TYValue extends ChartValue> {
 	definition: DomChartDefinition<TDatum, TXValue, TYValue>
 	ariaLabel: string
+	/**
+	 * Canvas by default. It does ~3.3x less React render work than Recharts and
+	 * beats the SVG renderer, and it is the only renderer where `whenFocused`'s
+	 * emit-a-node-per-datum behaviour costs nothing.
+	 *
+	 * Choose `"svg"` only for a stated reason: a CSS animation on a mark (the
+	 * infra threshold line's draw-in), or the `motion()` renderer, which is SVG
+	 * only and throws if it cannot find an `svg.ts-chart` root.
+	 */
+	renderer?: PlotRenderer
 	className?: string
 	renderTooltipBody?: (context: ChartTooltipBodyRenderContext<TDatum, TXValue, TYValue>) => ReactNode
 	/**
-	 * A DOM legend rendered beneath the plot — see `chart-legend.tsx` for why the
-	 * package's own legends do not apply to most of these charts.
+	 * A DOM legend rendered beneath the plot.
 	 *
 	 * The strip is a flex SIBLING of the measured chart box rather than a height
 	 * subtracted from it. That matters: the existing `ResizeObserver` then reports
@@ -98,86 +197,120 @@ export interface TanstackChartFrameProps<TDatum, TXValue extends ChartValue, TYV
 	 * Fires when the focused datum CHANGES — not on every pointer move — so a
 	 * chart can drive a React-side hover affordance without a commit per tick.
 	 *
-	 * This is the hook `pie-spike.tsx` needs: polar marks take no `states`, so the
-	 * only way to react to hover there is to rebuild the definition, and that is
-	 * only affordable if the callback is edge-triggered. It is.
+	 * Polar marks take no `states`, so the only way to react to hover there is to
+	 * rebuild the definition; that is only affordable because this is
+	 * edge-triggered.
 	 */
 	onFocusChange?: (point: ChartPoint<TDatum, TXValue, TYValue> | null) => void
 	/**
-	 * A caption strip below the legend — the heatmap's "N empty columns hidden"
-	 * footnote. A SIBLING of the measured plot for the same reason `legend` is:
-	 * the existing `ResizeObserver` then hands the plot whatever height is left,
-	 * with no arithmetic and no second observer.
-	 *
-	 * Separate from `legend` rather than folded into it because the heatmap uses
-	 * the package's IN-CHART gradient legend, so its `legend` slot is empty while
-	 * its footnote is not.
+	 * A caption strip below the legend — e.g. a heatmap's "N empty columns hidden"
+	 * footnote. A SIBLING of the measured plot for the same reason `legend` is.
 	 */
 	footer?: ReactNode
 }
 
 /**
  * One frame, one renderer. `@tanstack/charts/react/tooltip` exports the SVG and
- * Canvas components with an identical prop surface, so the two TanStack arms
- * differ only in which component is mounted — the definition is the same object.
+ * Canvas components with an identical prop surface, so the two arms differ only
+ * in which component is mounted — the definition is the same object.
+ *
+ * Keyboard navigation is NOT wired here on purpose: the library enables it by
+ * default and computes `tabIndex` itself (`dist/adapter-shared.js:11` opts out
+ * only on `keyboard: false`, `focus: false`, or a free-mode cursor). Setting
+ * `tabIndex` from here would fight that.
  */
-export function TanstackChartFrame<TDatum, TXValue extends ChartValue, TYValue extends ChartValue>({
-	renderer,
+export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends ChartValue>({
 	definition,
 	ariaLabel,
+	renderer = "canvas",
 	className,
 	renderTooltipBody,
 	legend,
 	onFocusChange,
 	footer,
-}: TanstackChartFrameProps<TDatum, TXValue, TYValue>) {
+}: PlotFrameProps<TDatum, TXValue, TYValue>) {
 	const { ref, height } = useMeasuredHeight()
+	const anchorRef = useRef<HTMLDivElement | null>(null)
+	const rectStore = useMemo(createPlotRectStore, [])
 
-	const ChartComponent = renderer === "tanstack-canvas" ? CanvasChart : SvgChart
+	if (import.meta.env.DEV) assertResolvedColors(definition, ariaLabel)
 
-	const chartProps = {
-		definition,
-		ariaLabel,
-		height: height ?? FALLBACK_HEIGHT,
-		renderTooltipBody,
-		onFocusChange,
-	}
+	/**
+	 * Positions the plot anchor imperatively and publishes the rect.
+	 *
+	 * The anchor exists because every perf spec and every alignment check needs a
+	 * DOM handle on the plot region, and Recharts gave one away for free as
+	 * `.recharts-cartesian-grid`. Writing it from `onRender` rather than from
+	 * React keeps it free: no state, no commit, no subscriber required.
+	 */
+	const handleRender = useCallback(
+		(context: { scene: ChartScene<TDatum, TXValue, TYValue> }) => {
+			const bounds = context.scene.chart
+			const node = anchorRef.current
+			if (node) {
+				node.style.transform = `translate(${bounds.x}px, ${bounds.y}px)`
+				node.style.width = `${bounds.width}px`
+				node.style.height = `${bounds.height}px`
+			}
+			rectStore.set(bounds)
+		},
+		[rectStore],
+	)
+
+	const ChartComponent = renderer === "canvas" ? CanvasChart : SvgChart
 
 	return (
-		// `select-none`: a chart is a figure, not prose. Without it, dragging the
-		// pointer across one — which is exactly what hovering a timeseries looks
-		// like — starts a text selection and paints the browser's selection
-		// highlight over the whole `<svg>`/`<canvas>`. Recharts charts sit inside
-		// `ChartContainer`, which has never had this problem because its content is
-		// unselectable by construction.
-		<div data-bench-chart={renderer} className={cn("flex flex-col select-none", className)}>
+		<PlotRectContext value={rectStore}>
 			{/*
-			 * `min-h-0` is load-bearing on a flex child: a flex item's default
-			 * `min-height: auto` refuses to shrink below its content, and the chart's
-			 * content is whatever height it was last measured at — so without this the
-			 * plot ratchets and pushes the legend out of the card instead of yielding
-			 * to it.
+			 * `select-none`: a chart is a figure, not prose. Without it, dragging the
+			 * pointer across one — which is exactly what hovering a timeseries looks
+			 * like — starts a text selection and paints the browser's selection
+			 * highlight over the whole `<svg>`/`<canvas>`.
 			 */}
-			<div ref={ref} className="min-h-0 flex-1">
+			<div data-chart-host={renderer} className={cn("flex flex-col select-none", className)}>
 				{/*
-				 * No `width`, deliberately — see `useMeasuredHeight`. The host takes
-				 * `width: 100%` and measures itself before first paint, which is both
-				 * the documented behaviour and the reason this no longer flashes.
-				 * Rendering is not gated on a measurement either: `FALLBACK_HEIGHT`
-				 * covers the frame before the layout effect resolves.
+				 * `min-h-0` is load-bearing on a flex child: a flex item's default
+				 * `min-height: auto` refuses to shrink below its content, and the chart's
+				 * content is whatever height it was last measured at — so without this the
+				 * plot ratchets and pushes the legend out of the card instead of yielding
+				 * to it.
 				 */}
-				<ChartComponent {...chartProps} />
+				<div ref={ref} className="relative min-h-0 flex-1">
+					{/*
+					 * No `width`, deliberately — see `useMeasuredHeight`. The host takes
+					 * `width: 100%` and measures itself before first paint. Rendering is
+					 * not gated on a measurement either: `FALLBACK_HEIGHT` covers the
+					 * frame before the layout effect resolves.
+					 */}
+					<ChartComponent
+						definition={definition}
+						ariaLabel={ariaLabel}
+						height={height ?? FALLBACK_HEIGHT}
+						renderTooltipBody={renderTooltipBody}
+						onFocusChange={onFocusChange}
+						onRender={handleRender}
+					/>
+					{/*
+					 * `pointer-events-none` and empty: this is a measurement handle, not a
+					 * layer. Anything that needs to PAINT over the plot belongs in the
+					 * definition as a mark, where it participates in scale resolution.
+					 */}
+					<div
+						ref={anchorRef}
+						data-chart-plot=""
+						aria-hidden="true"
+						className="pointer-events-none absolute top-0 left-0"
+					/>
+				</div>
+				{/*
+				 * `max-h-[45%]` is the legend ceiling that keeps a long series list from
+				 * starving the plot, expressed as a CSS cap rather than pixel arithmetic.
+				 * Recharts needed a computed number because it wants an explicit
+				 * `<Legend height>`; here flexbox already does the division.
+				 */}
+				{legend ? <div className="max-h-[45%] shrink-0 overflow-auto">{legend}</div> : null}
+				{footer ? <div className="shrink-0">{footer}</div> : null}
 			</div>
-			{/*
-			 * `max-h-[45%]` is `query-builder-legend.tsx`'s `MAX_LEGEND_FRACTION`,
-			 * expressed as a CSS cap rather than as `responsiveLegendHeight`'s pixel
-			 * arithmetic. The production legend has to compute a number because
-			 * Recharts wants an explicit `<Legend height>`; here flexbox already does
-			 * the division, so the only thing left to state is the ceiling that keeps a
-			 * long series list from starving the plot.
-			 */}
-			{legend ? <div className="max-h-[45%] shrink-0 overflow-auto">{legend}</div> : null}
-			{footer ? <div className="shrink-0">{footer}</div> : null}
-		</div>
+		</PlotRectContext>
 	)
 }

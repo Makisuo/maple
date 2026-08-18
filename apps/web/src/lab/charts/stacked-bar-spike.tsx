@@ -7,15 +7,18 @@ import { controlledSignal } from "@tanstack/charts/interaction/signal"
 import { interactiveColorLegend } from "@tanstack/charts/legend"
 import { memo, useMemo, useState, type ReactNode } from "react"
 
+import { type TanstackRenderer, plotRendererFor } from "@/lab/bench/tanstack/renderer-arm"
+import { muteColor } from "@maple/ui/components/plot/color-scale"
+import { PlotFrame } from "@maple/ui/components/plot/plot-frame"
 import {
-	ChartSeriesLegend,
 	MUTED_COLOR_AMOUNT,
-	useChartLegendHighlight,
-	type LegendSeriesSpec,
-} from "@/lab/bench/tanstack/chart-legend"
-import { cursorTooltip, usePlotChromeColors } from "@/lab/bench/tanstack/chart-shared"
-import { TanstackChartFrame, type TanstackRenderer } from "@/lab/bench/tanstack/tanstack-chart"
-import { muteColor } from "@/lab/charts/color-scale"
+	type PlotLegendSeries,
+	PlotSeriesLegend,
+	usePlotLegendHighlight,
+} from "@maple/ui/components/plot/plot-legend"
+import { cursorTooltip } from "@maple/ui/components/plot/plot-tooltip"
+import { usePlotChromeColors } from "@maple/ui/components/plot/theme"
+
 import {
 	STACKED_BAR_SERVICES,
 	stackedBarAxisContext,
@@ -218,13 +221,13 @@ function StackedBarFigure({
 	}, [rows, byBucket, colorFor, incomplete, axisContext, chrome])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Spans by service"
 			definition={definition}
 			legend={legend}
-			// `TooltipBody` reads every series off `points[0].datum`, which works when
+			// `PlotTooltipBody` reads every series off `points[0].datum`, which works when
 			// a datum is a whole bucket. Here it is one cell, so the bucket's other
 			// services have to be looked up rather than read.
 			renderTooltipBody={({ points }) => {
@@ -303,7 +306,7 @@ export const StackedBarLegendSpike = memo(function StackedBarLegendSpike({
 }) {
 	const colorFor = useServiceColor()
 
-	const legendSeries = useMemo<LegendSeriesSpec[]>(
+	const legendSeries = useMemo<PlotLegendSeries[]>(
 		() =>
 			STACKED_BAR_SERVICES.map((service) => ({
 				key: service,
@@ -312,7 +315,7 @@ export const StackedBarLegendSpike = memo(function StackedBarLegendSpike({
 			})),
 		[colorFor],
 	)
-	const { highlighted, highlight } = useChartLegendHighlight()
+	const { highlighted, highlight } = usePlotLegendHighlight()
 	const chromeColors = usePlotChromeColors()
 
 	// The whole highlight, expressed as a colour lookup: every row still draws and
@@ -333,7 +336,7 @@ export const StackedBarLegendSpike = memo(function StackedBarLegendSpike({
 			className={className}
 			colorFor={emphasisedColorFor}
 			legend={
-				<ChartSeriesLegend
+				<PlotSeriesLegend
 					series={legendSeries}
 					highlighted={highlighted}
 					onHighlight={highlight}
@@ -474,8 +477,8 @@ export const StackedBarSceneLegendSpike = memo(function StackedBarSceneLegendSpi
 	}, [rows, byBucket, colorFor, axisContext, visibleServices])
 
 	return (
-		<TanstackChartFrame
-			renderer={renderer}
+		<PlotFrame
+			renderer={plotRendererFor(renderer)}
 			className={className}
 			ariaLabel="Spans by service"
 			definition={definition}

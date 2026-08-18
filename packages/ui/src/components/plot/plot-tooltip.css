@@ -11,7 +11,7 @@
  * px-3 py-2 text-xs shadow-xl backdrop-blur-md"). Two properties the shell does
  * NOT write inline — backdrop-filter and transition — are set directly.
  */
-.maple-bench-tooltip {
+.maple-plot-tooltip {
 	--ts-chart-tooltip-background: color-mix(in oklab, var(--popover) 90%, transparent);
 	--ts-chart-tooltip-color: var(--popover-foreground);
 	--ts-chart-tooltip-border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
@@ -35,13 +35,13 @@
 }
 
 @starting-style {
-	.maple-bench-tooltip {
+	.maple-plot-tooltip {
 		opacity: 0;
 	}
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.maple-bench-tooltip {
+	.maple-plot-tooltip {
 		transition: none;
 	}
 }
