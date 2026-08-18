@@ -51,19 +51,15 @@ const POD_LIMIT_ROWS = makeRows(["value"], 1, 3.3)
 /**
  * Synthetic /lab/bench/infra page: the infra detail ChartViews (host + k8s) in one
  * linked-cursor group, mirroring the host-detail and infra-correlation grids.
- * `?mode=recharts` restores Recharts' syncId event bus as the storm baseline
- * the perf spec compares against.
- */
-/**
+ *
  * There is no `syncMode` arm any more. It existed to A/B the linked cursor
  * against Recharts' hover-sync event bus, and Recharts is gone from these
  * charts — the cursor is the only mechanism left to measure.
  */
 export function InfraChartBench() {
 	const recorder = useMemo(() => createReactRecorder(), [])
-	// Omitting syncMode exercises the ChartViews' real default ("cursor") — the
-	// container hook is a no-op storm-wise, so enabling it unconditionally except
-	// for the explicit recharts baseline keeps the default path honest.
+	// The ChartViews' real default, and now the only path: there is no second arm
+	// to hold it against since the infra charts moved off Recharts.
 	const linkedCursorEnabled = true
 	const { containerProps } = useLinkedCursor(linkedCursorEnabled)
 
@@ -71,7 +67,7 @@ export function InfraChartBench() {
 		const bench = startInteractionBench({
 			recorder,
 			isReady: () =>
-				document.querySelectorAll("[data-testid='infra-chart-bench'] .recharts-wrapper").length ===
+				document.querySelectorAll("[data-testid='infra-chart-bench'] [data-chart-host]").length ===
 				CHART_COUNT,
 		})
 		window.__infraBench = bench.harness

@@ -23,7 +23,7 @@ import {
 } from "react"
 
 import { cn } from "../../lib/utils"
-import { warnUnresolvedColors } from "./plot-colors-guard"
+import { warnDisplayOverride, warnUnresolvedColors } from "./plot-colors-guard"
 
 // The tooltip shell theming. Imported HERE rather than from `plot-tooltip.tsx`
 // because a chart can build its own tooltip config without going through
@@ -576,7 +576,14 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 	const rectStore = useMemo(createPlotRectStore, [])
 	const scalesStore = useMemo(createPlotScalesStore, [])
 
-	if (import.meta.env.DEV) warnUnresolvedColors(definition, ariaLabel)
+	// The merged host classes, hoisted out of the JSX below so the DEV guard can
+	// see what tailwind-merge actually produced rather than what was asked for.
+	const hostClassName = cn("flex flex-col select-none", className)
+
+	if (import.meta.env.DEV) {
+		warnUnresolvedColors(definition, ariaLabel)
+		warnDisplayOverride(hostClassName, ariaLabel)
+	}
 
 	/**
 	 * Positions the plot anchor imperatively and publishes the rect.
@@ -683,7 +690,7 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 				 * the whole figure, and turning the host into a row would make it a third
 				 * column beside the legend.
 				 */}
-				<div data-chart-host={renderer} className={cn("flex flex-col select-none", className)}>
+				<div data-chart-host={renderer} className={hostClassName}>
 					{sideLegend ? (
 						<div data-chart-legend-row="" className="flex min-h-0 flex-1 flex-row gap-3">
 							{plot}

@@ -79,3 +79,29 @@ export function warnUnresolvedColors(definition: unknown, ariaLabel: string): vo
 
 	walk(definition, 0, "definition")
 }
+
+/**
+ * Warns, in DEV, when a caller's `className` has DELETED the frame's own layout.
+ *
+ * `PlotFrame` merges its host classes through `cn`, i.e. tailwind-merge, which
+ * resolves conflicts by LAST WINS within a group. A caller passing any display
+ * utility — `hidden sm:block` on a sparkline that only shows at `sm` — is in the
+ * same group as the frame's `flex`, so the merge silently drops it. The host
+ * stops being a flex container, the plot box's `flex-1` goes inert, it takes its
+ * height from its content instead of from the box, and the measured height never
+ * resolves: the chart stays at `FALLBACK_HEIGHT` and paints a 320px canvas
+ * through whatever sits below it. That shipped once, on the service overview's
+ * top-operations sparkline.
+ *
+ * The fix at the call site is always the same — put the display utility on a
+ * WRAPPER and hand the chart only its size — so the warning names it.
+ */
+export function warnDisplayOverride(merged: string, ariaLabel: string): void {
+	if (/(^| )flex( |$)/.test(merged)) return
+	console.warn(
+		`[plot] "${ariaLabel}": a className passed to PlotFrame overrode its "flex" display ` +
+			`(merged: "${merged}"). The plot box will not size itself and the chart will paint at ` +
+			`its fallback height. Move the display utility to a wrapper element and pass the chart ` +
+			`only its width/height.`,
+	)
+}
