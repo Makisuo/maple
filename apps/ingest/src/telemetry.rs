@@ -2577,7 +2577,10 @@ fn encode_metrics(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per OTLP metric row dimension; a params struct would just rename the problem"
+)]
 fn push_metric_number_row(
     by_datasource: &mut BTreeMap<String, Vec<Vec<u8>>>,
     datasource: &str,
@@ -2623,7 +2626,10 @@ fn push_metric_number_row(
     push_json(by_datasource, datasource, extend(row, extra))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per OTLP metric row dimension; a params struct would just rename the problem"
+)]
 fn metric_common_row(
     metric: &opentelemetry_proto::tonic::metrics::v1::Metric,
     service_name: &str,

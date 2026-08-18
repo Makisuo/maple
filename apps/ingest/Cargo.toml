@@ -66,6 +66,53 @@ tokio-postgres-rustls = "0.13"
 rustls = { version = "0.23", features = ["ring"] }
 webpki-roots = "0.26"
 
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+# groups first, negative priority so specific lints below can override
+pedantic = { level = "warn", priority = -1 }
+
+# --- the agent-specific ones ---
+allow_attributes = "deny"                # forces #[expect] instead of #[allow]
+allow_attributes_without_reason = "deny" # every suppression needs a justification
+todo = "deny"                            # no todo!() left behind
+unimplemented = "deny"
+dbg_macro = "deny"
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+unwrap_in_result = "warn"
+let_underscore_must_use = "warn"
+mem_forget = "deny"
+
+# --- clone / alloc slop ---
+redundant_clone = "warn"      # nursery
+assigning_clones = "warn"
+clone_on_ref_ptr = "warn"
+str_to_string = "warn"
+implicit_clone = "warn"
+
+# --- structural slop ---
+cognitive_complexity = "warn" # nursery
+excessive_nesting = "warn"
+unused_async = "warn"         # nursery
+unnecessary_wraps = "warn"
+wildcard_imports = "warn"
+use_self = "warn"             # nursery
+
+# --- pedantic noise to allow back ---
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+doc_markdown = "allow"
+similar_names = "allow"
+items_after_statements = "allow"
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
 

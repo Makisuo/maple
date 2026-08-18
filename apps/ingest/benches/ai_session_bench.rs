@@ -11,9 +11,9 @@ use opentelemetry_proto::tonic::{
 
 fn kv(key: &str, value: &str) -> KeyValue {
     KeyValue {
-        key: key.to_string(),
+        key: key.to_owned(),
         value: Some(AnyValue {
-            value: Some(any_value::Value::StringValue(value.to_string())),
+            value: Some(any_value::Value::StringValue(value.to_owned())),
         }),
     }
 }
@@ -145,8 +145,18 @@ fn bench_classify(c: &mut Criterion) {
             "POST /api/checkout",
             wide_span_attrs(),
         ),
-        ("mastra_ai_span", "@mastra/otel-exporter", "agent.generate", mastra_span_attrs()),
-        ("vercel_ai_span_20_attrs", "ai", "ai.generateText", vercel_span_attrs()),
+        (
+            "mastra_ai_span",
+            "@mastra/otel-exporter",
+            "agent.generate",
+            mastra_span_attrs(),
+        ),
+        (
+            "vercel_ai_span_20_attrs",
+            "ai",
+            "ai.generateText",
+            vercel_span_attrs(),
+        ),
         (
             "claude_ai_span",
             "com.anthropic.claude_code",
@@ -165,7 +175,7 @@ fn bench_classify(c: &mut Criterion) {
                     resource_attrs: black_box(&resource),
                     events: &[],
                 }))
-            })
+            });
         });
     }
     group.finish();
@@ -181,12 +191,12 @@ fn bench_stamp_request(c: &mut Criterion) {
 
     let scope = |name: &str| {
         Some(InstrumentationScope {
-            name: name.to_string(),
+            name: name.to_owned(),
             ..Default::default()
         })
     };
     let span = |name: &str, attributes: Vec<KeyValue>| Span {
-        name: name.to_string(),
+        name: name.to_owned(),
         attributes,
         ..Default::default()
     };
@@ -194,22 +204,30 @@ fn bench_stamp_request(c: &mut Criterion) {
     let mut scope_spans = vec![
         ScopeSpans {
             scope: scope("@opentelemetry/instrumentation-http"),
-            spans: (0..60).map(|_| span("POST /api/checkout", http_span_attrs())).collect(),
+            spans: (0..60)
+                .map(|_| span("POST /api/checkout", http_span_attrs()))
+                .collect(),
             ..Default::default()
         },
         ScopeSpans {
             scope: scope("@opentelemetry/instrumentation-pg"),
-            spans: (0..35).map(|_| span("SELECT maple.orders", db_span_attrs())).collect(),
+            spans: (0..35)
+                .map(|_| span("SELECT maple.orders", db_span_attrs()))
+                .collect(),
             ..Default::default()
         },
         ScopeSpans {
             scope: scope("ai"),
-            spans: (0..3).map(|_| span("ai.generateText", vercel_span_attrs())).collect(),
+            spans: (0..3)
+                .map(|_| span("ai.generateText", vercel_span_attrs()))
+                .collect(),
             ..Default::default()
         },
         ScopeSpans {
             scope: scope("@mastra/otel-exporter"),
-            spans: (0..2).map(|_| span("agent.generate", mastra_span_attrs())).collect(),
+            spans: (0..2)
+                .map(|_| span("agent.generate", mastra_span_attrs()))
+                .collect(),
             ..Default::default()
         },
     ];
@@ -234,7 +252,7 @@ fn bench_stamp_request(c: &mut Criterion) {
                 black_box(request)
             },
             criterion::BatchSize::LargeInput,
-        )
+        );
     });
     group.finish();
 }

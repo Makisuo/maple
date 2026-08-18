@@ -51,6 +51,7 @@ pub struct AiClassification {
 }
 
 /// Borrowed view of one span, the unit [`classify_span`] works on.
+#[derive(Debug)]
 pub struct SpanView<'a> {
     pub scope_name: &'a str,
     pub span_name: &'a str,
@@ -68,16 +69,14 @@ pub fn stamp_trace_request(request: &mut ExportTraceServiceRequest) {
             resource_spans
                 .resource
                 .as_ref()
-                .map(|resource| resource.attributes.as_slice())
-                .unwrap_or(&[]),
+                .map_or(&[][..], |resource| resource.attributes.as_slice()),
         );
         for scope_spans in &mut resource_spans.scope_spans {
             let scope = scope_facts(
                 scope_spans
                     .scope
                     .as_ref()
-                    .map(|scope| scope.name.as_str())
-                    .unwrap_or(""),
+                    .map_or("", |scope| scope.name.as_str()),
                 &resource,
             );
             for span in &mut scope_spans.spans {
@@ -119,9 +118,9 @@ pub fn classify_span(view: &SpanView) -> Option<AiClassification> {
 
 fn string_attribute(key: &str, value: &str) -> KeyValue {
     KeyValue {
-        key: key.to_string(),
+        key: key.to_owned(),
         value: Some(AnyValue {
-            value: Some(any_value::Value::StringValue(value.to_string())),
+            value: Some(any_value::Value::StringValue(value.to_owned())),
         }),
     }
 }
@@ -160,6 +159,10 @@ fn resource_facts(attrs: &[KeyValue]) -> ResourceFacts<'_> {
 /// (`spring_boot`, `vercel_ai`, `matches_service_name`, the crewai refusal)
 /// deliberately don't set it, so they never force predicate evaluation on
 /// evidence-free spans.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "this is a set of independent evidence flags, not state; an enum would be wrong"
+)]
 #[derive(Default)]
 struct ScopeFacts {
     any: bool,
@@ -255,6 +258,10 @@ fn scope_facts(scope_name: &str, resource: &ResourceFacts) -> ScopeFacts {
 /// Everything the vendor predicates read from a span's own attributes,
 /// collected in one pass. Value slots hold the first string value seen;
 /// presence bits count any value type, matching `has_attr` semantics.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "this is a set of independent evidence flags, not state; an enum would be wrong"
+)]
 #[derive(Default)]
 struct SpanEvidence<'a> {
     /// Any field below (except `has_maple_ai`) is set.
@@ -319,6 +326,11 @@ fn value_str(attr: &KeyValue) -> &str {
     }
 }
 
+#[expect(
+    clippy::cognitive_complexity,
+    clippy::too_many_lines,
+    reason = "a flat first-byte dispatch table; splitting it would obscure the single-pass shape it exists for"
+)]
 fn collect_evidence<'a>(span_attrs: &'a [KeyValue], events: &'a [Event]) -> SpanEvidence<'a> {
     let mut ev = SpanEvidence::default();
     for attr in span_attrs {
@@ -392,7 +404,7 @@ fn collect_evidence<'a>(span_attrs: &'a [KeyValue], events: &'a [Event]) -> Span
                         "agent.call.id" => ev.gen_ai_agent_call_id = true,
                         "execute_tool.duration" => ev.gen_ai_execute_tool_duration = true,
                         _ if rest.starts_with("aggregated_usage.") => {
-                            ev.gen_ai_aggregated_usage = true
+                            ev.gen_ai_aggregated_usage = true;
                         }
                         _ => continue,
                     }
@@ -839,6 +851,10 @@ fn detect_openinference_openai(c: &Ctx) -> bool {
     c.scope.openinference_openai
 }
 
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "span-name suffixes like ._execute_core, not file extensions"
+)]
 fn detect_crewai(c: &Ctx) -> bool {
     if c.scope.crewai {
         return true;
@@ -974,122 +990,123 @@ mod tests {
         assert_eq!(result.session_id.as_deref(), session_id);
     }
 
-    #[test]
-    fn scope_detected_vendors_with_session_ids() {
-        classified(
-            "com.anthropic.claude_code",
-            "claude_code.interaction",
-            &[("session.id", "cc-1")],
-            &[],
-            "claude_agent_sdk",
-            Some("cc-1"),
-        );
-        classified(
-            "openinference.instrumentation.dspy",
-            "predict",
-            &[("session.id", "d-1")],
-            &[],
-            "dspy",
-            Some("d-1"),
-        );
-        classified(
-            "eve",
-            "ai.eve.turn",
-            &[("eve.session.id", "e-1")],
-            &[],
-            "eve",
-            Some("e-1"),
-        );
-        classified(
-            "@flue/opentelemetry",
-            "prompt",
-            &[("gen_ai.conversation.id", "f-1")],
-            &[],
-            "flue",
-            Some("f-1"),
-        );
-        classified(
-            "gcp.vertex.agent",
-            "invoke_agent",
-            &[("gcp.vertex.agent.session_id", "g-1")],
-            &[],
-            "google_adk",
-            Some("g-1"),
-        );
-        classified(
-            "langsmith",
-            "chain",
-            &[("langsmith.metadata.thread_id", "l-1")],
-            &[],
-            "langchain",
-            Some("l-1"),
-        );
-        classified(
-            "openinference.instrumentation.agno",
-            "agent.run",
-            &[("session.id", "a-1")],
-            &[],
-            "agno",
-            Some("a-1"),
-        );
-        classified(
-            "agent_framework",
-            "invoke_agent",
-            &[("gen_ai.conversation.id", "m-1")],
-            &[],
-            "microsoft_agent_framework",
-            Some("m-1"),
-        );
-        classified(
-            "openinference.instrumentation.openai_agents",
-            "agent",
-            &[("gen_ai.conversation.id", "o-1")],
-            &[],
-            "openai_agents_sdk",
-            Some("o-1"),
-        );
-        classified(
-            "openinference.instrumentation.openai",
-            "chat",
-            &[("session.id", "oo-1")],
-            &[],
-            "openinference-openai",
-            Some("oo-1"),
-        );
-        classified(
-            "crewai.telemetry",
-            "Crew.kickoff",
-            &[("session.id", "c-1")],
-            &[],
-            "crewai",
-            Some("c-1"),
-        );
-        classified(
-            "pydantic-ai",
-            "agent run",
-            &[("gen_ai.conversation.id", "p-1")],
-            &[],
-            "pydantic_ai",
-            Some("p-1"),
-        );
-        classified(
-            "openinference.instrumentation.smolagents",
-            "step",
-            &[("session.id", "s-1")],
-            &[],
-            "smolagents",
-            Some("s-1"),
-        );
-        classified(
-            "strands.telemetry.tracer",
-            "invoke",
-            &[("session.id", "st-1")],
-            &[],
-            "strands",
-            Some("st-1"),
-        );
-    }
+    /// (scope, span name, span attrs, expected vendor, expected session id)
+    type VendorCase<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str, &'a str);
 
+    #[test]
+    #[expect(clippy::too_many_lines, reason = "one table entry per vendor")]
+    fn scope_detected_vendors_with_session_ids() {
+        let cases: &[VendorCase] = &[
+            (
+                "com.anthropic.claude_code",
+                "claude_code.interaction",
+                &[("session.id", "cc-1")],
+                "claude_agent_sdk",
+                "cc-1",
+            ),
+            (
+                "openinference.instrumentation.dspy",
+                "predict",
+                &[("session.id", "d-1")],
+                "dspy",
+                "d-1",
+            ),
+            (
+                "eve",
+                "ai.eve.turn",
+                &[("eve.session.id", "e-1")],
+                "eve",
+                "e-1",
+            ),
+            (
+                "@flue/opentelemetry",
+                "prompt",
+                &[("gen_ai.conversation.id", "f-1")],
+                "flue",
+                "f-1",
+            ),
+            (
+                "gcp.vertex.agent",
+                "invoke_agent",
+                &[("gcp.vertex.agent.session_id", "g-1")],
+                "google_adk",
+                "g-1",
+            ),
+            (
+                "langsmith",
+                "chain",
+                &[("langsmith.metadata.thread_id", "l-1")],
+                "langchain",
+                "l-1",
+            ),
+            (
+                "openinference.instrumentation.agno",
+                "agent.run",
+                &[("session.id", "a-1")],
+                "agno",
+                "a-1",
+            ),
+            (
+                "agent_framework",
+                "invoke_agent",
+                &[("gen_ai.conversation.id", "m-1")],
+                "microsoft_agent_framework",
+                "m-1",
+            ),
+            (
+                "openinference.instrumentation.openai_agents",
+                "agent",
+                &[("gen_ai.conversation.id", "o-1")],
+                "openai_agents_sdk",
+                "o-1",
+            ),
+            (
+                "openinference.instrumentation.openai",
+                "chat",
+                &[("session.id", "oo-1")],
+                "openinference-openai",
+                "oo-1",
+            ),
+            (
+                "crewai.telemetry",
+                "Crew.kickoff",
+                &[("session.id", "c-1")],
+                "crewai",
+                "c-1",
+            ),
+            (
+                "pydantic-ai",
+                "agent run",
+                &[("gen_ai.conversation.id", "p-1")],
+                "pydantic_ai",
+                "p-1",
+            ),
+            (
+                "openinference.instrumentation.smolagents",
+                "step",
+                &[("session.id", "s-1")],
+                "smolagents",
+                "s-1",
+            ),
+            (
+                "strands.telemetry.tracer",
+                "invoke",
+                &[("session.id", "st-1")],
+                "strands",
+                "st-1",
+            ),
+        ];
+        for (scope_name, span_name, span_attrs, vendor, session_id) in cases {
+            classified(
+                scope_name,
+                span_name,
+                span_attrs,
+                &[],
+                vendor,
+                Some(session_id),
+            );
+        }
+    }
     #[test]
     fn vendors_without_session_ids() {
         for (scope, span_name) in [
@@ -1181,7 +1198,7 @@ mod tests {
     #[test]
     fn integer_session_ids_are_stringified() {
         let span_attrs = vec![KeyValue {
-            key: "session.id".to_string(),
+            key: "session.id".to_owned(),
             value: Some(AnyValue {
                 value: Some(any_value::Value::IntValue(4211)),
             }),
@@ -1432,11 +1449,11 @@ mod tests {
                 scope_spans: vec![
                     ScopeSpans {
                         scope: Some(InstrumentationScope {
-                            name: "@mastra/otel-exporter".to_string(),
+                            name: "@mastra/otel-exporter".to_owned(),
                             ..Default::default()
                         }),
                         spans: vec![Span {
-                            name: "agent.generate".to_string(),
+                            name: "agent.generate".to_owned(),
                             attributes: attrs(&[
                                 ("gen_ai.conversation.id", "conv-42"),
                                 // Customer-supplied stamps are stripped; the
@@ -1450,11 +1467,11 @@ mod tests {
                     },
                     ScopeSpans {
                         scope: Some(InstrumentationScope {
-                            name: "@opentelemetry/instrumentation-http".to_string(),
+                            name: "@opentelemetry/instrumentation-http".to_owned(),
                             ..Default::default()
                         }),
                         spans: vec![Span {
-                            name: "POST /checkout".to_string(),
+                            name: "POST /checkout".to_owned(),
                             attributes: attrs(&[("http.route", "/checkout")]),
                             ..Default::default()
                         }],
