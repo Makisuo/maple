@@ -236,7 +236,10 @@ struct IssueRow: View {
 						.fixedSize()
 					}
 
-					Text(Format.count(issue.occurrenceCount))
+					// The web carries this as a bare number with a tooltip; a
+					// phone has no hover, so the unit has to be on the row or
+					// the count reads as an orphan digit.
+					Text("\(Format.count(issue.occurrenceCount)) events")
 						.font(Typo.tiny)
 						.tabularNumbers()
 						.foregroundStyle(Token.mutedForeground)

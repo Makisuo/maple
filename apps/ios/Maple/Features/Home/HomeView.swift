@@ -27,10 +27,15 @@ struct HomeView: View {
 					SkeletonList()
 				}
 			}
+			// No title: `StatusHeadline` *is* this screen's headline, and a large
+			// title above it stacked two competing headlines in the same face.
+			// Home is a status board whose content leads — the bar carries only
+			// the organization and the bell. Services and Alerts are lists and do
+			// take large titles.
 			.navigationBarTitleDisplayMode(.inline)
 			.toolbar {
-				ToolbarItem(placement: .principal) {
-					OrganizationSwitcherButton(fallbackTitle: "Maple")
+				ToolbarItem(placement: .topBarLeading) {
+					OrganizationSwitcherButton()
 				}
 				ToolbarItem(placement: .topBarTrailing) {
 					Button {

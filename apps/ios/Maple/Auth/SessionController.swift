@@ -146,6 +146,17 @@ final class SessionController {
 			membershipsLoaded = true
 			organizationError = nil
 		} catch {
+			// An expired session fails this fetch too, and the fallback below
+			// would then offer the stale payload's organizations under a banner
+			// reading "…You are signed out" — a list whose every row bounces to
+			// sign-in. Nothing here is pickable without a session, so say so.
+			guard Clerk.shared.session != nil else {
+				memberships = []
+				organizationError = nil
+				phase = .signedOut
+				return
+			}
+
 			// Fall back to whatever the client payload carried. Partial is better
 			// than nothing for the switcher, but `membershipsLoaded` stays false so
 			// the auto-select path — the one that can silently pick wrong — is not

@@ -162,10 +162,16 @@ struct HealthDot: View {
 // MARK: - Tone rules
 
 enum Tone {
-	/// `errorRateToneClass`: > 5% error, > 0 warn, exactly 0 muted.
+	/// The breaks are `ServiceHealth`'s, not the web's `errorRateToneClass`.
+	///
+	/// The web warns on anything above zero, which on a phone-width list put an
+	/// amber number on six of nine rows — including services with no health dot,
+	/// so the two marks on one row disagreed about whether it was fine. Amber
+	/// costs more here (`DESIGN.md`: at most one per screen), so the tone follows
+	/// the same 1% / 5% breaks the dot does and a row now reads one way.
 	static func errorRate(_ ratio: Double) -> Color {
-		if ratio > 0.05 { return Token.severityError }
-		if ratio > 0 { return Token.severityWarn }
+		if ratio >= 0.05 { return Token.severityError }
+		if ratio >= 0.01 { return Token.severityWarn }
 		return Token.mutedForeground
 	}
 

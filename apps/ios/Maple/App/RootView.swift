@@ -38,8 +38,16 @@ struct RootView: View {
 		}
 		.background(Token.background)
 		.tint(Token.primary)
+		// Clerk draws `AuthView` itself; this is what stops sign-in from being
+		// the one screen in system colours and San Francisco.
+		.environment(\.clerkTheme, .maple)
 		.animation(.default, value: session.phase)
-		.onAppear { Typo.assertAvailable() }
+		.onAppear {
+			Typo.assertAvailable()
+			// After the font check, so a missing face is reported as a missing
+			// face rather than as a silently system-font navigation bar.
+			NavigationAppearance.apply()
+		}
 	}
 
 	/// Everything about Clerk's state that should re-derive the phase.

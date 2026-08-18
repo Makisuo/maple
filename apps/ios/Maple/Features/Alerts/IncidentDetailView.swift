@@ -397,6 +397,12 @@ private struct WhatTheRuleSaw: View {
 							}
 						}
 					}
+					// The last x-axis label is centred on the final gridline, so
+					// without a trailing inset half of it renders outside the plot
+					// and gets cut ("9:5…" instead of "9:52 AM"). With the inset
+					// Charts drops an overflowing label instead of slicing it, which
+					// is the better of the two failures.
+					.chartPlotStyle { $0.padding(.trailing, 14) }
 					.frame(height: 150)
 					.padding(.horizontal, 16)
 
@@ -739,7 +745,9 @@ private struct RuleFacts: View {
 					}
 				}
 				if let count = detail.incident.lastSampleCount {
-					DetailRow("Last sample", "\(Format.count(count)) samples")
+					// The value is the check's sample size, not a time — "Last
+					// sample" read as a timestamp next to a count.
+					DetailRow("Last check", "\(Format.count(count)) samples")
 					Hairline()
 				}
 			}
