@@ -12,9 +12,8 @@
  *     examined, including a non-AI verdict.
  *   - `AiSessionKeyState` is a frozen quality enum 0-6.
  *   - `AiSessionKeyHash` is `cityHash64(value)`, 0 unless state >= 5.
- *   - `AiRollupHour` is a receive-time-clamped rollup hour written by ingest.
  *
- * `requiredForIngest: true` because the gateway names all five in its INSERT
+ * `requiredForIngest: true` because the gateway names all four in its INSERT
  * column list: a BYO cluster below schema version 16 resolves
  * `clickhouse_ready = false` in `fetch_ingest_key` and its traffic routes to the
  * managed pipeline until `applySchema` stamps 16 (routing returns on the next 30s
@@ -42,7 +41,6 @@ export const AI_CLASSIFICATION_ALTER_STATEMENTS = [
 	"ALTER TABLE traces ADD COLUMN IF NOT EXISTS AiSessionKeyState UInt8 DEFAULT 0",
 	"ALTER TABLE traces ADD COLUMN IF NOT EXISTS AiSessionKeyHash UInt64 DEFAULT 0",
 	"ALTER TABLE traces ADD COLUMN IF NOT EXISTS AiRulesVersion UInt32 DEFAULT 0",
-	"ALTER TABLE traces ADD COLUMN IF NOT EXISTS AiRollupHour DateTime('UTC') DEFAULT toDateTime(0)",
 	"ALTER TABLE traces ADD INDEX IF NOT EXISTS idx_ai_vendor AiVendor TYPE set(0) GRANULARITY 4",
 	"ALTER TABLE traces ADD INDEX IF NOT EXISTS idx_scope_name ScopeName TYPE tokenbf_v1(4096, 3, 0) GRANULARITY 4",
 ] as const

@@ -59,8 +59,8 @@ import { join } from "node:path"
 
 describe("current local schema identity", () => {
 	it("matches the generated v6 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("daa45b39f38c7655")
-		expect(SCHEMA_DIGEST).toBe("daa45b39f38c7655c074781cd77dce68e90b60a175461197dcdb8bc8a13088a1")
+		expect(SCHEMA_FINGERPRINT).toBe("f4c12989f41744e2")
+		expect(SCHEMA_DIGEST).toBe("f4c12989f41744e2375a2819c126cc75edfce1f7b52ce75097e930cf9b792e7a")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
@@ -140,18 +140,17 @@ describe("current local schema identity", () => {
 		const v5TraceColumns = new Set(v5Traces?.columns.map((column) => column.name))
 		expect(
 			traces?.columns.map((column) => column.name).filter((name) => !v5TraceColumns.has(name)),
-		).toEqual(["AiVendor", "AiSessionKeyState", "AiSessionKeyHash", "AiRulesVersion", "AiRollupHour"])
+		).toEqual(["AiVendor", "AiSessionKeyState", "AiSessionKeyHash", "AiRulesVersion"])
 		// Every new column carries a DEFAULT, so a migrated store reads the same as a
 		// fresh one. A DEFAULT alone does NOT drop a column from the generated ingest
 		// INSERT list — that needs a DEFAULT *plus* an identity JSONPath
-		// (`$.<ColumnName>`); these five carry snake_case paths, so the writer stamps
+		// (`$.<ColumnName>`); these four carry snake_case paths, so the writer stamps
 		// them.
 		expect(
 			traces?.columns
 				.filter((column) => column.name.startsWith("Ai"))
 				.every((column) => column.defaultKind === "DEFAULT"),
 		).toBe(true)
-		expect(traces?.columns.find((column) => column.name === "AiRollupHour")?.type).toBe("DateTime('UTC')")
 		expect(traces?.indexes.filter((index) => !(v5Traces?.indexes ?? []).includes(index))).toEqual([
 			"idx_ai_vendor",
 			"idx_scope_name",

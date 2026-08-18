@@ -253,7 +253,7 @@ export const traces = defineDatasource("traces", {
 		 * The constant DEFAULTs keep pre-classifier rows readable, but the
 		 * snake_case JSONPaths are load-bearing: the insert-mapping generator drops
 		 * any column that has a DEFAULT *and* an identity path (`$.<Column>`), on
-		 * the assumption the gateway never emits it. These five are emitted on
+		 * the assumption the gateway never emits it. These four are emitted on
 		 * every span, so they must never take that shape.
 		 */
 		/** Normalized vendor slug from the closed allowlist. '' = not classified as AI. */
@@ -265,13 +265,6 @@ export const traces = defineDatasource("traces", {
 		/** Classifier rule-set version. 0 = never examined; non-zero = examined,
 		 * including a non-AI verdict. */
 		AiRulesVersion: column(t.uint32().default(0), { jsonPath: "$.ai_rules_version" }),
-		/**
-		 * Receive-time-clamped rollup hour, written for every span as
-		 * `YYYY-MM-DD HH:MM:SS` whether or not classification is enabled.
-		 */
-		AiRollupHour: column(t.dateTime("UTC").defaultExpr("toDateTime(0)"), {
-			jsonPath: "$.ai_rollup_hour",
-		}),
 	},
 	indexes: [
 		{

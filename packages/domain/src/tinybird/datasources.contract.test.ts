@@ -69,13 +69,11 @@ const EXPECTED_TOPLEVEL_KEYS = {
 		"links_span_id",
 		"links_trace_state",
 		"links_attributes",
-		// AI classification, emitted on every span by the ingest row builder
-		// (`ai_rollup_hour` even when classification is disabled).
+		// AI classification, emitted on every span by the ingest row builder.
 		"ai_vendor",
 		"ai_session_key_state",
 		"ai_session_key_hash",
 		"ai_rules_version",
-		"ai_rollup_hour",
 	]),
 	metrics_sum: new Set([...metricCommonKeys(), "value", "aggregation_temporality", "is_monotonic"]),
 	metrics_gauge: new Set([...metricCommonKeys(), "value"]),
@@ -152,7 +150,7 @@ function emittedTopLevelKeys(datasource: DatasourceDefinition): Set<string> {
 		// The same rule `scripts/generate-clickhouse-insert-mappings.ts` applies: a
 		// column counts as warehouse-computed only with a DEFAULT expression *and*
 		// an identity JSONPath (`$.<Column>`, the fallback when none is declared).
-		// A DEFAULT plus a declared path (`AiRollupHour` → `$.ai_rollup_hour`) is a
+		// A DEFAULT plus a declared path (`AiVendor` → `$.ai_vendor`) is a
 		// column the gateway does emit.
 		const isComputedIdentityPath = path === `$.${name}` || path === `$.${name}[:]`
 		if (defaultExpression !== undefined && isComputedIdentityPath) continue
