@@ -4,8 +4,8 @@ import { PLOT_SELECTOR } from "./plot-locator"
 // Mirrors service-detail.perf.spec.ts for the infra detail chart grids
 // (host metric strips, k8s pod/node charts, infra correlation panel). The
 // /lab/bench/infra route renders the real ChartViews with synthetic rows in one
-// linked-cursor group; ?mode=recharts restores the old syncId event bus as the
-// render-storm baseline.
+// linked-cursor group. There is no second arm: the Recharts syncId event bus was
+// the storm baseline, and these charts no longer use Recharts.
 
 interface ReactRenderMetrics {
 	commits: number
@@ -48,7 +48,7 @@ async function measurePointerSweep(page: Page): Promise<InteractionMetrics> {
 	await page.mouse.move(bounds.x + bounds.width - 1, bounds.y + bounds.height / 2, { steps: 180 })
 	const metrics = await page.evaluate(() => window.__infraBench!.endInteraction())
 
-	console.log(`[perf] infra ${mode}:`, JSON.stringify(metrics))
+	console.log("[perf] infra cursor:", JSON.stringify(metrics))
 	return metrics
 }
 

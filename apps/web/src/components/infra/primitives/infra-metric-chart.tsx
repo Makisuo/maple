@@ -33,7 +33,7 @@ import {
 	type ChartUnit,
 	type TransformedPoint,
 } from "../chart-utils"
-import { linkedCursorChartProps } from "@/hooks/use-linked-cursor"
+import { LinkedCursorOverlay, linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 
 /**
  * The utilization chart behind `/infra`'s host and Kubernetes detail pages.
@@ -307,6 +307,16 @@ export function InfraMetricChart({
 		<div className={cn("transition-opacity", waiting && "opacity-60", className)}>
 			{header?.({ series, colors, lastValues, labelFor, unit })}
 			<div className="relative" {...linkedCursorChartProps(linkedChartId)}>
+				{/*
+				 * `linkedCursorChartProps` only MARKS this chart as a participant; the
+				 * overlay is the element the hook actually positions and paints. The
+				 * port kept the marker and dropped the overlay, so the hook found every
+				 * sibling and had nothing to draw on — hovering one infra chart stopped
+				 * showing the cursor on the others, on `/infra/$hostName` and in the
+				 * correlation panel. Caught by `infra.perf.spec.ts`, which asserts four
+				 * overlays and was finding zero.
+				 */}
+				{linkedChartId != null && <LinkedCursorOverlay chartId={linkedChartId} />}
 				<div style={{ height: plotHeight }}>
 					<PlotFrame
 						definition={definition}
