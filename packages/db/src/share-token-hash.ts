@@ -77,3 +77,120 @@ export const verifyShareOgId = (ogId: string, hmacKey: string): string | undefin
 
 	return timingSafeEqual(presented, expected) ? shareId : undefined
 }
+
+/**
+ * Domain separation for the alert-chart id, distinct from `og:v1:` so a
+ * signature minted for a dashboard preview can never be replayed to render an
+ * alert chart, or the reverse.
+ */
+const ALERT_CHART_ID_LABEL = "alertchart:v1:"
+
+/**
+ * What an alert chart image is allowed to draw.
+ *
+ * The title, unit and threshold ride along with the window for the same reason
+ * the window does: pinning them is what makes an image drawn today still true
+ * next month. A rule that is renamed, re-thresholded or deleted afterwards does
+ * not retroactively change what a delivered alert said — and it also means the
+ * endpoint needs no rule lookup at all, only the series read.
+ *
+ * The window is part of the signed payload rather than a query parameter,
+ * which is the whole reason this feature needs no snapshot table: `alert_checks`
+ * is append-only with a year of retention, so a pinned window returns the same
+ * rows forever and the image is deterministic without storing its points. It is
+ * also what stops the URL becoming an arbitrary-range scan against the
+ * warehouse — a caller cannot widen `fromMs` without invalidating the signature.
+ */
+export interface AlertChartClaims {
+	readonly orgId: string
+	readonly ruleId: string
+	/** `null` for an ungrouped rule. */
+	readonly groupKey: string | null
+	readonly fromMs: number
+	readonly toMs: number
+	/** What the card is titled — the rule's measured quantity, as the message names it. */
+	readonly title: string
+	/** Chart unit, as the static renderer names them. */
+	readonly unit: string
+	readonly threshold: number | null
+	/** `"above" | "below" | "none"` — which side of the threshold to shade. */
+	readonly breachSide: string
+}
+
+/**
+ * Canonical, order-independent encoding of the claims.
+ *
+ * Hand-built rather than `JSON.stringify` of the object: key order there is
+ * insertion order, so a caller that built the claims differently would produce
+ * a different signature for the same claims.
+ */
+const encodeAlertChartClaims = (claims: AlertChartClaims): string =>
+	JSON.stringify([
+		claims.orgId,
+		claims.ruleId,
+		claims.groupKey,
+		claims.fromMs,
+		claims.toMs,
+		claims.title,
+		claims.unit,
+		claims.threshold,
+		claims.breachSide,
+	])
+
+const signAlertChartId = (payload: string, hmacKey: string): string =>
+	createHmac("sha256", hmacKey).update(`${ALERT_CHART_ID_LABEL}${payload}`, "utf8").digest("base64url")
+
+/**
+ * The public, opaque id of an alert notification's chart image.
+ *
+ * Unlike a share link this carries no credential at all — it is a rule id and a
+ * time range, signed. Anyone holding the URL can see one metric series, which
+ * is the same exposure a public dashboard share already accepts, and the
+ * signature is what keeps it to *that* series over *that* window.
+ */
+export const alertChartId = (claims: AlertChartClaims, hmacKey: string): string => {
+	const payload = encodeAlertChartClaims(claims)
+	const encoded = Buffer.from(payload, "utf8").toString("base64url")
+	return `${encoded}.${signAlertChartId(payload, hmacKey)}`
+}
+
+/**
+ * The claims inside an alert-chart id, or `undefined` if it does not verify.
+ *
+ * Constant-time for the same reason as `verifyShareOgId`: a presented signature
+ * is compared against a computed one, which is the shape a timing oracle needs.
+ * A malformed id fails identically to a tampered one — the caller gets no
+ * signal about which.
+ */
+export const verifyAlertChartId = (id: string, hmacKey: string): AlertChartClaims | undefined => {
+	const separator = id.indexOf(".")
+	if (separator <= 0) return undefined
+
+	const payload = Buffer.from(id.slice(0, separator), "base64url").toString("utf8")
+	if (payload.length === 0) return undefined
+
+	const presented = Buffer.from(id.slice(separator + 1), "utf8")
+	const expected = Buffer.from(signAlertChartId(payload, hmacKey), "utf8")
+	// `timingSafeEqual` throws on a length mismatch, which would itself be the
+	// oracle it exists to remove.
+	if (presented.length !== expected.length) return undefined
+	if (!timingSafeEqual(presented, expected)) return undefined
+
+	// Reached only for a payload this repo signed, so the shape is ours — but it
+	// is still parsed rather than trusted, because a decode failure here must be
+	// "no chart", not a thrown error inside an image request.
+	try {
+		const parsed: unknown = JSON.parse(payload)
+		if (!Array.isArray(parsed) || parsed.length !== 9) return undefined
+		const [orgId, ruleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide] = parsed
+		if (typeof orgId !== "string" || typeof ruleId !== "string") return undefined
+		if (groupKey !== null && typeof groupKey !== "string") return undefined
+		if (typeof fromMs !== "number" || typeof toMs !== "number") return undefined
+		if (typeof title !== "string" || typeof unit !== "string") return undefined
+		if (threshold !== null && typeof threshold !== "number") return undefined
+		if (typeof breachSide !== "string") return undefined
+		return { orgId, ruleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide }
+	} catch {
+		return undefined
+	}
+}

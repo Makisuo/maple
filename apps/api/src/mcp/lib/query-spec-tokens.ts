@@ -25,11 +25,27 @@ interface TokenSet {
 
 const TOKENS = {
 	"traces:timeseries": {
-		metrics: ["count", "avg_duration", "p50_duration", "p95_duration", "p99_duration", "error_rate", "apdex"],
+		metrics: [
+			"count",
+			"avg_duration",
+			"p50_duration",
+			"p95_duration",
+			"p99_duration",
+			"error_rate",
+			"apdex",
+		],
 		groupBys: ["service", "span_name", "status_code", "http_method", "attribute", "none"],
 	},
 	"traces:breakdown": {
-		metrics: ["count", "avg_duration", "p50_duration", "p95_duration", "p99_duration", "error_rate", "apdex"],
+		metrics: [
+			"count",
+			"avg_duration",
+			"p50_duration",
+			"p95_duration",
+			"p99_duration",
+			"error_rate",
+			"apdex",
+		],
 		groupBys: ["service", "span_name", "status_code", "http_method", "attribute"],
 	},
 	"logs:timeseries": {

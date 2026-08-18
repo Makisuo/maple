@@ -30,6 +30,10 @@ export interface TemplateRenderContext {
 	readonly windowMinutes: number
 	readonly incidentId: string | null
 	readonly incidentStatus: string
+	/** Unicode trend of recent observed values; absent when unavailable. */
+	readonly sparkline?: string | null
+	/** Public URL of this notification's chart image; absent when there is none. */
+	readonly chartUrl?: string | null
 	readonly dedupeKey: string
 	readonly template?: NotificationTemplateConfig | null
 	readonly sentAtMs?: number

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+	alertChartIdFromPath,
 	escapeAttribute,
 	ogIdFromPath,
 	ogMetaAdditions,
@@ -81,5 +82,38 @@ describe("ogMetaAdditions", () => {
 describe("escapeAttribute", () => {
 	it("escapes ampersands before the entities it introduces", () => {
 		expect(escapeAttribute(`a & "b" <c>`)).toBe("a &amp; &quot;b&quot; &lt;c&gt;")
+	})
+})
+
+describe("alertChartIdFromPath", () => {
+	// A signed chart id is base64url + "." + signature, so unlike a share OG id
+	// it legitimately contains a dot. Only the trailing `.png` is the extension.
+	const ID = "eyJhIjoxfQ.s1gn4tur3"
+
+	it("reads the id out of the image path", () => {
+		expect(alertChartIdFromPath(`/alerts/chart/${ID}.png`)).toBe(ID)
+	})
+
+	it("ignores the SPA's own alert routes", () => {
+		// `/alerts` is a real page. Matching it here would answer a navigation
+		// with a PNG.
+		expect(alertChartIdFromPath("/alerts")).toBeUndefined()
+		expect(alertChartIdFromPath("/alerts/rule_1")).toBeUndefined()
+		expect(alertChartIdFromPath("/alerts/chart/")).toBeUndefined()
+	})
+
+	it("rejects an id carrying path structure", () => {
+		expect(alertChartIdFromPath(`/alerts/chart/../${ID}.png`)).toBeUndefined()
+		expect(alertChartIdFromPath("/alerts/chart/a/b.png")).toBeUndefined()
+	})
+
+	it("requires the .png extension", () => {
+		expect(alertChartIdFromPath(`/alerts/chart/${ID}`)).toBeUndefined()
+		expect(alertChartIdFromPath(`/alerts/chart/${ID}.jpg`)).toBeUndefined()
+	})
+
+	it("does not collide with the share image path", () => {
+		expect(alertChartIdFromPath("/share/og/abc.png")).toBeUndefined()
+		expect(ogIdFromPath(`/alerts/chart/${ID}.png`)).toBeUndefined()
 	})
 })

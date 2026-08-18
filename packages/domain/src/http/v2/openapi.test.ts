@@ -196,6 +196,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/scrape_targets/{id}/probe",
 			"POST /v2/session_replays/for_trace",
 			"POST /v2/session_replays/search",
+			"POST /v2/share/alert-chart",
 			"POST /v2/share/og-card",
 			"POST /v2/share/og-meta",
 			"POST /v2/share/resolve",
@@ -249,6 +250,7 @@ describe("MapleApiV2 OpenAPI", () => {
 		"resolveShareWidgetData",
 		"resolveShareOgMeta",
 		"resolveShareOgCard",
+		"resolveAlertChart",
 	])
 
 	/**
@@ -1060,8 +1062,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			// not as a throw here.
 			const readGroups = (api: unknown): GeneratedOpenApiObject =>
 				(api as GeneratedOpenApiObject).groups ?? {}
-			const record = (value: unknown): GeneratedOpenApiObject =>
-				(value as GeneratedOpenApiObject) ?? {}
+			const record = (value: unknown): GeneratedOpenApiObject => (value as GeneratedOpenApiObject) ?? {}
 
 			const nullable: string[] = []
 			for (const [groupName, group] of Object.entries(readGroups(MapleApiV2))) {
@@ -1104,9 +1105,7 @@ describe("MapleApiV2 OpenAPI", () => {
 				["ApiKeyList", "next_cursor"],
 			] as const) {
 				const field = (schemas[schemaName] as GeneratedOpenApiObject).properties[property]
-				expect(hasNullBranch(field as GeneratedOpenApiObject), `${schemaName}.${property}`).toBe(
-					true,
-				)
+				expect(hasNullBranch(field as GeneratedOpenApiObject), `${schemaName}.${property}`).toBe(true)
 			}
 		})
 

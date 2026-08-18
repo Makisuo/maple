@@ -1056,3 +1056,47 @@ export const ListRuleChecksQuery = Schema.Struct({
 		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 2000 })),
 	),
 })
+
+/**
+ * The opaque, signed id of an alert notification's chart image (see
+ * `alertChartId` in `@maple/db`).
+ *
+ * Carries a rule id and a time window, signed — no credential, and nothing that
+ * can be turned into one. Loosely checked here because its structure is the
+ * signer's business: a malformed id fails verification, which is the same
+ * uniform "no such chart" as a tampered one.
+ */
+export const AlertChartId = Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(1024)).annotate({
+	identifier: "AlertChartId",
+})
+
+export const AlertChartRequest = Schema.Struct({
+	chartId: AlertChartId,
+}).annotate({ identifier: "AlertChartRequest" })
+
+/** `[epochMillis, value]`, oldest first. */
+export const AlertChartPoint = Schema.Tuple([Schema.Number, Schema.Number]).annotate({
+	identifier: "AlertChartPoint",
+})
+
+/** Which side of the threshold the renderer shades; `none` for range comparators. */
+export const AlertChartBreachSide = Schema.Literals(["above", "below", "none"]).annotate({
+	identifier: "AlertChartBreachSide",
+})
+
+/**
+ * Everything the image needs, and nothing else.
+ *
+ * Deliberately not the alert, the incident or the rule: this is fetched by
+ * whatever renders the picture, so it carries one series of numbers and the
+ * words drawn on the card. No org name, no destination, no incident id.
+ */
+export class AlertChartResponse extends Schema.Class<AlertChartResponse>("AlertChartResponse")({
+	title: Schema.String,
+	/** Chart unit, as the static renderer names them. */
+	unit: Schema.Literals(["number", "percent", "duration_ms", "bytes", "requests_per_sec"]),
+	kind: Schema.Literals(["line", "area", "bar"]),
+	points: Schema.Array(AlertChartPoint),
+	threshold: Schema.NullOr(Schema.Number),
+	breachSide: AlertChartBreachSide,
+}) {}

@@ -5,7 +5,12 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Textarea } from "@maple/ui/components/ui/textarea"
 import { cn } from "@maple/ui/lib/utils"
-import { HEATMAP_COLOR_SCALES, WIDGET_UNITS, type HeatmapColorScale } from "@maple/domain/http"
+import {
+	DEFAULT_HEATMAP_COLOR_SCALE,
+	HEATMAP_COLOR_SCALES,
+	WIDGET_UNITS,
+	type HeatmapColorScale,
+} from "@maple/domain/http"
 import type { ValueUnit } from "@/components/dashboard-builder/types"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
@@ -260,19 +265,20 @@ function RampSwatch({ scale }: { scale: HeatmapColorScale }) {
 
 function HeatmapColors() {
 	const { state, set } = useSettings()
+	// An unset palette shows the ramp the chart actually renders, not a second
+	// default — ticking it is a no-op, so no Apply repaints an untouched widget.
+	const colorScale = state.heatmapColorScale ?? DEFAULT_HEATMAP_COLOR_SCALE
 	return (
 		<>
 			<Field label="Color scale">
 				<Select
 					items={Object.fromEntries(HEATMAP_COLOR_SCALES.map((scale) => [scale, titleCase(scale)]))}
-					value={state.heatmapColorScale}
-					onValueChange={(value) =>
-						set({ heatmapColorScale: value as typeof state.heatmapColorScale })
-					}
+					value={colorScale}
+					onValueChange={(value) => set({ heatmapColorScale: value as HeatmapColorScale })}
 				>
 					<SelectTrigger className="w-full">
 						<span className="flex items-center gap-2">
-							<RampSwatch scale={state.heatmapColorScale} />
+							<RampSwatch scale={colorScale} />
 							<SelectValue />
 						</span>
 					</SelectTrigger>

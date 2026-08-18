@@ -16,6 +16,7 @@
  */
 import type { AlertSignalType, QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 import { AGGREGATIONS_BY_SOURCE } from "@maple/query-engine/query-builder"
+import type { ChartUnit } from "@maple/widgets/chart/static-chart"
 
 export type SignalUnit = "ratio" | "ms" | "rpm" | "apdex" | "count" | "plain"
 
@@ -109,4 +110,29 @@ export const resolveSignalDisplay = (input: SignalDisplayInput): SignalDisplay =
 	// A query-driven rule whose definition could not be loaded (deleted rule row),
 	// or a signal type added to the domain without an entry here.
 	return { label: humanize(input.signalType), unit: "plain" }
+}
+
+/**
+ * A rule's {@link SignalUnit} as the static chart renderer's unit.
+ *
+ * The two vocabularies are deliberately different: `SignalUnit` says what the
+ * rule measures, `ChartUnit` says how an axis formats. `apdex` and `count`
+ * both collapse to `number` because neither has a suffix worth printing on a
+ * chart — an apdex of `0.82` is not `0.82 apdex` — while `ratio` becomes
+ * `percent`, which is the one case where the chart adds a glyph the signal
+ * label does not.
+ */
+export const mapSignalUnit = (unit: SignalUnit): ChartUnit => {
+	switch (unit) {
+		case "ratio":
+			return "percent"
+		case "ms":
+			return "duration_ms"
+		case "rpm":
+			return "requests_per_sec"
+		case "apdex":
+		case "count":
+		case "plain":
+			return "number"
+	}
 }

@@ -25,9 +25,7 @@ const tenantFor = (userId: UserId): TenantContext => ({
 	authMode: "self_hosted",
 })
 
-const MODEL = CloudflareWorkersAI.configure({ accountId: "test", apiKey: "test" }).model(
-	"@cf/test/model",
-)
+const MODEL = CloudflareWorkersAI.configure({ accountId: "test", apiKey: "test" }).model("@cf/test/model")
 
 const INVESTIGATION_SESSION = `${orgId}:inv-00000000-0000-0000-0000-000000000000`
 
