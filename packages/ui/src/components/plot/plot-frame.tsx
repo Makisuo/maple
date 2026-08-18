@@ -421,7 +421,7 @@ export interface PlotFrameProps<TDatum, TXValue extends ChartValue, TYValue exte
 	className?: string
 	renderTooltipBody?: (context: ChartTooltipBodyRenderContext<TDatum, TXValue, TYValue>) => ReactNode
 	/**
-	 * A DOM legend rendered beneath the plot.
+	 * A DOM legend rendered beside or beneath the plot.
 	 *
 	 * The strip is a flex SIBLING of the measured chart box rather than a height
 	 * subtracted from it. That matters: the existing `ResizeObserver` then reports
@@ -429,6 +429,20 @@ export interface PlotFrameProps<TDatum, TXValue extends ChartValue, TYValue exte
 	 * toggle re-measures the plot with no arithmetic and no second observer.
 	 */
 	legend?: ReactNode
+	/**
+	 * Which axis the legend sits on. `"bottom"` is the default because it is the
+	 * shape every chart in the port already asks for, and because it is the only
+	 * one that is always safe: a strip under the plot costs height, which a card
+	 * has, while a column beside it costs width, which a narrow tile may not.
+	 *
+	 * `"right"` is what `ChartLegendMode`'s own `"right"` has always meant and
+	 * what the frame could not express — a chart asking for it got a single
+	 * narrow column stacked UNDER the plot, eating up to 45% of the tile while
+	 * the right side stayed empty. A chart choosing it owns the decision that its
+	 * card is wide enough (the pie measures and degrades to chips below a
+	 * threshold); the frame only lays it out.
+	 */
+	legendPlacement?: "bottom" | "right"
 	/**
 	 * Fires when the focused datum CHANGES — not on every pointer move — so a
 	 * chart can drive a React-side hover affordance without a commit per tick.
@@ -478,6 +492,7 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 	className,
 	renderTooltipBody,
 	legend,
+	legendPlacement = "bottom",
 	onFocusChange,
 	footer,
 	overlay,
@@ -514,6 +529,72 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 
 	const ChartComponent = renderer === "canvas" && supportsCanvas2d() ? CanvasChart : SvgChart
 
+	const sideLegend = legendPlacement === "right" && legend != null
+
+	/*
+	 * `min-h-0` is load-bearing on a flex child: a flex item's default
+	 * `min-height: auto` refuses to shrink below its content, and the chart's
+	 * content is whatever height it was last measured at — so without this the
+	 * plot ratchets and pushes the legend out of the card instead of yielding
+	 * to it.
+	 *
+	 * `min-w-0` is the same argument turned ninety degrees, and it is why the
+	 * row arm cannot simply reuse the column markup: beside a legend the plot is
+	 * a horizontal flex item, `min-width: auto` holds it at its last measured
+	 * width, and the legend gets pushed out of the card instead. It is added
+	 * only in row mode so the bottom layout keeps byte-identical markup.
+	 */
+	const plot = (
+		<div ref={ref} className={cn("relative min-h-0 flex-1", sideLegend && "min-w-0")}>
+			{/*
+			 * No `width`, deliberately — see `useMeasuredHeight`. The host takes
+			 * `width: 100%` and measures itself before first paint. Rendering is
+			 * not gated on a measurement either: `FALLBACK_HEIGHT` covers the
+			 * frame before the layout effect resolves.
+			 *
+			 * The measurement is still the plot box's OWN height in both arms, and
+			 * in row mode there is nothing to subtract: the legend is a sibling on
+			 * the other axis, so the box already reports the full row height.
+			 */}
+			<ChartComponent
+				definition={definition}
+				ariaLabel={ariaLabel}
+				height={height ?? FALLBACK_HEIGHT}
+				renderTooltipBody={renderTooltipBody}
+				onFocusChange={onFocusChange}
+				onRender={handleRender}
+			/>
+			{/*
+			 * `pointer-events-none` and empty: this is a measurement handle, not a
+			 * layer. Anything that needs to PAINT over the plot belongs in the
+			 * definition as a mark, where it participates in scale resolution.
+			 */}
+			<div
+				ref={anchorRef}
+				data-chart-plot=""
+				aria-hidden="true"
+				className="pointer-events-none absolute top-0 left-0"
+			/>
+			{/*
+			 * The overlay layer. Last child, so it stacks above the chart surface
+			 * without a z-index.
+			 *
+			 * `pointer-events-none` on the LAYER with the annotations opting back
+			 * in: a full-bleed transparent div that swallowed the pointer would
+			 * kill hover on every chart that has an overlay, which is the whole
+			 * plot. `overflow` is left visible on purpose — chips sit above the
+			 * plot's top edge, and under Recharts that needed the `foreignObject`
+			 * box extending upward to stay hoverable. A DOM sibling has no such
+			 * limit, so the overhang is now just layout.
+			 */}
+			{overlay ? (
+				<div data-chart-overlay="" className="pointer-events-none absolute inset-0">
+					{overlay}
+				</div>
+			) : null}
+		</div>
+	)
+
 	return (
 		<PlotRectContext value={rectStore}>
 			<PlotScalesContext value={scalesStore}>
@@ -522,66 +603,38 @@ export function PlotFrame<TDatum, TXValue extends ChartValue, TYValue extends Ch
 				 * pointer across one — which is exactly what hovering a timeseries looks
 				 * like — starts a text selection and paints the browser's selection
 				 * highlight over the whole `<svg>`/`<canvas>`.
+				 *
+				 * The host stays a COLUMN in both arms, and the side legend gets its own
+				 * row wrapper rather than flipping this axis: `footer` is a caption under
+				 * the whole figure, and turning the host into a row would make it a third
+				 * column beside the legend.
 				 */}
 				<div data-chart-host={renderer} className={cn("flex flex-col select-none", className)}>
-					{/*
-					 * `min-h-0` is load-bearing on a flex child: a flex item's default
-					 * `min-height: auto` refuses to shrink below its content, and the chart's
-					 * content is whatever height it was last measured at — so without this the
-					 * plot ratchets and pushes the legend out of the card instead of yielding
-					 * to it.
-					 */}
-					<div ref={ref} className="relative min-h-0 flex-1">
-						{/*
-						 * No `width`, deliberately — see `useMeasuredHeight`. The host takes
-						 * `width: 100%` and measures itself before first paint. Rendering is
-						 * not gated on a measurement either: `FALLBACK_HEIGHT` covers the
-						 * frame before the layout effect resolves.
-						 */}
-						<ChartComponent
-							definition={definition}
-							ariaLabel={ariaLabel}
-							height={height ?? FALLBACK_HEIGHT}
-							renderTooltipBody={renderTooltipBody}
-							onFocusChange={onFocusChange}
-							onRender={handleRender}
-						/>
-						{/*
-						 * `pointer-events-none` and empty: this is a measurement handle, not a
-						 * layer. Anything that needs to PAINT over the plot belongs in the
-						 * definition as a mark, where it participates in scale resolution.
-						 */}
-						<div
-							ref={anchorRef}
-							data-chart-plot=""
-							aria-hidden="true"
-							className="pointer-events-none absolute top-0 left-0"
-						/>
-						{/*
-						 * The overlay layer. Last child, so it stacks above the chart surface
-						 * without a z-index.
-						 *
-						 * `pointer-events-none` on the LAYER with the annotations opting back
-						 * in: a full-bleed transparent div that swallowed the pointer would
-						 * kill hover on every chart that has an overlay, which is the whole
-						 * plot. `overflow` is left visible on purpose — chips sit above the
-						 * plot's top edge, and under Recharts that needed the `foreignObject`
-						 * box extending upward to stay hoverable. A DOM sibling has no such
-						 * limit, so the overhang is now just layout.
-						 */}
-						{overlay ? (
-							<div data-chart-overlay="" className="pointer-events-none absolute inset-0">
-								{overlay}
-							</div>
-						) : null}
-					</div>
+					{sideLegend ? (
+						<div data-chart-legend-row="" className="flex min-h-0 flex-1 flex-row gap-3">
+							{plot}
+							{/*
+							 * `max-w-[45%]` is the bottom arm's `max-h-[45%]` turned ninety
+							 * degrees: the same ceiling, keeping a long series list from
+							 * starving the plot, on the axis this layout spends. A legend that
+							 * wants a precise width sets one on its own content — the pie's
+							 * table does, because its columns collapse below a known minimum —
+							 * and this cap only bounds one that does not.
+							 */}
+							<div className="max-w-[45%] shrink-0 overflow-auto">{legend}</div>
+						</div>
+					) : (
+						plot
+					)}
 					{/*
 					 * `max-h-[45%]` is the legend ceiling that keeps a long series list from
 					 * starving the plot, expressed as a CSS cap rather than pixel arithmetic.
 					 * Recharts needed a computed number because it wants an explicit
 					 * `<Legend height>`; here flexbox already does the division.
 					 */}
-					{legend ? <div className="max-h-[45%] shrink-0 overflow-auto">{legend}</div> : null}
+					{legend && !sideLegend ? (
+						<div className="max-h-[45%] shrink-0 overflow-auto">{legend}</div>
+					) : null}
 					{footer ? <div className="shrink-0">{footer}</div> : null}
 				</div>
 			</PlotScalesContext>
