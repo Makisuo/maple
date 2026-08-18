@@ -49,6 +49,15 @@ const MAX_BUFFERED_RESULTS = 10_000
 const RESULTS_FLUSH_CHUNK_SIZE = 1_000
 /** Upper bound on rate-limit backoff so a target keeps probing for recovery. */
 const MAX_BACKOFF_MS = Duration.toMillis(Duration.minutes(5))
+/**
+ * Flat suspension for a target whose org is over its billing limit (HTTP 402
+ * from our own ingest gateway). Unlike a rate limit, nothing about scraping
+ * again makes this clear — it clears when a human fixes the subscription — so
+ * the loop parks for a long, constant period instead of climbing the 5-minute
+ * exponential ladder. One probe an hour is enough to notice recovery.
+ */
+export const DELIVERY_BLOCKED_BACKOFF = Duration.minutes(60)
+const DELIVERY_BLOCKED_BACKOFF_MS = Duration.toMillis(DELIVERY_BLOCKED_BACKOFF)
 
 /**
  * Why a scrape failed. Every downstream decision — retry policy, the span's
@@ -90,6 +99,8 @@ export interface ScrapeFailed {
 	readonly message: string
 	/** Upstream `Retry-After` translated to ms, when present. */
 	readonly retryAfterMs?: number
+	/** HTTP status behind the failure, when one was seen (402, 429, 503, …). */
+	readonly statusCode?: number
 }
 
 /** The single value a resolved scrape produces. */
@@ -104,11 +115,13 @@ export const scrapeFailed = (fields: {
 	readonly reason: ScrapeFailureReason
 	readonly message: string
 	readonly retryAfterMs?: number | null
+	readonly statusCode?: number | null
 }): ScrapeOutcome => ({
 	_tag: "Failure",
 	reason: fields.reason,
 	message: fields.message,
 	...(fields.retryAfterMs != null ? { retryAfterMs: fields.retryAfterMs } : undefined),
+	...(fields.statusCode != null ? { statusCode: fields.statusCode } : undefined),
 })
 
 /**
@@ -161,11 +174,12 @@ export const backoffLogMessage = (reason: ScrapeFailureReason): string => {
  * The target period before a target's next scrape. The happy path returns the
  * configured interval; the caller ({@link ScrapeScheduler}'s target loop)
  * subtracts the scrape's own elapsed time so the happy-path cadence stays
- * start-to-start. A rate-limited, auth-rejected or delivery-blocked scrape
- * escalates exponentially — honoring `Retry-After` when it is longer — capped
- * at {@link MAX_BACKOFF_MS} so the target keeps probing for recovery (an auth
- * fix needs no restart: the credential is resolved server-side per scrape);
- * that delay runs from scrape end.
+ * start-to-start. A rate-limited or auth-rejected scrape escalates
+ * exponentially — honoring `Retry-After` when it is longer — capped at
+ * {@link MAX_BACKOFF_MS} so the target keeps probing for recovery (an auth fix
+ * needs no restart: the credential is resolved server-side per scrape); a
+ * delivery-blocked one parks flat for {@link DELIVERY_BLOCKED_BACKOFF}. Either
+ * delay runs from scrape end.
  */
 export const nextScrapeDelayMs = ({
 	baseMs,
@@ -177,6 +191,12 @@ export const nextScrapeDelayMs = ({
 	readonly consecutiveBackoffs: number
 }): number => {
 	if (!shouldBackOff(outcome)) return baseMs
+	// A billing block does not decay: park the target for a flat hour rather
+	// than climbing to the 5-minute ceiling and probing 12x as often for a
+	// condition only a subscription change can clear.
+	if (outcome._tag === "Failure" && outcome.reason === "delivery_blocked") {
+		return Math.max(DELIVERY_BLOCKED_BACKOFF_MS, outcome.retryAfterMs ?? 0)
+	}
 	// exponential is always >= baseMs (consecutiveBackoffs >= 0), so baseMs
 	// never needs to be a floor here.
 	const exponential = baseMs * 2 ** consecutiveBackoffs
@@ -405,20 +425,20 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 										converted.dataPointCounts.histogram,
 								})
 							}).pipe(
-								Effect.catch((error) =>
-									Effect.succeed(
+								Effect.catch((error) => {
+									const gatewayStatus =
+										error._tag === "@maple/scraper/OtlpIngestError" ? error.status : null
+									return Effect.succeed(
 										scrapeFailed({
 											message: error.message,
 											// The gateway's 402 is the one failure in here that a
 											// retry provably cannot clear.
 											reason:
-												error._tag === "@maple/scraper/OtlpIngestError" &&
-												error.status === 402
-													? "delivery_blocked"
-													: "scrape_failed",
+												gatewayStatus === 402 ? "delivery_blocked" : "scrape_failed",
+											statusCode: gatewayStatus,
 										}),
-									),
-								),
+									)
+								}),
 								Effect.catchDefect((defect) =>
 									Effect.succeed(
 										scrapeFailed({
@@ -434,6 +454,26 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 								// without parsing the free-text message — the same field the
 								// retry policy and the backoff log line read.
 								yield* Effect.annotateCurrentSpan("error.type", attempt.reason)
+								if (attempt.statusCode != null) {
+									yield* Effect.annotateCurrentSpan(
+										"http.response.status_code",
+										attempt.statusCode,
+									)
+								}
+								// A billing block is an expected, caller-side condition (our own
+								// gateway answering 402), not a fault of this scrape: per the
+								// repo's OTEL posture only 5xx is `Error`. Returning the outcome
+								// instead of failing leaves the span `Ok` with the reason on its
+								// attributes, so a blocked org stops minting an Error span (and a
+								// new error fingerprint) every single interval, forever. The Warn
+								// log below still reports it.
+								if (attempt.reason === "delivery_blocked") {
+									yield* Effect.annotateCurrentSpan(
+										"maple.scrape.outcome",
+										"delivery_blocked",
+									)
+									return attempt
+								}
 								return yield* new ScrapeAttemptFailed({
 									message: attempt.message,
 									reason: attempt.reason,
