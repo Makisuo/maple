@@ -30,6 +30,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
+use maple_ingest::ai_session;
 use maple_ingest::clickhouse_insert_mappings::SCHEMA_VERSION as CLICKHOUSE_SCHEMA_VERSION;
 use maple_ingest::metrics;
 use maple_ingest::otel::{
@@ -3975,6 +3976,7 @@ fn enrich_trace_request(request: &mut ExportTraceServiceRequest, resolved_key: &
         let resource = resource_span.resource.get_or_insert_with(Resource::default);
         enrich_resource_attributes(&mut resource.attributes, resolved_key);
     }
+    ai_session::stamp_trace_request(request);
 }
 
 fn enrich_logs_request(request: &mut ExportLogsServiceRequest, resolved_key: &ResolvedIngestKey) {
@@ -5672,6 +5674,41 @@ mod tests {
                 &a.value,
                 Some(AnyValue { value: Some(any_value::Value::StringValue(v)) }) if v == "org_real"
             )));
+    }
+
+    /// Decode-time enrichment stamps AI vendor/session attributes onto spans,
+    /// so both the native rows and the forwarded OTLP payload carry them.
+    #[test]
+    fn enrichment_stamps_ai_vendor_attributes_on_spans() {
+        let decoded = decode_json(
+            Signal::Traces,
+            r#"{"resourceSpans":[{"resource":{"attributes":[]},"scopeSpans":[{"scope":{"name":"@mastra/otel-exporter"},"spans":[{"traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174","name":"agent.generate","startTimeUnixNano":"1753660000000000000","endTimeUnixNano":"1753660000000000001","attributes":[{"key":"gen_ai.conversation.id","value":{"stringValue":"conv-42"}},{"key":"maple_ai.vendor.id","value":{"stringValue":"spoofed"}}]}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Traces(request) = decoded else {
+            panic!("expected traces");
+        };
+        let attributes = &request.resource_spans[0].scope_spans[0].spans[0].attributes;
+        let value = |key: &str| {
+            attributes.iter().find(|a| a.key == key).map(|a| match &a.value {
+                Some(AnyValue {
+                    value: Some(any_value::Value::StringValue(v)),
+                }) => v.clone(),
+                other => panic!("expected string value for {key}, got {other:?}"),
+            })
+        };
+        assert_eq!(value("maple_ai.vendor.id").as_deref(), Some("mastra"));
+        assert_eq!(value("maple_ai.vendor.version").as_deref(), Some("0"));
+        assert_eq!(value("maple_ai.session.id").as_deref(), Some("conv-42"));
+        assert_eq!(
+            attributes
+                .iter()
+                .filter(|a| a.key == "maple_ai.vendor.id")
+                .count(),
+            1,
+            "the spoofed customer stamp must be stripped, not kept alongside ours"
+        );
     }
 
     /// An export request with nothing to export is a no-op, not a rejection.

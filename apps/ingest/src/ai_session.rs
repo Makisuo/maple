@@ -1,25 +1,37 @@
 //! AI agent span classification: vendor detection + session-ID extraction.
 //!
-//! Runs per span inside the trace row encoder. A span that matches a vendor
-//! (or, failing that, a generic AI dialect) is stamped into its
-//! `span_attributes`:
+//! Runs at decode time (`enrich_trace_request`), before the write path forks,
+//! so the stamps ride inside the OTLP payload itself and reach both the native
+//! row encoder and the forward-to-collector path — same as the `maple_org_id`
+//! resource enrichment. A span that matches a vendor (or, failing that, a
+//! generic AI dialect) gets these span attributes appended:
 //!
-//! - `maple.ai.vendor.id` — vendor slug
-//! - `maple.ai.vendor.version` — identified vendor version, currently always `"0"`
-//! - `maple.ai.session.id` — the vendor's own session identifier, verbatim
+//! - `maple_ai.vendor.id` — vendor slug
+//! - `maple_ai.vendor.version` — identified vendor version, currently always `"0"`
+//! - `maple_ai.session.id` — the vendor's own session identifier, verbatim
+//!
+//! Any customer-supplied `maple_ai.*` keys are stripped first; the gateway is
+//! the authority for this namespace, like it is for `maple_org_id`.
 //!
 //! Detection is ordered first-match over the vendor predicates below; the
 //! session ID is the first non-empty session-granularity attribute for the
 //! matched vendor. Vendors without a session-level identifier (their
 //! instrumentation only emits run/user-scoped IDs, or nothing) get no
-//! `maple.ai.session.id`.
+//! `maple_ai.session.id`.
+//!
+//! Detection compares string-typed attribute values only. That is exact:
+//! every value a predicate tests is a non-numeric literal, so a bool/int/
+//! double value could never match anyway. Session IDs do stringify scalar
+//! values, since a numeric conversation ID is a real session.
 
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, KeyValue};
 use opentelemetry_proto::tonic::trace::v1::span::Event;
-use serde_json::{Map, Value};
 
-pub const VENDOR_ID_ATTR: &str = "maple.ai.vendor.id";
-pub const VENDOR_VERSION_ATTR: &str = "maple.ai.vendor.version";
-pub const SESSION_ID_ATTR: &str = "maple.ai.session.id";
+pub const ATTR_NAMESPACE: &str = "maple_ai.";
+pub const VENDOR_ID_ATTR: &str = "maple_ai.vendor.id";
+pub const VENDOR_VERSION_ATTR: &str = "maple_ai.vendor.version";
+pub const SESSION_ID_ATTR: &str = "maple_ai.session.id";
 pub const VENDOR_VERSION: &str = "0";
 
 #[derive(Debug, PartialEq)]
@@ -28,44 +40,119 @@ pub struct AiClassification {
     pub session_id: Option<String>,
 }
 
-/// Borrowed view of one span as the row encoder sees it: attribute values are
-/// already canonically stringified by `attr_map`, so every match below is a
-/// plain string comparison.
+/// Classify every span in a decoded trace request and stamp the `maple_ai.*`
+/// attributes onto the matching spans. Non-AI spans are left untouched (apart
+/// from the namespace strip).
+pub fn stamp_trace_request(request: &mut ExportTraceServiceRequest) {
+    for resource_spans in &mut request.resource_spans {
+        let resource_attrs: &[KeyValue] = resource_spans
+            .resource
+            .as_ref()
+            .map(|resource| resource.attributes.as_slice())
+            .unwrap_or(&[]);
+        for scope_spans in &mut resource_spans.scope_spans {
+            let scope_name = scope_spans
+                .scope
+                .as_ref()
+                .map(|scope| scope.name.as_str())
+                .unwrap_or("");
+            for span in &mut scope_spans.spans {
+                span.attributes
+                    .retain(|attr| !attr.key.starts_with(ATTR_NAMESPACE));
+                let classification = classify_span(&SpanView {
+                    scope_name,
+                    span_name: &span.name,
+                    span_attrs: &span.attributes,
+                    resource_attrs,
+                    events: &span.events,
+                });
+                let Some(classification) = classification else {
+                    continue;
+                };
+                span.attributes
+                    .push(string_attribute(VENDOR_ID_ATTR, classification.vendor));
+                span.attributes
+                    .push(string_attribute(VENDOR_VERSION_ATTR, VENDOR_VERSION));
+                if let Some(session_id) = classification.session_id {
+                    span.attributes
+                        .push(string_attribute(SESSION_ID_ATTR, &session_id));
+                }
+            }
+        }
+    }
+}
+
+fn string_attribute(key: &str, value: &str) -> KeyValue {
+    KeyValue {
+        key: key.to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(value.to_string())),
+        }),
+    }
+}
+
+/// Borrowed view of one span. Attribute lookups are first-occurrence-wins
+/// linear scans over the raw protobuf key/value lists.
 pub struct SpanView<'a> {
     pub scope_name: &'a str,
     pub span_name: &'a str,
-    pub span_attrs: &'a Map<String, Value>,
-    pub resource_attrs: &'a Map<String, Value>,
+    pub span_attrs: &'a [KeyValue],
+    pub resource_attrs: &'a [KeyValue],
     pub events: &'a [Event],
+}
+
+fn attr_str<'a>(attrs: &'a [KeyValue], key: &str) -> &'a str {
+    attrs
+        .iter()
+        .find(|attr| attr.key == key)
+        .and_then(|attr| attr.value.as_ref())
+        .and_then(|value| match value.value.as_ref() {
+            Some(any_value::Value::StringValue(text)) => Some(text.as_str()),
+            _ => None,
+        })
+        .unwrap_or("")
 }
 
 impl SpanView<'_> {
     fn attr(&self, key: &str) -> &str {
-        self.span_attrs
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or("")
+        attr_str(self.span_attrs, key)
     }
 
     fn has_attr(&self, key: &str) -> bool {
-        self.span_attrs.contains_key(key)
+        self.span_attrs.iter().any(|attr| attr.key == key)
     }
 
     fn attr_prefix(&self, prefix: &str) -> bool {
-        self.span_attrs.keys().any(|key| key.starts_with(prefix))
+        self.span_attrs
+            .iter()
+            .any(|attr| attr.key.starts_with(prefix))
     }
 
     fn resource(&self, key: &str) -> &str {
-        self.resource_attrs
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or("")
+        attr_str(self.resource_attrs, key)
     }
 
     fn event_attr_prefix(&self, prefix: &str) -> bool {
         self.events
             .iter()
             .any(|event| event.attributes.iter().any(|kv| kv.key.starts_with(prefix)))
+    }
+
+    fn session_value(&self, key: &str) -> Option<String> {
+        let value = self
+            .span_attrs
+            .iter()
+            .find(|attr| attr.key == key)?
+            .value
+            .as_ref()?;
+        let text = match value.value.as_ref()? {
+            any_value::Value::StringValue(text) => text.clone(),
+            any_value::Value::IntValue(int) => int.to_string(),
+            any_value::Value::DoubleValue(double) => double.to_string(),
+            any_value::Value::BoolValue(flag) => flag.to_string(),
+            _ => return None,
+        };
+        (!text.is_empty()).then_some(text)
     }
 }
 
@@ -207,9 +294,7 @@ pub fn classify_span(view: &SpanView) -> Option<AiClassification> {
             let session_id = vendor
                 .session_keys
                 .iter()
-                .map(|key| view.attr(key))
-                .find(|value| !value.is_empty())
-                .map(str::to_string);
+                .find_map(|key| view.session_value(key));
             return Some(AiClassification {
                 vendor: vendor.id,
                 session_id,
@@ -450,13 +535,14 @@ fn detect_unknown_other(v: &SpanView) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, KeyValue};
-    use serde_json::json;
+    use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
+    use opentelemetry_proto::tonic::resource::v1::Resource;
+    use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
 
-    fn attrs(pairs: &[(&str, &str)]) -> Map<String, Value> {
+    fn attrs(pairs: &[(&str, &str)]) -> Vec<KeyValue> {
         pairs
             .iter()
-            .map(|(key, value)| ((*key).to_string(), json!(value)))
+            .map(|(key, value)| string_attribute(key, value))
             .collect()
     }
 
@@ -696,6 +782,26 @@ mod tests {
     }
 
     #[test]
+    fn integer_session_ids_are_stringified() {
+        let span_attrs = vec![KeyValue {
+            key: "session.id".to_string(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::IntValue(4211)),
+            }),
+        }];
+        let resource_attrs = Vec::new();
+        let result = classify_span(&SpanView {
+            scope_name: "openinference.instrumentation.dspy",
+            span_name: "predict",
+            span_attrs: &span_attrs,
+            resource_attrs: &resource_attrs,
+            events: &[],
+        })
+        .unwrap();
+        assert_eq!(result.session_id.as_deref(), Some("4211"));
+    }
+
+    #[test]
     fn claude_agent_sdk_attribute_tiers() {
         classified(
             "",
@@ -813,22 +919,15 @@ mod tests {
 
     #[test]
     fn llamaindex_detected_from_event_attributes() {
-        let span_attrs = attrs(&[]);
-        let resource_attrs = attrs(&[]);
         let events = vec![Event {
-            attributes: vec![KeyValue {
-                key: "tags.llamaindex.run_id".to_string(),
-                value: Some(AnyValue {
-                    value: Some(any_value::Value::StringValue("r-1".to_string())),
-                }),
-            }],
+            attributes: vec![string_attribute("tags.llamaindex.run_id", "r-1")],
             ..Default::default()
         }];
         let result = classify_span(&SpanView {
             scope_name: "",
             span_name: "query",
-            span_attrs: &span_attrs,
-            resource_attrs: &resource_attrs,
+            span_attrs: &[],
+            resource_attrs: &[],
             events: &events,
         })
         .unwrap();
@@ -914,5 +1013,90 @@ mod tests {
         )
         .is_none());
         assert!(classify("", "SELECT users", &[("db.system", "postgres")], &[]).is_none());
+    }
+
+    fn attr_value(attrs: &[KeyValue], key: &str) -> Option<String> {
+        attrs.iter().find(|kv| kv.key == key).map(|kv| {
+            match kv.value.as_ref().and_then(|v| v.value.as_ref()) {
+                Some(any_value::Value::StringValue(text)) => text.clone(),
+                other => panic!("expected string value for {key}, got {other:?}"),
+            }
+        })
+    }
+
+    #[test]
+    fn stamp_trace_request_stamps_ai_spans_and_skips_the_rest() {
+        let mut request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource {
+                    attributes: attrs(&[("service.name", "agent-app")]),
+                    ..Default::default()
+                }),
+                scope_spans: vec![
+                    ScopeSpans {
+                        scope: Some(InstrumentationScope {
+                            name: "@mastra/otel-exporter".to_string(),
+                            ..Default::default()
+                        }),
+                        spans: vec![Span {
+                            name: "agent.generate".to_string(),
+                            attributes: attrs(&[
+                                ("gen_ai.conversation.id", "conv-42"),
+                                // Customer-supplied stamps are stripped; the
+                                // gateway owns this namespace.
+                                ("maple_ai.vendor.id", "spoofed"),
+                                ("maple_ai.session.id", "spoofed"),
+                            ]),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                    ScopeSpans {
+                        scope: Some(InstrumentationScope {
+                            name: "@opentelemetry/instrumentation-http".to_string(),
+                            ..Default::default()
+                        }),
+                        spans: vec![Span {
+                            name: "POST /checkout".to_string(),
+                            attributes: attrs(&[("http.route", "/checkout")]),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+        };
+
+        stamp_trace_request(&mut request);
+
+        let ai_span = &request.resource_spans[0].scope_spans[0].spans[0];
+        assert_eq!(
+            attr_value(&ai_span.attributes, VENDOR_ID_ATTR).as_deref(),
+            Some("mastra")
+        );
+        assert_eq!(
+            attr_value(&ai_span.attributes, VENDOR_VERSION_ATTR).as_deref(),
+            Some("0")
+        );
+        assert_eq!(
+            attr_value(&ai_span.attributes, SESSION_ID_ATTR).as_deref(),
+            Some("conv-42")
+        );
+        assert_eq!(
+            ai_span
+                .attributes
+                .iter()
+                .filter(|kv| kv.key.starts_with(ATTR_NAMESPACE))
+                .count(),
+            3,
+            "spoofed stamps must be stripped, not duplicated"
+        );
+
+        let http_span = &request.resource_spans[0].scope_spans[1].spans[0];
+        assert!(!http_span
+            .attributes
+            .iter()
+            .any(|kv| kv.key.starts_with(ATTR_NAMESPACE)));
     }
 }
