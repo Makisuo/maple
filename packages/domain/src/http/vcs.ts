@@ -432,6 +432,24 @@ export class VcsRepoUnavailableError extends Schema.TaggedError<VcsRepoUnavailab
 ) {}
 
 /**
+ * The provider is permanently refusing access to a specific repository for a
+ * reason retrying cannot clear: GitHub answers `451 Unavailable For Legal
+ * Reasons` (DMCA takedown, `{"block":{"reason":"dmca"}}`) or a `403` carrying
+ * the same block body. Distinct from `VcsRepoUnavailableError` (deleted /
+ * renamed / access lost) so the two are separable in telemetry — a blocked repo
+ * needs an operator, a gone repo needs nothing.
+ *
+ * TERMINAL: the sync consumer must drain the job, never redeliver it. A DMCA
+ * block on one repo retried ~12x per scheduled run, every 12h, for a year before
+ * this existed.
+ */
+export class VcsRepositoryBlockedError extends Schema.TaggedError<VcsRepositoryBlockedError>()(
+	"@maple/http/errors/VcsRepositoryBlockedError",
+	{ message: Schema.String, status: Schema.optionalKey(Schema.Number) },
+	{ httpApiStatus: 451 },
+) {}
+
+/**
  * A provider rate limit too far out to wait inline. `retryAfterSeconds` is seconds
  * until the budget resets (from `retry-after` / rate-limit headers). The sync
  * consumer redelivers the failed job with this delay; backfill catches it earlier

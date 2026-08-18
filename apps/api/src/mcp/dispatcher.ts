@@ -5,6 +5,7 @@ import { executeRegisteredMcpToolUnscoped, mapleToolCatalog, toInputSchema } fro
 import type { McpToolResult } from "./tools/types"
 import type { McpToolRuntimeRequirements } from "./tools/runtime-requirements"
 import { CurrentMcpTenant } from "./lib/query-warehouse"
+import { recordExpectedMcpFailure } from "./expected-failures"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 /**
@@ -35,8 +36,7 @@ const callMcpToolUnscoped = Effect.fn("McpToolDispatcher.call")(function* (name:
 	yield* Effect.annotateCurrentSpan("maple.mcp.tool", name)
 	return yield* executeRegisteredMcpToolUnscoped(name, input).pipe(
 		Effect.catchTag("@maple/mcp/decode-error", (error) =>
-			Effect.logWarning("Invalid parameters").pipe(
-				Effect.annotateLogs({ error: error.errorMessage }),
+			recordExpectedMcpFailure(error, "Invalid parameters").pipe(
 				Effect.as({
 					isError: true,
 					content: [
@@ -69,17 +69,18 @@ const callMcpToolUnscoped = Effect.fn("McpToolDispatcher.call")(function* (name:
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
 					} satisfies McpToolResult),
 				),
+			// Missing/invalid credentials are expected 401s, not failures: they are
+			// recorded on the span as attributes + a Warn log (see
+			// `expected-failures.ts`), never as an Error status or exception event.
 			"@maple/mcp/errors/McpAuthMissingError": (error) =>
-				Effect.logError("MCP authentication failed").pipe(
-					Effect.annotateLogs({ "error.message": error.message, "error.type": error._tag }),
+				recordExpectedMcpFailure(error, "MCP authentication failed").pipe(
 					Effect.as({
 						isError: true,
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
 					} satisfies McpToolResult),
 				),
 			"@maple/mcp/errors/McpAuthInvalidError": (error) =>
-				Effect.logError("MCP authentication failed").pipe(
-					Effect.annotateLogs({ "error.message": error.message, "error.type": error._tag }),
+				recordExpectedMcpFailure(error, "MCP authentication failed").pipe(
 					Effect.as({
 						isError: true,
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
