@@ -1,4 +1,5 @@
-import { defineHook, type HookContext } from "eve/hooks"
+import { defineHook } from "eve/hooks"
+import { logConnectionSearchFailures, teamIdOf } from "#lib/connection-search-failures.js"
 import { emitAgentLog } from "#lib/telemetry-log.js"
 
 /**
@@ -12,11 +13,6 @@ import { emitAgentLog } from "#lib/telemetry-log.js"
  * prints as a single JSON line. Interpolated `key=value` prose — the previous
  * shape — was queryable in neither place.
  */
-
-function teamIdOf(ctx: HookContext): string | undefined {
-	const team = ctx.session.auth.current?.attributes?.team_id
-	return typeof team === "string" && team.length > 0 ? team : undefined
-}
 
 export default defineHook({
 	events: {
@@ -40,6 +36,8 @@ export default defineHook({
 		},
 		"action.result"(event, ctx) {
 			const { result, status, error } = event.data
+			logConnectionSearchFailures(result, ctx)
+
 			const failed = status === "failed" || result.isError === true
 			if (!failed) return
 			const [kind, name] =
