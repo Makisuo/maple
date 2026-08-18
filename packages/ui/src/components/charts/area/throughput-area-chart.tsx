@@ -93,9 +93,10 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 				throughput: throughput ?? point.throughput,
 				throughput_incomplete: throughputIncomplete ?? point.throughput_incomplete,
 				tracedThroughput,
-				errorThroughput: throughput != null ? (throughput * errorRate) / 100 : null,
+				// errorRate is a fraction (errors / requests), not a percentage
+				errorThroughput: throughput != null ? throughput * errorRate : null,
 				errorThroughput_incomplete:
-					throughputIncomplete != null ? (throughputIncomplete * errorRate) / 100 : null,
+					throughputIncomplete != null ? throughputIncomplete * errorRate : null,
 			}
 		})
 	}, [processedData, perSecond, bucketSeconds])

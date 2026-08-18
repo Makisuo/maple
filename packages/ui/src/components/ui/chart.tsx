@@ -228,11 +228,173 @@ ${colorConfig
 const ChartTooltip = RechartsPrimitive.Tooltip
 
 /**
- * The tooltip card surface. Shared with charts that position their own card
- * (pie, heatmap) so every chart tooltip is the same translucent, blurred panel.
+ * The tooltip card surface — the same translucent, blurred panel for every chart
+ * tooltip. Module-local: charts get it via `ChartFloatingTooltip`, never directly.
  */
 const chartTooltipCardClassName =
 	"border-border/50 bg-popover/90 text-popover-foreground rounded-xl border px-3 py-2 text-xs shadow-xl backdrop-blur-md"
+
+/**
+ * Gates the position transition so a tooltip snaps to its anchor on first
+ * appearance and only *follows* on subsequent moves.
+ *
+ * Without this, a remount (recharts goes inactive whenever an in-chart overlay
+ * such as the commit marker card swallows pointer events) would slide the card
+ * in from the chart origin. So the transition is OFF for the first painted frame
+ * after the closed→open edge, then ON. Continuous hovering never closes, so the
+ * follow transition is never interrupted mid-hover.
+ */
+function useChartTooltipFollow(open: boolean): boolean {
+	const [followEnabled, setFollowEnabled] = React.useState(false)
+	const openRef = React.useRef(false)
+
+	React.useEffect(() => {
+		if (open === openRef.current) return
+		openRef.current = open
+		if (!open) {
+			// Reset so the next open starts snapped, not sliding in from the origin.
+			setFollowEnabled(false)
+			return
+		}
+		const raf = requestAnimationFrame(() => setFollowEnabled(true))
+		return () => cancelAnimationFrame(raf)
+	}, [open])
+
+	return followEnabled
+}
+
+/**
+ * A tooltip card anchored to a point or box *inside* a chart, portalled to the
+ * body so it can leave the widget card — whose `overflow-hidden` is deliberate
+ * (see `widget-shell.tsx`) and would otherwise clip it to the tile.
+ *
+ * Every chart tooltip goes through here: the recharts path via
+ * `ChartTooltipContent`, and the charts that compute their own anchor (pie,
+ * heatmap) directly. Collision handling, the z-band, the snap-then-follow
+ * transition and the suppression fade all live in one place as a result.
+ */
+export function ChartFloatingTooltip({
+	containerRef,
+	x,
+	y,
+	width = 0,
+	height = 0,
+	open,
+	side = "right",
+	sideOffset = 12,
+	chartId,
+	className,
+	children,
+}: {
+	/** Element `x`/`y` are measured against; its live client rect is read per position pass. */
+	containerRef: React.RefObject<HTMLElement | null>
+	/** Anchor box in `containerRef`-local CSS pixels. Zero-sized means a point (the cursor). */
+	x: number | undefined
+	y: number | undefined
+	width?: number
+	height?: number
+	/**
+	 * `false` keeps the card mounted but transparent, so it fades out in place
+	 * rather than vanishing — and so the next open resumes from where it sits.
+	 */
+	open: boolean
+	side?: TooltipPrimitive.Positioner.Props["side"]
+	sideOffset?: TooltipPrimitive.Positioner.Props["sideOffset"]
+	/**
+	 * Recharts-path only. Exactly one `[data-chart]` node may exist per open
+	 * tooltip — a perf spec asserts it — so the self-anchoring charts pass
+	 * nothing and are identified by `data-slot` instead.
+	 */
+	chartId?: string
+	className?: string
+	children: React.ReactNode
+}): React.ReactElement | null {
+	const suppressed = useChartTooltipSuppressed()
+	const followEnabled = useChartTooltipFollow(open)
+
+	if (x == null || y == null || !containerRef.current) {
+		return null
+	}
+
+	const anchor = {
+		getBoundingClientRect: () => {
+			// Read live: the container may have scrolled or resized since the
+			// last position pass, and base-ui re-invokes this on each one.
+			const rect = containerRef.current?.getBoundingClientRect()
+			const left = (rect?.left ?? 0) + x
+			const top = (rect?.top ?? 0) + y
+			return {
+				x: left,
+				y: top,
+				width,
+				height,
+				top,
+				left,
+				right: left + width,
+				bottom: top + height,
+			}
+		},
+	}
+
+	return (
+		<TooltipPrimitive.Root open>
+			<TooltipPrimitive.Portal>
+				{/*
+				 * The collision boundary is deliberately left at its default — which,
+				 * because we're in a `body` portal, is the WINDOW, not the widget card.
+				 * (`collisionBoundary: "clipping-ancestors"` resolves against the floating
+				 * element, so the card's `overflow-hidden` never applies here.) Escaping
+				 * the tile is the entire point of portalling: a 240px-tall widget would
+				 * otherwise clamp the card permanently on top of the data it describes.
+				 *
+				 * `sticky` is likewise deliberately off — it implies cross-axis shift,
+				 * which near the window edge would slide the card sideways across the
+				 * cursor and the plot instead of flipping cleanly to the other side.
+				 */}
+				<TooltipPrimitive.Positioner
+					anchor={anchor}
+					side={side}
+					sideOffset={sideOffset}
+					collisionPadding={12}
+					className={cn(
+						// z-55 is the transient hover-surface band (see tooltip.tsx); z-50
+						// is the modal band, where a tooltip inside a Sheet/Dialog would tie
+						// with the modal and let portal mount order decide paint order.
+						"z-55 pointer-events-none ease-out",
+						// Positioning is transform-based (there's no `Viewport`, so base-ui's
+						// `adaptiveOrigin` stays off and floating-ui's default `transform`
+						// styles apply) — which keeps the follow composited and makes a
+						// collision flip animate as one continuous slide rather than a
+						// discontinuous `left` → `right` origin swap.
+						followEnabled
+							? "transition-[transform,opacity] duration-200"
+							: "transition-opacity duration-200",
+						// Closed, or an in-chart overlay (commit markers) is showing its own
+						// card: stay mounted-but-transparent so the position transition
+						// resumes from here rather than from the origin.
+						(!open || suppressed) && "opacity-0",
+					)}
+				>
+					<TooltipPrimitive.Popup data-chart={chartId} data-slot="chart-tooltip">
+						<div
+							className={cn(
+								chartTooltipCardClassName,
+								// `size()` publishes --available-height on the positioner.
+								// Shift can't rescue a card taller than the window, and the
+								// positioner is pointer-events-none so scrolling it isn't an
+								// option — clamp instead of bleeding off both edges.
+								"max-h-(--available-height) overflow-hidden",
+								className,
+							)}
+						>
+							{children}
+						</div>
+					</TooltipPrimitive.Popup>
+				</TooltipPrimitive.Positioner>
+			</TooltipPrimitive.Portal>
+		</TooltipPrimitive.Root>
+	)
+}
 
 /**
  * Cartesian axis + grid with Maple's defaults baked in: no tick/axis lines,
@@ -300,29 +462,6 @@ function ChartTooltipContent({
 		) => string | undefined
 	}) {
 	const { config, containerRef, chartId } = useChart()
-	const suppressed = useChartTooltipSuppressed()
-
-	// When an in-chart overlay (the commit marker card) blocks pointer events, recharts
-	// goes inactive and this tooltip unmounts. On the next hover it remounts, and the
-	// left/top transition would otherwise slide it in from the chart origin (0,0). So we
-	// gate that position transition: it's OFF on the first painted frame after the
-	// inactive→active edge (the tooltip snaps to the cursor), then ON for subsequent
-	// moves (smooth follow). Continuous hovering stays active, so `followEnabled` stays
-	// true and the follow transition is never interrupted.
-	const isActive = !!active && !!payload?.length
-	const [followEnabled, setFollowEnabled] = React.useState(false)
-	const activeRef = React.useRef(false)
-	React.useEffect(() => {
-		if (isActive === activeRef.current) return
-		activeRef.current = isActive
-		if (!isActive) {
-			// Reset so the next activation starts snapped, not sliding in from the origin.
-			setFollowEnabled(false)
-			return
-		}
-		const raf = requestAnimationFrame(() => setFollowEnabled(true))
-		return () => cancelAnimationFrame(raf)
-	}, [isActive])
 
 	const tooltipLabel = React.useMemo(() => {
 		if (hideLabel || !payload?.length) {
@@ -356,163 +495,115 @@ function ChartTooltipContent({
 
 	const nestLabel = payload.length === 1 && indicator !== "dot"
 
-	const anchor =
-		containerRef.current && coordinate?.x != null && coordinate?.y != null
-			? {
-					getBoundingClientRect: () => {
-						const rect = containerRef.current!.getBoundingClientRect()
-						const x = rect.left + coordinate.x!
-						const y = rect.top + coordinate.y!
-						return { x, y, width: 0, height: 0, top: y, left: x, right: x, bottom: y }
-					},
-				}
-			: undefined
-
 	return (
-		<TooltipPrimitive.Root open>
-			<TooltipPrimitive.Portal>
-				<TooltipPrimitive.Positioner
-					anchor={anchor}
-					side="right"
-					sideOffset={12}
-					className={cn(
-						"z-50 pointer-events-none ease-out",
-						// Snap to the cursor on first appearance (see `followEnabled` above);
-						// once settled, transition left/top so it follows the cursor smoothly.
-						followEnabled
-							? "transition-[left,top,right,bottom,opacity] duration-200"
-							: "transition-opacity duration-200",
-						// An in-chart overlay (commit markers) suppresses the data tooltip
-						// while its own card shows. Stay mounted-but-transparent so the
-						// position transition resumes from here, not from the origin.
-						suppressed && "opacity-0",
-					)}
-				>
-					<TooltipPrimitive.Popup data-chart={chartId}>
-						<TooltipPrimitive.Viewport>
+		<ChartFloatingTooltip
+			containerRef={containerRef}
+			x={coordinate?.x}
+			y={coordinate?.y}
+			open
+			chartId={chartId}
+			className={cn("grid min-w-[8rem] items-start gap-1.5", className)}
+		>
+			{!nestLabel && tooltipLabel ? (
+				<div className="border-border/50 text-muted-foreground border-b pb-1 tracking-tight">
+					{tooltipLabel}
+				</div>
+			) : null}
+			<div className="grid gap-1.5">
+				{payload
+					.filter((item) => item.type !== "none" || !!formatter)
+					.filter((item) => {
+						if (typeof item.value !== "number" || item.value !== 0) return true
+						const hasNegative = payload.some((p) => typeof p.value === "number" && p.value < 0)
+						return hasNegative
+					})
+					.sort((a, b) => {
+						const aVal = typeof a.value === "number" ? a.value : 0
+						const bVal = typeof b.value === "number" ? b.value : 0
+						return bVal - aVal
+					})
+					.map((item, index) => {
+						const key = `${nameKey || item.name || item.dataKey || "value"}`
+						const itemConfig = getPayloadConfigFromPayload(config, item, key)
+						const indicatorColor = color || item.payload.fill || item.color
+
+						if (formatter && item?.value !== undefined && item.name) {
+							const formatted = formatter(item.value, item.name, item, index, item.payload)
+							if (formatted == null) return null
+							return (
+								<div
+									key={String(item.dataKey ?? index)}
+									className={cn(
+										"[&>svg]:text-muted-foreground flex w-full flex-wrap items-stretch gap-2 [&>svg]:h-2.5 [&>svg]:w-2.5",
+										indicator === "dot" && "items-center",
+										highlightKey != null &&
+											item.dataKey === highlightKey &&
+											"[&_*]:font-semibold",
+									)}
+								>
+									{formatted}
+								</div>
+							)
+						}
+
+						return (
 							<div
+								key={String(item.dataKey ?? index)}
 								className={cn(
-									chartTooltipCardClassName,
-									"grid min-w-[8rem] items-start gap-1.5",
-									className,
+									"[&>svg]:text-muted-foreground flex w-full flex-wrap items-stretch gap-2 [&>svg]:h-2.5 [&>svg]:w-2.5",
+									indicator === "dot" && "items-center",
+									highlightKey != null &&
+										item.dataKey === highlightKey &&
+										"[&_*]:font-semibold",
 								)}
 							>
-								{!nestLabel && tooltipLabel ? (
-									<div className="border-border/50 text-muted-foreground border-b pb-1 tracking-tight">
-										{tooltipLabel}
-									</div>
-								) : null}
-								<div className="grid gap-1.5">
-									{payload
-										.filter((item) => item.type !== "none" || !!formatter)
-										.filter((item) => {
-											if (typeof item.value !== "number" || item.value !== 0)
-												return true
-											const hasNegative = payload.some(
-												(p) => typeof p.value === "number" && p.value < 0,
-											)
-											return hasNegative
-										})
-										.sort((a, b) => {
-											const aVal = typeof a.value === "number" ? a.value : 0
-											const bVal = typeof b.value === "number" ? b.value : 0
-											return bVal - aVal
-										})
-										.map((item, index) => {
-											const key = `${nameKey || item.name || item.dataKey || "value"}`
-											const itemConfig = getPayloadConfigFromPayload(config, item, key)
-											const indicatorColor = color || item.payload.fill || item.color
-
-											if (formatter && item?.value !== undefined && item.name) {
-												const formatted = formatter(
-													item.value,
-													item.name,
-													item,
-													index,
-													item.payload,
-												)
-												if (formatted == null) return null
-												return (
-													<div
-														key={String(item.dataKey ?? index)}
-														className={cn(
-															"[&>svg]:text-muted-foreground flex w-full flex-wrap items-stretch gap-2 [&>svg]:h-2.5 [&>svg]:w-2.5",
-															indicator === "dot" && "items-center",
-															highlightKey != null &&
-																item.dataKey === highlightKey &&
-																"[&_*]:font-semibold",
-														)}
-													>
-														{formatted}
-													</div>
-												)
+								{itemConfig?.icon ? (
+									<itemConfig.icon />
+								) : (
+									!hideIndicator && (
+										<div
+											className={cn(
+												"shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
+												{
+													"h-2.5 w-2.5": indicator === "dot",
+													"w-1": indicator === "line",
+													"w-0 border-[1.5px] border-dashed bg-transparent":
+														indicator === "dashed",
+													"my-0.5": nestLabel && indicator === "dashed",
+												},
+											)}
+											style={
+												{
+													"--color-bg": indicatorColor,
+													"--color-border": indicatorColor,
+												} as React.CSSProperties
 											}
-
-											return (
-												<div
-													key={String(item.dataKey ?? index)}
-													className={cn(
-														"[&>svg]:text-muted-foreground flex w-full flex-wrap items-stretch gap-2 [&>svg]:h-2.5 [&>svg]:w-2.5",
-														indicator === "dot" && "items-center",
-														highlightKey != null &&
-															item.dataKey === highlightKey &&
-															"[&_*]:font-semibold",
-													)}
-												>
-													{itemConfig?.icon ? (
-														<itemConfig.icon />
-													) : (
-														!hideIndicator && (
-															<div
-																className={cn(
-																	"shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
-																	{
-																		"h-2.5 w-2.5": indicator === "dot",
-																		"w-1": indicator === "line",
-																		"w-0 border-[1.5px] border-dashed bg-transparent":
-																			indicator === "dashed",
-																		"my-0.5":
-																			nestLabel &&
-																			indicator === "dashed",
-																	},
-																)}
-																style={
-																	{
-																		"--color-bg": indicatorColor,
-																		"--color-border": indicatorColor,
-																	} as React.CSSProperties
-																}
-															/>
-														)
-													)}
-													<div
-														className={cn(
-															"flex flex-1 justify-between leading-none",
-															nestLabel ? "items-end" : "items-center",
-														)}
-													>
-														<div className="grid gap-1.5">
-															{nestLabel ? tooltipLabel : null}
-															<span className="text-muted-foreground">
-																{itemConfig?.label || item.name}
-															</span>
-														</div>
-														{item.value && (
-															<span className="text-foreground font-mono font-semibold tabular-nums">
-																{item.value.toLocaleString()}
-															</span>
-														)}
-													</div>
-												</div>
-											)
-										})}
+										/>
+									)
+								)}
+								<div
+									className={cn(
+										"flex flex-1 justify-between leading-none",
+										nestLabel ? "items-end" : "items-center",
+									)}
+								>
+									<div className="grid gap-1.5">
+										{nestLabel ? tooltipLabel : null}
+										<span className="text-muted-foreground">
+											{itemConfig?.label || item.name}
+										</span>
+									</div>
+									{item.value && (
+										<span className="text-foreground font-mono font-semibold tabular-nums">
+											{item.value.toLocaleString()}
+										</span>
+									)}
 								</div>
 							</div>
-						</TooltipPrimitive.Viewport>
-					</TooltipPrimitive.Popup>
-				</TooltipPrimitive.Positioner>
-			</TooltipPrimitive.Portal>
-		</TooltipPrimitive.Root>
+						)
+					})}
+			</div>
+		</ChartFloatingTooltip>
 	)
 }
 
@@ -616,5 +707,4 @@ export {
 	ChartXAxis,
 	ChartYAxis,
 	ChartGrid,
-	chartTooltipCardClassName,
 }

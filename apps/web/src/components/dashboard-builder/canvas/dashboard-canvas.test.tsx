@@ -55,6 +55,35 @@ describe("DashboardGrid outside a dashboard", () => {
 			),
 		).not.toThrow()
 	})
+
+	// `containerPadding` defaults to `margin`, which indented the first column by
+	// a gutter's width — so tiles sat 12px inside everything stacked above them
+	// (section headers, the share page's time-range label and refresh controls).
+	// The gutter belongs between tiles; the surrounding layout owns the outer
+	// padding. Asserted on the inline position because that is the only place the
+	// offset exists — there is no class to look for.
+	it("starts the first column flush with its container, not a gutter inside it", () => {
+		const [tier] = GRID_TIERS
+		const { container } = render(
+			<ShareWidgetStatesProvider states={{}}>
+				<DashboardGrid
+					widgets={[widget("w-1")]}
+					width={1200}
+					tier={tier}
+					editable={false}
+					renderWidget={SharedWidgetRenderer}
+				/>
+			</ShareWidgetStatesProvider>,
+		)
+
+		const item = container.querySelector<HTMLElement>(".react-grid-item")
+		expect(item).not.toBeNull()
+		// x only. y deliberately keeps `margin[1]`, so asserting on the whole
+		// transform would pass for the wrong reason (or fail for a good one).
+		const [x, y] = (item?.style.transform ?? "").match(/-?\d+(\.\d+)?px/g) ?? []
+		expect(x).toBe("0px")
+		expect(y).toBe(`${tier.margin[1]}px`)
+	})
 })
 
 describe("SharedWidgetRenderer", () => {

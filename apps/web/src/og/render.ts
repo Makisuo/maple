@@ -72,8 +72,22 @@ export const renderOgCard = async (
 	node: Node,
 	assets: AssetFetcher,
 	images: ReadonlyArray<EmbeddedImage> = [],
+): Promise<Uint8Array> => renderNode(node, assets, { width: CARD_WIDTH, height: CARD_HEIGHT }, images)
+
+/**
+ * Rasterise a node tree at an arbitrary size.
+ *
+ * The OG card is one fixed 1200×630 because that is what the `og:image:*` tags
+ * advertise; the alert chart is a different shape entirely, and both share the
+ * one expensive thing here — the module-scoped renderer and its fonts.
+ */
+export const renderNode = async (
+	node: Node,
+	assets: AssetFetcher,
+	size: { readonly width: number; readonly height: number },
+	images: ReadonlyArray<EmbeddedImage> = [],
 ): Promise<Uint8Array> => {
 	renderer ??= makeRenderer(assets)
 	const engine = await renderer
-	return engine.render(node, { width: CARD_WIDTH, height: CARD_HEIGHT, images: [...images] })
+	return engine.render(node, { ...size, images: [...images] })
 }

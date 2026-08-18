@@ -2,7 +2,7 @@ import * as React from "react"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
-import { chartTooltipCardClassName } from "../../ui/chart"
+import { ChartFloatingTooltip } from "../../ui/chart"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
@@ -366,22 +366,20 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 				)}
 			</svg>
 
-			{/* Tooltip */}
+			{/*
+			 * Tooltip — anchored to the slice's mid-radius point and portalled, so it
+			 * escapes the widget card's `overflow-hidden` instead of being clamped
+			 * inside the plot (which used to cut it off on up- and left-facing slices).
+			 */}
 			{tooltip !== "hidden" && hover !== null && slices[hover] && (
-				<div
-					className={cn(
-						chartTooltipCardClassName,
-						"pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap",
-					)}
-					style={{
-						left: clamp(
-							cx + Math.cos(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85),
-							60,
-							pieAreaW - 60,
-						),
-						top: cy + Math.sin(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85) - 8,
-						fontSize: 11,
-					}}
+				<ChartFloatingTooltip
+					containerRef={containerRef}
+					x={cx + Math.cos(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85)}
+					y={cy + Math.sin(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85)}
+					open
+					side="top"
+					sideOffset={8}
+					className="whitespace-nowrap text-[11px]"
 				>
 					<div className="flex items-center gap-1.5 font-medium text-foreground">
 						<span
@@ -400,7 +398,7 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 						<span className="px-1 text-muted-foreground/60">·</span>
 						<span>{(slices[hover].pct * 100).toFixed(1)}%</span>
 					</div>
-				</div>
+				</ChartFloatingTooltip>
 			)}
 
 			{/* Tabular legend — sorted largest-first, with Value and % columns. */}

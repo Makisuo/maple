@@ -157,6 +157,13 @@ describe("redactForShare", () => {
 		expect(redacted?.widgets[0]?.tabId).toBeUndefined()
 	})
 
+	// A single tile auto-refreshes on the cadence of the board it came from —
+	// otherwise a chart link goes stale on a wall while the board it was cut from
+	// keeps updating.
+	it("keeps the auto-refresh cadence on a single-chart share", () => {
+		expect(redactForShare(document, "w-query")?.refreshIntervalSeconds).toBe(60)
+	})
+
 	it("narrows a single-chart share's variables to the ones that chart uses", () => {
 		// The board's variable list is the board's. A chart link that shipped it
 		// whole would publish names, labels, option values and attribute keys
