@@ -23,9 +23,22 @@ import outcomeLog from "./hooks/outcome-log.js"
 
 const handleActionResult = outcomeLog.events?.["action.result"]
 
-const ctx = {
-	session: { id: "session-1", auth: { current: { attributes: { team_id: "T123" } } } },
-} as unknown as HookContext
+/**
+ * The real `HookContext` also carries `agent`, `channel`, `getSandbox`, and
+ * `getSkill` — none of which the connection-failure branch under test reads,
+ * only `session.id` and `session.auth.current.attributes.team_id` — so this
+ * fixture is deliberately incomplete. TypeScript's own excess/insufficient
+ * overlap check rejects a single-step cast for that reason (it wants proof
+ * this is intentional, not a typo), hence the `unknown` step; kept to this
+ * one factory rather than repeated per test.
+ */
+function fakeHookContext(teamId: string): HookContext {
+	return {
+		session: { id: "session-1", auth: { current: { attributes: { team_id: teamId } } } },
+	} as unknown as HookContext
+}
+
+const ctx = fakeHookContext("T123")
 
 function actionResultEvent(data: {
 	output: unknown
@@ -46,7 +59,7 @@ function actionResultEvent(data: {
 			stepIndex: 0,
 			turnId: "turn-1",
 		},
-	} as unknown as HookEvent<"action.result">
+	} as HookEvent<"action.result">
 }
 
 let errorSpy: ReturnType<typeof spyOn<Console, "error">>

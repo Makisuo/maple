@@ -24,6 +24,10 @@ export interface ConnectionSearchFailure {
 	readonly error: string
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 /**
  * eve projects a tool result either as the bare value or wrapped in
  * `{ type, value }` depending on which reconciliation path produced it
@@ -31,8 +35,8 @@ export interface ConnectionSearchFailure {
  * own `extractDiscoveredTools` applies.
  */
 function unwrapToolOutput(output: unknown): unknown {
-	if (output === null || typeof output !== "object") return output
-	return "type" in output && "value" in output ? (output as { value: unknown }).value : output
+	if (!isRecord(output)) return output
+	return "type" in output && "value" in output ? output.value : output
 }
 
 export function extractConnectionSearchFailures(output: unknown): readonly ConnectionSearchFailure[] {
@@ -41,8 +45,8 @@ export function extractConnectionSearchFailures(output: unknown): readonly Conne
 
 	const failures: ConnectionSearchFailure[] = []
 	for (const item of items) {
-		if (item === null || typeof item !== "object") continue
-		const { connection, error } = item as { connection?: unknown; error?: unknown }
+		if (!isRecord(item)) continue
+		const { connection, error } = item
 		if (typeof error !== "string" || error.length === 0) continue
 		failures.push({
 			connection: typeof connection === "string" && connection.length > 0 ? connection : undefined,
