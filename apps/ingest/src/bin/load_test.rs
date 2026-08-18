@@ -1,3 +1,16 @@
+//! Load generator for the ingest gateway. Dev tooling, not part of the served
+//! binary.
+#![expect(
+    clippy::cast_precision_loss,
+    reason = "every f64 cast here widens a request/byte counter for rate and percentile math, \
+              where the counters stay many orders of magnitude below 2^53"
+)]
+#![expect(
+    clippy::expect_used,
+    reason = "a load generator that cannot start its own fixtures has nothing to measure, so \
+              failing loudly at setup is the intended behaviour"
+)]
+
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
@@ -113,7 +126,7 @@ async fn main() -> Result<(), DynError> {
     let monitor_pid = ingest.id();
     let monitor = tokio::spawn(async move { monitor_process(monitor_pid, sample_tx).await });
 
-    let payload = build_logs_payload(cfg.batch_logs)?;
+    let payload = build_logs_payload(cfg.batch_logs);
     let started = Instant::now();
     let (successes, failures, mut latencies) = run_load(&cfg, payload).await?;
     let request_duration = started.elapsed();
@@ -123,8 +136,8 @@ async fn main() -> Result<(), DynError> {
     wait_for_exported_rows(&fake_state, expected_rows).await?;
     let export_catchup = catchup_started.elapsed();
 
-    let _ = ingest.kill();
-    let _ = ingest.wait();
+    drop(ingest.kill());
+    drop(ingest.wait());
     monitor.abort();
 
     let monitor_summary = summarize_samples(sample_rx);
@@ -158,19 +171,20 @@ async fn main() -> Result<(), DynError> {
         }
     }
     enforce_thresholds(&cfg, &summary)?;
-    let _ = std::fs::remove_dir_all(&cfg.queue_dir);
+    drop(std::fs::remove_dir_all(&cfg.queue_dir));
     Ok(())
 }
 
 impl LoadConfig {
     fn from_env() -> Result<Self, DynError> {
-        let ingest_bin = std::env::var("LOAD_TEST_INGEST_BIN")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
+        let ingest_bin = std::env::var("LOAD_TEST_INGEST_BIN").map_or_else(
+            |_| {
                 std::env::current_exe()
                     .expect("current executable path")
                     .with_file_name(format!("maple-ingest{}", std::env::consts::EXE_SUFFIX))
-            });
+            },
+            PathBuf::from,
+        );
 
         Ok(Self {
             ingest_mode: IngestMode::from_env()?,
@@ -183,8 +197,7 @@ impl LoadConfig {
             max_rss_mb: env_optional_u64("LOAD_TEST_MAX_RSS_MB")?,
             min_rps: env_optional_f64("LOAD_TEST_MIN_RPS")?,
             queue_dir: std::env::var("LOAD_TEST_QUEUE_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| unique_temp_dir("maple-ingest-load-wal")),
+                .map_or_else(|_| unique_temp_dir("maple-ingest-load-wal"), PathBuf::from),
         })
     }
 }
@@ -192,7 +205,7 @@ impl LoadConfig {
 impl IngestMode {
     fn from_env() -> Result<Self, DynError> {
         let raw = std::env::var("LOAD_TEST_INGEST_MODE")
-            .unwrap_or_else(|_| "tinybird".to_string())
+            .unwrap_or_else(|_| "tinybird".to_owned())
             .trim()
             .to_ascii_lowercase();
         match raw.as_str() {
@@ -333,7 +346,9 @@ async fn run_load(cfg: &LoadConfig, payload: Vec<u8>) -> Result<(u64, u64, Vec<u
     let next_request = Arc::new(AtomicU64::new(0));
     let successes = Arc::new(AtomicU64::new(0));
     let failures = Arc::new(AtomicU64::new(0));
-    let latencies = Arc::new(Mutex::new(Vec::with_capacity(cfg.requests as usize)));
+    let latencies = Arc::new(Mutex::new(Vec::with_capacity(
+        usize::try_from(cfg.requests).unwrap_or(usize::MAX),
+    )));
     let started = Instant::now();
 
     let mut tasks = Vec::with_capacity(cfg.concurrency);
@@ -404,8 +419,9 @@ async fn pace_request(started: Instant, request_index: u64, target_rps: u64) {
     }
     let target_elapsed = Duration::from_secs_f64(request_index as f64 / target_rps as f64);
     let elapsed = started.elapsed();
-    if target_elapsed > elapsed {
-        sleep(target_elapsed - elapsed).await;
+    let remaining = target_elapsed.saturating_sub(elapsed);
+    if !remaining.is_zero() {
+        sleep(remaining).await;
     }
 }
 
@@ -428,7 +444,9 @@ async fn wait_for_exported_rows(
 async fn monitor_process(pid: u32, tx: mpsc::UnboundedSender<ProcessSample>) {
     loop {
         if let Some(sample) = sample_process(pid) {
-            let _ = tx.send(sample);
+            if tx.send(sample).is_err() {
+                break;
+            }
         }
         sleep(Duration::from_millis(500)).await;
     }
@@ -467,13 +485,13 @@ fn summarize_samples(mut rx: mpsc::UnboundedReceiver<ProcessSample>) -> MonitorS
     summary
 }
 
-fn build_logs_payload(batch_logs: usize) -> Result<Vec<u8>, DynError> {
+fn build_logs_payload(batch_logs: usize) -> Vec<u8> {
     let records = (0..batch_logs)
         .map(|index| LogRecord {
             time_unix_nano: 1_700_000_000_000_000_000 + index as u64,
             observed_time_unix_nano: 1_700_000_000_000_000_000 + index as u64,
             severity_number: 9,
-            severity_text: "INFO".to_string(),
+            severity_text: "INFO".to_owned(),
             body: Some(AnyValue {
                 value: Some(any_value::Value::StringValue(format!(
                     "load test log {index}"
@@ -493,8 +511,8 @@ fn build_logs_payload(batch_logs: usize) -> Result<Vec<u8>, DynError> {
             }),
             scope_logs: vec![ScopeLogs {
                 scope: Some(InstrumentationScope {
-                    name: "maple-ingest-load-test".to_string(),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    name: "maple-ingest-load-test".to_owned(),
+                    version: env!("CARGO_PKG_VERSION").to_owned(),
                     attributes: Vec::new(),
                     dropped_attributes_count: 0,
                 }),
@@ -504,14 +522,14 @@ fn build_logs_payload(batch_logs: usize) -> Result<Vec<u8>, DynError> {
             schema_url: String::new(),
         }],
     };
-    Ok(request.encode_to_vec())
+    request.encode_to_vec()
 }
 
 fn string_kv(key: &str, value: &str) -> KeyValue {
     KeyValue {
-        key: key.to_string(),
+        key: key.to_owned(),
         value: Some(AnyValue {
-            value: Some(any_value::Value::StringValue(value.to_string())),
+            value: Some(any_value::Value::StringValue(value.to_owned())),
         }),
     }
 }
@@ -520,6 +538,12 @@ fn percentile_ms(latencies_us: &[u128], percentile: f64) -> f64 {
     if latencies_us.is_empty() {
         return 0.0;
     }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "percentile is a caller-supplied 0.0..=1.0 fraction, so the rounded product is a \
+                  valid index into the slice; the `min` below is the backstop"
+    )]
     let index = ((latencies_us.len() - 1) as f64 * percentile).round() as usize;
     latencies_us[index.min(latencies_us.len() - 1)] as f64 / 1000.0
 }
@@ -587,7 +611,6 @@ fn env_optional_f64(name: &str) -> Result<Option<f64>, DynError> {
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |duration| duration.as_nanos());
     std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
 }
