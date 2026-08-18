@@ -26,24 +26,20 @@ struct IncidentDetail {
 @MainActor
 @Observable
 final class IncidentDetailModel {
-	private(set) var state: LoadState<IncidentDetail> = .loading
+	private(set) var loader: ScreenLoader<IncidentDetail>!
 
 	let incidentID: String
+	let generation: Int
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(incidentID: String, api: any MapleAPI, session: SessionController) {
 		self.incidentID = incidentID
 		self.api = api
-		self.session = session
+		self.generation = session.dataGeneration
+		self.loader = ScreenLoader(session: session) { [unowned self] in try await self.fetch() }
 	}
 
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-		if let next = await session.perform({ try await self.fetch() }) {
-			state = next
-		}
-	}
+	var state: LoadState<IncidentDetail> { loader.state }
 
 	private func fetch() async throws -> IncidentDetail {
 		let incident = try await api.alertIncident(id: incidentID)
@@ -149,18 +145,13 @@ struct IncidentDetailView: View {
 	var body: some View {
 		ZStack {
 			Token.background.ignoresSafeArea()
-			if let model {
-				LoadableView(
-					state: model.state,
-					emptyTitle: "Not found",
-					emptyMessage: "This incident no longer exists.",
-					retry: { Task { await model.load() } }
-				) { detail in
-					IncidentDetailContent(detail: detail)
-				}
-				.refreshable { await model.load(showPlaceholder: false) }
-			} else {
-				SkeletonList()
+			LoadableView(
+				loader: model?.loader,
+				emptyTitle: "Not found",
+				emptyMessage: "This incident no longer exists.",
+				skeleton: { DetailSkeleton(leadsWithHeadline: true) }
+			) { detail in
+				IncidentDetailContent(detail: detail)
 			}
 		}
 		.navigationTitle("Incident")
@@ -177,9 +168,10 @@ struct IncidentDetailView: View {
 			}
 		}
 		.task(id: session.dataGeneration) {
-			let model = model ?? IncidentDetailModel(incidentID: incidentID, api: session.api, session: session)
+			let model = model?.generation == session.dataGeneration
+				? model! : IncidentDetailModel(incidentID: incidentID, api: session.api, session: session)
 			self.model = model
-			await model.load()
+			await model.loader.loadIfNeeded()
 		}
 		// The first incident someone reads is the moment "tell me next time"
 		// makes sense — so this is where the permission prompt lives, once.
@@ -205,20 +197,17 @@ private struct IncidentDetailContent: View {
 	let detail: IncidentDetail
 
 	var body: some View {
-		ScrollView {
-			VStack(alignment: .leading, spacing: 28) {
-				IncidentHeader(detail: detail)
-				WhatTheRuleSaw(detail: detail)
-				if detail.telemetryWindow != nil {
-					WhatChanged(detail: detail)
-				}
-				LikelyCause(detail: detail)
-				IncidentTimeline(detail: detail)
-				RuleFacts(detail: detail)
+		VStack(alignment: .leading, spacing: 28) {
+			IncidentHeader(detail: detail)
+			WhatTheRuleSaw(detail: detail)
+			if detail.telemetryWindow != nil {
+				WhatChanged(detail: detail)
 			}
-			.padding(.vertical, 16)
+			LikelyCause(detail: detail)
+			IncidentTimeline(detail: detail)
+			RuleFacts(detail: detail)
 		}
-		.scrollContentBackground(.hidden)
+		.padding(.vertical, 16)
 	}
 }
 

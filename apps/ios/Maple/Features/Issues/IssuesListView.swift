@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class IssuesListModel {
-	private(set) var state: LoadState<[ErrorIssue]> = .loading
+	private(set) var loader: ScreenLoader<[ErrorIssue]>!
 	private(set) var isLoadingMore = false
 
 	var query = IssueQuery(actionableOnly: false, sort: .lastSeen) {
@@ -12,7 +12,7 @@ final class IssuesListModel {
 			// The server rejects a cursor carried across a sort change
 			// (`cursor_sort_mismatch`), so any filter edit restarts pagination.
 			guard query != oldValue else { return }
-			Task { await load() }
+			Task { await loader.load(.replace) }
 		}
 	}
 
@@ -20,48 +20,39 @@ final class IssuesListModel {
 	private var hasMore = false
 
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
-		self.session = session
+		self.loader = ScreenLoader(session: session, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetchFirstPage() }
 	}
 
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-		nextCursor = nil
+	var state: LoadState<[ErrorIssue]> { loader.state }
 
-		do {
-			let page = try await api.issues(query: query, window: nil, limit: 20, cursor: nil)
-			nextCursor = page.nextCursor
-			hasMore = page.hasMore
-			state = page.items.isEmpty ? .empty : .loaded(page.items)
-		} catch is CancellationError {
-		} catch let error as MapleAPIError {
-			if await session.handle(error) {
-				await load(showPlaceholder: false)
-			} else {
-				state = .failed(error)
-			}
-		} catch {
-			state = .failed(.transport(error))
-		}
+	private func fetchFirstPage() async throws -> [ErrorIssue] {
+		let page = try await api.issues(query: query, window: nil, limit: 20, cursor: nil)
+		nextCursor = page.nextCursor
+		hasMore = page.hasMore
+		return page.items
 	}
 
 	/// Append the next page. Silent by design: a pagination failure must not
-	/// throw away the rows already on screen.
+	/// throw away the rows already on screen, and a page that arrives after a
+	/// refresh or filter change replaced the list is dropped rather than
+	/// appended to rows it was never a continuation of.
 	func loadMore() async {
-		guard hasMore, !isLoadingMore, let cursor = nextCursor, let existing = state.value else { return }
+		guard hasMore, !isLoadingMore, let cursor = nextCursor, state.value != nil else { return }
 		isLoadingMore = true
 		defer { isLoadingMore = false }
+		let generation = loader.generation
 
 		guard let page = try? await api.issues(query: query, window: nil, limit: 20, cursor: cursor) else {
-			hasMore = false
+			if generation == loader.generation { hasMore = false }
 			return
 		}
+		guard generation == loader.generation else { return }
 		nextCursor = page.nextCursor
 		hasMore = page.hasMore
-		state = .loaded(existing + page.items)
+		loader.update(ifGeneration: generation) { $0 + page.items }
 	}
 
 	var canLoadMore: Bool { hasMore }
@@ -71,63 +62,46 @@ final class IssuesListModel {
 /// `NavigationStack`, the org switcher, and the destinations; this view
 /// contributes its rows and its own filter menu.
 struct IssuesListContent: View {
-	@Environment(SessionController.self) private var session
-	@State private var model: IssuesListModel?
+	/// Owned by the hub so switching segments doesn't refetch; see
+	/// `AlertsHubModels`.
+	let model: IssuesListModel
 
 	var body: some View {
-		Group {
-			if let model {
-				content(model)
-					.toolbar {
-						ToolbarItem(placement: .topBarTrailing) {
-							FilterMenu(model: model)
-						}
-					}
-			} else {
-				SkeletonList(rowHeight: 56)
-			}
-		}
-		.task(id: session.dataGeneration) {
-			let model = model ?? IssuesListModel(api: session.api, session: session)
-			self.model = model
-			await model.load()
-		}
-	}
-
-	@ViewBuilder
-	private func content(_ model: IssuesListModel) -> some View {
 		LoadableView(
-			state: model.state,
+			loader: model.loader,
 			emptyTitle: "No issues",
 			emptyMessage: model.query.actionableOnly
 				? "Nothing needs attention right now."
 				: "No error issues match these filters.",
-			skeletonRowHeight: 56,
-			retry: { Task { await model.load() } }
+			skeletonRowHeight: 56
 		) { issues in
-			ScrollView {
-				LazyVStack(spacing: 0) {
-					ForEach(issues, id: \.id) { issue in
-						NavigationLink(value: Route.issue(id: issue.id)) {
-							IssueRow(issue: issue, showsService: true)
-						}
-						.buttonStyle(RowButtonStyle())
-						Hairline()
+			LazyVStack(spacing: 0) {
+				ForEach(issues, id: \.id) { issue in
+					NavigationLink(value: Route.issue(id: issue.id)) {
+						IssueRow(issue: issue, showsService: true)
 					}
+					.buttonStyle(RowButtonStyle())
+					Hairline()
+				}
 
-					if model.canLoadMore {
-						// Trigger on the appearance of the trailing row rather than
-						// on a scroll offset — no geometry maths, and it keeps
-						// working if row heights change.
-						SkeletonList(rowHeight: 56, rows: 2)
-							.frame(height: 112)
-							.task { await model.loadMore() }
-					}
+				if model.canLoadMore {
+					// Trigger on the appearance of the trailing row rather than
+					// on a scroll offset — no geometry maths, and it keeps
+					// working if row heights change.
+					SkeletonList(rowHeight: 56, rows: 2)
+						.frame(height: 112)
+						.task { await model.loadMore() }
 				}
 			}
-			.scrollContentBackground(.hidden)
 		}
-		.refreshable { await model.load(showPlaceholder: false) }
+		.toolbar {
+			ToolbarItem(placement: .topBarTrailing) {
+				FilterMenu(model: model)
+			}
+		}
+		.task {
+			await model.loader.loadIfNeeded()
+		}
 	}
 }
 

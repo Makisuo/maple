@@ -6,6 +6,8 @@ import SwiftUI
 /// the stack and the segment.
 struct AlertsHubView: View {
 	@Environment(AppNavigation.self) private var navigation
+	@Environment(SessionController.self) private var session
+	@State private var models: AlertsHubModels?
 
 	var body: some View {
 		@Bindable var navigation = navigation
@@ -18,10 +20,16 @@ struct AlertsHubView: View {
 						.padding(.top, 8)
 						.padding(.bottom, 10)
 					Hairline()
-					switch navigation.alertsSegment {
-					case .incidents: IncidentsListView()
-					case .errors: IssuesListContent()
-					case .anomalies: AnomaliesListView()
+					if let models {
+						switch navigation.alertsSegment {
+						case .incidents: IncidentsListView(model: models.incidents)
+						case .errors: IssuesListContent(model: models.issues)
+						case .anomalies: AnomaliesListView(model: models.anomalies)
+						}
+					} else {
+						// One frame, before the models exist: the same skeleton
+						// the segment renders itself.
+						ScrollView { SkeletonList(rowHeight: segmentRowHeight) }
 					}
 				}
 			}
@@ -34,6 +42,42 @@ struct AlertsHubView: View {
 			}
 			.mapleDestinations()
 		}
+		// Re-runs on org switch, replacing all three models at once so no
+		// segment shows one org's rows under the next org's title.
+		.task(id: session.dataGeneration) {
+			if models?.generation != session.dataGeneration {
+				models = AlertsHubModels(session: session)
+			}
+		}
+	}
+
+	private var segmentRowHeight: CGFloat {
+		switch navigation.alertsSegment {
+		case .incidents: 72
+		case .errors: 56
+		case .anomalies: 64
+		}
+	}
+}
+
+/// The three segments' models, owned by the hub rather than by the segment
+/// views. A segment view is rebuilt on every switch (it's a `switch` in the
+/// hub's body), and when the model lived in the view as `@State` it went with
+/// it — so Incidents → Errors → Incidents refetched and showed a skeleton
+/// each time. Each segment loads lazily on first appearance.
+@MainActor
+@Observable
+final class AlertsHubModels {
+	let incidents: IncidentsListModel
+	let issues: IssuesListModel
+	let anomalies: AnomaliesListModel
+	let generation: Int
+
+	init(session: SessionController) {
+		incidents = IncidentsListModel(api: session.api, session: session)
+		issues = IssuesListModel(api: session.api, session: session)
+		anomalies = AnomaliesListModel(api: session.api, session: session)
+		generation = session.dataGeneration
 	}
 }
 

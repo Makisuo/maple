@@ -621,5 +621,30 @@ struct FixtureAPI: MapleAPI {
 
 	private func pause() async throws {
 		try await Task.sleep(for: latency)
+		try Self.failureInjector.throwIfDue()
+	}
+
+	/// `MAPLE_FIXTURES_FAIL_EVERY=<n>` makes every nth request fail as if the
+	/// device were offline, so the error state, the refresh-failed strip, and
+	/// "Try again" can be exercised without a network to break.
+	private static let failureInjector = FailureInjector(
+		every: ProcessInfo.processInfo.environment["MAPLE_FIXTURES_FAIL_EVERY"].flatMap(Int.init) ?? 0
+	)
+
+	private final class FailureInjector: @unchecked Sendable {
+		private let every: Int
+		private var count = 0
+		private let lock = NSLock()
+
+		init(every: Int) { self.every = every }
+
+		func throwIfDue() throws {
+			guard every > 0 else { return }
+			lock.lock()
+			count += 1
+			let due = count % every == 0
+			lock.unlock()
+			if due { throw MapleAPIError.transport(URLError(.notConnectedToInternet)) }
+		}
 	}
 }

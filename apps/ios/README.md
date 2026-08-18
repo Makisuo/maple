@@ -80,6 +80,10 @@ Run → Arguments), or from the CLI:
 SIMCTL_CHILD_MAPLE_FIXTURES=1 xcrun simctl launch booted com.maple.mobile
 ```
 
+Add `MAPLE_FIXTURES_FAIL_EVERY=3` (any `n`) to make every nth request fail as
+if offline — the way to see the error state, the "Couldn't refresh" strip, and
+"Try again" without pulling the plug.
+
 `FixtureAPI` then stands in for the network with one believable organization
 (nine services, a critical incident, a warning, issues, an anomaly), generated
 relative to now so timestamps always read as current, and the session is pinned

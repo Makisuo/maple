@@ -6,6 +6,7 @@ import SwiftUI
 struct HomeView: View {
 	@Environment(SessionController.self) private var session
 	@Environment(AppNavigation.self) private var navigation
+	@Environment(\.scenePhase) private var scenePhase
 	@State private var model: HomeModel?
 	@State private var showsNotificationSettings = false
 
@@ -13,18 +14,13 @@ struct HomeView: View {
 		NavigationStack {
 			ZStack {
 				Token.background.ignoresSafeArea()
-				if let model {
-					LoadableView(
-						state: model.state,
-						emptyTitle: "Nothing yet",
-						emptyMessage: "No services have reported telemetry.",
-						retry: { Task { await model.load() } }
-					) { snapshot in
-						HomeContent(snapshot: snapshot)
-					}
-					.refreshable { await model.load(showPlaceholder: false) }
-				} else {
-					SkeletonList()
+				LoadableView(
+					loader: model?.loader,
+					emptyTitle: "Nothing yet",
+					emptyMessage: "No services have reported telemetry.",
+					skeleton: { HomeSkeleton() }
+				) { snapshot in
+					HomeContent(snapshot: snapshot)
 				}
 			}
 			// No title: `StatusHeadline` *is* this screen's headline, and a large
@@ -54,17 +50,29 @@ struct HomeView: View {
 			.mapleDestinations()
 		}
 		.task(id: session.dataGeneration) {
-			let model = model ?? HomeModel(api: session.api, session: session)
+			// A new org means a new model: the old board is dropped rather than
+			// left on screen until the new one arrives, and any refresh still
+			// running against the old org has nowhere to write.
+			let model = model?.generation == session.dataGeneration
+				? model! : HomeModel(api: session.api, session: session)
 			self.model = model
-			await model.load()
+			await model.loader.loadIfNeeded()
 			// Home is a status board: keep it current while it's on screen.
 			// `.task` is cancelled when the tab goes away, so this never runs
-			// in the background.
+			// off-tab; the scene-phase check keeps it from running off-screen.
 			while !Task.isCancelled {
 				try? await Task.sleep(for: .seconds(60))
-				guard !Task.isCancelled else { break }
-				await model.load(showPlaceholder: false)
+				guard !Task.isCancelled, scenePhase == .active else { continue }
+				await model.loader.load(.refresh)
 			}
+		}
+		.onChange(of: scenePhase) { _, phase in
+			// Coming back from the background: the board is as old as the
+			// absence, so refresh unless it is genuinely fresh.
+			guard phase == .active, let model, let loadedAt = model.state.value?.loadedAt,
+				Date().timeIntervalSince(loadedAt) > 30
+			else { return }
+			Task { await model.loader.load(.refresh) }
 		}
 	}
 }
@@ -74,79 +82,76 @@ private struct HomeContent: View {
 	@Environment(AppNavigation.self) private var navigation
 
 	var body: some View {
-		ScrollView {
-			VStack(alignment: .leading, spacing: 28) {
-				StatusHeadline(snapshot: snapshot)
-					.padding(.horizontal, 16)
+		VStack(alignment: .leading, spacing: 28) {
+			StatusHeadline(snapshot: snapshot)
+				.padding(.horizontal, 16)
 
-				if !snapshot.incidents.isEmpty {
-					HomeSection(title: "Open alerts", count: snapshot.incidents.count) {
-						VStack(spacing: 8) {
-							ForEach(snapshot.incidents) { card in
-								NavigationLink(value: Route.incident(id: card.id)) {
-									IncidentCardView(card: card)
-								}
-								.buttonStyle(.plain)
+			if !snapshot.incidents.isEmpty {
+				HomeSection(title: "Open alerts", count: snapshot.incidents.count) {
+					VStack(spacing: 8) {
+						ForEach(snapshot.incidents) { card in
+							NavigationLink(value: Route.incident(id: card.id)) {
+								IncidentCardView(card: card)
 							}
-						}
-						.padding(.horizontal, 16)
-					}
-				}
-
-				HomeSection(
-					title: "Needs attention",
-					count: snapshot.attention.isEmpty ? nil : snapshot.attention.count
-				) {
-					if snapshot.attention.isEmpty {
-						QuietRow(
-							text: snapshot.services.isEmpty
-								? "No services reported in the last hour."
-								: "All \(snapshot.services.count) services within thresholds."
-						)
-					} else {
-						VStack(spacing: 0) {
-							ForEach(snapshot.attention.prefix(6), id: \.name) { service in
-								NavigationLink(value: Route.service(name: service.name, window: .lastHour)) {
-									AttentionRow(service: service)
-								}
-								.buttonStyle(RowButtonStyle())
-								Hairline()
-							}
+							.buttonStyle(.plain)
 						}
 					}
-				}
-
-				HomeSection(title: "Last 24 hours", count: nil) {
-					VStack(spacing: 0) {
-						CountRow(
-							count: snapshot.newIssues,
-							singular: "new error issue",
-							plural: "new error issues",
-							detail: snapshot.activeIssues > 0 ? "\(snapshot.activeIssues) still active" : nil,
-							tint: snapshot.newIssues > 0 ? Token.foreground : Token.mutedForeground
-						) { navigation.open(.errors) }
-						Hairline()
-						CountRow(
-							count: snapshot.openAnomalies,
-							singular: "anomaly open",
-							plural: "anomalies open",
-							detail: nil,
-							tint: snapshot.openAnomalies > 0 ? Token.foreground : Token.mutedForeground
-						) { navigation.open(.anomalies) }
-						Hairline()
-					}
-				}
-
-				Text("Updated \(snapshot.loadedAt.formatted(date: .omitted, time: .shortened))")
-					.font(Typo.tiny)
-					.tabularNumbers()
-					.foregroundStyle(Token.mutedForeground.opacity(0.6))
 					.padding(.horizontal, 16)
+				}
 			}
-			.padding(.top, 8)
-			.padding(.bottom, 24)
+
+			HomeSection(
+				title: "Needs attention",
+				count: snapshot.attention.isEmpty ? nil : snapshot.attention.count
+			) {
+				if snapshot.attention.isEmpty {
+					QuietRow(
+						text: snapshot.services.isEmpty
+							? "No services reported in the last hour."
+							: "All \(snapshot.services.count) services within thresholds."
+					)
+				} else {
+					VStack(spacing: 0) {
+						ForEach(snapshot.attention.prefix(6), id: \.name) { service in
+							NavigationLink(value: Route.service(name: service.name, window: .lastHour)) {
+								AttentionRow(service: service)
+							}
+							.buttonStyle(RowButtonStyle())
+							Hairline()
+						}
+					}
+				}
+			}
+
+			HomeSection(title: "Last 24 hours", count: nil) {
+				VStack(spacing: 0) {
+					CountRow(
+						count: snapshot.newIssues,
+						singular: "new error issue",
+						plural: "new error issues",
+						detail: snapshot.activeIssues > 0 ? "\(snapshot.activeIssues) still active" : nil,
+						tint: snapshot.newIssues > 0 ? Token.foreground : Token.mutedForeground
+					) { navigation.open(.errors) }
+					Hairline()
+					CountRow(
+						count: snapshot.openAnomalies,
+						singular: "anomaly open",
+						plural: "anomalies open",
+						detail: nil,
+						tint: snapshot.openAnomalies > 0 ? Token.foreground : Token.mutedForeground
+					) { navigation.open(.anomalies) }
+					Hairline()
+				}
+			}
+
+			Text("Updated \(snapshot.loadedAt.formatted(date: .omitted, time: .shortened))")
+				.font(Typo.tiny)
+				.tabularNumbers()
+				.foregroundStyle(Token.mutedForeground.opacity(0.6))
+				.padding(.horizontal, 16)
 		}
-		.scrollContentBackground(.hidden)
+		.padding(.top, 8)
+		.padding(.bottom, 24)
 	}
 }
 
