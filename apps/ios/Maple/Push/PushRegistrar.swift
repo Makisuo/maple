@@ -157,28 +157,42 @@ final class PushRegistrar: NSObject {
 	}
 }
 
-/// Which APNs host the token belongs to. Development builds carry
-/// `aps-environment = development` in the embedded provisioning profile;
-/// TestFlight and App Store builds carry `production`. The simulator has no
-/// profile and no real APNs, so it reads as sandbox.
+/// Which APNs host the token belongs to. Getting this wrong is not a degraded
+/// mode: Apple answers a token sent to the other host with `BadDeviceToken`
+/// and the server disables the device, so the phone goes silent.
+///
+/// Xcode-installed builds carry `aps-environment = development` in the
+/// embedded provisioning profile; TestFlight archives carry `production`.
+/// **App Store installs have no embedded profile at all** — Apple strips it
+/// when it re-signs — and their tokens are production, so "no profile" must
+/// mean production. The simulator also has no profile, but a simulator token
+/// is undeliverable from a server on either host, so nothing is lost by
+/// treating it the same way.
 enum PushEnvironmentDetector {
 	static let current: PushEnvironment = {
 		guard let path = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision"),
 			let data = FileManager.default.contents(atPath: path),
 			let text = String(data: data, encoding: .isoLatin1)
 		else {
-			return .sandbox
+			return .production
 		}
-		// The profile is CMS-wrapped XML; the plist is readable in the clear.
-		if let range = text.range(of: "<key>aps-environment</key>") {
-			let tail = text[range.upperBound...]
-			if tail.range(of: "<string>production</string>")?.lowerBound == tail.range(of: "<string>")?.lowerBound {
-				return .production
-			}
-			return .sandbox
-		}
-		return .sandbox
+		return parse(profile: text)
 	}()
+
+	/// The profile is CMS-wrapped XML; the entitlements plist is readable in
+	/// the clear. Only a profile that positively says `development` is a
+	/// sandbox token — anything else (`production`, or a profile without the
+	/// key) is treated as production, the direction that at worst costs a
+	/// dev-build push rather than every real user's.
+	static func parse(profile text: String) -> PushEnvironment {
+		guard let keyRange = text.range(of: "<key>aps-environment</key>") else { return .production }
+		let tail = text[keyRange.upperBound...]
+		guard let open = tail.range(of: "<string>"),
+			let close = tail[open.upperBound...].range(of: "</string>")
+		else { return .production }
+		let value = tail[open.upperBound..<close.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+		return value == "development" ? .sandbox : .production
+	}
 }
 
 /// APNs and notification callbacks arrive on UIKit's app delegate; this

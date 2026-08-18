@@ -242,6 +242,22 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 							break
 						case "unregistered":
 							unregistered += 1
+							// Loud on purpose: a disabled row is silence on the phone until
+							// the app re-registers, and the reason names the fix
+							// (`BadDeviceToken` = wrong environment for the token,
+							// `DeviceTokenNotForTopic` = a build signed for another app id).
+							yield* Effect.logWarning(
+								"Mobile push: Apple says the token is dead, disabling device",
+							).pipe(
+								Effect.annotateLogs({
+									orgId: event.orgId,
+									deviceId: device.id,
+									environment: device.environment,
+									bundleId: device.bundleId,
+									appVersion: device.appVersion ?? "",
+									reason: result.reason,
+								}),
+							)
 							yield* devices.disable(device.id, result.reason).pipe(Effect.ignore)
 							break
 						case "failed":
