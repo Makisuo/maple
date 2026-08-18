@@ -72,3 +72,7 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 [[bench]]
 name = "ingest_bench"
 harness = false
+
+[[bench]]
+name = "ai_session_bench"
+harness = false
