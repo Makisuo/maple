@@ -1,8 +1,9 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // The local Maple server: OTLP/HTTP ingest + a raw SQL query API + the bundled
 // SPA, all on one port, backed by an embedded chDB. Replaces the Rust
 // `apps/ingest/src/bin/local.rs`. `maple start` calls `startServer`.
 
-import { Effect, Schema, type Scope } from "effect"
+import { Effect, Predicate, Schema, type Scope } from "effect"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
@@ -33,10 +34,6 @@ import {
 	RetiredDayAuthority,
 	retireLiveDayInServer,
 } from "./archives/retention"
-
-/** Fingerprint of the schema this build bootstraps stores with. Re-exported
- * from this module for the existing archive/checkpoint metadata seam. */
-export { SCHEMA_FINGERPRINT }
 
 /** Resolves a request path to a static asset (the bundled SPA). Returns
  *  `undefined` to fall through to the SPA shell (client-side routing). */
@@ -94,7 +91,15 @@ export const isBrowserOriginAllowed = (
 
 /** Build CORS headers for an origin that has already passed
  * `isBrowserOriginAllowed`. Echoing it preserves browser OTLP ingest between
- * loopback aliases and ports without restoring wildcard CORS. */
+ * loopback aliases and ports without restoring wildcard CORS.
+ *
+ * `authorization` is allowed because every browser SDK sends
+ * `Authorization: Bearer <ingest key>` once one is configured — the same bundle
+ * that ships to production is what people point at `maple start`. Rejecting the
+ * header in preflight blocked those pages entirely (and `@maple-dev/browser`,
+ * which requires an ingest key, could never reach local mode at all). Nothing
+ * is weakened by allowing it: this listener authenticates nothing, it gates on
+ * request origin, and `/v1/*` never reads the header's value. */
 export const corsHeadersForAllowedOrigin = (
 	origin: string | null,
 ): Readonly<Record<string, string>> | undefined =>
@@ -102,7 +107,7 @@ export const corsHeadersForAllowedOrigin = (
 		? {
 				"access-control-allow-origin": origin,
 				"access-control-allow-methods": "GET, POST, OPTIONS",
-				"access-control-allow-headers": "content-type, content-encoding",
+				"access-control-allow-headers": "content-type, content-encoding, authorization",
 				"access-control-allow-private-network": "true",
 				vary: "Origin",
 			}
@@ -440,7 +445,9 @@ const querySpan = (
 					"db.duration_ms": durationMs,
 					"result.rowCount": rowCount,
 					"http.response.status_code": response.status,
-					...(sql ? { "db.query.text": truncateSql(sql), "db.query.length": sql.length } : {}),
+					...(sql
+						? { "db.query.text": truncateSql(sql), "db.query.length": sql.length }
+						: undefined),
 				})
 				return yield* recordServerResponse(response)
 			}).pipe(
@@ -510,8 +517,8 @@ const handleRetirement = async (
 	} catch {
 		return text("invalid JSON body", 400)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
+	if (!Predicate.isObject(body)) return text("invalid body", 400)
+	const record = body
 	const keys = Object.keys(record).sort().join(",")
 	if (keys !== "archiveDir,rangeDate,sealingLagHours") return text("invalid retirement fields", 400)
 	if (
@@ -548,9 +555,9 @@ const handleCheckpointBackup = async (db: Chdb, token: string, req: Request): Pr
 	} catch {
 		return text("invalid JSON body", 400)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
-	if (Object.keys(record).sort().join(",") !== "checkpointId" || typeof record.checkpointId !== "string")
+	if (!Predicate.isObject(body)) return text("invalid body", 400)
+	const record = body
+	if (Object.keys(record).sort().join(",") !== "checkpointId" || !Predicate.isString(record.checkpointId))
 		return text("invalid checkpoint fields", 400)
 	if (!CHECKPOINT_ID.test(record.checkpointId)) return text("invalid checkpoint ID", 400)
 	try {

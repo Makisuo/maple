@@ -15,7 +15,7 @@ export const METRIC_NEEDS: Record<TracesMetric, MetricNeed[]> = {
 	p99_duration: ["count", "quantiles"],
 	error_rate: ["count", "error_rate"],
 	apdex: ["count", "apdex"],
-}
+} satisfies Record<TracesMetric, MetricNeed[]>
 
 // trace_list_mv column mappings (used by performance-hints UI)
 
@@ -27,11 +27,11 @@ export const TRACE_LIST_MV_ATTR_MAP: Record<string, string> = {
 	"http.target": "HttpRoute",
 	"http.status_code": "HttpStatusCode",
 	"http.response.status_code": "HttpStatusCode",
-}
+} satisfies Record<string, string>
 
 export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
 	"deployment.environment": "DeploymentEnv",
-}
+} satisfies Record<string, string>
 
 // Attribute filter → typed Condition
 
@@ -54,7 +54,7 @@ const HTTP_SEMCONV_ALIASES: Record<string, readonly string[]> = {
 	"http.request.method": ["http.method", "http.request.method"],
 	"http.status_code": ["http.status_code", "http.response.status_code"],
 	"http.response.status_code": ["http.status_code", "http.response.status_code"],
-}
+} satisfies Record<string, readonly string[]>
 
 /** `if(map[k0] != '', map[k0], if(map[k1] != '', …))` — first non-empty alias. */
 function coalescedMapGet(mapExpr: CH.Expr<Record<string, string>>, keys: readonly string[]): CH.Expr<string> {

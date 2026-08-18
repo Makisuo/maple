@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
 import type { WarehouseCapabilities } from "../capabilities"
 import type { QueryProfileName, WarehouseQuerySettings } from "../profiles/query-profile"

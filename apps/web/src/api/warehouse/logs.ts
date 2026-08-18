@@ -1,6 +1,14 @@
-import { Clock, Effect, Option, Schema } from "effect"
-import { LogsFacetDimension, QueryEngineExecuteRequest, formatWarehouseDateTime } from "@maple/query-engine"
-import { TraceId, SpanId } from "@maple/domain"
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
+import { Clock, Effect, Schema } from "effect"
+import {
+	LogsFacetDimension,
+	QueryEngineExecuteRequest,
+	coerceLogRow,
+	coerceLogRows,
+	formatWarehouseDateTime,
+	type LogRow,
+} from "@maple/query-engine"
+import { TraceId } from "@maple/domain"
 import {
 	DeploymentEnvironment,
 	GetLogRequest,
@@ -8,7 +16,7 @@ import {
 	ServiceName,
 	ServiceNamespace,
 } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import {
 	WarehouseDateTimeString,
 	decodeInput,
@@ -17,9 +25,6 @@ import {
 	extractFacets,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
-
-const toTraceId = Schema.decodeSync(TraceId)
-const toSpanId = Schema.decodeSync(SpanId)
 
 const ListLogsInputSchema = Schema.Struct({
 	limit: Schema.optional(
@@ -46,51 +51,18 @@ export type ListLogsInput = (typeof ListLogsInputSchema)["Encoded"]
 
 const DEFAULT_LIMIT = 100
 
-export interface Log {
-	timestamp: string
-	severityText: string
-	severityNumber: number
-	serviceName: string
-	body: string
-	traceId: TraceId
-	spanId: SpanId
-	logAttributes: Record<string, string>
-	resourceAttributes: Record<string, string>
-}
+/**
+ * A log row as the list renders it. The shape (and `coerceLogRow`) lives in
+ * `@maple/query-engine` so the share API's `list_logs` plan produces the same
+ * rows this function does; the alias keeps the existing imports.
+ */
+export type Log = LogRow
 
 export interface LogsResponse {
 	data: Log[]
 	meta: {
 		limit: number
 		cursor: string | null
-	}
-}
-
-const parseJson = Option.liftThrowable((value: string): unknown => JSON.parse(value))
-
-function parseAttributes(value: string | null | undefined): Record<string, string> {
-	if (!value) return {}
-	return parseJson(value).pipe(
-		Option.flatMap((parsed) =>
-			parsed && typeof parsed === "object"
-				? Option.some(parsed as Record<string, string>)
-				: Option.none(),
-		),
-		Option.getOrElse((): Record<string, string> => ({})),
-	)
-}
-
-function transformLog(raw: Record<string, unknown>): Log {
-	return {
-		timestamp: String(raw.timestamp ?? ""),
-		severityText: String(raw.severityText ?? ""),
-		severityNumber: Number(raw.severityNumber ?? 0),
-		serviceName: String(raw.serviceName ?? ""),
-		body: String(raw.body ?? ""),
-		traceId: raw.traceId ? toTraceId(String(raw.traceId)) : ("" as TraceId),
-		spanId: raw.spanId ? toSpanId(String(raw.spanId)) : ("" as SpanId),
-		logAttributes: parseAttributes(raw.logAttributes as string),
-		resourceAttributes: parseAttributes(raw.resourceAttributes as string),
 	}
 }
 
@@ -105,7 +77,7 @@ const listLogsEffect = Effect.fn("QueryEngine.listLogs")(function* ({ data }: { 
 
 	const logsResult = yield* runWarehouseQuery("listLogs", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.listLogs({
 				payload: new ListLogsRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -127,7 +99,7 @@ const listLogsEffect = Effect.fn("QueryEngine.listLogs")(function* ({ data }: { 
 		}),
 	)
 
-	const logs = logsResult.data.map(transformLog)
+	const logs = coerceLogRows(logsResult.data)
 	const cursor = logs.length === limit && logs.length > 0 ? logs[logs.length - 1].timestamp : null
 
 	return {
@@ -165,7 +137,7 @@ const getLogEffect = Effect.fn("QueryEngine.getLog")(function* ({ data }: { data
 
 	const response = yield* runWarehouseQuery("getLog", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.getLog({
 				payload: new GetLogRequest({
 					timestamp: input.timestamp,
@@ -178,7 +150,7 @@ const getLogEffect = Effect.fn("QueryEngine.getLog")(function* ({ data }: { data
 	)
 
 	return {
-		data: response.data.length > 0 ? transformLog(response.data[0]) : null,
+		data: response.data.length > 0 ? coerceLogRow(response.data[0]) : null,
 	} satisfies GetLogResult
 })
 
@@ -343,7 +315,6 @@ const getLogsFacetValuesEffect = Effect.fn("QueryEngine.getLogsFacetValues")(fun
 	}
 })
 
-// Log attribute keys / values
 // Backed by `log_attribute_keys_mv` and `log_attribute_values_mv` →
 // `attribute_keys_hourly` / `attribute_values_hourly`. Reads the rollup, not
 // the raw `logs` table — autocomplete on log attribute name/value stays fast

@@ -1,11 +1,16 @@
 import { Effect, Layer } from "effect"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { OrganizationService } from "@/services/org/OrganizationService"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
@@ -15,7 +20,10 @@ import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsServi
 import { SlackIntegrationService } from "@/services/integrations/SlackIntegrationService"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
-import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import {
+	WarehouseQueryService,
+	type WarehouseQueryServiceApi,
+} from "@/services/warehouse/WarehouseQueryService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { HttpV2AlertDeliveriesLive } from "./alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "./alert-destinations.http"
@@ -29,11 +37,14 @@ import { HttpV2PlanetScaleIntegrationsLive, HttpV2SlackIntegrationsLive } from "
 import { HttpV2ErrorIssuesLive } from "./error-issues.http"
 import { HttpV2AnomaliesLive } from "./anomalies.http"
 import { HttpV2InvestigationsLive } from "./investigations.http"
+import { HttpV2MobileDevicesLive } from "./mobile-devices.http"
 import { HttpV2OrganizationLive } from "./organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./session-replays.http"
 import { HttpV2InstrumentationAuditLive } from "./setup-audit.http"
+import { HttpV2SharePublicLive } from "./share.http"
+import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
 import {
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
@@ -67,12 +78,37 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2InvestigationsLive,
 	HttpV2AnomaliesLive,
 	HttpV2OrganizationLive,
+	// Real service, no stub: it needs only the Database every harness already
+	// provides, and its own route test is the only place that calls it.
+	HttpV2MobileDevicesLive.pipe(Layer.provide(MobileDevicesService.layer)),
 	HttpV2SessionReplaysLive,
 	HttpV2TracesLive,
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
+	// The share group's own dependencies are satisfied here rather than by every
+	// harness: most v2 route tests never touch the share endpoints, and threading
+	// inert services through two dozen call sites to register a group they never
+	// call is churn with no assertion behind it.
+	HttpV2SharePublicLive.pipe(
+		Layer.provide(
+			Layer.succeed(DashboardWidgetDataService, {
+				variableOptions: () => Effect.succeed({}),
+				resolve: () => Effect.die("share widget data is not exercised by v2 route harnesses"),
+			}),
+		),
+		Layer.provide(
+			// A directory with nobody in it, which is the self-hosted shape: the
+			// preview card carries no byline and everything else about it still
+			// renders. The share tests assert exactly that.
+			Layer.succeed(OrganizationService, {
+				retrieve: (orgId) =>
+					Effect.succeed({ id: orgId, name: null, slug: null, imageUrl: null, createdAtMs: null }),
+				delete: () => Effect.die("organization deletion is not exercised by v2 route harnesses"),
+			}),
+		),
+	),
 )
 
 export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {
@@ -105,12 +141,20 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 	Layer.succeed(AnomalyDetectionService, {
 		runTick: die,
 		listIncidents: die,
+		countIncidentsByService: die,
 		getIncident: die,
 		resolveIncidentManually: die,
 		setIncidentIssue: die,
 		getIncidentTimeseries: die,
 		getSettings: die,
 		updateSettings: die,
+	}),
+	Layer.succeed(ErrorIssueReadModelsService, {
+		listIssues: die,
+		countOpenIssuesByService: die,
+		getIssue: die,
+		listIssueIncidents: die,
+		listOpenIncidents: die,
 	}),
 	Layer.succeed(ErrorsService, {
 		listIssues: die,
@@ -148,7 +192,9 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 )
 
 /** Inert WarehouseQueryService for harnesses that never touch warehouse-backed groups. */
-export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
+export const makeWarehouseServiceStub = (
+	overrides: Partial<WarehouseQueryServiceApi> = {},
+): WarehouseQueryServiceApi => ({
 	query: die,
 	crossOrgQuery: die,
 	rawSqlQuery: die,
@@ -161,7 +207,10 @@ export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	warmRoute: () => Effect.void,
 	ingest: die,
 	asExecutor: dieSync,
+	...overrides,
 })
+
+export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, makeWarehouseServiceStub())
 
 export const TelemetryServiceStubsLayer = Layer.mergeAll(
 	Layer.succeed(QueryEngineService, {
@@ -177,7 +226,9 @@ export const TelemetryServiceStubsLayer = Layer.mergeAll(
  * so harnesses that build the real config services — and would be shadowed by that bundle — can still
  * satisfy the `instrumentationAudit` group.
  */
-export const SetupAuditServiceStubLayer = Layer.succeed(SetupAuditService, { run: die })
+export const SetupAuditServiceStubLayer = Layer.succeed(SetupAuditService, {
+	run: die,
+})
 
 /** Inert config-resource services for harnesses that never touch those groups. */
 export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
@@ -265,23 +316,52 @@ export const SlackIntegrationServiceStubLayer = Layer.succeed(
 	}),
 )
 
-/** Inert AlertsService for harnesses that never touch the alert groups. */
-export const AlertsServiceStubLayer = Layer.succeed(AlertsService, {
+const alertDestinationStubs = {
 	listDestinations: die,
 	createDestination: die,
 	updateDestination: die,
 	deleteDestination: die,
 	testDestination: die,
-	listRules: die,
-	createRule: die,
-	updateRule: die,
-	deleteRule: die,
-	testRule: die,
-	previewRule: die,
+}
+
+/** Inert destination capability for harnesses that never touch the alert destination group. */
+export const AlertDestinationsServiceStubLayer = Layer.succeed(
+	AlertDestinationsService,
+	alertDestinationStubs,
+)
+
+const alertReadModelStubs = {
 	listIncidents: die,
 	getIncident: die,
 	listRuleChecks: die,
 	summarizeRuleChecks: die,
 	listDeliveryEvents: die,
-	runSchedulerTick: die,
-})
+}
+
+/** Inert read-model capability for harnesses that never touch alert history. */
+export const AlertReadModelsServiceStubLayer = Layer.succeed(AlertReadModelsService, alertReadModelStubs)
+
+const alertRuleStubs = {
+	listRules: die,
+	createRule: die,
+	deleteRule: die,
+}
+
+/** Inert rule capability for harnesses that never touch alert-rule CRUD. */
+export const AlertRulesServiceStubLayer = Layer.succeed(AlertRulesService, alertRuleStubs)
+
+/** Inert AlertsService facade for harnesses that never touch the alert groups. */
+export const AlertsServiceStubLayer = Layer.mergeAll(
+	AlertDestinationsServiceStubLayer,
+	AlertReadModelsServiceStubLayer,
+	AlertRulesServiceStubLayer,
+	Layer.succeed(AlertsService, {
+		...alertDestinationStubs,
+		...alertReadModelStubs,
+		...alertRuleStubs,
+		updateRule: die,
+		testRule: die,
+		previewRule: die,
+		runSchedulerTick: die,
+	}),
+)

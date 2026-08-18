@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import {
+	IntegrationsConfigurationError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
 	IntegrationsRevokedError,
@@ -95,7 +96,7 @@ export interface PlanetScaleListEventsOptions {
 	readonly cursor?: string | undefined
 }
 
-export interface PlanetScaleServiceShape {
+export interface PlanetScaleServiceApi {
 	readonly pollAllOrgs: () => Effect.Effect<PlanetScalePollSummary, IntegrationsPersistenceError>
 	/** The org's (non-deleted) database inventory, for the API surface. */
 	readonly listDatabases: (
@@ -123,6 +124,7 @@ export interface PlanetScaleServiceShape {
 		options: PlanetScaleQueryInsightsOptions,
 	) => Effect.Effect<
 		PlanetScaleQueryInsightsResponse,
+		| IntegrationsConfigurationError
 		| IntegrationsNotConnectedError
 		| IntegrationsRevokedError
 		| IntegrationsValidationError
@@ -292,9 +294,9 @@ const DEPLOY_BACKFILL_VERB: Record<string, string> = {
 	errored: "failed",
 	reverted: "was reverted",
 	closed: "closed",
-}
+} satisfies Record<string, string>
 
-export class PlanetScaleService extends Context.Service<PlanetScaleService, PlanetScaleServiceShape>()(
+export class PlanetScaleService extends Context.Service<PlanetScaleService, PlanetScaleServiceApi>()(
 	"@maple/api/services/PlanetScaleService",
 	{
 		make: Effect.gen(function* () {
@@ -403,7 +405,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			 * collapsing them into one invisible boolean.
 			 */
 			const claimPollWork = Effect.fn("PlanetScaleService.claimPollWork")(function* (
-				orgId: string,
+				orgId: OrgId,
 				dataset: string,
 				databaseId: string,
 				ttlMs: number,
@@ -471,7 +473,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			})
 
 			/** The org-wide inventory anchor row — also the tick-overlap lease. */
-			const claimInventoryWork = (orgId: string) =>
+			const claimInventoryWork = (orgId: OrgId) =>
 				claimPollWork(orgId, INVENTORY_DATASET, "", INVENTORY_TTL_MS)
 
 			/**
@@ -484,7 +486,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				insertPlanetScaleEvent(input).pipe(Effect.provideService(Database, database))
 
 			const readPollState = Effect.fn("PlanetScaleService.readPollState")(function* (
-				orgId: string,
+				orgId: OrgId,
 				dataset: string,
 				databaseId: string,
 			) {
@@ -508,7 +510,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 
 			/** `databaseId → lastSuccessAt`, for round-robining a budgeted sweep. */
 			const pollStateByDatabaseId = Effect.fn("PlanetScaleService.pollStateByDatabaseId")(function* (
-				orgId: string,
+				orgId: OrgId,
 				dataset: string,
 			) {
 				const rows = yield* database
@@ -535,7 +537,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			 * success is what keeps a failed page from being skipped forever.
 			 */
 			const recordPollResult = Effect.fn("PlanetScaleService.recordPollResult")(function* (
-				orgId: string,
+				orgId: OrgId,
 				dataset: string,
 				databaseId: string,
 				error: string | null,
@@ -554,7 +556,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 											lastErrorAt: null,
 											leaseUntil: null,
 											updatedAt: new Date(now),
-											...(watermarkAt === null ? {} : { watermarkAt }),
+											...(!(watermarkAt === null) ? { watermarkAt } : undefined),
 										}
 									: {
 											lastError: error,
@@ -575,7 +577,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			})
 
 			const recordInventoryResult = Effect.fn("PlanetScaleService.recordInventoryResult")(function* (
-				orgId: string,
+				orgId: OrgId,
 				connectionId: string,
 				error: string | null,
 			) {
@@ -1214,7 +1216,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				listDatabases,
 				listEvents,
 				queryInsights,
-			} satisfies PlanetScaleServiceShape
+			} satisfies PlanetScaleServiceApi
 		}),
 	},
 ) {

@@ -27,6 +27,35 @@ export function formatDuration(ms: number): string {
 }
 
 /**
+ * Format a duration for an axis tick, at a precision derived from the tick spacing.
+ *
+ * `formatDuration` has fixed precision, so a deeply zoomed ruler stepping by 0.05 ms renders
+ * "1.5ms" for three ticks in a row. Deriving the decimal count from the step guarantees
+ * adjacent ticks are always distinguishable, whatever the zoom.
+ *
+ * The unit follows the *value* (µs below 1 ms, s at or above 1000 ms) while the precision
+ * follows the *step*, so a 0.001 ms step still reads "1234μs" rather than "1.234000ms".
+ */
+export function formatDurationAtStep(ms: number, stepMs: number): string {
+	if (!Number.isFinite(ms)) return "—"
+	const step = Number.isFinite(stepMs) && stepMs > 0 ? stepMs : 1
+	// Decimals needed to separate two ticks one step apart. The epsilon absorbs the float noise
+	// in log10(0.001) = -3.0000000000000004, which would otherwise ask for one extra digit.
+	const decimalsFor = (unitStep: number) => Math.max(0, -Math.floor(Math.log10(unitStep) + 1e-9))
+
+	if (Math.abs(ms) < 1 && step < 1) {
+		return `${(ms * 1000).toFixed(decimalsFor(step * 1000))}μs`
+	}
+	if (Math.abs(ms) < 1000) {
+		return `${ms.toFixed(Math.min(3, decimalsFor(step)))}ms`
+	}
+	if (Math.abs(ms) < 60_000) {
+		return `${(ms / 1000).toFixed(Math.min(3, decimalsFor(step / 1000)))}s`
+	}
+	return `${(ms / 60_000).toFixed(Math.min(2, decimalsFor(step / 60_000)))}min`
+}
+
+/**
  * Format a number with compact notation.
  * - |n| >= 1T: displays as e.g. "1.2T"
  * - |n| >= 1B: displays as e.g. "2.5B"
@@ -233,10 +262,12 @@ export function formatBucketLabel(
 	const includeSeconds = context.rangeMs <= 30 * 60 * 1000 && !includeDate
 
 	if (mode === "tooltip") {
+		// The tooltip header always carries the full date — ticks stay terse, but a
+		// hovered point should never make the reader work out which day it was.
 		return date.toLocaleString(undefined, {
-			year: includeDate ? "numeric" : undefined,
-			month: includeDate ? "short" : undefined,
-			day: includeDate ? "numeric" : undefined,
+			year: "numeric",
+			month: "short",
+			day: "numeric",
 			hour: "2-digit",
 			minute: "2-digit",
 			second: includeSeconds ? "2-digit" : undefined,
@@ -271,7 +302,7 @@ const bucketLabelMap: Record<number, string> = {
 	3600: "/h",
 	14400: "/4h",
 	86400: "/d",
-}
+} satisfies Record<number, string>
 
 /**
  * Map bucket interval seconds to a human-readable rate suffix.

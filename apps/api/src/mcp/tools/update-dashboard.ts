@@ -1,12 +1,13 @@
 import { McpQueryError, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Clock, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { DashboardDocument, DashboardId, PortableDashboardDocument } from "@maple/domain/http"
 import { IsoDateTimeString } from "@maple/domain"
 import { validateDashboardTimeRange } from "@/mcp/lib/resolve-dashboard-time-range"
 import { MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
+import { collectDocumentRenderWarnings } from "@/mcp/lib/validate-widget-renderability"
 
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
 const decodeIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
@@ -46,7 +47,7 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 				}
 			}
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const persistence = yield* DashboardPersistenceService
 
 			const portable = dashboard_json
@@ -149,6 +150,18 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 
 			if (dashboard.description) {
 				lines.splice(3, 0, `Description: ${dashboard.description}`)
+			}
+
+			// Advisory only. This tool is the full-replacement / restore escape
+			// hatch, so a legacy board carrying an ungrouped pie or a `"GB"` unit
+			// must still round-trip — blocking here would make it unrestorable.
+			const renderWarnings = collectDocumentRenderWarnings(dashboard.widgets)
+			if (renderWarnings.length > 0) {
+				lines.push(
+					"",
+					"### Render warnings (saved anyway)",
+					...renderWarnings.map((warning) => `- ${warning}`),
+				)
 			}
 
 			return {

@@ -28,7 +28,7 @@ export const accountTabLabels: Record<AccountTab, string> = {
 	passkeys: "Passkeys",
 	connections: "Connected Accounts",
 	sessions: "Active Sessions",
-}
+} satisfies Record<AccountTab, string>
 
 /**
  * Landing tab when `/account` is opened with no `?tab=`. Unlike `/settings`, every account tab is

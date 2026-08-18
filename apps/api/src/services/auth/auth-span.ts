@@ -20,5 +20,5 @@ export const annotateAuthSpan = (
 		"maple.auth.method": method,
 		orgId: attrs.orgId,
 		"tenant.userId": attrs.userId,
-		...(attrs.keyId ? { "maple.api_key.id": attrs.keyId } : {}),
+		...(attrs.keyId ? { "maple.api_key.id": attrs.keyId } : undefined),
 	})

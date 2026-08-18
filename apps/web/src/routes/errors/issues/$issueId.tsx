@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
 import { toastManager } from "@maple/ui/components/ui/toast"
@@ -33,8 +33,8 @@ import { IssueSidebar } from "@/components/errors/issue-sidebar"
 import { IssueTimeline } from "@/components/errors/issue-timeline"
 import { SectionHeader } from "@/components/layout/section-header"
 import { WorkflowBadge } from "@/components/errors/workflow-badge"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { errorIssueDetailFromV2 } from "@/lib/services/error-issues"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -80,7 +80,7 @@ function IssueDetailPage() {
 	const { issueId: rawIssueId } = Route.useParams()
 	const issueId = decodeIssueId(rawIssueId)
 
-	const detailQueryAtom = MapleApiV2AtomClient.query("errorIssues", "retrieve", {
+	const detailQueryAtom = retainedQueryV2("errorIssues", "retrieve", {
 		params: { id: issueId },
 		query: {},
 		reactivityKeys: ["errorIssues", `errorIssue:${issueId}`],
@@ -88,19 +88,19 @@ function IssueDetailPage() {
 	const detailResult = useAtomValue(detailQueryAtom)
 	const refreshDetail = useAtomRefresh(detailQueryAtom)
 
-	const eventsQueryAtom = MapleApiAtomClient.query("errors", "listIssueEvents", {
+	const eventsQueryAtom = retainedQuery("errors", "listIssueEvents", {
 		params: { issueId },
 		query: { limit: 200 },
 		reactivityKeys: ["errorIssues", `errorIssue:${issueId}:events`],
 	})
 	const eventsResult = useAtomValue(eventsQueryAtom)
 	const refreshEvents = useAtomRefresh(eventsQueryAtom)
-	const investigationsQueryAtom = MapleApiV2AtomClient.query("investigations", "list", {
+	const investigationsQueryAtom = retainedQueryV2("investigations", "list", {
 		query: { issue_id: issueId, limit: 10 },
 		reactivityKeys: ["investigations", `errorIssue:${issueId}:investigations`],
 	})
 	const investigationsResult = useAtomValue(investigationsQueryAtom)
-	const escalationQueryAtom = MapleApiAtomClient.query("errors", "listIssueEscalations", {
+	const escalationQueryAtom = retainedQuery("errors", "listIssueEscalations", {
 		params: { issueId },
 		reactivityKeys: [`errorIssue:${issueId}:escalations`],
 	})
@@ -327,8 +327,8 @@ function IssueDetailPage() {
 				params: { id: result.value.id },
 			})
 		} else {
-			const { title, description } = formatBackendError(result)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(result)
+			toastManager.add({ title, description: message, type: "error" })
 		}
 	}
 

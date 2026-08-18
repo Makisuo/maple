@@ -2,17 +2,17 @@ import type { TenantContext } from "@maple/auth"
 import { OrgId, UnauthorizedError, UserId } from "@maple/domain/http"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
-import { TenantResolver, type TenantResolverShape } from "./auth/TenantResolver"
+import { TenantResolver, type TenantResolverApi } from "./auth/TenantResolver"
 import {
 	ElectricClient,
-	type ElectricClientShape,
+	type ElectricClientApi,
 	type ElectricUpstreamResponse,
 } from "./electric/ElectricClient"
-import { SyncConfig, type SyncConfigShape } from "./config"
-import type { ShapeRequest } from "./shapes/request"
+import { SyncConfig, type SyncConfigValues } from "./config"
+import type { SyncRequest } from "./shapes/request"
 
 /** A coherent self-hosted config; override only what a test is actually about. */
-export const syncConfig = (overrides: Partial<SyncConfigShape> = {}): SyncConfigShape => ({
+export const syncConfig = (overrides: Partial<SyncConfigValues> = {}): SyncConfigValues => ({
 	ELECTRIC_URL: Option.some("http://electric:3000"),
 	ELECTRIC_SOURCE_ID: Option.none(),
 	ELECTRIC_SECRET: Option.none(),
@@ -26,7 +26,7 @@ export const syncConfig = (overrides: Partial<SyncConfigShape> = {}): SyncConfig
 	...overrides,
 })
 
-export const syncConfigLayer = (overrides: Partial<SyncConfigShape> = {}) =>
+export const syncConfigLayer = (overrides: Partial<SyncConfigValues> = {}) =>
 	Layer.succeed(SyncConfig, SyncConfig.of(syncConfig(overrides)))
 
 export interface RecordedRequest {
@@ -70,16 +70,16 @@ export const fixedTenantLayer = (orgId: string) => {
 	}
 	return Layer.succeed(TenantResolver, {
 		resolve: () => Effect.succeed(tenant),
-	} satisfies TenantResolverShape)
+	} satisfies TenantResolverApi)
 }
 
 /** A resolver that always rejects, as an expired/absent session would. */
 export const noTenantLayer = Layer.succeed(TenantResolver, {
 	resolve: () => Effect.fail(new UnauthorizedError({ message: "no session" })),
-} satisfies TenantResolverShape)
+} satisfies TenantResolverApi)
 
 export interface ElectricCall {
-	readonly request: ShapeRequest
+	readonly request: SyncRequest
 	readonly orgId: string
 }
 
@@ -90,8 +90,8 @@ export interface ElectricCall {
  */
 export const recordingElectricClient = (options: {
 	readonly calls: Array<ElectricCall>
-	readonly respond: () => ReturnType<ElectricClientShape["fetchShape"]>
-	readonly ensureConfigured?: ElectricClientShape["ensureConfigured"]
+	readonly respond: () => ReturnType<ElectricClientApi["fetchShape"]>
+	readonly ensureConfigured?: ElectricClientApi["ensureConfigured"]
 }) =>
 	Layer.succeed(ElectricClient, {
 		ensureConfigured: options.ensureConfigured ?? Effect.void,
@@ -99,7 +99,7 @@ export const recordingElectricClient = (options: {
 			options.calls.push({ request, orgId })
 			return options.respond()
 		},
-	} satisfies ElectricClientShape)
+	} satisfies ElectricClientApi)
 
 /** The common case: a canned 200 with the headers Electric would send. */
 export const okUpstream = (overrides: Partial<ElectricUpstreamResponse> = {}): ElectricUpstreamResponse => ({
@@ -113,7 +113,7 @@ export const okUpstream = (overrides: Partial<ElectricUpstreamResponse> = {}): E
  * Drives the router the way the browser does: a real `Request` through the real
  * web handler, so routing, the span wrapper, and the error boundary all run.
  */
-export const shapeRequest = <A, E>(
+export const syncRequest = <A, E>(
 	layers: Layer.Layer<A, E, HttpRouter.HttpRouter>,
 	path: string,
 	init?: RequestInit,

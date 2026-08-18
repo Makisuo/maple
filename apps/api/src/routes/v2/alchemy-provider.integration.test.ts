@@ -27,22 +27,27 @@ import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
-import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
+import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { OrgMembersService } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
-import { V2SchemaErrorsLive } from "./error-envelope"
+import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	makeWarehouseServiceStub,
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
@@ -70,17 +75,13 @@ const testConfig = () =>
 	)
 
 /** The v2 CRUD endpoints exercised here never reach the warehouse. */
-const warehouseStub: WarehouseQueryServiceShape = {
+const warehouseStub = makeWarehouseServiceStub({
 	query: () => Effect.die(new Error("unexpected warehouse pipe query")),
-	sqlQuery: () => Effect.succeed([]),
 	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
 	ingest: () => Effect.void,
-	asExecutor: () => {
-		throw new Error("asExecutor is not supported by this test stub")
-	},
-}
+})
 
 const session: ScopedPlanStatusSession = {
 	emit: () => Effect.void,
@@ -121,7 +122,18 @@ const makeHarness = () => {
 		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
 	)
 	const orgChSettingsLive = OrgClickHouseSettingsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
+		Layer.provide(Layer.mergeAll(envLive, testDb.layer, edgeCacheLive)),
+	)
+	const alertDestinationsLive = AlertDestinationsService.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(envLive, testDb.layer, runtimeLive, hazelOAuthLive, emailLive, orgMembersLive),
+		),
+	)
+	const alertReadModelsLive = AlertReadModelsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(testDb.layer, warehouseLive)),
+	)
+	const alertRulesLive = AlertRulesService.layer.pipe(
+		Layer.provide(Layer.mergeAll(testDb.layer, runtimeLive)),
 	)
 	const alertsLive = AlertsService.layer.pipe(
 		Layer.provide(
@@ -136,6 +148,9 @@ const makeHarness = () => {
 				orgMembersLive,
 				orgChSettingsLive,
 				investigationsLive,
+				alertDestinationsLive,
+				alertReadModelsLive,
+				alertRulesLive,
 			),
 		),
 	)
@@ -143,6 +158,10 @@ const makeHarness = () => {
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
+		alertDestinationsLive,
+		alertReadModelsLive,
+		alertRulesLive,
 		alertsLive,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
@@ -150,7 +169,7 @@ const makeHarness = () => {
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provide(TelemetryServiceStubsLayer),
-		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(V2TransportErrorBoundaryLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
@@ -215,7 +234,6 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 			Effect.gen(function* () {
 				const provider = yield* Dashboard.Provider
 
-				// Create.
 				const created = yield* provider.reconcile({
 					id: "ops",
 					instanceId: "i-1",
@@ -252,7 +270,6 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				expect(renamed.dashboardId).toBe(created.dashboardId)
 				expect(renamed.name).toBe("Operations v2")
 
-				// Read observes the renamed dashboard.
 				const observed = yield* provider.read!({
 					id: "ops",
 					instanceId: "i-1",
@@ -343,7 +360,6 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				})
 				expect(adopted.ruleId).toBe(rule.ruleId)
 
-				// Update threshold via PATCH.
 				const updated = yield* rules.reconcile({
 					id: "checkout-errors",
 					instanceId: "i-1",

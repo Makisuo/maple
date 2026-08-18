@@ -298,7 +298,7 @@ export const maybeEnqueueTriage: (
 			type: "incident",
 			incidentKind: input.incidentKind,
 			incidentId: input.incidentId,
-			...(input.issueId ? { issueId: input.issueId } : {}),
+			...(input.issueId ? { issueId: input.issueId } : undefined),
 		})
 		const inserted = yield* database.execute((db) =>
 			db
@@ -365,7 +365,7 @@ export const maybeEnqueueTriage: (
 							attempt: 0,
 						},
 					}),
-				catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+				catch: FanoutStartError.fromCause,
 			}),
 		)
 		if (Exit.isFailure(created)) {

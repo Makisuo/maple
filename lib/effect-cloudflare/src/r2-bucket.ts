@@ -114,13 +114,16 @@ const makeClient = (token: R2BucketToken): R2BucketClient => {
 	const wrapR2Object = (object: runtime.R2Object): R2Object => ({
 		...object,
 		writeHttpMetadata: (headers: Headers) =>
-			Effect.sync(() => object.writeHttpMetadata(headers as unknown as runtime.Headers)),
+			Effect.sync(() => {
+				// SAFETY: the Workers and DOM Headers declarations wrap the same runtime headers object.
+				object.writeHttpMetadata(headers as unknown as runtime.Headers)
+			}),
 	})
 
 	const wrapR2ObjectBody = (object: runtime.R2ObjectBody): R2ObjectBody => ({
 		...wrapR2Object(object),
 		body: Stream.fromReadableStream({
-			evaluate: () => object.body as unknown as ReadableStream<Uint8Array>,
+			evaluate: () => object.body as ReadableStream<Uint8Array>,
 			onError: (cause) =>
 				new R2Error({
 					message: cause instanceof Error ? cause.message : String(cause),
@@ -139,8 +142,8 @@ const makeClient = (token: R2BucketToken): R2BucketClient => {
 		({
 			objects: objects.objects.map(wrapR2Object),
 			delimitedPrefixes: objects.delimitedPrefixes,
-			...("cursor" in objects ? { cursor: objects.cursor } : {}),
-			...("truncated" in objects ? { truncated: objects.truncated } : {}),
+			...("cursor" in objects ? { cursor: objects.cursor } : undefined),
+			...("truncated" in objects ? { truncated: objects.truncated } : undefined),
 		}) as R2Objects
 
 	const wrapR2MultipartUpload = (upload: runtime.R2MultipartUpload): R2MultipartUpload => ({
@@ -174,6 +177,7 @@ const makeClient = (token: R2BucketToken): R2BucketClient => {
 		) =>
 			use((r) => r.put(key, value as any, options)).pipe(
 				Effect.map((object) =>
+					// SAFETY: Cloudflare returns null for a failed conditional put although the wrapper contract mirrors R2Object.
 					object === null
 						? (null as unknown as R2Object)
 						: wrapR2Object(object as runtime.R2Object),

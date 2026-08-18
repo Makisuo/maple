@@ -1,3 +1,5 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { describe, it } from "@effect/vitest"
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
@@ -23,7 +25,7 @@ import {
 import { withMaintenanceLock } from "../src/server/checkpoints"
 import { type ArchiveGenerationManifest } from "../src/server/archives/manifest"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 
 const withArchive = async (run: (archiveDir: string) => Promise<void> | void): Promise<void> => {
 	const parent = mkdtempSync(join(tmpdir(), "maple-archive-listing-test-"))

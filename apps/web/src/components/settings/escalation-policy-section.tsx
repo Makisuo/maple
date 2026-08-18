@@ -6,7 +6,7 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 import { Schema } from "effect"
 
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import {
 	IssueEscalationPolicyRule,
@@ -54,7 +54,7 @@ const emptyDraft = (): DraftRules => ({
  * detection-time alerts keep using the alert rule's own destinations.
  */
 export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
-	const policyQueryAtom = MapleApiAtomClient.query("errors", "getEscalationPolicy", {
+	const policyQueryAtom = retainedQuery("errors", "getEscalationPolicy", {
 		reactivityKeys: ["issueEscalationPolicy"],
 	})
 	const policyResult = useAtomValue(policyQueryAtom)
@@ -95,9 +95,11 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 				new IssueEscalationPolicyRule({
 					severity,
 					destinationIds: decodeDestinationIds(rules[severity].destinationIds),
-					...(rules[severity].minConfidence === CONFIDENCE_ANY
-						? {}
-						: { minConfidence: rules[severity].minConfidence as EscalationConfidence }),
+					...(!(rules[severity].minConfidence === CONFIDENCE_ANY)
+						? {
+								minConfidence: rules[severity].minConfidence as EscalationConfidence,
+							}
+						: undefined),
 				}),
 		)
 		const result = await upsertMutation({

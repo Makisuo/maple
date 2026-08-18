@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { describe, it } from "@effect/vitest"
 import { ok, rejects, strictEqual } from "node:assert"
 import {
@@ -24,7 +25,7 @@ import {
 	readCheckpointState,
 	withMaintenanceLock,
 } from "../src/server/checkpoints"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 
 // Pin and maintenance-lock API for the dependent archive branch. These tests

@@ -1,3 +1,4 @@
+import type { OrgId } from "@maple/domain"
 import { index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 /**
@@ -11,7 +12,7 @@ export const cloudflareHyperdriveConfigs = pgTable(
 	"cloudflare_hyperdrive_configs",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		/** Cloudflare's 32-hex Hyperdrive config id (what `db.namespace` collapses from). */
 		configId: text("config_id").notNull(),
 		name: text("name").notNull(),

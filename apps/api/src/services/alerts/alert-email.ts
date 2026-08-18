@@ -1,8 +1,8 @@
 import { AlertDeliveryError } from "@maple/domain/http"
-import { AlertNotification } from "@maple/email/alert-notification"
-import { render } from "@react-email/components"
+import { renderAlertNotification } from "@maple/email/alert-notification"
 import { Effect } from "effect"
 import {
+	displayGroupKey,
 	eventTypeEmoji,
 	formatEventTypeLabel,
 	formatObservedSummary,
@@ -10,7 +10,7 @@ import {
 	formatWindow,
 	slackAttachmentColor,
 	type TemplateRenderContext,
-} from "./AlertDeliveryDispatch"
+} from "./alert-formatting"
 
 export interface AlertEmailContent {
 	readonly subject: string
@@ -28,25 +28,24 @@ export const buildAlertEmailContent = (
 	linkUrl: string,
 	chatUrl: string,
 ): Effect.Effect<AlertEmailContent, AlertDeliveryError> =>
-	Effect.tryPromise({
-		try: async () => {
+	Effect.try({
+		// Synchronous: the template is a compiled string, spliced in place.
+		try: () => {
 			const eventLabel = formatEventTypeLabel(context.eventType)
 			const emoji = eventTypeEmoji(context.eventType)
-			const html = await render(
-				AlertNotification({
-					ruleName: context.ruleName,
-					eventLabel,
-					eventEmoji: emoji,
-					severity: context.severity,
-					signalLabel: formatSignalLabel(context.signalType),
-					group: context.groupKey ?? "all",
-					observedSummary: formatObservedSummary(context),
-					window: formatWindow(context.windowMinutes),
-					accentColor: slackAttachmentColor(context.eventType, context.severity),
-					linkUrl,
-					chatUrl,
-				}),
-			)
+			const html = renderAlertNotification({
+				ruleName: context.ruleName,
+				eventLabel,
+				eventEmoji: emoji,
+				severity: context.severity,
+				signalLabel: formatSignalLabel(context),
+				group: displayGroupKey(context.groupKey) ?? "all",
+				observedSummary: formatObservedSummary(context),
+				window: formatWindow(context.windowMinutes),
+				accentColor: slackAttachmentColor(context.eventType, context.severity),
+				linkUrl,
+				chatUrl,
+			})
 			return {
 				subject: `${emoji} ${context.ruleName} — ${eventLabel}`,
 				html,

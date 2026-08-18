@@ -5,14 +5,14 @@ import { Button, buttonVariants } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { useNetworkAutoRetry } from "@/hooks/use-network-auto-retry"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError, isAutomaticRetryError } from "@/lib/error-messages"
 import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
 
 function RouteError({ error, reset }: ErrorComponentProps) {
 	const router = useRouter()
 	const isStaleChunk = isChunkLoadError(error)
 
-	const formatted = formatBackendError(error)
+	const formatted = displayError(error)
 	const { title } = formatted
 	const stack = error instanceof Error ? error.stack : undefined
 
@@ -20,15 +20,10 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 		reset()
 		router.invalidate()
 	}
-	const autoRetrying = useNetworkAutoRetry(
-		formatted.recovery.kind === "retry" && formatted.recovery.automatic && !isStaleChunk,
-		retry,
-	)
-	const description = autoRetrying
-		? `${formatted.description} Retrying automatically…`
-		: formatted.description
-	const canRetry = formatted.recovery.kind === "retry" || formatted.recovery.kind === "reload"
-	const shouldReload = isStaleChunk || formatted.recovery.kind === "reload"
+	const autoRetrying = useNetworkAutoRetry(isAutomaticRetryError(formatted) && !isStaleChunk, retry)
+	const description = autoRetrying ? `${formatted.message} Retrying automatically…` : formatted.message
+	const canRetry = formatted.recovery === "retry" || formatted.recovery === "refresh"
+	const shouldReload = isStaleChunk || formatted.recovery === "refresh"
 
 	return (
 		<Empty className="min-h-[60vh]" role="alert" aria-live="assertive" aria-atomic="true">

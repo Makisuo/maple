@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Data, Effect } from "effect"
 import { runtime } from "./runtime"
 
 const requestUrl = (input: RequestInfo | URL): string =>
@@ -39,6 +39,10 @@ type FetchOutcome =
 	| { readonly ok: true; readonly response: Response }
 	| { readonly ok: false; readonly cause: unknown }
 
+class TracedFetchError extends Data.TaggedError("@maple/web/TracedFetchError")<{
+	readonly cause: unknown
+}> {}
+
 export const tracedFetch = (
 	peerService: string,
 	input: RequestInfo | URL,
@@ -68,6 +72,9 @@ export const tracedFetch = (
 					// to walk an `Error` back once the effect has failed. Cancellations
 					// therefore return normally and only real failures are re-failed below.
 					const outcome: FetchOutcome = yield* Effect.promise(() =>
+						// This function is Electric's injectable fetch port; preserving the platform
+						// rejection value is required for pause-stream cancellation semantics.
+						// oxlint-disable-next-line effecttsgo/global-fetch-in-effect
 						globalThis.fetch(input, { ...init, headers }).then(
 							(response) => ({ ok: true, response }) as const,
 							(cause) => ({ ok: false, cause }) as const,
@@ -84,7 +91,7 @@ export const tracedFetch = (
 						yield* Effect.annotateCurrentSpan("maple.http.cancelled", true)
 						return outcome
 					}
-					return yield* Effect.fail(outcome.cause)
+					return yield* new TracedFetchError({ cause: outcome.cause })
 				}).pipe(
 					Effect.withSpan("http.client", {
 						kind: "client",
@@ -100,19 +107,23 @@ export const tracedFetch = (
 			// Cancellations resolved the effect to keep the span `Ok`, so rethrow the
 			// original rejection verbatim here — Electric's pause/resume and every other
 			// caller must see exactly the value `fetch` rejected with.
-			.then((outcome) => (outcome.ok ? outcome.response : Promise.reject(outcome.cause)))
+			.then(
+				(outcome) => (outcome.ok ? outcome.response : Promise.reject(outcome.cause)),
+				(error) => Promise.reject(error instanceof TracedFetchError ? error.cause : error),
+			)
 	)
 }
 
 export const logClientError = (
-	message: string,
+	event: string,
 	error: unknown,
 	attributes: Record<string, string | number | boolean> = {},
 ): void => {
 	runtime.runFork(
-		Effect.logError(message).pipe(
+		Effect.logError("Client operation failed").pipe(
 			Effect.annotateLogs({
 				...attributes,
+				"maple.client.event": event,
 				"error.type": error instanceof Error ? error.name : "UnknownError",
 				"error.message": error instanceof Error ? error.message : String(error),
 			}),
@@ -121,14 +132,15 @@ export const logClientError = (
 }
 
 export const logClientWarning = (
-	message: string,
+	event: string,
 	error: unknown,
 	attributes: Record<string, string | number | boolean> = {},
 ): void => {
 	runtime.runFork(
-		Effect.logWarning(message).pipe(
+		Effect.logWarning("Client operation degraded").pipe(
 			Effect.annotateLogs({
 				...attributes,
+				"maple.client.event": event,
 				"error.type": error instanceof Error ? error.name : "UnknownError",
 				"error.message": error instanceof Error ? error.message : String(error),
 			}),

@@ -1,5 +1,5 @@
-import { activeTraceId } from "../events"
-import { type Emit, safeEmit } from "./shared"
+import { type Emit, safeEmit } from "../../capture/shared"
+import { activeTraceId } from "../../events/trace-id"
 
 /**
  * Capture fetch + XHR requests as session events, tagged with the active trace
@@ -39,7 +39,7 @@ export function installNetworkCapture(emit: Emit, ignoreUrl: (url: string) => bo
 			type: "network",
 			net: { method, url, status, durationMs: Math.round(performance.now() - start) },
 			traceId,
-			...(error ? { attrs: { error } } : {}),
+			...(error ? { attrs: { error } } : undefined),
 		})
 	}
 

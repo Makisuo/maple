@@ -2,25 +2,25 @@ import { McpQueryError, optionalNumberParam, optionalStringParam, type McpToolRe
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 
 const comparatorLabel: Record<string, string> = {
 	gt: ">",
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 const statusIcon: Record<string, string> = {
 	open: "🔴",
 	resolved: "✅",
-}
+} satisfies Record<string, string>
 
 const severityIcon: Record<string, string> = {
 	critical: "🔥",
 	warning: "⚠️",
-}
+} satisfies Record<string, string>
 
 function formatTimestamp(iso: string | null): string {
 	if (!iso) return "—"
@@ -41,10 +41,10 @@ export function registerGetIncidentTimelineTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max incidents to return (default 20)"),
 		}),
 		Effect.fn("McpTool.getIncidentTimeline")(function* ({ rule_id, status, severity, group_key, limit }) {
-			const tenant = yield* resolveTenant
-			const alerts = yield* AlertsService
+			const tenant = yield* CurrentMcpTenant
+			const readModels = yield* AlertReadModelsService
 
-			const result = yield* alerts.listIncidents(tenant.orgId).pipe(
+			const result = yield* readModels.listIncidents(tenant.orgId).pipe(
 				Effect.mapError(
 					(error) =>
 						new McpQueryError({

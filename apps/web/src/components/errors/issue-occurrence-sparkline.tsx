@@ -1,10 +1,12 @@
 import * as React from "react"
-import { Area, AreaChart, XAxis, YAxis } from "recharts"
+import { Area, AreaChart } from "recharts"
 import {
 	type ChartConfig,
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { cn } from "@maple/ui/lib/utils"
 import { formatBucketLabel } from "@maple/ui/lib/format"
@@ -68,10 +70,9 @@ export function IssueOccurrenceSparkline({ data, className }: IssueOccurrenceSpa
 						<stop offset="100%" stopColor="var(--primary)" stopOpacity={0.03} />
 					</linearGradient>
 				</defs>
-				<XAxis dataKey="bucket" hide />
-				<YAxis hide domain={[0, "dataMax"]} />
+				<ChartXAxis dataKey="bucket" hide />
+				<ChartYAxis hide domain={[0, "dataMax"]} />
 				<ChartTooltip
-					cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 					content={
 						<ChartTooltipContent
 							labelFormatter={(value) => formatBucketLabel(value, axisContext, "tooltip")}

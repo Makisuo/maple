@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 
 import { Registry, RegistryContext } from "@/lib/effect-atom"
 import { cleanup, fireEvent, render } from "@testing-library/react"

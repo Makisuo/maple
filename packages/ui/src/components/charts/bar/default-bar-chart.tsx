@@ -1,8 +1,8 @@
 "use client"
 
 import { useId } from "react"
-import { Bar, BarChart, CartesianGrid, XAxis } from "recharts"
-import { type ChartConfig, ChartContainer } from "../../ui/chart"
+import { Bar, BarChart } from "recharts"
+import { type ChartConfig, ChartContainer, ChartGrid, ChartXAxis } from "../../ui/chart"
 import type { BaseChartProps } from "../_shared/chart-types"
 import { defaultBarData } from "../_shared/sample-data"
 import { DottedPattern } from "../_shared/svg-patterns"
@@ -21,8 +21,8 @@ export function DefaultBarChart({ data = defaultBarData, className, syncId }: Ba
 				<defs>
 					<DottedPattern id={patternId} />
 				</defs>
-				<CartesianGrid vertical={false} strokeDasharray="3 3" />
-				<XAxis dataKey="name" tickLine={false} axisLine={false} />
+				<ChartGrid />
+				<ChartXAxis dataKey="name" />
 				<Bar
 					dataKey="value"
 					fill={`url(#${patternId})`}

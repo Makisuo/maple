@@ -10,6 +10,7 @@ import {
 	TraceId,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import {
 	WarehouseDateTimeString,
@@ -19,7 +20,6 @@ import {
 } from "@/api/warehouse/effect-utils"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
-// List sessions
 
 const ListReplaysInput = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
@@ -120,8 +120,8 @@ export const getReplaysFacets = Effect.fn("SessionReplays.facets")(function* ({
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
 	const result = yield* runWarehouseQuery("replaysFacets", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.sessionReplays.facets({
+			const client = yield* MapleInternalAtomClient
+			return yield* client.sessionReplaysInternal.facets({
 				payload: new ReplaysFacetsRequest({
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
@@ -150,8 +150,6 @@ export const getReplaysFacets = Effect.fn("SessionReplays.facets")(function* ({
 		durationP95: result.durationP95,
 	}
 })
-
-// Session detail
 
 const GetReplayInput = Schema.Struct({
 	sessionId: SessionId,
@@ -221,11 +219,15 @@ export const getReplayManifest = Effect.fn("SessionReplays.getReplayManifest")(f
 				params: { id: input.sessionId },
 				query: {
 					...(toIsoWindow(input.windowStart) !== undefined
-						? { window_start: toIsoWindow(input.windowStart)! }
-						: {}),
+						? {
+								window_start: toIsoWindow(input.windowStart)!,
+							}
+						: undefined),
 					...(toIsoWindow(input.windowEnd) !== undefined
-						? { window_end: toIsoWindow(input.windowEnd)! }
-						: {}),
+						? {
+								window_end: toIsoWindow(input.windowEnd)!,
+							}
+						: undefined),
 				},
 			})
 		}),
@@ -265,11 +267,15 @@ export const getReplayEvents = Effect.fn("SessionReplays.getReplayEvents")(funct
 					// only add round-trips.
 					limit: Math.max(1, input.toChunkSeq - input.fromChunkSeq + 1),
 					...(toIsoWindow(input.windowStart) !== undefined
-						? { window_start: toIsoWindow(input.windowStart)! }
-						: {}),
+						? {
+								window_start: toIsoWindow(input.windowStart)!,
+							}
+						: undefined),
 					...(toIsoWindow(input.windowEnd) !== undefined
-						? { window_end: toIsoWindow(input.windowEnd)! }
-						: {}),
+						? {
+								window_end: toIsoWindow(input.windowEnd)!,
+							}
+						: undefined),
 				},
 			})
 		}),
@@ -355,8 +361,8 @@ export const getSessionTraceSummaries = Effect.fn("SessionReplays.traceSummaries
 	const input = yield* decodeInput(SessionTraceSummariesInput, data ?? { traceIds: [] }, "traceSummaries")
 	const result = yield* runWarehouseQuery("traceSummaries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.sessionReplays.traceSummaries({
+			const client = yield* MapleInternalAtomClient
+			return yield* client.sessionReplaysInternal.traceSummaries({
 				payload: new SessionTraceSummariesRequest({
 					traceIds: input.traceIds,
 					windowStart: input.windowStart,

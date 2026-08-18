@@ -26,7 +26,7 @@ const BUDGET_MS: Record<LatencyScale, number> = {
 	p95: 1_000,
 	p99: 2_000,
 	cpu: 50,
-}
+} satisfies Record<LatencyScale, number>
 
 /**
  * Level boundaries as ratios of the budget. At the p95 budget these land on
@@ -74,7 +74,7 @@ export const LATENCY_TEXT_TONE: Record<LatencyLevel, string> = {
 	elevated: "text-foreground",
 	slow: "text-severity-warn",
 	critical: "text-severity-error",
-}
+} satisfies Record<LatencyLevel, string>
 
 /** Solid fill for inline meters and distribution bars behind a value. */
 export const LATENCY_BAR_TONE: Record<LatencyLevel, string> = {
@@ -83,7 +83,7 @@ export const LATENCY_BAR_TONE: Record<LatencyLevel, string> = {
 	elevated: "bg-foreground/20",
 	slow: "bg-severity-warn/25",
 	critical: "bg-severity-error/25",
-}
+} satisfies Record<LatencyLevel, string>
 
 /** Raw color strings for SVG fills and inline styles (no Tailwind class). */
 export const LATENCY_COLOR: Record<LatencyLevel, string> = {
@@ -92,7 +92,7 @@ export const LATENCY_COLOR: Record<LatencyLevel, string> = {
 	elevated: "var(--color-foreground)",
 	slow: "var(--color-severity-warn)",
 	critical: "var(--color-severity-error)",
-}
+} satisfies Record<LatencyLevel, string>
 
 /** Level → text class in one call. Mirrors the shape of `errorRateClass`. */
 export function latencyToneClass(ms: number, scale: LatencyScale = "p95", budgetMs?: number): string {
@@ -105,7 +105,7 @@ const LEVEL_LABEL: Record<LatencyLevel, string> = {
 	elevated: "elevated",
 	slow: "slow",
 	critical: "very slow",
-}
+} satisfies Record<LatencyLevel, string>
 
 /** Plain-word label for `title`/`aria-label`, so tone is never color-only. */
 export function latencyLevelLabel(level: LatencyLevel): string {

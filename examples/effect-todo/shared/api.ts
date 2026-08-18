@@ -30,6 +30,14 @@ export class TodoNotFoundError extends Schema.TaggedError<TodoNotFoundError>()(
 	{ httpApiStatus: 404 },
 ) {}
 
+/** Rejected input — an empty or oversized title. A second, deterministic error
+ * group in Maple's Errors view, so it isn't all random flakes. */
+export class InvalidTodoError extends Schema.TaggedError<InvalidTodoError>()(
+	"@maple-examples/todo/InvalidTodoError",
+	{ field: Schema.String, message: Schema.String },
+	{ httpApiStatus: 400 },
+) {}
+
 /**
  * The intentionally-flaky failure: `toggle` fails ~15% of the time with this
  * error so Maple's Errors view, the Error span status, and the apdex/error-rate
@@ -51,6 +59,7 @@ export class TodosApiGroup extends HttpApiGroup.make("todos")
 		HttpApiEndpoint.post("create", "/", {
 			payload: CreateTodoRequest,
 			success: Todo,
+			error: InvalidTodoError,
 		}),
 	)
 	.add(

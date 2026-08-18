@@ -1,6 +1,5 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import {
-	cleanErrorMessage,
-	extractUpstreamStatus,
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
@@ -9,28 +8,48 @@ import {
 	WarehouseQuotaExceededError,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
+	type WarehouseClassifiedError as DomainWarehouseClassifiedError,
+	type WarehouseReadError,
+	type WarehouseSettingsRouteError,
+	type WarehouseTokenRouteError,
 } from "@maple/domain/http"
 import { detectQuotaSetting } from "../profiles"
 
-// The message sanitizer and status sniffer moved to `@maple/domain/http`
-// (warehouse-error-meta) so the web formatter shares one implementation;
-// re-exported here for existing consumers/tests.
-export { cleanErrorMessage, extractUpstreamStatus }
+/** Strip HTML error pages and whitespace noise before classifying/logging an upstream failure. */
+export const cleanErrorMessage = (raw: string): string => {
+	let cleaned = raw
+	const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
+	if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
+	cleaned = cleaned
+		.replace(/<[^>]+>/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+	if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
+	return cleaned || raw.slice(0, 200)
+}
+
+const extractUpstreamStatus = (message: string): number | undefined => {
+	const match = message.match(/(?:status|HTTP status|response status code)[:\s]+(\d{3})/i)
+	if (match) return Number(match[1])
+	const titleMatch = message.match(/\b(\d{3})\s+(?:error|service temporarily unavailable)\b/i)
+	if (titleMatch) return Number(titleMatch[1])
+	return undefined
+}
 
 /**
- * Every warehouse error `mapWarehouseError` can produce. Precondition failures
- * (`WarehouseValidationError`) are raised by the executor before a query runs,
- * not by this classifier, so they're intentionally absent here.
+ * Every warehouse error `mapWarehouseError` can produce. Precondition and row
+ * decode failures are raised elsewhere in the executor, so they are absent.
  */
-export type WarehouseSqlError =
-	| WarehouseQueryError
-	| WarehouseUpstreamError
-	| WarehouseAuthError
-	| WarehouseConfigError
-	| WarehouseClientError
-	| WarehouseSchemaDriftError
-	| WarehouseMalformedQueryError
-	| WarehouseQuotaExceededError
+export type WarehouseClassifiedError = DomainWarehouseClassifiedError
+
+/** Failures while resolving settings or executing an ordinary read. */
+export type WarehouseReadExecutionError = WarehouseClassifiedError | WarehouseSettingsRouteError
+
+/** Raw SQL adds org-token failures to the normal read execution set. */
+export type WarehouseExecutionError = WarehouseReadExecutionError | WarehouseTokenRouteError
+
+/** SQL execution plus the result-schema failure unique to compiled queries. */
+export type WarehouseCompiledQueryError = WarehouseReadError
 
 type ClickHouseErrorDetails = {
 	readonly message: string
@@ -86,7 +105,7 @@ type ClassificationRule = {
 	/** Restricts the rule to SQL with this authorship. Unset means either. */
 	readonly authoredBy?: SqlAuthorship
 	/** Construct the tagged error for this rule. `upstreamStatus` is only used by the rules that carry it. */
-	readonly make: (base: ClassifiedBase, upstreamStatus: number | undefined) => WarehouseSqlError
+	readonly make: (base: ClassifiedBase, upstreamStatus: number | undefined) => WarehouseClassifiedError
 }
 
 // Ordered rules — first match wins. A raw error can satisfy several patterns
@@ -161,11 +180,37 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 		make: (base) => new WarehouseMalformedQueryError(base),
 	},
 	{
+		// The same complaint as the schema-drift rule below, but about SQL the CALLER
+		// wrote — the `run_sql` MCP tool and the raw_sql widget. A bad table alias
+		// (`t.OrgId`) or a column the author invented is a mistake in that query, not
+		// evidence that the cluster's schema is behind.
+		//
+		// This rule exists because the drift rule below had no authorship guard, so
+		// agent typos came back to customers as "your ClickHouse cluster's schema is
+		// out of sync — run schema apply". Ordered first so the caller case is claimed
+		// before the Maple-authored one can match it.
+		authoredBy: "caller",
+		types: new Set([
+			"UNKNOWN_IDENTIFIER",
+			"NO_SUCH_COLUMN_IN_TABLE",
+			"THERE_IS_NO_COLUMN",
+			"NOT_FOUND_COLUMN_IN_BLOCK",
+		]),
+		pattern:
+			/Unknown (?:expression or function )?identifier|Missing columns|There is no column|No such column/i,
+		make: (base) => new WarehouseMalformedQueryError(base),
+	},
+	{
 		// CH error types raised when a column or function reference doesn't exist in
 		// the cluster's schema. For BYO-ClickHouse customers this is almost always
 		// schema drift between Maple's expected schema and what the cluster has —
 		// resolved by running schema apply, not by retrying. Surfacing it as a
 		// distinct error lets the MCP layer return an actionable message.
+		//
+		// `authoredBy: "maple"` is load-bearing for the same reason it is on the
+		// malformed-query rule above: only a query WE generated can testify about the
+		// cluster's schema. See the caller-authored twin directly above.
+		authoredBy: "maple",
 		types: new Set([
 			"UNKNOWN_IDENTIFIER",
 			"NO_SUCH_COLUMN_IN_TABLE",
@@ -196,7 +241,7 @@ export const mapWarehouseError = (
 	pipe: string,
 	error: unknown,
 	authoredBy: SqlAuthorship = "caller",
-): WarehouseSqlError => {
+): WarehouseClassifiedError => {
 	const { message: rawMessage, code, type } = getClickHouseErrorDetails(error)
 	const message = cleanErrorMessage(rawMessage)
 	const base: ClassifiedBase = {

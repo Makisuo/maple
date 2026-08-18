@@ -9,9 +9,10 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { AutocompleteValuesProvider } from "@/hooks/use-autocomplete-values"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { QUERY_BUILDER_METRIC_TYPES } from "@maple/query-model"
 
 const metricDetailSearchSchema = Schema.Struct({
-	type: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
+	type: Schema.optional(Schema.Literals(QUERY_BUILDER_METRIC_TYPES)),
 	agg: Schema.optional(Schema.Literals(["avg", "sum", "min", "max", "count", "rate", "increase"])),
 	where: Schema.optional(Schema.String),
 	groupBy: Schema.optional(Schema.String),
@@ -56,11 +57,11 @@ function MetricDetailPage() {
 		navigate({
 			search: (prev) => ({
 				...prev,
-				...("agg" in patch ? { agg: patch.agg as MetricDetailSearchParams["agg"] } : {}),
-				...("where" in patch ? { where: patch.where || undefined } : {}),
-				...("groupBy" in patch ? { groupBy: patch.groupBy } : {}),
-				...("step" in patch ? { step: patch.step || undefined } : {}),
-				...("bd" in patch ? { bd: patch.bd } : {}),
+				...("agg" in patch ? { agg: patch.agg as MetricDetailSearchParams["agg"] } : undefined),
+				...("where" in patch ? { where: patch.where || undefined } : undefined),
+				...("groupBy" in patch ? { groupBy: patch.groupBy } : undefined),
+				...("step" in patch ? { step: patch.step || undefined } : undefined),
+				...("bd" in patch ? { bd: patch.bd } : undefined),
 			}),
 			replace: true,
 		})

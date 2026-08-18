@@ -1,8 +1,8 @@
 import { McpQueryError, requiredBooleanParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleId } from "@maple/domain"
 
 const decodeAlertRuleId = Schema.decodeUnknownOption(AlertRuleId)
@@ -45,8 +45,8 @@ export function registerDeleteAlertRuleTool(server: McpToolRegistrar) {
 				}
 			}
 
-			const tenant = yield* resolveTenant
-			const alerts = yield* AlertsService
+			const tenant = yield* CurrentMcpTenant
+			const alerts = yield* AlertRulesService
 
 			const result = yield* alerts.deleteRule(tenant.orgId, tenant.roles, ruleId.value).pipe(
 				Effect.catchTags({
@@ -66,7 +66,7 @@ export function registerDeleteAlertRuleTool(server: McpToolRegistrar) {
 								cause: error,
 							}),
 						),
-					"@maple/http/errors/AlertNotFoundError": (error) =>
+					"@maple/http/errors/AlertRuleNotFoundError": (error) =>
 						Effect.fail(
 							new McpQueryError({
 								message: `${error._tag}: ${error.message}. Use list_alert_rules to find available rule IDs.`,

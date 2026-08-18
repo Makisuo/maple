@@ -1,8 +1,7 @@
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Effect, Layer } from "effect"
-import { Database, type DatabaseClient, DatabaseError, type DatabaseShape } from "./DatabaseLive"
-import { PgConnectionScope } from "./pg-connection-scope"
-import { executeOnFreshPgClient } from "./pg-execute"
+import { Database, type DatabaseClient, DatabaseError, type DatabaseApi } from "./DatabaseLive"
+import { executeOnFreshPgClient, PgConnectionScope } from "./pg-connection-scope"
 import { resolveDbConnectionSource } from "./pg-connection-source"
 
 // Worker TCP sockets are request-bound, so this layer holds only the connection
@@ -18,7 +17,7 @@ const makePgDatabase = Effect.gen(function* () {
 		// Fail per execute so an absent DB does not abort the isolate layer graph.
 		return Database.of({
 			execute: () => Effect.fail(new DatabaseError({ message: source.reason, cause: undefined })),
-		} satisfies DatabaseShape)
+		} satisfies DatabaseApi)
 	}
 
 	return Database.of({
@@ -28,7 +27,7 @@ const makePgDatabase = Effect.gen(function* () {
 					? executeOnFreshPgClient(source.connectionString, fn, source.attributes)
 					: scope.run(fn),
 			),
-	} satisfies DatabaseShape)
+	} satisfies DatabaseApi)
 })
 
 export const layerPg = Layer.effect(Database, makePgDatabase)

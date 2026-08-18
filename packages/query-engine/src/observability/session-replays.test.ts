@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect"
 import { WarehouseUpstreamError } from "@maple/domain/http"
 import { getSessionTraces } from "./session-replays"
 import { WarehouseExecutor } from "./WarehouseExecutor"
-import type { WarehouseExecutorShape } from "./WarehouseExecutor"
+import type { WarehouseExecutorApi } from "./WarehouseExecutor"
 
 interface Captured {
 	sqls: string[]
@@ -21,7 +21,7 @@ interface MockResponses {
  * execution order of the concurrent detail (`session_replays`) and activity
  * (`session_events`) reads; the trace summaries read `trace_detail_spans`.
  */
-const makeExecutor = (captured: Captured, responses: MockResponses): WarehouseExecutorShape => {
+const makeExecutor = (captured: Captured, responses: MockResponses): WarehouseExecutorApi => {
 	const rowsFor = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 		if (sql.includes("session_events")) return responses.activity ?? []
 		if (sql.includes("trace_detail_spans")) return responses.summaries ?? []
@@ -33,15 +33,15 @@ const makeExecutor = (captured: Captured, responses: MockResponses): WarehouseEx
 		compiledQuery: ((compiled) => {
 			captured.sqls.push(compiled.sql)
 			return compiled.decodeRows(rowsFor(compiled.sql)).pipe(Effect.orDie)
-		}) as WarehouseExecutorShape["compiledQuery"],
+		}) as WarehouseExecutorApi["compiledQuery"],
 		compiledQueryFirst: ((compiled) => {
 			captured.sqls.push(compiled.sql)
 			return compiled.decodeFirstRow(rowsFor(compiled.sql)).pipe(Effect.orDie)
-		}) as WarehouseExecutorShape["compiledQueryFirst"],
+		}) as WarehouseExecutorApi["compiledQueryFirst"],
 	}
 }
 
-const makeLayer = (executor: WarehouseExecutorShape) => Layer.succeed(WarehouseExecutor, executor)
+const makeLayer = (executor: WarehouseExecutorApi) => Layer.succeed(WarehouseExecutor, executor)
 
 const traceIds = (n: number) => Array.from({ length: n }, (_, i) => `trace-${i}`)
 
@@ -138,7 +138,7 @@ describe("getSessionTraces", () => {
 
 	it.effect("propagates warehouse errors from the executor", () =>
 		Effect.gen(function* () {
-			const failing: WarehouseExecutorShape = {
+			const failing: WarehouseExecutorApi = {
 				orgId: "org_test",
 				query: () => Effect.succeed({ data: [] }),
 				compiledQuery: () =>

@@ -4,7 +4,17 @@ import {
 	DashboardTemplateParameterKey,
 	PortableDashboardDocument,
 } from "@maple/domain/http"
+import type {
+	QueryBuilderDataSource,
+	QueryBuilderFormulaPayload,
+	QueryBuilderMetricType,
+	QueryBuilderQueryDraftPayload,
+} from "@maple/query-model"
+import { makeQueryDataSource } from "@maple/widgets/dashboard"
 import type { TemplateParameterValues, WidgetDef } from "./types"
+
+/** The display half of a widget, so the shared chart presets are literal-typed. */
+type WidgetDisplay = WidgetDef["display"]
 
 // Brand makers — used inside template definitions for compile-time correctness
 
@@ -22,19 +32,18 @@ const decodePortableDashboard = Schema.decodeUnknownSync(PortableDashboardDocume
 export function makeQueryDraft(opts: {
 	id: string
 	name: string
-	dataSource: "traces" | "logs" | "metrics"
+	dataSource: QueryBuilderDataSource
 	aggregation: string
 	whereClause?: string
 	groupBy?: string[]
 	metricName?: string
-	metricType?: string
+	metricType?: QueryBuilderMetricType
 	isMonotonic?: boolean
-}): Record<string, unknown> {
-	const draft: Record<string, unknown> = {
+}): QueryBuilderQueryDraftPayload {
+	const base = {
 		id: opts.id,
 		name: opts.name,
 		enabled: true,
-		dataSource: opts.dataSource,
 		whereClause: opts.whereClause ?? "",
 		aggregation: opts.aggregation,
 		stepInterval: "",
@@ -51,43 +60,37 @@ export function makeQueryDraft(opts: {
 		orderBy: "",
 		limit: "",
 		legend: "",
-	}
+	} as const satisfies Omit<QueryBuilderQueryDraftPayload, "dataSource">
+
 	// Metric-only fields belong solely to the metrics source.
 	if (opts.dataSource === "metrics") {
-		draft.signalSource = "default"
-		draft.metricName = opts.metricName ?? ""
-		draft.metricType = opts.metricType ?? "gauge"
-		draft.isMonotonic = opts.isMonotonic ?? false
+		return {
+			...base,
+			dataSource: "metrics",
+			signalSource: "default",
+			metricName: opts.metricName ?? "",
+			metricType: opts.metricType ?? "gauge",
+			isMonotonic: opts.isMonotonic ?? false,
+		}
 	}
-	return draft
+	return { ...base, dataSource: opts.dataSource }
 }
 
-export function makeQueryBuilderTimeseriesDataSource(queries: Record<string, unknown>[]): {
-	endpoint: string
-	params: Record<string, unknown>
-} {
-	return {
-		endpoint: "custom_query_builder_timeseries",
-		params: {
-			queries,
-			formulas: [],
-			comparison: { mode: "none", includePercentChange: true },
-			debug: false,
-		},
-	}
+export function makeQueryBuilderTimeseriesDataSource(
+	queries: QueryBuilderQueryDraftPayload[],
+	formulas: QueryBuilderFormulaPayload[] = [],
+) {
+	return makeQueryDataSource({
+		resultShape: "timeseries",
+		queries,
+		formulas,
+		comparison: { mode: "none", includePercentChange: true },
+	})
 }
 
-export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unknown>[]): {
-	endpoint: string
-	params: Record<string, unknown>
-} {
-	return {
-		endpoint: "custom_query_builder_breakdown",
-		params: { queries },
-	}
+export function makeQueryBuilderBreakdownDataSource(queries: QueryBuilderQueryDraftPayload[]) {
+	return makeQueryDataSource({ resultShape: "breakdown", queries })
 }
-
-// Chart display presets
 
 // `seriesStats` (the Min/Max/Mean/Last table) is opt-in and costs up to 45% of a
 // widget's height. Every preset states it outright rather than leaning on the
@@ -102,14 +105,14 @@ export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unkn
 // sparse-data heuristic and stipple every dense series in the same chart with
 // point markers. Hovering still gives the active dot, and a reader who wants
 // permanent points can turn them back on per widget.
-export const CHART_DISPLAY_AREA = {
+export const CHART_DISPLAY_AREA: WidgetDisplay = {
 	chartId: "query-builder-area",
 	chartPresentation: { legend: "visible", seriesStats: false, showPoints: false },
 	stacked: true,
 	curveType: "monotone",
 }
 
-export const CHART_DISPLAY_LINE = {
+export const CHART_DISPLAY_LINE: WidgetDisplay = {
 	chartId: "query-builder-line",
 	chartPresentation: { legend: "visible", seriesStats: true, showPoints: false },
 	stacked: false,
@@ -120,14 +123,14 @@ export const CHART_DISPLAY_LINE = {
 // evictions, slow queries, dropped messages. A stacked area over those draws a
 // continuous ribbon between two isolated incidents and reads as sustained
 // pressure; discrete bars read as "three restarts, at these three times".
-export const CHART_DISPLAY_BAR = {
+export const CHART_DISPLAY_BAR: WidgetDisplay = {
 	chartId: "query-builder-bar",
 	chartPresentation: { legend: "visible", seriesStats: false, showPoints: false },
 	stacked: true,
 	curveType: "linear",
 }
 
-export function chartDisplayForMetric(aggregation: string): Record<string, unknown> {
+export function chartDisplayForMetric(aggregation: string): WidgetDisplay {
 	if (["count", "error_rate", "rate", "increase"].includes(aggregation)) {
 		return CHART_DISPLAY_AREA
 	}
@@ -140,8 +143,6 @@ export function chartDisplayForMetric(aggregation: string): Record<string, unkno
 	}
 	return CHART_DISPLAY_BAR
 }
-
-// Where clause helpers
 
 // Escape a user-supplied value before it is interpolated into a double-quoted
 // metric where-clause literal, so a value containing `"` (or `\`) can't break
@@ -158,18 +159,16 @@ export function combineWhere(...clauses: Array<string | undefined>): string {
 	return clauses.filter((clause) => clause && clause.trim().length > 0).join(" AND ")
 }
 
-// Metrics chart helpers
-
 export function metricsTimeseries(opts: {
 	id: string
 	name: string
 	metricName: string
-	metricType: string
+	metricType: QueryBuilderMetricType
 	aggregation?: string
 	whereClause?: string
 	groupBy?: string[]
 	isMonotonic?: boolean
-}): { endpoint: string; params: Record<string, unknown> } {
+}) {
 	return makeQueryBuilderTimeseriesDataSource([
 		makeQueryDraft({
 			id: opts.id,
@@ -189,11 +188,11 @@ export function metricsBreakdown(opts: {
 	id: string
 	name: string
 	metricName: string
-	metricType: string
+	metricType: QueryBuilderMetricType
 	aggregation?: string
 	whereClause?: string
 	groupBy: string[]
-}): { endpoint: string; params: Record<string, unknown> } {
+}) {
 	return makeQueryBuilderBreakdownDataSource([
 		makeQueryDraft({
 			id: opts.id,
@@ -207,8 +206,6 @@ export function metricsBreakdown(opts: {
 		}),
 	])
 }
-
-// Build PortableDashboardDocument from a template's widget list
 
 export function buildPortableDashboard(opts: {
 	name: string

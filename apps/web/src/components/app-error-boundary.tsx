@@ -6,7 +6,7 @@ import { Component, type ReactNode } from "react"
 
 import { buttonVariants } from "@maple/ui/components/ui/button"
 import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 
 interface AppErrorBoundaryProps {
 	children: ReactNode
@@ -45,7 +45,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 
 function CrashScreen({ error }: { error: unknown }) {
 	const name = error instanceof Error ? error.name : "Error"
-	const presentation = formatBackendError(error)
+	const presentation = displayError(error)
 	const stack = error instanceof Error ? error.stack : undefined
 
 	return (
@@ -73,7 +73,7 @@ function CrashScreen({ error }: { error: unknown }) {
 					The dashboard crashed
 				</h1>
 				<p className="text-sm text-balance text-muted-foreground">
-					{presentation.description} Your telemetry is safe — reloading usually recovers it.
+					{presentation.message} Your telemetry is safe — reloading usually recovers it.
 				</p>
 			</div>
 

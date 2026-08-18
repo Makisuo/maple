@@ -1,19 +1,31 @@
-import { Exit } from "effect"
+import { Cause, Exit } from "effect"
 import { useState } from "react"
-import { CreateTodoRequest, type Todo } from "../../shared/api.ts"
+import type { Todo } from "../../shared/api.ts"
+import { addTodoAtom, removeTodoAtom, toggleTodoAtom } from "./lib/actions.ts"
 import { TodoApiClient } from "./lib/atom-client.ts"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "./lib/effect-atom.ts"
 
 // Module-scope singletons — one atom per query, memoized by the client.
 const listAtom = TodoApiClient.query("todos", "list", { reactivityKeys: ["todos"] })
 
+/** Prefer the server's own error message (e.g. the validation reason) when it has one. */
+function failureMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
+	if (Exit.isSuccess(exit)) return fallback
+	const error = Cause.squash(exit.cause)
+	return typeof error === "object" && error !== null && "message" in error
+		? String((error as { message: unknown }).message)
+		: fallback
+}
+
 export function App() {
 	const listResult = useAtomValue(listAtom)
 	const refresh = useAtomRefresh(listAtom)
 
-	const createTodo = useAtomSet(TodoApiClient.mutation("todos", "create"), { mode: "promiseExit" })
-	const toggleTodo = useAtomSet(TodoApiClient.mutation("todos", "toggle"), { mode: "promiseExit" })
-	const removeTodo = useAtomSet(TodoApiClient.mutation("todos", "remove"), { mode: "promiseExit" })
+	// The action atoms wrap each interaction in its own `ui.todo.*` span, so the
+	// browser end of the trace says what the user did, not just which URL was hit.
+	const createTodo = useAtomSet(addTodoAtom, { mode: "promiseExit" })
+	const toggleTodo = useAtomSet(toggleTodoAtom, { mode: "promiseExit" })
+	const removeTodo = useAtomSet(removeTodoAtom, { mode: "promiseExit" })
 
 	const [title, setTitle] = useState("")
 	const [error, setError] = useState<string | null>(null)
@@ -25,27 +37,29 @@ export function App() {
 	const loading = Result.isInitial(listResult)
 
 	async function add() {
-		const value = title.trim()
-		if (!value || busy) return
+		if (busy) return
 		setBusy(true)
 		setError(null)
+		// Submitted untrimmed on purpose: a blank title is rejected by the server
+		// as an `InvalidTodoError`, which is the demo's deterministic error group.
+		const value = title
 		setTitle("")
-		const exit = await createTodo({ payload: new CreateTodoRequest({ title: value }) })
+		const exit = await createTodo(value)
 		if (Exit.isSuccess(exit)) refresh()
-		else setError("Failed to add todo.")
+		else setError(failureMessage(exit, "Failed to add todo."))
 		setBusy(false)
 	}
 
 	async function toggle(id: string) {
 		setError(null)
-		const exit = await toggleTodo({ params: { id } })
+		const exit = await toggleTodo(id)
 		if (Exit.isSuccess(exit)) refresh()
 		else setError("Toggle failed — simulated write conflict. See it in Maple → Errors.")
 	}
 
 	async function remove(id: string) {
 		setError(null)
-		const exit = await removeTodo({ params: { id } })
+		const exit = await removeTodo(id)
 		if (Exit.isSuccess(exit)) refresh()
 		else setError("Failed to delete todo.")
 	}
@@ -79,7 +93,7 @@ export function App() {
 						/>
 						<button
 							type="submit"
-							disabled={busy || !title.trim()}
+							disabled={busy}
 							className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
 						>
 							Add
@@ -166,7 +180,8 @@ export function App() {
 				<p className="mt-4 text-center text-xs text-slate-400">
 					Open{" "}
 					<span className="font-medium text-slate-500 dark:text-slate-300">Maple → Traces</span> to
-					watch each click flow <span className="font-mono">todo-web → todo-api</span>.
+					watch each click flow{" "}
+					<span className="font-mono">todo-web → todo-api → todo-notifier</span>.
 				</p>
 			</main>
 		</div>

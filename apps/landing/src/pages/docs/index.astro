@@ -48,7 +48,7 @@ const sdkGroups = orderGroups(groupBy(effectDocs), ["Effect SDK", "Platforms"]);
 const conceptualGroups = orderGroups(groupBy(conceptual), [...UNIVERSAL_GROUP_ORDER]);
 
 // Language registry for Section 02 — icon, display label, runtime hint
-const LANG_META: Record<string, { name: string; Icon: any; meta: string }> = {
+const LANG_META: Record<string, { name: string; Icon: any; meta: string }>  = {
     node:   { name: "node.js",  Icon: NodeJsLogo,  meta: "node 18+" },
     nextjs: { name: "next.js",  Icon: NextjsLogo,  meta: "app + pages" },
     python: { name: "python",   Icon: PythonLogo,  meta: "3.9+" },
@@ -58,16 +58,16 @@ const LANG_META: Record<string, { name: string; Icon: any; meta: string }> = {
     csharp: { name: "c#",       Icon: CsharpLogo,  meta: ".net 8" },
     kotlin: { name: "kotlin",   Icon: KotlinLogo,  meta: "jvm" },
     laravel: { name: "laravel", Icon: LaravelLogo, meta: "10/11/12" },
-};
+} satisfies Record<string, { name: string; Icon: any; meta: string }>;
 
 // Per-doc runtime/role tag shown right-aligned in the Effect listing.
-const META: Record<string, string> = {
+const META: Record<string, string>  = {
     "sdks/overview": "intro",
     "sdks/effect": "setup",
     "sdks/effect-server": "node · bun · deno",
     "sdks/effect-client": "browser",
     "sdks/effect-cloudflare": "workers",
-};
+} satisfies Record<string, string>;
 
 // Stat strip values
 const totalDocs = allDocs.length;

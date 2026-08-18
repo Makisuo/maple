@@ -1,7 +1,8 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 import { unsafeCompiledQuery } from "@maple/query-engine/ch"
-import { makeLocalWarehouseExecutorShape } from "./executor"
+import { makeLocalWarehouseExecutorApi } from "./executor"
 
 // The local executor is the REAL makeWarehouseExecutor wired to the `chdb`
 // backend — these tests pin the wiring: SQL normalization for the local
@@ -15,7 +16,7 @@ afterEach(() => {
 
 const stubFetch = (handler: (url: string, init?: RequestInit) => Response) => {
 	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
-		handler(String(input), init)) as unknown as typeof fetch
+		handler(String(input), init)) as typeof fetch
 }
 
 const stubLocalServer = (rows: ReadonlyArray<Record<string, unknown>>) => {
@@ -31,11 +32,11 @@ const stubLocalServer = (rows: ReadonlyArray<Record<string, unknown>>) => {
 	return requests
 }
 
-describe("makeLocalWarehouseExecutorShape", () => {
+describe("makeLocalWarehouseExecutorApi", () => {
 	it.effect("posts compiled SQL to /local/query with the trailing FORMAT stripped (chdb dialect)", () =>
 		Effect.gen(function* () {
 			const requests = stubLocalServer([{ c: 1 }])
-			const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
+			const executor = makeLocalWarehouseExecutorApi("http://127.0.0.1:4318")
 			const compiled = unsafeCompiledQuery<{ readonly c: number }>({
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
@@ -43,7 +44,7 @@ describe("makeLocalWarehouseExecutorShape", () => {
 				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'local'\nFORMAT JSON",
 			})
 
-			const rows = yield* shape.compiledQuery(compiled)
+			const rows = yield* executor.compiledQuery(compiled)
 
 			expect(rows).toEqual([{ c: 1 }])
 			expect(requests).toHaveLength(1)
@@ -58,11 +59,11 @@ describe("makeLocalWarehouseExecutorShape", () => {
 	it.effect("keeps the executor's OrgId scoping guard for trusted SQL", () =>
 		Effect.gen(function* () {
 			stubLocalServer([])
-			const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
+			const executor = makeLocalWarehouseExecutorApi("http://127.0.0.1:4318")
 
 			// Scope now rides on the compiled query rather than being sniffed out
 			// of the SQL string, so an unscoped one is rejected before execution.
-			const exit = yield* shape
+			const exit = yield* executor
 				.compiledQuery(
 					unsafeCompiledQuery({
 						reason: "test-fixture",
@@ -84,9 +85,9 @@ describe("makeLocalWarehouseExecutorShape", () => {
 				attempts += 1
 				return new Response("query failed: Unknown expression identifier", { status: 400 })
 			})
-			const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
+			const executor = makeLocalWarehouseExecutorApi("http://127.0.0.1:4318")
 
-			const exit = yield* shape
+			const exit = yield* executor
 				.compiledQuery(
 					unsafeCompiledQuery({
 						reason: "test-fixture",

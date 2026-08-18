@@ -1,9 +1,12 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Cause, Clock, ConfigProvider, Duration, Effect, Exit, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import {
 	AlertDestinationInUseError,
 	AlertForbiddenError,
+	AlertRecipientSelectionError,
 	AlertValidationError,
 	type AlertDestinationId,
 	AlertRulePreviewRequest,
@@ -13,15 +16,18 @@ import {
 	RoleName,
 	UserId,
 } from "@maple/domain/http"
-import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import {
 	AlertRuntime,
-	type AlertRuntimeShape,
+	type AlertRuntimeApi,
 	AlertsService,
-	type AlertsServiceShape,
+	type AlertsServiceApi,
 	interleaveAlertRulesByOrg,
 } from "./AlertsService"
+import { AlertDestinationsService } from "./AlertDestinationsService"
+import { AlertReadModelsService } from "./AlertReadModelsService"
+import { AlertRulesService } from "./AlertRulesService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService } from "@maple/cache"
 import { baselineWarehouseCapabilities } from "@maple/query-engine"
@@ -30,7 +36,7 @@ import { Env } from "@/platform/Env"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { EmailService } from "@/platform/EmailService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
-import { OrgMembersError, OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
+import { OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { Database } from "@/platform/DatabaseLive"
@@ -91,7 +97,7 @@ function makeWarehouseStub(state: {
 	logsAggregateRows?: ReadonlyArray<Record<string, unknown>>
 	logsAggregateByServiceRows?: ReadonlyArray<Record<string, unknown>>
 	rawQueryRows?: ReadonlyArray<Record<string, unknown>>
-}): WarehouseQueryServiceShape {
+}): WarehouseQueryServiceApi {
 	const succeedRows = (rows: ReadonlyArray<Record<string, unknown>>) => Effect.succeed(rows)
 
 	// All alert queries now go through sqlQuery (raw SQL via CH query engine).
@@ -127,7 +133,7 @@ function makeWarehouseStub(state: {
 	}
 }
 
-const defaultTestRuntime: AlertRuntimeShape = {
+const defaultTestRuntime: AlertRuntimeApi = {
 	// Time is sourced from Effect's Clock, which `it.effect` swaps for TestClock —
 	// scheduler-timestamp tests drive it deterministically via TestClock.setTime /
 	// TestClock.adjust. Real `fetch`/`Effect.timeout` settle on the live event loop.
@@ -164,7 +170,7 @@ const stubOrgMembersService = (
 	resolveMembers: (_orgId, userIds) => {
 		const byId = new Map(members.map((member) => [member.userId, member]))
 		const resolved: Array<OrgMember> = []
-		const unknown: Array<string> = []
+		const unknown: Array<(typeof userIds)[number]> = []
 		for (const userId of userIds) {
 			const member = byId.get(userId)
 			if (member === undefined) unknown.push(userId)
@@ -172,7 +178,7 @@ const stubOrgMembersService = (
 		}
 		return unknown.length > 0
 			? Effect.fail(
-					new OrgMembersError({
+					new AlertRecipientSelectionError({
 						message: "Some selected users are not members of this workspace",
 						unknownUserIds: unknown,
 					}),
@@ -183,8 +189,8 @@ const stubOrgMembersService = (
 
 const makeLayer = (
 	testDb: TestDb,
-	warehouseStub: WarehouseQueryServiceShape,
-	runtimeOverrides?: Partial<AlertRuntimeShape>,
+	warehouseStub: WarehouseQueryServiceApi,
+	runtimeOverrides?: Partial<AlertRuntimeApi>,
 	emailStub?: (typeof EmailService)["Service"],
 ) => {
 	const configLive = makeConfig()
@@ -210,25 +216,36 @@ const makeLayer = (
 	const emailLive = Layer.succeed(EmailService, emailStub ?? stubEmailService())
 	const orgMembersLive = Layer.succeed(OrgMembersService, stubOrgMembersService())
 	const orgChSettingsLive = OrgClickHouseSettingsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+		Layer.provide(Layer.mergeAll(envLive, databaseLive, edgeCacheLive)),
 	)
-
-	return AlertsService.layer.pipe(
+	const alertDestinationsLive = AlertDestinationsService.layer.pipe(
 		Layer.provide(
-			Layer.mergeAll(
-				envLive,
-				databaseLive,
-				queryEngineLive,
-				warehouseLive,
-				runtimeLive,
-				hazelOAuthLive,
-				emailLive,
-				orgMembersLive,
-				orgChSettingsLive,
-				investigationsLive,
-			),
+			Layer.mergeAll(envLive, databaseLive, runtimeLive, hazelOAuthLive, emailLive, orgMembersLive),
 		),
 	)
+	const alertReadModelsLive = AlertReadModelsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(databaseLive, warehouseLive)),
+	)
+	const alertRulesLive = AlertRulesService.layer.pipe(
+		Layer.provide(Layer.mergeAll(databaseLive, runtimeLive)),
+	)
+
+	const alertsLive = AlertsService.layer.pipe(
+		Layer.provide(envLive),
+		Layer.provide(databaseLive),
+		Layer.provide(queryEngineLive),
+		Layer.provide(warehouseLive),
+		Layer.provide(runtimeLive),
+		Layer.provide(hazelOAuthLive),
+		Layer.provide(emailLive),
+		Layer.provide(orgMembersLive),
+		Layer.provide(orgChSettingsLive),
+		Layer.provide(investigationsLive),
+		Layer.provide(alertDestinationsLive),
+		Layer.provide(alertReadModelsLive),
+		Layer.provide(alertRulesLive),
+	)
+	return Layer.mergeAll(alertDestinationsLive, alertReadModelsLive, alertRulesLive, alertsLive)
 }
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -239,7 +256,7 @@ const adminRoles = [asRoleName("root")]
 const memberRoles = [asRoleName("org:member")]
 
 const createWebhookDestination = (
-	alerts: AlertsServiceShape,
+	alerts: AlertsServiceApi,
 	orgId: ReturnType<typeof asOrgId>,
 	userId: ReturnType<typeof asUserId>,
 ) =>
@@ -252,7 +269,7 @@ const createWebhookDestination = (
 	})
 
 const createErrorRateRule = (
-	alerts: AlertsServiceShape,
+	alerts: AlertsServiceApi,
 	orgId: ReturnType<typeof asOrgId>,
 	userId: ReturnType<typeof asUserId>,
 	destinationId: AlertDestinationId,
@@ -278,14 +295,14 @@ const createErrorRateRule = (
 		}),
 	)
 
-const makeUuidSequence = (...values: string[]): Pick<AlertRuntimeShape, "makeUuid"> => {
+const makeUuidSequence = (...values: string[]): Pick<AlertRuntimeApi, "makeUuid"> => {
 	let index = 0
 	return {
 		makeUuid: () => values[index++] ?? `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
 	}
 }
 
-const okFetch: typeof fetch = (async () => new Response("ok", { status: 200 })) as unknown as typeof fetch
+const okFetch: typeof fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch
 
 const insertDeliveryEventRow = async (
 	db: TestDb,
@@ -351,6 +368,43 @@ const insertDeliveryEventRow = async (
 }
 
 describe("AlertsService", () => {
+	it.effect("delegates the legacy destination methods to AlertDestinationsService", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const destinations = yield* AlertDestinationsService
+			assert.strictEqual(alerts.listDestinations, destinations.listDestinations)
+			assert.strictEqual(alerts.createDestination, destinations.createDestination)
+			assert.strictEqual(alerts.updateDestination, destinations.updateDestination)
+			assert.strictEqual(alerts.deleteDestination, destinations.deleteDestination)
+			assert.strictEqual(alerts.testDestination, destinations.testDestination)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}))))
+	})
+
+	it.effect("delegates the legacy read methods to AlertReadModelsService", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const readModels = yield* AlertReadModelsService
+			assert.strictEqual(alerts.listIncidents, readModels.listIncidents)
+			assert.strictEqual(alerts.getIncident, readModels.getIncident)
+			assert.strictEqual(alerts.listRuleChecks, readModels.listRuleChecks)
+			assert.strictEqual(alerts.summarizeRuleChecks, readModels.summarizeRuleChecks)
+			assert.strictEqual(alerts.listDeliveryEvents, readModels.listDeliveryEvents)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}))))
+	})
+
+	it.effect("delegates the narrow rule methods to AlertRulesService", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const rules = yield* AlertRulesService
+			assert.strictEqual(alerts.listRules, rules.listRules)
+			assert.strictEqual(alerts.createRule, rules.createRule)
+			assert.strictEqual(alerts.deleteRule, rules.deleteRule)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}))))
+	})
+
 	it.effect("caps active alert rules per organization", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
@@ -968,8 +1022,7 @@ describe("AlertsService", () => {
 				},
 			] as ReadonlyArray<Record<string, unknown>>,
 		}
-		const failingFetch: typeof fetch = (async () =>
-			new Response("boom", { status: 500 })) as unknown as typeof fetch
+		const failingFetch: typeof fetch = (async () => new Response("boom", { status: 500 })) as typeof fetch
 
 		return Effect.gen(function* () {
 			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
@@ -1315,7 +1368,7 @@ describe("AlertsService", () => {
 		const fetchImpl = (async () => {
 			requestCount += 1
 			return new Response("ok", { status: 200 })
-		}) as unknown as typeof fetch
+		}) as typeof fetch
 
 		const stub = makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })
 		const overrides = { fetch: fetchImpl }
@@ -1510,10 +1563,111 @@ describe("AlertsService", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
+	/**
+	 * The delivery queue decides whether to re-enqueue from `error.error.retryable`,
+	 * which comes from the failure class's policy. Every delivery failure used to
+	 * be one `AlertDeliveryError` carrying `retry: "backoff"`, so a destination
+	 * whose credentials had been revoked was retried the full
+	 * `MAX_DELIVERY_ATTEMPTS` against a provider that would never accept it.
+	 * These two cases are the guard on that split.
+	 */
+	const deliveryRetryCase = (
+		label: string,
+		status: number,
+		expectRetry: boolean,
+		expectedMessage: string,
+	) =>
+		it.effect(label, () => {
+			const fixedTime = 1_710_000_400_000
+			const testDb = createTestDb(trackedDbs)
+			const respond = (async () => new Response("nope", { status })) as typeof fetch
+
+			return Effect.gen(function* () {
+				const alerts = yield* AlertsService
+				const orgId = asOrgId(`org_retry_${status}`)
+				const userId = asUserId(`user_retry_${status}`)
+				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+				const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+				const deliveryKey = `retry-${status}-key`
+
+				yield* Effect.promise(() =>
+					insertDeliveryEventRow(testDb, {
+						id: `00000000-0000-4000-8000-${String(status).padStart(12, "0")}`,
+						orgId,
+						incidentId: null,
+						ruleId: rule.id,
+						destinationId: destination.id,
+						deliveryKey,
+						eventType: "test",
+						attemptNumber: 1,
+						status: "queued",
+						scheduledAt: fixedTime - 1,
+						payloadJson: JSON.stringify({
+							eventType: "test",
+							incidentId: null,
+							incidentStatus: "resolved",
+							dedupeKey: `retry-${status}-dedupe`,
+							rule: {
+								id: rule.id,
+								name: rule.name,
+								signalType: rule.signalType,
+								severity: rule.severity,
+								groupKey: null,
+								comparator: rule.comparator,
+								threshold: rule.threshold,
+								windowMinutes: rule.windowMinutes,
+							},
+							observed: { value: 0, sampleCount: 0 },
+							linkUrl: "http://127.0.0.1:3471/alerts",
+							sentAt: new Date(fixedTime).toISOString(),
+						}),
+					}),
+				)
+
+				const tick = yield* alerts.runSchedulerTick()
+				const events = yield* alerts.listDeliveryEvents(orgId)
+
+				assert.strictEqual(tick.deliveryFailureCount, 1)
+				const firstAttempt = events.events.find(
+					(event) => event.deliveryKey === deliveryKey && event.attemptNumber === 1,
+				)
+				const retryAttempt = events.events.find(
+					(event) => event.deliveryKey === deliveryKey && event.attemptNumber === 2,
+				)
+				assert.strictEqual(firstAttempt?.status, "failed")
+				assert.include(firstAttempt?.errorMessage ?? "", expectedMessage)
+				if (expectRetry) {
+					assert.strictEqual(retryAttempt?.status, "queued", "a transient failure must retry")
+				} else {
+					assert.isUndefined(retryAttempt, "a terminal failure must not enqueue another attempt")
+				}
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+						now: Effect.succeed(fixedTime),
+						fetch: respond,
+					}),
+				),
+			)
+		})
+
+	deliveryRetryCase(
+		"does not retry a destination that rejected our credentials",
+		401,
+		false,
+		"Webhook delivery failed with 401",
+	)
+	deliveryRetryCase(
+		"retries a destination that is temporarily unavailable",
+		503,
+		true,
+		"Webhook delivery failed with 503",
+	)
+
 	it.live("times out stuck deliveries and enqueues a retry attempt", () => {
 		const fixedTime = 1_710_000_300_000
 		const testDb = createTestDb(trackedDbs)
-		const hangingFetch = (() => new Promise(() => {})) as unknown as typeof fetch
+		const hangingFetch = (() => new Promise(() => {})) as typeof fetch
 
 		return Effect.gen(function* () {
 			const alerts = yield* AlertsService
@@ -1593,7 +1747,7 @@ describe("AlertsService", () => {
 		const fetchImpl = (async () => {
 			requestCount += 1
 			return new Response("ok", { status: 200 })
-		}) as unknown as typeof fetch
+		}) as typeof fetch
 
 		return Effect.gen(function* () {
 			yield* TestClock.setTime(fixedTime)
@@ -1856,15 +2010,14 @@ describe("AlertsService", () => {
 					adminRoles,
 					{ type: "pagerduty", name: "Paging", enabled: true, integrationKey: REST_API_TOKEN },
 				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
-							fetch: fetchImpl,
-						}),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+						fetch: fetchImpl,
+					}),
+				),
+				Effect.exit,
+			)
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
@@ -1899,15 +2052,14 @@ describe("AlertsService", () => {
 					adminRoles,
 					{ type: "pagerduty", name: "Paging", enabled: true, integrationKey: VALID_PD_KEY },
 				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
-							fetch: fetchImpl,
-						}),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+						fetch: fetchImpl,
+					}),
+				),
+				Effect.exit,
+			)
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
@@ -2140,18 +2292,18 @@ describe("AlertsService", () => {
 					adminRoles,
 					{ type: "email", name: "Bad", enabled: true, memberUserIds: ["user_stranger"] },
 				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
+				),
+				Effect.exit,
+			)
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
-			assert.instanceOf(failure, AlertValidationError)
+			assert.instanceOf(failure, AlertRecipientSelectionError)
 			assert.include(failure.message, "not members")
+			assert.deepStrictEqual(failure.unknownUserIds, ["user_stranger"])
 		})
 	})
 
@@ -2583,17 +2735,14 @@ describe("AlertsService", () => {
 				const orgId = asOrgId("org_delete_guard")
 				const userId = asUserId("user_delete_guard")
 				const destination = yield* createWebhookDestination(alerts, orgId, userId)
-
 				yield* createErrorRateRule(alerts, orgId, userId, destination.id)
-
 				return yield* alerts.deleteDestination(orgId, adminRoles, destination.id)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
+				),
+				Effect.exit,
+			)
 
 			const failure = getError(exit)
 			assert.isTrue(Exit.isFailure(exit))
@@ -2622,13 +2771,12 @@ describe("AlertsService", () => {
 						url: "https://example.com/member",
 					},
 				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
+				),
+				Effect.exit,
+			)
 
 			const failure = getError(exit)
 
@@ -2851,7 +2999,7 @@ describe("AlertsService", () => {
 		}
 
 		const alertRows: ReadonlyArray<Record<string, unknown>> = [breachingRow, healthyRow]
-		const stub: WarehouseQueryServiceShape = {
+		const stub: WarehouseQueryServiceApi = {
 			...makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }),
 			sqlQuery: () => Effect.succeed(alertRows),
 			compiledQuery: (_tenant, compiled) => compiled.decodeRows(alertRows).pipe(Effect.orDie),
@@ -2905,7 +3053,7 @@ describe("AlertsService evaluation error persistence", () => {
 		failing: boolean
 		rows: ReadonlyArray<Record<string, unknown>>
 		ingested: Array<Record<string, unknown>>
-	}): WarehouseQueryServiceShape => {
+	}): WarehouseQueryServiceApi => {
 		const sqlQueryStub = () =>
 			state.failing
 				? Effect.fail(
@@ -2981,7 +3129,7 @@ describe("AlertsService evaluation error persistence", () => {
 			const errorChecks = state.ingested.filter((row) => row.Status === "error")
 			assert.lengthOf(errorChecks, 1)
 			assert.strictEqual(errorChecks[0]?.ErrorMessage, "Unknown column FooBar in traces")
-			assert.strictEqual(errorChecks[0]?.ErrorCategory, "tinybird_query")
+			assert.strictEqual(errorChecks[0]?.ErrorCategory, "warehouse_query_failed")
 			assert.strictEqual(errorChecks[0]?.GroupKey, "__total__")
 
 			const stateAfterFirstFailure = yield* Effect.promise(() =>
@@ -3259,7 +3407,7 @@ describe("AlertsService.previewRule", () => {
 		}
 
 		const seedRules = (
-			alerts: AlertsServiceShape,
+			alerts: AlertsServiceApi,
 			orgId: ReturnType<typeof asOrgId>,
 			userId: ReturnType<typeof asUserId>,
 			destinationId: AlertDestinationId,

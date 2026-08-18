@@ -17,6 +17,10 @@ import { migration_0011_session_analytics_columns } from "./0011_session_analyti
 import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
 import { migration_0013_service_map_ingest_bridge } from "./0013_service_map_ingest_bridge"
 import { migration_0014_web_events, webEventsBackfill } from "./0014_web_events"
+import {
+	migration_0015_service_overview_minutely,
+	serviceOverviewMinutelyBackfill,
+} from "./0015_service_overview_minutely"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -31,15 +35,86 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
-		expect(migrations.at(-1)).toBe(migration_0014_web_events)
-		expect(latestMigrationVersion).toBe(14)
-		// 0010 and 0014 are performance-only, so the ingest-gating version skips
-		// both and stays at 13 — nothing writes `web_events` directly, and bumping
-		// it would un-ready every BYO-CH org's ingest routing for a read-path change.
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+		expect(migrations.at(-1)).toBe(migration_0015_service_overview_minutely)
+		expect(latestMigrationVersion).toBe(15)
+		// 0010, 0014 and 0015 are performance-only, so the ingest-gating version
+		// skips all three and stays at 13 — nothing writes `web_events` or
+		// `service_overview_minutely` directly, and bumping it would un-ready every
+		// BYO-CH org's ingest routing for a read-path change.
 		expect(clickHouseSchemaVersion).toBe("13")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
+		expect(migration_0015_service_overview_minutely.requiredForIngest).toBe(false)
+	})
+
+	it("installs service_overview_minutely with a live-write MV and no POPULATE", () => {
+		const sql = migration_0015_service_overview_minutely.statements
+			.filter((stmt) => !isBackfill(stmt))
+			.join("\n")
+
+		// Mirrors service_overview_hourly's prefix, not service_operations_minutely's:
+		// the queries reading this filter on service and time, often with no
+		// environment predicate.
+		expect(sql).toContain(
+			"ORDER BY (OrgId, ServiceName, Minute, DeploymentEnv, ServiceNamespace, CommitSha)",
+		)
+		// Daily parts: a month-wide part at minute grain cannot prune a 12h window.
+		expect(sql).toContain("PARTITION BY toDate(Minute)")
+		expect(sql).toContain("TTL toDate(Minute) + INTERVAL 90 DAY")
+		// Three quantiles, matching service_overview_hourly. The two feed one UNION
+		// ALL, and a (0.5, 0.95) state here — the shape service_operations_minutely
+		// uses — would not type-check against the hourly branch.
+		expect(sql).toContain("AggregateFunction(quantilesTDigest(0.5, 0.95, 0.99), UInt64)")
+		expect(sql).toContain(
+			"CREATE MATERIALIZED VIEW IF NOT EXISTS service_overview_minutely_mv TO service_overview_minutely",
+		)
+		// Entry-point predicate identical to service_overview_spans_mv and
+		// service_overview_hourly_mv — all three tiers must agree on what a
+		// service-level span is.
+		expect(sql).toContain("WHERE SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''")
+
+		// Reads traces, NOT service_overview_minutely: cascading the hourly rollup
+		// off this table would make the backfill below double-count 30 days into
+		// service_overview_hourly, which is retained a year and cannot be rebuilt.
+		expect(sql).not.toContain("FROM service_overview_minutely")
+		expect(sql).not.toContain("POPULATE")
+	})
+
+	it("orders 0015 so the backfill and the MV never both write", () => {
+		const kinds = migration_0015_service_overview_minutely.statements.map((stmt) =>
+			isBackfill(stmt) ? "backfill" : stmt.split("\n")[0]!.trim(),
+		)
+
+		const dropIndex = kinds.findIndex((kind) => kind.startsWith("DROP VIEW"))
+		const truncateIndex = kinds.findIndex((kind) => kind.startsWith("TRUNCATE"))
+		const backfillIndex = kinds.indexOf("backfill")
+		const createMvIndex = kinds.findIndex((kind) => kind.startsWith("CREATE MATERIALIZED VIEW"))
+
+		// DROP → TRUNCATE → backfill → CREATE MV. The truncate makes a re-apply
+		// converge instead of doubling, and is only safe because the view is
+		// detached first.
+		expect(dropIndex).toBeGreaterThanOrEqual(0)
+		expect(dropIndex).toBeLessThan(truncateIndex)
+		expect(truncateIndex).toBeLessThan(backfillIndex)
+		expect(backfillIndex).toBeLessThan(createMvIndex)
+	})
+
+	it("backfills service_overview_minutely from the entry-point projection", () => {
+		// service_overview_spans is already filtered to the entry-point predicate,
+		// so the backfill matches the MV by construction rather than by a re-typed
+		// WHERE. Raw traces offers no deeper window; both are retained 30 days.
+		expect(serviceOverviewMinutelyBackfill.from).toBe("service_overview_spans")
+		expect(serviceOverviewMinutelyBackfill.tsColumn).toBe("Timestamp")
+		expect(serviceOverviewMinutelyBackfill.target).toBe("service_overview_minutely")
+		// Day-aligned chunks are coarser than minute groups, so no group straddles
+		// a chunk boundary.
+		expect(serviceOverviewMinutelyBackfill.groupBy).toBe(
+			"OrgId, Minute, ServiceName, DeploymentEnv, ServiceNamespace, CommitSha",
+		)
+		expect(serviceOverviewMinutelyBackfill.select).toContain(
+			"quantilesTDigestState(0.5, 0.95, 0.99)(Duration)",
+		)
 	})
 
 	it("installs web_events with a live-write MV and no POPULATE", () => {

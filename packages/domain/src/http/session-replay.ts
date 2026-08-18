@@ -2,7 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SessionId, TraceId, UserId } from "../primitives"
 import { TinybirdDateTime } from "../query-engine"
-import { Authorization } from "./current-tenant"
+import { Authorization, SessionAuthorization } from "./current-tenant"
 import { QueryEngineExecutionError, QueryEngineTimeoutError } from "./query-engine"
 import { warehouseHttpErrors } from "./warehouse"
 
@@ -12,8 +12,6 @@ import { warehouseHttpErrors } from "./warehouse"
 // datasources in ClickHouse. `getReplayEvents` returns the rrweb event arrays
 // inline; the API hydrates them from R2 first when the row is blob-backed, so
 // the wire shape is the same either way — no signed URLs, no client-side fetch.
-
-// --- List ---
 
 export class ListReplaysRequest extends Schema.Class<ListReplaysRequest>("ListReplaysRequest")({
 	startTime: TinybirdDateTime,
@@ -91,8 +89,6 @@ export class ListReplaysResponse extends Schema.Class<ListReplaysResponse>("List
 	data: Schema.Array(SessionReplayListItem),
 }) {}
 
-// --- Facets (filter sidebar option counts) ---
-
 export class ReplaysFacetsRequest extends Schema.Class<ReplaysFacetsRequest>("ReplaysFacetsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -132,8 +128,6 @@ export class ReplaysFacetsResponse extends Schema.Class<ReplaysFacetsResponse>("
 	durationP50: Schema.Number,
 	durationP95: Schema.Number,
 }) {}
-
-// --- Detail ---
 
 export class GetReplayRequest extends Schema.Class<GetReplayRequest>("GetReplayRequest")({
 	sessionId: SessionId,
@@ -201,8 +195,6 @@ export class GetReplayResponse extends Schema.Class<GetReplayResponse>("GetRepla
 
 // Replay chunk payloads are not served here — see the API group below.
 
-// --- Reverse correlation (trace → sessions) ---
-
 export class ReplaysForTraceRequest extends Schema.Class<ReplaysForTraceRequest>("ReplaysForTraceRequest")({
 	traceId: TraceId,
 	startTime: TinybirdDateTime,
@@ -220,8 +212,6 @@ export class ReplaysForTraceResponse extends Schema.Class<ReplaysForTraceRespons
 		),
 	},
 ) {}
-
-// --- Trace summaries (one bar per correlated trace) ---
 
 export class SessionTraceSummariesRequest extends Schema.Class<SessionTraceSummariesRequest>(
 	"SessionTraceSummariesRequest",
@@ -253,8 +243,6 @@ export class SessionTraceSummariesResponse extends Schema.Class<SessionTraceSumm
 )({
 	data: Schema.Array(SessionTraceSummary),
 }) {}
-
-// --- Session transcript (distilled events) ---
 
 export class SessionTranscriptRequest extends Schema.Class<SessionTranscriptRequest>(
 	"SessionTranscriptRequest",
@@ -307,13 +295,6 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 		}),
 	)
 	.add(
-		HttpApiEndpoint.post("facets", "/facets", {
-			payload: ReplaysFacetsRequest,
-			success: ReplaysFacetsResponse,
-			error: sessionReplayEndpointErrors,
-		}),
-	)
-	.add(
 		HttpApiEndpoint.post("getReplay", "/get", {
 			payload: GetReplayRequest,
 			success: GetReplayResponse,
@@ -333,13 +314,6 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 		}),
 	)
 	.add(
-		HttpApiEndpoint.post("traceSummaries", "/trace-summaries", {
-			payload: SessionTraceSummariesRequest,
-			success: SessionTraceSummariesResponse,
-			error: sessionReplayEndpointErrors,
-		}),
-	)
-	.add(
 		HttpApiEndpoint.post("sessionTranscript", "/transcript", {
 			payload: SessionTranscriptRequest,
 			success: SessionTranscriptResponse,
@@ -348,3 +322,29 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 	)
 	.prefix("/api/session-replays")
 	.middleware(Authorization) {}
+
+/**
+ * Session-replay helpers that exist for the dashboard and are not public API.
+ *
+ * Facet exploration and per-session trace summaries are shapes the replay UI
+ * drives — a filter sidebar's bucket counts and a timeline's span rollups — so
+ * `docs/http-api-migration.md` marks them "do not lift" to `/v2`. They live in
+ * the internal tier instead, where their shape can follow the UI.
+ */
+export class SessionReplaysInternalApiGroup extends HttpApiGroup.make("sessionReplaysInternal")
+	.add(
+		HttpApiEndpoint.post("facets", "/facets", {
+			payload: ReplaysFacetsRequest,
+			success: ReplaysFacetsResponse,
+			error: sessionReplayEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("traceSummaries", "/trace-summaries", {
+			payload: SessionTraceSummariesRequest,
+			success: SessionTraceSummariesResponse,
+			error: sessionReplayEndpointErrors,
+		}),
+	)
+	.prefix("/internal/session-replays")
+	.middleware(SessionAuthorization) {}

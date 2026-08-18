@@ -21,7 +21,7 @@ import {
 	updateIssueSelection,
 } from "@/lib/models/issue-selection"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { runMapleApiV2 } from "@/lib/collections/api-runner"
 import {
 	appendUniqueErrorIssues,
@@ -58,7 +58,7 @@ const FILTER_LABEL: Record<FilterValue, string> = {
 	cancelled: "Cancelled",
 	wontfix: "Wontfix",
 	all: "All",
-}
+} satisfies Record<FilterValue, string>
 
 const TOOLBAR_TABS = FILTER_VALUES.map((value) => ({
 	value,
@@ -85,7 +85,7 @@ const SEVERITY_FILTER_LABEL: Record<SeverityFilterValue, string> = {
 	medium: "Medium",
 	low: "Low",
 	unset: "Unset",
-}
+} satisfies Record<SeverityFilterValue, string>
 
 const searchSchema = Schema.Struct({
 	workflowState: Schema.optional(
@@ -185,13 +185,13 @@ function IssuesPage() {
 		kind: kindFilter,
 	})
 	const result = useAtomValue(
-		MapleApiV2AtomClient.query("errorIssues", "list", {
+		retainedQueryV2("errorIssues", "list", {
 			query: listQuery,
 			reactivityKeys: ["errorIssues"],
 		}),
 	)
 	const refresh = useAtomRefresh(
-		MapleApiV2AtomClient.query("errorIssues", "list", {
+		retainedQueryV2("errorIssues", "list", {
 			query: listQuery,
 			reactivityKeys: ["errorIssues"],
 		}),
@@ -409,8 +409,13 @@ function IssuesPageBody({
 		return out
 	}, [grouped, visibleGroups])
 
-	const selectedArray = useMemo(
-		() => flatIssues.filter((i) => selectedIds.has(i.id)).map((i) => i.id as ErrorIssueId),
+	// The bulk bar needs each selected issue's current state, not just its id —
+	// that is what lets it offer only the moves legal for the whole selection.
+	const selectedIssues = useMemo(
+		() =>
+			flatIssues
+				.filter((issue) => selectedIds.has(issue.id))
+				.map((issue) => ({ id: issue.id, state: issue.workflowState })),
 		[flatIssues, selectedIds],
 	)
 
@@ -541,7 +546,7 @@ function IssuesPageBody({
 							)}
 						</div>
 						<IssuesBulkBar
-							selectedIds={selectedArray}
+							selected={selectedIssues}
 							mutations={mutations}
 							onClear={clearSelection}
 						/>

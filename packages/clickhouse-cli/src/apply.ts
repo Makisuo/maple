@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 /**
  * Apply Maple's ClickHouse migrations to a target server.
  *
@@ -299,8 +300,6 @@ export async function listApplied(config: ClickHouseConfig): Promise<ReadonlyArr
 	)
 	return parseJsonEachRow<AppliedRow>(text)
 }
-
-// --- internals -------------------------------------------------------------
 
 async function ensureMigrationsTable(config: ClickHouseConfig): Promise<void> {
 	await exec(

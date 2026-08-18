@@ -1,7 +1,6 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { AnomalyIncidentId, ErrorIssueId, IsoDateTimeString, UserId } from "../primitives"
-import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 
 // Literals
 
@@ -159,113 +158,70 @@ export class AnomalyDetectorSettingsUpdateRequest extends Schema.Class<AnomalyDe
 
 // Errors
 
-export class AnomalyPersistenceError extends Schema.TaggedError<AnomalyPersistenceError>()(
+export class AnomalyPersistenceError extends HttpTaggedError<AnomalyPersistenceError>()(
 	"@maple/http/anomalies/AnomalyPersistenceError",
 	{
 		message: Schema.String,
 		cause: Schema.optionalKey(Schema.String),
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "anomalies_unavailable",
+		title: "Anomalies are temporarily unavailable",
+		message: "Anomalies are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class AnomalyForbiddenError extends Schema.TaggedError<AnomalyForbiddenError>()(
+export class AnomalyForbiddenError extends HttpTaggedError<AnomalyForbiddenError>()(
 	"@maple/http/anomalies/AnomalyForbiddenError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 403 },
+	{
+		status: 403,
+		code: "anomaly_settings_forbidden",
+		title: "Permission required",
+		retry: "never",
+		recovery: "request_access",
+		exposure: "public_message",
+	},
 ) {}
 
-export class AnomalyIncidentNotFoundError extends Schema.TaggedError<AnomalyIncidentNotFoundError>()(
+export class AnomalyIncidentNotFoundError extends HttpTaggedError<AnomalyIncidentNotFoundError>()(
 	"@maple/http/anomalies/AnomalyIncidentNotFoundError",
 	{
 		message: Schema.String,
 		incidentId: AnomalyIncidentId,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "anomaly_incident_not_found",
+		title: "Anomaly incident not found",
+		message: "No such anomaly incident.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
 
-export class AnomalyLinkedIssueNotFoundError extends Schema.TaggedError<AnomalyLinkedIssueNotFoundError>()(
+export class AnomalyLinkedIssueNotFoundError extends HttpTaggedError<AnomalyLinkedIssueNotFoundError>()(
 	"@maple/http/anomalies/AnomalyLinkedIssueNotFoundError",
 	{
 		message: Schema.String,
 		issueId: ErrorIssueId,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "error_issue_not_found",
+		title: "Error issue not found",
+		message: "No such error issue.",
+		param: "issue_id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
-
-// Query schemas
-
-const IncidentListQuery = Schema.Struct({
-	status: Schema.optional(AnomalyIncidentStatus),
-	signalType: Schema.optional(AnomalySignalType),
-	service: Schema.optional(Schema.String),
-	deploymentEnv: Schema.optional(Schema.String),
-	errorIssueId: Schema.optional(ErrorIssueId),
-	startTime: Schema.optional(IsoDateTimeString),
-	endTime: Schema.optional(IsoDateTimeString),
-	limit: Schema.optional(
-		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 500 })),
-	),
-})
-
-const IncidentTimeseriesQuery = Schema.Struct({
-	startTime: Schema.optional(IsoDateTimeString),
-	endTime: Schema.optional(IsoDateTimeString),
-})
-
-// API group
-
-export class AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
-	.add(
-		HttpApiEndpoint.get("listIncidents", "/incidents", {
-			query: IncidentListQuery,
-			success: AnomalyIncidentsListResponse,
-			error: AnomalyPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("getIncident", "/incidents/:incidentId", {
-			params: { incidentId: AnomalyIncidentId },
-			success: AnomalyIncidentDocument,
-			error: [AnomalyPersistenceError, AnomalyIncidentNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("getIncidentTimeseries", "/incidents/:incidentId/timeseries", {
-			params: { incidentId: AnomalyIncidentId },
-			query: IncidentTimeseriesQuery,
-			success: AnomalyIncidentTimeseriesResponse,
-			error: [AnomalyPersistenceError, AnomalyIncidentNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("resolveIncident", "/incidents/:incidentId/resolve", {
-			params: { incidentId: AnomalyIncidentId },
-			success: AnomalyIncidentDocument,
-			error: [AnomalyPersistenceError, AnomalyIncidentNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.put("setIncidentIssue", "/incidents/:incidentId/issue", {
-			params: { incidentId: AnomalyIncidentId },
-			payload: AnomalyIncidentLinkIssueRequest,
-			success: AnomalyIncidentDocument,
-			error: [AnomalyPersistenceError, AnomalyIncidentNotFoundError, AnomalyLinkedIssueNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("getSettings", "/settings", {
-			success: AnomalyDetectorSettingsDocument,
-			error: AnomalyPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.put("updateSettings", "/settings", {
-			payload: AnomalyDetectorSettingsUpdateRequest,
-			success: AnomalyDetectorSettingsDocument,
-			error: [AnomalyPersistenceError, AnomalyForbiddenError],
-		}),
-	)
-	.prefix("/api/anomalies")
-	.middleware(Authorization) {}

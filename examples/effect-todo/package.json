@@ -6,8 +6,9 @@
 	"type": "module",
 	"scripts": {
 		"server": "bun run --watch server/main.ts",
+		"notifier": "bun run --watch notifier/main.ts",
 		"web": "vite --config web/vite.config.ts",
-		"dev": "bun run server & bun run web",
+		"dev": "bun run server & bun run notifier & bun run web",
 		"typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json"
 	},
 	"dependencies": {

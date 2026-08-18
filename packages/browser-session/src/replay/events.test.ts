@@ -1,10 +1,11 @@
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // The capture modules install real DOM/global hooks; here we only need the
 // `emit` callback they are handed, so we can drive events through the same
-// path the browser would. Console is the hook we borrow — navigation is no
-// longer a capture module (the sink observes it, so page views are counted even
-// when replay is unsampled).
+// path the browser would. Console is the hook we borrow — navigation, errors
+// and interactions are no longer replay-only capture modules (the sink installs
+// them, so they are counted even when replay is unsampled).
 type EmitFn = (ev: { type: string; level?: string }) => void
 let emitRef: EmitFn | undefined
 
@@ -18,20 +19,16 @@ vi.mock("./capture/console", () => ({
 		emitRef = emit
 	}),
 }))
-vi.mock("./capture/interactions", () => ({
-	installInteractionCapture: () => () => {},
-}))
 vi.mock("./capture/network", () => ({ installNetworkCapture: () => () => {} }))
-vi.mock("./capture/errors", () => ({ installErrorCapture: () => () => {} }))
 
-vi.mock("../session", () => ({
+vi.mock("../session/session", () => ({
 	markActivity: vi.fn(),
 	noteNavigation: vi.fn(),
 }))
-vi.mock("./transport", () => ({ postSessionEvents: vi.fn(async () => {}) }))
+vi.mock("../platform/transport", () => ({ postSessionEvents: vi.fn(async () => {}) }))
 
 const { startEventCapture } = await import("./events")
-const { getActiveSink, resetSinkForTests } = await import("../events-sink")
+const { getActiveSink, resetSinkForTests } = await import("../events/events-sink")
 
 const CONFIG = {
 	endpoint: "https://ingest.test",

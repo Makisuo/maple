@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Schema } from "effect"
@@ -16,7 +16,10 @@ import {
 } from "@/components/anomalies/anomaly-group"
 import { AnomalyLiveIndicator } from "@/components/anomalies/anomaly-live-indicator"
 import { ListToolbar } from "@/components/common/list-toolbar"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
+import { runMapleApiV2 } from "@/lib/collections/api-runner"
+import { anomalyIncidentFromV2 } from "@/lib/services/anomalies"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { ErrorState } from "@/components/common/error-state"
@@ -24,9 +27,16 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import type { AnomalyIncidentDocument, AnomalyIncidentId } from "@maple/domain/http"
 
 const LIVE_REFRESH_INTERVAL_MS = 15_000
-const INCIDENTS_PAGE_LIMIT = 500
+// v2 lists cap at 100; further pages arrive through the explicit "Load more".
+const INCIDENTS_PAGE_LIMIT = 100
 
 type StatusTab = "open" | "resolved" | "all"
+
+interface LoadedPages {
+	readonly key: StatusTab
+	readonly rows: ReadonlyArray<AnomalyIncidentDocument>
+	readonly nextCursor: string | null
+}
 
 const TOOLBAR_TABS: ReadonlyArray<{ value: StatusTab; label: string }> = [
 	{ value: "open", label: "Open" },
@@ -61,14 +71,37 @@ function AnomaliesPage() {
 	const status: StatusTab = search.status ?? "open"
 	const live = search.live ?? status === "open"
 
-	const incidentsQueryAtom = MapleApiAtomClient.query("anomalies", "listIncidents", {
-		query: status === "all" ? { limit: INCIDENTS_PAGE_LIMIT } : { status, limit: INCIDENTS_PAGE_LIMIT },
-		reactivityKeys: ["anomalyIncidents"],
-	})
+	const listQuery = useMemo(
+		() => (status === "all" ? { limit: INCIDENTS_PAGE_LIMIT } : { status, limit: INCIDENTS_PAGE_LIMIT }),
+		[status],
+	)
+	// Memoized because `useRetainedRefreshableResultValue` updates state during
+	// render when the Result identity changes: a fresh atom per render would
+	// feed it a fresh Result every time and never converge.
+	const incidentsQueryAtom = useMemo(
+		() =>
+			retainedQueryV2("anomalies", "listIncidents", {
+				query: listQuery,
+				reactivityKeys: ["anomalyIncidents"],
+			}),
+		[listQuery],
+	)
 	// Retain the previous list across tab switches so the page never collapses
 	// back to skeletons; live refresh ticks keep the same atom and never dim.
 	const incidentsResult = useRetainedRefreshableResultValue(incidentsQueryAtom)
-	const refreshIncidents = useAtomRefresh(incidentsQueryAtom)
+	const refreshFirstPage = useAtomRefresh(incidentsQueryAtom)
+
+	// Pages loaded past the first. Keyed by the tab they were fetched for, so a
+	// tab switch discards them without an effect; a refresh clears them outright,
+	// otherwise the live tick would leave stale rows below fresh ones.
+	const [loadedPages, setLoadedPages] = useState<LoadedPages | null>(null)
+	const [loadingMore, setLoadingMore] = useState(false)
+	const pages = loadedPages?.key === status ? loadedPages : null
+
+	const refreshIncidents = useCallback(() => {
+		setLoadedPages(null)
+		refreshFirstPage()
+	}, [refreshFirstPage])
 
 	useIntervalRefresh(refreshIncidents, {
 		intervalMs: LIVE_REFRESH_INTERVAL_MS,
@@ -101,7 +134,36 @@ function AnomaliesPage() {
 		})
 	}, [navigate])
 
-	const allIncidents = Result.isSuccess(incidentsResult) ? incidentsResult.value.incidents : []
+	const firstPage = Result.isSuccess(incidentsResult) ? incidentsResult.value : undefined
+	const allIncidents = useMemo(() => {
+		const firstPageIncidents = firstPage?.data.map(anomalyIncidentFromV2) ?? []
+		if (pages === null) return firstPageIncidents
+		const byId = new Map(firstPageIncidents.map((incident) => [incident.id, incident]))
+		for (const incident of pages.rows) if (!byId.has(incident.id)) byId.set(incident.id, incident)
+		return [...byId.values()]
+	}, [firstPage, pages])
+
+	const nextCursor = pages === null ? (firstPage?.next_cursor ?? null) : pages.nextCursor
+
+	const loadMore = useCallback(async () => {
+		if (nextCursor === null || loadingMore) return
+		setLoadingMore(true)
+		try {
+			const page = await runMapleApiV2((client) =>
+				client.anomalies.listIncidents({ query: { ...listQuery, cursor: nextCursor } }),
+			)
+			const rows = page.data.map(anomalyIncidentFromV2)
+			setLoadedPages((current) => ({
+				key: status,
+				rows: [...(current?.key === status ? current.rows : []), ...rows],
+				nextCursor: page.next_cursor,
+			}))
+		} catch {
+			toastManager.add({ title: "More anomalies could not be loaded", type: "error" })
+		} finally {
+			setLoadingMore(false)
+		}
+	}, [listQuery, loadingMore, nextCursor, status])
 
 	const filtered = useMemo(
 		() =>
@@ -210,6 +272,9 @@ function AnomaliesPage() {
 				onClearFilters={clearFilters}
 				toolbar={toolbar}
 				Shell={AnomaliesShell}
+				hasMore={nextCursor !== null}
+				loadingMore={loadingMore}
+				onLoadMore={loadMore}
 			/>
 		))
 		.render()
@@ -222,6 +287,9 @@ function AnomaliesPageBody({
 	onClearFilters,
 	toolbar,
 	Shell,
+	hasMore,
+	loadingMore,
+	onLoadMore,
 }: {
 	incidents: ReadonlyArray<AnomalyIncidentDocument>
 	status: StatusTab
@@ -229,6 +297,9 @@ function AnomaliesPageBody({
 	onClearFilters: () => void
 	toolbar: React.ReactNode
 	Shell: (props: { children: React.ReactNode }) => React.ReactElement
+	hasMore: boolean
+	loadingMore: boolean
+	onLoadMore: () => void
 }) {
 	const navigate = useNavigate({ from: Route.fullPath })
 
@@ -328,6 +399,18 @@ function AnomaliesPageBody({
 								onFocus={setFocusedId}
 							/>
 						))}
+						{hasMore ? (
+							<div className="flex justify-center p-4">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={onLoadMore}
+									disabled={loadingMore}
+								>
+									{loadingMore ? "Loading…" : "Load more"}
+								</Button>
+							</div>
+						) : null}
 					</div>
 				)}
 			</div>

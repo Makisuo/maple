@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { Clock, Config, Context, Effect, Layer, Option, Schema } from "effect"
 import { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 
@@ -6,7 +7,7 @@ export { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 export class EdgeCacheIOError extends Schema.TaggedError<EdgeCacheIOError>()(
 	"@maple/cache/EdgeCacheIOError",
 	{
-		op: Schema.Literals(["get", "put"]),
+		op: Schema.Literals(["get", "put", "delete"]),
 		bucket: Schema.String,
 		key: Schema.String,
 		cause: Schema.String,
@@ -65,7 +66,7 @@ export interface EdgeCacheReadResult<A> {
 	readonly readMs: number
 }
 
-export interface EdgeCacheServiceShape {
+export interface EdgeCacheServiceApi {
 	readonly getOrCompute: <A, E, R, I = unknown>(
 		options: EdgeCacheGetOrComputeOptions<A, I>,
 		compute: Effect.Effect<A, E, R>,
@@ -182,18 +183,26 @@ const READ_BREAKER_OPEN_RATIO = 0.5
 /**
  * Outcomes required before the ratio may open the breaker, so one unlucky first
  * read on a cold bucket cannot skip the next window on a sample size of one.
+ *
+ * Two, not three: at three this breaker had **never fired in production** — zero
+ * spans with `cache.read_status = "skipped"` across 137 reads sitting at a 33.6%
+ * timeout rate. The requests that actually suffer make exactly two cache reads
+ * (measured: 46 of 46 two-read requests lost one read to the deadline, while 36
+ * of 36 one-read requests lost none), so a three-sample gate could never close in
+ * time to protect the very shape it exists for. One unlucky read still cannot
+ * open it alone.
  */
-const READ_BREAKER_MIN_SAMPLES = 3
+const READ_BREAKER_MIN_SAMPLES = 2
 
 /**
- * Build an `EdgeCacheServiceShape` against a specific backend. Exported for
+ * Build an `EdgeCacheServiceApi` against a specific backend. Exported for
  * tests so they can substitute a fake backend (e.g. a JSON-roundtripping one)
  * without going through `detectWorkersCache`.
  */
 export const makeEdgeCacheService = (
 	backend: EdgeCacheBackend,
 	readTimeoutMs = DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS,
-): EdgeCacheServiceShape => {
+): EdgeCacheServiceApi => {
 	const boundedReadTimeoutMs = Number.isFinite(readTimeoutMs)
 		? Math.max(1, Math.floor(readTimeoutMs))
 		: DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS
@@ -275,7 +284,13 @@ export const makeEdgeCacheService = (
 			const writeNowMs = yield* Clock.currentTimeMillis
 			yield* Effect.tryPromise({
 				try: () => backend.put(options.bucket, hash, stored, ttlSeconds, writeNowMs),
-				catch: (error) => error,
+				catch: (cause) =>
+					new EdgeCacheIOError({
+						op: "put",
+						bucket: options.bucket,
+						key: options.key,
+						cause: cause instanceof Error ? cause.message : String(cause),
+					}),
 			}).pipe(
 				Effect.tapError((error) =>
 					Effect.logWarning("Edge cache put failed; continuing without cache").pipe(
@@ -304,7 +319,13 @@ export const makeEdgeCacheService = (
 				? { value: undefined, timedOut: false as const }
 				: yield* Effect.tryPromise({
 						try: () => readBackend(options.bucket, hash, nowMs, timeoutMs),
-						catch: (error) => error,
+						catch: (cause) =>
+							new EdgeCacheIOError({
+								op: "get",
+								bucket: options.bucket,
+								key: options.key,
+								cause: cause instanceof Error ? cause.message : String(cause),
+							}),
 					}).pipe(
 						Effect.tapError((error) =>
 							Effect.logWarning("Edge cache get failed; treating as miss").pipe(
@@ -375,7 +396,13 @@ export const makeEdgeCacheService = (
 		const hash = yield* Effect.promise(() => sha256Hex(options.key))
 		yield* Effect.tryPromise({
 			try: () => backend.delete(options.bucket, hash),
-			catch: (error) => error,
+			catch: (cause) =>
+				new EdgeCacheIOError({
+					op: "delete",
+					bucket: options.bucket,
+					key: options.key,
+					cause: cause instanceof Error ? cause.message : String(cause),
+				}),
 		}).pipe(
 			Effect.tapError((error) =>
 				Effect.logWarning("Edge cache delete failed; entry will expire via TTL").pipe(
@@ -461,10 +488,10 @@ export const makeEdgeCacheService = (
 		rawGetDetailed,
 		rawGet,
 		rawPut,
-	} satisfies EdgeCacheServiceShape
+	} satisfies EdgeCacheServiceApi
 }
 
-export class EdgeCacheService extends Context.Service<EdgeCacheService, EdgeCacheServiceShape>()(
+export class EdgeCacheService extends Context.Service<EdgeCacheService, EdgeCacheServiceApi>()(
 	"@maple/cache/EdgeCacheService",
 ) {
 	/**

@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { createHash } from "node:crypto"
 import {
 	closeSync,

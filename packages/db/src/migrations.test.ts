@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { readdirSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"

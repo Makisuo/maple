@@ -1,24 +1,24 @@
-import type { MapleDatabaseClient } from "@maple/db/client"
+import type { MaplePgClient } from "@maple/db/client"
 import { fingerprintSql, SQL_TRACE_MAX, summarizeSql, truncateSql } from "@maple/query-engine/execution"
 import { Clock, Context, Effect, Schema } from "effect"
 import { isPostgresConnectionError, postgresErrorType, postgresSqlState } from "./postgres-errors"
 import { updateCurrentSpanName } from "./span-name"
 
-export type DatabaseClient = MapleDatabaseClient
+export type DatabaseClient = MaplePgClient
 
 export class DatabaseError extends Schema.TaggedError<DatabaseError>()("@maple/api/lib/DatabaseError", {
 	message: Schema.String,
 	cause: Schema.Unknown,
 }) {}
 
-export interface DatabaseShape {
+export interface DatabaseApi {
 	readonly execute: <T>(fn: (db: DatabaseClient) => Promise<T>) => Effect.Effect<T, DatabaseError>
 }
 
 /**
  * Callbacks handed to an `executeWithSpan` body so it can report what only it
- * knows: which statements ran, when the connection actually became usable, and
- * any transport-level attributes discovered along the way.
+ * knows: which statements ran, and any transport-level attributes discovered
+ * along the way.
  */
 export interface ExecuteHooks {
 	/**
@@ -26,14 +26,6 @@ export interface ExecuteHooks {
 	 * `db.query.text`.
 	 */
 	readonly collect: (query: string) => void
-	/**
-	 * Call exactly once, the moment the connection is usable (TCP + startup/auth
-	 * complete). Splits `db.connect_ms` from `db.query_ms`; without it the span
-	 * reports only the combined `db.duration_ms` and a stalled dial is
-	 * indistinguishable from a slow query. Bodies that do not own a dial (PGlite,
-	 * a caller-owned client) simply never call it.
-	 */
-	readonly markConnected: () => void
 	/** Merge extra attributes into the span at annotate time. */
 	readonly record: (attributes: Record<string, unknown>) => void
 }
@@ -46,6 +38,34 @@ export const toDatabaseError = (cause: unknown): DatabaseError => {
 		cause,
 	})
 }
+
+/** Shared by both entry points below so the two can never describe different origins. */
+const DB_SPAN_OPTIONS = {
+	kind: "client",
+	attributes: {
+		"db.system.name": "postgresql",
+		"peer.service": "planetscale-postgres",
+	},
+} as const
+
+/**
+ * A `Database.execute` span for a call refused before any statement could run.
+ *
+ * The refusal is decided in Effect, so it fails in Effect — there is no promise
+ * to throw out of. It still gets a span: a call that reached `Database.execute`
+ * and was turned away is exactly the thing an operator needs to see, and a
+ * silent `Effect.fail` would leave the trace looking as though it never
+ * happened. `db.query.*` is absent on purpose — there is no statement.
+ */
+export const failExecuteWithSpan = Effect.fn(
+	"Database.execute",
+	DB_SPAN_OPTIONS,
+)(function* (error: DatabaseError, extraAttributes?: Record<string, unknown>) {
+	if (extraAttributes) {
+		yield* Effect.annotateCurrentSpan(extraAttributes)
+	}
+	return yield* Effect.fail(error)
+})
 
 /**
  * Wraps one Database.execute call in a Client-kind span per Maple's telemetry
@@ -65,30 +85,23 @@ export const toDatabaseError = (cause: unknown): DatabaseError => {
  * for the same origin database, so the two paths don't produce divergent
  * service-map targets (MAP-01 in the maple-audit skill).
  *
- * Two clocks, deliberately. `db.duration_ms` stays on `Clock.currentTimeMillis`
- * because dashboards read it and `TestClock` drives it in unit tests. The
- * connect/query split needs real elapsed time, so it reads `Date.now()`. On
- * Workers that clock is frozen between I/O operations, but the dial and the
- * query are separate I/O, so it advances at each boundary and the split is
- * observable. What it cannot see is CPU time — if `db.connect_ms + db.query_ms`
- * falls materially short of the span's own wall duration, the residue is
- * scheduler/CPU delay rather than the socket.
+ * There is no connect/query split. postgres.js connects on the first statement,
+ * so there is no separate connect phase to time — the split previously came from
+ * a `select 1` probe that cost a round trip on every request purely to produce
+ * it. What that split was used to infer, `error.type` now states outright: a
+ * `CONNECT_TIMEOUT` and a constraint violation are different classes, not
+ * different durations.
  */
-export const executeWithSpan = Effect.fn("Database.execute", {
-	kind: "client",
-	attributes: {
-		"db.system.name": "postgresql",
-		"peer.service": "planetscale-postgres",
-	},
-})(function* <T>(run: (hooks: ExecuteHooks) => Promise<T>, extraAttributes?: Record<string, unknown>) {
+export const executeWithSpan = Effect.fn(
+	"Database.execute",
+	DB_SPAN_OPTIONS,
+)(function* <T>(run: (hooks: ExecuteHooks) => Promise<T>, extraAttributes?: Record<string, unknown>) {
 	if (extraAttributes) {
 		yield* Effect.annotateCurrentSpan(extraAttributes)
 	}
 	const statements: Array<string> = []
 	const recorded: Record<string, unknown> = {}
 	const startedMs = yield* Clock.currentTimeMillis
-	const wallStartedMs = yield* Effect.sync(() => Date.now())
-	let connectedAtMs: number | undefined
 	// Shared by the success and error paths — tapError runs inside the span,
 	// so a failing statement still carries its SQL and timing.
 	const annotate = Effect.gen(function* () {
@@ -97,7 +110,6 @@ export const executeWithSpan = Effect.fn("Database.execute", {
 		// exactly the input the warehouse would derive a shape label from, so the
 		// emitted summary can never disagree with the fallback derivation.
 		const { operation, collection, summary } = summarizeSql(sqlText)
-		const wallNowMs = yield* Effect.sync(() => Date.now())
 		yield* Effect.annotateCurrentSpan({
 			...recorded,
 			"db.query.text": truncateSql(sqlText, SQL_TRACE_MAX),
@@ -106,12 +118,6 @@ export const executeWithSpan = Effect.fn("Database.execute", {
 			"db.query.fingerprint": fingerprintSql(sqlText),
 			"db.statement_count": statements.length,
 			"db.duration_ms": (yield* Clock.currentTimeMillis) - startedMs,
-			// A dial that never completed reports the time it burned before giving
-			// up and omits `db.query_ms` — a tail made of `completed: false` spans
-			// is a different bug from one made of completed-but-slow dials.
-			"db.connect.completed": connectedAtMs !== undefined,
-			"db.connect_ms": (connectedAtMs ?? wallNowMs) - wallStartedMs,
-			...(connectedAtMs === undefined ? {} : { "db.query_ms": wallNowMs - connectedAtMs }),
 		})
 		if (summary !== "") {
 			yield* Effect.annotateCurrentSpan("db.query.summary", summary)
@@ -145,11 +151,6 @@ export const executeWithSpan = Effect.fn("Database.execute", {
 		try: () =>
 			run({
 				collect: (query) => statements.push(query),
-				// First call wins, so a body that marks defensively can't move the
-				// boundary once the query is already running.
-				markConnected: () => {
-					connectedAtMs ??= Date.now()
-				},
 				record: (attributes) => Object.assign(recorded, attributes),
 			}),
 		catch: toDatabaseError,
@@ -167,4 +168,4 @@ export const executeWithSpan = Effect.fn("Database.execute", {
 	return result
 })
 
-export class Database extends Context.Service<Database, DatabaseShape>()("@maple/api/services/Database") {}
+export class Database extends Context.Service<Database, DatabaseApi>()("@maple/api/services/Database") {}

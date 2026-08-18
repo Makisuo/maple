@@ -21,7 +21,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { formatNumber } from "@maple/ui/lib/format"
 
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 import { investigationOriginLabel } from "./investigation-status"
 
 export function InvestigationMeta({ investigation }: { investigation: V2Investigation }) {
@@ -126,7 +126,7 @@ function Escalation({
 	issueId: NonNullable<Extract<V2Investigation["subject"], { type: "incident" }>["issue_id"]>
 }) {
 	const result = useAtomValue(
-		MapleApiAtomClient.query("errors", "listIssueEscalations", {
+		retainedQuery("errors", "listIssueEscalations", {
 			params: { issueId },
 			reactivityKeys: [`errorIssue:${issueId}:escalations`],
 		}),
@@ -166,7 +166,7 @@ const ESCALATION_LABEL: Record<IssueEscalationAttemptDocument["status"], string>
 	sent: "Sent",
 	skipped: "Skipped",
 	failed: "Failed",
-}
+} satisfies Record<IssueEscalationAttemptDocument["status"], string>
 
 /**
  * Snapshot references are app-relative paths written by the API, so they route

@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import {
 	ApiKeyId,
+	IntegrationsConfigurationError,
 	IntegrationsForbiddenError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
@@ -14,7 +15,7 @@ import {
 import { slackWorkspaces, type SlackWorkspaceRow } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
 import { and, desc, eq, isNotNull, isNull, ne, or } from "drizzle-orm"
-import { Array as Arr, Clock, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Array as Arr, Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
 	decryptAes256Gcm,
@@ -167,20 +168,18 @@ export const missingBotScopes = (grantedScope: string | null): ReadonlyArray<str
  * `DatabaseError` wrapping the failed `execute`, where `completeInstall`
  * branches on it — it never leaves `completeInstall`.
  */
-class SlackCrossOrgConflict extends Data.TaggedError("SlackCrossOrgConflict")<{
-	readonly teamId: string
-	readonly orgId: string
-}> {
-	override get message(): string {
-		return `Slack team ${this.teamId} is already connected to org ${this.orgId}`
-	}
-}
+class SlackCrossOrgConflict extends Schema.TaggedError<SlackCrossOrgConflict>()(
+	"@maple/api/integrations/SlackCrossOrgConflict",
+	{
+		teamId: Schema.String,
+		orgId: OrgId,
+		message: Schema.String,
+	},
+) {}
 
 const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
 const decodeUserId = Schema.decodeUnknownEffect(UserId)
-
-// --- Slack API response shapes ---------------------------------------------
 
 const SlackOAuthAccessSchema = Schema.Struct({
 	ok: Schema.Boolean,
@@ -259,8 +258,6 @@ const SlackConversationsListSchema = Schema.Struct({
 })
 const decodeConversationsList = Schema.decodeUnknownEffect(SlackConversationsListSchema)
 
-// --- Public types -----------------------------------------------------------
-
 export interface SlackInstallStatus {
 	readonly installed: boolean
 	readonly teamId: string | null
@@ -296,20 +293,22 @@ export interface SlackChannelList {
 	readonly truncated: boolean
 }
 
-// --- Service ----------------------------------------------------------------
-
-export interface SlackIntegrationServiceShape {
+export interface SlackIntegrationServiceApi {
 	readonly startInstall: (
 		orgId: OrgId,
 		userId: UserId,
 		callbackUrl: string,
-	) => Effect.Effect<{ readonly url: string }, IntegrationsValidationError | IntegrationsPersistenceError>
+	) => Effect.Effect<
+		{ readonly url: string },
+		IntegrationsConfigurationError | IntegrationsPersistenceError
+	>
 	readonly completeInstall: (
 		code: string,
 		state: string,
 	) => Effect.Effect<
 		{ readonly orgId: OrgId; readonly teamName: string | null; readonly updated: boolean },
 		| IntegrationsValidationError
+		| IntegrationsConfigurationError
 		| IntegrationsForbiddenError
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
@@ -359,8 +358,8 @@ export interface SlackIntegrationServiceShape {
 // options) so the `SlackIntegrationService.of` in its return does not make the
 // class's base expression circular.
 const make: Effect.Effect<
-	SlackIntegrationServiceShape,
-	IntegrationsValidationError,
+	SlackIntegrationServiceApi,
+	IntegrationsConfigurationError,
 	Database | Env | ApiKeysService | OAuthStateRepository | HttpClient.HttpClient
 > = Effect.gen(function* () {
 	const database = yield* Database
@@ -372,7 +371,7 @@ const make: Effect.Effect<
 	const encryptionKey = yield* parseBase64Aes256GcmKey(
 		Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 		(message) =>
-			new IntegrationsValidationError({
+			new IntegrationsConfigurationError({
 				message:
 					message === "Expected a non-empty base64 encryption key"
 						? "MAPLE_INGEST_KEY_ENCRYPTION_KEY is required"
@@ -448,7 +447,7 @@ const make: Effect.Effect<
 		})
 		if (!clientId || !clientSecret) {
 			return yield* Effect.fail(
-				new IntegrationsValidationError({
+				new IntegrationsConfigurationError({
 					message: "Slack integration is not configured (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET)",
 				}),
 			)
@@ -653,7 +652,15 @@ const make: Effect.Effect<
 		const priorKeyLive = Option.isSome(reusableKeyId)
 			? yield* apiKeys.get(orgId, reusableKeyId.value).pipe(
 					Effect.map((key) => !key.revoked && (key.expiresAt === null || key.expiresAt > now)),
-					Effect.catch(() => Effect.succeed(false)),
+					Effect.catchTags({
+						"@maple/http/errors/ApiKeyNotFoundError": () => Effect.succeed(false),
+						"@maple/http/errors/ApiKeyPersistenceError": (error) =>
+							Effect.fail(
+								new IntegrationsPersistenceError({
+									message: `Failed to validate the existing Slack API key: ${error.message}`,
+								}),
+							),
+					}),
 				)
 			: false
 		const reusedKey = priorKeyLive ? reusableSecret : undefined
@@ -782,7 +789,13 @@ const make: Effect.Effect<
 					// Zero rows means the same-team conflict hit an active row owned by a
 					// different org (the setWhere blocked it) — abort so revoke-others
 					// rolls back too.
-					if (upserted.length === 0) throw new SlackCrossOrgConflict({ teamId, orgId })
+					if (upserted.length === 0) {
+						throw new SlackCrossOrgConflict({
+							teamId,
+							orgId,
+							message: `Slack team ${teamId} is already connected to org ${orgId}`,
+						})
+					}
 
 					return { revokedOtherKeyIds: revokedOthers.map((r) => r.apiKeyId) }
 				}),
@@ -943,7 +956,7 @@ const make: Effect.Effect<
 							apiKeySecretTag: null,
 							...(revoked
 								? { botTokenCiphertext: null, botTokenIv: null, botTokenTag: null }
-								: {}),
+								: undefined),
 						})
 						.where(
 							and(
@@ -1341,7 +1354,7 @@ const make: Effect.Effect<
 
 export class SlackIntegrationService extends Context.Service<
 	SlackIntegrationService,
-	SlackIntegrationServiceShape
+	SlackIntegrationServiceApi
 >()("@maple/api/services/SlackIntegrationService", { make }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 /**
  * The canvas is only useful if you can click it, and for one release you could not.
  *
@@ -31,6 +32,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 import { ProvenanceCanvas } from "./provenance-canvas"
 
+// SAFETY: This fixture mirrors the decoded investigation payload and uses fixed test-only identifiers.
 const investigation = {
 	id: "inv_YofPTrK9782DWwcnXhpcCw",
 	status: "diagnosed",
@@ -93,6 +95,7 @@ const renderCanvas = (onOpenAction = vi.fn(), subject: V2Investigation = investi
 }
 
 /** Mid-run: a fan in flight, no report, so both ghost columns are up. */
+// SAFETY: This fixture starts from a decoded investigation and overrides fields with valid variants.
 const running = {
 	...investigation,
 	status: "investigating",

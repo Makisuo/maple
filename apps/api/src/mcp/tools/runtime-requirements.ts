@@ -1,5 +1,11 @@
 import type { AlertsService } from "@/services/alerts/AlertsService"
+import type { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
+import type { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import type { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import type { ErrorActorsService } from "@/services/errors/ErrorActorsService"
+import type { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
+import type { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
+import type { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import type { ErrorsService } from "@/services/errors/ErrorsService"
 import type { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import type { VcsSourceService } from "@/services/integrations/vcs/VcsSourceService"
@@ -15,7 +21,13 @@ import type { CurrentMcpTenant } from "../lib/query-warehouse"
  */
 export type McpToolRuntimeRequirements =
 	| AlertsService
+	| AlertReadModelsService
+	| AlertRulesService
 	| DashboardPersistenceService
+	| ErrorActorsService
+	| ErrorIssueReadModelsService
+	| ErrorIssueWorkflowService
+	| ErrorPolicyService
 	| ErrorsService
 	| QueryEngineService
 	| RecommendationIssueService

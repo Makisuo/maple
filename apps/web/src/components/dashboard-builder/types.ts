@@ -1,12 +1,8 @@
-// Dashboard Type System
-//
-// The widget shape is owned by the Effect schemas in @maple/domain. The types
-// below derive from those schemas so the web client cannot drift from the HTTP
-// boundary. Only web-only concerns (data-source endpoint registry keys, render
-// state) are defined here.
+// Widget shapes derive from @maple/domain; only web-only registry and render state lives here.
 
 import type {
 	DashboardRefreshIntervalSeconds,
+	DashboardSectionSchema,
 	DashboardVariableSchema,
 	DashboardWidgetSchema,
 	WidgetDataSourceSchema,
@@ -14,23 +10,30 @@ import type {
 	WidgetLayoutSchema,
 	WidgetVisualization,
 } from "@maple/domain/http"
+import { WIDGET_UNIT_TOKENS } from "@maple/domain/http"
 
 // The domain schemas decode to deeply-readonly types; web widgets are mutable
 // React/builder state, so the derived types are unwrapped to mutable form.
+//
+// `dataSource` is the one exception, wherever it appears (a widget's own, and
+// the one `display.sparkline` embeds). A data source is always replaced
+// wholesale, never edited field-by-field, so it stays readonly — which is what
+// lets the constructors in `@maple/widgets/dashboard` be assigned straight into
+// these types instead of every call site fighting a variance mismatch.
 type DeepMutable<T> =
 	T extends ReadonlyArray<infer U>
 		? Array<DeepMutable<U>>
 		: T extends object
-			? { -readonly [K in keyof T]: DeepMutable<T[K]> }
+			? { -readonly [K in keyof T]: K extends "dataSource" ? T[K] : DeepMutable<T[K]> }
 			: T
 
-// --- Time Range ---
-
+// Deliberately NOT `@maple/query-model`'s `TimeRange`, which brands its ISO
+// strings. Every producer in the UI (the time-range picker, the builder form)
+// deals in plain strings; branding happens once, at the store's document
+// boundary — the same reason `DashboardWidget["timeRange"]` is re-typed below.
 export type TimeRange =
 	| { type: "relative"; value: string }
 	| { type: "absolute"; startTime: string; endTime: string }
-
-// --- Data Source Endpoints ---
 
 export type DataSourceEndpoint =
 	| "service_usage"
@@ -59,37 +62,42 @@ export type DataSourceEndpoint =
 	| "raw_sql_chart"
 	| "markdown_static"
 
-// --- Widget Data Source ---
+// A straight alias of the schema type, as of v3.
+//
+// This used to be `Omit<..., "endpoint"> & { endpoint: DataSourceEndpoint }`,
+// which bundled two unrelated jobs: keeping `serverFunctionMap` statically total,
+// and rejecting a typo'd endpoint at the widget-definition call site. Neither
+// survives contact with a discriminated union — `Omit` over a union collapses to
+// the keys every arm shares, so the result was a type that demanded `endpoint`
+// from arms that do not have one.
+//
+// Both jobs now live where they belong: `DataSourceEndpoint` below is its own
+// union and still keys the registry exhaustively, and the typo check moved to
+// `makeRouteDataSource`'s type parameter in `@maple/widgets/dashboard`.
+//
+// Still deliberately NOT `DeepMutable`, unlike the display/layout aliases below.
+// A data source is replaced wholesale — the builder never edits one field of it
+// in place — and keeping it readonly is what lets the constructors in
+// `@maple/widgets/dashboard` be assigned here directly, instead of every call
+// site fighting a variance mismatch. `DeepMutable` over a union would also strip
+// the readonly modifiers that make the arms discriminate cleanly.
+export type WidgetDataSource = typeof WidgetDataSourceSchema.Type
 
-// `endpoint` is narrowed to the registry key union so the data-source registry
-// stays statically indexable; everything else comes straight from the schema.
-export type WidgetDataSource = Omit<DeepMutable<typeof WidgetDataSourceSchema.Type>, "endpoint"> & {
-	endpoint: DataSourceEndpoint
-}
-
-// --- Widget Display ---
-
-export type ValueUnit =
-	| "none"
-	| "number"
-	| "percent"
-	| "percent_100"
-	| "duration_ms"
-	| "duration_us"
-	| "duration_s"
-	| "duration_ns"
-	| "bytes"
-	| "requests_per_sec"
-	| "short"
-	| (string & {})
+/**
+ * A `display.unit` token.
+ *
+ * Derived from `WIDGET_UNITS` rather than retyped, so the web picker, the MCP
+ * schema doc and the MCP write-path validator all offer one vocabulary. The
+ * `(string & {})` arm stays: the stored schema is an open string on purpose
+ * (closing it would make a legacy widget carrying `"GB"` fail to decode and lock
+ * its dashboard out of editing), so a value outside the catalog is
+ * representable — it just renders as a plain number.
+ */
+export type ValueUnit = (typeof WIDGET_UNIT_TOKENS)[number] | (string & {})
 
 export type WidgetDisplayConfig = DeepMutable<typeof WidgetDisplayConfigSchema.Type>
 
-// --- Widget Layout ---
-
 export type WidgetLayout = DeepMutable<typeof WidgetLayoutSchema.Type>
-
-// --- Visualization ---
 
 /**
  * The persisted `visualization` values this build knows how to render. Derived
@@ -115,8 +123,6 @@ export type WidgetDataState =
 	| { status: "error"; title?: string; message?: string; kind?: WidgetErrorKind }
 	| { status: "ready"; data: unknown }
 
-// --- Dashboard Widget ---
-
 // `timeRange` is re-typed for the same reason `Dashboard["timeRange"]` is: the
 // schema brands its ISO strings, and every producer in the UI (the time-range
 // picker, the builder form) deals in plain strings. Branding happens once, at
@@ -130,11 +136,10 @@ export type DashboardWidget = Omit<
 	timeRange?: TimeRange
 }
 
-// --- Dashboard Variables ---
-
 export type DashboardVariable = DeepMutable<typeof DashboardVariableSchema.Type>
 
-// --- Dashboard ---
+export type DashboardSection = DeepMutable<typeof DashboardSectionSchema.Type>
+export type DashboardSectionTab = DashboardSection["tabs"][number]
 
 export interface Dashboard {
 	id: string
@@ -143,6 +148,11 @@ export interface Dashboard {
 	tags?: string[]
 	timeRange: TimeRange
 	widgets: DashboardWidget[]
+	/**
+	 * Collapsible widget groups. Absent means one flat canvas — every widget sits
+	 * on the root grid, which is exactly how every pre-sections dashboard reads.
+	 */
+	sections?: DashboardSection[]
 	variables?: DashboardVariable[]
 	/** Auto-refresh cadence in seconds. Absent or `0` means off. */
 	refreshIntervalSeconds?: DashboardRefreshIntervalSeconds

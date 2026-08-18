@@ -5,6 +5,7 @@ import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
+import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
 
 /**
@@ -74,7 +75,7 @@ const WireApiKeyWithSecret = Schema.Struct({
 const decodeWireApiKeyWithSecret = Schema.decodeUnknownEffect(WireApiKeyWithSecret)
 
 const createBody = (props: ApiKeyProps): Record<string, unknown> => {
-	const body: Record<string, unknown> = { name: props.name }
+	const body: Record<string, unknown> = { name: props.name } satisfies Record<string, unknown>
 	if (props.description !== undefined) body.description = props.description
 	if (props.scopes !== undefined) body.scopes = props.scopes
 	if (props.kind !== undefined) body.kind = props.kind
@@ -110,32 +111,33 @@ export const ApiKeyProvider = () =>
 					return undefined
 				}),
 				reconcile: Effect.fn(function* ({ news, olds, output }) {
-					// Observe — confirm the key still exists and is not revoked.
 					let observed: Schema.Schema.Type<typeof WireApiKey> | undefined
 					if (output?.keyId) {
 						const fetched = yield* api
 							.get(`/v2/api_keys/${output.keyId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag(MapleErrorTags.apiKeyNotFound, () =>
+									Effect.succeed(undefined),
+								),
+							)
 						if (fetched !== undefined) {
 							const wire = yield* decodeWireApiKey(fetched)
 							if (!wire.revoked) observed = wire
 						}
 					}
 
-					// Ensure — create if missing/revoked. The secret is returned exactly
-					// once; it lives in Alchemy state from here on.
+					// The secret is returned once, then retained in Alchemy state.
 					if (observed === undefined || output === undefined) {
 						const created = yield* api.post("/v2/api_keys", createBody(news))
 						return fromSecretResponse(yield* decodeWireApiKeyWithSecret(created))
 					}
 
-					// Roll — `rotate` bumped: replace the secret in place.
 					if (olds !== undefined && olds.rotate !== news.rotate) {
 						const rolled = yield* api.post(`/v2/api_keys/${observed.id}/roll`)
 						return fromSecretResponse(yield* decodeWireApiKeyWithSecret(rolled))
 					}
 
-					// Steady state — preserve the stored secret (GET never returns it).
+					// Preserve the stored secret because GET never returns it.
 					return {
 						keyId: observed.id,
 						name: observed.name,
@@ -146,13 +148,13 @@ export const ApiKeyProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/api_keys/${output.keyId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag(MapleErrorTags.apiKeyNotFound, () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ output }) {
 					if (!output?.keyId) return undefined
 					const fetched = yield* api
 						.get(`/v2/api_keys/${output.keyId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+						.pipe(Effect.catchTag(MapleErrorTags.apiKeyNotFound, () => Effect.succeed(undefined)))
 					if (fetched === undefined) return undefined
 					const wire = yield* decodeWireApiKey(fetched)
 					if (wire.revoked) return undefined

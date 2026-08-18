@@ -67,7 +67,7 @@ describe("READ_ONLY_RULESET", () => {
 	})
 
 	it("never asks — a sub-agent turn has no way to surface an approval card", () => {
-		// Approval ends the *outer* turn and is applied by `POST /api/chat/apply`; a nested turn has
+		// Approval ends the *outer* turn and is applied by `POST /internal/chat/apply`; a nested turn has
 		// no such exit, so an `ask` in a sub-agent ruleset is a configuration error.
 		for (const definition of mapleToolCatalog) {
 			expect(evaluatePermission(READ_ONLY_RULESET, definition.name)).not.toBe("ask")

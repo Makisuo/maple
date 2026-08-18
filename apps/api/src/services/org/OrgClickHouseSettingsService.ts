@@ -1,3 +1,5 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import {
 	IsoDateTimeString,
 	OrgClickHouseApplySchemaStarted,
@@ -9,6 +11,7 @@ import {
 	OrgClickHouseSettingsForbiddenError,
 	OrgClickHouseSettingsPersistenceError,
 	OrgClickHouseSettingsResponse,
+	OrgClickHouseSettingsStoredConfigInvalidError,
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
 	OrgClickHouseSettingsValidationError,
@@ -27,6 +30,7 @@ import {
 	type DesiredTable,
 	type TableDiffEntry,
 } from "@maple/domain/clickhouse"
+import { EdgeCacheService } from "@maple/cache"
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
 import { eq, inArray } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
@@ -42,7 +46,6 @@ import {
 	Ref,
 	Schedule,
 	Schema,
-	Scope,
 } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
@@ -53,6 +56,7 @@ import {
 } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
+import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { dateToMs } from "@/platform/time"
 import { validateExternalUrl } from "@/http/url-validator"
 
@@ -104,12 +108,13 @@ type CachedSettingsRow = Pick<
 //                         that no background refresh ever completed)
 //
 // The SOFT TTL is what bounds staleness. Every write through this service busts
-// the memo, but only in the isolate that served the write — other isolates
-// converge by re-reading at the soft TTL. That degree of staleness is safe
-// because the warehouse executor self-heals on `WarehouseAuthError`: it calls
-// `invalidateRuntimeConfig` and retries once, so a credential rotation costs the
-// first request one extra round-trip instead of costing the org every request
-// until the entry ages out.
+// the memo AND the shared edge-cache entry, but the memo only in the isolate
+// that served the write — other isolates converge by re-reading at the soft TTL
+// (which now hits the shared entry, not Postgres). That degree of staleness is
+// safe because the warehouse executor self-heals on `WarehouseAuthError`: it
+// calls `invalidateRuntimeConfig` and retries once, so a credential rotation
+// costs the first request one extra round-trip instead of costing the org every
+// request until the entry ages out.
 //
 // The HARD ceiling is not a staleness bound — it is an isolate-lifetime backstop.
 // A background refresh is best-effort: it is forked into the triggering request's
@@ -122,12 +127,55 @@ type CachedSettingsRow = Pick<
 // the rest of the fan-out queued behind it.
 const ORG_CH_CONFIG_MEMO_TTL_MS = 300_000
 const ORG_CH_CONFIG_MEMO_HARD_MS = 21_600_000
+
+/**
+ * Shared tier between the in-isolate memo and Postgres, on the Workers Cache
+ * API. This is the tier that keeps queries off the database; the memo in front
+ * of it only saves the ~10ms read.
+ *
+ * Six hours here, five minutes on the memo, and the asymmetry is the point.
+ * Lengthening the MEMO would not avoid a single database read — past its soft
+ * TTL the refresh lands on this entry, not Postgres — it would only widen the
+ * window in which an isolate that missed a write keeps serving the old value,
+ * since a write can evict this shared entry for everyone but can only evict the
+ * memo of the isolate that served it. So the long TTL belongs on the tier that
+ * can be invalidated globally, and the short one on the tier that cannot.
+ *
+ * Holds the ENCRYPTED projection, exactly as the memo does — see
+ * `CachedChSettings`. That property matters more here than in an isolate-local
+ * map, so the envelope must never be flattened into plaintext.
+ */
+export const ORG_CH_CONFIG_CACHE_BUCKET = "org-ch-config"
+const ORG_CH_CONFIG_CACHE_TTL_SECONDS = 21_600
 interface RuntimeConfigMemoEntry {
 	readonly value: CachedChSettings | null
 	readonly freshUntil: number
 	readonly hardUntil: number
 }
 const runtimeConfigMemo = new Map<string, RuntimeConfigMemoEntry>()
+
+/**
+ * Recent failures of the blocking read, so one unreachable origin is not
+ * re-discovered by every caller.
+ *
+ * Only successes were ever memoized, which meant a failing Postgres cost every
+ * branch of an in-request fan-out its own full dial budget — the 22-per-trace
+ * shape described below, at ~10s each. Giving each request a single socket did
+ * not help: that reduced how many dials a HEALTHY request makes, not how many a
+ * failing one retries.
+ *
+ * Held for seconds, not the success TTL. The cost of being wrong is bounded and
+ * symmetric: an org whose database recovers within the window waits it out, and
+ * in exchange a degraded origin stops being hammered by callers that would each
+ * spend 10s failing. Failing fast also returns outbound connection slots, which
+ * is what lets the isolate recover at all.
+ */
+const ORG_CH_CONFIG_FAILURE_TTL_MS = 2_000
+interface RuntimeConfigFailureEntry {
+	readonly error: OrgClickHouseSettingsPersistenceError
+	readonly atMs: number
+}
+const runtimeConfigFailures = new Map<string, RuntimeConfigFailureEntry>()
 
 // Dedup marker for in-flight background refreshes, so N concurrent widget
 // requests that all find the same stale entry fork ONE Postgres read rather
@@ -163,6 +211,9 @@ const REFRESH_MARKER_STALE_MS = 10_000
 export const invalidateOrgRuntimeConfigMemo = (orgId: string): void => {
 	runtimeConfigMemo.delete(orgId)
 	refreshInFlight.delete(orgId)
+	// Third map, same rule: a stale failure must not outlive an explicit
+	// invalidation and turn a fresh write into a spurious read error.
+	runtimeConfigFailures.delete(orgId)
 }
 
 /**
@@ -183,6 +234,21 @@ const CachedChSettings = Schema.Struct({
 })
 type CachedChSettings = typeof CachedChSettings.Type
 
+/**
+ * What actually goes into the edge cache.
+ *
+ * Deliberately an envelope rather than a bare `CachedChSettings | null`.
+ * `getOrCompute` treats `read.value !== undefined` as a hit, so a stored `null`
+ * would work only for as long as the backend keeps distinguishing "no entry"
+ * from "entry holding null" through a JSON round-trip. Managed orgs — the
+ * common case — are exactly the ones that cache `null`, so if that distinction
+ * ever slipped, the majority of orgs would silently never cache and the tier
+ * would look like it was working while doing nothing.
+ */
+const CachedChSettingsEnvelope = Schema.Struct({
+	settings: Schema.NullOr(CachedChSettings),
+})
+
 const toCachedChSettings = (row: CachedSettingsRow): CachedChSettings => ({
 	schemaVersion: row.schemaVersion,
 	chUrl: row.chUrl,
@@ -197,7 +263,7 @@ const ROOT_ROLE = Schema.decodeSync(RoleName)("root")
 const ORG_ADMIN_ROLE = Schema.decodeSync(RoleName)("org:admin")
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 
-export interface OrgClickHouseSettingsServiceShape {
+export interface OrgClickHouseSettingsServiceApi {
 	readonly get: (
 		orgId: OrgId,
 		roles: ReadonlyArray<RoleName>,
@@ -261,7 +327,7 @@ export interface OrgClickHouseSettingsServiceShape {
 		Option.Option<RuntimeBackendConfig>,
 		| OrgClickHouseSettingsPersistenceError
 		| OrgClickHouseSettingsEncryptionError
-		| OrgClickHouseSettingsValidationError
+		| OrgClickHouseSettingsStoredConfigInvalidError
 	>
 	/**
 	 * Warm the runtime-config memo for many orgs in ONE Postgres round-trip.
@@ -556,8 +622,6 @@ const decodeStatus = (raw: string | null | undefined): "connected" | "error" | n
 	return null
 }
 
-// --- Desired-schema parsing --------------------------------------------------
-//
 // We parse the bundled snapshot statements from the static migration snapshot.
 // Parsing is cheap, but the snapshot is also static across the process
 // lifetime so the service memoizes the result in a `Ref` (created in `make`)
@@ -587,8 +651,6 @@ const parseDesiredTables = (): ReadonlyArray<DesiredTable> => {
 	return out
 }
 
-// --- ClickHouse HTTP exec helpers --------------------------------------------
-
 export interface ClickHouseExecConfig {
 	readonly url: string
 	readonly user: string
@@ -601,7 +663,7 @@ const buildClickHouseHeaders = (config: ClickHouseExecConfig): Record<string, st
 		"Content-Type": "text/plain",
 		"X-ClickHouse-User": config.user,
 		"X-ClickHouse-Database": config.database,
-	}
+	} satisfies Record<string, string>
 	if (config.password.length > 0) {
 		headers["X-ClickHouse-Key"] = config.password
 	}
@@ -719,9 +781,8 @@ const mapStatusToError = (
 	)
 }
 
-export const execClickHouse = (config: ClickHouseExecConfig, sql: string) =>
+const execClickHouseWithClient = (client: HttpClient.HttpClient, config: ClickHouseExecConfig, sql: string) =>
 	Effect.gen(function* () {
-		const client = yield* HttpClient.HttpClient
 		const request = HttpClientRequest.post(buildClickHouseUrl(config), {
 			headers: buildClickHouseHeaders(config),
 		}).pipe(HttpClientRequest.bodyText(sql))
@@ -770,8 +831,10 @@ export const execClickHouse = (config: ClickHouseExecConfig, sql: string) =>
 				),
 		}),
 		Effect.retry({ schedule: CLICKHOUSE_RETRY_SCHEDULE, while: isRetryableUpstream }),
-		Effect.provide(FetchHttpClient.layer),
 	)
+
+export const execClickHouse = (config: ClickHouseExecConfig, sql: string) =>
+	HttpClient.HttpClient.use((client) => execClickHouseWithClient(client, config, sql))
 
 interface ClickHouseTableRow {
 	readonly name: string
@@ -783,15 +846,15 @@ interface ClickHouseColumnRow {
 	readonly type: string
 }
 
-const fetchActualSchema = (config: ClickHouseExecConfig) =>
+const fetchActualSchema = (client: HttpClient.HttpClient, config: ClickHouseExecConfig) =>
 	Effect.gen(function* () {
 		// Tables: name + engine. Engine="MaterializedView" → MV; everything else → table.
 		const tablesSql = `SELECT name, engine FROM system.tables WHERE database = '${config.database.replace(/'/g, "''")}' FORMAT JSONEachRow`
-		const tablesText = yield* execClickHouse(config, tablesSql)
+		const tablesText = yield* execClickHouseWithClient(client, config, tablesSql)
 		const tableRows = parseJsonEachRow<ClickHouseTableRow>(tablesText)
 
 		const columnsSql = `SELECT table, name, type FROM system.columns WHERE database = '${config.database.replace(/'/g, "''")}' FORMAT JSONEachRow`
-		const columnsText = yield* execClickHouse(config, columnsSql)
+		const columnsText = yield* execClickHouseWithClient(client, config, columnsSql)
 		const columnRows = parseJsonEachRow<ClickHouseColumnRow>(columnsText)
 
 		const colsByTable = new Map<string, Array<{ name: string; type: string }>>()
@@ -832,20 +895,20 @@ const parseJsonEachRow = <T>(text: string): ReadonlyArray<T> => {
 // which `applySchema` kicks off. The `_maple_schema_migrations` bookkeeping
 // protocol is shared with `@maple/clickhouse-cli`.
 
-// --- Service -----------------------------------------------------------------
-
 export class OrgClickHouseSettingsService extends Context.Service<
 	OrgClickHouseSettingsService,
-	OrgClickHouseSettingsServiceShape
+	OrgClickHouseSettingsServiceApi
 >()("@maple/api/services/OrgClickHouseSettingsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
 		const env = yield* Env
+		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseEncryptionKey(Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY))
 		// Optional: present only inside a Worker isolate. Used to kick off the
 		// background schema-apply Workflow. Read optionally so non-worker/test
 		// contexts (where the binding is absent) still construct the service.
 		const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
+		const edgeCache = yield* EdgeCacheService
 
 		// Memoize the parsed desired-schema snapshot per service instance. The
 		// snapshot is static, so we parse it at most once and reuse it.
@@ -912,9 +975,22 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			return Option.fromNullishOr(rows[0])
 		})
 
+		/**
+		 * Drop the shared edge-cache entry for an org. Best-effort by contract —
+		 * `invalidate` logs and swallows backend failures, and the entry expires on
+		 * its TTL regardless.
+		 */
+		const invalidateSharedRuntimeConfig = (orgId: OrgId): Effect.Effect<void> =>
+			edgeCache.invalidate({ bucket: ORG_CH_CONFIG_CACHE_BUCKET, key: orgId })
+
 		// Bust the cached runtime config for an org after any write to its settings
 		// row, so the next warehouse query re-resolves rather than serving a stale
-		// value. Other isolates fall off within ORG_CH_CONFIG_MEMO_TTL_MS.
+		// value.
+		//
+		// Both tiers, always. Dropping only the memo would leave the shared entry
+		// to serve the pre-write value back to every OTHER isolate for the full
+		// six hours — the write would look applied to whoever made it and to
+		// nobody else.
 		const invalidateRuntimeConfigCache = (orgId: OrgId): Effect.Effect<boolean> =>
 			Effect.gen(function* () {
 				// Whether this org had a BYO row cached is the caller's retry gate (see
@@ -924,6 +1000,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				const memoized = runtimeConfigMemo.get(orgId)
 				const hadOverride = memoized !== undefined && memoized.value !== null
 				invalidateOrgRuntimeConfigMemo(orgId)
+				yield* invalidateSharedRuntimeConfig(orgId)
 				return hadOverride
 			})
 
@@ -1039,7 +1116,11 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			// host or token surfaces here rather than after the user closes the
 			// dialog. No DDL is run — applying the schema is a separate explicit
 			// action via the diff/apply endpoints.
-			yield* execClickHouse({ url, user, password: plainPassword, database: dbName }, "SELECT 1")
+			yield* execClickHouseWithClient(
+				httpClient,
+				{ url, user, password: plainPassword, database: dbName },
+				"SELECT 1",
+			)
 
 			const encryptedPassword =
 				plainPassword.length > 0 ? yield* encryptToken(plainPassword, encryptionKey) : null
@@ -1131,7 +1212,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			yield* requireAdmin(roles)
 			const row = yield* requireActiveRow(orgId)
 			const config = yield* loadConfigForRow(row)
-			const actual = yield* fetchActualSchema(config)
+			const actual = yield* fetchActualSchema(httpClient, config)
 			const entries = computeSchemaDiff({ tables: yield* getDesiredTables }, actual)
 
 			// Self-heal the recorded schema version. The ingest gateway only routes an
@@ -1423,7 +1504,13 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			if (startedAt !== undefined && nowMs - startedAt < REFRESH_MARKER_STALE_MS) return false
 			refreshInFlight.set(orgId, nowMs)
 
-			const work = readSettingsFromPostgres(orgId).pipe(
+			// Through the shared tier, not straight to Postgres. This fires once per
+			// isolate per org per soft TTL, so sending it to Postgres would mean
+			// every isolate re-dialling the database every five minutes for a row
+			// that changes on onboarding — most of the reads this tier exists to
+			// remove. Refreshing the memo from a shared entry that writes evict is
+			// the intended convergence path, not a staleness leak.
+			const work = readSharedOrPostgres(orgId).pipe(
 				Effect.flatMap((value) =>
 					Clock.currentTimeMillis.pipe(
 						Effect.map((writeNowMs) => storeCachedSettings(orgId, value, writeNowMs)),
@@ -1440,15 +1527,10 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				Effect.ensuring(Effect.sync(() => refreshInFlight.delete(orgId))),
 			)
 
-			const scope = yield* Effect.serviceOption(Scope.Scope)
-			// HTTP routes always have a request scope (HttpRouter provides one).
-			// Non-HTTP callers — crons, queue consumers, workflows — do not, and there
-			// the calling fiber IS the whole job, so it is a safe parent.
-			if (Option.isSome(scope)) {
-				yield* Effect.forkIn(work, scope.value)
-			} else {
-				yield* Effect.forkChild(work)
-			}
+			// Scoped rather than detached — see `forkRequestScoped` for why anything
+			// that touches Postgres must not outlive the invocation that owns the
+			// socket. This call site is where that rule was first worked out.
+			yield* forkRequestScoped(work)
 			return true
 		})
 
@@ -1460,35 +1542,71 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// answers it with zero network, and past its soft TTL it keeps answering
 		// from the stale value while a background fiber refreshes it.
 		//
-		// There is deliberately no cache layer between the memo and Postgres. One
-		// used to sit here (a 1h edge-cache entry) on the theory that it removed the
-		// cold Postgres round-trip for a fresh isolate. Production measurement over
-		// 7 days said otherwise: the read completed 241 times at a span p50 of 26ms
-		// and was abandoned at its 40ms deadline 1079 times, and the abandoned reads
-		// cost a p50 of 2547ms — because `cache.match()` cannot be cancelled, so the
-		// abandoned read kept holding one of the Worker's six connection slots and
-		// the fallback Postgres read queued behind it. The layer meant to avoid a
-		// ~26ms round-trip was manufacturing a ~2.5s one 82% of the time.
+		// Behind the memo sits ONE shared tier, on the Workers Cache API. Two
+		// earlier attempts at this were reverted, and the difference is worth
+		// spelling out, because the naive reading of that history ("a shared cache
+		// cannot work here") is too strong and would rule out the case it does fix.
 		//
-		// A SECOND attempt (#387) put the same tier on Workers KV instead, on the
-		// theory that a KV `get` is a cancellable subrequest and so cheap to
-		// abandon. Measured over 24h on the live deploy it was worse, and removed:
-		// KV reads that COMPLETE take 92ms (vs 6ms on the Cache API) and 79% of them
-		// still hit their deadline. It also could not reach the cost it was aimed
-		// at. 94% of the Postgres fallback is `apps/alerting` (4,646 resolutions/day
-		// at p50 573ms, ~44min of blocked wall time) which has no KV binding and so
-		// could never use the tier; `apps/api`, which had it, falls back at p50 24ms
-		// — cheaper than a KV read.
+		// The first attempt (a 1h edge-cache entry) measured, over 7 days: 241
+		// completed reads at a span p50 of 26ms, against 1079 abandoned at the 40ms
+		// deadline costing a p50 of 2547ms — because `cache.match()` cannot be
+		// cancelled, so the abandoned read kept holding one of the Worker's six
+		// connection slots and the Postgres fallback queued behind it. The second
+		// (#387) moved the tier to Workers KV on the theory that a KV `get` is a
+		// cancellable subrequest; it was worse (92ms completed vs 6ms on the Cache
+		// API, 79% still hitting the deadline) and `apps/alerting`, which was most
+		// of the volume, has no KV binding at all.
 		//
-		// The reason both attempts failed is that this is not a cold-isolate miss.
-		// Grouping alerting's Postgres resolutions by trace: 1,033 traces do zero,
-		// while 106 traces do 22 EACH (half of all of them). It is an in-request
-		// fan-out where every branch misses the memo because none has finished
-		// writing it yet. No shared cache can fix concurrent siblings — it just
-		// turns N Postgres reads into N cache reads contending for the same six
-		// connection slots. The fix is to resolve the config once BEFORE the
-		// fan-out, the way `warehouse.warmRoute` already does in
-		// `routes/v1/query-engine.http.ts`.
+		// What actually drove that 82% abandonment was CONCURRENCY WITHIN ONE
+		// REQUEST, not the tier. A `cache.match()` occupies one of the six
+		// connection slots while it waits for headers, so the timeout rate scales
+		// with how many reads a single request issues — measured at 8.4% for one
+		// read and 35.9% for four (see `DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS`). The
+		// org-config bucket was being read 22 times in a single alerting request
+		// (106 traces doing 22 resolutions each, half of all of them). Those reads
+		// congested each other, and each abandoned one held a slot the Postgres
+		// fallback then queued behind.
+		//
+		// That fan-out is gone: `AlertsService` now calls `primeRuntimeConfigs` to
+		// resolve the whole set in one statement, and the HTTP query paths call
+		// `warehouse.warmRoute` once per request before fanning out. What remains is
+		// the opposite shape — a dashboard load fires 5-17 parallel requests that
+		// land on DIFFERENT cold isolates, one config read each, before any
+		// warehouse `fetch()` is holding a slot. Measured in bursts of 17, 9, 9, 9,
+		// 8, 8 blocking reads in a single second. A per-isolate memo cannot help
+		// across isolates and neither can `warmRoute`; a shared entry can, because
+		// the first isolate to resolve populates it for the rest.
+		//
+		// So: one read per request, issued before the warehouse queries. Do NOT
+		// reintroduce a per-org cache read inside a fan-out — prime instead.
+		//
+		// The read deadline is deliberately left at the default. Raising it looks
+		// tempting given how expensive `compute` is here, but the latency
+		// distribution is bimodal, not long-tailed: a read that will succeed has
+		// done so by ~20ms, the entire 40-249ms band is 0.5% of reads, and anything
+		// past that is hung rather than slow. A longer deadline would buy almost no
+		// extra hits and charge the full deadline to every hung read.
+		const readSharedOrPostgres = (orgId: OrgId) =>
+			edgeCache
+				.getOrCompute(
+					{
+						bucket: ORG_CH_CONFIG_CACHE_BUCKET,
+						key: orgId,
+						ttlSeconds: ORG_CH_CONFIG_CACHE_TTL_SECONDS,
+						schema: CachedChSettingsEnvelope,
+					},
+					readSettingsFromPostgres(orgId).pipe(Effect.map((settings) => ({ settings }))),
+				)
+				.pipe(
+					Effect.tap((result) =>
+						Effect.annotateCurrentSpan(
+							"clickhouse.config.source",
+							result.hit ? "edge_cache" : "postgres",
+						),
+					),
+					Effect.map((result) => result.value.settings),
+				)
+
 		const resolveCachedSettings = Effect.fn("OrgClickHouseSettingsService.resolveCachedSettings")(
 			function* (orgId: OrgId) {
 				const nowMs = yield* Clock.currentTimeMillis
@@ -1516,11 +1634,32 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					return memoized.value
 				}
 
+				// Reuse a very recent failure rather than re-discovering it. Checked
+				// only on this branch: a usable memo above never reaches Postgres, so
+				// a blip can never take a served org offline — only callers that were
+				// going to make the blocking read anyway are short-circuited.
+				const failed = runtimeConfigFailures.get(orgId)
+				if (failed !== undefined && nowMs - failed.atMs < ORG_CH_CONFIG_FAILURE_TTL_MS) {
+					yield* Effect.annotateCurrentSpan({
+						"clickhouse.config.source": "postgres_failed",
+						"clickhouse.config.memoHit": false,
+						"clickhouse.config.failure_reused": true,
+					})
+					return yield* Effect.fail(failed.error)
+				}
+
+				// Overwritten by `readSharedOrPostgres` on success; setting it first
+				// leaves failures attributed to the Postgres compute path.
 				yield* Effect.annotateCurrentSpan({
 					"clickhouse.config.source": "postgres",
 					"clickhouse.config.memoHit": false,
 				})
-				const cached = yield* readSettingsFromPostgres(orgId)
+				const cached = yield* readSharedOrPostgres(orgId).pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() => runtimeConfigFailures.set(orgId, { error, atMs: nowMs })),
+					),
+				)
+				runtimeConfigFailures.delete(orgId)
 				storeCachedSettings(orgId, cached, nowMs)
 				return cached
 			},
@@ -1545,7 +1684,15 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					cached.schemaVersion !== clickHouseSchemaVersion,
 				)
 				const password = yield* decryptStoredPassword(cached)
-				yield* validateClickHouseCredentialTransport(cached.chUrl, password)
+				yield* validateClickHouseCredentialTransport(cached.chUrl, password).pipe(
+					Effect.mapError(
+						(cause) =>
+							new OrgClickHouseSettingsStoredConfigInvalidError({
+								message: cause.message,
+								cause,
+							}),
+					),
+				)
 				return Option.some<RuntimeBackendConfig>({
 					backend: "clickhouse",
 					url: cached.chUrl,
@@ -1620,10 +1767,10 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			invalidateRuntimeConfig,
 			isWarehouseWriteReady,
 			collectorConfig,
-		} satisfies OrgClickHouseSettingsServiceShape
+		} satisfies OrgClickHouseSettingsServiceApi
 	}),
 }) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 
 	static readonly get = (orgId: OrgId, roles: ReadonlyArray<RoleName>) =>
 		this.use((service) => service.get(orgId, roles))

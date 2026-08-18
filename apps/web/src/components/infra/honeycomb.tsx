@@ -14,7 +14,7 @@ const TONE_VAR: Record<HoneycombTone, string> = {
 	warn: "var(--severity-warn)",
 	crit: "var(--severity-error)",
 	stale: "var(--muted-foreground)",
-}
+} satisfies Record<HoneycombTone, string>
 
 // Flat fills for the small legend swatches (a clip-path hexagon can't carry a
 // ring, so the hex cells themselves separate via the inter-cell gap).
@@ -23,21 +23,21 @@ export const CELL_BG: Record<HoneycombTone, string> = {
 	warn: "bg-[var(--severity-warn)]",
 	crit: "bg-[var(--severity-error)]",
 	stale: "bg-[color-mix(in_oklab,var(--muted-foreground)_45%,var(--card))]",
-}
+} satisfies Record<HoneycombTone, string>
 
 export const CELL_RING: Record<HoneycombTone, string> = {
 	ok: "ring-[color-mix(in_oklab,var(--severity-info)_30%,transparent)]",
 	warn: "ring-[color-mix(in_oklab,var(--severity-warn)_35%,transparent)]",
 	crit: "ring-[color-mix(in_oklab,var(--severity-error)_40%,transparent)]",
 	stale: "ring-border/40",
-}
+} satisfies Record<HoneycombTone, string>
 
 const GLYPH_TONE: Record<HoneycombTone, string> = {
 	ok: "text-background/90",
 	warn: "text-background/90",
 	crit: "text-background/90",
 	stale: "text-foreground/70",
-}
+} satisfies Record<HoneycombTone, string>
 
 export interface HoneycombCell {
 	key: string

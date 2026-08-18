@@ -1,24 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { datasources, pipes, projectRevision } from "../generated/tinybird-project-manifest"
 import {
-	cleanupOwnedTinybirdDeployment,
-	cleanupStaleTinybirdDeployments,
-	fetchInstanceHealth,
 	getCurrentTinybirdProjectRevision,
-	getTinybirdDeploymentStatus,
-	pollTinybirdDeploymentStep,
-	setTinybirdDeploymentLiveStep,
-	startTinybirdDeploymentStep,
+	makeTinybirdProjectSyncRuntime,
 	TinybirdDeploymentNotReadyError,
 	TinybirdSyncRejectedError,
 	TinybirdSyncUnavailableError,
 } from "./project-sync"
 
-const originalFetch = globalThis.fetch
-
-afterEach(() => {
-	globalThis.fetch = originalFetch
-})
+const makeRuntime = (fetch: typeof globalThis.fetch) => makeTinybirdProjectSyncRuntime({ fetch })
 
 const jsonResponse = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), {
@@ -31,36 +21,58 @@ describe("Tinybird project sync", () => {
 		expect(await getCurrentTinybirdProjectRevision()).toBe(projectRevision)
 	})
 
+	it("reuses one injected transport across Promise operations", async () => {
+		const fetch = vi.fn(async () => jsonResponse({ deployment: { status: "data_ready" } }))
+		const runtime = makeRuntime(fetch as typeof globalThis.fetch)
+		const params = {
+			baseUrl: "https://customer.tinybird.co",
+			token: "token",
+			deploymentId: "dep-1",
+		} as const
+
+		const first = await runtime.getTinybirdDeploymentStatus(params)
+		const second = await runtime.getTinybirdDeploymentStatus(params)
+
+		expect(first).toEqual(second)
+		expect(fetch).toHaveBeenCalledTimes(2)
+	})
+
 	describe("startTinybirdDeploymentStep", () => {
 		it("uploads the bundled Tinybird resources without building from disk at runtime", async () => {
 			let requestBody: FormData | null = null
 			let authorizationHeader = ""
 
-			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-				const isRequest = input instanceof Request
-				const url =
-					typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-				const method = init?.method ?? (isRequest ? input.method : "GET")
-				const headers =
-					init?.headers instanceof Headers
-						? init.headers
-						: isRequest
-							? input.headers
-							: new Headers(init?.headers as HeadersInit | undefined)
-				authorizationHeader = headers.get("Authorization") ?? ""
+			const runtime = makeRuntime(
+				vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+					const isRequest = input instanceof Request
+					const url =
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.toString()
+								: input.url
+					const method = init?.method ?? (isRequest ? input.method : "GET")
+					const headers =
+						init?.headers instanceof Headers
+							? init.headers
+							: isRequest
+								? input.headers
+								: new Headers(init?.headers as HeadersInit | undefined)
+					authorizationHeader = headers.get("Authorization") ?? ""
 
-				if (url.includes("/v1/deploy") && method === "POST") {
-					requestBody = (init?.body ?? (isRequest ? input.body : null)) as FormData
-					return jsonResponse({
-						result: "no_changes",
-						deployment: { id: "dep-1", status: "live" },
-					})
-				}
+					if (url.includes("/v1/deploy") && method === "POST") {
+						requestBody = (init?.body ?? (isRequest ? input.body : null)) as FormData
+						return jsonResponse({
+							result: "no_changes",
+							deployment: { id: "dep-1", status: "live" },
+						})
+					}
 
-				throw new Error(`Unexpected request: ${method} ${url}`)
-			}) as unknown as typeof fetch
+					throw new Error(`Unexpected request: ${method} ${url}`)
+				}) as typeof fetch,
+			)
 
-			const result = await startTinybirdDeploymentStep({
+			const result = await runtime.startTinybirdDeploymentStep({
 				baseUrl: "https://customer.tinybird.co/",
 				token: "customer-token",
 			})
@@ -85,14 +97,16 @@ describe("Tinybird project sync", () => {
 		})
 
 		it("returns a successful-in-progress deployment when Tinybird accepts the request", async () => {
-			globalThis.fetch = vi.fn(async () =>
-				jsonResponse({
-					result: "success",
-					deployment: { id: "dep-2", status: "deploying" },
-				}),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async () =>
+					jsonResponse({
+						result: "success",
+						deployment: { id: "dep-2", status: "deploying" },
+					}),
+				) as typeof fetch,
+			)
 
-			const result = await startTinybirdDeploymentStep({
+			const result = await runtime.startTinybirdDeploymentStep({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 			})
@@ -103,12 +117,12 @@ describe("Tinybird project sync", () => {
 		})
 
 		it("classifies Tinybird deploy rejections as user-fixable upstream errors", async () => {
-			globalThis.fetch = vi.fn(
-				async () => new Response("bad credentials", { status: 401 }),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async () => new Response("bad credentials", { status: 401 })) as typeof fetch,
+			)
 
 			await expect(
-				startTinybirdDeploymentStep({
+				runtime.startTinybirdDeploymentStep({
 					baseUrl: "https://customer.tinybird.co",
 					token: "bad-token",
 				}),
@@ -116,29 +130,31 @@ describe("Tinybird project sync", () => {
 		})
 
 		it("extracts structured Tinybird feedback instead of showing the raw deploy response body", async () => {
-			globalThis.fetch = vi.fn(async () =>
-				jsonResponse(
-					{
-						result: "failed",
-						deployment: {
-							id: "59",
-							status: "calculating",
-							feedback: [
-								{
-									resource: null,
-									level: "ERROR",
-									message:
-										"There's already a deployment in progress.\n\nYou can check the status of your deployments with `tb deployment ls`.",
-								},
-							],
+			const runtime = makeRuntime(
+				vi.fn(async () =>
+					jsonResponse(
+						{
+							result: "failed",
+							deployment: {
+								id: "59",
+								status: "calculating",
+								feedback: [
+									{
+										resource: null,
+										level: "ERROR",
+										message:
+											"There's already a deployment in progress.\n\nYou can check the status of your deployments with `tb deployment ls`.",
+									},
+								],
+							},
 						},
-					},
-					400,
-				),
-			) as unknown as typeof fetch
+						400,
+					),
+				) as typeof fetch,
+			)
 
 			await expect(
-				startTinybirdDeploymentStep({
+				runtime.startTinybirdDeploymentStep({
 					baseUrl: "https://customer.tinybird.co",
 					token: "token",
 				}),
@@ -150,16 +166,18 @@ describe("Tinybird project sync", () => {
 		})
 
 		it("treats invalid Tinybird JSON as an upstream availability problem", async () => {
-			globalThis.fetch = vi.fn(
-				async () =>
-					new Response("not-json", {
-						status: 200,
-						headers: { "content-type": "application/json" },
-					}),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(
+					async () =>
+						new Response("not-json", {
+							status: 200,
+							headers: { "content-type": "application/json" },
+						}),
+				) as typeof fetch,
+			)
 
 			await expect(
-				startTinybirdDeploymentStep({
+				runtime.startTinybirdDeploymentStep({
 					baseUrl: "https://customer.tinybird.co",
 					token: "token",
 				}),
@@ -169,11 +187,11 @@ describe("Tinybird project sync", () => {
 
 	describe("pollTinybirdDeploymentStep", () => {
 		it("resolves when Tinybird reports data_ready", async () => {
-			globalThis.fetch = vi.fn(async () =>
-				jsonResponse({ deployment: { status: "data_ready" } }),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async () => jsonResponse({ deployment: { status: "data_ready" } })) as typeof fetch,
+			)
 
-			const result = await pollTinybirdDeploymentStep({
+			const result = await runtime.pollTinybirdDeploymentStep({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 				deploymentId: "dep-1",
@@ -185,11 +203,11 @@ describe("Tinybird project sync", () => {
 		})
 
 		it("resolves when Tinybird reports live", async () => {
-			globalThis.fetch = vi.fn(async () =>
-				jsonResponse({ deployment: { status: "live" } }),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async () => jsonResponse({ deployment: { status: "live" } })) as typeof fetch,
+			)
 
-			const result = await pollTinybirdDeploymentStep({
+			const result = await runtime.pollTinybirdDeploymentStep({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 				deploymentId: "dep-1",
@@ -201,12 +219,12 @@ describe("Tinybird project sync", () => {
 		})
 
 		it("throws TinybirdDeploymentNotReadyError for non-terminal non-ready statuses so workflow steps retry", async () => {
-			globalThis.fetch = vi.fn(async () =>
-				jsonResponse({ deployment: { status: "deploying" } }),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async () => jsonResponse({ deployment: { status: "deploying" } })) as typeof fetch,
+			)
 
 			await expect(
-				pollTinybirdDeploymentStep({
+				runtime.pollTinybirdDeploymentStep({
 					baseUrl: "https://customer.tinybird.co",
 					token: "token",
 					deploymentId: "dep-1",
@@ -215,14 +233,16 @@ describe("Tinybird project sync", () => {
 		})
 
 		it("rejects with a TinybirdSyncRejectedError when Tinybird reaches a terminal error state", async () => {
-			globalThis.fetch = vi.fn(async () =>
-				jsonResponse({
-					deployment: { status: "failed", errors: ["broken pipe"] },
-				}),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async () =>
+					jsonResponse({
+						deployment: { status: "failed", errors: ["broken pipe"] },
+					}),
+				) as typeof fetch,
+			)
 
 			await expect(
-				pollTinybirdDeploymentStep({
+				runtime.pollTinybirdDeploymentStep({
 					baseUrl: "https://customer.tinybird.co",
 					token: "token",
 					deploymentId: "dep-1",
@@ -233,11 +253,11 @@ describe("Tinybird project sync", () => {
 
 	describe("getTinybirdDeploymentStatus", () => {
 		it("treats data_ready as ready to promote, not as terminal", async () => {
-			globalThis.fetch = vi.fn(async () =>
-				jsonResponse({ deployment: { status: "data_ready" } }),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async () => jsonResponse({ deployment: { status: "data_ready" } })) as typeof fetch,
+			)
 
-			const result = await getTinybirdDeploymentStatus({
+			const result = await runtime.getTinybirdDeploymentStatus({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 				deploymentId: "dep-1",
@@ -250,11 +270,11 @@ describe("Tinybird project sync", () => {
 		})
 
 		it("treats live as the successful terminal deployment state", async () => {
-			globalThis.fetch = vi.fn(async () =>
-				jsonResponse({ deployment: { status: "live" } }),
-			) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async () => jsonResponse({ deployment: { status: "live" } })) as typeof fetch,
+			)
 
-			const result = await getTinybirdDeploymentStatus({
+			const result = await runtime.getTinybirdDeploymentStatus({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 				deploymentId: "dep-1",
@@ -270,15 +290,21 @@ describe("Tinybird project sync", () => {
 		it("POSTs to /v1/deployments/:id/set-live", async () => {
 			const calls: Array<{ url: string; method: string }> = []
 
-			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-				const url =
-					typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-				const method = init?.method ?? "GET"
-				calls.push({ url, method })
-				return new Response("", { status: 200 })
-			}) as unknown as typeof fetch
+			const runtime = makeRuntime(
+				vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+					const url =
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.toString()
+								: input.url
+					const method = init?.method ?? "GET"
+					calls.push({ url, method })
+					return new Response("", { status: 200 })
+				}) as typeof fetch,
+			)
 
-			await setTinybirdDeploymentLiveStep({
+			await runtime.setTinybirdDeploymentLiveStep({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 				deploymentId: "dep-1",
@@ -294,31 +320,37 @@ describe("Tinybird project sync", () => {
 		it("deletes only deployments in terminal failed states", async () => {
 			const calls: Array<{ method: string; url: string }> = []
 
-			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-				const url =
-					typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-				const method = init?.method ?? "GET"
-				calls.push({ method, url })
+			const runtime = makeRuntime(
+				vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+					const url =
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.toString()
+								: input.url
+					const method = init?.method ?? "GET"
+					calls.push({ method, url })
 
-				if (method === "GET" && url.includes("/v1/deployments")) {
-					return jsonResponse({
-						deployments: [
-							{ id: "live-1", status: "live", live: true },
-							// In-flight states must not be deleted — these are active
-							// deployments about to be promoted.
-							{ id: "in-flight-1", status: "deploying", live: false },
-							{ id: "in-flight-2", status: "data_ready", live: false },
-							// Terminal failed states are safe to clean up.
-							{ id: "failed-1", status: "failed", live: false },
-							{ id: "failed-2", status: "error", live: false },
-						],
-					})
-				}
+					if (method === "GET" && url.includes("/v1/deployments")) {
+						return jsonResponse({
+							deployments: [
+								{ id: "live-1", status: "live", live: true },
+								// In-flight states must not be deleted — these are active
+								// deployments about to be promoted.
+								{ id: "in-flight-1", status: "deploying", live: false },
+								{ id: "in-flight-2", status: "data_ready", live: false },
+								// Terminal failed states are safe to clean up.
+								{ id: "failed-1", status: "failed", live: false },
+								{ id: "failed-2", status: "error", live: false },
+							],
+						})
+					}
 
-				return new Response("", { status: 200 })
-			}) as unknown as typeof fetch
+					return new Response("", { status: 200 })
+				}) as typeof fetch,
+			)
 
-			await cleanupStaleTinybirdDeployments({
+			await runtime.cleanupStaleTinybirdDeployments({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 			})
@@ -331,18 +363,24 @@ describe("Tinybird project sync", () => {
 		it("is a no-op when there are no stale deployments", async () => {
 			const calls: Array<{ method: string; url: string }> = []
 
-			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-				const url =
-					typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-				const method = init?.method ?? "GET"
-				calls.push({ method, url })
+			const runtime = makeRuntime(
+				vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+					const url =
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.toString()
+								: input.url
+					const method = init?.method ?? "GET"
+					calls.push({ method, url })
 
-				return jsonResponse({
-					deployments: [{ id: "live-1", status: "live", live: true }],
-				})
-			}) as unknown as typeof fetch
+					return jsonResponse({
+						deployments: [{ id: "live-1", status: "live", live: true }],
+					})
+				}) as typeof fetch,
+			)
 
-			await cleanupStaleTinybirdDeployments({
+			await runtime.cleanupStaleTinybirdDeployments({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 			})
@@ -360,27 +398,33 @@ describe("Tinybird project sync", () => {
 				releaseGate = resolve
 			})
 
-			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-				const url =
-					typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-				const method = init?.method ?? "GET"
-				if (method === "GET") {
-					return jsonResponse({
-						deployments: staleIds.map((id) => ({ id, status: "failed", live: false })),
-					})
-				}
+			const runtime = makeRuntime(
+				vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+					const url =
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.toString()
+								: input.url
+					const method = init?.method ?? "GET"
+					if (method === "GET") {
+						return jsonResponse({
+							deployments: staleIds.map((id) => ({ id, status: "failed", live: false })),
+						})
+					}
 
-				const id = url.match(/\/v1\/deployments\/([^?]+)/)?.[1]
-				if (id === undefined) throw new Error(`Unexpected deletion URL: ${url}`)
-				attempted.push(id)
-				active += 1
-				peak = Math.max(peak, active)
-				await gate
-				active -= 1
-				return new Response("", { status: 200 })
-			}) as unknown as typeof fetch
+					const id = url.match(/\/v1\/deployments\/([^?]+)/)?.[1]
+					if (id === undefined) throw new Error(`Unexpected deletion URL: ${url}`)
+					attempted.push(id)
+					active += 1
+					peak = Math.max(peak, active)
+					await gate
+					active -= 1
+					return new Response("", { status: 200 })
+				}) as typeof fetch,
+			)
 
-			const cleanup = cleanupStaleTinybirdDeployments({
+			const cleanup = runtime.cleanupStaleTinybirdDeployments({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 			})
@@ -398,20 +442,26 @@ describe("Tinybird project sync", () => {
 		it("does not delete active or in-progress deployments", async () => {
 			const requests: string[] = []
 
-			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-				const url =
-					typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-				const method = init?.method ?? "GET"
-				requests.push(`${method} ${url}`)
+			const runtime = makeRuntime(
+				vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+					const url =
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.toString()
+								: input.url
+					const method = init?.method ?? "GET"
+					requests.push(`${method} ${url}`)
 
-				if (method === "GET") {
-					return jsonResponse({ deployment: { status: "deploying" } })
-				}
+					if (method === "GET") {
+						return jsonResponse({ deployment: { status: "deploying" } })
+					}
 
-				return new Response("", { status: 200 })
-			}) as unknown as typeof fetch
+					return new Response("", { status: 200 })
+				}) as typeof fetch,
+			)
 
-			await cleanupOwnedTinybirdDeployment({
+			await runtime.cleanupOwnedTinybirdDeployment({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 				deploymentId: "dep-1",
@@ -423,36 +473,42 @@ describe("Tinybird project sync", () => {
 
 	describe("fetchInstanceHealth", () => {
 		it("treats non-JSON health probe responses as missing metrics instead of failing", async () => {
-			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-				const isRequest = input instanceof Request
-				const url =
-					typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-				const method = init?.method ?? (isRequest ? input.method : "GET")
+			const runtime = makeRuntime(
+				vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+					const isRequest = input instanceof Request
+					const url =
+						typeof input === "string"
+							? input
+							: input instanceof URL
+								? input.toString()
+								: input.url
+					const method = init?.method ?? (isRequest ? input.method : "GET")
 
-				if (url.includes("/v1/workspace") && method === "GET") {
-					return new Response("<html>not json</html>", {
-						status: 200,
-						headers: { "content-type": "text/html" },
-					})
-				}
+					if (url.includes("/v1/workspace") && method === "GET") {
+						return new Response("<html>not json</html>", {
+							status: 200,
+							headers: { "content-type": "text/html" },
+						})
+					}
 
-				const parsedUrl = new URL(url)
-				const query = parsedUrl.searchParams.get("q") ?? ""
+					const parsedUrl = new URL(url)
+					const query = parsedUrl.searchParams.get("q") ?? ""
 
-				if (parsedUrl.pathname === "/v0/sql" && query.includes("datasources_storage")) {
-					return new Response("datasource probe exploded", { status: 502 })
-				}
-				if (parsedUrl.pathname === "/v0/sql" && query.includes("endpoint_errors")) {
-					return jsonResponse({ data: [{ cnt: 4 }] })
-				}
-				if (parsedUrl.pathname === "/v0/sql" && query.includes("pipe_stats_rt")) {
-					return jsonResponse({ data: [{ avg_ms: "0.0974" }] })
-				}
+					if (parsedUrl.pathname === "/v0/sql" && query.includes("datasources_storage")) {
+						return new Response("datasource probe exploded", { status: 502 })
+					}
+					if (parsedUrl.pathname === "/v0/sql" && query.includes("endpoint_errors")) {
+						return jsonResponse({ data: [{ cnt: 4 }] })
+					}
+					if (parsedUrl.pathname === "/v0/sql" && query.includes("pipe_stats_rt")) {
+						return jsonResponse({ data: [{ avg_ms: "0.0974" }] })
+					}
 
-				throw new Error(`Unexpected request: ${method} ${url}`)
-			}) as unknown as typeof fetch
+					throw new Error(`Unexpected request: ${method} ${url}`)
+				}) as typeof fetch,
+			)
 
-			const result = await fetchInstanceHealth({
+			const result = await runtime.fetchInstanceHealth({
 				baseUrl: "https://customer.tinybird.co",
 				token: "token",
 			})

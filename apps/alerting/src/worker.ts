@@ -1,5 +1,9 @@
 import {
 	ANTICIPATED_ERROR_IDENTIFIERS,
+	AlertDestinationsService,
+	AlertReadModelsService,
+	AlertRuntime,
+	AlertRulesService,
 	AlertsService,
 	AnomalyDetectionService,
 	BucketCacheService,
@@ -10,6 +14,10 @@ import {
 	EdgeCacheService,
 	EmailService,
 	Env,
+	ErrorActorsService,
+	ErrorIssueReadModelsService,
+	ErrorIssueWorkflowService,
+	ErrorPolicyService,
 	ErrorsService,
 	EscalationService,
 	HazelOAuthService,
@@ -44,7 +52,9 @@ interface AlertingWorkerEnv {
 	readonly [key: string]: unknown
 }
 
-const buildLayer = (env: AlertingWorkerEnv) => {
+export const buildLayer = (env: AlertingWorkerEnv) => {
+	// Keep config and binding services on the same invocation-scoped env record;
+	// scheduled handlers already receive the authoritative Cloudflare bindings.
 	const ConfigLive = layerFromEnv(env)
 	const WorkerEnvironmentLive = layerFromEnvRecord(env)
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
@@ -52,18 +62,18 @@ const buildLayer = (env: AlertingWorkerEnv) => {
 	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironmentLive))
 
 	const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
+	const AlertRuntimeLive = AlertRuntime.layer
+	const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
-	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(Layer.provide(BaseLive))
+	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, EdgeCacheServiceLive)),
+	)
 
 	const TinybirdOrgTokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(EnvLive))
 
 	const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(
 		Layer.provide(Layer.mergeAll(EnvLive, OrgClickHouseSettingsLive, TinybirdOrgTokenLive)),
 	)
-
-	// EdgeCacheService's storage backend is injected via the CacheBackend port.
-	// Define the wired layer once so it memoizes to a single shared instance.
-	const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
 	const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provide(EdgeCacheServiceLive))
 
@@ -83,9 +93,24 @@ const buildLayer = (env: AlertingWorkerEnv) => {
 
 	const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(EnvLive))
 
+	const AlertDestinationsServiceLive = AlertDestinationsService.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(BaseLive, HazelOAuthServiceLive, EmailServiceLive, OrgMembersServiceLive),
+		),
+	)
+
+	const AlertReadModelsServiceLive = AlertReadModelsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(DatabaseLive, WarehouseQueryServiceLive)),
+	)
+
+	const AlertRulesServiceLive = AlertRulesService.layer.pipe(
+		Layer.provide(Layer.mergeAll(DatabaseLive, AlertRuntimeLive)),
+	)
+
 	// WorkerEnvironment is merged in so the incident-open issue-hub hook can see
-	// the cross-script investigation workflow binding.
-	// AlertRuntime is a Context.Reference with defaults, so it needs no wiring here.
+	// the cross-script investigation workflow binding. The hoisted AlertRuntime
+	// layer is shared with the narrow rules capability even though the reference
+	// also has production defaults.
 	const AlertsServiceLive = AlertsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -93,9 +118,12 @@ const buildLayer = (env: AlertingWorkerEnv) => {
 				QueryEngineServiceLive,
 				WarehouseQueryServiceLive,
 				OrgClickHouseSettingsLive,
+				AlertRuntimeLive,
 				HazelOAuthServiceLive,
 				EmailServiceLive,
-				OrgMembersServiceLive,
+				AlertDestinationsServiceLive,
+				AlertReadModelsServiceLive,
+				AlertRulesServiceLive,
 				WorkerEnvironmentLive,
 			),
 		),
@@ -109,6 +137,15 @@ const buildLayer = (env: AlertingWorkerEnv) => {
 		Layer.provide(Layer.mergeAll(BaseLive, NotificationDispatcherLive)),
 	)
 
+	const ErrorActorsServiceLive = ErrorActorsService.layer.pipe(Layer.provide(BaseLive))
+	const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, ErrorActorsServiceLive)),
+	)
+	const ErrorPolicyServiceLive = ErrorPolicyService.layer.pipe(Layer.provide(BaseLive))
+	const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(DatabaseLive, WarehouseQueryServiceLive, ErrorIssueWorkflowServiceLive)),
+	)
+
 	// WorkerEnvironment is merged in so incident-open investigations can see the
 	// cross-script fan-out workflow binding.
 	const ErrorsServiceLive = ErrorsService.layer.pipe(
@@ -118,6 +155,10 @@ const buildLayer = (env: AlertingWorkerEnv) => {
 				WarehouseQueryServiceLive,
 				EdgeCacheServiceLive,
 				NotificationDispatcherLive,
+				ErrorActorsServiceLive,
+				ErrorIssueReadModelsServiceLive,
+				ErrorIssueWorkflowServiceLive,
+				ErrorPolicyServiceLive,
 				WorkerEnvironmentLive,
 			),
 		),
@@ -183,11 +224,16 @@ const buildLayer = (env: AlertingWorkerEnv) => {
  * `runScheduledEffect`'s `onInterrupt: "graceful"` handling instead of logging a phantom
  * tick failure. Mirrors the per-org guards inside the tick services.
  */
-const catchTickFailure = (label: string) =>
+export const catchTickFailure = (label: string) =>
 	Effect.catchCause((cause: Cause.Cause<unknown>) =>
 		Cause.hasInterruptsOnly(cause)
 			? Effect.interrupt
-			: Effect.logError(label).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
+			: Effect.logError("Alerting tick failed").pipe(
+					Effect.annotateLogs({
+						"error.message": Cause.pretty(cause),
+						"maple.alerting.tick": label,
+					}),
+				),
 	)
 
 interface TickAnnotations {
@@ -197,25 +243,34 @@ interface TickAnnotations {
 const makeTick = <A, E, R>(
 	run: Effect.Effect<A, E, R>,
 	spanKey: string,
-	label: string,
 	annotationsFor: (result: A) => TickAnnotations | undefined,
 ): Effect.Effect<void, never, R> =>
 	run.pipe(
 		Effect.tap((result) => {
 			const annotations = annotationsFor(result)
-			return annotations === undefined
-				? Effect.succeed(undefined)
-				: Effect.logInfo(`${label} complete`).pipe(Effect.annotateLogs(annotations))
+			const namespacedAnnotations =
+				annotations === undefined
+					? undefined
+					: Object.fromEntries(
+							Object.entries(annotations).map(([key, value]) => [
+								`maple.alerting.${key}`,
+								value,
+							]),
+						)
+			return namespacedAnnotations === undefined
+				? Effect.void
+				: Effect.logInfo("Alerting tick completed").pipe(
+						Effect.annotateLogs({ ...namespacedAnnotations, "maple.alerting.tick": spanKey }),
+					)
 		}),
 		Effect.asVoid,
 		Effect.withSpan(`alerting.${spanKey}_tick`),
-		catchTickFailure(`${label} failed`),
+		catchTickFailure(spanKey),
 	)
 
 const alertTick = makeTick(
 	AlertsService.use((alerts) => alerts.runSchedulerTick()),
 	"scheduler",
-	"Alerting worker tick",
 	(result) => ({
 		evaluatedCount: result.evaluatedCount,
 		processedCount: result.processedCount,
@@ -227,7 +282,6 @@ const alertTick = makeTick(
 const errorTick = makeTick(
 	ErrorsService.use((errors) => errors.runTick()),
 	"error",
-	"Errors worker tick",
 	(result) => ({
 		orgsProcessed: result.orgsProcessed,
 		issuesTouched: result.issuesTouched,
@@ -243,7 +297,6 @@ const errorTick = makeTick(
 const escalationTick = makeTick(
 	EscalationService.use((escalations) => escalations.runEscalationTick()),
 	"escalation",
-	"Escalation tick",
 	(result) =>
 		result.processed > 0
 			? {
@@ -259,7 +312,6 @@ const escalationTick = makeTick(
 const digestTick = makeTick(
 	DigestService.use((digest) => digest.runDigestTick()),
 	"digest",
-	"Digest tick",
 	(result) => ({
 		sentCount: result.sentCount,
 		errorCount: result.errorCount,
@@ -275,7 +327,6 @@ const digestTick = makeTick(
 const serviceMapRollupTick = makeTick(
 	ServiceMapRollupService.use((rollup) => rollup.runRollupTick()),
 	"service_map_rollup",
-	"Service map rollup tick",
 	(result) => ({
 		orgsProcessed: result.orgsProcessed,
 		hoursRolledUp: result.hoursRolledUp,
@@ -290,7 +341,6 @@ const serviceMapRollupTick = makeTick(
 const anomalyTick = makeTick(
 	AnomalyDetectionService.use((anomalies) => anomalies.runTick()),
 	"anomaly",
-	"Anomaly detection tick",
 	(result) => ({
 		orgsProcessed: result.orgsProcessed,
 		seriesEvaluated: result.seriesEvaluated,
@@ -306,7 +356,6 @@ const anomalyTick = makeTick(
 const cloudflareAnalyticsTick = makeTick(
 	CloudflareAnalyticsService.use((analytics) => analytics.pollAllOrgs()),
 	"cloudflare_analytics",
-	"Cloudflare analytics tick",
 	(result) => ({
 		orgs: result.orgs,
 		rowsIngested: result.rowsIngested,
@@ -319,7 +368,6 @@ const cloudflareAnalyticsTick = makeTick(
 const planetScaleTick = makeTick(
 	PlanetScaleService.use((planetscale) => planetscale.pollAllOrgs()),
 	"planetscale",
-	"PlanetScale poll tick",
 	(result) =>
 		result.orgs > 0
 			? {
@@ -332,10 +380,70 @@ const planetScaleTick = makeTick(
 			: undefined,
 )
 
-const everyMinuteTick = Effect.all([alertTick, errorTick, escalationTick], {
-	concurrency: 2,
-	discard: true,
-})
+export interface ScheduledTickPrograms<R = never> {
+	readonly alert: Effect.Effect<void, never, R>
+	readonly anomaly: Effect.Effect<void, never, R>
+	readonly cloudflareAnalytics: Effect.Effect<void, never, R>
+	readonly digest: Effect.Effect<void, never, R>
+	readonly error: Effect.Effect<void, never, R>
+	readonly escalation: Effect.Effect<void, never, R>
+	readonly planetScale: Effect.Effect<void, never, R>
+	readonly serviceMapRollup: Effect.Effect<void, never, R>
+}
+
+/**
+ * Keep cron routing separate from the Worker shell so the schedule and its
+ * concurrency groups can be characterized without acquiring production
+ * drivers. The concrete tick Effects remain module-scoped and unchanged.
+ */
+export const selectScheduledProgram = <R>(
+	cron: string,
+	ticks: ScheduledTickPrograms<R>,
+): Effect.Effect<void, never, R> =>
+	Match.value(cron).pipe(
+		Match.when("*/5 * * * *", () =>
+			Effect.all([ticks.anomaly, ticks.cloudflareAnalytics, ticks.planetScale], {
+				concurrency: 3,
+				discard: true,
+			}),
+		),
+		Match.when("*/15 * * * *", () => ticks.digest),
+		Match.when("0 * * * *", () => ticks.serviceMapRollup),
+		Match.when("* * * * *", () =>
+			Effect.all([ticks.alert, ticks.error, ticks.escalation], {
+				concurrency: 2,
+				discard: true,
+			}),
+		),
+		// Fail closed: a newly configured cron must not silently inherit the
+		// every-minute alert/error/escalation fan-out.
+		Match.orElse((unknownCron) =>
+			Effect.logWarning("Skipping unknown alerting cron schedule").pipe(
+				Effect.annotateLogs({ cron: unknownCron }),
+			),
+		),
+	)
+
+type ScheduledServices =
+	| AlertsService
+	| AnomalyDetectionService
+	| CloudflareAnalyticsService
+	| DigestService
+	| ErrorsService
+	| EscalationService
+	| PlanetScaleService
+	| ServiceMapRollupService
+
+const scheduledTicks: ScheduledTickPrograms<ScheduledServices> = {
+	alert: alertTick,
+	anomaly: anomalyTick,
+	cloudflareAnalytics: cloudflareAnalyticsTick,
+	digest: digestTick,
+	error: errorTick,
+	escalation: escalationTick,
+	planetScale: planetScaleTick,
+	serviceMapRollup: serviceMapRollupTick,
+}
 
 interface ScheduledEventLike {
 	readonly cron: string
@@ -366,23 +474,7 @@ export default {
 			)
 			return
 		}
-		const program = Match.value(event.cron).pipe(
-			Match.when("*/5 * * * *", () =>
-				Effect.all([anomalyTick, cloudflareAnalyticsTick, planetScaleTick], {
-					concurrency: 3,
-					discard: true,
-				}),
-			),
-			Match.when("*/15 * * * *", () => digestTick),
-			Match.when("0 * * * *", () => serviceMapRollupTick),
-			Match.when("* * * * *", () => everyMinuteTick),
-			// Unknown schedules must not inherit the every-minute fan-out.
-			Match.orElse((cron) =>
-				Effect.logWarning("Skipping unknown alerting cron schedule").pipe(
-					Effect.annotateLogs({ cron }),
-				),
-			),
-		)
+		const program = selectScheduledProgram(event.cron, scheduledTicks)
 		try {
 			// Cron ticks cancel gracefully on isolate teardown — the schedule reruns
 			// anyway, and re-raised interrupts (see the per-org catchCause guards in the

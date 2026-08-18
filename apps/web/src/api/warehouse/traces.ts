@@ -14,7 +14,7 @@ import {
 	SpanHierarchyRequest,
 	SpanName,
 } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { computeTraceTimeWindow } from "@/lib/trace-time-window"
 import {
 	WarehouseDateTimeString,
@@ -65,10 +65,10 @@ const ListTracesInputSchema = Schema.Struct({
 	httpStatusCodes: Schema.optional(Schema.Array(Schema.String)),
 	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
-	// Singular aliases, folded into the arrays by `oneOrMany`. Saved dashboard
-	// widgets store their `dataSource.params` verbatim, so a dashboard created
-	// before this change still sends `service: "api-gw"` — dropping these keys
-	// would silently stop it filtering.
+	// Singular aliases, folded into the arrays by `oneOrMany`. A curated-route
+	// widget's params bag reaches the server function verbatim (see
+	// `toWidgetRequest`), so a dashboard created before this change still sends
+	// `service: "api-gw"` — dropping these keys would silently stop it filtering.
 	service: Schema.optional(ServiceName),
 	spanName: Schema.optional(SpanName),
 	httpMethod: Schema.optional(Schema.String),
@@ -399,7 +399,7 @@ const getSpanHierarchyEffect = Effect.fn("QueryEngine.getSpanHierarchy")(functio
 
 	const result = yield* runWarehouseQuery("spanHierarchy", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.spanHierarchy({
 				payload: new SpanHierarchyRequest({
 					traceId: input.traceId,
@@ -459,7 +459,7 @@ const getSpanDetailEffect = Effect.fn("QueryEngine.getSpanDetail")(function* ({
 
 	const result = yield* runWarehouseQuery("spanDetail", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.spanDetail({
 				payload: new SpanDetailRequest({
 					traceId: input.traceId,
@@ -510,10 +510,10 @@ const GetTracesFacetsInputSchema = Schema.Struct({
 	httpStatusCodes: Schema.optional(Schema.Array(Schema.String)),
 	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
-	// Singular aliases, folded into the arrays by `oneOrMany`. Saved dashboard
-	// widgets store their `dataSource.params` verbatim, so a dashboard created
-	// before this change still sends `service: "api-gw"` — dropping these keys
-	// would silently stop it filtering.
+	// Singular aliases, folded into the arrays by `oneOrMany`. A curated-route
+	// widget's params bag reaches the server function verbatim (see
+	// `toWidgetRequest`), so a dashboard created before this change still sends
+	// `service: "api-gw"` — dropping these keys would silently stop it filtering.
 	service: Schema.optional(ServiceName),
 	spanName: Schema.optional(SpanName),
 	httpMethod: Schema.optional(Schema.String),

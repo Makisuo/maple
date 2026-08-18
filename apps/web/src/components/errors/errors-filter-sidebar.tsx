@@ -1,10 +1,9 @@
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
-import { useNavigate } from "@tanstack/react-router"
+import { getRouteApi } from "@tanstack/react-router"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { FilterSection, SingleCheckboxFilter, serviceColorMap } from "@/components/traces/filter-section"
-import { Route } from "@/routes/errors/index"
 import { getErrorsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	FilterSidebarBody,
@@ -14,13 +13,15 @@ import {
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 
+const routeApi = getRouteApi("/errors/")
+
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={3} />
 }
 
 export function ErrorsFilterSidebar() {
-	const navigate = useNavigate({ from: Route.fullPath })
-	const search = Route.useSearch()
+	const navigate = routeApi.useNavigate()
+	const search = routeApi.useSearch()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,

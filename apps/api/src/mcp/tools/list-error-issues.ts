@@ -9,8 +9,8 @@ import { formatNumber, formatTable, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { IssueKind, IssueSeverity, WorkflowState } from "@maple/domain/http"
 
 const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)
@@ -43,7 +43,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 			limit,
 			include_archived,
 		}) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				workflowState: workflow_state ?? "all",
@@ -51,7 +51,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				service: service ?? "all",
 				limit: limit ?? 50,
 			})
-			const errors = yield* ErrorsService
+			const readModels = yield* ErrorIssueReadModelsService
 
 			let typedState: WorkflowState | undefined
 			if (workflow_state) {
@@ -88,7 +88,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				typedKind = decoded.value
 			}
 
-			const result = yield* errors
+			const result = yield* readModels
 				.listIssues(tenant.orgId, {
 					workflowState: typedState,
 					severity: typedSeverity,
@@ -118,7 +118,10 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				lines.push("No error issues found.")
 			} else {
 				const headers = [
-					"ID",
+					// Full id, not a prefix. The 8-char truncation this used to render was
+					// being pasted into error_detail as if it were a fingerprint — a
+					// different identity space — where it died as a UInt64 parse error.
+					"Issue ID",
 					"Kind",
 					"State",
 					"Severity",
@@ -131,7 +134,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 					"Holder",
 				]
 				const rows = issues.map((i) => [
-					i.id.slice(0, 8),
+					i.id,
 					i.kind,
 					i.hasOpenIncident ? `${i.workflowState} (incident)` : i.workflowState,
 					i.severity ?? "—",

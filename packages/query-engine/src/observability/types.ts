@@ -5,8 +5,6 @@ export interface TimeRange {
 	readonly endTime: string
 }
 
-// --- Services ---
-
 export interface ServiceSummary {
 	readonly name: string
 	readonly throughput: number
@@ -21,8 +19,6 @@ export interface ListServicesInput {
 	readonly timeRange: TimeRange
 	readonly environment?: string
 }
-
-// --- Traces ---
 
 export interface SpanResult {
 	readonly traceId: TraceId
@@ -68,8 +64,6 @@ export interface SearchTracesOutput {
 	}
 }
 
-// --- Inspect Trace ---
-
 export interface SpanNode {
 	readonly spanId: SpanId
 	readonly parentSpanId: string
@@ -101,8 +95,6 @@ export interface InspectTraceOutput {
 	}>
 }
 
-// --- Errors ---
-
 export interface ErrorSummary {
 	/** Stable fingerprint hash (the error identity; pass to error_detail). */
 	readonly fingerprintHash: string
@@ -119,8 +111,6 @@ export interface FindErrorsInput {
 	readonly environment?: string
 	readonly limit?: number
 }
-
-// --- Logs ---
 
 export interface LogEntry {
 	readonly timestamp: string
@@ -153,8 +143,6 @@ export interface SearchLogsOutput {
 	}
 }
 
-// --- Log Pattern Mining ---
-
 export interface MineLogPatternsInput {
 	readonly timeRange: TimeRange
 	readonly service?: string
@@ -182,8 +170,6 @@ export interface MineLogPatternsOutput {
 	readonly patterns: ReadonlyArray<LogPattern>
 }
 
-// --- Service Health ---
-
 export interface ServiceHealthOutput {
 	readonly serviceName: string
 	readonly timeRange: TimeRange
@@ -206,8 +192,6 @@ export interface ServiceHealthOutput {
 	readonly recentLogs: ReadonlyArray<LogEntry>
 }
 
-// --- Service Map ---
-
 export interface ServiceEdge {
 	readonly sourceService: string
 	readonly targetService: string
@@ -216,8 +200,6 @@ export interface ServiceEdge {
 	readonly avgDurationMs: number
 	readonly p95DurationMs: number
 }
-
-// --- Slow Traces ---
 
 export interface FindSlowTracesInput {
 	readonly timeRange: TimeRange
@@ -236,8 +218,6 @@ export interface FindSlowTracesOutput {
 	} | null
 	readonly traces: ReadonlyArray<SpanResult>
 }
-
-// --- Attributes ---
 
 export interface ExploreAttributesInput {
 	readonly source: "traces" | "metrics" | "services"

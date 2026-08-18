@@ -1,10 +1,11 @@
+import type { OrgId, ScrapeTargetId } from "@maple/domain"
 import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 
 export const scrapeTargets = pgTable(
 	"scrape_targets",
 	{
-		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		id: text("id").$type<ScrapeTargetId>().notNull().primaryKey(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		name: text("name").notNull(),
 		serviceName: text("service_name"),
 		url: text("url").notNull(),
@@ -50,9 +51,10 @@ export const scrapeTargetChecks = pgTable(
 		// carry over existing ids; setval() realigns the sequence afterwards.
 		id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
 		targetId: text("target_id")
+			.$type<ScrapeTargetId>()
 			.notNull()
 			.references(() => scrapeTargets.id, { onDelete: "cascade" }),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		/** Sub-target discriminator (e.g. PlanetScale branch); empty string for plain targets. */
 		subTargetKey: text("sub_target_key").notNull().default(""),
 		checkedAt: timestamp("checked_at", { withTimezone: true, mode: "date" }).notNull(),

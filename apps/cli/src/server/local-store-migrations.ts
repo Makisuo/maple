@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 // Generic local-store migration coordinator.
 //
 // The coordinator owns process safety, journaling, chain progression, staging,
@@ -36,6 +37,7 @@ import { legacyToCurrentModule } from "./local-store-migrations/legacy-to-curren
 import { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
 import { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
 import { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
+import { v4ToV5ServiceOverviewMinutelyModule } from "./local-store-migrations/v4-to-v5-service-overview-minutely"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -55,9 +57,6 @@ export {
 } from "./local-store-migration-module"
 
 export { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
-export { v1ToV2ErrorRollupModule } from "./local-store-migrations/v1-to-v2-error-rollup"
-export { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-to-v3-service-map-ingest-bridge"
-export { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
 
 const NONTERMINAL_PHASES = new Set<MigrationPhase>([
 	"planned",
@@ -122,6 +121,7 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v1ToV2ErrorRollupModule,
 	v2ToV3ServiceMapIngestBridgeModule,
 	v3ToV4WebEventsModule,
+	v4ToV5ServiceOverviewMinutelyModule,
 ]
 
 export const validateMigrationRegistry = (
@@ -171,6 +171,8 @@ export type MigrationResolutionErrorKind =
 	| "missing-path"
 	| "chdb-mismatch"
 
+// Migration planning is synchronous throw/catch code; this error does not enter an Effect failure channel.
+// oxlint-disable-next-line effecttsgo/extends-native-error
 export class MigrationResolutionError extends Error {
 	readonly kind: MigrationResolutionErrorKind
 	constructor(kind: MigrationResolutionErrorKind, message: string) {
@@ -388,10 +390,12 @@ const parseIdentity = (value: unknown, label: string): LocalSchemaIdentity => {
 		fingerprint: identity.fingerprint,
 		digest: identity.digest,
 		chdb: identity.chdb,
-		...(typeof identity.manifestDigest === "string" ? { manifestDigest: identity.manifestDigest } : {}),
+		...(typeof identity.manifestDigest === "string"
+			? { manifestDigest: identity.manifestDigest }
+			: undefined),
 		...(typeof identity.projectRevision === "string"
 			? { projectRevision: identity.projectRevision }
-			: {}),
+			: undefined),
 	}
 }
 
@@ -414,8 +418,8 @@ const parseStep = (value: unknown, index: number): MigrationStepJournal => {
 		from: parseIdentity(step.from, `step ${index} from`),
 		to: parseIdentity(step.to, `step ${index} to`),
 		status: status as MigrationStepStatus,
-		...(step.state === undefined ? {} : { state: step.state }),
-		...(step.progress === undefined ? {} : { progress: step.progress }),
+		...(!(step.state === undefined) ? { state: step.state } : undefined),
+		...(!(step.progress === undefined) ? { progress: step.progress } : undefined),
 	}
 }
 
@@ -544,7 +548,7 @@ const parseJournal = (value: unknown): MigrationJournal => {
 		targetVersion: record.targetVersion as number,
 		cutoffAt: record.cutoffAt as string,
 		createdAt: record.createdAt as string,
-		...(record.failure === undefined ? {} : { failure: String(record.failure) }),
+		...(!(record.failure === undefined) ? { failure: String(record.failure) } : undefined),
 	}
 	assertJournalChainInvariants(journal)
 	for (const [index, step] of journal.chain.entries()) {
@@ -1133,8 +1137,8 @@ const makeModuleContext = (
 			const previous = current.chain[stepIndex]!
 			const nextStep: MigrationStepJournal = {
 				...previous,
-				...(update.state === undefined ? {} : { state: update.state }),
-				...(update.progress === undefined ? {} : { progress: update.progress }),
+				...(!(update.state === undefined) ? { state: update.state } : undefined),
+				...(!(update.progress === undefined) ? { progress: update.progress } : undefined),
 			}
 			current = {
 				...current,

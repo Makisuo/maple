@@ -103,7 +103,7 @@ const severityStyles: Record<string, string> = {
 	WARN: "text-severity-warn",
 	ERROR: "text-severity-error",
 	FATAL: "text-severity-fatal",
-}
+} satisfies Record<string, string>
 
 function LogEntry({ log, timeZone, onClick }: { log: Log; timeZone: string; onClick?: (log: Log) => void }) {
 	const severityStyle = severityStyles[log.severityText] ?? "text-severity-trace"

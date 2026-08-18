@@ -1,10 +1,10 @@
-export interface IntegrationStep {
+interface IntegrationStep {
 	title: string
 	code: string
 	language: string
 }
 
-export interface IntegrationSignal {
+interface IntegrationSignal {
 	title: string
 	description: string
 }
@@ -224,4 +224,4 @@ sdk.start();`,
 			},
 		],
 	},
-}
+} satisfies Record<string, Integration>

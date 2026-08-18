@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 /**
  * Turns an `HttpApiSchemaError` (the framework's request-decode failure) into
  * human-readable, path-anchored lines.
@@ -141,7 +142,7 @@ const KIND_LABEL: Record<SchemaErrorKind, string> = {
 	Body: "body",
 	Payload: "payload",
 	ResponseHeaders: "response headers",
-}
+} satisfies Record<SchemaErrorKind, string>
 
 /** `Request payload is invalid (2 problems).` — the summary line for the 400. */
 export const summarizeSchemaError = (

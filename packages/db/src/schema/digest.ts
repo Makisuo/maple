@@ -1,10 +1,11 @@
+import type { OrgId } from "@maple/domain"
 import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 export const digestSubscriptions = pgTable(
 	"digest_subscriptions",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		userId: text("user_id").notNull(),
 		email: text("email").notNull(),
 		enabled: boolean("enabled").notNull().default(true),

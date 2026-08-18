@@ -46,7 +46,7 @@ interface ServiceMapRollupResult {
 	readonly orgFailures: number
 }
 
-export interface ServiceMapRollupServiceShape {
+export interface ServiceMapRollupServiceApi {
 	/**
 	 * Aggregate service-to-service edges for any completed hour in the trailing
 	 * `LOOKBACK_HOURS` window not yet present in `service_map_edges_hourly`, and
@@ -68,7 +68,7 @@ export interface ServiceMapRollupServiceShape {
  */
 export class ServiceMapRollupService extends Context.Service<
 	ServiceMapRollupService,
-	ServiceMapRollupServiceShape
+	ServiceMapRollupServiceApi
 >()("@maple/api/services/ServiceMapRollupService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -82,6 +82,7 @@ export class ServiceMapRollupService extends Context.Service<
 		})
 
 		const processOrg = Effect.fn("ServiceMapRollupService.processOrg")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			const tenant = systemTenant(orgId)
 			const currentHourMs = Math.floor((yield* Clock.currentTimeMillis) / HOUR_MS) * HOUR_MS
 			const oldestHourMs = currentHourMs - LOOKBACK_HOURS * HOUR_MS
@@ -242,12 +243,16 @@ export class ServiceMapRollupService extends Context.Service<
 				.execute((db) =>
 					db.selectDistinct({ orgId: orgClickHouseSettings.orgId }).from(orgClickHouseSettings),
 				)
-				.pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ orgId: string }>))
+				.pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ orgId: OrgId }>))
 
 			return yield* warehouse
 				.crossOrgQuery(
 					systemTenant(knownOrgs[0]!),
-					CH.compile(CH.activeOrgsByTracesQuery(), { startTime }),
+					CH.compile(
+						CH.activeOrgsByTracesQuery(),
+						{ startTime },
+						{ rowSchema: CH.ActiveOrgsOutputSchema },
+					),
 					{
 						profile: "discovery",
 						context: "serviceMapRollupActiveOrgs",
@@ -257,12 +262,11 @@ export class ServiceMapRollupService extends Context.Service<
 				)
 				.pipe(
 					Effect.map((rows) => {
-						const active = new Set<string>(byoRows.map((row) => row.orgId))
+						const active = new Set<OrgId>(byoRows.map((row) => row.orgId))
 						for (const row of rows) {
-							const orgId = String((row as { orgId?: unknown }).orgId ?? "")
-							if (orgId) active.add(orgId)
+							active.add(row.orgId)
 						}
-						return active as ReadonlySet<string>
+						return active as ReadonlySet<OrgId>
 					}),
 					Effect.catchCause((cause) =>
 						Cause.hasInterruptsOnly(cause)
@@ -277,14 +281,14 @@ export class ServiceMapRollupService extends Context.Service<
 				)
 		})
 
-		const runRollupTick: ServiceMapRollupServiceShape["runRollupTick"] = Effect.fn(
+		const runRollupTick: ServiceMapRollupServiceApi["runRollupTick"] = Effect.fn(
 			"ServiceMapRollupService.runRollupTick",
 		)(function* () {
 			const orgRows = yield* database.execute((db) =>
 				db.selectDistinct({ orgId: orgIngestKeys.orgId }).from(orgIngestKeys),
 			)
 
-			const knownOrgs = orgRows.map((row) => row.orgId as OrgId)
+			const knownOrgs = orgRows.map((row) => row.orgId)
 			const active = yield* resolveActiveOrgs(knownOrgs)
 			const targetOrgs =
 				active === undefined ? knownOrgs : knownOrgs.filter((orgId) => active.has(orgId))

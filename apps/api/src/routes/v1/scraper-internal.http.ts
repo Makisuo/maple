@@ -25,6 +25,7 @@ const decodeScrapeIntervalSecondsSync = Schema.decodeUnknownSync(ScrapeIntervalS
 const SCRAPER_SYSTEM_USER = Schema.decodeSync(UserId)("system-prometheus-scraper")
 const decodeScrapeResultsEffect = Schema.decodeUnknownEffect(ScrapeResultReportList)
 const decodeLabelsEffect = Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.String))
+const EMPTY_LABELS = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.String))({})
 
 const errorText = (message: string, status: number) =>
 	HttpServerResponse.text(message, {
@@ -39,7 +40,7 @@ export interface ScrapeTargetRowLike {
 	readonly serviceName: string | null
 	readonly url: string
 	readonly scrapeIntervalSeconds: number
-	readonly labelsJson: Record<string, string> | null
+	readonly labelsJson: unknown
 }
 
 export interface SubTargetOverride {
@@ -49,6 +50,15 @@ export interface SubTargetOverride {
 	/** Discovery labels; the target's own labelsJson wins on key conflicts. */
 	readonly labels: Record<string, string>
 }
+
+class InvalidScrapeTargetRow extends Schema.TaggedError<InvalidScrapeTargetRow>()(
+	"@maple/api/routes/InvalidScrapeTargetRow",
+	{
+		message: Schema.String,
+		rawTargetId: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {}
 
 /**
  * Marshal a DB row into the internal wire shape. Unparseable labels degrade
@@ -64,10 +74,8 @@ export const toInternalScrapeTarget = (
 ): Effect.Effect<Option.Option<InternalScrapeTarget>> =>
 	Effect.gen(function* () {
 		const ownLabels = row.labelsJson
-			? yield* decodeLabelsEffect(row.labelsJson).pipe(
-					Effect.orElseSucceed(() => ({}) as Record<string, string>),
-				)
-			: {}
+			? yield* decodeLabelsEffect(row.labelsJson).pipe(Effect.orElseSucceed(() => EMPTY_LABELS))
+			: EMPTY_LABELS
 		const labels = subTarget ? { ...subTarget.labels, ...ownLabels } : ownLabels
 		return yield* Effect.try({
 			try: () =>
@@ -82,7 +90,12 @@ export const toInternalScrapeTarget = (
 					labels,
 					ingestKey,
 				}),
-			catch: () => new Error("invalid scrape target row"),
+			catch: (cause) =>
+				new InvalidScrapeTargetRow({
+					message: "Invalid scrape target row",
+					rawTargetId: row.id,
+					cause,
+				}),
 		}).pipe(Effect.option)
 	})
 
@@ -112,8 +125,8 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 			return undefined
 		}
 
-		const listTargets = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
+		const listTargets = Effect.fn("ScraperInternal.listTargets")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
 				const denied = unauthorized(req)
 				if (denied) return denied
 
@@ -195,15 +208,14 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 				)
 
 				return yield* HttpServerResponse.json(targets)
-			}).pipe(
-				Effect.catch((error) =>
-					Effect.logError("Failed to build scraper target list").pipe(
-						Effect.annotateLogs({ error: error.message }),
-						Effect.as(errorText("Scraper target list unavailable", 503)),
-					),
+			},
+			Effect.catch((error) =>
+				Effect.logError("Failed to build scraper target list").pipe(
+					Effect.annotateLogs({ error: error.message }),
+					Effect.as(errorText("Scraper target list unavailable", 503)),
 				),
-				Effect.withSpan("ScraperInternal.listTargets"),
-			)
+			),
+		)
 
 		const recordResults = (req: HttpServerRequest.HttpServerRequest) =>
 			Effect.gen(function* () {

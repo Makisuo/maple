@@ -4,7 +4,7 @@ import { McpToolExecutor, listMcpTools } from "./dispatcher"
 import { CurrentMcpRequestTenant } from "./lib/query-warehouse"
 import type { McpToolResult } from "./tools/types"
 
-const toCallToolResult = (result: McpToolResult): typeof McpSchema.CallToolResult.Type =>
+const toCallToolResult = (result: McpToolResult): McpSchema.CallToolResult =>
 	new McpSchema.CallToolResult({
 		isError: result.isError === true ? true : undefined,
 		content: result.content.map((entry) => ({
@@ -43,7 +43,7 @@ export const McpToolsLive = Layer.effectDiscard(
 							})
 						}
 
-						return yield* executor.execute(tenant, descriptor.name, payload).pipe(
+						return yield* executor.execute(tenant, descriptor.name, payload, "mcp").pipe(
 							Effect.map(toCallToolResult),
 							Effect.catchTag("@maple/internal-rpc/ToolNotFoundError", (error) =>
 								Effect.succeed(toBoundaryErrorResult(error)),

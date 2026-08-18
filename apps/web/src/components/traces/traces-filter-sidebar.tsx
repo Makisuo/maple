@@ -1,5 +1,5 @@
 import { Result } from "@/lib/effect-atom"
-import { useNavigate } from "@tanstack/react-router"
+import { getRouteApi } from "@tanstack/react-router"
 
 import {
 	FilterSection,
@@ -8,9 +8,7 @@ import {
 	serviceColorMap,
 } from "./filter-section"
 import { DurationRangeFilter } from "./duration-range-filter"
-import { Route } from "@/routes/traces"
 import type { TracesFacetsResponse } from "@/api/warehouse/traces"
-import type { TracesSearchParams } from "@/routes/traces"
 import {
 	FilterSidebarBody,
 	FilterSidebarError,
@@ -18,6 +16,9 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
+
+const routeApi = getRouteApi("/traces/")
+type TracesSearchParams = ReturnType<typeof routeApi.useSearch>
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={5} />
@@ -136,8 +137,8 @@ interface TracesFilterSidebarProps {
 }
 
 export function TracesFilterSidebar({ facetsResult }: TracesFilterSidebarProps) {
-	const navigate = useNavigate({ from: Route.fullPath })
-	const search = Route.useSearch()
+	const navigate = routeApi.useNavigate()
+	const search = routeApi.useSearch()
 
 	const onFilterChange = <K extends keyof TracesSearchParams>(key: K, value: TracesSearchParams[K]) => {
 		navigate({

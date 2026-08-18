@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { ok, rejects, strictEqual, throws } from "node:assert"
@@ -21,7 +22,7 @@ import {
 	checkpointStatePath,
 } from "../src/server/checkpoints"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 
 /** Seed a minimal checkpoint snapshot + state so resolveCheckpoint succeeds in unit tests. */
 const seedCheckpoint = (dataDir: string, checkpointId: string): string => {

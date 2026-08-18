@@ -10,6 +10,7 @@
 		"./glob": "./src/glob.ts",
 		"./http": "./src/http/index.ts",
 		"./http/v2": "./src/http/v2/index.ts",
+		"./http/v2-worker-unavailable": "./src/http/v2/worker-unavailable.ts",
 		"./internal-rpc": "./src/internal-rpc.ts",
 		"./llm": "./src/llm.ts",
 		"./permission": "./src/permission.ts",
@@ -25,7 +26,6 @@
 		"./clickhouse": "./src/clickhouse/index.ts",
 		"./generated/clickhouse-schema": "./src/generated/clickhouse-schema.ts",
 		"./where-clause": "./src/where-clause.ts",
-		"./http/observability": "./src/http/observability.ts",
 		"./http/warehouse-errors": "./src/http/warehouse-errors.ts",
 		"./chat-preamble": "./src/chat-preamble.ts",
 		"./chat-session": "./src/chat-session.ts"
@@ -36,6 +36,9 @@
 	},
 	"dependencies": {
 		"@maple-dev/clickhouse-builder": "workspace:*",
+		"@maple/primitives": "workspace:*",
+		"@maple/query-model": "workspace:*",
+		"@maple/widgets": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"effect": "catalog:effect"
 	},

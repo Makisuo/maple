@@ -127,14 +127,17 @@ export const competitorConfigs: Record<Competitor, { name: string; sliders: Slid
 			},
 		],
 	},
-}
+} satisfies Record<Competitor, { name: string; sliders: SliderConfig[] }>
 
 function calculateDatadog(values: Record<string, number>) {
+	// Published (annual billing): Infrastructure Pro $15/host, APM $31/host,
+	// log ingestion $0.10/GB, log indexing $1.70/M events at 15-day retention.
 	const infraCost = values.hosts * 15
 	const apmCost = values.apmHosts * 31
-	// Assume ~10 million log events indexed for the log volume
 	const logIngestion = values.logVolume * 0.1
-	const logIndexing = values.logVolume * 0.15 * 1.7 // ~0.15M events per GB indexed
+	// Indexing assumes ~1 KB/event (≈1M events per GB) with ~15% of events
+	// indexed — deliberately conservative; many Datadog setups index more.
+	const logIndexing = values.logVolume * 0.15 * 1.7
 	const totalLog = logIngestion + logIndexing
 
 	return {
@@ -152,12 +155,16 @@ function calculateDatadog(values: Record<string, number>) {
 }
 
 function calculateGrafana(values: Record<string, number>) {
+	// Published pay-as-you-go: $19/mo platform fee, metrics $6.50 per 1k active
+	// series beyond 10k free, logs & traces $0.45/GB ingested ($0.05 process +
+	// $0.40 write; retention and query billed separately, not modeled) beyond
+	// 50 GB free each, $8 per active user beyond 3 free.
 	const platformFee = 19
 	const metricSeriesK = values.metricSeries
 	const metricsOverage = Math.max(0, metricSeriesK - 10) * 6.5
-	const logsOverage = Math.max(0, values.logVolume - 50) * 0.5
-	const tracesOverage = Math.max(0, values.traceVolume - 50) * 0.5
-	const userCost = values.teamSize * 8
+	const logsOverage = Math.max(0, values.logVolume - 50) * 0.45
+	const tracesOverage = Math.max(0, values.traceVolume - 50) * 0.45
+	const userCost = Math.max(0, values.teamSize - 3) * 8
 
 	return {
 		total: platformFee + metricsOverage + logsOverage + tracesOverage + userCost,
@@ -166,15 +173,20 @@ function calculateGrafana(values: Record<string, number>) {
 			{ label: "Metrics", value: metricsOverage, detail: `${metricSeriesK}k series (10k free)` },
 			{ label: "Logs", value: logsOverage, detail: `${values.logVolume} GB (50 GB free)` },
 			{ label: "Traces", value: tracesOverage, detail: `${values.traceVolume} GB (50 GB free)` },
-			{ label: "Users", value: userCost, detail: `${values.teamSize} users × $8` },
+			{ label: "Users", value: userCost, detail: `${values.teamSize} users × $8 (3 free)` },
 		],
 	}
 }
 
 function calculateNewRelic(values: Record<string, number>) {
-	// Pro plan: $349/user/year ≈ $29.08/user/month for annual billing
-	const userCost = values.fullUsers * 29.08
-	const dataOverage = Math.max(0, values.dataVolume - 100) * 0.3
+	// Published pricing: Standard is $10 for the first full platform user +
+	// $99 per additional user, capped at 5 users; teams above 5 need Pro at
+	// $349/user/mo (annual commitment; $418.80 month-to-month). Data ingest
+	// beyond the free 100 GB is $0.40/GB on the Original Data option.
+	const users = values.fullUsers
+	const onStandard = users <= 5
+	const userCost = onStandard ? 10 + (users - 1) * 99 : users * 349
+	const dataOverage = Math.max(0, values.dataVolume - 100) * 0.4
 
 	return {
 		total: userCost + dataOverage,
@@ -182,7 +194,9 @@ function calculateNewRelic(values: Record<string, number>) {
 			{
 				label: "Full platform users",
 				value: userCost,
-				detail: `${values.fullUsers} users × $29/mo (annual)`,
+				detail: onStandard
+					? `Standard: $10 first user + ${users - 1} × $99`
+					: `Pro: ${users} users × $349/mo (annual)`,
 			},
 			{ label: "Data ingestion", value: dataOverage, detail: `${values.dataVolume} GB (100 GB free)` },
 		],
@@ -206,36 +220,56 @@ function calculateDash0(values: Record<string, number>) {
 }
 
 function calculateMaple(values: Record<string, number>, competitor: Competitor) {
+	// Maple Startup (autumn.config.ts): $39/mo with 100 GB included per signal
+	// (logs, traces, metrics) and $0.30/GB overage billed per signal — the
+	// allowances are not a fungible 300 GB pool. Maple meters decoded OTLP
+	// payload bytes; where a competitor bills in counts instead of volume, the
+	// branch converts using a per-item byte estimate documented at that branch.
 	const baseCost = 39
-	let totalDataGB: number
+	let logsGB = 0
+	let tracesGB = 0
+	let metricsGB = 0
 
 	if (competitor === "datadog") {
-		// Estimate total data from log volume + trace equivalents from APM hosts
-		totalDataGB = values.logVolume + values.apmHosts * 5 // ~5 GB traces per APM host
+		// Trace volume from APM hosts is a rough estimate: ~25 GB of spans per
+		// host per month (≈10 spans/sec at ~1 KB/span). Real per-host volume
+		// varies widely — Datadog's own included allotment is 150 GB/host.
+		logsGB = values.logVolume
+		tracesGB = values.apmHosts * 25
 	} else if (competitor === "grafana") {
-		totalDataGB = values.logVolume + values.traceVolume + values.metricSeries * 0.1 // rough metrics GB
+		// Grafana bills active series, which assumes 1 data point per minute
+		// per series. 1k series × 43,200 min/mo × ~0.1 KB/point ≈ 4.32 GB.
+		logsGB = values.logVolume
+		tracesGB = values.traceVolume
+		metricsGB = values.metricSeries * 4.32
 	} else if (competitor === "dash0") {
-		// Convert data-point counts to an estimated GB equivalent for Maple's volume-based pricing:
+		// Dash0 bills per item; convert counts to decoded OTLP volume at
 		// ~1 KB per span and per log record, ~0.1 KB per metric data point.
-		totalDataGB = values.spans * 1 + values.logs * 1 + values.metricPoints * 0.1
+		tracesGB = values.spans * 1
+		logsGB = values.logs * 1
+		metricsGB = values.metricPoints * 0.1
 	} else {
-		totalDataGB = values.dataVolume
+		// New Relic's slider is one total volume; assume it splits evenly
+		// across the three signals (under an even split the per-signal
+		// overage sum equals max(0, total − 300)).
+		logsGB = values.dataVolume / 3
+		tracesGB = values.dataVolume / 3
+		metricsGB = values.dataVolume / 3
 	}
 
-	// Maple: 100 GB each for logs, traces, metrics = 300 GB total included
-	// Overage billed at $0.30/GB beyond 300 GB total (autumn.config.ts)
-	const overage = Math.max(0, totalDataGB - 300) * 0.3
+	const overageGB = Math.max(0, logsGB - 100) + Math.max(0, tracesGB - 100) + Math.max(0, metricsGB - 100)
+	const overage = overageGB * 0.3
 
 	return {
 		total: baseCost + overage,
 		breakdown: [
-			{ label: "Startup plan", value: baseCost, detail: "300 GB included" },
+			{ label: "Startup plan", value: baseCost, detail: "100 GB per signal included" },
 			...(overage > 0
 				? [
 						{
 							label: "Overage",
 							value: overage,
-							detail: `${Math.round(totalDataGB - 300)} GB × $0.30`,
+							detail: `${Math.round(overageGB)} GB over × $0.30`,
 						},
 					]
 				: []),
@@ -373,9 +407,6 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 								</span>
 							</div>
 						))}
-						{mapleCost.breakdown.map((item) => (
-							<div key={`${item.label}-detail`} className="hidden" />
-						))}
 					</div>
 					<div className="mt-3 space-y-1">
 						{mapleCost.breakdown.map((item) => (
@@ -449,11 +480,18 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 
 			{/* Disclaimer */}
 			<p className="mt-4 text-[10px] text-[oklch(0.4_0.02_60)] leading-relaxed">
-				Estimates based on published pricing as of 2025. Actual costs may vary based on contract
-				terms, volume discounts, and additional features. Maple pricing based on the Startup plan
-				($39/mo with 300 GB total included data, then $0.30/GB).
+				Estimates based on published pricing as of August 2026. Actual costs may vary based on
+				contract terms, volume discounts, and additional features. Maple pricing based on the Startup
+				plan ($39/mo with 100 GB included per signal — logs, traces, metrics — then $0.30/GB, billed
+				per signal), metered on uncompressed (decoded OTLP) bytes.
+				{competitor === "grafana" &&
+					" Grafana bills active series (1 data point per minute per series), so the Maple estimate converts 1k active series to ~4.32 GB/mo assuming ~0.1 KB per decoded metric data point — your real ratio depends on attribute sizes. Grafana log and trace rates model ingest (process + write); retention and query fees are not included."}
+				{competitor === "datadog" &&
+					" Trace volume is estimated at ~25 GB of spans per APM host per month, and Datadog log indexing assumes ~1 KB per event with ~15% of events indexed; actual volumes depend on request rate and instrumentation density."}
+				{competitor === "new-relic" &&
+					" New Relic modeled on Standard ($10 first user + $99/user, max 5) up to 5 full platform users and Pro ($349/user/mo, annual commitment) above, with the Original Data option ($0.40/GB beyond 100 GB free); data is assumed to split evenly across logs, traces, and metrics."}
 				{competitor === "dash0" &&
-					" Dash0 bills per data point (spans & logs $0.60/M, metrics $0.20/M); Maple bills per GB, so the Maple estimate converts data points to volume at roughly 1 KB per span and log record and 0.1 KB per metric data point. Your real ratio depends on attribute and payload sizes."}
+					" Dash0 bills per data point (spans & logs $0.60/M, metrics $0.20/M); Maple bills per GB, so the Maple estimate converts at roughly 1 KB per span and log record and 0.1 KB per metric data point. Your real ratio depends on attribute and payload sizes."}
 			</p>
 		</div>
 	)

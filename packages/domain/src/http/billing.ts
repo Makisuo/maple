@@ -1,21 +1,12 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
-import { Schema } from "effect"
-import { Authorization } from "./current-tenant"
+import { Effect, Schema } from "effect"
+import { SessionAuthorization } from "./current-tenant"
 import { WarehouseQueryError } from "./warehouse-errors"
 
-// Typed Maple contract in front of the `autumn-js/backend` proxy. The handlers
-// (apps/api/src/routes/billing.http.ts) still call `autumnHandler` internally, so
-// every success schema below mirrors the raw JSON that Autumn returns — which is
-// exactly what the old `autumn-js/react` hooks surfaced to the UI. Schemas model
-// only the consumed subset and lean on optional/nullable fields so an upstream
-// shape addition can't fail decoding and 500 the endpoint (excess keys are
-// dropped by `Schema.Struct`/`Schema.Class` decoding).
+// Contract for raw Autumn proxy responses. Schemas model only consumed fields
+// and tolerate additive upstream fields.
 
-// ---- Plan shapes shared by the catalog and the customer's own plan ----
-//
-// Declared first because `BillingSubscriptionPlan` (the customer's expanded plan)
-// is built from them, and a Schema.Class evaluates its fields at module init —
-// referencing a class declared further down would throw at import time.
+// These precede BillingSubscriptionPlan because Schema.Class evaluates fields at module load.
 
 export class CatalogPlanItemPrice extends Schema.Class<CatalogPlanItemPrice>("CatalogPlanItemPrice")({
 	amount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
@@ -40,8 +31,6 @@ export class CatalogPlanPrice extends Schema.Class<CatalogPlanPrice>("CatalogPla
 	amount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	interval: Schema.optionalKey(Schema.NullOr(Schema.String)),
 }) {}
-
-// ---- Customer (getOrCreateCustomer) ----
 
 export class BillingBalance extends Schema.Class<BillingBalance>("BillingBalance")({
 	granted: Schema.optionalKey(Schema.NullOr(Schema.Number)),
@@ -102,10 +91,21 @@ export const BillingAlertThresholdType = Schema.Literals([
 ])
 export type BillingAlertThresholdType = typeof BillingAlertThresholdType.Type
 
+/**
+ * Autumn omits `enabled` on a billing control whose value is the API default,
+ * and the two defaults differ: a spend limit is off unless said otherwise, a
+ * usage alert is on. `autumn-js` injected them in its inbound Zod schemas
+ * (`z._default(boolean(), false)` / `z._default(boolean(), true)`) before
+ * anything downstream saw the row, so the decoded field stays a required
+ * `boolean` and every consumer keeps reading it unconditionally.
+ */
+const SpendLimitEnabled = Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false)))
+const UsageAlertEnabled = Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true)))
+
 /** Autumn-native cap on paid overage for one feature. */
 export class BillingSpendLimit extends Schema.Class<BillingSpendLimit>("BillingSpendLimit")({
 	featureId: Schema.optionalKey(Schema.String),
-	enabled: Schema.Boolean,
+	enabled: SpendLimitEnabled,
 	limitType: Schema.optionalKey(BillingLimitType),
 	overageLimit: Schema.optionalKey(Schema.Number),
 	source: Schema.optionalKey(Schema.String),
@@ -114,7 +114,7 @@ export class BillingSpendLimit extends Schema.Class<BillingSpendLimit>("BillingS
 /** Autumn-native usage alert; delivery is driven by Autumn webhooks. */
 export class BillingUsageAlert extends Schema.Class<BillingUsageAlert>("BillingUsageAlert")({
 	featureId: Schema.optionalKey(Schema.String),
-	enabled: Schema.Boolean,
+	enabled: UsageAlertEnabled,
 	threshold: Schema.Number,
 	thresholdType: BillingAlertThresholdType,
 	name: Schema.optionalKey(Schema.String),
@@ -133,8 +133,6 @@ export class BillingCustomer extends Schema.Class<BillingCustomer>("BillingCusto
 	flags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
 	billingControls: Schema.optionalKey(Schema.NullOr(BillingControls)),
 }) {}
-
-// ---- Plan catalog (listPlans) ----
 
 export class CatalogPlanEligibility extends Schema.Class<CatalogPlanEligibility>("CatalogPlanEligibility")({
 	status: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -163,8 +161,6 @@ export class CatalogPlansResponse extends Schema.Class<CatalogPlansResponse>("Ca
 	plans: Schema.Array(CatalogPlan),
 }) {}
 
-// ---- Invoices (getOrCreateCustomer with expand: ["invoices"]) ----
-
 export class BillingInvoice extends Schema.Class<BillingInvoice>("BillingInvoice")({
 	stripeId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	planIds: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
@@ -185,8 +181,6 @@ export class BillingInvoicesResponse extends Schema.Class<BillingInvoicesRespons
 	},
 ) {}
 
-// ---- Usage (aggregateEvents) ----
-
 export class BillingUsageFeature extends Schema.Class<BillingUsageFeature>("BillingUsageFeature")({
 	sum: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }) {}
@@ -200,8 +194,6 @@ const BillingUsageQuery = Schema.Struct({
 	featureId: Schema.Array(Schema.String),
 	range: Schema.String,
 })
-
-// ---- Daily spend series (warehouse-backed) ----
 
 /**
  * One UTC day of billable volume. Units match how the ingest gateway meters to
@@ -225,8 +217,6 @@ export class DailySpendResponse extends Schema.Class<DailySpendResponse>("DailyS
 	cycleStart: Schema.Number,
 	cycleEnd: Schema.Number,
 }) {}
-
-// ---- Autumn-native billing controls ----
 
 const NonNegativeFiniteNumber = Schema.Number.pipe(
 	Schema.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
@@ -261,8 +251,6 @@ export class UpdateBillingControlsRequest extends Schema.Class<UpdateBillingCont
 	spendLimits: Schema.Array(UpdateBillingSpendLimit),
 	usageAlerts: Schema.Array(UpdateBillingUsageAlert),
 }) {}
-
-// ---- Mutations (attach / previewAttach / openCustomerPortal) ----
 
 export class AttachRequest extends Schema.Class<AttachRequest>("AttachRequest")({
 	planId: Schema.String,
@@ -302,8 +290,6 @@ export class CustomerPortalResult extends Schema.Class<CustomerPortalResult>("Cu
 	url: Schema.String,
 }) {}
 
-// ---- Errors ----
-
 export class BillingUpstreamError extends Schema.TaggedError<BillingUpstreamError>()(
 	"@maple/http/errors/BillingUpstreamError",
 	{
@@ -317,8 +303,6 @@ export class BillingForbiddenError extends Schema.TaggedError<BillingForbiddenEr
 	{ message: Schema.String },
 	{ httpApiStatus: 403 },
 ) {}
-
-// ---- Groups ----
 
 // Authed billing operations: customer/usage reads, native controls, and checkout/portal.
 export class BillingApiGroup extends HttpApiGroup.make("billing")
@@ -378,8 +362,8 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 			error: BillingUpstreamError,
 		}),
 	)
-	.prefix("/api/billing")
-	.middleware(Authorization) {}
+	.prefix("/internal/billing")
+	.middleware(SessionAuthorization) {}
 
 // The plan catalog is global, so `listPlans` stays public — a transient
 // onboarding token gap serves the catalog instead of a 401. The handler still

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { Exit } from "effect"
 import { useAtomSet } from "@/lib/effect-atom"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
@@ -61,8 +61,8 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 		title: investigation.snapshot.title,
 		severity: investigation.severity ?? investigation.snapshot.severity ?? "unclassified",
 		status: investigation.status,
-		...(signalType ? { signalType } : {}),
-		...(investigation.snapshot.scope ? { scope: investigation.snapshot.scope } : {}),
+		...(signalType ? { signalType } : undefined),
+		...(investigation.snapshot.scope ? { scope: investigation.snapshot.scope } : undefined),
 		facts: investigation.snapshot.facts.map((fact) => ({
 			key: factKey(fact.label),
 			label: fact.label,
@@ -72,10 +72,10 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 			subject.type === "incident"
 				? {
 						incidentId: subject.incident_id,
-						...(subject.issue_id ? { issueId: subject.issue_id } : {}),
+						...(subject.issue_id ? { issueId: subject.issue_id } : undefined),
 						...(investigation.snapshot.scope
 							? { serviceName: investigation.snapshot.scope }
-							: {}),
+							: undefined),
 					}
 				: undefined,
 		...(investigation.report
@@ -83,7 +83,7 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 					aiSummary: investigation.report.summary,
 					aiSuspectedCause: investigation.report.suspectedCause,
 				}
-			: {}),
+			: undefined),
 	}
 }
 
@@ -136,8 +136,8 @@ export function InvestigationView({
 		} else {
 			// The server's reason is the whole message — a daily-budget 429 says which
 			// ceiling was hit and when it resets, and a fixed title threw all of it away.
-			const { title, description } = formatBackendError(result)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(result)
+			toastManager.add({ title, description: message, type: "error" })
 		}
 	}
 
@@ -152,8 +152,8 @@ export function InvestigationView({
 		if (Exit.isSuccess(result)) {
 			toastManager.add({ title: "Investigation resolved", type: "success" })
 		} else {
-			const { title, description } = formatBackendError(result)
-			toastManager.add({ title, description, type: "error" })
+			const { title, message } = displayError(result)
+			toastManager.add({ title, description: message, type: "error" })
 		}
 	}
 
@@ -182,8 +182,8 @@ export function InvestigationView({
 			to: "/investigations/$id",
 			params: { id: investigation.id },
 			search: {
-				...(tab === "overview" ? {} : { tab }),
-				...(index === null ? {} : { action: index }),
+				...(!(tab === "overview") ? { tab } : undefined),
+				...(!(index === null) ? { action: index } : undefined),
 			},
 			replace: true,
 		})

@@ -14,7 +14,6 @@ export * from "@maple-dev/clickhouse-builder"
 // resolve a pipe name to identical SQL.
 export { compilePipeQuery, type PipeCompiledQuery } from "./pipe-dispatch"
 
-// Tables
 export * as tables from "./tables"
 
 // Shared row-schema codecs (ClickHouse `FORMAT JSON` 64-bit-int-as-string coercion).
@@ -228,6 +227,7 @@ export {
 	errorFingerprintsQuery,
 	errorIssueTimeseriesQuery,
 	errorIssueSampleTracesQuery,
+	ErrorIssueSampleTracesOutputSchema,
 	type ErrorsByTypeOpts,
 	type ErrorsByTypeOutput,
 	type ErrorsTimeseriesOpts,
@@ -281,6 +281,7 @@ export {
 	activeOrgsByErrorEventsQuery,
 	activeOrgsByTracesQuery,
 	activeOrgsByLogsQuery,
+	ActiveOrgsOutputSchema,
 	type ActiveOrgsOutput,
 } from "./queries/activity"
 

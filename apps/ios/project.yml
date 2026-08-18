@@ -1,0 +1,113 @@
+# Source of truth for the Xcode project. `Maple.xcodeproj` is generated from
+# this file and is NOT committed — .pbxproj is merge-hostile and this repo runs
+# concurrent worktrees.
+#
+#   cd apps/ios && xcodegen generate && open Maple.xcodeproj
+#
+# or just ./scripts/bootstrap.sh
+name: Maple
+
+options:
+  bundleIdPrefix: com.maple
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: false
+
+configs:
+  Debug: debug
+  Release: release
+
+packages:
+  MapleAPI:
+    path: Packages/MapleAPI
+  Clerk:
+    url: https://github.com/clerk/clerk-ios
+    # Exact, not \`from\`: the app-level Package.resolved lives inside the
+    # generated .xcodeproj, which is gitignored, so this line is the only
+    # durable pin. Bump deliberately.
+    exactVersion: 1.3.9
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # The design is already actor-shaped (one actor for tokens, @MainActor
+    # models), so complete checking costs nothing and is set explicitly so a
+    # future downgrade is loud rather than silent.
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # DEVELOPMENT_TEAM is deliberately NOT set here. A value at project level
+    # outranks the xcconfigs, so hardcoding it (even to "") pinned every
+    # checkout to one team and left `""` winning over anything a developer set.
+    # It now comes from Config/Secrets.xcconfig, the same gitignored file the
+    # Clerk key uses — signing identity is per-developer, not per-repo.
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  Maple:
+    type: application
+    platform: iOS
+    sources:
+      - path: Maple
+    configFiles:
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
+    dependencies:
+      - package: MapleAPI
+        product: MapleAPI
+      - package: Clerk
+        product: ClerkKit
+      - package: Clerk
+        product: ClerkKitUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.maple.mobile
+        PRODUCT_NAME: Maple
+        CODE_SIGN_ENTITLEMENTS: Maple/Resources/Maple.entitlements
+        # iPhone only, portrait only, for the first slice.
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: Maple/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Maple
+        CFBundleShortVersionString: "0.1.0"
+        # These must live in the plist itself: `INFOPLIST_KEY_*` build settings
+        # are only honoured when Xcode generates the plist, and this one is
+        # written by XcodeGen. Without `UILaunchScreen` iOS assumes a legacy
+        # app and letterboxes it inside the old 4.7" canvas.
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Geist Mono is the body voice and proportional Geist the display face —
+        # the inversion that defines Maple's look. See Typography.swift.
+        # Bare filenames: Xcode flattens resources to the bundle root, so a
+        # "Fonts/" prefix here silently fails to register and SwiftUI falls back
+        # to the system font.
+        UIAppFonts:
+          - Geist-Regular.ttf
+          - Geist-SemiBold.ttf
+          - GeistMono-Regular.ttf
+          - GeistMono-Medium.ttf
+          - GeistMono-SemiBold.ttf
+        # DESIGN.md: "terminal-native, dark by default".
+        UIUserInterfaceStyle: Dark
+        CFBundleVersion: "1"
+        ITSAppUsesNonExemptEncryption: false
+        # Injected from Config/Secrets.xcconfig so no key is baked into source.
+        MapleClerkPublishableKey: $(CLERK_PUBLISHABLE_KEY)
+        MapleAPIBaseURL: $(MAPLE_API_BASE_URL)
+
+# One scheme. There is deliberately no app-target test bundle: every test worth
+# having is in Packages/MapleAPI, which runs with `swift test` — no simulator, no
+# signing, no Clerk key. An app-target test would launch the host app and need
+# all three.
+schemes:
+  Maple:
+    build:
+      targets:
+        Maple: all
+    run:
+      config: Debug

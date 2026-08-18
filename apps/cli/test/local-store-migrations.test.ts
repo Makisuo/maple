@@ -12,6 +12,8 @@ import {
 	LOCAL_SCHEMA_V3,
 	LOCAL_SCHEMA_V3_MANIFEST,
 	LOCAL_SCHEMA_V4,
+	LOCAL_SCHEMA_V4_MANIFEST,
+	LOCAL_SCHEMA_V5,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -53,16 +55,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v4 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("75ac856927d88d56")
-		expect(SCHEMA_DIGEST).toBe("75ac856927d88d56518f12c68407a8f2a199d000b6eeb8576f9c97000138f5a4")
+	it("matches the generated v5 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("c36c52a95568eb68")
+		expect(SCHEMA_DIGEST).toBe("c36c52a95568eb68f8ebc98d7d36b552f21fb09b888bb310c68f0ad52d529fe4")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(4)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V4)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(5)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V5)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -96,9 +98,29 @@ describe("current local schema identity", () => {
 		expect(webEventsView?.definition).toContain("FROM session_events")
 		const v3Names = new Set(LOCAL_SCHEMA_V3_MANIFEST.objects.map((object) => object.name))
 		expect(v3Names.has("web_events")).toBe(false)
+		const v4Names = new Set(LOCAL_SCHEMA_V4_MANIFEST.objects.map((object) => object.name))
+		expect([...v4Names].filter((name) => !v3Names.has(name))).toEqual(["web_events", "web_events_mv"])
+
+		// v5 is exactly v4 plus the minutely service-overview rollup and its view.
+		// Asserted against the frozen v4 manifest, same as above, so a later
+		// structural change cannot quietly ride along on this version.
+		const minutely = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "service_overview_minutely",
+		)
+		expect(minutely?.engine).toBe("AggregatingMergeTree")
+		expect(minutely?.orderBy).toBe(
+			"(OrgId, ServiceName, Minute, DeploymentEnv, ServiceNamespace, CommitSha)",
+		)
+		const minutelyView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "service_overview_minutely_mv",
+		)
+		// Reads traces directly — a cascade off the hourly rollup would make the
+		// migration's backfill double-count into a table that cannot be rebuilt.
+		expect(minutelyView?.definition).toContain("FROM traces")
+		expect(minutelyView?.definition).not.toContain("FROM service_overview_minutely")
 		expect(
-			LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name).filter((name) => !v3Names.has(name)),
-		).toEqual(["web_events", "web_events_mv"])
+			LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name).filter((name) => !v4Names.has(name)),
+		).toEqual(["service_overview_minutely", "service_overview_minutely_mv"])
 	})
 })
 
@@ -110,12 +132,14 @@ describe("local migration registry", () => {
 			"local-0001-to-0002-error-rollup",
 			"local-0002-to-0003-service-map-ingest-bridge",
 			"local-0003-to-0004-web-events",
+			"local-0004-to-0005-service-overview-minutely",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
 		expect(chain[1]?.to).toEqual(LOCAL_SCHEMA_V2)
 		expect(chain[2]?.to).toEqual(LOCAL_SCHEMA_V3)
 		expect(chain[3]?.to).toEqual(LOCAL_SCHEMA_V4)
+		expect(chain[4]?.to).toEqual(LOCAL_SCHEMA_V5)
 		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
@@ -151,7 +175,10 @@ describe("local migration registry", () => {
 		).toThrow(/no registered/)
 		expect(() =>
 			resolveMigrationChain(
-				{ ...CURRENT_LOCAL_SCHEMA, version: 5, fingerprint: "future", digest: SCHEMA_DIGEST },
+				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
+				// stops testing the future-store guard and starts testing the
+				// unknown-fingerprint one.
+				{ ...CURRENT_LOCAL_SCHEMA, version: 6, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -232,7 +259,7 @@ describe("local migration registry", () => {
 			openTarget: async () => undefined,
 			ensureCapacity: async () => undefined,
 			saveStep: async () => undefined,
-		} as unknown as MigrationModuleContext
+		} as MigrationModuleContext
 		await executeMigrationModule(v2, context, context.step, { prepareTarget: true })
 		expect(events).toEqual(["preflight", "prepareTarget", "apply", "verify"])
 
@@ -529,7 +556,7 @@ describe("durable migration recovery", () => {
 						from: first.from,
 						to: first.to,
 						status: resumeSecondStep ? "completed" : "pending",
-						...(resumeSecondStep ? { state: { module: first.id, version: 1 } } : {}),
+						...(resumeSecondStep ? { state: { module: first.id, version: 1 } } : undefined),
 					},
 					{
 						id: second.id,
@@ -538,8 +565,11 @@ describe("durable migration recovery", () => {
 						to: second.to,
 						status: resumeSecondStep ? "verified" : "pending",
 						...(resumeSecondStep
-							? { state: { module: second.id, version: 1 }, progress: { rows: 1 } }
-							: {}),
+							? {
+									state: { module: second.id, version: 1 },
+									progress: { rows: 1 },
+								}
+							: undefined),
 					},
 				],
 				currentStepIndex: resumeSecondStep ? 1 : 0,

@@ -18,11 +18,12 @@
 // active org is missed for the tick.
 
 import { from, param } from "@maple-dev/clickhouse-builder"
+import { OrgId } from "@maple/domain"
+import { Schema } from "effect"
 import { ErrorEventsByTime, LogsAggregatesHourly, TracesAggregatesHourly } from "../tables"
 
-export interface ActiveOrgsOutput {
-	readonly orgId: string
-}
+export const ActiveOrgsOutputSchema = Schema.Struct({ orgId: OrgId })
+export type ActiveOrgsOutput = Schema.Schema.Type<typeof ActiveOrgsOutputSchema>
 
 /** Orgs with any error events since `startTime` (gates the error-issue detector). */
 export function activeOrgsByErrorEventsQuery() {

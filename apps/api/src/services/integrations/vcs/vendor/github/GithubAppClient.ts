@@ -1,5 +1,5 @@
 import { GitCommitSha } from "@maple/domain/http"
-import { Clock, Context, Data, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Env } from "@/platform/Env"
 import { GithubHttp } from "./GithubHttp"
 
@@ -10,17 +10,17 @@ import { GithubHttp } from "./GithubHttp"
 // `GithubAppError` is internal to the GitHub layer; `GithubProvider` maps it to
 // the generic `VcsProviderError` at the port boundary.
 
-export class GithubAppError extends Data.TaggedError("GithubAppError")<{
-	message: string
-	status?: number
+export class GithubAppError extends Schema.TaggedError<GithubAppError>()("@maple/api/vcs/GithubAppError", {
+	message: Schema.String,
+	status: Schema.optionalKey(Schema.Number),
 	// Which resource the failing call addressed, so the provider can tell an
 	// installation-auth failure (the gone/suspended signal) from a repo-level one.
-	scope?: "installation" | "repository"
+	scope: Schema.optionalKey(Schema.Literals(["installation", "repository"])),
 	// Set when the failure is a rate limit too far out to wait through inline:
 	// seconds until the budget returns. The provider maps this to VcsRateLimitedError.
-	retryAfterSeconds?: number
-	cause?: unknown
-}> {}
+	retryAfterSeconds: Schema.optionalKey(Schema.Number),
+	cause: Schema.optionalKey(Schema.Defect()),
+}) {}
 
 const GITHUB_API_VERSION = "2022-11-28"
 const USER_AGENT = "maple-vcs-integration"
@@ -73,8 +73,6 @@ const rateLimitWaitSeconds = (response: Response, nowMs: number): number => {
 	}
 	return 60
 }
-
-// ---- REST response schemas ------------------------------------------------
 
 const GithubInstallationTokenResponse = Schema.Struct({
 	token: Schema.String,
@@ -201,8 +199,6 @@ const decodeBranchList = Schema.decodeUnknownEffect(GithubApiBranchList)
 const decodeCodeSearch = Schema.decodeUnknownEffect(GithubCodeSearchResponseSchema)
 const decodeContentFile = Schema.decodeUnknownEffect(GithubContentFileSchema)
 
-// ---- JWT (RS256 via Web Crypto) -------------------------------------------
-
 const base64UrlString = (value: string) => Buffer.from(value, "utf8").toString("base64url")
 const base64UrlBytes = (value: ArrayBuffer) => Buffer.from(value).toString("base64url")
 
@@ -248,8 +244,11 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				yield* Effect.annotateCurrentSpan({
 					"http.request.method": init?.method ?? "GET",
 					...(Option.isSome(parsed)
-						? { "server.address": parsed.value.host, "url.path": parsed.value.pathname }
-						: {}),
+						? {
+								"server.address": parsed.value.host,
+								"url.path": parsed.value.pathname,
+							}
+						: undefined),
 				})
 				const response = yield* Effect.tryPromise({
 					try: () => http.fetch(url, init),
@@ -344,8 +343,6 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				})
 				return `${signingInput}.${base64UrlBytes(signature)}`
 			})
-
-			// ---- HTTP helpers ---------------------------------------------
 
 			const failure = (response: Response, context: string, scope?: "installation" | "repository") =>
 				Effect.gen(function* () {
@@ -699,7 +696,6 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				)
 			})
 
-			// ---- User OAuth leg ----
 			// The two calls below prove the user owns the installation they're connecting.
 
 			// Trade the callback `code` for a short-lived user token.

@@ -8,8 +8,9 @@ import {
 	type McpToolResult,
 } from "./types"
 import { resolveTimeRange } from "@/mcp/lib/time"
+import { describeInvalidQuerySpec } from "@/mcp/lib/query-spec-tokens"
 import { Effect, Match, Schema } from "effect"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import {
 	MetricType,
@@ -26,7 +27,7 @@ import {
 	type MetricsBreakdownQuery,
 } from "@maple/query-engine"
 import { formatQueryResult } from "@/mcp/lib/format-query-result"
-import { warehouseErrorText, warehouseHandlers } from "@/mcp/lib/map-warehouse-error"
+import { warehouseErrorText, warehouseReadHandlers } from "@/mcp/lib/map-warehouse-error"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -35,6 +36,7 @@ import {
 	SpanName,
 	type QueryDataQueryContext,
 } from "@maple/domain"
+import { QUERY_BUILDER_DATA_SOURCES, type QueryResultContract } from "@maple/query-model"
 
 const asServiceName = Schema.decodeUnknownSync(ServiceName)
 const asSpanName = Schema.decodeUnknownSync(SpanName)
@@ -43,13 +45,16 @@ const asCommitSha = Schema.decodeUnknownSync(CommitSha)
 const asMetricName = Schema.decodeUnknownSync(MetricName)
 
 const queryDataSchema = Schema.Struct({
-	source: Schema.Literals(["traces", "logs", "metrics"]).annotate({
+	source: Schema.Literals(QUERY_BUILDER_DATA_SOURCES).annotate({
 		description:
 			"Data source. Use 'traces' for request/span analysis (latency, errors, throughput). " +
 			"Use 'logs' for log volume analysis. " +
 			"Use 'metrics' for custom metric aggregation (requires metric_name and metric_type — call list_metrics first).",
 	}),
-	kind: Schema.Literals(["timeseries", "breakdown"]).annotate({
+	kind: Schema.Literals([
+		"timeseries",
+		"breakdown",
+	] as const satisfies ReadonlyArray<QueryResultContract>).annotate({
 		description:
 			"Query shape. Use 'timeseries' when the user asks about trends, patterns, or 'how has X changed over time'. " +
 			"Use 'breakdown' when asking about top-N, distribution, or 'which services have the most errors'. " +
@@ -58,11 +63,14 @@ const queryDataSchema = Schema.Struct({
 	metric: optionalStringParam(
 		"Metric to compute. Traces: count (request volume), avg_duration, p50_duration, p95_duration, p99_duration (latency), " +
 			"error_rate (0-1 ratio), apdex (user satisfaction, requires apdex_threshold_ms). Logs: count only. " +
-			"Metrics: avg, sum, min, max, count, rate, increase. For monotonic counters (typically metric_type=sum with isMonotonic=true from list_metrics), prefer rate or increase over raw sum. Default: 'count' for traces/logs, 'avg' for metrics.",
+			"Metrics with kind=timeseries: avg, sum, min, max, count, rate, increase; with kind=breakdown ONLY avg, sum, count. " +
+			"For monotonic counters (typically metric_type=sum with isMonotonic=true from list_metrics), prefer rate or increase over raw sum. " +
+			"Default: 'count' for traces/logs, 'avg' for metrics.",
 	),
 	group_by: optionalStringParam(
-		"Grouping dimension. Traces: service, span_name, status_code, http_method, attribute, none. " +
-			"Logs: service, severity, none. Metrics: service, attribute, none. " +
+		"Grouping dimension. Traces: service, span_name, status_code, http_method, attribute. " +
+			"Logs: service, severity. Metrics: service, attribute, resource_attribute. " +
+			"'none' is additionally valid for kind=timeseries but not for kind=breakdown. " +
 			"Default: 'none' for timeseries, 'service' for breakdown.",
 	),
 	start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss UTC). Defaults to 1 hour ago"),
@@ -122,7 +130,6 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 		Effect.fn("McpTool.queryData")(function* (params) {
 			const { st, et } = resolveTimeRange(params.start_time, params.end_time)
 
-			// Validate attribute params
 			if (params.attribute_value && !params.attribute_key) {
 				return validationError(
 					"`attribute_value` requires `attribute_key`. Use explore_attributes to discover available keys.",
@@ -137,7 +144,6 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 				)
 			}
 
-			// Validate metrics-specific required params
 			if (params.source === "metrics") {
 				if (!params.metric_name || !params.metric_type) {
 					return validationError(
@@ -147,7 +153,19 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 				}
 			}
 
-			// Track defaults applied for transparency
+			// Reject an out-of-vocabulary metric/group_by HERE, while we still know which
+			// source and kind were asked for. Downstream, `QuerySpec` rejects the same
+			// value as an opaque SchemaError that names neither the combination nor the
+			// alternatives — which is what every query_data failure in production looked
+			// like, and why agents retried with another guess instead of a valid token.
+			const badToken = describeInvalidQuerySpec({
+				source: params.source,
+				kind: params.kind,
+				metric: params.metric,
+				groupBy: params.group_by,
+			})
+			if (badToken) return validationError(badToken.message, badToken.example)
+
 			const decisions: string[] = []
 
 			if (!params.start_time) decisions.push(`start_time: defaulted to 1 hour ago (${st})`)
@@ -341,7 +359,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 					}),
 			})
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const queryEngine = yield* QueryEngineService
 
 			yield* Effect.annotateCurrentSpan({
@@ -376,13 +394,11 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 						Effect.succeed(taggedErrorResult(error._tag, error.message, error.details)),
 					),
 					Effect.catchTags({
-						"@maple/http/errors/QueryEngineExecutionError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
 						"@maple/http/errors/QueryEngineTimeoutError": (error) =>
 							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						// Shared 9-tag warehouse table; warehouseErrorText appends the
+						// Shared exact warehouse table; warehouseErrorText appends the
 						// schema-apply hint for schema drift, matching the other MCP tools.
-						...warehouseHandlers((error) =>
+						...warehouseReadHandlers((error) =>
 							Effect.succeed(taggedErrorResult(error._tag, warehouseErrorText(error))),
 						),
 					}),

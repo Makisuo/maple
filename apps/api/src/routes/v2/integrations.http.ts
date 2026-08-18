@@ -1,13 +1,9 @@
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type {
-	IntegrationsNotConnectedError,
-	IntegrationsPersistenceError,
-	IntegrationsRevokedError,
-	IntegrationsUpstreamError,
-	IntegrationsValidationError,
 	PlanetScaleIntegrationStatus,
 	PlanetScaleQueryInsightsResponse,
+	SelfDescribingHttpError,
 } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import type { PlanetScaleDatabaseRow } from "@maple/db"
@@ -28,14 +24,11 @@ import {
 	MapleApiV2,
 	V2PlanetScaleEventList,
 	V2PlanetScaleQueryInsightList,
-	dependencyUnavailable,
-	invalidRequest,
 	isoTimestamp,
 	isoTimestampOrNull,
-	notFound,
-	permissionError,
-	serviceUnavailable,
-	upstreamError,
+	V2CallbackHostUnavailable,
+	V2InsufficientPermissions,
+	V2TimeRangeInvalid,
 } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
 import { requireAdmin } from "@/services/auth/auth"
@@ -170,9 +163,7 @@ const toPlanetScaleDatabase = (row: PlanetScaleDatabaseRow): V2PlanetScaleDataba
 	})),
 })
 
-const toQueryInsightList = (
-	response: PlanetScaleQueryInsightsResponse,
-): typeof V2PlanetScaleQueryInsightList.Type => ({
+const toQueryInsightList = (response: PlanetScaleQueryInsightsResponse): V2PlanetScaleQueryInsightList => ({
 	object: "planetscale_integration.query_insight_list",
 	branch: response.branch,
 	data: Arr.map(response.rows, (row) => ({
@@ -193,44 +184,12 @@ const toQueryInsightList = (
 	unavailable_reason: response.unavailableReason,
 })
 
-/**
- * The PlanetScale service failures, mapped once. Every OAuth-backed call can
- * fail the same five ways, and the mapping is uniform: a missing connection or a
- * revoked grant is a 404 (the resource isn't there for this org), a rejected
- * input is a 400, PlanetScale itself failing is a 502, and our own persistence
- * failing is a 503.
- */
-const mapPlanetScaleErrors = <A, R>(
-	effect: Effect.Effect<
-		A,
-		| IntegrationsNotConnectedError
-		| IntegrationsRevokedError
-		| IntegrationsValidationError
-		| IntegrationsUpstreamError
-		| IntegrationsPersistenceError,
-		R
-	>,
-) =>
-	effect.pipe(
-		Effect.catchTags({
-			"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
-				Effect.fail(notFound(error.message)),
-			"@maple/http/errors/IntegrationsRevokedError": (error) => Effect.fail(notFound(error.message)),
-			"@maple/http/errors/IntegrationsValidationError": (error) =>
-				Effect.fail(invalidRequest("planetscale_request_rejected", error.message)),
-			"@maple/http/errors/IntegrationsUpstreamError": (error) =>
-				Effect.fail(upstreamError("planetscale_upstream_error", error.message)),
-			// Sanitized, not `serviceUnavailable(error.message)`: a persistence
-			// failure's message is the driver's, and postgres.js puts the full
-			// failing SQL in it. That is fine in a v1 body the dashboard reads and
-			// wrong in a public one. Log the cause, return a stable code.
-			"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-				Effect.logError("PlanetScale persistence failure", {
-					tag: error._tag,
-					message: error.message,
-				}).pipe(Effect.andThen(Effect.fail(dependencyUnavailable("planetscale_unavailable")))),
-		}),
-	)
+const tapHttpErrors =
+	(context: string) =>
+	<A, Error extends SelfDescribingHttpError, R>(effect: Effect.Effect<A, Error, R>) =>
+		effect.pipe(
+			Effect.tapError((error) => Effect.logError(context, { tag: error._tag, message: error.message })),
+		)
 
 /**
  * Minute-aligned window, so panel refreshes inside the cache TTL share an entry.
@@ -242,7 +201,7 @@ const resolveWindow = (startTime: string, endTime: string) => {
 	const endMs = new Date(endTime).getTime()
 	if (endMs <= startMs) {
 		return Effect.fail(
-			invalidRequest("invalid_time_range", "end_time must be after start_time", "end_time"),
+			V2TimeRangeInvalid.make("end_time must be after start_time", { param: "end_time" }),
 		)
 	}
 	const MINUTE = 60_000
@@ -273,21 +232,9 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 			.handle("status", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const status = yield* slack.getStatus(tenant.orgId).pipe(
-						Effect.tapError((error) =>
-							Effect.logError("Slack integration status failed", {
-								tag: error._tag,
-								message: error.message,
-							}),
-						),
-						Effect.catchTags({
-							// Sanitized like the PlanetScale group: the message is the
-							// driver's, and postgres.js puts the full failing SQL in it.
-							// The `tapError` above already logged the real cause.
-							"@maple/http/errors/IntegrationsPersistenceError": () =>
-								Effect.fail(dependencyUnavailable("slack_unavailable")),
-						}),
-					)
+					const status = yield* slack
+						.getStatus(tenant.orgId)
+						.pipe(tapHttpErrors("Slack integration status failed"))
 					return toSlackStatus(status)
 				}),
 			)
@@ -295,10 +242,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* requireAdmin(tenant.roles, () =>
-						permissionError(
-							"insufficient_permissions",
-							"Only org admins can install the Slack app",
-						),
+						V2InsufficientPermissions.make("Only org admins can install the Slack app"),
 					)
 					const req = yield* HttpServerRequest.HttpServerRequest
 					const origin = resolveRequestOrigin(req)
@@ -307,28 +251,13 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 							origin,
 						})
 						return yield* Effect.fail(
-							serviceUnavailable("Slack installs are not available from this host"),
+							V2CallbackHostUnavailable.make("Slack installs are not available from this host"),
 						)
 					}
 					const callbackUrl = `${origin}${SLACK_CALLBACK_PATH}`
-					const result = yield* slack.startInstall(tenant.orgId, tenant.userId, callbackUrl).pipe(
-						Effect.catchTags({
-							"@maple/http/errors/IntegrationsValidationError": (error) =>
-								Effect.logError("Slack install misconfigured", {
-									tag: error._tag,
-									message: error.message,
-								}).pipe(
-									Effect.andThen(Effect.fail(dependencyUnavailable("slack_unavailable"))),
-								),
-							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-								Effect.logError("Slack persistence failure", {
-									tag: error._tag,
-									message: error.message,
-								}).pipe(
-									Effect.andThen(Effect.fail(dependencyUnavailable("slack_unavailable"))),
-								),
-						}),
-					)
+					const result = yield* slack
+						.startInstall(tenant.orgId, tenant.userId, callbackUrl)
+						.pipe(tapHttpErrors("Slack install failed"))
 					return {
 						object: "slack_integration.install" as const,
 						url: result.url,
@@ -339,24 +268,11 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* requireAdmin(tenant.roles, () =>
-						permissionError(
-							"insufficient_permissions",
-							"Only org admins can uninstall the Slack app",
-						),
+						V2InsufficientPermissions.make("Only org admins can uninstall the Slack app"),
 					)
-					yield* slack.uninstall(tenant.orgId).pipe(
-						Effect.tapError((error) =>
-							Effect.logError("Slack integration uninstall failed", {
-								tag: error._tag,
-								message: error.message,
-							}),
-						),
-						Effect.catchTags({
-							// Sanitized; the `tapError` above logged the real cause.
-							"@maple/http/errors/IntegrationsPersistenceError": () =>
-								Effect.fail(dependencyUnavailable("slack_unavailable")),
-						}),
-					)
+					yield* slack
+						.uninstall(tenant.orgId)
+						.pipe(tapHttpErrors("Slack integration uninstall failed"))
 					return {
 						object: "slack_integration" as const,
 						installed: false as const,
@@ -372,26 +288,11 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 					// to enumerate. `status` deliberately stays ungated — the Slack
 					// integration card renders install state for everyone.
 					yield* requireAdmin(tenant.roles, () =>
-						permissionError(
-							"insufficient_permissions",
-							"Only org admins can list Slack channels",
-						),
+						V2InsufficientPermissions.make("Only org admins can list Slack channels"),
 					)
-					const list = yield* slack.listChannels(tenant.orgId).pipe(
-						Effect.catchTags({
-							"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
-								Effect.fail(notFound(error.message)),
-							"@maple/http/errors/IntegrationsUpstreamError": (error) =>
-								Effect.fail(upstreamError("slack_upstream_error", error.message)),
-							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-								Effect.logError("Slack persistence failure", {
-									tag: error._tag,
-									message: error.message,
-								}).pipe(
-									Effect.andThen(Effect.fail(dependencyUnavailable("slack_unavailable"))),
-								),
-						}),
-					)
+					const list = yield* slack
+						.listChannels(tenant.orgId)
+						.pipe(tapHttpErrors("Slack channel list failed"))
 					return toChannelList(list)
 				}),
 			)
@@ -414,19 +315,9 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 					.handle("status", () =>
 						Effect.gen(function* () {
 							const tenant = yield* CurrentTenant.Context
-							const status = yield* planetscale.getStatus(tenant.orgId).pipe(
-								Effect.catchTags({
-									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-										Effect.logError("PlanetScale persistence failure", {
-											tag: error._tag,
-											message: error.message,
-										}).pipe(
-											Effect.andThen(
-												Effect.fail(dependencyUnavailable("planetscale_unavailable")),
-											),
-										),
-								}),
-							)
+							const status = yield* planetscale
+								.getStatus(tenant.orgId)
+								.pipe(tapHttpErrors("PlanetScale status failed"))
 							return toPlanetScaleStatus(status)
 						}),
 					)
@@ -434,10 +325,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 						Effect.gen(function* () {
 							const tenant = yield* CurrentTenant.Context
 							yield* requireAdmin(tenant.roles, () =>
-								permissionError(
-									"insufficient_permissions",
-									"Only org admins can connect PlanetScale",
-								),
+								V2InsufficientPermissions.make("Only org admins can connect PlanetScale"),
 							)
 							const req = yield* HttpServerRequest.HttpServerRequest
 							const origin = resolveRequestOrigin(req)
@@ -454,7 +342,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									},
 								)
 								return yield* Effect.fail(
-									serviceUnavailable(
+									V2CallbackHostUnavailable.make(
 										"PlanetScale connections are not available from this host",
 									),
 								)
@@ -464,37 +352,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									callbackUrl: `${origin}${PLANETSCALE_CALLBACK_PATH}`,
 									returnTo: payload.return_to,
 								})
-								.pipe(
-									Effect.catchTags({
-										// Both are misconfiguration or storage failures on our side —
-										// there is no caller input that produces either, so neither is
-										// a 4xx, and neither message is the caller's business.
-										// `startConnect` cannot fail upstream: nothing is sent to
-										// PlanetScale until the browser follows the authorize URL.
-										"@maple/http/errors/IntegrationsValidationError": (error) =>
-											Effect.logError("PlanetScale connect misconfigured", {
-												tag: error._tag,
-												message: error.message,
-											}).pipe(
-												Effect.andThen(
-													Effect.fail(
-														dependencyUnavailable("planetscale_unavailable"),
-													),
-												),
-											),
-										"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-											Effect.logError("PlanetScale persistence failure", {
-												tag: error._tag,
-												message: error.message,
-											}).pipe(
-												Effect.andThen(
-													Effect.fail(
-														dependencyUnavailable("planetscale_unavailable"),
-													),
-												),
-											),
-									}),
-								)
+								.pipe(tapHttpErrors("PlanetScale connect failed"))
 							return {
 								object: "planetscale_integration.connect" as const,
 								redirect_url: result.redirectUrl,
@@ -508,14 +366,13 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							// Admin-gated like `select_organization`: this drives the org picker
 							// while the connection is pending, and both are admin-only flows.
 							yield* requireAdmin(tenant.roles, () =>
-								permissionError(
-									"insufficient_permissions",
+								V2InsufficientPermissions.make(
 									"Only org admins can manage the PlanetScale integration",
 								),
 							)
-							const organizations = yield* mapPlanetScaleErrors(
-								planetscaleOAuth.listOrganizations(tenant.orgId),
-							)
+							const organizations = yield* planetscaleOAuth
+								.listOrganizations(tenant.orgId)
+								.pipe(tapHttpErrors("PlanetScale organization list failed"))
 							return {
 								object: "planetscale_integration.organization_list" as const,
 								organizations: Arr.map(organizations, (org) => ({
@@ -529,18 +386,17 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 						Effect.gen(function* () {
 							const tenant = yield* CurrentTenant.Context
 							yield* requireAdmin(tenant.roles, () =>
-								permissionError(
-									"insufficient_permissions",
+								V2InsufficientPermissions.make(
 									"Only org admins can manage the PlanetScale integration",
 								),
 							)
-							const status = yield* mapPlanetScaleErrors(
-								planetscale.finalizeOrgSelection(tenant.orgId, {
+							const status = yield* planetscale
+								.finalizeOrgSelection(tenant.orgId, {
 									organization: payload.organization,
 									includeBranches: payload.include_branches,
 									excludeBranches: payload.exclude_branches,
-								}),
-							)
+								})
+								.pipe(tapHttpErrors("PlanetScale organization selection failed"))
 							return toPlanetScaleStatus(status)
 						}),
 					)
@@ -548,17 +404,16 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 						Effect.gen(function* () {
 							const tenant = yield* CurrentTenant.Context
 							yield* requireAdmin(tenant.roles, () =>
-								permissionError(
-									"insufficient_permissions",
+								V2InsufficientPermissions.make(
 									"Only org admins can manage the PlanetScale integration",
 								),
 							)
-							const status = yield* mapPlanetScaleErrors(
-								planetscale.setMetricsToken(tenant.orgId, {
+							const status = yield* planetscale
+								.setMetricsToken(tenant.orgId, {
 									tokenId: payload.token_id,
 									tokenSecret: payload.token_secret,
-								}),
-							)
+								})
+								.pipe(tapHttpErrors("PlanetScale metrics token update failed"))
 							return toPlanetScaleStatus(status)
 						}),
 					)
@@ -566,30 +421,11 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 						Effect.gen(function* () {
 							const tenant = yield* CurrentTenant.Context
 							yield* requireAdmin(tenant.roles, () =>
-								permissionError(
-									"insufficient_permissions",
-									"Only org admins can disconnect PlanetScale",
-								),
+								V2InsufficientPermissions.make("Only org admins can disconnect PlanetScale"),
 							)
-							yield* planetscale.disconnect(tenant.orgId).pipe(
-								Effect.tapError((error) =>
-									Effect.logError("PlanetScale disconnect failed", {
-										tag: error._tag,
-										message: error.message,
-									}),
-								),
-								Effect.catchTags({
-									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-										Effect.logError("PlanetScale persistence failure", {
-											tag: error._tag,
-											message: error.message,
-										}).pipe(
-											Effect.andThen(
-												Effect.fail(dependencyUnavailable("planetscale_unavailable")),
-											),
-										),
-								}),
-							)
+							yield* planetscale
+								.disconnect(tenant.orgId)
+								.pipe(tapHttpErrors("PlanetScale disconnect failed"))
 							return {
 								object: "planetscale_integration" as const,
 								connected: false as const,
@@ -604,19 +440,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							const [rows, connection] = yield* Effect.all([
 								inventory.listDatabases(tenant.orgId),
 								planetscale.loadConnection(tenant.orgId),
-							]).pipe(
-								Effect.catchTags({
-									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-										Effect.logError("PlanetScale persistence failure", {
-											tag: error._tag,
-											message: error.message,
-										}).pipe(
-											Effect.andThen(
-												Effect.fail(dependencyUnavailable("planetscale_unavailable")),
-											),
-										),
-								}),
-							)
+							]).pipe(tapHttpErrors("PlanetScale database list failed"))
 							return {
 								object: "planetscale_integration.database_list" as const,
 								databases: Arr.map(rows, toPlanetScaleDatabase),
@@ -631,25 +455,14 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							const tenant = yield* CurrentTenant.Context
 							// Admin-only: the response carries the webhook HMAC secret.
 							yield* requireAdmin(tenant.roles, () =>
-								permissionError(
-									"insufficient_permissions",
+								V2InsufficientPermissions.make(
 									"Only org admins can read the PlanetScale webhook configuration",
 								),
 							)
 							const req = yield* HttpServerRequest.HttpServerRequest
-							const config = yield* planetscale.webhookConfig(tenant.orgId).pipe(
-								Effect.catchTags({
-									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-										Effect.logError("PlanetScale persistence failure", {
-											tag: error._tag,
-											message: error.message,
-										}).pipe(
-											Effect.andThen(
-												Effect.fail(dependencyUnavailable("planetscale_unavailable")),
-											),
-										),
-								}),
-							)
+							const config = yield* planetscale
+								.webhookConfig(tenant.orgId)
+								.pipe(tapHttpErrors("PlanetScale webhook config failed"))
 							return {
 								object: "planetscale_integration.webhook_config" as const,
 								configured: config.configured,
@@ -682,17 +495,18 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									ttlSeconds: 60,
 									schema: V2PlanetScaleQueryInsightList,
 								},
-								mapPlanetScaleErrors(
-									inventory
-										.queryInsights(tenant.orgId, {
-											database: payload.database,
-											branch: payload.branch,
-											startTime: startMs,
-											endTime: endMs,
-											limit,
-										})
-										.pipe(Effect.map(toQueryInsightList)),
-								),
+								inventory
+									.queryInsights(tenant.orgId, {
+										database: payload.database,
+										branch: payload.branch,
+										startTime: startMs,
+										endTime: endMs,
+										limit,
+									})
+									.pipe(
+										Effect.map(toQueryInsightList),
+										tapHttpErrors("PlanetScale query insights failed"),
+									),
 							)
 							return cached.value
 						}),
@@ -746,19 +560,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 											})),
 											next_cursor: nextCursor,
 										})),
-										Effect.catchTags({
-											"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-												Effect.logError("PlanetScale persistence failure", {
-													tag: error._tag,
-													message: error.message,
-												}).pipe(
-													Effect.andThen(
-														Effect.fail(
-															dependencyUnavailable("planetscale_unavailable"),
-														),
-													),
-												),
-										}),
+										tapHttpErrors("PlanetScale event list failed"),
 									),
 							)
 							return cached.value

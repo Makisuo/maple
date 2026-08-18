@@ -17,7 +17,8 @@ import { Spinner } from "@maple/ui/components/ui/spinner"
 import { shortIssueId } from "@/components/errors/issue-id"
 import { WorkflowRingIcon } from "@/components/icons"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
+import { errorIssueFromV2 } from "@/lib/services/error-issues"
 
 export function AnomalyLinkIssueDialog({
 	incident,
@@ -49,14 +50,14 @@ function DialogContent({
 	const [query, setQuery] = useState("")
 	const [allServices, setAllServices] = useState(false)
 
-	const issuesQueryAtom = MapleApiAtomClient.query("errors", "listIssues", {
-		query: allServices ? { limit: 100 } : { service: incident.serviceName, limit: 100 },
+	const issuesQueryAtom = retainedQueryV2("errorIssues", "list", {
+		query: allServices ? { limit: 100 } : { service_name: incident.serviceName, limit: 100 },
 		reactivityKeys: ["errorIssues"],
 	})
 	const issuesResult = useAtomValue(issuesQueryAtom)
 
 	const issues = Result.builder(issuesResult)
-		.onSuccess((value) => value.issues)
+		.onSuccess((value) => value.data.map(errorIssueFromV2))
 		.orElse(() => [] as ReadonlyArray<ErrorIssueDocument>)
 
 	const filtered = useMemo(() => {

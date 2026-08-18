@@ -3,11 +3,12 @@ import { Effect, Schema } from "effect"
 import { RoleName } from "@maple/domain/http"
 import { isAdmin, requireAdmin } from "./auth"
 
-const role = (raw: string) => Schema.decodeUnknownSync(RoleName)(raw)
+const role = (raw: string) => Schema.decodeSync(RoleName)(raw)
 
-class TestForbiddenError extends Error {
-	readonly _tag = "TestForbiddenError"
-}
+class TestForbiddenError extends Schema.TaggedError<TestForbiddenError>()(
+	"@maple/api/test/TestForbiddenError",
+	{ message: Schema.String },
+) {}
 
 describe("isAdmin", () => {
 	it("returns true for root", () => {
@@ -29,13 +30,13 @@ describe("isAdmin", () => {
 
 describe("requireAdmin", () => {
 	it.effect("succeeds when at least one role is admin", () =>
-		requireAdmin([role("root")], () => new TestForbiddenError("nope")),
+		requireAdmin([role("root")], () => new TestForbiddenError({ message: "nope" })),
 	)
 
 	it.effect("fails with the supplied error for non-admin roles", () =>
 		Effect.gen(function* () {
 			const error = yield* Effect.flip(
-				requireAdmin([role("org:member")], () => new TestForbiddenError("nope")),
+				requireAdmin([role("org:member")], () => new TestForbiddenError({ message: "nope" })),
 			)
 			assert.instanceOf(error, TestForbiddenError)
 		}),

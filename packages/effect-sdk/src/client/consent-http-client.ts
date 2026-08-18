@@ -91,6 +91,7 @@ export const filterOtlpRequestForConsent = (
 	const since = consentAllowedSince()
 	if (!Number.isFinite(since)) return undefined
 	try {
+		// SAFETY: The SDK's OTLP encoder created this body; malformed shapes throw below and fail closed.
 		const decoded = JSON.parse(new TextDecoder().decode(request.body.body)) as OtlpBody
 		const threshold = BigInt(Math.trunc(since)) * 1_000_000n
 		const filtered = request.url.endsWith("/v1/traces")

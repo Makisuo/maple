@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
-import type { ErrorIssueDocument, WorkflowState } from "@maple/domain/http"
+import type { ErrorIssueDocument } from "@maple/domain/http"
+import { allowedTransitionsForAll } from "@maple/domain/http"
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -17,16 +18,6 @@ import { useCopy } from "@maple/ui/hooks/use-copy"
 import { agentPromptFromIssue } from "./agent-debug-prompt"
 import type { IssueMutations } from "./use-issue-mutations"
 
-const STATE_ORDER: ReadonlyArray<WorkflowState> = [
-	"triage",
-	"todo",
-	"in_progress",
-	"in_review",
-	"done",
-	"cancelled",
-	"wontfix",
-]
-
 export function IssueContextMenu({
 	issue,
 	mutations,
@@ -40,6 +31,10 @@ export function IssueContextMenu({
 	onOpenInNewTab: () => void
 	children: ReactNode
 }) {
+	// The offered moves come from the domain matrix the server enforces, so the
+	// menu can never present a transition the API would reject — a `cancelled`
+	// issue offers nothing at all.
+	const targets = allowedTransitionsForAll([issue.workflowState])
 	const canClaim = !issue.leaseHolder
 	const canRelease = Boolean(issue.leaseHolder)
 
@@ -64,24 +59,28 @@ export function IssueContextMenu({
 						<span>Change status</span>
 					</ContextMenuSubTrigger>
 					<ContextMenuSubContent className="w-56 p-1">
-						{STATE_ORDER.map((state) => {
-							const active = state === issue.workflowState
-							return (
+						<ContextMenuItem disabled>
+							<WorkflowRingIcon state={issue.workflowState} size={14} />
+							<span className="flex-1">{WORKFLOW_LABEL[issue.workflowState]}</span>
+							<CheckIcon size={12} className="text-muted-foreground" />
+						</ContextMenuItem>
+						{targets.length === 0 ? (
+							<ContextMenuItem disabled>
+								<span className="flex-1">
+									No moves from {WORKFLOW_LABEL[issue.workflowState]}
+								</span>
+							</ContextMenuItem>
+						) : (
+							targets.map((state) => (
 								<ContextMenuItem
 									key={state}
-									onClick={() => {
-										if (!active) void mutations.transitionTo(issue.id, state)
-									}}
-									disabled={active}
+									onClick={() => void mutations.transitionTo(issue.id, state)}
 								>
 									<WorkflowRingIcon state={state} size={14} />
 									<span className="flex-1">{WORKFLOW_LABEL[state]}</span>
-									{active ? (
-										<CheckIcon size={12} className="text-muted-foreground" />
-									) : null}
 								</ContextMenuItem>
-							)
-						})}
+							))
+						)}
 					</ContextMenuSubContent>
 				</ContextMenuSub>
 

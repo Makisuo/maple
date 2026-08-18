@@ -10,8 +10,8 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { trackProduct } from "@/lib/analytics"
 import { useAtomRefresh, useAtomSet } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { showErrorToast } from "@/lib/error-toast"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import type { IntegrationId } from "./integration-catalog"
@@ -86,8 +86,7 @@ function useOAuthPopupFlow({
 	})
 
 	useMountEffect(() => {
-		// React Doctor cannot infer useMountEffect.
-		// oxlint-disable-next-line react-doctor/rules-of-hooks
+		// react-doctor-disable-next-line react-doctor/rules-of-hooks -- React Doctor does not recognize useMountEffect as an Effect Event boundary.
 		const poll = () => checkPopup()
 		const id = setInterval(poll, 500)
 		return () => {
@@ -137,8 +136,7 @@ function useIntegrationMessage(
 		onMessage(event.data)
 	})
 	useMountEffect(() => {
-		// React Doctor cannot infer useMountEffect.
-		// oxlint-disable-next-line react-doctor/rules-of-hooks
+		// react-doctor-disable-next-line react-doctor/rules-of-hooks -- React Doctor does not recognize useMountEffect as an Effect Event boundary.
 		const listener = (event: MessageEvent) => handleMessage(event)
 		window.addEventListener("message", listener)
 		return () => window.removeEventListener("message", listener)
@@ -147,12 +145,12 @@ function useIntegrationMessage(
 
 function CloudflareConnectBoundary({ children }: { children: React.ReactNode }) {
 	const refreshStatus = useAtomRefresh(
-		MapleApiAtomClient.query("integrations", "cloudflareStatus", {
+		retainedQuery("integrations", "cloudflareStatus", {
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
 	const refreshUsage = useAtomRefresh(
-		MapleApiAtomClient.query("integrations", "cloudflareUsage", {
+		retainedQuery("integrations", "cloudflareUsage", {
 			reactivityKeys: ["cloudflareIntegrationUsage"],
 		}),
 	)
@@ -190,7 +188,7 @@ function CloudflareConnectBoundary({ children }: { children: React.ReactNode }) 
 
 function HazelConnectBoundary({ children }: { children: React.ReactNode }) {
 	const refreshStatus = useAtomRefresh(
-		MapleApiAtomClient.query("integrations", "hazelStatus", {
+		retainedQuery("integrations", "hazelStatus", {
 			reactivityKeys: ["hazelIntegrationStatus"],
 		}),
 	)
@@ -224,7 +222,7 @@ function HazelConnectBoundary({ children }: { children: React.ReactNode }) {
 
 function GithubConnectBoundary({ children }: { children: React.ReactNode }) {
 	const refreshStatus = useAtomRefresh(
-		MapleApiAtomClient.query("integrations", "githubStatus", {
+		retainedQuery("integrations", "githubStatus", {
 			reactivityKeys: ["githubIntegrationStatus"],
 		}),
 	)
@@ -260,7 +258,7 @@ function GithubConnectBoundary({ children }: { children: React.ReactNode }) {
 
 function PlanetscaleConnectBoundary({ children }: { children: React.ReactNode }) {
 	const refreshStatus = useAtomRefresh(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+		retainedQueryV2("planetscaleIntegration", "status", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)

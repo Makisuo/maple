@@ -7,7 +7,7 @@ npm install @maple-dev/alchemy alchemy effect
 ```
 
 `alchemy` and `effect` are peer dependencies — this release is built and tested against
-`alchemy@2.0.0-beta.70` and `effect@4.0.0-beta.105`.
+`alchemy@2.0.0-beta.72` and `effect@4.0.0-rc.108`.
 
 ## Usage
 
@@ -71,7 +71,31 @@ Set `MAPLE_API_KEY` to a Maple API key (create one in the Maple dashboard, or wi
 - **Alert rules & destinations** need `alerts:write` **and** an org-admin key.
 - **API keys & ingest keys** need `api_keys:write` / `ingest_keys:read` **and** an org-admin key.
 
-`MAPLE_API_URL` overrides the API base URL (defaults to `https://api.maple.dev`). To source configuration differently, provide your own `Maple.MapleEnvironment` layer.
+`MAPLE_API_URL` overrides the API base URL (defaults to `https://api.maple.dev`).
+`Maple.providers()` reads those variables and uses the runtime's global `fetch`.
+
+To supply configuration or transport explicitly, compose the open provider
+layer with both services. These layers are used directly; no internal default
+overrides them:
+
+```typescript
+import * as Maple from "@maple-dev/alchemy"
+import { Layer, Redacted } from "effect"
+import { HttpClient } from "effect/unstable/http"
+
+const mapleProviders = Maple.providersWithDependencies().pipe(
+	Layer.provide(
+		Layer.succeed(Maple.MapleEnvironment, {
+			baseUrl: "https://maple.internal.example",
+			apiKey: Redacted.make("maple_ak_…"),
+		}),
+	),
+	Layer.provide(Layer.succeed(HttpClient.HttpClient, myHttpClient)),
+)
+```
+
+`Maple.MapleApiFromHttpClient()` exposes the same environment-and-transport
+seam when constructing the API client without the Alchemy provider collection.
 
 ## Resources
 

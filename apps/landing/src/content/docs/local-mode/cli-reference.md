@@ -46,7 +46,7 @@ Start the local ingest + query server (embedded ClickHouse via chDB).
 | `--advertise-host <host>`                           | connection-safe bind address | Host printed for clients and the bundled UI                         |
 | `--port <int>`                                      | `4318`                       | Port for OTLP/HTTP ingest, query API, and bundled UI                |
 | `--data-dir <path>`                                 | `~/.maple/data`              | Embedded ClickHouse data directory                                  |
-| `--chdb-config-file <path>`                         |                              | Optional ClickHouse config file passed to embedded chDB             |
+| `--chdb-config-file <path>`                         | generated                    | ClickHouse config for embedded chDB (default enables backups)       |
 | `--offline`                                         | `false`                      | Serve the bundled same-origin UI instead of `local.maple.dev`       |
 | `--background`, `-d`                                | `false`                      | Run detached; stop with `maple stop`                                |
 | `--reset`                                           | `false`                      | Wipe live chDB data while preserving checkpoints                    |
@@ -101,8 +101,19 @@ or cleanliness.
 
 ### `maple checkpoint`
 
-Create and validate a restorable checkpoint of the local chDB store. The running
-server must have been started with a chDB config that allows ClickHouse backups:
+Create and validate a restorable checkpoint of the local chDB store. This works
+out of the box — `maple start` writes a backups-enabled chDB config to
+`~/.maple/chdb-config.xml` and starts the embedded engine with it:
+
+```bash
+maple start
+maple checkpoint
+```
+
+Checkpoints need `<backups>` in the config of the _running_ server, because
+`BACKUP DATABASE default TO Disk('default', …)` is executed by that process;
+`maple checkpoint` is a separate process and cannot add it after the fact. So if
+you pass your own `--chdb-config-file`, it must include the stanza:
 
 ```xml
 <clickhouse>

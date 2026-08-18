@@ -58,7 +58,6 @@ const PHRASE_BY_TOOL: Record<string, string> = {
 	list_error_incidents: "Listing error incidents…",
 	claim_error_issue: "Updating an issue…",
 	release_error_issue: "Updating an issue…",
-	heartbeat_error_issue: "Updating an issue…",
 	comment_on_error_issue: "Commenting on an issue…",
 	transition_error_issue: "Updating an issue…",
 	set_issue_severity: "Updating issue severity…",
@@ -93,7 +92,7 @@ const PHRASE_BY_TOOL: Record<string, string> = {
 	propose_fix: "Drafting a fix…",
 	search_sessions: "Searching sessions…",
 	get_session_transcript: "Reading a session transcript…",
-}
+} satisfies Record<string, string>
 
 /** Keyword fallbacks for tools not in {@link PHRASE_BY_TOOL}, checked in order. */
 const PHRASE_BY_KEYWORD: readonly (readonly [string, string])[] = [

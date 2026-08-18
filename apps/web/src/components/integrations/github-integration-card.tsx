@@ -37,7 +37,7 @@ import {
 } from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { GITHUB_ACCENT, IntegrationIconPlate } from "./integration-catalog"
 import { useIntegrationConnect, type IntegrationConnect } from "./integration-connect"
 import {
@@ -67,11 +67,14 @@ const SYNC_PRESENTATION: Record<
 	backfilling: { label: "Syncing", tone: "text-info-foreground", Icon: LoaderIcon, spin: true },
 	pending: { label: "Queued", tone: "text-muted-foreground", Icon: ClockIcon },
 	error: { label: "Sync failed", tone: "text-destructive-foreground", Icon: CircleWarningIcon },
-}
+} satisfies Record<
+	VcsRepoSyncStatus,
+	{ label: string; tone: string; Icon: typeof CircleCheckIcon; spin?: boolean }
+>
 
 export function GithubIntegrationCard() {
 	// Assigned once so the refresh hook targets the same memoized query atom.
-	const statusQuery = MapleApiAtomClient.query("integrations", "githubStatus", {
+	const statusQuery = retainedQuery("integrations", "githubStatus", {
 		reactivityKeys: ["githubIntegrationStatus"],
 	})
 	const statusResult = useAtomValue(statusQuery)

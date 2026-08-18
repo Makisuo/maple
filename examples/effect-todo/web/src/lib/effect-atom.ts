@@ -18,9 +18,9 @@ class ResultBuilder<A, E, B> {
 		private readonly mapped: Option.Option<B>,
 	) {}
 
-	onSuccess<C>(f: (value: A) => C): ResultBuilder<A, E, C> {
+	onSuccess<C>(f: (value: A) => C): ResultBuilder<A, E, B | C> {
 		if (Option.isSome(this.mapped)) {
-			return new ResultBuilder(this.result, this.mapped as unknown as Option.Option<C>)
+			return new ResultBuilder(this.result, this.mapped)
 		}
 		if (AsyncResult.isSuccess(this.result)) {
 			return new ResultBuilder(this.result, Option.some(f(this.result.value)))
@@ -30,7 +30,7 @@ class ResultBuilder<A, E, B> {
 
 	onError<C>(f: (error: E) => C): ResultBuilder<A, E, B | C> {
 		if (Option.isSome(this.mapped)) {
-			return new ResultBuilder(this.result, this.mapped as unknown as Option.Option<B | C>)
+			return new ResultBuilder(this.result, this.mapped)
 		}
 		if (AsyncResult.isFailure(this.result)) {
 			return new ResultBuilder(this.result, Option.some(f(Cause.squash(this.result.cause) as E)))

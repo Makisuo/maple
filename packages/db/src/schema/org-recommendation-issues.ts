@@ -1,3 +1,4 @@
+import type { OrgId } from "@maple/domain"
 import { index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 // Durable, numbered attribute-recommendation issues (PlanetScale-style). Recommendations are
@@ -13,7 +14,7 @@ export const orgRecommendationIssues = pgTable(
 	"org_recommendation_issues",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		/** Per-org monotonic display number (`#1`, `#2`, …). */
 		number: integer("number").notNull(),
 		/** Stable dedupe key from the detector, e.g. `rename:http.status_code`. */

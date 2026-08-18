@@ -6,16 +6,36 @@ import {
 	type McpToolResult,
 } from "./types"
 import { Effect, Schema } from "effect"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { autoBucketSeconds, runRawSql } from "@/mcp/lib/run-raw-sql"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { formatTable, truncate } from "@/mcp/lib/format"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
+import { McpQueryError } from "./types"
+import { listWarehouseTables } from "@/services/warehouse/warehouse-catalog"
 
 // Rows returned to the model are capped so a wide/long result doesn't blow the
 // context. The full count is always reported via meta.rowCount.
 const MAX_RENDERED_ROWS = 100
+
+/**
+ * Matches how each backend words a missing relation: ClickHouse says "Unknown
+ * table"/"doesn't exist", the Tinybird gateway says "Resource '<name>' not found".
+ */
+const UNKNOWN_TABLE = /unknown table|table .* does(?:n't| not) exist|Resource '[^']*' not found/i
+
+export const withTableListOnUnknownTable = (error: McpQueryError): McpQueryError => {
+	if (!UNKNOWN_TABLE.test(error.message)) return error
+	const names = listWarehouseTables()
+		.map((t) => t.name)
+		.join(", ")
+	return new McpQueryError({
+		message: `${error.message}\n\nAvailable tables: ${names}.\nCall describe_warehouse_tables with a table name for its columns.`,
+		pipeName: error.pipeName,
+		cause: error.cause,
+	})
+}
 
 const runSqlSchema = Schema.Struct({
 	sql: requiredStringParam(
@@ -53,7 +73,7 @@ export function registerRunSqlTool(server: McpToolRegistrar) {
 		runSqlDescription,
 		runSqlSchema,
 		Effect.fn("McpTool.runSql")(function* (params) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const { st, et } = resolveTimeRange(params.start_time, params.end_time)
 			const granularitySeconds = params.granularity_seconds ?? autoBucketSeconds(st, et)
 
@@ -84,6 +104,12 @@ export function registerRunSqlTool(server: McpToolRegistrar) {
 				),
 				// Execution failures (CH syntax/schema/quota) surface the warehouse message so the agent can fix the SQL.
 				Effect.mapError(toMcpQueryError("run_sql")),
+				// ...but "no such table" is the one failure the warehouse message cannot
+				// resolve on its own: the agent invented a name (`otel_traces` was the
+				// most common) and the reply never says what the real names are. It
+				// points at describe_warehouse_tables instead, which agents skip — 60
+				// calls against 1,008 run_sql calls. Put the answer in the error.
+				Effect.mapError(withTableListOnUnknownTable),
 			)
 
 			if (!outcome.ok) return outcome.result

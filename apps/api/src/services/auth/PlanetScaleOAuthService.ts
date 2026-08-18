@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 import {
+	IntegrationsConfigurationError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
 	IntegrationsRevokedError,
@@ -12,7 +13,7 @@ import { oauthAuthStates } from "@maple/db"
 import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Result, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "@/platform/DatabaseLive"
-import { Env, type EnvShape } from "@/platform/Env"
+import { Env, type EnvConfig } from "@/platform/Env"
 import { msToDate } from "@/platform/time"
 import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS, toUpstreamError } from "./oauth/connection-helpers"
 
@@ -54,11 +55,11 @@ interface ResolvedPlanetScaleOAuthConfig {
 	readonly scopes: string
 }
 
-const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(function* (env: EnvShape) {
+const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(function* (env: EnvConfig) {
 	const clientId = yield* Option.match(env.PLANETSCALE_OAUTH_CLIENT_ID, {
 		onNone: () =>
 			Effect.fail(
-				new IntegrationsValidationError({
+				new IntegrationsConfigurationError({
 					message: "PLANETSCALE_OAUTH_CLIENT_ID is required to use the PlanetScale integration",
 				}),
 			),
@@ -67,7 +68,7 @@ const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(functio
 	const clientSecret = yield* Option.match(env.PLANETSCALE_OAUTH_CLIENT_SECRET, {
 		onNone: () =>
 			Effect.fail(
-				new IntegrationsValidationError({
+				new IntegrationsConfigurationError({
 					message: "PLANETSCALE_OAUTH_CLIENT_SECRET is required to use the PlanetScale integration",
 				}),
 			),
@@ -86,6 +87,15 @@ export interface PlanetScaleOrganization {
 	readonly id: string
 	readonly name: string
 }
+
+/** Exact failures involved in resolving a usable PlanetScale OAuth token. */
+export type PlanetScaleAccessTokenError =
+	| IntegrationsNotConnectedError
+	| IntegrationsRevokedError
+	| IntegrationsUpstreamError
+	| IntegrationsPersistenceError
+	| IntegrationsValidationError
+	| IntegrationsConfigurationError
 
 // Lenient decoders: only the fields we consume. PlanetScale list endpoints wrap
 // results in a `{ data: [...] }` envelope.
@@ -115,14 +125,14 @@ const CurrentUserSchema = Schema.Struct({
 })
 const decodeCurrentUser = Schema.decodeUnknownEffect(Schema.fromJsonString(CurrentUserSchema))
 
-export interface PlanetScaleOAuthServiceShape {
+export interface PlanetScaleOAuthServiceApi {
 	readonly startConnect: (
 		orgId: OrgId,
 		userId: UserId,
 		options: { readonly callbackUrl: string; readonly returnTo?: string },
 	) => Effect.Effect<
 		{ readonly redirectUrl: string; readonly state: string },
-		IntegrationsValidationError | IntegrationsPersistenceError
+		IntegrationsConfigurationError | IntegrationsPersistenceError
 	>
 	/**
 	 * Exchange the callback code and persist the grant. Does NOT bind a
@@ -141,20 +151,14 @@ export interface PlanetScaleOAuthServiceShape {
 			readonly organizations: ReadonlyArray<PlanetScaleOrganization>
 		},
 		| IntegrationsValidationError
+		| IntegrationsConfigurationError
 		| IntegrationsRevokedError
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
 	>
 	readonly getValidAccessToken: (
 		orgId: OrgId,
-	) => Effect.Effect<
-		{ readonly accessToken: string },
-		| IntegrationsNotConnectedError
-		| IntegrationsRevokedError
-		| IntegrationsUpstreamError
-		| IntegrationsPersistenceError
-		| IntegrationsValidationError
-	>
+	) => Effect.Effect<{ readonly accessToken: string }, PlanetScaleAccessTokenError>
 	/** Organizations the stored grant can access — org-picker material. */
 	readonly listOrganizations: (
 		orgId: OrgId,
@@ -165,6 +169,7 @@ export interface PlanetScaleOAuthServiceShape {
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
 		| IntegrationsValidationError
+		| IntegrationsConfigurationError
 	>
 	/** Whether a grant is stored for the org (drives pendingOrgSelection). */
 	readonly hasConnection: (orgId: OrgId) => Effect.Effect<boolean, IntegrationsPersistenceError>
@@ -188,7 +193,7 @@ export interface PlanetScaleOAuthServiceShape {
 
 export class PlanetScaleOAuthService extends Context.Service<
 	PlanetScaleOAuthService,
-	PlanetScaleOAuthServiceShape
+	PlanetScaleOAuthServiceApi
 >()("@maple/api/services/PlanetScaleOAuthService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -556,7 +561,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 			connectedByUserId,
 			grantStatus,
 			disconnect,
-		} satisfies PlanetScaleOAuthServiceShape
+		} satisfies PlanetScaleOAuthServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

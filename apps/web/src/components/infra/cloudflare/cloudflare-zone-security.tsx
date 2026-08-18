@@ -25,7 +25,7 @@ const ACTION_COLORS: Record<string, string> = {
 	log: "color-mix(in oklab, var(--muted-foreground) 40%, transparent)",
 	allow: "var(--severity-info)",
 	unknown: "color-mix(in oklab, var(--muted-foreground) 25%, transparent)",
-}
+} satisfies Record<string, string>
 
 const ACTION_ORDER = [
 	"block",

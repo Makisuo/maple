@@ -1,13 +1,25 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { snapTimestamp } from "@/lib/time-utils"
 
-function normalizeForKey(value: unknown): unknown {
+/** How a leaf string is treated: snapped to the 15s grid, or dropped entirely. */
+type TimestampMode = "snap" | "drop"
+
+/** Matches the warehouse `YYYY-MM-DD HH:MM:SS[.fff]` shape, with or without a `T`. */
+const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/
+
+const DROPPED = Symbol("dropped")
+
+function normalize(value: unknown, mode: TimestampMode): unknown {
 	if (value === null || typeof value !== "object") {
-		if (typeof value === "string") return snapTimestamp(value)
+		if (typeof value === "string") {
+			if (mode === "snap") return snapTimestamp(value)
+			return TIMESTAMP_PATTERN.test(value) ? DROPPED : value
+		}
 		return value
 	}
 
 	if (Array.isArray(value)) {
-		return value.map(normalizeForKey)
+		return value.map((entry) => normalize(entry, mode)).filter((entry) => entry !== DROPPED)
 	}
 
 	const entries = Object.entries(value as Record<string, unknown>)
@@ -16,10 +28,15 @@ function normalizeForKey(value: unknown): unknown {
 
 	const normalized: Record<string, unknown> = {}
 	for (const [key, entryValue] of entries) {
-		normalized[key] = normalizeForKey(entryValue)
+		const entry = normalize(entryValue, mode)
+		if (entry !== DROPPED) normalized[key] = entry
 	}
 
 	return normalized
+}
+
+function normalizeForKey(value: unknown): unknown {
+	return normalize(value, "snap")
 }
 
 export function encodeKey(value: unknown): string {
@@ -53,4 +70,39 @@ export function encodeOrgScopedKey(orgId: string | null | undefined, value: unkn
 /** Recover just the encoded input from a key built by `encodeOrgScopedKey`. */
 export function orgScopedKeyPayload(key: string): string {
 	return key.slice(key.indexOf(ORG_KEY_SEPARATOR) + 1)
+}
+
+/**
+ * The *logical* identity of an atom key: the same query, with the time window
+ * removed. Two keys that differ only in their range collapse to one identity.
+ *
+ * This is what lets a remount serve the previous result while the new window
+ * loads. Snapping the range (see `snapRangeForCache`) keeps a key stable for
+ * minutes at a time, but the boundary still has to be crossed eventually, and
+ * on a 1h preset the grid is only 15s — at that point the key is genuinely new
+ * and only an identity that ignores time can find what was there before.
+ *
+ * Derived from the key rather than the input because `Atom.family` factories
+ * only ever see the key.
+ *
+ * The org prefix is preserved deliberately. An identity that spanned orgs would
+ * revive exactly the bug `ORG_KEY_SEPARATOR` above exists to prevent: switching
+ * orgs and being shown the previous org's rows.
+ */
+export function identityFromKey(key: string): string {
+	const separatorIndex = key.indexOf(ORG_KEY_SEPARATOR)
+	const orgPrefix = separatorIndex === -1 ? "" : key.slice(0, separatorIndex)
+	const payload = orgScopedKeyPayload(key)
+
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(payload)
+	} catch {
+		// Not decodable — fall back to the key itself. Identity stays correct
+		// (never over-shares), it just can't match across windows.
+		return key
+	}
+
+	const stripped = normalize(parsed, "drop")
+	return `${orgPrefix}${ORG_KEY_SEPARATOR}${JSON.stringify(stripped === DROPPED ? null : stripped)}`
 }

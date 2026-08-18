@@ -9,6 +9,7 @@
  * upward-only (enforced by the writers via escalationReasonFor).
  */
 import {
+	AlertPersistenceError,
 	AlertSignalType,
 	EscalationConfidence,
 	IssueEscalationPolicyRule,
@@ -26,9 +27,11 @@ import {
 } from "@maple/db"
 import { and, asc, eq, inArray } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { Database, type DatabaseClient, DatabaseError } from "@/platform/DatabaseLive"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
+import { makePersistenceError } from "./alert-persistence"
 import { NotificationDispatcher, type NotificationRequest } from "./NotificationDispatcher"
 
 const ESCALATIONS_PER_TICK = 50
@@ -50,8 +53,8 @@ interface EscalationTickResult {
 	readonly retried: number
 }
 
-export interface EscalationServiceShape {
-	readonly runEscalationTick: () => Effect.Effect<EscalationTickResult, DatabaseError>
+export interface EscalationServiceApi {
+	readonly runEscalationTick: () => Effect.Effect<EscalationTickResult, AlertPersistenceError>
 }
 
 /*
@@ -59,13 +62,13 @@ export interface EscalationServiceShape {
  * `EscalationService.of(...)` return does not create a circular inference
  * through the class's own base expression.
  */
-const make: Effect.Effect<EscalationServiceShape, never, Database | NotificationDispatcher | Env> =
-	Effect.gen(function* () {
+const make: Effect.Effect<EscalationServiceApi, never, Database | NotificationDispatcher | Env> = Effect.gen(
+	function* () {
 		const database = yield* Database
 		const dispatcher = yield* NotificationDispatcher
 		const env = yield* Env
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) => database.execute(fn)
+		const dbExecute = makeDbExecute(database, "EscalationService", makePersistenceError)
 
 		const loadPolicy = (orgId: OrgId) =>
 			dbExecute((db) =>
@@ -89,8 +92,10 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 					.set({
 						status,
 						error: error ?? null,
-						...(deliveryResults === undefined ? {} : { deliveryResultsJson: deliveryResults }),
-						...(status === "queued" ? {} : { processedAt: new Date(timestamp) }),
+						...(!(deliveryResults === undefined)
+							? { deliveryResultsJson: deliveryResults }
+							: undefined),
+						...(!(status === "queued") ? { processedAt: new Date(timestamp) } : undefined),
 					})
 					.where(eq(issueEscalations.id, row.id)),
 			)
@@ -154,12 +159,14 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 				rules,
 				severity: row.severity,
 				source: row.source,
-				...(confidence === undefined ? {} : { confidence }),
+				...(!(confidence === undefined) ? { confidence } : undefined),
 				enabledDestinationIds: new Set(destinationRows.map((destination) => destination.id)),
 			})
 			yield* Effect.annotateCurrentSpan({
 				"maple.escalation.policy_outcome": decision.outcome,
-				...(decision.skipReason ? { "maple.escalation.skip_reason": decision.skipReason } : {}),
+				...(decision.skipReason
+					? { "maple.escalation.skip_reason": decision.skipReason }
+					: undefined),
 				"maple.escalation.destination_count": decision.destinationIds.length,
 			})
 			if (decision.outcome === "skip") {
@@ -218,7 +225,7 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 						severitySource: issue.severitySource,
 						linkUrl,
 					},
-					...(payload.triage !== undefined ? { triage: payload.triage } : {}),
+					...(payload.triage !== undefined ? { triage: payload.triage } : undefined),
 					source: row.source,
 					reason: row.reason,
 					...(row.investigationId != null
@@ -228,8 +235,8 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 									url: `${env.MAPLE_APP_BASE_URL}/investigations/${row.investigationId}`,
 								},
 							}
-						: {}),
-					...(row.runId != null ? { runId: row.runId } : {}),
+						: undefined),
+					...(row.runId != null ? { runId: row.runId } : undefined),
 				},
 			}
 
@@ -263,7 +270,7 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 			return "retried" as const
 		})
 
-		const runEscalationTick: EscalationServiceShape["runEscalationTick"] = Effect.fn(
+		const runEscalationTick: EscalationServiceApi["runEscalationTick"] = Effect.fn(
 			"EscalationService.runEscalationTick",
 		)(function* () {
 			const rows = yield* dbExecute((db) =>
@@ -308,9 +315,10 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 		})
 
 		return EscalationService.of({ runEscalationTick })
-	})
+	},
+)
 
-export class EscalationService extends Context.Service<EscalationService, EscalationServiceShape>()(
+export class EscalationService extends Context.Service<EscalationService, EscalationServiceApi>()(
 	"@maple/api/services/EscalationService",
 	{ make },
 ) {

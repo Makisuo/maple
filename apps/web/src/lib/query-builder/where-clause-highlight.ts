@@ -30,7 +30,7 @@ export const WHERE_CLAUSE_TOKEN_COLOR: Record<WhereClauseTokenType, string> = {
 	number: "var(--sh-entity)",
 	boolean: "var(--sh-entity)",
 	plain: "var(--sh-identifier)",
-}
+} satisfies Record<WhereClauseTokenType, string>
 
 const TOKEN_RE =
 	/("[^"]*"?|'[^']*'?)|(!=|>=|<=|[=<>])|(!?[A-Za-z_][A-Za-z0-9_.:/-]*)|(-?\d+(?:\.\d+)?)|(\s+)|(.)/gy

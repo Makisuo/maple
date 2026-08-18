@@ -342,8 +342,8 @@ export class CliDeviceAuthService extends Context.Service<
 				return new CliDeviceCompleteResponse({
 					status: "complete",
 					token,
-					orgId: row.approvedOrgId as OrgId,
-					userId: row.approvedUserId as UserId,
+					orgId: row.approvedOrgId,
+					userId: row.approvedUserId,
 				})
 			}
 
@@ -416,8 +416,8 @@ export class CliDeviceAuthService extends Context.Service<
 					return new CliDeviceCompleteResponse({
 						status: "complete",
 						token,
-						orgId: row.approvedOrgId as OrgId,
-						userId: row.approvedUserId as UserId,
+						orgId: row.approvedOrgId,
+						userId: row.approvedUserId,
 					})
 				}
 				return yield* new CliDevicePersistenceError({ message: "CLI credential issuance raced" })
@@ -425,8 +425,8 @@ export class CliDeviceAuthService extends Context.Service<
 			return new CliDeviceCompleteResponse({
 				status: "complete",
 				token: rawToken,
-				orgId: row.approvedOrgId as OrgId,
-				userId: row.approvedUserId as UserId,
+				orgId: row.approvedOrgId,
+				userId: row.approvedUserId,
 			})
 		})
 

@@ -10,6 +10,7 @@ import {
 	templateId,
 } from "@/dashboard-templates/helpers"
 import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
 
 function widgets(serviceName?: string): WidgetDef[] {
 	const where = serviceWhereClause(serviceName)
@@ -77,13 +78,10 @@ function widgets(serviceName?: string): WidgetDef[] {
 		{
 			id: "recent-traces",
 			visualization: "list",
-			dataSource: {
-				endpoint: "list_traces",
-				params: {
-					...(serviceName && { service: serviceName }),
-					limit: 10,
-				},
-			},
+			dataSource: makeRouteDataSource("list_traces", {
+				...(serviceName && { service: serviceName }),
+				limit: 10,
+			}),
 			display: {
 				title: "Recent Traces",
 				listDataSource: "traces",

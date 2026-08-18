@@ -1,23 +1,28 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import {
-	WarehouseQueryError,
-	WarehouseConfigError,
 	MAX_RAW_SQL_RESULT_BYTES,
-	WarehouseSchemaDriftError,
-	WarehouseUpstreamError,
 	OrgClickHouseSettingsEncryptionError,
 	OrgClickHouseSettingsPersistenceError,
-	OrgClickHouseSettingsValidationError,
+	OrgClickHouseSettingsStoredConfigInvalidError,
 	OrgId,
+	TinybirdOrgTokenConfigError,
 	UserId,
+	WarehouseConfigError,
+	WarehouseQueryError,
+	WarehouseResultDecodeError,
+	WarehouseScopeError,
+	WarehouseUpstreamError,
 } from "@maple/domain/http"
 import { unsafeCompiledQuery } from "@maple/query-engine/ch"
+import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { makeWarehouseExecutor, type ResolvedWarehouseConfig } from "@maple/query-engine/execution"
 import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
 import {
 	OrgClickHouseSettingsService,
-	type OrgClickHouseSettingsServiceShape,
+	type OrgClickHouseSettingsServiceApi,
 } from "@/services/org/OrgClickHouseSettingsService"
 import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
 import type { TenantContext } from "@/services/auth/AuthService"
@@ -42,7 +47,7 @@ const makeConfig = (extra: Record<string, string> = {}, includeTinybirdSigning =
 						TINYBIRD_SIGNING_KEY: "test-signing-key",
 						TINYBIRD_WORKSPACE_ID: "test-workspace",
 					}
-				: {}),
+				: undefined),
 			MAPLE_AUTH_MODE: "self_hosted",
 			MAPLE_ROOT_PASSWORD: "test-root-password",
 			MAPLE_DEFAULT_ORG_ID: "default",
@@ -58,8 +63,9 @@ const buildLayer = (testDb: TestDb, extra: Record<string, string> = {}, includeT
 	const configLive = makeConfig(extra, includeTinybirdSigning)
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
 	const databaseLive = testDb.layer
+	const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(MemoryCacheBackendLive))
 	const orgSettingsLive = OrgClickHouseSettingsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+		Layer.provide(Layer.mergeAll(envLive, databaseLive, edgeCacheLive)),
 	)
 	const tinybirdTokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
 	return WarehouseQueryService.layer.pipe(
@@ -232,7 +238,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 					}),
 				),
 			invalidateRuntimeConfig: () => Effect.succeed(false),
-		} as unknown as OrgClickHouseSettingsServiceShape)
+		} as OrgClickHouseSettingsServiceApi)
 		const layer = WarehouseQueryService.layer.pipe(
 			Layer.provide(Layer.mergeAll(envLive, tokenLive, orgSettingsLive)),
 		)
@@ -247,32 +253,32 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("preserves runtime-config dependency and configuration semantics", () => {
+	it.effect("preserves exact runtime-config dependency failures", () => {
 		const cases = [
 			{
 				source: new OrgClickHouseSettingsPersistenceError({ message: "database unavailable" }),
-				expected: WarehouseUpstreamError,
 			},
 			{
 				source: new OrgClickHouseSettingsEncryptionError({ message: "decrypt failed" }),
-				expected: WarehouseConfigError,
 			},
 			{
-				source: new OrgClickHouseSettingsValidationError({ message: "invalid stored URL" }),
-				expected: WarehouseConfigError,
+				source: new OrgClickHouseSettingsStoredConfigInvalidError({
+					message: "invalid stored URL",
+					cause: new Error("invalid stored URL"),
+				}),
 			},
 		] as const
 
 		return Effect.forEach(
 			cases,
-			({ source, expected }) => {
+			({ source }) => {
 				const configLive = makeConfig({}, false)
 				const envLive = Env.layer.pipe(Layer.provide(configLive))
 				const tokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
 				const orgSettingsLive = Layer.succeed(OrgClickHouseSettingsService, {
 					resolveRuntimeConfig: () => Effect.fail(source),
 					invalidateRuntimeConfig: () => Effect.succeed(false),
-				} as unknown as OrgClickHouseSettingsServiceShape)
+				} as OrgClickHouseSettingsServiceApi)
 				const layer = WarehouseQueryService.layer.pipe(
 					Layer.provide(Layer.mergeAll(envLive, tokenLive, orgSettingsLive)),
 				)
@@ -281,19 +287,14 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 					const exit = yield* WarehouseQueryService.use((service) =>
 						service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 					).pipe(Effect.exit)
-					const mapped = getError(exit)
-					assert.instanceOf(mapped, expected)
-					assert.strictEqual(
-						(mapped as WarehouseConfigError | WarehouseUpstreamError).cause,
-						source,
-					)
+					assert.strictEqual(getError(exit), source)
 				}).pipe(Effect.provide(layer))
 			},
 			{ discard: true },
 		)
 	})
 
-	it.effect("maps missing Tinybird signing configuration to WarehouseConfigError", () => {
+	it.effect("preserves missing Tinybird signing configuration as its own tag", () => {
 		__testables.setClientFactory(() => ({
 			sql: async () => ({ data: [] }),
 			insert: async () => {},
@@ -305,9 +306,9 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 			).pipe(Effect.exit)
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseConfigError)
-			assert.include((failure as WarehouseConfigError).message, "TINYBIRD_SIGNING_KEY")
-			assert.notInclude((failure as WarehouseConfigError).message, "managed-token")
+			assert.instanceOf(failure, TinybirdOrgTokenConfigError)
+			assert.include((failure as TinybirdOrgTokenConfigError).message, "TINYBIRD_SIGNING_KEY")
+			assert.notInclude((failure as TinybirdOrgTokenConfigError).message, "managed-token")
 		}).pipe(Effect.provide(layer))
 	})
 
@@ -466,7 +467,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("maps row decode failures to WarehouseSchemaDriftError", () => {
+	it.effect("maps row decode failures to WarehouseResultDecodeError", () => {
 		__testables.setClientFactory(() => ({
 			sql: async () => ({ data: [{ count: "not-a-number" }] }),
 			insert: async () => {},
@@ -489,7 +490,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseSchemaDriftError)
+			assert.instanceOf(failure, WarehouseResultDecodeError)
 		}).pipe(Effect.provide(layer))
 	})
 
@@ -519,6 +520,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
+			assert.instanceOf(failure, WarehouseScopeError)
 			assert.strictEqual(
 				(failure as { message?: string } | undefined)?.message,
 				"compiled query is not tenant-scoped: no top-level OrgId predicate (compiledQuery). " +
@@ -589,7 +591,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("maps first-row decode failures to WarehouseSchemaDriftError", () => {
+	it.effect("maps first-row decode failures to WarehouseResultDecodeError", () => {
 		__testables.setClientFactory(() => ({
 			sql: async () => ({ data: [{ count: "not-a-number" }] }),
 			insert: async () => {},
@@ -612,7 +614,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseSchemaDriftError)
+			assert.instanceOf(failure, WarehouseResultDecodeError)
 		}).pipe(Effect.provide(layer))
 	})
 })

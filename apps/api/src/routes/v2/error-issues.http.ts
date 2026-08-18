@@ -7,25 +7,16 @@ import type {
 	IssueListCursorFields,
 	IssueSeverityListCursorFields,
 } from "@maple/domain/http"
-import {
-	CurrentTenant,
-	ErrorIssueNotFoundError,
-	ErrorPersistenceError,
-	IssueListCursor,
-	IssueSeverityListCursor,
-} from "@maple/domain/http"
+import { CurrentTenant, IssueListCursor, IssueSeverityListCursor } from "@maple/domain/http"
 import type {
 	V2ErrorIncident,
 	V2ErrorIssue,
 	V2ErrorIssueActor,
 	V2ErrorIssueDetail,
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2ServiceUnavailableError,
 } from "@maple/domain/http/v2"
-import { dependencyUnavailable, invalidRequest, MapleApiV2, resourceNotFound } from "@maple/domain/http/v2"
+import { MapleApiV2, V2CursorInvalid, V2CursorSortMismatch } from "@maple/domain/http/v2"
 import { Effect, Schema } from "effect"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 
 const toV2Actor = (actor: ActorDocument): V2ErrorIssueActor => ({
 	id: actor.id,
@@ -80,7 +71,10 @@ const toV2Incident = (incident: ErrorIncidentDocument): V2ErrorIncident => ({
 
 export const toV2IssueDetail = (detail: ErrorIssueDetailResponse): V2ErrorIssueDetail => ({
 	...toV2Issue(detail.issue),
-	timeseries: detail.timeseries.map((point) => ({ bucket: point.bucket, count: point.count })),
+	timeseries: detail.timeseries.map((point) => ({
+		bucket: point.bucket,
+		count: point.count,
+	})),
 	sample_traces: detail.sampleTraces.map((trace) => ({
 		trace_id: trace.traceId,
 		span_id: trace.spanId,
@@ -92,79 +86,53 @@ export const toV2IssueDetail = (detail: ErrorIssueDetailResponse): V2ErrorIssueD
 	incidents: detail.incidents.map(toV2Incident),
 })
 
-const mapPersistenceError = <A, R>(
-	effect: Effect.Effect<A, ErrorPersistenceError, R>,
-): Effect.Effect<A, V2ServiceUnavailableError, R> =>
-	effect.pipe(
-		Effect.catchTag("@maple/http/errors/ErrorPersistenceError", () =>
-			Effect.fail(dependencyUnavailable("error_issue_query_unavailable")),
-		),
-	)
-
-const mapRetrieveError = <A, R>(
-	effect: Effect.Effect<A, ErrorPersistenceError | ErrorIssueNotFoundError, R>,
-): Effect.Effect<A, V2ServiceUnavailableError | V2NotFoundError, R> =>
-	effect.pipe(
-		Effect.catchTags({
-			"@maple/http/errors/ErrorIssueNotFoundError": () =>
-				Effect.fail(resourceNotFound("error_issue", "No such error issue.")),
-			"@maple/http/errors/ErrorPersistenceError": () =>
-				Effect.fail(dependencyUnavailable("error_issue_retrieve_unavailable")),
-		}),
-	)
-
 const decodeCursor = (
 	cursor: string | undefined,
 	sort: "last_seen" | "severity",
 ): Effect.Effect<
 	IssueListCursorFields | IssueSeverityListCursorFields | undefined,
-	V2InvalidRequestError
+	ReturnType<typeof V2CursorInvalid.make> | ReturnType<typeof V2CursorSortMismatch.make>
 > => {
 	if (cursor === undefined) return Effect.succeed(undefined)
 	if (sort === "severity") {
 		if (!cursor.startsWith("sev_")) {
-			return Effect.fail(
-				invalidRequest("cursor_sort_mismatch", "Cursor does not match the selected sort.", "cursor"),
-			)
+			return Effect.fail(V2CursorSortMismatch.make(undefined, { param: "cursor" }))
 		}
 		return Schema.decodeEffect(IssueSeverityListCursor)(cursor.slice(4)).pipe(
-			Effect.mapError(() => invalidRequest("cursor_invalid", "Invalid pagination cursor.", "cursor")),
+			Effect.mapError(() => V2CursorInvalid.make(undefined, { param: "cursor" })),
 		)
 	}
 	if (cursor.startsWith("sev_")) {
-		return Effect.fail(
-			invalidRequest("cursor_sort_mismatch", "Cursor does not match the selected sort.", "cursor"),
-		)
+		return Effect.fail(V2CursorSortMismatch.make(undefined, { param: "cursor" }))
 	}
 	return Schema.decodeEffect(IssueListCursor)(cursor).pipe(
-		Effect.mapError(() => invalidRequest("cursor_invalid", "Invalid pagination cursor.", "cursor")),
+		Effect.mapError(() => V2CursorInvalid.make(undefined, { param: "cursor" })),
 	)
 }
 
 export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssues", (handlers) =>
 	Effect.gen(function* () {
-		const errors = yield* ErrorsService
+		const readModels = yield* ErrorIssueReadModelsService
 		return handlers
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const sort = query.sort ?? "last_seen"
 					const cursor = yield* decodeCursor(query.cursor, sort)
-					const response = yield* errors
-						.listIssues(tenant.orgId, {
-							workflowState: query.workflow_state,
-							severity: query.severity,
-							kind: query.kind,
-							service: query.service_name,
-							deploymentEnv: query.deployment_environment,
-							startTime: query.start_time,
-							endTime: query.end_time,
-							actionable: query.actionable === "true",
-							sort,
-							limit: query.limit ?? 20,
-							cursor,
-						})
-						.pipe(mapPersistenceError)
+					const response = yield* readModels.listIssues(tenant.orgId, {
+						workflowState: query.workflow_state,
+						severity: query.severity,
+						kind: query.kind,
+						service: query.service_name,
+						deploymentEnv: query.deployment_environment,
+						startTime: query.start_time,
+						endTime: query.end_time,
+						actionable: query.actionable === "true",
+						sort,
+						limit: query.limit ?? 20,
+						cursor,
+					})
+
 					return {
 						object: "list" as const,
 						data: response.issues.map(toV2Issue),
@@ -176,9 +144,8 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 			.handle("serviceCounts", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const counts = yield* errors
-						.countOpenIssuesByService(tenant.orgId)
-						.pipe(mapPersistenceError)
+					const counts = yield* readModels.countOpenIssuesByService(tenant.orgId)
+
 					return {
 						object: "list" as const,
 						data: counts.map((row) => ({
@@ -193,14 +160,13 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 			.handle("retrieve", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const detail = yield* errors
-						.getIssue(tenant.orgId, params.id, {
-							startTime: query.start_time,
-							endTime: query.end_time,
-							bucketSeconds: query.bucket_seconds,
-							sampleLimit: query.sample_limit,
-						})
-						.pipe(mapRetrieveError)
+					const detail = yield* readModels.getIssue(tenant.orgId, params.id, {
+						startTime: query.start_time,
+						endTime: query.end_time,
+						bucketSeconds: query.bucket_seconds,
+						sampleLimit: query.sample_limit,
+					})
+
 					return toV2IssueDetail(detail)
 				}),
 			)

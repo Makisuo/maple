@@ -38,6 +38,7 @@ import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
+import { clerkRequest } from "@/services/auth/clerk-request"
 
 const ROOT_ROLE = Schema.decodeSync(RoleName)("root")
 const ORG_ADMIN_ROLE = Schema.decodeSync(RoleName)("org:admin")
@@ -91,10 +92,19 @@ export interface OrganizationInfo {
 	readonly id: OrgId
 	readonly name: string | null
 	readonly slug: string | null
+	/**
+	 * The org's own logo, or `null` when it never uploaded one.
+	 *
+	 * Clerk always hands back a URL — it generates an initials avatar when
+	 * `hasImage` is false — so the flag is what separates "this is their mark"
+	 * from "this is a placeholder Clerk drew". Callers that want a placeholder
+	 * should draw their own rather than ship Clerk's into a Maple surface.
+	 */
+	readonly imageUrl: string | null
 	readonly createdAtMs: number | null
 }
 
-export interface OrganizationServiceShape {
+export interface OrganizationServiceApi {
 	readonly retrieve: (orgId: OrgId) => Effect.Effect<OrganizationInfo, OrganizationProviderError>
 	readonly delete: (
 		orgId: OrgId,
@@ -105,7 +115,7 @@ export interface OrganizationServiceShape {
 	>
 }
 
-export class OrganizationService extends Context.Service<OrganizationService, OrganizationServiceShape>()(
+export class OrganizationService extends Context.Service<OrganizationService, OrganizationServiceApi>()(
 	"@maple/api/services/OrganizationService",
 	{
 		make: Effect.gen(function* () {
@@ -146,13 +156,13 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 
 			const deleteClerkOrganization = Effect.fn("OrganizationService.deleteClerkOrganization")(
 				function* (orgId: OrgId) {
+					yield* Effect.annotateCurrentSpan("orgId", orgId)
 					const clerk = clerkClient()
 					if (Option.isNone(clerk)) return
 
-					yield* Effect.tryPromise({
-						try: () => clerk.value.organizations.deleteOrganization(orgId),
-						catch: toProviderError,
-					})
+					yield* clerkRequest("Clerk.organizations.deleteOrganization", { orgId }, () =>
+						clerk.value.organizations.deleteOrganization(orgId),
+					).pipe(Effect.mapError((error) => toProviderError(error.cause)))
 				},
 			)
 
@@ -165,16 +175,22 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 				yield* Effect.annotateCurrentSpan("orgId", orgId)
 				const clerk = clerkClient()
 				if (Option.isNone(clerk)) {
-					return { id: orgId, name: null, slug: null, createdAtMs: null } satisfies OrganizationInfo
+					return {
+						id: orgId,
+						name: null,
+						slug: null,
+						imageUrl: null,
+						createdAtMs: null,
+					} satisfies OrganizationInfo
 				}
-				const org = yield* Effect.tryPromise({
-					try: () => clerk.value.organizations.getOrganization({ organizationId: orgId }),
-					catch: toProviderError,
-				})
+				const org = yield* clerkRequest("Clerk.organizations.getOrganization", { orgId }, () =>
+					clerk.value.organizations.getOrganization({ organizationId: orgId }),
+				).pipe(Effect.mapError((error) => toProviderError(error.cause)))
 				return {
 					id: orgId,
 					name: org.name,
 					slug: org.slug,
+					imageUrl: org.hasImage ? org.imageUrl : null,
 					createdAtMs: org.createdAt,
 				} satisfies OrganizationInfo
 			})
@@ -193,7 +209,7 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 			return {
 				retrieve,
 				delete: deleteOrganization,
-			} satisfies OrganizationServiceShape
+			} satisfies OrganizationServiceApi
 		}),
 	},
 ) {

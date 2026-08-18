@@ -8,7 +8,12 @@
  * for existing rows (recomputed from each row's StatusMessage / ExceptionType;
  * FingerprintHash is left untouched, so existing issues do not re-bucket).
  *
- * Generated from the snapshot by scripts/gen-error-label-migration.ts.
+ * The third statement is the verbatim `error_events_mv` CREATE as the schema
+ * emitter produced it at v3, transcribed here so the migration body cannot
+ * drift from — or mis-escape — the DDL it was cut from. It is frozen history:
+ * this file records what was applied against a v3-era schema and must never be
+ * re-derived from today's snapshot. Later changes to `error_events_mv` belong
+ * in a new migration, never in an edit here.
  */
 export const migration_0003_error_events_label = {
 	version: 3,

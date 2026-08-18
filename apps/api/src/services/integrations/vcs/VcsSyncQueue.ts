@@ -41,7 +41,7 @@ export const clampQueueDelaySeconds = (seconds: number): number =>
 const textEncoder = new TextEncoder()
 const jsonByteLength = (body: unknown): number => textEncoder.encode(JSON.stringify(body)).length
 
-export interface VcsSyncQueueShape {
+export interface VcsSyncQueueApi {
 	/**
 	 * Enqueue a job. `delaySeconds` (0–86,400) holds it invisible until the delay
 	 * elapses — used to requeue a rate-limited backfill continuation only once the
@@ -54,7 +54,7 @@ export interface VcsSyncQueueShape {
 	readonly sendBatch: (jobs: ReadonlyArray<VcsSyncJob>) => Effect.Effect<void, VcsQueueError>
 }
 
-export class VcsSyncQueue extends Context.Service<VcsSyncQueue, VcsSyncQueueShape>()(
+export class VcsSyncQueue extends Context.Service<VcsSyncQueue, VcsSyncQueueApi>()(
 	"@maple/api/services/vcs/VcsSyncQueue",
 	{
 		make: Effect.gen(function* () {
@@ -148,7 +148,7 @@ export class VcsSyncQueue extends Context.Service<VcsSyncQueue, VcsSyncQueueShap
 				)
 			})
 
-			return { send, sendBatch } satisfies VcsSyncQueueShape
+			return { send, sendBatch } satisfies VcsSyncQueueApi
 		}),
 	},
 ) {

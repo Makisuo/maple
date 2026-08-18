@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { Chdb, RAW_TELEMETRY_TTL_COLUMNS } from "./chdb"
 import { LOCAL_SCHEMA_MANIFEST } from "./schema-identity"
 import {
@@ -59,11 +60,13 @@ export const inspectPhysicalSchema = (db: Chdb): PhysicalSchema => {
 		list.push({
 			name: column.name,
 			type: column.type,
-			...(!column.default_kind ? {} : { defaultKind: column.default_kind }),
-			...(!column.default_expression ? {} : { defaultExpression: column.default_expression }),
-			...(!column.compression_codec || column.compression_codec === "NONE"
-				? {}
-				: { codec: column.compression_codec }),
+			...(!!column.default_kind ? { defaultKind: column.default_kind } : undefined),
+			...(!!column.default_expression ? { defaultExpression: column.default_expression } : undefined),
+			...(!(!column.compression_codec || column.compression_codec === "NONE")
+				? {
+						codec: column.compression_codec,
+					}
+				: undefined),
 		})
 		columnsByTable.set(column.table, list)
 	}

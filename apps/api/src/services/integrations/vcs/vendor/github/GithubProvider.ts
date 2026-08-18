@@ -33,8 +33,6 @@ const PROVIDER: VcsProviderId = "github"
 // jobs is safe and order-independent.
 const PUSH_JOB_MAX_BYTES = QUEUE_MESSAGE_LIMIT_BYTES - 16 * 1024 // 16 KB reserve ⇒ 112 KB target
 
-// ---- Webhook payload schemas (minimal, permissive) ------------------------
-
 const PushAuthor = Schema.Struct({
 	name: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	email: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -130,8 +128,8 @@ const toVcsError = (
 	}
 	return new VcsProviderError({
 		message: error.message,
-		...(error.status === undefined ? {} : { status: error.status }),
-		...(error.cause === undefined ? {} : { cause: error.cause }),
+		...(!(error.status === undefined) ? { status: error.status } : undefined),
+		...(!(error.cause === undefined) ? { cause: error.cause } : undefined),
 	})
 }
 
@@ -233,8 +231,8 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 					return yield* new VcsWebhookSignatureError({ message })
 				})
 
-			const verifySignature = (rawBody: string, signatureHeader: string | undefined) =>
-				Effect.gen(function* () {
+			const verifySignature = Effect.fn("GithubProvider.verifySignature")(
+				function* (rawBody: string, signatureHeader: string | undefined) {
 					const secret = env.GITHUB_APP_WEBHOOK_SECRET
 					if (Option.isNone(secret)) {
 						yield* Effect.logWarning(
@@ -292,11 +290,9 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 						return yield* signatureRejected("mismatch", "Webhook signature mismatch")
 					}
 					yield* Effect.annotateCurrentSpan({ "vcs.webhook.signature_result": "ok" })
-				}).pipe(
-					Effect.withSpan("GithubProvider.verifySignature", {
-						attributes: { "vcs.provider": PROVIDER },
-					}),
-				)
+				},
+				Effect.annotateSpans({ "vcs.provider": PROVIDER }),
+			)
 
 			const mapPush = (raw: unknown, now: number) =>
 				Effect.gen(function* () {
@@ -479,22 +475,20 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 			// skip_reason / identifiers) are made by each mapper onto the surrounding
 			// `webhookToJobs` span.
 			const mapEvent = (event: string | undefined, parsed: unknown, now: number) =>
-				Effect.gen(function* () {
-					return yield* Match.value(event).pipe(
-						Match.when("push", () => mapPush(parsed, now)),
-						Match.when("installation", () => mapInstallation(parsed)),
-						Match.when("installation_repositories", () => mapInstallationRepositories(parsed)),
-						Match.when("create", () => mapRefEvent("created")(parsed)),
-						Match.when("delete", () => mapRefEvent("deleted")(parsed)),
-						Match.orElse(() =>
-							// ping and unhandled events are accepted no-ops.
-							Effect.annotateCurrentSpan({
-								"vcs.webhook.outcome": "skipped",
-								"vcs.webhook.skip_reason": "unhandled_event",
-							}).pipe(Effect.as([])),
-						),
-					)
-				})
+				Match.value(event).pipe(
+					Match.when("push", () => mapPush(parsed, now)),
+					Match.when("installation", () => mapInstallation(parsed)),
+					Match.when("installation_repositories", () => mapInstallationRepositories(parsed)),
+					Match.when("create", () => mapRefEvent("created")(parsed)),
+					Match.when("delete", () => mapRefEvent("deleted")(parsed)),
+					Match.orElse(() =>
+						// ping and unhandled events are accepted no-ops.
+						Effect.annotateCurrentSpan({
+							"vcs.webhook.outcome": "skipped",
+							"vcs.webhook.skip_reason": "unhandled_event",
+						}).pipe(Effect.as([])),
+					),
+				)
 
 			const webhookToJobs = (input: VcsWebhookRequest) =>
 				Effect.gen(function* () {
@@ -559,9 +553,11 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 						.listCommits(installation.externalInstallationId, repo.owner, repo.name, {
 							sha: opts.branch,
 							sinceIso: new Date(opts.sinceMs).toISOString(),
-							...(opts.untilMs === undefined
-								? {}
-								: { untilIso: new Date(opts.untilMs).toISOString() }),
+							...(!(opts.untilMs === undefined)
+								? {
+										untilIso: new Date(opts.untilMs).toISOString(),
+									}
+								: undefined),
 						})
 						.pipe(Effect.mapError(toVcsCommitError))
 					const normalized = result.commits.map((c) => normalizeFetchedCommit(c, now))
@@ -602,7 +598,7 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 							// A 404 means this repo doesn't contain the SHA (or access was lost) —
 							// for a SHA-only probe that's "look in the next repo", not a failure.
 							// Every other GitHub failure is mapped to the port's semantic errors.
-							Effect.catchTag("GithubAppError", (error) =>
+							Effect.catchTag("@maple/api/vcs/GithubAppError", (error) =>
 								error.status === 404
 									? Effect.succeed(Option.none<CommitUpsertInput>())
 									: Effect.fail(toVcsCommitError(error)),
@@ -666,7 +662,7 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 										: file.content,
 							}),
 						),
-						Effect.catchTag("GithubAppError", (error) =>
+						Effect.catchTag("@maple/api/vcs/GithubAppError", (error) =>
 							error.status === 404
 								? Effect.succeed(Option.none())
 								: Effect.fail(toVcsCommitError(error)),

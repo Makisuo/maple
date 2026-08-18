@@ -1,6 +1,6 @@
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 
 /**
  * Whether the current user holds an org-admin role — the gate the API applies to
@@ -12,7 +12,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
  * disabled until we know the answer rather than flickering enabled.
  */
 export function useIsOrgAdmin(): boolean {
-	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
+	const sessionResult = useAtomValue(retainedQuery("auth", "session", {}))
 
 	if (!isClerkAuthEnabled) return true
 

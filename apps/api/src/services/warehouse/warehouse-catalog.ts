@@ -63,7 +63,7 @@ const TABLE_NOTES: Record<string, ReadonlyArray<string>> = {
 		"Metric counts are split across four columns by point type (`SumMetricCount`, `GaugeMetricCount`, `HistogramMetricCount`, `ExpHistogramMetricCount`) — add all four for a total metric-point count.",
 		"Has no `DeploymentEnv` dimension, so prod-vs-staging splits are impossible here; use `logs_aggregates_hourly` / `traces_aggregates_hourly` for that.",
 	],
-}
+} satisfies Record<string, ReadonlyArray<string>>
 
 interface ColumnInfo {
 	readonly name: string

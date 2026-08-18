@@ -47,7 +47,7 @@ const jsonLd = {
     description,
     datePublished: isoDate(date),
     dateModified: isoDate(date),
-    ...(cover && Astro.site ? { image: new URL(cover, Astro.site).toString() } : {}),
+    ...((cover && Astro.site) ? ({ image: new URL(cover, Astro.site).toString() }) : undefined),
     author: { "@type": "Organization", name: "Maple" },
     publisher: {
         "@type": "Organization",
@@ -59,7 +59,7 @@ const jsonLd = {
         name: "Maple changelog",
         url: "https://maple.dev/changelog",
     },
-    ...(canonicalUrl ? { mainEntityOfPage: canonicalUrl } : {}),
+    ...((canonicalUrl) ? ({ mainEntityOfPage: canonicalUrl }) : undefined),
 };
 
 const key = "font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted";

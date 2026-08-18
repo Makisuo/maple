@@ -4,6 +4,7 @@ import {
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	combineWhere,
+	makeQueryBuilderTimeseriesDataSource,
 	makeQueryDraft,
 	metricsTimeseries,
 	paramKey,
@@ -20,8 +21,6 @@ function zoneWhere(zoneName?: string): string {
 	return zoneName ? `service.name = "cloudflare/${zoneName}"` : ""
 }
 
-type DataSource = { endpoint: string; params: Record<string, unknown> }
-
 /**
  * A ratio over `cloudflare.http.requests`, as two hidden query-builder queries plus a formula.
  * Powers both the KPI stat and the over-time chart for cache hit rate and 5xx error rate.
@@ -35,48 +34,43 @@ function requestsRatioDataSource(opts: {
 	numeratorWhere: string
 	formulaName: string
 	legend: string
-}): DataSource {
+}) {
 	const base = {
 		dataSource: "metrics" as const,
 		aggregation: "sum",
 		metricName: "cloudflare.http.requests",
-		metricType: "sum",
+		metricType: "sum" as const,
 	}
-	return {
-		endpoint: "custom_query_builder_timeseries",
-		params: {
-			queries: [
-				{
-					...makeQueryDraft({
-						...base,
-						id: `${opts.idPrefix}-num`,
-						name: "A",
-						whereClause: combineWhere(opts.where, opts.numeratorWhere),
-					}),
-					hidden: true,
-				},
-				{
-					...makeQueryDraft({
-						...base,
-						id: `${opts.idPrefix}-den`,
-						name: "B",
-						whereClause: opts.where,
-					}),
-					hidden: true,
-				},
-			],
-			formulas: [
-				{
-					id: `${opts.idPrefix}-ratio`,
-					name: opts.formulaName,
-					expression: "A / B",
-					legend: opts.legend,
-				},
-			],
-			comparison: { mode: "none", includePercentChange: true },
-			debug: false,
-		},
-	}
+	return makeQueryBuilderTimeseriesDataSource(
+		[
+			{
+				...makeQueryDraft({
+					...base,
+					id: `${opts.idPrefix}-num`,
+					name: "A",
+					whereClause: combineWhere(opts.where, opts.numeratorWhere),
+				}),
+				hidden: true,
+			},
+			{
+				...makeQueryDraft({
+					...base,
+					id: `${opts.idPrefix}-den`,
+					name: "B",
+					whereClause: opts.where,
+				}),
+				hidden: true,
+			},
+		],
+		[
+			{
+				id: `${opts.idPrefix}-ratio`,
+				name: opts.formulaName,
+				expression: "A / B",
+				legend: opts.legend,
+			},
+		],
+	)
 }
 
 /**
@@ -158,7 +152,6 @@ function ratioStat(opts: {
 function widgets(zoneName?: string): WidgetDef[] {
 	const where = zoneWhere(zoneName)
 	return [
-		// -- KPI row -----------------------------------------------------------
 		metricStat({
 			id: "kpi-requests",
 			name: "Requests",
@@ -194,7 +187,6 @@ function widgets(zoneName?: string): WidgetDef[] {
 			layout: { x: 9, y: 0, w: 3, h: 2 },
 		}),
 
-		// -- Traffic & cache ---------------------------------------------------
 		{
 			id: "requests-by-status",
 			visualization: "chart",
@@ -240,7 +232,6 @@ function widgets(zoneName?: string): WidgetDef[] {
 			layout: { x: 6, y: 8, w: 6, h: 6 },
 		},
 
-		// -- Latency -----------------------------------------------------------
 		{
 			id: "edge-ttfb",
 			visualization: "chart",
@@ -274,7 +265,6 @@ function widgets(zoneName?: string): WidgetDef[] {
 			layout: { x: 6, y: 14, w: 6, h: 6 },
 		},
 
-		// -- Bandwidth & Workers ----------------------------------------------
 		{
 			id: "bytes-served",
 			visualization: "chart",

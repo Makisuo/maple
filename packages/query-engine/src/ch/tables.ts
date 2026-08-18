@@ -131,6 +131,29 @@ export const ServiceOverviewHourly = table("service_overview_hourly", {
 	ApdexToleratingCount: T.uint64,
 })
 
+/**
+ * Minute-grain twin of {@link ServiceOverviewHourly}, for windows whose bucket
+ * size is under an hour. Columns are deliberately identical apart from the
+ * bucket column, so the two can share a UNION ALL branch shape.
+ */
+export const ServiceOverviewMinutely = table("service_overview_minutely", {
+	OrgId: T.string,
+	Minute: T.dateTime,
+	ServiceName: T.string,
+	DeploymentEnv: T.string,
+	ServiceNamespace: T.string,
+	CommitSha: T.string,
+	SpanCount: T.uint64,
+	EstimatedSpanCount: T.float64,
+	ErrorCount: T.uint64,
+	EstimatedErrorCount: T.float64,
+	DurationSum: T.float64,
+	DurationQuantiles: T.string,
+	FirstSeen: T.dateTime,
+	ApdexSatisfiedCount: T.uint64,
+	ApdexToleratingCount: T.uint64,
+})
+
 export const ErrorSpans = table("error_spans", {
 	OrgId: T.string,
 	Timestamp: T.dateTime,
@@ -444,7 +467,7 @@ export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	SampleRateSum: T.float64,
 })
 
-export const ServiceMapDbQueryShapesHourly = table("service_map_db_query_shapes_hourly", {
+export const ServiceMapDbQuerySignaturesHourly = table("service_map_db_query_shapes_hourly", {
 	OrgId: T.string,
 	Hour: T.dateTime,
 	ServiceName: T.string,

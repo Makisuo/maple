@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 // bench-queries.ts — ClickHouse query benchmarking CLI (Effect)
 //
 // Replays production SQL (captured on `WarehouseQueryService.executeSql` spans
@@ -35,6 +36,7 @@ import {
 	Schema,
 } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { CH } from "@maple/query-engine"
 import * as Integrations from "@maple/query-engine-integrations"
@@ -175,14 +177,14 @@ interface TinybirdConfig {
 	readonly internalOrgId: string
 }
 
-interface BenchConfigShape {
+interface BenchConfigValues {
 	readonly clickhouse: Option.Option<ClickHouseConfig>
 	readonly tinybird: Option.Option<TinybirdConfig>
 }
 
 const stripTrailingSlash = (s: string) => s.replace(/\/+$/, "")
 
-export class BenchConfig extends Context.Service<BenchConfig, BenchConfigShape>()("bench/BenchConfig", {
+export class BenchConfig extends Context.Service<BenchConfig, BenchConfigValues>()("bench/BenchConfig", {
 	make: Effect.gen(function* () {
 		const chUrl = yield* Config.option(Config.string("CLICKHOUSE_URL"))
 		const chUser = yield* Config.string("CLICKHOUSE_USER").pipe(Config.withDefault("default"))
@@ -207,7 +209,7 @@ export class BenchConfig extends Context.Service<BenchConfig, BenchConfigShape>(
 			internalOrgId,
 		}))
 
-		return { clickhouse, tinybird } satisfies BenchConfigShape
+		return { clickhouse, tinybird } satisfies BenchConfigValues
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)
@@ -224,7 +226,7 @@ const parseSummaryHeader = (value: string | null): Option.Option<Record<string, 
 	}
 }
 
-interface ClickHouseShape {
+interface ClickHouseApi {
 	readonly run: (
 		sql: string,
 		opts?: { readonly queryId?: string },
@@ -232,9 +234,10 @@ interface ClickHouseShape {
 	readonly queryLog: (queryId: string) => Effect.Effect<Option.Option<QueryLogEntry>, MissingConfigError>
 }
 
-export class ClickHouse extends Context.Service<ClickHouse, ClickHouseShape>()("bench/ClickHouse", {
+export class ClickHouse extends Context.Service<ClickHouse, ClickHouseApi>()("bench/ClickHouse", {
 	make: Effect.gen(function* () {
 		const { clickhouse } = yield* BenchConfig
+		const httpClient = yield* HttpClient.HttpClient
 
 		const requireConfig = Option.match(clickhouse, {
 			onNone: () =>
@@ -265,23 +268,22 @@ export class ClickHouse extends Context.Service<ClickHouse, ClickHouseShape>()("
 			url.searchParams.set("wait_end_of_query", "1")
 
 			const start = performance.now()
-			const response = yield* Effect.tryPromise({
-				try: (signal) =>
-					fetch(url, {
-						method: "POST",
-						headers: {
-							Authorization: authHeader(cfg),
-							"Content-Type": "text/plain; charset=utf-8",
-						},
-						body: sql,
-						signal,
-					}),
-				catch: (cause) => new HttpRequestError({ url: cfg.url, message: String(cause) }),
-			})
-			const body = yield* Effect.tryPromise({
-				try: () => response.text(),
-				catch: (cause) => new HttpRequestError({ url: cfg.url, message: String(cause) }),
-			})
+			const request = HttpClientRequest.post(url, {
+				headers: {
+					Authorization: authHeader(cfg),
+					"Content-Type": "text/plain; charset=utf-8",
+				},
+			}).pipe(HttpClientRequest.bodyText(sql))
+			const response = yield* httpClient
+				.execute(request)
+				.pipe(
+					Effect.mapError(
+						(cause) => new HttpRequestError({ url: cfg.url, message: String(cause) }),
+					),
+				)
+			const body = yield* response.text.pipe(
+				Effect.mapError((cause) => new HttpRequestError({ url: cfg.url, message: String(cause) })),
+			)
 			const wallMs = performance.now() - start
 
 			return {
@@ -325,7 +327,7 @@ export class ClickHouse extends Context.Service<ClickHouse, ClickHouseShape>()("
 			return Option.none<QueryLogEntry>()
 		})
 
-		return { run, queryLog } satisfies ClickHouseShape
+		return { run, queryLog } satisfies ClickHouseApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(BenchConfig.layer))
@@ -333,7 +335,7 @@ export class ClickHouse extends Context.Service<ClickHouse, ClickHouseShape>()("
 
 // Tinybird client — source for mining db.query.text spans
 
-interface TinybirdShape {
+interface TinybirdApi {
 	readonly query: (
 		sql: string,
 	) => Effect.Effect<
@@ -344,9 +346,10 @@ interface TinybirdShape {
 	readonly internalOrgId: Effect.Effect<string, MissingConfigError>
 }
 
-export class Tinybird extends Context.Service<Tinybird, TinybirdShape>()("bench/Tinybird", {
+export class Tinybird extends Context.Service<Tinybird, TinybirdApi>()("bench/Tinybird", {
 	make: Effect.gen(function* () {
 		const { tinybird } = yield* BenchConfig
+		const httpClient = yield* HttpClient.HttpClient
 
 		const requireConfig = Option.match(tinybird, {
 			onNone: () =>
@@ -364,14 +367,19 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdShape>()("bench/
 		const query = Effect.fn("Tinybird.query")(function* (sql: string) {
 			const cfg = yield* requireConfig
 			const url = `${cfg.host}/v0/sql?q=${encodeURIComponent(sql)}`
-			const response = yield* Effect.tryPromise({
-				try: (signal) => fetch(url, { headers: { Authorization: `Bearer ${cfg.token}` }, signal }),
-				catch: (cause) => new HttpRequestError({ url: cfg.host, message: String(cause) }),
+			const request = HttpClientRequest.get(url, {
+				headers: { Authorization: `Bearer ${cfg.token}` },
 			})
-			const text = yield* Effect.tryPromise({
-				try: () => response.text(),
-				catch: (cause) => new HttpRequestError({ url: cfg.host, message: String(cause) }),
-			})
+			const response = yield* httpClient
+				.execute(request)
+				.pipe(
+					Effect.mapError(
+						(cause) => new HttpRequestError({ url: cfg.host, message: String(cause) }),
+					),
+				)
+			const text = yield* response.text.pipe(
+				Effect.mapError((cause) => new HttpRequestError({ url: cfg.host, message: String(cause) })),
+			)
 			if (!response.ok) {
 				return yield* Effect.fail(
 					new UpstreamStatusError({
@@ -392,7 +400,7 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdShape>()("bench/
 			query,
 			host: requireConfig.pipe(Effect.map((c) => c.host)),
 			internalOrgId: requireConfig.pipe(Effect.map((c) => c.internalOrgId)),
-		} satisfies TinybirdShape
+		} satisfies TinybirdApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(BenchConfig.layer))
@@ -641,7 +649,7 @@ const failedResult = (sample: Sample, message: string): SampleResult => ({
 })
 
 const benchmarkSample = Effect.fn("bench.sample")(function* (
-	ch: ClickHouseShape,
+	ch: ClickHouseApi,
 	sample: Sample,
 	runsPerQuery: number,
 	warmupRuns: number,
@@ -956,10 +964,14 @@ const rootCommand = Command.make("bench-queries").pipe(
 	Command.withSubcommands([fetchCommand, runCommand, inspectCommand, compareCommand]),
 )
 
-const BenchLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer)
+const BenchServicesLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer).pipe(
+	Layer.provide(FetchHttpClient.layer),
+)
+const BenchLive = Layer.mergeAll(BenchServicesLive, BunServices.layer)
 
 Command.run(rootCommand, { version: "0.1.0" }).pipe(
+	// Application root: this is the one runtime boundary that owns the complete layer graph.
+	// oxlint-disable-next-line effecttsgo/strict-effect-provide
 	Effect.provide(BenchLive),
-	Effect.provide(BunServices.layer),
 	BunRuntime.runMain,
 )

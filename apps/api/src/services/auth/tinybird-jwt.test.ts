@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { createHmac } from "node:crypto"
 import { assert, describe, it } from "@effect/vitest"
 import { mintOrgReadJwt } from "./tinybird-jwt"

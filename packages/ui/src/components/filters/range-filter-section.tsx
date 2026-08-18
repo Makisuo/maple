@@ -436,7 +436,10 @@ function RangeHistogram({
 
 // Parsing and formatting
 
-const UNIT_MS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }
+const UNIT_MS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 } satisfies Record<
+	string,
+	number
+>
 
 /** Accepts a bare number in the control's own unit, or a suffixed duration
  *  ("90s", "2m", "1h 30m"). Blank or unparseable means unbounded on that side. */

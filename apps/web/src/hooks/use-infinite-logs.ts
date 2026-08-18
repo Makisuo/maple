@@ -1,11 +1,11 @@
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
-import { Effect } from "effect"
 
 import { listLogs, type Log, type LogsResponse } from "@/api/warehouse/logs"
 import { listLogsResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
+import { mapleRuntime } from "@/lib/registry"
 import type { LogsSearchParams } from "@/routes/logs"
 
 const PAGE_SIZE = 100
@@ -93,7 +93,8 @@ export function useInfiniteLogs(filters: LogsSearchParams | undefined): UseInfin
 
 		const currentKey = filterKeyRef.current
 
-		Effect.runPromise(listLogs({ data: { ...queryParams, cursor: lastCursor, limit: PAGE_SIZE } }))
+		mapleRuntime
+			.runPromise(listLogs({ data: { ...queryParams, cursor: lastCursor, limit: PAGE_SIZE } }))
 			.then((result) => {
 				if (filterKeyRef.current !== currentKey) return
 				setAdditionalPages((prev) => [...prev, result])

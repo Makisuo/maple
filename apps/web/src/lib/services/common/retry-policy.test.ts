@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { describe, expect, it } from "vitest"
+import { describe, it } from "@effect/vitest"
+import { expect } from "vitest"
 import { isRetryableResponse, isRetryableTransportError, withMapleRetryPolicy } from "./retry-policy"
 
 const transportError = (request: HttpClientRequest.HttpClientRequest, cause?: unknown) =>
@@ -62,35 +63,45 @@ describe("isRetryableResponse", () => {
 		).toBe(false)
 	})
 
-	it("replays a raw transient response before API error decoding", async () => {
-		let attempts = 0
-		const client = withMapleRetryPolicy(
-			HttpClient.make((request) =>
-				Effect.sync(() => {
-					attempts += 1
-					return response(request, attempts === 1 ? 503 : 200)
-				}),
-			),
-		)
-
-		const result = await Effect.runPromise(client.get("https://api.maple.dev/v1/services"))
-		expect(result.status).toBe(200)
-		expect(attempts).toBe(2)
+	it.each([500, 502, 503])("leaves v2 %s retry decisions to the decoded error body", (status) => {
+		expect(
+			isRetryableResponse(response(HttpClientRequest.get("https://api.maple.dev/v2/services"), status)),
+		).toBe(false)
 	})
 
-	it("returns a mutation failure response without replaying it", async () => {
-		let attempts = 0
-		const client = withMapleRetryPolicy(
-			HttpClient.make((request) =>
-				Effect.sync(() => {
-					attempts += 1
-					return response(request, 503)
-				}),
-			),
-		)
+	it.live("replays a raw transient response before API error decoding", () =>
+		Effect.gen(function* () {
+			let attempts = 0
+			const client = withMapleRetryPolicy(
+				HttpClient.make((request) =>
+					Effect.sync(() => {
+						attempts += 1
+						return response(request, attempts === 1 ? 503 : 200)
+					}),
+				),
+			)
 
-		const result = await Effect.runPromise(client.post("https://api.maple.dev/v1/dashboards"))
-		expect(result.status).toBe(503)
-		expect(attempts).toBe(1)
-	})
+			const result = yield* client.get("https://api.maple.dev/v1/services")
+			expect(result.status).toBe(200)
+			expect(attempts).toBe(2)
+		}),
+	)
+
+	it.live("returns a mutation failure response without replaying it", () =>
+		Effect.gen(function* () {
+			let attempts = 0
+			const client = withMapleRetryPolicy(
+				HttpClient.make((request) =>
+					Effect.sync(() => {
+						attempts += 1
+						return response(request, 503)
+					}),
+				),
+			)
+
+			const result = yield* client.post("https://api.maple.dev/v1/dashboards")
+			expect(result.status).toBe(503)
+			expect(attempts).toBe(1)
+		}),
+	)
 })

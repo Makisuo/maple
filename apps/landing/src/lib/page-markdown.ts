@@ -48,12 +48,6 @@ export const table = (headers: string[], rows: string[][]): string =>
 		...rows.map((row) => `| ${row.join(" | ")} |`),
 	].join("\n")
 
-/** `- [label](url)` */
-export const link = (label: string, url: string): string => `[${label}](${url})`
-
 /** Absolute URL against the configured `site` — feeds `llms.txt`, same as rss.xml.ts. */
 export const absolute = (site: URL | undefined, path: string): string =>
 	new URL(path, site ?? "https://maple.dev").toString()
-
-/** Cell-safe: a literal `|` would open a new column. */
-export const cell = (value: string): string => value.replace(/\|/g, "\\|")

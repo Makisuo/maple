@@ -528,7 +528,7 @@ export type ServiceMapDbEdgesHourlyRow = InferRow<typeof serviceMapDbEdgesHourly
  * sample-rate corrected; raw `CallCount`/`ErrorCount` stay unweighted.
  * Populated by `service_map_db_query_shapes_hourly_mv`.
  */
-export const serviceMapDbQueryShapesHourly = defineDatasource("service_map_db_query_shapes_hourly", {
+export const serviceMapDbQuerySignaturesHourly = defineDatasource("service_map_db_query_shapes_hourly", {
 	description:
 		"Pre-aggregated hourly database query shapes (one row per service/db.system/query-shape) for the service map's database detail panel. Uses AggregatingMergeTree with a sample-weighted t-digest state for true p50/p95. Populated by materialized view.",
 	jsonPaths: false,
@@ -569,7 +569,7 @@ export const serviceMapDbQueryShapesHourly = defineDatasource("service_map_db_qu
 	}),
 })
 
-export type ServiceMapDbQueryShapesHourlyRow = InferRow<typeof serviceMapDbQueryShapesHourly>
+export type ServiceMapDbQuerySignaturesHourlyRow = InferRow<typeof serviceMapDbQuerySignaturesHourly>
 
 /**
  * Pre-aggregated hourly service-to-external-target edges for the service detail
@@ -790,6 +790,60 @@ export const serviceOverviewHourly = defineDatasource("service_overview_hourly",
 })
 
 export type ServiceOverviewHourlyRow = InferRow<typeof serviceOverviewHourly>
+
+/**
+ * Minute-grain twin of `service_overview_hourly`, for windows whose bucket size
+ * is smaller than an hour.
+ *
+ * At the services list's ~100-point target, any window under ~4.2 days asks for
+ * sub-hour buckets — which includes the default 12h view. Without this tier
+ * those requests fall off the rollup splice entirely and scan raw `traces`.
+ *
+ * Columns are deliberately identical to `service_overview_hourly`, including
+ * `FirstSeen` and both Apdex counters: the two feed the same UNION ALL, and the
+ * quantile state must declare the same three quantiles or the union does not
+ * type-check (`service_operations_minutely` carries only 0.5/0.95 — do not copy
+ * that shape here).
+ *
+ * 90 days rather than 365: the tier is only reachable for windows under ~5 days,
+ * it is strictly lower-cardinality than the `service_operations_minutely` tier it
+ * sits beside, and a second annual table would be a second thing that cannot be
+ * rebuilt past the 30-day source retention.
+ */
+export const serviceOverviewMinutely = defineDatasource("service_overview_minutely", {
+	description:
+		"Minutely service entry-point aggregates with release dimensions, sampling-aware counts, latency states, and fixed-500ms Apdex counts. Serves sub-hour buckets that the hourly rollup cannot.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Minute: t.dateTime(),
+		ServiceName: t.string().lowCardinality(),
+		DeploymentEnv: t.string().lowCardinality(),
+		ServiceNamespace: t.string().lowCardinality(),
+		CommitSha: t.string().lowCardinality(),
+		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		EstimatedSpanCount: t.simpleAggregateFunction("sum", t.float64()),
+		ErrorCount: t.simpleAggregateFunction("sum", t.uint64()),
+		EstimatedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
+		DurationSum: t.simpleAggregateFunction("sum", t.float64()),
+		DurationQuantiles: t.aggregateFunction("quantilesTDigest(0.5, 0.95, 0.99)", t.uint64()),
+		FirstSeen: t.simpleAggregateFunction("min", t.dateTime()),
+		ApdexSatisfiedCount: t.simpleAggregateFunction("sum", t.uint64()),
+		ApdexToleratingCount: t.simpleAggregateFunction("sum", t.uint64()),
+	},
+	engine: engine.aggregatingMergeTree({
+		// Daily parts, not monthly: at minute grain a month-wide part is far too
+		// coarse to prune a 12h window. Matches `service_operations_minutely`.
+		partitionKey: "toDate(Minute)",
+		// Mirrors the hourly rollup's prefix rather than the operations rollup's:
+		// the queries that read this filter on service and time, often without an
+		// environment predicate.
+		sortingKey: ["OrgId", "ServiceName", "Minute", "DeploymentEnv", "ServiceNamespace", "CommitSha"],
+		ttl: "toDate(Minute) + INTERVAL 90 DAY",
+	}),
+})
+
+export type ServiceOverviewMinutelyRow = InferRow<typeof serviceOverviewMinutely>
 
 /**
  * Pre-materialized error spans for the errors page.

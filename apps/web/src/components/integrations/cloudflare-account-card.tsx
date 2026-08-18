@@ -8,7 +8,7 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { CircleWarningIcon, CloudflareIcon, CloudflareMonoIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { CLOUDFLARE_ACCENT, IntegrationIconPlate } from "./integration-catalog"
 import { useIntegrationConnect } from "./integration-connect"
 import {
@@ -42,14 +42,14 @@ const EMPTY_USAGE: RowUsage = { totalRequests: 0, lastDataAt: null, points: [] }
  */
 export function CloudflareAccountCard() {
 	// Assigned once so the refresh hooks target the same memoized query atoms.
-	const statusQuery = MapleApiAtomClient.query("integrations", "cloudflareStatus", {
+	const statusQuery = retainedQuery("integrations", "cloudflareStatus", {
 		reactivityKeys: ["cloudflareIntegrationStatus"],
 	})
 	const statusResult = useAtomValue(statusQuery)
 
 	// Warehouse-derived ingest volume: loads independently so the card renders instantly
 	// from status and the usage columns hydrate (or silently stay absent) afterwards.
-	const usageQuery = MapleApiAtomClient.query("integrations", "cloudflareUsage", {
+	const usageQuery = retainedQuery("integrations", "cloudflareUsage", {
 		reactivityKeys: ["cloudflareIntegrationUsage"],
 	})
 	const usageResult = useAtomValue(usageQuery)

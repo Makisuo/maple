@@ -62,20 +62,20 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 					Effect.tap((response) =>
 						Effect.annotateCurrentSpan({ "maple.scrape.upstream_status": response.status }),
 					),
-					Effect.flatMap((response) =>
-						Effect.succeed(
-							HttpServerResponse.text(response.body, {
-								status: response.status,
-								headers: {
-									"content-type": response.contentType,
-									// Forward the upstream rate-limit hint so the scraper can
-									// back off precisely on 429/503.
-									...(response.retryAfterSeconds !== null
-										? { "retry-after": String(response.retryAfterSeconds) }
-										: {}),
-								},
-							}),
-						),
+					Effect.map((response) =>
+						HttpServerResponse.text(response.body, {
+							status: response.status,
+							headers: {
+								"content-type": response.contentType,
+								// Forward the upstream rate-limit hint so the scraper can
+								// back off precisely on 429/503.
+								...(response.retryAfterSeconds !== null
+									? {
+											"retry-after": String(response.retryAfterSeconds),
+										}
+									: undefined),
+							},
+						}),
 					),
 					// Map each concrete scrape error to its HTTP status: missing/disabled
 					// target → 404, decryption failure → 500, persistence (our DB) → 502,
@@ -94,6 +94,23 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 							Effect.annotateCurrentSpan({
 								"maple.scrape.auth_failure_reason": error.reason,
 							}).pipe(Effect.as(errorText(`[auth:${error.reason}] ${error.message}`, 502))),
+						"@maple/http/errors/IntegrationsConfigurationError": (error) =>
+							Effect.succeed(errorText(`[auth:config] ${error.message}`, 502)),
+						"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
+							Effect.succeed(errorText(`[auth:not_connected] ${error.message}`, 502)),
+						"@maple/http/errors/IntegrationsRevokedError": (error) =>
+							Effect.succeed(errorText(`[auth:revoked] ${error.message}`, 502)),
+						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+							Effect.succeed(
+								errorText(
+									`[auth:upstream] PlanetScale token refresh failed upstream: ${error.message}`,
+									502,
+								),
+							),
+						"@maple/http/errors/IntegrationsValidationError": (error) =>
+							Effect.succeed(errorText(`[auth:config] ${error.message}`, 502)),
+						"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+							Effect.succeed(errorText(error.message, 502)),
 					}),
 				)
 			})

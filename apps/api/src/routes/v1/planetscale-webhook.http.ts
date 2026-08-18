@@ -29,13 +29,9 @@ const textResponse = (body: string, status: number) => HttpServerResponse.text(b
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 
 class PlanetScaleWebhookUnavailable extends Schema.TaggedError<PlanetScaleWebhookUnavailable>()(
-	"PlanetScaleWebhookUnavailable",
-	{ body: Schema.String },
-) {
-	override get message(): string {
-		return this.body
-	}
-}
+	"@maple/api/routes/PlanetScaleWebhookUnavailable",
+	{ message: Schema.String },
+) {}
 
 export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
@@ -71,11 +67,11 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 				Effect.gen(function* () {
 					yield* Effect.annotateCurrentSpan({
 						"http.response.status_code": 503,
-						"error.type": "PlanetScaleWebhookUnavailable",
+						"error.type": "@maple/api/routes/PlanetScaleWebhookUnavailable",
 						"maple.planetscale.webhook.outcome": "enqueue_failed",
 						"maple.planetscale.webhook.reason": reason,
 					})
-					return yield* new PlanetScaleWebhookUnavailable({ body })
+					return yield* new PlanetScaleWebhookUnavailable({ message: body })
 				})
 
 			if (connectionId.length === 0) {
@@ -217,9 +213,15 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 
 		yield* router.add("POST", ROUTE, (req) =>
 			handle(req).pipe(
-				Effect.catchTag("PlanetScaleWebhookUnavailable", ({ body }) =>
-					Effect.succeed(textResponse(body, 503)),
-				),
+				Effect.catchTags({
+					"@maple/api/routes/PlanetScaleWebhookUnavailable": ({ message }) =>
+						Effect.succeed(textResponse(message, 503)),
+					"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+						Effect.logError("PlanetScale webhook persistence failed").pipe(
+							Effect.annotateLogs({ message: error.message }),
+							Effect.as(textResponse("Webhook service unavailable", 503)),
+						),
+				}),
 			),
 		)
 	}),

@@ -5,6 +5,7 @@ import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
+import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
 
 /** A write-only channel secret: plain string or `Redacted` (recommended). */
@@ -85,7 +86,10 @@ const unwrap = (value: SecretInput): string => (Redacted.isRedacted(value) ? Red
 
 /** The create/update body: all declared props, secrets unwrapped. */
 const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
-	const body: Record<string, unknown> = { type: props.type, name: props.name }
+	const body: Record<string, unknown> = { type: props.type, name: props.name } satisfies Record<
+		string,
+		unknown
+	>
 	if (props.enabled !== undefined) body.enabled = props.enabled
 	switch (props.type) {
 		case "pagerduty":
@@ -143,16 +147,18 @@ export const AlertDestinationProvider = () =>
 					return undefined
 				}),
 				reconcile: Effect.fn(function* ({ news, olds, output }) {
-					// Observe — re-fetch by id; recover from out-of-band deletes.
 					let observed: Schema.Schema.Type<typeof WireDestination> | undefined
 					if (output?.destinationId) {
 						const fetched = yield* api
 							.get(`/v2/alerts/destinations/${output.destinationId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag(MapleErrorTags.alertDestinationNotFound, () =>
+									Effect.succeed(undefined),
+								),
+							)
 						if (fetched !== undefined) observed = yield* decodeWireDestination(fetched)
 					}
 
-					// Ensure — create if missing.
 					if (observed === undefined) {
 						const created = yield* api.post("/v2/alerts/destinations", desiredBody(news))
 						observed = yield* decodeWireDestination(created)
@@ -161,8 +167,7 @@ export const AlertDestinationProvider = () =>
 						olds === undefined ||
 						!deepEqual(olds, news, { stripNullish: true })
 					) {
-						// Sync — PATCH when observable fields drift OR declared props changed
-						// (write-only secrets can only be pushed, never compared).
+						// Write-only secrets must be pushed because they cannot be compared.
 						const updated = yield* api.patch(
 							`/v2/alerts/destinations/${observed.id}`,
 							desiredBody(news),
@@ -175,13 +180,17 @@ export const AlertDestinationProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/alerts/destinations/${output.destinationId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag(MapleErrorTags.alertDestinationNotFound, () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ output }) {
 					if (!output?.destinationId) return undefined
 					const fetched = yield* api
 						.get(`/v2/alerts/destinations/${output.destinationId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+						.pipe(
+							Effect.catchTag(MapleErrorTags.alertDestinationNotFound, () =>
+								Effect.succeed(undefined),
+							),
+						)
 					if (fetched === undefined) return undefined
 					return toAttributes(yield* decodeWireDestination(fetched))
 				}),

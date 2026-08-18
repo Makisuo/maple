@@ -49,10 +49,10 @@ import type { TenantContext } from "@/services/auth/tenant-context"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
 import {
-	makeTracedPgConnection,
-	type TracedPgConnection,
-	tracedPgConnectionFrom,
-} from "@/platform/pg-execute"
+	makePgConnectionScope,
+	type PgConnectionScopeApi,
+	pgConnectionScopeFrom,
+} from "@/platform/pg-connection-scope"
 import type { WorkflowEventLike, WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
 import { normalizePlan, widthFor, type NormalizedPlan, type PlannedHypothesis } from "./plan-normalize"
 
@@ -152,19 +152,19 @@ const fanoutTelemetry = MapleCloudflareSDK.make({
  * One runtime for the whole instance, built lazily and shared by every step.
  *
  * The dynamic-import gymnastics in this file and in `turn-runner.ts` exist
- * because building `MainLive` constructs hundreds of Schema ASTs and blows
+ * because building the service graph constructs hundreds of Schema ASTs and blows
  * Cloudflare's startup-CPU budget (error 10021). Building five of them
  * concurrently, one per lane step, would take that cost and multiply it against
  * a 30s per-step CPU limit — so the lane steps share one.
  */
 const makeRuntime = async (env: InvestigationFanoutWorkflowEnv) => {
-	const [{ MainLive }, { layerPg }, { layerLlm }] = await Promise.all([
-		import("../app"),
+	const [{ McpServicesLive }, { layerPg }, { layerLlm }] = await Promise.all([
+		import("../runtime/mcp-service-graph"),
 		import("../platform/DatabasePgLive"),
 		import("../platform/Llm"),
 	])
 	return ManagedRuntime.make(
-		MainLive.pipe(
+		McpServicesLive.pipe(
 			Layer.provideMerge(layerLlm(env)),
 			Layer.provideMerge(layerPg),
 			Layer.provideMerge(layerFromEnvRecord(env)),
@@ -576,25 +576,25 @@ export async function runInvestigationFanout(
 	step: WorkflowStepLike,
 	deps: InvestigationFanoutDeps = {},
 ): Promise<InvestigationFanoutWorkflowResult> {
-	const connection = deps.db !== undefined ? tracedPgConnectionFrom(deps.db) : dialWorkflowDb(env)
+	const connection = deps.db !== undefined ? pgConnectionScopeFrom(deps.db) : dialWorkflowDb(env)
 	try {
 		return await runWithDb(connection, env, event, step, deps)
 	} finally {
-		await connection.end()
+		await connection.close()
 		await fanoutTelemetry.flush(env).catch(() => undefined)
 	}
 }
 
-const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): TracedPgConnection => {
+const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): PgConnectionScopeApi => {
 	const source = resolveDbConnectionSource(env)
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)
 	}
-	return makeTracedPgConnection(source.connectionString, source.attributes)
+	return makePgConnectionScope(source.connectionString, source.attributes)
 }
 
 async function runWithDb(
-	connection: TracedPgConnection,
+	connection: PgConnectionScopeApi,
 	env: InvestigationFanoutWorkflowEnv,
 	event: WorkflowEventLike<InvestigationFanoutWorkflowPayload>,
 	step: WorkflowStepLike,
@@ -606,7 +606,14 @@ async function runWithDb(
 	const idTyped = decodeInvestigationId(investigationId)
 
 	const dbStep = <T>(fn: (db: MaplePgClient) => Promise<T>): Promise<T> =>
-		Effect.runPromise(connection.step(fn).pipe(Effect.provide(fanoutTelemetry.layer)))
+		Effect.runPromise(
+			connection.run(fn).pipe(
+				// Each durable workflow step crosses back into Effect from Promise-land
+				// and owns the telemetry context for that isolated run.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
+				Effect.provide(fanoutTelemetry.layer),
+			),
+		)
 
 	const laneRows = () =>
 		dbStep((db) =>

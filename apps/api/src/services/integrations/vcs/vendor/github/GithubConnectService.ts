@@ -42,8 +42,6 @@ const GITHUB_PROVIDER = "github" as const
 const GITHUB_WEB_BASE = "https://github.com"
 const STATE_TTL_MS = 10 * 60_000 // 10 minutes
 
-// ---- Service shape --------------------------------------------------------
-
 interface GithubBranchStatus {
 	readonly name: string
 	readonly isDefault: boolean
@@ -73,7 +71,7 @@ interface GithubConnectStatus {
 	readonly repositories: ReadonlyArray<GithubRepoStatus>
 }
 
-export interface GithubConnectServiceShape {
+export interface GithubConnectServiceApi {
 	/** Create a single-use state row and the GitHub install URL to open. */
 	readonly startConnect: (
 		orgId: OrgId,
@@ -146,10 +144,10 @@ const fromGithubError = (error: GithubAppError) =>
 			})
 		: new IntegrationsUpstreamError({
 				message: error.message,
-				...(error.status === undefined ? {} : { status: error.status }),
+				...(!(error.status === undefined) ? { status: error.status } : undefined),
 			})
 
-export class GithubConnectService extends Context.Service<GithubConnectService, GithubConnectServiceShape>()(
+export class GithubConnectService extends Context.Service<GithubConnectService, GithubConnectServiceApi>()(
 	"@maple/api/services/vcs/vendor/github/GithubConnectService",
 	{
 		make: Effect.gen(function* () {
@@ -323,7 +321,9 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 								error.status === 404 || error.status === 410
 									? "installation gone/missing"
 									: "github upstream failure",
-							...(error.status === undefined ? {} : { "vcs.github.status": error.status }),
+							...(!(error.status === undefined)
+								? { "vcs.github.status": error.status }
+								: undefined),
 						}),
 					),
 					Effect.mapError(fromGithubError),
@@ -345,7 +345,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 
 				yield* asPersistence(
 					repo.upsertInstallation({
-						orgId: stateRow.orgId as OrgId,
+						orgId: stateRow.orgId,
 						provider: GITHUB_PROVIDER,
 						externalInstallationId: installationId,
 						accountLogin: account.login,
@@ -353,7 +353,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 						externalAccountId: String(account.id),
 						accountAvatarUrl: account.avatar_url ?? null,
 						repositorySelection,
-						installedByUserId: stateRow.initiatedByUserId as UserId,
+						installedByUserId: stateRow.initiatedByUserId,
 					}),
 				)
 
@@ -373,7 +373,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 					"vcs.account.type": accountType,
 					"vcs.repository.selection": repositorySelection,
 				})
-				return { orgId: stateRow.orgId as OrgId, returnTo: stateRow.returnTo ?? null }
+				return { orgId: stateRow.orgId, returnTo: stateRow.returnTo ?? null }
 			})
 
 			// Resolve an installation's repositories into the dashboard summary shape
@@ -660,7 +660,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 				disconnect,
 				deleteRepository,
 				setTrackedBranch,
-			} satisfies GithubConnectServiceShape
+			} satisfies GithubConnectServiceApi
 		}),
 	},
 ) {

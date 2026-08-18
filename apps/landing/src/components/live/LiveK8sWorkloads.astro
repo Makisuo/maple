@@ -11,7 +11,7 @@
  *   "console" — feature page, full app-mock with breadcrumb strip,
  *               time-range controls, filter sidebar, kind tabs.
  */
-import * as m from "../../paraglide/messages";
+import * as m from "../../paraglide/messages.js";
 
 interface Props {
 	variant?: "section" | "full" | "console";
@@ -53,11 +53,11 @@ const extraRow: Row = {
 
 const rows: Row[] = showSummary ? [...baseRows, extraRow] : baseRows;
 
-const kindColor: Record<Kind, string> = {
+const kindColor: Record<Kind, string>  = {
 	Deployment:  "var(--service-1)",
 	StatefulSet: "var(--service-3)",
 	DaemonSet:   "var(--service-5)",
-};
+} satisfies Record<Kind, string>;
 
 const filterGroups = isConsole
 	? [

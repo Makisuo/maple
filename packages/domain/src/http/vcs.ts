@@ -8,8 +8,6 @@ import { OrgId, UserId } from "../primitives"
 // the GitHub layer behind the `VcsProviderClient` port. Adding another provider
 // means extending `VcsProviderId` + the enum normalizations — no new tables.
 
-// ---- Branded IDs ----------------------------------------------------------
-
 export const VcsInstallationId = Schema.String.check(Schema.isUUID()).pipe(
 	Schema.brand("@maple/VcsInstallationId"),
 	Schema.annotate({ identifier: "@maple/VcsInstallationId", title: "VCS Installation ID" }),
@@ -58,8 +56,6 @@ export const GitCommitSha = Schema.String.pipe(
 )
 export type GitCommitSha = Schema.Schema.Type<typeof GitCommitSha>
 
-// ---- Provider + normalized enums ------------------------------------------
-
 /** The set of supported VCS providers. Extend this array to add a provider. */
 export const VcsProviderId = Schema.Literals(["github"]).annotate({
 	identifier: "@maple/VcsProviderId",
@@ -104,8 +100,6 @@ export const VcsRepoStatus = Schema.Literals(["active", "removed"]).annotate({
 	title: "VCS Repository Status",
 })
 export type VcsRepoStatus = Schema.Schema.Type<typeof VcsRepoStatus>
-
-// ---- Row → domain models (validated reads) --------------------------------
 
 export class VcsInstallation extends Schema.Class<VcsInstallation>("VcsInstallation")({
 	id: VcsInstallationId,
@@ -200,8 +194,6 @@ export class VcsBranch extends Schema.Class<VcsBranch>("VcsBranch")({
 	updatedAt: Schema.Number,
 }) {}
 
-// ---- Boundary input DTOs (provider → repo / queue) ------------------------
-
 /** Normalized repository, returned by a provider and persisted by the repo. */
 export const RepoUpsertInput = Schema.Struct({
 	externalRepoId: Schema.String,
@@ -278,8 +270,6 @@ export const VcsRepositoryRef = Schema.Struct({
 	name: Schema.String,
 })
 export type VcsRepositoryRef = Schema.Schema.Type<typeof VcsRepositoryRef>
-
-// ---- Queue jobs (vendor-agnostic; orgId resolved by the orchestrator) ------
 
 export const VcsInstallationSyncReason = Schema.Literals([
 	"created",
@@ -389,8 +379,6 @@ export const VcsSyncJob = Schema.Union([
 	BranchEventJob,
 ])
 export type VcsSyncJob = Schema.Schema.Type<typeof VcsSyncJob>
-
-// ---- Tagged errors --------------------------------------------------------
 
 export class VcsRepoPersistenceError extends Schema.TaggedError<VcsRepoPersistenceError>()(
 	"@maple/http/errors/VcsRepoPersistenceError",

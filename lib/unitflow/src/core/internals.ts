@@ -45,7 +45,7 @@ export const make = <Item, A>(
 	source: Source<ReadonlyArray<Item>>,
 	pick: (item: Item) => Source<A>,
 ): Flatten<A> =>
-	// The store brand is the same global symbol `store.ts` declares, but
+	// SAFETY: the store brand is the same global symbol `store.ts` declares, but
 	// TypeScript cannot unify the two unique-symbol declarations across modules.
 	// eslint-disable-next-line revizo/no-type-assertion
 	({

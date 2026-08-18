@@ -10,7 +10,7 @@ import {
 } from "../src/server/archives/export"
 import { parseArchiveGenerationManifest } from "../src/server/archives/manifest"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 
 // Pure-logic tests for the round-5 fixes. The end-to-end adversarial coverage
 // (column swap, row reassociation, byte refinement, timezone, recovery) lives

@@ -1,4 +1,5 @@
 import {
+	IntegrationsRevokedError,
 	OrgId,
 	ScrapeTargetAuthError,
 	ScrapeTargetEncryptionError,
@@ -24,10 +25,14 @@ import {
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Env } from "@/platform/Env"
-import { buildScrapeAuthHeaders, catchOAuthTokenFailure } from "@/services/auth/scrape-auth"
+import { buildScrapeAuthHeaders } from "@/services/auth/scrape-auth"
 import { validateExternalUrlSync } from "@/http/url-validator"
 import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
-import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"
+import {
+	PlanetScaleOAuthService,
+	planetScaleBearerHeader,
+	type PlanetScaleAccessTokenError,
+} from "@/services/auth/PlanetScaleOAuthService"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -94,6 +99,7 @@ type DiscoveryError =
 	| ScrapeTargetEncryptionError
 	| ScrapeTargetAuthError
 	| ScrapeTargetUpstreamError
+	| PlanetScaleAccessTokenError
 
 const toPersistenceError = (message: string) => new ScrapeTargetPersistenceError({ message })
 
@@ -101,7 +107,7 @@ const toPersistenceError = (message: string) => new ScrapeTargetPersistenceError
 // undecodable payload. Kept distinct from persistence (our DB) so the class —
 // not a regex over the message — carries the failure kind downstream.
 const toUpstreamError = (message: string, status?: number) =>
-	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
+	new ScrapeTargetUpstreamError({ message, ...(!(status === undefined) ? { status } : undefined) })
 
 /** Convert one http_sd group into sub-targets, dropping SSRF-invalid hosts. */
 export const subTargetsFromGroup = (group: {
@@ -206,7 +212,7 @@ const branchPassesFilters = (name: string, filters: BranchFilters): boolean => {
 	return true
 }
 
-export interface PlanetScaleDiscoveryServiceShape {
+export interface PlanetScaleDiscoveryServiceApi {
 	/**
 	 * Resolve a planetscale target row into its discovered sub-targets,
 	 * refreshing the cache when older than the TTL. Fails only when discovery
@@ -220,6 +226,7 @@ export interface PlanetScaleDiscoveryServiceShape {
 		| ScrapeTargetEncryptionError
 		| ScrapeTargetAuthError
 		| ScrapeTargetUpstreamError
+		| PlanetScaleAccessTokenError
 	>
 	/** Last discovery error for a target (null when the last refresh succeeded). */
 	readonly lastError: (targetId: string) => Effect.Effect<string | null>
@@ -229,7 +236,7 @@ export interface PlanetScaleDiscoveryServiceShape {
 
 export class PlanetScaleDiscoveryService extends Context.Service<
 	PlanetScaleDiscoveryService,
-	PlanetScaleDiscoveryServiceShape
+	PlanetScaleDiscoveryServiceApi
 >()("@maple/api/services/PlanetScaleDiscoveryService", {
 	make: Effect.gen(function* () {
 		const env = yield* Env
@@ -260,9 +267,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				return yield* buildScrapeAuthHeaders(row, encryptionKey)
 			}
 			const orgId = yield* Schema.decodeEffect(OrgId)(row.orgId).pipe(Effect.orDie)
-			const { accessToken } = yield* psOAuth
-				.getValidAccessToken(orgId)
-				.pipe(Effect.catchTags(catchOAuthTokenFailure))
+			const { accessToken } = yield* psOAuth.getValidAccessToken(orgId)
 			return { Authorization: planetScaleBearerHeader(accessToken) }
 		})
 
@@ -286,14 +291,12 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				}),
 			)
 
-			// A rejected credential is an auth failure, not a persistence one — keep
-			// the taxonomy so the org-picker/status surfaces can key on the reason
-			// instead of regex-sniffing the status out of the message.
+			// Preserve the OAuth grant's exact public failure. A manual service token
+			// has no integration grant, so it keeps the scrape-target auth tag.
 			if (response.status === 401 || response.status === 403) {
 				return yield* Effect.fail(
 					row.authType === "planetscale_oauth"
-						? new ScrapeTargetAuthError({
-								reason: "revoked",
+						? new IntegrationsRevokedError({
 								message: `PlanetScale discovery rejected the OAuth token (HTTP ${response.status}). Check the OAuth app's read_metrics_endpoints scope and reconnect.`,
 							})
 						: new ScrapeTargetAuthError({
@@ -458,7 +461,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				Effect.tap(Effect.sync(() => inFlight.delete(targetId))),
 			)
 
-		return { discover, lastError, invalidate } satisfies PlanetScaleDiscoveryServiceShape
+		return { discover, lastError, invalidate } satisfies PlanetScaleDiscoveryServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

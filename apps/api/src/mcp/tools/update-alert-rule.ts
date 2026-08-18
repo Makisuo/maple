@@ -8,8 +8,10 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { toMcpHttpError } from "@/mcp/lib/map-http-error"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { AlertsService } from "@/services/alerts/AlertsService"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleUpsertRequest, type AlertRuleDocument } from "@maple/domain/http"
 
 const decodeAlertRuleRequest = Schema.decodeUnknownEffect(AlertRuleUpsertRequest)
@@ -26,7 +28,7 @@ const comparatorLabel: Record<string, string> = {
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 interface UpdateAlertRuleParams {
 	rule_id: string
@@ -87,7 +89,7 @@ function buildUpdatedRequest(
 		rawQuerySql: current.rawQuerySql,
 		rawQueryReducer: current.rawQueryReducer,
 		destinationIds: [...current.destinationIds],
-	}
+	} satisfies Record<string, unknown>
 
 	if (params.name !== undefined) request.name = params.name
 	if (params.severity !== undefined) request.severity = params.severity
@@ -123,9 +125,9 @@ function buildUpdatedRequest(
 	if (params.notification_title !== undefined || params.notification_body !== undefined) {
 		const existing = current.notificationTemplate
 		const notificationTemplate: Record<string, string> = {
-			...(existing?.title ? { title: existing.title } : {}),
-			...(existing?.body ? { body: existing.body } : {}),
-		}
+			...(existing?.title ? { title: existing.title } : undefined),
+			...(existing?.body ? { body: existing.body } : undefined),
+		} satisfies Record<string, string>
 		if (params.notification_title !== undefined) notificationTemplate.title = params.notification_title
 		if (params.notification_body !== undefined) notificationTemplate.body = params.notification_body
 		request.notificationTemplate =
@@ -190,19 +192,13 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.updateAlertRule")(function* (params) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const alerts = yield* AlertsService
+			const rules = yield* AlertRulesService
 
-			const list = yield* alerts.listRules(tenant.orgId).pipe(
-				Effect.mapError(
-					(error) =>
-						new McpQueryError({
-							message: error.message,
-							pipeName: "update_alert_rule",
-							cause: error,
-						}),
-				),
-			)
+			const list = yield* rules
+				.listRules(tenant.orgId)
+				.pipe(Effect.mapError(toMcpHttpError("update_alert_rule")))
 
 			const current = list.rules.find((r) => r.id === params.rule_id)
 			if (!current) {
@@ -238,43 +234,7 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 
 			const rule = yield* alerts
 				.updateRule(tenant.orgId, tenant.userId, tenant.roles, current.id, decoded)
-				.pipe(
-					Effect.catchTag("@maple/http/errors/AlertValidationError", (error) =>
-						Effect.fail(
-							new McpQueryError({
-								message: `${error._tag}: ${error.message}\n${error.details.join("\n")}`,
-								pipeName: "update_alert_rule",
-								cause: error,
-							}),
-						),
-					),
-					Effect.catchTags({
-						"@maple/http/errors/AlertForbiddenError": (error) =>
-							Effect.fail(
-								new McpQueryError({
-									message: `${error._tag}: ${error.message}`,
-									pipeName: "update_alert_rule",
-									cause: error,
-								}),
-							),
-						"@maple/http/errors/AlertPersistenceError": (error) =>
-							Effect.fail(
-								new McpQueryError({
-									message: `${error._tag}: ${error.message}`,
-									pipeName: "update_alert_rule",
-									cause: error,
-								}),
-							),
-						"@maple/http/errors/AlertNotFoundError": (error) =>
-							Effect.fail(
-								new McpQueryError({
-									message: `${error._tag}: ${error.message}`,
-									pipeName: "update_alert_rule",
-									cause: error,
-								}),
-							),
-					}),
-				)
+				.pipe(Effect.mapError(toMcpHttpError("update_alert_rule")))
 
 			const lines: string[] = [
 				`## Alert Rule Updated`,

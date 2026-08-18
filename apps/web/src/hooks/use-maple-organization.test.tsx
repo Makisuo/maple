@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -11,6 +12,7 @@ vi.mock("@/lib/effect-atom", async () => {
 })
 vi.mock("@/lib/services/common/atom-client", () => ({
 	MapleApiAtomClient: { query: () => ({}) },
+	retainedQuery: () => ({}),
 }))
 
 const { Result } = await import("@/lib/effect-atom")

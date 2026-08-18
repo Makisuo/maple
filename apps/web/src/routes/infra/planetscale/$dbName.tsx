@@ -71,7 +71,7 @@ import {
 	planetscaleEventsResultAtom,
 	planetscaleInfraTimeseriesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -168,12 +168,12 @@ function PlanetScaleDatabasePage() {
 	}
 
 	const statusResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+		retainedQueryV2("planetscaleIntegration", "status", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const inventoryResult = useAtomValue(
-		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+		retainedQueryV2("planetscaleIntegration", "databases", {
 			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
@@ -472,7 +472,7 @@ function PlanetScaleDatabaseData({
 				startTime,
 				endTime,
 				bucketSeconds,
-				...(branch === undefined ? {} : { branch }),
+				...(!(branch === undefined) ? { branch } : undefined),
 			},
 		}),
 	)
@@ -490,7 +490,7 @@ function PlanetScaleDatabaseData({
 				database,
 				startTime: Date.parse(startTime),
 				endTime: Date.parse(endTime),
-				...(branch === undefined ? {} : { branch }),
+				...(!(branch === undefined) ? { branch } : undefined),
 			},
 		}),
 	)

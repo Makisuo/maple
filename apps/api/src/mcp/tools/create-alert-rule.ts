@@ -8,8 +8,9 @@ import {
 } from "./types"
 import { Effect, Match, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { toMcpHttpError } from "@/mcp/lib/map-http-error"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AlertRuleUpsertRequest } from "@maple/domain/http"
 
 const decodeAlertRuleRequest = Schema.decodeUnknownEffect(AlertRuleUpsertRequest)
@@ -64,9 +65,7 @@ const ALERT_TEMPLATES: Record<string, AlertTemplate> = {
 		defaultThreshold: 100,
 		defaults: {},
 	},
-}
-
-// Build request from raw params (custom mode)
+} satisfies Record<string, AlertTemplate>
 
 interface CreateAlertRuleParams {
 	name: string
@@ -187,7 +186,7 @@ function buildAlertRuleRequest(
 		windowMinutes,
 		destinationIds,
 		...templateDefaults,
-	}
+	} satisfies Record<string, unknown>
 
 	if (params.enabled !== undefined) request.enabled = params.enabled
 	if (params.service_names) request.serviceNames = splitCsv(params.service_names)
@@ -237,13 +236,14 @@ const comparatorLabel: Record<string, string> = {
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 	server.tool(
 		"create_alert_rule",
-		"Create an alert rule. Use a template for common cases (high_error_rate, slow_p95, slow_p99, low_apdex, throughput_drop) or template='custom' for full control. " +
-			"Templates auto-fill signal_type, comparator, and a sensible default threshold. " +
+		// The template names live on the `template` parameter, with their thresholds;
+		// repeating them here cost tokens twice for one fact.
+		"Create an alert rule — from a `template` for common cases, or template='custom' for full control. " +
 			"Use list_alert_rules to find destination_ids.",
 		Schema.Struct({
 			name: requiredStringParam("Rule name"),
@@ -269,9 +269,10 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			// Custom-mode params (used when template is 'custom' or omitted)
 			signal_type: optionalStringParam(
 				"Signal type (for custom): error_rate, p95_latency, p99_latency, apdex, throughput, builder_query, raw_query. Use builder_query with a metrics draft for custom metrics. " +
-					"NOTE: error_rate, p95_latency, p99_latency, apdex and throughput are all computed over ROOT spans only. A service that records failures on child spans " +
-					"and returns success from its entry point (common in cron jobs and workers — see audit_setup STAT-04 for which services emit no entry-point spans) " +
-					"will read as healthy no matter the threshold. For those, use raw_query, or rely on error-issue notifications, which fingerprint child-span exceptions.",
+					// Load-bearing caveat, not filler: without it an agent will happily create a
+					// rule that can never fire. Compressed, not dropped.
+					"NOTE: all except builder_query/raw_query are computed over ROOT spans only, so a service that fails on child spans but returns success from its entry point " +
+					"(common in cron jobs and workers — audit_setup STAT-04 lists them) reads as healthy at any threshold. Use raw_query there, or rely on error-issue notifications.",
 			),
 			comparator: optionalStringParam(
 				"Comparison operator (for custom): gt (>), gte (>=), lt (<), lte (<=)",
@@ -329,46 +330,12 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 				),
 			)
 
-			const tenant = yield* resolveTenant
-			const alerts = yield* AlertsService
+			const tenant = yield* CurrentMcpTenant
+			const alerts = yield* AlertRulesService
 
-			const rule = yield* alerts.createRule(tenant.orgId, tenant.userId, tenant.roles, decoded).pipe(
-				Effect.catchTag("@maple/http/errors/AlertValidationError", (error) =>
-					Effect.fail(
-						new McpQueryError({
-							message: `${error._tag}: ${error.message}\n${error.details.join("\n")}`,
-							pipeName: "create_alert_rule",
-							cause: error,
-						}),
-					),
-				),
-				Effect.catchTags({
-					"@maple/http/errors/AlertForbiddenError": (error) =>
-						Effect.fail(
-							new McpQueryError({
-								message: `${error._tag}: ${error.message}`,
-								pipeName: "create_alert_rule",
-								cause: error,
-							}),
-						),
-					"@maple/http/errors/AlertPersistenceError": (error) =>
-						Effect.fail(
-							new McpQueryError({
-								message: `${error._tag}: ${error.message}`,
-								pipeName: "create_alert_rule",
-								cause: error,
-							}),
-						),
-					"@maple/http/errors/AlertNotFoundError": (error) =>
-						Effect.fail(
-							new McpQueryError({
-								message: `${error._tag}: ${error.message}`,
-								pipeName: "create_alert_rule",
-								cause: error,
-							}),
-						),
-				}),
-			)
+			const rule = yield* alerts
+				.createRule(tenant.orgId, tenant.userId, tenant.roles, decoded)
+				.pipe(Effect.mapError(toMcpHttpError("create_alert_rule")))
 
 			const lines: string[] = [
 				`## Alert Rule Created`,

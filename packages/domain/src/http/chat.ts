@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { Authorization } from "./current-tenant"
+import { SessionAuthorization } from "./current-tenant"
 
 /**
  * Apply an approval-gated AI chat proposal.
@@ -83,5 +83,5 @@ export class ChatApiGroup extends HttpApiGroup.make("chat")
 			],
 		}),
 	)
-	.prefix("/api/chat")
-	.middleware(Authorization) {}
+	.prefix("/internal/chat")
+	.middleware(SessionAuthorization) {}

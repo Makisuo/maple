@@ -1,4 +1,6 @@
 import { Schema } from "effect"
+import { ALERT_REDUCERS } from "@maple/query-model"
+import { PublicHttpErrorBodySchema } from "./http/error-policy"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -487,8 +489,6 @@ export class QueryEngineExecuteResponse extends Schema.Class<QueryEngineExecuteR
 	result: QueryEngineResult,
 }) {}
 
-// ---- Batched execution ----------------------------------------------------
-//
 // The dashboard fans out one query per widget, and each used to be its own
 // POST — plus its own CORS preflight — against a worker pinned to us-east-1.
 // The batch endpoint collapses a render pass into a single round trip.
@@ -509,15 +509,8 @@ export class QueryEngineExecuteResponse extends Schema.Class<QueryEngineExecuteR
  */
 export const QUERY_ENGINE_BATCH_MAX = 4
 
-/**
- * A per-item failure. Carries the original error's `_tag` so the client can
- * hand it straight to its existing error normalization — `@maple/http/errors/*`
- * tags pass through untouched and keep their UI copy.
- */
-export const QueryEngineBatchFailure = Schema.Struct({
-	_tag: Schema.String,
-	message: Schema.String,
-})
+/** A per-item failure uses the same complete public body as a failed HTTP response. */
+export const QueryEngineBatchFailure = PublicHttpErrorBodySchema
 export type QueryEngineBatchFailure = Schema.Schema.Type<typeof QueryEngineBatchFailure>
 
 /**
@@ -546,7 +539,13 @@ export class QueryEngineExecuteBatchResponse extends Schema.Class<QueryEngineExe
 	results: Schema.Array(QueryEngineBatchOutcome),
 }) {}
 
-export const QueryEngineAlertReducer = Schema.Literals(["identity", "sum", "avg", "min", "max"]).annotate({
+/**
+ * The alert-rule spelling of the shared reducer table in `@maple/query-model`.
+ * `ALERT_REDUCER_TO_SERIES_REDUCER` maps each of these onto the widget spelling
+ * (`STAT_AGGREGATES`); the two sets stay distinct because `"identity"` and
+ * `"first"` coincide only on a one-bucket window.
+ */
+export const QueryEngineAlertReducer = Schema.Literals(ALERT_REDUCERS).annotate({
 	identifier: "@maple/QueryEngineAlertReducer",
 })
 export type QueryEngineAlertReducer = Schema.Schema.Type<typeof QueryEngineAlertReducer>

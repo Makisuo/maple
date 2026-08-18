@@ -3,7 +3,7 @@
  *
  * The in-process chat agent (`apps/api/src/chat/`) interrupts the turn on these
  * tools instead of executing them; the web client applies the real change via
- * `POST /api/chat/apply`, which only accepts tools in this set. The Slack agent
+ * `POST /internal/chat/apply`, which only accepts tools in this set. The Slack agent
  * gates the same set behind eve's native human-in-the-loop approval.
  *
  * Keep in sync — two copies, no shared import:
@@ -30,7 +30,6 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 	"release_error_issue",
 	"transition_error_issue",
 	"comment_on_error_issue",
-	"heartbeat_error_issue",
 	"set_issue_severity",
 	"update_error_notification_policy",
 	// fixes / agents

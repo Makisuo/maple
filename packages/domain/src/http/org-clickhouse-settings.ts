@@ -2,6 +2,16 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
 import { IsoDateTimeString } from "../primitives"
+import {
+	OrgClickHouseSettingsEncryptionError,
+	OrgClickHouseSettingsForbiddenError,
+	OrgClickHouseSettingsPersistenceError,
+	OrgClickHouseSettingsUpstreamRejectedError,
+	OrgClickHouseSettingsUpstreamUnavailableError,
+	OrgClickHouseSettingsValidationError,
+} from "./org-clickhouse-settings-errors"
+
+export * from "./org-clickhouse-settings-errors"
 
 /**
  * Connection-level status for a per-org BYO ClickHouse row.
@@ -57,8 +67,6 @@ export class OrgClickHouseSettingsDeleteResponse extends Schema.Class<OrgClickHo
 )({
 	configured: Schema.Literal(false),
 }) {}
-
-// --- Schema diff & apply -----------------------------------------------------
 
 export const ClickHouseTableKind = Schema.Literals(["table", "materialized_view"])
 export type ClickHouseTableKind = Schema.Schema.Type<typeof ClickHouseTableKind>
@@ -197,52 +205,6 @@ export class OrgClickHouseCollectorConfigResponse extends Schema.Class<OrgClickH
 	/** Name of the env var the customer must set with the CH password. */
 	passwordEnvVar: Schema.String,
 }) {}
-
-// --- Errors ------------------------------------------------------------------
-
-export class OrgClickHouseSettingsForbiddenError extends Schema.TaggedError<OrgClickHouseSettingsForbiddenError>()(
-	"@maple/http/errors/OrgClickHouseSettingsForbiddenError",
-	{ message: Schema.String },
-	{ httpApiStatus: 403 },
-) {}
-
-export class OrgClickHouseSettingsValidationError extends Schema.TaggedError<OrgClickHouseSettingsValidationError>()(
-	"@maple/http/errors/OrgClickHouseSettingsValidationError",
-	{ message: Schema.String },
-	{ httpApiStatus: 400 },
-) {}
-
-export class OrgClickHouseSettingsPersistenceError extends Schema.TaggedError<OrgClickHouseSettingsPersistenceError>()(
-	"@maple/http/errors/OrgClickHouseSettingsPersistenceError",
-	{ message: Schema.String },
-	{ httpApiStatus: 503 },
-) {}
-
-export class OrgClickHouseSettingsEncryptionError extends Schema.TaggedError<OrgClickHouseSettingsEncryptionError>()(
-	"@maple/http/errors/OrgClickHouseSettingsEncryptionError",
-	{ message: Schema.String },
-	{ httpApiStatus: 500 },
-) {}
-
-export class OrgClickHouseSettingsUpstreamRejectedError extends Schema.TaggedError<OrgClickHouseSettingsUpstreamRejectedError>()(
-	"@maple/http/errors/OrgClickHouseSettingsUpstreamRejectedError",
-	{
-		message: Schema.String,
-		statusCode: Schema.NullOr(Schema.Number),
-	},
-	{ httpApiStatus: 400 },
-) {}
-
-export class OrgClickHouseSettingsUpstreamUnavailableError extends Schema.TaggedError<OrgClickHouseSettingsUpstreamUnavailableError>()(
-	"@maple/http/errors/OrgClickHouseSettingsUpstreamUnavailableError",
-	{
-		message: Schema.String,
-		statusCode: Schema.NullOr(Schema.Number),
-	},
-	{ httpApiStatus: 503 },
-) {}
-
-// --- API group ---------------------------------------------------------------
 
 export class OrgClickHouseSettingsApiGroup extends HttpApiGroup.make("orgClickHouseSettings")
 	.add(

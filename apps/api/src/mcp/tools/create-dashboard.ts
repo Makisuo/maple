@@ -1,17 +1,27 @@
 import { McpQueryError, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import {
 	DashboardTemplateParameterKey,
 	PortableDashboardDocument,
-	defaultWidgetHeight,
+	defaultWidgetLayout,
+	findNextPosition,
 } from "@maple/domain/http"
 import { DASHBOARD_TEMPLATES, getTemplate } from "@/dashboard-templates"
-import { formatValidationSummary, inspectWidgetsAfterMutation } from "@/mcp/lib/inspect-widget"
 import {
-	CHART_DISPLAY_AREA,
+	QUERY_BUILDER_DATA_SOURCES,
+	QUERY_BUILDER_METRIC_TYPES,
+	toQueryBuilderDataSource,
+	toQueryBuilderMetricType,
+} from "@maple/query-model"
+import {
+	collectBlockingBuilderWarnings,
+	formatValidationSummary,
+	inspectWidgetsAfterMutation,
+} from "@/mcp/lib/inspect-widget"
+import {
 	chartDisplayForMetric,
 	makeQueryBuilderBreakdownDataSource,
 	makeQueryBuilderTimeseriesDataSource,
@@ -20,6 +30,8 @@ import {
 import type { TemplateParameterValues, WidgetDef } from "@/dashboard-templates"
 import { validateDashboardTimeRange } from "@/mcp/lib/resolve-dashboard-time-range"
 import { MAX_LIST_RANGE_SECONDS, MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
+import { makeRouteDataSource } from "@maple/widgets/dashboard"
+import { collectDocumentRenderWarnings } from "@/mcp/lib/validate-widget-renderability"
 
 const decodePortableDashboard = Schema.decodeUnknownEffect(PortableDashboardDocument)
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
@@ -38,7 +50,7 @@ const VALID_GROUP_BY: Record<string, readonly string[]> = {
 	traces: ["service.name", "span.name", "status.code", "http.method", "none"],
 	logs: ["service.name", "severity", "none"],
 	metrics: ["service.name", "none"],
-}
+} satisfies Record<string, readonly string[]>
 
 function validateGroupBy(rawGroupBy: string, source: string, widgetTitle: string): string | null {
 	const validOptions = VALID_GROUP_BY[source] ?? []
@@ -49,6 +61,13 @@ function validateGroupBy(rawGroupBy: string, source: string, widgetTitle: string
 	const optsList = [...validOptions, ...(source === "metrics" ? ["attr.<key>"] : [])]
 	return `Widget "${widgetTitle}": invalid group_by "${rawGroupBy}" for source=${source}. Valid: ${optsList.join(", ")}. ${source === "metrics" ? "Example: attr.signal" : ""}`
 }
+
+/** The kinds `simpleSpecToWidget` actually knows how to build. */
+const SIMPLE_SPEC_VISUALIZATIONS = ["chart", "stat", "table", "list"] as const
+type SimpleSpecVisualization = (typeof SIMPLE_SPEC_VISUALIZATIONS)[number]
+
+const isSimpleSpecVisualization = (value: string): value is SimpleSpecVisualization =>
+	SIMPLE_SPEC_VISUALIZATIONS.some((candidate) => candidate === value)
 
 interface SimpleWidgetSpec {
 	title: string
@@ -74,12 +93,29 @@ function simpleSpecToWidget(
 		return `Widget "${spec.title ?? "(untitled)"}": title and source are required.`
 	}
 
-	if (!["traces", "logs", "metrics"].includes(source)) {
-		return `Widget "${spec.title}": source must be traces, logs, or metrics.`
+	// The simplified path builds four shapes and falls through to a timeseries
+	// chart for anything else, so a `pie` or `heatmap` here would previously be
+	// persisted with a timeseries data source it cannot draw. Reject instead of
+	// silently mis-wiring; richer kinds go through `add_dashboard_widget`.
+	if (!isSimpleSpecVisualization(viz)) {
+		return `Widget "${spec.title}": visualization must be one of ${SIMPLE_SPEC_VISUALIZATIONS.join(", ")} for simplified specs. Use add_dashboard_widget for other kinds.`
 	}
 
-	if (source === "metrics" && (!spec.metric_name || !spec.metric_type)) {
+	const dataSource = toQueryBuilderDataSource(source)
+	if (dataSource === null) {
+		return `Widget "${spec.title}": source must be ${QUERY_BUILDER_DATA_SOURCES.join(", ")}.`
+	}
+
+	if (dataSource === "metrics" && (!spec.metric_name || !spec.metric_type)) {
 		return `Widget "${spec.title}": source=metrics requires metric_name and metric_type. Use list_metrics to discover.`
+	}
+
+	// Narrowed rather than passed through: an unrecognised `metric_type` used to
+	// be silently coerced to `gauge`, which draws a chart that looks fine and
+	// aggregates a counter wrong.
+	const metricType = spec.metric_type === undefined ? undefined : toQueryBuilderMetricType(spec.metric_type)
+	if (spec.metric_type !== undefined && metricType === null) {
+		return `Widget "${spec.title}": metric_type must be one of ${QUERY_BUILDER_METRIC_TYPES.join(", ")}.`
 	}
 
 	const metric = spec.metric ?? (source === "metrics" ? "avg" : "count")
@@ -97,15 +133,15 @@ function simpleSpecToWidget(
 	const queryDraft = makeQueryDraft({
 		id: `q-${id}`,
 		name: spec.title,
-		dataSource: source as "traces" | "logs" | "metrics",
+		dataSource,
 		aggregation: metric,
 		whereClause: where,
 		groupBy,
 		metricName: spec.metric_name,
-		metricType: spec.metric_type,
+		...(!(metricType === null || metricType === undefined) ? { metricType } : undefined),
 	})
 
-	const display: Record<string, unknown> = { title: spec.title }
+	const display: Record<string, unknown> = { title: spec.title } satisfies Record<string, unknown>
 	display.unit = spec.unit ?? inferUnit(metric)
 
 	if (viz === "table") {
@@ -138,13 +174,10 @@ function simpleSpecToWidget(
 			return {
 				id,
 				visualization: viz,
-				dataSource: {
-					endpoint: "list_logs",
-					params: {
-						...(spec.service_name && { service: spec.service_name }),
-						limit: 10,
-					},
-				},
+				dataSource: makeRouteDataSource("list_logs", {
+					...(spec.service_name ? { service: spec.service_name } : undefined),
+					limit: 10,
+				}),
 				display: { title: spec.title, listDataSource: "logs", listLimit: 10 },
 				layout,
 			}
@@ -152,45 +185,33 @@ function simpleSpecToWidget(
 		return {
 			id,
 			visualization: viz,
-			dataSource: {
-				endpoint: "list_traces",
-				params: {
-					...(spec.service_name && { service: spec.service_name }),
-					limit: 10,
-				},
-			},
+			dataSource: makeRouteDataSource("list_traces", {
+				...(spec.service_name ? { service: spec.service_name } : undefined),
+				limit: 10,
+			}),
 			display: { title: spec.title, listDataSource: "traces", listLimit: 10 },
 			layout,
 		}
 	}
 
 	if (viz === "stat") {
-		const metricsFilters: Record<string, unknown> | undefined =
-			source === "metrics"
-				? {
-						metricName: spec.metric_name,
-						metricType: spec.metric_type,
-						...(spec.service_name && { serviceName: spec.service_name }),
-					}
-				: spec.service_name
-					? { serviceName: spec.service_name }
-					: undefined
-
+		// Same endpoint and query draft as every other kind here. This used to
+		// build the legacy `custom_timeseries` shape with its own filter bag and a
+		// `flattenSeries` step, so an agent-made stat was the one widget on a
+		// dashboard that did not go through the query builder — and so the only one
+		// `collectBlockingBuilderWarnings` could never inspect.
+		//
+		// A timeseries query source returns wide rows (`{ bucket, <series>:
+		// value }`), which `reduceToValue` reads directly — no flattening. Naming
+		// the series after the widget title is a best effort; `resolveField` falls
+		// back to the first numeric column, which for a single-query stat is the
+		// only series.
 		return {
 			id,
 			visualization: viz,
 			dataSource: {
-				endpoint: "custom_timeseries",
-				params: {
-					source,
-					metric,
-					groupBy: "none",
-					...(metricsFilters && { filters: metricsFilters }),
-				},
-				transform: {
-					flattenSeries: { valueField: "value" },
-					reduceToValue: { field: "value", aggregate: "avg" },
-				},
+				...makeQueryBuilderTimeseriesDataSource([queryDraft]),
+				transform: { reduceToValue: { field: spec.title, aggregate: "avg" } },
 			},
 			display,
 			layout,
@@ -199,8 +220,6 @@ function simpleSpecToWidget(
 
 	const ds = makeQueryBuilderTimeseriesDataSource([queryDraft])
 	Object.assign(display, chartDisplayForMetric(metric))
-	// Reference CHART_DISPLAY_AREA so static analyzers don't drop the import.
-	void CHART_DISPLAY_AREA
 
 	return {
 		id,
@@ -211,38 +230,27 @@ function simpleSpecToWidget(
 	}
 }
 
+/**
+ * Grid rectangles for a run of simplified specs.
+ *
+ * Placement is the shared `findNextPosition`, so this agrees with the web store,
+ * the MCP widget tools and the Perses importer instead of being a fourth
+ * algorithm. What stays local is the *width* policy, which is genuinely this
+ * tool's own: stats are quarter-width so a row of them reads as a strip of KPIs,
+ * everything else is full-bleed because a simplified spec carries no layout
+ * intent to honour.
+ */
 function computeAutoLayout(specs: SimpleWidgetSpec[]): Array<{ x: number; y: number; w: number; h: number }> {
-	const layouts: Array<{ x: number; y: number; w: number; h: number }> = []
-	// Stats are the only kind that shares a row, so its height is what advances
-	// `y` whenever an in-progress stat row is closed out.
-	const statHeight = defaultWidgetHeight("stat").h
-	let y = 0
-	let x = 0
+	const placed: Array<{ layout: { x: number; y: number; w: number; h: number } }> = []
 
 	for (const spec of specs) {
 		const viz = spec.visualization ?? "chart"
-		const { h } = defaultWidgetHeight(viz)
-
-		if (viz === "stat") {
-			if (x + 4 > 12) {
-				y += statHeight
-				x = 0
-			}
-			layouts.push({ x, y, w: 4, h })
-			x += 4
-			continue
-		}
-
-		// Everything else is full-bleed, so close any open stat row first.
-		if (x > 0) {
-			y += statHeight
-			x = 0
-		}
-		layouts.push({ x: 0, y, w: 12, h })
-		y += h
+		const { h } = defaultWidgetLayout(viz)
+		const w = viz === "stat" ? 4 : 12
+		placed.push({ layout: { ...findNextPosition(placed, w), w, h } })
 	}
 
-	return layouts
+	return placed.map((widget) => widget.layout)
 }
 
 function parseSimpleWidgets(json: string): WidgetDef[] | string {
@@ -286,19 +294,15 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 
 	server.tool(
 		"create_dashboard",
-		"Create a dashboard from a template, simplified widget specs, or custom JSON.\n\n" +
+		// Kept deliberately short: this is routing information — which of the three
+		// modes to use — not a schema reference. The per-parameter descriptions carry
+		// the shapes, and `describe_dashboard_schema` carries the full vocabulary.
+		"Create a dashboard one of three ways: from a `template`, from simplified `widgets` specs, or from full `dashboard_json`.\n\n" +
 			"Templates:\n" +
 			templateList +
-			"\n  custom — provide dashboard_json with full widget definitions\n\n" +
-			"Each template accepts optional service_name (for app templates) or its own params (see list_dashboard_templates).\n\n" +
-			"Simplified widgets (provide name + widgets JSON array, same params as query_data):\n" +
-			'  Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }\n' +
-			"  group_by: traces=service.name|span.name|status.code|http.method|none; logs=service.name|severity|none; metrics=service.name|attr.<key>|none\n" +
-			"  Note: table requires a group_by field. list shows recent traces or logs.\n" +
-			"Custom JSON: provide dashboard_json with full widget definitions (use get_dashboard to see schema). " +
-			"For raw widget JSON, trace/log queries omit the metric-only fields (`metricName`/`metricType`/`isMonotonic`); `whereClause` is a custom grammar (use `exists` not SQL `IS NULL`). See `maple://instructions` for the full widget JSON shape.\n\n" +
-			"After persistence, automatically validates every inspectable widget (custom_query_builder_timeseries/breakdown) and includes a per-widget verdict (looks_healthy/suspicious/broken) + sanity flags in the response. " +
-			'Pass `validate: "false"` to skip validation when creating dashboards with many widgets.',
+			"\n\nCreated widgets are inspected (up to 12) and returned with a per-widget verdict " +
+			"(looks_healthy/suspicious/broken). Use `inspect_chart_data` for any beyond that cap, " +
+			'or pass `validate: "false"` to skip inspection entirely.',
 		Schema.Struct({
 			name: requiredStringParam("Dashboard name"),
 			template: optionalStringParam(
@@ -316,10 +320,12 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				"Metric type for metric-overview template: sum, gauge, histogram, or exponential_histogram",
 			),
 			widgets: optionalStringParam(
-				"JSON array of simplified widget specs (alternative to templates and dashboard_json).",
+				'JSON array of simplified widget specs (same params as query_data). Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }. ' +
+					"group_by: traces=service.name|span.name|status.code|http.method|none; logs=service.name|severity|none; metrics=service.name|attr.<key>|none. " +
+					'"table" requires group_by; "list" shows recent traces or logs.',
 			),
 			dashboard_json: optionalStringParam(
-				"Full dashboard JSON string for complete control over widget configuration.",
+				"Full dashboard JSON for complete control over widget configuration. Call `describe_dashboard_schema` first for the panel types, the four kind-discriminated data-source shapes, the unit vocabulary and the aggregation/group-by tokens — all generated from the live schema.",
 			),
 			validate: optionalStringParam(
 				"Set to 'false' to skip automatic data validation on the created widgets. Default: validate.",
@@ -380,11 +386,36 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 					}
 				}
 
+				// The same pre-persist gate the widget mutation tools run. It never
+				// ran here because this is a create rather than a mutate, so a
+				// simplified spec that silently dropped a clause — an unsupported
+				// group-by, an over-cap filter set — was persisted and only surfaced
+				// as a confidently wrong chart in the browser.
+				const blocking = yield* Effect.forEach(result, (widget) =>
+					collectBlockingBuilderWarnings(widget.dataSource).pipe(
+						Effect.map((warnings) =>
+							warnings.map((w) => `${widget.display.title ?? widget.id}: ${w}`),
+						),
+					),
+				).pipe(Effect.map((all) => all.flat()))
+
+				if (blocking.length > 0) {
+					return {
+						isError: true,
+						content: [
+							{
+								type: "text" as const,
+								text: `These widgets would not query what they describe:\n${blocking.map((w) => `  - ${w}`).join("\n")}`,
+							},
+						],
+					}
+				}
+
 				const timeRangeValue = params.time_range ?? DEFAULT_TIME_RANGE
 
 				portable = yield* decodePortableDashboard({
 					name: params.name,
-					...(params.description && { description: params.description }),
+					...(params.description ? { description: params.description } : undefined),
 					timeRange: { type: "relative", value: timeRangeValue },
 					widgets: result,
 				}).pipe(
@@ -443,8 +474,8 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 						const description = params.description ?? built.description
 						return new PortableDashboardDocument({
 							name: params.name || built.name,
-							...(description && { description }),
-							...(built.tags && { tags: built.tags }),
+							...(description ? { description } : undefined),
+							...(built.tags ? { tags: built.tags } : undefined),
 							// An explicit time_range wins over the template's default —
 							// this branch used to drop the parameter entirely.
 							timeRange: params.time_range
@@ -476,7 +507,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				}
 			}
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const persistence = yield* DashboardPersistenceService
 
 			const dashboard = yield* persistence.create(tenant.orgId, tenant.userId, portable).pipe(
@@ -516,6 +547,18 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				lines.push(`Source: simplified widget specs`)
 			}
 
+			// Advisory across every creation path, including `dashboard_json`, which
+			// previously received no widget validation at all despite the tool
+			// description implying otherwise.
+			const renderWarnings = collectDocumentRenderWarnings(dashboard.widgets)
+			if (renderWarnings.length > 0) {
+				lines.push(
+					"",
+					"### Render warnings (saved anyway)",
+					...renderWarnings.map((warning) => `- ${warning}`),
+				)
+			}
+
 			const validationBlock = formatValidationSummary(validation, false)
 			if (validationBlock) {
 				lines.push("", validationBlock)
@@ -534,7 +577,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 							createdAt: dashboard.createdAt,
 							updatedAt: dashboard.updatedAt,
 						},
-						...(validation.ran && { validation }),
+						...(validation.ran ? { validation } : undefined),
 					},
 				}),
 			}

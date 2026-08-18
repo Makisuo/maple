@@ -10,7 +10,19 @@ import { Cause, Effect, Exit, type ManagedRuntime } from "effect"
 import { DeleteError, InsertError, MissingTxIdError, UpdateError } from "./errors"
 import type { EffectDeleteHandler, EffectInsertHandler, EffectUpdateHandler } from "./types"
 
+type MutationResult = { txid: Txid | Array<Txid> }
+type PromiseMutationHandler<Params> = (params: Params) => Promise<MutationResult>
+
 /** Adapts an Effect insert handler to Electric's Promise API. */
+export function convertInsertHandler<
+	T extends Row<unknown>,
+	TKey extends string | number,
+	TUtils extends UtilsRecord,
+	E = never,
+>(
+	handler: EffectInsertHandler<T, TKey, TUtils, E, never> | undefined,
+	runtime?: undefined,
+): PromiseMutationHandler<InsertMutationFnParams<T, TKey, TUtils>> | undefined
 export function convertInsertHandler<
 	T extends Row<unknown>,
 	TKey extends string | number,
@@ -19,12 +31,18 @@ export function convertInsertHandler<
 	R = never,
 >(
 	handler: EffectInsertHandler<T, TKey, TUtils, E, R> | undefined,
-	runtime?: ManagedRuntime.ManagedRuntime<R, any>,
-):
-	| ((params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<{
-			txid: Txid | Array<Txid>
-	  }>)
-	| undefined {
+	runtime: ManagedRuntime.ManagedRuntime<R, unknown>,
+): PromiseMutationHandler<InsertMutationFnParams<T, TKey, TUtils>> | undefined
+export function convertInsertHandler<
+	T extends Row<unknown>,
+	TKey extends string | number,
+	TUtils extends UtilsRecord,
+	E = never,
+	R = never,
+>(
+	handler: EffectInsertHandler<T, TKey, TUtils, E, R> | undefined,
+	runtime?: ManagedRuntime.ManagedRuntime<R, unknown>,
+): PromiseMutationHandler<InsertMutationFnParams<T, TKey, TUtils>> | undefined {
 	if (!handler) return undefined
 
 	return async (params: InsertMutationFnParams<T, TKey, TUtils>) => {
@@ -43,6 +61,8 @@ export function convertInsertHandler<
 		const exit = runtime
 			? await runtime.runPromiseExit(effect)
 			: await Effect.runPromiseExit(
+					// The overload without a runtime only accepts handlers whose requirements are `never`.
+					// oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion
 					effect as Effect.Effect<{ txid: Txid | Array<Txid> }, InsertError, never>,
 				)
 
@@ -78,15 +98,30 @@ export function convertUpdateHandler<
 	TKey extends string | number,
 	TUtils extends UtilsRecord,
 	E = never,
+>(
+	handler: EffectUpdateHandler<T, TKey, TUtils, E, never> | undefined,
+	runtime?: undefined,
+): PromiseMutationHandler<UpdateMutationFnParams<T, TKey, TUtils>> | undefined
+export function convertUpdateHandler<
+	T extends Row<unknown>,
+	TKey extends string | number,
+	TUtils extends UtilsRecord,
+	E = never,
 	R = never,
 >(
 	handler: EffectUpdateHandler<T, TKey, TUtils, E, R> | undefined,
-	runtime?: ManagedRuntime.ManagedRuntime<R, any>,
-):
-	| ((params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<{
-			txid: Txid | Array<Txid>
-	  }>)
-	| undefined {
+	runtime: ManagedRuntime.ManagedRuntime<R, unknown>,
+): PromiseMutationHandler<UpdateMutationFnParams<T, TKey, TUtils>> | undefined
+export function convertUpdateHandler<
+	T extends Row<unknown>,
+	TKey extends string | number,
+	TUtils extends UtilsRecord,
+	E = never,
+	R = never,
+>(
+	handler: EffectUpdateHandler<T, TKey, TUtils, E, R> | undefined,
+	runtime?: ManagedRuntime.ManagedRuntime<R, unknown>,
+): PromiseMutationHandler<UpdateMutationFnParams<T, TKey, TUtils>> | undefined {
 	if (!handler) return undefined
 
 	return async (params: UpdateMutationFnParams<T, TKey, TUtils>) => {
@@ -105,6 +140,8 @@ export function convertUpdateHandler<
 		const exit = runtime
 			? await runtime.runPromiseExit(effect)
 			: await Effect.runPromiseExit(
+					// The overload without a runtime only accepts handlers whose requirements are `never`.
+					// oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion
 					effect as Effect.Effect<{ txid: Txid | Array<Txid> }, UpdateError, never>,
 				)
 
@@ -140,15 +177,30 @@ export function convertDeleteHandler<
 	TKey extends string | number,
 	TUtils extends UtilsRecord,
 	E = never,
+>(
+	handler: EffectDeleteHandler<T, TKey, TUtils, E, never> | undefined,
+	runtime?: undefined,
+): PromiseMutationHandler<DeleteMutationFnParams<T, TKey, TUtils>> | undefined
+export function convertDeleteHandler<
+	T extends Row<unknown>,
+	TKey extends string | number,
+	TUtils extends UtilsRecord,
+	E = never,
 	R = never,
 >(
 	handler: EffectDeleteHandler<T, TKey, TUtils, E, R> | undefined,
-	runtime?: ManagedRuntime.ManagedRuntime<R, any>,
-):
-	| ((params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<{
-			txid: Txid | Array<Txid>
-	  }>)
-	| undefined {
+	runtime: ManagedRuntime.ManagedRuntime<R, unknown>,
+): PromiseMutationHandler<DeleteMutationFnParams<T, TKey, TUtils>> | undefined
+export function convertDeleteHandler<
+	T extends Row<unknown>,
+	TKey extends string | number,
+	TUtils extends UtilsRecord,
+	E = never,
+	R = never,
+>(
+	handler: EffectDeleteHandler<T, TKey, TUtils, E, R> | undefined,
+	runtime?: ManagedRuntime.ManagedRuntime<R, unknown>,
+): PromiseMutationHandler<DeleteMutationFnParams<T, TKey, TUtils>> | undefined {
 	if (!handler) return undefined
 
 	return async (params: DeleteMutationFnParams<T, TKey, TUtils>) => {
@@ -167,6 +219,8 @@ export function convertDeleteHandler<
 		const exit = runtime
 			? await runtime.runPromiseExit(effect)
 			: await Effect.runPromiseExit(
+					// The overload without a runtime only accepts handlers whose requirements are `never`.
+					// oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion
 					effect as Effect.Effect<{ txid: Txid | Array<Txid> }, DeleteError, never>,
 				)
 

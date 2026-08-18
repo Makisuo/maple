@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react"
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Line, LineChart } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { latencyTimeSeriesData } from "../_shared/sample-data"
@@ -11,6 +11,9 @@ import {
 	ChartLegendContent,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "../../ui/chart"
 import { formatLatency, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
@@ -57,17 +60,12 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 	return (
 		<ChartContainer config={chartConfig} className={className}>
 			<LineChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
-				<CartesianGrid vertical={false} />
-				<XAxis
+				<ChartGrid />
+				<ChartXAxis
 					dataKey="bucket"
-					tickLine={false}
-					axisLine={false}
-					tickMargin={8}
 					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
 				/>
-				<YAxis
-					tickLine={false}
-					axisLine={false}
+				<ChartYAxis
 					tickMargin={8}
 					width={yAxisWidth ?? 70}
 					tickFormatter={(v) => formatLatency(v)}

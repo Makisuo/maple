@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { randomUUID } from "node:crypto"
 import { Retry } from "@distilled.cloud/cloudflare"
 import { afterEach, assert, describe, it } from "@effect/vitest"
@@ -10,6 +11,7 @@ import {
 	orgClickHouseSettings,
 } from "@maple/db"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { eq } from "drizzle-orm"
@@ -19,7 +21,7 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { CloudflareAnalyticsService, hasAnalyticsScopes } from "./CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "@/services/auth/CloudflareOAuthService"
@@ -332,7 +334,7 @@ interface CompiledQueryStub {
 const makeWarehouseStub = (
 	captured: CapturedIngest[],
 	queryStub?: CompiledQueryStub,
-): WarehouseQueryServiceShape =>
+): WarehouseQueryServiceApi =>
 	({
 		ingest: (
 			tenant: { orgId: string },
@@ -367,7 +369,7 @@ const makeWarehouseStub = (
 				),
 				Effect.orDie,
 			),
-	}) as unknown as WarehouseQueryServiceShape
+	}) as WarehouseQueryServiceApi
 
 const makeLayer = (
 	testDb: TestDb,
@@ -379,7 +381,11 @@ const makeLayer = (
 	CloudflareAnalyticsService.layer.pipe(
 		Layer.provideMerge(CloudflareOAuthService.layer),
 		Layer.provideMerge(OrgIngestKeysService.layer),
-		Layer.provideMerge(OrgClickHouseSettingsService.layer),
+		Layer.provideMerge(
+			OrgClickHouseSettingsService.layer.pipe(
+				Layer.provide(EdgeCacheService.layer.pipe(Layer.provide(MemoryCacheBackendLive))),
+			),
+		),
 		Layer.provideMerge(Layer.succeed(WarehouseQueryService, makeWarehouseStub(captured, queryStub))),
 		Layer.provideMerge(testDb.layer),
 		Layer.provideMerge(Env.layer),

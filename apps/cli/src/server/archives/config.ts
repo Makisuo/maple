@@ -1283,6 +1283,7 @@ const validateCompleteConfigSchema = (
 	if (!exactJson(parsed.effective, expectedEffective)) {
 		throw new Error(`invalid calibration config effective values do not match exact derivation: ${path}`)
 	}
+	// SAFETY: every field and the exact derived effective configuration were validated above.
 	return parsed as unknown as VerifiedCalibrationConfigDocument
 }
 

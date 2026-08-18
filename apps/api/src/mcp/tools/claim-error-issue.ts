@@ -7,7 +7,7 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { ErrorIssueId } from "@maple/domain/http"
@@ -17,7 +17,7 @@ const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
 export function registerClaimErrorIssueTool(server: McpToolRegistrar) {
 	server.tool(
 		"claim_error_issue",
-		"Claim a lease on an error issue so other agents don't duplicate work. Issues in 'triage' or 'todo' auto-transition to 'in_progress' on claim. Lease defaults to 30 min; call heartbeat_error_issue before it expires or the issue drops back to 'todo'.",
+		"Claim a lease on an error issue so other agents don't duplicate work. Issues in 'triage' or 'todo' auto-transition to 'in_progress' on claim. The lease (default 30 min) renews automatically whenever you act on the issue — transition it, comment, or set its severity — and is released when you move it to a terminal state or call release_error_issue.",
 		Schema.Struct({
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),
 			lease_duration_seconds: optionalNumberParam(
@@ -25,7 +25,7 @@ export function registerClaimErrorIssueTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.claimErrorIssue")(function* ({ issue_id, lease_duration_seconds }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const decodedIssueId = decodeIssueId(issue_id)
 			if (Option.isNone(decodedIssueId)) {
 				return validationError(

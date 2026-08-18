@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { TenantContext } from "@/services/auth/tenant-context"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { McpQueryError } from "@/mcp/tools/types"
 
 /**
@@ -10,8 +10,8 @@ import { McpQueryError } from "@/mcp/tools/types"
  */
 export const resolveActorId = Effect.fn("resolveActorId")(function* (tenant: TenantContext) {
 	if (tenant.actorId) return tenant.actorId
-	const errors = yield* ErrorsService
-	const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId).pipe(
+	const actors = yield* ErrorActorsService
+	const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId).pipe(
 		Effect.mapError(
 			(error) =>
 				new McpQueryError({

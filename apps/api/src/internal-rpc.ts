@@ -39,24 +39,23 @@ export const callMcpToolRpc = (input: unknown) =>
 		Effect.flatMap((request) =>
 			McpToolExecutor.pipe(
 				Effect.flatMap((executor) =>
-					executor.execute(makeInternalTenant(request.orgId), request.name, request.input),
+					executor.execute(makeInternalTenant(request.orgId), request.name, request.input, "rpc"),
 				),
 			),
 		),
 		Effect.withSpan("InternalRpc.callMcpTool"),
 	)
 
-export const submitDiagnosisRpc = (input: unknown) =>
-	Effect.gen(function* () {
-		const request = yield* decodeSubmitDiagnosis(input)
-		yield* Effect.annotateCurrentSpan({
-			orgId: request.orgId,
-			"maple.investigation.id": request.investigationId,
-		})
-		const investigations = yield* InvestigationService
-		return yield* investigations.submitDiagnosis(
-			request.orgId,
-			request.investigationId,
-			new SubmitDiagnosisRequest({ report: request.report }),
-		)
-	}).pipe(Effect.withSpan("InternalRpc.submitDiagnosis"))
+export const submitDiagnosisRpc = Effect.fn("InternalRpc.submitDiagnosis")(function* (input: unknown) {
+	const request = yield* decodeSubmitDiagnosis(input)
+	yield* Effect.annotateCurrentSpan({
+		orgId: request.orgId,
+		"maple.investigation.id": request.investigationId,
+	})
+	const investigations = yield* InvestigationService
+	return yield* investigations.submitDiagnosis(
+		request.orgId,
+		request.investigationId,
+		new SubmitDiagnosisRequest({ report: request.report }),
+	)
+})

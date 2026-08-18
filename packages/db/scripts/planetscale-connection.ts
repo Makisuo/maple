@@ -14,6 +14,7 @@
  *                                            (otherwise an interactive `pscale auth login` session is used)
  */
 import { spawnSync } from "node:child_process"
+import * as Predicate from "effect/Predicate"
 import postgres from "postgres"
 
 const FAILURE = 1
@@ -101,7 +102,9 @@ const createCredential = (database: string, branch: string): Credential => {
 	}
 	let parsed: Record<string, unknown>
 	try {
-		parsed = JSON.parse(result.stdout) as Record<string, unknown>
+		const value: unknown = JSON.parse(result.stdout)
+		if (!Predicate.isObject(value)) throw new TypeError("role response is not an object")
+		parsed = value
 	} catch {
 		return fail("Could not parse `pscale role create --format json` output")
 	}
@@ -182,7 +185,7 @@ const pinSessionRoleToPostgres = async (connectionUrl: string): Promise<void> =>
 		// URL username is not a usable role name.
 		const [row] = await sql`SELECT current_user`
 		const role: unknown = row?.current_user
-		if (typeof role !== "string" || !ROLE_PATTERN.test(role)) {
+		if (!Predicate.isString(role) || !ROLE_PATTERN.test(role)) {
 			fail(`Could not determine the migration role to pin (got ${JSON.stringify(role)})`)
 			return
 		}

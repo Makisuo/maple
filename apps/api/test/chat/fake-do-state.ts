@@ -43,7 +43,7 @@ export const makeFakeDurableObjectState = (): FakeDurableObjectState => {
 	}
 
 	return {
-		storage: { sql: sql as unknown as SqlStorage },
+		storage: { sql: sql as SqlStorage },
 		waitUntil: (promise) => {
 			// Swallow rejections here the way the runtime does; a test that cares awaits `pending`.
 			pending.push(promise.catch(() => undefined))

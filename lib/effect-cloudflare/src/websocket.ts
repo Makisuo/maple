@@ -9,26 +9,12 @@ import * as Effect from "effect/Effect"
 import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { DurableObjectState } from "./durable-object-state.ts"
+import { fromWebSocket } from "./durable-websocket.ts"
 
-export type RawWebSocket = cf.WebSocket
-
-export interface DurableWebSocket {
-	readonly ws: RawWebSocket
-	send(data: string | Uint8Array): Effect.Effect<void>
-	close(code: number, reason: string): Effect.Effect<void>
-	serializeAttachment<T>(value: T): void
-	deserializeAttachment<T>(): T | null
-}
-
-export const fromWebSocket = (ws: RawWebSocket): DurableWebSocket => ({
-	ws,
-	send: (data) => Effect.sync(() => ws.send(data as any)),
-	close: (code, reason) => Effect.sync(() => ws.close(code, reason)),
-	serializeAttachment: (value) => ws.serializeAttachment(value),
-	deserializeAttachment: () => ws.deserializeAttachment() as any,
-})
+export { fromWebSocket, type DurableWebSocket, type RawWebSocket } from "./durable-websocket.ts"
 
 export const upgrade = Effect.fnUntraced(function* () {
+	// SAFETY: The global Response constructor is the same runtime constructor described by Workers types.
 	const _Response = Response as any as typeof cf.Response
 	const ctx = yield* DurableObjectState
 	// @ts-expect-error — WebSocketPair is a Worker global

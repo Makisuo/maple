@@ -3,8 +3,9 @@ import { formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { DASHBOARD_TEMPLATES } from "@/dashboard-templates"
 
 export function registerListDashboardsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -14,7 +15,7 @@ export function registerListDashboardsTool(server: McpToolRegistrar) {
 			search: optionalStringParam("Filter dashboards by name (case-insensitive contains)"),
 		}),
 		Effect.fn("McpTool.listDashboards")(function* ({ search }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const persistence = yield* DashboardPersistenceService
 
 			const result = yield* persistence.list(tenant.orgId).pipe(
@@ -64,8 +65,12 @@ export function registerListDashboardsTool(server: McpToolRegistrar) {
 			for (const d of dashboards.slice(0, 3)) {
 				nextSteps.push(`\`get_dashboard dashboard_id="${d.id}"\` — view dashboard configuration`)
 			}
+			// Interpolated rather than hardcoded: this line used to suggest
+			// `service_health`, but template keys are kebab-case, so the suggestion
+			// errored when followed literally.
+			const exampleTemplate = DASHBOARD_TEMPLATES[0]?.id ?? "blank"
 			nextSteps.push(
-				'`create_dashboard template="service_health"` — create a new dashboard from template',
+				`\`create_dashboard template="${exampleTemplate}"\` — create a new dashboard from template`,
 			)
 			lines.push(formatNextSteps(nextSteps))
 

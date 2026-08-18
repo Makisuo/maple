@@ -53,6 +53,12 @@ const telemetry = MapleCloudflareSDK.make({
 // `HttpMiddleware.tracer` ends the root server span on a deferred macrotask, but
 // `telemetry.flush` drains synchronously. Yield one macrotask first so `span.end`
 // runs before we drain, otherwise isolated requests silently drop the trace.
+//
+// The SDK now owns this drain — `telemetry.flush` yields a macrotask inside its
+// own serialized body. This local yield is kept deliberately redundant (an extra
+// macrotask is harmless) so a version skew between the worker and the published
+// SDK can't drop spans; remove it once the SDK version carrying that change is
+// pinned here.
 const flushTelemetry = async (env: Record<string, unknown>): Promise<void> => {
 	await new Promise<void>((resolve) => setTimeout(resolve, 0))
 	await telemetry.flush(env)
@@ -138,6 +144,8 @@ const handle = async (
 		Effect.runFork(
 			Effect.logError("electric-sync handler failed").pipe(
 				Effect.annotateLogs({ error: message }),
+				// One-shot recovery fiber after the main handler runtime rejected.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
 				Effect.provide(telemetry.layer),
 			),
 		)

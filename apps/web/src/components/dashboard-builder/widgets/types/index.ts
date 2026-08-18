@@ -41,7 +41,7 @@ export const widgetTypes: Record<PanelType, WidgetTypeDefinition> = {
 	heatmap: heatmapWidgetType,
 	funnel: funnelWidgetType,
 	markdown: markdownWidgetType,
-}
+} satisfies Record<PanelType, WidgetTypeDefinition>
 
 /** In Type-picker order. */
 export const widgetTypeList: ReadonlyArray<WidgetTypeDefinition> = [

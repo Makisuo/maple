@@ -3,7 +3,7 @@ import * as Cloudflare from "alchemy/Cloudflare"
 import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
-import type { MapleApiRpcShape } from "@maple/domain/internal-rpc"
+import type { MapleApiRpcContract } from "@maple/domain/internal-rpc"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -39,7 +39,35 @@ export interface CreateMapleApiOptions {
 }
 
 /** Alchemy resource type for the API Worker, carrying its internal RPC surface. */
-export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcShape>
+export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcContract>
+
+const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
+	const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
+	return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
+		name: resolveHyperdriveName(stage),
+		origin: {
+			scheme: "postgres",
+			host: pgUrl.hostname,
+			port: Number(pgUrl.port || "5432"),
+			// Connect-time db (`postgres`, the PlanetScale cluster default),
+			// not the PS resource name.
+			database: pgUrl.pathname.replace(/^\//, "") || "postgres",
+			user: decodeURIComponent(pgUrl.username),
+			password: Redacted.make(decodeURIComponent(pgUrl.password)),
+		},
+		// Read-after-write everywhere (alert state CAS, dashboard versioning) —
+		// revisit caching once read paths that tolerate staleness are identified.
+		caching: { disabled: true },
+		dev: {
+			scheme: "postgres",
+			host: "localhost",
+			port: 5499,
+			database: "maple",
+			user: "maple",
+			password: Redacted.make("maple"),
+		},
+	})
+})
 
 export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
@@ -64,36 +92,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		//   dying — so DB-backed routes 500 while everything else works.
 		const databaseMode = resolveDatabaseMode(stage)
 		const hyperdriveRefId = resolveHyperdriveRefId(stage, "api")
-		const mapleDb =
-			databaseMode !== "managed"
-				? undefined
-				: yield* Effect.gen(function* () {
-						const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
-						return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
-							name: resolveHyperdriveName(stage),
-							origin: {
-								scheme: "postgres",
-								host: pgUrl.hostname,
-								port: Number(pgUrl.port || "5432"),
-								// Connect-time db (`postgres`, the PlanetScale cluster default),
-								// not the PS resource name.
-								database: pgUrl.pathname.replace(/^\//, "") || "postgres",
-								user: decodeURIComponent(pgUrl.username),
-								password: Redacted.make(decodeURIComponent(pgUrl.password)),
-							},
-							// Read-after-write everywhere (alert state CAS, dashboard versioning) —
-							// revisit caching once read paths that tolerate staleness are identified.
-							caching: { disabled: true },
-							dev: {
-								scheme: "postgres",
-								host: "localhost",
-								port: 5499,
-								database: "maple",
-								user: "maple",
-								password: Redacted.make("maple"),
-							},
-						})
-					})
+		const mapleDb = databaseMode !== "managed" ? undefined : yield* createManagedMapleDb(stage)
 
 		const mcpSessions = yield* Cloudflare.KV.Namespace("MCP_SESSIONS", {
 			title: resolveWorkerName("mcp-sessions", stage),
@@ -171,6 +170,18 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			workersDev: true,
+			// alchemy ≥ beta.70 sets rolldown `strictExecutionOrder: true`, which wraps
+			// ~every chunk in a lazy `__esmMin` initializer. The DB module graph (drizzle
+			// pgTable schemas + Effect Schema ASTs) then evaluates on first use — inside
+			// the first Postgres call of each fresh isolate — instead of at script
+			// startup. That is what stepped the cold dial from ~2s to ~9-11s on
+			// 2026-08-08 (deploy 2679ba80) and produced the CONNECT_TIMEOUT incident;
+			// see the 2026-08-11 investigation. Eager evaluation moves that cost back to
+			// script startup, off the request path. If chunking ever regresses into
+			// upstream #749 (`ScriptStartupError: Cannot access '<minified>' before
+			// initialization`), the deploy fails loudly at upload — remove this override
+			// and instead warm the DB graph off the request path.
+			build: { output: { strictExecutionOrder: false } },
 			// Custom domain (not a zone route): routes don't create DNS records, so
 			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
 			// provision DNS + edge certs automatically.
@@ -187,7 +198,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			crons: ["0 */12 * * *", "0 * * * *", "0 */6 * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
-				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
+				...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
 				// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
 				// `@maple/llm`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
 				// resource, which also fronts model calls with caching/rate-limits/logging.
@@ -227,7 +238,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 								allowedSenderAddresses: ["notifications@noreply.maple.dev"],
 							}),
 						}
-					: {}),
+					: undefined),
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
 				...optionalSecret("TINYBIRD_SIGNING_KEY"),
@@ -244,6 +255,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Redacted.make(
 					requireEnv("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
 				),
+				MAPLE_SHARE_TOKEN_HMAC_KEY: Redacted.make(requireEnv("MAPLE_SHARE_TOKEN_HMAC_KEY")),
 				MAPLE_INGEST_PUBLIC_URL:
 					process.env.MAPLE_INGEST_PUBLIC_URL?.trim() || "https://ingest.maple.dev",
 				MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
@@ -294,6 +306,10 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalPlain("SLACK_CLIENT_ID"),
 				...optionalSecret("SLACK_CLIENT_SECRET"),
 				...optionalSecret("SLACK_INTERNAL_SERVICE_TOKEN"),
+				// Apple push (iOS app) — token auth; see platform/Apns.ts
+				...optionalPlain("APNS_TEAM_ID"),
+				...optionalPlain("APNS_KEY_ID"),
+				...optionalSecret("APNS_PRIVATE_KEY"),
 				...optionalPlain("GITHUB_APP_ID"),
 				...optionalPlain("GITHUB_APP_SLUG"),
 				...optionalSecret("GITHUB_APP_PRIVATE_KEY"),

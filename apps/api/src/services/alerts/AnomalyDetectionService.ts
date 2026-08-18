@@ -10,6 +10,7 @@ import {
 	AnomalyLinkedIssueNotFoundError,
 	AnomalyTimeseriesBucket,
 	type AnomalyIncidentId,
+	type AnomalyIncidentSeverity,
 	type AnomalyIncidentStatus,
 	AnomalyPersistenceError,
 	AnomalySignalType,
@@ -21,6 +22,7 @@ import {
 	RoleName,
 	type UserId,
 	UserId as UserIdSchema,
+	type WarehouseReadError,
 } from "@maple/domain/http"
 import {
 	anomalyDetectorSettings,
@@ -50,14 +52,13 @@ import {
 	MutableHashMap,
 	Option,
 	Ref,
-	Schedule,
 	Schema,
 } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
-import { isRetryablePostgresContention } from "@/platform/postgres-errors"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -126,29 +127,10 @@ const ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS = 2 * HOUR_MS
 const ANOMALY_ACTIVE_ORGS_CACHE_BUCKET = "anomaly-active-orgs"
 const ANOMALY_ACTIVE_ORGS_CACHE_KEY = "active"
 const ANOMALY_ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
-const describeCause = (cause: unknown): string | undefined => {
-	if (cause == null) return undefined
-	if (cause instanceof Error) return cause.stack ?? cause.message
-	if (typeof cause === "string") return cause
-	try {
-		return JSON.stringify(cause)
-	} catch {
-		return String(cause)
-	}
-}
-
-const makePersistenceError = (error: unknown): AnomalyPersistenceError => {
-	const message =
-		error instanceof DatabaseError || error instanceof Error
-			? error.message
-			: "Anomaly persistence failure"
-	const cause = describeCause(error instanceof Error ? error.cause : error)
-	return cause === undefined
-		? new AnomalyPersistenceError({ message })
-		: new AnomalyPersistenceError({ message, cause })
-}
-
-const CONTENTION_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
+export const makePersistenceError = makePersistenceErrorMapper(
+	AnomalyPersistenceError,
+	"Anomaly persistence failure",
+)
 
 /**
  * Adapt a drizzle incident row (timestamptz → Date, jsonb → unknown[]) to the
@@ -182,7 +164,18 @@ interface AnomalyTickResult {
 	readonly orgFailures: number
 }
 
-export interface AnomalyDetectionServiceShape {
+/** One (service, environment, signal) group of incidents. */
+export interface AnomalyServiceCountRow {
+	readonly serviceName: string
+	readonly deploymentEnv: string
+	readonly signalType: AnomalySignalType
+	readonly severity: AnomalyIncidentSeverity
+	readonly incidentCount: number
+	/** ISO-8601 UTC. Formatted in SQL — see the note on the query. */
+	readonly lastTriggeredAt: string
+}
+
+export interface AnomalyDetectionServiceApi {
 	readonly runTick: () => Effect.Effect<AnomalyTickResult, AnomalyPersistenceError>
 	readonly listIncidents: (
 		orgId: OrgId,
@@ -198,6 +191,16 @@ export interface AnomalyDetectionServiceShape {
 			readonly offset?: number
 		},
 	) => Effect.Effect<AnomalyIncidentsListResponse, AnomalyPersistenceError>
+	/**
+	 * Incidents collapsed to one row per (service, environment, signal).
+	 *
+	 * Exists because the fleet-health surfaces need every open incident at once
+	 * to shade per-service rows, which is a `GROUP BY`, not a page of a list.
+	 */
+	readonly countIncidentsByService: (
+		orgId: OrgId,
+		opts: { readonly status?: AnomalyIncidentStatus },
+	) => Effect.Effect<ReadonlyArray<AnomalyServiceCountRow>, AnomalyPersistenceError>
 	readonly getIncident: (
 		orgId: OrgId,
 		incidentId: AnomalyIncidentId,
@@ -220,7 +223,7 @@ export interface AnomalyDetectionServiceShape {
 		opts: { readonly startTime?: string; readonly endTime?: string },
 	) => Effect.Effect<
 		AnomalyIncidentTimeseriesResponse,
-		AnomalyPersistenceError | AnomalyIncidentNotFoundError
+		AnomalyPersistenceError | AnomalyIncidentNotFoundError | WarehouseReadError
 	>
 	readonly getSettings: (
 		orgId: OrgId,
@@ -245,22 +248,7 @@ const make = Effect.gen(function* () {
 		onSome: (e) => e[INVESTIGATION_FANOUT_BINDING],
 	})
 
-	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-		database.execute(fn).pipe(
-			Effect.retry({
-				schedule: CONTENTION_RETRY_SCHEDULE,
-				while: isRetryablePostgresContention,
-			}),
-			Effect.tapError((error) =>
-				Effect.logError("AnomalyDetectionService dbExecute failed").pipe(
-					Effect.annotateLogs({
-						message: error.message,
-						cause: describeCause(error.cause) ?? "(none)",
-					}),
-				),
-			),
-			Effect.mapError(makePersistenceError),
-		)
+	const dbExecute = makeDbExecute(database, "AnomalyDetectionService", makePersistenceError)
 
 	const isoFromEpoch = (ms: number) => decodeIsoSync(new Date(ms).toISOString())
 
@@ -273,8 +261,6 @@ const make = Effect.gen(function* () {
 		authMode: "self_hosted",
 	})
 
-	// Active-org gating
-	//
 	// The tick historically evaluated every org with an ingest key, scanning a
 	// 7-day window for each — overwhelmingly idle orgs, which dominated Tinybird
 	// CPU. Instead, run ONE cross-org scan of the recent hourly MVs (pinned to
@@ -376,8 +362,6 @@ const make = Effect.gen(function* () {
 		)
 	})
 
-	// Settings
-
 	const parseMutedSignals = (raw: ReadonlyArray<string>): ReadonlyArray<AnomalySignalType> =>
 		Arr.filterMap(raw, (value) => decodeMutedSignalResult(value))
 
@@ -429,7 +413,7 @@ const make = Effect.gen(function* () {
 		return refreshed
 	})
 
-	const getSettings: AnomalyDetectionServiceShape["getSettings"] = Effect.fn(
+	const getSettings: AnomalyDetectionServiceApi["getSettings"] = Effect.fn(
 		"AnomalyDetectionService.getSettings",
 	)(function* (orgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -438,7 +422,7 @@ const make = Effect.gen(function* () {
 		return settingsToDocument(row)
 	})
 
-	const updateSettings: AnomalyDetectionServiceShape["updateSettings"] = Effect.fn(
+	const updateSettings: AnomalyDetectionServiceApi["updateSettings"] = Effect.fn(
 		"AnomalyDetectionService.updateSettings",
 	)(function* (orgId, userId, request) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -458,8 +442,6 @@ const make = Effect.gen(function* () {
 		const refreshed = yield* loadSettingsRow(orgId)
 		return settingsToDocument(refreshed ?? { ...existing, ...next })
 	})
-
-	// Incident reads
 
 	const incidentToDocument = (row: AnomalyIncidentRow): AnomalyIncidentDocument =>
 		new AnomalyIncidentDocument({
@@ -506,7 +488,7 @@ const make = Effect.gen(function* () {
 			lastReopenedAt: row.lastReopenedAt ? isoFromDate(row.lastReopenedAt) : null,
 		})
 
-	const listIncidents: AnomalyDetectionServiceShape["listIncidents"] = Effect.fn(
+	const listIncidents: AnomalyDetectionServiceApi["listIncidents"] = Effect.fn(
 		"AnomalyDetectionService.listIncidents",
 	)(function* (orgId, opts) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -540,6 +522,50 @@ const make = Effect.gen(function* () {
 		return new AnomalyIncidentsListResponse({ incidents: rows.map(incidentToDocument) })
 	})
 
+	const countIncidentsByService: AnomalyDetectionServiceApi["countIncidentsByService"] = Effect.fn(
+		"AnomalyDetectionService.countIncidentsByService",
+	)(function* (orgId, opts) {
+		yield* Effect.annotateCurrentSpan({ orgId })
+		const status = opts.status ?? "open"
+		const rows = yield* dbExecute((db) =>
+			db
+				.select({
+					serviceName: anomalyIncidents.serviceName,
+					deploymentEnv: anomalyIncidents.deploymentEnv,
+					signalType: anomalyIncidents.signalType,
+					// Severity is a two-value ladder, so a boolean rollup says
+					// exactly what the caller needs without ordering strings.
+					hasCritical: sql<boolean>`bool_or(${anomalyIncidents.severity} = 'critical')`,
+					incidentCount: sql<number>`count(*)::int`,
+					// Drizzle applies a column's codec to a column reference, not to
+					// an aggregate over it, so `max()` arrives as whatever the driver
+					// hands back — a Date under one, a Postgres datetime string under
+					// another. Formatting in SQL removes the guess: one ISO-8601 UTC
+					// string, identical under postgres.js and PGlite.
+					lastTriggeredAt: sql<string>`to_char(
+						max(${anomalyIncidents.lastTriggeredAt}) AT TIME ZONE 'UTC',
+						'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+					)`,
+				})
+				.from(anomalyIncidents)
+				.where(and(eq(anomalyIncidents.orgId, orgId), eq(anomalyIncidents.status, status)))
+				.groupBy(
+					anomalyIncidents.serviceName,
+					anomalyIncidents.deploymentEnv,
+					anomalyIncidents.signalType,
+				),
+		)
+		yield* Effect.annotateCurrentSpan({ groupCount: rows.length })
+		return rows.map((row) => ({
+			serviceName: row.serviceName,
+			deploymentEnv: row.deploymentEnv,
+			signalType: row.signalType,
+			severity: (row.hasCritical ? "critical" : "warning") satisfies AnomalyIncidentSeverity,
+			incidentCount: row.incidentCount,
+			lastTriggeredAt: row.lastTriggeredAt,
+		}))
+	})
+
 	const requireIncidentRow = Effect.fn("AnomalyDetectionService.requireIncidentRow")(function* (
 		orgId: OrgId,
 		incidentId: AnomalyIncidentId,
@@ -563,7 +589,7 @@ const make = Effect.gen(function* () {
 		return row
 	})
 
-	const getIncident: AnomalyDetectionServiceShape["getIncident"] = Effect.fn(
+	const getIncident: AnomalyDetectionServiceApi["getIncident"] = Effect.fn(
 		"AnomalyDetectionService.getIncident",
 	)(function* (orgId, incidentId) {
 		yield* Effect.annotateCurrentSpan({ orgId, incidentId })
@@ -571,9 +597,7 @@ const make = Effect.gen(function* () {
 		return incidentToDocument(row)
 	})
 
-	// Incident mutations
-
-	const resolveIncidentManually: AnomalyDetectionServiceShape["resolveIncidentManually"] = Effect.fn(
+	const resolveIncidentManually: AnomalyDetectionServiceApi["resolveIncidentManually"] = Effect.fn(
 		"AnomalyDetectionService.resolveIncidentManually",
 	)(function* (orgId, incidentId) {
 		yield* Effect.annotateCurrentSpan({ orgId, incidentId })
@@ -625,7 +649,7 @@ const make = Effect.gen(function* () {
 		return incidentToDocument(refreshed)
 	})
 
-	const setIncidentIssue: AnomalyDetectionServiceShape["setIncidentIssue"] = Effect.fn(
+	const setIncidentIssue: AnomalyDetectionServiceApi["setIncidentIssue"] = Effect.fn(
 		"AnomalyDetectionService.setIncidentIssue",
 	)(function* (orgId, incidentId, issueId) {
 		yield* Effect.annotateCurrentSpan({ orgId, incidentId, issueId: issueId ?? "(none)" })
@@ -666,7 +690,7 @@ const make = Effect.gen(function* () {
 	/** Max chart window; matches the detector's own baseline horizon. */
 	const TIMESERIES_MAX_WINDOW_MS = BASELINE_WINDOW_MS
 
-	const getIncidentTimeseries: AnomalyDetectionServiceShape["getIncidentTimeseries"] = Effect.fn(
+	const getIncidentTimeseries: AnomalyDetectionServiceApi["getIncidentTimeseries"] = Effect.fn(
 		"AnomalyDetectionService.getIncidentTimeseries",
 	)(function* (tenant, incidentId, opts) {
 		const orgId = tenant.orgId
@@ -716,12 +740,10 @@ const make = Effect.gen(function* () {
 				deploymentEnv: row.deploymentEnv,
 				bucketSeconds,
 			})
-			const rows = yield* warehouse
-				.compiledQuery(tenant, compiled, {
-					profile: "list",
-					context: "anomalyIncidentTimeseries",
-				})
-				.pipe(Effect.mapError(makePersistenceError))
+			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+				profile: "list",
+				context: "anomalyIncidentTimeseries",
+			})
 			buckets = rollingCountBuckets(
 				rows.map((r) => ({
 					bucketMs: parseWarehouseDateTime(String(r.bucket ?? "")),
@@ -749,12 +771,10 @@ const make = Effect.gen(function* () {
 				serviceName: row.serviceName,
 				deploymentEnv: row.deploymentEnv,
 			})
-			const rows = yield* warehouse
-				.compiledQuery(tenant, compiled, {
-					profile: "list",
-					context: "anomalyIncidentTimeseries",
-				})
-				.pipe(Effect.mapError(makePersistenceError))
+			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+				profile: "list",
+				context: "anomalyIncidentTimeseries",
+			})
 			buckets = rows.map((r) => {
 				const hourMs = parseWarehouseDateTime(String(r.hour ?? ""))
 				const errorLogCount = Number(r.errorLogCount ?? 0)
@@ -771,12 +791,10 @@ const make = Effect.gen(function* () {
 				serviceName: row.serviceName,
 				deploymentEnv: row.deploymentEnv,
 			})
-			const rows = yield* warehouse
-				.compiledQuery(tenant, compiled, {
-					profile: "list",
-					context: "anomalyIncidentTimeseries",
-				})
-				.pipe(Effect.mapError(makePersistenceError))
+			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+				profile: "list",
+				context: "anomalyIncidentTimeseries",
+			})
 			const signalType = row.signalType
 			unit =
 				signalType === "error_rate"
@@ -1683,13 +1701,13 @@ const make = Effect.gen(function* () {
 								severity,
 								lastTriggeredAt: new Date(nowMs),
 								updatedAt: new Date(nowMs),
-								...(fingerprintsJson !== undefined ? { fingerprintsJson } : {}),
+								...(fingerprintsJson !== undefined ? { fingerprintsJson } : undefined),
 							}
 						: {
 								severity,
 								lastTriggeredAt: new Date(nowMs),
 								updatedAt: new Date(nowMs),
-								...(fingerprintsJson !== undefined ? { fingerprintsJson } : {}),
+								...(fingerprintsJson !== undefined ? { fingerprintsJson } : undefined),
 							}
 					const updated = yield* dbExecute((db) =>
 						db
@@ -1749,10 +1767,10 @@ const make = Effect.gen(function* () {
 									lastObservedValue: evaluation.value,
 									lastSampleCount: evaluation.sampleCount,
 								}
-							: {}),
+							: undefined),
 						...(runtime !== undefined && runtime.entries.length > 0
 							? { fingerprintsJson: runtime.entries }
-							: {}),
+							: undefined),
 					}
 					const updated = yield* dbExecute((db) =>
 						db
@@ -1844,11 +1862,11 @@ const make = Effect.gen(function* () {
 												lastObservedValue: evaluation.value,
 												lastSampleCount: evaluation.sampleCount,
 											}
-										: {}),
+										: undefined),
 									updatedAt: new Date(nowMs),
 									...(runtime !== undefined && runtime.entries.length > 0
 										? { fingerprintsJson: runtime.entries }
-										: {}),
+										: undefined),
 								})
 								.where(
 									and(
@@ -1884,7 +1902,7 @@ const make = Effect.gen(function* () {
 										fingerprintsJson: runtime.entries,
 										severity: headlineSeverity(runtime.entries, runtime.row.severity),
 									}
-								: {}),
+								: undefined),
 							...(isPrimary
 								? {
 										detectorKey: next.detectorKey,
@@ -1900,9 +1918,9 @@ const make = Effect.gen(function* () {
 													// type integer: "4729.711321330495"`.
 													lastSampleCount: next.lastSampleCount ?? 0,
 												}
-											: {}),
+											: undefined),
 									}
-								: {}),
+								: undefined),
 						}
 						yield* dbExecute((db) =>
 							db
@@ -2018,7 +2036,7 @@ const make = Effect.gen(function* () {
 		return stats
 	})
 
-	const runTick: AnomalyDetectionServiceShape["runTick"] = Effect.fn("AnomalyDetectionService.runTick")(
+	const runTick: AnomalyDetectionServiceApi["runTick"] = Effect.fn("AnomalyDetectionService.runTick")(
 		function* () {
 			const nowMs = yield* Clock.currentTimeMillis
 			const runRetention = Math.floor(nowMs / TICK_CADENCE_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
@@ -2137,6 +2155,7 @@ const make = Effect.gen(function* () {
 	return AnomalyDetectionService.of({
 		runTick,
 		listIncidents,
+		countIncidentsByService,
 		getIncident,
 		resolveIncidentManually,
 		setIncidentIssue,
@@ -2148,7 +2167,7 @@ const make = Effect.gen(function* () {
 
 export class AnomalyDetectionService extends Context.Service<
 	AnomalyDetectionService,
-	AnomalyDetectionServiceShape
+	AnomalyDetectionServiceApi
 >()("@maple/api/services/AnomalyDetectionService") {
 	static readonly layer = Layer.effect(this, make)
 }

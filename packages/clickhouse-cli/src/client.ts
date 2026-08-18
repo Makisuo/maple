@@ -25,13 +25,13 @@ export interface ClickHouseConfig {
  */
 export async function exec(config: ClickHouseConfig, sql: string): Promise<string> {
 	const url = `${config.url.replace(/\/$/, "")}/?database=${encodeURIComponent(config.database)}`
-	const headers: Record<string, string> = {
+	const headers = new Headers({
 		"Content-Type": "text/plain",
 		"X-ClickHouse-User": config.user,
 		"X-ClickHouse-Database": config.database,
-	}
+	})
 	if (config.password.length > 0) {
-		headers["X-ClickHouse-Key"] = config.password
+		headers.set("X-ClickHouse-Key", config.password)
 	}
 	const response = await fetch(url, {
 		method: "POST",
@@ -45,6 +45,8 @@ export async function exec(config: ClickHouseConfig, sql: string): Promise<strin
 	return body
 }
 
+// This dependency-free Promise client throws across its CLI boundary; it never enters an Effect error channel.
+// oxlint-disable-next-line effecttsgo/extends-native-error
 export class ClickHouseError extends Error {
 	readonly status: number
 	readonly body: string

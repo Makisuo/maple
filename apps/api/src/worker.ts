@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import type { MessageBatch, ScheduledController } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
@@ -9,10 +10,12 @@ import {
 } from "@maple/effect-cloudflare"
 import { WorkerEntrypoint } from "cloudflare:workers"
 import { Cause, Context, Effect, Exit, FileSystem, Layer, ManagedRuntime, Path } from "effect"
-import { HttpRouter } from "effect/unstable/http"
+import { HttpRouter, type HttpMiddleware } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
+import { serverErrorSpanMiddleware } from "./http/server-error-span"
+import { v2WorkerUnavailableResponse } from "./http/v2-worker-unavailable"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
 import { classifyWorkerQueue } from "./queue-dispatch"
 
@@ -68,6 +71,12 @@ const telemetry = MapleCloudflareSDK.make({
 // hasn't fired yet. Isolated requests (e.g. a GitHub webhook) freeze the isolate
 // before a subsequent request rescues it, so the trace is silently dropped.
 // Yield one macrotask first so `span.end` runs before we drain.
+//
+// The SDK now owns this drain — `telemetry.flush` yields a macrotask inside its
+// own serialized body. This local yield is kept deliberately redundant (an extra
+// macrotask is harmless) so a version skew between the worker and the published
+// SDK can't drop spans; remove it once the SDK version carrying that change is
+// pinned here.
 const flushTelemetry = async (env: Record<string, unknown>): Promise<void> => {
 	await new Promise<void>((resolve) => setTimeout(resolve, 0))
 	await telemetry.flush(env)
@@ -85,8 +94,8 @@ const scoped = async <A, E, R>(program: Effect.Effect<A, E, R>) => {
 	return withPgConnectionScope(program)
 }
 
-// The route graph (`./app`) and database layer are imported DYNAMICALLY, not at
-// module scope. The static import graph reachable from `./app` eagerly builds
+// The service graph, HTTP graph, and database layer are imported DYNAMICALLY,
+// not at module scope. The static import graph reachable from the HTTP graph eagerly builds
 // hundreds of Effect Schema ASTs (`@maple/domain` + 47 MCP tool schemas) at
 // module-evaluation time. Cloudflare runs only the top-level module scope
 // during upload validation, so pulling that work in statically blew the fixed
@@ -94,12 +103,24 @@ const scoped = async <A, E, R>(program: Effect.Effect<A, E, R>) => {
 // the top level near-empty; the cost moves to the first request, which runs
 // under the far larger per-request CPU budget.
 const buildHandler = async () => {
-	const { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } = await import("./app")
+	const { HttpServicesLive } = await import("./runtime/service-graph")
+	const { AllRoutes, ApiAuthLive, ApiObservabilityLive } = await import("./runtime/http-graph")
 	const { layerPg } = await import("@/platform/DatabasePgLive")
 	const { pgConnectionMiddleware } = await import("@/platform/pg-connection-scope")
+	// The worker's one per-request middleware stack. Ordering is load-bearing:
+	// `serverErrorSpanMiddleware` must stay OUTERMOST (directly under
+	// `HttpMiddleware.tracer`) so it converts a 5xx success into the failure the
+	// tracer records — after `pgConnectionMiddleware`'s exit-agnostic `ensuring`
+	// has already released the request's Postgres socket. It also keeps a
+	// standing requirement satisfied: POST /mcp hangs indefinitely on Workers
+	// when `toWebHandler` is given NO middleware (1101 in prod, miniflare
+	// "worker hung" locally — suspected Effect RpcServer / HttpRouter
+	// scope-propagation bug), so this slot must never go back to empty.
+	const apiRequestMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) =>
+		serverErrorSpanMiddleware(pgConnectionMiddleware(httpApp))
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
-			Layer.provideMerge(MainLive),
+			Layer.provideMerge(HttpServicesLive),
 			Layer.provideMerge(ApiAuthLive),
 			Layer.provideMerge(ApiObservabilityLive),
 			Layer.provideMerge(WorkerPlatformLive),
@@ -108,14 +129,9 @@ const buildHandler = async () => {
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLayer),
 		),
-		// `pgConnectionMiddleware` gives the request its single Postgres socket. It
-		// also keeps a standing requirement satisfied: POST /mcp hangs indefinitely
-		// on Workers when `toWebHandler` is given NO middleware (1101 in prod,
-		// miniflare "worker hung" locally — suspected Effect RpcServer / HttpRouter
-		// scope-propagation bug), so this slot must never go back to empty.
 		// `disableLogger: true` stops Effect's default logger double-logging;
 		// application logs flow through the OTLP logger from `telemetry.layer`.
-		{ middleware: pgConnectionMiddleware, disableLogger: true },
+		{ middleware: apiRequestMiddleware, disableLogger: true },
 	)
 }
 
@@ -128,13 +144,13 @@ let handlerPromise: ReturnType<typeof buildHandler> | undefined
 const getHandler = () => (handlerPromise ??= buildHandler())
 
 // RPC has no HttpApi request to construct the application services for it, so
-// it gets a sibling isolate-wide ManagedRuntime. The heavy route/service graph
+// it gets a sibling isolate-wide ManagedRuntime. Its headless service graph
 // stays behind a dynamic import, preserving the worker's startup-CPU budget.
 const buildRpcRuntime = async (env: Record<string, unknown>) => {
-	const { MainLive } = await import("./app")
+	const { InvestigationServicesLive } = await import("./runtime/mcp-service-graph")
 	const { layerPg } = await import("@/platform/DatabasePgLive")
 	return ManagedRuntime.make(
-		MainLive.pipe(
+		InvestigationServicesLive.pipe(
 			Layer.provideMerge(WorkerPlatformLive),
 			Layer.provideMerge(layerPg),
 			Layer.provideMerge(layerFromEnvRecord(env)),
@@ -175,19 +191,22 @@ const runInternalRpc = async (
 	env: Record<string, unknown>,
 	ctx: ExecutionContext,
 ) => {
-	const [runtime, rpc] = await Promise.all([getRpcRuntime(env), import("./internal-rpc")])
+	const [runtime, { callMcpToolRpc, listMcpToolsRpc, submitDiagnosisRpc }] = await Promise.all([
+		getRpcRuntime(env),
+		import("./internal-rpc"),
+	])
 	let exit: Exit.Exit<unknown, unknown>
 	// The RPC runtime is isolate-wide, so the scope goes around each call rather
 	// than around the runtime — one socket per RPC invocation, released with it.
 	switch (method) {
 		case "listMcpTools":
-			exit = await runtime.runPromiseExit(await scoped(rpc.listMcpToolsRpc))
+			exit = await runtime.runPromiseExit(await scoped(listMcpToolsRpc))
 			break
 		case "callMcpTool":
-			exit = await runtime.runPromiseExit(await scoped(rpc.callMcpToolRpc(input)))
+			exit = await runtime.runPromiseExit(await scoped(callMcpToolRpc(input)))
 			break
 		case "submitDiagnosis":
-			exit = await runtime.runPromiseExit(await scoped(rpc.submitDiagnosisRpc(input)))
+			exit = await runtime.runPromiseExit(await scoped(submitDiagnosisRpc(input)))
 			break
 	}
 	ctx.waitUntil(flushTelemetry(env))
@@ -208,6 +227,15 @@ const isMcpPost = (request: Request): boolean => {
 	if (request.method !== "POST") return false
 	try {
 		return new URL(request.url).pathname === "/mcp"
+	} catch {
+		return false
+	}
+}
+
+const isV2Request = (request: Request): boolean => {
+	try {
+		const pathname = new URL(request.url).pathname
+		return pathname === "/v2" || pathname.startsWith("/v2/")
 	} catch {
 		return false
 	}
@@ -314,6 +342,8 @@ const handle = async (
 					method: request.method,
 					url: request.url,
 				}),
+				// One-shot recovery fiber after the main handler runtime rejected.
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
 				Effect.provide(telemetry.layer),
 			),
 		)
@@ -323,7 +353,9 @@ const handle = async (
 			)
 		}
 		ctx.waitUntil(flushTelemetry(env))
-		return new Response("The API worker is temporarily unavailable.", { status: 504 })
+		return isV2Request(request)
+			? v2WorkerUnavailableResponse()
+			: new Response("The API worker is temporarily unavailable.", { status: 504 })
 	}
 }
 

@@ -1,14 +1,7 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
-	"ignoreWorkspaces": [
-		"apps/ingest",
-		"apps/landing",
-		"apps/mobile",
-		"examples/*",
-		"lib/llm",
-		"lib/thinking-orbs"
-	],
-	"ignore": ["**/routeTree.gen.ts", ".context/**", ".deepsec/**"],
+	"ignoreWorkspaces": ["apps/ingest", "apps/ios", "examples/*", "lib/llm", "lib/thinking-orbs"],
+	"ignore": [".context/**", ".deepsec/**", "**/*.type-test.ts"],
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {
 		".": {
@@ -25,8 +18,12 @@
 				"src/lib/effect-atom.ts"
 			]
 		},
+		"apps/landing": {
+			"entry": ["src/worker.ts", "alchemy.run.ts", "tools/**/*.ts", "tools/**/*.js"],
+			"ignoreDependencies": ["@paper-design/shaders"]
+		},
 		"apps/api": {
-			"entry": ["alchemy.run.ts", "autumn.config.ts"],
+			"entry": ["alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
 			"ignoreDependencies": ["cloudflare"]
 		},
 		"apps/alerting": {
@@ -53,7 +50,9 @@
 			"ignoreBinaries": ["pscale"]
 		},
 		"packages/email": {
-			"entry": ["src/render-preview.tsx"]
+			"entry": ["scripts/**/*.ts"],
+			"ignore": ["src/generated/**"],
+			"ignoreDependencies": ["tailwindcss"]
 		},
 		"lib/effect-cloudflare": {
 			"ignoreDependencies": ["cloudflare"]
@@ -78,6 +77,7 @@
 		"nsTypes": "warn",
 		"enumMembers": "warn",
 		"namespaceMembers": "warn",
-		"duplicates": "warn"
+		"duplicates": "warn",
+		"cycles": "error"
 	}
 }

@@ -4,7 +4,13 @@ import { DashboardId, DashboardVersionId } from "@maple/domain/http"
 import { Atom, useAtom } from "@/lib/effect-atom"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { DashboardCanvas } from "@/components/dashboard-builder/canvas/dashboard-canvas"
+import { DashboardSections } from "@/components/dashboard-builder/sections/dashboard-sections"
+import { LiveWidgetRenderer } from "@/components/dashboard-builder/canvas/live-widget-renderer"
+import {
+	withActiveTab,
+	withSectionCollapsed,
+	type SectionViewSearch,
+} from "@/lib/dashboards/section-view-state"
 import { DashboardToolbar } from "@/components/dashboard-builder/toolbar/dashboard-toolbar"
 import { WidgetPicker } from "@/components/dashboard-builder/config/chart-picker"
 import { InlineEditableTitle } from "@/components/dashboard-builder/inline-editable-title"
@@ -15,9 +21,12 @@ import {
 import { DashboardVariablesProvider } from "@/components/dashboard-builder/dashboard-variables-context"
 import {
 	VARIABLE_PARAM_PREFIX,
-	pickVariableParams,
+	dashboardViewParamsSchema,
+	pickDashboardControlParams,
+	resolveRefreshIntervalSeconds,
 	variableSearchRest,
-} from "@/lib/dashboard-variables/search-params"
+	variableValuesFromSearch,
+} from "@/lib/dashboard-controls/search-params"
 import {
 	DashboardActionsProvider,
 	useDashboardActions,
@@ -31,7 +40,8 @@ import { SyncDegradedBanner, SyncUnavailable } from "@/components/common/sync-un
 import { historyPanelOpenAtom, previewedVersionAtom } from "@/atoms/dashboard-history-atoms"
 import { useDashboardVersions } from "@/components/dashboard-builder/history/use-dashboard-history"
 import { Result } from "@/lib/effect-atom"
-import { useMemo, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
+import type { DashboardRefreshIntervalSeconds, SectionTarget } from "@maple/domain/http"
 
 // Module-level atoms — singleton (only one dashboard page visible at a time)
 const chartPickerOpenAtom = Atom.make(false)
@@ -48,34 +58,38 @@ const asDashboardId = Schema.decodeSync(DashboardId)
 const dashboardViewSearchSchema = Schema.StructWithRest(
 	Schema.Struct({
 		mode: Schema.optional(Schema.Literal("edit")),
+		...dashboardViewParamsSchema,
 	}),
 	[variableSearchRest],
 )
-
-function variableValuesFromSearch(search: Record<string, unknown>): Record<string, string> {
-	const values: Record<string, string> = {}
-	for (const [key, value] of Object.entries(search)) {
-		if (!key.startsWith(VARIABLE_PARAM_PREFIX)) continue
-		if (typeof value === "string") {
-			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = value
-		} else if (typeof value === "number" || typeof value === "boolean") {
-			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = String(value)
-		}
-	}
-	return values
-}
 
 export const Route = createFileRoute("/dashboards/$dashboardId")({
 	component: DashboardViewPage,
 	validateSearch: Schema.toStandardSchemaV1(dashboardViewSearchSchema),
 })
 
-function DashboardRefreshBridge({ children }: { children: ReactNode }) {
+function DashboardRefreshBridge({
+	children,
+	refreshIntervalSeconds,
+	paused,
+}: {
+	children: ReactNode
+	refreshIntervalSeconds: DashboardRefreshIntervalSeconds
+	paused: boolean
+}) {
 	const {
 		state: { timeRange },
 	} = useDashboardTimeRange()
 	const timePreset = timeRange.type === "relative" ? timeRange.value : undefined
-	return <PageRefreshProvider timePreset={timePreset}>{children}</PageRefreshProvider>
+	return (
+		<PageRefreshProvider
+			timePreset={timePreset}
+			autoRefreshMs={refreshIntervalSeconds * 1000}
+			autoRefreshPaused={paused}
+		>
+			{children}
+		</PageRefreshProvider>
+	)
 }
 
 function DashboardViewPage() {
@@ -94,6 +108,7 @@ function DashboardViewPage() {
 		persistenceError,
 		updateDashboard,
 		updateDashboardTimeRange,
+		updateDashboardRefreshInterval,
 		addWidget,
 		cloneWidget,
 		removeWidget,
@@ -102,9 +117,22 @@ function DashboardViewPage() {
 		updateWidget,
 		updateWidgetLayouts,
 		autoLayoutWidgets,
+		addSection,
+		renameSection,
+		setSectionCollapsedDefault,
+		setSectionCollapsible,
+		reorderSections,
+		deleteSection,
+		addTab,
+		renameTab,
+		deleteTab,
+		moveWidgetToSection,
 	} = useDashboardStore()
 
 	const [chartPickerOpen, setChartPickerOpen] = useAtom(chartPickerOpenAtom)
+	// Which grid the picker's next widget lands in. Set by a group's own "+",
+	// cleared by the toolbar's, so the two entry points can't drift.
+	const [pendingSectionTarget, setPendingSectionTarget] = useState<SectionTarget>(null)
 	const [historyPanelOpen, setHistoryPanelOpen] = useAtom(historyPanelOpenAtom)
 	const [previewed, setPreviewed] = useAtom(previewedVersionAtom)
 
@@ -113,7 +141,8 @@ function DashboardViewPage() {
 	const isPreviewing = previewed !== null
 	const mode: WidgetMode = search.mode === "edit" && !readOnly && !isPreviewing ? "edit" : "view"
 
-	// Functional search updates so toggling edit mode never wipes `var-*` params.
+	// Functional search updates so toggling edit mode never wipes the per-viewer
+	// controls (`var-*` selections, filter clause, section collapse, active tabs).
 	const handleToggleEdit = () => {
 		if (isPreviewing) return
 		navigate({
@@ -121,8 +150,33 @@ function DashboardViewPage() {
 			params: { dashboardId },
 			search: (prev) =>
 				mode === "edit"
-					? pickVariableParams(prev)
-					: { ...pickVariableParams(prev), mode: "edit" as const },
+					? pickDashboardControlParams(prev)
+					: { ...pickDashboardControlParams(prev), mode: "edit" as const },
+		})
+	}
+
+	// `?refresh=` is per-viewer and wins over the board's saved cadence, so a
+	// read-only viewer can start (or silence) auto-refresh without touching the
+	// document. Picking one always writes the param; in edit mode it *also*
+	// becomes the dashboard's default, which is the only path that cuts a version.
+	const refreshIntervalSeconds = resolveRefreshIntervalSeconds(
+		search.refresh,
+		activeDashboard?.refreshIntervalSeconds,
+	)
+
+	const handleRefreshIntervalChange = (next: DashboardRefreshIntervalSeconds) => {
+		if (mode === "edit" && !readOnly && !isPreviewing) {
+			updateDashboardRefreshInterval(dashboardId, next)
+		}
+		navigate({
+			to: "/dashboards/$dashboardId",
+			params: { dashboardId },
+			replace: true,
+			search: (prev) => ({
+				...pickDashboardControlParams(prev),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
+				refresh: next,
+			}),
 		})
 	}
 
@@ -134,8 +188,8 @@ function DashboardViewPage() {
 			params: { dashboardId },
 			replace: true,
 			search: (prev) => ({
-				...pickVariableParams(prev),
-				...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+				...pickDashboardControlParams(prev),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
 				[`${VARIABLE_PARAM_PREFIX}${name}`]: value,
 			}),
 		})
@@ -143,6 +197,39 @@ function DashboardViewPage() {
 
 	const openHistory = () => {
 		setHistoryPanelOpen(true)
+	}
+
+	// Section view state is per-viewer: it rides the URL with `replace` so
+	// collapsing a group doesn't fill the back button with layout noise, and it
+	// never touches the stored document.
+	//
+	// The update is applied *to* the picked params rather than spread over them.
+	// `withSectionCollapsed` signals "drop this key" by deleting it from the
+	// object it returns, and `{...base, ...update(prev)}` silently undoes that —
+	// the deleted key simply isn't there to overwrite the stale value, so an id
+	// toggled twice ends up in both `collapsed` and `expanded`, and `expanded`
+	// wins, pinning the group open forever.
+	//
+	// `mode` is re-added for the same class of reason: `pickDashboardControlParams`
+	// deliberately drops it, so without this, collapsing a group while editing
+	// would quietly kick the user out of edit mode.
+	const applySectionView = (update: (prev: SectionViewSearch) => SectionViewSearch) => {
+		navigate({
+			to: "/dashboards/$dashboardId",
+			params: { dashboardId },
+			replace: true,
+			search: (prev) => ({
+				...update(pickDashboardControlParams(prev)),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
+			}),
+		})
+	}
+
+	const sectionViewSearch: SectionViewSearch = {
+		collapsed: search.collapsed,
+		expanded: search.expanded,
+		tab: search.tab,
+		widget: search.widget,
 	}
 
 	if (!activeDashboard) {
@@ -229,6 +316,7 @@ function DashboardViewPage() {
 					dashboardId={dashboardId}
 					mode={mode}
 					readOnly={readOnly || isPreviewing}
+					sections={activeDashboard.sections ?? []}
 					store={{
 						addWidget,
 						removeWidget,
@@ -238,9 +326,22 @@ function DashboardViewPage() {
 						updateWidget,
 						updateWidgetLayouts,
 						autoLayoutWidgets,
+						addSection,
+						renameSection,
+						setSectionCollapsedDefault,
+						setSectionCollapsible,
+						reorderSections,
+						deleteSection,
+						addTab,
+						renameTab,
+						deleteTab,
+						moveWidgetToSection,
 					}}
 				>
-					<DashboardRefreshBridge>
+					<DashboardRefreshBridge
+						refreshIntervalSeconds={refreshIntervalSeconds}
+						paused={mode === "edit" || isPreviewing}
+					>
 						<DashboardLayout.Root>
 							<DashboardLayout.Breadcrumbs
 								items={[
@@ -267,6 +368,8 @@ function DashboardViewPage() {
 												onToggleEdit={handleToggleEdit}
 												onAddWidget={() => setChartPickerOpen(true)}
 												onOpenHistory={openHistory}
+												refreshIntervalSeconds={refreshIntervalSeconds}
+												onRefreshIntervalChange={handleRefreshIntervalChange}
 											/>
 										</DashboardLayout.Header>
 									</DashboardLayout.Sticky>
@@ -285,7 +388,9 @@ function DashboardViewPage() {
 												onCancel={() => setPreviewed(null)}
 												onRestored={() => setPreviewed(null)}
 											/>
-										) : activeDashboard.widgets.length === 0 && mode === "view" ? (
+										) : activeDashboard.widgets.length === 0 &&
+										  (activeDashboard.sections?.length ?? 0) === 0 &&
+										  mode === "view" ? (
 											<div className="flex flex-col items-center justify-center gap-4 px-4 py-24 text-center">
 												<div className="flex gap-2">
 													<div className="size-8 rounded bg-primary/15" />
@@ -309,7 +414,7 @@ function DashboardViewPage() {
 															to: "/dashboards/$dashboardId",
 															params: { dashboardId },
 															search: (prev) => ({
-																...pickVariableParams(prev),
+																...pickDashboardControlParams(prev),
 																mode: "edit" as const,
 															}),
 														})
@@ -320,15 +425,41 @@ function DashboardViewPage() {
 												</button>
 											</div>
 										) : (
-											<DashboardCanvas widgets={activeDashboard.widgets} />
+											<DashboardSections
+												renderWidget={LiveWidgetRenderer}
+												widgets={activeDashboard.widgets}
+												sections={activeDashboard.sections ?? []}
+												search={sectionViewSearch}
+												onToggleCollapsed={(sectionId, collapsed) =>
+													applySectionView((prev) =>
+														withSectionCollapsed(prev, sectionId, collapsed),
+													)
+												}
+												onSelectTab={(sectionId, tabId) =>
+													applySectionView((prev) =>
+														withActiveTab(prev, sectionId, tabId),
+													)
+												}
+												onAddWidget={(sectionId, tabId) => {
+													setPendingSectionTarget({ sectionId, tabId })
+													setChartPickerOpen(true)
+												}}
+											/>
 										)}
 
 										<WidgetPickerWithActions
 											open={readOnly || isPreviewing ? false : chartPickerOpen}
+											target={pendingSectionTarget}
 											onOpenChange={
 												readOnly || isPreviewing
 													? () => undefined
-													: setChartPickerOpen
+													: (open) => {
+															setChartPickerOpen(open)
+															// Reset on close so the next toolbar "Add
+															// widget" lands on the root canvas rather
+															// than inheriting the last group used.
+															if (!open) setPendingSectionTarget(null)
+														}
 											}
 										/>
 									</DashboardLayout.Scroll>
@@ -382,10 +513,21 @@ function HistoryPanelMount({ dashboardId, onClose }: { dashboardId: DashboardId;
 function WidgetPickerWithActions({
 	open,
 	onOpenChange,
+	target,
 }: {
 	open: boolean
 	onOpenChange: (open: boolean) => void
+	/** Which grid the chosen widget lands in; `null` is the root canvas. */
+	target: SectionTarget
 }) {
 	const { addWidget } = useDashboardActions()
-	return <WidgetPicker open={open} onOpenChange={onOpenChange} onSelect={addWidget} />
+	return (
+		<WidgetPicker
+			open={open}
+			onOpenChange={onOpenChange}
+			onSelect={(visualization, dataSource, display) =>
+				addWidget(visualization, dataSource, display, target)
+			}
+		/>
+	)
 }

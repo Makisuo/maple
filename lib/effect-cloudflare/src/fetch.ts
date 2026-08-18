@@ -68,30 +68,28 @@ const doFetch = (
 	}
 	const url = urlResult.success
 
+	// SAFETY: DOM and Workers fetch declarations describe the same Fetch API runtime values.
 	const send = (body: BodyInit | undefined) =>
-		Effect.mapError(
-			Effect.map(
-				Effect.tryPromise({
-					try: () =>
-						fetcher.fetch(
-							url.toString() as runtime.RequestInfo,
-							{
-								method: request.method,
-								headers: request.headers as unknown as runtime.HeadersInit,
-								body,
-								duplex: request.body._tag === "Stream" ? "half" : undefined,
-							} as runtime.RequestInit,
-						) as unknown as Promise<Response>,
-					catch: (cause) => cause,
-				}),
-				(response) => HttpClientResponse.fromWeb(request, response),
-			),
-			(cause) =>
-				new HttpClientError.TransportError({
-					request,
-					cause,
-					description: "Service binding fetch failed",
-				}),
+		Effect.map(
+			Effect.tryPromise({
+				try: () =>
+					fetcher.fetch(
+						url.toString() as runtime.RequestInfo,
+						{
+							method: request.method,
+							headers: request.headers as runtime.HeadersInit,
+							body,
+							duplex: request.body._tag === "Stream" ? "half" : undefined,
+						} as runtime.RequestInit,
+					) as unknown as Promise<Response>,
+				catch: (cause) =>
+					new HttpClientError.TransportError({
+						request,
+						cause,
+						description: "Service binding fetch failed",
+					}),
+			}),
+			(response) => HttpClientResponse.fromWeb(request, response),
 		)
 
 	switch (request.body._tag) {

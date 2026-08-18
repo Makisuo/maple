@@ -109,9 +109,6 @@ done
 # which carries the same swap and the longer note.
 ico "$MARK" "$TILE" "apps/local-ui/public/favicon.ico"
 
-# --- Expo web favicon -------------------------------------------------------
-render "$TMP/rounded.svg" 48 apps/mobile/assets/favicon.png
-
 # --- PWA / apple-touch-icon / schema.org logo -------------------------------
 for size in 192 512; do
 	render "$TMP/square.svg" "$size" "$TMP/logo$size.png"
@@ -120,15 +117,5 @@ for size in 192 512; do
 		cp "$TMP/flat$size.png" "apps/$app/public/logo$size.png"
 	done
 done
-
-# --- Expo native app icons --------------------------------------------------
-# icon.png is the iOS/store icon: full-bleed and opaque, iOS masks its own
-# corners. adaptive-icon.png and splash-icon.png stay transparent — Android
-# and Expo supply the background from app.json, so baking a tile into the
-# foreground would double it up and clip under the system mask.
-render "$TMP/square.svg" 1024 "$TMP/icon.png"
-flatten "$TMP/icon.png" apps/mobile/assets/icon.png
-render "$TMP/bare.svg"   1024 apps/mobile/assets/adaptive-icon.png
-render "$TMP/splash.svg" 1024 apps/mobile/assets/splash-icon.png
 
 echo "icons regenerated from $SRC"

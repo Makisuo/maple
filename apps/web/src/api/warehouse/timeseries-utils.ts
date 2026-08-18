@@ -1,6 +1,5 @@
-import { bucketTimeline, computeBucketSeconds as computeBucketSecondsMs } from "@maple/query-engine"
+import { bucketTimeline, computeBucketSecondsForRange } from "@maple/query-engine"
 
-const TARGET_POINTS = 100
 const TINYBIRD_DATETIME_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(\.\d+)?$/
 
 function toEpochMs(value: string): number {
@@ -82,20 +81,31 @@ export function toIsoBucket(value: string | Date): string {
 	return new Date(parsed).toISOString()
 }
 
-export function computeBucketSeconds(
-	startTime?: string,
-	endTime?: string,
-	targetPoints = TARGET_POINTS,
-): number {
-	if (!startTime || !endTime) return 300
+/**
+ * Chart-policy bucket width, from warehouse DateTime strings.
+ *
+ * A thin alias over the shared `computeBucketSecondsForRange` — kept as a local
+ * export because ~15 call sites import it from here, not because it does
+ * anything of its own.
+ */
+export function computeBucketSeconds(startTime?: string, endTime?: string, targetPoints?: number): number {
+	return computeBucketSecondsForRange(startTime, endTime, "chart", targetPoints)
+}
 
-	const startMs = toEpochMs(startTime)
-	const endMs = toEpochMs(endTime)
-	if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
-		return 300
-	}
-
-	return computeBucketSecondsMs(startMs, endMs, { targetPoints })
+/**
+ * Round a bucket width up to a whole minute.
+ *
+ * The service-overview rollup tiers are minute- and hour-grain, so a bucket that
+ * is not a minute multiple has no tier that can place a row inside it and the
+ * query falls back to scanning raw spans. Callers that can tolerate a slightly
+ * coarser bucket use this to stay on the rollup.
+ *
+ * Rounds UP, never below 60: rounding down would produce more points than the
+ * caller asked for, and 0 is not a bucket.
+ */
+export function quantizeToMinute(bucketSeconds: number): number {
+	if (!Number.isFinite(bucketSeconds) || bucketSeconds <= 60) return 60
+	return Math.ceil(bucketSeconds / 60) * 60
 }
 
 export function buildBucketTimeline(

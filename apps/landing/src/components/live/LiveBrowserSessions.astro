@@ -38,14 +38,14 @@ const events: SessionEvent[] = [
 	{ t: "1:12", type: "click", label: "Retry payment", tid: "b740" },
 ];
 
-const typeLabel: Record<EventType, string> = {
+const typeLabel: Record<EventType, string>  = {
 	nav: "NAV",
 	click: "CLICK",
 	input: "INPUT",
 	console: "CONSOLE",
 	net: "NET",
 	error: "ERROR",
-};
+} satisfies Record<EventType, string>;
 
 const n = events.length;
 

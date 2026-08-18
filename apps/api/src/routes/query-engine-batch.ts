@@ -1,8 +1,9 @@
 import type { QueryEngineBatchOutcome, QueryEngineResult } from "@maple/query-engine"
 import { Clock, Duration, Effect } from "effect"
+import { QueryEngineTimeoutError, type SelfDescribingHttpError } from "@maple/domain/http"
 
 /**
- * Fan-out for `POST /api/query-engine/execute-batch`.
+ * Fan-out for `POST /internal/query-engine/execute-batch`.
  *
  * Extracted from the route handler so the two things that actually carry risk —
  * the shared deadline and per-item failure isolation — are testable without an
@@ -29,10 +30,7 @@ export const QE_BATCH_DEADLINE_MS = 25_000
 
 const timedOut = (): QueryEngineBatchOutcome => ({
 	outcome: "failure",
-	error: {
-		_tag: "@maple/http/errors/QueryEngineTimeoutError",
-		message: "Query exceeded the batch deadline.",
-	},
+	error: new QueryEngineTimeoutError({ message: "Query exceeded the batch deadline." }).error,
 })
 
 /**
@@ -41,10 +39,7 @@ const timedOut = (): QueryEngineBatchOutcome => ({
  * as `failure` outcomes rather than failing the effect: one bad widget must not
  * take down the others sharing its request.
  */
-export const runQueryEngineBatch = <
-	Request,
-	Error extends { readonly _tag: string; readonly message: string },
->(options: {
+export const runQueryEngineBatch = <Request, Error extends SelfDescribingHttpError>(options: {
 	readonly requests: ReadonlyArray<Request>
 	readonly execute: (request: Request) => Effect.Effect<QueryEngineResult, Error>
 	readonly deadlineMs?: number
@@ -72,7 +67,7 @@ export const runQueryEngineBatch = <
 						Effect.catch((error) =>
 							Effect.succeed({
 								outcome: "failure",
-								error: { _tag: error._tag, message: error.message },
+								error: error.error,
 							} satisfies QueryEngineBatchOutcome),
 						),
 					)

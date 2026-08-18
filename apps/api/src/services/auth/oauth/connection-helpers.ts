@@ -24,8 +24,9 @@ import {
 	parseBase64Aes256GcmKey,
 	type EncryptedValue,
 } from "@/platform/Crypto"
-import type { DatabaseClient, DatabaseShape } from "@/platform/DatabaseLive"
-import type { EnvShape } from "@/platform/Env"
+import type { DatabaseApi } from "@/platform/DatabaseLive"
+import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
+import type { EnvConfig } from "@/platform/Env"
 import { msToDate } from "@/platform/time"
 
 export const OAUTH_STATE_TTL_MS = 10 * 60_000 // 10 minutes
@@ -35,12 +36,12 @@ export const OAUTH_REFRESH_LEEWAY_MS = 60_000 // refresh when the access token i
  * How long `getValidConnectionToken` may serve a connection row from the
  * in-isolate memo instead of re-reading Postgres.
  *
- * Why this exists: on Workers every `database.execute` opens a fresh
- * postgres.js client over Hyperdrive, so an uncached read on a hot path is a
- * ~200ms network call that is also exposed to the 2s/8s dial ladder in
- * `pg-execute.ts` — measured at p50 11ms but with ~4% of dials stalling out to
- * 10s. Poller and scrape paths call this once per tick per org, which made it
- * one of the largest sources of dial volume on the api worker.
+ * Why this exists: an uncached read on a hot path is a network call exposed to
+ * the dial itself — measured at p50 11ms but with ~4% of dials stalling out.
+ * Poller and scrape paths call this once per tick per org, which made it one of
+ * the largest sources of dial volume on the api worker. Requests now share one
+ * connection per invocation (`pg-connection-scope.ts`), which amortizes the
+ * dial but not the round trip.
  *
  * 60s is deliberately far tighter than the token's own lifetime: the memo is
  * about collapsing a burst of same-tick reads, not about holding credentials.
@@ -65,8 +66,8 @@ const decodeTokenResponse = Schema.decodeUnknownEffect(OAuthTokenResponseSchema)
 export const toUpstreamError = (message: string, status?: number, cause?: unknown) =>
 	new IntegrationsUpstreamError({
 		message,
-		...(status === undefined ? {} : { status }),
-		...(cause === undefined ? {} : { cause }),
+		...(!(status === undefined) ? { status } : undefined),
+		...(!(cause === undefined) ? { cause } : undefined),
 	})
 
 /** The token-endpoint slice of a provider's resolved OAuth config. */
@@ -82,8 +83,8 @@ export interface MakeOAuthConnectionHelpersOptions {
 	readonly provider: string
 	/** Display name used in error messages ("Cloudflare", "Hazel"). */
 	readonly providerLabel: string
-	readonly database: DatabaseShape
-	readonly env: EnvShape
+	readonly database: DatabaseApi
+	readonly env: EnvConfig
 }
 
 /**
@@ -108,14 +109,12 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				}),
 		)
 
-		const toPersistenceError = (cause: unknown) =>
-			new IntegrationsPersistenceError({
-				message:
-					cause instanceof Error ? cause.message : `${providerLabel} integration database error`,
-			})
+		const toPersistenceError = makePersistenceErrorMapper(
+			IntegrationsPersistenceError,
+			`${providerLabel} integration database error`,
+		)
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			database.execute(fn).pipe(Effect.mapError(toPersistenceError))
+		const dbExecute = makeDbExecute(database, `${providerLabel} integration`, toPersistenceError)
 
 		const encryptValue = (plaintext: string) =>
 			encryptAes256Gcm(
@@ -332,7 +331,9 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					code,
 					redirect_uri: redirectUri,
 					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
+					...(config.clientSecret
+						? { client_secret: Redacted.value(config.clientSecret) }
+						: undefined),
 					...extraParams,
 				})
 				if (status < 200 || status >= 300) {
@@ -357,7 +358,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				grant_type: "refresh_token",
 				refresh_token: refreshToken,
 				client_id: config.clientId,
-				...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
+				...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : undefined),
 			})
 			if (status === 400 || status === 401) {
 				return yield* Effect.fail(

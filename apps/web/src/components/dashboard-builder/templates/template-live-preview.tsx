@@ -5,7 +5,7 @@ import { useContainerSize } from "@maple/ui/hooks/use-container-size"
 import type { V2DashboardTemplate } from "@maple/domain/http/v2"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { DashboardTimeRangeWrapper } from "@/components/dashboard-builder/dashboard-providers"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
@@ -47,7 +47,7 @@ const MIN_HEIGHT: Record<string, number> = {
 	stat: CARD_CHROME + 80,
 	gauge: CARD_CHROME + 108,
 	markdown: CARD_CHROME + 28,
-}
+} satisfies Record<string, number>
 /**
  * Charts and the table/list family. The two terms are the chart box's whole
  * budget: a 128px plot, comfortably clear of `MIN_CHART_PLOT_HEIGHT` (100), and
@@ -188,7 +188,7 @@ export function TemplateLivePreview({ template, parameters, className }: Templat
 
 	const result = useAtomValue(
 		armed
-			? MapleApiV2AtomClient.query("dashboards", "previewTemplate", {
+			? retainedQueryV2("dashboards", "previewTemplate", {
 					params: { template_id: template.id },
 					payload,
 					// Abandoned parameter variants shouldn't accumulate.
@@ -199,7 +199,7 @@ export function TemplateLivePreview({ template, parameters, className }: Templat
 
 	return Result.builder(result)
 		.onSuccess((preview) => {
-			const widgets = preview.widgets as unknown as DashboardWidget[]
+			const widgets = preview.widgets as DashboardWidget[]
 			const shown = widgets.slice(0, MAX_PREVIEW_WIDGETS)
 			const hidden = widgets.length - shown.length
 

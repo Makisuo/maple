@@ -1,7 +1,7 @@
 import { McpQueryError, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 
 export function registerGetDashboardTool(server: McpToolRegistrar) {
@@ -12,7 +12,7 @@ export function registerGetDashboardTool(server: McpToolRegistrar) {
 			dashboard_id: requiredStringParam("Dashboard ID to retrieve"),
 		}),
 		Effect.fn("McpTool.getDashboard")(function* ({ dashboard_id }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const persistence = yield* DashboardPersistenceService
 
 			const result = yield* persistence.list(tenant.orgId).pipe(
@@ -59,7 +59,7 @@ export function registerGetDashboardTool(server: McpToolRegistrar) {
 					// Only present when the widget is pinned to its own window; the
 					// absence is meaningful ("follows the dashboard range"), so it must
 					// not become an explicit `undefined` on the way out.
-					...(w.timeRange ? { timeRange: w.timeRange } : {}),
+					...(w.timeRange ? { timeRange: w.timeRange } : undefined),
 				})),
 				createdAt: dashboard.createdAt,
 				updatedAt: dashboard.updatedAt,

@@ -23,7 +23,7 @@ import { matchesGlob } from "./glob"
 /**
  * - `allow` — the tool executes inside the turn.
  * - `ask` — the turn *stops*: the call is emitted as a proposal and applied out of band by
- *   `POST /api/chat/apply`. Maple has no in-turn suspend; see the note on `ask` below.
+ *   `POST /internal/chat/apply`. Maple has no in-turn suspend; see the note on `ask` below.
  * - `deny` — the tool is omitted from the request entirely. The model never learns it exists,
  *   which is a stronger and cheaper guarantee than refusing the call after the fact.
  */

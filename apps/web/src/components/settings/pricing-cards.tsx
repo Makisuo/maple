@@ -53,7 +53,7 @@ const FEATURE_ICONS: Record<string, IconComponent> = {
 	traces: PulseIcon,
 	metrics: ChartLineIcon,
 	browser_sessions: PlayRotateClockwiseIcon,
-}
+} satisfies Record<string, IconComponent>
 
 // Display labels for the metered data rows, keyed by Autumn featureId (Autumn
 // returns the raw featureId — e.g. "browser_sessions" — when a feature has no
@@ -63,7 +63,7 @@ const DATA_FEATURE_LABELS: Record<string, string> = {
 	traces: "Traces",
 	metrics: "Metrics",
 	browser_sessions: "Browser Sessions",
-}
+} satisfies Record<string, string>
 
 // Per-feature icons for the platform-feature rows, keyed by the `icon` strings
 // in lib/billing/plans.ts. Falls back to CircleCheckIcon for any unmapped key.
@@ -73,7 +73,7 @@ const PLATFORM_FEATURE_ICONS: Record<string, IconComponent> = {
 	bell: BellIcon,
 	code: CodeIcon,
 	shield: ShieldIcon,
-}
+} satisfies Record<string, IconComponent>
 
 const HIDDEN_FEATURE_IDS = new Set<string>(["ai_input_tokens", "ai_output_tokens"])
 
@@ -241,7 +241,6 @@ export function PricingCards() {
 
 	const plans = plansResult.value.plans
 
-	// Filter out add-on and auto-enabled (free) plans for the main grid
 	const visiblePlans = plans.filter((p) => !p.addOn && !p.autoEnable)
 
 	async function handleCheckout(planId: string) {

@@ -7,9 +7,9 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
-import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorIssueId, WorkflowState } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
@@ -25,7 +25,7 @@ export function registerReleaseErrorIssueTool(server: McpToolRegistrar) {
 			note: optionalStringParam("Optional reasoning / context"),
 		}),
 		Effect.fn("McpTool.releaseErrorIssue")(function* ({ issue_id, transition_to, note }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const decodedIssueId = decodeIssueId(issue_id)
 			if (Option.isNone(decodedIssueId)) {
 				return validationError(
@@ -44,8 +44,8 @@ export function registerReleaseErrorIssueTool(server: McpToolRegistrar) {
 			}
 
 			const actorId = yield* resolveActorId(tenant)
-			const errors = yield* ErrorsService
-			const issue = yield* errors
+			const workflow = yield* ErrorIssueWorkflowService
+			const issue = yield* workflow
 				.releaseIssue(tenant.orgId, actorId, decodedIssueId.value, {
 					transitionTo: typedState,
 					note,

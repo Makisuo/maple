@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { InternalRpcInvalidInputError } from "@maple/domain/internal-rpc"
 import { callMcpToolRpc, submitDiagnosisRpc } from "./internal-rpc"
-import { InvestigationService, type InvestigationServiceShape } from "./services/errors/InvestigationService"
+import { McpToolExecutor, type McpToolExecutorApi } from "./mcp/dispatcher"
+import { InvestigationService, type InvestigationServiceApi } from "./services/errors/InvestigationService"
 
 const investigationId = "00000000-0000-4000-8000-000000000001"
 const report = {
@@ -22,7 +22,7 @@ const report = {
 	confidence: "high",
 } as const
 
-const unusedInvestigationService: InvestigationServiceShape = {
+const unusedInvestigationService: InvestigationServiceApi = {
 	listInvestigations: () => Effect.die("unused"),
 	getInvestigation: () => Effect.die("unused"),
 	createInvestigation: () => Effect.die("unused"),
@@ -32,17 +32,22 @@ const unusedInvestigationService: InvestigationServiceShape = {
 	submitDiagnosis: () => Effect.die("unused"),
 }
 
+const unusedMcpToolExecutor: McpToolExecutorApi = {
+	execute: () => Effect.die("unused"),
+}
+
 describe("internal RPC boundary", () => {
 	it.effect("rejects invalid org IDs before MCP dispatch", () =>
 		Effect.gen(function* () {
 			const error = yield* Effect.flip(
-				callMcpToolRpc({ orgId: " ", name: "inspect_trace", input: {} }) as Effect.Effect<
-					never,
-					InternalRpcInvalidInputError,
-					never
-				>,
+				callMcpToolRpc({ orgId: " ", name: "inspect_trace", input: {} }).pipe(
+					Effect.provideService(McpToolExecutor, unusedMcpToolExecutor),
+				),
 			)
 			expect(error._tag).toBe("@maple/internal-rpc/InvalidInputError")
+			if (error._tag !== "@maple/internal-rpc/InvalidInputError") {
+				throw new Error(`Expected invalid input, received ${error._tag}`)
+			}
 			expect(error.method).toBe("callMcpTool")
 		}),
 	)
@@ -71,7 +76,7 @@ describe("internal RPC boundary", () => {
 		Effect.gen(function* () {
 			const calls: Array<{ orgId: string; investigationId: string; summary: string }> = []
 			const expected = { id: investigationId, status: "diagnosed" } as never
-			const service: InvestigationServiceShape = {
+			const service: InvestigationServiceApi = {
 				...unusedInvestigationService,
 				submitDiagnosis: (orgId, id, request) =>
 					Effect.sync(() => {

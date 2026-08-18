@@ -1,7 +1,7 @@
 import { QueryEngineExecuteRequest, formatWarehouseDateTime } from "@maple/query-engine"
 import { Clock, Effect, Schema } from "effect"
 import { ListMetricsRequest, MetricName, MetricsSummaryRequest, ServiceName } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import {
 	WarehouseDateTimeString,
 	decodeInput,
@@ -9,8 +9,9 @@ import {
 	extractAttributeValues,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
+import { QUERY_BUILDER_METRIC_TYPES } from "@maple/query-model"
 
-const MetricTypeSchema = Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])
+const MetricTypeSchema = Schema.Literals(QUERY_BUILDER_METRIC_TYPES)
 
 const ListMetricsInputSchema = Schema.Struct({
 	limit: Schema.optional(
@@ -66,7 +67,7 @@ const listMetricsEffect = Effect.fn("QueryEngine.listMetrics")(function* ({
 
 	const result = yield* runWarehouseQuery("listMetrics", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.listMetrics({
 				payload: new ListMetricsRequest({
 					startTime: input.startTime ?? fallback.startTime,
@@ -173,7 +174,7 @@ const getMetricsSummaryEffect = Effect.fn("QueryEngine.getMetricsSummary")(funct
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
 	const result = yield* runWarehouseQuery("metricsSummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.metricsSummary({
 				payload: new MetricsSummaryRequest({
 					startTime: input.startTime ?? fallback.startTime,

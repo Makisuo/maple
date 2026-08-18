@@ -38,7 +38,7 @@ const SEVERITY_NUMBERS: Record<LogSeverity, SeverityNumber> = {
 	info: SeverityNumber.INFO,
 	warn: SeverityNumber.WARN,
 	error: SeverityNumber.ERROR,
-}
+} satisfies Record<LogSeverity, SeverityNumber>
 
 /** Drops absent values so they never become empty-string attributes. */
 function definedAttributes(attributes: LogAttributes): Record<string, string | number | boolean> {

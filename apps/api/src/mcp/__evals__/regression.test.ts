@@ -103,3 +103,80 @@ describe("inspect_span drill-down", () => {
 		expect(text.toLowerCase()).toContain("not found")
 	})
 })
+
+// Every one of these reproduces a failure observed in production traces over the
+// 8 days to 2026-08-17. They run the REAL handler through the REAL dispatcher, so
+// they assert the message an agent actually receives — the thing that decides
+// whether it recovers or retries the same mistake.
+describe("agent-recoverable error messages", () => {
+	// error_detail: 15 failures, 100% of that tool's errors. `list_error_issues`
+	// rendered an 8-char slice of a Postgres issue id and `find_errors` claimed the
+	// two ids were "the same identity", so agents fed an issue id into a UInt64
+	// column and got a raw ClickHouse parse error back.
+	it("rejects a truncated issue id with the tool that actually produces fingerprints", async () => {
+		const text = renderedText(await runToolDirect(rt, "error_detail", { fingerprint: "2b11d788" }))
+		expect(text).toContain("find_errors")
+		expect(text).toMatch(/decimal/i)
+		// The old behaviour: the value reached the SQL and CH complained.
+		expect(text).not.toMatch(/toUInt64|syntax error/i)
+	})
+
+	it("rejects a full issue UUID rather than querying with it", async () => {
+		const text = renderedText(
+			await runToolDirect(rt, "error_detail", {
+				fingerprint: "2b11d788-6f3a-4c21-9f0e-51c4a8d7e930",
+			}),
+		)
+		expect(text).toMatch(/UUID|issue id/i)
+		expect(text).not.toMatch(/toUInt64|syntax error/i)
+	})
+
+	// The `alert:<uuid>:<scope>` form is an incident id in a third identity space.
+	it("routes an alert incident id to the incident tools", async () => {
+		const text = renderedText(
+			await runToolDirect(rt, "error_detail", {
+				fingerprint: "alert:c797a165-b518-4d13-9963-c542401431a9:all",
+			}),
+		)
+		expect(text).toContain("incident")
+		expect(text).toMatch(/list_alert_incidents|get_incident_timeline/)
+	})
+
+	it("accepts a genuine decimal fingerprint", async () => {
+		const text = renderedText(
+			await runToolDirect(rt, "error_detail", { fingerprint: "11640295108927840024" }),
+		)
+		expect(text).not.toMatch(/Invalid fingerprint/i)
+	})
+
+	// query_data: 22 failures, 100% of that tool's errors — all a token that is
+	// valid for one source/kind combination rejected by another, reported as a bare
+	// SchemaError that named neither the combination nor the alternatives.
+	it("names the valid metrics when the token is only valid for the other kind", async () => {
+		const text = renderedText(
+			await runToolDirect(rt, "query_data", {
+				source: "metrics",
+				kind: "breakdown",
+				metric: "rate",
+				metric_name: "http.server.duration",
+				metric_type: "histogram",
+			}),
+		)
+		expect(text).toContain('"avg", "sum", "count"')
+		expect(text).toContain('kind="timeseries"')
+		expect(text).not.toContain("SchemaError")
+	})
+
+	it("names the valid group_by values for the chosen source", async () => {
+		const text = renderedText(
+			await runToolDirect(rt, "query_data", {
+				source: "logs",
+				kind: "breakdown",
+				metric: "count",
+				group_by: "http_method",
+			}),
+		)
+		expect(text).toContain('"service", "severity"')
+		expect(text).not.toContain("SchemaError")
+	})
+})

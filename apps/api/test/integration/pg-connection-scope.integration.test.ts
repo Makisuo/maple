@@ -3,7 +3,7 @@ import { createMaplePgSocket } from "@maple/db/client"
 import { sql } from "drizzle-orm"
 import { Effect, Exit, Tracer } from "effect"
 import type { DatabaseClient } from "@/platform/DatabaseLive"
-import { makePgConnectionScope } from "@/platform/pg-connection-scope"
+import { makePgConnectionScope, MAX_CONNECTIONS } from "@/platform/pg-connection-scope"
 import { isPostgresConnectionError, postgresErrorType } from "@/platform/postgres-errors"
 
 /**
@@ -62,40 +62,60 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		return rows[0]?.n ?? 0
 	}
 
-	/** Postgres tears backends down asynchronously, so settle rather than sample once. */
-	const waitForBackends = async (expected: number): Promise<number> => {
-		for (let attempt = 0; attempt < 50; attempt++) {
-			const n = await backends()
-			if (n === expected) return n
+	/**
+	 * Every assertion here is a DELTA against a baseline sampled at the start of
+	 * the test, never an absolute count. The docker Postgres these run against is
+	 * shared — a dev server or a previous run can hold tens of backends on the
+	 * same database — and an absolute count turns that into a spurious failure
+	 * about connection scoping.
+	 */
+	const settle = async (): Promise<number> => {
+		let previous = await backends()
+		for (let attempt = 0; attempt < 30; attempt++) {
 			await new Promise((resolve) => setTimeout(resolve, 100))
+			const n = await backends()
+			if (n === previous) return n
+			previous = n
 		}
-		return backends()
+		return previous
 	}
 
-	it("serves many executes from a single backend, and releases it on close", async () => {
-		await waitForBackends(0)
+	/** Wait for the scope's own backends to reach `expected`, ignoring ambient ones. */
+	const waitForDelta = async (baseline: number, expected: number): Promise<number> => {
+		for (let attempt = 0; attempt < 50; attempt++) {
+			const delta = (await backends()) - baseline
+			if (delta === expected) return delta
+			await new Promise((resolve) => setTimeout(resolve, 100))
+		}
+		return (await backends()) - baseline
+	}
+
+	it("serves many sequential executes from a single backend, and releases it on close", async () => {
+		const baseline = await settle()
 		const scope = makePgConnectionScope(url)
 
+		// Sampled AFTER each execute, not inside it: the client is lazy, so before
+		// the first statement runs there is legitimately no connection yet.
 		const observed: Array<number> = []
-		for (let i = 0; i < 5; i++) {
-			await Effect.runPromise(
-				scope.run(async (db: DatabaseClient) => {
-					observed.push(await backends())
-					return db.execute(sql`select 1 as one`)
-				}),
-			)
+		try {
+			for (let i = 0; i < 5; i++) {
+				await Effect.runPromise(scope.run((db: DatabaseClient) => db.execute(sql`select 1 as one`)))
+				observed.push((await backends()) - baseline)
+			}
+		} finally {
+			await scope.close()
 		}
 
-		// The claim the whole PR rests on: five executes, one connection. Before
-		// this change each of these was its own handshake and its own slot.
+		// The claim this rests on: five SEQUENTIAL executes, one connection. Each of
+		// these used to be its own handshake and its own outbound slot. Raising the
+		// pool ceiling does not change this — postgres.js opens a second socket only
+		// when a second statement is actually in flight.
 		assert.deepStrictEqual(observed, [1, 1, 1, 1, 1])
-
-		await scope.close()
-		assert.strictEqual(await waitForBackends(0), 0)
+		assert.strictEqual(await waitForDelta(baseline, 0), 0)
 	})
 
-	it("keeps concurrent executes on one backend and does not cross-attribute their SQL", async () => {
-		await waitForBackends(0)
+	it("bounds concurrent executes by the pool ceiling and does not cross-attribute their SQL", async () => {
+		const baseline = await settle()
 		const scope = makePgConnectionScope(url)
 		const { spans, tracer } = makeRecordingTracer()
 
@@ -109,7 +129,7 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 			).pipe(Effect.withTracer(tracer)),
 		)
 
-		assert.strictEqual(await backends(), 1)
+		const backendsDuring = (await backends()) - baseline
 
 		// The real test of the per-call `wrapMaplePgClient`. Drizzle fixes its
 		// logger at construction, so a single shared wrapper would put both
@@ -124,11 +144,51 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		assert.notInclude(alpha[0], "beta_marker")
 		assert.notInclude(beta[0], "alpha_marker")
 
+		// This asserted exactly 1 while the pool was capped at 1, which is the cap
+		// that serialized cron ticks behind a single connection. The contract now is
+		// a CEILING, not serialization: concurrent statements may open up to
+		// `MAX_CONNECTIONS` and no more. How many of the two land together is a race
+		// between them, so the lower bound is 1, not 2.
+		assert.isAtLeast(backendsDuring, 1)
+		assert.isAtMost(backendsDuring, MAX_CONNECTIONS)
+
 		await scope.close()
+		assert.strictEqual(await waitForDelta(baseline, 0), 0)
 	})
 
-	it("runs a transaction and lets queued executes through behind it", async () => {
-		await waitForBackends(0)
+	it("overlaps concurrent statements instead of serializing them", async () => {
+		// The regression this whole change exists for. With the pool capped at 1,
+		// four 300ms statements queue head-to-tail and take ~1.2s; a cron tick issuing
+		// thousands is what took `SELECT actors` from p50 928ms to 5687ms in
+		// production. `pg_sleep` makes the serialization observable in wall time,
+		// which no fake socket can do.
+		const baseline = await settle()
+		const scope = makePgConnectionScope(url)
+		const sleepSeconds = 0.3
+		const concurrency = 4
+
+		const startedAt = Date.now()
+		await Effect.runPromise(
+			Effect.all(
+				Array.from({ length: concurrency }, () =>
+					scope.run((db: DatabaseClient) => db.execute(sql`select pg_sleep(${sleepSeconds})`)),
+				),
+				{ concurrency },
+			),
+		)
+		const elapsedMs = Date.now() - startedAt
+
+		// Serialized would be >= 1200ms. Overlapped is one sleep plus scheduling.
+		// The midpoint is a wide margin either way, so this is not timing-flaky.
+		assert.isBelow(elapsedMs, sleepSeconds * 1000 * concurrency * 0.6)
+		assert.isAtMost((await backends()) - baseline, MAX_CONNECTIONS)
+
+		await scope.close()
+		assert.strictEqual(await waitForDelta(baseline, 0), 0)
+	})
+
+	it("runs a transaction and lets queued executes through beside it", async () => {
+		const baseline = await settle()
 		const scope = makePgConnectionScope(url)
 		const table = `scope_txn_${Date.now()}`
 
@@ -138,9 +198,10 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 			),
 		)
 
-		// With max: 1 a transaction holds the only connection. Anything queued
-		// behind it must complete rather than deadlock — the risk flagged when the
-		// pool size was fixed at one.
+		// A transaction pins whichever connection it runs on for its whole duration.
+		// Anything issued alongside it must still complete rather than deadlock —
+		// the risk originally flagged when the pool was fixed at one, and still worth
+		// holding now that the ceiling lets the sibling take its own connection.
 		const [, queued] = await Effect.runPromise(
 			Effect.all(
 				[
@@ -160,17 +221,18 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		const rows = await Effect.runPromise(
 			scope.run((db: DatabaseClient) => db.execute(sql.raw(`select count(*)::int as n from ${table}`))),
 		)
-		assert.strictEqual(Number((rows as unknown as Array<{ n: number }>)[0]?.n), 2)
-		assert.strictEqual(await backends(), 1)
+		assert.strictEqual(Number((rows as Array<{ n: number }>)[0]?.n), 2)
+		assert.isAtMost((await backends()) - baseline, MAX_CONNECTIONS)
 
 		await Effect.runPromise(scope.run((db: DatabaseClient) => db.execute(sql.raw(`drop table ${table}`))))
 		await scope.close()
+		assert.strictEqual(await waitForDelta(baseline, 0), 0)
 	})
 
-	it("classifies a refused dial as a connection error on a real socket", async () => {
-		// Port 1 is refused immediately, so both attempt budgets are spent in
-		// milliseconds. This closes the loop on postgres-errors.ts, which the unit
-		// suite only exercises against hand-built error objects.
+	it("classifies a refused connection as a connection error on a real socket", async () => {
+		// Port 1 is refused immediately. This closes the loop on postgres-errors.ts,
+		// which the unit suite only exercises against hand-built error objects, and
+		// is the diagnostic that replaced the connect/query duration split.
 		const scope = makePgConnectionScope("postgres://maple:maple@127.0.0.1:1/never")
 		const { spans, tracer } = makeRecordingTracer()
 
@@ -186,8 +248,49 @@ describe.skipIf(PG_URL === undefined)("PgConnectionScope against a real Postgres
 		}
 		const [span] = dbSpans(spans)
 		assert.isDefined(span)
-		assert.strictEqual(span.attributes.get("db.connect.completed"), false)
+		assert.strictEqual(span.attributes.get("db.connect.failed"), true)
 		assert.isDefined(span.attributes.get("error.type"))
+
+		await scope.close()
+	})
+
+	it("opens one connection for a whole fan-out against an unreachable origin", async () => {
+		// The production shape this exists for: a request whose branches all miss
+		// the org-config memo, against an origin that cannot be reached. Each branch
+		// must reuse the scope's one client rather than creating its own — an
+		// unreachable origin should cost one connection attempt's worth of outbound
+		// slot, not N.
+		//
+		// Real clients, counted: `openSocket` wraps the production constructor
+		// rather than replacing it, so this measures the same code path the unit
+		// test fakes.
+		let creations = 0
+		const scope = makePgConnectionScope("postgres://maple:maple@127.0.0.1:1/never", undefined, {
+			// The seam forwards the production options rather than inventing its own,
+			// so this measures the same client the request path builds.
+			openSocket: (options) => {
+				creations += 1
+				return createMaplePgSocket("postgres://maple:maple@127.0.0.1:1/never", options)
+			},
+		})
+
+		// Sequential on purpose: a concurrent version would pass trivially. The case
+		// that matters is the branch arriving after the previous failure resolved,
+		// which must not decide to start over with a new client.
+		const results: Array<"ok" | "rejected"> = []
+		for (let i = 0; i < 10; i++) {
+			results.push(
+				await Effect.runPromise(scope.run((db: DatabaseClient) => db.execute(sql`select 1`)))
+					.then(() => "ok" as const)
+					.catch(() => "rejected" as const),
+			)
+		}
+
+		assert.deepStrictEqual(
+			results,
+			Array.from({ length: 10 }, () => "rejected" as const),
+		)
+		assert.strictEqual(creations, 1)
 
 		await scope.close()
 	})

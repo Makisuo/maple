@@ -3,15 +3,15 @@ import { formatTable, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/alerts/AlertsService"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 
 const comparatorLabel: Record<string, string> = {
 	gt: ">",
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
-}
+} satisfies Record<string, string>
 
 export function registerListAlertIncidentsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -24,10 +24,10 @@ export function registerListAlertIncidentsTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results to return (default 50)"),
 		}),
 		Effect.fn("McpTool.listAlertIncidents")(function* ({ status, severity, group_key, limit }) {
-			const tenant = yield* resolveTenant
-			const alerts = yield* AlertsService
+			const tenant = yield* CurrentMcpTenant
+			const readModels = yield* AlertReadModelsService
 
-			const result = yield* alerts.listIncidents(tenant.orgId).pipe(
+			const result = yield* readModels.listIncidents(tenant.orgId).pipe(
 				Effect.mapError(
 					(error) =>
 						new McpQueryError({

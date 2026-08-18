@@ -6,7 +6,7 @@ import {
 	type McpToolRegistrar,
 } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
-import { withTenantExecutor, resolveTenant } from "@/mcp/lib/query-warehouse"
+import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { truncate } from "@/mcp/lib/format"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -62,7 +62,7 @@ export function registerGetSessionTranscriptTool(server: McpToolRegistrar) {
 			const lim = clampLimit(limit, { defaultValue: 100, max: 250 })
 			const off = clampOffset(offset, { max: 10_000 })
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				sessionId: session_id,

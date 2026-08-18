@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
@@ -14,7 +15,6 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import { type Flatten, isFlatten, stateOf as flattenStateOf } from "./internals.js"
 import {
 	InstanceScope,
-	ownerScope,
 	Registry,
 	type RegistryService,
 	releaseSubscription,
@@ -24,7 +24,6 @@ import {
 	trackSubscription,
 } from "./registry.js"
 import type * as KeyValueStore from "effect/unstable/persistence/KeyValueStore"
-import * as Event from "./event.js"
 import { makeSlot, type PersistOptions } from "./persistence.js"
 import { awaitFirst, evaluate, type WaitPredicate } from "./wait-for.js"
 
@@ -74,7 +73,7 @@ export const make = <A>(initial: A, options?: Options): Store<A> => ({
 	initial,
 	"~source": true,
 	"~sink": true,
-	...(options?.name === undefined ? {} : { name: options.name }),
+	...(!(options?.name === undefined) ? { name: options.name } : undefined),
 })
 
 export const isStore = (value: unknown): value is Store<unknown> =>
@@ -116,7 +115,7 @@ export const combine = <const Sources extends ReadonlyArray<Source<any>>, A>(
 	// eslint-disable-next-line revizo/no-type-assertion
 	initial: compute(...(sources.map((source) => source.initial) as SourceValues<Sources>)),
 	"~source": true,
-	...(options?.name === undefined ? {} : { name: options.name }),
+	...(!(options?.name === undefined) ? { name: options.name } : undefined),
 })
 
 /**
@@ -182,7 +181,8 @@ const Unresolved = Symbol.for("@unitflow/core/Store/Unresolved")
  * means taking the equivalent `withPermit` path.
  */
 const uncontended = (subscriptionRef: SubscriptionRef.SubscriptionRef<any>): boolean => {
-	const free: unknown = Reflect.get(subscriptionRef.semaphore, "free")
+	if (!("free" in subscriptionRef.semaphore)) return false
+	const free = subscriptionRef.semaphore.free
 	return typeof free === "number" && free >= 1
 }
 
@@ -592,7 +592,7 @@ const storeStream = <A>(store: Source<A>): Stream.Stream<A, never, Registry> =>
 					const items = queue
 					queue = []
 					tracker.outstanding = items.length
-					// eslint-disable-next-line revizo/no-type-assertion
+					// SAFETY: the queue-length guard above proves this array contains at least one item.
 					return Effect.succeed(items as unknown as readonly [A, ...Array<A>])
 				}
 				if (closed) return Cause.done()
@@ -605,7 +605,7 @@ const storeStream = <A>(store: Source<A>): Stream.Stream<A, never, Registry> =>
 						const items = queue
 						queue = []
 						tracker.outstanding = items.length
-						// eslint-disable-next-line revizo/no-type-assertion
+						// SAFETY: the queue-length guard above proves this array contains at least one item.
 						return Effect.succeed(items as unknown as readonly [A, ...Array<A>])
 					}),
 					Effect.onInterrupt(() => {
@@ -646,106 +646,6 @@ const watchSources = (source: Source<any>): ReadonlyArray<Source<any>> =>
 const uniqueSources = (sources: ReadonlyArray<Source<any>>): ReadonlyArray<Source<any>> => [
 	...new Map(sources.map((source) => [source.id, source])).values(),
 ]
-
-/** Creates an event that emits the store's value on every subsequent store
- * emission. The current replayed value is skipped, so construction does not
- * count as a change. */
-export const changed = <A>(
-	store: Source<A>,
-	options?: Pick<Event.Options, "name">,
-): Effect.Effect<Event.Event<A>, never, Registry> =>
-	Effect.gen(function* () {
-		const changedEvent = Event.make<A>(
-			options?.name !== undefined
-				? { name: options.name }
-				: store.name === undefined
-					? undefined
-					: { name: `${store.name}.changed` },
-		)
-		const sources = uniqueSources(watchSources(store))
-
-		// Flattened sources need the two-level stream watcher; everything else
-		// takes the fused path below: a synchronous store listener recomputes,
-		// dedupes, and dispatches into the event — no watcher pipeline at all.
-		if (sources.some(isFlatten)) {
-			let current = yield* get(store)
-			const emitIfChanged = Effect.flatMap(get(store), (value) =>
-				Effect.suspend(() => {
-					if (Object.is(value, current)) return Effect.void
-					current = value
-					return Event.emit(changedEvent, value)
-				}),
-			)
-			yield* Effect.forEach(
-				sources,
-				(source) =>
-					Registry.run(
-						stream(source).pipe(
-							Stream.drop(1),
-							Stream.mapEffect(() => emitIfChanged),
-						),
-					),
-				{ discard: true },
-			)
-			return changedEvent
-		}
-
-		const registry = yield* Registry
-		const scope = yield* ownerScope
-		// The event channel binds to the declaring scope now — the same owner the
-		// watcher pipeline's subscription would have bound it to.
-		const channel = yield* Event.pubsub(changedEvent)
-		// Materialize every watched ref, so the sync evaluator always resolves.
-		yield* Effect.forEach(sources, ref, { discard: true })
-		let current: unknown = yield* get(store)
-		const needsMemo = isCombined(store)
-		let closed = false
-		// Reads at dispatch time (not the offered value): a recomputation always
-		// reflects the latest source values, exactly like the watcher's `get`.
-		const listener: StoreStreamListener<unknown> = {
-			offer() {
-				if (closed) return
-				const value = evalSync(registry, store, needsMemo ? new Map() : undefined)
-				if (value === Unresolved || Object.is(value, current)) return
-				current = value
-				// The store may have been named after this event was created (port
-				// naming runs when `make` returns) — inherit lazily.
-				if (changedEvent.name === undefined && store.name !== undefined) {
-					// eslint-disable-next-line revizo/no-type-assertion
-					;(changedEvent as { name?: string }).name = `${store.name}.changed`
-				}
-				// The evaluator returns this source's value type.
-				// eslint-disable-next-line revizo/no-type-assertion
-				Event.dispatchUnsafe(registry, channel, changedEvent, value as A)
-			},
-			close() {
-				closed = true
-			},
-		}
-		const listenersByStore = listenersFor(registry)
-		for (const source of sources) {
-			const listeners = listenersByStore.get(source.id)
-			if (listeners === undefined) {
-				listenersByStore.set(source.id, new Set([listener]))
-			} else {
-				listeners.add(listener)
-			}
-		}
-		yield* Scope.addFinalizer(
-			scope,
-			Effect.sync(() => {
-				closed = true
-				const byStore = storeStreamListeners.get(registry)
-				for (const source of sources) {
-					const listeners = byStore?.get(source.id)
-					if (listeners === undefined) continue
-					listeners.delete(listener)
-					if (listeners.size === 0) byStore?.delete(source.id)
-				}
-			}),
-		)
-		return changedEvent
-	})
 
 /** `waitFor` options without a timeout: the wait can only end with a match
  * (or the interruption/failure paths documented on {@link waitFor}). */

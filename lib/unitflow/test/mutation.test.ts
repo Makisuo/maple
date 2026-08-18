@@ -234,22 +234,22 @@ describe("Mutation", () => {
 
 	it("keeps the sink's mutation type through NarrowInput and BoundUi (type-level)", () => {
 		type SaveSink = Mutation.Sink<{ readonly name: string }, { readonly id: number }, SaveError>
-		type Shape = {
+		type Definition = {
 			readonly inputs: { readonly save: SaveSink }
 			readonly outputs: Record<never, never>
 			readonly ui: { readonly save: SaveSink }
 		}
 
-		type NarrowedInput = Model.Ports<Shape>["inputs"]["save"]
+		type NarrowedInput = Model.Ports<Definition>["inputs"]["save"]
 		const toSink = (port: NarrowedInput): SaveSink => port
 		const fromSink = (sink: SaveSink): NarrowedInput => sink
 
-		const callThroughPorts = (ports: Model.Ports<Shape>) =>
+		const callThroughPorts = (ports: Model.Ports<Definition>) =>
 			Mutation.call(ports.inputs.save, { name: "Loft" })
 		type CallSuccess = Effect.Success<ReturnType<typeof callThroughPorts>>
 		const successWitness = (value: CallSuccess): { readonly id: number } => value
 
-		type Bound = BoundUi<Shape["ui"]>
+		type Bound = BoundUi<Definition["ui"]>
 		const bound: Bound = { save: (_value: { readonly name: string }) => undefined }
 		// @ts-expect-error the bound callback takes the mutation's input type
 		const wrong: Bound = { save: (_value: number) => undefined }

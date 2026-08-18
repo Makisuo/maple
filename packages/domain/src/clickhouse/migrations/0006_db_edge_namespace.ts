@@ -79,7 +79,7 @@ const dbEdgesBackfill: BackfillSpec = {
 	groupBy: "OrgId, Hour, ServiceName, DbSystem, DbNamespace, DeploymentEnv",
 }
 
-const dbQueryShapesBackfill: BackfillSpec = {
+const dbQuerySignaturesBackfill: BackfillSpec = {
 	kind: "backfill",
 	target: "service_map_db_query_shapes_hourly__v6",
 	columns: [
@@ -225,7 +225,7 @@ SELECT
   '' AS DbNamespace
 FROM service_map_db_query_shapes_hourly
 WHERE ${PRE_RETENTION_HOUR_PREDICATE}`,
-		dbQueryShapesBackfill,
+		dbQuerySignaturesBackfill,
 		"DROP TABLE IF EXISTS service_map_db_query_shapes_hourly__v6_old",
 		"RENAME TABLE service_map_db_query_shapes_hourly TO service_map_db_query_shapes_hourly__v6_old, service_map_db_query_shapes_hourly__v6 TO service_map_db_query_shapes_hourly",
 		"DROP TABLE IF EXISTS service_map_db_query_shapes_hourly__v6_old",

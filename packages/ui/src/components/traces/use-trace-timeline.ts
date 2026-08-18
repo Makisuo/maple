@@ -1,18 +1,14 @@
 import * as React from "react"
+import { spanStartMs } from "../../lib/span-tree"
 import type { SpanNode } from "../../lib/types"
 import type { TimelineBar, ViewportState, TimelineState, TimelineAction } from "./trace-timeline-types"
-import {
-	ROW_HEIGHT,
-	ROW_GAP,
-	OVERSCAN,
-	MIN_VISIBLE_ABS_MS,
-	DEFAULT_MAX_WINDOW_MS,
-} from "./trace-timeline-types"
+import { ROW_HEIGHT, ROW_GAP, OVERSCAN, MIN_TICK_PX, DEFAULT_MAX_WINDOW_MS } from "./trace-timeline-types"
+import { clampViewport, viewportBounds } from "./clamp-viewport"
 import { getValueHue } from "../../lib/colors"
 import { resolveColorValue, isStatusCodePreset, type ColorByField } from "./color-by"
 import { computeDefaultExpandedSpanIds, countDescendants } from "./auto-collapse"
 
-// --- Color palette (kept muted to preserve current aesthetic) ---
+export { clampViewport }
 
 const ERROR_HUE = 25
 const NEUTRAL_FILL = "oklch(0.22 0.005 0)"
@@ -30,8 +26,6 @@ function barBorderFromHue(hue: number | null, isError: boolean, statusPreset: bo
 	return `oklch(0.55 0.18 ${hue})`
 }
 
-// --- Layout ---
-
 export interface LayoutResult {
 	bars: TimelineBar[]
 	totalRows: number
@@ -43,6 +37,7 @@ export function layoutSpans(
 	rootSpans: SpanNode[],
 	expandedSpanIds: Set<string>,
 	colorBy: ColorByField,
+	traceStartMs: number,
 ): LayoutResult {
 	const bars: TimelineBar[] = []
 	const barIndexBySpanId = new Map<string, number>()
@@ -50,7 +45,7 @@ export function layoutSpans(
 	const statusPreset = isStatusCodePreset(colorBy)
 
 	function visit(node: SpanNode) {
-		const startMs = new Date(node.startTime).getTime()
+		const startMs = spanStartMs(node)
 		const endMs = startMs + node.durationMs
 		const hasChildren = node.children.length > 0
 		const isCollapsed = hasChildren && !expandedSpanIds.has(node.spanId)
@@ -64,6 +59,10 @@ export function layoutSpans(
 			row: currentRow,
 			startMs,
 			endMs,
+			// Trace-relative, because these become the `--b0`/`--b1` custom properties and the
+			// viewport's `--vp0` is trace-relative too. See `writeTimeSurface`.
+			offsetStartMs: startMs - traceStartMs,
+			offsetEndMs: endMs - traceStartMs,
 			depth: node.depth,
 			parentSpanId: node.parentSpanId,
 			isError,
@@ -99,125 +98,34 @@ export function layoutSpans(
 	return { bars, totalRows: currentRow, barIndexBySpanId, parentIndexById }
 }
 
-// --- State reducer ---
-
-export function clampViewport(vp: ViewportState, traceStartMs: number, traceEndMs: number): ViewportState {
-	const traceDuration = Math.max(0, traceEndMs - traceStartMs)
-	// Trace boundaries with 5% padding each side.
-	const padding = traceDuration * 0.05
-	const loBound = traceStartMs - padding
-	const hiBound = traceEndMs + padding
-	const boundWidth = hiBound - loBound
-
-	// Absolute floor only — a proportional floor (traceDuration * k) makes long traces
-	// un-zoomable: a 7-min trace would cap the window at tens of ms while the spans you're
-	// trying to inspect are µs-scale, so zoom appears not to work. SpanBar clamps its
-	// rendered width, so extreme zoom can't emit gigapixel nodes.
-	const minDuration = MIN_VISIBLE_ABS_MS
-	const maxDuration = Math.max(boundWidth, minDuration)
-
-	const rawDuration = vp.endMs - vp.startMs
-	const duration = Number.isFinite(rawDuration)
-		? Math.max(minDuration, Math.min(rawDuration, maxDuration))
-		: maxDuration
-
-	// Window as wide as (or wider than) the padded trace → center it, so neither edge
-	// clamp can push the other back out of bounds (degenerate/near-zero traces included).
-	if (duration >= boundWidth) {
-		const center = (loBound + hiBound) / 2
-		return { startMs: center - duration / 2, endMs: center + duration / 2 }
+/**
+ * Every span id that has children, bucketed by depth.
+ *
+ * Walks the whole tree (not just the expanded rows), because "expand one level" has to know
+ * about parents that are currently hidden inside a collapsed ancestor. Built once per tree so
+ * the level-at-a-time buttons are O(level) rather than O(tree) per click.
+ */
+export function collectParentIdsByLevel(rootSpans: SpanNode[]): Map<number, Set<string>> {
+	const byLevel = new Map<number, Set<string>>()
+	const visit = (node: SpanNode) => {
+		if (node.children.length > 0) {
+			let level = byLevel.get(node.depth)
+			if (!level) {
+				level = new Set()
+				byLevel.set(node.depth, level)
+			}
+			level.add(node.spanId)
+			node.children.forEach(visit)
+		}
 	}
-
-	// Right-clamp before left-clamp: min() first means the subsequent max() can only pull
-	// the window right, never past hiBound (duration < boundWidth guarantees room).
-	const startMs = Number.isFinite(vp.startMs)
-		? Math.max(loBound, Math.min(vp.startMs, hiBound - duration))
-		: loBound
-	return { startMs, endMs: startMs + duration }
+	rootSpans.forEach(visit)
+	return byLevel
 }
 
 export function timelineReducer(state: TimelineState, action: TimelineAction): TimelineState {
 	switch (action.type) {
 		case "RESET":
 			return action.state
-
-		case "SET_VIEWPORT":
-			// Clamp here (not at dispatch sites) so every path — minimap pan/resize/jump
-			// included — is bounded by the same rules as the other gestures.
-			return {
-				...state,
-				viewport: clampViewport(action.viewport, action.traceStartMs, action.traceEndMs),
-			}
-
-		case "ZOOM": {
-			const { centerMs, factor, traceStartMs, traceEndMs } = action
-			const currentDuration = state.viewport.endMs - state.viewport.startMs
-			const newDuration = currentDuration / factor
-			const ratio = (centerMs - state.viewport.startMs) / currentDuration
-			const newStart = centerMs - ratio * newDuration
-			return {
-				...state,
-				viewport: clampViewport(
-					{ startMs: newStart, endMs: newStart + newDuration },
-					traceStartMs,
-					traceEndMs,
-				),
-			}
-		}
-
-		case "PAN": {
-			const { deltaMs, traceStartMs, traceEndMs } = action
-			return {
-				...state,
-				viewport: clampViewport(
-					{
-						startMs: state.viewport.startMs + deltaMs,
-						endMs: state.viewport.endMs + deltaMs,
-					},
-					traceStartMs,
-					traceEndMs,
-				),
-			}
-		}
-
-		case "ZOOM_TO_SPAN": {
-			const { startMs, endMs, traceStartMs, traceEndMs } = action
-			const spanDuration = endMs - startMs
-			const padding = Math.max(spanDuration * 0.1, 0.001)
-			return {
-				...state,
-				viewport: clampViewport(
-					{ startMs: startMs - padding, endMs: endMs + padding },
-					traceStartMs,
-					traceEndMs,
-				),
-			}
-		}
-
-		case "ZOOM_TO_RANGE": {
-			// Drag-to-select target: zoom to exactly the dragged window (no extra padding),
-			// clamped so it stays inside the trace and respects the min-visible floor.
-			const { startMs, endMs, traceStartMs, traceEndMs } = action
-			const lo = Math.min(startMs, endMs)
-			const hi = Math.max(startMs, endMs)
-			return {
-				...state,
-				viewport: clampViewport({ startMs: lo, endMs: hi }, traceStartMs, traceEndMs),
-			}
-		}
-
-		case "ZOOM_TO_FIT": {
-			const { traceStartMs, traceEndMs } = action
-			const padding = (traceEndMs - traceStartMs) * 0.02
-			return {
-				...state,
-				viewport: clampViewport(
-					{ startMs: traceStartMs - padding, endMs: traceEndMs + padding },
-					traceStartMs,
-					traceEndMs,
-				),
-			}
-		}
 
 		case "SET_FOCUSED_INDEX":
 			return { ...state, focusedIndex: action.index }
@@ -240,10 +148,14 @@ export function timelineReducer(state: TimelineState, action: TimelineAction): T
 
 		case "TOGGLE_COLLAPSE": {
 			const next = new Set(state.expandedSpanIds)
-			if (next.has(action.spanId)) {
-				next.delete(action.spanId)
-			} else {
-				next.add(action.spanId)
+			const expanding = !next.has(action.spanId)
+			if (expanding) next.add(action.spanId)
+			else next.delete(action.spanId)
+			// Alt-click: drag the whole subtree to the state the clicked node just took, so one
+			// gesture opens or folds a branch entirely instead of one level at a time.
+			for (const id of action.descendantIds ?? []) {
+				if (expanding) next.add(id)
+				else next.delete(id)
 			}
 			return { ...state, expandedSpanIds: next }
 		}
@@ -254,46 +166,63 @@ export function timelineReducer(state: TimelineState, action: TimelineAction): T
 		case "COLLAPSE_ALL":
 			return { ...state, expandedSpanIds: new Set<string>() }
 
+		case "SET_EXPANDED":
+			return { ...state, expandedSpanIds: action.spanIds }
+
 		default:
 			return state
 	}
 }
-
-// --- Time axis ticks ---
 
 const NICE_INTERVALS = [
 	0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000,
 	5000, 10000, 20000, 60000,
 ]
 
+/** Snap up to the nearest nice interval — never down, or the tick count overshoots the budget. */
+function niceIntervalAtLeast(rawInterval: number): number {
+	for (const nice of NICE_INTERVALS) {
+		if (nice >= rawInterval) return nice
+	}
+	// Past the ladder (multi-minute windows): keep stepping by whole minutes.
+	const minute = 60_000
+	return Math.max(minute, Math.ceil(rawInterval / minute) * minute)
+}
+
+/**
+ * Tick spacing budgeted against the measured column, not a fixed tick count.
+ *
+ * A fixed count (the old `targetTickCount = 6`) collides labels on a narrow panel and leaves a
+ * wide one nearly empty. Dividing by `MIN_TICK_PX` gives whatever count actually fits.
+ */
+export function tickIntervalForWidth(visibleDurationMs: number, columnWidthPx: number): number {
+	const maxTicks = Math.max(1, Math.floor(columnWidthPx / MIN_TICK_PX))
+	return niceIntervalAtLeast(visibleDurationMs / maxTicks)
+}
+
+/**
+ * Tick offsets from the trace start covering the window, plus the interval they were spaced at
+ * (the label formatter needs it to pick a precision that keeps adjacent labels distinct).
+ */
 export function computeTimeAxisTicks(
 	viewport: ViewportState,
 	traceStartMs: number,
-	targetTickCount: number = 6,
-): number[] {
+	columnWidthPx: number,
+): { ticks: number[]; intervalMs: number } {
 	const visibleDuration = viewport.endMs - viewport.startMs
-	const rawInterval = visibleDuration / targetTickCount
+	if (!(visibleDuration > 0) || !(columnWidthPx > 0)) return { ticks: [], intervalMs: 1 }
 
-	// Find the nearest "nice" interval
-	let interval = NICE_INTERVALS[NICE_INTERVALS.length - 1]
-	for (const nice of NICE_INTERVALS) {
-		if (nice >= rawInterval) {
-			interval = nice
-			break
-		}
-	}
-
+	const intervalMs = tickIntervalForWidth(visibleDuration, columnWidthPx)
 	const ticks: number[] = []
-	const offsetFromTraceStart = viewport.startMs - traceStartMs
-	const firstTick = Math.ceil(offsetFromTraceStart / interval) * interval
-	for (let t = firstTick; t <= viewport.endMs - traceStartMs; t += interval) {
+	const from = viewport.startMs - traceStartMs
+	const to = viewport.endMs - traceStartMs
+	const firstTick = Math.ceil(from / intervalMs) * intervalMs
+	// Bounded independently of the arithmetic: a pathological interval must not spin here.
+	for (let t = firstTick, i = 0; t <= to && i < 512; t += intervalMs, i++) {
 		ticks.push(t)
 	}
-
-	return ticks
+	return { ticks, intervalMs }
 }
-
-// --- Search ---
 
 export function computeSearchMatches(bars: TimelineBar[], query: string): Set<string> {
 	if (!query.trim()) return new Set()
@@ -311,8 +240,6 @@ export function computeSearchMatches(bars: TimelineBar[], query: string): Set<st
 	return matches
 }
 
-// --- Main hook ---
-
 export interface UseTraceTimelineOptions {
 	rootSpans: SpanNode[]
 	totalDurationMs: number
@@ -327,12 +254,13 @@ export interface UseTraceTimelineResult {
 	totalRows: number
 	barIndexBySpanId: Map<string, number>
 	parentIndexById: Map<string, number>
+	parentIdsByLevel: Map<number, Set<string>>
 	state: TimelineState
 	dispatch: React.Dispatch<TimelineAction>
 	traceStartMs: number
 	traceEndMs: number
-	visibleDurationMs: number
-	timeAxisTicks: number[]
+	/** Window to open (and re-open) the trace at — feeds the viewport controller. */
+	defaultViewport: ViewportState
 	searchMatches: Set<string>
 	isSearchActive: boolean
 }
@@ -355,7 +283,7 @@ export function useTraceTimeline({
 		let minStart = Number.POSITIVE_INFINITY
 		let maxEnd = Number.NEGATIVE_INFINITY
 		const visit = (node: SpanNode) => {
-			const s = new Date(node.startTime).getTime()
+			const s = spanStartMs(node)
 			if (Number.isFinite(s)) {
 				if (s < minStart) minStart = s
 				const e = s + node.durationMs
@@ -383,61 +311,53 @@ export function useTraceTimeline({
 
 	// Default view shows at most DEFAULT_MAX_WINDOW_MS (10s) starting at the trace start, so long
 	// traces open zoomed-in and readable instead of squeezing minutes of spans into the panel.
-	// Traces shorter than the window show in full. Zoom out (Fit / ⌘-scroll) reaches the whole trace.
+	//
+	// A trace that fits opens at exactly the padded bounds — the same span the minimap strip
+	// covers — so at rest the strip and the timeline column are the same coordinate space and a
+	// given instant sits at the same x in both. Opening at some *other* "whole trace" window
+	// (this used to apply its own 2% pad) left the two a couple of percent out of step, which
+	// reads as the minimap being subtly misaligned with the ruler.
 	const defaultViewport = React.useMemo<ViewportState>(() => {
-		const windowMs = Math.min(traceDurationMs, DEFAULT_MAX_WINDOW_MS)
-		const pad = windowMs * 0.02
-		// Route through clampViewport so the min-width floor holds at first paint too.
+		const bounds = viewportBounds(traceStartMs, traceEndMs)
+		if (traceDurationMs <= DEFAULT_MAX_WINDOW_MS) {
+			return clampViewport({ startMs: bounds.loMs, endMs: bounds.hiMs }, traceStartMs, traceEndMs)
+		}
+		// Long trace: open on the first window. Route through clampViewport so the min-width
+		// floor holds at first paint too.
+		const pad = DEFAULT_MAX_WINDOW_MS * 0.02
 		return clampViewport(
-			{ startMs: traceStartMs - pad, endMs: traceStartMs + windowMs + pad },
+			{ startMs: traceStartMs - pad, endMs: traceStartMs + DEFAULT_MAX_WINDOW_MS + pad },
 			traceStartMs,
 			traceEndMs,
 		)
 	}, [traceStartMs, traceEndMs, traceDurationMs])
 
-	// Initialize with default expanded spans (auto-collapses big subtrees on long traces).
 	const defaultExpanded = React.useMemo(
 		() => computeDefaultExpandedSpanIds(rootSpans, { keepVisibleSpanId }),
 		[rootSpans, keepVisibleSpanId],
 	)
 
 	const [state, dispatch] = React.useReducer(timelineReducer, {
-		viewport: defaultViewport,
 		focusedIndex: null,
 		searchQuery: "",
 		expandedSpanIds: defaultExpanded,
 	})
 
-	// Reset state when trace data changes
 	const rootSpanIdsKey = rootSpans.map((s) => s.spanId).join(",")
 	React.useEffect(() => {
 		dispatch({
 			type: "RESET",
-			state: {
-				viewport: defaultViewport,
-				focusedIndex: null,
-				searchQuery: "",
-				expandedSpanIds: defaultExpanded,
-			},
+			state: { focusedIndex: null, searchQuery: "", expandedSpanIds: defaultExpanded },
 		})
 	}, [rootSpanIdsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Layout bars
 	const { bars, totalRows, barIndexBySpanId, parentIndexById } = React.useMemo(
-		() => layoutSpans(rootSpans, state.expandedSpanIds, colorBy),
-		[rootSpans, state.expandedSpanIds, colorBy],
+		() => layoutSpans(rootSpans, state.expandedSpanIds, colorBy, traceStartMs),
+		[rootSpans, state.expandedSpanIds, colorBy, traceStartMs],
 	)
 
-	// Viewport derived values
-	const visibleDurationMs = state.viewport.endMs - state.viewport.startMs
+	const parentIdsByLevel = React.useMemo(() => collectParentIdsByLevel(rootSpans), [rootSpans])
 
-	// Time axis ticks
-	const timeAxisTicks = React.useMemo(
-		() => computeTimeAxisTicks(state.viewport, traceStartMs),
-		[state.viewport, traceStartMs],
-	)
-
-	// Search
 	const searchMatches = React.useMemo(
 		() => computeSearchMatches(bars, state.searchQuery),
 		[bars, state.searchQuery],
@@ -450,12 +370,12 @@ export function useTraceTimeline({
 		totalRows,
 		barIndexBySpanId,
 		parentIndexById,
+		parentIdsByLevel,
 		state,
 		dispatch,
 		traceStartMs,
 		traceEndMs,
-		visibleDurationMs,
-		timeAxisTicks,
+		defaultViewport,
 		searchMatches,
 		isSearchActive,
 	}

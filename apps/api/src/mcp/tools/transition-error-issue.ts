@@ -7,7 +7,7 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { ErrorIssueId, WorkflowState, describeWorkflowTransitions } from "@maple/domain/http"
@@ -30,7 +30,7 @@ export function registerTransitionErrorIssueTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.transitionErrorIssue")(function* ({ issue_id, to_state, note, snooze_until }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const decodedIssueId = decodeIssueId(issue_id)
 			if (Option.isNone(decodedIssueId)) {
 				return validationError(

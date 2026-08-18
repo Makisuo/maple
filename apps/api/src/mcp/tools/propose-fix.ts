@@ -7,7 +7,7 @@ import {
 } from "./types"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { ErrorIssueId } from "@maple/domain/http"
@@ -32,7 +32,7 @@ export function registerProposeFixTool(server: McpToolRegistrar) {
 			artifacts_json: optionalStringParam("JSON array of artifact URLs (logs, traces, analysis docs)"),
 		}),
 		Effect.fn("McpTool.proposeFix")(function* ({ issue_id, patch_summary, pr_url, artifacts_json }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const decodedIssueId = decodeIssueId(issue_id)
 			if (Option.isNone(decodedIssueId)) {
 				return validationError(

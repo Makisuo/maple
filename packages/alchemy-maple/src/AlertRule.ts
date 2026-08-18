@@ -4,6 +4,7 @@ import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
+import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
 
 export type AlertSignalType =
@@ -145,13 +146,16 @@ export const AlertRuleProvider = () =>
 					return undefined
 				}),
 				reconcile: Effect.fn(function* ({ news, output }) {
-					// Observe — re-fetch by id, falling back to the org-unique name so we
-					// recover from partial state-persistence failures without duplicating.
+					// The unique name prevents duplicates after partial state persistence.
 					let observedRaw: unknown
 					if (output?.ruleId) {
 						observedRaw = yield* api
 							.get(`/v2/alerts/rules/${output.ruleId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag(MapleErrorTags.alertRuleNotFound, () =>
+									Effect.succeed(undefined),
+								),
+							)
 					}
 					if (observedRaw === undefined) {
 						const adopted = yield* findByName(news.name)
@@ -160,11 +164,9 @@ export const AlertRuleProvider = () =>
 						}
 					}
 
-					// Ensure — create if missing.
 					if (observedRaw === undefined) {
 						observedRaw = yield* api.post("/v2/alerts/rules", desiredBody(news))
 					} else if (drifted(news, observedRaw as Record<string, unknown>)) {
-						// Sync — PATCH only on drift of declared fields.
 						const current = yield* decodeWireRule(observedRaw)
 						observedRaw = yield* api.patch(`/v2/alerts/rules/${current.id}`, desiredBody(news))
 					}
@@ -174,13 +176,17 @@ export const AlertRuleProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/alerts/rules/${output.ruleId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag(MapleErrorTags.alertRuleNotFound, () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ olds, output }) {
 					if (output?.ruleId) {
 						const fetched = yield* api
 							.get(`/v2/alerts/rules/${output.ruleId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag(MapleErrorTags.alertRuleNotFound, () =>
+									Effect.succeed(undefined),
+								),
+							)
 						if (fetched !== undefined) return toAttributes(yield* decodeWireRule(fetched))
 					}
 					if (olds?.name !== undefined) {

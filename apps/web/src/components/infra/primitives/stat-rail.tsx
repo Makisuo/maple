@@ -13,7 +13,7 @@ interface StatRailProps {
 const COLUMNS_CLASS: Record<3 | 4, string> = {
 	3: "md:grid-cols-3",
 	4: "md:grid-cols-4",
-}
+} satisfies Record<3 | 4, string>
 
 export function StatRail({ children, columns = 4, className }: StatRailProps) {
 	return (

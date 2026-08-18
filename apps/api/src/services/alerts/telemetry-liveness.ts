@@ -1,7 +1,7 @@
 import { Effect, Option } from "effect"
 import * as CH from "@maple/query-engine/ch"
 import type { TenantContext } from "@/services/auth/AuthService"
-import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 /**
@@ -78,7 +78,7 @@ export type ServiceWindowPair = readonly [
  * of callers that already resolved the service inside their own closure.
  */
 export type LivenessWarehouse = Pick<
-	WarehouseQueryServiceShape,
+	WarehouseQueryServiceApi,
 	"compiledQuery" | "compiledQueryFirst" | "warmRoute"
 >
 
@@ -94,8 +94,6 @@ export interface LivenessProbeInput {
 	readonly baselineStartMs: number
 	readonly baselineEndMs: number
 }
-
-// I/O
 
 const EMPTY_TOTALS: ServiceWindowTotals = { spanCount: 0, estimatedSpanCount: 0 }
 
@@ -216,8 +214,10 @@ export const probeLiveness: (input: LivenessProbeInput) => Effect.Effect<Livenes
 		"maple.liveness.reason": result.reason,
 		"maple.liveness.observed_count": result.observedCount,
 		"maple.liveness.baseline_count": result.baselineCount,
-		...(result.ratio != null ? { "maple.liveness.volume_ratio": result.ratio } : {}),
-		...(result.samplingDelta != null ? { "maple.liveness.sampling_delta": result.samplingDelta } : {}),
+		...(result.ratio != null ? { "maple.liveness.volume_ratio": result.ratio } : undefined),
+		...(result.samplingDelta != null
+			? { "maple.liveness.sampling_delta": result.samplingDelta }
+			: undefined),
 	})
 
 	return result

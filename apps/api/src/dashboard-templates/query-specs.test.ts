@@ -38,11 +38,13 @@ function allParams(template: TemplateDefinition): TemplateParameterValues {
 	return values
 }
 
+// v3 replaced the `custom_query_builder_*` endpoint names with `kind: "query"`
+// plus a `resultShape`, so the spec builder is selected by shape.
 function specBuilderFor(
-	endpoint: string,
+	resultKind,
 ): ((query: Parameters<typeof buildTimeseriesQuerySpec>[0]) => BuildSpecResult) | null {
-	if (endpoint === "custom_query_builder_timeseries") return buildTimeseriesQuerySpec
-	if (endpoint === "custom_query_builder_breakdown") return buildBreakdownQuerySpec
+	if (resultKind === "timeseries") return buildTimeseriesQuerySpec
+	if (resultKind === "breakdown") return buildBreakdownQuerySpec
 	return null
 }
 
@@ -50,11 +52,13 @@ describe("dashboard template query specs", () => {
 	function checkTemplate(template: TemplateDefinition, params: TemplateParameterValues, variant: string) {
 		const built = template.build(params)
 		for (const widget of built.widgets) {
-			const buildSpec = specBuilderFor(widget.dataSource.endpoint)
+			const dataSource = widget.dataSource
+			if (dataSource.kind !== "query") continue
+			const buildSpec = specBuilderFor(dataSource.resultShape)
 			if (!buildSpec) continue
 
-			const rawQueries = widget.dataSource.params?.queries
-			expect(Array.isArray(rawQueries), `${template.id}/${widget.id}: params.queries`).toBe(true)
+			const rawQueries = dataSource.queries
+			expect(Array.isArray(rawQueries), `${template.id}/${widget.id}: queries`).toBe(true)
 			if (!Array.isArray(rawQueries)) continue
 			expect(rawQueries.length, `${template.id}/${widget.id}`).toBeGreaterThan(0)
 
@@ -80,7 +84,7 @@ describe("dashboard template query specs", () => {
 		})
 	}
 
-	// If the query-builder endpoints are ever renamed, the loop above would
+	// If the query-builder result shapes are ever renamed, the loop above would
 	// silently skip everything and the guard would pass vacuously. Recount here
 	// (template building is pure) instead of sharing a mutable counter across
 	// tests — that breaks under shuffle, sharding, and `it.only`.
@@ -89,9 +93,10 @@ describe("dashboard template query specs", () => {
 		for (const template of DASHBOARD_TEMPLATES) {
 			const built = template.build(sampleParams(template))
 			for (const widget of built.widgets) {
-				if (!specBuilderFor(widget.dataSource.endpoint)) continue
-				const rawQueries = widget.dataSource.params?.queries
-				if (Array.isArray(rawQueries)) queryBuilderQueries += rawQueries.length
+				const dataSource = widget.dataSource
+				if (dataSource.kind !== "query") continue
+				if (!specBuilderFor(dataSource.resultShape)) continue
+				queryBuilderQueries += dataSource.queries.length
 			}
 		}
 		expect(queryBuilderQueries).toBeGreaterThan(0)

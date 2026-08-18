@@ -31,4 +31,4 @@ export const CACHE_OPERATION_COLORS: Record<string, string> = {
 	GET: "bg-[#E8872B]",
 	SET: "bg-[#4A9EFF]",
 	DELETE: "bg-[#E85D4A]",
-}
+} satisfies Record<string, string>

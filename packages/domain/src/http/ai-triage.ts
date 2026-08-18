@@ -1,7 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { IsoDateTimeString, UserId } from "../primitives"
-import { Authorization } from "./current-tenant"
+import { SessionAuthorization } from "./current-tenant"
 import { IssueSeverity } from "./errors"
 
 // Literals
@@ -66,8 +66,6 @@ export class AiTriageResult extends Schema.Class<AiTriageResult>("AiTriageResult
 	 */
 	unchecked: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
-
-// Settings
 
 export class AiTriageSettingsDocument extends Schema.Class<AiTriageSettingsDocument>(
 	"AiTriageSettingsDocument",
@@ -135,5 +133,5 @@ export class AiTriageApiGroup extends HttpApiGroup.make("aiTriage")
 			error: [AiTriagePersistenceError, AiTriageForbiddenError, AiTriageValidationError],
 		}),
 	)
-	.prefix("/api/ai-triage")
-	.middleware(Authorization) {}
+	.prefix("/internal/ai-triage")
+	.middleware(SessionAuthorization) {}

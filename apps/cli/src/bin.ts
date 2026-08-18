@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 import { BunRuntime } from "@effect/platform-bun"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, Layer, Metric } from "effect"
+import { Effect, Layer, Metric, Runtime } from "effect"
 import * as Command from "effect/unstable/cli/Command"
 import { FetchHttpClient } from "effect/unstable/http"
 import { cli } from "./cli"
 import { MapleConfig } from "./core/config"
 import { Mode } from "./core/mode"
+import { annotateOutcome, recoverExpected } from "./core/outcomes"
 import { TelemetryLayer } from "./core/telemetry"
 import { maybeNotifyUpdate } from "./core/update"
 import { WarehouseExecutorFromMode } from "./core/warehouse"
@@ -58,6 +59,8 @@ if (checkpointProbeDataDir !== undefined) {
 		process.exitCode = 1
 	}
 } else {
+	/* oxlint-disable effecttsgo/multiple-effect-provide */
+	/* oxlint-disable effecttsgo/strict-effect-provide */
 	maybeNotifyUpdate.pipe(
 		Effect.flatMap(() =>
 			Command.run(cli, { version: MAPLE_VERSION }).pipe(
@@ -73,9 +76,51 @@ if (checkpointProbeDataDir !== undefined) {
 				process.exitCode = 1
 			}),
 		),
+		// Expected outcomes, recovered inside the span for the same reason as the
+		// archive error above. These are the CLI behaving correctly — a refused
+		// precondition, an unresolvable backend, `--help` — and letting them reach
+		// `withSpan` closed the root span `Error`. They dominated the CLI's error
+		// stream (~24k events for the already-running guard alone) and buried real
+		// failures under outcomes nobody needs to act on.
+		//
+		// The outcome is annotated rather than dropped, so `maple.cli.outcome` still
+		// answers "how often do people hit this?" without the span being an error.
+		// Same rule `apps/ingest` applies to expected 4xx rejections.
+		//
+		// Genuine failures stay uncaught on purpose: `@maple/cli/ServerError` (bind
+		// failure, dirty store, incompatible store) and every other tag still close
+		// the span `Error` and are reported by `runMain`.
+		Effect.catchTags({
+			"@maple/cli/ServerStateError": recoverExpected,
+			// Mode resolution ("No Maple backend found", "Cannot use --remote and
+			// --local together") reaches here as a `WarehouseConfigError`, remapped by
+			// `WarehouseExecutorFromMode` in core/warehouse.ts. `pipeName` is the
+			// discriminator: only "mode" is an expected outcome — every other
+			// `WarehouseConfigError` is a real query failure (unknown table, bad
+			// column) and is re-raised so it still closes the span `Error`.
+			"@maple/http/errors/WarehouseConfigError": (error) =>
+				error.pipeName === "mode" ? recoverExpected(error) : Effect.fail(error),
+			// `Command.runWith` renders the help text and then re-fails with the same
+			// error, so `maple --help` recorded as an error span. The text is already
+			// on stdout by now; only the exit code is left to honour — 0 for a plain
+			// `--help`, 1 when help was shown because parsing failed.
+			//
+			// The tag is "ShowHelp"; `~effect/cli/CliError/ShowHelp` (what shows up in
+			// telemetry) is the schema *identifier*, not the tag.
+			ShowHelp: (error) =>
+				annotateOutcome(error._tag).pipe(
+					Effect.andThen(
+						Effect.sync(() => {
+							process.exitCode = Runtime.getErrorExitCode(error)
+						}),
+					),
+				),
+		}),
 		Effect.withSpan("maple", { attributes: { "cli.argv": process.argv.slice(2).join(" ") } }),
 		Effect.provide(MainLayer),
 		Effect.provide(TelemetryLayer),
 		BunRuntime.runMain,
 	)
+	/* oxlint-enable effecttsgo/strict-effect-provide */
+	/* oxlint-enable effecttsgo/multiple-effect-provide */
 }

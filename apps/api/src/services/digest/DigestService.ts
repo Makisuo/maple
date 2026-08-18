@@ -13,16 +13,17 @@ import {
 } from "@maple/domain/http"
 import type { RoleName as RoleNameType } from "@maple/domain/http"
 import { createClerkClient } from "@clerk/backend"
-import { render } from "@react-email/components"
 import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
 import { Clock, Array as Arr, Cause, Effect, Layer, Option, Redacted, Ref, Context } from "effect"
-import { deriveDigestStatus, WeeklyDigest, type WeeklyDigestProps } from "@maple/email/weekly-digest"
+import { deriveDigestStatus, type WeeklyDigestProps } from "@maple/email/weekly-digest-core"
+import { renderWeeklyDigest } from "@maple/email/weekly-digest"
 import { Database } from "@/platform/DatabaseLive"
 import { dateToMs } from "@/platform/time"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/cache"
+import { clerkRequest } from "@/services/auth/clerk-request"
 import {
 	isOrgWarehouseQuarantined,
 	quarantineOnConfigClassCause,
@@ -159,8 +160,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 							set: {
 								email: input.email,
 								enabled: input.enabled !== false,
-								...(input.dayOfWeek != null ? { dayOfWeek: input.dayOfWeek } : {}),
-								...(input.timezone != null ? { timezone: input.timezone } : {}),
+								...(input.dayOfWeek != null ? { dayOfWeek: input.dayOfWeek } : undefined),
+								...(input.timezone != null ? { timezone: input.timezone } : undefined),
 								updatedAt: new Date(now),
 							},
 						}),
@@ -194,6 +195,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		 * orgId on any error or when Clerk isn't configured.
 		 */
 		const resolveOrgName = Effect.fn("DigestService.resolveOrgName")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			if (env.MAPLE_AUTH_MODE.toLowerCase() !== "clerk") return String(orgId)
 			if (Option.isNone(env.CLERK_SECRET_KEY)) return String(orgId)
 
@@ -201,10 +203,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 				secretKey: Redacted.value(env.CLERK_SECRET_KEY.value),
 			})
 
-			return yield* Effect.tryPromise({
-				try: () => clerk.organizations.getOrganization({ organizationId: orgId }),
-				catch: (error) => error,
-			}).pipe(
+			return yield* clerkRequest("Clerk.organizations.getOrganization", { orgId }, () =>
+				clerk.organizations.getOrganization({ organizationId: orgId }),
+			).pipe(
 				Effect.map((org) => org.name || String(orgId)),
 				Effect.orElseSucceed(() => String(orgId)),
 			)
@@ -479,8 +480,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		const renderDigestHtml = Effect.fn("DigestService.renderDigestHtml")(function* (
 			props: WeeklyDigestProps,
 		) {
-			return yield* Effect.tryPromise({
-				try: () => render(WeeklyDigest(props)),
+			return yield* Effect.try({
+				// Synchronous: the template is a compiled string, spliced in place.
+				try: () => renderWeeklyDigest(props),
 				catch: (error) =>
 					new DigestRenderError({
 						message: error instanceof Error ? error.message : "Failed to render digest email",
@@ -506,6 +508,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		const lastSyncAt = yield* Ref.make<number | null>(null)
 
 		const paginateClerk = <T>(
+			spanName: string,
+			attributes: Readonly<Record<string, string>>,
 			fetchPage: (params: {
 				limit: number
 				offset: number
@@ -523,10 +527,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 				// (beta) ships neither `iterate` nor `loop`, so an imperative
 				// while-loop driving sequential `yield*`s is the clearest form here.
 				while (true) {
-					const page = yield* Effect.tryPromise({
-						try: () => fetchPage({ limit: PAGE_SIZE, offset }),
-						catch: () => new DigestPersistenceError({ message: errorMessage }),
-					})
+					const page = yield* clerkRequest(spanName, attributes, () =>
+						fetchPage({ limit: PAGE_SIZE, offset }),
+					).pipe(Effect.mapError(() => new DigestPersistenceError({ message: errorMessage })))
 					all.push(...page.data)
 					offset += page.data.length
 					if (offset >= page.totalCount || page.data.length === 0) break
@@ -539,6 +542,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			clerk: ReturnType<typeof createClerkClient>,
 		) {
 			const orgs = yield* paginateClerk(
+				"Clerk.organizations.getOrganizationList",
+				{},
 				(params) => clerk.organizations.getOrganizationList(params),
 				"Failed to list Clerk organizations",
 			)
@@ -546,6 +551,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			const perOrgMemberships = yield* Effect.forEach(orgs, (org) =>
 				Effect.gen(function* () {
 					const members = yield* paginateClerk(
+						"Clerk.organizations.getOrganizationMembershipList",
+						{ orgId: org.id },
 						(params) =>
 							clerk.organizations.getOrganizationMembershipList({
 								organizationId: org.id,
@@ -558,7 +565,13 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						const memberEmail = member.publicUserData?.identifier
 						const memberUserId = member.publicUserData?.userId
 						if (!memberEmail || !memberUserId) return []
-						return [{ orgId: org.id, userId: memberUserId, email: memberEmail }]
+						return [
+							{
+								orgId: OrgId.make(org.id),
+								userId: UserId.make(memberUserId),
+								email: memberEmail,
+							},
+						]
 					})
 				}),
 			)
@@ -567,7 +580,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		})
 
 		const reconcileSubscriptions = Effect.fn("DigestService.reconcileSubscriptions")(function* (
-			clerkMemberships: Array<{ orgId: string; userId: string; email: string }>,
+			clerkMemberships: Array<{ orgId: OrgId; userId: UserId; email: string }>,
 		) {
 			const now = yield* Clock.currentTimeMillis
 
@@ -684,7 +697,6 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			const todayStartMs = now - (now % 86_400_000)
 			const currentDayOfWeek = new Date(now).getUTCDay()
 
-			// Find subscriptions due for sending
 			const subs = yield* database
 				.execute((db) =>
 					db.select().from(digestSubscriptions).where(eq(digestSubscriptions.enabled, true)),
@@ -701,7 +713,6 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 				return { sentCount: 0, errorCount: 0, skipped: false }
 			}
 
-			// Group by org to avoid duplicate Tinybird queries
 			const byOrg = Arr.groupBy(dueSubs, (s) => s.orgId)
 
 			const results = yield* Effect.forEach(

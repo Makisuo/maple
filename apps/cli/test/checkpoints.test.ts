@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { describe, it } from "@effect/vitest"
 import { Effect, Exit, Option } from "effect"
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert"
@@ -51,7 +52,7 @@ import {
 	syncDirectory,
 	syncTree,
 } from "../src/server/durable-files"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { SCHEMA_FINGERPRINT } from "../src/server/schema-identity"
 import { storeMarkerPath, storeOpenMarkerPath } from "../src/server/store-version"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 

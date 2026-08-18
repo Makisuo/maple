@@ -2,19 +2,24 @@ import { McpQueryError, requiredStringParam, validationError, type McpToolRegist
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { decodeWidgetJson, withDashboardMutation } from "@/mcp/lib/dashboard-mutations"
+import { formatRenderIssues, validateWidgetRenderability } from "@/mcp/lib/validate-widget-renderability"
+import { resolvePanelType } from "@/mcp/lib/panel-type"
+import { withScalarReduction } from "@/mcp/lib/raw-sql-widget"
 import {
 	collectBlockingBuilderWarnings,
 	formatValidationSummary,
 	inspectWidgetsAfterMutation,
 } from "@/mcp/lib/inspect-widget"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 
 const TOOL = "update_dashboard_widget"
 
 export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 	server.tool(
 		TOOL,
-		'Replace a single widget on an existing dashboard. Pass the full widget JSON (same shape as one entry in `widgets[]` from get_dashboard) for ONLY the widget you want to change. Other widgets and dashboard metadata are left untouched. The stored widget id is always forced to the widget_id parameter, so any id inside widget_json is ignored.\n\nThe response includes an automatic validation summary (verdict, flags). If `verdict` is `suspicious` or `broken`, fix the widget and call this tool again — the chart will not render meaningful data as-is.\n\nTrace and log queries omit the metric-only fields (`metricName`/`metricType`/`isMonotonic`/`signalSource`) — only `dataSource: "metrics"` queries carry them. `whereClause` is a custom grammar (`=`, `>`, `<`, `>=`, `<=`, `contains`, `exists` joined by ` AND `) — there is NO SQL `IS NULL`/`IS NOT NULL`; use `<key> exists` to require an attribute. See the `maple://instructions` resource for the full widget JSON shape (aggregations per source, groupBy prefixes, units, stat reduceToValue, hideSeries).',
+		"Replace a single widget on an existing dashboard. Pass the full widget JSON (the same shape as one entry in `widgets[]` from get_dashboard) for ONLY the widget you want to change; everything else is left untouched. The stored id is always forced to `widget_id`, so any `id` inside `widget_json` is ignored.\n\n" +
+			"**Call `describe_dashboard_schema` before editing** for the data-source kinds, unit vocabulary, aggregations and group-by tokens — generated from the live schema.\n\n" +
+			"This replaces the WHOLE widget, so omitting `timeRange` removes an existing per-widget override. The response carries render warnings plus an automatic validation summary; a `suspicious` or `broken` verdict means the chart will not render meaningfully as-is.",
 		Schema.Struct({
 			dashboard_id: requiredStringParam(
 				"ID of the dashboard containing the widget (use list_dashboards to find IDs)",
@@ -27,13 +32,42 @@ export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.updateDashboardWidget")(function* ({ dashboard_id, widget_id, widget_json }) {
-			const parsedWidget = yield* decodeWidgetJson(widget_json, TOOL)
+			const decodedWidget = yield* decodeWidgetJson(widget_json, TOOL)
+
+			// Repair rather than reject. A scalar tile needs `transform.reduceToValue`
+			// to read `data[0].value`, and plenty of stored stats predate that being
+			// checked — blocking here would make a legacy widget uneditable, so you
+			// could not even fix its title. `add_dashboard_widget` injects the same
+			// default, so both paths agree.
+			const panel = resolvePanelType({
+				visualization: decodedWidget.visualization,
+				chartId: decodedWidget.display.chartId,
+			})
+			const parsedWidget = panel.ok
+				? {
+						...decodedWidget,
+						dataSource: withScalarReduction(
+							decodedWidget.dataSource,
+							panel.resolved.meta.isScalar,
+						),
+					}
+				: decodedWidget
+			const repairedScalar = parsedWidget.dataSource !== decodedWidget.dataSource
 
 			// Reject clauses the engine can't honor before persisting the replacement.
 			const blockingWarnings = yield* collectBlockingBuilderWarnings(parsedWidget.dataSource)
 			if (blockingWarnings.length > 0) {
 				return validationError(
 					`This widget's query has clauses the engine can't honor, which would silently change what the chart shows (the widget was NOT updated):\n- ${blockingWarnings.join("\n- ")}\n\nFix and retry. Notes: span/resource attributes work automatically (e.g. \`query.context = "x"\`) but cap at 5 attr filters; logs/metrics accept only a fixed set of filter/groupBy keys; prefix non-allowlisted groupBy keys with \`attr.\`.`,
+				)
+			}
+
+			// Combinations the renderer cannot draw — a scalar with no reduction, a
+			// note wired to a query, a list backed by SQL.
+			const renderIssues = validateWidgetRenderability({ widget: parsedWidget })
+			if (renderIssues.fatal.length > 0) {
+				return validationError(
+					`This widget cannot render as configured (it was NOT updated):\n${formatRenderIssues({ fatal: renderIssues.fatal, warnings: [] })}`,
 				)
 			}
 
@@ -67,7 +101,7 @@ export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 			const { dashboard } = result
 			const updated = dashboard.widgets.find((w) => w.id === widget_id)
 
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const validation = yield* inspectWidgetsAfterMutation({
 				tenant,
 				dashboard,
@@ -83,6 +117,21 @@ export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 				`Total widgets: ${dashboard.widgets.length}`,
 				`Updated: ${dashboard.updatedAt.slice(0, 19)}`,
 			]
+
+			if (repairedScalar) {
+				lines.push(
+					"",
+					'Note: this widget had no `transform.reduceToValue`, so `{ field: "value", aggregate: "first" }` was added — a stat/gauge renders `[object Object]` without one. Set it explicitly to choose a different reducer.',
+				)
+			}
+
+			if (renderIssues.warnings.length > 0) {
+				lines.push(
+					"",
+					"### Render warnings",
+					formatRenderIssues({ fatal: [], warnings: renderIssues.warnings }),
+				)
+			}
 
 			const validationBlock = formatValidationSummary(validation, true)
 			if (validationBlock) {

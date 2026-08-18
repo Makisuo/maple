@@ -7,7 +7,7 @@ import {
 	computeSeriesStats,
 	sortZeroSeriesLast,
 } from "./query-builder-legend"
-import { hasOnlyIntegerValues, isSparseSeries } from "./sparse-series"
+import { hasOnlyIntegerValues, isolatedPointIndexes, type PointsMode, pointsFit } from "./sparse-series"
 
 export interface TimeseriesSeriesDefinition {
 	/** Original series key from the query result (used as the display label). */
@@ -24,10 +24,17 @@ export interface TimeseriesSeriesPresentationOptions {
 	seriesDefinitions: ReadonlyArray<TimeseriesSeriesDefinition>
 	chartConfig: ChartConfig
 	/**
-	 * User preference for point dots. Sparse data force-enables them regardless.
-	 * Chart types without dots (bar) omit this and ignore `renderDots`.
+	 * User preference for point dots: `true` every point, `false` none,
+	 * `undefined` Auto — dots on isolated points always, on every point only when
+	 * they fit the width. Chart types without dots (bar) omit this and ignore
+	 * the resulting `points`.
 	 */
 	showPoints?: boolean
+	/**
+	 * Rendered plot width for the Auto density rule. Omit (or pass 0 while the
+	 * container is unmeasured) and Auto only dots isolated points.
+	 */
+	plotWidthPx?: number
 }
 
 export interface TimeseriesSeriesPresentation {
@@ -36,12 +43,15 @@ export interface TimeseriesSeriesPresentation {
 	/** Legend entries in render order — all-zero series sorted last. */
 	legendSeries: LegendSeries[]
 	/**
-	 * Whether line/area series should render point dots. True when the user
-	 * asked for points, or when the data is sparse (isolated non-zero buckets
-	 * between zeros render as barely visible spikes — dots keep single-bucket
-	 * values readable).
+	 * Which points carry a dot: every one, only the isolated ones a line cannot
+	 * show, or none. Line/area feed this to `shouldDot`.
 	 */
-	renderDots: boolean
+	pointsMode: PointsMode
+	/**
+	 * `(chartKey, rowIndex) => draw a dot?` — the per-point rule behind
+	 * `pointsMode`, ready to hand to a Recharts `dot` render function.
+	 */
+	shouldDot: (chartKey: string, index: number) => boolean
 	/**
 	 * True when the data is integer-only (counts) so the y-axis can suppress
 	 * fractional ticks (0.5/1.5); a unit or any fractional value keeps decimal
@@ -61,6 +71,7 @@ export function useTimeseriesSeriesPresentation({
 	seriesDefinitions,
 	chartConfig,
 	showPoints,
+	plotWidthPx = 0,
 }: TimeseriesSeriesPresentationOptions): TimeseriesSeriesPresentation {
 	const seriesStats = React.useMemo(() => computeSeriesStats(data, valueKeys), [data, valueKeys])
 
@@ -77,13 +88,29 @@ export function useTimeseriesSeriesPresentation({
 		[seriesDefinitions, chartConfig, seriesStats],
 	)
 
-	const sparse = React.useMemo(() => isSparseSeries(data, valueKeys), [data, valueKeys])
-	// An explicit preference wins in both directions; the sparse heuristic only
-	// decides when the caller has no opinion. `||` meant a caller that had
-	// deliberately turned dots off still got them back on sparse data.
-	const renderDots = showPoints ?? sparse
+	// An explicit preference wins in both directions; Auto only decides when the
+	// caller has no opinion. (An earlier `||` meant a caller that had deliberately
+	// turned dots off still got them back on sparse data.)
+	const pointsMode: PointsMode =
+		showPoints === true
+			? "all"
+			: showPoints === false
+				? "none"
+				: pointsFit(plotWidthPx, data.length)
+					? "all"
+					: "isolated"
+
+	const isolated = React.useMemo(
+		() => (pointsMode === "isolated" ? isolatedPointIndexes(data, valueKeys) : undefined),
+		[pointsMode, data, valueKeys],
+	)
+	const shouldDot = React.useCallback(
+		(chartKey: string, index: number): boolean =>
+			pointsMode === "all" || (isolated?.get(chartKey)?.has(index) ?? false),
+		[pointsMode, isolated],
+	)
 
 	const integerOnlyData = React.useMemo(() => hasOnlyIntegerValues(data, valueKeys), [data, valueKeys])
 
-	return { seriesStats, legendSeries, renderDots, integerOnlyData }
+	return { seriesStats, legendSeries, pointsMode, shouldDot, integerOnlyData }
 }

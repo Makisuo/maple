@@ -10,7 +10,7 @@
 		"@cloudflare/workers-types": "4.20260603.1",
 		"@maple-dev/alchemy": "workspace:*",
 		"@maple-dev/effect-sdk": "workspace:*",
-		"alchemy": "2.0.0-beta.70",
+		"alchemy": "2.0.0-beta.72",
 		"effect": "catalog:effect",
 		"typescript": "catalog:tooling"
 	}

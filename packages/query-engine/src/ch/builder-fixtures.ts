@@ -53,7 +53,7 @@ const FINGERPRINT = "11640393269246331608"
 
 const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 
-// ----- web-analytics (routes/v1/query-engine.http.ts, via registry/queries.ts) -----
+// Web analytics fixtures used by the v1 route registry.
 //
 // Two fixtures per page-view builder: unfiltered, and with a
 // session_replays-only filter set. The second is the one that matters — it
@@ -143,7 +143,7 @@ const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
 ]
 
 export const builderFixtures: ReadonlyArray<BuilderFixture> = [
-	// ----- session-replays (routes/session-replay.http.ts, routes/v2/session-replays.http.ts) -----
+	// Session replay fixtures used by the replay routes.
 	{
 		module: "session-replays",
 		name: "sessionReplaysListQuery",
@@ -257,7 +257,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 
-	// ----- session-events (routes/session-replay.http.ts, v2/session-replays.http.ts) -----
+	// Session event fixtures used by the replay routes.
 	{
 		module: "session-events",
 		name: "sessionTranscriptQuery",
@@ -281,7 +281,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 
 	...webAnalyticsFixtures,
 
-	// ----- errors builders reached only via direct calls (ErrorsService, v2 telemetry, observability) -----
+	// Error fixtures reached through ErrorsService, v2 telemetry, and observability.
 	{
 		// telemetry.http.ts v2GetSpan / observability/span-detail.ts
 		module: "errors",
@@ -359,7 +359,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 	// fixture, a builder contributes nothing to `__sql_baseline__/catalog.sql`
 	// and its SQL can drift silently.
 
-	// ----- service-operations: the three-tier raw/minutely/hourly splice -----
+	// Service-operation splice across raw, minutely, and hourly sources.
 	{
 		// routes/v2/services.http.ts — service detail "Operations" tab.
 		module: "service-operations",
@@ -397,7 +397,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 
-	// ----- services: the hourly-rollup splice behind the service catalog -----
+	// Service-catalog hourly-rollup splice.
 	{
 		// routes/v2/services.http.ts — the services list.
 		module: "services",
@@ -421,7 +421,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 
-	// ----- infra: the four gauge-timeseries shapes and three facet unions -----
+	// Infra gauge timeseries and facet unions.
 	{
 		module: "infra",
 		name: "hostGaugeTimeseriesQuery",
@@ -618,7 +618,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		sampleValues: { targetType: "http" },
 	},
 
-	// ----- traces (runtime/query-engine.ts trace-list page enrichment) -----
+	// Trace-list enrichment fixtures.
 	{
 		module: "traces",
 		name: "traceServicesByTraceIdsQuery",

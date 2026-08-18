@@ -9,5 +9,28 @@
 	// migration-snapshot diff.
 	// lib/llm and lib/thinking-orbs are vendored upstream source in prettier style;
 	// reformatting them would turn every future upstream sync into a whole-file conflict.
-	"ignorePatterns": [".context", "deploy", "skills", "packages/db/drizzle", "lib/llm", "lib/thinking-orbs"],
+	// The Maizzle .vue sources under packages/email have load-bearing whitespace —
+	// Vue turns a newline between two inline elements into a rendered space, and
+	// oxfmt happily breaks `<span>NEW</span>{{ message }}` across lines. They are
+	// authored in the exact shape they compile to.
+	// TanStack Router owns routeTree.gen.ts and regenerates it in its configured
+	// style during web builds; formatting it only creates transient churn.
+	"ignorePatterns": [
+		".agents/**",
+		".codex/**",
+		".context/**",
+		".deepsec/**",
+		".factory/**",
+		".impeccable/**",
+		".superset/**",
+		"deploy",
+		"skills",
+		"packages/db/drizzle",
+		"lib/llm",
+		"lib/thinking-orbs",
+		"packages/email/emails",
+		"packages/email/components",
+		"apps/web/src/routeTree.gen.ts",
+		"scripts/oxlint-plugins/anti-slop/**",
+	],
 }

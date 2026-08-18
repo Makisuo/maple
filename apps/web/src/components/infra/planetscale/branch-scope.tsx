@@ -21,7 +21,7 @@ const FALLBACK_EXPLANATION: Record<BranchScopeSurface, string> = {
 	chart: "PlanetScale reports these gauges per branch, but the history endpoint answers one branch or the whole database — so this shows every branch combined.",
 	insights:
 		"PlanetScale's Query Insights API answers one branch at a time, so this shows the resolved branch only.",
-}
+} satisfies Record<BranchScopeSurface, string>
 
 /**
  * @param selected Branch names the page is filtered to. Empty means all.

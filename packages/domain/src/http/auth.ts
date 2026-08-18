@@ -1,7 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { OrgId, UserId } from "../primitives"
-import { Authorization, TenantSchema } from "./current-tenant"
+import { Authorization, TenantSchema, UnauthorizedError } from "./current-tenant"
 
 export class CliDeviceStartRequest extends Schema.Class<CliDeviceStartRequest>("CliDeviceStartRequest")({
 	deviceName: Schema.String,
@@ -144,11 +144,21 @@ export class SelfHostedLoginRequest extends Schema.Class<SelfHostedLoginRequest>
 	password: Schema.String,
 }) {}
 
+/**
+ * `expiresAt` is when THIS token stops verifying; `sessionExpiresAt` is when the
+ * login behind it can no longer be renewed and the root password is required
+ * again. Both are epoch millis (the repo-wide wire convention) even though the
+ * JWT claims they derive from are RFC 7519 seconds — the conversion belongs at
+ * this boundary, not in every client. A client renews before `expiresAt` and
+ * sends the operator back to the login screen at `sessionExpiresAt`.
+ */
 export class SelfHostedLoginResponse extends Schema.Class<SelfHostedLoginResponse>("SelfHostedLoginResponse")(
 	{
 		token: Schema.String,
 		orgId: OrgId,
 		userId: UserId,
+		expiresAt: Schema.Number,
+		sessionExpiresAt: Schema.Number,
 	},
 ) {}
 
@@ -196,6 +206,18 @@ export class AuthApiGroup extends HttpApiGroup.make("auth")
 	.add(
 		HttpApiEndpoint.get("session", "/session", {
 			success: TenantSchema,
+		}),
+	)
+	// Renewal for self-hosted sessions, whose tokens are deliberately short-lived.
+	// It sits in the authenticated group because the presented token IS the
+	// credential: an expired one is rejected by the middleware and the operator
+	// re-enters the root password, which is the intended end of a session.
+	// Clerk-mode deployments get `SelfHostedAuthDisabledError` — Clerk renews its
+	// own sessions.
+	.add(
+		HttpApiEndpoint.post("sessionRefresh", "/session/refresh", {
+			success: SelfHostedLoginResponse,
+			error: [SelfHostedAuthDisabledError, UnauthorizedError],
 		}),
 	)
 	.add(

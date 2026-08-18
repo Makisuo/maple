@@ -22,8 +22,6 @@ import { Database, type DatabaseError } from "@/platform/DatabaseLive"
  * so repeated firings dedupe into one issue that re-opens.
  */
 
-// Signature
-
 /** Verify PlanetScale's `X-PlanetScale-Signature`: HMAC-SHA256 hex of the raw body. */
 export const verifyPlanetScaleSignature = (
 	rawBody: string,
@@ -36,8 +34,6 @@ export const verifyPlanetScaleSignature = (
 	if (provided.length !== expected.length) return false
 	return timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(provided, "utf8"))
 }
-
-// Payload
 
 export const PlanetScaleWebhookPayload = Schema.Struct({
 	/** Unix epoch seconds. */
@@ -52,8 +48,6 @@ export type PlanetScaleWebhookPayload = Schema.Schema.Type<typeof PlanetScaleWeb
 export const decodePlanetScaleWebhookPayload = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(PlanetScaleWebhookPayload),
 )
-
-// Classification
 
 /** Where an event belongs on the timeline. Mirrored by the web vocabulary table. */
 export type PlanetScaleEventCategory = "deploy_request" | "branch" | "database" | "cluster" | "keyspace"
@@ -216,16 +210,14 @@ const DEPLOY_STATE_VERB: Record<string, string> = {
 	"deploy_request.errored": "failed",
 	"deploy_request.reverted": "was reverted",
 	"deploy_request.closed": "closed",
-}
+} satisfies Record<string, string>
 
 const BRANCH_STATE_VERB: Record<string, string> = {
 	"branch.ready": "is ready",
 	"branch.sleeping": "went to sleep",
 	"branch.primary_promoted": "was promoted to primary",
 	"branch.start_maintenance": "entered maintenance",
-}
-
-// Timeline rows
+} satisfies Record<string, string>
 
 /**
  * PlanetScale webhook `timestamp` is epoch SECONDS; the deploy-request REST

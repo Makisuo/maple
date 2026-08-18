@@ -27,7 +27,7 @@ import {
 } from "@maple/domain/chat-session"
 import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
 import { LLM, Message, type Model } from "@maple/llm"
-import { Effect, Layer, ManagedRuntime, Stream } from "effect"
+import { Cause, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
@@ -61,7 +61,7 @@ const toTenantContext = (encoded: ChatTurnTenantEncoded): TenantContext => {
 		userId: tenant.userId,
 		roles: [...tenant.roles],
 		authMode: tenant.authMode,
-		...(tenant.actorId === undefined ? {} : { actorId: tenant.actorId }),
+		...(!(tenant.actorId === undefined) ? { actorId: tenant.actorId } : undefined),
 	}
 }
 
@@ -180,7 +180,21 @@ const compactIfNeeded = (
 		// Bounded, and never allowed to turn a delivered answer into a failed turn. A conversation
 		// that stays uncompacted just falls back to the head-drop next time.
 		Effect.timeout(COMPACTION_TIMEOUT),
-		Effect.catchCause(() => Effect.void),
+		Effect.catchCause((cause) =>
+			Cause.hasInterruptsOnly(cause)
+				? Effect.void
+				: Effect.annotateCurrentSpan("maple.chat.compaction_outcome", "failed").pipe(
+						Effect.andThen(
+							Effect.logWarning("Chat transcript compaction failed").pipe(
+								Effect.annotateLogs({
+									sessionId: input.sessionId,
+									messageId: input.messageId,
+									cause: Cause.pretty(cause),
+								}),
+							),
+						),
+					),
+		),
 	)
 
 /** Compaction is housekeeping; it must not hold the turn slot open. */
@@ -198,14 +212,14 @@ const CHAT_TURN_FAILED = "Maple couldn't complete this response."
  */
 export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promise<void> => {
 	const [
-		{ MainLive },
+		{ InvestigationServicesLive },
 		{ layerPg },
 		{ layerLlm, resolveTriageModel },
 		loop,
-		{ buildSubmitDiagnosisTool },
+		{ buildDiagnosisCompletion },
 		{ McpToolExecutor },
 	] = await Promise.all([
-		import("../app"),
+		import("../runtime/mcp-service-graph"),
 		import("../platform/DatabasePgLive"),
 		import("../platform/Llm"),
 		import("./loop"),
@@ -215,7 +229,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	const { InvestigationService } = await import("@/services/errors/InvestigationService")
 
 	const runtime = ManagedRuntime.make(
-		MainLive.pipe(
+		InvestigationServicesLive.pipe(
 			Layer.provideMerge(layerLlm(input.env)),
 			Layer.provideMerge(layerPg),
 			Layer.provideMerge(layerFromEnvRecord(input.env)),
@@ -230,14 +244,18 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	const annotateTurn = () =>
 		Effect.annotateCurrentSpan({
 			"maple.chat.outcome": observability.outcome ?? "unknown",
-			...(observability.finishReason === undefined
-				? {}
-				: { "maple.chat.finish_reason": observability.finishReason }),
+			...(!(observability.finishReason === undefined)
+				? {
+						"maple.chat.finish_reason": observability.finishReason,
+					}
+				: undefined),
 			"maple.chat.empty_output": observability.emptyOutput,
 			"maple.chat.recovery_count": observability.recoveryCount,
-			...(observability.failureReason === undefined
-				? {}
-				: { "maple.chat.failure_reason": observability.failureReason }),
+			...(!(observability.failureReason === undefined)
+				? {
+						"maple.chat.failure_reason": observability.failureReason,
+					}
+				: undefined),
 		})
 
 	const program = Effect.gen(function* () {
@@ -252,7 +270,10 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
 		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
 		const usage = loop.makeTurnUsage()
-		const extraTools = buildSubmitDiagnosisTool(
+		// One value: the tool *and* whether this turn's answer is a call to it. Passing the tool alone
+		// is what left an autonomous investigation with no way to file its report once it ran out of
+		// steps — see `buildDiagnosisCompletion`.
+		const completion = buildDiagnosisCompletion(
 			input.sessionId,
 			tenant,
 			investigations.submitDiagnosis,
@@ -268,7 +289,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 				model,
 				messages: toLlmMessages(history, input.session.compaction()),
 				messageId: input.messageId,
-				extraTools,
+				...(completion === undefined ? undefined : { completion }),
 				usage,
 				observability,
 				// An abort clears the claim; the turn notices here and stops at the next event
@@ -301,10 +322,20 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		yield* annotateTurn()
 		yield* compactIfNeeded(input, model, usage)
 	}).pipe(
-		Effect.tapError(() => {
+		Effect.tapCause((cause) => {
 			observability.outcome = "error"
 			observability.failureReason ??= "UnhandledTurnFailure"
-			return annotateTurn()
+			return annotateTurn().pipe(
+				Effect.andThen(
+					Effect.logError("Unhandled chat turn failure").pipe(
+						Effect.annotateLogs({
+							sessionId: input.sessionId,
+							messageId: input.messageId,
+							cause: Cause.pretty(cause),
+						}),
+					),
+				),
+			)
 		}),
 		Effect.withSpan("chat.turn", {
 			attributes: {
@@ -317,10 +348,9 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 
 	try {
 		await runtime.runPromise(program)
-	} catch (cause) {
+	} catch {
 		// The detailed cause belongs in server logs and the failed Effect span, never in the durable
 		// event the browser reads back.
-		console.error("[chat.turn] Unhandled turn failure", cause)
 		if (input.session.holdsTurn(input.messageId)) {
 			input.session.append({
 				type: "turn-end",

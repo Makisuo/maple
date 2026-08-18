@@ -8,6 +8,7 @@ import type { V2Recommendation } from "@maple/domain/http/v2"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { displayError } from "@/lib/error-messages"
 import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
@@ -58,14 +59,14 @@ const KIND_BADGE: Record<IssueKind, { label: string; variant: "success" | "warni
 	rename: { label: "Safe rename", variant: "success" },
 	"double-emission": { label: "Both emitted", variant: "warning" },
 	naming: { label: "Naming", variant: "info" },
-}
+} satisfies Record<IssueKind, { label: string; variant: "success" | "warning" | "info" }>
 
 const STATUS_BADGE: Record<IssueStatus, { label: string; variant: "success" | "secondary" | "outline" }> = {
 	open: { label: "Open", variant: "outline" },
 	dismissed: { label: "Dismissed", variant: "secondary" },
 	applied: { label: "Applied", variant: "success" },
 	resolved: { label: "Resolved", variant: "success" },
-}
+} satisfies Record<IssueStatus, { label: string; variant: "success" | "secondary" | "outline" }>
 
 const MODE = {
 	auto: {
@@ -189,7 +190,7 @@ function RecommendationDetailPage() {
 
 	return Result.builder(listResult)
 		.onInitial(() => <LoadingShell />)
-		.onError((error) => <ErrorShell message={error.message} />)
+		.onError((error) => <ErrorShell message={displayError(error).message} />)
 		.onSuccess(() => {
 			if (!issue) return <InactiveShell />
 			return (

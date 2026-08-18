@@ -1,11 +1,9 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { AuthorizationV2, V2SchemaErrors } from "./auth"
-import { Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2ServiceUnavailableError } from "./errors"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
+import { SetupAuditUnavailableError } from "../../setup-audit"
+import { AuthorizationV2 } from "./auth"
+import { wireExample, Timestamp } from "./envelopes"
+import { publicError } from "./public-error"
 
 export const V2SetupAuditAffectedEntity = Schema.Struct({
 	kind: Schema.Literals([
@@ -182,7 +180,7 @@ export class V2InstrumentationAuditApiGroup extends HttpApiGroup.make("instrumen
 	.add(
 		HttpApiEndpoint.get("retrieve", "/", {
 			success: V2SetupAudit,
-			error: [V2InvalidRequestError, V2ServiceUnavailableError],
+			error: publicError(SetupAuditUnavailableError),
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSetupAudit",
@@ -195,7 +193,6 @@ export class V2InstrumentationAuditApiGroup extends HttpApiGroup.make("instrumen
 	)
 	.prefix("/v2/instrumentation/audit")
 	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Setup Audit",

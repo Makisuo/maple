@@ -4,6 +4,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { cn } from "@maple/ui/lib/utils"
+import { WIDGET_UNITS } from "@maple/domain/http"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 import { useWidgetBuilder } from "@/hooks/use-widget-builder"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
@@ -12,30 +13,14 @@ import { Switch } from "@maple/ui/components/ui/switch"
 import { getListPerformanceHints } from "@/lib/query-builder/performance-hints"
 import { GripDotsIcon } from "@/components/icons"
 
-type ListDataSource = "traces" | "logs"
-
-interface ListColumnDraft {
-	field: string
-	header: string
-	unit?: ValueUnit
-	align?: "left" | "center" | "right"
-}
+import {
+	LOG_DEFAULT_COLUMNS,
+	TRACE_DEFAULT_COLUMNS,
+	type ListColumnDraft,
+	type ListDataSource,
+} from "@/lib/query-builder/list-widget-config"
 
 // Props interface removed — ListConfigPanel now reads from context
-
-const TRACE_DEFAULT_COLUMNS: ListColumnDraft[] = [
-	{ field: "serviceName", header: "Service" },
-	{ field: "spanName", header: "Span" },
-	{ field: "durationMs", header: "Duration", unit: "duration_ms", align: "right" },
-	{ field: "statusCode", header: "Status" },
-]
-
-const LOG_DEFAULT_COLUMNS: ListColumnDraft[] = [
-	{ field: "timestamp", header: "Time" },
-	{ field: "severityText", header: "Severity" },
-	{ field: "serviceName", header: "Service" },
-	{ field: "body", header: "Message" },
-]
 
 // These are the fields returned by the query engine's list query
 // (raw traces table, not the materialized view)
@@ -53,19 +38,12 @@ const TRACE_FIELDS = [
 
 const LOG_FIELDS = ["timestamp", "severityText", "severityNumber", "serviceName", "body", "traceId", "spanId"]
 
-const UNIT_OPTIONS: Array<{ value: string; label: string }> = [
-	{ value: "none", label: "None" },
-	{ value: "number", label: "Number" },
-	{ value: "percent", label: "Percent (0–1)" },
-	{ value: "percent_100", label: "Percent (0–100)" },
-	{ value: "duration_ms", label: "Duration (ms)" },
-	{ value: "duration_us", label: "Duration (us)" },
-	{ value: "bytes", label: "Bytes" },
-	{ value: "requests_per_sec", label: "Req/s" },
-]
-
-export { TRACE_DEFAULT_COLUMNS, LOG_DEFAULT_COLUMNS }
-export type { ListColumnDraft, ListDataSource }
+// Derived from the shared catalog so a token added there shows up here, and so
+// the picker can never offer one the formatter does not handle.
+const UNIT_OPTIONS: Array<{ value: string; label: string }> = WIDGET_UNITS.map((unit) => ({
+	value: unit.token,
+	label: unit.label,
+}))
 
 function DraggableColumnRow({
 	id,
@@ -253,7 +231,7 @@ export function ListConfigPanel() {
 	const resourcePrefix = "resourceAttributes."
 
 	const dynamicAttributeKeys = useMemo(() => {
-		const vals = autocompleteValues[listDataSource]
+		const vals = listDataSource === "traces" ? autocompleteValues.traces : autocompleteValues.logs
 		const keys: string[] = []
 		if (vals && "attributeKeys" in vals && Array.isArray(vals.attributeKeys)) {
 			for (const k of vals.attributeKeys) {

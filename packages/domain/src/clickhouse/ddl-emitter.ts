@@ -405,8 +405,6 @@ export const emitJsonPathSpec = (
 	})
 }
 
-// --- Runtime parsers for already-emitted statements --------------------------
-//
 // `parseEmittedCreateTable` and `parseEmittedCreateMaterializedView` consume
 // the *output* of the emitters (i.e. the SQL strings we ship in
 // `latestSnapshotStatements`) and reconstruct a structured shape suitable for

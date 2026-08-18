@@ -36,6 +36,32 @@ export const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
 export const MAX_TIMESERIES_POINTS = 1_500
 
 /**
+ * Widest window a shared-dashboard viewer may request.
+ *
+ * Held at the general query ceiling rather than something tighter: a share is a
+ * read-only view of a dashboard its author already curated, so narrowing it
+ * further would make shared boards show less than the same board does signed
+ * in, for no security gain — the cost ceiling is enforced by the per-shape caps
+ * and the cost profile, not by this number.
+ */
+export const SHARE_MAX_RANGE_SECONDS = MAX_QUERY_RANGE_SECONDS
+
+/**
+ * Endpoints whose result is a raw-row list, and which therefore obey
+ * `MAX_LIST_RANGE_SECONDS` rather than the chart ceilings.
+ *
+ * Lives here rather than beside either consumer because both the browser (which
+ * offers a "narrow the range" affordance) and the share resolver (which clamps
+ * silently, having no affordance to offer) have to agree on the set. Two copies
+ * would drift into a tile that narrows in one surface and scans in the other.
+ */
+export const LIST_ENDPOINTS: ReadonlySet<string> = new Set([
+	"custom_query_builder_list",
+	"list_traces",
+	"list_logs",
+])
+
+/**
  * Attribute/metric discovery reads pre-aggregated hourly rollups, so it can
  * span wider than the raw-row list cap.
  */

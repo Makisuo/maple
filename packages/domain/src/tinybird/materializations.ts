@@ -5,11 +5,12 @@ import {
 	serviceMapSpans,
 	serviceMapChildren,
 	serviceMapDbEdgesHourly,
-	serviceMapDbQueryShapesHourly,
+	serviceMapDbQuerySignaturesHourly,
 	serviceExternalEdgesHourly,
 	servicePlatformsHourly,
 	serviceOverviewSpans,
 	serviceOverviewHourly,
+	serviceOverviewMinutely,
 	errorSpans,
 	errorEvents,
 	errorEventsByTime,
@@ -339,6 +340,52 @@ export const serviceOverviewHourlyMv = defineMaterializedView("service_overview_
 })
 
 /**
+ * Minute-grain twin of `service_overview_hourly_mv`.
+ *
+ * Reads `traces` directly rather than cascading `service_overview_hourly_mv` off
+ * this table (the shape `service_operations` uses). A cascade would make the
+ * minutely backfill — an `INSERT INTO … SELECT`, which fires every MV attached to
+ * its target — pour 30 days of duplicate rows into `service_overview_hourly`, the
+ * one table that is retained for a year and cannot be rebuilt past its 30-day
+ * source. There is no statement ordering that makes that safe, because
+ * `service_overview_hourly` can never be truncated.
+ *
+ * Entry-point semantics intentionally match `service_overview_spans_mv` and
+ * `service_overview_hourly_mv`.
+ */
+export const serviceOverviewMinutelyMv = defineMaterializedView("service_overview_minutely_mv", {
+	description:
+		"Pre-aggregates service entry-point spans minutely by environment, namespace, and commit, for windows whose bucket size is under an hour.",
+	datasource: serviceOverviewMinutely,
+	nodes: [
+		node({
+			name: "service_overview_minutely_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfMinute(toDateTime(Timestamp)) AS Minute,
+          ServiceName,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ResourceAttributes['service.namespace'] AS ServiceNamespace,
+          ResourceAttributes['deployment.commit_sha'] AS CommitSha,
+          count() AS SpanCount,
+          sum(SampleRate) AS EstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS ErrorCount,
+          sumIf(SampleRate, StatusCode = 'Error') AS EstimatedErrorCount,
+          sum(toFloat64(Duration)) AS DurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS DurationQuantiles,
+          min(toDateTime(Timestamp)) AS FirstSeen,
+          countIf(StatusCode != 'Error' AND Duration < 500000000) AS ApdexSatisfiedCount,
+          countIf(StatusCode != 'Error' AND Duration >= 500000000 AND Duration < 2000000000) AS ApdexToleratingCount
+        FROM traces
+        WHERE SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''
+        GROUP BY OrgId, Minute, ServiceName, DeploymentEnv, ServiceNamespace, CommitSha
+      `,
+		}),
+	],
+})
+
+/**
  * Materialized view populating trace_list_mv from root spans.
  * Pre-extracts HTTP attributes from SpanAttributes and normalizes span names
  * so the trace list query avoids scanning heavy Map columns and GROUP BY.
@@ -473,12 +520,12 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
  * NOTE: `DbSystem` uses the `db.system.name` → `db.system` coalesce
  * (`DB_SYSTEM_ATTR_SQL`), the same as `service_map_db_edges_hourly_mv`.
  */
-export const serviceMapDbQueryShapesHourlyMv = defineMaterializedView(
+export const serviceMapDbQuerySignaturesHourlyMv = defineMaterializedView(
 	"service_map_db_query_shapes_hourly_mv",
 	{
 		description:
 			"Pre-aggregates Client/Producer DB spans into hourly query-shape buckets (normalized fingerprint + label + sample-weighted t-digest) for the service map's database detail panel.",
-		datasource: serviceMapDbQueryShapesHourly,
+		datasource: serviceMapDbQuerySignaturesHourly,
 		nodes: [
 			node({
 				name: "service_map_db_query_shapes_hourly_mv_node",

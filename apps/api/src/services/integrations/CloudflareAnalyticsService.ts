@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 /**
  * Cloudflare edge-analytics collector.
  *
@@ -71,7 +72,8 @@ import {
 	type CloudflareHyperdriveConfig,
 	type CloudflareZone,
 } from "@/services/integrations/CloudflareApi"
-import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
+import { Database } from "@/platform/DatabaseLive"
+import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
 import { dateToMs } from "@/platform/time"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -130,8 +132,8 @@ import {
 	workersSelection,
 	zoneAnalyticsDocument,
 	zoneChunkSizeFor,
-	type DatasetSettingsShape,
-	type SettingsResponseShape,
+	type DatasetSettingsContract,
+	type SettingsResponseContract,
 } from "./cloudflare-analytics/queries"
 import * as Integrations from "@maple/query-engine-integrations"
 
@@ -183,10 +185,10 @@ const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 /** Synthetic actor stamped on rows the poller writes on the org's behalf (ingest keys, state). */
 const SYSTEM_USER_ID = decodeUserIdSync("system-cloudflare-analytics")
 
-const toPersistenceError = (cause: unknown) =>
-	new IntegrationsPersistenceError({
-		message: cause instanceof Error ? cause.message : "Cloudflare analytics database error",
-	})
+const toPersistenceError = makePersistenceErrorMapper(
+	IntegrationsPersistenceError,
+	"Cloudflare analytics database error",
+)
 
 /** Integrations-page usage window: last 24h in hourly buckets. */
 const USAGE_WINDOW_MS = 24 * 60 * 60_000
@@ -243,9 +245,9 @@ interface DatasetDef {
 	 * response carried nothing for this row (its cached settings stay untouched).
 	 */
 	readonly settingsNode: (
-		decoded: SettingsResponseShape,
+		decoded: SettingsResponseContract,
 		row: CloudflareAnalyticsStateRow,
-	) => DatasetSettingsShape | null | undefined
+	) => DatasetSettingsContract | null | undefined
 }
 
 const decodeError = (dataset: string) =>
@@ -258,9 +260,9 @@ const decodeError = (dataset: string) =>
  * the path/dimension datasets ride the existing `settingsQuery` unchanged.
  */
 const httpZoneSettingsNode = (
-	decoded: SettingsResponseShape,
+	decoded: SettingsResponseContract,
 	row: CloudflareAnalyticsStateRow,
-): DatasetSettingsShape | null | undefined => {
+): DatasetSettingsContract | null | undefined => {
 	const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
 	return zone === undefined ? undefined : (zone.settings?.httpRequestsAdaptiveGroups ?? null)
 }
@@ -611,7 +613,7 @@ const parseStoredSettings = (settingsJson: string | null): ParsedSettings => {
 
 /** `availableFields` naming isn't pinned by docs — match on substring, defaulting to available. */
 const quantilesFromAvailableFields = (
-	settings: DatasetSettingsShape | null | undefined,
+	settings: DatasetSettingsContract | null | undefined,
 	needle: string,
 ): boolean => {
 	const fields = settings?.availableFields
@@ -825,7 +827,7 @@ interface DatasetPollFailure {
  * buried in `cloudflare_analytics_state.lastError` where nothing watches it.
  */
 class CloudflareAnalyticsPollError extends Schema.TaggedError<CloudflareAnalyticsPollError>()(
-	"@maple/cloudflare/AnalyticsPollError",
+	"@maple/api/integrations/CloudflareAnalyticsPollError",
 	{
 		message: Schema.String,
 		orgId: OrgId,
@@ -939,9 +941,7 @@ const observeDatasetFailure = (orgId: OrgId, failure: DatasetPollFailure) =>
 		Effect.ignore,
 	)
 
-// Service
-
-interface CloudflareAnalyticsZoneStatusShape {
+interface CloudflareAnalyticsZoneStatusFields {
 	readonly id: string
 	readonly name: string
 	readonly enabled: boolean
@@ -951,7 +951,7 @@ interface CloudflareAnalyticsZoneStatusShape {
 }
 
 interface CloudflareAnalyticsStatus {
-	readonly zones: ReadonlyArray<CloudflareAnalyticsZoneStatusShape>
+	readonly zones: ReadonlyArray<CloudflareAnalyticsZoneStatusFields>
 	readonly workers: {
 		readonly enabled: boolean
 		readonly lastSyncedAt: number | null
@@ -982,7 +982,7 @@ interface PollAllOrgsSummary {
 	}>
 }
 
-export interface CloudflareAnalyticsServiceShape {
+export interface CloudflareAnalyticsServiceApi {
 	readonly pollAllOrgs: () => Effect.Effect<PollAllOrgsSummary, IntegrationsPersistenceError>
 	readonly pollOrg: (orgId: OrgId) => Effect.Effect<PollOrgSummary, IntegrationsPersistenceError>
 	readonly getStatus: (
@@ -1002,11 +1002,12 @@ export interface CloudflareAnalyticsServiceShape {
 
 export class CloudflareAnalyticsService extends Context.Service<
 	CloudflareAnalyticsService,
-	CloudflareAnalyticsServiceShape
+	CloudflareAnalyticsServiceApi
 >()("@maple/api/services/CloudflareAnalyticsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
 		const env = yield* Env
+		const httpClient = yield* HttpClient.HttpClient
 		const warehouse = yield* WarehouseQueryService
 		const oauth = yield* CloudflareOAuthService
 		const ingestKeys = yield* OrgIngestKeysService
@@ -1016,8 +1017,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 		/** The ingest gateway's OTLP metrics endpoint — poller metrics flow through it like all telemetry. */
 		const ingestMetricsUrl = `${env.MAPLE_INGEST_PUBLIC_URL.replace(/\/+$/, "")}/v1/metrics`
 
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			database.execute(fn).pipe(Effect.mapError(toPersistenceError))
+		const dbExecute = makeDbExecute(database, "CloudflareAnalyticsService", toPersistenceError)
 
 		const systemTenant = (orgId: OrgId): TenantContext => ({
 			orgId,
@@ -1025,8 +1025,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 			roles: [decodeRoleNameSync("root")],
 			authMode: "self_hosted",
 		})
-
-		// State-row helpers
 
 		const loadStateRows = (orgId: OrgId) =>
 			dbExecute((db) =>
@@ -1053,7 +1051,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			updateRows(rowIds, {
 				lastError: message.slice(0, 500),
 				lastErrorAt: new Date(now),
-				...(options?.disable ? { enabled: false } : {}),
+				...(options?.disable ? { enabled: false } : undefined),
 				updatedAt: new Date(now),
 			})
 
@@ -1069,7 +1067,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					.set({
 						lastError: message.slice(0, 500),
 						lastErrorAt: new Date(now),
-						...(options?.disable ? { enabled: false } : {}),
+						...(options?.disable ? { enabled: false } : undefined),
 						updatedAt: new Date(now),
 					})
 					.where(eq(cloudflareAnalyticsState.orgId, orgId)),
@@ -1264,8 +1262,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 			return [...rows, ...inserted]
 		})
 
-		// Settings refresh (per-plan limits discovery)
-
 		/**
 		 * Refresh stale per-plan dataset settings. Returns true when anything was written — the
 		 * caller then reloads its row set (and skips the reload otherwise).
@@ -1322,25 +1318,25 @@ export class CloudflareAnalyticsService extends Context.Service<
 						query: settingsQuery({ withZones: plan.zoneIds.length > 0 }),
 						variables: {
 							accountTag: accountId,
-							...(plan.zoneIds.length > 0 ? { zoneTags: plan.zoneIds } : {}),
+							...(plan.zoneIds.length > 0 ? { zoneTags: plan.zoneIds } : undefined),
 						},
 					},
 					apiBaseUrl,
 				).pipe(
 					// Token died mid-refresh: stop burning settings calls — every further one
 					// would 401 too. The poll loop records the revoke on its first chunk.
-					Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
-						Effect.logWarning("cloudflare-analytics settings query failed", {
-							errorTag: error._tag,
-							error: error.message,
-						}).pipe(Effect.as("revoked" as const)),
-					),
-					Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
-						Effect.logWarning("cloudflare-analytics settings query failed", {
-							errorTag: error._tag,
-							error: error.message,
-						}).pipe(Effect.as(null)),
-					),
+					Effect.catchTags({
+						"@maple/http/errors/IntegrationsRevokedError": (error) =>
+							Effect.logWarning("cloudflare-analytics settings query failed", {
+								errorTag: error._tag,
+								error: error.message,
+							}).pipe(Effect.as("revoked" as const)),
+						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+							Effect.logWarning("cloudflare-analytics settings query failed", {
+								errorTag: error._tag,
+								error: error.message,
+							}).pipe(Effect.as(null)),
+					}),
 				)
 				if (result === "revoked") return wrote
 				if (result == null || result.errors.length > 0) continue
@@ -1372,7 +1368,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 							settings,
 							dataset.availableFieldsNeedle,
 						),
-						...(settings?.enabled === false ? { enabled: false } : {}),
+						...(settings?.enabled === false ? { enabled: false } : undefined),
 						updatedAt: new Date(now),
 					}
 					const key = `${set.settingsJson}|${set.quantilesAvailable}|${set.enabled ?? ""}`
@@ -1409,11 +1405,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const total = rows.sumRows.length + rows.gaugeRows.length
 				if (total === 0) return 0
 				const payload = metricRowsToOtlp(rows.sumRows, rows.gaugeRows)
-				const client = yield* HttpClient.HttpClient
 				const request = HttpClientRequest.post(ingestMetricsUrl, {
 					headers: { authorization: `Bearer ${ingestKey}`, "content-type": "application/json" },
 				}).pipe(HttpClientRequest.bodyJsonUnsafe(payload))
-				const response = yield* client
+				const response = yield* httpClient
 					.execute(request)
 					.pipe(Effect.annotateSpans("peer.service", "ingest"))
 				if (response.status >= 300) {
@@ -1429,7 +1424,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 			},
 			(effect) =>
 				effect.pipe(
-					Effect.provide(FetchHttpClient.layer),
 					Effect.mapError((error) =>
 						error instanceof IntegrationsUpstreamError
 							? error
@@ -1440,8 +1434,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 					),
 				),
 		)
-
-		// Generic dataset polling
 
 		/**
 		 * One poll step: query a batched document's window, attribute GraphQL-level errors to their
@@ -1738,8 +1730,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 			},
 		)
 
-		// Per-org poll
-
 		const pollOrg = Effect.fn("CloudflareAnalyticsService.pollOrg")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			// A skip used to be silent — the reason only ever landed in the returned summary, which
@@ -1910,32 +1900,32 @@ export class CloudflareAnalyticsService extends Context.Service<
 							{ orgId, accountId, accessToken, ingestKey, liveScripts },
 							now,
 						).pipe(
-							Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
-								// Stop this org's loop; the seam disables + records health org-wide.
-								// Also stamp the connection so pollAllOrgs skips it until reconnect
-								// (a mid-poll 401 never goes through the refresh path that stamps).
-								oauth.markConnectionRevoked(orgId).pipe(
-									Effect.andThen(Ref.set(revokedRef, true)),
-									Effect.as(
-										allPartsFailed(item, "revoked", error.message, {
-											orgWide: true,
-											disable: true,
-										}),
+							Effect.catchTags({
+								"@maple/http/errors/IntegrationsRevokedError": (error) =>
+									// Stop this org's loop; the seam disables + records health org-wide.
+									// Also stamp the connection so pollAllOrgs skips it until reconnect
+									// (a mid-poll 401 never goes through the refresh path that stamps).
+									oauth.markConnectionRevoked(orgId).pipe(
+										Effect.andThen(Ref.set(revokedRef, true)),
+										Effect.as(
+											allPartsFailed(item, "revoked", error.message, {
+												orgWide: true,
+												disable: true,
+											}),
+										),
 									),
-								),
-							),
-							Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
-								// A 402 is the gateway refusing this org's metrics on billing grounds.
-								// It is org-wide and cannot clear mid-tick, so stop the loop the way a
-								// revoke does: continuing would re-fetch windows from Cloudflare that
-								// have nowhere to land, and — because the frontier only advances on
-								// acceptance — replay the same windows on every future tick forever.
-								error.status === 402
-									? Ref.set(deliveryBlockedRef, true).pipe(
-											Effect.as(documentFailed(item, "billing", error.message)),
-										)
-									: Effect.succeed(allPartsFailed(item, "upstream", error.message)),
-							),
+								"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+									// A 402 is the gateway refusing this org's metrics on billing grounds.
+									// It is org-wide and cannot clear mid-tick, so stop the loop the way a
+									// revoke does: continuing would re-fetch windows from Cloudflare that
+									// have nowhere to land, and — because the frontier only advances on
+									// acceptance — replay the same windows on every future tick forever.
+									error.status === 402
+										? Ref.set(deliveryBlockedRef, true).pipe(
+												Effect.as(documentFailed(item, "billing", error.message)),
+											)
+										: Effect.succeed(allPartsFailed(item, "upstream", error.message)),
+							}),
 						)
 
 						// Mirror the DB writes onto the in-memory rows so the next round re-plans
@@ -2030,8 +2020,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 				),
 			)
 		})
-
-		// All-orgs tick + status
 
 		const pollAllOrgs = Effect.fn("CloudflareAnalyticsService.pollAllOrgs")(function* () {
 			const orgRows = yield* dbExecute((db) =>
@@ -2305,7 +2293,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 				["queue", QUEUE_SERVICE_PREFIX],
 				["zone", ZONE_SERVICE_PREFIX],
 			]
-			const KIND_ORDER: Record<"zone" | "worker" | "queue", number> = { zone: 0, worker: 1, queue: 2 }
+			const KIND_ORDER: Record<"zone" | "worker" | "queue", number> = {
+				zone: 0,
+				worker: 1,
+				queue: 2,
+			} satisfies Record<"zone" | "worker" | "queue", number>
 			const services = [...byService.entries()]
 				.map(([serviceName, agg]) => {
 					const match = SERVICE_KINDS.find(([, prefix]) => serviceName.startsWith(prefix))
@@ -2412,8 +2404,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 			getUsage,
 			listHyperdriveConfigs: listHyperdriveConfigsForOrg,
 			resetOrgState,
-		} satisfies CloudflareAnalyticsServiceShape
+		} satisfies CloudflareAnalyticsServiceApi
 	}),
 }) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }

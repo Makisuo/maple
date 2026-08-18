@@ -1,11 +1,14 @@
 import { useId, useMemo, type ReactNode } from "react"
-import { Area, AreaChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, Line, LineChart } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 
 import type {
@@ -15,7 +18,7 @@ import type {
 } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@maple/ui/lib/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
-import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler, transformRows } from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, makeBucketLabeler, transformRows } from "../chart-utils"
 import { CHART_HEIGHT, ChartCard } from "../primitives/chart-card"
 import {
 	BREAKDOWN_OTHER_KEY,
@@ -193,30 +196,14 @@ export function StackedBreakdownChart({
 								</linearGradient>
 							))}
 						</defs>
-						<CartesianGrid
-							strokeDasharray={CHART_GRID_DASH}
-							stroke="var(--border)"
-							vertical={false}
-						/>
-						<XAxis
-							dataKey="time"
-							tickLine={false}
-							axisLine={false}
+						<ChartGrid />
+						<ChartXAxis dataKey="time" />
+						<ChartYAxis
 							tickMargin={8}
-							fontSize={10}
-							stroke="var(--muted-foreground)"
-						/>
-						<YAxis
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
 							width={52}
-							stroke="var(--muted-foreground)"
 							tickFormatter={(v: number) => formatNumber(v)}
 						/>
 						<ChartTooltip
-							cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 							content={
 								<ChartTooltipContent
 									indicator="dot"
@@ -389,30 +376,10 @@ export function CloudflareZoneLatencyChart({
 					syncId={syncId}
 					syncMethod="value"
 				>
-					<CartesianGrid
-						strokeDasharray={CHART_GRID_DASH}
-						stroke="var(--border)"
-						vertical={false}
-					/>
-					<XAxis
-						dataKey="time"
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
-						fontSize={10}
-						stroke="var(--muted-foreground)"
-					/>
-					<YAxis
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
-						fontSize={10}
-						width={52}
-						stroke="var(--muted-foreground)"
-						tickFormatter={(v: number) => formatLatency(v)}
-					/>
+					<ChartGrid />
+					<ChartXAxis dataKey="time" />
+					<ChartYAxis tickMargin={8} width={52} tickFormatter={(v: number) => formatLatency(v)} />
 					<ChartTooltip
-						cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 						content={
 							<ChartTooltipContent
 								indicator="dot"

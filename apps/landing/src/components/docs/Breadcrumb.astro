@@ -5,7 +5,7 @@ interface Props {
     title: string;
 }
 
-const sdkLabels: Record<string, string> = {
+const sdkLabels: Record<string, string>  = {
     effect: "Effect",
     node: "Node.js",
     nextjs: "Next.js",
@@ -15,7 +15,7 @@ const sdkLabels: Record<string, string> = {
     java: "Java",
     csharp: "C#",
     kotlin: "Kotlin",
-};
+} satisfies Record<string, string>;
 
 const { sdk, group, title } = Astro.props;
 const sdkLabel = sdk ? sdkLabels[sdk] ?? sdk : null;

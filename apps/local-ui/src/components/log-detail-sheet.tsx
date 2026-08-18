@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // Intentionally divergent from the web app's `@/components/logs/log-detail-sheet`:
 // that one is wired to effect-atom (trace timeline, correlated logs) and a wider
 // sub-component family local mode doesn't have. The shareable pieces (AttributesTable,
@@ -117,7 +118,7 @@ const HERO_TONE: Record<string, string> = {
 	WARNING: "bg-severity-warn/5 border-severity-warn/20",
 	ERROR: "bg-severity-error/5 border-severity-error/20",
 	FATAL: "bg-severity-fatal/5 border-severity-fatal/20",
-}
+} satisfies Record<string, string>
 
 const BODY_LINE_THRESHOLD = 280
 

@@ -1,4 +1,5 @@
 import * as React from "react"
+import * as Predicate from "effect/Predicate"
 import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/lib/utils"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -185,8 +186,6 @@ function useClockAt() {
 	)
 }
 
-// --- Events tab -------------------------------------------------------------
-
 function EventsTab({ sessionId, window }: { sessionId: string; window?: ReplayPartitionWindow }) {
 	const result = useAtomValue(getSessionTranscriptResultAtom({ data: { sessionId, ...window } }))
 	const [filter, setFilter] = React.useState<EventFilter>("all")
@@ -295,10 +294,8 @@ function EventProps({ attributes }: { attributes?: string }) {
 		if (!attributes) return []
 		try {
 			const parsed: unknown = JSON.parse(attributes)
-			if (!parsed || typeof parsed !== "object") return []
-			return Object.entries(parsed as Record<string, unknown>).map(
-				([key, value]) => [key, String(value)] as const,
-			)
+			if (!Predicate.isObject(parsed)) return []
+			return Object.entries(parsed).map(([key, value]) => [key, String(value)] as const)
 		} catch {
 			return []
 		}
@@ -435,8 +432,6 @@ function NetDurationBar({ durationMs, failed }: { durationMs: number; failed: bo
 	)
 }
 
-// --- Traces tab -------------------------------------------------------------
-
 function TracesTab({
 	traceIds,
 	window,
@@ -557,8 +552,6 @@ function TraceListRow({ summary }: { summary: SessionTraceSummary }) {
 		</li>
 	)
 }
-
-// --- Session tab ------------------------------------------------------------
 
 function SessionTab({ sessionId, session }: { sessionId: string; session: SessionRailSession }) {
 	return (

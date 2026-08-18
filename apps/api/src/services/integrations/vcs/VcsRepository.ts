@@ -34,6 +34,7 @@ import {
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { Array as Arr, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database, type DatabaseError } from "@/platform/DatabaseLive"
+import { dateToMs, msToDate } from "@/platform/time"
 
 // Postgres caps bind parameters at 65535. Chunk unbounded `inArray(...)` filters
 // and bulk inserts so a large installation (every repo/commit at once) stays well
@@ -50,14 +51,6 @@ const decodeBranch = Schema.decodeUnknownSync(VcsBranch)
 const decodeGitSha = Schema.decodeUnknownSync(GitCommitSha)
 
 const toPersistenceError = (error: DatabaseError) => new VcsRepoPersistenceError({ message: error.message })
-
-// Postgres `timestamptz` columns surface as `Date`; the domain schemas carry
-// epoch-millisecond `number`s. Convert at the row boundary (read → ms, write →
-// `new Date(ms)`).
-const msOf = (date: Date): number => date.getTime()
-const msOrNull = (date: Date | null): number | null => (date === null ? null : date.getTime())
-const dateOrNull = (ms: number | null | undefined): Date | null =>
-	ms === null || ms === undefined ? null : new Date(ms)
 
 const decodeAll = <Row, A>(table: string, rows: ReadonlyArray<Row>, f: (row: Row) => A) =>
 	Effect.try({
@@ -91,10 +84,10 @@ const rowToInstallation = (row: VcsInstallationRow): VcsInstallation =>
 		accountAvatarUrl: row.accountAvatarUrl ?? null,
 		repositorySelection: row.repositorySelection,
 		status: row.status,
-		suspendedAt: msOrNull(row.suspendedAt),
+		suspendedAt: dateToMs(row.suspendedAt),
 		installedByUserId: row.installedByUserId,
-		createdAt: msOf(row.createdAt),
-		updatedAt: msOf(row.updatedAt),
+		createdAt: dateToMs(row.createdAt),
+		updatedAt: dateToMs(row.updatedAt),
 	})
 
 const rowToRepo = (row: VcsRepositoryRow): VcsRepo =>
@@ -114,10 +107,10 @@ const rowToRepo = (row: VcsRepositoryRow): VcsRepo =>
 		isArchived: row.isArchived,
 		status: row.status,
 		syncStatus: row.syncStatus,
-		lastSyncedAt: msOrNull(row.lastSyncedAt),
+		lastSyncedAt: dateToMs(row.lastSyncedAt),
 		lastSyncError: row.lastSyncError ?? null,
-		createdAt: msOf(row.createdAt),
-		updatedAt: msOf(row.updatedAt),
+		createdAt: dateToMs(row.createdAt),
+		updatedAt: dateToMs(row.updatedAt),
 	})
 
 const rowToCommit = (row: VcsCommitRow): VcsCommit =>
@@ -132,10 +125,10 @@ const rowToCommit = (row: VcsCommitRow): VcsCommit =>
 		authorEmail: row.authorEmail ?? null,
 		authorLogin: row.authorLogin ?? null,
 		authorAvatarUrl: row.authorAvatarUrl ?? null,
-		authoredAt: msOrNull(row.authoredAt),
-		committedAt: msOf(row.committedAt),
+		authoredAt: dateToMs(row.authoredAt),
+		committedAt: dateToMs(row.committedAt),
 		htmlUrl: row.htmlUrl,
-		createdAt: msOf(row.createdAt),
+		createdAt: dateToMs(row.createdAt),
 	})
 
 const rowToBranch = (row: VcsRepositoryBranchRow): VcsBranch =>
@@ -147,8 +140,8 @@ const rowToBranch = (row: VcsRepositoryBranchRow): VcsBranch =>
 		name: row.name,
 		isDefault: row.isDefault,
 		headSha: row.headSha ?? null,
-		createdAt: msOf(row.createdAt),
-		updatedAt: msOf(row.updatedAt),
+		createdAt: dateToMs(row.createdAt),
+		updatedAt: dateToMs(row.updatedAt),
 	})
 
 // Note: `status` is intentionally not part of the upsert input. A new row gets
@@ -186,8 +179,6 @@ type RepoQueryScope = "active" | "all"
 export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/services/vcs/VcsRepository", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
-
-		// ---- Installations ------------------------------------------------
 
 		const selectInstallationRow = (provider: VcsProviderId, externalInstallationId: string) =>
 			database
@@ -261,7 +252,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 		const upsertInstallation = Effect.fn("VcsRepository.upsertInstallation")(function* (
 			input: UpsertInstallationInput,
 		) {
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			const rows = yield* database
 				.execute((db) =>
 					db
@@ -314,7 +305,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			installationId: VcsInstallationId,
 			status: VcsInstallStatus,
 		) {
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			yield* database
 				.execute((db) =>
 					db
@@ -324,8 +315,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 				)
 				.pipe(Effect.mapError(toPersistenceError))
 		})
-
-		// ---- Repositories -------------------------------------------------
 
 		const listRepositoriesByInstallation = Effect.fn("VcsRepository.listRepositoriesByInstallation")(
 			function* (installationId: VcsInstallationId, scope: RepoQueryScope) {
@@ -428,7 +417,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			repos: ReadonlyArray<RepoUpsertInput>,
 		) {
 			if (repos.length === 0) return
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			const values = repos.map((r) => ({
 				id: randomUUID() as VcsRepo["id"],
 				orgId: installation.orgId,
@@ -495,7 +484,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 		const markRepositoryRemoved = Effect.fn("VcsRepository.markRepositoryRemoved")(function* (
 			repositoryId: VcsRepositoryId,
 		) {
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			yield* database
 				.execute((db) =>
 					db
@@ -515,31 +504,27 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			orgId: OrgId,
 			repositoryId: VcsRepositoryId,
 		) {
-			const repoRows = yield* database
-				.execute((db) =>
-					db
-						.select({ id: vcsRepositories.id })
-						.from(vcsRepositories)
-						.where(and(eq(vcsRepositories.orgId, orgId), eq(vcsRepositories.id, repositoryId)))
-						.limit(1),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
+			const repoRows = yield* database.execute((db) =>
+				db
+					.select({ id: vcsRepositories.id })
+					.from(vcsRepositories)
+					.where(and(eq(vcsRepositories.orgId, orgId), eq(vcsRepositories.id, repositoryId)))
+					.limit(1),
+			)
 			if (repoRows[0]?.id === undefined) return false
 			// Delete branches, commits, then the repo in one atomic transaction, so a
 			// failure part-way can't leave child rows behind a deleted repo.
-			yield* database
-				.execute((db) =>
-					db.transaction(async (tx) => {
-						await tx
-							.delete(vcsRepositoryBranches)
-							.where(eq(vcsRepositoryBranches.repositoryId, repositoryId))
-						await tx.delete(vcsCommits).where(eq(vcsCommits.repositoryId, repositoryId))
-						await tx.delete(vcsRepositories).where(eq(vcsRepositories.id, repositoryId))
-					}),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
+			yield* database.execute((db) =>
+				db.transaction(async (tx) => {
+					await tx
+						.delete(vcsRepositoryBranches)
+						.where(eq(vcsRepositoryBranches.repositoryId, repositoryId))
+					await tx.delete(vcsCommits).where(eq(vcsCommits.repositoryId, repositoryId))
+					await tx.delete(vcsRepositories).where(eq(vcsRepositories.id, repositoryId))
+				}),
+			)
 			return true
-		})
+		}, Effect.mapError(toPersistenceError))
 
 		// Write a sync-status transition. `last_synced_at` is touched ONLY when the
 		// caller passes `syncedAt` (i.e. a sync actually completed) — so marking a repo
@@ -549,7 +534,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			repositoryId: VcsRepositoryId,
 			update: RepoSyncStatusUpdate,
 		) {
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			yield* database
 				.execute((db) =>
 					db
@@ -557,7 +542,9 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 						.set({
 							syncStatus: update.status,
 							lastSyncError: update.error ?? null,
-							...("syncedAt" in update ? { lastSyncedAt: dateOrNull(update.syncedAt) } : {}),
+							...("syncedAt" in update
+								? { lastSyncedAt: msToDate(update.syncedAt) }
+								: undefined),
 							updatedAt: now,
 						})
 						.where(eq(vcsRepositories.id, repositoryId)),
@@ -571,7 +558,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			repositoryId: VcsRepositoryId,
 			message: string,
 		) {
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			yield* database
 				.execute((db) =>
 					db
@@ -582,8 +569,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 				.pipe(Effect.mapError(toPersistenceError))
 		})
 
-		// ---- Commits ------------------------------------------------------
-
 		// Persist commits for an already-resolved repository. Commits belong to the
 		// repo only (no commit↔branch link — a repo tracks one branch at a time).
 		// Idempotent: upsert on (repository_id, sha). The commit row denormalizes
@@ -593,7 +578,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			commits: ReadonlyArray<CommitUpsertInput>,
 		) {
 			if (commits.length === 0) return 0
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			// Decode every SHA through the branded type before writing — a bad SHA
 			// throws here and is mapped to VcsRepoDecodeError below.
 			const values = yield* Effect.try({
@@ -611,8 +596,8 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 							authorEmail: c.authorEmail,
 							authorLogin: c.authorLogin,
 							authorAvatarUrl: c.authorAvatarUrl,
-							authoredAt: dateOrNull(c.authoredAt),
-							committedAt: new Date(c.committedAt),
+							authoredAt: msToDate(c.authoredAt),
+							committedAt: msToDate(c.committedAt),
 							htmlUrl: c.htmlUrl,
 							createdAt: now,
 						}
@@ -691,8 +676,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			return yield* Effect.forEach(rows, (row) => decodeOne("vcs_commits", row, rowToCommit))
 		})
 
-		// ---- Branches -----------------------------------------------------
-
 		// Bulk upsert a repo's branches from a provider listing — just the picker's
 		// list of names. `isDefault` is a display hint derived here (the provider is
 		// oblivious to it) by matching the repo's `defaultBranch`. Which branch is
@@ -702,7 +685,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			branches: ReadonlyArray<BranchUpsertInput>,
 		) {
 			if (branches.length === 0) return
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			const values = yield* Effect.try({
 				try: () =>
 					branches.map((b) => {
@@ -756,7 +739,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			repository: VcsRepo,
 			name: string,
 		) {
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			const isDefault = name === repository.defaultBranch
 			const rows = yield* database
 				.execute((db) =>
@@ -811,7 +794,7 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			repositoryId: VcsRepositoryId,
 			branch: string,
 		) {
-			const now = new Date(yield* Clock.currentTimeMillis)
+			const now = msToDate(yield* Clock.currentTimeMillis)
 			yield* database
 				.execute((db) =>
 					db.transaction(async (tx) => {
@@ -905,8 +888,6 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			return true
 		})
 
-		// ---- Cascade delete -----------------------------------------------
-
 		// Remove an installation and everything beneath it (its repositories and
 		// their commits), in dependency order. The dashboard disconnect flow uses
 		// this: severing the integration must not strand the org's repos/commits in
@@ -919,54 +900,47 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 			orgId: OrgId,
 			installationId: VcsInstallationId,
 		) {
-			const repoRows = yield* database
-				.execute((db) =>
-					db
-						.select({ id: vcsRepositories.id })
-						.from(vcsRepositories)
+			const repoRows = yield* database.execute((db) =>
+				db
+					.select({ id: vcsRepositories.id })
+					.from(vcsRepositories)
+					.where(
+						and(
+							eq(vcsRepositories.orgId, orgId),
+							eq(vcsRepositories.installationId, installationId),
+						),
+					),
+			)
+
+			const repoIds = repoRows.map((r) => r.id)
+			// One atomic transaction, children before parents: branches + commits (chunked
+			// to stay under the bind-variable cap), then the repos, then the installation.
+			yield* database.execute((db) =>
+				db.transaction(async (tx) => {
+					for (const chunk of Arr.chunksOf(repoIds, INARRAY_CHUNK_SIZE)) {
+						await tx
+							.delete(vcsRepositoryBranches)
+							.where(inArray(vcsRepositoryBranches.repositoryId, chunk))
+					}
+					for (const chunk of Arr.chunksOf(repoIds, INARRAY_CHUNK_SIZE)) {
+						await tx.delete(vcsCommits).where(inArray(vcsCommits.repositoryId, chunk))
+					}
+					await tx
+						.delete(vcsRepositories)
 						.where(
 							and(
 								eq(vcsRepositories.orgId, orgId),
 								eq(vcsRepositories.installationId, installationId),
 							),
-						),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
-
-			const repoIds = repoRows.map((r) => r.id)
-			// One atomic transaction, children before parents: branches + commits (chunked
-			// to stay under the bind-variable cap), then the repos, then the installation.
-			yield* database
-				.execute((db) =>
-					db.transaction(async (tx) => {
-						for (const chunk of Arr.chunksOf(repoIds, INARRAY_CHUNK_SIZE)) {
-							await tx
-								.delete(vcsRepositoryBranches)
-								.where(inArray(vcsRepositoryBranches.repositoryId, chunk))
-						}
-						for (const chunk of Arr.chunksOf(repoIds, INARRAY_CHUNK_SIZE)) {
-							await tx.delete(vcsCommits).where(inArray(vcsCommits.repositoryId, chunk))
-						}
-						await tx
-							.delete(vcsRepositories)
-							.where(
-								and(
-									eq(vcsRepositories.orgId, orgId),
-									eq(vcsRepositories.installationId, installationId),
-								),
-							)
-						await tx
-							.delete(vcsInstallations)
-							.where(
-								and(
-									eq(vcsInstallations.orgId, orgId),
-									eq(vcsInstallations.id, installationId),
-								),
-							)
-					}),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
-		})
+						)
+					await tx
+						.delete(vcsInstallations)
+						.where(
+							and(eq(vcsInstallations.orgId, orgId), eq(vcsInstallations.id, installationId)),
+						)
+				}),
+			)
+		}, Effect.mapError(toPersistenceError))
 
 		return {
 			resolveInstallation,

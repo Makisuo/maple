@@ -8,7 +8,7 @@ import {
 	type QueryBuilderMetricType,
 	type QueryBuilderQueryDraft,
 } from "@maple/query-engine/query-builder"
-import type { ListColumnDraft, ListDataSource } from "@/components/dashboard-builder/config/list-config-panel"
+import type { ListColumnDraft, ListDataSource } from "@/lib/query-builder/list-widget-config"
 import type {
 	TimeRange,
 	ValueUnit,
@@ -16,6 +16,8 @@ import type {
 	WidgetDataSource,
 } from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
+import { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
+import type { QueryComparisonMode } from "@maple/query-model"
 import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } from "@maple/domain/where-clause"
 
@@ -27,7 +29,16 @@ import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } fro
 // definitions under `components/dashboard-builder/widgets/types/` can import it
 // without an import cycle through the registry those dispatchers read.
 
-export type StatAggregate = "sum" | "first" | "count" | "avg" | "max" | "min"
+// The single widget-side spelling of the shared reducer table.
+export { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
+
+export type PointsMode = "auto" | "always" | "never"
+
+/** `chartPresentation.showPoints` ⇄ `PointsMode`: absent is Auto. */
+export const pointsModeFromShowPoints = (showPoints: boolean | undefined): PointsMode =>
+	showPoints === undefined ? "auto" : showPoints ? "always" : "never"
+export const showPointsFromPointsMode = (mode: PointsMode): boolean | undefined =>
+	mode === "auto" ? undefined : mode === "always"
 
 export interface QueryBuilderWidgetState {
 	visualization: VisualizationType
@@ -43,29 +54,31 @@ export interface QueryBuilderWidgetState {
 	curveType: "linear" | "monotone"
 	queries: QueryBuilderQueryDraft[]
 	formulas: QueryBuilderFormulaDraft[]
-	comparisonMode: "none" | "previous_period"
+	comparisonMode: QueryComparisonMode
 	includePercentChange: boolean
-	debug: boolean
 	statAggregate: StatAggregate
 	statValueField: string
 	unit: ValueUnit
 	legendPosition: LegendPosition
 	seriesStatsEnabled: boolean
+	/**
+	 * Point dots on line/area series. `auto` (no stored preference) dots isolated
+	 * points always and every point only when they fit the width; the other two
+	 * pin `chartPresentation.showPoints`.
+	 */
+	pointsMode: PointsMode
 	tableLimit: string
 	// Threshold lines (chart) / threshold coloring (stat, gauge)
 	thresholds: Array<{ value: number; color: string }>
-	// Gauge-specific
 	gaugeMin: string
 	gaugeMax: string
 	// Stat-specific: render a trend sparkline behind the value
 	sparklineEnabled: boolean
-	// List-specific
 	listDataSource: ListDataSource
 	listWhereClause: string
 	listLimit: string
 	listColumns: ListColumnDraft[]
 	listRootOnly: boolean
-	// Heatmap-specific
 	heatmapColorScale: HeatmapColorScale
 	heatmapScaleType: HeatmapScaleType
 	// Markdown-specific: the note body. Static — never hits the warehouse.
@@ -176,14 +189,7 @@ function toMetricType(input: unknown, fallback: QueryBuilderMetricType): QueryBu
 }
 
 export function toStatAggregate(value: unknown): StatAggregate {
-	return value === "sum" ||
-		value === "first" ||
-		value === "count" ||
-		value === "avg" ||
-		value === "max" ||
-		value === "min"
-		? value
-		: "first"
+	return STAT_AGGREGATES.find((candidate) => candidate === value) ?? "first"
 }
 
 function normalizeLoadedQuery(raw: QueryBuilderQueryDraft, index: number): QueryBuilderQueryDraft {
@@ -284,7 +290,7 @@ const TRACES_AGGREGATION_TITLES: Record<string, string> = {
 	p99_duration: "P99 duration",
 	error_rate: "Error rate",
 	apdex: "Apdex",
-}
+} satisfies Record<string, string>
 
 /**
  * Human-readable fallback title derived from the first visible query, e.g.
@@ -316,7 +322,14 @@ export function deriveDefaultWidgetTitle(queries: readonly QueryBuilderQueryDraf
 }
 
 /** Reads a persisted widget's `params.queries` back into editor drafts. */
-export function loadQueryDrafts(params: Record<string, unknown>): {
+/**
+ * Editor drafts from a stored query set.
+ *
+ * Takes `{ queries, formulas }` rather than a params bag so callers hand it the
+ * result of `dataSourceQuerySet` — the accessor that reads v2 and v3 alike —
+ * instead of reaching into `dataSource.params` themselves.
+ */
+export function loadQueryDrafts(params: { queries?: unknown; formulas?: unknown }): {
 	queries: QueryBuilderQueryDraft[]
 	formulas: QueryBuilderFormulaDraft[]
 } {
@@ -411,7 +424,7 @@ export function buildListEndpointParams(
 	const { clauses } = parseWhereClauses(whereClause)
 	// NOTE: startTime/endTime are injected by useWidgetData from the dashboard
 	// time range — do NOT include them here or they'll clash with interpolation.
-	const params: Record<string, unknown> = { limit }
+	const params: Record<string, unknown> = { limit } satisfies Record<string, unknown>
 
 	if (dataSource === "traces") {
 		const attributeFilters: Array<{ key: string; value: string; matchMode?: string }> = []

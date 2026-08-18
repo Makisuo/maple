@@ -1,17 +1,18 @@
 import { index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import type { OrgId, UserId } from "@maple/domain/primitives"
 
 export const oauthConnections = pgTable(
 	"oauth_connections",
 	{
 		id: text("id").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		provider: text("provider").notNull(),
 		externalUserId: text("external_user_id").notNull(),
 		externalUserEmail: text("external_user_email"),
 		// Provider-agnostic display label for the connected principal (e.g. a Cloudflare account
 		// name). Kept separate from externalUserEmail so that column only ever holds real emails.
 		externalAccountName: text("external_account_name"),
-		connectedByUserId: text("connected_by_user_id").notNull(),
+		connectedByUserId: text("connected_by_user_id").$type<UserId>().notNull(),
 		scope: text("scope").notNull().default(""),
 		accessTokenCiphertext: text("access_token_ciphertext").notNull(),
 		accessTokenIv: text("access_token_iv").notNull(),
@@ -36,9 +37,9 @@ export const oauthAuthStates = pgTable(
 	"oauth_auth_states",
 	{
 		state: text("state").notNull().primaryKey(),
-		orgId: text("org_id").notNull(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
 		provider: text("provider").notNull(),
-		initiatedByUserId: text("initiated_by_user_id").notNull(),
+		initiatedByUserId: text("initiated_by_user_id").$type<UserId>().notNull(),
 		redirectUri: text("redirect_uri").notNull(),
 		returnTo: text("return_to"),
 		// PKCE code verifier (RFC 7636). Set for providers that use the Authorization Code + PKCE

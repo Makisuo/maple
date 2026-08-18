@@ -1,7 +1,8 @@
-import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ExternalUserId, ScrapeTargetId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 import {
 	GitCommitSha,
 	VcsAccountType,
@@ -74,8 +75,6 @@ export class HazelDisconnectResponse extends Schema.Class<HazelDisconnectRespons
 		disconnected: Schema.Boolean,
 	},
 ) {}
-
-// ---- Cloudflare (account OAuth + telemetry auto-provisioning) --------------
 
 /** Per-zone edge-analytics collection state (from the GraphQL Analytics poller). */
 export class CloudflareAnalyticsZoneStatus extends Schema.Class<CloudflareAnalyticsZoneStatus>(
@@ -236,8 +235,6 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 	disconnected: Schema.Boolean,
 }) {}
 
-// ---- PlanetScale (OAuth integration) ----------------------------------------
-//
 // These shapes now serve two callers at once, which is why they are camelCase
 // with epoch-ms timestamps and the v2 file is not:
 //
@@ -563,8 +560,6 @@ export class PlanetScaleEventsResponse extends Schema.Class<PlanetScaleEventsRes
 	nextCursor: Schema.NullOr(Schema.String),
 }) {}
 
-// ---- GitHub (VCS App installation) ----------------------------------------
-
 /** One branch a repo knows about — an option in the tracked-branch picker. */
 export class GithubBranchSummary extends Schema.Class<GithubBranchSummary>("GithubBranchSummary")({
 	name: Schema.String,
@@ -663,8 +658,6 @@ export class GithubSetTrackedBranchResponse extends Schema.Class<GithubSetTracke
 	backfillQueued: Schema.Boolean,
 }) {}
 
-// ---- Commit hover cards (vendor-agnostic) ---------------------------------
-
 /**
  * A single resolved commit, for the dashboard's commit-SHA hover card. Provider-
  * neutral: any connected VCS provider resolves into this same shape. `resolved`
@@ -702,69 +695,137 @@ export class VcsCommitDetailsResponse extends Schema.Class<VcsCommitDetailsRespo
 /** Upper bound on SHAs per bulk commit lookup — one page of a list view. */
 export const VCS_COMMIT_DETAILS_MAX_SHAS = 50
 
-export class IntegrationsForbiddenError extends Schema.TaggedError<IntegrationsForbiddenError>()(
+export class IntegrationsForbiddenError extends HttpTaggedError<IntegrationsForbiddenError>()(
 	"@maple/http/errors/IntegrationsForbiddenError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 403 },
+	{
+		status: 403,
+		code: "integration_forbidden",
+		title: "Permission required",
+		retry: "never",
+		recovery: "request_access",
+		exposure: "public_message",
+	},
 ) {}
 
-export class IntegrationsValidationError extends Schema.TaggedError<IntegrationsValidationError>()(
+export class IntegrationsValidationError extends HttpTaggedError<IntegrationsValidationError>()(
 	"@maple/http/errors/IntegrationsValidationError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 400 },
+	{
+		status: 400,
+		code: "integration_request_invalid",
+		title: "Invalid integration request",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
 ) {}
 
-export class IntegrationsNotConnectedError extends Schema.TaggedError<IntegrationsNotConnectedError>()(
+/** Maple cannot start an integration because its server-side configuration is incomplete. */
+export class IntegrationsConfigurationError extends HttpTaggedError<IntegrationsConfigurationError>()(
+	"@maple/http/errors/IntegrationsConfigurationError",
+	{
+		message: Schema.String,
+	},
+	{
+		status: 503,
+		code: "integration_not_configured",
+		title: "Integration is not configured",
+		message: "This integration is not configured in Maple. Contact support.",
+		retry: "never",
+		recovery: "contact_support",
+		exposure: "redacted",
+	},
+) {}
+
+export class IntegrationsNotConnectedError extends HttpTaggedError<IntegrationsNotConnectedError>()(
 	"@maple/http/errors/IntegrationsNotConnectedError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 409 },
+	{
+		status: 409,
+		code: "integration_not_connected",
+		title: "Integration not connected",
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "public_message",
+	},
 ) {}
 
-export class IntegrationsRevokedError extends Schema.TaggedError<IntegrationsRevokedError>()(
+export class IntegrationsRevokedError extends HttpTaggedError<IntegrationsRevokedError>()(
 	"@maple/http/errors/IntegrationsRevokedError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 401 },
+	{
+		status: 401,
+		code: "integration_authorization_revoked",
+		title: "Integration authorization revoked",
+		message: "The integration authorization was revoked. Reconnect and try again.",
+		retry: "never",
+		recovery: "reconnect",
+		exposure: "redacted",
+	},
 ) {}
 
-export class IntegrationsUpstreamError extends Schema.TaggedError<IntegrationsUpstreamError>()(
+export class IntegrationsUpstreamError extends HttpTaggedError<IntegrationsUpstreamError>()(
 	"@maple/http/errors/IntegrationsUpstreamError",
 	{
 		message: Schema.String,
 		status: Schema.optionalKey(Schema.Number),
 		cause: Schema.optionalKey(Schema.Defect()),
 	},
-	{ httpApiStatus: 502 },
+	{
+		status: 502,
+		code: "integration_upstream_error",
+		title: "Integration provider is unavailable",
+		message: "The integration provider could not complete the request.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class IntegrationsPersistenceError extends Schema.TaggedError<IntegrationsPersistenceError>()(
+export class IntegrationsPersistenceError extends HttpTaggedError<IntegrationsPersistenceError>()(
 	"@maple/http/errors/IntegrationsPersistenceError",
 	{
 		message: Schema.String,
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "integration_persistence_unavailable",
+		title: "Integrations are temporarily unavailable",
+		message: "Integrations are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-/**
- * Every `/api/integrations/planetscale/*` operation below is superseded by the
- * `/v2/integrations/planetscale` group (`http/v2/integrations-planetscale.ts`),
- * which is where new work goes: scoped API keys, snake_case + ISO wire format,
- * and the documented error envelope.
- *
- * v1 stays mounted because customers may still be calling it — the dashboard no
- * longer does, so nothing in this repo will notice if it breaks. Marking the
- * operations deprecated puts that in `/docs` rather than leaving it as tribal
- * knowledge. Delete them only once the access logs show no external traffic.
- */
-const PLANETSCALE_V1_DEPRECATED = OpenApi.annotations({ deprecated: true })
+export type IntegrationHttpError =
+	| IntegrationsForbiddenError
+	| IntegrationsConfigurationError
+	| IntegrationsNotConnectedError
+	| IntegrationsRevokedError
+	| IntegrationsValidationError
+	| IntegrationsUpstreamError
+	| IntegrationsPersistenceError
 
+/**
+ * The `/api/integrations/planetscale/*` operations are gone — `/v2/integrations/
+ * planetscale` (`http/v2/integrations-planetscale.ts`) is the whole surface now:
+ * scoped API keys, snake_case + ISO wire format, and the documented error
+ * envelope. The schemas below stay because v2 and `PlanetScaleService` use them.
+ *
+ * The OAuth callback and the webhook receiver are NOT part of that retirement.
+ * They keep their version-neutral raw-router paths because PlanetScale stores
+ * those URLs on its side — see `docs/api-v2.md`.
+ */
 export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 	.add(
 		HttpApiEndpoint.get("hazelStatus", "/hazel/status", {
@@ -867,113 +928,6 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			success: CloudflareHyperdrivesResponse,
 			error: IntegrationsPersistenceError,
 		}),
-	)
-	.add(
-		HttpApiEndpoint.get("planetscaleStatus", "/planetscale/status", {
-			success: PlanetScaleIntegrationStatus,
-			error: IntegrationsPersistenceError,
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		HttpApiEndpoint.post("planetscaleStart", "/planetscale/start", {
-			payload: PlanetScaleStartConnectRequest,
-			success: PlanetScaleStartConnectResponse,
-			error: [
-				IntegrationsForbiddenError,
-				IntegrationsValidationError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// Organizations the stored OAuth grant can access — drives the org picker
-		// while the connection is pendingOrgSelection (and "change organization").
-		HttpApiEndpoint.get("planetscaleOrganizations", "/planetscale/organizations", {
-			success: PlanetScaleOrganizationsResponse,
-			error: [
-				IntegrationsForbiddenError,
-				IntegrationsValidationError,
-				IntegrationsNotConnectedError,
-				IntegrationsRevokedError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// Binds the OAuth grant to one PlanetScale organization: probes API
-		// permissions, then auto-provisions (or adopts) the managed scrape target.
-		// Re-binding is an upsert.
-		HttpApiEndpoint.post("planetscaleSelectOrganization", "/planetscale/select-organization", {
-			payload: PlanetScaleSelectOrganizationRequest,
-			success: PlanetScaleIntegrationStatus,
-			error: [
-				IntegrationsForbiddenError,
-				IntegrationsValidationError,
-				IntegrationsNotConnectedError,
-				IntegrationsRevokedError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// Validates the token against the metrics discovery endpoint before
-		// storing it on the managed scrape target (re-submitting rotates it).
-		HttpApiEndpoint.post("planetscaleSetMetricsToken", "/planetscale/metrics-token", {
-			payload: PlanetScaleMetricsTokenRequest,
-			success: PlanetScaleIntegrationStatus,
-			error: [
-				IntegrationsForbiddenError,
-				IntegrationsNotConnectedError,
-				IntegrationsValidationError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		HttpApiEndpoint.delete("planetscaleDisconnect", "/planetscale", {
-			success: PlanetScaleDisconnectResponse,
-			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// The org's polled database/branch inventory — consumed by the service map
-		// (node branding + metric-overlay matching) and the infra page.
-		HttpApiEndpoint.get("planetscaleDatabases", "/planetscale/databases", {
-			success: PlanetScaleDatabasesResponse,
-			error: IntegrationsPersistenceError,
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		HttpApiEndpoint.get("planetscaleWebhookConfig", "/planetscale/webhook-config", {
-			success: PlanetScaleWebhookConfigResponse,
-			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		HttpApiEndpoint.post("planetscaleQueryInsights", "/planetscale/query-insights", {
-			payload: PlanetScaleQueryInsightsRequest,
-			success: PlanetScaleQueryInsightsResponse,
-			error: [
-				IntegrationsNotConnectedError,
-				IntegrationsValidationError,
-				IntegrationsRevokedError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// POST, matching query-insights: the window + filters make a long key that
-		// belongs in a body, and the handler edge-caches on a computed key anyway.
-		HttpApiEndpoint.post("planetscaleEvents", "/planetscale/events", {
-			payload: PlanetScaleEventsRequest,
-			success: PlanetScaleEventsResponse,
-			error: [IntegrationsValidationError, IntegrationsPersistenceError],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		HttpApiEndpoint.get("githubStatus", "/github/status", {

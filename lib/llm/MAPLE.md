@@ -21,6 +21,7 @@ the vendor.
 | Change | Why |
 | --- | --- |
 | `src/schema/opencode-llm.ts` added; `src/schema/ids.ts` and `src/schema/messages.ts` import from it instead of `@opencode-ai/schema/llm` | Drops a whole second unpublished workspace package from the sync surface. The dependency was 5 symbols in 2 files; the file inlines `opencode/packages/schema/src/llm.ts` verbatim plus the `optional` helper it pulls from `opencode/packages/schema/src/schema.ts`. |
+| `src/schema/errors.ts` uses `Schema.TaggedError`; `src/protocols/shared.ts` maps `SseError` into `LLMError` | Keeps the vendored core compatible with Maple's pinned Effect v4 beta: `TaggedErrorClass` was replaced by `TaggedError`, and the SSE decoder now exposes a typed `SseError` that must be normalized at the package boundary. |
 | `package.json` rewritten | `@maple/llm`, `private`, no build step, source exports, `effect: "catalog:effect"`, vitest instead of `bun test`. Upstream's `@opencode-ai/http-recorder`, `@effect/platform-node`, `@clack/prompts`, `@tsconfig/bun` and `@typescript/native-preview` dev deps are dropped. |
 | `tsconfig.json` replaced | Copied from `packages/query-engine` so it typechecks under Maple's toolchain rather than `@tsconfig/bun`. |
 | Upstream's `AGENTS.md` renamed to `UPSTREAM-AGENTS.md` | Left as `AGENTS.md` it would load as directory-scoped agent instructions inside Maple while pointing at `packages/opencode/**` paths that don't exist here, and telling agents to run `bun test`. The content is still worth reading — the Effect conventions in it are the ones this source follows. |

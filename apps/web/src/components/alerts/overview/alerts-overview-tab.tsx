@@ -30,7 +30,7 @@ import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { AlertsOverviewModel, type AlertsOverviewReady } from "@/lib/models/alerts-overview-model"
 import { unitflowRuntime } from "@/lib/models/runtime"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQuery } from "@/lib/services/common/atom-client"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { ErrorState } from "@/components/common/error-state"
 import {
@@ -132,7 +132,7 @@ const AlertsOverviewContent = memo(function AlertsOverviewContent({
 		timelineRange,
 	} = data
 
-	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
+	const sessionResult = useAtomValue(retainedQuery("auth", "session", {}))
 	const { result: destinationsResult } = useAlertDestinationsList()
 
 	const destinations = Result.builder(destinationsResult)
@@ -180,7 +180,7 @@ const AlertsOverviewContent = memo(function AlertsOverviewContent({
 	// current user surfaced as "You". Maple has no org-members endpoint, so other
 	// creators are shown by their raw identifier.
 	const creatorOptions = useMemo(() => {
-		const options: Record<string, string> = { [ANY_CREATOR]: "Anyone" }
+		const options: Record<string, string> = { [ANY_CREATOR]: "Anyone" } satisfies Record<string, string>
 		for (const rule of rules) {
 			if (!(rule.createdBy in options)) {
 				options[rule.createdBy] = rule.createdBy === currentUserId ? "You" : rule.createdBy

@@ -38,7 +38,7 @@ const queryDefinitionOptions = <Payload, Row>(
 	return {
 		profile: definition.profile,
 		context: definition.id,
-		...(settings === undefined ? {} : { settings }),
+		...(!(settings === undefined) ? { settings } : undefined),
 	}
 }
 

@@ -6,7 +6,11 @@ import {
 } from "@maple/query-engine"
 
 /**
- * Coalesces `/api/query-engine/execute` calls into `/execute-batch`.
+ * Coalesces individual query executions into `/internal/query-engine/execute-batch`.
+ *
+ * This is now the only way a query reaches the warehouse from the browser — the
+ * single-query `/execute` endpoint was removed once this batcher had carried all
+ * traffic for a full release.
  *
  * Every warehouse module funnels through one choke point, and each atom runs on
  * its own fiber, so a render pass used to emit one POST per query — each with
@@ -70,8 +74,7 @@ export const makeExecuteBatcher = (
 					if (outcome === undefined) {
 						entry.reject(new Error("Batch response was missing a result for this query."))
 					} else if (outcome.outcome === "failure") {
-						// Carries the server's original `_tag`, so normalizeWarehouseError
-						// passes it through and the UI keeps its specific error copy.
+						// Per-item failures already use the complete public error body.
 						entry.reject(outcome.error)
 					} else {
 						entry.resolve(new QueryEngineExecuteResponse({ result: outcome.result }))

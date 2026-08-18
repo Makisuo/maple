@@ -4,13 +4,14 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { cn } from "@maple/ui/lib/utils"
 
 import { SectionHeader } from "@/components/layout/section-header"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
+import { anomalyIncidentFromV2 } from "@/lib/services/anomalies"
 import { AnomalyRow } from "./anomaly-row"
 import { SEVERITY_TONE } from "./anomaly-format"
 
 function useRelatedAnomalies(issueId: ErrorIssueId) {
-	const incidentsQueryAtom = MapleApiAtomClient.query("anomalies", "listIncidents", {
-		query: { errorIssueId: issueId, limit: 50 },
+	const incidentsQueryAtom = retainedQueryV2("anomalies", "listIncidents", {
+		query: { error_issue_id: issueId, limit: 50 },
 		reactivityKeys: ["anomalyIncidents", `errorIssue:${issueId}:anomalies`],
 	})
 	return useAtomValue(incidentsQueryAtom)
@@ -23,7 +24,7 @@ function useRelatedAnomalies(issueId: ErrorIssueId) {
 export function RelatedAnomaliesSection({ issueId }: { issueId: ErrorIssueId }) {
 	const result = useRelatedAnomalies(issueId)
 	const incidents = Result.builder(result)
-		.onSuccess((value) => value.incidents)
+		.onSuccess((value) => value.data.map(anomalyIncidentFromV2))
 		.orElse(() => [])
 
 	if (incidents.length === 0) return null
@@ -52,7 +53,7 @@ export function RelatedAnomaliesSection({ issueId }: { issueId: ErrorIssueId }) 
 export function OpenAnomalyBadge({ issueId }: { issueId: ErrorIssueId }) {
 	const result = useRelatedAnomalies(issueId)
 	const openIncidents = Result.builder(result)
-		.onSuccess((value) => value.incidents.filter((incident) => incident.status === "open"))
+		.onSuccess((value) => value.data.filter((incident) => incident.status === "open"))
 		.orElse(() => [])
 
 	if (openIncidents.length === 0) return null

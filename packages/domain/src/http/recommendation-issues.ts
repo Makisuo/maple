@@ -1,7 +1,6 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { IsoDateTimeString, RecommendationIssueId } from "../primitives"
-import { Authorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 
 export const RecommendationIssueKind = Schema.Literals(["rename", "double-emission", "naming"])
 export type RecommendationIssueKind = typeof RecommendationIssueKind.Type
@@ -30,39 +29,31 @@ export class RecommendationIssuesListResponse extends Schema.Class<Recommendatio
 	issues: Schema.Array(RecommendationIssue),
 }) {}
 
-export class RecommendationIssuePersistenceError extends Schema.TaggedError<RecommendationIssuePersistenceError>()(
+export class RecommendationIssuePersistenceError extends HttpTaggedError<RecommendationIssuePersistenceError>()(
 	"@maple/http/errors/RecommendationIssuePersistenceError",
 	{ message: Schema.String },
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "recommendations_unavailable",
+		title: "Recommendations are temporarily unavailable",
+		message: "Recommendations are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
-export class RecommendationIssueNotFoundError extends Schema.TaggedError<RecommendationIssueNotFoundError>()(
+export class RecommendationIssueNotFoundError extends HttpTaggedError<RecommendationIssueNotFoundError>()(
 	"@maple/http/errors/RecommendationIssueNotFoundError",
 	{ id: RecommendationIssueId, message: Schema.String },
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "recommendation_not_found",
+		title: "Recommendation not found",
+		message: "No such recommendation.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {}
-
-export class RecommendationIssuesApiGroup extends HttpApiGroup.make("recommendationIssues")
-	.add(
-		// Reconciles live telemetry → persisted issues, then returns the full numbered list.
-		HttpApiEndpoint.get("list", "/", {
-			success: RecommendationIssuesListResponse,
-			error: RecommendationIssuePersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("dismiss", "/:id/dismiss", {
-			params: { id: RecommendationIssueId },
-			success: RecommendationIssuesListResponse,
-			error: [RecommendationIssueNotFoundError, RecommendationIssuePersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("reopen", "/:id/reopen", {
-			params: { id: RecommendationIssueId },
-			success: RecommendationIssuesListResponse,
-			error: [RecommendationIssueNotFoundError, RecommendationIssuePersistenceError],
-		}),
-	)
-	.prefix("/api/recommendation-issues")
-	.middleware(Authorization) {}

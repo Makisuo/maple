@@ -8,6 +8,7 @@ import {
 	ErrorIncidentId,
 	ErrorIssueId,
 	InvestigationId,
+	MobileDeviceId,
 } from "../../primitives"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
@@ -21,3 +22,4 @@ export const AnomalyIncidentPublicId = PublicId(PublicIdPrefixes.anomalyIncident
 export const ErrorIncidentPublicId = PublicId(PublicIdPrefixes.errorIncident, ErrorIncidentId)
 export const ErrorIssuePublicId = PublicId(PublicIdPrefixes.errorIssue, ErrorIssueId)
 export const InvestigationPublicId = PublicId(PublicIdPrefixes.investigation, InvestigationId)
+export const MobileDevicePublicId = PublicId(PublicIdPrefixes.mobileDevice, MobileDeviceId)

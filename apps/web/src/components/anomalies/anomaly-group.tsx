@@ -15,7 +15,7 @@ const GROUP_LABEL: Record<AnomalyGroupKey, string> = {
 	critical: "Critical",
 	warning: "Warning",
 	resolved: "Resolved",
-}
+} satisfies Record<AnomalyGroupKey, string>
 
 export function anomalyGroupKey(incident: AnomalyIncidentDocument): AnomalyGroupKey {
 	if (incident.status !== "open") return "resolved"

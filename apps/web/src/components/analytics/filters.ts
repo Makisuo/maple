@@ -55,7 +55,7 @@ export const FILTER_CHIP_LABEL: Record<AnalyticsFilterKey, string> = {
 	utmMedium: "utm_medium",
 	utmCampaign: "utm_campaign",
 	visitorType: "visitor",
-}
+} satisfies Record<AnalyticsFilterKey, string>
 
 /** Filter key → sidebar section heading. Sentence case, matching the rest of the app. */
 export const FILTER_SECTION_LABEL: Record<AnalyticsFilterKey, string> = {
@@ -71,7 +71,7 @@ export const FILTER_SECTION_LABEL: Record<AnalyticsFilterKey, string> = {
 	utmMedium: "UTM medium",
 	utmCampaign: "UTM campaign",
 	visitorType: "Visitor",
-}
+} satisfies Record<AnalyticsFilterKey, string>
 
 const FILTER_KEYS = Object.keys(FILTER_CHIP_LABEL) as ReadonlyArray<AnalyticsFilterKey>
 
@@ -111,12 +111,3 @@ export const activeFilterChips = (filters: AnalyticsFilters): ReadonlyArray<Acti
  */
 export const toggleFilterValue = (current: string | undefined, value: string): string | undefined =>
 	current === value ? undefined : value
-
-/**
- * `ReferrerHost` and friends are `''` for sessions that never populated them,
- * and those rows are dropped server-side rather than shown as a blank label. A
- * dimension nobody sends therefore arrives as an empty list — which is the
- * signal the panels use to say "not collected" instead of "zero".
- */
-export const DIRECT_REFERRER_NOTE =
-	"Sessions with no referrer are excluded rather than bucketed as direct — an empty referrer also covers internal navigation and Referrer-Policy suppression."

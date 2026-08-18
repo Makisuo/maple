@@ -1,10 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { MAX_RAW_SQL_RESULT_ROWS } from "@maple/domain/http"
+import { computeBucketSecondsForRange } from "@maple/query-engine"
 import { runRawSql, autoBucketSeconds } from "./run-raw-sql"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
@@ -13,7 +14,7 @@ const tenant = { orgId: "org_test" } as TenantContext
 const makeStub = (
 	rows: ReadonlyArray<Record<string, unknown>>,
 	captured?: { sql?: string; profile?: string; context?: string },
-): WarehouseQueryServiceShape =>
+): WarehouseQueryServiceApi =>
 	({
 		rawSqlQuery: (
 			_t: unknown,
@@ -27,9 +28,9 @@ const makeStub = (
 			}
 			return Effect.succeed(rows)
 		},
-	}) as unknown as WarehouseQueryServiceShape
+	}) as WarehouseQueryServiceApi
 
-const provide = (stub: WarehouseQueryServiceShape) => Layer.succeed(WarehouseQueryService, stub)
+const provide = (stub: WarehouseQueryServiceApi) => Layer.succeed(WarehouseQueryService, stub)
 
 const range = { startTime: "2026-04-01 00:00:00", endTime: "2026-04-01 01:00:00" }
 
@@ -40,7 +41,11 @@ describe("runRawSql", () => {
 				sql?: string
 				profile?: string
 				context?: string
-			} = {}
+			} = {} satisfies {
+				sql?: string
+				profile?: string
+				context?: string
+			}
 			const result = yield* runRawSql({
 				tenant,
 				sql: "SELECT ServiceName, count() AS c FROM traces WHERE $__orgFilter GROUP BY ServiceName",
@@ -104,11 +109,15 @@ describe("runRawSql", () => {
 })
 
 describe("autoBucketSeconds", () => {
-	it("picks a sub-minute bucket for short windows and a coarse one for long windows", () => {
+	it("is the signed-in raw-SQL policy: 300s floor, coarser for long windows", () => {
 		const short = autoBucketSeconds("2026-04-01 00:00:00", "2026-04-01 00:05:00")
 		const long = autoBucketSeconds("2026-04-01 00:00:00", "2026-04-08 00:00:00")
 		assert.isTrue(short < long)
-		assert.isTrue(short >= 1)
+		assert.strictEqual(short, 300)
+		assert.strictEqual(
+			long,
+			computeBucketSecondsForRange("2026-04-01 00:00:00", "2026-04-08 00:00:00", "rawSql"),
+		)
 	})
 
 	it("falls back to 300 for invalid ranges", () => {

@@ -6,7 +6,8 @@ import {
 	type McpToolResult,
 } from "./types"
 import { Effect, Schema } from "effect"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { dataSourceEndpoint } from "@maple/widgets/dashboard"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import {
@@ -69,11 +70,12 @@ function unsupportedEndpointResult(
 	widget: {
 		id: string
 		visualization: string
-		dataSource: {
-			endpoint: string
-			params?: Record<string, unknown>
-			transform?: Record<string, unknown>
-		}
+		// `unknown`, because that is all this function needs: it hands the value to
+		// `dataSourceEndpoint` (which narrows internally) and to `JSON.stringify`.
+		// Spelling out a shape here only ever pinned it to one schema version — and
+		// this is the diagnostic path for a widget nothing else could read, so it is
+		// the last place that should care what shape the data source is in.
+		dataSource: unknown
 		display: { title?: string; unit?: string }
 	},
 	dashboardName: string,
@@ -82,21 +84,16 @@ function unsupportedEndpointResult(
 		`## Widget inspection: ${widget.display.title ?? widget.id}`,
 		`Dashboard: ${dashboardName}`,
 		`Visualization: ${widget.visualization}`,
-		`Endpoint: ${widget.dataSource.endpoint}`,
+		`Endpoint: ${dataSourceEndpoint(widget.dataSource) ?? "(typed data source)"}`,
 		``,
 		`This endpoint is not yet supported by inspect_chart_data.`,
 		`Use the \`query_data\` tool directly to verify, with the params shown below.`,
 		``,
 		`Widget definition:`,
-		JSON.stringify(
-			{
-				endpoint: widget.dataSource.endpoint,
-				params: widget.dataSource.params,
-				transform: widget.dataSource.transform,
-			},
-			null,
-			2,
-		),
+		// The whole data source rather than three hand-picked fields: this is the
+		// diagnostic path for a widget nothing else could read, so showing exactly
+		// what is stored beats showing the subset an older shape happened to have.
+		JSON.stringify(widget.dataSource, null, 2),
 	].join("\n")
 
 	return { content: [{ type: "text" as const, text }] }
@@ -187,11 +184,11 @@ const inspectChartDataDescription =
 	"Inspect the actual data a dashboard chart will render. " +
 	"The mutation tools (`create_dashboard`, `add_dashboard_widget`, `update_dashboard_widget`) now run this validation automatically. " +
 	"Use this tool to re-verify a widget after fixing it, or to inspect any existing widget on demand. " +
-	"Returns row counts, series statistics, sample data points, and sanity flags (EMPTY, ALL_ZEROS, FLAT_LINE, UNIT_MISMATCH, NEGATIVE_VALUES, UNREALISTIC_MAGNITUDE, SINGLE_SERIES_DOMINATES, CARDINALITY_EXPLOSION, SUSPICIOUS_GAP, BROKEN_BREAKDOWN, SINGLE_POINT, ALL_NULLS, BUILDER_WARNINGS). " +
+	"Returns row counts, series statistics, sample data points, and sanity flags (EMPTY, ALL_ZEROS, FLAT_LINE, UNIT_MISMATCH, PERCENT_SCALE_MISMATCH, NEGATIVE_VALUES, UNREALISTIC_MAGNITUDE, SINGLE_SERIES_DOMINATES, CARDINALITY_EXPLOSION, SUSPICIOUS_GAP, BROKEN_BREAKDOWN, SINGLE_POINT, ALL_NULLS, BUILDER_WARNINGS). " +
 	"The verdict is one of `looks_healthy`, `suspicious`, or `broken`. **If the verdict is not `looks_healthy`, fix the widget via update_dashboard_widget and re-inspect.** " +
-	"Supports custom_query_builder_timeseries, custom_query_builder_breakdown, and raw_sql_chart widgets (raw SQL is executed and its rows returned). " +
+	"Supports widgets backed by a `query` data source (timeseries and breakdown result shapes) and by `raw_sql` (which is executed and its rows returned). " +
 	"Limitations: formula expressions in `formulas[]` are NOT evaluated server-side — only the base queries are inspected; " +
-	"checks only the requested window without the dashboard UI's auto-fallback. For other predefined-endpoint widgets (service_overview, errors_summary, etc.), this tool returns guidance to use `query_data` directly with the widget's params."
+	"checks only the requested window without the dashboard UI's auto-fallback. For widgets backed by a curated `route` data source (service_overview, errors_summary, etc.), this tool returns guidance to use `query_data` directly with the widget's params."
 
 export function registerInspectChartDataTool(server: McpToolRegistrar) {
 	server.tool(
@@ -208,7 +205,7 @@ export function registerInspectChartDataTool(server: McpToolRegistrar) {
 			),
 		}),
 		Effect.fn("McpTool.inspectChartData")(function* ({ dashboard_id, widget_id, start_time, end_time }) {
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 			const persistence = yield* DashboardPersistenceService
 
 			const list = yield* persistence.list(tenant.orgId).pipe(
@@ -283,15 +280,7 @@ export function registerInspectChartDataTool(server: McpToolRegistrar) {
 					{
 						id: widget.id,
 						visualization: widget.visualization,
-						dataSource: {
-							endpoint: widget.dataSource.endpoint,
-							...(widget.dataSource.params && {
-								params: widget.dataSource.params as Record<string, unknown>,
-							}),
-							...(widget.dataSource.transform && {
-								transform: widget.dataSource.transform as Record<string, unknown>,
-							}),
-						},
+						dataSource: widget.dataSource,
 						display: {
 							...(widget.display.title !== undefined && { title: widget.display.title }),
 							...(widget.display.unit !== undefined && { unit: widget.display.unit }),

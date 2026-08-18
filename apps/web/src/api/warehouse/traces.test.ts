@@ -1,3 +1,4 @@
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { beforeEach, expect, vi } from "vitest"

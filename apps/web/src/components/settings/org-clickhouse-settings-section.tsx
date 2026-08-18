@@ -2,7 +2,7 @@ import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-a
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Exit, Option } from "effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
-import { formatBackendError } from "@/lib/error-messages"
+import { displayError } from "@/lib/error-messages"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -31,15 +31,15 @@ import {
 	CircleXmarkIcon,
 	LoaderIcon,
 } from "@/components/icons"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { OrgClickHouseSettingsUpsertRequest } from "@maple/domain/http"
 import { DataPlatformUsageSection } from "@/components/settings/data-platform-usage-section"
 
 function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
 	if (Exit.isSuccess(exit)) return fallback
 	const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-	const formatted = formatBackendError(failure ?? exit)
-	return formatted.description || formatted.title || fallback
+	const formatted = displayError(failure ?? exit)
+	return formatted.message || formatted.title || fallback
 }
 
 const syncDateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -81,15 +81,15 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 	const [isDisabling, setIsDisabling] = useState(false)
 	const [expandedDrifts, setExpandedDrifts] = useState<ReadonlySet<string>>(new Set())
 
-	const settingsQueryAtom = MapleApiAtomClient.query("orgClickHouseSettings", "get", {})
+	const settingsQueryAtom = retainedQuery("orgClickHouseSettings", "get", {})
 	const settingsResult = useAtomValue(settingsQueryAtom)
 	const refreshSettings = useAtomRefresh(settingsQueryAtom)
 
-	const diffQueryAtom = MapleApiAtomClient.query("orgClickHouseSettings", "schemaDiff", {})
+	const diffQueryAtom = retainedQuery("orgClickHouseSettings", "schemaDiff", {})
 	const diffResult = useAtomValue(diffQueryAtom)
 	const refreshDiff = useAtomRefresh(diffQueryAtom)
 
-	const statusQueryAtom = MapleApiAtomClient.query("orgClickHouseSettings", "applySchemaStatus", {})
+	const statusQueryAtom = retainedQuery("orgClickHouseSettings", "applySchemaStatus", {})
 	const statusResult = useAtomValue(statusQueryAtom)
 	const refreshStatus = useAtomRefresh(statusQueryAtom)
 
@@ -420,6 +420,7 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 								<div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
 									Failed to introspect ClickHouse:{" "}
 									{getExitErrorMessage(
+										// SAFETY: this branch has already excluded loading and success, leaving the failure Exit variant.
 										diffResult as unknown as Exit.Exit<unknown, unknown>,
 										"check that credentials are valid",
 									)}

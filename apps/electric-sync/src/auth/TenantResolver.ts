@@ -3,7 +3,7 @@ import type { UnauthorizedError } from "@maple/domain/http"
 import { Context, Effect, Layer } from "effect"
 import { SyncConfig } from "../config"
 
-export interface TenantResolverShape {
+export interface TenantResolverApi {
 	readonly resolve: (
 		headers: Record<string, string | undefined>,
 	) => Effect.Effect<TenantContext, UnauthorizedError>
@@ -23,12 +23,12 @@ export interface TenantResolverShape {
  * API-key path here, because this worker has no database and the browser's
  * shape-fetch only ever sends the session bearer.
  */
-export class TenantResolver extends Context.Service<TenantResolver, TenantResolverShape>()(
+export class TenantResolver extends Context.Service<TenantResolver, TenantResolverApi>()(
 	"@maple/electric-sync/TenantResolver",
 	{
 		make: Effect.gen(function* () {
 			const config = yield* SyncConfig
-			return { resolve: makeResolveTenant(config) } satisfies TenantResolverShape
+			return { resolve: makeResolveTenant(config) } satisfies TenantResolverApi
 		}),
 	},
 ) {

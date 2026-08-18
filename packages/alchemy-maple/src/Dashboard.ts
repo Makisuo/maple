@@ -4,12 +4,13 @@ import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
+import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
 
 /**
  * Dashboard props, authored in the v2 wire shape (snake_case, exactly as
- * documented at `/v2/docs`). `widgets`, `variables`, and `time_range` are
- * passed through verbatim.
+ * documented at `/v2/docs`). `widgets`, `sections`, `variables`, and
+ * `time_range` are passed through verbatim.
  */
 export interface DashboardProps {
 	/** Dashboard name (unique-ish label shown in the UI). */
@@ -19,6 +20,11 @@ export interface DashboardProps {
 	/** e.g. `{ type: "relative", value: "12h" }`. */
 	time_range?: Record<string, unknown>
 	widgets?: Array<Record<string, unknown>>
+	/**
+	 * Collapsible widget groups. Widgets join one by setting `section_id` and
+	 * `tab_id`, and their `layout` is relative to that group's own grid.
+	 */
+	sections?: Array<Record<string, unknown>>
 	variables?: Array<Record<string, unknown>>
 }
 
@@ -55,6 +61,12 @@ const WireDashboard = Schema.Struct({
 	tags: Schema.Array(Schema.String),
 	time_range: Schema.Record(Schema.String, Schema.Unknown),
 	widgets: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	// Optional, unlike its siblings: an IaC client has its own release cadence and
+	// routinely runs against a Maple API older than itself. A required field here
+	// would make `alchemy deploy` fail to decode every dashboard served by a
+	// deployment that predates sections. `drifted` reads it as `[]` when absent,
+	// which is what such an API means anyway.
+	sections: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
 	variables: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 })
 const decodeWireDashboard = Schema.decodeUnknownEffect(WireDashboard)
@@ -62,22 +74,24 @@ const decodeWireDashboard = Schema.decodeUnknownEffect(WireDashboard)
 /** The request body for create/update: exactly the props the user set. */
 const desiredBody = (props: DashboardProps) => ({
 	name: props.name,
-	...(props.description !== undefined ? { description: props.description } : {}),
-	...(props.tags !== undefined ? { tags: props.tags } : {}),
-	...(props.time_range !== undefined ? { time_range: props.time_range } : {}),
-	...(props.widgets !== undefined ? { widgets: props.widgets } : {}),
-	...(props.variables !== undefined ? { variables: props.variables } : {}),
+	...(props.description !== undefined ? { description: props.description } : undefined),
+	...(props.tags !== undefined ? { tags: props.tags } : undefined),
+	...(props.time_range !== undefined ? { time_range: props.time_range } : undefined),
+	...(props.widgets !== undefined ? { widgets: props.widgets } : undefined),
+	...(props.sections !== undefined ? { sections: props.sections } : undefined),
+	...(props.variables !== undefined ? { variables: props.variables } : undefined),
 })
 
 /** Compare only the fields the user declared against the observed wire object. */
 const drifted = (props: DashboardProps, observed: Schema.Schema.Type<typeof WireDashboard>): boolean => {
 	const body = desiredBody(props) as Record<string, unknown>
-	return Object.keys(body).some(
-		(key) =>
-			!deepEqual(body[key], (observed as unknown as Record<string, unknown>)[key], {
-				stripNullish: true,
-			}),
-	)
+	// An API that predates sections omits the key entirely; treat that as "no
+	// groups" so declaring `sections: []` doesn't read as perpetual drift.
+	const seen: Record<string, unknown> = {
+		...(observed as Record<string, unknown>),
+		sections: observed.sections ?? [],
+	} satisfies Record<string, unknown>
+	return Object.keys(body).some((key) => !deepEqual(body[key], seen[key], { stripNullish: true }))
 }
 
 const toAttributes = (observed: Schema.Schema.Type<typeof WireDashboard>) => ({
@@ -100,21 +114,22 @@ export const DashboardProvider = () =>
 					return undefined
 				}),
 				reconcile: Effect.fn(function* ({ news, output }) {
-					// Observe — re-fetch by id; recover from out-of-band deletes.
 					let observed: Schema.Schema.Type<typeof WireDashboard> | undefined
 					if (output?.dashboardId) {
 						const fetched = yield* api
 							.get(`/v2/dashboards/${output.dashboardId}`)
-							.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+							.pipe(
+								Effect.catchTag(MapleErrorTags.dashboardNotFound, () =>
+									Effect.succeed(undefined),
+								),
+							)
 						if (fetched !== undefined) observed = yield* decodeWireDashboard(fetched)
 					}
 
-					// Ensure — create if missing.
 					if (observed === undefined) {
 						const created = yield* api.post("/v2/dashboards", desiredBody(news))
 						observed = yield* decodeWireDashboard(created)
 					} else if (drifted(news, observed)) {
-						// Sync — PATCH only when the declared fields drift.
 						const updated = yield* api.patch(`/v2/dashboards/${observed.id}`, desiredBody(news))
 						observed = yield* decodeWireDashboard(updated)
 					}
@@ -124,13 +139,17 @@ export const DashboardProvider = () =>
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/dashboards/${output.dashboardId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.void))
+						.pipe(Effect.catchTag(MapleErrorTags.dashboardNotFound, () => Effect.void))
 				}),
 				read: Effect.fn(function* ({ output }) {
 					if (!output?.dashboardId) return undefined
 					const fetched = yield* api
 						.get(`/v2/dashboards/${output.dashboardId}`)
-						.pipe(Effect.catchTag("Maple::NotFoundError", () => Effect.succeed(undefined)))
+						.pipe(
+							Effect.catchTag(MapleErrorTags.dashboardNotFound, () =>
+								Effect.succeed(undefined),
+							),
+						)
 					if (fetched === undefined) return undefined
 					return toAttributes(yield* decodeWireDashboard(fetched))
 				}),

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
 
 /**
  * `useMapleChat`'s stream reader, driven by a fake SSE body.

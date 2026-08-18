@@ -2,25 +2,46 @@ import { type ReactNode, createElement, useCallback, useMemo } from "react"
 import { Atom, ScopedAtom, useAtom } from "@/lib/effect-atom"
 import { useOptionalPageRefreshContext } from "@/components/time-range-picker/page-refresh-context"
 import type { TimeRange } from "@/components/dashboard-builder/types"
-import { relativeToAbsolute } from "@/lib/time-utils"
+import { resolveTimeRangeWindow } from "@maple/query-engine"
 
 type ResolvedTimeRange = { startTime: string; endTime: string }
 
 const DEFAULT_RELATIVE_FALLBACK = "1h"
 
-export function resolveTimeRange(timeRange: TimeRange): ResolvedTimeRange | null {
-	if (timeRange.type === "absolute") {
-		return { startTime: timeRange.startTime, endTime: timeRange.endTime }
-	}
-	const resolved = relativeToAbsolute(timeRange.value)
+export interface ResolveTimeRangeOptions {
+	/**
+	 * Floor the endpoint to the cache-key grid. Default `true`; pass `false` on
+	 * an explicit reload so the window actually advances to "now".
+	 */
+	snap?: boolean
+}
+
+/**
+ * The signed-in dashboard's view of `resolveTimeRangeWindow` — the same
+ * resolver the share page and the share API use, so a board and its share link
+ * run over the same window. Only the DEV warning and the `"1h"` fallback for a
+ * malformed stored preset are this app's own.
+ *
+ * Every widget on the dashboard keys its fetch off this range, so an unsnapped
+ * `now` hands all of them a fresh cache key on each mount at once — hence the
+ * default snap.
+ */
+export function resolveTimeRange(
+	timeRange: TimeRange,
+	options?: ResolveTimeRangeOptions,
+): ResolvedTimeRange | null {
+	const resolved = resolveTimeRangeWindow(timeRange, { snap: options?.snap })
 	if (resolved) return resolved
 
 	if (import.meta.env.DEV) {
 		console.warn(
-			`[resolveTimeRange] Invalid relative time range value "${timeRange.value}", falling back to "${DEFAULT_RELATIVE_FALLBACK}"`,
+			`[resolveTimeRange] Invalid time range ${JSON.stringify(timeRange)}, falling back to "${DEFAULT_RELATIVE_FALLBACK}"`,
 		)
 	}
-	return relativeToAbsolute(DEFAULT_RELATIVE_FALLBACK)
+	return resolveTimeRangeWindow(
+		{ type: "relative", value: DEFAULT_RELATIVE_FALLBACK },
+		{ snap: options?.snap },
+	)
 }
 
 function timeRangesEqual(a: TimeRange, b: TimeRange): boolean {
@@ -50,7 +71,10 @@ export function useDashboardTimeRange() {
 	// re-runs their queries).
 	const refreshVersion = useOptionalPageRefreshContext()?.refreshVersion ?? 0
 	const resolvedTimeRange = useMemo(
-		() => resolveTimeRange(timeRange),
+		// Snapped while idle so navigating back to a dashboard reuses every tile's
+		// cached result; unsnapped once the user reloads, so the window advances to
+		// the real "now" rather than staying inside the previous grid cell.
+		() => resolveTimeRange(timeRange, { snap: refreshVersion === 0 }),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[timeRange, refreshVersion],
 	)

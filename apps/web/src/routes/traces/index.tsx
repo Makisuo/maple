@@ -1,5 +1,6 @@
 import * as React from "react"
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
+import { warmAtoms } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { BooleanFromStringParam, OptionalStringArrayParam } from "@/lib/search-params"
@@ -9,7 +10,7 @@ import { TracesFilterSidebar } from "@/components/traces/traces-filter-sidebar"
 import { AdvancedFilterDialog } from "@/components/traces/advanced-filter-dialog"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
-import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { resolveEffectiveTimeRange, useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useAtomValue } from "@/lib/effect-atom"
 import { applyWhereClause } from "@/lib/traces/advanced-filter-sync"
 import { getTracesFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -66,6 +67,19 @@ export type TracesSearchParams = Schema.Schema.Type<typeof tracesSearchSchema>
 export const Route = createFileRoute("/traces/")({
 	component: TracesPage,
 	validateSearch: Schema.toStandardSchemaV1(tracesSearchSchema),
+	loaderDeps: ({ search }) => search,
+	// Only the facet sidebar is warmed. The trace list is paginated and sorted
+	// from state the route does not own, so rebuilding its input here would risk
+	// warming a different entry than the table reads — two fetches instead of
+	// none.
+	loader: ({ context, deps }) => {
+		const { startTime, endTime } = resolveEffectiveTimeRange(
+			deps.startTime,
+			deps.endTime,
+			deps.timePreset ?? "12h",
+		)
+		warmAtoms(context.effectRegistry, [getTracesFacetsResultAtom({ data: { startTime, endTime } })])
+	},
 })
 
 function TracesPage() {

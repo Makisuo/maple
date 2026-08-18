@@ -1,4 +1,5 @@
 import { WIDGET_TYPES } from "@maple/domain/http"
+import { dataSourceTransform } from "@maple/widgets/dashboard"
 
 import { CirclePercentageIcon } from "@/components/icons"
 import { WidgetSettings } from "@/components/dashboard-builder/config/settings-fields"
@@ -20,7 +21,7 @@ const SAMPLE_VALUES: Record<string, number> = {
 	"stat-error-rate": 0.032,
 	"stat-total-errors": 1247,
 	"stat-total-services": 12,
-}
+} satisfies Record<string, number>
 
 function StatPresetPreview({ preset }: { preset: WidgetPresetDefinition }) {
 	const { display } = preset
@@ -53,8 +54,8 @@ export const statWidgetType: WidgetTypeDefinition = {
 	PresetPreview: StatPresetPreview,
 
 	initialState: (widget) => ({
-		statAggregate: toStatAggregate(widget.dataSource.transform?.reduceToValue?.aggregate),
-		statValueField: widget.dataSource.transform?.reduceToValue?.field ?? "",
+		statAggregate: toStatAggregate(dataSourceTransform(widget.dataSource)?.reduceToValue?.aggregate),
+		statValueField: dataSourceTransform(widget.dataSource)?.reduceToValue?.field ?? "",
 		sparklineEnabled: widget.display.sparkline?.enabled === true,
 	}),
 

@@ -79,6 +79,7 @@ describe("updateFeatureControls", () => {
 })
 
 describe("maximumInvoiceCents", () => {
+	// SAFETY: maximumInvoiceCents reads only the base and per-feature cap fields supplied by this focused fixture.
 	const model = {
 		baseCents: 3_900,
 		partial: false,

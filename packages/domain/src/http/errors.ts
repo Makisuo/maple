@@ -16,6 +16,7 @@ import {
 } from "../primitives"
 import { Authorization } from "./current-tenant"
 import { AlertSeverity } from "./alerts"
+import { HttpTaggedError } from "./error-policy"
 
 // Workflow state machine literals
 
@@ -59,6 +60,30 @@ export const WORKFLOW_TRANSITIONS: Record<WorkflowState, ReadonlyArray<WorkflowS
 	done: ["triage", "in_progress", "cancelled", "wontfix"],
 	cancelled: [],
 	wontfix: ["triage", "cancelled"],
+} satisfies Record<WorkflowState, ReadonlyArray<WorkflowState>>
+
+/**
+ * Every workflow state in canonical display order. The order the issue hub
+ * shows states in — groups, selects, and status menus — so a list of states
+ * reads the same everywhere.
+ */
+export const WORKFLOW_STATE_ORDER: ReadonlyArray<WorkflowState> = WorkflowState.literals
+
+/**
+ * The states that *every* one of `from` can legally move to — the intersection
+ * of their rows in {@link WORKFLOW_TRANSITIONS}, in canonical order.
+ *
+ * This is what a menu should offer: for one issue it is that issue's row, and
+ * for a multi-issue selection it is the moves the server would accept for all
+ * of them, so a bulk action can never half-apply. A state with no outgoing
+ * moves (`cancelled`) contributes an empty row and therefore collapses the
+ * result to nothing, and an empty input yields nothing (nothing selected, no
+ * legal move).
+ */
+export const allowedTransitionsForAll = (from: Iterable<WorkflowState>): ReadonlyArray<WorkflowState> => {
+	const rows = Array.from(from, (state) => WORKFLOW_TRANSITIONS[state])
+	if (rows.length === 0) return []
+	return WORKFLOW_STATE_ORDER.filter((target) => rows.every((row) => row.includes(target)))
 }
 
 /** States from which no further transition is possible. */
@@ -473,13 +498,21 @@ const IssueEventsQuery = Schema.Struct({
 
 // Errors
 
-export class ErrorPersistenceError extends Schema.TaggedError<ErrorPersistenceError>()(
+export class ErrorPersistenceError extends HttpTaggedError<ErrorPersistenceError>()(
 	"@maple/http/errors/ErrorPersistenceError",
 	{
 		message: Schema.String,
 		cause: Schema.optionalKey(Schema.String),
 	},
-	{ httpApiStatus: 503 },
+	{
+		status: 503,
+		code: "error_issues_unavailable",
+		title: "Error issues are temporarily unavailable",
+		message: "Error issues are temporarily unavailable. Retry in a few seconds.",
+		retry: "backoff",
+		recovery: "retry",
+		exposure: "redacted",
+	},
 ) {}
 
 export const EscalationSkipReason = Schema.Literals([
@@ -559,20 +592,27 @@ export class ErrorForbiddenError extends Schema.TaggedError<ErrorForbiddenError>
 	{ httpApiStatus: 403 },
 ) {}
 
-export class ErrorIssueNotFoundError extends Schema.TaggedError<ErrorIssueNotFoundError>()(
+export class ErrorIssueNotFoundError extends HttpTaggedError<ErrorIssueNotFoundError>()(
 	"@maple/http/errors/ErrorIssueNotFoundError",
 	{
 		message: Schema.String,
-		resourceType: Schema.Literals(["issue", "incident"]),
-		resourceId: Schema.Union([ErrorIssueId, ErrorIncidentId]),
+		issueId: ErrorIssueId,
 	},
-	{ httpApiStatus: 404 },
+	{
+		status: 404,
+		code: "error_issue_not_found",
+		title: "Error issue not found",
+		message: "No such error issue.",
+		param: "id",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
 ) {
 	static forIssue(id: ErrorIssueId) {
 		return new ErrorIssueNotFoundError({
 			message: `No such error issue: '${id}'`,
-			resourceType: "issue",
-			resourceId: id,
+			issueId: id,
 		})
 	}
 }

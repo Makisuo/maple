@@ -35,7 +35,7 @@ import {
 	type WorkloadFacetsResponse,
 } from "@maple/domain/http"
 import { Effect } from "effect"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { runWarehouseQuery } from "./effect-utils"
 
 export type WorkloadKind = "deployment" | "statefulset" | "daemonset"
@@ -59,7 +59,7 @@ export interface ListHostsInput {
 export function listHosts({ data }: { data: ListHostsInput }) {
 	return runWarehouseQuery("listHosts", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: ListHostsResponse = yield* client.queryEngine.listHosts({
 				payload: new ListHostsRequest({
 					startTime: data.startTime,
@@ -83,7 +83,7 @@ export interface HostDetailSummaryInput {
 export function hostDetailSummary({ data }: { data: HostDetailSummaryInput }) {
 	return runWarehouseQuery("hostDetailSummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: HostDetailSummaryResponse = yield* client.queryEngine.hostDetailSummary({
 				payload: new HostDetailSummaryRequest({
 					startTime: data.startTime,
@@ -115,7 +115,7 @@ export interface FleetUtilizationTimeseriesInput {
 export function fleetUtilizationTimeseries({ data }: { data: FleetUtilizationTimeseriesInput }) {
 	return runWarehouseQuery("fleetUtilizationTimeseries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: FleetUtilizationTimeseriesResponse =
 				yield* client.queryEngine.fleetUtilizationTimeseries({
 					payload: new FleetUtilizationTimeseriesRequest({
@@ -132,7 +132,7 @@ export function fleetUtilizationTimeseries({ data }: { data: FleetUtilizationTim
 export function hostInfraTimeseries({ data }: { data: HostInfraTimeseriesInput }) {
 	return runWarehouseQuery("hostInfraTimeseries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: HostInfraTimeseriesResponse = yield* client.queryEngine.hostInfraTimeseries({
 				payload: new HostInfraTimeseriesRequest({
 					startTime: data.startTime,
@@ -146,8 +146,6 @@ export function hostInfraTimeseries({ data }: { data: HostInfraTimeseriesInput }
 		}),
 	)
 }
-
-// Pods
 
 export interface ListPodsInput {
 	startTime: string
@@ -175,7 +173,7 @@ export interface ListPodsInput {
 export function listPods({ data }: { data: ListPodsInput }) {
 	return runWarehouseQuery("listPods", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: ListPodsResponse = yield* client.queryEngine.listPods({
 				payload: new ListPodsRequest({
 					startTime: data.startTime,
@@ -221,7 +219,7 @@ export interface PodsSummaryInput {
 export function podsSummary({ data }: { data: PodsSummaryInput }) {
 	return runWarehouseQuery("podsSummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: PodsSummaryResponse = yield* client.queryEngine.podsSummary({
 				payload: new PodsSummaryRequest({
 					startTime: data.startTime,
@@ -255,7 +253,7 @@ export interface PodFacetsInput {
 export function getPodFacets({ data }: { data: PodFacetsInput }) {
 	return runWarehouseQuery("podFacets", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: PodFacetsResponse = yield* client.queryEngine.podFacets({
 				payload: new PodFacetsRequest({
 					startTime: data.startTime,
@@ -288,7 +286,7 @@ export interface PodDetailSummaryInput {
 export function podDetailSummary({ data }: { data: PodDetailSummaryInput }) {
 	return runWarehouseQuery("podDetailSummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: PodDetailSummaryResponse = yield* client.queryEngine.podDetailSummary({
 				payload: new PodDetailSummaryRequest({
 					startTime: data.startTime,
@@ -316,7 +314,7 @@ export interface PodInfraTimeseriesInput {
 export function podInfraTimeseries({ data }: { data: PodInfraTimeseriesInput }) {
 	return runWarehouseQuery("podInfraTimeseries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: PodInfraTimeseriesResponse = yield* client.queryEngine.podInfraTimeseries({
 				payload: new PodInfraTimeseriesRequest({
 					startTime: data.startTime,
@@ -332,8 +330,6 @@ export function podInfraTimeseries({ data }: { data: PodInfraTimeseriesInput }) 
 	)
 }
 
-// Nodes
-
 export interface ListNodesInput {
 	startTime: string
 	endTime: string
@@ -348,7 +344,7 @@ export interface ListNodesInput {
 export function listNodes({ data }: { data: ListNodesInput }) {
 	return runWarehouseQuery("listNodes", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: ListNodesResponse = yield* client.queryEngine.listNodes({
 				payload: new ListNodesRequest({
 					startTime: data.startTime,
@@ -378,7 +374,7 @@ export interface NodeFacetsInput {
 export function getNodeFacets({ data }: { data: NodeFacetsInput }) {
 	return runWarehouseQuery("nodeFacets", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: NodeFacetsResponse = yield* client.queryEngine.nodeFacets({
 				payload: new NodeFacetsRequest({
 					startTime: data.startTime,
@@ -403,7 +399,7 @@ export interface NodeDetailSummaryInput {
 export function nodeDetailSummary({ data }: { data: NodeDetailSummaryInput }) {
 	return runWarehouseQuery("nodeDetailSummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: NodeDetailSummaryResponse = yield* client.queryEngine.nodeDetailSummary({
 				payload: new NodeDetailSummaryRequest({
 					startTime: data.startTime,
@@ -429,7 +425,7 @@ export interface NodeInfraTimeseriesInput {
 export function nodeInfraTimeseries({ data }: { data: NodeInfraTimeseriesInput }) {
 	return runWarehouseQuery("nodeInfraTimeseries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: NodeInfraTimeseriesResponse = yield* client.queryEngine.nodeInfraTimeseries({
 				payload: new NodeInfraTimeseriesRequest({
 					startTime: data.startTime,
@@ -463,7 +459,7 @@ export interface ListWorkloadsInput {
 export function listWorkloads({ data }: { data: ListWorkloadsInput }) {
 	return runWarehouseQuery("listWorkloads", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: ListWorkloadsResponse = yield* client.queryEngine.listWorkloads({
 				payload: new ListWorkloadsRequest({
 					startTime: data.startTime,
@@ -499,7 +495,7 @@ export interface WorkloadFacetsInput {
 export function getWorkloadFacets({ data }: { data: WorkloadFacetsInput }) {
 	return runWarehouseQuery("workloadFacets", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: WorkloadFacetsResponse = yield* client.queryEngine.workloadFacets({
 				payload: new WorkloadFacetsRequest({
 					startTime: data.startTime,
@@ -529,7 +525,7 @@ export interface WorkloadDetailSummaryInput {
 export function workloadDetailSummary({ data }: { data: WorkloadDetailSummaryInput }) {
 	return runWarehouseQuery("workloadDetailSummary", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: WorkloadDetailSummaryResponse = yield* client.queryEngine.workloadDetailSummary({
 				payload: new WorkloadDetailSummaryRequest({
 					startTime: data.startTime,
@@ -560,7 +556,7 @@ export interface WorkloadInfraTimeseriesInput {
 export function workloadInfraTimeseries({ data }: { data: WorkloadInfraTimeseriesInput }) {
 	return runWarehouseQuery("workloadInfraTimeseries", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
+			const client = yield* MapleInternalAtomClient
 			const response: WorkloadInfraTimeseriesResponse =
 				yield* client.queryEngine.workloadInfraTimeseries({
 					payload: new WorkloadInfraTimeseriesRequest({

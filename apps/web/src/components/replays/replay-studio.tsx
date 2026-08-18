@@ -2,7 +2,7 @@ import { ReplaySurface, ReplayTransport } from "@/components/replays/replay-play
 import { ReplayPlayerProvider } from "@/components/replays/replay-player-context"
 import { ReplayEditorTimeline } from "@/components/replays/replay-editor-timeline"
 import { SessionRail } from "@/components/replays/session-events-panel"
-import { recordedMarker, type ReplayPartitionWindow } from "@/components/replays/replay-format"
+import { recordedMarker, replayFormat, type ReplayPartitionWindow } from "@/components/replays/replay-format"
 import { Reveal, SessionIdentityBar } from "@/components/replays/session-detail-parts"
 
 // Replay studio
@@ -70,12 +70,17 @@ export function ReplayStudio({
 	const isActive = session.status === "active"
 	const label = session.userId || "Anonymous session"
 	const recorded = recordedMarker(session.resourceAttributes)
+	// Which engine plays this session (browser rrweb vs mobile H.264 segments).
+	// Read from the already-loaded session metadata, so the player never has to
+	// download a chunk to find out what it is looking at.
+	const format = replayFormat(session.resourceAttributes)
 
 	return (
 		<ReplayPlayerProvider
 			sessionId={sessionId}
 			window={window}
 			recorded={recorded}
+			format={format}
 			sessionActive={isActive}
 		>
 			<div className="flex min-h-0 flex-1 flex-col lg:flex-row">

@@ -3,7 +3,7 @@ import { defineConfig } from "tsdown"
 export default defineConfig({
 	entry: {
 		index: "./src/index.ts",
-		expr: "./src/ch/expr.ts",
+		expr: "./src/expr.ts",
 		types: "./src/ch/types.ts",
 		sql: "./src/sql/index.ts",
 	},

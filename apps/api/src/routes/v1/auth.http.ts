@@ -5,6 +5,7 @@ import {
 	CliDevicePersistenceError,
 	CurrentTenant,
 	MapleApi,
+	UnauthorizedError,
 } from "@maple/domain/http"
 import { Effect, Option } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
@@ -45,6 +46,21 @@ export const HttpAuthLive = HttpApiBuilder.group(MapleApi, "auth", (handlers) =>
 		const mcpOAuth = yield* McpOAuthService
 		return handlers
 			.handle("session", () => CurrentTenant.Context)
+			.handle("sessionRefresh", () =>
+				Effect.gen(function* () {
+					const request = yield* HttpServerRequest.HttpServerRequest
+					const token = bearerToken(request.headers.authorization)
+					// The middleware only guarantees SOME accepted credential; renewal
+					// specifically trades one self-hosted bearer for another, so an
+					// absent one is unauthorized rather than a 500 on `undefined`.
+					if (!token) {
+						return yield* new UnauthorizedError({
+							message: "Self-hosted session renewal requires a bearer token",
+						})
+					}
+					return yield* auth.refreshSelfHostedSession(token)
+				}),
+			)
 			.handle("cliDeviceInspect", ({ params }) => cliAuth.inspect(params.userCode))
 			.handle("cliDeviceApprove", ({ params }) =>
 				Effect.gen(function* () {

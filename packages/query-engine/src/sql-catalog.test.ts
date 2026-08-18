@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import * as Predicate from "effect/Predicate"
 import { warehouseQueries } from "@maple/domain"
 import {
 	collectBuilderCatalog,
@@ -8,6 +9,7 @@ import {
 	dedupeByFingerprint,
 	pipeFixtures,
 	pipePathReachesAnnualRoute,
+	querySpecFixtures,
 	routeCoverage,
 	uncoveredPipes,
 } from "./sql-catalog"
@@ -83,17 +85,19 @@ describe("sql catalog", () => {
 	// collapse is legitimate: a fixture with no attribute filter is unaffected by
 	// index capabilities, and `dedupeByFingerprint` stops the sweep paying twice.)
 	it("gives each labelled fixture of a pipe a distinct SQL shape", () => {
-		const shapes = new Map<string, Set<string>>()
+		const fingerprints = new Map<string, Set<string>>()
 		const labels = new Map<string, Set<string>>()
 		for (const entry of pipeEntries) {
 			const key = `${entry.name}@${entry.capabilityLabel}`
-			if (!shapes.has(key)) shapes.set(key, new Set())
+			if (!fingerprints.has(key)) fingerprints.set(key, new Set())
 			if (!labels.has(key)) labels.set(key, new Set())
-			shapes.get(key)!.add(entry.fingerprint)
+			fingerprints.get(key)!.add(entry.fingerprint)
 			labels.get(key)!.add(entry.label)
 		}
-		for (const [key, fingerprints] of shapes) {
-			expect(fingerprints.size, `${key} fixtures collapse to the same SQL`).toBe(labels.get(key)!.size)
+		for (const [key, entryFingerprints] of fingerprints) {
+			expect(entryFingerprints.size, `${key} fixtures collapse to the same SQL`).toBe(
+				labels.get(key)!.size,
+			)
 		}
 	})
 
@@ -112,8 +116,34 @@ describe("sql catalog", () => {
 		const annual = specEntries.filter((entry) => entry.route === "traces_timeseries:annual")
 		expect(annual.length).toBeGreaterThan(0)
 		for (const entry of annual) {
-			expect(entry.sql, entry.id).toContain("service_overview_hourly")
+			// Always spliced, never a single-tier read.
 			expect(entry.sql, entry.id).toContain("UNION ALL")
+			expect(entry.sql, entry.id).toContain("service_overview_spans")
+
+			// Which interior tiers appear is decided by the bucket width, and the
+			// rule is not cosmetic: an hourly row carries no position inside an hour,
+			// so letting it answer a sub-hour bucket piles the whole hour onto the
+			// bucket containing `:00`.
+			// Longest match: several labels are prefixes of each other
+			// (`traces-timeseries-annual` prefixes `…-annual-minutely-grouped`), and a
+			// first-match lookup silently reads the wrong fixture's bucket width.
+			const fixture = querySpecFixtures
+				.filter((candidate) => entry.id.startsWith(`spec:${candidate.label}`))
+				.sort((a, b) => b.label.length - a.label.length)[0]
+			const query = fixture?.query
+			const bucketSeconds =
+				query && "bucketSeconds" in query && typeof query.bucketSeconds === "number"
+					? query.bucketSeconds
+					: 0
+			expect(bucketSeconds, `${entry.id} has no bucketSeconds`).toBeGreaterThan(0)
+
+			if (bucketSeconds % 3600 === 0) {
+				expect(entry.sql, entry.id).toContain("service_overview_hourly")
+				expect(entry.sql, entry.id).toContain("service_overview_minutely")
+			} else {
+				expect(entry.sql, entry.id).toContain("service_overview_minutely")
+				expect(entry.sql, entry.id).not.toContain("service_overview_hourly")
+			}
 		}
 	})
 
@@ -124,7 +154,7 @@ describe("sql catalog", () => {
 		expect(pipePathReachesAnnualRoute()).toBe(false)
 	})
 
-	it("dedupes to fewer shapes than fixtures", () => {
+	it("dedupes to fewer fingerprints than fixtures", () => {
 		const unique = dedupeByFingerprint(entries)
 		expect(unique.length).toBeGreaterThan(warehouseQueries.length - 1)
 		expect(unique.length).toBeLessThanOrEqual(entries.length)
@@ -165,7 +195,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"top-operations": topOperationQueries,
 	"web-analytics": webAnalyticsQueries,
 	traces: traceQueries,
-}
+} satisfies Record<string, Record<string, unknown>>
 
 /**
  * Builders not (yet) in the fixture set. THREE reasons only, and each group
@@ -309,9 +339,9 @@ describe("builder coverage", () => {
 		for (const key of EXEMPT_BUILDERS) {
 			const [moduleName, exportName] = key.split("/") as [string, string]
 			expect(
-				typeof QUERY_MODULES[moduleName]?.[exportName],
+				Predicate.isFunction(QUERY_MODULES[moduleName]?.[exportName]),
 				`${key} is exempt but no longer exported`,
-			).toBe("function")
+			).toBe(true)
 			expect(fixtured.has(key), `${key} is exempt AND fixtured — drop the exemption`).toBe(false)
 		}
 	})

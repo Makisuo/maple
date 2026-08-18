@@ -1,18 +1,22 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
-import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatNumber, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { findErrors } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
+import { provideWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerFindErrorsTool(server: McpToolRegistrar) {
 	server.tool(
 		"find_errors",
-		"Find and categorize errors by type with counts and affected services. Each error has a stable `fingerprint` id — pass it to error_detail for sample traces, or to the error-issue tools (same identity as list_error_issues).",
+		// Do not reinstate the old claim that a fingerprint is the "same identity as
+		// list_error_issues" — it is not. A fingerprint is a decimal UInt64 hash; an
+		// issue id is a UUID. Conflating them was the sole cause of every production
+		// error_detail failure.
+		"Find and categorize errors by type with counts and affected services. Each error has a stable `fingerprint` (a decimal UInt64) — pass it to error_detail for sample traces. The error-issue tools take an `issue_id` UUID from list_error_issues instead, which is a separate identity.",
 		Schema.Struct({
 			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
 			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
@@ -22,7 +26,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
 		}),
 		Effect.fn("McpTool.findErrors")(function* ({ start_time, end_time, service, environment, limit }) {
 			const { st, et } = resolveTimeRange(start_time, end_time)
-			const tenant = yield* resolveTenant
+			const tenant = yield* CurrentMcpTenant
 
 			const errors = yield* findErrors({
 				timeRange: { startTime: st, endTime: et },
@@ -30,7 +34,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
 				environment: environment ?? undefined,
 				limit: limit ?? 20,
 			}).pipe(
-				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
+				provideWarehouseExecutorFromTenant(tenant),
 				Effect.mapError(toMcpQueryError("errors_by_type")),
 			)
 

@@ -23,7 +23,7 @@ const telemetry = MapleFlush.make({
 		"vcs.repository.url.full": "https://github.com/Makisuo/maple",
 		...(import.meta.env.VITE_COMMIT_SHA
 			? { "vcs.ref.head.revision": import.meta.env.VITE_COMMIT_SHA }
-			: {}),
+			: undefined),
 	},
 	// Expected 4xx API responses (the maple-web → maple-api edge surfaces these
 	// as client-span failures) record as Ok instead of errors.
@@ -40,8 +40,10 @@ const telemetry = MapleFlush.make({
 	// `*.localhost` cookies host-only, so web.localhost and landing.localhost
 	// would each mint their own visitor.
 	...(import.meta.env.VITE_MAPLE_COOKIE_DOMAIN
-		? { privacy: { cookieDomain: import.meta.env.VITE_MAPLE_COOKIE_DOMAIN } }
-		: {}),
+		? {
+				privacy: { cookieDomain: import.meta.env.VITE_MAPLE_COOKIE_DOMAIN },
+			}
+		: undefined),
 })
 
 export const mapleOtelLayer = telemetry.layer

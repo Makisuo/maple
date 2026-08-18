@@ -1,11 +1,14 @@
 import { useMemo } from "react"
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Line, LineChart } from "recharts"
 
 import {
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 	type ChartConfig,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "@maple/ui/components/ui/chart"
 import { cn } from "@maple/ui/lib/utils"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
@@ -13,7 +16,7 @@ import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@maple/ui/lib/format"
 import { formatBytes, formatPercent } from "@maple/ui/lib/format"
-import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler, transformRows } from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, makeBucketLabeler, transformRows } from "../chart-utils"
 import { OTHER_ZONES_COLOR, OTHER_ZONES_SERIES } from "./constants"
 
 export type CloudflareZoneMetric = "requests" | "errorRate" | "cacheHitRate" | "bytes"
@@ -23,7 +26,7 @@ const METRIC_LABELS: Record<CloudflareZoneMetric, string> = {
 	errorRate: "5xx error rate",
 	cacheHitRate: "Cache hit rate",
 	bytes: "Bandwidth",
-}
+} satisfies Record<CloudflareZoneMetric, string>
 
 const CHART_HEIGHT = 200
 
@@ -141,30 +144,16 @@ export function CloudflareZoneChart({
 						syncId={syncId}
 						syncMethod="value"
 					>
-						<CartesianGrid
-							strokeDasharray={CHART_GRID_DASH}
-							stroke="var(--border)"
-							vertical={false}
-						/>
-						<XAxis
+						<ChartGrid />
+						<ChartXAxis
 							dataKey="time"
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
-							stroke="var(--muted-foreground)"
 						/>
-						<YAxis
-							tickLine={false}
-							axisLine={false}
+						<ChartYAxis
 							tickMargin={8}
-							fontSize={10}
 							width={52}
-							stroke="var(--muted-foreground)"
 							tickFormatter={(v: number) => formatMetricValue(v, metric)}
 						/>
 						<ChartTooltip
-							cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
 							itemSorter={(item) => -Number(item.value ?? 0)}
 							content={
 								<ChartTooltipContent

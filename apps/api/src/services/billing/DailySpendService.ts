@@ -29,7 +29,7 @@ export const toUtcDateKey = (epochMs: number) => new Date(epochMs).toISOString()
 
 const startOfUtcDay = (epochMs: number) => Math.floor(epochMs / DAY_MS) * DAY_MS
 
-export interface DailySpendServiceShape {
+export interface DailySpendServiceApi {
 	readonly get: (
 		tenant: TenantContext,
 		/**
@@ -47,7 +47,7 @@ export interface DailySpendServiceShape {
 const toQueryError = (error: { readonly message: string }) =>
 	new WarehouseQueryError({ pipeName: "billingDailySpend", message: error.message })
 
-export class DailySpendService extends Context.Service<DailySpendService, DailySpendServiceShape>()(
+export class DailySpendService extends Context.Service<DailySpendService, DailySpendServiceApi>()(
 	"@maple/api/services/DailySpendService",
 	{
 		make: Effect.gen(function* () {
@@ -58,6 +58,7 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				cycle: { readonly startMs: number; readonly endMs: number },
 			) {
 				const orgId = tenant.orgId
+				yield* Effect.annotateCurrentSpan("orgId", orgId)
 				const params = {
 					orgId,
 					startTime: formatWarehouseDateTime(cycle.startMs),
@@ -130,7 +131,7 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				})
 			})
 
-			return { get } satisfies DailySpendServiceShape
+			return { get } satisfies DailySpendServiceApi
 		}),
 	},
 ) {

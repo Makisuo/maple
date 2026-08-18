@@ -12,11 +12,13 @@ import { V2SlackIntegrationsApiGroup } from "./integrations"
 import { V2PlanetScaleIntegrationsApiGroup } from "./integrations-planetscale"
 import { V2ErrorIssuesApiGroup } from "./error-issues"
 import { V2InvestigationsApiGroup } from "./investigations"
+import { V2MobileDevicesApiGroup } from "./mobile-devices"
 import { V2OrganizationApiGroup } from "./organization"
 import { V2InstrumentationRecommendationsApiGroup } from "./recommendations"
 import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
 import { V2SessionReplaysApiGroup } from "./session-replays"
 import { V2InstrumentationAuditApiGroup } from "./setup-audit"
+import { V2SharePublicApiGroup } from "./share"
 import {
 	V2LogsApiGroup,
 	V2MetricsApiGroup,
@@ -24,7 +26,8 @@ import {
 	V2ServicesApiGroup,
 	V2TracesApiGroup,
 } from "./telemetry"
-import { V2UnexpectedErrors } from "./auth"
+import { V2SchemaErrors, V2UnexpectedErrors } from "./auth"
+import { collapseQueryParameterNullBranches } from "./openapi-nullable"
 
 const HTTP_OPERATION_METHODS = ["get", "post", "put", "patch", "delete", "head"] as const
 
@@ -94,12 +97,15 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2InvestigationsApiGroup)
 	.add(V2AnomaliesApiGroup)
 	.add(V2OrganizationApiGroup)
+	.add(V2MobileDevicesApiGroup)
 	.add(V2SessionReplaysApiGroup)
 	.add(V2TracesApiGroup)
 	.add(V2LogsApiGroup)
 	.add(V2MetricsApiGroup)
 	.add(V2ServicesApiGroup)
 	.add(V2ServiceMapApiGroup)
+	.add(V2SharePublicApiGroup)
+	.middleware(V2SchemaErrors)
 	.middleware(V2UnexpectedErrors)
 	.annotateMerge(
 		OpenApi.annotations({
@@ -107,7 +113,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 			version: "2.0.0",
 			summary: "The public, stability-committed HTTP API for the Maple observability platform.",
 			description: [
-				"The Maple public API is a resource-oriented REST interface for everything the dashboard can do.",
+				"The Maple public API is a resource-oriented REST interface for customer-stable resources and workflows.",
 				"It follows Stripe's design philosophy, modernized where useful:",
 				"",
 				"- **Resources** are plural nouns under `/v2` (`/v2/api_keys`). Related resources share a product namespace (`/v2/alerts/rules`, `/v2/alerts/destinations`). Non-CRUD verbs are sub-resource POSTs (`/v2/api_keys/{id}/roll`).",
@@ -124,7 +130,9 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 			// key (they are not in `OpenAPISpecInfo`), so inject them via the api-level
 			// spec transform, which receives the whole generated document.
 			transform: (spec) => {
-				const withRateLimitHeaders = addRateLimitResponseHeaders(spec)
+				const withRateLimitHeaders = collapseQueryParameterNullBranches(
+					addRateLimitResponseHeaders(spec),
+				)
 				return {
 					...withRateLimitHeaders,
 					info: {

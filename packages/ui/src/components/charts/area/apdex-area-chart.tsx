@@ -1,5 +1,5 @@
 import { memo, useId, useMemo } from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Area, AreaChart } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { apdexTimeSeriesData } from "../_shared/sample-data"
@@ -12,6 +12,9 @@ import {
 	ChartLegendContent,
 	ChartTooltip,
 	ChartTooltipContent,
+	ChartGrid,
+	ChartXAxis,
+	ChartYAxis,
 } from "../../ui/chart"
 import { inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
@@ -70,18 +73,13 @@ export const ApdexAreaChart = memo(function ApdexAreaChart({
 						/>
 					)}
 				</defs>
-				<CartesianGrid vertical={false} />
-				<XAxis
+				<ChartGrid />
+				<ChartXAxis
 					dataKey="bucket"
-					tickLine={false}
-					axisLine={false}
-					tickMargin={8}
 					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
 				/>
-				<YAxis
+				<ChartYAxis
 					domain={[0, 1]}
-					tickLine={false}
-					axisLine={false}
 					tickMargin={8}
 					width={yAxisWidth ?? 50}
 				/>

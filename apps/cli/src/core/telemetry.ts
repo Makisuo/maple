@@ -9,6 +9,24 @@ import { MAPLE_VERSION } from "../version"
 const DEFAULT_INGEST_KEY = "maple_pk_bwGJomBwDO4B15sopcuinQVqNFCDjhE2"
 
 /**
+ * Where this invocation is running.
+ *
+ * Without this the SDK falls back to `Config.withDefault("development")` — none
+ * of `MAPLE_ENVIRONMENT` / `RAILWAY_ENVIRONMENT_NAME` / `DEPLOYMENT_ENV` exist
+ * on a laptop — so *every* CLI install reported `development`, indistinguishable
+ * from a Maple worker running locally and, worse, from our own CI. Triaging the
+ * CLI's error stream meant reading paths out of error strings to guess whether a
+ * failure came from a user or a GitHub Actions runner.
+ *
+ * `CI` is the de-facto standard variable, set by GitHub Actions, GitLab, CircleCI
+ * and Buildkite alike. An explicit `MAPLE_ENVIRONMENT` still wins.
+ */
+const resolveEnvironment = (): string => {
+	if (process.env.MAPLE_ENVIRONMENT) return process.env.MAPLE_ENVIRONMENT
+	return process.env.CI ? "ci" : "cli"
+}
+
+/**
  * OpenTelemetry layer for the CLI — traces + logs about the CLI itself
  * (commands, warehouse queries) and, when running `maple start`, the server's
  * OTLP-ingest and `/local/query` request handling.
@@ -27,13 +45,14 @@ export const TelemetryLayer = Maple.layer({
 	serviceName: "maple-cli",
 	serviceNamespace: "backend",
 	serviceVersion: MAPLE_VERSION,
+	environment: resolveEnvironment(),
 	repositoryUrl: "https://github.com/Makisuo/maple",
 	ingestKey: process.env.MAPLE_INGEST_KEY ?? DEFAULT_INGEST_KEY,
 	shutdownTimeout: "3 seconds",
-	// NOTE: expected user errors (bad flag, "maple is already running") still
-	// record as Error spans here. `anticipatedErrorIdentifiers` — which the API
-	// and alerting workers use to map 4xx-ish outcomes to Ok — is implemented in
-	// Maple's flushable tracer, and this server layer wires Effect's stock
-	// `Otlp.layerJson` instead. Supporting it on the CLI means giving the server
-	// SDK the flushable tracer, which is an SDK change, not a CLI one.
+	// NOTE: expected user outcomes ("maple is already running", `--help`) no
+	// longer record as Error spans — `bin.ts` recovers them inside the root span
+	// and annotates `maple.cli.outcome` instead. That is a CLI-side fix, not the
+	// SDK's `anticipatedErrorIdentifiers`, which lives in Maple's flushable tracer
+	// while this server layer wires Effect's stock `Otlp.layerJson`. Anything
+	// still arriving as an Error span here is a genuine failure.
 })

@@ -41,7 +41,7 @@ export function PasswordSection() {
 			await updatePassword({
 				newPassword,
 				// Clerk rejects `currentPassword` on an account that has none yet.
-				...(hasPassword ? { currentPassword } : {}),
+				...(hasPassword ? { currentPassword } : undefined),
 				signOutOfOtherSessions,
 			})
 			setCurrentPassword("")

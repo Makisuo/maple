@@ -45,7 +45,7 @@ export const SENSITIVITY: Record<AnomalySensitivity, SensitivityConfig> = {
 	low: { k: 6, ratio: 3.0 },
 	normal: { k: 4, ratio: 2.0 },
 	high: { k: 3, ratio: 1.5 },
-}
+} satisfies Record<AnomalySensitivity, SensitivityConfig>
 
 /** Minimum sealed baseline samples before a series is evaluated at all. */
 const MIN_BASELINE_SAMPLES = 6
@@ -195,7 +195,6 @@ export function evaluateGoldenSignals(
 	const insufficientBaseline = baseline.length < MIN_BASELINE_SAMPLES
 	const currentCount = current.requestCount
 
-	// --- Error rate -----------------------------------------------------------
 	{
 		const signal: AnomalySignalType = "error_rate"
 		if (insufficientBaseline || currentCount < GOLDEN_MIN_VOLUME) {
@@ -227,7 +226,6 @@ export function evaluateGoldenSignals(
 		}
 	}
 
-	// --- p95 latency -----------------------------------------------------------
 	{
 		const signal: AnomalySignalType = "latency_p95"
 		if (insufficientBaseline || currentCount < GOLDEN_MIN_VOLUME) {
@@ -250,7 +248,6 @@ export function evaluateGoldenSignals(
 		}
 	}
 
-	// --- Throughput (drops only) -----------------------------------------------
 	{
 		const signal: AnomalySignalType = "throughput"
 		const ratePerMin = config.elapsedMinutes > 0 ? currentCount / config.elapsedMinutes : currentCount

@@ -11,6 +11,7 @@ import {
 import { selectedPlanKnownAtomFor } from "@/atoms/selected-plan-atoms"
 import { useAtom } from "@/lib/effect-atom"
 import { hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
+import { isFixturePath, isPublicPath } from "@/lib/public-routes"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { AnchoredToastProvider, ToastProvider } from "@maple/ui/components/ui/toast"
 import { AttributesProvider } from "@maple/ui/components/attributes/context"
@@ -53,39 +54,27 @@ function renderAttributeValue(attrKey: string, value: string) {
  * is the same "unreachable without a running API" failure the auth bypass exists
  * to prevent, arriving through the other door.
  */
-const FIXTURE_PATHS = [
-	"/widget-lab",
-	"/node-lab",
-	"/service-map-bench",
-	"/service-detail-bench",
-	"/infra-bench",
-	"/logs-bench",
-	"/overview-bench",
-]
-
-const PUBLIC_PATHS = new Set(["/sign-in", "/sign-up", "/org-required", ...FIXTURE_PATHS])
-
 // Routes that render their own onboarding/billing UI and so must never be
 // gated on plan selection (neither redirected away nor blocked while loading).
 const ALLOWED_WITHOUT_PLAN = ["/select-plan", "/quick-start", "/cli-login", "/mcp-authorize"]
 
 export const Route = createRootRouteWithContext<{ auth: RouterAuthContext } & EffectRouterContext>()({
 	beforeLoad: ({ context, location }) => {
-		if (PUBLIC_PATHS.has(location.pathname)) return
+		if (isPublicPath(location.pathname)) return
 
 		const redirectUrl = location.pathname + (location.searchStr ?? "")
 
 		if (!context.auth?.isAuthenticated) {
 			throw redirect({
 				to: "/sign-in",
-				search: { redirect_url: redirectUrl } as Record<string, string>,
+				search: { redirect_url: redirectUrl } satisfies Record<string, string>,
 			})
 		}
 
 		if (!context.auth.orgId) {
 			throw redirect({
 				to: "/org-required",
-				search: { redirect_url: redirectUrl } as Record<string, string>,
+				search: { redirect_url: redirectUrl } satisfies Record<string, string>,
 			})
 		}
 	},
@@ -105,8 +94,8 @@ const AppFrame = memo(function AppFrame() {
 			<ToastProvider position="bottom-right">
 				<AnchoredToastProvider>
 					<Outlet />
-					{!PUBLIC_PATHS.has(pathname) && <IdleRoutePrefetch />}
-					{!PUBLIC_PATHS.has(pathname) && (
+					{!isPublicPath(pathname) && <IdleRoutePrefetch />}
+					{!isPublicPath(pathname) && (
 						<>
 							<GlobalShortcuts />
 							<GlobalChatSheet />
@@ -188,7 +177,7 @@ function ClerkReverseRedirects() {
 	// A fixture surface has no org-scoped data to gate, so it renders whatever the
 	// plan query is doing. Checked after the auth-page redirects above, which are
 	// about sending a signed-in reader somewhere better rather than gating them.
-	if (FIXTURE_PATHS.includes(pathname)) {
+	if (isFixturePath(pathname)) {
 		return <AppFrame />
 	}
 

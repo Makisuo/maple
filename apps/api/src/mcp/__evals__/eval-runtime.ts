@@ -1,6 +1,6 @@
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { OrgId, UserId } from "@maple/domain/http"
-import { MainLive } from "@/app"
+import { McpServicesLive } from "@/runtime/mcp-service-graph"
 import { Env } from "@/platform/Env"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { createTestDb } from "@/platform/test-pglite"
@@ -48,7 +48,7 @@ export const makeEvalRuntime = (): EvalRuntime => {
 	const databaseLive = testDb.layer
 	const workerEnvLive = Layer.succeed(WorkerEnvironment, env as Record<string, unknown>)
 
-	const layer = MainLive.pipe(
+	const layer = McpServicesLive.pipe(
 		Layer.provide(Layer.mergeAll(configLive, envLive, databaseLive, workerEnvLive)),
 	)
 	// `as any`: the residual requirement set is satisfied at runtime (same pattern
@@ -84,6 +84,6 @@ export const runToolDirect = async (
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> => {
 	return rt.runtime.runPromise(
-		McpToolExecutor.pipe(Effect.flatMap((executor) => executor.execute(rt.tenant, name, params))),
+		McpToolExecutor.pipe(Effect.flatMap((executor) => executor.execute(rt.tenant, name, params, "mcp"))),
 	)
 }

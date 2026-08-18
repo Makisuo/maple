@@ -40,7 +40,7 @@ const CONFIDENCE_RANK: Record<EscalationConfidence, number> = {
 	low: 1,
 	medium: 2,
 	high: 3,
-}
+} satisfies Record<EscalationConfidence, number>
 
 /** Pure policy evaluation shared by delivery, previews, and the simulator. */
 export const evaluateEscalationPolicy = (input: EvaluateEscalationPolicyInput): EscalationPolicyDecision => {

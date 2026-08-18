@@ -2,9 +2,9 @@ import * as React from "react"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
+import { ChartFloatingTooltip } from "../../ui/chart"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
-import { pieSampleData } from "../_shared/sample-data"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import {
 	bucketCategorical,
@@ -110,7 +110,6 @@ function arcPath(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Layout constants.
 // ──────────────────────────────────────────────────────────────────────────────
 
 const LEGEND_GAP = 6
@@ -135,11 +134,13 @@ const TABLE_MIN_PIE_W = 120
 // too narrow to host text without overflowing onto its neighbours.
 const LABEL_MIN_PCT = 0.06
 
+// No sample-data fallback: substituting fixtures for real rows made every
+// misconfigured or mis-fed chart draw a plausible-looking picture instead of an
+// empty one. Gallery thumbnails pass their sample rows in explicitly via `data`.
+const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
+
 export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, pie }: BaseChartProps) {
-	const source: ReadonlyArray<Record<string, unknown>> =
-		Array.isArray(data) && data.length > 0
-			? data
-			: (pieSampleData as ReadonlyArray<Record<string, unknown>>)
+	const source: ReadonlyArray<Record<string, unknown>> = Array.isArray(data) ? data : EMPTY_ROWS
 
 	const valueField = React.useMemo(() => pickValueField(source), [source])
 
@@ -178,7 +179,6 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 		return { slices: out, total: sum }
 	}, [source, valueField])
 
-	// Measure container.
 	const containerRef = React.useRef<HTMLDivElement | null>(null)
 	const containerSize = useContainerSize(containerRef)
 	const size = { w: Math.floor(containerSize.width), h: Math.floor(containerSize.height) }
@@ -366,19 +366,20 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 				)}
 			</svg>
 
-			{/* Tooltip */}
+			{/*
+			 * Tooltip — anchored to the slice's mid-radius point and portalled, so it
+			 * escapes the widget card's `overflow-hidden` instead of being clamped
+			 * inside the plot (which used to cut it off on up- and left-facing slices).
+			 */}
 			{tooltip !== "hidden" && hover !== null && slices[hover] && (
-				<div
-					className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-[color-mix(in_oklch,var(--border)_80%,var(--foreground)_15%)] bg-popover/95 px-2.5 py-1.5 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] backdrop-blur-sm"
-					style={{
-						left: clamp(
-							cx + Math.cos(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85),
-							60,
-							pieAreaW - 60,
-						),
-						top: cy + Math.sin(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85) - 8,
-						fontSize: 11,
-					}}
+				<ChartFloatingTooltip
+					containerRef={containerRef}
+					x={cx + Math.cos(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85)}
+					y={cy + Math.sin(angleMid(slices[hover]) - Math.PI / 2) * (outerR * 0.85)}
+					open
+					side="top"
+					sideOffset={8}
+					className="whitespace-nowrap text-[11px]"
 				>
 					<div className="flex items-center gap-1.5 font-medium text-foreground">
 						<span
@@ -397,7 +398,7 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 						<span className="px-1 text-muted-foreground/60">·</span>
 						<span>{(slices[hover].pct * 100).toFixed(1)}%</span>
 					</div>
-				</div>
+				</ChartFloatingTooltip>
 			)}
 
 			{/* Tabular legend — sorted largest-first, with Value and % columns. */}
