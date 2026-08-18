@@ -156,6 +156,10 @@ export {
 	agentSessionsListQuery,
 	agentTracesListQuery,
 	agentSessionsFacetsQuery,
+	agentSessionTraceIdsQuery,
+	agentSessionSpansQuery,
+	AGENT_SESSION_MAX_TRACES,
+	AGENT_SESSION_MAX_SPANS,
 	type AgentSessionsFilterOpts,
 	type AgentSessionsListOpts,
 	type AgentSessionsListOutput,
@@ -163,6 +167,9 @@ export {
 	type AgentTracesListOutput,
 	type AgentSessionsFacetsOpts,
 	type AgentSessionsFacetsOutput,
+	type AgentSessionTraceIdsOutput,
+	type AgentSessionSpansOpts,
+	type AgentSessionSpansOutput,
 } from "./queries/agent-sessions"
 
 // Queries — Web Analytics (product analytics over the browser SDK's session data)

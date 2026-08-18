@@ -686,6 +686,28 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				window,
 			),
 	},
+	{
+		module: "agent-sessions",
+		name: "agentSessionTraceIdsQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(CH.agentSessionTraceIdsQuery(), {
+				...window,
+				sessionKeyHash: "13464164225153980885",
+			}),
+	},
+	{
+		module: "agent-sessions",
+		name: "agentSessionSpansQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.agentSessionSpansQuery({
+					traceIds: [TRACE_ID, "4bf92f3577b34da6a3ce929d0e0e4736"],
+				}),
+				window,
+			),
+	},
 
 	// ----- activity: the only deliberately cross-org builders in the product.
 	// ----- Fixtured so the catalog's tenant-scope test actually exercises the

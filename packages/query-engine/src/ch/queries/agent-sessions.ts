@@ -278,3 +278,107 @@ export function agentSessionsFacetsQuery(
 		errorFacet,
 	).format("JSON")
 }
+
+// Session detail (two-phase)
+//
+// Phase 1 resolves the session key hash to the session's TraceIds — only
+// `AiSessionKeyState = 6` rows carry the hash. Phase 2 fetches ALL AI spans
+// (`AiVendor != ''`) of those traces, because the session's substance usually
+// lives on spans that do NOT carry the key: in the CrewAI shape the token
+// counts sit on child openinference-openai LLM spans, and only the
+// orchestration spans are keyed. Every fetched span runs through the vendor
+// integration layer (`@maple/domain/ai`) on the read side; SpanAttributes
+// travels whole because that layer owns which keys matter per vendor — a
+// projected-key list here would couple the query to every integration's
+// spellings.
+
+/** Caps, not pagination: a session past either bound is degenerate (a leaked
+ *  process-wide key) and the detail view is the wrong lens for it. The read
+ *  layer reports truncation rather than silently pretending completeness. */
+export const AGENT_SESSION_MAX_TRACES = 200
+export const AGENT_SESSION_MAX_SPANS = 2000
+
+export interface AgentSessionTraceIdsOutput {
+	readonly traceId: string
+	/** Window of the trace's KEY-CARRYING spans only — phase 2 re-derives real
+	 *  bounds from all AI spans. These exist to give phase 2 a buffered
+	 *  partition hint. */
+	readonly startTime: string
+	readonly endTime: string
+}
+
+export function agentSessionTraceIdsQuery() {
+	return from(Traces)
+		.select(($) => ({
+			traceId: $.TraceId,
+			startTime: CH.min_($.Timestamp),
+			endTime: CH.max_($.Timestamp),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			$.AiSessionKeyState.eq(SESSION_GRANULARITY),
+			// String-side comparison: the hash is a UInt64 identity and 2^53-unsafe,
+			// so it crosses every boundary as a string (house rule).
+			CH.toString_($.AiSessionKeyHash).eq(param.string("sessionKeyHash")),
+		])
+		.groupBy("traceId")
+		.orderBy(["startTime", "asc"])
+		.limit(AGENT_SESSION_MAX_TRACES)
+		.format("JSON")
+}
+
+export interface AgentSessionSpansOpts {
+	/** Phase-1 TraceIds. Values from our own warehouse, not user input. */
+	traceIds: readonly string[]
+}
+
+export interface AgentSessionSpansOutput {
+	readonly traceId: string
+	readonly spanId: string
+	readonly parentSpanId: string
+	readonly timestamp: string
+	readonly durationMs: number
+	readonly spanName: string
+	readonly spanKind: string
+	readonly serviceName: string
+	readonly statusCode: string
+	readonly statusMessage: string
+	readonly vendor: string
+	readonly sessionKeyState: number
+	readonly spanAttributes: Record<string, string>
+}
+
+/** The `startTime`/`endTime` params are buffered phase-1 bounds — a partition
+ *  hint (the sort key is (OrgId, ServiceName, SpanName, Timestamp), so TraceId
+ *  never seeks), padded by the caller so AI spans adjacent to the keyed window
+ *  aren't clipped. */
+export function agentSessionSpansQuery(opts: AgentSessionSpansOpts) {
+	return from(Traces)
+		.select(($) => ({
+			traceId: $.TraceId,
+			spanId: $.SpanId,
+			parentSpanId: $.ParentSpanId,
+			timestamp: $.Timestamp,
+			durationMs: $.Duration.div(1_000_000),
+			spanName: $.SpanName,
+			spanKind: $.SpanKind,
+			serviceName: $.ServiceName,
+			statusCode: $.StatusCode,
+			statusMessage: $.StatusMessage,
+			vendor: $.AiVendor,
+			sessionKeyState: $.AiSessionKeyState,
+			spanAttributes: $.SpanAttributes,
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			$.TraceId.in_(...opts.traceIds),
+			$.AiVendor.neq(""),
+		])
+		.orderBy(["timestamp", "asc"], ["spanId", "asc"])
+		.limit(AGENT_SESSION_MAX_SPANS)
+		.format("JSON")
+}

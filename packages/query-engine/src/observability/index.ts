@@ -49,6 +49,7 @@ export {
 	listAgentSessions,
 	listAgentTraces,
 	agentSessionsFacets,
+	getAgentSessionDetail,
 	type AgentSessionsFilterInput,
 	type ListAgentSessionsInput,
 	type ListAgentTracesInput,
@@ -56,4 +57,8 @@ export {
 	type AgentSessionsListOutput,
 	type AgentTracesListOutput,
 	type AgentSessionsFacetsOutput,
+	type AgentSessionDetailInput,
+	type AgentSessionDetailOutput,
+	type AgentSessionTrace,
+	type NormalizedAiSpan,
 } from "./agent-sessions"

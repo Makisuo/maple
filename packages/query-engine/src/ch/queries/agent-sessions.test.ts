@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { compileCH, compileUnion } from "@maple-dev/clickhouse-builder"
 import {
+	AGENT_SESSION_MAX_SPANS,
+	AGENT_SESSION_MAX_TRACES,
+	agentSessionSpansQuery,
+	agentSessionTraceIdsQuery,
 	agentSessionsFacetsQuery,
 	agentSessionsListQuery,
 	agentTracesListQuery,
@@ -127,5 +131,48 @@ describe("agentSessionsFacetsQuery", () => {
 	it("drops empty facet values after the arrayJoin", () => {
 		const { sql } = compileUnion(agentSessionsFacetsQuery({ tab: "sessions" }), WINDOW)
 		expect(sql).toContain("HAVING name != ''")
+	})
+})
+
+describe("agentSessionTraceIdsQuery", () => {
+	const window = { ...WINDOW, sessionKeyHash: "13464164225153980885" }
+
+	it("resolves the hash to TraceIds over session-granularity rows only", () => {
+		const { sql, tenantScope } = compileCH(agentSessionTraceIdsQuery(), window)
+		expect(tenantScope).toBe("org")
+		expect(sql).toContain("AiSessionKeyState = 6")
+		expect(sql).toContain("GROUP BY traceId")
+		expect(sql).toContain(`LIMIT ${AGENT_SESSION_MAX_TRACES}`)
+	})
+
+	// The hash is a UInt64 identity: it arrives as a string and must never round
+	// through a JS number, so the comparison happens on the string side.
+	it("compares the key hash as a string", () => {
+		const { sql } = compileCH(agentSessionTraceIdsQuery(), window)
+		expect(sql).toContain("toString(AiSessionKeyHash) = '13464164225153980885'")
+	})
+})
+
+describe("agentSessionSpansQuery", () => {
+	const traceIds = ["0af7651916cd43dd8448eb211c80319c", "4bf92f3577b34da6a3ce929d0e0e4736"]
+
+	it("fetches every AI span of the session's traces, org-scoped", () => {
+		const { sql, tenantScope } = compileCH(agentSessionSpansQuery({ traceIds }), WINDOW)
+		expect(tenantScope).toBe("org")
+		expect(sql).toContain("AiVendor != ''")
+		expect(sql).toContain(
+			"TraceId IN ('0af7651916cd43dd8448eb211c80319c', '4bf92f3577b34da6a3ce929d0e0e4736')",
+		)
+		expect(sql).toContain(`LIMIT ${AGENT_SESSION_MAX_SPANS}`)
+	})
+
+	// The integration layer dispatches on attribute spellings per vendor, so the
+	// whole map travels — a projected key list here would couple this query to
+	// every integration.
+	it("selects the full SpanAttributes map and the classification columns", () => {
+		const { sql } = compileCH(agentSessionSpansQuery({ traceIds }), WINDOW)
+		expect(sql).toContain("SpanAttributes AS spanAttributes")
+		expect(sql).toContain("AiVendor AS vendor")
+		expect(sql).toContain("AiSessionKeyState AS sessionKeyState")
 	})
 })

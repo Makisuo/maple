@@ -191,6 +191,47 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
+-- builder:agent-sessions:agentSessionSpansQuery:default  [3dba1d73]
+SELECT
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          Duration / 1000000 AS durationMs,
+          SpanName AS spanName,
+          SpanKind AS spanKind,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          AiVendor AS vendor,
+          AiSessionKeyState AS sessionKeyState,
+          SpanAttributes AS spanAttributes
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND TraceId IN ('0af7651916cd43dd8448eb211c80319c', '4bf92f3577b34da6a3ce929d0e0e4736')
+          AND AiVendor != ''
+        ORDER BY timestamp ASC, spanId ASC
+        LIMIT 2000
+        FORMAT JSON
+
+-- builder:agent-sessions:agentSessionTraceIdsQuery:default  [6f04e848]
+SELECT
+          TraceId AS traceId,
+          min(Timestamp) AS startTime,
+          max(Timestamp) AS endTime
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AiSessionKeyState = 6
+          AND toString(AiSessionKeyHash) = '13464164225153980885'
+        GROUP BY traceId
+        ORDER BY startTime ASC
+        LIMIT 200
+        FORMAT JSON
+
 -- builder:agent-sessions:agentTracesListQuery:default  [dc798139]
 SELECT
           TraceId AS traceId,
