@@ -426,7 +426,7 @@ export function usePlotLegendSlot(items: readonly PlotLegendItem[] | null): bool
 	useEffect(() => {
 		if (!slot) return
 		const next = items ?? NO_LEGEND_ITEMS
-		if (published.current === next) return  // TEMP: identity-only, the old behaviour
+		if (published.current !== null && sameLegendItems(published.current, next)) return
 		published.current = next
 		slot.setItems(next)
 	}, [slot, items])
