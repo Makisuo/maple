@@ -99,8 +99,7 @@ function ChartStateBox({
 	// An explicit prop wins; inside a provider with no override the box simply
 	// fills what the provider already reserved (so a legend or footer sibling
 	// shrinking it stays honoured); with neither, the parent owns the height.
-	const sizing =
-		height != null ? { height } : inherited != null ? { height: "100%" as const } : undefined
+	const sizing = height != null ? { height } : inherited != null ? { height: "100%" as const } : undefined
 
 	return (
 		<div className={cn("w-full", sizing == null && "h-full", className)} style={sizing}>
@@ -148,23 +147,28 @@ const MESSAGE_BASE = "flex items-center justify-center px-3 text-center font-mon
  * border here; an empty window is a normal outcome inside a card that already
  * has a frame, so a second frame around the message just adds noise.
  */
-export function ChartEmpty({ children, height, className }: {
+export function ChartEmpty({
+	children,
+	height,
+	className,
+}: {
 	children: ReactNode
 	height?: number
 	className?: string
 }) {
 	return (
-		<ChartStateBox
-			height={height}
-			className={cn(MESSAGE_BASE, "text-muted-foreground", className)}
-		>
+		<ChartStateBox height={height} className={cn(MESSAGE_BASE, "text-muted-foreground", className)}>
 			{children}
 		</ChartStateBox>
 	)
 }
 
 /** A chart whose query failed. */
-export function ChartError({ children, height, className }: {
+export function ChartError({
+	children,
+	height,
+	className,
+}: {
 	children: ReactNode
 	height?: number
 	className?: string
@@ -172,7 +176,11 @@ export function ChartError({ children, height, className }: {
 	return (
 		<ChartStateBox
 			height={height}
-			className={cn(MESSAGE_BASE, "border border-destructive/40 bg-destructive/5 text-destructive", className)}
+			className={cn(
+				MESSAGE_BASE,
+				"border border-destructive/40 bg-destructive/5 text-destructive",
+				className,
+			)}
 		>
 			{children}
 		</ChartStateBox>

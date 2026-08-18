@@ -28,6 +28,13 @@ import { normalizeTimestampInput } from "@/lib/timezone-format"
 import type { LogsSearchParams } from "@/routes/logs"
 import { SEVERITY_COLORS, SEVERITY_ORDER } from "@maple/ui/lib/severity"
 
+/**
+ * The volume strip is deliberately short — it is a scrubber above the log list,
+ * not a chart in its own right. Declared once so the plot and its loading
+ * stand-in reserve the same strip.
+ */
+const LOGS_VOLUME_CHART_HEIGHT = 120
+
 /** More bars than the default 40-point target for a denser histogram. */
 const HISTOGRAM_TARGET_POINTS = 150
 
@@ -217,13 +224,6 @@ interface LogsVolumeChartProps {
 	filters?: LogsSearchParams
 	onTimeRangeSelect?: (range: { startTime: string; endTime: string }) => void
 }
-
-/**
- * The volume strip is deliberately short — it is a scrubber above the log list,
- * not a chart in its own right. Declared once so the plot and its loading
- * stand-in reserve the same strip.
- */
-const LOGS_VOLUME_CHART_HEIGHT = 120
 
 export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartProps) {
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(

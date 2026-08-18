@@ -39,7 +39,6 @@ const METRIC_LABELS: Record<CloudflareZoneMetric, string> = {
 	bytes: "Bandwidth",
 } satisfies Record<CloudflareZoneMetric, string>
 
-
 function formatMetricValue(value: number, metric: CloudflareZoneMetric): string {
 	if (metric === "errorRate" || metric === "cacheHitRate") return formatPercent(value)
 	if (metric === "bytes") return formatBytes(value)
