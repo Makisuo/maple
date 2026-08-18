@@ -114,11 +114,6 @@ export function WidgetShell({
 							{timeRangeLabel}
 						</span>
 					)}
-					{headerValue != null && (
-						<div className="ml-auto shrink-0 font-mono font-semibold text-xs tabular-nums">
-							{headerValue}
-						</div>
-					)}
 					{legendItems.length >= 2 &&
 						(() => {
 							// Keep the header to a single row: show a few items, then a
@@ -131,7 +126,7 @@ export function WidgetShell({
 								// Below ~380px the title alone fills the header row, so
 								// the legend is dropped entirely rather than squeezed to
 								// a row of unreadable truncated stubs.
-								<div className="hidden min-w-0 flex-1 items-center justify-end gap-x-3 overflow-hidden @min-[380px]/widget:flex">
+								<div className="ml-auto hidden min-w-0 flex-1 items-center justify-end gap-x-3 overflow-hidden @min-[380px]/widget:flex">
 									{visible.map((item) => (
 										<span
 											key={item.key}
@@ -155,6 +150,20 @@ export function WidgetShell({
 								</div>
 							)
 						})()}
+					{headerValue != null && (
+						// LAST in the row, so the headline stat keeps the top-right corner.
+						// It used to come BEFORE the legend, which was invisible only because
+						// `legendItems` was permanently empty for every ported chart — the bug
+						// that restoring the legend slot fixed. With chips actually rendering,
+						// they landed to the right of the stat and took the corner.
+						//
+						// `ml-auto` stays on both: the legend's `flex-1` absorbs the free space
+						// when there is one, and this is what pushes the stat right when there
+						// is not.
+						<div className="ml-auto shrink-0 font-mono font-semibold text-xs tabular-nums">
+							{headerValue}
+						</div>
+					)}
 				</div>
 				{showMenu && (
 					<CardAction

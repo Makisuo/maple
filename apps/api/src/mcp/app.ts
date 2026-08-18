@@ -42,9 +42,11 @@ const SUPPORTED_PROTOCOL_VERSIONS: ReadonlySet<string> = new Set(
  * header check is the only thing turning a newer client into a hard failure.
  *
  * That failure is invisible in two ways, which is why this went unnoticed: a
- * 4xx on a SERVER span is `Ok` by our semconv, and the MCP clients in eve treat
- * 400 as "wrong transport" and retry over SSE, where a POST-only route answers
- * 405. The caller sees an opaque connection error, never a version mismatch.
+ * 4xx on a SERVER span is `Ok` by our semconv, and the MCP clients in eve — the
+ * `@ai-sdk/mcp` client used by apps/slack-agent, which defaults to `2025-11-25`
+ * — treat 400 as "wrong transport" and retry over SSE, where a POST-only route
+ * answers 405. The caller sees an opaque connection error, never a version
+ * mismatch.
  *
  * Clients that send a version we DO implement are untouched, so this is a no-op
  * the moment Effect ships newer adapters and they are added to MCP_PROTOCOLS.

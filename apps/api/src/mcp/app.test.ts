@@ -187,11 +187,14 @@ describe("MCP HTTP authorization", () => {
 			await dispose()
 		}
 	})
+
 	it("negotiates a newer client protocol version down instead of rejecting it", async () => {
-		// Regression: the Slack agent's MCP client advertises `2025-11-25`, which
-		// McpServer rejected with a bare 400 before parsing the body — and eve
-		// reads 400 as "wrong transport", retries over SSE, and gets 405 from a
-		// POST-only route. The bot never connected once.
+		// Regression: the Slack agent's MCP client advertises `2025-11-25` in the
+		// `Mcp-Protocol-Version` header on the very first `initialize` request —
+		// where per the MCP spec that header is only the client's preference and
+		// negotiation belongs in the body. McpServer rejected it with a bare 400
+		// before parsing the body — and eve reads 400 as "wrong transport", retries
+		// over SSE, and gets 405 from a POST-only route. The bot never connected once.
 		const db = createTestDb(createdDbs)
 		const base = Layer.mergeAll(db.layer, Env.layer.pipe(Layer.provide(testConfig())))
 		const services = Layer.mergeAll(
@@ -236,7 +239,14 @@ describe("MCP HTTP authorization", () => {
 				}),
 				Context.empty() as never,
 			)
-			expect(initialized.status).toBe(200)
+			const initializedBody = await initialized.clone().json()
+			expect({
+				status: initialized.status,
+				protocolVersion: initializedBody.result?.protocolVersion,
+			}).toEqual({
+				status: 200,
+				protocolVersion: "2025-06-18",
+			})
 
 			const sessionId = initialized.headers.get("mcp-session-id")
 			expect(sessionId).not.toBeNull()
