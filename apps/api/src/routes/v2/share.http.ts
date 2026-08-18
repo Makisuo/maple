@@ -22,6 +22,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpServerRequest } from "effect/unstable/http"
 import {
 	AlertChartResponse,
+	AlertRuleId,
 	OrgId,
 	RoleName,
 	UserId as UserIdSchema,
@@ -61,6 +62,7 @@ import { resolveShareVariables } from "@/services/dashboards/share-variables"
 import { resolveShareWindow } from "@/services/dashboards/share-window"
 
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
+const decodeAlertRuleId = Schema.decodeUnknownEffect(AlertRuleId)
 const decodeRoleName = Schema.decodeUnknownSync(RoleName)
 const decodeUserId = Schema.decodeUnknownSync(UserIdSchema)
 
@@ -455,7 +457,14 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 					const claims = verifyAlertChartId(payload.chartId, hmacKey)
 					if (claims === undefined) return yield* notFound
 
-					const orgId = yield* decodeOrgId(claims.orgId).pipe(Effect.catch(() => notFound))
+					// The signature proves we minted the payload; it does not make the
+					// ids inside it decoded. Both are parsed here, at the boundary,
+					// and an id that will not decode is the uniform not-found rather
+					// than a brand asserted onto whatever came back off the wire.
+					const orgId = yield* decodeOrgId(claims.rawOrgId).pipe(Effect.catch(() => notFound))
+					const ruleId = yield* decodeAlertRuleId(claims.rawRuleId).pipe(
+						Effect.catch(() => notFound),
+					)
 
 					// No rule lookup: everything drawn as words — title, unit,
 					// threshold, which side to shade — is pinned in the signed id, so a
@@ -463,7 +472,7 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 					// already-sent alert's picture says.
 					const series = yield* loadChartSeries(warehouse, systemTenant(orgId), {
 						orgId,
-						ruleId: claims.ruleId,
+						ruleId,
 						groupKey: claims.groupKey,
 						// The comparator is not carried; `breachSide` is the only thing
 						// derived from it that the renderer needs, and it is signed.

@@ -25,7 +25,7 @@
  * picture on it.
  */
 import * as CH from "@maple/query-engine/ch"
-import type { AlertComparator, OrgId } from "@maple/domain/http"
+import type { AlertComparator, AlertRuleId, OrgId } from "@maple/domain/http"
 import { alertChartId } from "@maple/db"
 import {
 	downsample,
@@ -124,7 +124,7 @@ export interface ChartSeriesWarehouse {
 
 export interface LoadChartSeriesOptions {
 	readonly orgId: OrgId
-	readonly ruleId: string
+	readonly ruleId: AlertRuleId
 	/** `null` for an ungrouped rule — the query then spans every group. */
 	readonly groupKey: string | null
 	readonly comparator: AlertComparator
@@ -229,7 +229,7 @@ export const chartImageUrl = (options: {
 	readonly appBaseUrl: string
 	readonly hmacKey: string | null
 	readonly orgId: OrgId
-	readonly ruleId: string
+	readonly ruleId: AlertRuleId
 	readonly groupKey: string | null
 	readonly fromMs: number
 	readonly toMs: number

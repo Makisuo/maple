@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import type { AlertRuleId, OrgId } from "@maple/domain/primitives"
 
 const SHARE_TOKEN_PREFIX = "mshare_"
 
@@ -102,8 +103,8 @@ const ALERT_CHART_ID_LABEL = "alertchart:v1:"
  * warehouse — a caller cannot widen `fromMs` without invalidating the signature.
  */
 export interface AlertChartClaims {
-	readonly orgId: string
-	readonly ruleId: string
+	readonly orgId: OrgId
+	readonly ruleId: AlertRuleId
 	/** `null` for an ungrouped rule. */
 	readonly groupKey: string | null
 	readonly fromMs: number
@@ -115,6 +116,20 @@ export interface AlertChartClaims {
 	readonly threshold: number | null
 	/** `"above" | "below" | "none"` — which side of the threshold to shade. */
 	readonly breachSide: string
+}
+
+/**
+ * What comes back out of a chart id, which is **not** the same type that went in.
+ *
+ * The signature proves this repo minted the payload; it does not make the
+ * strings inside it decoded entity ids. They arrived in a URL and came out of
+ * `JSON.parse`, so they are named `raw*` and stay unbranded — the caller decodes
+ * them at its boundary, and a value that fails to decode is a 404 rather than a
+ * brand that was asserted into existence.
+ */
+export interface VerifiedAlertChartClaims extends Omit<AlertChartClaims, "orgId" | "ruleId"> {
+	readonly rawOrgId: string
+	readonly rawRuleId: string
 }
 
 /**
@@ -162,7 +177,7 @@ export const alertChartId = (claims: AlertChartClaims, hmacKey: string): string 
  * A malformed id fails identically to a tampered one — the caller gets no
  * signal about which.
  */
-export const verifyAlertChartId = (id: string, hmacKey: string): AlertChartClaims | undefined => {
+export const verifyAlertChartId = (id: string, hmacKey: string): VerifiedAlertChartClaims | undefined => {
 	const separator = id.indexOf(".")
 	if (separator <= 0) return undefined
 
@@ -182,14 +197,14 @@ export const verifyAlertChartId = (id: string, hmacKey: string): AlertChartClaim
 	try {
 		const parsed: unknown = JSON.parse(payload)
 		if (!Array.isArray(parsed) || parsed.length !== 9) return undefined
-		const [orgId, ruleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide] = parsed
-		if (typeof orgId !== "string" || typeof ruleId !== "string") return undefined
+		const [rawOrgId, rawRuleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide] = parsed
+		if (typeof rawOrgId !== "string" || typeof rawRuleId !== "string") return undefined
 		if (groupKey !== null && typeof groupKey !== "string") return undefined
 		if (typeof fromMs !== "number" || typeof toMs !== "number") return undefined
 		if (typeof title !== "string" || typeof unit !== "string") return undefined
 		if (threshold !== null && typeof threshold !== "number") return undefined
 		if (typeof breachSide !== "string") return undefined
-		return { orgId, ruleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide }
+		return { rawOrgId, rawRuleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide }
 	} catch {
 		return undefined
 	}
