@@ -151,6 +151,15 @@ export const makeAlertDestinationDelivery = (options: {
 				sampleCount: context.sampleCount,
 			},
 			template: context.template ?? null,
+			// Snapshotted at queue time, not re-derived at delivery: a retry an
+			// hour later must show what the alert saw, not what has happened since.
+			chart:
+				context.sparkline || context.chartUrl
+					? {
+							...(context.sparkline ? { sparkline: context.sparkline } : undefined),
+							...(context.chartUrl ? { url: context.chartUrl } : undefined),
+						}
+					: null,
 			linkUrl: context.linkUrl,
 			chatUrl: buildAlertChatUrl(options.appBaseUrl, context),
 			sentAt: new Date(context.sentAtMs).toISOString(),
@@ -162,6 +171,10 @@ export const makeAlertDestinationDelivery = (options: {
 			readonly rule: Record<string, unknown>
 			readonly observed: Record<string, unknown>
 			readonly template: AlertNotificationTemplate | null
+			readonly chart: {
+				readonly sparkline?: string
+				readonly url?: string
+			} | null
 			readonly linkUrl: string
 			readonly chatUrl: string
 			readonly sentAt: string
