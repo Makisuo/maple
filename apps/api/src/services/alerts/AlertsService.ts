@@ -41,7 +41,6 @@ import {
 	type QueryEngineTimeoutError,
 	type QueryEngineValidationError,
 	RoleName,
-	UserId as UserIdSchema,
 	type UserId,
 } from "@maple/domain/http"
 import {
@@ -82,7 +81,6 @@ import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueu
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import type { TenantContext } from "@/services/auth/AuthService"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { formatComparator } from "./alert-formatting"
 import { EmailService } from "@/platform/EmailService"
@@ -95,6 +93,7 @@ import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { chartImageUrl, chartWindow, loadChartSeries } from "./alert-chart-series"
+import { systemTenant } from "./system-tenant"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { ApnsClient } from "@/platform/Apns"
@@ -207,8 +206,6 @@ const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.
 const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.id)
 const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(AlertDeliveryEventDocument.fields.id)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.createdAt)
-const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
@@ -429,13 +426,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			} = rulePersistence
 
 			const dbExecute = makeDbExecute(database, "AlertsService", makePersistenceError)
-
-			const systemTenant = (orgId: OrgId): TenantContext => ({
-				orgId,
-				userId: decodeUserIdSync("system-alerting"),
-				roles: [decodeRoleNameSync("root")],
-				authMode: "self_hosted",
-			})
 
 			/**
 			 * Services a rule's telemetry-liveness probe should cover. An empty list

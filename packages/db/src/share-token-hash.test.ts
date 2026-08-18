@@ -76,7 +76,7 @@ const claims = {
 	unit: "percent",
 	threshold: 2,
 	breachSide: "above",
-}
+} as const
 
 /** What `claims` looks like coming back out — ids undecoded, by design. */
 const verified = {

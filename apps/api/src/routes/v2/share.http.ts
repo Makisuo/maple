@@ -24,8 +24,6 @@ import {
 	AlertChartResponse,
 	AlertRuleId,
 	OrgId,
-	RoleName,
-	UserId as UserIdSchema,
 	SHARE_NOT_FOUND_MESSAGE,
 	ShareNotConfiguredError,
 	ShareNotFoundError,
@@ -44,7 +42,7 @@ import { hashShareToken, shareOgId, verifyAlertChartId, verifyShareOgId } from "
 import { redactForShare } from "@maple/widgets/dashboard"
 import { Effect, Option, Redacted, Schema } from "effect"
 import { Env } from "@/platform/Env"
-import { AuthService, type TenantContext } from "@/services/auth/AuthService"
+import { AuthService } from "@/services/auth/AuthService"
 import {
 	ApiV2RateLimiter,
 	shareIpRateLimitKey,
@@ -52,6 +50,7 @@ import {
 	shareTokenRateLimitKey,
 } from "@/services/auth/ApiV2RateLimiter"
 import { loadChartSeries } from "@/services/alerts/alert-chart-series"
+import { systemTenant } from "@/services/alerts/system-tenant"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
@@ -63,33 +62,6 @@ import { resolveShareWindow } from "@/services/dashboards/share-window"
 
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
 const decodeAlertRuleId = Schema.decodeUnknownEffect(AlertRuleId)
-const decodeRoleName = Schema.decodeUnknownSync(RoleName)
-const decodeUserId = Schema.decodeUnknownSync(UserIdSchema)
-
-/**
- * The alert-chart read runs as the alerting system, not as a viewer: there is
- * no viewer to run as. The org it may read is fixed by the signed id, and the
- * query itself filters `OrgId`, so this widens nothing a caller controls.
- */
-const systemTenant = (orgId: OrgId): TenantContext => ({
-	orgId,
-	userId: decodeUserId("system-alerting"),
-	roles: [decodeRoleName("root")],
-	authMode: "self_hosted",
-})
-
-const CHART_UNITS = ["number", "percent", "duration_ms", "bytes", "requests_per_sec"] as const
-const BREACH_SIDES = ["above", "below", "none"] as const
-
-/**
- * Signed values, so these always match — but narrowed by lookup rather than
- * asserted, because an image request must not be able to throw on a value this
- * repo will one day add to one list and forget in the other.
- */
-const decodeChartUnit = (raw: string): (typeof CHART_UNITS)[number] =>
-	CHART_UNITS.find((unit) => unit === raw) ?? "number"
-const decodeBreachSide = (raw: string): (typeof BREACH_SIDES)[number] =>
-	BREACH_SIDES.find((side) => side === raw) ?? "none"
 
 /** Uniform "no such link", used for every reason a token might not resolve. */
 const notFound = Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
@@ -488,11 +460,11 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 
 					return new AlertChartResponse({
 						title: claims.title,
-						unit: decodeChartUnit(claims.unit),
+						unit: claims.unit,
 						kind: "area",
 						points: series.points.map((point) => [point[0], point[1]] as const),
 						threshold: claims.threshold,
-						breachSide: decodeBreachSide(claims.breachSide),
+						breachSide: claims.breachSide,
 					})
 				}),
 			)

@@ -1083,6 +1083,26 @@ export const AlertChartPoint = Schema.Tuple([Schema.Number, Schema.Number]).anno
 export const AlertChartBreachSide = Schema.Literals(["above", "below", "none"]).annotate({
 	identifier: "AlertChartBreachSide",
 })
+export type AlertChartBreachSide = Schema.Schema.Type<typeof AlertChartBreachSide>
+
+/**
+ * Chart unit, as the static renderer names them.
+ *
+ * The single authority for this list: it types the HTTP response *and* the
+ * signed chart id's payload in `@maple/db`, so the wire and the signature
+ * cannot disagree about what units exist. The renderer in `@maple/widgets`
+ * declares a structurally identical union — it sits below this package and
+ * cannot import it — and the two meet in `apps/web`, where a divergence is a
+ * type error rather than a runtime surprise.
+ */
+export const AlertChartUnit = Schema.Literals([
+	"number",
+	"percent",
+	"duration_ms",
+	"bytes",
+	"requests_per_sec",
+]).annotate({ identifier: "AlertChartUnit" })
+export type AlertChartUnit = Schema.Schema.Type<typeof AlertChartUnit>
 
 /**
  * Everything the image needs, and nothing else.
@@ -1093,8 +1113,7 @@ export const AlertChartBreachSide = Schema.Literals(["above", "below", "none"]).
  */
 export class AlertChartResponse extends Schema.Class<AlertChartResponse>("AlertChartResponse")({
 	title: Schema.String,
-	/** Chart unit, as the static renderer names them. */
-	unit: Schema.Literals(["number", "percent", "duration_ms", "bytes", "requests_per_sec"]),
+	unit: AlertChartUnit,
 	kind: Schema.Literals(["line", "area", "bar"]),
 	points: Schema.Array(AlertChartPoint),
 	threshold: Schema.NullOr(Schema.Number),

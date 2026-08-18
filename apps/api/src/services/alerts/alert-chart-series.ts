@@ -25,6 +25,7 @@
  * picture on it.
  */
 import * as CH from "@maple/query-engine/ch"
+import { CHNumber } from "@maple/query-engine/ch"
 import type { AlertComparator, AlertRuleId, OrgId } from "@maple/domain/http"
 import { alertChartId } from "@maple/db"
 import {
@@ -34,7 +35,7 @@ import {
 	type ChartPoint,
 	type ChartUnit,
 } from "@maple/widgets/chart/static-chart"
-import { Duration, Effect, Option } from "effect"
+import { Array as Arr, Cause, Duration, Effect, Option, Order, Result, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 
@@ -106,6 +107,44 @@ export const chartWindow = (options: {
 	return { fromMs: Math.min(lead, floor), toMs: options.nowMs }
 }
 
+/**
+ * The two columns a chart reads, decoded rather than coerced.
+ *
+ * `listRuleChecksQuery` declares no `rowSchema`, so `compiledQuery` hands back
+ * undecoded rows. `Number(row.observedValue)` would have compiled and produced
+ * `NaN` on any wire-format drift — the exact failure `CHNumber` exists to
+ * absorb, since a gateway or read-only cluster that refuses
+ * `output_format_json_quote_64bit_integers=0` sends quoted numbers.
+ */
+const CheckRow = Schema.Struct({
+	timestamp: Schema.String,
+	observedValue: Schema.NullOr(CHNumber),
+})
+const decodeCheckRow = Schema.decodeUnknownResult(CheckRow)
+
+/**
+ * One audit row as a chart point, or a reason it was dropped.
+ *
+ * `Array.filterMap` in Effect v4 keeps the successes of a `Result`-returning
+ * transform, so the failure side names why a row is not drawn instead of
+ * silently vanishing into a boolean filter.
+ */
+const toChartPoint = (row: unknown): Result.Result<ChartPoint, string> => {
+	const decoded = decodeCheckRow(row)
+	if (Result.isFailure(decoded)) return Result.fail("undecodable check row")
+
+	const { timestamp, observedValue } = decoded.success
+	// A failed evaluation writes an audit row with no observed value. Reading
+	// that as 0 would draw a recovery that never happened.
+	if (observedValue === null) return Result.fail("no observed value")
+
+	const at = Date.parse(timestamp)
+	return Number.isNaN(at) ? Result.fail("unparseable timestamp") : Result.succeed([at, observedValue])
+}
+
+/** The query pages newest-first for the checks table; a chart reads left to right. */
+const byTimestamp = Order.mapInput(Order.Number, (point: ChartPoint) => point[0])
+
 /** `alert_checks` is DateTime64(3) on the wire: "YYYY-MM-DD HH:MM:SS.mmm" UTC. */
 const toWarehouseDateTime = (epochMs: number): string =>
 	new Date(epochMs).toISOString().replace("T", " ").replace("Z", "")
@@ -175,15 +214,7 @@ export const loadChartSeries = (
 		const breachSide = breachSideFor(options.comparator)
 		// The query orders newest-first for the checks table's own pagination;
 		// a chart reads left to right.
-		const points: ChartPoint[] = []
-		for (const row of rows) {
-			const value = row.observedValue
-			if (value == null) continue
-			const at = Date.parse(`${String(row.timestamp)}`)
-			if (Number.isNaN(at)) continue
-			points.push([at, Number(value)])
-		}
-		points.sort((a, b) => a[0] - b[0])
+		const points = Arr.sort(Arr.filterMap(rows, toChartPoint), byTimestamp)
 
 		// Two points is a line segment, not a trend, and it makes the message
 		// look instrumented without informing anyone.
@@ -206,7 +237,7 @@ export const loadChartSeries = (
 				Effect.annotateLogs({
 					orgId: options.orgId,
 					"maple.alert.rule_id": options.ruleId,
-					cause: String(cause),
+					cause: Cause.pretty(cause),
 				}),
 				Effect.as(null),
 			),

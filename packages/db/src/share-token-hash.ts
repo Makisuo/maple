@@ -1,5 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import type { AlertRuleId, OrgId } from "@maple/domain/primitives"
+import { AlertChartBreachSide, AlertChartUnit } from "@maple/domain/http"
+import { Result, Schema } from "effect"
 
 const SHARE_TOKEN_PREFIX = "mshare_"
 
@@ -111,11 +113,10 @@ export interface AlertChartClaims {
 	readonly toMs: number
 	/** What the card is titled — the rule's measured quantity, as the message names it. */
 	readonly title: string
-	/** Chart unit, as the static renderer names them. */
-	readonly unit: string
+	readonly unit: AlertChartUnit
 	readonly threshold: number | null
-	/** `"above" | "below" | "none"` — which side of the threshold to shade. */
-	readonly breachSide: string
+	/** Which side of the threshold the renderer shades. */
+	readonly breachSide: AlertChartBreachSide
 }
 
 /**
@@ -139,6 +140,32 @@ export interface VerifiedAlertChartClaims extends Omit<AlertChartClaims, "orgId"
  * insertion order, so a caller that built the claims differently would produce
  * a different signature for the same claims.
  */
+/**
+ * The signed payload, positionally.
+ *
+ * A tuple rather than an object because the bytes are what is signed: object
+ * key order is insertion order, so two callers building the same claims in a
+ * different order would produce different signatures for the same claims. The
+ * positions are the format — appending is safe, reordering is a break.
+ *
+ * Declared as a schema so verification *decodes* rather than hand-checking
+ * nine `typeof`s, and so `unit` and `breachSide` come back as their literal
+ * unions instead of `string` the caller has to re-narrow.
+ */
+const AlertChartPayload = Schema.Tuple([
+	Schema.String,
+	Schema.String,
+	Schema.NullOr(Schema.String),
+	Schema.Number,
+	Schema.Number,
+	Schema.String,
+	AlertChartUnit,
+	Schema.NullOr(Schema.Number),
+	AlertChartBreachSide,
+])
+
+const decodeAlertChartPayload = Schema.decodeUnknownResult(Schema.fromJsonString(AlertChartPayload))
+
 const encodeAlertChartClaims = (claims: AlertChartClaims): string =>
 	JSON.stringify([
 		claims.orgId,
@@ -192,20 +219,11 @@ export const verifyAlertChartId = (id: string, hmacKey: string): VerifiedAlertCh
 	if (!timingSafeEqual(presented, expected)) return undefined
 
 	// Reached only for a payload this repo signed, so the shape is ours — but it
-	// is still parsed rather than trusted, because a decode failure here must be
-	// "no chart", not a thrown error inside an image request.
-	try {
-		const parsed: unknown = JSON.parse(payload)
-		if (!Array.isArray(parsed) || parsed.length !== 9) return undefined
-		const [rawOrgId, rawRuleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide] = parsed
-		if (typeof rawOrgId !== "string" || typeof rawRuleId !== "string") return undefined
-		if (groupKey !== null && typeof groupKey !== "string") return undefined
-		if (typeof fromMs !== "number" || typeof toMs !== "number") return undefined
-		if (typeof title !== "string" || typeof unit !== "string") return undefined
-		if (threshold !== null && typeof threshold !== "number") return undefined
-		if (typeof breachSide !== "string") return undefined
-		return { rawOrgId, rawRuleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide }
-	} catch {
-		return undefined
-	}
+	// is decoded rather than trusted. A signature written by an older or newer
+	// version of this format still verifies, and its payload still has to parse.
+	const decoded = decodeAlertChartPayload(payload)
+	if (Result.isFailure(decoded)) return undefined
+
+	const [rawOrgId, rawRuleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide] = decoded.success
+	return { rawOrgId, rawRuleId, groupKey, fromMs, toMs, title, unit, threshold, breachSide }
 }

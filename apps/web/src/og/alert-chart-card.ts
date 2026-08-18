@@ -44,6 +44,21 @@ const COLOR = {
 } as const
 
 /**
+ * Bytes to base64, in chunks.
+ *
+ * `String.fromCharCode(...bytes)` on a 20 KB SVG spreads twenty thousand
+ * arguments onto the stack, which is a RangeError waiting for a busy chart.
+ */
+const toBase64 = (bytes: Uint8Array): string => {
+	const CHUNK = 0x8000
+	let binary = ""
+	for (let i = 0; i < bytes.length; i += CHUNK) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+	}
+	return btoa(binary)
+}
+
+/**
  * A row whose children sit at the two ends.
  *
  * `display: "flex"` is not decoration — takumi ignores `justifyContent`,
@@ -83,7 +98,11 @@ export const alertChartCardNode = (spec: StaticChartSpec): Node => {
 	// Inlined rather than referenced: the renderer resolves external images
 	// through a loader, and a chart that needs a network fetch to draw itself
 	// would be a second way for this endpoint to fail.
-	const plotSrc = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(plot.svg)))}`
+	//
+	// `btoa` is Latin-1 only and the title can be any UTF-8, so the SVG is
+	// encoded to bytes first. (The old `btoa(unescape(encodeURIComponent(…)))`
+	// trick does the same thing via a function deprecated for two decades.)
+	const plotSrc = `data:image/svg+xml;base64,${toBase64(new TextEncoder().encode(plot.svg))}`
 
 	return container({
 		style: {
