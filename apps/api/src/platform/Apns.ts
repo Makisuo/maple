@@ -70,6 +70,20 @@ const APNS_HOSTS = {
 	sandbox: "https://api.sandbox.push.apple.com",
 } as const satisfies Record<MobilePushEnvironment, string>
 
+/**
+ * Topics this key is allowed to sign for.
+ *
+ * `bundle_id` arrives from the device registration payload, is stored on the
+ * row, and ends up verbatim as `apns-topic` on a request signed with Maple's
+ * team key. Unchecked, any authenticated client could make the worker mint
+ * provider JWTs for arbitrary topics under Maple's Apple team — and every such
+ * row burns a send attempt per incident that Apple answers with
+ * `DeviceTokenNotForTopic`. The app ships exactly one bundle id
+ * (`PRODUCT_BUNDLE_IDENTIFIER` in `apps/ios/project.yml`), so the set is closed
+ * — a build that ships another bundle id adds it here.
+ */
+const ALLOWED_TOPICS = new Set<string>(["com.maple.mobile"])
+
 /** Reasons that mean the token itself is gone, per Apple's table. */
 const UNREGISTERED_REASONS = new Set([
 	"Unregistered",
@@ -186,6 +200,13 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 					"maple.push.bundle_id": push.bundleId,
 					"peer.service": "apns",
 				})
+				// Before the token is minted: an unknown topic must not reach the
+				// signing step at all.
+				if (!ALLOWED_TOPICS.has(push.bundleId)) {
+					return yield* new ApnsError({
+						message: `Refusing to send for an unknown APNs topic: ${push.bundleId}`,
+					})
+				}
 				const token = yield* currentToken
 				const body = {
 					aps: {

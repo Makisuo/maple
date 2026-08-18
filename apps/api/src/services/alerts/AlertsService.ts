@@ -89,6 +89,7 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { makeDbExecute } from "@/platform/db-execute"
+import { dateToMs } from "@/platform/time"
 import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
@@ -701,7 +702,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							dedupeKey: incident.dedupeKey,
 							openForMs:
 								eventType === "resolve"
-									? Math.max(0, scheduledAt - incident.firstTriggeredAt.getTime())
+									? Math.max(0, scheduledAt - dateToMs(incident.firstTriggeredAt))
 									: null,
 							linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
 						})

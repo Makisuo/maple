@@ -41,7 +41,6 @@ final class PushRegistrar: NSObject {
 	private let center = UNUserNotificationCenter.current()
 
 	private enum Key {
-		static let registeredOrgs = "push.registeredOrgIds"
 		static let prompted = "push.promptedOnce"
 		static func preferences(_ orgId: String) -> String { "push.preferences.\(orgId)" }
 	}
@@ -108,11 +107,6 @@ final class PushRegistrar: NSObject {
 		}
 	}
 
-	private var registeredOrgIds: Set<String> {
-		get { Set(defaults.stringArray(forKey: Key.registeredOrgs) ?? []) }
-		set { defaults.set(Array(newValue).sorted(), forKey: Key.registeredOrgs) }
-	}
-
 	// MARK: Sync
 
 	/// Everything a registration depends on. Screens key a `.task(id:)` on this
@@ -143,7 +137,6 @@ final class PushRegistrar: NSObject {
 					preferences: preferences(for: orgId)
 				)
 			)
-			registeredOrgIds.insert(orgId)
 			lastError = nil
 		} catch is CancellationError {
 		} catch {
@@ -161,7 +154,6 @@ final class PushRegistrar: NSObject {
 		// Other orgs' rows are removed the next time this token registers
 		// there and the user signs out from it, or when APNs reports it dead.
 		try? await api.unregisterDevice(token: deviceToken)
-		registeredOrgIds = []
 	}
 }
 
