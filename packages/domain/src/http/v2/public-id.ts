@@ -37,6 +37,7 @@ export const PublicIdPrefixes = {
 	ingestKey: "ingk",
 	attributeMapping: "amap",
 	sessionReplay: "srep",
+	mobileDevice: "mdev",
 	/** Synthetic identity for logs, which have no native OTel record id. */
 	log: "log",
 	/** Reserved for the future events/webhooks system. */

@@ -59,6 +59,10 @@ const IOS_OPERATIONS: ReadonlyArray<string> = [
 	"listAnomalyIncidents",
 	"getAnomalyIncident",
 	"getAnomalyIncidentTimeseries",
+	// Push
+	"listMobileDevices",
+	"registerMobileDevice",
+	"unregisterMobileDevice",
 ]
 
 const ERROR_ENVELOPE_SCHEMA_NAME = "MapleErrorEnvelope"
@@ -233,7 +237,8 @@ function collapseNullableUnions(doc: JsonObject): void {
 			const next =
 				finiteNumberSchema(current, deref) ??
 				mergedStringEnum(current, deref) ??
-				flattenedConstraintAllOf(current)
+				flattenedConstraintAllOf(current) ??
+				singleBranchUnion(current)
 			if (next === undefined) break
 			current = next
 			collapsed = true
@@ -450,6 +455,17 @@ function flattenedConstraintAllOf(schema: JsonObject): JsonObject | undefined {
 
 	const { allOf: _dropped, ...siblings } = schema
 	return { ...merged, ...siblings }
+}
+
+/**
+ * `{ anyOf: [S] }` → `S`. A one-member `Schema.Literals` (a platform enum with
+ * one platform so far) is emitted as a single-branch union, which the
+ * generator turns into a one-case enum wrapper around a one-case enum.
+ */
+function singleBranchUnion(schema: JsonObject): JsonObject | undefined {
+	const branches = asObjectArray(schema.anyOf)
+	if (branches === undefined || branches.length !== 1) return undefined
+	return mergeAnnotations(schema, branches[0]!)
 }
 
 /** Fold a wrapper's sibling annotations (title, description) onto its inner schema. */

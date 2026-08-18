@@ -306,6 +306,10 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalPlain("SLACK_CLIENT_ID"),
 				...optionalSecret("SLACK_CLIENT_SECRET"),
 				...optionalSecret("SLACK_INTERNAL_SERVICE_TOKEN"),
+				// Apple push (iOS app) — token auth; see platform/Apns.ts
+				...optionalPlain("APNS_TEAM_ID"),
+				...optionalPlain("APNS_KEY_ID"),
+				...optionalSecret("APNS_PRIVATE_KEY"),
 				...optionalPlain("GITHUB_APP_ID"),
 				...optionalPlain("GITHUB_APP_SLUG"),
 				...optionalSecret("GITHUB_APP_PRIVATE_KEY"),

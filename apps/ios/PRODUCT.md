@@ -26,7 +26,7 @@ Everything above the fold answers question 1.
 
 - **Status headline.** Derived on-device, no new endpoint:
   `All 14 services healthy` · `2 degraded, 1 critical alert` · `No data in
-  the last hour` (liveness — an org that stopped sending is *not* healthy).
+the last hour` (liveness — an org that stopped sending is _not_ healthy).
   Colour follows the worst thing on screen; amber primary used here and only
   here.
 - **Open incidents**, critical first, each a card: rule name · service(s) ·
@@ -41,7 +41,7 @@ Everything above the fold answers question 1.
   each a row that opens the Alerts tab pre-filtered.
 - Pull-to-refresh; auto-refresh every 60s while foregrounded.
 
-Time window is fixed to *now* (1h for rates, 24h for "new"). Home has no time
+Time window is fixed to _now_ (1h for rates, 24h for "new"). Home has no time
 picker — a time picker is a question-2 tool.
 
 ### Services
@@ -72,7 +72,7 @@ Anomalies**. Default segment is whichever has open items, incidents first.
 1. Headline: `Checkout error rate · 9.0% > 5.0% · open 32 min · critical`.
 2. **What the rule saw**: the check history for this rule/group
    (`GET /v2/alerts/rules/{id}/checks`) rendered as a bar/line of observed
-   values with the threshold line. This works for *every* signal type
+   values with the threshold line. This works for _every_ signal type
    including builder/raw queries, because it's the rule's own observations,
    not a re-query.
 3. **What changed on the service** (only for the five service signals): the
@@ -112,11 +112,11 @@ health, then bumped to critical if any open incident is critical, then to
 
 Reads needed, all in v2 already:
 
-| Screen | Operations |
-| --- | --- |
-| Home | `listServices` (1h), `listAlertIncidents?status=open`, `listErrorIssues` (24h, sort first_seen), `listAnomalyIncidents`, `queryTraceTimeseries` for sparklines |
-| Services | `listServices`, `getService`, `queryTraceTimeseries`, `queryTraceBreakdown`, `listAlertIncidents`, `listErrorIssues` |
-| Alerts | `listAlertIncidents`, `getAlertIncident`, `getAlertRule`, `listAlertRuleChecks`, `listAlertDeliveries`, `listErrorIssues`, `getErrorIssue`, `listAnomalyIncidents`, `getAnomalyIncident`, `getAnomalyIncidentTimeseries` |
+| Screen   | Operations                                                                                                                                                                                                               |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Home     | `listServices` (1h), `listAlertIncidents?status=open`, `listErrorIssues` (24h, sort first_seen), `listAnomalyIncidents`, `queryTraceTimeseries` for sparklines                                                           |
+| Services | `listServices`, `getService`, `queryTraceTimeseries`, `queryTraceBreakdown`, `listAlertIncidents`, `listErrorIssues`                                                                                                     |
+| Alerts   | `listAlertIncidents`, `getAlertIncident`, `getAlertRule`, `listAlertRuleChecks`, `listAlertDeliveries`, `listErrorIssues`, `getErrorIssue`, `listAnomalyIncidents`, `getAnomalyIncident`, `getAnomalyIncidentTimeseries` |
 
 Add these `operationId`s to `IOS_OPERATIONS` in `scripts/generate-ios-openapi.ts`.
 Sparkline queries: batch per screen, 1h/24 buckets, `p95_duration` and
@@ -147,6 +147,16 @@ subtitle with severity + duration, thread by `dedupe_key` so renotifies
 collapse, deep link `maple://incidents/{id}` (universal link
 `https://app.maple.dev/…` so it also works with the app absent). Later:
 a Live Activity on the Lock Screen while a critical incident is open.
+
+### Status (2026-08-17)
+
+Shipped: `mobile_devices` table + `/v2/mobile_devices`, `ApnsClient`
+(ES256 JWT, HTTP/2 via Workers `fetch` — verified working in production
+Workers; local `workerd` speaks HTTP/1.1 and can't reach APNs), fan-out from
+`AlertsService.queueIncidentNotifications` for trigger / renotify / resolve,
+the iOS registrar + settings sheet + notification-tap deep link. Not yet:
+issue and anomaly pushes (toggles exist, greyed by copy), Live Activity,
+delivery rows in the incident timeline.
 
 ### Backend shape
 

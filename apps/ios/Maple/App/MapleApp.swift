@@ -4,9 +4,10 @@ import SwiftUI
 
 @main
 struct MapleApp: App {
+	@UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 	@State private var clerk: Clerk
 	@State private var session: SessionController
-	@State private var navigation = AppNavigation()
+	@State private var navigation: AppNavigation
 
 	init() {
 		// `Clerk.shared` traps until `configure` has run, and Swift evaluates
@@ -18,6 +19,10 @@ struct MapleApp: App {
 		// SDK quiet, and the session is pinned to `.ready`. Used for previews,
 		// screenshots, and working on screens without a signed-in org.
 		let tokens = ClerkTokenProvider()
+		let navigation = AppNavigation()
+		_navigation = State(initialValue: navigation)
+		// Notification taps arrive on the app delegate, outside the view tree.
+		PushRegistrar.shared.navigation = navigation
 		if FixtureAPI.isEnabled {
 			_clerk = State(initialValue: Clerk.configure(publishableKey: FixtureSession.publishableKey))
 			_session = State(initialValue: SessionController.fixture(api: FixtureAPI(), tokens: tokens))

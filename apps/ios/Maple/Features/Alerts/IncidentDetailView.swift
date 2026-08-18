@@ -181,6 +181,9 @@ struct IncidentDetailView: View {
 			self.model = model
 			await model.load()
 		}
+		// The first incident someone reads is the moment "tell me next time"
+		// makes sense — so this is where the permission prompt lives, once.
+		.task { await PushRegistrar.shared.promptIfNeeded() }
 	}
 
 	private func shareText(_ detail: IncidentDetail) -> String {

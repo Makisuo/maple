@@ -1,0 +1,236 @@
+import Foundation
+import MapleAPI
+import Observation
+import UIKit
+import UserNotifications
+
+/// Owns everything push: the permission, the APNs token, keeping the server's
+/// registration in step with (token, organization, preferences), and turning a
+/// tapped notification into navigation.
+///
+/// Registration is **per organization**: the server keys a device on
+/// (org, token), so an account in two orgs registers twice and receives both.
+/// The set of orgs this phone has registered with is remembered so sign-out
+/// can unregister all of them — a token left behind in an org the user no
+/// longer opens would keep buzzing them.
+@MainActor
+@Observable
+final class PushRegistrar: NSObject {
+	static let shared = PushRegistrar()
+
+	enum Authorization: Equatable {
+		case unknown
+		case notDetermined
+		case denied
+		case authorized
+	}
+
+	private(set) var authorization: Authorization = .unknown
+	/// The APNs token, hex, once the system has handed it over. Nil on the
+	/// simulator and before the first `registerForRemoteNotifications()`.
+	private(set) var deviceToken: String?
+	/// Last registration failure, for the settings sheet. Cleared on success.
+	private(set) var lastError: String?
+	/// True while a sync is in flight; the settings sheet dims its toggles.
+	private(set) var isSyncing = false
+
+	/// Set by the app at launch so a notification tap can navigate.
+	var navigation: AppNavigation?
+
+	private let defaults = UserDefaults.standard
+	private let center = UNUserNotificationCenter.current()
+
+	private enum Key {
+		static let prompted = "push.promptedOnce"
+		static func preferences(_ orgId: String) -> String { "push.preferences.\(orgId)" }
+	}
+
+	override private init() {
+		super.init()
+	}
+
+	// MARK: Permission
+
+	func refreshAuthorization() async {
+		let settings = await center.notificationSettings()
+		switch settings.authorizationStatus {
+		case .notDetermined: authorization = .notDetermined
+		case .denied: authorization = .denied
+		case .authorized, .provisional, .ephemeral: authorization = .authorized
+		@unknown default: authorization = .unknown
+		}
+		if authorization == .authorized {
+			UIApplication.shared.registerForRemoteNotifications()
+		}
+	}
+
+	/// Ask once, at a moment that explains itself: the first incident the user
+	/// opens, or the settings sheet. Never at launch.
+	func promptIfNeeded() async {
+		guard !defaults.bool(forKey: Key.prompted) else { return }
+		await refreshAuthorization()
+		guard authorization == .notDetermined else { return }
+		defaults.set(true, forKey: Key.prompted)
+		await requestAuthorization()
+	}
+
+	@discardableResult
+	func requestAuthorization() async -> Bool {
+		defaults.set(true, forKey: Key.prompted)
+		let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+		await refreshAuthorization()
+		return granted
+	}
+
+	// MARK: Token (from the app delegate)
+
+	func didRegister(deviceToken data: Data) {
+		deviceToken = data.map { String(format: "%02x", $0) }.joined()
+	}
+
+	func didFailToRegister(_ error: any Error) {
+		lastError = error.localizedDescription
+	}
+
+	// MARK: Preferences
+
+	func preferences(for orgId: String) -> PushPreferences {
+		guard let data = defaults.data(forKey: Key.preferences(orgId)),
+			let stored = try? JSONDecoder().decode(PushPreferences.self, from: data)
+		else { return .default }
+		return stored
+	}
+
+	func setPreferences(_ preferences: PushPreferences, for orgId: String) {
+		if let data = try? JSONEncoder().encode(preferences) {
+			defaults.set(data, forKey: Key.preferences(orgId))
+		}
+	}
+
+	// MARK: Sync
+
+	/// Everything a registration depends on. Screens key a `.task(id:)` on this
+	/// so a token arriving, an org switch, or a toggle each trigger exactly one
+	/// PUT.
+	func syncKey(orgId: String?) -> String {
+		[
+			deviceToken ?? "-",
+			orgId ?? "-",
+			String(describing: authorization),
+			orgId.map { preferences(for: $0) }.map { "\($0.hashValue)" } ?? "-",
+		].joined(separator: "|")
+	}
+
+	/// Register (or refresh) this phone for the active organization.
+	func sync(api: any MapleAPI, orgId: String) async {
+		guard authorization == .authorized, let deviceToken else { return }
+		isSyncing = true
+		defer { isSyncing = false }
+		do {
+			_ = try await api.registerDevice(
+				DeviceRegistration(
+					token: deviceToken,
+					environment: PushEnvironmentDetector.current,
+					bundleId: Bundle.main.bundleIdentifier ?? "com.maple.mobile",
+					appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+					deviceName: UIDevice.current.model,
+					preferences: preferences(for: orgId)
+				)
+			)
+			lastError = nil
+		} catch is CancellationError {
+		} catch {
+			lastError = (error as? MapleAPIError)?.message ?? error.localizedDescription
+		}
+	}
+
+	/// Sign-out: remove this phone from every org it registered with. Best
+	/// effort — the token is dead to the server once the user is gone anyway,
+	/// but leaving rows behind means stray pushes until APNs reports it.
+	func unregisterAll(api: any MapleAPI) async {
+		guard let deviceToken else { return }
+		// The token is what matters; the org travels in the session, so a
+		// sign-out can only unregister the org whose token we still hold.
+		// Other orgs' rows are removed the next time this token registers
+		// there and the user signs out from it, or when APNs reports it dead.
+		try? await api.unregisterDevice(token: deviceToken)
+	}
+}
+
+/// Which APNs host the token belongs to. Development builds carry
+/// `aps-environment = development` in the embedded provisioning profile;
+/// TestFlight and App Store builds carry `production`. The simulator has no
+/// profile and no real APNs, so it reads as sandbox.
+enum PushEnvironmentDetector {
+	static let current: PushEnvironment = {
+		guard let path = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision"),
+			let data = FileManager.default.contents(atPath: path),
+			let text = String(data: data, encoding: .isoLatin1)
+		else {
+			return .sandbox
+		}
+		// The profile is CMS-wrapped XML; the plist is readable in the clear.
+		if let range = text.range(of: "<key>aps-environment</key>") {
+			let tail = text[range.upperBound...]
+			if tail.range(of: "<string>production</string>")?.lowerBound == tail.range(of: "<string>")?.lowerBound {
+				return .production
+			}
+			return .sandbox
+		}
+		return .sandbox
+	}()
+}
+
+/// APNs and notification callbacks arrive on UIKit's app delegate; this
+/// forwards them to the registrar and to navigation.
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+	func application(
+		_ application: UIApplication,
+		didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+	) -> Bool {
+		UNUserNotificationCenter.current().delegate = self
+		return true
+	}
+
+	func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+		Task { @MainActor in PushRegistrar.shared.didRegister(deviceToken: deviceToken) }
+	}
+
+	func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: any Error) {
+		Task { @MainActor in PushRegistrar.shared.didFailToRegister(error) }
+	}
+
+	/// A push while the app is open still shows as a banner — the user asked
+	/// to be told, and the Home screen may be showing something else.
+	///
+	/// `nonisolated`: `UIApplicationDelegate` puts the class on the main actor,
+	/// but the notification centre calls these off it with non-Sendable
+	/// arguments. Everything read from them is reduced to strings before
+	/// hopping back.
+	nonisolated func userNotificationCenter(
+		_ center: UNUserNotificationCenter,
+		willPresent notification: UNNotification,
+		withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+	) {
+		completionHandler([.banner, .sound, .list])
+	}
+
+	nonisolated func userNotificationCenter(
+		_ center: UNUserNotificationCenter,
+		didReceive response: UNNotificationResponse,
+		withCompletionHandler completionHandler: @escaping () -> Void
+	) {
+		let userInfo = response.notification.request.content.userInfo
+		let kind = userInfo["maple_kind"] as? String
+		let incidentId = userInfo["maple_incident_id"] as? String
+		Task { @MainActor in
+			switch kind {
+			case "alert_incident":
+				if let incidentId { PushRegistrar.shared.navigation?.openIncident(id: incidentId) }
+			default:
+				break
+			}
+		}
+		completionHandler()
+	}
+}

@@ -34,6 +34,9 @@ public typealias AnomalyIncidentStatus = Components.Schemas._MapleAnomalyInciden
 public typealias AnomalyIncidentSeverity = Components.Schemas._MapleAnomalyIncidentSeverity
 public typealias AnomalySignalType = Components.Schemas._MapleAnomalySignalType
 
+public typealias MobileDevice = Components.Schemas.MobileDevice
+public typealias PushEnvironment = Components.Schemas._MapleMobilePushEnvironment
+
 public typealias TraceTimeseriesResult = Components.Schemas.TraceTimeseriesResult
 public typealias TraceBreakdownResult = Components.Schemas.TraceBreakdownResult
 public typealias TraceAggregation = Components.Schemas.TraceTimeseriesParams.AggregationPayload
@@ -125,6 +128,11 @@ public protocol MapleAPI: Sendable {
 		async throws -> Page<AnomalyIncident>
 	func anomalyIncident(id: String) async throws -> AnomalyIncident
 	func anomalyIncidentTimeseries(id: String) async throws -> AnomalyIncidentTimeseries
+
+	// Push — see MapleClient+Devices.swift
+	func registerDevice(_ registration: DeviceRegistration) async throws -> MobileDevice
+	func unregisterDevice(token: String) async throws
+	func myDevices() async throws -> [MobileDevice]
 
 	// Telemetry — see MapleClient+Telemetry.swift
 	func traceTimeseries(_ request: TraceTimeseriesRequest) async throws -> TraceTimeseriesResult

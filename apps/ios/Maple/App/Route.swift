@@ -62,9 +62,20 @@ extension View {
 final class AppNavigation {
 	var tab: AppTab = .home
 	var alertsSegment: AlertsSegment = .incidents
+	/// The Alerts tab's stack. Owned here so a notification tap can push an
+	/// incident onto it from outside the view tree.
+	var alertsPath: [Route] = []
 
 	func open(_ segment: AlertsSegment) {
 		alertsSegment = segment
+		tab = .alerts
+	}
+
+	/// A tapped push: land on the incident, with the Alerts list underneath
+	/// so back goes somewhere sensible.
+	func openIncident(id: String) {
+		alertsSegment = .incidents
+		alertsPath = [.incident(id: id)]
 		tab = .alerts
 	}
 }

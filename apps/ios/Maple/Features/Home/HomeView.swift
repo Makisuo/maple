@@ -7,6 +7,7 @@ struct HomeView: View {
 	@Environment(SessionController.self) private var session
 	@Environment(AppNavigation.self) private var navigation
 	@State private var model: HomeModel?
+	@State private var showsNotificationSettings = false
 
 	var body: some View {
 		NavigationStack {
@@ -31,6 +32,19 @@ struct HomeView: View {
 				ToolbarItem(placement: .principal) {
 					OrganizationSwitcherButton(fallbackTitle: "Maple")
 				}
+				ToolbarItem(placement: .topBarTrailing) {
+					Button {
+						showsNotificationSettings = true
+					} label: {
+						Image(systemName: PushRegistrar.shared.authorization == .authorized ? "bell.badge" : "bell")
+							.font(.system(size: 14, weight: .medium))
+							.foregroundStyle(Token.foreground)
+					}
+					.accessibilityLabel("Notification settings")
+				}
+			}
+			.sheet(isPresented: $showsNotificationSettings) {
+				NotificationSettingsView().environment(session)
 			}
 			.mapleDestinations()
 		}

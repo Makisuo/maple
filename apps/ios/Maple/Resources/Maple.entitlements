@@ -9,5 +9,15 @@
 	<array>
 		<string>$(AppIdentifierPrefix)com.maple.mobile</string>
 	</array>
+	<!-- Push. Xcode rewrites `development` to `production` for App Store and
+	     TestFlight archives; the app reads whichever landed in the embedded
+	     profile to pick the APNs host it registers with (PushEnvironment). -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<!-- Critical incidents break through Focus modes. Apple grants this
+	     entitlement on request; without it the level silently downgrades to
+	     `active`, which is the right fallback. -->
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
 </dict>
 </plist>

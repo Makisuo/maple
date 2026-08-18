@@ -89,12 +89,16 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { makeDbExecute } from "@/platform/db-execute"
+import { dateToMs } from "@/platform/time"
 import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
+import { ApnsClient } from "@/platform/Apns"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
+import { MobilePushService } from "@/services/push/MobilePushService"
 import { AlertRuntime } from "./AlertRuntime"
 import { AlertDestinationsService, type AlertDestinationsServiceApi } from "./AlertDestinationsService"
 import { makeAlertDestinationDelivery, parseAlertDestinationEncryptionKey } from "./AlertDestinationDelivery"
@@ -145,6 +149,15 @@ const ALERT_CHECK_INGEST_CONCURRENCY = 4
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
 // group-by rule opening hundreds of incidents can't stall the per-minute tick.
 const ISSUE_UPSERTS_PER_TICK = 50
+// The same fuse for phones, and it bounds two things at once. A grouped rule
+// opening many incidents at once would otherwise send one notification per
+// group to every registered device in the org — and because the send is awaited
+// inside the tick, the evaluation of every other rule that minute queues behind
+// it. Capping the events caps both the notification storm and the wall time the
+// tick can spend in APNs. Deliberately not solved by forking the send instead:
+// on Workers a fiber that outlives the invocation is simply cancelled, which
+// would trade a slow notification for a silently dropped one.
+const INCIDENT_PUSHES_PER_TICK = 25
 const DELIVERY_LEASE_TTL_MS = 30_000
 
 type DatabaseTransaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
@@ -367,6 +380,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			const email = yield* EmailService
 			const orgChSettings = yield* OrgClickHouseSettingsService
 			const slackBotToken = yield* SlackBotTokenResolver
+			const mobilePush = yield* MobilePushService
 			const encryptionKey = yield* parseAlertDestinationEncryptionKey(
 				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			)
@@ -668,7 +682,55 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					evaluation: EvaluatedRule,
 					eventType: AlertEventTypeValue,
 					scheduledAt: number,
+					// Null on the ad-hoc paths (a rule edit resolving its own
+					// incidents): those are one user action, not a storm.
+					pushBudget: Ref.Ref<number> | null,
 				) {
+					// Phones first, and regardless of destinations: push is per person,
+					// not per rule, and a rule with no Slack channel still has people
+					// who installed the app. Best-effort by contract — it never fails
+					// the tick.
+					const pushAllowed =
+						pushBudget === null ||
+						(yield* Ref.modify(pushBudget, (remaining): [boolean, number] =>
+							remaining > 0 ? [true, remaining - 1] : [false, remaining],
+						))
+					if (pushAllowed) {
+						yield* mobilePush
+							.notifyIncident({
+								orgId,
+								eventType,
+								incidentId: incident.id,
+								ruleId: rule.id,
+								ruleName: rule.name,
+								severity: rule.severity,
+								signalType: rule.signalType,
+								signalDisplay: resolveSignalDisplay({
+									signalType: rule.signalType,
+									queryBuilderDraft: rule.queryBuilderDraft,
+									rawQueryReducer: rule.rawQueryReducer,
+								}),
+								comparator: rule.comparator,
+								threshold: rule.threshold,
+								thresholdUpper: rule.thresholdUpper,
+								value: evaluation.value,
+								groupKey: incident.groupKey,
+								serviceNames: rule.serviceNames,
+								windowMinutes: rule.windowMinutes,
+								dedupeKey: incident.dedupeKey,
+								openForMs:
+									eventType === "resolve"
+										? Math.max(0, scheduledAt - dateToMs(incident.firstTriggeredAt))
+										: null,
+								linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
+							})
+							.pipe(Effect.timeout("20 seconds"), Effect.ignoreCause)
+					} else {
+						yield* Effect.logWarning(
+							"Mobile push: per-tick budget exhausted, skipping incident notification",
+						).pipe(Effect.annotateLogs({ orgId, ruleId: rule.id, incidentId: incident.id }))
+					}
+
 					if (rule.destinationIds.length === 0) return
 
 					const rows = yield* dbExecute((db) =>
@@ -1499,6 +1561,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				timestamp: number,
 				pendingChecks: Ref.Ref<Chunk.Chunk<AlertChecksRow>>,
 				issueBudget: Ref.Ref<number>,
+				pushBudget: Ref.Ref<number>,
 				prefetch: TickPrefetch,
 			) {
 				const stateConflictTarget: [
@@ -1706,6 +1769,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 								evaluation,
 								"trigger",
 								timestamp,
+								pushBudget,
 							)
 						}
 						return {
@@ -1761,6 +1825,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 								evaluation,
 								"renotify",
 								timestamp,
+								pushBudget,
 							)
 						}
 						return {
@@ -1860,6 +1925,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 								evaluation,
 								"resolve",
 								timestamp,
+								pushBudget,
 							)
 						}
 						return {
@@ -2040,6 +2106,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				opts: {
 					readonly staleGroupKeys?: HashSet.HashSet<string>
 					readonly resolveAll?: boolean
+					/** Absent on the rule-edit paths, which are one user action. */
+					readonly pushBudget?: Ref.Ref<number>
 				},
 			) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": ruleId })
@@ -2103,6 +2171,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							syntheticEvaluation,
 							"resolve",
 							timestamp,
+							opts.pushBudget ?? null,
 						)
 					}),
 				)
@@ -2139,6 +2208,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					evaluatedGroups: HashSet.HashSet<string>,
 					timestamp: number,
 					openIncidents: ReadonlyArray<AlertIncidentRow>,
+					pushBudget: Ref.Ref<number>,
 				) {
 					// Supplied from the tick-head prefetch instead of re-read here — this
 					// was the single heaviest query shape in the service, because it read
@@ -2236,6 +2306,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 								syntheticEvaluation,
 								"resolve",
 								timestamp,
+								pushBudget,
 							)
 
 							yield* dbExecute((db) =>
@@ -2611,6 +2682,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				// Chunk makes concurrent appends immutable without copying the full buffer.
 				const pendingChecks = yield* Ref.make(Chunk.empty<AlertChecksRow>())
 				const issueBudget = yield* Ref.make(ISSUE_UPSERTS_PER_TICK)
+				const pushBudget = yield* Ref.make(INCIDENT_PUSHES_PER_TICK)
 
 				// Two housekeeping statements used to run per rule, inside the loop.
 				// Both are gated to touch zero rows in steady state (to keep the
@@ -2808,6 +2880,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 												timestamp,
 												pendingChecks,
 												issueBudget,
+												pushBudget,
 												prefetch,
 											)
 										}),
@@ -2820,6 +2893,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 										HashSet.fromIterable(normalized.serviceNames),
 										timestamp,
 										prefetch.openIncidentsForRule(row.orgId, row.id),
+										pushBudget,
 									)
 									yield* Metric.update(
 										AlertingMetrics.ruleEvaluationDurationMs,
@@ -2851,6 +2925,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 											timestamp,
 											pendingChecks,
 											issueBudget,
+											pushBudget,
 											prefetch,
 										)
 									}),
@@ -2866,6 +2941,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 									evaluatedGroups,
 									timestamp,
 									prefetch.openIncidentsForRule(row.orgId, row.id),
+									pushBudget,
 								)
 
 								// Self-heal state rows whose key shape contradicts the rule's
@@ -2958,8 +3034,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						))[0]
 						if (!ruleRow) return
 						const normalized = yield* normalizeRuleRow(ruleRow)
+						// Budgeted: a sweep that resolves every incident of every
+						// disabled rule is exactly the shape that storms phones.
 						yield* resolveStaleIncidents(orgId, normalized.id, normalized, {
 							resolveAll: true,
+							pushBudget,
 						})
 					}),
 				)
@@ -3036,5 +3115,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 ) {
 	// The resolver remains private to alert delivery; the destination capability
 	// is explicit so composition roots can expose it without the evaluator graph.
-	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))
+	static readonly layer = Layer.effect(this, this.make).pipe(
+		Layer.provide(SlackBotTokenResolver.layer),
+		// Push to phones rides along with incident notifications; its own
+		// requirements (Env, Database) are the ones this layer already needs.
+		Layer.provide(
+			MobilePushService.layer.pipe(
+				Layer.provide(Layer.mergeAll(ApnsClient.layer, MobileDevicesService.layer)),
+			),
+		),
+	)
 }

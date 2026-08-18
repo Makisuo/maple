@@ -288,6 +288,13 @@
       "when": 1786832731147,
       "tag": "0041_dashboard_share_id_index",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786963071458,
+      "tag": "0042_mobile_devices",
+      "breakpoints": true
     }
   ]
 }

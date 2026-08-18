@@ -25,10 +25,10 @@ message telling you the same thing.
 
 Which key depends on which API you point at:
 
-| `MAPLE_API_BASE_URL`      | Clerk instance          | Key                                                    |
-| ------------------------- | ----------------------- | ------------------------------------------------------ |
-| `https://api.maple.dev`   | production, `clerk.maple.dev` | `PUBLIC_CLERK_PUBLISHABLE_KEY` from `.env.local` (`pk_live_…`) |
-| `http://localhost:3472`   | dev                     | `CLERK_PUBLISHABLE_KEY` from `.env.local` (`pk_test_…`)       |
+| `MAPLE_API_BASE_URL`    | Clerk instance                | Key                                                            |
+| ----------------------- | ----------------------------- | -------------------------------------------------------------- |
+| `https://api.maple.dev` | production, `clerk.maple.dev` | `PUBLIC_CLERK_PUBLISHABLE_KEY` from `.env.local` (`pk_live_…`) |
+| `http://localhost:3472` | dev                           | `CLERK_PUBLISHABLE_KEY` from `.env.local` (`pk_test_…`)        |
 
 They are not interchangeable: the API verifies a token against its own Clerk
 instance, so a `pk_test_` session against `api.maple.dev` is rejected.
@@ -54,6 +54,22 @@ Everything that is worth unit-testing lives in `Packages/MapleAPI`, which has no
 UIKit, no simulator, and no signing requirement. That is why CI runs
 `swift test` there first: it fails in about a minute rather than after a full
 app build.
+
+## Push notifications
+
+`Maple/Push` owns it. `PushRegistrar` asks for permission the first time an
+incident is opened (or from the bell on Home), receives the APNs token via
+`AppDelegate`, and keeps `PUT /v2/mobile_devices/{token}` in step with
+(token, organization, permission, preferences) through one `.task(id:)` on the
+tab root. Registration is per organization; sign-out unregisters. A tapped
+notification lands on the incident (`AppNavigation.openIncident`).
+
+The server side is `apps/api/src/services/push` + `platform/Apns.ts`; it sends
+only when `APNS_TEAM_ID` / `APNS_KEY_ID` / `APNS_PRIVATE_KEY` are set on the
+alerting worker. `aps-environment` in the entitlements is `development` and
+Xcode flips it for archives; the app reads whichever landed in the embedded
+profile to pick the APNs host. The simulator on Apple silicon does get a
+token, but nothing is delivered to it from a Worker.
 
 ## Running without a sign-in
 
@@ -87,11 +103,11 @@ The script (`scripts/generate-ios-openapi.ts`) does more than dump the spec. The
 full v2 document is 94 paths and 480+ schemas, and Effect's JSON-Schema output
 uses three idioms that generate unusable Swift:
 
-| Contract emits | Without normalization | After |
-| --- | --- | --- |
-| `anyOf: [T, null]` | `Union_23` with `.value1: String?` | `String?` |
-| `anyOf: [number, enum["NaN", …]]` | a struct wrapping a `Double` | `Double` |
-| `allOf: [{minLength}, {pattern}]` | struct with `value1`/`value2` | `String` |
+| Contract emits                    | Without normalization              | After     |
+| --------------------------------- | ---------------------------------- | --------- |
+| `anyOf: [T, null]`                | `Union_23` with `.value1: String?` | `String?` |
+| `anyOf: [number, enum["NaN", …]]` | a struct wrapping a `Double`       | `Double`  |
+| `allOf: [{minLength}, {pattern}]` | struct with `value1`/`value2`      | `String`  |
 
 It also prunes to the operations the app calls, merges the per-annotation-site
 copies of a domain enum (`_maple_AlertSignalType_2` → `_maple_AlertSignalType`)

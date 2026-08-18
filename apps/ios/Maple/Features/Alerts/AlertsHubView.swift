@@ -9,7 +9,7 @@ struct AlertsHubView: View {
 
 	var body: some View {
 		@Bindable var navigation = navigation
-		NavigationStack {
+		NavigationStack(path: $navigation.alertsPath) {
 			ZStack {
 				Token.background.ignoresSafeArea()
 				VStack(spacing: 0) {
