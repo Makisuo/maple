@@ -88,7 +88,6 @@
 		".factory/**",
 		".impeccable/**",
 		".superset/**",
-		"apps/slack-agent/**",
 		"apps/web/src/routeTree.gen.ts",
 		"lib/llm/**",
 		"lib/thinking-orbs/**",
