@@ -187,4 +187,75 @@ describe("MCP HTTP authorization", () => {
 			await dispose()
 		}
 	})
+
+	it("negotiates down when the client declares a newer Mcp-Protocol-Version header on initialize", async () => {
+		// Regression test for the eve/@ai-sdk/mcp client (used by apps/slack-agent), which
+		// defaults to a newer protocol version than this server implements and sends it as
+		// the `Mcp-Protocol-Version` header on the very first `initialize` request — before
+		// any negotiation has happened. `effect`'s McpServer.layerHttp rejects a header that
+		// isn't in its declared `protocols` list outright, even for `initialize`, where the
+		// header is only the client's preference and negotiation should happen via the body.
+		const db = createTestDb(createdDbs)
+		const base = Layer.mergeAll(db.layer, Env.layer.pipe(Layer.provide(testConfig())))
+		const services = Layer.mergeAll(
+			ApiKeysService.layer,
+			AuthService.layer,
+			makeMcpToolExecutorStubLayer(),
+		).pipe(Layer.provideMerge(base))
+		const orgId = Schema.decodeUnknownSync(OrgId)("org_test")
+		const userId = Schema.decodeUnknownSync(UserId)("user_test")
+		const key = await Effect.runPromise(
+			Effect.gen(function* () {
+				const apiKeys = yield* ApiKeysService
+				return yield* apiKeys.create(orgId, userId, {
+					name: "Newer protocol version test",
+					kind: "mcp",
+					scopes: ["mcp:tools"],
+					metadataJson: {
+						source: "maple_mcp_oauth",
+						roles: ["org:member"],
+						clientId: "client_test",
+						resource: "https://api.example.com/mcp",
+					},
+				})
+			}).pipe(Effect.provide(services)),
+		)
+		const routes = McpLive.pipe(Layer.provideMerge(services))
+		const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true })
+		try {
+			const response = await handler(
+				new Request("http://internal-worker.invalid/mcp", {
+					method: "POST",
+					headers: {
+						authorization: `Bearer ${key.secret}`,
+						accept: "application/json, text/event-stream",
+						"content-type": "application/json",
+						host: "internal-worker.invalid",
+						"x-forwarded-host": "api.example.com",
+						"x-forwarded-proto": "https",
+						"mcp-protocol-version": "2025-11-25",
+					},
+					body: JSON.stringify({
+						jsonrpc: "2.0",
+						id: 1,
+						method: "initialize",
+						params: {
+							protocolVersion: "2025-11-25",
+							capabilities: {},
+							clientInfo: { name: "test", version: "1.0.0" },
+						},
+					}),
+				}),
+				Context.empty() as never,
+			)
+			const body = await response.clone().json()
+			expect({ status: response.status, protocolVersion: body.result?.protocolVersion }).toEqual({
+				status: 200,
+				protocolVersion: "2025-06-18",
+			})
+			expect(response.headers.get("mcp-session-id")).not.toBeNull()
+		} finally {
+			await dispose()
+		}
+	})
 })
