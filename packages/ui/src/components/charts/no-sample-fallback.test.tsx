@@ -1,6 +1,3 @@
-// TEST-SEAM: `ResponsiveContainer` measures the DOM, which jsdom cannot; it is
-// replaced with a fixed-size box so Recharts lays the chart out and the SVG can
-// be inspected.
 /**
  * A live chart never invents data.
  *
@@ -37,21 +34,6 @@ beforeAll(() => {
 		height: 400,
 		toJSON: () => ({}),
 	})
-})
-
-vi.mock("recharts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("recharts")>()
-	const ResponsiveContainer = ({ children }: { children: React.ReactNode }) => (
-		<div style={{ width: 800, height: 400 }}>
-			{React.isValidElement(children)
-				? React.cloneElement(children as React.ReactElement<{ width?: number; height?: number }>, {
-						width: 800,
-						height: 400,
-					})
-				: children}
-		</div>
-	)
-	return { ...actual, ResponsiveContainer }
 })
 
 import type { ChartLegendMode, PlotProps } from "./_shared/chart-types"
