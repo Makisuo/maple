@@ -79,13 +79,29 @@ pub fn stamp_trace_request(request: &mut ExportTraceServiceRequest) {
                     .map_or("", |scope| scope.name.as_str()),
                 &resource,
             );
+            let scope_forces = scope.any || resource.mastra_sdk;
             for span in &mut scope_spans.spans {
+                // Phase 1: a read-only screen pass. For the overwhelmingly
+                // common span this is the entire cost - no SpanEvidence init,
+                // no stores, just the two-byte screen per key. Only a screen
+                // hit (which can be a false positive - the screen is a
+                // superset of the real patterns) pays for phase 2.
+                if !scope_forces
+                    && !span_name_candidate(&span.name)
+                    && !screen_hits(&span.attributes, &span.events)
+                {
+                    continue;
+                }
                 let (classification, has_maple_ai) = {
-                    let ev = collect_evidence(&span.attributes, &span.events);
-                    (
-                        classify_from_facts(&scope, &resource, &span.name, &ev, &span.attributes),
-                        ev.has_maple_ai,
-                    )
+                    let mut ev = SpanEvidence::default();
+                    collect_evidence(&mut ev, &span.attributes, &span.events);
+                    let classification =
+                        if scope_forces || ev.any || span_name_candidate(&span.name) {
+                            run_predicates(&scope, &resource, &span.name, &ev, &span.attributes)
+                        } else {
+                            None
+                        };
+                    (classification, ev.has_maple_ai)
                 };
                 if has_maple_ai {
                     span.attributes
@@ -94,13 +110,18 @@ pub fn stamp_trace_request(request: &mut ExportTraceServiceRequest) {
                 let Some(classification) = classification else {
                     continue;
                 };
+                // One reserve, not up to three doubling reallocs that each
+                // copy every existing KeyValue.
+                span.attributes.reserve(3);
                 span.attributes
                     .push(string_attribute(VENDOR_ID_ATTR, classification.vendor));
                 span.attributes
                     .push(string_attribute(VENDOR_VERSION_ATTR, VENDOR_VERSION));
                 if let Some(session_id) = classification.session_id {
+                    // The session String moves into the attribute instead of
+                    // being copied a second time.
                     span.attributes
-                        .push(string_attribute(SESSION_ID_ATTR, &session_id));
+                        .push(owned_string_attribute(SESSION_ID_ATTR, session_id));
                 }
             }
         }
@@ -112,15 +133,20 @@ pub fn stamp_trace_request(request: &mut ExportTraceServiceRequest) {
 pub fn classify_span(view: &SpanView) -> Option<AiClassification> {
     let resource = resource_facts(view.resource_attrs);
     let scope = scope_facts(view.scope_name, &resource);
-    let ev = collect_evidence(view.span_attrs, view.events);
+    let mut ev = SpanEvidence::default();
+    collect_evidence(&mut ev, view.span_attrs, view.events);
     classify_from_facts(&scope, &resource, view.span_name, &ev, view.span_attrs)
 }
 
 fn string_attribute(key: &str, value: &str) -> KeyValue {
+    owned_string_attribute(key, value.to_owned())
+}
+
+fn owned_string_attribute(key: &str, value: String) -> KeyValue {
     KeyValue {
         key: key.to_owned(),
         value: Some(AnyValue {
-            value: Some(any_value::Value::StringValue(value.to_owned())),
+            value: Some(any_value::Value::StringValue(value)),
         }),
     }
 }
@@ -191,9 +217,48 @@ struct ScopeFacts {
     matches_service_name: bool,
 }
 
+/// Every scope name and scope-name prefix the match below can accept, and the
+/// screen derived from it. Scopes are per-`ScopeSpans` rather than per-span,
+/// but a trace carries only a handful of spans per scope, so the ~20 string
+/// comparisons behind this were a real share of the per-trace cost.
+const SCOPE_NAMES: &[&str] = &[
+    "com.anthropic.claude_code",
+    "com.anthropic.claude_code.",
+    "openinference.instrumentation.",
+    "eve",
+    "@flue/opentelemetry",
+    "gcp.vertex.agent",
+    "haystack",
+    "langsmith",
+    "litellm",
+    "llamaindex.opentelemetry.tracer",
+    "@mastra/otel-exporter",
+    "agent_framework",
+    "agent_runtime ",
+    "crewai.telemetry",
+    "pydantic-ai",
+    "strands.telemetry.tracer",
+    "org.springframework.boot",
+    "ai",
+    "gen_ai",
+    "semantic_kernel.",
+];
+
+static SCOPE_SCREEN: [u64; 256] = build_screen(&[SCOPE_NAMES]);
+
 fn scope_facts(scope_name: &str, resource: &ResourceFacts) -> ScopeFacts {
     let mut facts = ScopeFacts::default();
     if scope_name.is_empty() {
+        return facts;
+    }
+    facts.matches_service_name = scope_name == resource.service_name;
+    // Same two-byte screen as the attribute keys: `@opentelemetry/...`,
+    // `express`, a bare service name and friends are rejected on the byte pair,
+    // before any of the exact names below is compared.
+    let [b0, b1, ..] = *scope_name.as_bytes() else {
+        return facts;
+    };
+    if SCOPE_SCREEN[b0 as usize] & (1u64 << (b1 & 63)) == 0 {
         return facts;
     }
     match scope_name {
@@ -251,7 +316,6 @@ fn scope_facts(scope_name: &str, resource: &ResourceFacts) -> ScopeFacts {
         || facts.semantic_kernel
         || facts.smolagents
         || facts.strands;
-    facts.matches_service_name = scope_name == resource.service_name;
     facts
 }
 
@@ -326,172 +390,257 @@ fn value_str(attr: &KeyValue) -> &str {
     }
 }
 
+const SCREEN_KEYS: &[&str] = &[
+    "ai.",
+    "agno.",
+    "agent_framework.",
+    "coding_agent",
+    "concurrency",
+    "crew_",
+    "executor.",
+    "edge_group.",
+    "event_loop.",
+    "flue.",
+    "flow_",
+    "flow.node.",
+    "gen_ai.",
+    "gcp.vertex.agent.",
+    "haystack.",
+    "input.value",
+    "langsmith.",
+    "llamaindex.",
+    "llm.",
+    "logfire.json_schema",
+    "mastra.",
+    "message.",
+    "model_request_parameters",
+    ATTR_NAMESPACE,
+    "openinference.span.kind",
+    "output.value",
+    "operation.cost",
+    "pydantic_ai.",
+    "span.type",
+    "sk.available_functions",
+    "smolagents.",
+    "spring.ai.",
+    "task_key",
+    "toolChoice",
+    "tool.",
+    "traceloop.",
+];
+
+const fn build_screen(groups: &[&[&str]]) -> [u64; 256] {
+    let mut table = [0u64; 256];
+    let mut g = 0;
+    while g < groups.len() {
+        let keys = groups[g];
+        let mut i = 0;
+        while i < keys.len() {
+            let bytes = keys[i].as_bytes();
+            table[bytes[0] as usize] |= 1u64 << (bytes[1] & 63);
+            i += 1;
+        }
+        g += 1;
+    }
+    table
+}
+
+static KEY_SCREEN: [u64; 256] = build_screen(&[SCREEN_KEYS]);
+
+/// Phase-1 screen: does any span attribute key (or event attribute key) pass
+/// the two-byte screen? Read-only and store-free by design - this is the only
+/// per-attribute work the common non-AI span performs.
+fn screen_hits(span_attrs: &[KeyValue], events: &[Event]) -> bool {
+    let hit = span_attrs.iter().any(|attr| {
+        let [b0, b1, ..] = *attr.key.as_bytes() else {
+            return false;
+        };
+        KEY_SCREEN[b0 as usize] & (1u64 << (b1 & 63)) != 0
+    });
+    hit || events.iter().any(|event| {
+        event
+            .attributes
+            .iter()
+            .any(|attr| attr.key.starts_with("tags.llamaindex."))
+    })
+}
+
+/// The screen's slow path: this key's first two bytes belong to some pattern,
+/// so compare it properly. Deliberately out of line — inlined into
+/// [`collect_evidence`] it hoists ~25 instructions' worth of comparison
+/// literals into the prologue of every single call, which every span pays and
+/// only a matching key uses.
+#[inline(never)]
 #[expect(
     clippy::cognitive_complexity,
     clippy::too_many_lines,
     reason = "a flat first-byte dispatch table; splitting it would obscure the single-pass shape it exists for"
 )]
-fn collect_evidence<'a>(span_attrs: &'a [KeyValue], events: &'a [Event]) -> SpanEvidence<'a> {
-    let mut ev = SpanEvidence::default();
-    for attr in span_attrs {
-        let key = attr.key.as_str();
-        // First-byte dispatch: a non-AI key takes the match jump plus at most
-        // a handful of failed starts_with probes, no hashing.
-        match key.as_bytes().first() {
-            Some(b'a') => {
-                if key.starts_with("ai.") {
-                    ev.ai = true;
-                } else if key.starts_with("agno.") {
-                    ev.agno = true;
-                } else if key.starts_with("agent_framework.") {
-                    ev.agent_framework = true;
-                } else {
-                    continue;
-                }
+fn absorb_key<'a>(ev: &mut SpanEvidence<'a>, attr: &'a KeyValue, b0: u8) {
+    let key = attr.key.as_str();
+    match b0 {
+        b'a' => {
+            if key.starts_with("ai.") {
+                ev.ai = true;
+            } else if key.starts_with("agno.") {
+                ev.agno = true;
+            } else if key.starts_with("agent_framework.") {
+                ev.agent_framework = true;
+            } else {
+                return;
             }
-            Some(b'c') => match key {
-                "coding_agent" => ev.coding_agent = true,
-                "concurrency" => ev.concurrency = true,
-                _ if key.starts_with("crew_") => ev.crew = true,
-                _ => continue,
-            },
-            Some(b'e') => {
-                if key.starts_with("executor.") {
-                    ev.executor = true;
-                } else if key.starts_with("edge_group.") {
-                    ev.edge_group = true;
-                } else if key.starts_with("event_loop.") {
-                    ev.event_loop = true;
-                } else {
-                    continue;
-                }
-            }
-            Some(b'f') => {
-                if key.starts_with("flue.") {
-                    ev.flue = true;
-                } else if key.starts_with("flow_") {
-                    ev.flow_underscore = true;
-                } else if key.starts_with("flow.node.") {
-                    ev.flow_node = true;
-                } else {
-                    continue;
-                }
-            }
-            Some(b'g') => {
-                if let Some(rest) = key.strip_prefix("gen_ai.") {
-                    match rest {
-                        "system" => {
-                            if ev.gen_ai_system.is_empty() {
-                                ev.gen_ai_system = value_str(attr);
-                            }
-                        }
-                        "operation.name" => {
-                            ev.has_gen_ai_operation_name = true;
-                            if ev.gen_ai_operation_name.is_empty() {
-                                ev.gen_ai_operation_name = value_str(attr);
-                            }
-                        }
-                        "provider.name" => {
-                            if ev.gen_ai_provider_name.is_empty() {
-                                ev.gen_ai_provider_name = value_str(attr);
-                            }
-                        }
-                        "response.finish_reason" => {
-                            if ev.gen_ai_finish_reason.is_empty() {
-                                ev.gen_ai_finish_reason = value_str(attr);
-                            }
-                        }
-                        "agent.call.id" => ev.gen_ai_agent_call_id = true,
-                        "execute_tool.duration" => ev.gen_ai_execute_tool_duration = true,
-                        _ if rest.starts_with("aggregated_usage.") => {
-                            ev.gen_ai_aggregated_usage = true;
-                        }
-                        _ => continue,
-                    }
-                } else if key.starts_with("gcp.vertex.agent.") {
-                    ev.gcp_vertex_agent = true;
-                } else {
-                    continue;
-                }
-            }
-            Some(b'h') => {
-                if key.starts_with("haystack.") {
-                    ev.haystack = true;
-                } else {
-                    continue;
-                }
-            }
-            Some(b'i') => {
-                if key == "input.value" {
-                    ev.input_value = true;
-                } else {
-                    continue;
-                }
-            }
-            Some(b'l') => {
-                if key.starts_with("langsmith.") {
-                    ev.langsmith = true;
-                } else if key.starts_with("llamaindex.") {
-                    ev.llamaindex = true;
-                } else if key.starts_with("llm.") {
-                    ev.llm = true;
-                } else if key == "logfire.json_schema" {
-                    ev.logfire_json_schema = true;
-                } else {
-                    continue;
-                }
-            }
-            Some(b'm') => {
-                if key.starts_with("mastra.") {
-                    ev.mastra = true;
-                } else if key.starts_with("message.") {
-                    ev.message = true;
-                } else if key == "model_request_parameters" {
-                    ev.model_request_parameters = true;
-                } else if key.starts_with(ATTR_NAMESPACE) {
-                    ev.has_maple_ai = true;
-                    continue;
-                } else {
-                    continue;
-                }
-            }
-            Some(b'o') => match key {
-                "openinference.span.kind" => ev.openinference_span_kind = true,
-                "output.value" => ev.output_value = true,
-                "operation.cost" => ev.operation_cost = true,
-                _ => continue,
-            },
-            Some(b'p') => {
-                if key.starts_with("pydantic_ai.") {
-                    ev.pydantic_ai = true;
-                } else {
-                    continue;
-                }
-            }
-            Some(b's') => match key {
-                "span.type" => {
-                    ev.has_span_type = true;
-                    if ev.span_type.is_empty() {
-                        ev.span_type = value_str(attr);
-                    }
-                }
-                "sk.available_functions" => ev.sk_available_functions = true,
-                _ if key.starts_with("smolagents.") => ev.smolagents = true,
-                _ if key.starts_with("spring.ai.") => ev.spring_ai = true,
-                _ => continue,
-            },
-            Some(b't') => match key {
-                "task_key" => ev.task_key = true,
-                "toolChoice" => ev.tool_choice = true,
-                "tool.result_as_answer" => ev.tool_result_as_answer = true,
-                "tool.description_updated" => ev.tool_description_updated = true,
-                "tool.cache_function" => ev.tool_cache_function = true,
-                _ if key.starts_with("traceloop.") => ev.traceloop = true,
-                _ => continue,
-            },
-            _ => continue,
         }
-        ev.any = true;
+        b'c' => match key {
+            "coding_agent" => ev.coding_agent = true,
+            "concurrency" => ev.concurrency = true,
+            _ if key.starts_with("crew_") => ev.crew = true,
+            _ => return,
+        },
+        b'e' => {
+            if key.starts_with("executor.") {
+                ev.executor = true;
+            } else if key.starts_with("edge_group.") {
+                ev.edge_group = true;
+            } else if key.starts_with("event_loop.") {
+                ev.event_loop = true;
+            } else {
+                return;
+            }
+        }
+        b'f' => {
+            if key.starts_with("flue.") {
+                ev.flue = true;
+            } else if key.starts_with("flow_") {
+                ev.flow_underscore = true;
+            } else if key.starts_with("flow.node.") {
+                ev.flow_node = true;
+            } else {
+                return;
+            }
+        }
+        b'g' => {
+            if let Some(rest) = key.strip_prefix("gen_ai.") {
+                match rest {
+                    "system" => {
+                        if ev.gen_ai_system.is_empty() {
+                            ev.gen_ai_system = value_str(attr);
+                        }
+                    }
+                    "operation.name" => {
+                        ev.has_gen_ai_operation_name = true;
+                        if ev.gen_ai_operation_name.is_empty() {
+                            ev.gen_ai_operation_name = value_str(attr);
+                        }
+                    }
+                    "provider.name" => {
+                        if ev.gen_ai_provider_name.is_empty() {
+                            ev.gen_ai_provider_name = value_str(attr);
+                        }
+                    }
+                    "response.finish_reason" => {
+                        if ev.gen_ai_finish_reason.is_empty() {
+                            ev.gen_ai_finish_reason = value_str(attr);
+                        }
+                    }
+                    "agent.call.id" => ev.gen_ai_agent_call_id = true,
+                    "execute_tool.duration" => ev.gen_ai_execute_tool_duration = true,
+                    _ if rest.starts_with("aggregated_usage.") => {
+                        ev.gen_ai_aggregated_usage = true;
+                    }
+                    _ => return,
+                }
+            } else if key.starts_with("gcp.vertex.agent.") {
+                ev.gcp_vertex_agent = true;
+            } else {
+                return;
+            }
+        }
+        b'h' if key.starts_with("haystack.") => ev.haystack = true,
+        b'i' if key == "input.value" => ev.input_value = true,
+        b'l' => {
+            if key.starts_with("langsmith.") {
+                ev.langsmith = true;
+            } else if key.starts_with("llamaindex.") {
+                ev.llamaindex = true;
+            } else if key.starts_with("llm.") {
+                ev.llm = true;
+            } else if key == "logfire.json_schema" {
+                ev.logfire_json_schema = true;
+            } else {
+                return;
+            }
+        }
+        b'm' => {
+            if key.starts_with("mastra.") {
+                ev.mastra = true;
+            } else if key.starts_with("message.") {
+                ev.message = true;
+            } else if key == "model_request_parameters" {
+                ev.model_request_parameters = true;
+            } else if key.starts_with(ATTR_NAMESPACE) {
+                ev.has_maple_ai = true;
+                return;
+            } else {
+                return;
+            }
+        }
+        b'o' => match key {
+            "openinference.span.kind" => ev.openinference_span_kind = true,
+            "output.value" => ev.output_value = true,
+            "operation.cost" => ev.operation_cost = true,
+            _ => return,
+        },
+        b'p' if key.starts_with("pydantic_ai.") => ev.pydantic_ai = true,
+        b's' => match key {
+            "span.type" => {
+                ev.has_span_type = true;
+                if ev.span_type.is_empty() {
+                    ev.span_type = value_str(attr);
+                }
+            }
+            "sk.available_functions" => ev.sk_available_functions = true,
+            _ if key.starts_with("smolagents.") => ev.smolagents = true,
+            _ if key.starts_with("spring.ai.") => ev.spring_ai = true,
+            _ => return,
+        },
+        b't' => match key {
+            "task_key" => ev.task_key = true,
+            "toolChoice" => ev.tool_choice = true,
+            "tool.result_as_answer" => ev.tool_result_as_answer = true,
+            "tool.description_updated" => ev.tool_description_updated = true,
+            "tool.cache_function" => ev.tool_cache_function = true,
+            _ if key.starts_with("traceloop.") => ev.traceloop = true,
+            _ => return,
+        },
+        _ => return,
+    }
+    ev.any = true;
+}
+
+/// Fills `ev` from one span's attributes and events. Takes the evidence by
+/// `&mut` rather than returning it: the struct is ~130 bytes, and returning it
+/// by value makes the compiler build it on this frame and copy it out on every
+/// single span.
+fn collect_evidence<'a>(
+    ev: &mut SpanEvidence<'a>,
+    span_attrs: &'a [KeyValue],
+    events: &'a [Event],
+) {
+    for attr in span_attrs {
+        // Two-byte screen. Almost every key on real traffic is uninteresting,
+        // and the screen rejects it for one table load and one not-taken
+        // branch — no string comparison, and none of the literals those
+        // comparisons need. Screening on the *pair* is what makes it cheap: a
+        // first-byte-only test would still send `http.*` into the `haystack.`
+        // probe, `server.*` into three `s` probes and `client.*` into three
+        // `c` probes.
+        let [b0, b1, ..] = *attr.key.as_bytes() else {
+            continue;
+        };
+        if KEY_SCREEN[b0 as usize] & (1u64 << (b1 & 63)) == 0 {
+            continue;
+        }
+        absorb_key(ev, attr, b0);
     }
     for event in events {
         for attr in &event.attributes {
@@ -505,7 +654,6 @@ fn collect_evidence<'a>(span_attrs: &'a [KeyValue], events: &'a [Event]) -> Span
             break;
         }
     }
-    ev
 }
 
 // ---------------------------------------------------------------------------
@@ -562,12 +710,23 @@ fn effect_name_tier(span_name: &str) -> EffectNameTier {
 /// Can this span name alone put the span in front of the vendor predicates?
 /// Only haystack and effect_ai detect on bare span names; everything else's
 /// span-name tests are gated behind scope or attribute evidence.
+static NAME_SCREEN: [u64; 256] = build_screen(&[
+    &HAYSTACK_SPAN_NAMES,
+    &EFFECT_GUARDED_SPAN_NAMES,
+    &EFFECT_UNGUARDED_SPAN_NAMES,
+]);
+
 fn span_name_candidate(span_name: &str) -> bool {
-    match span_name.as_bytes().first() {
-        Some(b'h') => HAYSTACK_SPAN_NAMES.contains(&span_name),
-        Some(b'C' | b'T' | b'L' | b'E' | b'P') => effect_name_tier(span_name) != EffectNameTier::No,
-        _ => false,
+    let [b0, b1, ..] = *span_name.as_bytes() else {
+        return false;
+    };
+    if NAME_SCREEN[b0 as usize] & (1u64 << (b1 & 63)) == 0 {
+        return false;
     }
+    if b0 == b'h' {
+        return HAYSTACK_SPAN_NAMES.contains(&span_name);
+    }
+    effect_name_tier(span_name) != EffectNameTier::No
 }
 
 // ---------------------------------------------------------------------------
@@ -721,9 +880,19 @@ fn classify_from_facts(
     span_attrs: &[KeyValue],
 ) -> Option<AiClassification> {
     // The common case: nothing about this span can match any predicate.
-    if !scope.any && !ev.any && !resource.mastra_sdk && !span_name_candidate(span_name) {
+    if !scope.any && !resource.mastra_sdk && !ev.any && !span_name_candidate(span_name) {
         return None;
     }
+    run_predicates(scope, resource, span_name, ev, span_attrs)
+}
+
+fn run_predicates(
+    scope: &ScopeFacts,
+    resource: &ResourceFacts,
+    span_name: &str,
+    ev: &SpanEvidence,
+    span_attrs: &[KeyValue],
+) -> Option<AiClassification> {
     let ctx = Ctx {
         scope,
         resource,

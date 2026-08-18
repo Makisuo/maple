@@ -52,6 +52,17 @@ fn db_span_attrs() -> Vec<KeyValue> {
     ])
 }
 
+fn internal_span_attrs() -> Vec<KeyValue> {
+    attrs(&[
+        ("code.function.name", "recalculate"),
+        ("code.namespace", "checkout.cart"),
+        ("thread.name", "tokio-runtime-worker"),
+        ("otel.status_code", "OK"),
+        ("cart.item_count", "7"),
+        ("cart.currency", "EUR"),
+    ])
+}
+
 fn wide_span_attrs() -> Vec<KeyValue> {
     let mut out = http_span_attrs();
     for i in 0..18 {
@@ -257,5 +268,123 @@ fn bench_stamp_request(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_classify, bench_stamp_request);
+/// A realistic single trace: 20 non-AI spans (1 root HTTP + 12 HTTP/internal +
+/// 7 DB) across three scopes under one resource. This is the headline case —
+/// the budget is ~50ns per *trace*, not per span.
+///
+/// Measured with a plain `iter` rather than `iter_batched`: a trace with no AI
+/// spans and no `maple_ai.*` keys is never mutated by `stamp_trace_request`, so
+/// re-running it over the same request is idempotent and avoids paying (and
+/// cache-polluting with) a deep clone per iteration.
+fn non_ai_trace_request() -> ExportTraceServiceRequest {
+    let scope = |name: &str| {
+        Some(InstrumentationScope {
+            name: name.to_owned(),
+            ..Default::default()
+        })
+    };
+    let span = |name: &str, attributes: Vec<KeyValue>| Span {
+        name: name.to_owned(),
+        attributes,
+        ..Default::default()
+    };
+    ExportTraceServiceRequest {
+        resource_spans: vec![ResourceSpans {
+            resource: Some(Resource {
+                attributes: service_resource("checkout"),
+                ..Default::default()
+            }),
+            scope_spans: vec![
+                ScopeSpans {
+                    scope: scope("@opentelemetry/instrumentation-http"),
+                    spans: std::iter::once(span("POST /api/checkout", http_span_attrs()))
+                        .chain((0..8).map(|_| span("GET /api/cart", http_span_attrs())))
+                        .collect(),
+                    ..Default::default()
+                },
+                ScopeSpans {
+                    scope: scope("checkout"),
+                    spans: (0..4)
+                        .map(|_| span("cart.recalculate", internal_span_attrs()))
+                        .collect(),
+                    ..Default::default()
+                },
+                ScopeSpans {
+                    scope: scope("@opentelemetry/instrumentation-pg"),
+                    spans: (0..7)
+                        .map(|_| span("SELECT maple.orders", db_span_attrs()))
+                        .collect(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }],
+    }
+}
+
+fn bench_stamp_trace(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ai_stamp_trace");
+    group.warm_up_time(Duration::from_millis(500));
+    group.measurement_time(Duration::from_secs(3));
+
+    let mut request = non_ai_trace_request();
+    let before = attr_count(&request);
+    group.bench_function("trace_20_spans_non_ai", |b| {
+        b.iter(|| {
+            stamp_trace_request(black_box(&mut request));
+        });
+    });
+    assert_eq!(
+        attr_count(&request),
+        before,
+        "a non-AI trace must not be mutated, otherwise this bench is not idempotent"
+    );
+
+    // Same trace shape with two AI spans swapped in: the stamping path does run,
+    // so this one has to clone per iteration.
+    let mut mixed = non_ai_trace_request();
+    mixed.resource_spans[0].scope_spans.push(ScopeSpans {
+        scope: Some(InstrumentationScope {
+            name: "ai".to_owned(),
+            ..Default::default()
+        }),
+        spans: (0..2)
+            .map(|_| Span {
+                name: "ai.generateText".to_owned(),
+                attributes: vercel_span_attrs(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    });
+    mixed.resource_spans[0].scope_spans[0].spans.truncate(7);
+    group.bench_function("trace_20_spans_2_ai", |b| {
+        b.iter_batched(
+            || mixed.clone(),
+            |mut request| {
+                stamp_trace_request(&mut request);
+                black_box(request)
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+    group.finish();
+}
+
+fn attr_count(request: &ExportTraceServiceRequest) -> usize {
+    request
+        .resource_spans
+        .iter()
+        .flat_map(|rs| rs.scope_spans.iter())
+        .flat_map(|ss| ss.spans.iter())
+        .map(|s| s.attributes.len())
+        .sum()
+}
+
+criterion_group!(
+    benches,
+    bench_classify,
+    bench_stamp_request,
+    bench_stamp_trace
+);
 criterion_main!(benches);
