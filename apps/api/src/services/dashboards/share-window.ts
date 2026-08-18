@@ -10,7 +10,22 @@
  * two parsers on the public surface for no gain, since the share page resolves
  * its own picker before it asks.
  */
-import { SHARE_MAX_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
+import { MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
+
+/**
+ * Widest window a shared-dashboard viewer may request.
+ *
+ * Held at the general query ceiling rather than something tighter: a share is a
+ * read-only view of a dashboard its author already curated, so narrowing it
+ * further would make shared boards show less than the same board does signed
+ * in, for no security gain — the cost ceiling is enforced by the per-shape caps
+ * and the cost profile, not by this number.
+ *
+ * Named here rather than in `limits.ts` because a bare alias of another export
+ * is indistinguishable from a duplicate: one value, one exported name, and the
+ * policy documented where it is enforced.
+ */
+const SHARE_MAX_RANGE_SECONDS = MAX_QUERY_RANGE_SECONDS
 import { ShareRangeInvalidError } from "@maple/domain/http"
 import { Clock, Effect } from "effect"
 

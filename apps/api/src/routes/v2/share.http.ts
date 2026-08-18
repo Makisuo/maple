@@ -37,7 +37,7 @@ import {
 	ShareWrongOrgError,
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { MAX_LIST_RANGE_SECONDS, SHARE_MAX_RANGE_SECONDS } from "@maple/query-engine"
+import { MAX_LIST_RANGE_SECONDS, MAX_QUERY_RANGE_SECONDS } from "@maple/query-engine"
 import { hashShareToken, shareOgId, verifyAlertChartId, verifyShareOgId } from "@maple/db"
 import { redactForShare } from "@maple/widgets/dashboard"
 import { Effect, Option, Redacted, Schema } from "effect"
@@ -239,7 +239,7 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 						scope: share.widgetId === undefined ? "dashboard" : "widget",
 						dashboard,
 						limits: {
-							maxRangeSeconds: SHARE_MAX_RANGE_SECONDS,
+							maxRangeSeconds: MAX_QUERY_RANGE_SECONDS,
 							maxListRangeSeconds: MAX_LIST_RANGE_SECONDS,
 						},
 						// Only a public single-chart link may be framed by a third party:
