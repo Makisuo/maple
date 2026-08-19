@@ -1,13 +1,10 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { displayError } from "@/lib/error-messages"
 import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
-import { useCopy } from "@maple/ui/hooks/use-copy"
-
-import { Button } from "@maple/ui/components/ui/button"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -18,71 +15,136 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@maple/ui/components/ui/alert-dialog"
-import { CopyIcon, DotsVerticalIcon, PulseIcon } from "@/components/icons"
-import { agentPromptFromIssue } from "@/components/errors/agent-debug-prompt"
-import { OpenAnomalyBadge, RelatedAnomaliesSection } from "@/components/anomalies/related-anomalies-section"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { warehouseDateTimeToIso } from "@maple/query-engine"
+
+import { RelatedAnomaliesSection } from "@/components/anomalies/related-anomalies-section"
+import { ErrorState } from "@/components/common/error-state"
 import { AlertSourceCard } from "@/components/errors/alert-source-card"
-import { IssueKindBadge } from "@/components/errors/kind-badge"
-import { SeverityBadge } from "@/components/errors/severity-badge"
-import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { IssueCommentComposer } from "@/components/errors/issue-comment-composer"
+import { IssueCulpritPanel } from "@/components/errors/issue-culprit-panel"
+import { IssueFactStrip } from "@/components/errors/issue-fact-strip"
+import { IssueHeader } from "@/components/errors/issue-header"
 import { IssueIncidentsTable } from "@/components/errors/issue-incidents-table"
-import { IssueOccurrenceSparkline } from "@/components/errors/issue-occurrence-sparkline"
+import { IssueOccurrencePanel } from "@/components/errors/issue-occurrence-panel"
 import { IssueOccurrencesTable } from "@/components/errors/issue-occurrences-table"
 import { IssueSidebar } from "@/components/errors/issue-sidebar"
+import { ISSUE_TABS, IssueTabs, type IssueTab } from "@/components/errors/issue-tabs"
 import { IssueTimeline } from "@/components/errors/issue-timeline"
-import { SectionHeader } from "@/components/layout/section-header"
-import { WorkflowBadge } from "@/components/errors/workflow-badge"
+import { LinkedInvestigationPanel } from "@/components/errors/linked-investigation-panel"
+import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { errorIssueDetailFromV2 } from "@/lib/services/error-issues"
-import { Badge } from "@maple/ui/components/ui/badge"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { ErrorState } from "@/components/common/error-state"
 import {
 	ErrorIssueId,
 	ErrorIssueSetSeverityRequest,
 	EscalationPolicyEvaluationRequest,
-	type IssueEscalationAttemptDocument,
 	type IssueSeverity,
 	type WorkflowState,
 } from "@maple/domain/http"
 import type { ErrorIssueDocument } from "@maple/domain/http"
-import type { V2Investigation } from "@maple/domain/http/v2"
 import {
 	makeIssueClaimPayload,
 	makeIssueCommentPayload,
 	makeIssueReleasePayload,
 	makeIssueTransitionPayload,
 } from "./-issue-mutation-payloads"
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@maple/ui/components/ui/dropdown-menu"
 
 const decodeIssueId = Schema.decodeSync(ErrorIssueId)
-const ISSUE_LOADING_BREADCRUMBS = [
-	{ label: "Errors", href: "/errors" },
-	{ label: "Issues", href: "/errors/issues" },
-	{ label: "…" },
-] as const
+
+const ISSUE_LOADING_BREADCRUMBS = [{ label: "Errors", href: "/errors" }, { label: "…" }] as const
+
+/**
+ * How many buckets the detail chart gets. Denser than the list row's 32 — this
+ * one is a full-width interactive plot, not a 56px glyph, and the shape is the
+ * reason you opened the page.
+ */
+const CHART_BUCKETS = 48
+/** Endpoint bounds on `bucket_seconds`; a range outside them is a 400. */
+const MIN_BUCKET_SECONDS = 60
+const MAX_BUCKET_SECONDS = 86_400
+const SAMPLE_LIMIT = 50
+
+const DEFAULT_PRESET = "12h"
+
+const issueSearchSchema = Schema.Struct({
+	tab: Schema.optional(Schema.Literals(ISSUE_TABS)),
+	...TimeRangeSearchFields,
+})
 
 export const Route = createFileRoute("/errors/issues/$issueId")({
 	component: IssueDetailPage,
+	validateSearch: Schema.toStandardSchemaV1(issueSearchSchema),
 })
 
 function IssueDetailPage() {
-	const navigate = useNavigate()
-	const promptCopy = useCopy({ label: "Agent prompt" })
+	const search = Route.useSearch()
+	return (
+		<PageRefreshProvider timePreset={search.timePreset ?? DEFAULT_PRESET}>
+			<IssueDetailContent />
+		</PageRefreshProvider>
+	)
+}
+
+/** Warehouse-format (`YYYY-MM-DD HH:mm:ss`) to epoch ms. */
+function warehouseMs(value: string): number {
+	return Date.parse(value.replace(" ", "T") + "Z")
+}
+
+function IssueDetailContent() {
+	const navigate = useNavigate({ from: Route.fullPath })
+	const search = Route.useSearch()
 	const { issueId: rawIssueId } = Route.useParams()
 	const issueId = decodeIssueId(rawIssueId)
+	const tab: IssueTab = search.tab ?? "overview"
+
+	// The detail endpoint has always taken a window — `start_time`, `end_time`,
+	// `bucket_seconds`, `sample_limit` — and the page called it with `{}`. So the
+	// chart, the sample traces and the rail's "Events (window)" all described
+	// whatever the server defaulted to, on a page with no control to change it,
+	// arrived at from a list that does have one.
+	const range = useEffectiveTimeRange(search.startTime, search.endTime, search.timePreset ?? DEFAULT_PRESET)
+
+	const chartWindow = useMemo(() => {
+		const startMs = warehouseMs(range.startTime)
+		const endMs = warehouseMs(range.endTime)
+		const spanSeconds =
+			Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+				? (endMs - startMs) / 1000
+				: 12 * 3600
+		const bucketSeconds = Math.min(
+			MAX_BUCKET_SECONDS,
+			Math.max(MIN_BUCKET_SECONDS, Math.round(spanSeconds / CHART_BUCKETS)),
+		)
+		return {
+			startMs: Number.isFinite(startMs) ? startMs : 0,
+			endMs: Number.isFinite(endMs) ? endMs : 0,
+			bucketMs: bucketSeconds * 1000,
+			bucketSeconds,
+		}
+	}, [range.startTime, range.endTime])
+
+	const detailQuery = useMemo(
+		() => ({
+			// The page's range is warehouse format; the v2 contract takes ISO. Handing
+			// the raw range over fails to encode and the request never leaves the
+			// browser — the same trap the hub hit.
+			start_time: warehouseDateTimeToIso(range.startTime),
+			end_time: warehouseDateTimeToIso(range.endTime),
+			bucket_seconds: chartWindow.bucketSeconds,
+			sample_limit: SAMPLE_LIMIT,
+		}),
+		[range.startTime, range.endTime, chartWindow.bucketSeconds],
+	)
 
 	const detailQueryAtom = retainedQueryV2("errorIssues", "retrieve", {
 		params: { id: issueId },
-		query: {},
+		query: detailQuery,
 		reactivityKeys: ["errorIssues", `errorIssue:${issueId}`],
 	})
 	const detailResult = useAtomValue(detailQueryAtom)
@@ -150,6 +212,10 @@ function IssueDetailPage() {
 		],
 		[issueId],
 	)
+
+	const handleTimeChange = (next: { startTime?: string; endTime?: string; presetValue?: string }) => {
+		void navigate({ search: (prev) => applyTimeRangeSearch(prev, next) })
+	}
 
 	const transitionTo = async (next: WorkflowState) => {
 		setBusy("state")
@@ -352,38 +418,18 @@ function IssueDetailPage() {
 
 	return Result.builder(detailResult)
 		.onInitial(() => (
-			<DashboardLayout.Root>
-				<DashboardLayout.Breadcrumbs items={[...ISSUE_LOADING_BREADCRUMBS]} />
-				<DashboardLayout.Body>
-					<DashboardLayout.Content>
-						<DashboardLayout.Sticky>
-							<DashboardLayout.Header title="Issue" />
-						</DashboardLayout.Sticky>
-						<DashboardLayout.Scroll>
-							<div className="space-y-4">
-								<Skeleton className="h-24 w-full" />
-								<Skeleton className="h-20 w-full" />
-								<Skeleton className="h-40 w-full" />
-							</div>
-						</DashboardLayout.Scroll>
-					</DashboardLayout.Content>
-				</DashboardLayout.Body>
-			</DashboardLayout.Root>
+			<IssueShell breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]}>
+				<div className="space-y-4">
+					<Skeleton className="h-24 w-full" />
+					<Skeleton className="h-20 w-full" />
+					<Skeleton className="h-40 w-full" />
+				</div>
+			</IssueShell>
 		))
 		.onError((error) => (
-			<DashboardLayout.Root>
-				<DashboardLayout.Breadcrumbs items={[...ISSUE_LOADING_BREADCRUMBS]} />
-				<DashboardLayout.Body>
-					<DashboardLayout.Content>
-						<DashboardLayout.Sticky>
-							<DashboardLayout.Header title="Issue" />
-						</DashboardLayout.Sticky>
-						<DashboardLayout.Scroll>
-							<ErrorState error={error} title="Failed to load issue" onRetry={refreshDetail} />
-						</DashboardLayout.Scroll>
-					</DashboardLayout.Content>
-				</DashboardLayout.Body>
-			</DashboardLayout.Root>
+			<IssueShell breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]}>
+				<ErrorState error={error} title="Failed to load issue" onRetry={refreshDetail} />
+			</IssueShell>
 		))
 		.onSuccess((v2Detail) => {
 			const detail = errorIssueDetailFromV2(v2Detail)
@@ -395,6 +441,16 @@ function IssueDetailPage() {
 			const escalationAttempts = Result.builder(escalationResult)
 				.onSuccess((response) => response.attempts)
 				.orElse(() => [])
+			const events = Result.builder(eventsResult)
+				.onSuccess((value) => value.events)
+				.orElse(() => [])
+			// Everyone who has spoken or acted on this issue, newest activity first,
+			// so the composer's participant strip leads with whoever is here now.
+			const participants = [
+				...(issue.leaseHolder ? [issue.leaseHolder] : []),
+				...(issue.assignedActor ? [issue.assignedActor] : []),
+				...[...events].reverse().flatMap((event) => (event.actor ? [event.actor] : [])),
+			]
 			const linkedEscalation = linkedInvestigation
 				? (escalationAttempts.find((attempt) => attempt.investigationId === linkedInvestigation.id) ??
 					null)
@@ -405,122 +461,94 @@ function IssueDetailPage() {
 						? issue.sourceRef.latestIncidentId
 						: null
 					: ((incidents.find((incident) => incident.status === "open") ?? incidents[0])?.id ?? null)
+			const investigate = () =>
+				void startInvestigation({
+					issue,
+					kind: issue.kind === "alert" ? "alert" : "error",
+					incidentId: latestIncidentId,
+				})
 
 			return (
 				<DashboardLayout.Root>
 					<DashboardLayout.Breadcrumbs
 						items={[
 							{ label: "Errors", href: "/errors" },
-							{ label: "Issues", href: "/errors/issues" },
 							{ label: issue.exceptionType || issue.errorLabel || "Unlabelled error" },
 						]}
 					/>
 					<DashboardLayout.Body>
 						<DashboardLayout.Content>
 							<DashboardLayout.Sticky>
-								<DashboardLayout.Header
-									title={issue.exceptionType || issue.errorLabel || "Unlabelled error"}
-									description={issue.serviceName}
-								>
-									<div className="flex items-center gap-2">
-										<IssueKindBadge kind={issue.kind} />
-										<SeverityBadge severity={issue.severity} />
-										<WorkflowBadge state={issue.workflowState} />
-										{issue.hasOpenIncident ? (
-											<Badge
-												variant="outline"
-												className="bg-destructive/10 text-destructive"
-											>
-												Incident open
-											</Badge>
-										) : null}
-										<OpenAnomalyBadge issueId={issueId} />
-										{linkedInvestigation ? (
-											<Button
-												size="sm"
-												render={
-													<Link
-														to="/investigations/$id"
-														params={{ id: linkedInvestigation.id }}
-													/>
-												}
-											>
-												<PulseIcon className="size-3.5" />
-												Open investigation
-											</Button>
-										) : (
-											<Button
-												size="sm"
-												disabled={busy === "investigation"}
-												onClick={() =>
-													void startInvestigation({
-														issue,
-														kind: issue.kind === "alert" ? "alert" : "error",
-														incidentId: latestIncidentId,
-													})
-												}
-											>
-												<PulseIcon className="size-3.5" />
-												Start investigation
-											</Button>
-										)}
-										{issue.kind === "error" ? (
-											<DropdownMenu>
-												<DropdownMenuTrigger
-													render={
-														<Button
-															size="icon-sm"
-															variant="outline"
-															aria-label="More issue actions"
-														/>
-													}
-												>
-													<DotsVerticalIcon className="size-4" />
-												</DropdownMenuTrigger>
-												<DropdownMenuContent align="end">
-													<DropdownMenuItem
-														onClick={() => {
-															void promptCopy.copy(agentPromptFromIssue(issue))
-														}}
-													>
-														<CopyIcon className="size-3.5" />
-														Copy agent prompt
-													</DropdownMenuItem>
-												</DropdownMenuContent>
-											</DropdownMenu>
-										) : null}
-									</div>
-								</DashboardLayout.Header>
+								<IssueHeader
+									issue={issue}
+									issueId={issueId}
+									investigation={linkedInvestigation}
+									search={search}
+									onTimeChange={handleTimeChange}
+									onStartInvestigation={investigate}
+									startingInvestigation={busy === "investigation"}
+								/>
+								<IssueTabs
+									issueId={issueId}
+									active={tab}
+									occurrenceCount={sampleTraces.length}
+									activityCount={events.length + escalationAttempts.length}
+									showOccurrences={issue.kind === "error"}
+								/>
 							</DashboardLayout.Sticky>
 							<DashboardLayout.Scroll>
-								<div className="space-y-8">
-									<section className="space-y-4">
-										{issue.exceptionMessage ? (
-											<p className="max-w-4xl text-sm leading-relaxed text-muted-foreground">
-												{issue.exceptionMessage}
-											</p>
-										) : null}
+								{tab === "overview" ? (
+									<div className="flex flex-col gap-7">
+										<IssueCulpritPanel issue={issue} />
+										<IssueFactStrip
+											issue={issue}
+											windowCount={totalInWindow}
+											windowLabel={windowLabel(search)}
+										/>
 										{issue.kind === "alert" ? (
 											<AlertSourceCard issue={issue} />
 										) : (
-											<IssueOccurrenceSparkline data={timeseries} />
+											<IssueOccurrencePanel
+												data={timeseries}
+												severity={issue.severity}
+												window={chartWindow}
+											/>
 										)}
-										<LinkedInvestigationSummary
+										<LinkedInvestigationPanel
 											investigation={linkedInvestigation}
 											escalation={linkedEscalation}
-											onStart={() =>
-												void startInvestigation({
-													issue,
-													kind: issue.kind === "alert" ? "alert" : "error",
-													incidentId: latestIncidentId,
-												})
-											}
+											onStart={investigate}
 											starting={busy === "investigation"}
 										/>
-									</section>
-
-									<section aria-labelledby="activity-heading">
-										<SectionHeader id="activity-heading" label="Activity" />
+										{issue.kind === "error" ? (
+											<BodySection
+												id="incidents"
+												title="Incidents"
+												count={
+													incidents.length === 0
+														? undefined
+														: `${incidents.length} opened`
+												}
+											>
+												<IssueIncidentsTable incidents={incidents} />
+											</BodySection>
+										) : null}
+										<RelatedAnomaliesSection issueId={issueId} />
+									</div>
+								) : tab === "occurrences" ? (
+									<BodySection
+										id="occurrences"
+										title="Latest occurrences"
+										count={
+											sampleTraces.length === 0
+												? undefined
+												: `${sampleTraces.length} sampled in this window`
+										}
+									>
+										<IssueOccurrencesTable traces={sampleTraces} />
+									</BodySection>
+								) : (
+									<BodySection id="activity" title="Activity">
 										{Result.builder(eventsResult)
 											.onError((error) => (
 												<ErrorState
@@ -540,32 +568,15 @@ function IssueDetailPage() {
 												<Skeleton className="h-20 w-full" />
 											))}
 										<IssueCommentComposer
-											value={commentDraft}
+											className="mt-6"
+											disabled={busy === "comment"}
 											onChange={setCommentDraft}
 											onSubmit={submitComment}
-											disabled={busy === "comment"}
+											participants={participants}
+											value={commentDraft}
 										/>
-									</section>
-
-									{issue.kind === "error" ? (
-										<section aria-labelledby="incidents-heading">
-											<SectionHeader id="incidents-heading" label="Incidents" />
-											<IssueIncidentsTable incidents={incidents} />
-										</section>
-									) : null}
-
-									<RelatedAnomaliesSection issueId={issueId} />
-
-									{issue.kind === "error" ? (
-										<section aria-labelledby="occurrences-heading">
-											<SectionHeader
-												id="occurrences-heading"
-												label="Latest occurrences"
-											/>
-											<IssueOccurrencesTable traces={sampleTraces} />
-										</section>
-									) : null}
-								</div>
+									</BodySection>
+								)}
 								<AlertDialog
 									open={severityConfirmation !== null}
 									onOpenChange={(open) => {
@@ -603,7 +614,6 @@ function IssueDetailPage() {
 						<DashboardLayout.RightPanel>
 							<IssueSidebar
 								issue={issue}
-								totalInWindow={totalInWindow}
 								busy={busy}
 								onTransition={transitionTo}
 								onClaim={claim}
@@ -619,77 +629,66 @@ function IssueDetailPage() {
 		.render()
 }
 
-function LinkedInvestigationSummary({
-	investigation,
-	escalation,
-	onStart,
-	starting,
-}: {
-	investigation: V2Investigation | null
-	escalation: IssueEscalationAttemptDocument | null
-	onStart: () => void
-	starting: boolean
-}) {
-	if (!investigation) {
-		return (
-			<div className="flex items-center justify-between gap-4 border px-4 py-3">
-				<div>
-					<p className="text-sm font-medium text-foreground">No linked investigation</p>
-					<p className="mt-0.5 text-xs text-muted-foreground">
-						Start an evidence-backed autonomous pass for this issue.
-					</p>
-				</div>
-				<Button size="sm" variant="outline" onClick={onStart} disabled={starting}>
-					<PulseIcon className="size-3.5" />
-					Start investigation
-				</Button>
-			</div>
-		)
-	}
+/** Names the window the fact strip's "Events" lane is counting over. */
+function windowLabel(search: { startTime?: string; timePreset?: string }): string {
+	if (search.startTime && !search.timePreset) return "selected range"
+	return search.timePreset ?? DEFAULT_PRESET
+}
 
+/** The loading and failure shells, which differ only in what they put in `Scroll`. */
+function IssueShell({
+	breadcrumbs,
+	children,
+}: {
+	breadcrumbs: Array<{ label: string; href?: string }>
+	children: React.ReactNode
+}) {
 	return (
-		<div className="grid gap-3 border px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto]">
-			<div className="min-w-0">
-				<div className="flex flex-wrap items-center gap-2">
-					<p className="text-sm font-medium text-foreground">Linked investigation</p>
-					<Badge variant="outline" className="capitalize">
-						{investigation.status}
-					</Badge>
-					{investigation.confidence ? (
-						<span className="text-xs capitalize text-muted-foreground">
-							{investigation.confidence} confidence
-						</span>
-					) : null}
-				</div>
-				<p className="mt-1 truncate text-sm text-muted-foreground">
-					{investigation.report?.suspectedCause ??
-						(investigation.status === "investigating"
-							? "Gathering evidence…"
-							: (investigation.error ?? "No diagnosis submitted"))}
-				</p>
-				{escalation ? (
-					<p className="mt-1 text-xs text-muted-foreground">
-						Escalation: <span className="capitalize text-foreground">{escalation.status}</span>
-						{escalation.deliveries.length > 0
-							? ` · ${escalation.deliveries
-									.map(
-										(delivery) =>
-											`${delivery.destinationName ?? delivery.destinationId} ${delivery.status}`,
-									)
-									.join(", ")}`
-							: escalation.skipReason
-								? ` · ${escalation.skipReason.replaceAll("_", " ")}`
-								: ""}
-					</p>
-				) : null}
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={breadcrumbs} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Issue" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>{children}</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
+	)
+}
+
+/**
+ * A titled block in the page body.
+ *
+ * `SectionHeader`'s 10px eyebrow is the rail's typography — it is what
+ * `DetailRail.Group` uses — so applying it to main-column sections made the two
+ * read at the same rank and left the page with no heading hierarchy at all. This
+ * is the investigation page's section heading instead.
+ */
+function BodySection({
+	id,
+	title,
+	count,
+	children,
+}: {
+	id: string
+	title: string
+	count?: string
+	children: React.ReactNode
+}) {
+	return (
+		<section aria-labelledby={`${id}-heading`} className="flex shrink-0 flex-col gap-3.5">
+			<div className="flex items-baseline gap-2.5">
+				<h2
+					id={`${id}-heading`}
+					className="font-display text-base font-semibold tracking-[-0.01em] text-foreground"
+				>
+					{title}
+				</h2>
+				{count ? <span className="text-sm text-muted-foreground">{count}</span> : null}
 			</div>
-			<Button
-				size="sm"
-				variant="outline"
-				render={<Link to="/investigations/$id" params={{ id: investigation.id }} />}
-			>
-				Open investigation
-			</Button>
-		</div>
+			{children}
+		</section>
 	)
 }

@@ -161,6 +161,35 @@ describe("ErrorIssueReadModelsService", () => {
 		}).pipe(Effect.provide(makeLayer(contexts)))
 	})
 
+	it.effect("restricts the list to an explicit fingerprint set", () => {
+		const contexts: Array<string> = []
+		return Effect.gen(function* () {
+			const readModels = yield* ErrorIssueReadModelsService
+			const now = yield* Clock.currentTimeMillis
+			const wanted = asIssueId(randomUUID())
+			const other = asIssueId(randomUUID())
+
+			yield* seedIssue(ORG, wanted, now, { fingerprintHash: "fp-wanted" })
+			yield* seedIssue(ORG, other, now + 1_000, { fingerprintHash: "fp-other" })
+
+			// The volume-ranked list ranks fingerprints in the warehouse first, then
+			// asks for exactly those issues — order is re-applied client-side, but the
+			// set has to be exact or the ranking is drawn against the wrong rows.
+			const listed = yield* readModels.listIssues(ORG, {
+				fingerprintHashes: ["fp-wanted"],
+			})
+			assert.deepStrictEqual(
+				listed.issues.map((issue) => issue.id),
+				[wanted],
+			)
+
+			// An empty set is a real filter that matches nothing, not an absent one
+			// that widens back to every issue in the org.
+			const none = yield* readModels.listIssues(ORG, { fingerprintHashes: [] })
+			assert.lengthOf(none.issues, 0)
+		}).pipe(Effect.provide(makeLayer(contexts)))
+	})
+
 	it.effect("preserves issue ownership and not-found semantics", () => {
 		const contexts: Array<string> = []
 		return Effect.gen(function* () {

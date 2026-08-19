@@ -15,6 +15,7 @@ import type {
 	ErrorsByTypeRequest,
 	ErrorsSummaryRequest,
 	ErrorsTimeseriesRequest,
+	ErrorsSparkRequest,
 	HostDetailSummaryRequest,
 	ListHostsRequest,
 	ListLogsRequest,
@@ -70,6 +71,8 @@ export const errorsByType = defineQuery({
 				services: payload.services,
 				deploymentEnvs: payload.deploymentEnvs,
 				fingerprintHashes: payload.fingerprintHashes,
+				errorLabels: payload.errorLabels,
+				serviceVersions: payload.serviceVersions,
 				limit: payload.limit,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
@@ -96,6 +99,30 @@ export const errorsTimeseries = defineQuery({
 		),
 })
 
+export const errorsSpark = defineQuery({
+	id: "errorsSpark",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ErrorsSparkRequest, orgId: string) =>
+		CH.compile(
+			CH.errorsSparkQuery({
+				fingerprintHashes: payload.fingerprintHashes,
+				services: payload.services,
+				deploymentEnvs: payload.deploymentEnvs,
+				errorLabels: payload.errorLabels,
+				serviceVersions: payload.serviceVersions,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				// Optional buckets default to one hour, as errorsTimeseries does.
+				bucketSeconds: payload.bucketSeconds ?? 3600,
+			},
+			{ rowSchema: CH.ErrorsSparkOutputSchema },
+		),
+})
+
 export const errorsSummary = defineQuery({
 	id: "errorsSummary",
 	profile: "aggregation",
@@ -107,6 +134,8 @@ export const errorsSummary = defineQuery({
 				services: payload.services,
 				deploymentEnvs: payload.deploymentEnvs,
 				fingerprintHashes: payload.fingerprintHashes,
+				errorLabels: payload.errorLabels,
+				serviceVersions: payload.serviceVersions,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
 		),

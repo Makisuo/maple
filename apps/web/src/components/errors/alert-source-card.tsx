@@ -1,6 +1,5 @@
 import { Link } from "@tanstack/react-router"
 import type { ErrorIssueDocument } from "@maple/domain/http"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 
 /**
  * Source panel for alert-backed issues: links back to the alert rule that
@@ -14,26 +13,24 @@ export function AlertSourceCard({ issue }: { issue: ErrorIssueDocument }) {
 	const groupKey = typeof sourceRef?.groupKey === "string" ? sourceRef.groupKey : null
 
 	return (
-		<Card>
-			<CardHeader className="space-y-1">
-				<CardTitle className="text-sm">Alert source</CardTitle>
-				<CardDescription>
-					This issue is fed by alert rule incidents
-					{signalType ? ` (${signalType})` : ""}
-					{groupKey && groupKey !== "__total__" ? ` for group "${groupKey}"` : ""}.
-				</CardDescription>
-			</CardHeader>
+		<div className="flex shrink-0 flex-col gap-2 rounded-xl border bg-card px-5 py-4">
+			<h2 className="font-display text-base font-semibold tracking-[-0.01em] text-foreground">
+				Alert source
+			</h2>
+			<p className="text-sm text-muted-foreground">
+				This issue is fed by alert rule incidents
+				{signalType ? ` (${signalType})` : ""}
+				{groupKey && groupKey !== "__total__" ? ` for group "${groupKey}"` : ""}.
+			</p>
 			{ruleId ? (
-				<CardContent className="text-sm">
-					<Link
-						to="/alerts/$ruleId"
-						params={{ ruleId }}
-						className="text-primary underline-offset-4 hover:underline"
-					>
-						View alert rule →
-					</Link>
-				</CardContent>
+				<Link
+					to="/alerts/$ruleId"
+					params={{ ruleId }}
+					className="text-sm text-primary underline-offset-4 hover:underline"
+				>
+					View alert rule &rarr;
+				</Link>
 			) : null}
-		</Card>
+		</div>
 	)
 }

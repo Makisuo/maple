@@ -4543,6 +4543,14 @@
           },
           {
             "in": "query",
+            "name": "fingerprint_hash",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "deployment_environment",
             "required": false,
             "schema": {
