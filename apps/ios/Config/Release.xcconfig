@@ -1,2 +1,6 @@
 #include "Base.xcconfig"
 #include? "Secrets.xcconfig"
+
+// TestFlight and the App Store both build Release, and both talk to
+// api.maple.dev — so this is the environment their telemetry belongs to.
+MAPLE_ENVIRONMENT = production

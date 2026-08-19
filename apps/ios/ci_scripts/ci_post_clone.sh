@@ -62,10 +62,22 @@ if [ -z "${CLERK_PUBLISHABLE_KEY:-}" ]; then
 fi
 say "CLERK_PUBLISHABLE_KEY is set (${#CLERK_PUBLISHABLE_KEY} characters)"
 
+# MAPLE_INGEST_KEY is deliberately NOT fatal when missing, unlike the Clerk key.
+# Clerk absent means the app cannot sign in at all; telemetry absent means the
+# SDK logs once and records nothing. Failing the build over it would block a
+# release on an observability setting.
+if [ -n "${MAPLE_INGEST_KEY:-}" ]; then
+	say "MAPLE_INGEST_KEY is set (${#MAPLE_INGEST_KEY} characters)"
+else
+	say "MAPLE_INGEST_KEY is not set — this build ships without session replay or tracing."
+	say "Add it under Xcode Cloud → Workflow → Environment to enable them."
+fi
+
 # DEVELOPMENT_TEAM is deliberately absent: Xcode Cloud manages signing itself,
 # and an explicit team here fights its cloud-managed certificates.
 cat >Config/Secrets.xcconfig <<EOF
 CLERK_PUBLISHABLE_KEY = $CLERK_PUBLISHABLE_KEY
+MAPLE_INGEST_KEY = ${MAPLE_INGEST_KEY:-}
 EOF
 say "wrote Config/Secrets.xcconfig"
 

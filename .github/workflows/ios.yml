@@ -38,6 +38,29 @@ jobs:
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+            # maple-swift is a private repo in the same org, and SwiftPM resolves
+            # it over HTTPS with whatever credentials git has. The default
+            # GITHUB_TOKEN is scoped to *this* repo only, so it cannot clone it —
+            # resolution fails with a bare "authentication required" that reads
+            # like a network fault. MAPLE_SWIFT_TOKEN is a PAT (or App token) with
+            # read access to MapleTechLabs/maple-swift.
+            #
+            # Guarded rather than unconditional so a fork or a secretless run
+            # fails at resolution with the message below rather than on a git
+            # config line, which says nothing about what is actually missing.
+            - name: Authenticate SwiftPM for private packages
+              env:
+                  MAPLE_SWIFT_TOKEN: ${{ secrets.MAPLE_SWIFT_TOKEN }}
+              run: |
+                  if [ -z "$MAPLE_SWIFT_TOKEN" ]; then
+                    echo "::error::MAPLE_SWIFT_TOKEN is not set. The app depends on the private" \
+                         "MapleTechLabs/maple-swift package; add a repo secret with read access to it."
+                    exit 1
+                  fi
+                  git config --global \
+                    url."https://x-access-token:$MAPLE_SWIFT_TOKEN@github.com/MapleTechLabs/".insteadOf \
+                    "https://github.com/MapleTechLabs/"
+
             - name: Select Xcode
               uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
               with:

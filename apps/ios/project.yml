@@ -28,6 +28,18 @@ packages:
     # generated .xcodeproj, which is gitignored, so this line is the only
     # durable pin. Bump deliberately.
     exactVersion: 1.3.9
+  # Maple's own iOS SDK: session replay + OpenTelemetry tracing.
+  #
+  # The repo is PRIVATE, so resolving this needs credentials that a bare
+  # checkout does not have — see .github/workflows/ios.yml and
+  # ci_scripts/ci_post_clone.sh, which both configure git for it.
+  #
+  # Keyed `MapleSwift`, not `Maple`: XcodeGen resolves `- package:` names
+  # against the same namespace as target names, and this project already has a
+  # target called Maple.
+  MapleSwift:
+    url: https://github.com/MapleTechLabs/maple-swift
+    exactVersion: 0.2.0
 
 settings:
   base:
@@ -60,10 +72,24 @@ targets:
         product: ClerkKit
       - package: Clerk
         product: ClerkKitUI
+      # Umbrella product: re-exports MapleCore, MapleReplay and MapleTracing,
+      # so `import Maple` is the only import a call site needs.
+      - package: MapleSwift
+        product: Maple
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.maple.mobile
         PRODUCT_NAME: Maple
+        # The Swift module name, which defaults to the target name and would
+        # otherwise be `Maple` — the same name as the SDK's umbrella module, so
+        # both targets emit `Maple.swiftmodule` and the build fails with
+        # "Multiple commands produce …/Maple.swiftmodule".
+        #
+        # Renaming the module rather than the product: the app is still called
+        # Maple everywhere a user can see. Safe here because the project has no
+        # app-target test bundle to `@testable import`, and no storyboards or
+        # XIBs, which are the two things that name a module in text.
+        PRODUCT_MODULE_NAME: MapleApp
         # App Store Connect refuses any distributed build without a 1024pt
         # icon — including TestFlight — and the failure surfaces as the
         # unhelpful "Preparing build for App Store Connect failed".
@@ -105,6 +131,20 @@ targets:
         # Injected from Config/Secrets.xcconfig so no key is baked into source.
         MapleClerkPublishableKey: $(CLERK_PUBLISHABLE_KEY)
         MapleAPIBaseURL: $(MAPLE_API_BASE_URL)
+        # Read by MapleBundleConfiguration at launch, so `Maple.start()` takes
+        # no arguments and the values move per-configuration and per-pipeline
+        # rather than per-commit. An unset build setting substitutes to empty,
+        # which the SDK reads as "not configured" and logs — it never sends a
+        # literal `$(…)` as a bearer token.
+        #
+        # No ServiceVersion here: `$(CFBundleShortVersionString)` is a plist key,
+        # not a build setting, so it substitutes to empty. The SDK reads
+        # CFBundleShortVersionString+CFBundleVersion off the bundle itself.
+        Maple:
+          IngestKey: $(MAPLE_INGEST_KEY)
+          Endpoint: $(MAPLE_INGEST_ENDPOINT)
+          Environment: $(MAPLE_ENVIRONMENT)
+          ServiceName: maple-ios
 
 # One scheme. There is deliberately no app-target test bundle: every test worth
 # having is in Packages/MapleAPI, which runs with `swift test` — no simulator, no

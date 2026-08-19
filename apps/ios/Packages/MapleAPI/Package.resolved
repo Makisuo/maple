@@ -1,5 +1,5 @@
 {
-  "originHash" : "2847eb70043893be0b807d67e39bb98519c8536dba977c42ebee0374b2f74679",
+  "originHash" : "9eda7ce9b8b3f193d76618505ccf7ce92b1478a2012ebfd1db40cb9bf7779cba",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "32f7e0f08225845f086097e2a0a5d957557cf49b",
         "version" : "1.3.9"
+      }
+    },
+    {
+      "identity" : "maple-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/MapleTechLabs/maple-swift",
+      "state" : {
+        "revision" : "84d33eddbd7334843ea6455cfd1f65353e44afee",
+        "version" : "0.2.0"
       }
     },
     {
