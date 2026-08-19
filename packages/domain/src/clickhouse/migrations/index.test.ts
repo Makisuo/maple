@@ -22,6 +22,7 @@ import {
 	serviceOverviewMinutelyBackfill,
 } from "./0015_service_overview_minutely"
 import { migration_0016_error_events_4xx_and_frame_redaction } from "./0016_error_events_4xx_and_frame_redaction"
+import { migration_0017_error_service_version_columns } from "./0017_error_service_version_columns"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -37,12 +38,12 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
 		])
-		expect(migrations.at(-1)).toBe(migration_0016_error_events_4xx_and_frame_redaction)
-		expect(latestMigrationVersion).toBe(16)
-		// 0010, 0014, 0015 and 0016 are read-path only, so the ingest-gating version
-		// skips all four and stays at 13 — nothing writes `web_events`,
+		expect(migrations.at(-1)).toBe(migration_0017_error_service_version_columns)
+		expect(latestMigrationVersion).toBe(17)
+		// 0010, 0014, 0015, 0016 and 0017 are read-path only, so the ingest-gating
+		// version skips all five and stays at 13 — nothing writes `web_events`,
 		// `service_overview_minutely` or `error_events` directly, and bumping it
 		// would un-ready every BYO-CH org's ingest routing for a read-path change.
 		expect(clickHouseSchemaVersion).toBe("13")
@@ -50,6 +51,7 @@ describe("ClickHouse migrations", () => {
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
 		expect(migration_0015_service_overview_minutely.requiredForIngest).toBe(false)
 		expect(migration_0016_error_events_4xx_and_frame_redaction.requiredForIngest).toBe(false)
+		expect(migration_0017_error_service_version_columns.requiredForIngest).toBe(false)
 	})
 
 	it("recreates both error-events MVs with the 4xx guard and the widened frame redaction", () => {
@@ -83,6 +85,53 @@ describe("ClickHouse migrations", () => {
 		// to filter on. New events only.
 		expect(sql).not.toContain("ALTER TABLE error_events")
 		expect(migration_0016_error_events_4xx_and_frame_redaction.statements.some(isBackfill)).toBe(false)
+	})
+
+	it("adds the ServiceVersion columns before recreating the MVs that write them", () => {
+		const statements: ReadonlyArray<string> =
+			migration_0017_error_service_version_columns.statements.filter((stmt) => !isBackfill(stmt))
+		const sql = statements.join("\n")
+
+		// The drifted columns: present in the 0001 snapshot, never ALTERed onto a
+		// server provisioned before they were added to the datasource definitions.
+		expect(sql).toContain(
+			"ALTER TABLE error_events ADD COLUMN IF NOT EXISTS ServiceVersion LowCardinality(String)",
+		)
+		expect(sql).toContain(
+			"ALTER TABLE error_events_by_time ADD COLUMN IF NOT EXISTS ServiceVersion LowCardinality(String)",
+		)
+		expect(sql).toContain(
+			"ALTER TABLE error_fingerprints_minutely ADD COLUMN IF NOT EXISTS ServiceVersions SimpleAggregateFunction(groupUniqArrayArray, Array(String))",
+		)
+
+		// An MV's SELECT is frozen at creation, so each view is dropped and
+		// recreated from the current snapshot body.
+		for (const view of ["error_events_mv", "error_events_by_time_mv", "error_fingerprints_minutely_mv"]) {
+			const dropAt = statements.findIndex((stmt) => stmt === `DROP VIEW IF EXISTS ${view}`)
+			const createAt = statements.findIndex((stmt) =>
+				stmt.startsWith(`CREATE MATERIALIZED VIEW IF NOT EXISTS ${view} `),
+			)
+			expect(dropAt).toBeGreaterThanOrEqual(0)
+			expect(createAt).toBeGreaterThan(dropAt)
+		}
+
+		// Every ALTER must land before the first view that writes into it — a
+		// recreated MV needs somewhere to put the new column.
+		const lastAlter = statements.reduce(
+			(last, stmt, index) => (stmt.startsWith("ALTER TABLE ") ? index : last),
+			-1,
+		)
+		const firstDrop = statements.findIndex((stmt) => stmt.startsWith("DROP VIEW "))
+		expect(lastAlter).toBeLessThan(firstDrop)
+
+		// The recreated bodies must actually populate the columns, or the ALTERs
+		// are cosmetic and errorIssuesScan keeps returning empty version arrays.
+		expect(sql).toContain("AS ServiceVersion")
+		expect(sql).toContain("groupUniqArray(ServiceVersion) AS ServiceVersions")
+
+		// Nothing is backfilled: ServiceVersion comes from the source span's
+		// resource attributes, which these target tables do not keep.
+		expect(migration_0017_error_service_version_columns.statements.some(isBackfill)).toBe(false)
 	})
 
 	it("installs service_overview_minutely with a live-write MV and no POPULATE", () => {

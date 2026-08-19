@@ -15,6 +15,7 @@ import { migration_0013_service_map_ingest_bridge } from "./0013_service_map_ing
 import { migration_0014_web_events } from "./0014_web_events"
 import { migration_0015_service_overview_minutely } from "./0015_service_overview_minutely"
 import { migration_0016_error_events_4xx_and_frame_redaction } from "./0016_error_events_4xx_and_frame_redaction"
+import { migration_0017_error_service_version_columns } from "./0017_error_service_version_columns"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -62,6 +63,7 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0014_web_events,
 	migration_0015_service_overview_minutely,
 	migration_0016_error_events_4xx_and_frame_redaction,
+	migration_0017_error_service_version_columns,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied

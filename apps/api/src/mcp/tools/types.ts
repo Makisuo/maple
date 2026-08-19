@@ -1,5 +1,5 @@
 import type { Effect } from "effect"
-import { Schema } from "effect"
+import { Schema, SchemaTransformation } from "effect"
 import type { McpToolRequirements } from "./runtime-requirements"
 
 class McpTenantError extends Schema.TaggedError<McpTenantError>()("@maple/mcp/errors/McpTenantError", {
@@ -59,8 +59,44 @@ export const requiredStringParam = (description: string) => Schema.String.annota
 export const optionalStringParam = (description: string) =>
 	Schema.optional(Schema.String).annotate({ description })
 
+/**
+ * Numeric parameters accept a number OR a numeric string, and publish as
+ * `anyOf: [{type: "number"}, {type: "string"}]`.
+ *
+ * Two defects, fixed together because they share one cause — how `Schema.Number`
+ * renders:
+ *
+ *  1. `Schema.Number` has to encode `Infinity`/`NaN`, which JSON cannot hold, so
+ *     it published every numeric parameter as
+ *     `anyOf: [{type: "number"}, {type: "string", enum: ["Infinity", "-Infinity", "NaN"]}]`.
+ *     A model reading that sees a numeric parameter whose type is "number or
+ *     string" and reasonably emits `"1500"` — which the decoder then rejected
+ *     with `Expected number | undefined at ["max_duration_ms"]`. The published
+ *     schema invited the exact input it refused. `Schema.Finite` renders as a
+ *     plain `{type: "number"}` and drops the non-finite branch, which none of
+ *     these parameters (durations, limits, offsets, HTTP statuses) can use
+ *     anyway — an infinite limit reaching the warehouse is a bug, not a value.
+ *  2. Accepting only a raw number was needlessly strict for callers that are
+ *     LLMs, including our own auto-investigation agent (`investigation.hypothesis`
+ *     spans produced most of these). `NumberFromString` still rejects anything
+ *     that is not a number ("soon", "1500ms", ""), so this widens the accepted
+ *     encodings, not the accepted values.
+ *
+ * Both checks on the string branch are load-bearing, not belt-and-braces:
+ * `NumberFromString` is `Number(s)`, which does not validate. Without `isFinite`,
+ * `"soon"` decodes to `NaN`; without the blank guard, `""` and `"   "` decode to
+ * `0` — a model's way of saying "no value" would silently become `limit: 0` or
+ * `max_duration_ms: 0` and return an empty result set instead of an error.
+ */
+const NumericString = Schema.String.check(
+	Schema.makeFilter((value: string) => value.trim().length > 0, {
+		title: "nonBlankNumericString",
+		description: "a non-blank string that will be decoded as a finite number",
+	}),
+).pipe(Schema.decodeTo(Schema.Finite, SchemaTransformation.numberFromString))
+
 export const optionalNumberParam = (description: string) =>
-	Schema.optional(Schema.Number).annotate({ description })
+	Schema.optional(Schema.Union([Schema.Finite, NumericString])).annotate({ description })
 
 export const optionalBooleanParam = (description: string) =>
 	Schema.optional(Schema.Boolean).annotate({ description })
