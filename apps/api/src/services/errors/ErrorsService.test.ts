@@ -20,6 +20,7 @@ import {
 } from "@maple/domain/primitives"
 import {
 	alertDestinations,
+	errorFingerprintCandidates,
 	errorIncidents,
 	errorNotificationDeliveries,
 	errorIssues,
@@ -1669,6 +1670,55 @@ describe("ErrorsService.runTick", () => {
 				db.select().from(errorTickStates).where(eq(errorTickStates.orgId, ORG)),
 			)
 			assert.strictEqual(after[0]?.processedThrough.getTime(), before[0]?.processedThrough.getTime())
+		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+	})
+
+	it.effect("holds a rare fingerprint as a candidate and promotes it with its earned totals", () => {
+		// One occurrence per tick, under PROMOTION_MIN_OCCURRENCES. Nothing used to
+		// stand between "a fingerprint appeared once" and "a durable row plus a
+		// first-seen notification", which is how one unapplied migration minted
+		// 2,531 issues in three days.
+		const rows = [scanRow({ count: 1, serviceVersions: ["1.0.0"] })]
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const candidates = () =>
+				database.execute((db) =>
+					db
+						.select()
+						.from(errorFingerprintCandidates)
+						.where(eq(errorFingerprintCandidates.fingerprintHash, SCAN_FINGERPRINT)),
+				)
+
+			yield* TestClock.setTime(TICK_MS)
+			// An unrelated issue, purely so the org is discovered as active.
+			yield* seedIssue(asIssueId(randomUUID()))
+			yield* errors.runTick()
+			assert.lengthOf(yield* loadIssuesByFingerprint(SCAN_FINGERPRINT), 0)
+			assert.lengthOf(yield* candidates(), 1)
+
+			// Second tick, second build. The ON CONFLICT path has to accumulate the
+			// count AND union the build set rather than overwrite either.
+			rows[0] = scanRow({ count: 1, serviceVersions: ["1.1.0"] })
+			yield* TestClock.setTime(TICK_MS + 120_000)
+			yield* errors.runTick()
+			assert.lengthOf(yield* loadIssuesByFingerprint(SCAN_FINGERPRINT), 0)
+			const pending = (yield* candidates())[0]!
+			assert.strictEqual(pending.occurrenceCount, 2)
+			assert.sameMembers([...pending.serviceVersionsJson], ["1.0.0", "1.1.0"])
+
+			// Third occurrence clears the threshold.
+			rows[0] = scanRow({ count: 1, serviceVersions: ["1.1.0"] })
+			yield* TestClock.setTime(TICK_MS + 240_000)
+			yield* errors.runTick()
+
+			const promoted = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+			// The issue opens with the occurrences it earned across all three ticks,
+			// not just the one in the promoting window.
+			assert.strictEqual(promoted.occurrenceCount, 3)
+			assert.sameMembers([...promoted.seenVersionsJson], ["1.0.0", "1.1.0"])
+			// The candidate row is handed over, not left behind to double-count.
+			assert.lengthOf(yield* candidates(), 0)
 		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
 	})
 

@@ -26,7 +26,11 @@ enum WidgetRefreshScheduler {
 	/// Register at launch, before the app finishes `didFinishLaunching` —
 	/// registering later throws.
 	static func register() {
-		BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
+		// `.main` rather than the default background queue: the work is one
+		// request and a `UserDefaults` write, and running the handler where the
+		// publisher already lives means `BGTask` — which is not `Sendable` —
+		// never crosses an isolation boundary.
+		BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: .main) { task in
 			guard let task = task as? BGAppRefreshTask else { return }
 			handle(task)
 		}
@@ -55,6 +59,11 @@ enum WidgetRefreshScheduler {
 		// ending here.
 		schedule()
 
+		// `BGTask` is not `Sendable` and cannot become so: the system hands one
+		// object to one handler and expects that object back. The unsafe part
+		// is therefore not exercised — the task is registered with `.main`, and
+		// both touches below happen there.
+		nonisolated(unsafe) let task = task
 		let work = Task { @MainActor in
 			await IssuesWidgetPublisher.shared.refresh(force: true)
 			task.setTaskCompleted(success: true)
