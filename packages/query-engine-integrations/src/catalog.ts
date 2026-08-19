@@ -53,6 +53,13 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 	},
 	{
 		module: "ai-sessions",
+		name: "aiSessionFacetsQuery",
+		label: "default",
+		compile: () =>
+			compileUnion(CH.aiSessionFacetsQuery(), window, { rowSchema: CH.aiSessionFacetsRowSchema }),
+	},
+	{
+		module: "ai-sessions",
 		name: "aiSessionSpansQuery",
 		label: "default",
 		compile: () =>

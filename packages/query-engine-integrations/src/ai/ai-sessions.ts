@@ -49,6 +49,9 @@ import {
 	fromQuery,
 	inSubquery,
 	param,
+	unionAll,
+	type CHUnionQuery,
+	type ColumnAccessor,
 	type CompiledQueryRowSchema,
 } from "@maple-dev/clickhouse-builder"
 import { TraceDetailSpans, Traces } from "@maple/query-engine/ch/tables"
@@ -83,6 +86,13 @@ const hasSessionId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<strin
 /** Not in the builder's function set; same local helper `tracesDetailQuery` uses. */
 const fromUnixTimestamp64Nano = (nanos: CH.Expr<number>): CH.Expr<string> =>
 	compileFnCall<string>("fromUnixTimestamp64Nano", nanos)
+
+/**
+ * Exact distinct count. Not in the builder's function set, which only carries
+ * the approximate `uniq`. A facet count sits next to the list it filters, so an
+ * HLL estimate that disagrees with the visible row count reads as a bug.
+ */
+const uniqExact = <T>(expr: CH.Expr<T>): CH.Expr<number> => compileFnCall<number>("uniqExact", expr)
 
 export interface AiSessionListOpts {
 	/** Sessions returned, most recently started first. */
@@ -231,6 +241,66 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 			.limit(limit)
 			.format("JSON")
 	)
+}
+
+// List facets (UNION ALL — vendor / service)
+
+export interface AiSessionFacetsOutput {
+	readonly name: string
+	readonly count: number
+	readonly facetType: string
+}
+
+export const aiSessionFacetsRowSchema: CompiledQueryRowSchema<AiSessionFacetsOutput> = Schema.Struct({
+	name: Schema.String,
+	count: CHNumber,
+	facetType: Schema.String,
+})
+
+/**
+ * Distinct sessions per vendor and per service, for the list's filter sidebar.
+ *
+ * This is the detection scan of `aiSessionListQuery` and nothing else — no
+ * `trace_detail_spans` fan-out, which is the expensive half. It can be: both of
+ * the list's filters are applied at that level, so the population a facet
+ * describes is exactly the population its filter selects.
+ *
+ * That makes the counts ANY-span counts, matching the filter: a session belongs
+ * to every vendor and every service that ANY of its session-bearing spans
+ * carries, so a session whose turn spans came from two vendors is counted under
+ * both and the facet counts sum to more than the number of sessions. Picking one
+ * value returns exactly the count shown.
+ *
+ * `uniqExact` rather than `uniq`: session counts are small enough that the exact
+ * aggregate costs nothing, and the number has to agree with the list beside it.
+ */
+export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
+	const facet = (facetType: string, name: ($: ColumnAccessor<typeof Traces.columns>) => CH.Expr<string>) =>
+		from(Traces)
+			.select(($) => ({
+				name: name($),
+				count: uniqExact($.SpanAttributes.get(SESSION_ID_ATTR)),
+				facetType: CH.lit(facetType),
+			}))
+			.where(($) => [
+				// Every UNION ALL branch reads a table, so every branch carries the org
+				// predicate itself — see this file's header.
+				$.OrgId.eq(param.string("orgId")),
+				$.Timestamp.gte(param.dateTime("startTime")),
+				$.Timestamp.lte(param.dateTime("endTime")),
+				hasSessionId($.SpanAttributes, $.SpanAttributes.get(SESSION_ID_ATTR)),
+				// A span can be session-bearing without a vendor stamp; a blank option
+				// filters nothing and is not offered.
+				name($).neq(""),
+			])
+			.groupBy("name")
+			.orderBy(["count", "desc"])
+			.limit(50)
+
+	return unionAll(
+		facet("vendor", ($) => $.SpanAttributes.get(VENDOR_ID_ATTR)),
+		facet("service", ($) => $.ServiceName),
+	).format("JSON")
 }
 
 export interface AiSessionSpansOpts {
