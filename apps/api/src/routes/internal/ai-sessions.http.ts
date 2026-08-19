@@ -1,5 +1,10 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { CurrentTenant, ListAiSessionsResponse, MapleInternalApi } from "@maple/domain/http"
+import {
+	CurrentTenant,
+	ListAiSessionsFacetsResponse,
+	ListAiSessionsResponse,
+	MapleInternalApi,
+} from "@maple/domain/http"
 import { Effect } from "effect"
 import { CH } from "@maple/query-engine"
 import * as Integrations from "@maple/query-engine-integrations"
@@ -19,28 +24,53 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 		Effect.gen(function* () {
 			const warehouse = yield* WarehouseQueryService
 
-			return handlers.handle("list", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					const compiled = CH.compile(
-						Integrations.aiSessionListQuery({
-							limit: payload.limit,
-							vendorIds: payload.vendorIds,
-							serviceNames: payload.serviceNames,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-						{ rowSchema: Integrations.aiSessionListRowSchema },
-					)
-					// The row schema already coerces the UInt64 aggregates and decodes
-					// exactly the response's fields, so rows pass through unmapped
-					// (unlike listReplays, which re-brands and re-coerces per field).
-					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
-						profile: "list",
-						context: "listAiSessions",
-					})
-					return new ListAiSessionsResponse({ data: rows })
-				}),
-			)
+			return handlers
+				.handle("list", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+						const compiled = CH.compile(
+							Integrations.aiSessionListQuery({
+								limit: payload.limit,
+								vendorIds: payload.vendorIds,
+								serviceNames: payload.serviceNames,
+							}),
+							{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+							{ rowSchema: Integrations.aiSessionListRowSchema },
+						)
+						// The row schema already coerces the UInt64 aggregates and decodes
+						// exactly the response's fields, so rows pass through unmapped
+						// (unlike listReplays, which re-brands and re-coerces per field).
+						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+							profile: "list",
+							context: "listAiSessions",
+						})
+						return new ListAiSessionsResponse({ data: rows })
+					}),
+				)
+				.handle("facets", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+						const compiled = CH.compileUnion(
+							Integrations.aiSessionFacetsQuery(),
+							{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+							{ rowSchema: Integrations.aiSessionFacetsRowSchema },
+						)
+						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+							profile: "list",
+							context: "aiSessionsFacets",
+						})
+						// One UNION ALL result carrying both dimensions, split by facetType.
+						const pick = (facetType: string) =>
+							rows
+								.filter((row) => row.facetType === facetType)
+								.map((row) => ({ name: row.name, count: row.count }))
+						return new ListAiSessionsFacetsResponse({
+							vendors: pick("vendor"),
+							services: pick("service"),
+						})
+					}),
+				)
 		}),
 )

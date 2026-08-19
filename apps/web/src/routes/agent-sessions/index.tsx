@@ -7,7 +7,10 @@ import { AgentSessionsFilterSidebar } from "@/components/agent-sessions/agent-se
 import { NotFoundError } from "@/components/route-error"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { listAiSessionsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import {
+	aiSessionsFacetsResultAtom,
+	listAiSessionsResultAtom,
+} from "@/lib/services/atoms/warehouse-query-atoms"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -104,12 +107,11 @@ function AgentSessionsBody({
 			},
 		}),
 	)
-	// The sidebar's option lists come from the UNFILTERED window, so picking a
-	// vendor doesn't erase the others from the list. With no filter active this
-	// is the same atom entry as `result` (undefined fields drop from the cache
-	// key), so it costs nothing; plain useAtomValue keeps it off the Reload
-	// subscription — options refetch when the window rolls, which is enough.
-	const optionsResult = useAtomValue(listAiSessionsResultAtom({ data: window }))
+	// The sidebar's counts come from the UNFILTERED window, so picking a vendor
+	// doesn't erase the others from the list. Plain useAtomValue keeps this off
+	// the Reload subscription — the facets refetch when the window rolls, which
+	// is enough.
+	const facetsResult = useAtomValue(aiSessionsFacetsResultAtom({ data: { startTime, endTime } }))
 	const sessions = Result.isSuccess(result) ? result.value.data : []
 
 	const headerActions = (
@@ -130,7 +132,7 @@ function AgentSessionsBody({
 	return (
 		<>
 			<DashboardLayout.Filters>
-				<AgentSessionsFilterSidebar optionsResult={optionsResult} />
+				<AgentSessionsFilterSidebar facetsResult={facetsResult} />
 			</DashboardLayout.Filters>
 			<DashboardLayout.Content>
 				<DashboardLayout.Sticky>

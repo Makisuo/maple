@@ -48,6 +48,29 @@ export class ListAiSessionsResponse extends Schema.Class<ListAiSessionsResponse>
 	data: Schema.Array(AiSessionListItem),
 }) {}
 
+export class ListAiSessionsFacetsRequest extends Schema.Class<ListAiSessionsFacetsRequest>(
+	"ListAiSessionsFacetsRequest",
+)({
+	// The window and nothing else: the facets are deliberately unfiltered, so
+	// picking a vendor doesn't erase the other vendors from the sidebar.
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+}) {}
+
+export const AiSessionFacetItem = Schema.Struct({
+	name: Schema.String,
+	count: Schema.Number,
+})
+
+export class ListAiSessionsFacetsResponse extends Schema.Class<ListAiSessionsFacetsResponse>(
+	"ListAiSessionsFacetsResponse",
+)({
+	/** Distinct sessions per vendor id, matching what `vendorIds` selects. */
+	vendors: Schema.Array(AiSessionFacetItem),
+	/** Distinct sessions per service name, matching what `serviceNames` selects. */
+	services: Schema.Array(AiSessionFacetItem),
+}) {}
+
 // Exactly what a compiled warehouse read can fail with — not the wider
 // `sessionReplayEndpointErrors` union, whose extra members (the legacy
 // QueryEngine wrappers, token-mint errors) this endpoint can never produce.
@@ -58,6 +81,13 @@ export class AiSessionsInternalApiGroup extends HttpApiGroup.make("aiSessionsInt
 		HttpApiEndpoint.post("list", "/list", {
 			payload: ListAiSessionsRequest,
 			success: ListAiSessionsResponse,
+			error: aiSessionEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("facets", "/facets", {
+			payload: ListAiSessionsFacetsRequest,
+			success: ListAiSessionsFacetsResponse,
 			error: aiSessionEndpointErrors,
 		}),
 	)

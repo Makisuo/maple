@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import { ListAiSessionsRequest } from "@maple/domain/http"
+import { ListAiSessionsFacetsRequest, ListAiSessionsRequest } from "@maple/domain/http"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
@@ -43,4 +43,33 @@ export const listAiSessions = Effect.fn("AiSessions.listAiSessions")(function* (
 		}),
 	)
 	return { data: result.data }
+})
+
+// List facets (filter sidebar option counts)
+
+const AiSessionsFacetsInput = Schema.Struct({
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
+})
+export type AiSessionsFacetsInput = Schema.Schema.Type<typeof AiSessionsFacetsInput>
+
+export const getAiSessionsFacets = Effect.fn("AiSessions.aiSessionsFacets")(function* ({
+	data,
+}: {
+	data: AiSessionsFacetsInput
+}) {
+	const input = yield* decodeInput(AiSessionsFacetsInput, data ?? {}, "aiSessionsFacets")
+	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
+	const result = yield* runWarehouseQuery("aiSessionsFacets", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			return yield* client.aiSessionsInternal.facets({
+				payload: new ListAiSessionsFacetsRequest({
+					startTime: input.startTime ?? fallback.startTime,
+					endTime: input.endTime ?? fallback.endTime,
+				}),
+			})
+		}),
+	)
+	return { vendors: result.vendors, services: result.services }
 })

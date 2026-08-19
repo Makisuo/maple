@@ -13,31 +13,9 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { vendorLabel, type AgentSessionRow } from "./agent-sessions-list"
+import { vendorLabel } from "./agent-sessions-list"
 
 const routeApi = getRouteApi("/agent-sessions/")
-
-/**
- * Facet counts derived client-side from the unfiltered list rows — sessions per
- * vendor and per touched service within the current window. There is no facets
- * warehouse query yet, so the counts (and the option lists) only see what the
- * list's own limit returned; good enough while a window holds tens of sessions,
- * and the seam to replace with a real aggregation when it doesn't.
- */
-function facetCounts(
-	rows: ReadonlyArray<AgentSessionRow>,
-	pick: (row: AgentSessionRow) => ReadonlyArray<string>,
-): FilterOption[] {
-	const counts = new Map<string, number>()
-	for (const row of rows) {
-		for (const name of pick(row)) {
-			counts.set(name, (counts.get(name) ?? 0) + 1)
-		}
-	}
-	return [...counts.entries()]
-		.map(([name, count]) => ({ name, count }))
-		.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
-}
 
 /** A selected value absent from the current window stays checkable (count 0). */
 function withSelected(options: FilterOption[], selected?: string): FilterOption[] {
@@ -48,11 +26,21 @@ function withSelected(options: FilterOption[], selected?: string): FilterOption[
 }
 
 interface AgentSessionsFilterSidebarProps {
-	/** The UNFILTERED window's sessions, so option lists survive an active filter. */
-	optionsResult: Result.Result<{ readonly data: ReadonlyArray<AgentSessionRow> }, unknown>
+	/**
+	 * Distinct sessions per option, aggregated over the whole window rather than
+	 * over the page of rows the list returned. Deliberately unfiltered, so
+	 * selecting one option leaves the others visible and countable.
+	 */
+	facetsResult: Result.Result<
+		{
+			readonly vendors: ReadonlyArray<FilterOption>
+			readonly services: ReadonlyArray<FilterOption>
+		},
+		unknown
+	>
 }
 
-export function AgentSessionsFilterSidebar({ optionsResult }: AgentSessionsFilterSidebarProps) {
+export function AgentSessionsFilterSidebar({ facetsResult }: AgentSessionsFilterSidebarProps) {
 	const navigate = routeApi.useNavigate()
 	const search = routeApi.useSearch()
 
@@ -68,18 +56,12 @@ export function AgentSessionsFilterSidebar({ optionsResult }: AgentSessionsFilte
 
 	const hasActiveFilters = !!search.vendor || !!search.service
 
-	return Result.builder(optionsResult)
+	return Result.builder(facetsResult)
 		.onInitial(() => <FilterSidebarLoading sectionCount={2} />)
 		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((value, result) => {
-			const vendors = withSelected(
-				facetCounts(value.data, (row) => [row.vendorId]),
-				search.vendor,
-			)
-			const services = withSelected(
-				facetCounts(value.data, (row) => row.serviceNames),
-				search.service,
-			)
+			const vendors = withSelected([...value.vendors], search.vendor)
+			const services = withSelected([...value.services], search.service)
 
 			return (
 				<FilterSidebarFrame waiting={result.waiting}>
