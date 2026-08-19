@@ -579,7 +579,7 @@ describe("ScrapeScheduler", () => {
 			const tracer = makeCapturingTracer()
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
 			harness.ingestImpl = () => Effect.fail(billingLimitError)
-			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)), Effect.provide(tracer.layer))
+			yield* startScheduler.pipe(Effect.provide([harnessLayer(harness), tracer.layer]))
 
 			yield* TestClock.adjust(Duration.seconds(1))
 
@@ -597,7 +597,7 @@ describe("ScrapeScheduler", () => {
 			const tracer = makeCapturingTracer()
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
 			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 503, body: "unavailable" }))
-			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)), Effect.provide(tracer.layer))
+			yield* startScheduler.pipe(Effect.provide([harnessLayer(harness), tracer.layer]))
 
 			yield* TestClock.adjust(Duration.seconds(1))
 
