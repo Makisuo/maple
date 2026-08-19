@@ -15,6 +15,8 @@ import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { QueryEngineService, type QueryEngineServiceApi } from "@/services/warehouse/QueryEngineService"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
@@ -145,6 +147,27 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 			},
 		]
 	}
+	if (sql.includes("AS baselineP95LatencyMs")) {
+		return [
+			// Two rows for one service: the catalog aggregates namespaces under a
+			// single name, so the busiest baseline row has to win rather than the
+			// last one read.
+			{
+				serviceName: "api",
+				serviceNamespace: "checkout",
+				environment: "production",
+				baselineP95LatencyMs: "35",
+				baselineSpanCount: "5000",
+			},
+			{
+				serviceName: "api",
+				serviceNamespace: "internal",
+				environment: "production",
+				baselineP95LatencyMs: "900",
+				baselineSpanCount: "120",
+			},
+		]
+	}
 	if (sql.includes("FROM service_overview_spans")) {
 		return [
 			{
@@ -226,6 +249,10 @@ const makeHarness = (
 		AuthService.layer,
 		DashboardPersistenceService.layer,
 		SharedDashboardService.layer,
+		// Not read by any telemetry route, but the v2 group layer is built as one
+		// unit, so a group this suite never calls still has to resolve.
+		MobileDevicesService.layer,
+		LiveActivitiesService.layer,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 	const telemetryLive = Layer.mergeAll(
 		Layer.succeed(WarehouseQueryService, warehouseService),
@@ -355,7 +382,13 @@ describe("v2 telemetry reads over HTTP", () => {
 
 		const services = await harness.request("GET", `/v2/services?${windowQuery}`, key.secret)
 		expect(services.status).toBe(200)
-		expect(services.body.data[0]).toMatchObject({ name: "api", has_sampling: true, span_count: 10 })
+		expect(services.body.data[0]).toMatchObject({
+			name: "api",
+			has_sampling: true,
+			span_count: 10,
+			baseline_p95_latency_ms: 35,
+			baseline_span_count: 5000,
+		})
 		const service = await harness.request("GET", `/v2/services/api?${windowQuery}`, key.secret)
 		expect(service.status).toBe(200)
 
@@ -529,12 +562,23 @@ describe("v2 telemetry reads over HTTP", () => {
 		)
 		expect(services.status).toBe(200)
 
-		const catalogSql = observedSql.find((sql) => sql.includes("service_overview_spans"))
+		// The listing compiles two queries against the same rollups — the catalog
+		// and the latency baseline — so pick the catalog out by its own alias.
+		const catalogSql = observedSql.find((sql) => sql.includes("AS p95LatencyMs"))
 		expect(catalogSql).toBeDefined()
 		expect(catalogSql).toContain("'2026-07-15 12:00:00'")
 		expect(catalogSql).toContain("'2026-07-16 12:00:00'")
 		// A fractional literal is a TYPE_MISMATCH against a DateTime column.
 		expect(catalogSql).not.toMatch(/'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+'/)
+
+		// The baseline covers the seven days before the window, hour-floored so
+		// the cache key survives a drifting client window — and second-precision
+		// for the same DateTime reason.
+		const baselineSql = observedSql.find((sql) => sql.includes("AS baselineP95LatencyMs"))
+		expect(baselineSql).toBeDefined()
+		expect(baselineSql).toContain("'2026-07-08 12:00:00'")
+		expect(baselineSql).toContain("'2026-07-15 12:00:00'")
+		expect(baselineSql).not.toMatch(/'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+'/)
 		await harness.dispose()
 	})
 

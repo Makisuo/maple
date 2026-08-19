@@ -10,6 +10,7 @@ import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadMod
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { OrganizationService } from "@/services/org/OrganizationService"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
 import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
@@ -78,9 +79,11 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2InvestigationsLive,
 	HttpV2AnomaliesLive,
 	HttpV2OrganizationLive,
-	// Real service, no stub: it needs only the Database every harness already
-	// provides, and its own route test is the only place that calls it.
-	HttpV2MobileDevicesLive.pipe(Layer.provide(MobileDevicesService.layer)),
+	// Real services, no stubs: they need only the Database every harness already
+	// provides, and their own route tests are the only places that call them.
+	HttpV2MobileDevicesLive.pipe(
+		Layer.provide(Layer.mergeAll(MobileDevicesService.layer, LiveActivitiesService.layer)),
+	),
 	HttpV2SessionReplaysLive,
 	HttpV2TracesLive,
 	HttpV2LogsLive,

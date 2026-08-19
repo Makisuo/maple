@@ -38,19 +38,11 @@ final class ServicesListModel {
 	/// need attention are the ones on screen without scrolling.
 	private func sorted(_ services: [Service]) -> [Service] {
 		services.sorted { first, second in
-			let a = ServiceHealth(errorRate: first.errorRate, p95LatencyMs: first.p95LatencyMs)
-			let b = ServiceHealth(errorRate: second.errorRate, p95LatencyMs: second.p95LatencyMs)
-			if a != b { return rank(a) < rank(b) }
+			let a = ServiceHealth(service: first)
+			let b = ServiceHealth(service: second)
+			if a != b { return a.rank > b.rank }
 			if first.errorRate != second.errorRate { return first.errorRate > second.errorRate }
 			return first.throughput > second.throughput
-		}
-	}
-
-	private func rank(_ health: ServiceHealth) -> Int {
-		switch health {
-		case .unhealthy: 0
-		case .degraded: 1
-		case .healthy: 2
 		}
 	}
 }
@@ -150,7 +142,7 @@ private struct ServiceRow: View {
 	let openIssues: Int
 
 	private var health: ServiceHealth {
-		ServiceHealth(errorRate: service.errorRate, p95LatencyMs: service.p95LatencyMs)
+		ServiceHealth(service: service)
 	}
 
 	var body: some View {

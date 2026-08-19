@@ -11,6 +11,8 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
 
+import { SeverityBadge } from "@/components/errors/severity-badge"
+import { SeveritySelect } from "@/components/errors/severity-select"
 import { AiTriageSettingsSection } from "./ai-triage-settings-section"
 import { EscalationPolicySection } from "./escalation-policy-section"
 import { SectionHeader } from "@/components/layout/section-header"
@@ -18,7 +20,6 @@ import { MapleApiAtomClient, retainedQuery } from "@/lib/services/common/atom-cl
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
-const SEVERITIES: ReadonlyArray<IssueSeverity> = ["critical", "high", "medium", "low"]
 const CONFIDENCES: ReadonlyArray<EscalationConfidence> = ["high", "medium", "low"]
 
 export function AutomationSection({
@@ -90,17 +91,13 @@ function PolicySimulator() {
 			<div className="border bg-card/20 p-4">
 				<div className="grid gap-4 md:grid-cols-3">
 					<SimulatorField label="Severity">
-						<select
+						{/* The two sibling fields are still native <select>s. They are a
+						    separate design-system gap, not a severity one. */}
+						<SeveritySelect
 							value={severity}
-							onChange={(event) => setSeverity(event.target.value as IssueSeverity)}
-							className="h-8 w-full border bg-background px-2 text-sm"
-						>
-							{SEVERITIES.map((value) => (
-								<option key={value} value={value}>
-									{value}
-								</option>
-							))}
-						</select>
+							onChange={(next) => setSeverity(next ?? "high")}
+							className="h-8 w-full"
+						/>
 					</SimulatorField>
 					<SimulatorField label="Decision source">
 						<select
@@ -192,9 +189,7 @@ function RecentDeliveries() {
 									className="grid gap-2 px-4 py-3 text-sm md:grid-cols-[8rem_1fr_auto]"
 								>
 									<div className="flex items-center gap-2">
-										<Badge variant="outline" className="capitalize">
-											{attempt.severity}
-										</Badge>
+										<SeverityBadge severity={attempt.severity} />
 										<span className="capitalize text-muted-foreground">
 											{attempt.status}
 										</span>

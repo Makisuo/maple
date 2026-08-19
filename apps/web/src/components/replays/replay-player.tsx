@@ -1,8 +1,10 @@
 import * as React from "react"
 import { createPortal } from "react-dom"
 import "@rrweb/replay/dist/style.css"
+import { Button } from "@maple/ui/components/ui/button"
 import { cn } from "@maple/ui/lib/utils"
-import { type DisplayMarker, type IdleBand, errorMessage, useReplayPlayer } from "./replay-player-context"
+import { displayError } from "@/lib/error-messages"
+import { type DisplayMarker, type IdleBand, useReplayPlayer } from "./replay-player-context"
 import {
 	GlobeIcon,
 	ArrowPathIcon,
@@ -44,7 +46,8 @@ export function ReplaySurface({
 	 *  corners so surface + transport read as one unit. */
 	docked?: boolean
 }) {
-	const { status, error, sessionActive, figureRef, surfaceRef, mountRef, isFullscreen } = useReplayPlayer()
+	const { status, error, retry, sessionActive, figureRef, surfaceRef, mountRef, isFullscreen } =
+		useReplayPlayer()
 	// A scrubber over a session that has no recording is a dead control; drop the
 	// whole transport rather than offer it.
 	const showTransport = status !== "unrecorded"
@@ -90,11 +93,7 @@ export function ReplaySurface({
 				{status !== "ready" && (
 					<div className="absolute inset-0 bg-muted/30">
 						{status === "loading" && <PlayerMessage spinner>Loading replay…</PlayerMessage>}
-						{status === "error" && (
-							<PlayerMessage tone="error">
-								Couldn’t load this replay — {errorMessage(error)}
-							</PlayerMessage>
-						)}
+						{status === "error" && <PlayerError error={error} onRetry={retry} />}
 						{status === "empty" && (
 							<PlayerMessage spinner={sessionActive}>
 								{sessionActive
@@ -421,25 +420,52 @@ function HoverTimeBubble({
 /** Keeps the hover bubble clear of the viewport edges. */
 const EDGE_MARGIN = 8
 
-function PlayerMessage({
-	children,
-	spinner,
-	tone,
-}: {
-	children: React.ReactNode
-	spinner?: boolean
-	tone?: "error"
-}) {
+/**
+ * The load failure, read through the app's shared error contract.
+ *
+ * Not `String(error)`: every failure reaching here is a v2 error envelope,
+ * which carries its title, message and recovery inside a nested `error` body
+ * and stringifies to `[object Object]`. `displayError` unwraps that — and
+ * resolves a transport or unexpected failure to the same shape — so the reader
+ * gets the server's own words and a retry only when retrying can help.
+ *
+ * Styled like `PlayerMessage` rather than reusing the page-level `ErrorState`:
+ * this sits on the player's own always-dark surface, so it keeps the muted
+ * treatment that reads in both themes there instead of that component's
+ * `text-foreground`, which would wash out in light mode.
+ */
+function PlayerError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+	const formatted = displayError(error)
+	const canRetry = formatted.recovery === "retry" || formatted.recovery === "refresh"
+	return (
+		<div className="flex aspect-video w-full items-center justify-center p-8">
+			<div
+				className="flex max-w-sm flex-col items-center gap-3 text-center"
+				role="alert"
+				aria-live="polite"
+			>
+				<div className="grid size-11 place-items-center rounded-full bg-destructive/10 text-destructive">
+					<EyeIcon className="size-5" />
+				</div>
+				<div className="space-y-1">
+					<p className="text-sm font-medium text-muted-foreground">{formatted.title}</p>
+					<p className="text-sm leading-relaxed text-muted-foreground">{formatted.message}</p>
+				</div>
+				{canRetry && (
+					<Button size="sm" variant="outline" onClick={onRetry}>
+						Try again
+					</Button>
+				)}
+			</div>
+		</div>
+	)
+}
+
+function PlayerMessage({ children, spinner }: { children: React.ReactNode; spinner?: boolean }) {
 	return (
 		<div className="flex aspect-video w-full items-center justify-center p-8">
 			<div className="flex max-w-sm flex-col items-center gap-3 text-center">
-				<div
-					className={
-						tone === "error"
-							? "grid size-11 place-items-center rounded-full bg-destructive/10 text-destructive"
-							: "grid size-11 place-items-center rounded-full bg-muted text-muted-foreground"
-					}
-				>
+				<div className="grid size-11 place-items-center rounded-full bg-muted text-muted-foreground">
 					{spinner ? (
 						<ArrowPathIcon className="size-5 animate-spin" />
 					) : (

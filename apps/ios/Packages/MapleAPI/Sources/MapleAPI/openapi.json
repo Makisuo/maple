@@ -2162,6 +2162,12 @@
         "additionalProperties": false,
         "description": "An observed service aggregated by service name.",
         "properties": {
+          "baseline_p95_latency_ms": {
+            "type": "number"
+          },
+          "baseline_span_count": {
+            "type": "number"
+          },
           "deployment_environments": {
             "items": {
               "type": "string"

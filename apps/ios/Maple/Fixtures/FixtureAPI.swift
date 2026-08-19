@@ -29,24 +29,30 @@ struct FixtureAPI: MapleAPI {
 		let p50: Double
 		let p95: Double
 		let p99: Double
+		/// The service's own trailing-7d p95. Most seeds sit at their baseline —
+		/// a batch worker whose p95 is always ~900ms is normal, not degraded —
+		/// so only `payments`, at 3.4× its own history, is latency-degraded.
+		let baselineP95: Double
 	}
 
 	private static let seeds: [Seed] = [
-		Seed(name: "checkout-api", namespace: "commerce", throughput: 42.1, errorRate: 0.091, p50: 84, p95: 640, p99: 1_480),
-		Seed(name: "search", namespace: "discovery", throughput: 118.4, errorRate: 0.004, p50: 210, p95: 1_340, p99: 2_900),
-		Seed(name: "payments", namespace: "commerce", throughput: 9.7, errorRate: 0.012, p50: 120, p95: 410, p99: 880),
-		Seed(name: "web", namespace: "edge", throughput: 380.2, errorRate: 0.0007, p50: 32, p95: 140, p99: 320),
-		Seed(name: "auth", namespace: "platform", throughput: 61.0, errorRate: 0.0002, p50: 18, p95: 61, p99: 140),
-		Seed(name: "catalog", namespace: "commerce", throughput: 27.5, errorRate: 0, p50: 44, p95: 190, p99: 410),
-		Seed(name: "notifications", namespace: "platform", throughput: 3.2, errorRate: 0.001, p50: 90, p95: 380, p99: 720),
-		Seed(name: "worker", namespace: "platform", throughput: 14.9, errorRate: 0, p50: 400, p95: 900, p99: 1_900),
-		Seed(name: "ingest-gateway", namespace: "edge", throughput: 1_240.0, errorRate: 0.0001, p50: 6, p95: 21, p99: 58),
+		Seed(name: "checkout-api", namespace: "commerce", throughput: 42.1, errorRate: 0.091, p50: 84, p95: 640, p99: 1_480, baselineP95: 610),
+		Seed(name: "search", namespace: "discovery", throughput: 118.4, errorRate: 0.004, p50: 210, p95: 1_340, p99: 2_900, baselineP95: 1_280),
+		Seed(name: "payments", namespace: "commerce", throughput: 9.7, errorRate: 0.012, p50: 120, p95: 410, p99: 880, baselineP95: 120),
+		Seed(name: "web", namespace: "edge", throughput: 380.2, errorRate: 0.0007, p50: 32, p95: 140, p99: 320, baselineP95: 135),
+		Seed(name: "auth", namespace: "platform", throughput: 61.0, errorRate: 0.0002, p50: 18, p95: 61, p99: 140, baselineP95: 58),
+		Seed(name: "catalog", namespace: "commerce", throughput: 27.5, errorRate: 0, p50: 44, p95: 190, p99: 410, baselineP95: 185),
+		Seed(name: "notifications", namespace: "platform", throughput: 3.2, errorRate: 0.001, p50: 90, p95: 380, p99: 720, baselineP95: 360),
+		Seed(name: "worker", namespace: "platform", throughput: 14.9, errorRate: 0, p50: 400, p95: 900, p99: 1_900, baselineP95: 880),
+		Seed(name: "ingest-gateway", namespace: "edge", throughput: 1_240.0, errorRate: 0.0001, p50: 6, p95: 21, p99: 58, baselineP95: 20),
 	]
 
 	private func service(_ seed: Seed, window: ResolvedTimeWindow) -> Service {
 		let seconds = window.end.timeIntervalSince(window.start)
 		let spans = seed.throughput * seconds
 		return Service(
+			baselineP95LatencyMs: seed.baselineP95,
+			baselineSpanCount: (seed.throughput * 7 * 24 * 3_600).rounded(),
 			deploymentEnvironments: ["production"],
 			errorCount: (spans * seed.errorRate).rounded(),
 			errorRate: seed.errorRate,

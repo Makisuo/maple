@@ -123,7 +123,7 @@ struct ServiceDetailView: View {
 						.lineLimit(1)
 					if let service = model?.state.value?.service {
 						HealthDot(
-							health: ServiceHealth(errorRate: service.errorRate, p95LatencyMs: service.p95LatencyMs)
+							health: ServiceHealth(service: service)
 						)
 					}
 				}

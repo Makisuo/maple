@@ -105,7 +105,7 @@ struct HomeSnapshot {
 	}
 
 	private func health(of service: Service) -> ServiceHealth {
-		ServiceHealth(errorRate: service.errorRate, p95LatencyMs: service.p95LatencyMs)
+		ServiceHealth(service: service)
 	}
 }
 

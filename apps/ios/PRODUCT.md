@@ -104,7 +104,11 @@ out. Nothing else.
 
 Reuse the thresholds already ported into `Primitives.swift` from
 `service-health.ts` / `latency-tone.ts` — the phone must agree with the
-browser about what "degraded" means. Home's headline is `max` over per-service
+browser about what "degraded" means. Latency is judged against the service's
+own trailing-7d p95, which `listServices` returns as
+`baseline_p95_latency_ms`; the absolute 1s/3s breaks are only the fallback for
+a service with no usable history, because on their own they call every
+slow-by-design worker degraded forever. Home's headline is `max` over per-service
 health, then bumped to critical if any open incident is critical, then to
 "no data" if `throughput == 0` across the org for the last hour.
 
