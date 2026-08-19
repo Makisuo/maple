@@ -1,7 +1,7 @@
 // BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // Intentionally divergent from the web app's `@/components/logs/log-detail-sheet`:
 // that one is wired to effect-atom (trace timeline, correlated logs) and a wider
-// sub-component family local mode doesn't have. The shareable pieces (AttributesTable,
+// sub-component family local mode doesn't have. The shareable pieces (AttributesSection,
 // SeverityBadge, severity/format libs) already come from @maple/ui.
 
 import { useMemo, useState } from "react"
@@ -20,7 +20,7 @@ import {
 	PulseIcon,
 	XmarkIcon,
 } from "@maple/ui/components/icons"
-import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@maple/ui/components/attributes"
+import { CopyableValue, AttributesSection, ResourceAttributesSection } from "@maple/ui/components/attributes"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { cn } from "@maple/ui/lib/utils"
 import type { LocalLog } from "../lib/log-shape"
@@ -266,7 +266,7 @@ function LogAttributesPanel({ log }: { log: LocalLog }) {
 				/>
 			)}
 
-			<AttributesTable
+			<AttributesSection
 				attributes={log.logAttributes}
 				title="Log Attributes"
 				searchQuery={attrSearch}

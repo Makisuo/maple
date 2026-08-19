@@ -1,6 +1,6 @@
 // Intentionally divergent from the web app's `@/components/traces/span-detail-panel`:
 // that one is wired to effect-atom, infra correlation, and timezone preferences local
-// mode doesn't have. The shareable pieces (AttributesTable, SeverityBadge,
+// mode doesn't have. The shareable pieces (AttributesSection, SeverityBadge,
 // HttpSpanLabel, format/colors libs) already come from @maple/ui.
 
 import { useState } from "react"
@@ -12,7 +12,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { XmarkIcon, ClockIcon, CircleInfoIcon, CodeIcon } from "@maple/ui/components/icons"
-import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@maple/ui/components/attributes"
+import { CopyableValue, AttributesSection, ResourceAttributesSection } from "@maple/ui/components/attributes"
 import { getCacheInfo, cacheResultStyles } from "@maple/ui/lib/cache"
 import { getServiceColor } from "@maple/ui/lib/colors"
 import { formatDuration } from "@maple/ui/lib/format"
@@ -183,7 +183,7 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 							</div>
 
 							{span.isMissing ? (
-								<AttributesTable
+								<AttributesSection
 									attributes={span.spanAttributes ?? {}}
 									title="Span Attributes"
 									groupByNamespace
@@ -197,7 +197,7 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 								</div>
 							) : (
 								<>
-									<AttributesTable
+									<AttributesSection
 										attributes={detail.data?.spanAttributes ?? span.spanAttributes ?? {}}
 										title="Span Attributes"
 										groupByNamespace
