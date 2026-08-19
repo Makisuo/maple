@@ -115,6 +115,10 @@ final class PushRegistrar: NSObject {
 	func syncKey(orgId: String?) -> String {
 		[
 			deviceToken ?? "-",
+			// A push-to-start token arriving after launch has to re-register the
+			// device, or the Lock Screen stays dark for every incident until the
+			// next org switch.
+			LiveActivityController.shared.pushToStartToken ?? "-",
 			orgId ?? "-",
 			String(describing: authorization),
 			orgId.map { preferences(for: $0) }.map { "\($0.hashValue)" } ?? "-",
@@ -134,7 +138,8 @@ final class PushRegistrar: NSObject {
 					bundleId: Bundle.main.bundleIdentifier ?? "com.maple.mobile",
 					appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
 					deviceName: UIDevice.current.model,
-					preferences: preferences(for: orgId)
+					preferences: preferences(for: orgId),
+					liveActivityStartToken: LiveActivityController.shared.pushToStartToken
 				)
 			)
 			lastError = nil

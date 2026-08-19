@@ -97,6 +97,7 @@ import { systemTenant } from "./system-tenant"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { ApnsClient } from "@/platform/Apns"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
 import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { MobilePushService } from "@/services/push/MobilePushService"
 import { AlertRuntime } from "./AlertRuntime"
@@ -171,6 +172,12 @@ const ISSUE_UPSERTS_PER_TICK = 50
 // on Workers a fiber that outlives the invocation is simply cancelled, which
 // would trade a slow notification for a silently dropped one.
 const INCIDENT_PUSHES_PER_TICK = 25
+/**
+ * Checks read for the Lock Screen sparkline. Rules evaluate about once a
+ * minute, so this is the last ~half hour — enough to show the climb that opened
+ * the incident, before the server downsamples it to twelve points.
+ */
+const LIVE_ACTIVITY_CHECK_HISTORY = 30
 const DELIVERY_LEASE_TTL_MS = 30_000
 
 type DatabaseTransaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
@@ -735,6 +742,26 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 										? Math.max(0, scheduledAt - dateToMs(incident.firstTriggeredAt))
 										: null,
 								linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
+								// Unevaluated: the Lock Screen sparkline is the only
+								// consumer, so this warehouse read happens for a critical
+								// incident on a phone that can show one, and nowhere else.
+								recentValues: readModels
+									.listRuleChecks(orgId, rule.id, {
+										...(incident.groupKey === null
+											? undefined
+											: { groupKey: incident.groupKey }),
+										limit: LIVE_ACTIVITY_CHECK_HISTORY,
+									})
+									.pipe(
+										Effect.map((page) =>
+											page.checks.flatMap((check) =>
+												check.observedValue === null ? [] : [check.observedValue],
+											),
+										),
+										// A missing chart is a smaller loss than a missing
+										// notification: never let this fail the push.
+										Effect.orElseSucceed(() => [] as ReadonlyArray<number>),
+									),
 							})
 							.pipe(Effect.timeout("20 seconds"), Effect.ignoreCause)
 					} else {
@@ -3303,7 +3330,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 		// requirements (Env, Database) are the ones this layer already needs.
 		Layer.provide(
 			MobilePushService.layer.pipe(
-				Layer.provide(Layer.mergeAll(ApnsClient.layer, MobileDevicesService.layer)),
+				Layer.provide(
+					Layer.mergeAll(ApnsClient.layer, MobileDevicesService.layer, LiveActivitiesService.layer),
+				),
 			),
 		),
 	)

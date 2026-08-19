@@ -132,9 +132,19 @@ targets:
                     - GeistMono-SemiBold.ttf
                 # DESIGN.md: "terminal-native, dark by default".
                 UIUserInterfaceStyle: Dark
+                # Lock Screen Live Activities for critical incidents. This key
+                # belongs to the *app*, not to the widget extension that declares
+                # the activity — without it `ActivityAuthorizationInfo` reports
+                # activities as unavailable and every push-to-start is dropped.
+                # Deliberately no NSSupportsLiveActivitiesFrequentUpdates: Maple
+                # pushes on trigger, renotify and resolve only, and asking for the
+                # frequent-update budget it does not need would cost the user
+                # battery for nothing.
+                NSSupportsLiveActivities: true
                 # How a widget tap gets back into the app: maple://issue/<id>
                 # and maple://issues, handled by AppNavigation.open(_:). The
-                # scheme is Maple's own and is not claimed by Clerk.
+                # scheme is Maple's own and is not claimed by Clerk. A tapped
+                # Live Activity adds maple://incident/<inc_id>.
                 CFBundleURLTypes:
                     - CFBundleURLName: com.maple.mobile.deeplink
                       CFBundleURLSchemes:

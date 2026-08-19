@@ -49,6 +49,35 @@ export interface ApnsPush {
 	readonly sound?: string | undefined
 }
 
+/**
+ * A Live Activity push. Same connection and key as an alert push, different
+ * topic (`<bundle>.push-type.liveactivity`), different `apns-push-type`, and a
+ * payload where everything lives under `aps` rather than beside it.
+ *
+ * `start` goes to the device's push-to-start token and must carry the
+ * attributes; `update` and `end` go to the activity's own token and carry only
+ * the content state. Getting the token/event pairing wrong is a 400 from Apple
+ * with `BadDeviceToken`, not a no-op.
+ */
+export interface ApnsLiveActivityPush {
+	/** Push-to-start token for `start`; the activity's update token otherwise. */
+	readonly pushToken: string
+	readonly environment: MobilePushEnvironment
+	readonly bundleId: string
+	readonly event: "start" | "update" | "end"
+	/** Required for `start`; ignored by Apple otherwise. */
+	readonly attributesType?: string | undefined
+	readonly attributes?: Record<string, unknown> | undefined
+	readonly contentState: Record<string, unknown>
+	/** Seconds. After this the activity renders as stale rather than as current. */
+	readonly staleAfterSeconds?: number | undefined
+	/** Seconds from now at which an ended activity leaves the Lock Screen. */
+	readonly dismissAfterSeconds?: number | undefined
+	/** Optional banner alongside the activity — `start` only, in practice. */
+	readonly alert?: ApnsAlert | undefined
+	readonly priority?: 5 | 10 | undefined
+}
+
 export type ApnsSendResult =
 	| { readonly outcome: "sent"; readonly apnsId: string | null }
 	/** Apple says this token is dead: stop sending to it. */
@@ -63,6 +92,7 @@ export type ApnsSendResult =
 export interface ApnsClientApi {
 	readonly isConfigured: boolean
 	readonly send: (push: ApnsPush) => Effect.Effect<ApnsSendResult, ApnsError>
+	readonly sendLiveActivity: (push: ApnsLiveActivityPush) => Effect.Effect<ApnsSendResult, ApnsError>
 }
 
 const APNS_HOSTS = {
@@ -83,6 +113,12 @@ const APNS_HOSTS = {
  * — a build that ships another bundle id adds it here.
  */
 const ALLOWED_TOPICS = new Set<string>(["com.maple.mobile"])
+
+/**
+ * Live Activity pushes are signed for a *suffixed* topic. Derived rather than
+ * listed so the allowlist above stays the single place a bundle id is admitted.
+ */
+const liveActivityTopic = (bundleId: string) => `${bundleId}.push-type.liveactivity`
 
 /** Reasons that mean the token itself is gone, per Apple's table. */
 const UNREGISTERED_REASONS = new Set([
@@ -131,15 +167,16 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 			const config = resolveConfig(env)
 
 			if (config === null) {
+				const unconfigured = () =>
+					Effect.fail(
+						new ApnsError({
+							message: "APNs is not configured (APNS_TEAM_ID, APNS_KEY_ID, APNS_PRIVATE_KEY)",
+						}),
+					)
 				return {
 					isConfigured: false,
-					send: () =>
-						Effect.fail(
-							new ApnsError({
-								message:
-									"APNs is not configured (APNS_TEAM_ID, APNS_KEY_ID, APNS_PRIVATE_KEY)",
-							}),
-						),
+					send: unconfigured,
+					sendLiveActivity: unconfigured,
 				} satisfies ApnsClientApi
 			}
 
@@ -236,8 +273,22 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 						? { "apns-collapse-id": push.collapseId.slice(0, 64) }
 						: undefined),
 				}
+				return yield* dispatch(push.environment, push.deviceToken, headers, body)
+			})
+
+			/**
+			 * One POST to Apple and one reading of its answer, shared by both push
+			 * types: the difference between an alert and a Live Activity is entirely
+			 * in the headers and the body, never in how a 410 is interpreted.
+			 */
+			const dispatch = Effect.fn("ApnsClient.dispatch")(function* (
+				environment: MobilePushEnvironment,
+				pushToken: string,
+				headers: Record<string, string>,
+				body: unknown,
+			) {
 				const request = yield* HttpClientRequest.bodyJson(
-					HttpClientRequest.post(`${APNS_HOSTS[push.environment]}/3/device/${push.deviceToken}`, {
+					HttpClientRequest.post(`${APNS_HOSTS[environment]}/3/device/${pushToken}`, {
 						headers,
 					}),
 					body,
@@ -285,7 +336,63 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 				} satisfies ApnsSendResult
 			})
 
-			return { isConfigured: true, send } satisfies ApnsClientApi
+			const sendLiveActivity = Effect.fn("ApnsClient.sendLiveActivity")(function* (
+				push: ApnsLiveActivityPush,
+			) {
+				yield* Effect.annotateCurrentSpan({
+					"maple.push.environment": push.environment,
+					"maple.push.bundle_id": push.bundleId,
+					"maple.push.live_activity_event": push.event,
+					"peer.service": "apns",
+				})
+				if (!ALLOWED_TOPICS.has(push.bundleId)) {
+					return yield* new ApnsError({
+						message: `Refusing to send for an unknown APNs topic: ${push.bundleId}`,
+					})
+				}
+				const token = yield* currentToken
+				const nowSeconds = Math.floor((yield* Clock.currentTimeMillis) / 1000)
+				const body = {
+					aps: {
+						// Seconds, and Apple drops an update whose timestamp is not
+						// newer than the last one it delivered — so it is the wall
+						// clock, never a constant.
+						timestamp: nowSeconds,
+						event: push.event,
+						"content-state": push.contentState,
+						...(push.event === "start" && push.attributesType !== undefined
+							? { "attributes-type": push.attributesType, attributes: push.attributes ?? {} }
+							: undefined),
+						...(push.staleAfterSeconds !== undefined
+							? { "stale-date": nowSeconds + push.staleAfterSeconds }
+							: undefined),
+						...(push.event === "end" && push.dismissAfterSeconds !== undefined
+							? { "dismissal-date": nowSeconds + push.dismissAfterSeconds }
+							: undefined),
+						...(push.alert !== undefined
+							? {
+									alert: {
+										title: push.alert.title,
+										...(push.alert.subtitle !== undefined
+											? { subtitle: push.alert.subtitle }
+											: undefined),
+										body: push.alert.body,
+									},
+								}
+							: undefined),
+					},
+				}
+				const headers = {
+					authorization: `bearer ${token}`,
+					"apns-topic": liveActivityTopic(push.bundleId),
+					"apns-push-type": "liveactivity",
+					"apns-priority": String(push.priority ?? 10),
+					"apns-expiration": String(nowSeconds + 3600),
+				}
+				return yield* dispatch(push.environment, push.pushToken, headers, body)
+			})
+
+			return { isConfigured: true, send, sendLiveActivity } satisfies ApnsClientApi
 		}),
 	},
 ) {

@@ -1,8 +1,9 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { CurrentTenant } from "@maple/domain/http"
+import { CurrentTenant, MobileDeviceNotFoundError } from "@maple/domain/http"
 import type { V2MobileDevice } from "@maple/domain/http/v2"
 import { MapleApiV2, isoTimestamp } from "@maple/domain/http/v2"
 import { Effect } from "effect"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
 import { MobileDevicesService, type MobileDevice } from "@/services/push/MobileDevicesService"
 
 const toV2 = (device: MobileDevice): V2MobileDevice => ({
@@ -21,6 +22,7 @@ const toV2 = (device: MobileDevice): V2MobileDevice => ({
 		new_error_issues: device.preferences.newErrorIssues,
 		anomalies: device.preferences.anomalies,
 	},
+	live_activities_enabled: device.liveActivityStartToken !== null,
 	enabled: device.enabled,
 	last_seen_at: isoTimestamp(device.lastSeenAtMs),
 	created_at: isoTimestamp(device.createdAtMs),
@@ -29,6 +31,7 @@ const toV2 = (device: MobileDevice): V2MobileDevice => ({
 export const HttpV2MobileDevicesLive = HttpApiBuilder.group(MapleApiV2, "mobileDevices", (handlers) =>
 	Effect.gen(function* () {
 		const devices = yield* MobileDevicesService
+		const activities = yield* LiveActivitiesService
 
 		return handlers
 			.handle("list", () =>
@@ -53,6 +56,7 @@ export const HttpV2MobileDevicesLive = HttpApiBuilder.group(MapleApiV2, "mobileD
 						bundleId: payload.bundle_id,
 						appVersion: payload.app_version,
 						deviceName: payload.device_name,
+						liveActivityStartToken: payload.live_activity_start_token,
 						preferences:
 							payload.preferences === undefined
 								? undefined
@@ -65,6 +69,62 @@ export const HttpV2MobileDevicesLive = HttpApiBuilder.group(MapleApiV2, "mobileD
 									},
 					})
 					return toV2(device)
+				}),
+			)
+			.handle("registerLiveActivity", ({ params, payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					// The activity belongs to a device, and the device is what says
+					// which APNs host its tokens live on — an activity whose device is
+					// gone could never be pushed to.
+					const device = yield* devices.find(tenant.orgId, "ios", params.token)
+					if (device === null) {
+						return yield* new MobileDeviceNotFoundError({
+							message: "Device not registered",
+							token: params.token,
+						})
+					}
+					const activity = yield* activities.register({
+						orgId: tenant.orgId,
+						deviceId: device.id,
+						incidentId: params.incident_id,
+						activityId: payload.activity_id,
+						pushToken: payload.push_token,
+					})
+					return {
+						object: "live_activity" as const,
+						// The path param is already the decoded internal id; the success
+						// schema re-encodes it to `inc_…` on the way out.
+						incident_id: params.incident_id,
+						activity_id: activity.activityId,
+						ended: activity.endedAtMs !== null,
+						created_at: isoTimestamp(activity.createdAtMs),
+					}
+				}),
+			)
+			.handle("endLiveActivity", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const device = yield* devices.find(tenant.orgId, "ios", params.token)
+					if (device === null) {
+						return yield* new MobileDeviceNotFoundError({
+							message: "Device not registered",
+							token: params.token,
+						})
+					}
+					yield* activities.endForDevice(
+						tenant.orgId,
+						device.id,
+						params.incident_id,
+						"ended_on_device",
+					)
+					// Idempotent: an activity the server never knew about is already
+					// in the state the app is asking for.
+					return {
+						object: "live_activity" as const,
+						incident_id: params.incident_id,
+						deleted: true as const,
+					}
 				}),
 			)
 			.handle("unregister", ({ params }) =>

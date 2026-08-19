@@ -63,6 +63,8 @@ const IOS_OPERATIONS: ReadonlyArray<string> = [
 	"listMobileDevices",
 	"registerMobileDevice",
 	"unregisterMobileDevice",
+	"registerLiveActivity",
+	"endLiveActivity",
 ]
 
 const ERROR_ENVELOPE_SCHEMA_NAME = "MapleErrorEnvelope"

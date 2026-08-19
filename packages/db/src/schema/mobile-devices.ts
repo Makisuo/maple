@@ -40,6 +40,14 @@ export const mobileDevices = pgTable(
 		environment: text("environment").notNull(),
 		bundleId: text("bundle_id").notNull(),
 		appVersion: text("app_version"),
+		/**
+		 * The ActivityKit push-to-start token, hex. Present once the app has run
+		 * on iOS 17.2+ with Live Activities enabled; it lets the server *create* a
+		 * Live Activity on a locked phone that has never opened the app today.
+		 * Distinct from `token` — a push here starts an activity, a push there
+		 * shows a notification.
+		 */
+		liveActivityStartToken: text("live_activity_start_token"),
 		deviceName: text("device_name"),
 		preferences: jsonb("preferences").$type<MobileDevicePreferences>().notNull(),
 		/** Set when APNs reports the token dead (410 / BadDeviceToken); the row is kept for the audit trail. */

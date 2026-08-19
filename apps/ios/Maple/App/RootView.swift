@@ -72,6 +72,7 @@ struct MainTabView: View {
 	@Environment(\.scenePhase) private var scenePhase
 	private let push = PushRegistrar.shared
 	private let widgets = WidgetPublisher.shared
+	private let liveActivities = LiveActivityController.shared
 
 	var body: some View {
 		@Bindable var navigation = navigation
@@ -97,6 +98,13 @@ struct MainTabView: View {
 		// The Home Screen widget's data. Keyed on the org so a switch republishes
 		// immediately rather than leaving the previous org's counts on the Home
 		// Screen until the next background refresh.
+		// Live Activities: the observation tasks have to be running before a push
+		// can start one, and the push-to-start token only reaches the server
+		// through the registration above — hence both, keyed on the org.
+		.task(id: session.currentOrganizationId) {
+			guard let orgId = session.currentOrganizationId else { return }
+			liveActivities.configure(api: session.api, organizationId: orgId)
+		}
 		.task(id: session.currentOrganizationId) {
 			guard let orgId = session.currentOrganizationId else { return }
 			widgets.configure(

@@ -134,6 +134,9 @@ public protocol MapleAPI: Sendable {
 	func registerDevice(_ registration: DeviceRegistration) async throws -> MobileDevice
 	func unregisterDevice(token: String) async throws
 	func myDevices() async throws -> [MobileDevice]
+	func registerLiveActivity(deviceToken: String, incidentId: String, activityId: String, pushToken: String)
+		async throws
+	func endLiveActivity(deviceToken: String, incidentId: String) async throws
 
 	// Telemetry — see MapleClient+Telemetry.swift
 	func traceTimeseries(_ request: TraceTimeseriesRequest) async throws -> TraceTimeseriesResult

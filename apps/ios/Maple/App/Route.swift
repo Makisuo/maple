@@ -106,6 +106,11 @@ final class AppNavigation {
 	func open(_ url: URL) {
 		guard url.scheme == IssuesWidgetKind.urlScheme else { return }
 		switch url.host() {
+		case "incident":
+			// `maple://incident/<id>` — a tapped Live Activity. The id is the
+			// public `inc_…` form the activity was started with.
+			let id = url.pathComponents.first { $0 != "/" }
+			if let id, !id.isEmpty { openIncident(id: id) } else { open(.incidents) }
 		case "issues":
 			open(.errors)
 		case "issue":

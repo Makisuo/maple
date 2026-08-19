@@ -629,6 +629,7 @@ struct FixtureAPI: MapleAPI {
 			environment: registration.environment,
 			id: "mdev_fixture",
 			lastSeenAt: stamp(0),
+			liveActivitiesEnabled: registration.liveActivityStartToken != nil,
 			object: .mobileDevice,
 			platform: .ios,
 			preferences: .init(
@@ -649,6 +650,19 @@ struct FixtureAPI: MapleAPI {
 	func myDevices() async throws -> [MobileDevice] {
 		try await pause()
 		return []
+	}
+
+	func registerLiveActivity(
+		deviceToken: String,
+		incidentId: String,
+		activityId: String,
+		pushToken: String
+	) async throws {
+		try await pause()
+	}
+
+	func endLiveActivity(deviceToken: String, incidentId: String) async throws {
+		try await pause()
 	}
 
 	// MARK: Helpers

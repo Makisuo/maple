@@ -220,6 +220,9 @@ final class SessionController {
 		// While the token is still valid: the server keys the device on the
 		// org in the token, so this has to happen before Clerk drops it.
 		await PushRegistrar.shared.unregisterAll(api: api)
+		// Same reason, plus one of its own: an activity left running would keep
+		// someone else's incident on this phone's Lock Screen after sign-out.
+		await LiveActivityController.shared.stop()
 		try? await Clerk.shared.auth.signOut()
 		memberships = []
 		membershipsLoaded = false

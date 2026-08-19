@@ -3,7 +3,7 @@ import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
-import { MapleApiV2 } from "@maple/domain/http/v2"
+import { MapleApiV2, encodePublicId } from "@maple/domain/http/v2"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { Env } from "@/platform/Env"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
@@ -11,6 +11,7 @@ import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
 import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
@@ -36,6 +37,9 @@ afterEach(() => cleanupTestDbs(createdDbs))
 const ORG = Schema.decodeUnknownSync(OrgId)("org_mobile_e2e")
 const USER = Schema.decodeUnknownSync(UserId)("user_mobile_e2e")
 const TOKEN = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+/** ActivityKit's two extra tokens: one starts an activity, one updates it. */
+const START_TOKEN = "b1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+const ACTIVITY_TOKEN = "c1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
 
 const testConfig = () =>
 	ConfigProvider.layer(
@@ -62,6 +66,7 @@ const makeHarness = () => {
 		DashboardPersistenceService.layer,
 		SharedDashboardService.layer,
 		MobileDevicesService.layer,
+		LiveActivitiesService.layer,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
@@ -185,6 +190,84 @@ describe("v2 mobile devices", () => {
 
 			const empty = await harness.request("GET", "/v2/mobile_devices", key.secret)
 			expect(empty.body.data).toEqual([])
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("records and forgets a Live Activity's update token", async () => {
+		const harness = makeHarness()
+		try {
+			const key = await harness.bootstrapKey()
+			const incidentId = "0f8fad5b-d9cb-469f-a165-70867728950e"
+			const publicIncidentId = encodePublicId("inc", incidentId)
+
+			// Registering an activity before the device exists is a 404, not a
+			// dangling row: the device is what says which APNs host to push to.
+			const orphan = await harness.request(
+				"PUT",
+				`/v2/mobile_devices/${TOKEN}/live_activities/${publicIncidentId}`,
+				key.secret,
+				{ activity_id: "activity-1", push_token: ACTIVITY_TOKEN },
+			)
+			expect(orphan.status).toBe(404)
+
+			const device = await harness.request("PUT", `/v2/mobile_devices/${TOKEN}`, key.secret, {
+				platform: "ios",
+				environment: "sandbox",
+				bundle_id: "com.maple.mobile",
+				live_activity_start_token: START_TOKEN,
+			})
+			expect(device.status).toBe(200)
+			expect(device.body.live_activities_enabled).toBe(true)
+
+			const registered = await harness.request(
+				"PUT",
+				`/v2/mobile_devices/${TOKEN}/live_activities/${publicIncidentId}`,
+				key.secret,
+				{ activity_id: "activity-1", push_token: ACTIVITY_TOKEN },
+			)
+			expect(registered.status).toBe(200)
+			expect(registered.body.incident_id).toBe(publicIncidentId)
+			expect(registered.body.ended).toBe(false)
+
+			const running = await harness.runtime.runPromise(
+				Effect.gen(function* () {
+					const activities = yield* LiveActivitiesService
+					return yield* activities.listActive(ORG, incidentId)
+				}),
+			)
+			expect(running.map((row) => row.pushToken)).toEqual([ACTIVITY_TOKEN])
+
+			// iOS rotated the token: the same (device, incident) is updated, not
+			// duplicated.
+			const rotated = await harness.request(
+				"PUT",
+				`/v2/mobile_devices/${TOKEN}/live_activities/${publicIncidentId}`,
+				key.secret,
+				{ activity_id: "activity-1", push_token: `${ACTIVITY_TOKEN}ff` },
+			)
+			expect(rotated.status).toBe(200)
+
+			const ended = await harness.request(
+				"DELETE",
+				`/v2/mobile_devices/${TOKEN}/live_activities/${publicIncidentId}`,
+				key.secret,
+			)
+			expect(ended.status).toBe(200)
+			expect(ended.body).toEqual({
+				object: "live_activity",
+				incident_id: publicIncidentId,
+				deleted: true,
+			})
+
+			const afterEnd = await harness.runtime.runPromise(
+				Effect.gen(function* () {
+					const activities = yield* LiveActivitiesService
+					return yield* activities.listActive(ORG, incidentId)
+				}),
+			)
+			expect(afterEnd).toEqual([])
 		} finally {
 			await harness.dispose()
 		}

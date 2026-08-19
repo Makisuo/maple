@@ -33,6 +33,8 @@ export interface MobileDevice {
 	readonly bundleId: string
 	readonly appVersion: string | null
 	readonly deviceName: string | null
+	/** ActivityKit push-to-start token, or null on a build/OS that has none. */
+	readonly liveActivityStartToken: string | null
 	readonly preferences: ResolvedMobileDevicePreferences
 	readonly enabled: boolean
 	readonly lastSeenAtMs: number
@@ -46,6 +48,8 @@ export interface RegisterMobileDeviceInput {
 	readonly bundleId: string
 	readonly appVersion?: string | undefined
 	readonly deviceName?: string | undefined
+	/** Absent keeps the stored token: an older app build must not erase it. */
+	readonly liveActivityStartToken?: string | undefined
 	/** Partial: absent keys keep the stored value (or the default on first registration). */
 	readonly preferences?: Partial<ResolvedMobileDevicePreferences> | undefined
 }
@@ -66,6 +70,12 @@ export interface MobileDevicesServiceApi {
 		orgId: OrgId,
 		userId: UserId,
 	) => Effect.Effect<ReadonlyArray<MobileDevice>, MobileDevicePersistenceError>
+	/** One device by its push token, or null. */
+	readonly find: (
+		orgId: OrgId,
+		platform: MobilePlatform,
+		token: string,
+	) => Effect.Effect<MobileDevice | null, MobileDevicePersistenceError>
 	/** Enabled devices only — what the fan-out sends to. */
 	readonly listForOrg: (
 		orgId: OrgId,
@@ -99,6 +109,7 @@ const toDevice = (row: MobileDeviceRow): MobileDevice => ({
 	bundleId: row.bundleId,
 	appVersion: row.appVersion,
 	deviceName: row.deviceName,
+	liveActivityStartToken: row.liveActivityStartToken,
 	preferences: resolveMobileDevicePreferences(row.preferences),
 	enabled: row.disabledAt === null,
 	lastSeenAtMs: dateToMs(row.lastSeenAt),
@@ -176,6 +187,8 @@ export class MobileDevicesService extends Context.Service<MobileDevicesService, 
 								bundleId: input.bundleId,
 								appVersion: input.appVersion ?? existing.appVersion,
 								deviceName: input.deviceName ?? existing.deviceName,
+								liveActivityStartToken:
+									input.liveActivityStartToken ?? existing.liveActivityStartToken,
 								preferences,
 								disabledAt: null,
 								disabledReason: null,
@@ -201,6 +214,7 @@ export class MobileDevicesService extends Context.Service<MobileDevicesService, 
 							bundleId: input.bundleId,
 							appVersion: input.appVersion ?? null,
 							deviceName: input.deviceName ?? null,
+							liveActivityStartToken: input.liveActivityStartToken ?? null,
 							preferences,
 							disabledAt: null,
 							disabledReason: null,
@@ -239,6 +253,15 @@ export class MobileDevicesService extends Context.Service<MobileDevicesService, 
 					return yield* new MobileDeviceNotFoundError({ message: "Device not registered", token })
 				}
 				return toDevice(row)
+			})
+
+			const find = Effect.fn("MobileDevicesService.find")(function* (
+				orgId: OrgId,
+				platform: MobilePlatform,
+				token: string,
+			) {
+				const row = yield* findRow(orgId, platform, token)
+				return row === null ? null : toDevice(row)
 			})
 
 			const listForUser = Effect.fn("MobileDevicesService.listForUser")(function* (
@@ -300,6 +323,7 @@ export class MobileDevicesService extends Context.Service<MobileDevicesService, 
 			return {
 				register,
 				unregister,
+				find,
 				listForUser,
 				listForOrg,
 				disable,

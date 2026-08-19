@@ -1756,6 +1756,100 @@
         ],
         "type": "object"
       },
+      "LiveActivity": {
+        "additionalProperties": false,
+        "description": "A Lock Screen Live Activity running on one device for one alert incident. Maple pushes updates to it as the incident renotifies, and ends it when the incident resolves.",
+        "examples": [
+          {
+            "activity_id": "F9E1B4C0-8F2A-4C6D-9E1B-4C08F2A4C6D9",
+            "created_at": "2026-08-17T09:10:00.000Z",
+            "ended": false,
+            "incident_id": "inc_YofPTrK9782DWwcnXhpcCw",
+            "object": "live_activity"
+          }
+        ],
+        "properties": {
+          "activity_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "incident_id": {
+            "$ref": "#/components/schemas/_maple_AlertIncidentId"
+          },
+          "object": {
+            "description": "The object type — always `\"live_activity\"`.",
+            "enum": [
+              "live_activity"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "incident_id",
+          "activity_id",
+          "ended",
+          "created_at"
+        ],
+        "title": "Live Activity",
+        "type": "object"
+      },
+      "LiveActivityDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deleted": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "incident_id": {
+            "$ref": "#/components/schemas/_maple_AlertIncidentId"
+          },
+          "object": {
+            "enum": [
+              "live_activity"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "incident_id",
+          "deleted"
+        ],
+        "title": "Live Activity delete response",
+        "type": "object"
+      },
+      "LiveActivityRegisterParams": {
+        "additionalProperties": false,
+        "description": "Hands Maple the update token for an activity the device just started. Idempotent on `(device, incident)`.",
+        "properties": {
+          "activity_id": {
+            "description": "ActivityKit's own identifier for the running activity.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "push_token": {
+            "description": "The activity's APNs update token, hex. Different from both the device token and the push-to-start token, and rotated by iOS — the app re-submits it on every rotation.",
+            "maxLength": 512,
+            "minLength": 16,
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity_id",
+          "push_token"
+        ],
+        "title": "Live Activity registration",
+        "type": "object"
+      },
       "MapleErrorEnvelope": {
         "additionalProperties": false,
         "description": "Every Maple API failure returns this envelope. Branch on `error._tag`.",
@@ -1835,6 +1929,7 @@
             "environment": "production",
             "id": "mdev_YofPTrK9782DWwcnXhpcCw",
             "last_seen_at": "2026-08-17T09:10:00.000Z",
+            "live_activities_enabled": true,
             "object": "mobile_device",
             "platform": "ios",
             "preferences": {
@@ -1872,6 +1967,10 @@
           },
           "last_seen_at": {
             "type": "string"
+          },
+          "live_activities_enabled": {
+            "description": "`true` once the device has handed over a Live Activity push-to-start token, meaning critical incidents can raise a Lock Screen Live Activity on it.",
+            "type": "boolean"
           },
           "object": {
             "description": "The object type — always `\"mobile_device\"`.",
@@ -1934,6 +2033,7 @@
           "environment",
           "bundle_id",
           "preferences",
+          "live_activities_enabled",
           "enabled",
           "last_seen_at",
           "created_at"
@@ -2031,6 +2131,13 @@
           },
           "environment": {
             "$ref": "#/components/schemas/_maple_MobilePushEnvironment"
+          },
+          "live_activity_start_token": {
+            "description": "ActivityKit's push-to-start token, hex. Lets Maple start a Lock Screen Live Activity for a critical incident on a phone that has not opened the app. Opaque to Maple.",
+            "maxLength": 512,
+            "minLength": 16,
+            "title": "Live Activity push-to-start token",
+            "type": "string"
           },
           "platform": {
             "enum": [
@@ -5283,6 +5390,312 @@
           }
         ],
         "summary": "Register or refresh a device",
+        "tags": [
+          "Mobile Devices"
+        ]
+      }
+    },
+    "/v2/mobile_devices/{token}/live_activities/{incident_id}": {
+      "delete": {
+        "description": "Called when the activity ended on the device — dismissed by the user or ended by the app — so Maple stops pushing to a dead token. Requires the `mobile_devices:write` scope.",
+        "operationId": "endLiveActivity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "description": "The platform push token — the hex APNs device token on iOS. Opaque to Maple.",
+              "examples": [
+                "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+              ],
+              "maxLength": 512,
+              "minLength": 16,
+              "title": "Device token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/_maple_AlertIncidentId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveActivityDeleteResponse"
+                }
+              }
+            },
+            "description": "LiveActivityDeleteResponse"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/MobileDeviceNotFoundError failure. HTTP 404."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/MobileDevicePersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Forget a Live Activity",
+        "tags": [
+          "Mobile Devices"
+        ]
+      },
+      "put": {
+        "description": "Records the APNs update token for a Live Activity the device started for this incident, so Maple can update and end it. Requires the `mobile_devices:write` scope.",
+        "operationId": "registerLiveActivity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "description": "The platform push token — the hex APNs device token on iOS. Opaque to Maple.",
+              "examples": [
+                "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+              ],
+              "maxLength": 512,
+              "minLength": 16,
+              "title": "Device token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/_maple_AlertIncidentId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveActivityRegisterParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveActivity"
+                }
+              }
+            },
+            "description": "A Lock Screen Live Activity running on one device for one alert incident. Maple pushes updates to it as the incident renotifies, and ends it when the incident resolves."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/MobileDeviceNotFoundError failure. HTTP 404."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/MobileDevicePersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register a Live Activity update token",
         "tags": [
           "Mobile Devices"
         ]

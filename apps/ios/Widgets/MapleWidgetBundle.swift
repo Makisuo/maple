@@ -11,5 +11,8 @@ struct MapleWidgetBundle: WidgetBundle {
 	var body: some Widget {
 		IssuesWidget()
 		ThroughputWidget()
+		// A Live Activity is declared here like any other widget; it just never
+		// appears in the gallery, because only a running activity can show it.
+		IncidentActivityWidget()
 	}
 }

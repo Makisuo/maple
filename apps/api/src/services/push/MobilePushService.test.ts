@@ -2,9 +2,15 @@ import { assert, describe, expect, it } from "@effect/vitest"
 import { encodePublicId } from "@maple/domain/http/v2"
 import { MobileDeviceId, OrgId, UserId } from "@maple/domain/primitives"
 import { Effect, Layer, Schema } from "effect"
-import { ApnsClient, type ApnsPush, type ApnsSendResult } from "@/platform/Apns"
+import { ApnsClient, type ApnsLiveActivityPush, type ApnsPush, type ApnsSendResult } from "@/platform/Apns"
+import { LiveActivitiesService, type LiveActivity } from "./LiveActivitiesService"
 import { MobileDevicesService, type MobileDevice } from "./MobileDevicesService"
-import { MobilePushService, renderIncidentPush, type IncidentPushEvent } from "./MobilePushService"
+import {
+	MobilePushService,
+	buildLiveActivitySeries,
+	renderIncidentPush,
+	type IncidentPushEvent,
+} from "./MobilePushService"
 
 const ORG = Schema.decodeUnknownSync(OrgId)("org_push_test")
 const USER = Schema.decodeUnknownSync(UserId)("user_push_test")
@@ -21,6 +27,7 @@ const device = (n: number, overrides: Partial<MobileDevice> = {}): MobileDevice 
 	bundleId: "com.maple.mobile",
 	appVersion: null,
 	deviceName: null,
+	liveActivityStartToken: `start-${n}`,
 	preferences: {
 		criticalIncidents: true,
 		warningIncidents: true,
@@ -56,12 +63,36 @@ const event = (overrides: Partial<IncidentPushEvent> = {}): IncidentPushEvent =>
 	...overrides,
 })
 
+/** What a running Live Activity looks like to the fan-out. */
+const activity = (n: number, overrides: Partial<LiveActivity> = {}): LiveActivity => ({
+	id: `act-${n}`,
+	orgId: ORG,
+	deviceId: deviceId(n),
+	incidentId: "inc-1",
+	activityId: `activity-${n}`,
+	pushToken: `update-${n}`,
+	endedAtMs: null,
+	createdAtMs: 0,
+	...overrides,
+})
+
+interface LiveActivityRecorder {
+	readonly pushes: Array<ApnsLiveActivityPush>
+	readonly ended: Array<string>
+}
+
 const makeLayer = (
 	devices: ReadonlyArray<MobileDevice>,
 	sendImpl: (push: ApnsPush) => ApnsSendResult,
 	sent: Array<ApnsPush>,
 	disabled: Array<string>,
 	configured = true,
+	live: LiveActivityRecorder = { pushes: [], ended: [] },
+	running: ReadonlyArray<LiveActivity> = [],
+	liveSendImpl: (push: ApnsLiveActivityPush) => ApnsSendResult = () => ({
+		outcome: "sent",
+		apnsId: null,
+	}),
 ) =>
 	MobilePushService.layer.pipe(
 		Layer.provide(
@@ -72,10 +103,15 @@ const makeLayer = (
 						sent.push(push)
 						return Effect.succeed(sendImpl(push))
 					},
+					sendLiveActivity: (push) => {
+						live.pushes.push(push)
+						return Effect.succeed(liveSendImpl(push))
+					},
 				}),
 				Layer.succeed(MobileDevicesService, {
 					register: () => Effect.die("unused"),
 					unregister: () => Effect.die("unused"),
+					find: () => Effect.die("unused"),
 					listForUser: () => Effect.die("unused"),
 					listForOrg: () => Effect.succeed(devices),
 					disable: (id, reason) => {
@@ -83,6 +119,15 @@ const makeLayer = (
 						return Effect.void
 					},
 					markPushed: () => Effect.void,
+				}),
+				Layer.succeed(LiveActivitiesService, {
+					register: () => Effect.die("unused"),
+					listActive: () => Effect.succeed(running),
+					end: (id, reason) => {
+						live.ended.push(`${id}:${reason}`)
+						return Effect.void
+					},
+					endForDevice: () => Effect.die("unused"),
 				}),
 			),
 		),
@@ -193,6 +238,201 @@ describe("MobilePushService.notifyIncident", () => {
 		}).pipe(
 			Effect.provide(
 				makeLayer([device(1)], () => ({ outcome: "sent", apnsId: null }), sent, [], false),
+			),
+		)
+	})
+})
+
+describe("buildLiveActivitySeries", () => {
+	it("puts the checks oldest-first and appends the value that fired this push", () => {
+		// `listRuleChecks` returns newest first, and the check that just fired is
+		// usually still in flight through the ingest pipeline — so the current
+		// value has to be appended or the chart lags the number beside it.
+		expect(buildLiveActivitySeries(event({ value: 0.091 }), [0.074, 0.052, 0.031])).toEqual([
+			0.031, 0.052, 0.074, 0.091,
+		])
+	})
+
+	it("keeps the last twelve points and drops non-finite ones", () => {
+		const many = Array.from({ length: 40 }, (_, index) => index)
+		const series = buildLiveActivitySeries(event({ value: 99 }), many.slice().reverse())
+		expect(series).toHaveLength(12)
+		expect(series.at(-1)).toBe(99)
+		expect(series.at(0)).toBe(29)
+		expect(buildLiveActivitySeries(event({ value: 1 }), [Number.NaN, 2])).toEqual([2, 1])
+	})
+
+	it("is just the value when there is no history, and empty when there is neither", () => {
+		expect(buildLiveActivitySeries(event({ value: 0.09 }), [])).toEqual([0.09])
+		expect(buildLiveActivitySeries(event({ value: null }), [])).toEqual([])
+	})
+})
+
+describe("MobilePushService live activities", () => {
+	it.effect("starts one on every phone with a push-to-start token when a critical incident opens", () => {
+		const live: LiveActivityRecorder = { pushes: [], ended: [] }
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			yield* push.notifyIncident(event({ recentValues: Effect.succeed([0.074, 0.052, 0.031]) }))
+			assert.deepStrictEqual(
+				live.pushes.map((p) => [p.pushToken, p.event, p.environment]),
+				[
+					["start-1", "start", "production"],
+					["start-3", "start", "sandbox"],
+				],
+			)
+			const [first] = live.pushes
+			assert.strictEqual(first!.attributesType, "IncidentActivityAttributes")
+			assert.deepStrictEqual(first!.attributes, {
+				incident_id: encodePublicId("inc", "inc-1"),
+				rule_name: "Checkout error rate",
+				service: "checkout-api",
+				signal_label: "Error Rate",
+				// Epoch seconds, never an ISO string — ActivityKit decodes this
+				// dictionary with a plain JSONDecoder.
+				started_at: first!.attributes!.started_at,
+			})
+			assert.strictEqual(typeof first!.attributes!.started_at, "number")
+			assert.deepStrictEqual(
+				{ ...first!.contentState, updated_at: 0 },
+				{
+					value: "9.1%",
+					threshold: "> 5%",
+					status: "firing",
+					updated_at: 0,
+					// The chart: recent checks oldest-first, then the current value.
+					series: [0.031, 0.052, 0.074, 0.091],
+					// Raw, not formatted — the sparkline rules it off in the series' units.
+					threshold_value: 0.05,
+				},
+			)
+		}).pipe(
+			Effect.provide(
+				makeLayer(
+					[
+						device(1),
+						// Opted out of critical pushes: no banner, and no Lock Screen.
+						device(2, { preferences: { ...device(2).preferences, criticalIncidents: false } }),
+						device(3, { environment: "sandbox" }),
+						// iOS with Live Activities switched off.
+						device(4, { liveActivityStartToken: null }),
+					],
+					() => ({ outcome: "sent", apnsId: null }),
+					[],
+					[],
+					true,
+					live,
+				),
+			),
+		)
+	})
+
+	it.effect("never lets the chart read fail the push", () => {
+		const live: LiveActivityRecorder = { pushes: [], ended: [] }
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			yield* push.notifyIncident(event({ recentValues: Effect.die("the warehouse is having a day") }))
+			// Started anyway, with just the current value as the series.
+			assert.deepStrictEqual(
+				live.pushes.map((p) => p.event),
+				["start"],
+			)
+			assert.deepStrictEqual(live.pushes[0]!.contentState.series, [0.091])
+		}).pipe(
+			Effect.provide(
+				makeLayer([device(1)], () => ({ outcome: "sent", apnsId: null }), [], [], true, live),
+			),
+		)
+	})
+
+	it.effect("leaves the Lock Screen alone for a warning", () => {
+		const live: LiveActivityRecorder = { pushes: [], ended: [] }
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			yield* push.notifyIncident(event({ severity: "warning" }))
+			assert.strictEqual(live.pushes.length, 0)
+		}).pipe(
+			Effect.provide(
+				makeLayer([device(1)], () => ({ outcome: "sent", apnsId: null }), [], [], true, live),
+			),
+		)
+	})
+
+	it.effect("updates the running activities on a renotify and ends them on a resolve", () => {
+		const live: LiveActivityRecorder = { pushes: [], ended: [] }
+		const running = [activity(1)]
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			yield* push.notifyIncident(event({ eventType: "renotify" }))
+			assert.deepStrictEqual(
+				live.pushes.map((p) => [p.pushToken, p.event, p.dismissAfterSeconds]),
+				[["update-1", "update", undefined]],
+			)
+			assert.deepStrictEqual(live.ended, [])
+
+			yield* push.notifyIncident(event({ eventType: "resolve", value: 0.012 }))
+			const end = live.pushes[1]!
+			assert.strictEqual(end.event, "end")
+			assert.strictEqual(end.contentState.status, "resolved")
+			assert.strictEqual(end.contentState.value, "1.2%")
+			// The activity clears itself rather than sitting there resolved forever.
+			assert.strictEqual(end.dismissAfterSeconds, 5 * 60)
+			assert.deepStrictEqual(live.ended, ["act-1:incident_resolved"])
+		}).pipe(
+			Effect.provide(
+				makeLayer(
+					[device(1)],
+					() => ({ outcome: "sent", apnsId: null }),
+					[],
+					[],
+					true,
+					live,
+					running,
+				),
+			),
+		)
+	})
+
+	it.effect("closes the row when the user dismissed the activity", () => {
+		const live: LiveActivityRecorder = { pushes: [], ended: [] }
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			yield* push.notifyIncident(event({ eventType: "renotify" }))
+			assert.deepStrictEqual(live.ended, ["act-1:Unregistered"])
+		}).pipe(
+			Effect.provide(
+				makeLayer(
+					[device(1)],
+					() => ({ outcome: "sent", apnsId: null }),
+					[],
+					[],
+					true,
+					live,
+					[activity(1)],
+					() => ({ outcome: "unregistered", reason: "Unregistered" }),
+				),
+			),
+		)
+	})
+
+	it.effect("still ends the activity when nobody wants the resolve notification", () => {
+		const live: LiveActivityRecorder = { pushes: [], ended: [] }
+		const quiet = device(1, {
+			preferences: { ...device(1).preferences, resolvedIncidents: false },
+		})
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			const summary = yield* push.notifyIncident(event({ eventType: "resolve" }))
+			assert.deepStrictEqual(summary, { sent: 0, failed: 0, unregistered: 0, skipped: 1 })
+			assert.deepStrictEqual(
+				live.pushes.map((p) => p.event),
+				["end"],
+			)
+		}).pipe(
+			Effect.provide(
+				makeLayer([quiet], () => ({ outcome: "sent", apnsId: null }), [], [], true, live, [
+					activity(1),
+				]),
 			),
 		)
 	})

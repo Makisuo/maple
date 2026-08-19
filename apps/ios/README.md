@@ -75,6 +75,60 @@ installs have none — Apple re-signs and strips it) as production. The simulato
 nothing is delivered to it from a Worker — registering from the simulator
 leaves a row Apple rejects with `BadDeviceToken`, which disables it.
 
+## The Lock Screen Live Activity
+
+A **critical** incident raises a Live Activity — the card that sits on the Lock
+Screen until the incident resolves, counting how long it has been going on. It
+is declared in the same widget extension (`Widgets/IncidentActivityWidget.swift`)
+but it is not on a timeline: what it shows is whatever the last APNs push said.
+
+Three tokens are in play, which is the whole complexity of the feature:
+
+| Token               | Who issues it             | What it does             |
+| ------------------- | ------------------------- | ------------------------ |
+| APNs device token   | iOS, once per install     | notifications            |
+| push-to-start token | ActivityKit, per install  | **creates** an activity  |
+| activity push token | ActivityKit, per activity | **updates and ends** one |
+
+The push-to-start token means the phone never has to have opened the app for an
+incident to appear: it rides along on the device registration, and the server
+pushes to it directly. The activity's own token only exists once the activity is
+running and is handed to the _app_, so `LiveActivityController` posts it back to
+`PUT /v2/mobile_devices/{token}/live_activities/{incident_id}`. Without that
+second token an activity would start and then freeze on the numbers it started
+with. Because both ride on the device row, a phone that refused notification
+permission gets no Live Activities either — the registration that carries the
+start token never happens.
+
+Server side, `MobilePushService.syncLiveActivities` starts on `trigger`, updates
+on `renotify`, and ends on `resolve` with a resolved state that clears itself
+after five minutes. The activity is sent **in addition to** the notification,
+never instead of it.
+
+The card carries a sparkline of the last twelve checks with the threshold ruled
+off dashed — the shape answers what the number cannot, which is whether this is
+still climbing. Two details make it honest: the current value is **appended** to
+the series server-side, because `alert_checks` goes through the ingest pipeline
+and the check that fired the push is usually not queryable yet; and the chart is
+**not zero-anchored** here (`Sparkline(anchorsToZero: false)`), because at 30pt
+tall a zero-anchored 2%→9% climb is a flat line. The checks are read lazily —
+`IncidentPushEvent.recentValues` is an unevaluated Effect, so the warehouse query
+happens only for a critical incident that has somewhere to draw itself.
+
+Two shapes are wire contracts with no runtime error when they drift, so both are
+pinned by tests in `MapleWidgetDataTests`:
+
+- the **type name** `IncidentActivityAttributes`, which the start push names in
+  `aps.attributes-type` (`LIVE_ACTIVITY_ATTRIBUTES_TYPE` on the server), and
+- the **snake_case coding keys and epoch-second dates** in
+  `IncidentActivityAttributes`. ActivityKit decodes with a plain `JSONDecoder`,
+  whose default date strategy is Apple's 2001 reference date — an ISO-8601
+  string does not decode, and a failed decode is silence, not an error.
+
+Live Activities render in the simulator but cannot receive pushes; verifying the
+push path needs a device. `NSSupportsLiveActivities` is on the **app's**
+Info.plist, not the extension's.
+
 ## The Home Screen widgets
 
 `Widgets/` is a WidgetKit extension with two widgets:

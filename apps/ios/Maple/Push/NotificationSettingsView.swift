@@ -11,6 +11,7 @@ struct NotificationSettingsView: View {
 	@Environment(SessionController.self) private var session
 	@Environment(\.dismiss) private var dismiss
 	private let push = PushRegistrar.shared
+	private let liveActivities = LiveActivityController.shared
 
 	@State private var preferences = PushPreferences.default
 
@@ -29,6 +30,7 @@ struct NotificationSettingsView: View {
 								toggle("Warnings", nil, \.warningIncidents)
 								toggle("Resolved", "Quiet — no sound, no Focus.", \.resolvedIncidents)
 							}
+							liveActivitySection
 							prefsSection("Errors and anomalies") {
 								toggle("New error issues", "Not yet delivered; coming with issue notifications.", \.newErrorIssues)
 								toggle("Anomalies", "Not yet delivered; coming with anomaly notifications.", \.anomalies)
@@ -54,6 +56,7 @@ struct NotificationSettingsView: View {
 			}
 			.task {
 				await push.refreshAuthorization()
+				liveActivities.refreshAuthorization()
 				if let orgId { preferences = push.preferences(for: orgId) }
 			}
 		}
@@ -139,6 +142,52 @@ struct NotificationSettingsView: View {
 				.background(Token.primary, in: .rect(cornerRadius: Token.Radius.md))
 		}
 		.buttonStyle(.plain)
+	}
+
+	// MARK: Live Activities
+
+	/// Not a toggle: iOS owns this switch, and Maple can only report what it
+	/// finds. Shown even when it is on, so "why is there nothing on my Lock
+	/// Screen" has an answer in the app rather than three levels into Settings.
+	@ViewBuilder
+	private var liveActivitySection: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			SectionLabel("Lock Screen").padding(.horizontal, 16)
+			VStack(alignment: .leading, spacing: 12) {
+				if liveActivities.areActivitiesEnabled {
+					statusRow(
+						dot: Token.success,
+						title: "Live Activities on",
+						detail: liveActivities.pushToStartToken == nil
+							? "A critical incident will appear on your Lock Screen once iOS issues this phone a token."
+							: "A critical incident shows on your Lock Screen until it resolves."
+					)
+					if FixtureAPI.isEnabled {
+						// Fixture mode has no incidents and no pushes; this is how the
+						// card gets designed and screenshotted.
+						actionButton("Preview on Lock Screen") {
+							liveActivities.startPreviewActivity()
+						}
+					}
+				} else {
+					statusRow(
+						dot: Token.mutedForeground,
+						title: "Live Activities off",
+						detail: "Turn on Live Activities for Maple in iOS Settings to see critical incidents on the Lock Screen."
+					)
+					actionButton("Open Settings") {
+						if let url = URL(string: UIApplication.openSettingsURLString) {
+							UIApplication.shared.open(url)
+						}
+					}
+				}
+			}
+			.padding(16)
+			.frame(maxWidth: .infinity, alignment: .leading)
+			.background(Token.card, in: .rect(cornerRadius: Token.Radius.lg))
+			.overlay(RoundedRectangle(cornerRadius: Token.Radius.lg).stroke(Token.border, lineWidth: Token.hairline))
+			.padding(.horizontal, 16)
+		}
 	}
 
 	// MARK: Preferences

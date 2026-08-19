@@ -55,6 +55,10 @@ public struct DeviceRegistration: Hashable, Sendable {
 	public var appVersion: String?
 	public var deviceName: String?
 	public var preferences: PushPreferences?
+	/// ActivityKit's push-to-start token, when the OS has issued one. Nil leaves
+	/// whatever the server already has — an app build that cannot produce one
+	/// must not erase the token a previous build registered.
+	public var liveActivityStartToken: String?
 
 	public init(
 		token: String,
@@ -62,7 +66,8 @@ public struct DeviceRegistration: Hashable, Sendable {
 		bundleId: String,
 		appVersion: String? = nil,
 		deviceName: String? = nil,
-		preferences: PushPreferences? = nil
+		preferences: PushPreferences? = nil,
+		liveActivityStartToken: String? = nil
 	) {
 		self.token = token
 		self.environment = environment
@@ -70,6 +75,7 @@ public struct DeviceRegistration: Hashable, Sendable {
 		self.appVersion = appVersion
 		self.deviceName = deviceName
 		self.preferences = preferences
+		self.liveActivityStartToken = liveActivityStartToken
 	}
 }
 
@@ -85,6 +91,7 @@ extension MapleClient {
 							bundleId: registration.bundleId,
 							deviceName: registration.deviceName,
 							environment: registration.environment,
+							liveActivityStartToken: registration.liveActivityStartToken,
 							platform: .ios,
 							preferences: registration.preferences?.wire
 						)
@@ -98,6 +105,33 @@ extension MapleClient {
 	public func unregisterDevice(token: String) async throws {
 		try await mapping {
 			_ = try await client.unregisterMobileDevice(.init(path: .init(token: token))).ok
+		}
+	}
+
+	/// Hands the server the update token for an activity this phone just
+	/// started, so incident updates and the final "resolved" can reach it.
+	public func registerLiveActivity(
+		deviceToken: String,
+		incidentId: String,
+		activityId: String,
+		pushToken: String
+	) async throws {
+		try await mapping {
+			_ = try await client.registerLiveActivity(
+				.init(
+					path: .init(token: deviceToken, incidentId: incidentId),
+					body: .json(.init(activityId: activityId, pushToken: pushToken))
+				)
+			).ok
+		}
+	}
+
+	/// The activity is gone from this phone — dismissed, or ended locally.
+	public func endLiveActivity(deviceToken: String, incidentId: String) async throws {
+		try await mapping {
+			_ = try await client.endLiveActivity(
+				.init(path: .init(token: deviceToken, incidentId: incidentId))
+			).ok
 		}
 	}
 
