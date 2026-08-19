@@ -1,4 +1,5 @@
 import MapleAPI
+import MapleWidgetData
 import SwiftUI
 
 /// Every push destination in the app.
@@ -77,6 +78,34 @@ final class AppNavigation {
 		alertsSegment = .incidents
 		alertsPath = [.incident(id: id)]
 		tab = .alerts
+	}
+
+	/// A tapped widget row: the issue, with the Errors list underneath.
+	func openIssue(id: String) {
+		alertsSegment = .errors
+		alertsPath = [.issue(id: id)]
+		tab = .alerts
+	}
+
+	/// The Home Screen widget's deep links — `maple://issues` and
+	/// `maple://issue/<id>`; see `IssuesWidgetKind`.
+	///
+	/// Anything else is ignored rather than guessed at: a URL this app does not
+	/// recognise landing the user on a random tab is worse than it doing
+	/// nothing, and the scheme is ours alone.
+	func open(_ url: URL) {
+		guard url.scheme == IssuesWidgetKind.urlScheme else { return }
+		switch url.host() {
+		case "issues":
+			open(.errors)
+		case "issue":
+			// `maple://issue/<id>` — the id is the first path component, and an
+			// empty one means the widget's row lost its issue.
+			let id = url.pathComponents.first { $0 != "/" }
+			if let id, !id.isEmpty { openIssue(id: id) } else { open(.errors) }
+		default:
+			break
+		}
 	}
 }
 

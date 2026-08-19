@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import {
+	errorFingerprintCandidates,
 	errorIncidents,
 	errorIssues,
 	errorIssueEvents,
@@ -22,6 +23,7 @@ import type {
 	IssueSeverity,
 	OrgId,
 } from "@maple/domain/http"
+import { FINGERPRINT_VERSION } from "@maple/domain/tinybird/fingerprint"
 import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 
 export interface ErrorTickScanRow {
@@ -31,6 +33,8 @@ export interface ErrorTickScanRow {
 	readonly exceptionMessage: string
 	readonly errorLabel: string
 	readonly topFrame: string
+	/** Every distinct build the fingerprint was seen from in this window. */
+	readonly serviceVersions: ReadonlyArray<string>
 	readonly count: number
 	readonly firstSeenMs: number
 	readonly lastSeenMs: number
@@ -82,6 +86,184 @@ export interface PersistErrorTickWindowResult {
  * the only field that survives intact. `isErrorTickClaimLost` is the only
  * supported way to test for it.
  */
+/**
+ * Occurrences a brand-new fingerprint must accumulate before it becomes an
+ * Issue. Below this it waits in `error_fingerprint_candidates`.
+ *
+ * The gap this closes: a fingerprint used to become a durable row plus a
+ * first-seen notification on its very first occurrence, so one unapplied
+ * migration minted 2,531 issues in three days. Deliberately low — the cost of
+ * the threshold is that a genuinely rare error is delayed until it recurs, and
+ * anything that only ever happens once is not worth a triage row.
+ */
+const PROMOTION_MIN_OCCURRENCES = 3
+
+/**
+ * How long after an issue is resolved before an occurrence counts as a
+ * regression. Covers the rollout window: a fix marked done is not live
+ * everywhere the same second, and stragglers from the pre-fix build would
+ * otherwise reopen the issue immediately.
+ */
+const REGRESSION_GRACE_MS = 60 * 60 * 1000
+
+/**
+ * Cap on the per-issue build set, so a long-lived issue cannot grow unbounded.
+ *
+ * Overflow evicts the LEAST RECENTLY SEEN build, not the oldest-inserted one.
+ * Those differ for exactly the builds that matter here: a stale client still
+ * reporting the bug keeps re-observing its own version, and evicting it because
+ * it was added first is what would make it look like a regression.
+ */
+const MAX_TRACKED_VERSIONS = 50
+
+/** The transaction handle `persistErrorTickWindow` runs its statements on. */
+type ErrorTickTransaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
+
+/**
+ * Accumulate not-yet-promoted fingerprints and return the ones that have now
+ * earned an Issue, carrying their ACCUMULATED totals rather than this window's.
+ *
+ * Promotion deletes the candidate row, so a fingerprint is counted once: the
+ * Issue takes over from here and the next occurrence lands on it directly.
+ */
+const promoteCandidates = async (
+	tx: ErrorTickTransaction,
+	input: PersistErrorTickWindowInput,
+	unknownRows: ReadonlyArray<ErrorTickScanRow>,
+	windowEnd: Date,
+): Promise<ReadonlyArray<ErrorTickScanRow>> => {
+	if (unknownRows.length === 0) return []
+
+	const upserted = await tx
+		.insert(errorFingerprintCandidates)
+		.values(
+			unknownRows.map((row) => ({
+				orgId: input.orgId,
+				fingerprintHash: row.fingerprintHash,
+				serviceName: row.serviceName,
+				exceptionType: row.exceptionType,
+				exceptionMessage: row.exceptionMessage,
+				errorLabel: row.errorLabel,
+				topFrame: row.topFrame,
+				serviceVersionsJson: mergeVersions([], row.serviceVersions),
+				occurrenceCount: row.count,
+				firstSeenAt: msToDate(row.firstSeenMs),
+				lastSeenAt: msToDate(row.lastSeenMs),
+				updatedAt: windowEnd,
+			})),
+		)
+		.onConflictDoUpdate({
+			target: [errorFingerprintCandidates.orgId, errorFingerprintCandidates.fingerprintHash],
+			set: {
+				serviceName: sql`excluded.service_name`,
+				exceptionType: sql`excluded.exception_type`,
+				exceptionMessage: sql`excluded.exception_message`,
+				errorLabel: sql`excluded.error_label`,
+				topFrame: sql`excluded.top_frame`,
+				// Union rather than overwrite: a candidate accumulates across ticks and
+				// the builds it was seen from seed the issue it is promoted into. The
+				// cap mirrors MAX_TRACKED_VERSIONS; which build is dropped past it is
+				// unordered, which is fine for a row that lives at most a day.
+				serviceVersionsJson: sql`(
+					select coalesce(jsonb_agg(version), '[]'::jsonb)
+					from (
+						select distinct value as version
+						from jsonb_array_elements(
+							${errorFingerprintCandidates.serviceVersionsJson} || excluded.service_versions_json
+						)
+						limit ${sql.raw(String(MAX_TRACKED_VERSIONS))}
+					) as versions
+				)`,
+				occurrenceCount: sql`${errorFingerprintCandidates.occurrenceCount} + excluded.occurrence_count`,
+				firstSeenAt: sql`least(${errorFingerprintCandidates.firstSeenAt}, excluded.first_seen_at)`,
+				lastSeenAt: sql`greatest(${errorFingerprintCandidates.lastSeenAt}, excluded.last_seen_at)`,
+				updatedAt: sql`excluded.updated_at`,
+			},
+		})
+		.returning()
+
+	const ready = upserted.filter((row) => row.occurrenceCount >= PROMOTION_MIN_OCCURRENCES)
+	if (ready.length === 0) return []
+
+	await tx.delete(errorFingerprintCandidates).where(
+		and(
+			eq(errorFingerprintCandidates.orgId, input.orgId),
+			inArray(
+				errorFingerprintCandidates.fingerprintHash,
+				ready.map((row) => row.fingerprintHash),
+			),
+		),
+	)
+
+	return ready.map((row) => ({
+		fingerprintHash: row.fingerprintHash,
+		serviceName: row.serviceName,
+		exceptionType: row.exceptionType,
+		exceptionMessage: row.exceptionMessage,
+		errorLabel: row.errorLabel,
+		topFrame: row.topFrame,
+		serviceVersions: row.serviceVersionsJson,
+		count: row.occurrenceCount,
+		firstSeenMs: row.firstSeenAt.getTime(),
+		lastSeenMs: row.lastSeenAt.getTime(),
+	}))
+}
+
+/**
+ * Whether an occurrence on a resolved issue is a genuine regression.
+ *
+ * Two guards, and the second is the one that matters for shipped clients.
+ * `maple-cli` runs on other people's machines: after a fix ships, every old
+ * binary in the wild keeps emitting the bug forever. Under the previous rule —
+ * any occurrence on a `done` issue reopens it — those issues could never stay
+ * fixed, which is why agents kept re-fixing the same bug.
+ *
+ * Version comparison is set MEMBERSHIP, never ordering: `maple-cli` reports
+ * semver ("0.0.18") while the Workers report git SHAs, so "newer than the fix"
+ * is not a question these strings can answer. A build already running when the
+ * issue was resolved is an old client; a build we had not seen then is a real
+ * regression, which is exactly the signal wanted.
+ *
+ * The rule only engages for services that actually report `service.version`.
+ * Where it is absent the guard degrades to the old behaviour — any occurrence
+ * reopens — which is the safe direction but silent, so the binding matters:
+ * `COMMIT_SHA` is bound for the api/alerting/electric-sync Workers and reaches
+ * `service.version` via `resolveResourceFromEnv`, the web build stamps
+ * `VITE_COMMIT_SHA`, and `maple-cli` reports `MAPLE_VERSION`.
+ */
+export const isRegression = (
+	prior: Pick<ErrorIssueRow, "workflowState" | "resolvedAt" | "resolvedVersionsJson">,
+	row: Pick<ErrorTickScanRow, "lastSeenMs" | "serviceVersions">,
+): boolean => {
+	if (prior.workflowState !== "done") return false
+
+	const resolvedAtMs = prior.resolvedAt?.getTime()
+	if (resolvedAtMs !== undefined && row.lastSeenMs < resolvedAtMs + REGRESSION_GRACE_MS) return false
+
+	// A window can carry several builds. It is a regression if ANY of them was
+	// not already running when the issue was resolved — one new build firing is
+	// the signal, and it must not be masked by old clients in the same window.
+	// A window with no build information at all cannot be ruled out either.
+	if (row.serviceVersions.length === 0) return true
+	return row.serviceVersions.some((version) => !prior.resolvedVersionsJson.includes(version))
+}
+
+/**
+ * Union the builds observed this window into an issue's tracked set.
+ *
+ * Re-observing a build moves it to the end, so the cap evicts by least-recently-
+ * seen rather than by insertion order.
+ */
+const mergeVersions = (
+	existing: ReadonlyArray<string>,
+	observed: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+	const fresh = observed.filter((version) => version !== "")
+	if (fresh.length === 0) return existing
+	const next = [...existing.filter((version) => !fresh.includes(version)), ...new Set(fresh)]
+	return next.length > MAX_TRACKED_VERSIONS ? next.slice(next.length - MAX_TRACKED_VERSIONS) : next
+}
+
 const CLAIM_LOST_MARKER = "[error-tick-claim-lost]"
 
 export const isErrorTickClaimLost = (error: { readonly message: string }): boolean =>
@@ -238,12 +420,45 @@ export const persistErrorTickWindow = (
 		// issues for the org, so the prefetch is authoritative: a fingerprint
 		// absent here is genuinely new. (Alert-kind issues use an `alert:` prefixed
 		// fingerprint and cannot collide.)
+		// A fingerprint with no Issue yet is not admitted on sight: it accumulates
+		// in the candidate table and is promoted only once it clears
+		// PROMOTION_MIN_OCCURRENCES. Promotion returns the ACCUMULATED totals, so a
+		// newly promoted issue opens with the occurrences it earned rather than
+		// just the ones in this window.
+		const promoted = await promoteCandidates(
+			tx,
+			input,
+			rows.filter((row) => !issueByFingerprint.has(row.fingerprintHash)),
+			windowEnd,
+		)
+		const promotedByFingerprint = new Map(promoted.map((row) => [row.fingerprintHash, row]))
+
 		const applicable: Array<{
 			readonly row: ErrorTickScanRow
 			readonly prior: ErrorIssueRow | undefined
+			readonly regression: boolean
+			readonly suppressed: boolean
 		}> = []
-		for (const row of rows) {
-			const prior = issueByFingerprint.get(row.fingerprintHash)
+		for (const scanned of rows) {
+			const prior = issueByFingerprint.get(scanned.fingerprintHash)
+			const promotedRow = promotedByFingerprint.get(scanned.fingerprintHash)
+			// A promoted row carries the candidate's ACCUMULATED totals, which the
+			// upsert below writes verbatim. Its build set still has to pick up the
+			// builds seen in the promoting window itself.
+			const row =
+				promotedRow === undefined
+					? scanned
+					: {
+							...promotedRow,
+							serviceVersions: mergeVersions(
+								promotedRow.serviceVersions,
+								scanned.serviceVersions,
+							),
+						}
+
+			// Still short of the promotion threshold — it stays a candidate.
+			if (prior === undefined && !promotedByFingerprint.has(scanned.fingerprintHash)) continue
+
 			// `wontfix` suppresses the issue until its snooze elapses; a null snooze
 			// means suppressed indefinitely.
 			if (
@@ -252,7 +467,17 @@ export const persistErrorTickWindow = (
 			) {
 				continue
 			}
-			applicable.push({ row, prior })
+			const regression = prior !== undefined && isRegression(prior, row)
+			// An occurrence on a resolved issue that is NOT a regression is an old
+			// client still running the pre-fix build. Its counters are still truthful
+			// — the event really did happen — but it is not new work: it must not open
+			// an incident, notify a destination, or start an investigation. Before the
+			// regression rule existed every such occurrence reopened the issue, so the
+			// incident always had a reopened issue under it; now the reopen can be
+			// skipped, and without this flag the incident path would still fire and
+			// re-alert on a bug that is already fixed.
+			const suppressed = prior?.workflowState === "done" && !regression
+			applicable.push({ row, prior, regression, suppressed })
 		}
 
 		const events: Array<ErrorIssueEventInsert> = []
@@ -272,10 +497,11 @@ export const persistErrorTickWindow = (
 			const upserted = await tx
 				.insert(errorIssues)
 				.values(
-					applicable.map(({ row }) => ({
+					applicable.map(({ row, prior }) => ({
 						id: input.makeIssueId(),
 						orgId: input.orgId,
 						fingerprintHash: row.fingerprintHash,
+						fingerprintVersion: FINGERPRINT_VERSION,
 						serviceName: row.serviceName,
 						exceptionType: row.exceptionType,
 						exceptionMessage: row.exceptionMessage,
@@ -291,6 +517,7 @@ export const persistErrorTickWindow = (
 						firstSeenAt: msToDate(row.firstSeenMs),
 						lastSeenAt: msToDate(row.lastSeenMs),
 						occurrenceCount: row.count,
+						seenVersionsJson: mergeVersions(prior?.seenVersionsJson ?? [], row.serviceVersions),
 						resolvedAt: null,
 						resolvedByActorId: null,
 						snoozeUntil: null,
@@ -302,6 +529,7 @@ export const persistErrorTickWindow = (
 				.onConflictDoUpdate({
 					target: [errorIssues.orgId, errorIssues.fingerprintHash],
 					set: {
+						fingerprintVersion: sql`excluded.fingerprint_version`,
 						serviceName: sql`excluded.service_name`,
 						exceptionType: sql`excluded.exception_type`,
 						exceptionMessage: sql`excluded.exception_message`,
@@ -310,10 +538,15 @@ export const persistErrorTickWindow = (
 						firstSeenAt: sql`least(${errorIssues.firstSeenAt}, excluded.first_seen_at)`,
 						lastSeenAt: sql`greatest(${errorIssues.lastSeenAt}, excluded.last_seen_at)`,
 						occurrenceCount: sql`${errorIssues.occurrenceCount} + excluded.occurrence_count`,
-						// Activity on a resolved issue is a regression: reopen it.
-						workflowState: sql`case when ${errorIssues.workflowState} = 'done' then 'triage' else ${errorIssues.workflowState} end`,
-						resolvedAt: sql`case when ${errorIssues.workflowState} = 'done' then null else ${errorIssues.resolvedAt} end`,
-						resolvedByActorId: sql`case when ${errorIssues.workflowState} = 'done' then null else ${errorIssues.resolvedByActorId} end`,
+						// The merged set is computed against the pre-update row and arrives
+						// via the INSERT values, so this stays one statement.
+						seenVersionsJson: sql`excluded.seen_versions_json`,
+						// Reopening is NOT decided here. It used to be
+						// `case when workflow_state = 'done' then 'triage'`, which reopened a
+						// fixed issue on any occurrence at all — including one from a build
+						// that predates the fix. That needs the issue's resolved-build set,
+						// which SQL cannot reach from `excluded`, so `isRegression` decides in
+						// TypeScript and the targeted update below applies it.
 						updatedAt: sql`excluded.updated_at`,
 					},
 				})
@@ -324,7 +557,7 @@ export const persistErrorTickWindow = (
 
 			const idByFingerprint = new Map(upserted.map((row) => [row.fingerprintHash, row.id]))
 
-			for (const { row, prior } of applicable) {
+			for (const { row, prior, regression, suppressed } of applicable) {
 				const issueId = idByFingerprint.get(row.fingerprintHash)
 				if (!issueId) throw new Error(`Error issue upsert returned no row for ${row.fingerprintHash}`)
 
@@ -341,12 +574,12 @@ export const persistErrorTickWindow = (
 					)
 				}
 
-				const wasRegression = prior?.workflowState === "done"
+				const wasRegression = regression
 				if (wasRegression) {
 					events.push(
 						buildEvent(input, issueId, "state_change", {
 							fromState: "done",
-							toState: "triage",
+							toState: "regressed",
 							payload: { viaRegression: true },
 						}),
 						buildEvent(input, issueId, "regression", {
@@ -355,12 +588,36 @@ export const persistErrorTickWindow = (
 					)
 				}
 
+				// Counters were accumulated by the upsert above; everything downstream
+				// of `observed` is the incident/notification/investigation path, which
+				// a pre-fix straggler must not enter.
+				if (suppressed) continue
+
 				observed.push({
 					issueId,
 					row,
 					wasRegression,
 					priorSeverity: prior?.severity ?? null,
 				})
+			}
+
+			// Apply the reopen decided above. Reopening lands in `regressed`, not
+			// `triage`: an issue that was fixed and came back is not the same thing
+			// as one nobody has looked at, and flattening the two is what let the
+			// same bug be picked up and fixed again from scratch.
+			const regressedIds = observed.filter((entry) => entry.wasRegression).map((entry) => entry.issueId)
+			if (regressedIds.length > 0) {
+				await tx
+					.update(errorIssues)
+					.set({
+						workflowState: "regressed",
+						resolvedAt: null,
+						resolvedByActorId: null,
+						lastRegressedAt: windowEnd,
+						regressionCount: sql`${errorIssues.regressionCount} + 1`,
+						updatedAt: windowEnd,
+					})
+					.where(and(eq(errorIssues.orgId, input.orgId), inArray(errorIssues.id, regressedIds)))
 			}
 		}
 

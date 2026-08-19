@@ -4,6 +4,7 @@ use std::env;
 use tracing::field::Empty;
 use tracing::{info_span, Span};
 
+#[derive(Debug)]
 pub struct ResourceConfig {
     pub service_name: &'static str,
     pub service_namespace: &'static str,
@@ -39,7 +40,7 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
     attrs.push(KeyValue::new(
         "vcs.repository.url.full",
         env::var("VCS_REPOSITORY_URL")
-            .unwrap_or_else(|_| "https://github.com/Makisuo/maple".to_string()),
+            .unwrap_or_else(|_| "https://github.com/Makisuo/maple".to_owned()),
     ));
     if let Some(revision) = detect_head_revision() {
         attrs.push(KeyValue::new("vcs.ref.head.revision", revision));
@@ -64,6 +65,10 @@ fn detect_head_revision() -> Option<String> {
 /// Mirrors packages/effect-sdk/src/server/platform.ts platform detection — first
 /// match wins. Returns the cloud.{provider,platform,region} (and faas.* / k8s.*
 /// where applicable) attribute set for the runtime environment.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one branch per hosting platform, each a self-contained set of resource attributes"
+)]
 fn detect_platform() -> Vec<KeyValue> {
     if env::var("CF_VERSION_METADATA").is_ok() || env::var("WORKERS_CI").is_ok() {
         return vec![
@@ -169,7 +174,7 @@ fn detect_platform() -> Vec<KeyValue> {
 }
 
 fn os_type() -> &'static str {
-    match std::env::consts::OS {
+    match env::consts::OS {
         "macos" => "darwin",
         "windows" => "windows",
         other => other,
@@ -177,7 +182,7 @@ fn os_type() -> &'static str {
 }
 
 fn host_arch() -> &'static str {
-    match std::env::consts::ARCH {
+    match env::consts::ARCH {
         "x86_64" => "amd64",
         "x86" => "x86",
         "aarch64" => "arm64",
@@ -496,7 +501,7 @@ pub fn resolve_config_internal_span() -> Span {
 mod tests {
     use super::*;
 
-    fn find_attr<'a>(resource: &'a Resource, key: &str) -> Option<String> {
+    fn find_attr(resource: &Resource, key: &str) -> Option<String> {
         resource
             .iter()
             .find(|(k, _)| k.as_str() == key)
@@ -705,9 +710,9 @@ mod tests {
             service_name: "ingest",
             service_namespace: "ingest",
             service_version: "0.0.0",
-            service_instance_id: "test-instance".to_string(),
-            deployment_env: "test".to_string(),
-            internal_org_id: "internal".to_string(),
+            service_instance_id: "test-instance".to_owned(),
+            deployment_env: "test".to_owned(),
+            internal_org_id: "internal".to_owned(),
         });
         assert_eq!(
             find_attr(&resource, "process.runtime.name").as_deref(),

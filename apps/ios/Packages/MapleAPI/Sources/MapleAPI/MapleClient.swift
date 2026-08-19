@@ -238,15 +238,47 @@ public struct MapleClient: MapleAPI {
 	func mapping<T>(_ work: () async throws -> T) async throws -> T {
 		do {
 			return try await work()
-		} catch let error as MapleAPIError {
-			throw error
-		} catch let error as ClientError {
-			if let underlying = error.underlyingError as? MapleAPIError { throw underlying }
-			throw MapleAPIError.transport(error)
-		} catch is CancellationError {
-			throw CancellationError()
 		} catch {
-			throw MapleAPIError.decoding(error)
+			throw Self.normalize(error)
+		}
+	}
+
+	/// The one place a raw error becomes either `MapleAPIError` or
+	/// `CancellationError`. Static so it is testable without a token provider.
+	///
+	/// OpenAPIRuntime wraps everything the transport throws in a `ClientError`,
+	/// including the `CancellationError` / `URLError(.cancelled)` that a
+	/// cancelled Task produces. Mapping that to `.transport` reported every
+	/// superseded request — a tab switch, an org switch, a pull-to-refresh
+	/// interrupted by navigation — as "Can't reach Maple", so cancellation is
+	/// unwrapped first and rethrown as the plain `CancellationError` that
+	/// callers already look for.
+	static func normalize(_ error: any Error) -> any Error {
+		if isCancellation(error) { return CancellationError() }
+		switch error {
+		case let error as MapleAPIError:
+			return error
+		case let error as ClientError:
+			if let underlying = error.underlyingError as? MapleAPIError { return underlying }
+			return MapleAPIError.transport(error)
+		default:
+			return MapleAPIError.decoding(error)
+		}
+	}
+
+	static func isCancellation(_ error: any Error) -> Bool {
+		switch error {
+		case is CancellationError:
+			return true
+		case let error as URLError:
+			return error.code == .cancelled
+		case let error as ClientError:
+			return isCancellation(error.underlyingError)
+		case let error as MapleAPIError:
+			if case .transport(let underlying) = error { return isCancellation(underlying) }
+			return false
+		default:
+			return false
 		}
 	}
 }

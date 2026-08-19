@@ -757,7 +757,9 @@ describe("CloudflareAnalyticsService", () => {
 					assert.isBelow(row.backfillAt!.getTime(), HORIZON)
 				}
 				// Budget-bound tick (that's WHY history is incomplete) — the head still won the race.
-				assert.isAbove(summary.callsMade, 40)
+				// Pinned to the cap rather than a magic number so lowering MAX_CALLS_PER_ORG_TICK
+				// (done to stop rate-limiting ourselves) doesn't turn this into a false failure.
+				assert.isAtLeast(summary.callsMade, 20)
 			}).pipe(Effect.provide(makeLayer(testDb, captured)))
 		},
 	)
@@ -989,6 +991,63 @@ describe("CloudflareAnalyticsService", () => {
 			Effect.provide(
 				makeLayer(testDb, captured, {
 					graphqlErrors: [{ message: "not authorized to access these fields" }],
+				}),
+			),
+		)
+	})
+
+	it.effect("a Cloudflare rate limit is a quiet org-wide backoff, not a per-dataset failure", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// Several datasets behind the head: without the collapse this tick produced one
+			// CloudflareAnalyticsPollError per dataset × zone-chunk (~1.7k events/day in prod).
+			for (const dataset of ["http_requests", "firewall_events", "dns_queries"]) {
+				yield* seedStateRow({
+					dataset,
+					zoneId: ZONE_ID,
+					zoneName: ZONE_NAME,
+					watermarkAt: new Date(T0 - 30 * MIN),
+					settingsFetchedAt: new Date(T0 - 5 * MIN),
+				})
+			}
+			yield* seedStateRow({
+				dataset: "workers_invocations",
+				watermarkAt: new Date(T0 - 30 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			// Classified as `rate-limited` → no failure outcome at all, so nothing reaches the
+			// observeDatasetFailure seam that records exception events.
+			assert.strictEqual(summary.failures.length, 0)
+			assert.strictEqual(summary.rowsIngested, 0)
+			// One depleted budget stops the org's tick instead of burning the whole call budget:
+			// at most the settings probe plus the single document that hit the limiter.
+			assert.isAtMost(summary.callsMade, 2)
+
+			const rows = yield* loadStateRows
+			for (const row of rows) {
+				// Our own pacing is not a tenant-facing integration error, and nothing is disabled.
+				assert.isNull(row.lastError, `${row.dataset} must not record a tenant-facing error`)
+				assert.isTrue(row.enabled, `${row.dataset} must stay enabled`)
+				// Frontiers stay put — the same windows are retried after the backoff. (Rows that
+				// discovery created this tick simply have no watermark yet.)
+				if (row.watermarkAt != null) assert.strictEqual(row.watermarkAt.getTime(), T0 - 30 * MIN)
+			}
+			// The lease is held rather than released, so the next tick skips this org for ~5 min.
+			const anchor = rows.find((row) => row.dataset === "workers_invocations" && row.zoneId === "")
+			assert.isNotNull(anchor!.leaseUntil)
+			assert.isAbove(anchor!.leaseUntil!.getTime(), T0)
+			assert.strictEqual(captured.length, 0)
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					graphqlErrors: [
+						{ message: "Rate limiter budget depleted. Please try again after 5 minutes." },
+					],
 				}),
 			),
 		)

@@ -186,5 +186,3 @@ export const resolveShareVariables = Effect.fn("resolveShareVariables")(function
 	// dashboard, not a 400.
 	return resolved satisfies VariableValues
 })
-
-export const __testables = { TEXTBOX_ALLOWED }

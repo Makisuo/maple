@@ -285,3 +285,70 @@ describe("new-visitor attribution", () => {
 		expect(getSession().visitorIsNew).toBe(false)
 	})
 })
+
+// The record validator was an `effect/Schema` decoder until it became the
+// single largest item in the browser SDK's page-load budget. These pin the
+// semantics that replaced it, since records written by the old decoder are
+// still out there in real sessionStorage.
+//
+// Every fixture carries its own id, deliberately: a rejected record falls back
+// to the module's in-memory `ephemeral` copy, which outlives a test, so a
+// shared id would let a previous test's session masquerade as this one's.
+describe("stored record validation", () => {
+	const base = (id: string) => ({
+		id,
+		startedAt: Date.now(),
+		lastActivityAt: Date.now(),
+		chunkSeq: 3,
+	})
+	const store = (record: unknown): void => storage.setItem(STORAGE_KEY, JSON.stringify(record))
+
+	it("accepts a minimal record written by an older SDK", () => {
+		store(base("sess-minimal"))
+		expect(getSession().id).toBe("sess-minimal")
+	})
+
+	it("accepts a record carrying every optional field", () => {
+		store({
+			...base("sess-full"),
+			metaVersion: 4,
+			entryUrl: "https://acme.test/pricing",
+			entryReferrer: "https://news.test",
+			utm: { utm_source: "hn" },
+			visitorIsNew: true,
+			lastUrl: "https://acme.test/checkout",
+			pageViews: 2,
+			clickCount: 7,
+			errorCount: 1,
+		})
+		const session = getSession()
+		expect(session.id).toBe("sess-full")
+		expect(session.metaVersion).toBe(4)
+		expect(session.utm).toEqual({ utm_source: "hn" })
+		expect(session.visitorIsNew).toBe(true)
+	})
+
+	it.each([
+		["a required field of the wrong type", { ...base("sess-bad"), chunkSeq: "3" }],
+		["an optional number of the wrong type", { ...base("sess-bad"), pageViews: "2" }],
+		["an optional string of the wrong type", { ...base("sess-bad"), entryUrl: 404 }],
+		["an optional boolean of the wrong type", { ...base("sess-bad"), visitorIsNew: "yes" }],
+		["a utm map with a non-string value", { ...base("sess-bad"), utm: { utm_source: 5 } }],
+		// `null` is not an accepted stand-in for absent — `Schema.optionalKey`
+		// rejected it too, and a null here means something wrote a shape we do
+		// not understand.
+		["a null in place of an absent optional", { ...base("sess-bad"), metaVersion: null }],
+		["a JSON array rather than an object", [base("sess-bad")]],
+		["a JSON scalar rather than an object", "sess-bad"],
+	])("rejects %s rather than adopting it", (_label, record) => {
+		store(record)
+		expect(getSession().id).not.toBe("sess-bad")
+	})
+
+	it("drops an unknown key written by a newer SDK rather than carrying it", () => {
+		store({ ...base("sess-future"), somethingFromTheFuture: "keep-out" })
+		const session = getSession()
+		expect(session.id).toBe("sess-future")
+		expect(session).not.toHaveProperty("somethingFromTheFuture")
+	})
+})

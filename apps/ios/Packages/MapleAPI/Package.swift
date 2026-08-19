@@ -14,7 +14,11 @@ let package = Package(
 	name: "MapleAPI",
 	platforms: [.iOS(.v18), .macOS(.v15)],
 	products: [
-		.library(name: "MapleAPI", targets: ["MapleAPI"])
+		.library(name: "MapleAPI", targets: ["MapleAPI"]),
+		// What the Home Screen widget renders. Its own product because the
+		// widget extension links it *without* MapleAPI: an extension has no
+		// Clerk session and no business carrying a 30k-line generated client.
+		.library(name: "MapleWidgetData", targets: ["MapleWidgetData"]),
 	],
 	dependencies: [
 		.package(url: "https://github.com/apple/swift-openapi-generator", from: "1.10.0"),
@@ -32,6 +36,9 @@ let package = Package(
 				.plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
 			]
 		),
+		// Zero dependencies, deliberately — see IssuesSnapshot.swift.
+		.target(name: "MapleWidgetData"),
 		.testTarget(name: "MapleAPITests", dependencies: ["MapleAPI"]),
+		.testTarget(name: "MapleWidgetDataTests", dependencies: ["MapleWidgetData"]),
 	]
 )

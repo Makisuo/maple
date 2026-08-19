@@ -24,19 +24,21 @@
 		"@maple/infra": "workspace:*",
 		"@maple/ui": "workspace:*",
 		"@tailwindcss/vite": "catalog:tailwind",
+		"@tanstack/charts": "0.14.0",
 		"@types/react": "catalog:react",
 		"@types/react-dom": "catalog:react",
 		"astro": "^5.17.1",
 		"autumn-js": "^1.2.51",
+		"d3-scale": "^4.0.2",
 		"fuse.js": "^7.4.2",
 		"motion": "^12.40.0",
 		"react": "catalog:react",
 		"react-dom": "catalog:react",
-		"recharts": "catalog:ui",
 		"tailwindcss": "catalog:tailwind",
 		"tw-animate-css": "catalog:tailwind"
 	},
 	"devDependencies": {
+		"@types/d3-scale": "^4.0.9",
 		"typescript": "^6.0.3"
 	},
 	"portless": {

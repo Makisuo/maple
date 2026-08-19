@@ -531,7 +531,6 @@ function PlanetScaleDatabaseData({
 				buckets={buckets}
 				metric={LEAD_METRIC}
 				waiting={waiting}
-				syncId={`ps-${database}`}
 				scope={scope}
 				markers={markers}
 				emptyMessage={chartEmptyMessage}
@@ -543,7 +542,6 @@ function PlanetScaleDatabaseData({
 						buckets={buckets}
 						metric={metric}
 						waiting={waiting}
-						syncId={`ps-${database}`}
 						scope={scope}
 						markers={markers}
 						emptyMessage={chartEmptyMessage}

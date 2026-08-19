@@ -42,6 +42,7 @@ import { Route as InfraHostNameRouteImport } from './routes/infra/$hostName'
 import { Route as InvestigationsIndexRouteImport } from './routes/investigations/index'
 import { Route as InvestigationsIdRouteImport } from './routes/investigations/$id'
 import { Route as LabIndexRouteImport } from './routes/lab/index'
+import { Route as LabChartsRouteImport } from './routes/lab/charts'
 import { Route as LabFlowRouteImport } from './routes/lab/flow'
 import { Route as LabNodesRouteImport } from './routes/lab/nodes'
 import { Route as LabQueryBuilderRouteImport } from './routes/lab/query-builder'
@@ -71,6 +72,7 @@ import { Route as LabBenchLogsRouteImport } from './routes/lab/bench/logs'
 import { Route as LabBenchOverviewRouteImport } from './routes/lab/bench/overview'
 import { Route as LabBenchServiceDetailRouteImport } from './routes/lab/bench/service-detail'
 import { Route as LabBenchServiceMapRouteImport } from './routes/lab/bench/service-map'
+import { Route as LabBenchTanstackRouteImport } from './routes/lab/bench/tanstack'
 import { Route as DashboardsDashboardIdWidgetsWidgetIdRouteImport } from './routes/dashboards/$dashboardId_.widgets.$widgetId'
 import { Route as InfraKubernetesNodesIndexRouteImport } from './routes/infra/kubernetes/nodes/index'
 import { Route as InfraKubernetesNodesNodeNameRouteImport } from './routes/infra/kubernetes/nodes/$nodeName'
@@ -244,6 +246,11 @@ const LabIndexRoute = LabIndexRouteImport.update({
   path: '/',
   getParentRoute: () => LabRouteRoute,
 } as any)
+const LabChartsRoute = LabChartsRouteImport.update({
+  id: '/charts',
+  path: '/charts',
+  getParentRoute: () => LabRouteRoute,
+} as any)
 const LabFlowRoute = LabFlowRouteImport.update({
   id: '/flow',
   path: '/flow',
@@ -391,6 +398,11 @@ const LabBenchServiceMapRoute = LabBenchServiceMapRouteImport.update({
   path: '/bench/service-map',
   getParentRoute: () => LabRouteRoute,
 } as any)
+const LabBenchTanstackRoute = LabBenchTanstackRouteImport.update({
+  id: '/bench/tanstack',
+  path: '/bench/tanstack',
+  getParentRoute: () => LabRouteRoute,
+} as any)
 const DashboardsDashboardIdWidgetsWidgetIdRoute =
   DashboardsDashboardIdWidgetsWidgetIdRouteImport.update({
     id: '/dashboards/$dashboardId_/widgets/$widgetId',
@@ -460,6 +472,7 @@ export interface FileRoutesByFullPath {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
+  '/lab/charts': typeof LabChartsRoute
   '/lab/flow': typeof LabFlowRoute
   '/lab/nodes': typeof LabNodesRoute
   '/lab/query-builder': typeof LabQueryBuilderRoute
@@ -494,6 +507,7 @@ export interface FileRoutesByFullPath {
   '/lab/bench/overview': typeof LabBenchOverviewRoute
   '/lab/bench/service-detail': typeof LabBenchServiceDetailRoute
   '/lab/bench/service-map': typeof LabBenchServiceMapRoute
+  '/lab/bench/tanstack': typeof LabBenchTanstackRoute
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
   '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
@@ -530,6 +544,7 @@ export interface FileRoutesByTo {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
+  '/lab/charts': typeof LabChartsRoute
   '/lab/flow': typeof LabFlowRoute
   '/lab/nodes': typeof LabNodesRoute
   '/lab/query-builder': typeof LabQueryBuilderRoute
@@ -564,6 +579,7 @@ export interface FileRoutesByTo {
   '/lab/bench/overview': typeof LabBenchOverviewRoute
   '/lab/bench/service-detail': typeof LabBenchServiceDetailRoute
   '/lab/bench/service-map': typeof LabBenchServiceMapRoute
+  '/lab/bench/tanstack': typeof LabBenchTanstackRoute
   '/errors/issues': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare': typeof InfraCloudflareIndexRoute
   '/infra/planetscale': typeof InfraPlanetscaleIndexRoute
@@ -602,6 +618,7 @@ export interface FileRoutesById {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
+  '/lab/charts': typeof LabChartsRoute
   '/lab/flow': typeof LabFlowRoute
   '/lab/nodes': typeof LabNodesRoute
   '/lab/query-builder': typeof LabQueryBuilderRoute
@@ -636,6 +653,7 @@ export interface FileRoutesById {
   '/lab/bench/overview': typeof LabBenchOverviewRoute
   '/lab/bench/service-detail': typeof LabBenchServiceDetailRoute
   '/lab/bench/service-map': typeof LabBenchServiceMapRoute
+  '/lab/bench/tanstack': typeof LabBenchTanstackRoute
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
   '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
@@ -675,6 +693,7 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
+    | '/lab/charts'
     | '/lab/flow'
     | '/lab/nodes'
     | '/lab/query-builder'
@@ -709,6 +728,7 @@ export interface FileRouteTypes {
     | '/lab/bench/overview'
     | '/lab/bench/service-detail'
     | '/lab/bench/service-map'
+    | '/lab/bench/tanstack'
     | '/errors/issues/'
     | '/infra/cloudflare/'
     | '/infra/planetscale/'
@@ -745,6 +765,7 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
+    | '/lab/charts'
     | '/lab/flow'
     | '/lab/nodes'
     | '/lab/query-builder'
@@ -779,6 +800,7 @@ export interface FileRouteTypes {
     | '/lab/bench/overview'
     | '/lab/bench/service-detail'
     | '/lab/bench/service-map'
+    | '/lab/bench/tanstack'
     | '/errors/issues'
     | '/infra/cloudflare'
     | '/infra/planetscale'
@@ -816,6 +838,7 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
+    | '/lab/charts'
     | '/lab/flow'
     | '/lab/nodes'
     | '/lab/query-builder'
@@ -850,6 +873,7 @@ export interface FileRouteTypes {
     | '/lab/bench/overview'
     | '/lab/bench/service-detail'
     | '/lab/bench/service-map'
+    | '/lab/bench/tanstack'
     | '/errors/issues/'
     | '/infra/cloudflare/'
     | '/infra/planetscale/'
@@ -1156,6 +1180,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LabIndexRouteImport
       parentRoute: typeof LabRouteRoute
     }
+    '/lab/charts': {
+      id: '/lab/charts'
+      path: '/charts'
+      fullPath: '/lab/charts'
+      preLoaderRoute: typeof LabChartsRouteImport
+      parentRoute: typeof LabRouteRoute
+    }
     '/lab/flow': {
       id: '/lab/flow'
       path: '/flow'
@@ -1359,6 +1390,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LabBenchServiceMapRouteImport
       parentRoute: typeof LabRouteRoute
     }
+    '/lab/bench/tanstack': {
+      id: '/lab/bench/tanstack'
+      path: '/bench/tanstack'
+      fullPath: '/lab/bench/tanstack'
+      preLoaderRoute: typeof LabBenchTanstackRouteImport
+      parentRoute: typeof LabRouteRoute
+    }
     '/dashboards/$dashboardId_/widgets/$widgetId': {
       id: '/dashboards/$dashboardId_/widgets/$widgetId'
       path: '/dashboards/$dashboardId/widgets/$widgetId'
@@ -1412,6 +1450,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface LabRouteRouteChildren {
+  LabChartsRoute: typeof LabChartsRoute
   LabFlowRoute: typeof LabFlowRoute
   LabNodesRoute: typeof LabNodesRoute
   LabQueryBuilderRoute: typeof LabQueryBuilderRoute
@@ -1423,9 +1462,11 @@ interface LabRouteRouteChildren {
   LabBenchOverviewRoute: typeof LabBenchOverviewRoute
   LabBenchServiceDetailRoute: typeof LabBenchServiceDetailRoute
   LabBenchServiceMapRoute: typeof LabBenchServiceMapRoute
+  LabBenchTanstackRoute: typeof LabBenchTanstackRoute
 }
 
 const LabRouteRouteChildren: LabRouteRouteChildren = {
+  LabChartsRoute: LabChartsRoute,
   LabFlowRoute: LabFlowRoute,
   LabNodesRoute: LabNodesRoute,
   LabQueryBuilderRoute: LabQueryBuilderRoute,
@@ -1437,6 +1478,7 @@ const LabRouteRouteChildren: LabRouteRouteChildren = {
   LabBenchOverviewRoute: LabBenchOverviewRoute,
   LabBenchServiceDetailRoute: LabBenchServiceDetailRoute,
   LabBenchServiceMapRoute: LabBenchServiceMapRoute,
+  LabBenchTanstackRoute: LabBenchTanstackRoute,
 }
 
 const LabRouteRouteWithChildren = LabRouteRoute._addFileChildren(

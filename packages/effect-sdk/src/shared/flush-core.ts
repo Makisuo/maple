@@ -84,6 +84,10 @@ export const buildResolved = (
 	const headers: Record<string, string> = {
 		"content-type": "application/json",
 		"user-agent": opts.userAgent,
+		// Browsers refuse to let a page set `user-agent`, so the same
+		// `<sdk>/<version>` also rides a header they do allow. Ingest records it
+		// as `maple.sdk`; its CORS allow-list must include it (it does).
+		"x-maple-sdk": opts.userAgent,
 	} satisfies Record<string, string>
 	if (r.ingestKey) headers.authorization = `Bearer ${Redacted.value(r.ingestKey)}`
 	return {

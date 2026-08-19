@@ -352,15 +352,31 @@ const startDetached = (
 		const bindAddr = serverUrl(host, port)
 		const connectAddr = serverUrl(advertiseHost, port)
 		const probeAddr = serverProbeUrl(host, port)
-		let up = false
-		for (let i = 0; i < 100; i++) {
-			yield* Effect.sleep("100 millis")
-			if (yield* probeHealth(probeAddr)) {
-				up = true
-				break
+		// One span for the whole readiness wait, never one per probe. The probes
+		// themselves are untraced (see `probeHealth`), so a boot shows up as a
+		// single `server.wait_ready` carrying how many attempts it took — instead of
+		// ~10 `Error` client spans for the ECONNREFUSEDs that are the expected
+		// answer while the child is still binding. The span succeeds either way;
+		// missing the deadline is reported by the `ServerError` below, once.
+		const up = yield* Effect.gen(function* () {
+			for (let attempt = 1; attempt <= 100; attempt++) {
+				yield* Effect.sleep("100 millis")
+				if (yield* probeHealth(probeAddr)) {
+					yield* Effect.annotateCurrentSpan({ "maple.server.probe_attempt": attempt })
+					return true
+				}
+				if (!isProcessAlive(child.pid)) {
+					// Child died early — stop waiting.
+					yield* Effect.annotateCurrentSpan({
+						"maple.server.probe_attempt": attempt,
+						"maple.server.exited_early": true,
+					})
+					return false
+				}
 			}
-			if (!isProcessAlive(child.pid)) break // child died early — stop waiting
-		}
+			yield* Effect.annotateCurrentSpan({ "maple.server.probe_attempt": 100 })
+			return false
+		}).pipe(Effect.withSpan("server.wait_ready", { attributes: { "server.address": probeAddr } }))
 		if (!up) {
 			return yield* new ServerError({
 				message: `background server did not come up within 10s — check ${prettyPath(logPath)}`,
@@ -741,7 +757,17 @@ export const checkpoint = Command.make("checkpoint", { dataDir: dataDirFlag, hos
 				dataDir,
 				host: connectionHostForBindHost(a.host),
 				port: a.port,
-			}).pipe(Effect.mapError((e) => new ServerError({ message: e.message })))
+			}).pipe(
+				// Only genuine create failures become a `ServerError`. A refused
+				// precondition (`CheckpointPreconditionError`) passes straight through
+				// to `bin.ts`, which recovers it like any other expected outcome —
+				// re-wrapping it here is what billed a second error event per refusal.
+				Effect.mapError((e) =>
+					e._tag === "@maple/cli/CheckpointPreconditionError"
+						? e
+						: new ServerError({ message: e.message }),
+				),
+			)
 			yield* Effect.sync(() =>
 				process.stdout.write(
 					`${green("✓")} checkpoint created\n` +

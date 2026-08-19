@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { keepaliveFor, postSessionEvents, postSessionMeta } from "./transport"
+import {
+	keepaliveFor,
+	postSessionBlob,
+	postSessionEvents,
+	postSessionMeta,
+	SDK_HINT_HEADER,
+	sdkHint,
+} from "./transport"
 
 const CONFIG = {
 	endpoint: "https://ingest.test",
 	ingestKey: "k",
+	sdk: "maple-test/0.0.0",
 	maskAllInputs: false,
 	maskAllText: false,
 }
@@ -75,6 +83,38 @@ describe("transport", () => {
 
 		await postSessionEvents(CONFIG, [{ seq: 0 }, { seq: 1 }])
 		expect(lastInit(fetchMock).body).toBe('{"seq":0}\n{"seq":1}\n')
+	})
+
+	it("stamps the SDK identity hint on every request", async () => {
+		// Ingest records this as `maple.sdk`; without it a rejected browser
+		// request carries nothing that says which SDK build produced it.
+		const CHUNK = { sessionId: "s1", chunkSeq: 0, isCheckpoint: true, eventCount: 1, durationMs: 0 }
+		await postSessionMeta(CONFIG, { session_id: "s1" })
+		expect((lastInit(fetchMock).headers as Record<string, string>)[SDK_HINT_HEADER]).toBe(
+			"maple-test/0.0.0",
+		)
+		await postSessionEvents(CONFIG, [{ seq: 0 }])
+		expect((lastInit(fetchMock).headers as Record<string, string>)[SDK_HINT_HEADER]).toBe(
+			"maple-test/0.0.0",
+		)
+		await postSessionBlob(CONFIG, CHUNK, new Uint8Array([0x1f, 0x8b]))
+		expect((lastInit(fetchMock).headers as Record<string, string>)[SDK_HINT_HEADER]).toBe(
+			"maple-test/0.0.0",
+		)
+		expect(sdkHint("maple-browser", "1.2.3")).toBe("maple-browser/1.2.3")
+	})
+
+	it("reports how ingest answered a chunk, and 413 as the session being exhausted", async () => {
+		const CHUNK = { sessionId: "s1", chunkSeq: 0, isCheckpoint: true, eventCount: 1, durationMs: 0 }
+		const bytes = new Uint8Array([0x1f, 0x8b])
+		expect(await postSessionBlob(CONFIG, CHUNK, bytes)).toBe("accepted")
+		fetchMock.mockResolvedValueOnce(new Response(null, { status: 413 }))
+		expect(await postSessionBlob(CONFIG, CHUNK, bytes)).toBe("exhausted")
+		fetchMock.mockResolvedValueOnce(new Response(null, { status: 400 }))
+		expect(await postSessionBlob(CONFIG, CHUNK, bytes)).toBe("rejected")
+		vi.spyOn(console, "warn").mockImplementation(() => {})
+		fetchMock.mockRejectedValueOnce(new Error("network down"))
+		expect(await postSessionBlob(CONFIG, CHUNK, bytes)).toBe("failed")
 	})
 
 	it("never throws into the host app when ingest is unreachable", async () => {

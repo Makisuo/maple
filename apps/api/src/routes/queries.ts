@@ -454,8 +454,8 @@ const cloudflareInfraZoneBreakdownTotals = defineQuery({
 	id: "cloudflareInfraZoneBreakdownTotals",
 	profile: "aggregation",
 	cache: 15,
-	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) =>
-		CH.compile(
+	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) => {
+		return CH.compile(
 			Integrations.cloudflareZoneBreakdownTotalsSQL(
 				payload.dimension,
 				toCloudflareFilters(payload),
@@ -463,7 +463,8 @@ const cloudflareInfraZoneBreakdownTotals = defineQuery({
 			),
 			zoneBreakdownParams(payload, orgId),
 			{ rowSchema: Integrations.cloudflareZoneBreakdownTotalsRowSchema },
-		),
+		)
+	},
 })
 
 /**

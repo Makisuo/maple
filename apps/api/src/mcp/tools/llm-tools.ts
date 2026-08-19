@@ -109,27 +109,29 @@ export const buildMapleTools = (
 											message: `${definition.name} requires user approval and was not executed.`,
 										}),
 									)
-								: executor.execute(tenant, definition.name, params, options.surface ?? "chat").pipe(
-										Effect.flatMap((result) =>
-											result.isError
-												? Effect.fail(
-														new ToolFailure({
-															message: toolResultText(result),
-														}),
-													)
-												: Effect.succeed(toolResultText(result)),
-										),
-										// A tool that fails outright (unknown tool, tenant error) must
-										// not kill the turn — hand the model the message and let it
-										// route around.
-										Effect.catchCause((cause) =>
-											Effect.fail(
-												new ToolFailure({
-													message: `Tool failed: ${summarizeToolFailure(cause)}`,
-												}),
+								: executor
+										.execute(tenant, definition.name, params, options.surface ?? "chat")
+										.pipe(
+											Effect.flatMap((result) =>
+												result.isError
+													? Effect.fail(
+															new ToolFailure({
+																message: toolResultText(result),
+															}),
+														)
+													: Effect.succeed(toolResultText(result)),
+											),
+											// A tool that fails outright (unknown tool, tenant error) must
+											// not kill the turn — hand the model the message and let it
+											// route around.
+											Effect.catchCause((cause) =>
+												Effect.fail(
+													new ToolFailure({
+														message: `Tool failed: ${summarizeToolFailure(cause)}`,
+													}),
+												),
 											),
 										),
-									),
 					}),
 				]
 			}),

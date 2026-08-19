@@ -55,6 +55,19 @@ export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
 	return compileFnCall<ReadonlyArray<T>>("groupUniqArray", expr)
 }
 
+/**
+ * `groupUniqArrayArray(arrayColumn)` — flatten arrays across rows into one
+ * distinct set.
+ *
+ * The `-Array` combinator form of {@link groupUniqArray}: the argument is
+ * already an array per row. This is also the merge function a
+ * `SimpleAggregateFunction(groupUniqArrayArray, Array(T))` column is declared
+ * with, so reading such a column back uses the same name.
+ */
+export function groupUniqArrayArray<T>(expr: Expr<ReadonlyArray<T>>): Expr<ReadonlyArray<T>> {
+	return compileFnCall<ReadonlyArray<T>>("groupUniqArrayArray", expr)
+}
+
 /** `argMin(value, orderBy)` — the `value` from the row with the smallest `orderBy`. */
 export function argMin<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
 	return compileFnCall<T>("argMin", value, orderBy)

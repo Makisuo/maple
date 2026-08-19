@@ -71,7 +71,8 @@ export interface InsertStatement {
  * Like {@link buildInsertSql}, but splits the NDJSON batch on line boundaries
  * into as many statements as needed so each stays under chDB's query-size
  * limit. A single line larger than the budget is emitted as its own statement
- * (never split mid-line).
+ * (never split mid-line) — that case is what `Chdb.open`'s
+ * `SET max_query_size` (`MAX_QUERY_SIZE_BYTES`) exists for.
  */
 export function buildInsertStatements(datasource: string, ndjson: string): InsertStatement[] {
 	const template = templates.get(datasource)

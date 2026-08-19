@@ -76,6 +76,7 @@ extension WorkflowState {
 	var label: String {
 		switch self {
 		case .triage: "Triage"
+		case .regressed: "Regressed"
 		case .todo: "Todo"
 		case .inProgress: "In progress"
 		case .inReview: "In review"
@@ -89,6 +90,9 @@ extension WorkflowState {
 	var tint: Color {
 		switch self {
 		case .triage: Token.amberText
+		// Red, not amber, matching `workflow-badge.tsx`: a regression is a fix
+		// that did not hold, and it reads as more urgent than untriaged.
+		case .regressed: Token.destructive
 		case .inProgress: Token.blueText
 		case .inReview: Token.purpleText
 		case .done: Token.success
@@ -99,6 +103,7 @@ extension WorkflowState {
 	var fill: Color {
 		switch self {
 		case .triage: Token.amberFill
+		case .regressed: Token.destructive
 		case .inProgress: Token.blueFill
 		case .inReview: Token.purpleFill
 		case .done: Token.success
@@ -162,10 +167,16 @@ struct HealthDot: View {
 // MARK: - Tone rules
 
 enum Tone {
-	/// `errorRateToneClass`: > 5% error, > 0 warn, exactly 0 muted.
+	/// The breaks are `ServiceHealth`'s, not the web's `errorRateToneClass`.
+	///
+	/// The web warns on anything above zero, which on a phone-width list put an
+	/// amber number on six of nine rows — including services with no health dot,
+	/// so the two marks on one row disagreed about whether it was fine. Amber
+	/// costs more here (`DESIGN.md`: at most one per screen), so the tone follows
+	/// the same 1% / 5% breaks the dot does and a row now reads one way.
 	static func errorRate(_ ratio: Double) -> Color {
-		if ratio > 0.05 { return Token.severityError }
-		if ratio > 0 { return Token.severityWarn }
+		if ratio >= 0.05 { return Token.severityError }
+		if ratio >= 0.01 { return Token.severityWarn }
 		return Token.mutedForeground
 	}
 

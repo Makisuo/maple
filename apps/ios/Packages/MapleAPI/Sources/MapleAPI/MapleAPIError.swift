@@ -86,6 +86,14 @@ extension MapleAPIError {
 		return body.message.localizedCaseInsensitiveContains("active organization is required")
 	}
 
+	/// True when the underlying failure is a cancelled Task, however deeply the
+	/// transport wrapped it. `MapleClient` normalizes these to a plain
+	/// `CancellationError` before they escape, so this is a defensive check for
+	/// callers that receive one anyway.
+	public var isCancellation: Bool {
+		MapleClient.isCancellation(self)
+	}
+
 	public var isRetryable: Bool {
 		switch self {
 		case .api(_, let error): error.retryable

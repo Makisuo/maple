@@ -1,5 +1,9 @@
 import * as React from "react"
-import { Area, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine } from "recharts"
+import { areaY, d3Curve, defineChart, lineY, rect, ruleY } from "@tanstack/charts"
+import { decorative } from "@tanstack/charts/mark/decorative"
+import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { scaleTime } from "d3-scale"
+import { curveMonotoneX } from "d3-shape"
 
 import type {
 	AlertCheckDocument,
@@ -11,21 +15,31 @@ import type {
 import { formatSignalValue } from "@/lib/alerts/form-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import {
-	type ChartConfig,
-	ChartContainer,
-	ChartTooltip,
-	ChartTooltipContent,
-	ChartGrid,
-	ChartXAxis,
-	ChartYAxis,
-} from "@maple/ui/components/ui/chart"
+	PlotFrame,
+	PlotTooltipBody,
+	createTooltipFocusStore,
+	cursorTooltip,
+	dashedGridY,
+	focusCrosshair,
+	resolvePlotColor,
+	roundCapDasharray,
+	useChartId,
+	usePlotChromeColors,
+	useResolvedSeriesColors,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
+import { useTheme } from "@maple/ui/hooks/use-theme"
+
+/** A `ChartConfig` in all but name — kept local now that the Recharts kit is gone. */
+type ChartConfig = Record<string, { label: string; color?: string }>
 import { formatBucketLabel } from "@maple/ui/lib/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
 /** The single-series signal line and its area fill — one fixed accent, never hashed. */
-const SIGNAL_COLOR = "var(--chart-1)"
+const SIGNAL_TOKEN = "--chart-1"
+const SIGNAL_FALLBACK = "#6366f1"
 
 /**
  * THE alert rule chart — shared by the create form's live hero and the rule
@@ -507,121 +521,301 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 		}))
 	}, [incidentBands, domain])
 
+	const chromeColors = usePlotChromeColors()
+	const focusStore = React.useMemo(() => createTooltipFocusStore(), [])
+	const signalGradientId = useChartId("alert-signal")
+	const { theme } = useTheme()
+
+	const palette = React.useMemo(
+		() => ({
+			signal: resolvePlotColor(SIGNAL_TOKEN, SIGNAL_FALLBACK),
+			destructive: resolvePlotColor("--destructive", "#ef4444"),
+			muted: resolvePlotColor("--muted-foreground", "#71717a"),
+		}),
+		[theme],
+	)
+
+	const resolvedSeriesColors = useResolvedSeriesColors(seriesColors, palette.signal)
+
+	/**
+	 * One plotted bucket: the row's series values, plus its instant as a `Date`.
+	 *
+	 * Precomputed rather than derived in the x accessor — the time scale would
+	 * otherwise allocate a `Date` per datum on every scale pass.
+	 */
+	type SignalPoint = Record<string, unknown> & { t: number; at: Date }
+
+	const points = React.useMemo<SignalPoint[]>(
+		() => chartData.map((row) => ({ ...row, t: num(row.t), at: new Date(num(row.t)) })),
+		[chartData],
+	)
+
+	const tooltipSeries = React.useMemo<PlotTooltipSeries<SignalPoint>[]>(() => {
+		const keys = isMultiSeries ? seriesKeys : [SINGLE_KEY]
+		const rows: PlotTooltipSeries<SignalPoint>[] = keys.map((key) => ({
+			label: chartConfig[key]?.label ?? key,
+			color: isMultiSeries ? (resolvedSeriesColors.get(key) ?? palette.signal) : palette.signal,
+			value: (point: SignalPoint) => {
+				const value = point[key]
+				return typeof value === "number" ? value : null
+			},
+			format: (value: number) => formatSignalValue(signalType, value),
+		}))
+		if (hasGhost) {
+			rows.push({
+				label: chartConfig[GHOST_KEY]?.label ?? "Other source",
+				color: palette.muted,
+				dashed: true,
+				value: (point: SignalPoint) => {
+					const value = point[GHOST_KEY]
+					return typeof value === "number" ? value : null
+				},
+				format: (value: number) => formatSignalValue(signalType, value),
+			})
+		}
+		return rows
+	}, [isMultiSeries, seriesKeys, chartConfig, resolvedSeriesColors, palette, signalType, hasGhost])
+
+	const definition = React.useMemo(() => {
+		const at = (point: SignalPoint) => point.at
+		const valueOf = (key: string) => (point: SignalPoint) => {
+			const value = point[key]
+			return typeof value === "number" ? value : null
+		}
+		const curve = d3Curve(curveMonotoneX)
+
+		/**
+		 * The fill under the single-series signal, split at the threshold.
+		 *
+		 * Four stops with two sharing `splitOffset` is a hard colour break, not a
+		 * blend: below the line the area reads as the signal's own accent, above it
+		 * as the breach colour. `verticalGradient` only builds the two-stop form,
+		 * so this is spelled out.
+		 */
+		const signalGradient = {
+			id: signalGradientId,
+			x1: 0,
+			y1: 0,
+			x2: 0,
+			y2: 1,
+			stops: breachAbove
+				? [
+						{ offset: 0, color: palette.destructive, opacity: 0.32 },
+						{ offset: splitOffset, color: palette.destructive, opacity: 0.08 },
+						{ offset: splitOffset, color: palette.signal, opacity: 0.12 },
+						{ offset: 1, color: palette.signal, opacity: 0.02 },
+					]
+				: breachBelow
+					? [
+							{ offset: 0, color: palette.signal, opacity: 0.12 },
+							{ offset: splitOffset, color: palette.signal, opacity: 0.05 },
+							{ offset: splitOffset, color: palette.destructive, opacity: 0.08 },
+							{ offset: 1, color: palette.destructive, opacity: 0.3 },
+						]
+					: [
+							{ offset: 0.05, color: palette.signal, opacity: 0.45 },
+							{ offset: 0.95, color: palette.signal, opacity: 0.04 },
+						],
+		}
+
+		/** A band spanning the full y domain — `rect` has no "fill the plot" mode. */
+		const band = (
+			bands: ReadonlyArray<{ x1: number; x2: number }>,
+			fill: string,
+			fillOpacity: number,
+			id: string,
+		) =>
+			bands.length === 0
+				? []
+				: [
+						decorative(
+							rect(bands, {
+								id,
+								x1: (b: { x1: number }) => new Date(Math.max(b.x1, domain.min)),
+								x2: (b: { x2: number }) => new Date(Math.min(b.x2, domain.max)),
+								y1: () => yDomain[0],
+								y2: () => yDomain[1],
+								fill,
+								fillOpacity,
+								stroke: "none",
+							}),
+						),
+					]
+
+		return defineChart({
+			gradients: [signalGradient],
+			marks: [
+				dashedGridY(),
+				// No-data windows. The Recharts original hatched these with an SVG
+				// `<pattern>`; the chart spec carries gradients but not patterns, so
+				// this is a flat muted wash at the hatch's own weight. It still reads
+				// as "nothing was measured here" against the plot background.
+				...band(noDataBands, palette.muted, 0.1, "no-data"),
+				...band(
+					incidentBands.filter((b) => b.open),
+					palette.destructive,
+					0.12,
+					"incident-open",
+				),
+				...band(
+					incidentBands.filter((b) => !b.open),
+					palette.destructive,
+					0.06,
+					"incident-closed",
+				),
+				...band(wouldFireBands, palette.destructive, 0.08, "would-fire"),
+				// Threshold rules. The labels deliberately live in the caption below
+				// the plot, so they cannot clip at the right edge.
+				ruleY(
+					thresholdUpper != null
+						? [{ value: threshold }, { value: thresholdUpper }]
+						: [{ value: threshold }],
+					{
+						y: (entry: { value: number }) => entry.value,
+						stroke: palette.destructive,
+						strokeOpacity: 1,
+						strokeWidth: 1.5,
+						strokeDasharray: "6 4",
+					},
+				),
+				// The unselected source, behind the primary: same shape, dashed and
+				// muted, so "the query says one thing, the evaluator recorded another"
+				// is visible instead of inferred.
+				...(hasGhost
+					? [
+							lineY(points, {
+								id: GHOST_KEY,
+								x: at,
+								y: valueOf(GHOST_KEY),
+								stroke: palette.muted,
+								strokeWidth: 1.5,
+								strokeDasharray: roundCapDasharray(5, 3, 1.5),
+								curve,
+							}),
+						]
+					: []),
+				...(isMultiSeries
+					? seriesKeys.map((key) =>
+							lineY(points, {
+								id: key,
+								x: at,
+								y: valueOf(key),
+								stroke: resolvedSeriesColors.get(key) ?? palette.signal,
+								strokeWidth: 1.5,
+								curve,
+							}),
+						)
+					: [
+							areaY(points, {
+								id: `${SINGLE_KEY}-band`,
+								x: at,
+								y: valueOf(SINGLE_KEY),
+								y1: () => yDomain[0],
+								fill: `url(#${signalGradientId})`,
+								stroke: "none",
+								curve,
+							}),
+							lineY(points, {
+								id: SINGLE_KEY,
+								x: at,
+								y: valueOf(SINGLE_KEY),
+								stroke: palette.signal,
+								strokeWidth: 2,
+								curve,
+							}),
+						]),
+				focusCrosshair(chromeColors),
+			],
+			x: {
+				// A real time scale over the bucket instants, which is what Recharts'
+				// `type="number" scale="time"` was.
+				scale: scaleTime().domain([new Date(domain.min), new Date(domain.max)]),
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 8,
+						format: (value: Date) => formatTime(value.getTime(), "tick"),
+					},
+					tickLabels: { thin: { minGap: 12 } },
+				},
+			},
+			y: {
+				scale: scaleLinear().domain(yDomain),
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 8,
+						format: (value: number) => formatSignalValue(signalType, value),
+					},
+				},
+			},
+			margin: { top: 8, right: PLOT_RIGHT, bottom: 0, left: Y_AXIS_WIDTH },
+			focus: "group-x",
+			focusRing: false,
+			tooltip: cursorTooltip(focusStore.anchor),
+		})
+	}, [
+		points,
+		domain,
+		yDomain,
+		noDataBands,
+		incidentBands,
+		wouldFireBands,
+		threshold,
+		thresholdUpper,
+		hasGhost,
+		isMultiSeries,
+		seriesKeys,
+		resolvedSeriesColors,
+		palette,
+		splitOffset,
+		breachAbove,
+		breachBelow,
+		signalGradientId,
+		chromeColors,
+		formatTime,
+		signalType,
+		focusStore,
+	])
+
 	const chartArea = hasSignal ? (
-		<ChartContainer config={chartConfig} className="aspect-auto w-full" style={{ height: CHART_HEIGHT }}>
-			<ComposedChart
-				data={chartData}
-				accessibilityLayer
-				margin={{ top: 8, right: PLOT_RIGHT, bottom: 0, left: 0 }}
-			>
-				<defs>
-					<linearGradient id="alert-signal-fill" x1="0" y1="0" x2="0" y2="1">
-						{breachAbove ? (
-							<>
-								<stop offset={0} stopColor="var(--destructive)" stopOpacity={0.32} />
-								<stop
-									offset={splitOffset}
-									stopColor="var(--destructive)"
-									stopOpacity={0.08}
-								/>
-								<stop offset={splitOffset} stopColor={SIGNAL_COLOR} stopOpacity={0.12} />
-								<stop offset={1} stopColor={SIGNAL_COLOR} stopOpacity={0.02} />
-							</>
-						) : breachBelow ? (
-							<>
-								<stop offset={0} stopColor={SIGNAL_COLOR} stopOpacity={0.12} />
-								<stop offset={splitOffset} stopColor={SIGNAL_COLOR} stopOpacity={0.05} />
-								<stop
-									offset={splitOffset}
-									stopColor="var(--destructive)"
-									stopOpacity={0.08}
-								/>
-								<stop offset={1} stopColor="var(--destructive)" stopOpacity={0.3} />
-							</>
-						) : (
-							<>
-								<stop offset={0.05} stopColor={SIGNAL_COLOR} stopOpacity={0.45} />
-								<stop offset={0.95} stopColor={SIGNAL_COLOR} stopOpacity={0.04} />
-							</>
-						)}
-					</linearGradient>
-					<pattern
-						id="alert-nodata-hatch"
-						patternUnits="userSpaceOnUse"
-						width={6}
-						height={6}
-						patternTransform="rotate(45)"
-					>
-						<line
-							x1={0}
-							y1={0}
-							x2={0}
-							y2={6}
-							stroke="var(--muted-foreground)"
-							strokeOpacity={0.25}
-							strokeWidth={1.5}
-						/>
-					</pattern>
-				</defs>
-				<ChartGrid />
-
-				{noDataBands.map((band, i) => (
-					<ReferenceArea
-						key={`no-data-${i}`}
-						x1={Math.max(band.x1, domain.min)}
-						x2={Math.min(band.x2, domain.max)}
-						fill="url(#alert-nodata-hatch)"
-						stroke="none"
-						ifOverflow="hidden"
-					/>
-				))}
-
-				{incidentBands.map((band, i) => (
-					<ReferenceArea
-						key={`incident-${i}`}
-						x1={band.x1}
-						x2={band.x2}
-						fill="var(--destructive)"
-						fillOpacity={band.open ? 0.12 : 0.06}
-						stroke="none"
-						ifOverflow="hidden"
-					/>
-				))}
-
-				{wouldFireBands.map((band, i) => (
-					<ReferenceArea
-						key={`would-fire-${i}`}
-						x1={band.x1}
-						x2={band.x2}
-						fill="var(--destructive)"
-						fillOpacity={0.08}
-						stroke="var(--destructive)"
-						strokeOpacity={0.4}
-						strokeDasharray="4 3"
-						ifOverflow="hidden"
-					/>
-				))}
-
-				<ChartXAxis
-					dataKey="t"
-					type="number"
-					scale="time"
-					domain={[domain.min, domain.max]}
-					tickFormatter={(value) => formatTime(value as number, "tick")}
-				/>
-				<ChartYAxis
-					tickMargin={8}
-					width={Y_AXIS_WIDTH}
-					domain={yDomain}
-					tickFormatter={(value) => formatSignalValue(signalType, num(value))}
-				/>
-
-				<ChartTooltip
-					content={
-						<ChartTooltipContent
-							labelFormatter={(_, payload) => {
-								const t = payload?.[0]?.payload?.t
-								if (typeof t !== "number") return ""
+		<div className="w-full">
+			{/*
+			 * The series key, only when there is more than one series to tell apart.
+			 * Recharts drew this with `<Legend verticalAlign="top" height={32}>`; the
+			 * plot layer keeps legends in the DOM, so it is a sibling above the plot
+			 * rather than a reserved band inside it.
+			 */}
+			{isMultiSeries ? (
+				<div className="flex h-8 items-center gap-3 overflow-x-auto whitespace-nowrap">
+					{seriesKeys.map((key) => (
+						<span key={key} className="inline-flex items-center gap-1.5">
+							<span
+								aria-hidden
+								className="size-2 shrink-0 rounded-full"
+								style={{ background: resolvedSeriesColors.get(key) ?? palette.signal }}
+							/>
+							<span className="text-xs text-muted-foreground">
+								{chartConfig[key]?.label ?? key}
+							</span>
+						</span>
+					))}
+				</div>
+			) : null}
+			<div style={{ height: CHART_HEIGHT }}>
+				<PlotFrame
+					definition={definition}
+					ariaLabel="Alert signal"
+					className="h-full w-full"
+					renderTooltipBody={({ points: focused }) => (
+						<PlotTooltipBody
+							points={focused}
+							series={tooltipSeries}
+							focusStore={focusStore}
+							heading={(point: SignalPoint) => {
+								const t = num(point.t)
 								const label = formatTime(t, "tooltip")
 								const samples = sampleCounts.get(t)
 								const status = statuses.get(t)
@@ -632,104 +826,11 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 								].filter(Boolean)
 								return extras.length > 0 ? `${label} · ${extras.join(" · ")}` : label
 							}}
-							formatter={(value, name) => (
-								<span className="flex items-center gap-2">
-									<span
-										className="size-2.5 shrink-0 rounded-[2px]"
-										style={{
-											backgroundColor:
-												chartConfig[name as string]?.color ?? "var(--chart-1)",
-										}}
-									/>
-									<span className="text-muted-foreground">
-										{chartConfig[name as string]?.label ?? name}
-									</span>
-									<span className="font-mono font-medium">
-										{typeof value === "number"
-											? formatSignalValue(signalType, value)
-											: "—"}
-									</span>
-								</span>
-							)}
 						/>
-					}
+					)}
 				/>
-
-				{isMultiSeries && (
-					<Legend
-						verticalAlign="top"
-						height={32}
-						iconType="circle"
-						iconSize={8}
-						wrapperStyle={{ overflowX: "auto", overflowY: "hidden", whiteSpace: "nowrap" }}
-						formatter={(value: string) => (
-							<span className="text-xs text-muted-foreground">{value}</span>
-						)}
-					/>
-				)}
-
-				{/* Dashed threshold line(s) only — the labels live in the caption below
-				    the plot so they can't clip at the right edge or collide with the
-				    legend/series. */}
-				<ReferenceLine
-					y={threshold}
-					stroke="var(--destructive)"
-					strokeDasharray="6 4"
-					strokeWidth={1.5}
-				/>
-				{thresholdUpper != null && (
-					<ReferenceLine
-						y={thresholdUpper}
-						stroke="var(--destructive)"
-						strokeDasharray="6 4"
-						strokeWidth={1.5}
-					/>
-				)}
-
-				{/* The unselected source, behind the primary: same shape, dashed and
-				    muted, so "the query says one thing, the evaluator recorded
-				    another" is visible instead of inferred. */}
-				{hasGhost && (
-					<Line
-						type="monotone"
-						dataKey={GHOST_KEY}
-						stroke="var(--muted-foreground)"
-						strokeWidth={1.5}
-						strokeDasharray="5 3"
-						dot={false}
-						connectNulls
-						isAnimationActive={false}
-					/>
-				)}
-
-				{isMultiSeries ? (
-					seriesKeys.map((key) => (
-						<Line
-							key={key}
-							type="monotone"
-							dataKey={key}
-							stroke={seriesColors.get(key)}
-							strokeWidth={1.5}
-							dot={false}
-							// Skipped/no-data windows stay visible as gaps — connecting
-							// across them would fabricate a signal the evaluator never saw.
-							connectNulls={source !== "preview"}
-							isAnimationActive={false}
-						/>
-					))
-				) : (
-					<Area
-						type="monotone"
-						dataKey={SINGLE_KEY}
-						stroke={SIGNAL_COLOR}
-						strokeWidth={2}
-						fill="url(#alert-signal-fill)"
-						connectNulls={source !== "preview"}
-						isAnimationActive={false}
-					/>
-				)}
-			</ComposedChart>
-		</ChartContainer>
+			</div>
+		</div>
 	) : loading ? (
 		<Skeleton className="w-full" style={{ height: CHART_HEIGHT }} />
 	) : error != null ? (

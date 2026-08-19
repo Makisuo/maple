@@ -33,6 +33,7 @@ const { getActiveSink, resetSinkForTests } = await import("../events/events-sink
 const CONFIG = {
 	endpoint: "https://ingest.test",
 	ingestKey: "k",
+	sdk: "maple-test/0.0.0",
 	maskAllInputs: false,
 	maskAllText: false,
 }

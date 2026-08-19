@@ -32,8 +32,12 @@ const BUDGET = {
 	 * to our source can move — the other two are ~90% third-party and would
 	 * absorb a doubling of our code without crossing a ceiling — so this is the
 	 * one that makes a regression legible. Kept deliberately tight.
+	 *
+	 * 11, not the 5 this once read: that 5 was calibrated against a measurement
+	 * that counted only the entry chunk and silently dropped the shared chunk
+	 * next to it. Our eager first-party code has been ~10 kB the whole time.
 	 */
-	firstParty: 5,
+	firstParty: 11,
 }
 
 /** How close to a ceiling counts as worth warning about. */
@@ -81,36 +85,42 @@ const measure = async (outputs: Array<{ path: string; text: () => Promise<string
 
 const chunks = await measure(result.outputs)
 
-const entry = chunks.find((chunk) => chunk.name.startsWith("index.")) ?? chunks[0]!
-
 /**
  * Walk static imports from the entry. Anything reached this way lands in the
  * eager graph; everything else is behind an `import()` and only downloads when
  * that import runs.
  */
-const eagerNames = new Set<string>([entry.name])
-const queue = [entry]
-while (queue.length > 0) {
-	const chunk = queue.pop()!
-	for (const match of chunk.text.matchAll(/(?:from|import)\s*"\.\/([^"]+)"/g)) {
-		const name = match[1]!
-		if (eagerNames.has(name)) continue
-		const next = chunks.find((candidate) => candidate.name === name)
-		if (!next) continue
-		eagerNames.add(name)
-		queue.push(next)
+const eagerChunks = (group: Chunk[]): Chunk[] => {
+	const entryChunk = group.find((chunk) => chunk.name.startsWith("index.")) ?? group[0]!
+	const names = new Set<string>([entryChunk.name])
+	const queue = [entryChunk]
+	while (queue.length > 0) {
+		const chunk = queue.pop()!
+		for (const match of chunk.text.matchAll(/(?:from|import)\s*"\.\/([^"]+)"/g)) {
+			const name = match[1]!
+			if (names.has(name)) continue
+			const next = group.find((candidate) => candidate.name === name)
+			if (!next) continue
+			names.add(name)
+			queue.push(next)
+		}
 	}
+	return group.filter((chunk) => names.has(chunk.name))
 }
 
-const eager = chunks.filter((chunk) => eagerNames.has(chunk.name))
+const eager = eagerChunks(chunks)
+const eagerNames = new Set(eager.map((chunk) => chunk.name))
 const lazy = chunks.filter((chunk) => !eagerNames.has(chunk.name))
 const total = (group: Chunk[]): number => group.reduce((sum, chunk) => sum + chunk.gzip, 0)
 
 // Same entry, dependencies left external: what a host app that already ships
 // OpenTelemetry pays to add this SDK. The lazy chunk is rrweb-dominated and
 // disappears entirely here, so only the eager side is meaningful.
-const firstParty = await measure((await build(["@opentelemetry/*", "rrweb"])).outputs)
-const firstPartyEager = firstParty.filter((chunk) => chunk.name.startsWith("index."))
+// Walked, not filtered to `index.*`: code splitting can park first-party code
+// in a shared chunk the entry statically imports, which is exactly as eager as
+// the entry itself. Filtering by name silently excluded it — that is how ~30 kB
+// of bundled `effect/Schema` sat inside budget while this line reported 3.5 kB.
+const firstParty = eagerChunks(await measure((await build(["@opentelemetry/*", "rrweb"])).outputs))
 
 const report = (label: string, group: Chunk[], budget: number): boolean => {
 	const gzip = total(group)
@@ -128,7 +138,7 @@ const report = (label: string, group: Chunk[], budget: number): boolean => {
 console.log("@maple-dev/browser — bundled, minified, gzipped")
 const eagerOk = report("eager  every page load ", eager, BUDGET.eager)
 const lazyOk = report("lazy   sampled sessions", lazy, BUDGET.lazy)
-const firstPartyOk = report("ours   eager, deps external", firstPartyEager, BUDGET.firstParty)
+const firstPartyOk = report("ours   eager, deps external", firstParty, BUDGET.firstParty)
 
 if (!eagerOk || !lazyOk || !firstPartyOk) {
 	console.error("\nbundle size exceeds budget — raise it in scripts/size.ts if the cost is intended")

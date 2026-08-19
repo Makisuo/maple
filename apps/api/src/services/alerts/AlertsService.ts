@@ -41,7 +41,6 @@ import {
 	type QueryEngineTimeoutError,
 	type QueryEngineValidationError,
 	RoleName,
-	UserId as UserIdSchema,
 	type UserId,
 } from "@maple/domain/http"
 import {
@@ -57,7 +56,7 @@ import {
 	alertRuleStates,
 	type AlertRuleStateRow,
 } from "@maple/db"
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import {
 	Array as Arr,
 	Cause,
@@ -82,18 +81,19 @@ import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueu
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import type { TenantContext } from "@/services/auth/AuthService"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { formatComparator } from "./alert-formatting"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { makeDbExecute } from "@/platform/db-execute"
-import { dateToMs } from "@/platform/time"
+import { dateToMs, msToDate } from "@/platform/time"
 import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { chartImageUrl, chartWindow, loadChartSeries } from "./alert-chart-series"
+import { systemTenant } from "./system-tenant"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { ApnsClient } from "@/platform/Apns"
@@ -113,7 +113,7 @@ import {
 	planEvaluateSource,
 	type NormalizedRule,
 } from "./AlertRuleModel"
-import { resolveSignalDisplay } from "./alert-signal-display"
+import { mapSignalUnit, resolveSignalDisplay } from "./alert-signal-display"
 
 export { AlertRuntime, type AlertRuntimeApi } from "./AlertRuntime"
 
@@ -144,6 +144,19 @@ interface DeliveryAttemptFailure {
 }
 
 const MAX_DELIVERY_ATTEMPTS = 5
+/**
+ * Consecutive *terminal* delivery failures after which a destination is
+ * auto-disabled.
+ *
+ * A `retry: "never"` failure is already not retried within its own delivery —
+ * but that only bounds one incident. Nothing used to bound the destination, so
+ * a webhook whose provider answers 400 forever kept being handed every new
+ * incident, failing, and losing the alert silently. Three in a row is enough to
+ * separate "this one payload was refused" from "this destination is dead".
+ */
+const DESTINATION_DISABLE_AFTER_FAILURES = 3
+/** Bound on the stored `disabled_reason`; it is a provider sentence, not a log. */
+const DISABLED_REASON_MAX_LENGTH = 500
 const ALERT_TEST_DELIVERY_CONCURRENCY = 5
 const ALERT_CHECK_INGEST_CONCURRENCY = 4
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
@@ -192,14 +205,20 @@ const StoredDeliveryPayloadSchema = Schema.Struct({
 		}),
 	),
 	template: Schema.optionalKey(Schema.NullOr(AlertNotificationTemplate)),
+	chart: Schema.optionalKey(
+		Schema.NullOr(
+			Schema.Struct({
+				sparkline: Schema.optionalKey(Schema.String),
+				url: Schema.optionalKey(Schema.String),
+			}),
+		),
+	),
 })
 
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
 const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.id)
 const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(AlertDeliveryEventDocument.fields.id)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.createdAt)
-const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
@@ -420,13 +439,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			} = rulePersistence
 
 			const dbExecute = makeDbExecute(database, "AlertsService", makePersistenceError)
-
-			const systemTenant = (orgId: OrgId): TenantContext => ({
-				orgId,
-				userId: decodeUserIdSync("system-alerting"),
-				roles: [decodeRoleNameSync("root")],
-				authMode: "self_hosted",
-			})
 
 			/**
 			 * Services a rule's telemetry-liveness probe should cover. An empty list
@@ -749,6 +761,52 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					)
 
 					const destinations = new Map(rows.map((row) => [row.id, row]))
+
+					// Once per notification, not once per destination: N destinations
+					// on one rule must not mean N reads of the same series. Never
+					// fails — `loadChartSeries` answers `null` for every problem it
+					// can have, so a slow or broken warehouse costs the sparkline and
+					// nothing else.
+					const window = chartWindow({
+						incidentStartedAtMs: incident.firstTriggeredAt.getTime(),
+						nowMs: scheduledAt,
+						windowMinutes: rule.windowMinutes,
+					})
+					const series = yield* loadChartSeries(warehouse, systemTenant(orgId), {
+						orgId,
+						ruleId: rule.id,
+						groupKey: incident.groupKey,
+						comparator: rule.comparator,
+						threshold: rule.threshold,
+						...window,
+					})
+
+					// The image URL rides with the series it describes: both pin the
+					// same window, so a retry an hour later renders the same picture
+					// this notification was written about.
+					const display = resolveSignalDisplay(rule)
+					const displayGroup = incident.groupKey === "__total__" ? null : incident.groupKey
+					const chartUrl =
+						series === null
+							? null
+							: chartImageUrl({
+									appBaseUrl: env.MAPLE_APP_BASE_URL,
+									hmacKey: Option.match(env.MAPLE_SHARE_TOKEN_HMAC_KEY, {
+										onNone: () => null,
+										onSome: (key) => Redacted.value(key),
+									}),
+									orgId,
+									ruleId: rule.id,
+									groupKey: incident.groupKey,
+									...window,
+									title: displayGroup
+										? `${display.label} · ${displayGroup}`
+										: display.label,
+									unit: mapSignalUnit(display.unit),
+									threshold: series.threshold,
+									breachSide: series.breachSide,
+								})
+
 					const payload = buildPayload({
 						eventType,
 						incidentId: incident.id,
@@ -765,6 +823,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						windowMinutes: rule.windowMinutes,
 						value: evaluation.value,
 						sampleCount: evaluation.sampleCount,
+						sparkline: series?.sparkline ?? null,
+						chartUrl,
 						template: rule.notificationTemplate,
 						linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
 						sentAtMs: scheduledAt,
@@ -1306,6 +1366,104 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				)
 			})
 
+			/**
+			 * A delivery got through: the destination is alive, so the terminal-failure
+			 * streak is over. Guarded on `> 0` so the overwhelmingly common case (a
+			 * healthy destination) costs no write.
+			 */
+			const clearDestinationFailureStreak = Effect.fn("AlertsService.clearDestinationFailureStreak")(
+				function* (destinationId: AlertDestinationRow["id"], currentTime: number) {
+					yield* dbExecute((db) =>
+						db
+							.update(alertDestinations)
+							.set({
+								consecutiveFailures: 0,
+								lastFailureAt: null,
+								updatedAt: msToDate(currentTime),
+							})
+							.where(
+								and(
+									eq(alertDestinations.id, destinationId),
+									gte(alertDestinations.consecutiveFailures, 1),
+								),
+							),
+					)
+				},
+			)
+
+			/**
+			 * Count a terminal (`retry: "never"`) failure against the destination and
+			 * disable it once the streak reaches the threshold.
+			 *
+			 * The increment and the disable are two statements on purpose: the
+			 * increment is conditional on the row still being enabled, which makes it
+			 * idempotent against two workers finishing failed deliveries at once —
+			 * whoever crosses the threshold second finds `enabled = false` and counts
+			 * nothing.
+			 */
+			const noteTerminalDestinationFailure = Effect.fn("AlertsService.noteTerminalDestinationFailure")(
+				function* (
+					row: AlertDeliveryEventRow,
+					destinationType: string | null,
+					currentTime: number,
+					failure: DeliveryAttemptFailure,
+				) {
+					const counted = yield* dbExecute((db) =>
+						db
+							.update(alertDestinations)
+							.set({
+								consecutiveFailures: sql`${alertDestinations.consecutiveFailures} + 1`,
+								lastFailureAt: msToDate(currentTime),
+								updatedAt: msToDate(currentTime),
+							})
+							.where(
+								and(
+									eq(alertDestinations.id, row.destinationId),
+									eq(alertDestinations.enabled, true),
+								),
+							)
+							.returning({ consecutiveFailures: alertDestinations.consecutiveFailures }),
+					)
+
+					const streak = counted[0]?.consecutiveFailures
+					if (streak === undefined || streak < DESTINATION_DISABLE_AFTER_FAILURES) return
+
+					const reason = failure.message.slice(0, DISABLED_REASON_MAX_LENGTH)
+					yield* dbExecute((db) =>
+						db
+							.update(alertDestinations)
+							.set({
+								enabled: false,
+								disabledAt: msToDate(currentTime),
+								disabledReason: reason,
+								updatedAt: msToDate(currentTime),
+							})
+							.where(eq(alertDestinations.id, row.destinationId)),
+					)
+
+					// The in-product signal is the setup audit: a disabled destination
+					// makes every rule that selects it fail CFG-ALERT-03 ("will evaluate
+					// and breach but deliver to nobody"), and `disabledReason` names the
+					// provider sentence on the destination itself. There is no org-level
+					// notification channel that does not itself go through a destination,
+					// so this log is the operator-side signal — same shape as the dead
+					// push token path in `MobilePushService`.
+					yield* Effect.logWarning(
+						"Alert destination auto-disabled after repeated terminal delivery failures",
+					).pipe(
+						Effect.annotateLogs({
+							workerId,
+							orgId: row.orgId,
+							destinationId: row.destinationId,
+							destinationType: destinationType ?? "",
+							consecutiveFailures: streak,
+							failureKind: failure.kind,
+							reason,
+						}),
+					)
+				},
+			)
+
 			const processQueuedDeliveries = Effect.fn("AlertsService.processQueuedDeliveries")(function* () {
 				const currentTime = yield* now
 				const rows = yield* dbExecute((db) =>
@@ -1371,6 +1529,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					yield* Metric.update(AlertingMetrics.deliveriesAttemptedTotal, 1)
 
 					const destinationRow = destinationMap.get(row.destinationId)
+					// On the span before anything can fail, so a delivery error issue
+					// names the destination it was aimed at without a DB round-trip.
+					yield* Effect.annotateCurrentSpan({
+						"maple.delivery.destination_id": row.destinationId,
+						...(destinationRow
+							? { "maple.delivery.destination_type": destinationRow.type }
+							: undefined),
+					})
 					if (!destinationRow) {
 						failureCount += 1
 						yield* Metric.update(AlertingMetrics.deliveriesFailedTotal, 1)
@@ -1441,6 +1607,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							value: payload.observed?.value ?? null,
 							sampleCount: payload.observed?.sampleCount ?? null,
 							template: payload.template ?? storedRule?.notificationTemplate ?? null,
+							sparkline: payload.chart?.sparkline ?? null,
+							chartUrl: payload.chart?.url ?? null,
 							linkUrl: resolveNotificationLinkUrl(
 								{
 									serviceNames: storedRule?.serviceNames ?? [],
@@ -1466,6 +1634,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						responseCode: result.responseCode,
 						errorMessage: null,
 					})
+
+					yield* clearDestinationFailureStreak(row.destinationId, currentTime)
 
 					if (row.incidentId) {
 						yield* dbExecute((db) =>
@@ -1527,6 +1697,18 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							currentTime + (yield* computeRetryDelayMs(row.attemptNumber)),
 							row.deliveryKey,
 							row.attemptNumber + 1,
+						)
+					}
+
+					// A terminal failure is never retried for this delivery, so without
+					// this the destination would keep receiving (and losing) every
+					// future incident.
+					if (!failure.retryable) {
+						yield* noteTerminalDestinationFailure(
+							row,
+							destinationMap.get(row.destinationId)?.type ?? null,
+							currentTime,
+							failure,
 						)
 					}
 

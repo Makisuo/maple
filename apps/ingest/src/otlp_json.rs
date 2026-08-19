@@ -51,6 +51,11 @@ const U32_NUMBER_FIELDS: &[&str] = &[
 /// Enum fields sent as their protobuf enum *name*. The OTLP/JSON profile tells
 /// senders to use numbers, but standard protobuf JSON permits names and some
 /// clients emit them, so decode both.
+#[expect(
+    clippy::match_same_arms,
+    reason = "arms are grouped by protobuf field; three enums happening to share the value 0, 1 or \
+              2 is not a reason to interleave them"
+)]
 fn enum_value(field: &str, name: &str) -> Option<i64> {
     let n = match (field, name) {
         ("severityNumber", n) => return severity_number(n),
@@ -77,14 +82,8 @@ fn severity_number(name: &str) -> Option<i64> {
     if rest == "UNSPECIFIED" {
         return Some(0);
     }
-    let (base, offset) = rest.split_at(
-        rest.len()
-            - rest
-                .chars()
-                .rev()
-                .take_while(|c| c.is_ascii_digit())
-                .count(),
-    );
+    let (base, offset) =
+        rest.split_at(rest.len() - rest.chars().rev().take_while(char::is_ascii_digit).count());
     let step = match base {
         "TRACE" => 1,
         "DEBUG" => 5,
@@ -117,7 +116,7 @@ pub fn normalize(value: &mut Value, root_field: &str) {
         // replacing it with an empty list would discard the payload and answer
         // 200, which is the failure mode this module exists to remove.
         if !map.contains_key(root_field) {
-            map.insert(root_field.to_string(), Value::Array(Vec::new()));
+            map.insert(root_field.to_owned(), Value::Array(Vec::new()));
         }
     }
 }
@@ -313,7 +312,7 @@ mod tests {
 
     #[test]
     fn empty_request_gets_its_root_list() {
-        assert_eq!(norm(r#"{}"#), serde_json::json!({"resourceLogs": []}));
+        assert_eq!(norm(r"{}"), serde_json::json!({"resourceLogs": []}));
         assert_eq!(
             norm(r#"{"resourceLogs":null}"#),
             serde_json::json!({"resourceLogs": []})

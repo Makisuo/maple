@@ -1,11 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Fiber, Layer, Metric, Redacted, Schema } from "effect"
+import { Duration, Effect, Exit, Fiber, Layer, Metric, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { InternalScrapeTarget, ScrapeResultReport, ScrapeTargetId } from "@maple/domain/http"
 import { ApiClient, ApiRequestError, type ApiClientApi, type ScrapeProxyResponse } from "./ApiClient"
 import { OtlpIngest, OtlpIngestError, type OtlpIngestApi } from "./OtlpIngest"
 import {
 	backoffLogMessage,
+	DELIVERY_BLOCKED_BACKOFF,
 	initialJitterMs,
 	makeResultBuffer,
 	nextScrapeDelayMs,
@@ -19,7 +20,14 @@ import {
 } from "./ScrapeScheduler"
 import { ScraperEnv, type ScraperEnvConfig } from "./Env"
 import { bufferedResults } from "./Metrics"
+import { endedSpansNamed, makeCapturingTracer } from "./testing/capturing-tracer"
 import type { OtlpExportRequest } from "./prometheus/otlp"
+
+/** What the ingest gateway returns for an org over its billing limit. */
+const billingLimitError = new OtlpIngestError({
+	message: "ingest gateway rejected metrics: billing limit reached (HTTP 402)",
+	status: 402,
+})
 
 const decodeTarget = Schema.decodeUnknownSync(InternalScrapeTarget)
 
@@ -516,25 +524,87 @@ describe("ScrapeScheduler", () => {
 		}),
 	)
 
-	it.effect("backs off when the ingest gateway blocks delivery (402) instead of re-scraping", () =>
+	it.effect("suspends a target for the full backoff when the gateway blocks delivery (402)", () =>
 		Effect.gen(function* () {
 			// Prod scenario: the org is over its billing limit, so every export is
-			// refused. Scraping again cannot help — the data has nowhere to go.
+			// refused. Scraping again cannot help — the data has nowhere to go, and
+			// only a subscription change clears it, so the loop parks for an hour.
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
-			harness.ingestImpl = () =>
-				Effect.fail(
-					new OtlpIngestError({
-						message: "ingest gateway rejected metrics: billing limit reached (HTTP 402)",
-						status: 402,
-					}),
-				)
+			harness.ingestImpl = () => Effect.fail(billingLimitError)
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(60))
-
-			// Exponential backoff off a 10s base: scrapes at t=0, 10, 30.
-			assert.strictEqual(harness.scrapeCalls.length, 3)
+			// One scrape at t=0, then nothing for the whole hour (the old exponential
+			// ladder scraped at t=0, 10, 30 and capped at 5 minutes).
+			assert.strictEqual(harness.scrapeCalls.length, 1)
 			assert.include(harness.reportedResults[0]?.error ?? "", "billing limit")
+
+			yield* TestClock.adjust(Duration.minutes(58))
+			assert.strictEqual(harness.scrapeCalls.length, 1)
+
+			// t=60min: one probe for recovery.
+			yield* TestClock.adjust(Duration.minutes(2))
+			assert.strictEqual(harness.scrapeCalls.length, 2)
+		}),
+	)
+
+	it.effect("resumes the normal cadence once delivery is unblocked again", () =>
+		Effect.gen(function* () {
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			let blocked = true
+			harness.ingestImpl = () => (blocked ? Effect.fail(billingLimitError) : Effect.void)
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+
+			yield* TestClock.adjust(Duration.seconds(1))
+			assert.strictEqual(harness.scrapeCalls.length, 1)
+
+			// Subscription fixed while the target is parked.
+			blocked = false
+			yield* TestClock.adjust(DELIVERY_BLOCKED_BACKOFF)
+			// The probe at t=60min succeeds…
+			assert.strictEqual(harness.scrapeCalls.length, 2)
+
+			// …and the backoff is cleared: back to the 10s interval.
+			yield* TestClock.adjust(Duration.seconds(30))
+			assert.strictEqual(harness.scrapeCalls.length, 5)
+			assert.isAtLeast(harness.ingestCalls.length, 4)
+		}),
+	)
+
+	it.effect("does not close the scrape span as an error when delivery is blocked (402)", () =>
+		Effect.gen(function* () {
+			// Only 5xx is `Error` (CLAUDE.md): a 402 from our own gateway is an
+			// expected caller-side condition. It used to mint two Error spans and two
+			// error fingerprints every 5 minutes, forever, for a single blocked org.
+			const tracer = makeCapturingTracer()
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.ingestImpl = () => Effect.fail(billingLimitError)
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)), Effect.provide(tracer.layer))
+
+			yield* TestClock.adjust(Duration.seconds(1))
+
+			const spans = endedSpansNamed(tracer.ended, "scraper.scrape_target")
+			assert.lengthOf(spans, 1)
+			assert.isTrue(Exit.isSuccess(spans[0]!.exit))
+			assert.strictEqual(spans[0]!.attributes.get("error.type"), "delivery_blocked")
+			assert.strictEqual(spans[0]!.attributes.get("maple.scrape.outcome"), "delivery_blocked")
+			assert.strictEqual(spans[0]!.attributes.get("http.response.status_code"), 402)
+		}),
+	)
+
+	it.effect("still closes the scrape span as an error for a genuine scrape failure", () =>
+		Effect.gen(function* () {
+			const tracer = makeCapturingTracer()
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 503, body: "unavailable" }))
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)), Effect.provide(tracer.layer))
+
+			yield* TestClock.adjust(Duration.seconds(1))
+
+			const spans = endedSpansNamed(tracer.ended, "scraper.scrape_target")
+			assert.lengthOf(spans, 1)
+			assert.isTrue(Exit.isFailure(spans[0]!.exit))
+			assert.strictEqual(spans[0]!.attributes.get("error.type"), "rate_limited")
 		}),
 	)
 
@@ -770,19 +840,25 @@ describe("nextScrapeDelayMs", () => {
 	// Regression: a 402 from our own gateway used to flatten into the generic
 	// "some error" outcome with both backoff flags false, so the target kept
 	// scraping at full cadence and re-POSTing data the gateway would refuse again.
-	it("escalates exponentially when the ingest gateway refuses delivery (402)", () => {
+	// It then climbed the same 5-minute exponential ladder as a rate limit, which
+	// still probed 12x an hour for a condition only a subscription change clears.
+	it("parks flat for the delivery-blocked backoff when the gateway refuses delivery (402)", () => {
+		const blocked = Duration.toMillis(DELIVERY_BLOCKED_BACKOFF)
+		// Independent of the base interval and of how long it has been blocked.
 		assert.strictEqual(
 			nextScrapeDelayMs({ baseMs: 10_000, outcome: deliveryBlocked, consecutiveBackoffs: 0 }),
-			10_000,
+			blocked,
 		)
 		assert.strictEqual(
 			nextScrapeDelayMs({ baseMs: 10_000, outcome: deliveryBlocked, consecutiveBackoffs: 3 }),
-			80_000,
+			blocked,
 		)
 		assert.strictEqual(
-			nextScrapeDelayMs({ baseMs: 60_000, outcome: deliveryBlocked, consecutiveBackoffs: 5 }),
-			Duration.toMillis(Duration.minutes(5)),
+			nextScrapeDelayMs({ baseMs: 300_000, outcome: deliveryBlocked, consecutiveBackoffs: 5 }),
+			blocked,
 		)
+		// …and is not clipped by the rate-limit ceiling.
+		assert.isAbove(blocked, Duration.toMillis(Duration.minutes(5)))
 	})
 
 	it("escalates exponentially on a rejected credential (401/403) too", () => {

@@ -1,32 +1,16 @@
-import { useId, useMemo } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { Area, AreaChart, Line, LineChart, ReferenceLine } from "recharts"
 
-import {
-	ChartContainer,
-	ChartTooltip,
-	ChartTooltipContent,
-	type ChartConfig,
-	ChartGrid,
-	ChartXAxis,
-	ChartYAxis,
-} from "@maple/ui/components/ui/chart"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/lib/utils"
-import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
+import { ChartError, ChartLoading, ChartPlotArea } from "@maple/ui/components/charts"
 
 import { hostInfraTimeseriesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { HostInfraMetric } from "@/api/warehouse/infra"
-import { formatBytesPerSecond } from "@maple/ui/lib/format"
+import { formatValueWithUnit } from "./chart-utils"
 import {
-	CHART_EMPTY_MESSAGE,
-	formatValueWithUnit,
-	transformRows,
-	UNNAMED_SERIES_KEY,
-} from "./chart-utils"
-import { InfraTooltipItem } from "./chart-tooltip"
+	InfraMetricChart,
+	INFRA_METRIC_CHART_HEIGHT,
+	type InfraSeriesInfo,
+} from "./primitives/infra-metric-chart"
 import { displayError } from "@/lib/error-messages"
-import { LinkedCursorOverlay, linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 
 interface HostDetailChartProps {
 	hostName: string
@@ -42,8 +26,6 @@ interface HostDetailChartProps {
 	 */
 	syncId?: string
 }
-
-const CHART_HEIGHT = 220
 
 // Human label for each host metric, shown as the tooltip/legend "type" for the
 // single unnamed series.
@@ -69,24 +51,24 @@ export function HostDetailChart({
 		}),
 	)
 
-	return Result.builder(result)
-		.onInitial(() => <Skeleton className="h-[220px] w-full rounded-none" />)
-		.onError((err) => (
-			<div className="flex h-[220px] items-center justify-center border border-destructive/40 bg-destructive/5 font-mono text-[11px] text-destructive">
-				{displayError(err).message}
-			</div>
-		))
-		.onSuccess((response, holder) => (
-			<HostMetricChartView
-				rows={response.data}
-				unit={response.unit}
-				metric={metric}
-				seriesLabel={HOST_METRIC_LABELS[metric]}
-				waiting={Boolean(holder.waiting)}
-				syncId={syncId}
-			/>
-		))
-		.render()
+	return (
+		<ChartPlotArea height={INFRA_METRIC_CHART_HEIGHT}>
+			{Result.builder(result)
+				.onInitial(() => <ChartLoading variant="area" />)
+				.onError((err) => <ChartError>{displayError(err).message}</ChartError>)
+				.onSuccess((response, holder) => (
+					<HostMetricChartView
+						rows={response.data}
+						unit={response.unit}
+						metric={metric}
+						seriesLabel={HOST_METRIC_LABELS[metric]}
+						waiting={Boolean(holder.waiting)}
+						syncId={syncId}
+					/>
+				))
+				.render()}
+		</ChartPlotArea>
+	)
 }
 
 interface HostMetricChartViewProps {
@@ -97,13 +79,43 @@ interface HostMetricChartViewProps {
 	// instead of a bare "value".
 	seriesLabel?: string
 	waiting: boolean
-	syncId?: string
 	/**
-	 * `cursor` (default) drives the shared linked cursor; `recharts` hands the
-	 * syncId to Recharts' event bus instead (render storms on hover — kept only
-	 * for the perf bench baseline).
+	 * Groups this chart with its siblings for the linked hover cursor. The
+	 * container rendering the group must spread `useLinkedCursor(...)`'s
+	 * `containerProps`.
 	 */
-	syncMode?: "recharts" | "cursor"
+	syncId?: string
+}
+
+/**
+ * The host page's right-aligned last-value strip.
+ *
+ * The Kubernetes page draws bordered chips instead, which is why the summary is
+ * the caller's rather than the shared chart's.
+ */
+function HostSeriesSummary({ series, colors, lastValues, labelFor, unit }: InfraSeriesInfo) {
+	return (
+		<div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 px-3 py-2">
+			{series.map((name) => {
+				const value = lastValues[name]
+				return (
+					<div key={name} className="inline-flex items-baseline gap-1.5">
+						<span
+							aria-hidden
+							className="size-1.5 translate-y-[-1px] rounded-full"
+							style={{ background: colors.get(name) }}
+						/>
+						<span className="text-[11px] text-muted-foreground">{labelFor(name)}</span>
+						{value !== undefined && (
+							<span className="font-mono text-[11px] text-foreground/85 tabular-nums">
+								{formatValueWithUnit(value, unit)}
+							</span>
+						)}
+					</div>
+				)
+			})}
+		</div>
+	)
 }
 
 // Exported for the /lab/bench/infra synthetic perf harness.
@@ -114,208 +126,22 @@ export function HostMetricChartView({
 	seriesLabel,
 	waiting,
 	syncId,
-	syncMode = "cursor",
 }: HostMetricChartViewProps) {
-	const gradientPrefix = useId().replace(/:/g, "")
-
-	const { data, series } = useMemo(() => transformRows(rows), [rows])
-
-	// Series names can contain dots/slashes (container names, mount points),
-	// which are invalid in a raw `var(--color-…)` reference — colour series
-	// directly instead of via the ChartContainer CSS variables.
-	const seriesColor = useMemo(() => resolveSeriesColors(series), [series])
-
-	const config = useMemo<ChartConfig>(
-		() =>
-			Object.fromEntries(
-				series.map((name) => [
-					name,
-					{
-						// Swap the unnamed-series placeholder for the metric label.
-						label: name === UNNAMED_SERIES_KEY ? (seriesLabel ?? name) : name,
-						color: seriesColor.get(name),
-					},
-				]),
-			),
-		[series, seriesLabel, seriesColor],
-	)
-
-	const lastValues = useMemo(() => {
-		const out: Record<string, number> = {}
-		const latest = data[data.length - 1]
-		if (!latest) return out
-		for (const s of series) {
-			const v = latest[s]
-			if (typeof v === "number") out[s] = v
-		}
-		return out
-	}, [data, series])
-
-	if (data.length === 0) {
-		return (
-			<div className="flex h-[220px] items-center justify-center border border-dashed border-border/60 font-mono text-[11px] text-muted-foreground">
-				{CHART_EMPTY_MESSAGE}
-			</div>
-		)
-	}
-
-	const tickFormatter = (v: number) => {
-		if (unit === "percent") return `${Math.round(v * 100)}%`
-		if (unit === "bytes_per_second") return formatBytesPerSecond(v)
-		return v.toLocaleString(undefined, { maximumFractionDigits: 2 })
-	}
-
-	const isStacked = metric === "cpu" || metric === "memory"
-	const showThreshold = metric === "cpu" || metric === "memory"
-	const margin = { top: 12, right: 12, left: 0, bottom: 0 }
-	const linkedCursor = syncMode === "cursor" && syncId != null
-	const rechartsSyncId = syncMode === "recharts" ? syncId : undefined
+	// CPU and memory are a whole split into parts, so they stack and carry the
+	// 80% warning rule; the rest are independent lines.
+	const stacked = metric === "cpu" || metric === "memory"
 
 	return (
-		<div className={cn("transition-opacity", waiting && "opacity-60")}>
-			<div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 px-3 py-2">
-				{series.map((s) => {
-					const value = lastValues[s]
-					return (
-						<div key={s} className="inline-flex items-baseline gap-1.5">
-							<span
-								aria-hidden
-								className="size-1.5 rounded-full translate-y-[-1px]"
-								style={{ background: seriesColor.get(s) }}
-							/>
-							<span className="text-[11px] text-muted-foreground">{config[s]?.label ?? s}</span>
-							{value !== undefined && (
-								<span className="font-mono text-[11px] tabular-nums text-foreground/85">
-									{formatValueWithUnit(value, unit)}
-								</span>
-							)}
-						</div>
-					)
-				})}
-			</div>
-			<div
-				className="relative"
-				{...linkedCursorChartProps(linkedCursor ? `host-${metric}` : undefined)}
-			>
-				<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
-					{isStacked ? (
-						<AreaChart data={data} margin={margin} syncId={rechartsSyncId} syncMethod="value">
-							<defs>
-								{series.map((s) => {
-									const id = `${gradientPrefix}-${s.replace(/\W+/g, "_")}`
-									return (
-										<linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
-											<stop
-												offset="5%"
-												stopColor={seriesColor.get(s)}
-												stopOpacity={0.45}
-											/>
-											<stop
-												offset="95%"
-												stopColor={seriesColor.get(s)}
-												stopOpacity={0.04}
-											/>
-										</linearGradient>
-									)
-								})}
-							</defs>
-							<ChartGrid />
-							<ChartXAxis
-								dataKey="time"
-							/>
-							<ChartYAxis
-								tickMargin={8}
-								width={52}
-								tickFormatter={tickFormatter}
-							/>
-							{showThreshold && (
-								<ReferenceLine
-									y={0.8}
-									stroke="var(--severity-warn)"
-									strokeOpacity={0.7}
-									className="infra-ref-line"
-									label={{
-										value: "80%",
-										position: "right",
-										fill: "var(--severity-warn)",
-										fontSize: 9,
-									}}
-								/>
-							)}
-							<ChartTooltip
-								content={
-									<ChartTooltipContent
-										indicator="dot"
-										formatter={(value, name) => (
-											<InfraTooltipItem
-												color={seriesColor.get(String(name)) ?? ""}
-												label={config[String(name)]?.label ?? String(name)}
-												value={Number(value)}
-												unit={unit}
-											/>
-										)}
-									/>
-								}
-							/>
-							{series.map((s) => {
-								const id = `${gradientPrefix}-${s.replace(/\W+/g, "_")}`
-								return (
-									<Area
-										key={s}
-										dataKey={s}
-										type="monotone"
-										stackId="a"
-										stroke={seriesColor.get(s)}
-										strokeWidth={1.4}
-										fill={`url(#${id})`}
-										fillOpacity={1}
-									/>
-								)
-							})}
-						</AreaChart>
-					) : (
-						<LineChart data={data} margin={margin} syncId={rechartsSyncId} syncMethod="value">
-							<ChartGrid />
-							<ChartXAxis
-								dataKey="time"
-							/>
-							<ChartYAxis
-								tickMargin={8}
-								width={64}
-								tickFormatter={tickFormatter}
-							/>
-							<ChartTooltip
-								content={
-									<ChartTooltipContent
-										indicator="line"
-										formatter={(value, name) => (
-											<InfraTooltipItem
-												color={seriesColor.get(String(name)) ?? ""}
-												label={config[String(name)]?.label ?? String(name)}
-												value={Number(value)}
-												unit={unit}
-											/>
-										)}
-									/>
-								}
-							/>
-							{series.map((s) => (
-								<Line
-									key={s}
-									dataKey={s}
-									type="monotone"
-									stroke={seriesColor.get(s)}
-									strokeWidth={1.6}
-									dot={false}
-									activeDot={{ r: 3, strokeWidth: 0 }}
-								/>
-							))}
-						</LineChart>
-					)}
-				</ChartContainer>
-				{linkedCursor && <LinkedCursorOverlay chartId={`host-${metric}`} />}
-			</div>
-		</div>
+		<InfraMetricChart
+			rows={rows}
+			unit={unit}
+			seriesLabel={seriesLabel}
+			stacked={stacked}
+			showThreshold={stacked}
+			waiting={waiting}
+			linkedChartId={syncId != null ? `host-${metric}` : undefined}
+			header={HostSeriesSummary}
+		/>
 	)
 }
 

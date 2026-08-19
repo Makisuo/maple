@@ -1,6 +1,6 @@
 {
 	"name": "@maple-dev/effect-sdk",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"description": "Maple observability SDK for Effect applications",
 	"keywords": [
 		"effect",
@@ -72,6 +72,6 @@
 		"vitest": "catalog:"
 	},
 	"peerDependencies": {
-		"effect": ">=4.0.0-beta.33"
+		"effect": ">=4.0.0-rc.108"
 	}
 }

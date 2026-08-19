@@ -1,8 +1,14 @@
 import { Suspense, type ComponentType } from "react"
+import type { PlotProps } from "@maple/ui/components/charts/_shared/chart-types"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 interface ChartPreviewProps {
-	component: ComponentType<{ className?: string; data?: Record<string, unknown>[] }>
+	/**
+	 * Any registry entry's `component`. The registry is discriminated on `kind`
+	 * and each entry carries its chart's exact props, but every one of those is a
+	 * supertype of `PlotProps`, so a caller that only sets `data` needs no switch.
+	 */
+	component: ComponentType<PlotProps>
 	/**
 	 * Sample rows for the gallery tile — pass the registry entry's `sampleData`.
 	 *

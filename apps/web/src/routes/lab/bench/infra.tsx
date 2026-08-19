@@ -1,21 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { Schema } from "effect"
 
-import { InfraChartBench, type InfraBenchSyncMode } from "@/lab/bench/infra-chart-bench"
+import { InfraChartBench } from "@/lab/bench/infra-chart-bench"
 
-const infraBenchSearchSchema = Schema.Struct({
-	mode: Schema.optional(Schema.Literals(["recharts", "cursor"])),
-})
-
+/**
+ * The `?mode=` search param is gone along with the Recharts arm it selected.
+ * It chose between the linked cursor and Recharts' hover-sync event bus as the
+ * render-storm baseline; the infra charts no longer have a Recharts path, so
+ * there is nothing to A/B and the bench measures the one implementation.
+ */
 export const Route = createFileRoute("/lab/bench/infra")({
 	component: InfraBenchPage,
-	validateSearch: Schema.toStandardSchemaV1(infraBenchSearchSchema),
 })
 
 function InfraBenchPage() {
-	const search = Route.useSearch()
-
-	// Omit the prop when no ?mode= is given so the bench exercises the infra
-	// ChartViews' real default — the perf spec asserts that default stays "cursor".
-	return <InfraChartBench syncMode={search.mode as InfraBenchSyncMode | undefined} />
+	return <InfraChartBench />
 }

@@ -12,6 +12,7 @@ import {
 	onConsentChange,
 	publishSessionSink,
 	rotateSession,
+	sdkHint,
 	setActiveTraceIdProvider,
 	setVisitorTracking,
 	startEventSink,
@@ -25,6 +26,10 @@ import type { ReplaySessionHandle } from "@maple/browser-session/replay"
 import { trace } from "@opentelemetry/api"
 import { type MapleBrowserConfig, type ResolvedConfig, resolveConfig } from "./config"
 import { setupTracing } from "./tracing"
+import { SDK_NAME, SDK_VERSION } from "./version"
+
+/** `x-maple-sdk` value for every request this build makes to ingest. */
+const SDK_HINT = sdkHint(SDK_NAME, SDK_VERSION)
 
 export interface MapleBrowserHandle {
 	/** Empty until consent is granted when `requireConsent` is enabled. */
@@ -83,6 +88,7 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 			{
 				endpoint: config.endpoint,
 				ingestKey: config.ingestKey,
+				sdk: SDK_HINT,
 				maskAllInputs: config.maskAllInputs,
 				maskAllText: config.maskAllText,
 			},
@@ -92,6 +98,7 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 		const shared = {
 			endpoint: config.endpoint,
 			ingestKey: config.ingestKey,
+			sdk: SDK_HINT,
 			serviceName: config.serviceName,
 			environment: config.environment,
 			serviceVersion: config.serviceVersion,

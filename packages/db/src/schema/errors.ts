@@ -75,6 +75,12 @@ export const errorIssues = pgTable(
 		kind: text("kind").$type<IssueKind>().notNull().default("error"),
 		sourceRefJson: jsonb("source_ref_json").$type<unknown>(),
 		fingerprintHash: text("fingerprint_hash").notNull(),
+		// Which fingerprint algorithm produced `fingerprintHash` — see
+		// FINGERPRINT_VERSION in @maple/domain. Hashes cannot collide across
+		// versions, so a row stamped with an older version can never receive
+		// another occurrence: retention archives it on sight instead of waiting out
+		// the 14-day resolved window with a stale issue sitting in `triage`.
+		fingerprintVersion: integer("fingerprint_version").notNull().default(1),
 		serviceName: text("service_name").notNull(),
 		exceptionType: text("exception_type").notNull(),
 		exceptionMessage: text("exception_message").notNull(),
@@ -96,6 +102,26 @@ export const errorIssues = pgTable(
 		occurrenceCount: integer("occurrence_count").notNull().default(0),
 		resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
 		resolvedByActorId: text("resolved_by_actor_id").$type<ActorId>(),
+		// Survives a reopen, unlike `resolvedAt` which the regression path nulls.
+		// Without it an issue that was fixed and regressed looked identical to one
+		// nobody had ever touched — the reason agents kept re-fixing the same bug.
+		lastResolvedAt: timestamp("last_resolved_at", { withTimezone: true, mode: "date" }),
+		lastRegressedAt: timestamp("last_regressed_at", { withTimezone: true, mode: "date" }),
+		regressionCount: integer("regression_count").notNull().default(0),
+		// Builds this issue has been observed from, and the snapshot taken when it
+		// was last resolved. Membership, not ordering: `maple-cli` reports semver
+		// while the Workers report git SHAs, so "newer than the fix" is not a
+		// question these strings can answer. An occurrence from a build that was
+		// already running at resolution time is an old client still in the wild,
+		// not a regression. Every build seen in a window is unioned in, not one
+		// sampled per tick — a sampled set makes the rule a lottery precisely
+		// where clients run many versions at once. Capped, least-recently-seen
+		// evicted first — see MAX_TRACKED_VERSIONS.
+		seenVersionsJson: jsonb("seen_versions_json").$type<ReadonlyArray<string>>().notNull().default([]),
+		resolvedVersionsJson: jsonb("resolved_versions_json")
+			.$type<ReadonlyArray<string>>()
+			.notNull()
+			.default([]),
 		snoozeUntil: timestamp("snooze_until", { withTimezone: true, mode: "date" }),
 		archivedAt: timestamp("archived_at", { withTimezone: true, mode: "date" }),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
@@ -106,6 +132,11 @@ export const errorIssues = pgTable(
 		index("error_issues_org_workflow_idx").on(table.orgId, table.workflowState),
 		index("error_issues_org_severity_idx").on(table.orgId, table.severity),
 		index("error_issues_org_last_seen_idx").on(table.orgId, table.lastSeenAt),
+		// Retention sweeps for issues left behind by a fingerprint-algorithm bump.
+		// Once a sweep drains them the scan returns nothing, and it stays an index
+		// lookup rather than the heap check that `error_issues_org_archived_idx`
+		// below was added to prevent.
+		index("error_issues_org_fp_version_idx").on(table.orgId, table.fingerprintVersion),
 		index("error_issues_org_assignee_idx").on(table.orgId, table.assignedActorId),
 		index("error_issues_lease_expiry_idx").on(table.leaseExpiresAt),
 		// The hourly archived-issue purge filters (org_id, archived_at IS NOT NULL,
@@ -117,6 +148,45 @@ export const errorIssues = pgTable(
 		index("error_issues_org_archived_idx")
 			.on(table.orgId, table.archivedAt)
 			.where(sql`${table.archivedAt} is not null`),
+	],
+)
+
+/**
+ * Holding area for fingerprints that have been seen but have not yet earned an
+ * Issue.
+ *
+ * Nothing used to stand between "a fingerprint appeared once" and "a durable row
+ * plus a first-seen notification", so a single unapplied migration could mint
+ * 2,531 issues in three days. A fingerprint accumulates here until it clears
+ * PROMOTION_MIN_OCCURRENCES, and only then becomes an Issue; rows that never get
+ * there are pruned by retention. Display fields are carried so promotion needs
+ * no second warehouse read.
+ */
+export const errorFingerprintCandidates = pgTable(
+	"error_fingerprint_candidates",
+	{
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		fingerprintHash: text("fingerprint_hash").notNull(),
+		serviceName: text("service_name").notNull(),
+		exceptionType: text("exception_type").notNull(),
+		exceptionMessage: text("exception_message").notNull(),
+		errorLabel: text("error_label").notNull().default(""),
+		topFrame: text("top_frame").notNull(),
+		// Builds seen while the fingerprint was still a candidate, so a promoted
+		// issue starts with the set it earned rather than one window's worth.
+		serviceVersionsJson: jsonb("service_versions_json")
+			.$type<ReadonlyArray<string>>()
+			.notNull()
+			.default([]),
+		occurrenceCount: integer("occurrence_count").notNull().default(0),
+		firstSeenAt: timestamp("first_seen_at", { withTimezone: true, mode: "date" }).notNull(),
+		lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }).notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [
+		primaryKey({ columns: [table.orgId, table.fingerprintHash] }),
+		// Retention prunes candidates that never reached the threshold.
+		index("error_fingerprint_candidates_last_seen_idx").on(table.orgId, table.lastSeenAt),
 	],
 )
 
@@ -278,6 +348,8 @@ export const errorNotificationDeliveries = pgTable(
 export type ActorRow = typeof actors.$inferSelect
 export type ActorInsert = typeof actors.$inferInsert
 export type ErrorIssueRow = typeof errorIssues.$inferSelect
+export type ErrorFingerprintCandidateRow = typeof errorFingerprintCandidates.$inferSelect
+export type ErrorFingerprintCandidateInsert = typeof errorFingerprintCandidates.$inferInsert
 export type ErrorIssueStateRow = typeof errorIssueStates.$inferSelect
 export type ErrorIssueEventRow = typeof errorIssueEvents.$inferSelect
 export type ErrorIssueEventInsert = typeof errorIssueEvents.$inferInsert
