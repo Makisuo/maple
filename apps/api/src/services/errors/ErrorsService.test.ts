@@ -916,6 +916,15 @@ const backdateResolution = (issueId: ErrorIssueId, resolvedAtMs: number) =>
 		)
 	})
 
+/** Seed the build snapshot a resolution would have captured. */
+const setResolvedVersions = (issueId: ErrorIssueId, versions: ReadonlyArray<string>) =>
+	Effect.gen(function* () {
+		const database = yield* Database
+		return yield* database.execute((db) =>
+			db.update(errorIssues).set({ resolvedVersionsJson: versions }).where(eq(errorIssues.id, issueId)),
+		)
+	})
+
 const loadIncidentsForIssue = (issueId: ErrorIssueId) =>
 	Effect.gen(function* () {
 		const database = yield* Database
@@ -1662,6 +1671,50 @@ describe("ErrorsService.runTick", () => {
 			assert.strictEqual(after[0]?.processedThrough.getTime(), before[0]?.processedThrough.getTime())
 		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
 	})
+
+	it.effect(
+		"an occurrence from a pre-fix build leaves a done issue alone and opens no incident",
+		() => {
+			const rows = [scanRow()]
+			return Effect.gen(function* () {
+				const errors = yield* ErrorsService
+				yield* TestClock.setTime(TICK_MS)
+				yield* seedIssue(asIssueId(randomUUID()))
+				yield* errors.runTick()
+				const issue = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+
+				const actor = yield* errors.ensureUserActor(ORG, USER)
+				yield* errors.transitionIssue(ORG, actor.id, issue.id, "done")
+				// Record the build the issue was fixed on, then backdate the fix so the
+				// rollout grace window is not what keeps the issue closed.
+				yield* setResolvedVersions(issue.id, ["1.2.3"])
+				yield* backdateResolution(issue.id, TICK_MS - 3 * 60 * 60 * 1000)
+				const incidentsBefore = yield* loadIncidentsForIssue(issue.id)
+				const openBefore = incidentsBefore.filter((i) => i.status === "open").length
+
+				rows[0] = scanRow({ serviceVersion: "1.2.3" })
+				yield* TestClock.setTime(TICK_MS + 120_000)
+				const second = yield* errors.runTick()
+
+				// An old client still running the pre-fix build is not new work: the
+				// issue stays fixed, and — the part that matters — no fresh incident,
+				// notification, or investigation is raised off the back of it.
+				const after = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+				assert.strictEqual(after.workflowState, "done")
+				assert.strictEqual(after.regressionCount, 0)
+				assert.strictEqual(second.incidentsOpened, 0)
+				assert.strictEqual(second.issuesTouched, 0)
+
+				const incidentsAfter = yield* loadIncidentsForIssue(issue.id)
+				assert.lengthOf(incidentsAfter, incidentsBefore.length)
+				assert.strictEqual(incidentsAfter.filter((i) => i.status === "open").length, openBefore)
+
+				// The occurrence still happened, so the counters stay truthful.
+				assert.isAbove(after.occurrenceCount, issue.occurrenceCount)
+			}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+		},
+		15_000,
+	)
 
 	it.effect("one batched window applies new, ongoing, regressed and snoozed fingerprints", () => {
 		const ONGOING = "11111111111111111111"

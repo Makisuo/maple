@@ -400,6 +400,7 @@ export const persistErrorTickWindow = (
 			readonly row: ErrorTickScanRow
 			readonly prior: ErrorIssueRow | undefined
 			readonly regression: boolean
+			readonly suppressed: boolean
 		}> = []
 		for (const scanned of rows) {
 			const prior = issueByFingerprint.get(scanned.fingerprintHash)
@@ -416,7 +417,17 @@ export const persistErrorTickWindow = (
 			) {
 				continue
 			}
-			applicable.push({ row, prior, regression: prior !== undefined && isRegression(prior, row) })
+			const regression = prior !== undefined && isRegression(prior, row)
+			// An occurrence on a resolved issue that is NOT a regression is an old
+			// client still running the pre-fix build. Its counters are still truthful
+			// — the event really did happen — but it is not new work: it must not open
+			// an incident, notify a destination, or start an investigation. Before the
+			// regression rule existed every such occurrence reopened the issue, so the
+			// incident always had a reopened issue under it; now the reopen can be
+			// skipped, and without this flag the incident path would still fire and
+			// re-alert on a bug that is already fixed.
+			const suppressed = prior?.workflowState === "done" && !regression
+			applicable.push({ row, prior, regression, suppressed })
 		}
 
 		const events: Array<ErrorIssueEventInsert> = []
@@ -496,7 +507,7 @@ export const persistErrorTickWindow = (
 
 			const idByFingerprint = new Map(upserted.map((row) => [row.fingerprintHash, row.id]))
 
-			for (const { row, prior, regression } of applicable) {
+			for (const { row, prior, regression, suppressed } of applicable) {
 				const issueId = idByFingerprint.get(row.fingerprintHash)
 				if (!issueId) throw new Error(`Error issue upsert returned no row for ${row.fingerprintHash}`)
 
@@ -526,6 +537,11 @@ export const persistErrorTickWindow = (
 						}),
 					)
 				}
+
+				// Counters were accumulated by the upsert above; everything downstream
+				// of `observed` is the incident/notification/investigation path, which
+				// a pre-fix straggler must not enter.
+				if (suppressed) continue
 
 				observed.push({
 					issueId,

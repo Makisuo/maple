@@ -479,9 +479,16 @@ const make: Effect.Effect<
 
 			const row = claimed[0]!
 
-			// Move to in_progress if currently in triage/todo.
+			// Move to in_progress if the issue is still waiting to be picked up.
+			// `regressed` belongs here with triage/todo: claiming a bug that came back
+			// is starting work on it, and leaving it in `regressed` would strand it
+			// outside the in-progress views.
 			let next = row
-			if (row.workflowState === "triage" || row.workflowState === "todo") {
+			if (
+				row.workflowState === "triage" ||
+				row.workflowState === "regressed" ||
+				row.workflowState === "todo"
+			) {
 				next = yield* applyTransition(orgId, actorId, row, "in_progress", {
 					payload: { viaClaim: true },
 					timestamp,
