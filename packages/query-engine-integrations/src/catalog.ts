@@ -4,7 +4,9 @@
 // import this package (the dependency runs one way), so the fixtures live with
 // the builders instead. Same contract as the core catalog — compile the REAL
 // exported builder with production-shaped params, so every SQL shape the
-// product can emit is enumerated and snapshotted.
+// product can emit is enumerated and snapshotted. The ClickHouse e2e sweep in
+// apps/api (`sql-catalog.clickhouse.e2e.test.ts`) analyzes these fixtures
+// against the real migrations alongside the core catalog.
 
 import { compile, compileUnion, type CompiledQuery } from "@maple/query-engine/ch"
 import * as CH from "./index"
