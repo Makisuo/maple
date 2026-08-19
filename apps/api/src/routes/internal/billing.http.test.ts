@@ -8,10 +8,12 @@ import {
 	CUSTOMER_CACHE_TTL_SECONDS,
 	CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
 	readCustomerCached,
+	resolveAttachConflict,
 	responseHasActivePlan,
 } from "@/services/billing/autumn-client"
-import { AutumnClient } from "@/services/billing/autumn-http"
+import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
 import {
+	BillingConflictError,
 	BillingCustomer,
 	UpdateBillingControlsRequest,
 	UpdateBillingSpendLimit,
@@ -356,5 +358,64 @@ describe("responseHasActivePlan", () => {
 		assert.isFalse(responseHasActivePlan(noPlanResponse))
 		assert.isFalse(responseHasActivePlan({ id: ORG }))
 		assert.isFalse(responseHasActivePlan({ subscriptions: [{ planId: "startup", status: "expired" }] }))
+	})
+})
+
+describe("resolveAttachConflict", () => {
+	const conflict = new BillingConflictError({
+		message: "Customer already has this plan",
+		code: "already_attached",
+		upstreamStatus: 409,
+	})
+
+	const customerRead = (response: unknown, statusCode = 200) =>
+		Effect.succeed({ statusCode, response } satisfies AutumnResult)
+
+	it("answers success when the customer already holds the plan", async () => {
+		// The double-click case that produced 5 of our 9 attach 502s: the first
+		// attach succeeded, the page sat on the old DOM while the browser navigated
+		// to Stripe, and the customer clicked again. Telling someone who has just
+		// paid that their purchase failed is the worst outcome available here.
+		const result = await Effect.runPromise(
+			resolveAttachConflict(customerRead(activePlanResponse), "startup", conflict),
+		)
+		assert.deepStrictEqual(result, {})
+	})
+
+	it("re-fails when the conflict was about something else", async () => {
+		// 409 is not exclusively "already attached", so a conflict we cannot
+		// explain must keep its status rather than be swallowed as success.
+		const error = await Effect.runPromise(
+			Effect.flip(resolveAttachConflict(customerRead(noPlanResponse), "startup", conflict)),
+		)
+		assert.strictEqual(error._tag, "@maple/http/errors/BillingConflictError")
+	})
+
+	it("re-fails when the customer holds a DIFFERENT plan", async () => {
+		const error = await Effect.runPromise(
+			Effect.flip(resolveAttachConflict(customerRead(activePlanResponse), "enterprise", conflict)),
+		)
+		assert.strictEqual(error._tag, "@maple/http/errors/BillingConflictError")
+	})
+
+	it("re-fails when the confirming read itself fails", async () => {
+		// No confirmation means no licence to call it a success.
+		const error = await Effect.runPromise(
+			Effect.flip(resolveAttachConflict(customerRead({ message: "boom" }, 503), "startup", conflict)),
+		)
+		assert.strictEqual(error._tag, "@maple/http/errors/BillingConflictError")
+	})
+
+	it("counts a trialing subscription Autumn reports as active", async () => {
+		// Autumn reports trials as `active`; a trialist re-clicking Subscribe is
+		// the exact population this incident came from.
+		const trialing = {
+			id: ORG,
+			subscriptions: [{ planId: "startup", status: "active", trialEndsAt: 9_999_999_999_000 }],
+		}
+		const result = await Effect.runPromise(
+			resolveAttachConflict(customerRead(trialing), "startup", conflict),
+		)
+		assert.deepStrictEqual(result, {})
 	})
 })

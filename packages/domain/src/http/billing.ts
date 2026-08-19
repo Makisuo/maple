@@ -290,6 +290,83 @@ export class CustomerPortalResult extends Schema.Class<CustomerPortalResult>("Cu
 	url: Schema.String,
 }) {}
 
+/**
+ * Context every classified Autumn rejection carries.
+ *
+ * `code` is Autumn's own error identifier, passed through VERBATIM as a plain
+ * string. It is deliberately not a `Schema.Literals` union: Autumn owns that
+ * vocabulary and can add to it at any time, and an exhaustive union here would
+ * turn a new upstream code into a decode failure — trading a legible 4xx for an
+ * opaque 500. The transport already parses it out at `errorResponse`
+ * (`apps/api/src/services/billing/autumn-http.ts`), defaulting to
+ * `"autumn_api_error"` when the body carries none.
+ */
+const autumnFailureFields = {
+	message: Schema.String,
+	code: Schema.String,
+	/** The status Autumn itself answered with, before we mapped it. */
+	upstreamStatus: Schema.Number,
+}
+
+/**
+ * Autumn refused the charge — a declined card, an expired payment method, a
+ * missing one. The `message` is Autumn's own wording, which is the only place
+ * the actual decline reason exists.
+ */
+export class BillingPaymentRequiredError extends Schema.TaggedError<BillingPaymentRequiredError>()(
+	"@maple/http/errors/BillingPaymentRequiredError",
+	autumnFailureFields,
+	{ httpApiStatus: 402 },
+) {}
+
+/**
+ * The request conflicts with the customer's current state — most often a repeat
+ * `attach` for a plan they already hold, which is what a double-click produces.
+ * See the attach handler: a conflict that resolves to "already on this plan" is
+ * answered as success, never surfaced.
+ */
+export class BillingConflictError extends Schema.TaggedError<BillingConflictError>()(
+	"@maple/http/errors/BillingConflictError",
+	autumnFailureFields,
+	{ httpApiStatus: 409 },
+) {}
+
+/** Autumn is throttling us. Retryable as-is, unlike every other 4xx here. */
+export class BillingRateLimitedError extends Schema.TaggedError<BillingRateLimitedError>()(
+	"@maple/http/errors/BillingRateLimitedError",
+	autumnFailureFields,
+	{ httpApiStatus: 429 },
+) {}
+
+/**
+ * Autumn rejected the request itself — an unknown plan id, a malformed control.
+ * Only raised on endpoints that take caller input; on a pure read an upstream
+ * 4xx means WE built a bad request, which is a Maple bug and stays a 502.
+ */
+export class BillingRequestError extends Schema.TaggedError<BillingRequestError>()(
+	"@maple/http/errors/BillingRequestError",
+	autumnFailureFields,
+	{ httpApiStatus: 400 },
+) {}
+
+/**
+ * `AUTUMN_SECRET_KEY` is unset. A deployment fault, not an upstream one — it
+ * previously surfaced as a 502, which pointed every investigation at Autumn.
+ */
+export class BillingNotConfiguredError extends Schema.TaggedError<BillingNotConfiguredError>()(
+	"@maple/http/errors/BillingNotConfiguredError",
+	{ message: Schema.String },
+	{ httpApiStatus: 500 },
+) {}
+
+/**
+ * Autumn is broken or unreachable: a 5xx, a transport failure, an empty 2xx, or
+ * a body we could not decode. Deliberately NOT used for upstream 4xx on
+ * caller-input endpoints — those are the classified errors above.
+ *
+ * Field shape is unchanged (`message` only): a transport failure has no upstream
+ * status or code to report.
+ */
 export class BillingUpstreamError extends Schema.TaggedError<BillingUpstreamError>()(
 	"@maple/http/errors/BillingUpstreamError",
 	{
@@ -298,31 +375,66 @@ export class BillingUpstreamError extends Schema.TaggedError<BillingUpstreamErro
 	{ httpApiStatus: 502 },
 ) {}
 
+/**
+ * Every failure `classifyAutumn` can produce. Endpoints that take caller input
+ * declare the whole union; pure reads collapse the 4xx members back into
+ * `BillingUpstreamError` at the handler, because on those endpoints an upstream
+ * 4xx is our bug and blaming the browser with a 400 would be a lie.
+ */
+export type AutumnFailure =
+	| BillingPaymentRequiredError
+	| BillingConflictError
+	| BillingRateLimitedError
+	| BillingRequestError
+	| BillingNotConfiguredError
+	| BillingUpstreamError
+
 export class BillingForbiddenError extends Schema.TaggedError<BillingForbiddenError>()(
 	"@maple/http/errors/BillingForbiddenError",
 	{ message: Schema.String },
 	{ httpApiStatus: 403 },
 ) {}
 
+/**
+ * Failures reachable on every billing call, whatever it does: Autumn is broken
+ * or unreachable (502), or we are not configured to call it (500).
+ */
+const billingTransportErrors = [BillingUpstreamError, BillingNotConfiguredError] as const
+
+/**
+ * The above plus Autumn's classified rejections — declared ONLY on endpoints
+ * that carry caller input (a plan id, a set of controls), where an upstream 4xx
+ * is genuinely about what the caller asked for. Pure reads deliberately omit
+ * these: there, a 4xx means we built a bad request, and answering the browser
+ * with a 400 would blame someone who supplied nothing.
+ */
+const billingRequestErrors = [
+	BillingRequestError,
+	BillingPaymentRequiredError,
+	BillingConflictError,
+	BillingRateLimitedError,
+	...billingTransportErrors,
+] as const
+
 // Authed billing operations: customer/usage reads, native controls, and checkout/portal.
 export class BillingApiGroup extends HttpApiGroup.make("billing")
 	.add(
 		HttpApiEndpoint.get("getCustomer", "/customer", {
 			success: BillingCustomer,
-			error: BillingUpstreamError,
+			error: [...billingTransportErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.get("getUsage", "/usage", {
 			query: BillingUsageQuery,
 			success: BillingUsage,
-			error: BillingUpstreamError,
+			error: [...billingTransportErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.get("listInvoices", "/invoices", {
 			success: BillingInvoicesResponse,
-			error: BillingUpstreamError,
+			error: [...billingTransportErrors],
 		}),
 	)
 	// Warehouse-backed, unlike every other read in this group: Autumn only knows
@@ -331,35 +443,35 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 	.add(
 		HttpApiEndpoint.get("getDailySpend", "/daily-spend", {
 			success: DailySpendResponse,
-			error: [BillingUpstreamError, WarehouseQueryError],
+			error: [...billingTransportErrors, WarehouseQueryError],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.put("updateBillingControls", "/billing-controls", {
 			payload: UpdateBillingControlsRequest,
 			success: BillingCustomer,
-			error: [BillingForbiddenError, BillingUpstreamError],
+			error: [BillingForbiddenError, ...billingRequestErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("attach", "/attach", {
 			payload: AttachRequest,
 			success: AttachResult,
-			error: BillingUpstreamError,
+			error: [...billingRequestErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("previewAttach", "/preview-attach", {
 			payload: PreviewAttachRequest,
 			success: PreviewAttachResult,
-			error: BillingUpstreamError,
+			error: [...billingRequestErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("openCustomerPortal", "/portal", {
 			payload: CustomerPortalRequest,
 			success: CustomerPortalResult,
-			error: BillingUpstreamError,
+			error: [...billingTransportErrors],
 		}),
 	)
 	.prefix("/internal/billing")
@@ -372,7 +484,7 @@ export class BillingPublicApiGroup extends HttpApiGroup.make("billingPublic")
 	.add(
 		HttpApiEndpoint.get("listPlans", "/plans", {
 			success: CatalogPlansResponse,
-			error: BillingUpstreamError,
+			error: [...billingTransportErrors],
 		}),
 	)
 	.prefix("/api/billing") {}

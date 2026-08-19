@@ -3,7 +3,7 @@ import { ConfigProvider, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { BillingCustomer, BillingUsage } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
-import { decodeUpstream, ensureOk } from "@/services/billing/autumn-client"
+import { classifyAutumn, decodeUpstream, ensureOk } from "@/services/billing/autumn-client"
 import {
 	AutumnClient,
 	type AutumnClientApi,
@@ -235,7 +235,9 @@ describe("AutumnClient request construction", () => {
 				clientLayer({ AUTUMN_API_URL: API_URL }),
 			),
 		)
-		assert.strictEqual(error._tag, "@maple/http/errors/BillingUpstreamError")
+		// A missing key is a deployment fault, NOT an upstream one: reporting 502
+		// here sent every investigation to Autumn for a call it never received.
+		assert.strictEqual(error._tag, "@maple/http/errors/BillingNotConfiguredError")
 		assert.strictEqual(error.message, "Billing is not configured")
 	})
 })
@@ -396,8 +398,19 @@ describe("AutumnClient response handling", () => {
 			response: { message: "Card declined", code: "card_declined", statusCode: 402 },
 		})
 
-		const exit = await Effect.runPromiseExit(ensureOk(result))
-		assert.isTrue(exit._tag === "Failure")
+		// Asserting only "it failed" is what let 402/409/429 collapse into one
+		// opaque 502 unnoticed. Pin the classification itself.
+		const classified = await Effect.runPromise(Effect.flip(classifyAutumn(result)))
+		assert.strictEqual(classified._tag, "@maple/http/errors/BillingPaymentRequiredError")
+		assert.strictEqual(classified.code, "card_declined")
+		assert.strictEqual(classified.upstreamStatus, 402)
+		assert.strictEqual(classified.message, "Card declined")
+
+		// …and that a pure READ still reports 502, because there the same upstream
+		// 4xx means we built a bad request, not that the caller did.
+		const collapsed = await Effect.runPromise(Effect.flip(ensureOk(result)))
+		assert.strictEqual(collapsed._tag, "@maple/http/errors/BillingUpstreamError")
+		assert.include(collapsed.message, "card_declined")
 	})
 
 	it("does NOT fail open on a 5xx — the status survives so the cache refuses it", async () => {
@@ -515,5 +528,55 @@ describe("camelizeKeys", () => {
 		assert.deepStrictEqual(camelizeKeys({ values: { ai_input_tokens: 12, some_group: [{ a_b: 1 }] } }), {
 			values: { ai_input_tokens: 12, some_group: [{ a_b: 1 }] },
 		})
+	})
+})
+
+describe("classifyAutumn", () => {
+	const rejection = (statusCode: number, code = "some_code"): AutumnResult => ({
+		statusCode,
+		response: { message: "nope", code, statusCode },
+	})
+
+	// The status class is the contract. Autumn's `code` rides along as context and
+	// is deliberately NOT what we branch on — they own that vocabulary and can add
+	// to it, and a `Schema.Literals` union here would turn a new code into a decode
+	// failure, trading a legible 4xx for an opaque 500.
+	const cases = [
+		[402, "@maple/http/errors/BillingPaymentRequiredError"],
+		[409, "@maple/http/errors/BillingConflictError"],
+		[429, "@maple/http/errors/BillingRateLimitedError"],
+		[400, "@maple/http/errors/BillingRequestError"],
+		[404, "@maple/http/errors/BillingRequestError"],
+		[422, "@maple/http/errors/BillingRequestError"],
+		[500, "@maple/http/errors/BillingUpstreamError"],
+		[503, "@maple/http/errors/BillingUpstreamError"],
+	] as const
+
+	for (const [status, tag] of cases) {
+		it(`maps HTTP ${status} to ${tag.split("/").pop()}`, async () => {
+			const error = await Effect.runPromise(Effect.flip(classifyAutumn(rejection(status))))
+			assert.strictEqual(error._tag, tag)
+		})
+	}
+
+	it("carries Autumn's own code verbatim, including one we've never seen", async () => {
+		const error = await Effect.runPromise(
+			Effect.flip(classifyAutumn(rejection(409, "a_code_autumn_invented_yesterday"))),
+		)
+		assert.strictEqual(error._tag, "@maple/http/errors/BillingConflictError")
+		assert.strictEqual("code" in error ? error.code : undefined, "a_code_autumn_invented_yesterday")
+	})
+
+	it("passes a 2xx body straight through", async () => {
+		const body = await Effect.runPromise(classifyAutumn({ statusCode: 200, response: { ok: 1 } }))
+		assert.deepStrictEqual(body, { ok: 1 })
+	})
+
+	it("collapses every classified 4xx back to 502 under ensureOk, keeping the status in the message", async () => {
+		for (const [status] of cases.filter(([code]) => code < 500)) {
+			const error = await Effect.runPromise(Effect.flip(ensureOk(rejection(status))))
+			assert.strictEqual(error._tag, "@maple/http/errors/BillingUpstreamError")
+			assert.include(error.message, String(status))
+		}
 	})
 })
