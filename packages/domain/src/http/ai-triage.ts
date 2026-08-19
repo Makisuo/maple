@@ -67,13 +67,38 @@ export class AiTriageResult extends Schema.Class<AiTriageResult>("AiTriageResult
 	unchecked: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
+/**
+ * What today's budget has actually been spent on, in both units.
+ *
+ * Ships with the settings rather than as its own endpoint because a ceiling and
+ * its consumption are unreadable apart: "1000 passes/day" answers nothing on its
+ * own, and the question an operator arrives with is always whether triage is
+ * running right now.
+ */
+export class AiTriageUsage extends Schema.Class<AiTriageUsage>("AiTriageUsage")({
+	runs: Schema.Number,
+	passes: Schema.Number,
+}) {}
+
 export class AiTriageSettingsDocument extends Schema.Class<AiTriageSettingsDocument>(
 	"AiTriageSettingsDocument",
 )({
 	enabled: Schema.Boolean,
 	maxRunsPerDay: Schema.Number,
-	/** Model passes per day — one investigation spends about six. */
+	/** Model passes per day — one investigation spends `fanoutSize + 1`, so 4–7. */
 	maxPassesPerDay: Schema.Number,
+	/** Spent so far in the current UTC day. */
+	usage: AiTriageUsage,
+	/**
+	 * Whether an ordinary-severity incident would be refused right now.
+	 *
+	 * Derived server-side from the same verdict the enqueue path uses, so the
+	 * banner cannot drift from the rule that actually refuses starts. `high` and
+	 * `critical` may still start while this is true — they draw on the reserve.
+	 */
+	passesExhausted: Schema.Boolean,
+	/** When the budget resets — the next UTC midnight. Null when nothing is exhausted. */
+	resumesAt: Schema.NullOr(IsoDateTimeString),
 	updatedAt: Schema.NullOr(IsoDateTimeString),
 	updatedBy: Schema.NullOr(UserId),
 }) {}

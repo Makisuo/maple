@@ -280,6 +280,10 @@ export const maybeEnqueueTriage: (
 			limits: settings,
 			passCount: reservedPasses,
 			nowMs,
+			// Severity decides which pass ceiling applies, so that a burst of `low`
+			// incidents just after UTC midnight cannot spend the slice a `critical`
+			// opening at noon needs.
+			severity: snapshot.severity,
 		})
 		if (verdict.kind === "exceeded") {
 			yield* Effect.logWarning("Investigation daily budget reached; skipping autonomous start").pipe(
@@ -290,6 +294,16 @@ export const maybeEnqueueTriage: (
 					quotaLimit: verdict.limit,
 				}),
 			)
+			// A refused start has to be visible as a *refusal*. `start_result` used to
+			// be set only on the success path, so a budget-exhausted org looked
+			// identical in traces to one with nothing to investigate — which is how
+			// this went unnoticed for two weeks.
+			yield* Effect.annotateCurrentSpan({
+				orgId: input.orgId,
+				"maple.investigation.start_result": "quota_exceeded",
+				"maple.investigation.quota_dimension": verdict.dimension,
+				"maple.investigation.quota_limit": verdict.limit,
+			})
 			return { enqueued: false, reason: "daily_cap" as const }
 		}
 

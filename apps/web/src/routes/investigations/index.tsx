@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Exit, Schema } from "effect"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { displayError } from "@/lib/error-messages"
 import type { V2Investigation } from "@maple/domain/http/v2"
-import { Button } from "@maple/ui/components/ui/button"
+import { Button, buttonVariants } from "@maple/ui/components/ui/button"
+import { cn } from "@maple/ui/lib/utils"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { ToolbarSearch } from "@maple/ui/components/toolbar"
@@ -29,6 +30,7 @@ import {
 import { InvestigateBar } from "@/components/investigations/investigate-bar"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
+import { retainedInternalQuery } from "@/lib/services/common/internal-atom-client"
 
 type HubView = "active" | "history"
 
@@ -101,6 +103,16 @@ function InvestigationsHub() {
 	})
 	const result = useAtomValue(listQuery)
 	const refresh = useAtomRefresh(listQuery)
+	// The hub is where someone stands when they ask "why is nothing being
+	// investigated?", so the answer has to be here rather than three clicks away
+	// in settings.
+	const budget = Result.builder(
+		useAtomValue(
+			retainedInternalQuery("aiTriage", "getSettings", { reactivityKeys: ["aiTriageSettings"] }),
+		),
+	)
+		.onSuccess((value) => value)
+		.orElse(() => null)
 	const create = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "create"), {
 		mode: "promiseExit",
 	})
@@ -253,6 +265,9 @@ function InvestigationsHub() {
 					) : (
 						<>
 							<DashboardLayout.Sticky>
+								{budget?.enabled && budget.passesExhausted ? (
+									<BudgetExhaustedNotice resumesAt={budget.resumesAt} />
+								) : null}
 								<TriageStrip investigations={page} />
 								<InvestigateBar onSubmit={handleCreate} busy={creating} />
 							</DashboardLayout.Sticky>
@@ -295,6 +310,38 @@ function InvestigationsHub() {
 				</DashboardLayout.Content>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
+	)
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Budget notice
+ * -----------------------------------------------------------------------------------------------*/
+
+/**
+ * Says why nothing new is starting.
+ *
+ * Not dismissible and not a toast: the condition lasts until UTC midnight and is
+ * the direct answer to the question that brings someone to this page. It reads
+ * "paused", never "off" — high and critical incidents still start from the
+ * reserved slice while this is showing, and an operator who takes it as a total
+ * stop will go looking for a bug that is not there.
+ */
+function BudgetExhaustedNotice({ resumesAt }: { resumesAt: string | null }) {
+	const resumes = resumesAt === null ? null : new Date(toEpochMs(resumesAt))
+	return (
+		<div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+			<span className="font-medium text-foreground">Automatic triage paused</span>
+			<span className="text-muted-foreground">
+				Today&apos;s model budget is spent
+				{resumes === null
+					? "."
+					: `; it resets ${resumes.toLocaleString(undefined, { timeStyle: "short", dateStyle: "medium" })}.`}{" "}
+				High and critical incidents still start.
+			</span>
+			<Link to="/settings" className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "ml-auto")}>
+				Raise the limit
+			</Link>
+		</div>
 	)
 }
 
