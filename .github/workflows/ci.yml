@@ -411,6 +411,13 @@ jobs:
 
             - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
+            # The action always installs the root `maple` workspace, so naming
+            # it as the only filter installs the CI tools (oxlint and the JS
+            # plugins the shared config loads) and no workspace packages.
+            - uses: ./.github/actions/bun-install
+              with:
+                  filters: maple
+
             # apps/slack-agent is deliberately outside the bun workspace (it
             # self-deploys to Railway, not Cloudflare), so the root install and
             # the `bun turbo` job above never reach it — it needs its own.
@@ -426,6 +433,16 @@ jobs:
             # ungated to Slack.
             - run: bun test
               working-directory: apps/slack-agent
+
+            # Lint runs here rather than in the root `effect-lint` job for two
+            # reasons. The `ts` paths filter excludes apps/slack-agent, so a
+            # slack-agent-only PR never runs that job — the exact shape of #518,
+            # which shipped an `as unknown as` cast past the anti-slop rules that
+            # exist to catch it. And `effect-lint` is type-aware, which cannot
+            # resolve this app's `@types/bun` from a root install, so it rejects
+            # the tsconfig outright. The base config is AST-only, which is all
+            # the anti-slop and maple rules need.
+            - run: bun run lint:slack-agent
 
     # The only job where `layerPg` meets a real Postgres. Everything else that
     # touches the Database service runs on PGlite (in-process, single-connection,

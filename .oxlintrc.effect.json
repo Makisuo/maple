@@ -44,99 +44,6 @@
 				"effecttsgo/any-unknown-in-error-context": "off"
 			}
 		},
-		// apps/slack-agent is a plain-TypeScript eve/AI SDK app with no Effect
-		// dependency at all, so the effecttsgo rule set (tuned for Effect's
-		// error/requirement channels) does not apply — every rule the preset
-		// declares is listed here rather than dropping the plugin, because an
-		// override's `plugins` list does not retract a rule the base config
-		// already turned on by name. The general-purpose rules (anti-slop, maple,
-		// typescript, …) still apply in full.
-		{
-			"files": ["apps/slack-agent/**"],
-			"rules": {
-				"effecttsgo/abort-controller-in-effect": "off",
-				"effecttsgo/async-function": "off",
-				"effecttsgo/catch-all-to-map-error": "off",
-				"effecttsgo/catch-chain-to-first-success-of": "off",
-				"effecttsgo/catch-tag-to-catch-reason": "off",
-				"effecttsgo/catch-to-ignore": "off",
-				"effecttsgo/catch-to-or-else-succeed": "off",
-				"effecttsgo/catch-unfailable-effect": "off",
-				"effecttsgo/class-self-mismatch": "off",
-				"effecttsgo/crypto-random-uuid": "off",
-				"effecttsgo/crypto-random-uuid-in-effect": "off",
-				"effecttsgo/duplicate-package": "off",
-				"effecttsgo/effect-fn-iife": "off",
-				"effecttsgo/effect-fn-implicit-any": "off",
-				"effecttsgo/effect-fn-opportunity": "off",
-				"effecttsgo/effect-gen-uses-adapter": "off",
-				"effecttsgo/effect-in-failure": "off",
-				"effecttsgo/effect-in-void-success": "off",
-				"effecttsgo/effect-map-flatten": "off",
-				"effecttsgo/effect-map-void": "off",
-				"effecttsgo/effect-succeed-with-void": "off",
-				"effecttsgo/extends-native-error": "off",
-				"effecttsgo/flat-map-to-map": "off",
-				"effecttsgo/floating-effect": "off",
-				"effecttsgo/floating-effect-in-vitest": "off",
-				"effecttsgo/generic-effect-services": "off",
-				"effecttsgo/global-console": "off",
-				"effecttsgo/global-console-in-effect": "off",
-				"effecttsgo/global-date": "off",
-				"effecttsgo/global-date-in-effect": "off",
-				"effecttsgo/global-error-in-effect-catch": "off",
-				"effecttsgo/global-error-in-effect-failure": "off",
-				"effecttsgo/global-fetch": "off",
-				"effecttsgo/global-fetch-in-effect": "off",
-				"effecttsgo/global-random": "off",
-				"effecttsgo/global-random-in-effect": "off",
-				"effecttsgo/global-timers": "off",
-				"effecttsgo/global-timers-in-effect": "off",
-				"effecttsgo/instance-of-schema": "off",
-				"effecttsgo/layer-merge-all-with-dependencies": "off",
-				"effecttsgo/lazy-effect": "off",
-				"effecttsgo/lazy-promise-in-effect-sync": "off",
-				"effecttsgo/leaking-requirements": "off",
-				"effecttsgo/missing-effect-context": "off",
-				"effecttsgo/missing-effect-error": "off",
-				"effecttsgo/missing-layer-context": "off",
-				"effecttsgo/missing-return-yield-star": "off",
-				"effecttsgo/missing-star-in-yield-effect-gen": "off",
-				"effecttsgo/multiple-catch-tag": "off",
-				"effecttsgo/multiple-effect-provide": "off",
-				"effecttsgo/new-promise": "off",
-				"effecttsgo/node-builtin-import": "off",
-				"effecttsgo/non-object-effect-service-type": "off",
-				"effecttsgo/outdated-api": "off",
-				"effecttsgo/overridden-schema-constructor": "off",
-				"effecttsgo/prefer-schema-over-json": "off",
-				"effecttsgo/prefer-typed-schema-decoder": "off",
-				"effecttsgo/prefer-unsafe-constructor": "off",
-				"effecttsgo/process-env": "off",
-				"effecttsgo/process-env-in-effect": "off",
-				"effecttsgo/promise-in-effect-success": "off",
-				"effecttsgo/redundant-map-error": "off",
-				"effecttsgo/redundant-or-die": "off",
-				"effecttsgo/redundant-schema-tag-identifier": "off",
-				"effecttsgo/return-effect-in-gen": "off",
-				"effecttsgo/run-effect-inside-effect": "off",
-				"effecttsgo/schema-literal-non-finite": "off",
-				"effecttsgo/schema-number": "off",
-				"effecttsgo/schema-opaque-instance-member": "off",
-				"effecttsgo/schema-struct-with-tag": "off",
-				"effecttsgo/schema-sync-in-effect": "off",
-				"effecttsgo/scope-in-layer-effect": "off",
-				"effecttsgo/sync-to-succeed": "off",
-				"effecttsgo/try-catch-in-effect-gen": "off",
-				"effecttsgo/unknown-in-effect-catch": "off",
-				"effecttsgo/unnecessary-effect-gen": "off",
-				"effecttsgo/unnecessary-fail-yieldable-error": "off",
-				"effecttsgo/unnecessary-pipe": "off",
-				"effecttsgo/unnecessary-pipe-chain": "off",
-				"effecttsgo/unnecessary-typeof-type": "off",
-				"effecttsgo/unsafe-effect-type-assertion": "off"
-			}
-		},
 		// Tests may use host globals and intentionally incomplete layers; production code may not.
 		{
 			"files": [
@@ -172,6 +79,11 @@
 		".factory/**",
 		".impeccable/**",
 		".superset/**",
+		// apps/slack-agent sits outside the bun workspace, so a root install
+		// never fetches its `@types/bun` and this type-aware run rejects its
+		// tsconfig outright. It is linted with the base (AST-only) config in
+		// the `slack-agent` CI job instead, which installs its dependencies.
+		"apps/slack-agent/**",
 		"apps/web/src/routeTree.gen.ts",
 		"lib/llm/**",
 		"lib/thinking-orbs/**"
