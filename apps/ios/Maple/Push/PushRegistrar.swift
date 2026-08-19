@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
 	) {
 		Task { @MainActor in
-			await IssuesWidgetPublisher.shared.refresh(force: true)
+			await WidgetPublisher.shared.refresh(force: true)
 			completionHandler(.newData)
 		}
 	}

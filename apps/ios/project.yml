@@ -186,6 +186,8 @@ targets:
             - path: Maple/DesignSystem/Tokens.swift
             - path: Maple/DesignSystem/Typography.swift
             - path: Maple/DesignSystem/ServiceColor.swift
+            # The same one-line chart the app draws beside every number.
+            - path: Maple/Components/Sparkline.swift
             # Fonts are per-bundle. Without a copy in the extension, Geist Mono
             # resolves to nothing and SwiftUI silently falls back.
             - path: Maple/Resources/Fonts

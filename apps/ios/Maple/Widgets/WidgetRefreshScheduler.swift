@@ -65,7 +65,7 @@ enum WidgetRefreshScheduler {
 		// both touches below happen there.
 		nonisolated(unsafe) let task = task
 		let work = Task { @MainActor in
-			await IssuesWidgetPublisher.shared.refresh(force: true)
+			await WidgetPublisher.shared.refresh(force: true)
 			task.setTaskCompleted(success: true)
 		}
 

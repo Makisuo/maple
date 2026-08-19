@@ -66,6 +66,9 @@ final class AppNavigation {
 	/// The Alerts tab's stack. Owned here so a notification tap can push an
 	/// incident onto it from outside the view tree.
 	var alertsPath: [Route] = []
+	/// The Services tab's stack, owned here for the same reason: the
+	/// throughput widget opens the service it was configured for.
+	var servicesPath: [Route] = []
 
 	func open(_ segment: AlertsSegment) {
 		alertsSegment = segment
@@ -78,6 +81,13 @@ final class AppNavigation {
 		alertsSegment = .incidents
 		alertsPath = [.incident(id: id)]
 		tab = .alerts
+	}
+
+	/// A tapped throughput widget: the service, with the Services list
+	/// underneath so back goes somewhere sensible.
+	func openService(name: String) {
+		servicesPath = [.service(name: name)]
+		tab = .services
 	}
 
 	/// A tapped widget row: the issue, with the Errors list underneath.
@@ -103,6 +113,19 @@ final class AppNavigation {
 			// empty one means the widget's row lost its issue.
 			let id = url.pathComponents.first { $0 != "/" }
 			if let id, !id.isEmpty { openIssue(id: id) } else { open(.errors) }
+		case "services":
+			servicesPath = []
+			tab = .services
+		case "service":
+			// `maple://service/<name>`; service names can contain characters
+			// the widget percent-encoded, so decode before matching.
+			let name = url.pathComponents.first { $0 != "/" }?.removingPercentEncoding
+			if let name, !name.isEmpty {
+				openService(name: name)
+			} else {
+				servicesPath = []
+				tab = .services
+			}
 		default:
 			break
 		}

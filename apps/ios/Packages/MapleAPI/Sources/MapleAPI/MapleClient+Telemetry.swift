@@ -1,16 +1,23 @@
 import Foundation
 import OpenAPIRuntime
 
-/// A trace timeseries query, narrowed to the shape the app needs: one service,
-/// one aggregation, one window. `bucketSeconds` defaults to whatever gives the
-/// window roughly `TraceTimeseriesRequest.targetPoints` points, so a sparkline
-/// on a 1h window and one on a 7d window carry the same visual density.
+/// A trace timeseries query, narrowed to the shape the app needs: one
+/// aggregation, one window, optionally one service or one series per group.
+/// `bucketSeconds` defaults to whatever gives the window roughly
+/// `TraceTimeseriesRequest.targetPoints` points, so a sparkline on a 1h window
+/// and one on a 7d window carry the same visual density.
 public struct TraceTimeseriesRequest: Hashable, Sendable {
 	public var aggregation: TraceAggregation
 	public var window: ResolvedTimeWindow
 	public var serviceName: String?
 	public var hasError: Bool?
 	public var bucketSeconds: Int?
+	/// One series per group instead of one series overall. The widget uses
+	/// `.service` to get every service's shape from a single request rather
+	/// than one request per service.
+	public var groupBy: TraceTimeseriesGroup?
+	/// How many groups to return. Ignored without `groupBy`.
+	public var seriesLimit: Int?
 
 	public static let targetPoints = 40
 
@@ -19,13 +26,17 @@ public struct TraceTimeseriesRequest: Hashable, Sendable {
 		window: ResolvedTimeWindow,
 		serviceName: String? = nil,
 		hasError: Bool? = nil,
-		bucketSeconds: Int? = nil
+		bucketSeconds: Int? = nil,
+		groupBy: TraceTimeseriesGroup? = nil,
+		seriesLimit: Int? = nil
 	) {
 		self.aggregation = aggregation
 		self.window = window
 		self.serviceName = serviceName
 		self.hasError = hasError
 		self.bucketSeconds = bucketSeconds
+		self.groupBy = groupBy
+		self.seriesLimit = seriesLimit
 	}
 
 	/// Snapped to a minute multiple: the server rounds anyway, and a whole
@@ -74,6 +85,8 @@ extension MapleClient {
 							bucketSeconds: request.resolvedBucketSeconds,
 							endTime: request.window.endTime,
 							filters: filters(serviceName: request.serviceName, hasError: request.hasError),
+							groupBy: request.groupBy,
+							seriesLimit: request.groupBy == nil ? nil : request.seriesLimit,
 							startTime: request.window.startTime
 						)
 					)
@@ -113,5 +126,15 @@ extension TraceTimeseriesResult {
 	/// The values of the first (only, when ungrouped) series, in order.
 	public var values: [Double] {
 		series.first?.points.map(\.value) ?? []
+	}
+
+	/// A grouped result as `group name → values`. Series without a group are
+	/// dropped: with `groupBy` set they cannot be attributed to anything, and
+	/// silently folding them into one bucket would double-count.
+	public var valuesByGroup: [String: [Double]] {
+		Dictionary(
+			series.compactMap { series in series.group.map { ($0, series.points.map(\.value)) } },
+			uniquingKeysWith: { first, _ in first }
+		)
 	}
 }

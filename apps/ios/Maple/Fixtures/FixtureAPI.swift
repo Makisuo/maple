@@ -524,11 +524,47 @@ struct FixtureAPI: MapleAPI {
 
 	func traceTimeseries(_ request: TraceTimeseriesRequest) async throws -> TraceTimeseriesResult {
 		try await pause()
-		let seed = Self.seeds.first { $0.name == request.serviceName } ?? Self.seeds[3]
 		let bucket = TimeInterval(request.resolvedBucketSeconds)
 		let count = max(2, Int(request.window.end.timeIntervalSince(request.window.start) / bucket))
-		let incident = request.serviceName == "checkout-api" || request.serviceName == "search"
-		let points = (0..<count).map { index -> TimeseriesValuePoint in
+
+		// Grouped: one series per service, which is what the throughput widget
+		// asks for. Ungrouped keeps the single-series shape every screen uses.
+		if request.groupBy == .service {
+			let seeds = Array(Self.seeds.prefix(request.seriesLimit ?? Self.seeds.count))
+			return TraceTimeseriesResult(
+				aggregation: .init(rawValue: request.aggregation.rawValue) ?? .count,
+				bucketSeconds: request.resolvedBucketSeconds,
+				endTime: request.window.endTime,
+				object: .traceTimeseries,
+				series: seeds.map { seed in
+					TimeseriesSeries(
+						group: seed.name,
+						points: series(for: seed, request: request, bucket: bucket, count: count)
+					)
+				},
+				startTime: request.window.startTime
+			)
+		}
+
+		let seed = Self.seeds.first { $0.name == request.serviceName } ?? Self.seeds[3]
+		return TraceTimeseriesResult(
+			aggregation: .init(rawValue: request.aggregation.rawValue) ?? .count,
+			bucketSeconds: request.resolvedBucketSeconds,
+			endTime: request.window.endTime,
+			object: .traceTimeseries,
+			series: [TimeseriesSeries(group: nil, points: series(for: seed, request: request, bucket: bucket, count: count))],
+			startTime: request.window.startTime
+		)
+	}
+
+	private func series(
+		for seed: Seed,
+		request: TraceTimeseriesRequest,
+		bucket: TimeInterval,
+		count: Int
+	) -> [TimeseriesValuePoint] {
+		let incident = seed.name == "checkout-api" || seed.name == "search"
+		return (0..<count).map { index -> TimeseriesValuePoint in
 			let progress = Double(index) / Double(max(1, count - 1))
 			let ramp = incident ? max(0, (progress - 0.55) / 0.3) : 0
 			let wobble = sin(Double(index) * 0.9) * 0.08 + 1
@@ -546,14 +582,6 @@ struct FixtureAPI: MapleAPI {
 				value: value
 			)
 		}
-		return TraceTimeseriesResult(
-			aggregation: .init(rawValue: request.aggregation.rawValue) ?? .count,
-			bucketSeconds: request.resolvedBucketSeconds,
-			endTime: request.window.endTime,
-			object: .traceTimeseries,
-			series: [TimeseriesSeries(group: nil, points: points)],
-			startTime: request.window.startTime
-		)
 	}
 
 	func traceBreakdown(_ request: TraceBreakdownRequest) async throws -> TraceBreakdownResult {

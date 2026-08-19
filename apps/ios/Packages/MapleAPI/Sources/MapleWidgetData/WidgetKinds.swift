@@ -22,3 +22,23 @@ public enum IssuesWidgetKind {
 		URL(string: "\(urlScheme)://issues")
 	}
 }
+
+/// The throughput widget — configurable, per `SelectServiceIntent`, to one
+/// service or to the whole organization.
+public enum ThroughputWidgetKind {
+	public static let identifier = "MapleThroughputWidget"
+
+	/// A configured widget opens its service; the unconfigured one opens the
+	/// Services tab.
+	public static func serviceURL(name: String?) -> URL? {
+		guard let name, !name.isEmpty else { return servicesListURL }
+		guard let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+			return servicesListURL
+		}
+		return URL(string: "\(IssuesWidgetKind.urlScheme)://service/\(encoded)")
+	}
+
+	public static var servicesListURL: URL? {
+		URL(string: "\(IssuesWidgetKind.urlScheme)://services")
+	}
+}

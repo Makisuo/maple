@@ -42,6 +42,7 @@ public typealias TraceBreakdownResult = Components.Schemas.TraceBreakdownResult
 public typealias TraceAggregation = Components.Schemas.TraceTimeseriesParams.AggregationPayload
 public typealias TraceBreakdownAggregation = Components.Schemas.TraceBreakdownParams.AggregationPayload
 public typealias TraceBreakdownGroup = Components.Schemas.TraceBreakdownParams.GroupByPayload
+public typealias TraceTimeseriesGroup = Components.Schemas.TraceTimeseriesParams.GroupByPayload
 public typealias TimeseriesSeries = Components.Schemas.TimeseriesSeries
 public typealias TimeseriesValuePoint = Components.Schemas.TimeseriesValuePoint
 public typealias BreakdownItem = Components.Schemas.BreakdownItem

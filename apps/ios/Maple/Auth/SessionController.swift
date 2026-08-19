@@ -213,7 +213,7 @@ final class SessionController {
 		phase = .signedOut
 		// The Home Screen outlives the session: without this, the previous
 		// account's failures stay readable on a locked phone.
-		IssuesWidgetPublisher.shared.clear()
+		WidgetPublisher.shared.clear()
 	}
 
 	func signOut() async {

@@ -100,9 +100,9 @@ struct IssuesSnapshotStoreTests {
 	/// running on the same machine as these tests.
 	private static let suiteName = "com.maple.tests.issues-snapshot"
 
-	private func makeStore() -> IssuesSnapshotStore {
+	private func makeStore() -> WidgetSnapshotStore<IssuesSnapshot> {
 		UserDefaults(suiteName: Self.suiteName)?.removePersistentDomain(forName: Self.suiteName)
-		return IssuesSnapshotStore(appGroupIdentifier: Self.suiteName)
+		return WidgetSnapshotStore(key: "issues.snapshot.v1", appGroupIdentifier: Self.suiteName)
 	}
 
 	@Test("Round-trips through the shared suite")

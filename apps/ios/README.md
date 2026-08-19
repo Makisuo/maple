@@ -46,7 +46,9 @@ Maple/DesignSystem           tokens, type scale, service colours, shared primiti
 Maple/Features               Home, Services, Alerts (incidents/anomalies), Issues
 Maple/Components             LoadableView, formatting, Sparkline, alert formatting
 Maple/Fixtures               FixtureAPI — the app without Clerk or a network
+Maple/Widgets                publishes the widget's snapshot; background refresh
 Maple/Resources/Fonts        Geist + Geist Mono (SIL OFL)
+Widgets/                     the Home Screen / Lock Screen widget extension
 Packages/MapleAPI            the generated API client — builds and tests with plain `swift test`
 ```
 
@@ -72,6 +74,63 @@ profile to pick the APNs host, and treats a missing profile (TestFlight and App 
 installs have none — Apple re-signs and strips it) as production. The simulator on Apple silicon does get a token, but
 nothing is delivered to it from a Worker — registering from the simulator
 leaves a row Apple rejects with `BadDeviceToken`, which disables it.
+
+## The Home Screen widgets
+
+`Widgets/` is a WidgetKit extension with two widgets:
+
+- **Ongoing issues** — what the app's "Needs attention" filter returns over the
+  last 24 hours, worst first (severity, then whether it is paging, then
+  recency). Small, medium and large, plus all three Lock Screen accessories. A
+  row taps through to that issue (`maple://issue/<id>`), the rest of the widget
+  to the Errors list (`maple://issues`).
+- **Throughput** — traffic over the last hour with its trend, error rate and
+  p95, for the whole organization or for **one service the user picks in the
+  widget itself** (long-press → Edit Widget → Service). That picker is an
+  `AppIntentConfiguration`: `SelectServiceIntent` with a `ServiceEntity` whose
+  query reads the published snapshot, so the choices are the services the app
+  last saw — the extension queries nothing. Unset means the organization total,
+  which is the useful default. Taps open the service (`maple://service/<name>`)
+  or the Services tab.
+
+Deep links are handled by `AppNavigation.open(_:)`, which owns both tab stacks.
+Every widget must also be listed in `MapleWidgetBundle` — one that compiles but
+is missing from that body never appears in the gallery, with no error anywhere.
+
+The extension makes **no network requests**. Every v2 request needs a Clerk
+session token with a one-minute TTL, and an extension has no interactive way to
+recover when refreshing one fails — so the app fetches and writes two small JSON
+snapshots into the App Group `group.com.maple.mobile`, and the widgets only
+render them. The snapshot types, their ranking, the shared store and the
+formatters live in `Packages/MapleAPI/Sources/MapleWidgetData` — a module with
+**no dependency on `MapleAPI`**, which is why the extension does not link the
+generated client. They are covered by `swift test` alongside the client's own
+tests.
+
+Throughput costs three requests per round: the service list (whose numbers the
+organization total is summed from), one `group_by: service` timeseries for every
+service's shape at once, and one ungrouped timeseries for the total's shape —
+summing only the charted services would under-report a big org. Bucket counts
+are divided by the bucket length before publishing, so the sparkline and the
+headline are both "per second" and cannot disagree.
+
+Four things republish it, which between them cover how a phone is used:
+
+- the tabs appearing, and every return to the foreground (`RootView`),
+- an organization switch — the counts belong to one org, so a switch republishes
+  at once rather than leaving the previous org's numbers on the Home Screen,
+- `BGAppRefreshTask` while the app is closed (`WidgetRefreshScheduler`),
+- a push arriving, silent or visible (`AppDelegate`).
+
+Background refresh is opportunistic — iOS decides whether to run it at all — so
+the widgets render their own age rather than implying the numbers are current:
+past thirty minutes they dim and say "as of 2h ago". Sign-out clears both
+snapshots; the Home Screen outlives the session.
+
+Both targets carry the App Group entitlement. With automatic signing Xcode
+creates the group on first build; a mismatch between the two entitlements files
+and `IssuesSnapshotStore.appGroupIdentifier` is silent — the widget simply
+renders "Open Maple" forever.
 
 ## Running without a sign-in
 

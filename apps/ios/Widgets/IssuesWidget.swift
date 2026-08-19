@@ -6,7 +6,7 @@ import WidgetKit
 ///
 /// The extension holds no session and makes no requests: it renders the
 /// snapshot the app publishes into the shared App Group. See `IssuesSnapshot`
-/// for why, and `IssuesWidgetPublisher` for who writes it.
+/// for why, and `WidgetPublisher` for who writes it.
 struct IssuesWidget: Widget {
 	var body: some WidgetConfiguration {
 		StaticConfiguration(kind: IssuesWidgetKind.identifier, provider: IssuesProvider()) { entry in
@@ -39,7 +39,7 @@ struct IssuesEntry: TimelineEntry {
 }
 
 struct IssuesProvider: TimelineProvider {
-	private let store = IssuesSnapshotStore.shared
+	private let store = WidgetSnapshotStore<IssuesSnapshot>.issues
 
 	/// The redacted skeleton iOS shows while placing a widget. Real-shaped
 	/// sample data, so the outline is the widget's own layout rather than a

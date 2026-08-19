@@ -71,7 +71,7 @@ struct MainTabView: View {
 	@Environment(SessionController.self) private var session
 	@Environment(\.scenePhase) private var scenePhase
 	private let push = PushRegistrar.shared
-	private let widgets = IssuesWidgetPublisher.shared
+	private let widgets = WidgetPublisher.shared
 
 	var body: some View {
 		@Bindable var navigation = navigation

@@ -41,7 +41,7 @@ private struct SmallView: View {
 				if let top = snapshot.issues.first {
 					Divider().overlay(Token.border)
 						.padding(.bottom, 8)
-					IssueRowView(issue: top, now: entry.date, showsCount: false)
+					IssueRowView(issue: top, now: entry.date, showsCount: false, showsTrailingTime: false)
 				}
 
 				StalenessFooter(snapshot: snapshot, now: entry.date)
@@ -65,13 +65,20 @@ private struct ListView: View {
 					CountLine(snapshot: snapshot, isCompact: true)
 				}
 
-				SeverityLine(snapshot: snapshot)
-					.padding(.bottom, 8)
+				// Everything secondary on one line: at 155pt tall the medium
+				// family has room for a header, three rows, and nothing else —
+				// a separate footer row got clipped.
+				SeverityLine(
+					snapshot: snapshot,
+					now: entry.date,
+					extra: snapshot.openCount > rowLimit ? "+\(snapshot.openCount - rowLimit) more" : nil
+				)
+				.padding(.bottom, 6)
 
 				VStack(alignment: .leading, spacing: 0) {
 					ForEach(Array(snapshot.issues.prefix(rowLimit).enumerated()), id: \.element.id) { index, issue in
 						if index > 0 {
-							Divider().overlay(Token.border).padding(.vertical, 6)
+							Divider().overlay(Token.border).padding(.vertical, 4)
 						}
 						// Per-row deep link: the point of showing the rows is
 						// that one of them is the reason to open the app.
@@ -81,18 +88,7 @@ private struct ListView: View {
 					}
 				}
 
-				Spacer(minLength: 4)
-
-				HStack {
-					if snapshot.openCount > rowLimit {
-						Text("+\(snapshot.openCount - rowLimit) more")
-							.font(Typo.tiny)
-							.tabularNumbers()
-							.foregroundStyle(Token.mutedForeground)
-					}
-					Spacer()
-					StalenessFooter(snapshot: snapshot, now: entry.date)
-				}
+				Spacer(minLength: 0)
 			}
 		}
 		.widgetURL(IssuesWidgetKind.issuesListURL)
@@ -220,8 +216,12 @@ private struct CountLine: View {
 	}
 }
 
+/// The one secondary line: severity counts, plus whatever else the family
+/// needs to admit — rows it could not show, and how old the data is.
 private struct SeverityLine: View {
 	let snapshot: IssuesSnapshot
+	var now: Date?
+	var extra: String?
 
 	var body: some View {
 		Text(summary)
@@ -235,7 +235,10 @@ private struct SeverityLine: View {
 		var parts: [String] = []
 		if snapshot.criticalCount > 0 { parts.append("\(snapshot.criticalCount) critical") }
 		if snapshot.highCount > 0 { parts.append("\(snapshot.highCount) high") }
-		return parts.isEmpty ? "needs attention" : parts.joined(separator: " · ")
+		if parts.isEmpty { parts.append("needs attention") }
+		if let extra { parts.append(extra) }
+		if let now, snapshot.isStale(at: now) { parts.append("as of \(WidgetTime.age(snapshot.age(at: now)))") }
+		return parts.joined(separator: " · ")
 	}
 }
 
@@ -243,9 +246,13 @@ private struct IssueRowView: View {
 	let issue: WidgetIssue
 	let now: Date
 	let showsCount: Bool
+	/// The small family has no room for a time column beside the title, so it
+	/// carries the time on the metadata line instead of truncating the name of
+	/// the exception — which is the one thing the row exists to say.
+	var showsTrailingTime = true
 
 	var body: some View {
-		VStack(alignment: .leading, spacing: 2) {
+		VStack(alignment: .leading, spacing: 1) {
 			HStack(alignment: .firstTextBaseline, spacing: 6) {
 				// A dot, not a chip: at this size a "Critical" badge costs the
 				// title half its width. The severity word is on the header
@@ -260,13 +267,15 @@ private struct IssueRowView: View {
 					.foregroundStyle(Token.foreground)
 					.lineLimit(1)
 
-				Spacer(minLength: 4)
+				if showsTrailingTime {
+					Spacer(minLength: 4)
 
-				Text(WidgetTime.lastSeen(issue.lastSeenAt, now: now))
-					.font(Typo.tiny)
-					.tabularNumbers()
-					.foregroundStyle(Token.mutedForeground)
-					.layoutPriority(1)
+					Text(WidgetTime.lastSeen(issue.lastSeenAt, now: now))
+						.font(Typo.tiny)
+						.tabularNumbers()
+						.foregroundStyle(Token.mutedForeground)
+						.layoutPriority(1)
+				}
 			}
 
 			HStack(spacing: 6) {
@@ -275,6 +284,14 @@ private struct IssueRowView: View {
 					.font(Typo.tiny)
 					.foregroundStyle(Token.mutedForeground)
 					.lineLimit(1)
+
+				if !showsTrailingTime {
+					Text(WidgetTime.lastSeen(issue.lastSeenAt, now: now))
+						.font(Typo.tiny)
+						.tabularNumbers()
+						.foregroundStyle(Token.mutedForeground)
+						.layoutPriority(1)
+				}
 
 				if showsCount {
 					Text("\(WidgetTime.count(issue.occurrenceCount)) events")

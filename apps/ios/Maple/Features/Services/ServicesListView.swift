@@ -57,11 +57,15 @@ final class ServicesListModel {
 
 struct ServicesListView: View {
 	@Environment(SessionController.self) private var session
+	@Environment(AppNavigation.self) private var navigation
 	@State private var model: ServicesListModel?
 	@State private var search = ""
 
 	var body: some View {
-		NavigationStack {
+		@Bindable var navigation = navigation
+		// The path lives in `AppNavigation` so the throughput widget can open a
+		// service from outside the view tree — same reason as the Alerts hub.
+		return NavigationStack(path: $navigation.servicesPath) {
 			ZStack {
 				Token.background.ignoresSafeArea()
 				content
