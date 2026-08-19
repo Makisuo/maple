@@ -21,6 +21,7 @@ services:
   # workerd boot.
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     command: ["postgres", "-c", "wal_level=logical"]
     environment:
       POSTGRES_USER: maple
@@ -38,6 +39,7 @@ services:
   # electric-sync worker (in workerd) authenticates and org-scopes every request.
   electric:
     image: electricsql/electric:latest
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://maple:${MAPLE_POSTGRES_PASSWORD}@postgres:5432/maple?sslmode=disable
       ELECTRIC_INSECURE: "true"
@@ -51,6 +53,7 @@ services:
   # Telemetry store.
   clickhouse:
     image: clickhouse/clickhouse-server:26.2-alpine
+    restart: unless-stopped
     environment:
       CLICKHOUSE_DB: maple
       CLICKHOUSE_USER: default
@@ -91,6 +94,7 @@ services:
   # OTLP receiver → mapleexporter → ClickHouse base tables.
   collector:
     image: ghcr.io/makisuo/maple/otel-collector-maple:0.1.5
+    restart: unless-stopped
     # The image runs as nonroot (uid 65532), which can't write the durable
     # file-storage queue on a fresh root-owned named volume. Run as root so the
     # on-disk queue (which survives ClickHouse blips without dropping telemetry)
@@ -112,6 +116,7 @@ services:
   # through a Hyperdrive binding and drizzle-migrates it (incl. the Electric
   # publication) on boot.
   workerd:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: deploy/workerd/Dockerfile
@@ -152,6 +157,7 @@ services:
   # Static SPA. VITE_* are baked at build time, so changing MAPLE_APP_BASE_URL
   # (your public origin) needs a `--build` rebuild of this service.
   web:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -167,6 +173,7 @@ services:
   # worker, /* → SPA. This is the one port you open.
   proxy:
     image: caddy:2-alpine
+    restart: unless-stopped
     volumes:
       - ./deploy/workerd/Caddyfile:/etc/caddy/Caddyfile:ro
     ports:

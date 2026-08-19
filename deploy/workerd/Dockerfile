@@ -74,8 +74,8 @@ COPY --from=builder /app/packages/db/drizzle /app/migrations
 COPY --from=builder /build/clickhouse-cli.js /app/clickhouse-cli.js
 
 # Runtime entry + its deps
-COPY deploy/workerd/package.json deploy/workerd/runtime.ts ./
-RUN bun install --production
+COPY deploy/workerd/package.json deploy/workerd/bun.lock deploy/workerd/runtime.ts ./
+RUN bun install --production --frozen-lockfile
 
 ENV NODE_ENV=production
 ENV MAPLE_DATA_DIR=/data

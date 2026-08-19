@@ -93,7 +93,10 @@ const toWorkerOptions = (
 		compatibilityDate: cfg.compatibility_date,
 		compatibilityFlags: cfg.compatibility_flags,
 		// wrangler `vars` are plain strings; fold them in with the shared env.
-		bindings: { ...sharedBindings, ...(cfg.vars ?? {}) },
+		// Shared env last: a wrangler `vars` entry is a dev-local default (e.g.
+		// api's `API_V2_RATE_LIMIT_PARTITION: "local"` and its `-local` queue
+		// names), so the operator's environment has to be able to override it.
+		bindings: { ...(cfg.vars ?? {}), ...sharedBindings },
 	}
 
 	// Every declared Hyperdrive points at the one control-plane Postgres.
@@ -173,8 +176,11 @@ const configs = new Map(WORKER_NAMES.map((name) => [name, readWrangler(name)]))
 }
 
 // Forward Maple-relevant env vars to all workers as bindings.
+// Every prefix here is read by `apps/api/src/platform/Env.ts`. The integration
+// keys are all optional there, so a prefix missing from this list fails silently
+// — the feature just never configures itself. Add to both together.
 const envPrefixRe =
-	/^(MAPLE_|CLICKHOUSE_|TINYBIRD_|CLERK_|RESEND_|AUTUMN_|SD_|INTERNAL_|ELECTRIC_|OPENROUTER_)/
+	/^(MAPLE_|CLICKHOUSE_|TINYBIRD_|CLERK_|RESEND_|AUTUMN_|SD_|INTERNAL_|ELECTRIC_|OPENROUTER_|EMAIL_|HAZEL_|SLACK_|APNS_|GITHUB_|CLOUDFLARE_|PLANETSCALE_)/
 const sharedBindings: Record<string, string> = {}
 for (const [k, v] of Object.entries(process.env)) {
 	if (v !== undefined && envPrefixRe.test(k)) sharedBindings[k] = v
@@ -199,11 +205,46 @@ console.log(`[runtime] api listening on :${API_PORT}`)
 // electric-sync proxy on its own port — Miniflare only exposes the first worker.
 const electricSync = await mf.getWorker(PROXIED_WORKER)
 
+// Framing headers that must not survive the re-wrap. `worker.fetch` hands back a
+// body that is already content-decoded and Node re-chunks it, so a copied
+// content-encoding/content-length would misdescribe the bytes we actually write
+// (the browser fails the shape request with ERR_CONTENT_DECODING_FAILED). This is
+// the same strip `apps/electric-sync/src/routes/headers.ts` does one layer down.
+const STRIPPED_RESPONSE_HEADERS = new Set([
+	"connection",
+	"content-encoding",
+	"content-length",
+	"transfer-encoding",
+])
+
+// Honour the socket's high-water mark. An initial Electric shape snapshot is far
+// larger than the send buffer, so ignoring `write()`'s backpressure signal would
+// accumulate the whole shape in this process's heap. Resolving on `close` too
+// keeps an aborted client from parking the loop on a `drain` that never fires.
+const writeChunk = (res: ServerResponse, chunk: Buffer): Promise<void> =>
+	res.write(chunk)
+		? Promise.resolve()
+		: new Promise((resolve) => {
+				const settle = (): void => {
+					res.off("drain", settle)
+					res.off("close", settle)
+					resolve()
+				}
+				res.once("drain", settle)
+				res.once("close", settle)
+			})
+
 const proxyToWorker = async (
 	worker: { fetch: (input: string, init: RequestInit) => Promise<Response> },
 	req: IncomingMessage,
 	res: ServerResponse,
 ): Promise<void> => {
+	// A `live=true` shape request hangs for tens of seconds, so a closed tab must
+	// cancel the worker invocation rather than leak one in-flight fetch per
+	// abandoned stream.
+	const abort = new AbortController()
+	res.on("close", () => abort.abort())
+
 	try {
 		const proto = (req.headers["x-forwarded-proto"] as string) ?? "http"
 		const host = (req.headers["x-forwarded-host"] as string) ?? (req.headers.host ?? "localhost")
@@ -220,26 +261,41 @@ const proxyToWorker = async (
 			method: req.method,
 			headers: req.headers as Record<string, string>,
 			body,
+			signal: abort.signal,
 		})
 		res.statusCode = upstream.status
-		upstream.headers.forEach((value, key) => res.setHeader(key, value))
+		upstream.headers.forEach((value, key) => {
+			if (!STRIPPED_RESPONSE_HEADERS.has(key.toLowerCase())) res.setHeader(key, value)
+		})
 		if (upstream.body) {
 			const reader = upstream.body.getReader()
-			while (true) {
-				const { done, value } = await reader.read()
-				if (done) break
-				res.write(Buffer.from(value))
+			try {
+				while (!res.destroyed) {
+					const { done, value } = await reader.read()
+					if (done) break
+					await writeChunk(res, Buffer.from(value))
+				}
+			} finally {
+				if (res.destroyed) void reader.cancel().catch(() => {})
 			}
 		}
 		res.end()
 	} catch (err) {
 		console.error("[proxy] error:", err)
-		res.statusCode = 502
-		res.end(`bad gateway: ${(err as Error).message}`)
+		// Once the first chunk has flushed the status line a 502 is no longer
+		// expressible: `statusCode` is a no-op and appending an error string would
+		// splice garbage into the shape body the client is mid-parse on. Kill the
+		// socket instead so the client sees a broken stream and retries.
+		if (res.headersSent) {
+			res.destroy(err as Error)
+		} else {
+			res.statusCode = 502
+			res.end(`bad gateway: ${(err as Error).message}`)
+		}
 	}
 }
 
-createServer((req, res) => {
+const syncServer = createServer((req, res) => {
 	proxyToWorker(electricSync as never, req, res).catch((err) => {
 		console.error("[proxy] unhandled:", err)
 		if (!res.headersSent) res.statusCode = 500
@@ -253,6 +309,8 @@ createServer((req, res) => {
 // scheduled handler; each handler dispatches on the exact cron expression, so
 // it is passed through verbatim. Schedules come from each worker's wrangler.jsonc.
 type ScheduledWorker = { scheduled: (opts: { cron?: string }) => Promise<{ outcome: string }> }
+
+const cronJobs: CronJob[] = []
 
 const triggerCron = async (
 	workerName: string,
@@ -272,15 +330,29 @@ for (const name of WORKER_NAMES) {
 	if (crons.length === 0) continue
 	const worker = (await mf.getWorker(name)) as unknown as ScheduledWorker
 	for (const cron of crons) {
-		new CronJob(cron, () => triggerCron(name, worker, cron), null, true)
+		cronJobs.push(new CronJob(cron, () => triggerCron(name, worker, cron), null, true))
 	}
 	console.log(`[runtime] ${name} crons registered: ${crons.join(", ")}`)
 }
 
-// Cleanup
+// Cleanup. Order matters: stop firing crons, stop accepting new sync
+// connections and let in-flight shape responses drain, and only then dispose
+// Miniflare — disposing first severs every open stream mid-body.
 const shutdown = async (signal: string): Promise<void> => {
 	console.log(`[runtime] received ${signal}, shutting down`)
-	await mf.dispose()
+	for (const job of cronJobs) job.stop()
+	await new Promise<void>((resolve) => {
+		syncServer.close(() => resolve())
+		// Idle keep-alive sockets hold the close open indefinitely; active
+		// responses are untouched and still get to finish.
+		syncServer.closeIdleConnections()
+	})
+	try {
+		await mf.dispose()
+	} catch (err) {
+		console.error("[runtime] dispose failed:", err)
+		process.exit(1)
+	}
 	process.exit(0)
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"))
