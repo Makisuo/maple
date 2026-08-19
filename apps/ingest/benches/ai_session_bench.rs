@@ -1,0 +1,390 @@
+use std::time::Duration;
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use maple_ingest::ai_session::{classify_span, stamp_trace_request, SpanView};
+use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, InstrumentationScope, KeyValue};
+use opentelemetry_proto::tonic::resource::v1::Resource;
+use opentelemetry_proto::tonic::{
+    collector::trace::v1::ExportTraceServiceRequest,
+    trace::v1::{ResourceSpans, ScopeSpans, Span},
+};
+
+fn kv(key: &str, value: &str) -> KeyValue {
+    KeyValue {
+        key: key.to_owned(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(value.to_owned())),
+        }),
+    }
+}
+
+fn attrs(pairs: &[(&str, &str)]) -> Vec<KeyValue> {
+    pairs.iter().map(|(k, v)| kv(k, v)).collect()
+}
+
+fn http_span_attrs() -> Vec<KeyValue> {
+    attrs(&[
+        ("http.request.method", "POST"),
+        ("http.route", "/api/checkout"),
+        ("url.path", "/api/checkout"),
+        ("url.scheme", "https"),
+        ("server.address", "api.example.com"),
+        ("server.port", "443"),
+        ("network.protocol.version", "1.1"),
+        ("user_agent.original", "Mozilla/5.0"),
+        ("http.response.status_code", "200"),
+        ("http.request.body.size", "1042"),
+        ("http.response.body.size", "2318"),
+        ("client.address", "203.0.113.7"),
+    ])
+}
+
+fn db_span_attrs() -> Vec<KeyValue> {
+    attrs(&[
+        ("db.system", "postgresql"),
+        ("db.namespace", "maple"),
+        ("db.operation.name", "SELECT"),
+        ("db.query.text", "SELECT * FROM orders WHERE org_id = $1"),
+        ("server.address", "db.internal"),
+        ("server.port", "5432"),
+        ("db.response.returned_rows", "42"),
+        ("network.peer.address", "10.0.0.12"),
+    ])
+}
+
+fn internal_span_attrs() -> Vec<KeyValue> {
+    attrs(&[
+        ("code.function.name", "recalculate"),
+        ("code.namespace", "checkout.cart"),
+        ("thread.name", "tokio-runtime-worker"),
+        ("otel.status_code", "OK"),
+        ("cart.item_count", "7"),
+        ("cart.currency", "EUR"),
+    ])
+}
+
+fn wide_span_attrs() -> Vec<KeyValue> {
+    let mut out = http_span_attrs();
+    for i in 0..18 {
+        out.push(kv(&format!("app.custom.dimension_{i}"), "value"));
+    }
+    out
+}
+
+fn mastra_span_attrs() -> Vec<KeyValue> {
+    attrs(&[
+        ("mastra.span.type", "agent_run"),
+        ("mastra.agent.id", "support-agent"),
+        ("gen_ai.conversation.id", "conv-8f14e45f"),
+        ("gen_ai.request.model", "claude-opus-5"),
+        ("gen_ai.usage.input_tokens", "1042"),
+        ("gen_ai.usage.output_tokens", "231"),
+        ("mastra.metadata.runId", "run-77"),
+        ("mastra.metadata.resourceId", "user-9"),
+    ])
+}
+
+fn vercel_span_attrs() -> Vec<KeyValue> {
+    attrs(&[
+        ("operation.name", "ai.generateText"),
+        ("ai.operationId", "ai.generateText"),
+        ("ai.model.id", "gpt-5"),
+        ("ai.model.provider", "openai"),
+        ("ai.prompt.messages", "[{\"role\":\"user\"}]"),
+        ("ai.response.text", "hello"),
+        ("ai.response.finishReason", "stop"),
+        ("ai.settings.maxRetries", "2"),
+        ("ai.settings.context.eve.session.id", "sess-42"),
+        ("ai.usage.promptTokens", "812"),
+        ("ai.usage.completionTokens", "96"),
+        ("ai.response.id", "resp-1"),
+        ("ai.response.model", "gpt-5"),
+        ("ai.response.timestamp", "2026-08-18T12:00:00Z"),
+        ("gen_ai.system", "openai"),
+        ("gen_ai.request.model", "gpt-5"),
+        ("gen_ai.response.model", "gpt-5"),
+        ("gen_ai.usage.input_tokens", "812"),
+        ("gen_ai.usage.output_tokens", "96"),
+        ("ai.telemetry.functionId", "chat"),
+    ])
+}
+
+fn claude_span_attrs() -> Vec<KeyValue> {
+    attrs(&[
+        ("span.type", "llm_request"),
+        ("session.id", "sess-cc-1"),
+        ("model", "claude-opus-5"),
+        ("input_tokens", "1200"),
+        ("output_tokens", "300"),
+    ])
+}
+
+fn service_resource(name: &str) -> Vec<KeyValue> {
+    attrs(&[
+        ("service.name", name),
+        ("service.version", "1.4.2"),
+        ("telemetry.sdk.name", "opentelemetry"),
+        ("telemetry.sdk.language", "nodejs"),
+        ("telemetry.sdk.version", "1.30.0"),
+        ("deployment.environment.name", "production"),
+        ("maple_org_id", "org_bench"),
+    ])
+}
+
+fn bench_classify(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ai_classify");
+    group.warm_up_time(Duration::from_millis(500));
+    group.measurement_time(Duration::from_secs(2));
+
+    let resource = service_resource("checkout");
+    let cases: Vec<(&str, &str, &str, Vec<KeyValue>)> = vec![
+        (
+            "non_ai_http_12_attrs",
+            "@opentelemetry/instrumentation-http",
+            "POST /api/checkout",
+            http_span_attrs(),
+        ),
+        (
+            "non_ai_db_8_attrs",
+            "@opentelemetry/instrumentation-pg",
+            "SELECT maple.orders",
+            db_span_attrs(),
+        ),
+        (
+            "non_ai_wide_30_attrs",
+            "@opentelemetry/instrumentation-http",
+            "POST /api/checkout",
+            wide_span_attrs(),
+        ),
+        (
+            "mastra_ai_span",
+            "@mastra/otel-exporter",
+            "agent.generate",
+            mastra_span_attrs(),
+        ),
+        (
+            "vercel_ai_span_20_attrs",
+            "ai",
+            "ai.generateText",
+            vercel_span_attrs(),
+        ),
+        (
+            "claude_ai_span",
+            "com.anthropic.claude_code",
+            "claude_code.llm_request",
+            claude_span_attrs(),
+        ),
+    ];
+
+    for (name, scope_name, span_name, span_attrs) in &cases {
+        group.bench_function(*name, |b| {
+            b.iter(|| {
+                black_box(classify_span(&SpanView {
+                    scope_name: black_box(scope_name),
+                    span_name: black_box(span_name),
+                    span_attrs: black_box(span_attrs),
+                    resource_attrs: black_box(&resource),
+                    events: &[],
+                }))
+            });
+        });
+    }
+    group.finish();
+}
+
+/// The number that has to stay under 50ns/span: a realistic batch (95% non-AI
+/// HTTP/DB spans, 5% AI spans) through the full decode-time stamping path,
+/// measured per span.
+fn bench_stamp_request(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ai_stamp");
+    group.warm_up_time(Duration::from_millis(500));
+    group.measurement_time(Duration::from_secs(3));
+
+    let scope = |name: &str| {
+        Some(InstrumentationScope {
+            name: name.to_owned(),
+            ..Default::default()
+        })
+    };
+    let span = |name: &str, attributes: Vec<KeyValue>| Span {
+        name: name.to_owned(),
+        attributes,
+        ..Default::default()
+    };
+
+    let mut scope_spans = vec![
+        ScopeSpans {
+            scope: scope("@opentelemetry/instrumentation-http"),
+            spans: (0..60)
+                .map(|_| span("POST /api/checkout", http_span_attrs()))
+                .collect(),
+            ..Default::default()
+        },
+        ScopeSpans {
+            scope: scope("@opentelemetry/instrumentation-pg"),
+            spans: (0..35)
+                .map(|_| span("SELECT maple.orders", db_span_attrs()))
+                .collect(),
+            ..Default::default()
+        },
+        ScopeSpans {
+            scope: scope("ai"),
+            spans: (0..3)
+                .map(|_| span("ai.generateText", vercel_span_attrs()))
+                .collect(),
+            ..Default::default()
+        },
+        ScopeSpans {
+            scope: scope("@mastra/otel-exporter"),
+            spans: (0..2)
+                .map(|_| span("agent.generate", mastra_span_attrs()))
+                .collect(),
+            ..Default::default()
+        },
+    ];
+    let span_count: usize = scope_spans.iter().map(|ss| ss.spans.len()).sum();
+    let request = ExportTraceServiceRequest {
+        resource_spans: vec![ResourceSpans {
+            resource: Some(Resource {
+                attributes: service_resource("checkout"),
+                ..Default::default()
+            }),
+            scope_spans: std::mem::take(&mut scope_spans),
+            ..Default::default()
+        }],
+    };
+
+    group.throughput(Throughput::Elements(span_count as u64));
+    group.bench_function("mixed_100_spans_95pct_non_ai", |b| {
+        b.iter_batched(
+            || request.clone(),
+            |mut request| {
+                stamp_trace_request(&mut request);
+                black_box(request)
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+    group.finish();
+}
+
+/// A realistic single trace: 20 non-AI spans (1 root HTTP + 12 HTTP/internal +
+/// 7 DB) across three scopes under one resource. This is the headline case —
+/// the budget is ~50ns per *trace*, not per span.
+///
+/// Measured with a plain `iter` rather than `iter_batched`: a trace with no AI
+/// spans and no `maple_ai.*` keys is never mutated by `stamp_trace_request`, so
+/// re-running it over the same request is idempotent and avoids paying (and
+/// cache-polluting with) a deep clone per iteration.
+fn non_ai_trace_request() -> ExportTraceServiceRequest {
+    let scope = |name: &str| {
+        Some(InstrumentationScope {
+            name: name.to_owned(),
+            ..Default::default()
+        })
+    };
+    let span = |name: &str, attributes: Vec<KeyValue>| Span {
+        name: name.to_owned(),
+        attributes,
+        ..Default::default()
+    };
+    ExportTraceServiceRequest {
+        resource_spans: vec![ResourceSpans {
+            resource: Some(Resource {
+                attributes: service_resource("checkout"),
+                ..Default::default()
+            }),
+            scope_spans: vec![
+                ScopeSpans {
+                    scope: scope("@opentelemetry/instrumentation-http"),
+                    spans: std::iter::once(span("POST /api/checkout", http_span_attrs()))
+                        .chain((0..8).map(|_| span("GET /api/cart", http_span_attrs())))
+                        .collect(),
+                    ..Default::default()
+                },
+                ScopeSpans {
+                    scope: scope("checkout"),
+                    spans: (0..4)
+                        .map(|_| span("cart.recalculate", internal_span_attrs()))
+                        .collect(),
+                    ..Default::default()
+                },
+                ScopeSpans {
+                    scope: scope("@opentelemetry/instrumentation-pg"),
+                    spans: (0..7)
+                        .map(|_| span("SELECT maple.orders", db_span_attrs()))
+                        .collect(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }],
+    }
+}
+
+fn bench_stamp_trace(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ai_stamp_trace");
+    group.warm_up_time(Duration::from_millis(500));
+    group.measurement_time(Duration::from_secs(3));
+
+    let mut request = non_ai_trace_request();
+    let before = attr_count(&request);
+    group.bench_function("trace_20_spans_non_ai", |b| {
+        b.iter(|| {
+            stamp_trace_request(black_box(&mut request));
+        });
+    });
+    assert_eq!(
+        attr_count(&request),
+        before,
+        "a non-AI trace must not be mutated, otherwise this bench is not idempotent"
+    );
+
+    // Same trace shape with two AI spans swapped in: the stamping path does run,
+    // so this one has to clone per iteration.
+    let mut mixed = non_ai_trace_request();
+    mixed.resource_spans[0].scope_spans.push(ScopeSpans {
+        scope: Some(InstrumentationScope {
+            name: "ai".to_owned(),
+            ..Default::default()
+        }),
+        spans: (0..2)
+            .map(|_| Span {
+                name: "ai.generateText".to_owned(),
+                attributes: vercel_span_attrs(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    });
+    mixed.resource_spans[0].scope_spans[0].spans.truncate(7);
+    group.bench_function("trace_20_spans_2_ai", |b| {
+        b.iter_batched(
+            || mixed.clone(),
+            |mut request| {
+                stamp_trace_request(&mut request);
+                black_box(request)
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+    group.finish();
+}
+
+fn attr_count(request: &ExportTraceServiceRequest) -> usize {
+    request
+        .resource_spans
+        .iter()
+        .flat_map(|rs| rs.scope_spans.iter())
+        .flat_map(|ss| ss.spans.iter())
+        .map(|s| s.attributes.len())
+        .sum()
+}
+
+criterion_group!(
+    benches,
+    bench_classify,
+    bench_stamp_request,
+    bench_stamp_trace
+);
+criterion_main!(benches);
