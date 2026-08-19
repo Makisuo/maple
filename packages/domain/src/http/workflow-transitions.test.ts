@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+	MACHINE_OWNED_WORKFLOW_STATES,
 	TERMINAL_WORKFLOW_STATES,
 	WORKFLOW_STATE_ORDER,
 	WORKFLOW_TRANSITIONS,
@@ -67,11 +68,26 @@ describe("describeWorkflowTransitions", () => {
 })
 
 describe("allowedTransitionsForAll", () => {
-	it("offers exactly the matrix row for a single issue in each state", () => {
+	it("offers the matrix row for a single issue in each state, less machine-owned targets", () => {
 		for (const state of ALL_STATES) {
 			expect(allowedTransitionsForAll([state]), state).toEqual(
-				WORKFLOW_STATE_ORDER.filter((target) => WORKFLOW_TRANSITIONS[state].includes(target)),
+				WORKFLOW_STATE_ORDER.filter(
+					(target) =>
+						!MACHINE_OWNED_WORKFLOW_STATES.has(target) &&
+						WORKFLOW_TRANSITIONS[state].includes(target),
+				),
 			)
+		}
+	})
+
+	it("never offers a machine-owned state, even where the matrix allows it", () => {
+		// `done -> regressed` is a legal edge because the errors tick travels it,
+		// but it records an observation about which build fired. A human choosing
+		// it from a menu would be asserting that, and the next tick would overwrite
+		// the claim anyway.
+		expect(WORKFLOW_TRANSITIONS.done).toContain("regressed")
+		for (const state of ALL_STATES) {
+			expect(allowedTransitionsForAll([state]), state).not.toContain("regressed")
 		}
 	})
 

@@ -77,7 +77,7 @@ struct DecodingTests {
 			   "claimed_at":"2026-08-17T09:00:00.000Z","notes":"looking into it",
 			   "first_seen_at":"2026-08-10T00:00:00.000Z","last_seen_at":"2026-08-17T09:30:00.000Z",
 			   "occurrence_count":9,"resolved_at":null,"snooze_until":null,"archived_at":null,
-			   "has_open_incident":true}]}
+			   "regression_count":0,"resolved_versions":[],"has_open_incident":true}]}
 			""".utf8
 		)
 
@@ -106,7 +106,7 @@ struct DecodingTests {
 			 "lease_holder":null,"lease_expires_at":null,"claimed_at":null,"notes":null,
 			 "first_seen_at":"2026-08-01T00:00:00.000Z","last_seen_at":"2026-08-17T00:00:00.000Z",
 			 "occurrence_count":417,"resolved_at":null,"snooze_until":null,"archived_at":null,
-			 "has_open_incident":true,
+			 "regression_count":2,"resolved_versions":["1.4.0"],"has_open_incident":true,
 			 "timeseries":[{"bucket":"2026-08-17T00:00:00.000Z","count":12}],
 			 "sample_traces":[{"trace_id":"abc","span_id":"def","service_name":"maple-api",
 			   "timestamp":"2026-08-17T00:00:00.000Z","exception_message":"boom","duration_micros":15400}],
@@ -150,7 +150,8 @@ struct DecodingTests {
 		   "assigned_actor":null,"lease_holder":null,"lease_expires_at":null,"claimed_at":null,
 		   "notes":null,"first_seen_at":"2026-08-01T00:00:00.000Z",
 		   "last_seen_at":"2026-08-17T00:00:00.000Z","occurrence_count":417,"resolved_at":null,
-		   "snooze_until":null,"archived_at":null,"has_open_incident":false}]}
+		   "snooze_until":null,"archived_at":null,"regression_count":0,"resolved_versions":[],
+		   "has_open_incident":false}]}
 		""".utf8
 	)
 }

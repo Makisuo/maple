@@ -75,8 +75,20 @@ const findTopLevelFrom = (sql: string): number => {
 	throw new Error(`could not find top-level FROM in SQL:\n${sql}`)
 }
 
+/**
+ * Drop `--` line comments before scanning. Both scanners below track string
+ * literals by toggling on `'`, and an apostrophe in prose ("Drizzle\'s params
+ * line") reads as an opening quote — which silently desynchronizes the rest of
+ * the parse and surfaces as "could not find top-level FROM".
+ */
+const stripLineComments = (sql: string): string =>
+	sql
+		.split("\n")
+		.map((line) => line.replace(/(^|\s)--.*$/, ""))
+		.join("\n")
+
 const pipeSelectColumns = (resource: Resource): string[] => {
-	const sql = blockBody(resource, "SQL")
+	const sql = stripLineComments(blockBody(resource, "SQL"))
 	const selectMatch = /\bSELECT\b/i.exec(sql)
 	expect(selectMatch, `${resource.name} should include SELECT`).not.toBeNull()
 

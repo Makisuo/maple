@@ -149,7 +149,14 @@ const splitStatements = (sql: string): ReadonlyArray<string> => {
 			const char = line[i]
 			if (quote !== null) {
 				if (char === quote && line[i - 1] !== "\\") quote = null
-			} else if (char === "'" || char === '"' || char === "`") quote = char
+				continue
+			}
+			// The rest of a `--` line is prose, and prose has apostrophes. Reading
+			// one as an opening quote leaves the splitter "inside a string" for the
+			// rest of the file, which silently fuses every remaining statement into
+			// one — the manifest then just loses the objects instead of failing.
+			if (char === "-" && line[i + 1] === "-") break
+			if (char === "'" || char === '"' || char === "`") quote = char
 		}
 		if (quote === null && /^\s*$/.test(line) && current.trim().length > 0) {
 			const candidate = current.trim()
