@@ -298,25 +298,25 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 					//  - VcsInstallationGoneError → propagates to processMessage (disconnect).
 					//  - VcsProviderError (transient) → propagates so the queue retries.
 					//  - VcsRepositoryBlockedError (legal block) → terminal, drain (never retried).
-					Effect.catchTag("@maple/http/errors/VcsRepositoryBlockedError", (error) =>
-						drainBlockedRepository(installation, repository, error, "commits"),
-					),
-					Effect.catchTag("@maple/http/errors/VcsRepoUnavailableError", (error) =>
-						Effect.annotateCurrentSpan({
-							"vcs.commits.outcome": "skipped",
-							"vcs.commits.reason": "repository_unavailable",
-						}).pipe(
-							Effect.andThen(repo.markRepoSyncError(repository.id, error.message)),
-							Effect.flatMap(() =>
-								Effect.logWarning("[VCS] Repository unavailable — backfill skipped").pipe(
-									Effect.annotateLogs({
-										provider: installation.provider,
-										externalRepoId: job.externalRepoId,
-									}),
+					Effect.catchTags({
+						"@maple/http/errors/VcsRepositoryBlockedError": (error) =>
+							drainBlockedRepository(installation, repository, error, "commits"),
+						"@maple/http/errors/VcsRepoUnavailableError": (error) =>
+							Effect.annotateCurrentSpan({
+								"vcs.commits.outcome": "skipped",
+								"vcs.commits.reason": "repository_unavailable",
+							}).pipe(
+								Effect.andThen(repo.markRepoSyncError(repository.id, error.message)),
+								Effect.flatMap(() =>
+									Effect.logWarning("[VCS] Repository unavailable — backfill skipped").pipe(
+										Effect.annotateLogs({
+											provider: installation.provider,
+											externalRepoId: job.externalRepoId,
+										}),
+									),
 								),
 							),
-						),
-					),
+					}),
 					Effect.withSpan("VcsSyncService.syncCommits"),
 				)
 
@@ -423,24 +423,26 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 					// A repo-scoped fetch failure drains here (branch sync owns no sync_status —
 					// that belongs to the commit backfill). Installation-gone propagates to the
 					// disconnect handler in processMessage.
-					Effect.catchTag("@maple/http/errors/VcsRepositoryBlockedError", (error) =>
-						drainBlockedRepository(installation, repository, error, "branches"),
-					),
-					Effect.catchTag("@maple/http/errors/VcsRepoUnavailableError", () =>
-						Effect.annotateCurrentSpan({
-							"vcs.branches.outcome": "skipped",
-							"vcs.branches.reason": "repository_unavailable",
-						}).pipe(
-							Effect.andThen(
-								Effect.logWarning("[VCS] Repository unavailable — branch sync skipped").pipe(
-									Effect.annotateLogs({
-										provider: installation.provider,
-										externalRepoId: repository.externalRepoId,
-									}),
+					Effect.catchTags({
+						"@maple/http/errors/VcsRepositoryBlockedError": (error) =>
+							drainBlockedRepository(installation, repository, error, "branches"),
+						"@maple/http/errors/VcsRepoUnavailableError": () =>
+							Effect.annotateCurrentSpan({
+								"vcs.branches.outcome": "skipped",
+								"vcs.branches.reason": "repository_unavailable",
+							}).pipe(
+								Effect.andThen(
+									Effect.logWarning(
+										"[VCS] Repository unavailable — branch sync skipped",
+									).pipe(
+										Effect.annotateLogs({
+											provider: installation.provider,
+											externalRepoId: repository.externalRepoId,
+										}),
+									),
 								),
 							),
-						),
-					),
+					}),
 					Effect.withSpan("VcsSyncService.syncBranches"),
 				)
 
