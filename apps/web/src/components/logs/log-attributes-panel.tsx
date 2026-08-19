@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { SearchInput } from "@maple/ui/components/ui/search-input"
-import { AttributesTable, ResourceAttributesSection } from "@/components/attributes"
+import { AttributesSection, ResourceAttributesSection } from "@/components/attributes"
 import type { Log } from "@/api/warehouse/logs"
 
 interface LogAttributesPanelProps {
@@ -27,7 +27,7 @@ export function LogAttributesPanel({ log }: LogAttributesPanelProps) {
 				/>
 			)}
 
-			<AttributesTable
+			<AttributesSection
 				attributes={log.logAttributes}
 				title="Log Attributes"
 				searchQuery={attrSearch}

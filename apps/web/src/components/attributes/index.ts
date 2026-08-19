@@ -4,6 +4,7 @@
 export {
 	CopyableValue,
 	AttributesTable,
+	AttributesSection,
 	ResourceAttributesSection,
 	tryParseJson,
 } from "@maple/ui/components/attributes"
