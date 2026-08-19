@@ -96,13 +96,23 @@ const parseJson = (raw: string): AiJsonValue | undefined => {
 	}
 }
 
-const decodeStringArray = (raw: string): readonly string[] => {
+const decodeStringArray = (raw: string): readonly string[] | undefined => {
 	// Real data carries both shapes for the same attribute: `'["stop"]'` from
 	// instrumentation that serialises the array, and a bare `"stop"` from
 	// instrumentation that emits the single value. Anything that is not a JSON
 	// array of strings is treated as the bare form rather than discarded.
 	const parsed = parseJson(raw)
-	return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string") ? parsed : [raw]
+	// Unparseable is the bare form: `stop` and `"stop"`-without-quotes both land
+	// here, and that is the only case where the raw text IS the value.
+	if (parsed === undefined) return [raw]
+	if (typeof parsed === "string") return [parsed]
+	if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")) return parsed
+	// Parsed cleanly but into some other shape — an object, a number, an array of
+	// non-strings. That is structured data in the wrong shape, not a bare value.
+	// Wrapping the raw JSON text into a one-element array would type-check and
+	// silently consume the field with a value that never existed, so decode to
+	// nothing and let the next alias have its turn.
+	return undefined
 }
 
 const decodeAttribute = (type: AiFieldDef["type"], raw: string): AiDecodedValue | undefined => {
@@ -125,6 +135,15 @@ const decodeAttribute = (type: AiFieldDef["type"], raw: string): AiDecodedValue 
 			return decodeStringArray(raw)
 		case "json":
 			return parseJson(raw)
+		default: {
+			// A sixth field type added to the catalog without a case here would
+			// otherwise compile clean and make every field of that type silently
+			// absent from every span — the one failure mode this module is least
+			// able to surface. `tsconfig` has no `noImplicitReturns`, so the
+			// never-assignment is what actually enforces it.
+			const unhandled: never = type
+			return unhandled
+		}
 	}
 }
 
@@ -227,6 +246,12 @@ const resolvedIntegrations = new Map<string, AiIntegration>()
  */
 export const resolveAiIntegration = (vendorId: string | undefined): AiIntegration => {
 	if (vendorId === undefined) return genAiIntegration
+	// `Object.hasOwn`, not a plain index: the vendor stamp is customer-reachable
+	// (the gateway strips `maple_ai.*` from span attributes but not from RESOURCE
+	// attributes), and a plain index reads through the prototype chain — a stamp
+	// of `constructor` or `toString` would resolve truthy, skip the guard below,
+	// and mint an integration with `id: undefined` into the module-level cache.
+	if (!Object.hasOwn(AI_VENDOR_INTEGRATIONS, vendorId)) return genAiIntegration
 	const vendor = AI_VENDOR_INTEGRATIONS[vendorId]
 	if (vendor === undefined) return genAiIntegration
 	const cached = resolvedIntegrations.get(vendorId)
@@ -249,7 +274,9 @@ const collectPromptVariables = (attributes: Record<string, string>): Record<stri
 	let collected: Record<string, string> | undefined
 	for (const [key, value] of Object.entries(attributes)) {
 		if (!key.startsWith(AI_PROMPT_VARIABLE_PREFIX) || value === "") continue
-		collected ??= {}
+		// Null-prototype again: a `gen_ai.prompt.variable.__proto__` key would hit
+		// the prototype setter on a `{}` literal and be dropped without a trace.
+		collected ??= Object.create(null) as Record<string, string>
 		collected[key.slice(AI_PROMPT_VARIABLE_PREFIX.length)] = value
 	}
 	return collected
@@ -270,7 +297,14 @@ interface AiSpanOptionalFields {
 }
 
 export const mapAiSpan = (row: AiSessionSpanRow): AiAgentSpan => {
-	const attributes = { ...row.resourceAttributes, ...row.spanAttributes }
+	// Null-prototype: attribute keys are customer-controlled, and a `Record`
+	// index would otherwise resolve `toString` or `valueOf` to an inherited
+	// function that the `=== ""` check below would wave through as a value.
+	const attributes: Record<string, string> = Object.assign(
+		Object.create(null) as Record<string, string>,
+		row.resourceAttributes,
+		row.spanAttributes,
+	)
 	const vendorId = readAttribute(attributes, MAPLE_AI_VENDOR_ID_ATTR)
 	const integration = resolveAiIntegration(vendorId)
 

@@ -378,3 +378,73 @@ describe("resolveAiIntegration", () => {
 		expect(resolveAiIntegration("vercel_ai_sdk")).toBe(resolveAiIntegration("vercel_ai_sdk"))
 	})
 })
+
+// The vendor stamp is customer-reachable: the ingest gateway strips `maple_ai.*`
+// from span attributes but NOT from resource attributes, so these names can
+// arrive from outside. A plain index reads them off `Object.prototype`.
+describe("hostile vendor stamps", () => {
+	const prototypeKeys = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]
+
+	for (const stamp of prototypeKeys) {
+		it(`falls back to the default integration for a stamp of ${stamp}`, () => {
+			const resolved = resolveAiIntegration(stamp)
+
+			// Before the Object.hasOwn guard this resolved to a merged integration
+			// with `id: undefined`, which violates AiAgentSpanSchema at the encode
+			// boundary and was memoised process-wide.
+			expect(resolved.id).toBe("gen_ai")
+			expect(resolved).toBe(genAiIntegration)
+		})
+	}
+
+	it("maps a span whose stamp arrives via a resource attribute", () => {
+		const mapped = mapAiSpan(row({}, { resourceAttributes: { "maple_ai.vendor.id": "constructor" } }))
+
+		expect(mapped.integrationId).toBe("gen_ai")
+		expect(typeof mapped.integrationId).toBe("string")
+	})
+
+	it("keeps a prompt variable literally named __proto__", () => {
+		const mapped = mapAiSpan(row({ "gen_ai.prompt.variable.__proto__": "kept" }))
+
+		// Asserted through `Object.keys` rather than against an object literal: a
+		// `{ __proto__: "kept" }` literal collapses to `{}` via the prototype
+		// setter, so the expectation would silently test nothing.
+		expect(Object.keys(mapped.promptVariables ?? {})).toEqual(["__proto__"])
+		expect(mapped.promptVariables?.["__proto__"]).toBe("kept")
+	})
+
+	it("does not mistake an inherited member for an attribute value", () => {
+		const mapped = mapAiSpan(row({ "gen_ai.request.model": "gpt-5.6-luna" }))
+
+		expect(mapped.genAi.requestModel).toBe("gpt-5.6-luna")
+		expect(mapped.genAi.toolCallResult).toBeUndefined()
+	})
+})
+
+describe("stringArray decoding rejects malformed arrays", () => {
+	it("treats a bare value as the single-element form", () => {
+		expect(
+			mapAiSpan(row({ "gen_ai.response.finish_reasons": "stop" })).genAi.responseFinishReasons,
+		).toEqual(["stop"])
+	})
+
+	it("yields no field for an array of non-strings rather than wrapping the raw JSON", () => {
+		const mapped = mapAiSpan(row({ "gen_ai.response.finish_reasons": "[1,2]" }))
+
+		// Wrapping to `['[1,2]']` would type-check and silently consume the field
+		// with a value that never existed.
+		expect(mapped.genAi.responseFinishReasons).toBeUndefined()
+	})
+
+	it("lets the next alias win when the canonical key is malformed", () => {
+		const mapped = mapAiSpan(
+			row({
+				"gen_ai.response.finish_reasons": '{"reason":"stop"}',
+				"gen_ai.response.finish_reason": "length",
+			}),
+		)
+
+		expect(mapped.genAi.responseFinishReasons).toEqual(["length"])
+	})
+})

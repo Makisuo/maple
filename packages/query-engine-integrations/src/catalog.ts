@@ -30,7 +30,10 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		module: "ai-sessions",
 		name: "aiSessionListQuery",
 		label: "default",
-		compile: () => compile(CH.aiSessionListQuery(), window),
+		// Row schemas are attached here, not just in the unit tests: the ClickHouse
+		// e2e sweep only runs its quoted/unquoted 64-bit decode assertion for
+		// fixtures whose compiled query carries one.
+		compile: () => compile(CH.aiSessionListQuery(), window, { rowSchema: CH.aiSessionListRowSchema }),
 	},
 	{
 		// The vendor/service filters the AI sessions list page sends.
@@ -45,13 +48,19 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 					serviceNames: ["maple-slack-agent"],
 				}),
 				window,
+				{ rowSchema: CH.aiSessionListRowSchema },
 			),
 	},
 	{
 		module: "ai-sessions",
 		name: "aiSessionSpansQuery",
 		label: "default",
-		compile: () => compile(CH.aiSessionSpansQuery(), { ...window, sessionId: "wrun_sql_catalog" }),
+		compile: () =>
+			compile(
+				CH.aiSessionSpansQuery(),
+				{ ...window, sessionId: "wrun_sql_catalog" },
+				{ rowSchema: CH.aiSessionSpansRowSchema },
+			),
 	},
 	{
 		module: "cloudflare-infra",

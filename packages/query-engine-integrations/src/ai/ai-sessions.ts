@@ -67,6 +67,14 @@ const VENDOR_VERSION_ATTR = "maple_ai.vendor.version"
  */
 const SESSION_ORDER_SENTINEL = "2106-01-01 00:00:00"
 
+/**
+ * Default span cap for `aiSessionSpansQuery`, exported so a caller can request
+ * `+ 1` and detect truncation instead of hardcoding the number. Mirrors
+ * `SPAN_HIERARCHY_MAX_SPANS`, which is exported from the core package for the
+ * same reason.
+ */
+export const AI_SESSION_SPANS_MAX_SPANS = 2_000
+
 /** ClickHouse returns `''` for a missing Map key, so presence needs both halves. */
 const hasSessionId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<string>) =>
 	CH.mapContains(attrs, SESSION_ID_ATTR).and(get.neq(""))
@@ -268,9 +276,18 @@ export const aiSessionSpansRowSchema: CompiledQueryRowSchema<AiSessionSpansOutpu
  *
  * Known v1 limitation: the time window bounds BOTH levels, so a session whose
  * traces straddle the window edge returns only the spans inside it.
+ *
+ * Truncation drops the END of the session, because the rows come back oldest
+ * first and an agent's answer is the last thing it writes. Ask for
+ * `AI_SESSION_SPANS_MAX_SPANS + 1`, slice back to the cap and report the
+ * overflow — the idiom `telemetry.http.ts` already uses — rather than showing a
+ * truncated transcript as a completed one. Callers should also bound the
+ * response by bytes (`compiledQueryBounded`, as the session-replay route does):
+ * at the default cap this can return tens of megabytes, and Tinybird rejects the
+ * server-side `max_result_bytes` settings that would otherwise cap it.
  */
 export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
-	const limit = opts.limit ?? 2000
+	const limit = opts.limit ?? AI_SESSION_SPANS_MAX_SPANS
 
 	const sessionTraceIds = from(Traces)
 		.select(($) => ({ TraceId: $.TraceId }))
