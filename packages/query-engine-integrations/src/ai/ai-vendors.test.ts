@@ -142,16 +142,33 @@ describe("openinference", () => {
 		})
 	})
 
-	it("drops the default alias for a field it replaces", () => {
-		// An override REPLACES the default key list for that field rather than
-		// extending it, so the default's `gen_ai.completion` alias is gone here.
-		// This is the whole point of per-field replacement: a dialect gets to say
-		// which keys are meaningful for it.
+	it("replaces the default key list rather than extending it", () => {
+		// The replacement is real — an override decides the whole list and its
+		// order for a field it claims. Demonstrated by precedence rather than by
+		// loss: the dialect key wins over a lower-priority alias in the same list.
 		const mapped = mapAiSpan(
-			row("openinference-openai", { "gen_ai.completion": '[{"role":"assistant"}]' }),
+			row("openinference-openai", {
+				"llm.output_messages": '[{"role":"assistant","from":"dialect"}]',
+				"gen_ai.completion": '[{"role":"assistant","from":"legacy"}]',
+			}),
 		)
 
-		expect(mapped.genAi.outputMessages).toBeUndefined()
+		expect(mapped.genAi.outputMessages).toEqual([{ role: "assistant", from: "dialect" }])
+	})
+
+	it("still reads the default's legacy aliases it did not supersede", () => {
+		// Regression: the override used to omit these, so identifying a span as
+		// OpenInference LOST its token counts and messages — a recognised vendor
+		// mapped strictly worse than an unrecognised one.
+		const mapped = mapAiSpan(
+			row("openinference-openai", {
+				"gen_ai.usage.prompt_tokens": "120",
+				"gen_ai.completion": '[{"role":"assistant"}]',
+			}),
+		)
+
+		expect(mapped.genAi.usageInputTokens).toBe(120)
+		expect(mapped.genAi.outputMessages).toEqual([{ role: "assistant" }])
 	})
 
 	it("translates the span kind into a gen_ai operation name", () => {
@@ -225,4 +242,34 @@ describe("eve", () => {
 		expect(mapped.genAi.providerName).toBe("x_ai")
 		expect(mapped.genAi.conversationId).toBe("turn_1")
 	})
+})
+
+describe("recognising a vendor never maps worse than not recognising it", () => {
+	// A vendor's key list REPLACES the default's for that field, so an override
+	// that forgets the default's legacy aliases silently loses fields precisely
+	// because the span was identified. Driven from the registry so a new override
+	// inherits the check.
+	const LEGACY_ONLY_SPAN = {
+		"gen_ai.usage.prompt_tokens": "120",
+		"gen_ai.usage.completion_tokens": "34",
+		"gen_ai.usage.input_tokens.cached": "2048",
+		"gen_ai.usage.output_tokens.reasoning": "704",
+		"gen_ai.prompt": '[{"role":"user"}]',
+		"gen_ai.completion": '[{"role":"assistant"}]',
+		"gen_ai.system": "anthropic",
+		"gen_ai.response.finish_reason": "stop",
+	}
+
+	const mappedFieldCount = (vendorId: string) =>
+		Object.keys(mapAiSpan(row(vendorId, LEGACY_ONLY_SPAN)).genAi).length
+
+	// An unregistered stamp resolves to the default integration, which is the
+	// baseline every override has to at least match.
+	const baseline = mappedFieldCount("unknown:other")
+
+	for (const vendorId of Object.keys(AI_VENDOR_INTEGRATIONS)) {
+		it(`maps at least as many legacy fields under ${vendorId}`, () => {
+			expect(mappedFieldCount(vendorId)).toBeGreaterThanOrEqual(baseline)
+		})
+	}
 })

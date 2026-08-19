@@ -44,6 +44,7 @@
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import {
+	compileFnCall,
 	from,
 	fromQuery,
 	inSubquery,
@@ -78,6 +79,10 @@ export const AI_SESSION_SPANS_MAX_SPANS = 2_000
 /** ClickHouse returns `''` for a missing Map key, so presence needs both halves. */
 const hasSessionId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<string>) =>
 	CH.mapContains(attrs, SESSION_ID_ATTR).and(get.neq(""))
+
+/** Not in the builder's function set; same local helper `tracesDetailQuery` uses. */
+const fromUnixTimestamp64Nano = (nanos: CH.Expr<number>): CH.Expr<string> =>
+	compileFnCall<string>("fromUnixTimestamp64Nano", nanos)
 
 export interface AiSessionListOpts {
 	/** Sessions returned, most recently started first. */
@@ -177,7 +182,14 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 				// and `toUnixTimestamp64Nano` reject it — verified against production,
 				// it fails with ILLEGAL_TYPE_OF_ARGUMENT.
 				traceStart: CH.min_($.Timestamp),
-				traceEnd: CH.max_($.Timestamp),
+				// `Timestamp` is the span's START, so `max(Timestamp)` is when the
+				// last span BEGAN — the trace end is that span's start plus its own
+				// duration. Without the `+ Duration` a session whose trace is a
+				// single long span reports a duration of 0, and every other session
+				// under-reports by exactly the last-starting span's duration, which
+				// is invisible because it always looks like plausible jitter. Same
+				// idiom as `tracesDetailQuery`.
+				traceEndNanos: CH.max_(CH.toUnixTimestamp64Nano($.Timestamp).add(CH.toInt64($.Duration))),
 			}
 		})
 		.where(($) => [
@@ -194,19 +206,20 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 				sessionId: $.sessionId,
 				vendorId: CH.argMin($.vendorId, $.sessionStart),
 				vendorVersion: CH.argMin($.vendorVersion, $.sessionStart),
-				traceCount: CH.uniq($.traceId),
+				// `count()`, not `uniq()`: the derived table already emits exactly one
+				// row per trace, so this is exact and cheaper — `uniq` is an
+				// approximate HLL that would start drifting on a very large session.
+				traceCount: CH.count(),
 				spanCount: CH.sum($.spanCount),
 				errorSpanCount: CH.sum($.errorSpanCount),
 				serviceNames: CH.groupUniqArrayArray($.serviceNames),
 				startTime: CH.toString_(CH.min_($.traceStart)),
-				endTime: CH.toString_(CH.max_($.traceEnd)),
+				endTime: CH.toString_(fromUnixTimestamp64Nano(CH.max_($.traceEndNanos))),
 				// Nanoseconds first: `Timestamp` is DateTime64(9), and subtracting two
 				// of them yields a Decimal whose scale the wire format then quotes.
 				// Wrapped in `intDiv` because `Expr.sub`/`div` do not parenthesize.
 				durationMs: CH.intDiv(
-					CH.toUnixTimestamp64Nano(CH.max_($.traceEnd)).sub(
-						CH.toUnixTimestamp64Nano(CH.min_($.traceStart)),
-					),
+					CH.max_($.traceEndNanos).sub(CH.toUnixTimestamp64Nano(CH.min_($.traceStart))),
 					1_000_000,
 				),
 			}))
@@ -295,31 +308,42 @@ export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 			$.OrgId.eq(param.string("orgId")),
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
+			// The presence guard is what stops an empty `sessionId` param from
+			// matching every span that simply LACKS the key — ClickHouse reads a
+			// missing Map key back as `''`, so equality alone would turn a blank
+			// session id into a whole-org trace dump.
+			hasSessionId($.SpanAttributes, $.SpanAttributes.get(SESSION_ID_ATTR)),
 			$.SpanAttributes.get(SESSION_ID_ATTR).eq(param.string("sessionId")),
 		])
 
-	return from(TraceDetailSpans)
-		.select(($) => ({
-			traceId: $.TraceId,
-			spanId: $.SpanId,
-			parentSpanId: $.ParentSpanId,
-			spanName: $.SpanName,
-			spanKind: $.SpanKind,
-			serviceName: $.ServiceName,
-			durationMs: $.Duration.div(1_000_000),
-			statusCode: $.StatusCode,
-			statusMessage: $.StatusMessage,
-			timestamp: CH.toString_($.Timestamp),
-			spanAttributes: $.SpanAttributes,
-			resourceAttributes: $.ResourceAttributes,
-		}))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
-			inSubquery($.TraceId, sessionTraceIds),
-		])
-		.orderBy(["timestamp", "asc"])
-		.limit(limit)
-		.format("JSON")
+	return (
+		from(TraceDetailSpans)
+			.select(($) => ({
+				traceId: $.TraceId,
+				spanId: $.SpanId,
+				parentSpanId: $.ParentSpanId,
+				spanName: $.SpanName,
+				spanKind: $.SpanKind,
+				serviceName: $.ServiceName,
+				durationMs: $.Duration.div(1_000_000),
+				statusCode: $.StatusCode,
+				statusMessage: $.StatusMessage,
+				timestamp: CH.toString_($.Timestamp),
+				spanAttributes: $.SpanAttributes,
+				resourceAttributes: $.ResourceAttributes,
+			}))
+			.where(($) => [
+				$.OrgId.eq(param.string("orgId")),
+				$.Timestamp.gte(param.dateTime("startTime")),
+				$.Timestamp.lte(param.dateTime("endTime")),
+				inSubquery($.TraceId, sessionTraceIds),
+			])
+			// `spanId` breaks ties: agent spans routinely share a millisecond, and
+			// without it the LIMIT cuts an arbitrary subset, so two loads of the same
+			// truncated session can disagree and a parent can survive while its
+			// children are dropped.
+			.orderBy(["timestamp", "asc"], ["spanId", "asc"])
+			.limit(limit)
+			.format("JSON")
+	)
 }

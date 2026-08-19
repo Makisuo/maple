@@ -305,7 +305,15 @@ export const mapAiSpan = (row: AiSessionSpanRow): AiAgentSpan => {
 		row.resourceAttributes,
 		row.spanAttributes,
 	)
-	const vendorId = readAttribute(attributes, MAPLE_AI_VENDOR_ID_ATTR)
+	// The `maple_ai.*` envelope is read from SPAN attributes only, never the
+	// merged view. The gateway strips this namespace from span attributes before
+	// stamping its own verdict, so a span-level value is authoritative — but it
+	// does not touch resource attributes, and `aiSessionSpansQuery` selects
+	// sessions on `SpanAttributes` alone. Reading the merged view would let one
+	// forged resource attribute mark every span in a service as an AI span and
+	// label it with a session id the query never matched on.
+	const envelope = row.spanAttributes
+	const vendorId = readAttribute(envelope, MAPLE_AI_VENDOR_ID_ATTR)
 	const integration = resolveAiIntegration(vendorId)
 
 	const genAi: MutableAiGenAiValues = {}
@@ -325,8 +333,8 @@ export const mapAiSpan = (row: AiSessionSpanRow): AiAgentSpan => {
 	integration.refine?.(genAi, { row, attributes })
 
 	const promptVariables = collectPromptVariables(attributes)
-	const sessionId = readAttribute(attributes, MAPLE_AI_SESSION_ID_ATTR)
-	const vendorVersion = readAttribute(attributes, MAPLE_AI_VENDOR_VERSION_ATTR)
+	const sessionId = readAttribute(envelope, MAPLE_AI_SESSION_ID_ATTR)
+	const vendorVersion = readAttribute(envelope, MAPLE_AI_VENDOR_VERSION_ATTR)
 
 	// Collected separately so an absent stamp leaves the key off the span
 	// entirely rather than present-and-undefined.

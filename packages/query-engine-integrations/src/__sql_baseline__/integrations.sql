@@ -3,13 +3,13 @@ SELECT
           sessionId AS sessionId,
           argMin(vendorId, sessionStart) AS vendorId,
           argMin(vendorVersion, sessionStart) AS vendorVersion,
-          uniq(traceId) AS traceCount,
+          count() AS traceCount,
           sum(spanCount) AS spanCount,
           sum(errorSpanCount) AS errorSpanCount,
           groupUniqArrayArray(serviceNames) AS serviceNames,
           toString(min(traceStart)) AS startTime,
-          toString(max(traceEnd)) AS endTime,
-          intDiv(toUnixTimestamp64Nano(max(traceEnd)) - toUnixTimestamp64Nano(min(traceStart)), 1000000) AS durationMs
+          toString(fromUnixTimestamp64Nano(max(traceEndNanos))) AS endTime,
+          intDiv(max(traceEndNanos) - toUnixTimestamp64Nano(min(traceStart)), 1000000) AS durationMs
         FROM (SELECT
           TraceId AS traceId,
           max(SpanAttributes['maple_ai.session.id']) AS sessionId,
@@ -20,7 +20,7 @@ SELECT
           countIf(StatusCode = 'Error') AS errorSpanCount,
           groupUniqArray(ServiceName) AS serviceNames,
           min(Timestamp) AS traceStart,
-          max(Timestamp) AS traceEnd
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
@@ -44,13 +44,13 @@ SELECT
           sessionId AS sessionId,
           argMin(vendorId, sessionStart) AS vendorId,
           argMin(vendorVersion, sessionStart) AS vendorVersion,
-          uniq(traceId) AS traceCount,
+          count() AS traceCount,
           sum(spanCount) AS spanCount,
           sum(errorSpanCount) AS errorSpanCount,
           groupUniqArrayArray(serviceNames) AS serviceNames,
           toString(min(traceStart)) AS startTime,
-          toString(max(traceEnd)) AS endTime,
-          intDiv(toUnixTimestamp64Nano(max(traceEnd)) - toUnixTimestamp64Nano(min(traceStart)), 1000000) AS durationMs
+          toString(fromUnixTimestamp64Nano(max(traceEndNanos))) AS endTime,
+          intDiv(max(traceEndNanos) - toUnixTimestamp64Nano(min(traceStart)), 1000000) AS durationMs
         FROM (SELECT
           TraceId AS traceId,
           max(SpanAttributes['maple_ai.session.id']) AS sessionId,
@@ -61,7 +61,7 @@ SELECT
           countIf(StatusCode = 'Error') AS errorSpanCount,
           groupUniqArray(ServiceName) AS serviceNames,
           min(Timestamp) AS traceStart,
-          max(Timestamp) AS traceEnd
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
@@ -106,8 +106,9 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
           AND SpanAttributes['maple_ai.session.id'] = 'wrun_sql_catalog')
-        ORDER BY timestamp ASC
+        ORDER BY timestamp ASC, spanId ASC
         LIMIT 2000
         FORMAT JSON
 

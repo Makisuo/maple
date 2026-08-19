@@ -61,6 +61,7 @@ const vercelAiSdkIntegration: AiIntegration = {
 			"gen_ai.usage.cache_read.input_tokens",
 			"ai.usage.cachedInputTokens",
 			"ai.usage.inputTokenDetails.cacheReadTokens",
+			"gen_ai.usage.input_tokens.cached",
 		],
 		usageCacheCreationInputTokens: [
 			"gen_ai.usage.cache_creation.input_tokens",
@@ -115,18 +116,38 @@ const openInferenceIntegration: AiIntegration = {
 	sources: {
 		requestModel: ["gen_ai.request.model", "llm.model_name"],
 		providerName: ["gen_ai.provider.name", "gen_ai.system", "llm.provider", "llm.system"],
-		usageInputTokens: ["gen_ai.usage.input_tokens", "llm.token_count.prompt"],
-		usageOutputTokens: ["gen_ai.usage.output_tokens", "llm.token_count.completion"],
+		// Each list re-states the default's legacy aliases after the dialect keys.
+		// A vendor list REPLACES the default's, so omitting them would make a
+		// recognised vendor map strictly worse than an unrecognised one — an
+		// OpenInference span emitting old-semconv `gen_ai.usage.prompt_tokens`
+		// would lose its token counts precisely because we identified it.
+		usageInputTokens: [
+			"gen_ai.usage.input_tokens",
+			"llm.token_count.prompt",
+			"gen_ai.usage.prompt_tokens",
+		],
+		usageOutputTokens: [
+			"gen_ai.usage.output_tokens",
+			"llm.token_count.completion",
+			"gen_ai.usage.completion_tokens",
+		],
 		usageCacheReadInputTokens: [
 			"gen_ai.usage.cache_read.input_tokens",
 			"llm.token_count.prompt_details.cache_read",
+			"gen_ai.usage.input_tokens.cached",
 		],
 		usageReasoningOutputTokens: [
 			"gen_ai.usage.reasoning.output_tokens",
 			"llm.token_count.completion_details.reasoning",
+			"gen_ai.usage.output_tokens.reasoning",
 		],
-		inputMessages: ["gen_ai.input.messages", "llm.input_messages", "input.value"],
-		outputMessages: ["gen_ai.output.messages", "llm.output_messages", "output.value"],
+		inputMessages: ["gen_ai.input.messages", "llm.input_messages", "input.value", "gen_ai.prompt"],
+		outputMessages: [
+			"gen_ai.output.messages",
+			"llm.output_messages",
+			"output.value",
+			"gen_ai.completion",
+		],
 		toolName: ["gen_ai.tool.name", "tool.name"],
 		toolDescription: ["gen_ai.tool.description", "tool.description"],
 		toolCallArguments: ["gen_ai.tool.call.arguments", "tool.parameters"],
