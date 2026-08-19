@@ -2544,6 +2544,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 
 			const SCHEDULER_LOCK_TTL_MS = 30_000
 
+			// Rules claimed per round trip. The ceiling is SCHEDULER_LOCK_TTL_MS (30s):
+			// a chunk's locks are all dated from its claim, so the chunk must finish
+			// well inside that window or the next tick can re-claim a rule this one is
+			// still evaluating. At concurrency 5 and the observed p50 per rule, 25
+			// rules run ~10s — a 3x margin. Raising this trades round trips for lock
+			// staleness; do not raise it without also raising the TTL.
+			const RULE_CLAIM_CHUNK_SIZE = 25
+
 			// Unchanged-state ticks skip the alert_rule_states upsert so the Electric
 			// shape stays quiet; lastEvaluatedAt is refreshed at most this often.
 			const STATE_HEARTBEAT_MS = 5 * 60_000
@@ -2555,30 +2563,52 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			const SCHEDULER_HEARTBEAT_MS = 5 * 60_000
 
 			/**
-			 * CAS the per-rule scheduler lock, then refresh the user-visible heartbeat.
+			 * Rules are claimed a chunk at a time, not one statement per rule.
 			 *
-			 * Both statements run inside ONE `execute`: under `DatabasePgLive` each call
-			 * dials and tears down its own postgres.js client, so the handshake count is
-			 * what costs, not the statement count — same trade as
-			 * `ErrorsService.loadOrgTickPreamble`. These are the two statements every
-			 * rule paid for on every tick.
+			 * This was the single largest cost in the service: 6,127 `INSERT
+			 * alert_rule_claims` per hour at p50 1,187ms — 8,155s of wall time, MORE
+			 * than every warehouse query in the alerting worker combined (5,388s), to
+			 * acquire a lock guarding a query whose own p50 is 393ms. With the rule
+			 * loop at concurrency 5 and `MAX_CONNECTIONS` also 5, every slot spent
+			 * ~40% of each rule's critical path on the claim alone.
 			 *
-			 * The claim: the `INSERT` arm covers the first tick for a rule; `setWhere`
-			 * makes a loser's conflict update a no-op so `RETURNING` stays empty.
-			 * Winning returns one row, losing returns zero, so callers keep using
-			 * `claimed.length === 0` to bail.
+			 * Chunked rather than one batch for the whole tick, and that is the
+			 * correctness constraint, not a tuning knob. `SCHEDULER_LOCK_TTL_MS` is
+			 * 30s against a 60s tick interval, and the tick itself runs p50 51s / p95
+			 * 85s — so it already overruns its interval and overlaps itself. Claiming
+			 * every rule at tick head would date the whole tick's locks from T0: a
+			 * rule evaluated at T0+50s would hold a lock that expired at T0+30s, and
+			 * the next tick starting at T0+60s would re-claim and evaluate it
+			 * CONCURRENTLY. Per-chunk claiming keeps a lock's age bounded by how long
+			 * one chunk takes (~10s at this size) instead of by the whole tick, which
+			 * preserves the guarantee the per-rule claim gave.
+			 *
+			 * Both statements still run inside ONE `execute` — under `DatabasePgLive`
+			 * the handshake count is what costs, not the statement count.
+			 *
+			 * The claim: one multi-row `INSERT`, whose `INSERT` arm covers a rule's
+			 * first tick. `setWhere` gates each row INDEPENDENTLY, so a loser's
+			 * conflict update stays a no-op and `RETURNING` comes back as exactly the
+			 * winners — the same row-level CAS as before, one round trip instead of N.
 			 *
 			 * The heartbeat: `alert_rules.last_scheduled_at` is gated in SQL so it
 			 * touches zero rows — and writes no WAL tuple — on the ~4 of every 5 ticks
-			 * that fall inside the heartbeat window. It runs only for the claim winner,
-			 * and its failure is swallowed so it cannot cost a rule its evaluation:
-			 * the claim is already committed by then, and the heartbeat is cosmetic.
+			 * that fall inside the heartbeat window. It runs only for the claim
+			 * winners, and its failure is swallowed so it cannot cost a rule its
+			 * evaluation: the claims are already committed by then, and the heartbeat
+			 * is cosmetic.
 			 */
-			const claimAndTouchRule = (orgId: OrgId, ruleId: AlertRuleId, timestamp: number) =>
+			const claimRuleChunk = (chunk: ReadonlyArray<AlertRuleRow>, timestamp: number) =>
 				dbExecute(async (db) => {
 					const claimed = await db
 						.insert(alertRuleClaims)
-						.values({ ruleId, orgId, lastScheduledAt: new Date(timestamp) })
+						.values(
+							chunk.map((row) => ({
+								ruleId: row.id,
+								orgId: row.orgId,
+								lastScheduledAt: new Date(timestamp),
+							})),
+						)
 						.onConflictDoUpdate({
 							target: alertRuleClaims.ruleId,
 							set: { lastScheduledAt: new Date(timestamp) },
@@ -2597,7 +2627,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							.set({ lastScheduledAt: new Date(timestamp) })
 							.where(
 								and(
-									eq(alertRules.id, ruleId),
+									inArray(
+										alertRules.id,
+										claimed.map((row) => row.id),
+									),
 									or(
 										isNull(alertRules.lastScheduledAt),
 										lt(
@@ -3053,170 +3086,187 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					)
 				})
 
+				// One claim round trip per chunk, then that chunk's winners evaluate at
+				// the same concurrency as before. The chunk boundary is a barrier, which
+				// is what bounds each lock's age to a chunk rather than to the tick —
+				// see `claimRuleChunk`. Sized so a chunk stays well inside
+				// SCHEDULER_LOCK_TTL_MS at the observed per-rule cost.
 				yield* Effect.forEach(
-					interleaveAlertRulesByOrg(rows),
-					(row) =>
+					Arr.chunksOf(interleaveAlertRulesByOrg(rows), RULE_CLAIM_CHUNK_SIZE),
+					(chunk) =>
 						Effect.gen(function* () {
 							const timestamp = yield* now
-							const claimed = yield* claimAndTouchRule(row.orgId, row.id, timestamp)
+							const claimed = yield* claimRuleChunk(chunk, timestamp)
 							if (claimed.length === 0) return
+							const claimedIds = new Set(claimed.map((row) => row.id))
 
-							yield* Effect.gen(function* () {
-								const ruleStart = yield* now
-								const normalized = yield* normalizeRuleRow(row)
-
-								if (normalized.serviceNames.length > 1) {
-									yield* Effect.forEach(normalized.serviceNames, (svcName) =>
-										Effect.gen(function* () {
-											const perServicePlan = yield* compileRulePlan({
-												...normalized,
-												serviceName: svcName,
-											})
-											const perService = {
-												...normalized,
-												serviceName: svcName,
-												compiledPlan: perServicePlan,
-											}
-											const observations = yield* evaluateRule(row.orgId, perService)
-											const evaluation = observations[0]?.evaluation
-											if (evaluation == null) return
-											yield* recordEvaluationStatus(evaluation)
-											yield* processEvaluation(
-												row,
-												normalized,
-												evaluation,
-												svcName,
-												timestamp,
-												pendingChecks,
-												issueBudget,
-												pushBudget,
-												prefetch,
-											)
-										}),
-									)
-
-									yield* resolveOrphanedGroupIncidents(
-										row.orgId,
-										normalized.id,
-										normalized,
-										HashSet.fromIterable(normalized.serviceNames),
-										timestamp,
-										prefetch.openIncidentsForRule(row.orgId, row.id),
-										pushBudget,
-									)
-									yield* Metric.update(
-										AlertingMetrics.ruleEvaluationDurationMs,
-										(yield* now) - ruleStart,
-									)
-									return
-								}
-
-								// Uniform grouped/ungrouped path. `evaluateRule` returns one
-								// outcome per group already keyed in storage vocabulary — a single
-								// UNGROUPED_GROUP_KEY entry (with a no-data fallback) when the
-								// compiled plan is ungrouped — so both shapes flow through the
-								// same loop with no key translation here.
-								const grouped = isGroupedPlan(normalized.compiledPlan)
-								const results = yield* evaluateRule(row.orgId, normalized)
-								const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
-								const eligible = grouped
-									? Arr.filter(results, (r) => !HashSet.has(excludeSet, r.groupKey))
-									: results
-
-								yield* Effect.forEach(eligible, ({ evaluation, groupKey }) =>
+							yield* Effect.forEach(
+								chunk.filter((row) => claimedIds.has(row.id)),
+								(row) =>
 									Effect.gen(function* () {
-										yield* recordEvaluationStatus(evaluation)
-										yield* processEvaluation(
-											row,
-											normalized,
-											evaluation,
-											groupKey,
-											timestamp,
-											pendingChecks,
-											issueBudget,
-											pushBudget,
-											prefetch,
+										const ruleStart = yield* now
+										const normalized = yield* normalizeRuleRow(row)
+
+										if (normalized.serviceNames.length > 1) {
+											yield* Effect.forEach(normalized.serviceNames, (svcName) =>
+												Effect.gen(function* () {
+													const perServicePlan = yield* compileRulePlan({
+														...normalized,
+														serviceName: svcName,
+													})
+													const perService = {
+														...normalized,
+														serviceName: svcName,
+														compiledPlan: perServicePlan,
+													}
+													const observations = yield* evaluateRule(
+														row.orgId,
+														perService,
+													)
+													const evaluation = observations[0]?.evaluation
+													if (evaluation == null) return
+													yield* recordEvaluationStatus(evaluation)
+													yield* processEvaluation(
+														row,
+														normalized,
+														evaluation,
+														svcName,
+														timestamp,
+														pendingChecks,
+														issueBudget,
+														pushBudget,
+														prefetch,
+													)
+												}),
+											)
+
+											yield* resolveOrphanedGroupIncidents(
+												row.orgId,
+												normalized.id,
+												normalized,
+												HashSet.fromIterable(normalized.serviceNames),
+												timestamp,
+												prefetch.openIncidentsForRule(row.orgId, row.id),
+												pushBudget,
+											)
+											yield* Metric.update(
+												AlertingMetrics.ruleEvaluationDurationMs,
+												(yield* now) - ruleStart,
+											)
+											return
+										}
+
+										// Uniform grouped/ungrouped path. `evaluateRule` returns one
+										// outcome per group already keyed in storage vocabulary — a single
+										// UNGROUPED_GROUP_KEY entry (with a no-data fallback) when the
+										// compiled plan is ungrouped — so both shapes flow through the
+										// same loop with no key translation here.
+										const grouped = isGroupedPlan(normalized.compiledPlan)
+										const results = yield* evaluateRule(row.orgId, normalized)
+										const excludeSet = HashSet.fromIterable(
+											normalized.excludeServiceNames,
 										)
-									}),
-								)
+										const eligible = grouped
+											? Arr.filter(results, (r) => !HashSet.has(excludeSet, r.groupKey))
+											: results
 
-								const evaluatedGroups = HashSet.fromIterable(
-									Arr.map(eligible, (r) => r.groupKey),
-								)
-								yield* resolveOrphanedGroupIncidents(
-									row.orgId,
-									normalized.id,
-									normalized,
-									evaluatedGroups,
-									timestamp,
-									prefetch.openIncidentsForRule(row.orgId, row.id),
-									pushBudget,
-								)
+										yield* Effect.forEach(eligible, ({ evaluation, groupKey }) =>
+											Effect.gen(function* () {
+												yield* recordEvaluationStatus(evaluation)
+												yield* processEvaluation(
+													row,
+													normalized,
+													evaluation,
+													groupKey,
+													timestamp,
+													pendingChecks,
+													issueBudget,
+													pushBudget,
+													prefetch,
+												)
+											}),
+										)
 
-								// Self-heal state rows whose key shape contradicts the rule's
-								// groupedness: a grouped rule can never legitimately own an
-								// ungrouped row (left behind when this rule evaluated ungrouped,
-								// or by recordEvaluationFailure), and vice versa. Orphan resolution
-								// above only deletes incident-backed rows. Zero rows touched in
-								// steady state, so the Electric shape stays quiet.
-								//
-								// Applied set-based after the loop (see `flushSelfHeal`). Safe to
-								// defer: it is scoped to this rule and this rule's own writes are
-								// already done, so end-of-tick is the same state it would have seen
-								// here.
-								yield* Ref.update(
-									selfHealTargets,
-									Chunk.append({ orgId: row.orgId, ruleId: row.id, grouped }),
-								)
+										const evaluatedGroups = HashSet.fromIterable(
+											Arr.map(eligible, (r) => r.groupKey),
+										)
+										yield* resolveOrphanedGroupIncidents(
+											row.orgId,
+											normalized.id,
+											normalized,
+											evaluatedGroups,
+											timestamp,
+											prefetch.openIncidentsForRule(row.orgId, row.id),
+											pushBudget,
+										)
 
-								yield* Metric.update(
-									AlertingMetrics.ruleEvaluationDurationMs,
-									(yield* now) - ruleStart,
-								)
-							}).pipe(
-								// The rule evaluated cleanly — clear any stored evaluation error.
-								// Conditional on lastError IS NOT NULL so healthy steady-state
-								// ticks touch zero rows (no Electric shape churn). This also
-								// covers grouped/multi-service rules, whose "__total__" error row
-								// is never revisited by upsertState.
-								//
-								// Accumulated and applied set-based after the loop. Only rules that
-								// reach here are cleared, so a rule that failed this tick keeps the
-								// `lastError` that `recordEvaluationFailure` just wrote for it.
-								Effect.tap(() =>
-									Ref.update(
-										clearErrorTargets,
-										Chunk.append({ orgId: row.orgId, ruleId: row.id }),
+										// Self-heal state rows whose key shape contradicts the rule's
+										// groupedness: a grouped rule can never legitimately own an
+										// ungrouped row (left behind when this rule evaluated ungrouped,
+										// or by recordEvaluationFailure), and vice versa. Orphan resolution
+										// above only deletes incident-backed rows. Zero rows touched in
+										// steady state, so the Electric shape stays quiet.
+										//
+										// Applied set-based after the loop (see `flushSelfHeal`). Safe to
+										// defer: it is scoped to this rule and this rule's own writes are
+										// already done, so end-of-tick is the same state it would have seen
+										// here.
+										yield* Ref.update(
+											selfHealTargets,
+											Chunk.append({ orgId: row.orgId, ruleId: row.id, grouped }),
+										)
+
+										yield* Metric.update(
+											AlertingMetrics.ruleEvaluationDurationMs,
+											(yield* now) - ruleStart,
+										)
+									}).pipe(
+										// The rule evaluated cleanly — clear any stored evaluation error.
+										// Conditional on lastError IS NOT NULL so healthy steady-state
+										// ticks touch zero rows (no Electric shape churn). This also
+										// covers grouped/multi-service rules, whose "__total__" error row
+										// is never revisited by upsertState.
+										//
+										// Accumulated and applied set-based after the loop. Only rules that
+										// reach here are cleared, so a rule that failed this tick keeps the
+										// `lastError` that `recordEvaluationFailure` just wrote for it.
+										Effect.tap(() =>
+											Ref.update(
+												clearErrorTargets,
+												Chunk.append({ orgId: row.orgId, ruleId: row.id }),
+											),
+										),
+										Effect.catch((error) =>
+											recordEvaluationFailure(
+												row,
+												error,
+												error.error.code,
+												"pipeName" in error
+													? {
+															pipe: error.pipeName,
+															...(error._tag ===
+															"@maple/http/errors/WarehouseQuotaExceededError"
+																? {
+																		quotaSetting: error.setting,
+																	}
+																: undefined),
+															...(error._tag ===
+																"@maple/http/errors/WarehouseUpstreamError" ||
+															error._tag ===
+																"@maple/http/errors/WarehouseAuthError"
+																? {
+																		upstreamStatus: error.upstreamStatus,
+																	}
+																: undefined),
+														}
+													: undefined,
+											),
+										),
 									),
-								),
-								Effect.catch((error) =>
-									recordEvaluationFailure(
-										row,
-										error,
-										error.error.code,
-										"pipeName" in error
-											? {
-													pipe: error.pipeName,
-													...(error._tag ===
-													"@maple/http/errors/WarehouseQuotaExceededError"
-														? {
-																quotaSetting: error.setting,
-															}
-														: undefined),
-													...(error._tag ===
-														"@maple/http/errors/WarehouseUpstreamError" ||
-													error._tag === "@maple/http/errors/WarehouseAuthError"
-														? {
-																upstreamStatus: error.upstreamStatus,
-															}
-														: undefined),
-												}
-											: undefined,
-									),
-								),
+								{ concurrency: 5 },
 							)
 						}),
-					{ concurrency: 5 },
+					{ concurrency: 1 },
 				)
 
 				yield* flushRuleStateHousekeeping(

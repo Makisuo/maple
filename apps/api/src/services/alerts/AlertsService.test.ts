@@ -273,13 +273,16 @@ const createErrorRateRule = (
 	orgId: ReturnType<typeof asOrgId>,
 	userId: ReturnType<typeof asUserId>,
 	destinationId: AlertDestinationId,
+	// Callers that create SEVERAL rules in one org must vary this: alert_rules
+	// carries a unique index on (org_id, name).
+	name = "Checkout error rate",
 ) =>
 	alerts.createRule(
 		orgId,
 		userId,
 		adminRoles,
 		new AlertRuleUpsertRequest({
-			name: "Checkout error rate",
+			name,
 			severity: "critical",
 			enabled: true,
 			serviceNames: ["checkout"],
@@ -781,6 +784,72 @@ describe("AlertsService", () => {
 				ruleThird!.lastScheduledAt!.getTime(),
 				ruleFirst!.lastScheduledAt!.getTime(),
 				"alert_rules catches up once the heartbeat window elapses",
+			)
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
+	// Rules are claimed a chunk at a time in ONE multi-row INSERT, so the whole
+	// batch rides on `setWhere` gating each row independently. If it ever gated the
+	// statement instead, one rule already held by another worker would either drag
+	// its whole chunk down or — worse — hand every rule in the chunk a claim it did
+	// not win, and two workers would evaluate the same rules concurrently.
+	it.effect("claims only the unheld rules when a chunk contains one another worker holds", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_batch_claim")
+			const userId = asUserId("user_batch_claim")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const ruleA = yield* createErrorRateRule(alerts, orgId, userId, destination.id, "rule A")
+			const ruleHeld = yield* createErrorRateRule(alerts, orgId, userId, destination.id, "rule held")
+			const ruleC = yield* createErrorRateRule(alerts, orgId, userId, destination.id, "rule C")
+
+			// Another worker took this one moments ago: inside SCHEDULER_LOCK_TTL_MS,
+			// so this tick must lose it and leave its timestamp untouched.
+			const heldAt = new Date(DEFAULT_CLOCK_EPOCH_MS - 1_000)
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`insert into alert_rule_claims (rule_id, org_id, last_scheduled_at) values ($1, $2, $3)`,
+					[ruleHeld.id, orgId, heldAt],
+				),
+			)
+
+			yield* alerts.runSchedulerTick()
+
+			const claimFor = (ruleId: string) =>
+				Effect.promise(() =>
+					queryFirstRow<{ lastScheduledAt: Date | null }>(
+						testDb,
+						`select last_scheduled_at as "lastScheduledAt" from alert_rule_claims where rule_id = $1`,
+						[ruleId],
+					),
+				)
+
+			const claimA = yield* claimFor(ruleA.id)
+			const claimHeld = yield* claimFor(ruleHeld.id)
+			const claimC = yield* claimFor(ruleC.id)
+
+			// The two free rules are claimed by this tick...
+			assert.strictEqual(
+				claimA?.lastScheduledAt?.getTime(),
+				DEFAULT_CLOCK_EPOCH_MS,
+				"an unheld rule in the batch is claimed",
+			)
+			assert.strictEqual(
+				claimC?.lastScheduledAt?.getTime(),
+				DEFAULT_CLOCK_EPOCH_MS,
+				"every unheld rule in the batch is claimed, not just the first",
+			)
+			// ...while the held one keeps the other worker's timestamp exactly.
+			assert.strictEqual(
+				claimHeld?.lastScheduledAt?.getTime(),
+				heldAt.getTime(),
+				"a rule held inside the lock TTL is not stolen by the batch",
 			)
 		}).pipe(
 			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
