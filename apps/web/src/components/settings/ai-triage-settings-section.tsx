@@ -35,6 +35,7 @@ function DailyLimitField({
 	max,
 	disabled,
 	help,
+	spent,
 	onCommit,
 }: {
 	id: string
@@ -44,6 +45,8 @@ function DailyLimitField({
 	max: number
 	disabled: boolean
 	help: React.ReactNode
+	/** Consumed so far today. A ceiling on its own does not say whether it is about to bite. */
+	spent: number
 	onCommit: (next: number) => void
 }) {
 	const [draft, setDraft] = useState<string | null>(null)
@@ -67,7 +70,12 @@ function DailyLimitField({
 					}
 				}}
 			/>
-			<p className="text-xs text-muted-foreground">{help}</p>
+			<p className="text-xs text-muted-foreground">
+				<span className="text-foreground">
+					{spent.toLocaleString()} of {value.toLocaleString()} used today
+				</span>{" "}
+				· {help}
+			</p>
 		</div>
 	)
 }
@@ -164,6 +172,7 @@ export function AiTriageSettingsSection({ isAdmin, hasEntitlement }: AiTriageSet
 								min={1}
 								max={500}
 								disabled={isSaving}
+								spent={current.usage.runs}
 								help="How many incidents auto-triage may investigate in a UTC day."
 								onCommit={(parsed) =>
 									save(
@@ -180,7 +189,8 @@ export function AiTriageSettingsSection({ isAdmin, hasEntitlement }: AiTriageSet
 								min={1}
 								max={2000}
 								disabled={isSaving}
-								help="The spend ceiling. A planned investigation spends about six passes — planner, hypotheses, validator — so this is usually what stops triage first, whichever ceiling is reached first."
+								spent={current.usage.passes}
+								help="The spend ceiling. A planned investigation spends four to seven passes — planner, hypotheses, validator — so this is usually what stops triage first, whichever ceiling is reached first. Three tenths of it is reserved for high and critical incidents."
 								onCommit={(parsed) =>
 									save(
 										new AiTriageSettingsUpdateRequest({ maxPassesPerDay: parsed }),
