@@ -56,6 +56,12 @@ export const V2ErrorIssue = Schema.Struct({
 	last_seen_at: Timestamp,
 	occurrence_count: Schema.Number,
 	resolved_at: Schema.NullOr(Timestamp),
+	// Fix history, so a consumer can tell "never triaged" from "fixed before and
+	// came back" without replaying the event log.
+	last_resolved_at: Schema.NullOr(Timestamp),
+	last_regressed_at: Schema.NullOr(Timestamp),
+	regression_count: Schema.Number,
+	resolved_versions: Schema.Array(Schema.String),
 	snooze_until: Schema.NullOr(Timestamp),
 	archived_at: Schema.NullOr(Timestamp),
 	has_open_incident: Schema.Boolean,

@@ -705,19 +705,25 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
  * Unwraps the first OTel `exception` event and computes a cityHash64
  * FingerprintHash used to group occurrences into Issues.
  *
- * Fingerprint inputs: (OrgId, ServiceName, ExceptionType, top-3 normalized frames, msg fallback).
- * - Stack lines are filtered to frame-shaped ones (must contain `:NUMBER`), which
- *   skips language-specific headers like Python's "Traceback..." or Java's
- *   "Exception: message" that would otherwise leak dynamic message text into the hash.
- * - Line numbers (`:123`) and hex pointers (`0x...`) are stripped so minor code
- *   moves don't rotate the fingerprint.
+ * Fingerprint inputs: (OrgId, ServiceName, ExceptionType, top-3 normalized frames,
+ * message signature).
+ * - Stack lines are filtered by frame SHAPE — one alternative per runtime's frame
+ *   syntax — not by "contains `:NUMBER`". The old rule accepted any colon-digit
+ *   line, so Drizzle's `params:` line (actual row values) and `Type: message`
+ *   headers were hashed as frames. Over 90 days that produced 68,550 fingerprints
+ *   from 114 distinct error labels; shape matching plus the signature below brings
+ *   the same corpus to 2,080.
+ * - Line numbers (`:123`), hex pointers (`0x...`), URL origins and Vite bundle
+ *   content hashes are stripped so minor code moves, preview hosts and redeploys
+ *   don't rotate the fingerprint.
  * - Top 3 frames are hashed (not just 1) so errors raised inside shared library
  *   code still distinguish between different call sites.
- * - Whenever there are no frame-shaped stack lines, a normalized prefix of
- *   StatusMessage (IDs/numbers/hex runs redacted) is folded into the hash — even
- *   when ExceptionType is present. This prevents generic types (e.g.
- *   "HttpServerError", "Error") or malformed types (e.g. a stringified JSON
- *   prefix) from monopolizing a single bucket per service.
+ * - A redacted signature of StatusMessage is folded in ALWAYS, not only when
+ *   frames are absent. Bundled runtimes minify every module into one file, so the
+ *   top frames alone cannot separate two bugs in the same Worker, and generic
+ *   types ("HttpServerError", "Error") would monopolize one bucket per service.
+ *   Redaction runs before hashing, so the signature discriminates without
+ *   reintroducing cardinality.
  *
  * DeploymentEnv is intentionally NOT part of the hash: the same bug across
  * staging/prod should stay one issue; filter by env at query/triage time.
@@ -738,24 +744,51 @@ const errorEventsSelectSql = `
           if(_ei > 0, EventsAttributes[_ei]['exception.type'], '') AS _exType,
           if(_ei > 0, EventsAttributes[_ei]['exception.message'], StatusMessage) AS _exMsg,
           if(_ei > 0, EventsAttributes[_ei]['exception.stacktrace'], '') AS _exStack,
+          -- Frame lines are matched by SHAPE, not by "contains :NUMBER". The old
+          -- rule accepted any line with a colon-digit, which let non-frame lines
+          -- in: Drizzle's \`params: <row values>\` line, and the \`Type: message\`
+          -- header (\`Code: 62\`, \`position 1628\`, embedded timestamps). Row values
+          -- and message text then entered the hash and split one bug into
+          -- thousands of issues — 23,035 fingerprints for six real
+          -- AnomalyPersistenceError call sites, 15,051 for thirteen DatabaseError
+          -- ones. Each alternative below is one runtime's frame syntax; anything
+          -- that is not shaped like a frame is skipped, which is what the
+          -- language-header note above always intended.
           arraySlice(
             arrayFilter(
-              line -> match(line, ':[0-9]+|line [0-9]+'),
+              line -> match(
+                line,
+                '^[ \\\\t]*at |^[ \\\\t]*File "|^[ \\\\t]+from [^ ]+:[0-9]+|^[^ \\\\t@]+@[^ \\\\t]*:[0-9]+|^[ \\\\t]+[^ \\\\t]+\\\\.(go|rs):[0-9]+'
+              ),
               splitByChar('\\n', _exStack)
             ),
             1, 3
           ) AS _rawFrames,
-          -- Redact every volatile token a frame line can carry. The last two
-          -- alternatives (long hex runs, 6+ digit runs) mirror the _msgFallback
-          -- redaction: a trace/span id or request id embedded in the first stack
-          -- line otherwise splits one bug into one issue per occurrence.
+          -- Redact every volatile token a frame line can carry, outermost first:
+          --   1. the URL origin, so app.maple.dev and app-pr-246.maple.dev (and
+          --      every other preview host) share one fingerprint;
+          --   2. Vite's 8-char content hash on bundle filenames — without this
+          --      every deploy rotates \`index-s17g7I3p.js\` and re-splits every
+          --      browser and Worker issue that has ever been triaged;
+          --   3. line numbers, hex pointers, long hex runs and 6+ digit runs — a
+          --      trace/span or request id embedded in a stack line otherwise
+          --      splits one bug into one issue per occurrence.
           arrayMap(
-            line -> replaceRegexpAll(line, ':[0-9]+|line [0-9]+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}', ''),
+            line -> replaceRegexpAll(
+              replaceRegexpAll(
+                replaceRegexpAll(
+                  replaceRegexpAll(line, 'https?://[^/ )]+', ''),
+                  '-[A-Za-z0-9_-]{8}\\\\.js', '.js'
+                ),
+                '-[A-Za-z0-9_-]{8}\\\\.css', '.css'
+              ),
+              ':[0-9]+|line [0-9]+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}', ''
+            ),
             _rawFrames
           ) AS _topFrames,
           if(length(_topFrames) > 0, _topFrames[1], '') AS _topFrame,
           arrayStringConcat(_topFrames, '\\n') AS _fpFrames,
-          -- JSON detection (only consulted when _fpFrames = '')
+          -- JSON detection for the message signature below.
           isValidJSON(StatusMessage) AS _isJson,
           _isJson AND JSONType(StatusMessage) = 'Object' AS _isJsonObj,
           -- General, KEY-NAME-AGNOSTIC canonical signature: iterate ALL top-level
@@ -772,12 +805,40 @@ const errorEventsSelectSql = `
             ),
             '|'
           ) AS _jsonSig,
-          -- Fold into the existing fallback hash slot. Non-JSON path is unchanged.
+          -- The message signature is folded in ALWAYS, not only when there are no
+          -- frames. Bundled runtimes minify every module into one file, so the top
+          -- three frames of a Worker error are \`toDatabaseError (worker.js)\` for
+          -- every failing query alike: on frames alone, 25 distinct DatabaseError
+          -- bugs (316k occurrences) collapse into a single issue. The signature
+          -- restores that discrimination, and it cannot reinflate cardinality the
+          -- way the old 200-char raw prefix did because everything variable is
+          -- redacted first — emails, URLs and paths, then ids and every digit run
+          -- (the old rule kept runs shorter than 6, which is why a timestamp's hour
+          -- survived and split one bug into one issue per hour of the day).
           multiIf(
-            _fpFrames != '', '',
-            _isJsonObj,      _jsonSig,
-            replaceRegexpAll(substring(StatusMessage, 1, 200), '[0-9a-fA-F]{8,}|[0-9]+', '#')
-          ) AS _msgFallback,
+            _isJsonObj, _jsonSig,
+            -- Route and file paths are deliberately KEPT: the endpoint that
+            -- failed is signal, and collapsing every path to a placeholder merges
+            -- unrelated bugs. Only the volatile parts go — the origin (so preview
+            -- hosts don't split an issue) and the home directory (so two users'
+            -- local store paths are one bug, not two).
+            substring(
+              replaceRegexpAll(
+                replaceRegexpAll(
+                  replaceRegexpAll(
+                    replaceRegexpAll(
+                      substring(StatusMessage, 1, 400),
+                      '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}', 'EMAIL'
+                    ),
+                    'https?://[^/ )"]+', ''
+                  ),
+                  '/(Users|home)/[^/ ]+', '/~'
+                ),
+                '[0-9a-fA-F-]{6,}|[0-9]+', '#'
+              ),
+              1, 120
+            )
+          ) AS _msgSig,
           -- Display-only, best-effort human label (decoupled from the fingerprint:
           -- many labels may map to one hash). The broad key list here is a DISPLAY
           -- heuristic only; the fingerprint above makes no key-name assumption.
@@ -828,10 +889,11 @@ const errorEventsSelectSql = `
           _exMsg AS ExceptionMessage,
           _exStack AS ExceptionStacktrace,
           _topFrame AS TopFrame,
-          cityHash64(OrgId, ServiceName, _exType, _fpFrames, _msgFallback) AS FingerprintHash,
+          cityHash64(OrgId, ServiceName, _exType, _fpFrames, _msgSig) AS FingerprintHash,
           StatusMessage,
           Duration,
-          _errorLabel AS ErrorLabel
+          _errorLabel AS ErrorLabel,
+          ResourceAttributes['service.version'] AS ServiceVersion
         FROM traces
         WHERE StatusCode = 'Error'
           -- Client-side runtimes (notably the native Cloudflare Workers
@@ -903,7 +965,8 @@ export const errorFingerprintsMinutelyMv = defineMaterializedView("error_fingerp
           anyLast(TopFrame) AS TopFrame,
           count() AS OccurrenceCount,
           min(Timestamp) AS FirstSeen,
-          max(Timestamp) AS LastSeen
+          max(Timestamp) AS LastSeen,
+          anyLast(ServiceVersion) AS ServiceVersion
         FROM error_events
         GROUP BY OrgId, Minute, FingerprintHash
       `,

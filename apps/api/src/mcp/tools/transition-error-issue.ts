@@ -10,7 +10,12 @@ import { createDualContent } from "@/mcp/lib/structured-output"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
 import { ErrorsService } from "@/services/errors/ErrorsService"
-import { ErrorIssueId, WorkflowState, describeWorkflowTransitions } from "@maple/domain/http"
+import {
+	ErrorIssueId,
+	WORKFLOW_STATE_ORDER,
+	WorkflowState,
+	describeWorkflowTransitions,
+} from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
 const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)
@@ -21,9 +26,7 @@ export function registerTransitionErrorIssueTool(server: McpToolRegistrar) {
 		`Move an error issue to a new workflow state. Valid transitions: ${describeWorkflowTransitions()}.`,
 		Schema.Struct({
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),
-			to_state: requiredStringParam(
-				"Target workflow state: triage, todo, in_progress, in_review, done, cancelled, wontfix",
-			),
+			to_state: requiredStringParam(`Target workflow state: ${WORKFLOW_STATE_ORDER.join(", ")}`),
 			note: optionalStringParam("Optional reasoning / context, stored on the event"),
 			snooze_until: optionalStringParam(
 				"ISO datetime for 'wontfix' transition. The issue re-opens as 'triage' if new events arrive after this time.",
@@ -40,7 +43,7 @@ export function registerTransitionErrorIssueTool(server: McpToolRegistrar) {
 			const decodedState = decodeWorkflowState(to_state)
 			if (Option.isNone(decodedState)) {
 				return validationError(
-					`Invalid to_state: '${to_state}'. Must be one of: triage, todo, in_progress, in_review, done, cancelled, wontfix.`,
+					`Invalid to_state: '${to_state}'. Must be one of: ${WORKFLOW_STATE_ORDER.join(", ")}.`,
 				)
 			}
 

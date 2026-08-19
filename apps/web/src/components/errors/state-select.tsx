@@ -4,6 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 const LABEL: Record<WorkflowState, string> = {
 	triage: "Triage",
+	regressed: "Regressed",
 	todo: "Todo",
 	in_progress: "In progress",
 	in_review: "In review",

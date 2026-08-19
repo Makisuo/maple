@@ -89,7 +89,7 @@ describe("ClickHouse DDL emitter", () => {
 		expect(ddl).toMatch(/^CREATE MATERIALIZED VIEW IF NOT EXISTS error_events_mv TO error_events AS/)
 		expect(ddl).toContain("FROM traces")
 		expect(ddl).toContain("WHERE StatusCode = 'Error'")
-		expect(ddl).toContain("cityHash64(OrgId, ServiceName, _exType, _fpFrames, _msgFallback)")
+		expect(ddl).toContain("cityHash64(OrgId, ServiceName, _exType, _fpFrames, _msgSig)")
 	})
 
 	it("emits a JSONPath spec mapping each ingested column to its $.path", async () => {

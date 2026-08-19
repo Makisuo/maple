@@ -86,7 +86,7 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:errors:errorTickBootstrapIssuesQuery:bootstrap-window  [654cc034]
+-- builder:errors:errorTickBootstrapIssuesQuery:bootstrap-window  [26a14ba1]
 SELECT
           toString(FingerprintHash) AS fingerprintHash,
           any(ServiceName) AS serviceName,
@@ -94,6 +94,7 @@ SELECT
           any(ExceptionMessage) AS exceptionMessage,
           any(ErrorLabel) AS errorLabel,
           any(TopFrame) AS topFrame,
+          any(ServiceVersion) AS serviceVersion,
           count() AS count,
           min(Timestamp) AS firstSeen,
           max(Timestamp) AS lastSeen
@@ -104,7 +105,7 @@ SELECT
         GROUP BY fingerprintHash
         FORMAT JSON
 
--- builder:errors:errorTickIssuesQuery:cursor-window  [40cf1922]
+-- builder:errors:errorTickIssuesQuery:cursor-window  [1511ae6d]
 SELECT
           toString(FingerprintHash) AS fingerprintHash,
           any(ServiceName) AS serviceName,
@@ -112,6 +113,7 @@ SELECT
           any(ExceptionMessage) AS exceptionMessage,
           any(ErrorLabel) AS errorLabel,
           any(TopFrame) AS topFrame,
+          any(ServiceVersion) AS serviceVersion,
           sum(OccurrenceCount) AS count,
           min(FirstSeen) AS firstSeen,
           max(LastSeen) AS lastSeen

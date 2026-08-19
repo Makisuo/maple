@@ -87,7 +87,7 @@ describe("IssuesBulkBar move-to menu follows the transition matrix", () => {
 		renderBar({ selected: [issue("a", "done")] })
 		openMoveTo()
 
-		expect(moveItems()).toEqual(["Triage", "In progress", "Cancelled", "Won't fix"])
+		expect(moveItems()).toEqual(["Triage", "Regressed", "In progress", "Cancelled", "Won't fix"])
 	})
 
 	it("offers nothing for an issue in a state with no outgoing moves", () => {

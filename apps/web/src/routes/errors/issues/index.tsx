@@ -38,6 +38,7 @@ import type { ErrorIssueDocument, ErrorIssueId, WorkflowState } from "@maple/dom
 
 const FILTER_VALUES = [
 	"triage",
+	"regressed",
 	"todo",
 	"in_progress",
 	"in_review",
@@ -51,6 +52,7 @@ type FilterValue = (typeof FILTER_VALUES)[number]
 
 const FILTER_LABEL: Record<FilterValue, string> = {
 	triage: "Triage",
+	regressed: "Regressed",
 	todo: "Todo",
 	in_progress: "In progress",
 	in_review: "In review",
@@ -66,6 +68,8 @@ const TOOLBAR_TABS = FILTER_VALUES.map((value) => ({
 }))
 
 const GROUP_ORDER: ReadonlyArray<WorkflowState> = [
+	// Regressions first: a fix that did not hold outranks an untriaged issue.
+	"regressed",
 	"triage",
 	"todo",
 	"in_progress",
@@ -88,18 +92,9 @@ const SEVERITY_FILTER_LABEL: Record<SeverityFilterValue, string> = {
 } satisfies Record<SeverityFilterValue, string>
 
 const searchSchema = Schema.Struct({
-	workflowState: Schema.optional(
-		Schema.Literals([
-			"all",
-			"triage",
-			"todo",
-			"in_progress",
-			"in_review",
-			"done",
-			"cancelled",
-			"wontfix",
-		]),
-	),
+	// Derived from FILTER_VALUES rather than repeated: the hand-copied list drifted
+	// the moment a new state was added.
+	workflowState: Schema.optional(Schema.Literals(FILTER_VALUES)),
 	severity: Schema.optional(Schema.Literals(SEVERITY_FILTER_VALUES)),
 	kind: Schema.optional(Schema.Literals(["error", "alert"])),
 })

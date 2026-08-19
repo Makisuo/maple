@@ -905,6 +905,11 @@ export const errorEvents = defineDatasource("error_events", {
 		StatusMessage: t.string(),
 		Duration: t.uint64(),
 		ErrorLabel: t.string(),
+		// Emitting build, for the issue evaluator's regression rule: an occurrence
+		// from a build that was already running when the issue was resolved is an
+		// old client still in the wild, not a regression. Appended last so the
+		// materialized projection stays aligned with this column order.
+		ServiceVersion: t.string().lowCardinality(),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
@@ -948,6 +953,11 @@ export const errorEventsByTime = defineDatasource("error_events_by_time", {
 		StatusMessage: t.string(),
 		Duration: t.uint64(),
 		ErrorLabel: t.string(),
+		// Emitting build, for the issue evaluator's regression rule: an occurrence
+		// from a build that was already running when the issue was resolved is an
+		// old client still in the wild, not a regression. Appended last so the
+		// materialized projection stays aligned with this column order.
+		ServiceVersion: t.string().lowCardinality(),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
@@ -986,6 +996,10 @@ export const errorFingerprintsMinutely = defineDatasource("error_fingerprints_mi
 		OccurrenceCount: t.simpleAggregateFunction("sum", t.uint64()),
 		FirstSeen: t.simpleAggregateFunction("min", t.dateTime()),
 		LastSeen: t.simpleAggregateFunction("max", t.dateTime()),
+		// One build per fingerprint-minute is enough: the evaluator unions these
+		// into a per-issue set over time, so a service running several builds at
+		// once converges within a few ticks.
+		ServiceVersion: t.simpleAggregateFunction("anyLast", t.string()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toYYYYMM(Minute)",

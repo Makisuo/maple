@@ -899,6 +899,23 @@ const loadIssuesByFingerprint = (fingerprintHash: string) =>
 		)
 	})
 
+/**
+ * Push an issue's resolution into the past so the reopen grace window has
+ * elapsed. The tick steps through 5-minute windows, so advancing TestClock far
+ * enough to clear the one-hour grace would mean driving a dozen empty ticks;
+ * backdating the resolution expresses the same situation directly.
+ */
+const backdateResolution = (issueId: ErrorIssueId, resolvedAtMs: number) =>
+	Effect.gen(function* () {
+		const database = yield* Database
+		return yield* database.execute((db) =>
+			db
+				.update(errorIssues)
+				.set({ resolvedAt: new Date(resolvedAtMs) })
+				.where(eq(errorIssues.id, issueId)),
+		)
+	})
+
 const loadIncidentsForIssue = (issueId: ErrorIssueId) =>
 	Effect.gen(function* () {
 		const database = yield* Database
@@ -1329,17 +1346,23 @@ describe("ErrorsService.runTick", () => {
 				const resolved = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
 				assert.strictEqual(resolved.workflowState, "done")
 				assert.isNotNull(resolved.resolvedAt)
+				yield* backdateResolution(issue.id, TICK_MS - 3 * 60 * 60 * 1000)
 
 				yield* TestClock.setTime(TICK_MS + 120_000)
 				const second = yield* errors.runTick()
 				assert.strictEqual(second.issuesTouched, 1)
 				assert.strictEqual(second.incidentsOpened, 1)
 
-				// A done issue reopens immediately on re-observation — the errors tick
-				// has no reopen cool-down window.
+				// Reopening lands in `regressed`, not `triage`: an issue that was fixed
+				// and came back is not the same as one nobody has looked at, and
+				// flattening the two is what let the same bug be fixed twice.
 				const reopened = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
-				assert.strictEqual(reopened.workflowState, "triage")
+				assert.strictEqual(reopened.workflowState, "regressed")
 				assert.isNull(reopened.resolvedAt)
+				assert.strictEqual(reopened.regressionCount, 1)
+				assert.isNotNull(reopened.lastRegressedAt)
+				// The fix itself stays on record so the next reader knows it happened.
+				assert.isNotNull(reopened.lastResolvedAt)
 
 				const events = yield* loadEventsForIssue(issue.id)
 				assert.lengthOf(
@@ -1665,7 +1688,8 @@ describe("ErrorsService.runTick", () => {
 			yield* seedIssue(regressedId, {
 				fingerprintHash: REGRESSED,
 				workflowState: "done",
-				resolvedAt: new Date(TICK_MS),
+				// Resolved well before this window, so the rollout grace has elapsed.
+				resolvedAt: new Date(TICK_MS - 3 * 60 * 60 * 1000),
 				occurrenceCount: 10,
 				firstSeenAt: new Date(TICK_MS - 600_000),
 				lastSeenAt: new Date(TICK_MS - 600_000),
@@ -1711,7 +1735,7 @@ describe("ErrorsService.runTick", () => {
 
 			// Regressed: reopened, resolution cleared, both audit events written.
 			const regressedAfter = (yield* loadIssuesByFingerprint(REGRESSED))[0]!
-			assert.strictEqual(regressedAfter.workflowState, "triage")
+			assert.strictEqual(regressedAfter.workflowState, "regressed")
 			assert.isNull(regressedAfter.resolvedAt)
 			assert.strictEqual(regressedAfter.occurrenceCount, 12)
 			const regressedEvents = yield* loadEventsForIssue(regressedId)
