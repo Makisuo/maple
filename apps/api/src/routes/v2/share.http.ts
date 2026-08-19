@@ -21,6 +21,8 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpServerRequest } from "effect/unstable/http"
 import {
+	AlertChartResponse,
+	AlertRuleId,
 	OrgId,
 	SHARE_NOT_FOUND_MESSAGE,
 	ShareNotConfiguredError,
@@ -35,10 +37,10 @@ import {
 	ShareWrongOrgError,
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { MAX_LIST_RANGE_SECONDS, SHARE_MAX_RANGE_SECONDS } from "@maple/query-engine"
-import { hashShareToken, shareOgId, verifyShareOgId } from "@maple/db"
+import { MAX_LIST_RANGE_SECONDS, MAX_QUERY_RANGE_SECONDS } from "@maple/query-engine"
+import { hashShareToken, shareOgId, verifyAlertChartId, verifyShareOgId } from "@maple/db"
 import { redactForShare } from "@maple/widgets/dashboard"
-import { Effect, Option, Redacted } from "effect"
+import { Effect, Option, Redacted, Schema } from "effect"
 import { Env } from "@/platform/Env"
 import { AuthService } from "@/services/auth/AuthService"
 import {
@@ -47,6 +49,9 @@ import {
 	shareOgRateLimitKey,
 	shareTokenRateLimitKey,
 } from "@/services/auth/ApiV2RateLimiter"
+import { loadChartSeries } from "@/services/alerts/alert-chart-series"
+import { systemTenant } from "@/services/alerts/system-tenant"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
@@ -54,6 +59,9 @@ import { ogDescription, ogSubtitle, ogTiles, ogTitle } from "@/services/dashboar
 import { OrganizationService } from "@/services/org/OrganizationService"
 import { resolveShareVariables } from "@/services/dashboards/share-variables"
 import { resolveShareWindow } from "@/services/dashboards/share-window"
+
+const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
+const decodeAlertRuleId = Schema.decodeUnknownEffect(AlertRuleId)
 
 /** Uniform "no such link", used for every reason a token might not resolve. */
 const notFound = Effect.fail(new ShareNotFoundError({ message: SHARE_NOT_FOUND_MESSAGE }))
@@ -67,6 +75,7 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 		const shares = yield* SharedDashboardService
 		const persistence = yield* DashboardPersistenceService
 		const widgetData = yield* DashboardWidgetDataService
+		const warehouse = yield* WarehouseQueryService
 
 		/**
 		 * Two keys, both must pass: per token, so a leaked link cannot be scraped
@@ -230,7 +239,7 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 						scope: share.widgetId === undefined ? "dashboard" : "widget",
 						dashboard,
 						limits: {
-							maxRangeSeconds: SHARE_MAX_RANGE_SECONDS,
+							maxRangeSeconds: MAX_QUERY_RANGE_SECONDS,
 							maxListRangeSeconds: MAX_LIST_RANGE_SECONDS,
 						},
 						// Only a public single-chart link may be framed by a third party:
@@ -407,6 +416,56 @@ export const HttpV2SharePublicLive = HttpApiBuilder.group(MapleApiV2, "sharePubl
 					}
 					const described = description === undefined ? card : { ...card, description }
 					return new ShareOgCardResponse(org === undefined ? described : { ...described, org })
+				}),
+			)
+			.handle("alertChart", ({ payload }) =>
+				Effect.gen(function* () {
+					const hmacKey = yield* requireHmacKey
+					// Keyed on the id as presented, before verification, for the same
+					// reason as `ogCard`: otherwise the cheap way to hammer this is to
+					// send ids that never reach a bucket.
+					yield* enforceOgRateLimit(payload.chartId)
+
+					const claims = verifyAlertChartId(payload.chartId, hmacKey)
+					if (claims === undefined) return yield* notFound
+
+					// The signature proves we minted the payload; it does not make the
+					// ids inside it decoded. Both are parsed here, at the boundary,
+					// and an id that will not decode is the uniform not-found rather
+					// than a brand asserted onto whatever came back off the wire.
+					const orgId = yield* decodeOrgId(claims.rawOrgId).pipe(Effect.catch(() => notFound))
+					const ruleId = yield* decodeAlertRuleId(claims.rawRuleId).pipe(
+						Effect.catch(() => notFound),
+					)
+
+					// No rule lookup: everything drawn as words — title, unit,
+					// threshold, which side to shade — is pinned in the signed id, so a
+					// rule renamed or deleted after delivery cannot change what an
+					// already-sent alert's picture says.
+					const series = yield* loadChartSeries(warehouse, systemTenant(orgId), {
+						orgId,
+						ruleId,
+						groupKey: claims.groupKey,
+						// The comparator is not carried; `breachSide` is the only thing
+						// derived from it that the renderer needs, and it is signed.
+						comparator: "gt",
+						threshold: claims.threshold ?? 0,
+						fromMs: claims.fromMs,
+						toMs: claims.toMs,
+					})
+					// A window whose checks have aged out of `alert_checks` retention,
+					// or a warehouse that would not answer. Either way there is no
+					// picture to draw, and the uniform not-found is the honest reply.
+					if (series === null) return yield* notFound
+
+					return new AlertChartResponse({
+						title: claims.title,
+						unit: claims.unit,
+						kind: "area",
+						points: series.points.map((point) => [point[0], point[1]] as const),
+						threshold: claims.threshold,
+						breachSide: claims.breachSide,
+					})
 				}),
 			)
 	}),

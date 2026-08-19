@@ -1061,13 +1061,19 @@
         "title": "Anomaly timeseries bucket",
         "type": "object"
       },
-      "Arrays_18": {
+      "Arrays_15": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "Arrays_19": {
         "items": {
           "$ref": "#/components/schemas/TimeseriesSeries"
         },
         "type": "array"
       },
-      "Arrays_19": {
+      "Arrays_20": {
         "items": {
           "$ref": "#/components/schemas/BreakdownItem"
         },
@@ -1326,6 +1332,12 @@
           "kind": {
             "$ref": "#/components/schemas/_maple_IssueKind"
           },
+          "last_regressed_at": {
+            "type": "string"
+          },
+          "last_resolved_at": {
+            "type": "string"
+          },
           "last_seen_at": {
             "type": "string"
           },
@@ -1350,8 +1362,14 @@
           "priority": {
             "type": "number"
           },
+          "regression_count": {
+            "type": "number"
+          },
           "resolved_at": {
             "type": "string"
+          },
+          "resolved_versions": {
+            "$ref": "#/components/schemas/Arrays_15"
           },
           "service_name": {
             "type": "string"
@@ -1390,6 +1408,8 @@
           "first_seen_at",
           "last_seen_at",
           "occurrence_count",
+          "regression_count",
+          "resolved_versions",
           "has_open_incident"
         ],
         "title": "Error issue",
@@ -1478,6 +1498,12 @@
           "kind": {
             "$ref": "#/components/schemas/_maple_IssueKind"
           },
+          "last_regressed_at": {
+            "type": "string"
+          },
+          "last_resolved_at": {
+            "type": "string"
+          },
           "last_seen_at": {
             "type": "string"
           },
@@ -1502,8 +1528,14 @@
           "priority": {
             "type": "number"
           },
+          "regression_count": {
+            "type": "number"
+          },
           "resolved_at": {
             "type": "string"
+          },
+          "resolved_versions": {
+            "$ref": "#/components/schemas/Arrays_15"
           },
           "sample_traces": {
             "items": {
@@ -1554,6 +1586,8 @@
           "first_seen_at",
           "last_seen_at",
           "occurrence_count",
+          "regression_count",
+          "resolved_versions",
           "has_open_incident",
           "timeseries",
           "sample_traces",
@@ -2260,7 +2294,7 @@
             "type": "string"
           },
           "data": {
-            "$ref": "#/components/schemas/Arrays_19"
+            "$ref": "#/components/schemas/Arrays_20"
           },
           "end_time": {
             "type": "string"
@@ -2481,7 +2515,7 @@
             "type": "string"
           },
           "series": {
-            "$ref": "#/components/schemas/Arrays_18"
+            "$ref": "#/components/schemas/Arrays_19"
           },
           "start_time": {
             "type": "string"
@@ -2896,6 +2930,7 @@
       "_maple_WorkflowState": {
         "enum": [
           "triage",
+          "regressed",
           "todo",
           "in_progress",
           "in_review",

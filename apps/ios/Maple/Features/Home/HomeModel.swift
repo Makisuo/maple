@@ -119,10 +119,13 @@ enum OverallStatus {
 @MainActor
 @Observable
 final class HomeModel {
-	private(set) var state: LoadState<HomeSnapshot> = .loading
+	private(set) var loader: ScreenLoader<HomeSnapshot>!
+	/// The `SessionController.dataGeneration` this model was built for; the
+	/// view builds a fresh one when it moves, so one org's board never lingers
+	/// while the next org loads.
+	let generation: Int
 
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	/// Home is always "now": an hour for rates, a day for what's new. There is
 	/// no time picker on purpose — a picker answers "what happened", and that
@@ -132,15 +135,11 @@ final class HomeModel {
 
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
-		self.session = session
+		self.generation = session.dataGeneration
+		self.loader = ScreenLoader(session: session) { [unowned self] in try await self.fetch() }
 	}
 
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-		if let next = await session.perform({ try await self.fetch() }) {
-			state = next
-		}
-	}
+	var state: LoadState<HomeSnapshot> { loader.state }
 
 	private func fetch() async throws -> HomeSnapshot {
 		let now = Date()

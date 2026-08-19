@@ -26,7 +26,13 @@ use opentelemetry_proto::tonic::metrics::v1::{
     metric, number_data_point, Exemplar, NumberDataPoint,
 };
 use opentelemetry_proto::tonic::trace::v1::{span, status, Span};
+#[cfg(test)]
 use reqwest::Client;
+
+/// The shared outbound HTTP client type: plain `reqwest::Client` in normal
+/// builds, hotpath's instrumented wrapper (same request API) under
+/// `--features hotpath`.
+pub use hotpath::wrap::reqwest::Client as HttpClient;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use tokio::sync::mpsc;
@@ -49,7 +55,7 @@ impl ExportDestination {
     /// Every export destination, in lane order. A frame's lane within its WAL
     /// shard is `shard * LANES_PER_SHARD + destination.lane_ordinal()`, so the
     /// position in this slice is load-bearing — do not reorder.
-    pub const ALL: [ExportDestination; 2] = [Self::Tinybird, Self::ClickHouse];
+    pub const ALL: [Self; 2] = [Self::Tinybird, Self::ClickHouse];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -111,8 +117,8 @@ fn collect_source_links(frames: &[QueuedFrame]) -> (Vec<SpanContext>, usize) {
 fn host_of(url: &str) -> String {
     url::Url::parse(url)
         .ok()
-        .and_then(|parsed| parsed.host_str().map(|host| host.to_string()))
-        .unwrap_or_else(|| "unknown".to_string())
+        .and_then(|parsed| parsed.host_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 /// One `clickhouse.export` attempt span. Built in several places in the retry
@@ -273,7 +279,7 @@ impl ClickHouseBreakerRegistry {
 
     fn state_for(&self, org_id: &str) -> Arc<Mutex<BreakerState>> {
         self.states
-            .entry(org_id.to_string())
+            .entry(org_id.to_owned())
             .or_insert_with(|| Arc::new(Mutex::new(BreakerState::default())))
             .clone()
     }
@@ -287,7 +293,9 @@ impl ClickHouseBreakerRegistry {
         let Some(state) = self.states.get(org_id) else {
             return BreakerDecision::Allow;
         };
-        let guard = state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let guard = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         breaker_decision(&guard, self.cfg, now)
     }
 
@@ -296,7 +304,9 @@ impl ClickHouseBreakerRegistry {
             return;
         }
         if let Some(state) = self.states.get(org_id) {
-            let mut guard = state.lock().unwrap_or_else(|poison| poison.into_inner());
+            let mut guard = state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.consecutive_failures = 0;
             guard.opened_at = None;
         }
@@ -307,7 +317,9 @@ impl ClickHouseBreakerRegistry {
             return;
         }
         let state = self.state_for(org_id);
-        let mut guard = state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut guard = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         guard.consecutive_failures = guard.consecutive_failures.saturating_add(1);
         if guard.consecutive_failures >= self.cfg.failure_threshold {
             // Re-stamped on every failure on purpose: `on_failure` only runs for
@@ -432,40 +444,36 @@ impl TinybirdConfig {
     }
 
     pub fn validate_for_pipeline(&self, require_tinybird_credentials: bool) -> Result<(), String> {
-        if self.endpoint.is_empty() {
-            if require_tinybird_credentials {
-                return Err(
-                    "TINYBIRD_HOST is required when INGEST_WRITE_MODE uses tinybird".to_string(),
-                );
-            }
+        if self.endpoint.is_empty() && require_tinybird_credentials {
+            return Err(
+                "TINYBIRD_HOST is required when INGEST_WRITE_MODE uses tinybird".to_owned(),
+            );
         }
-        if self.token.is_empty() {
-            if require_tinybird_credentials {
-                return Err(
-                    "TINYBIRD_TOKEN is required when INGEST_WRITE_MODE uses tinybird".to_string(),
-                );
-            }
+        if self.token.is_empty() && require_tinybird_credentials {
+            return Err(
+                "TINYBIRD_TOKEN is required when INGEST_WRITE_MODE uses tinybird".to_owned(),
+            );
         }
         if self.wal_shards == 0 {
-            return Err("INGEST_WAL_SHARDS must be greater than 0".to_string());
+            return Err("INGEST_WAL_SHARDS must be greater than 0".to_owned());
         }
         if self.batch_max_rows == 0 || self.batch_max_bytes == 0 {
             return Err(
                 "INGEST_BATCH_MAX_ROWS and INGEST_BATCH_MAX_BYTES must be greater than 0"
-                    .to_string(),
+                    .to_owned(),
             );
         }
         if self.queue_max_bytes == 0 {
-            return Err("INGEST_QUEUE_MAX_BYTES must be greater than 0".to_string());
+            return Err("INGEST_QUEUE_MAX_BYTES must be greater than 0".to_owned());
         }
         if self.org_queue_max_bytes == 0 {
-            return Err("INGEST_ORG_QUEUE_MAX_BYTES must be greater than 0".to_string());
+            return Err("INGEST_ORG_QUEUE_MAX_BYTES must be greater than 0".to_owned());
         }
         if self.export_concurrency_per_shard == 0 {
-            return Err("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD must be greater than 0".to_string());
+            return Err("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD must be greater than 0".to_owned());
         }
         if self.export_max_attempts == 0 {
-            return Err("INGEST_EXPORT_MAX_ATTEMPTS must be greater than 0".to_string());
+            return Err("INGEST_EXPORT_MAX_ATTEMPTS must be greater than 0".to_owned());
         }
         Ok(())
     }
@@ -493,7 +501,7 @@ impl SamplingPolicy {
         if !self.trace_sample_ratio.is_finite() {
             return 1.0;
         }
-        self.trace_sample_ratio.clamp(0.000001, 1.0)
+        self.trace_sample_ratio.clamp(0.000_001, 1.0)
     }
 }
 
@@ -564,10 +572,8 @@ pub enum PipelineError {
 impl std::fmt::Display for PipelineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Backpressure(message) => f.write_str(message),
-            Self::Throttled(message) => f.write_str(message),
-            Self::QueueUnavailable(message) => f.write_str(message),
-            Self::Encode(message) => f.write_str(message),
+            Self::Backpressure(message) | Self::Throttled(message) => f.write_str(message),
+            Self::QueueUnavailable(message) | Self::Encode(message) => f.write_str(message),
         }
     }
 }
@@ -607,6 +613,13 @@ pub struct AcceptStats {
 #[derive(Clone)]
 pub struct TelemetryPipeline {
     inner: Arc<PipelineInner>,
+}
+/// The pipeline is a handle around channels, files and an export task, none of
+/// which say anything useful in a `{:?}`.
+impl std::fmt::Debug for TelemetryPipeline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TelemetryPipeline").finish_non_exhaustive()
+    }
 }
 
 struct PipelineInner {
@@ -652,13 +665,16 @@ struct EncodedFrame {
 }
 
 impl TelemetryPipeline {
-    pub async fn new(cfg: TinybirdConfig, http: Client) -> Result<Self, String> {
+    // `HttpClient` is the raw `reqwest::Client` in normal builds and the
+    // hotpath-instrumented wrapper under `--features hotpath`; `impl Into<_>`
+    // lets callers (and tests) keep handing in a plain `reqwest::Client`.
+    pub async fn new(cfg: TinybirdConfig, http: impl Into<HttpClient>) -> Result<Self, String> {
         Self::new_with_clickhouse(cfg, http, None).await
     }
 
     pub async fn new_with_clickhouse(
         cfg: TinybirdConfig,
-        http: Client,
+        http: impl Into<HttpClient>,
         clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
     ) -> Result<Self, String> {
         Self::new_with_clickhouse_validation(cfg, http, clickhouse_targets, true).await
@@ -666,10 +682,11 @@ impl TelemetryPipeline {
 
     pub async fn new_with_clickhouse_validation(
         cfg: TinybirdConfig,
-        http: Client,
+        http: impl Into<HttpClient>,
         clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
         require_tinybird_credentials: bool,
     ) -> Result<Self, String> {
+        let http: HttpClient = http.into();
         cfg.validate_for_pipeline(require_tinybird_credentials)?;
         std::fs::create_dir_all(&cfg.queue_dir)
             .map_err(|error| format!("create ingest WAL dir: {error}"))?;
@@ -684,6 +701,9 @@ impl TelemetryPipeline {
 
         for shard in 0..cfg.wal_shards {
             for destination in ExportDestination::ALL {
+                // Deliberately not `hotpath::channel!`-wrapped: commit_frames
+                // relies on `try_reserve_owned` permits (reserve before the WAL
+                // append), which the profiler's Sender wrapper does not expose.
                 let (sender, receiver) = mpsc::channel(cfg.queue_channel_capacity);
                 debug_assert_eq!(lane_senders.len(), lane_index(shard, destination));
                 lane_senders.push(sender);
@@ -732,6 +752,7 @@ impl TelemetryPipeline {
         .await
     }
 
+    #[hotpath::measure]
     pub async fn accept_traces_to(
         &self,
         org_id: &str,
@@ -766,6 +787,7 @@ impl TelemetryPipeline {
             .await
     }
 
+    #[hotpath::measure]
     pub async fn accept_logs_to(
         &self,
         org_id: &str,
@@ -792,6 +814,7 @@ impl TelemetryPipeline {
             .await
     }
 
+    #[hotpath::measure]
     pub async fn accept_metrics_to(
         &self,
         org_id: &str,
@@ -830,6 +853,7 @@ impl TelemetryPipeline {
         .await
     }
 
+    #[hotpath::measure]
     pub async fn accept_rows_to(
         &self,
         org_id: &str,
@@ -842,11 +866,15 @@ impl TelemetryPipeline {
             rows: rows.len(),
             dropped: 0,
         };
-        let frames = rows_to_frames(org_id, hash64(org_id), signal, datasource, rows);
+        let frames = rows_to_frames(org_id, hash64(org_id), signal, datasource, &rows);
+        // The rows are copied into the frame payload above; free them before the
+        // WAL append rather than holding both across the await.
+        drop(rows);
         self.commit_frames(frames, destination).await?;
         Ok(stats)
     }
 
+    #[hotpath::measure]
     async fn commit_frames(
         &self,
         frames: Vec<EncodedFrame>,
@@ -874,25 +902,26 @@ impl TelemetryPipeline {
         let result = async {
             for mut frame in frames {
                 frame.destination = destination;
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "routing_key is a hash; a truncated hash still spreads uniformly across shards"
+                )]
                 let shard = (frame.routing_key as usize) % self.inner.cfg.wal_shards;
                 // Route to the destination's own lane so a stalled ClickHouse export
                 // cannot fill the Tinybird channel for the same shard (and vice versa).
                 let lane = lane_index(shard, destination);
                 let sender = self.inner.lane_senders[lane].clone();
-                let permit = match sender.try_reserve_owned() {
-                    Ok(permit) => permit,
-                    Err(_) => {
-                        metrics::backpressure_shed(
-                            &frame.org_id,
-                            frame.destination.as_str(),
-                            frame.signal.as_str(),
-                        );
-                        // Which lane is full is the whole question when debugging
-                        // a 429: a stalled BYO-ClickHouse target backs up only its
-                        // own lane, and this is what shows that.
-                        record_failing_frame(shard, lane, &frame.datasource);
-                        return Err(PipelineError::Backpressure("Telemetry queue is full"));
-                    }
+                let Ok(permit) = sender.try_reserve_owned() else {
+                    metrics::backpressure_shed(
+                        &frame.org_id,
+                        frame.destination.as_str(),
+                        frame.signal.as_str(),
+                    );
+                    // Which lane is full is the whole question when debugging
+                    // a 429: a stalled BYO-ClickHouse target backs up only its
+                    // own lane, and this is what shows that.
+                    record_failing_frame(shard, lane, &frame.datasource);
+                    return Err(PipelineError::Backpressure("Telemetry queue is full"));
                 };
                 let queued_bytes = frame.payload.len() as u64;
                 self.reserve_org_queue_bytes(&frame.org_id, queued_bytes)
@@ -946,7 +975,7 @@ impl TelemetryPipeline {
         let counter = self
             .inner
             .org_queue_bytes
-            .entry(org_id.to_string())
+            .entry(org_id.to_owned())
             .or_insert_with(|| Arc::new(AtomicU64::new(0)))
             .clone();
         loop {
@@ -985,6 +1014,12 @@ impl TelemetryPipeline {
         release_org_queue_bytes(&self.inner.org_queue_bytes, org_id, bytes);
     }
 
+    #[hotpath::measure]
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "WAL recovery: the branches are the recovery cases, and each needs the others' \
+                  context to be readable"
+    )]
     async fn replay_committed_frames(&self) {
         for lane in 0..self.inner.lane_senders.len() {
             let frames = match self.inner.wal.replay(lane).await {
@@ -1051,7 +1086,7 @@ impl ShardedWal {
                     .read(true)
                     .append(true)
                     .open(&path)
-                    .map_err(|error| format!("open ingest WAL {path:?}: {error}"))?;
+                    .map_err(|error| format!("open ingest WAL {}: {error}", path.display()))?;
                 debug_assert_eq!(lanes.len(), lane_index(shard, destination));
                 lanes.push(Arc::new(WalShard {
                     shard,
@@ -1071,6 +1106,11 @@ impl ShardedWal {
     /// durably re-appended to its destination's lane, then the legacy file + cursor
     /// are removed. Best-effort: a failed shard is logged and left in place so the
     /// next boot retries it — startup never wedges and no frame is dropped.
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "WAL recovery: the branches are the recovery cases, and each needs the others' \
+                  context to be readable"
+    )]
     async fn migrate_legacy_shards(&self, cfg: &TinybirdConfig) {
         for shard in 0..cfg.wal_shards {
             let legacy_path = cfg.queue_dir.join(format!("shard-{shard:03}.wal"));
@@ -1117,8 +1157,8 @@ impl ShardedWal {
                 }
             }
             if migrated {
-                let _ = std::fs::remove_file(&legacy_path);
-                let _ = std::fs::remove_file(&legacy_cursor);
+                drop(std::fs::remove_file(&legacy_path));
+                drop(std::fs::remove_file(&legacy_cursor));
                 if count > 0 {
                     info!(
                         shard,
@@ -1134,6 +1174,7 @@ impl ShardedWal {
         self.append_inner(lane, frame, true).await
     }
 
+    #[hotpath::measure]
     async fn append_inner(
         &self,
         lane: usize,
@@ -1150,13 +1191,13 @@ impl ShardedWal {
             let mut file = lane_ref
                 .file
                 .lock()
-                .map_err(|_| "WAL lane mutex poisoned".to_string())?;
+                .map_err(|_| "WAL lane mutex poisoned".to_owned())?;
             let start = file
                 .seek(SeekFrom::End(0))
                 .map_err(|error| format!("seek WAL: {error}"))?;
             if enforce_cap && start.saturating_add(encoded.len() as u64) > lane_ref.max_bytes {
                 metrics::wal_shard_full(lane_ref.shard, lane_ref.destination.as_str());
-                return Err("Telemetry WAL lane is full".to_string());
+                return Err("Telemetry WAL lane is full".to_owned());
             }
             file.write_all(&encoded)
                 .map_err(|error| format!("write WAL: {error}"))?;
@@ -1186,6 +1227,7 @@ impl ShardedWal {
             .map_err(|error| format!("join WAL replay: {error}"))?
     }
 
+    #[hotpath::measure]
     async fn mark_exported(&self, lane: usize, offset: u64) -> Result<(), String> {
         let shard_ref = Arc::clone(
             self.lanes
@@ -1201,7 +1243,7 @@ impl ShardedWal {
                 let mut file = shard_ref
                     .file
                     .lock()
-                    .map_err(|_| "WAL shard mutex poisoned".to_string())?;
+                    .map_err(|_| "WAL shard mutex poisoned".to_owned())?;
                 let size = file
                     .seek(SeekFrom::End(0))
                     .map_err(|error| format!("seek WAL: {error}"))?;
@@ -1303,15 +1345,15 @@ fn read_legacy_frames(path: &Path, cursor_path: &Path) -> Result<Vec<DecodedWalF
 fn encode_wal_frame(frame: &EncodedFrame) -> Result<Vec<u8>, String> {
     let datasource = frame.datasource.as_bytes();
     let org_id = frame.org_id.as_bytes();
-    if datasource.len() > u16::MAX as usize {
-        return Err("datasource name too long".to_string());
-    }
-    if org_id.len() > u16::MAX as usize {
-        return Err("org id too long".to_string());
-    }
-    if frame.payload.len() > u32::MAX as usize {
-        return Err("WAL payload too large".to_string());
-    }
+    // Every length below is written into a fixed-width header field, so the
+    // conversion is the bounds check.
+    let datasource_len =
+        u16::try_from(datasource.len()).map_err(|_| "datasource name too long".to_owned())?;
+    let org_id_len = u16::try_from(org_id.len()).map_err(|_| "org id too long".to_owned())?;
+    let payload_len =
+        u32::try_from(frame.payload.len()).map_err(|_| "WAL payload too large".to_owned())?;
+    let row_count =
+        u32::try_from(frame.row_count).map_err(|_| "WAL row count too large".to_owned())?;
     let mut crc = Crc32::new();
     crc.update(&[signal_tag(frame.signal)]);
     crc.update(&[destination_tag(frame.destination)]);
@@ -1327,10 +1369,10 @@ fn encode_wal_frame(frame: &EncodedFrame) -> Result<Vec<u8>, String> {
     out.push(3);
     out.push(signal_tag(frame.signal));
     out.push(destination_tag(frame.destination));
-    out.extend_from_slice(&(datasource.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(org_id.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(frame.payload.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(frame.row_count as u32).to_le_bytes());
+    out.extend_from_slice(&datasource_len.to_le_bytes());
+    out.extend_from_slice(&org_id_len.to_le_bytes());
+    out.extend_from_slice(&payload_len.to_le_bytes());
+    out.extend_from_slice(&row_count.to_le_bytes());
     out.extend_from_slice(&checksum.to_le_bytes());
     out.extend_from_slice(org_id);
     out.extend_from_slice(datasource);
@@ -1348,6 +1390,10 @@ struct DecodedWalFrame {
     payload: Vec<u8>,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "a binary header parsed field by field, each with its own bounds check"
+)]
 fn read_wal_frame(file: &mut File, start: u64) -> Result<Option<DecodedWalFrame>, String> {
     let mut prefix = [0u8; 6];
     let read = file
@@ -1506,7 +1552,7 @@ fn add_org_queue_bytes(counters: &Arc<DashMap<String, Arc<AtomicU64>>>, org_id: 
         return;
     }
     let counter = counters
-        .entry(org_id.to_string())
+        .entry(org_id.to_owned())
         .or_insert_with(|| Arc::new(AtomicU64::new(0)))
         .clone();
     let current = counter.fetch_add(bytes, Ordering::AcqRel) + bytes;
@@ -1547,7 +1593,7 @@ struct ExportWorker {
     org_queue_bytes: Arc<DashMap<String, Arc<AtomicU64>>>,
     clickhouse_breakers: Arc<ClickHouseBreakerRegistry>,
     clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
-    http: Client,
+    http: HttpClient,
     receiver: mpsc::Receiver<QueuedFrame>,
 }
 
@@ -1567,7 +1613,7 @@ impl ExportWorker {
                             None => break,
                         }
                     }
-                    _ = &mut deadline => break,
+                    () = &mut deadline => break,
                 }
             }
 
@@ -1594,7 +1640,8 @@ impl ExportWorker {
                 // How long the batch sat in the lane before the worker picked it
                 // up — the difference between "export is slow" and "the queue is
                 // backed up", which the duration alone cannot tell you.
-                "maple.ingest.batch_wait_ms" = batch_wait.as_millis() as u64,
+                "maple.ingest.batch_wait_ms" =
+                    u64::try_from(batch_wait.as_millis()).unwrap_or(u64::MAX),
                 "maple.ingest.linked_traces" = links.len(),
                 "maple.ingest.source_trace_count" = source_trace_count,
             );
@@ -1612,6 +1659,7 @@ impl ExportWorker {
         }
     }
 
+    #[hotpath::measure]
     async fn export_and_mark(&self, frames: Vec<QueuedFrame>) -> Result<(), String> {
         if frames.is_empty() {
             return Ok(());
@@ -1682,6 +1730,11 @@ impl ExportWorker {
         Ok(())
     }
 
+    #[hotpath::measure]
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "one export attempt plus the retry and error classification around it"
+    )]
     async fn post_tinybird(
         &self,
         datasource: &str,
@@ -1693,7 +1746,12 @@ impl ExportWorker {
             self.cfg.endpoint.trim_end_matches('/'),
             datasource
         );
-        let compressed = bytes::Bytes::from(gzip(body)?);
+        let compressed = bytes::Bytes::from(gzip(&body)?);
+        // `gzip` only borrows now, so nothing else frees this. The uncompressed
+        // batch is up to INGEST_BATCH_MAX_BYTES and is never read again — during
+        // an upstream outage the retry loop below runs for minutes, and holding
+        // it that long, once per in-flight lane, is real memory.
+        drop(body);
         let max_attempts = self.cfg.export_max_attempts;
         let mut attempt = 0u32;
         // The real host, not a hardcoded one — self-hosted and local Tinybird
@@ -1770,7 +1828,7 @@ impl ExportWorker {
                     warn!(datasource, status, attempt, "Retrying Tinybird batch");
                 }
                 Err(error) => {
-                    last_status = "transport".to_string();
+                    last_status = "transport".to_owned();
                     span_handle.record("maple.ingest.outcome", "retry");
                     span_handle.record("error.type", "transport");
                     span_handle.record("otel.status_description", error.to_string().as_str());
@@ -1803,6 +1861,12 @@ impl ExportWorker {
         }
     }
 
+    #[hotpath::measure]
+    #[expect(
+        clippy::cognitive_complexity,
+        clippy::too_many_lines,
+        reason = "one export attempt plus the retry and error classification around it"
+    )]
     async fn post_clickhouse(
         &self,
         org_id: &str,
@@ -1819,7 +1883,12 @@ impl ExportWorker {
             return Ok(ClickHouseExportOutcome::Dropped);
         };
 
-        let compressed = bytes::Bytes::from(gzip(body)?);
+        let compressed = bytes::Bytes::from(gzip(&body)?);
+        // `gzip` only borrows now, so nothing else frees this. The uncompressed
+        // batch is up to INGEST_BATCH_MAX_BYTES and is never read again — during
+        // an upstream outage the retry loop below runs for minutes, and holding
+        // it that long, once per in-flight lane, is real memory.
+        drop(body);
         let max_attempts = self.cfg.export_max_attempts;
         let mut attempt = 0u32;
         // Set on every retryable failure; only read when the retry budget is
@@ -1940,7 +2009,7 @@ impl ExportWorker {
             span.record("db.namespace", target.database.as_str());
 
             let sql = build_clickhouse_insert_sql(mapping, org_id);
-            let endpoint_url = target.endpoint.trim_end_matches('/').to_string();
+            let endpoint_url = target.endpoint.trim_end_matches('/').to_owned();
             let mut request_url = match url::Url::parse(&endpoint_url) {
                 Ok(url) => url,
                 Err(error) => {
@@ -2049,7 +2118,7 @@ impl ExportWorker {
                         "Retrying ClickHouse batch"
                     );
                     self.clickhouse_breakers.on_failure(org_id, Instant::now());
-                    last_status = bucket.to_string();
+                    last_status = bucket.to_owned();
                 }
                 Err(error) => {
                     span.record("maple.ingest.outcome", "retry");
@@ -2064,7 +2133,7 @@ impl ExportWorker {
                         "Retrying ClickHouse batch after transport error"
                     );
                     self.clickhouse_breakers.on_failure(org_id, Instant::now());
-                    last_status = "transport".to_string();
+                    last_status = "transport".to_owned();
                 }
             }
 
@@ -2149,7 +2218,7 @@ fn build_clickhouse_insert_sql(mapping: &InsertMapping, org_id: &str) -> String 
             if *select == clickhouse_insert_mappings::ORG_PLACEHOLDER {
                 org_literal.clone()
             } else {
-                (*select).to_string()
+                (*select).to_owned()
             }
         })
         .collect::<Vec<_>>()
@@ -2167,16 +2236,22 @@ fn escape_clickhouse_sql_literal(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
-fn gzip(body: Vec<u8>) -> Result<Vec<u8>, String> {
+#[hotpath::measure]
+fn gzip(body: &[u8]) -> Result<Vec<u8>, String> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
     encoder
-        .write_all(&body)
+        .write_all(body)
         .map_err(|error| format!("gzip Tinybird body: {error}"))?;
     encoder
         .finish()
         .map_err(|error| format!("finish gzip Tinybird body: {error}"))
 }
 
+#[hotpath::measure]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one branch per OTLP shape, flattened into the row this datasource stores"
+)]
 fn encode_traces(
     datasources: &DatasourceNames,
     org_id: &str,
@@ -2199,15 +2274,15 @@ fn encode_traces(
             .get("service.name")
             .and_then(Value::as_str)
             .unwrap_or("")
-            .to_string();
+            .to_owned();
 
         for scope_spans in &resource_spans.scope_spans {
             let scope = scope_spans.scope.as_ref();
             let scope_attrs = scope
                 .map(|scope| attr_map(&scope.attributes))
                 .unwrap_or_default();
-            let scope_name = scope.map(|scope| scope.name.as_str()).unwrap_or("");
-            let scope_version = scope.map(|scope| scope.version.as_str()).unwrap_or("");
+            let scope_name = scope.map_or("", |scope| scope.name.as_str());
+            let scope_version = scope.map_or("", |scope| scope.version.as_str());
 
             for span in &scope_spans.spans {
                 let trace_id = bytes_hex(&span.trace_id);
@@ -2227,7 +2302,7 @@ fn encode_traces(
                     && !span.trace_state.contains("th:")
                 {
                     span_attrs.insert(
-                        "SampleRate".to_string(),
+                        "SampleRate".to_owned(),
                         json!(format_sample_rate(sample_rate)),
                     );
                 }
@@ -2283,7 +2358,7 @@ fn encode_traces(
                     "scope_attributes": scope_attrs,
                     "duration": span.end_time_unix_nano.saturating_sub(span.start_time_unix_nano),
                     "status_code": status_code(span.status.as_ref().map(|status| status.code).unwrap_or_default()),
-                    "status_message": span.status.as_ref().map(|status| status.message.as_str()).unwrap_or(""),
+                    "status_message": span.status.as_ref().map_or("", |status| status.message.as_str()),
                     "span_attributes": span_attrs,
                     "events_timestamp": events_timestamp,
                     "events_name": events_name,
@@ -2306,11 +2381,12 @@ fn encode_traces(
         routing_key,
         TelemetrySignal::Traces,
         datasources.traces.clone(),
-        rows,
+        &rows,
     );
     Ok((frames, stats))
 }
 
+#[hotpath::measure]
 fn encode_logs(
     datasources: &DatasourceNames,
     org_id: &str,
@@ -2328,15 +2404,15 @@ fn encode_logs(
             .get("service.name")
             .and_then(Value::as_str)
             .unwrap_or("")
-            .to_string();
+            .to_owned();
 
         for scope_logs in &resource_logs.scope_logs {
             let scope = scope_logs.scope.as_ref();
             let scope_attrs = scope
                 .map(|scope| attr_map(&scope.attributes))
                 .unwrap_or_default();
-            let scope_name = scope.map(|scope| scope.name.as_str()).unwrap_or("");
-            let scope_version = scope.map(|scope| scope.version.as_str()).unwrap_or("");
+            let scope_name = scope.map_or("", |scope| scope.name.as_str());
+            let scope_version = scope.map_or("", |scope| scope.version.as_str());
 
             for log in &scope_logs.log_records {
                 let trace_id = bytes_hex(&log.trace_id);
@@ -2366,11 +2442,16 @@ fn encode_logs(
         routing_key,
         TelemetrySignal::Logs,
         datasources.logs.clone(),
-        rows,
+        &rows,
     );
     Ok((frames, stats))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one column of the row being encoded; grouping them into a struct \
+              would only move the same list one level away from the JSON it builds"
+)]
 fn encode_log_row(
     log: &LogRecord,
     service_name: &str,
@@ -2400,6 +2481,11 @@ fn encode_log_row(
     }))
 }
 
+#[hotpath::measure]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one branch per OTLP shape, flattened into the row this datasource stores"
+)]
 fn encode_metrics(
     datasources: &DatasourceNames,
     org_id: &str,
@@ -2418,15 +2504,15 @@ fn encode_metrics(
             .get("service.name")
             .and_then(Value::as_str)
             .unwrap_or("")
-            .to_string();
+            .to_owned();
 
         for scope_metrics in &resource_metrics.scope_metrics {
             let scope = scope_metrics.scope.as_ref();
             let scope_attrs = scope
                 .map(|scope| attr_map(&scope.attributes))
                 .unwrap_or_default();
-            let scope_name = scope.map(|scope| scope.name.as_str()).unwrap_or("");
-            let scope_version = scope.map(|scope| scope.version.as_str()).unwrap_or("");
+            let scope_name = scope.map_or("", |scope| scope.name.as_str());
+            let scope_version = scope.map_or("", |scope| scope.version.as_str());
 
             for metric in &scope_metrics.metrics {
                 routing_key = hash64(&metric.name);
@@ -2493,7 +2579,7 @@ fn encode_metrics(
                                 &datasources.metrics_histogram,
                                 extend(
                                     row,
-                                    json!({
+                                    &json!({
                                         "count": point.count,
                                         "sum": point.sum.unwrap_or(0.0),
                                         "bucket_counts": point.bucket_counts,
@@ -2531,14 +2617,14 @@ fn encode_metrics(
                                 &datasources.metrics_exponential_histogram,
                                 extend(
                                     row,
-                                    json!({
+                                    &json!({
                                         "count": point.count,
                                         "sum": point.sum.unwrap_or(0.0),
                                         "scale": point.scale,
                                         "zero_count": point.zero_count,
-                                        "positive_offset": positive.map(|b| b.offset).unwrap_or(0),
+                                        "positive_offset": positive.map_or(0, |b| b.offset),
                                         "positive_bucket_counts": positive.map(|b| b.bucket_counts.clone()).unwrap_or_default(),
-                                        "negative_offset": negative.map(|b| b.offset).unwrap_or(0),
+                                        "negative_offset": negative.map_or(0, |b| b.offset),
                                         "negative_bucket_counts": negative.map(|b| b.bucket_counts.clone()).unwrap_or_default(),
                                         "min": point.min,
                                         "max": point.max,
@@ -2564,7 +2650,7 @@ fn encode_metrics(
             routing_key,
             TelemetrySignal::Metrics,
             datasource,
-            rows,
+            &rows,
         ));
     }
 
@@ -2577,7 +2663,11 @@ fn encode_metrics(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one column of the row being encoded; grouping them into a struct \
+              would only move the same list one level away from the JSON it builds"
+)]
 fn push_metric_number_row(
     by_datasource: &mut BTreeMap<String, Vec<Vec<u8>>>,
     datasource: &str,
@@ -2595,6 +2685,10 @@ fn push_metric_number_row(
 ) -> Result<(), PipelineError> {
     let value = match point.value {
         Some(number_data_point::Value::AsDouble(value)) => value,
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "the row carries one numeric column, so int points widen to f64 on the way in"
+        )]
         Some(number_data_point::Value::AsInt(value)) => value as f64,
         None => 0.0,
     };
@@ -2620,10 +2714,14 @@ fn push_metric_number_row(
         point.flags,
         &point.exemplars,
     );
-    push_json(by_datasource, datasource, extend(row, extra))
+    push_json(by_datasource, datasource, extend(row, &extra))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one column of the row being encoded; grouping them into a struct \
+              would only move the same list one level away from the JSON it builds"
+)]
 fn metric_common_row(
     metric: &opentelemetry_proto::tonic::metrics::v1::Metric,
     service_name: &str,
@@ -2639,8 +2737,7 @@ fn metric_common_row(
     flags: u32,
     exemplars: &[Exemplar],
 ) -> Value {
-    let (trace_ids, span_ids, timestamps, values, filtered_attributes) =
-        encode_exemplars(exemplars);
+    let exemplars = encode_exemplars(exemplars);
     json!({
         "resource_attributes": resource_attrs,
         "resource_schema_url": resource_schema_url,
@@ -2656,17 +2753,24 @@ fn metric_common_row(
         "start_timestamp": format_timestamp_nano(start_time_unix_nano),
         "timestamp": format_timestamp_nano(time_unix_nano),
         "flags": flags,
-        "exemplars_trace_id": trace_ids,
-        "exemplars_span_id": span_ids,
-        "exemplars_timestamp": timestamps,
-        "exemplars_value": values,
-        "exemplars_filtered_attributes": filtered_attributes
+        "exemplars_trace_id": exemplars.trace_ids,
+        "exemplars_span_id": exemplars.span_ids,
+        "exemplars_timestamp": exemplars.timestamps,
+        "exemplars_value": exemplars.values,
+        "exemplars_filtered_attributes": exemplars.filtered_attributes
     })
 }
 
-fn encode_exemplars(
-    exemplars: &[Exemplar],
-) -> (Vec<String>, Vec<String>, Vec<String>, Vec<f64>, Vec<Value>) {
+/// The exemplar columns of one metric row: five parallel arrays, one per column.
+struct EncodedExemplars {
+    trace_ids: Vec<String>,
+    span_ids: Vec<String>,
+    timestamps: Vec<String>,
+    values: Vec<f64>,
+    filtered_attributes: Vec<Value>,
+}
+
+fn encode_exemplars(exemplars: &[Exemplar]) -> EncodedExemplars {
     let mut trace_ids = Vec::with_capacity(exemplars.len());
     let mut span_ids = Vec::with_capacity(exemplars.len());
     let mut timestamps = Vec::with_capacity(exemplars.len());
@@ -2680,6 +2784,10 @@ fn encode_exemplars(
             Some(opentelemetry_proto::tonic::metrics::v1::exemplar::Value::AsDouble(value)) => {
                 value
             }
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "exemplars share the f64 column of the point they annotate"
+            )]
             Some(opentelemetry_proto::tonic::metrics::v1::exemplar::Value::AsInt(value)) => {
                 value as f64
             }
@@ -2687,7 +2795,13 @@ fn encode_exemplars(
         });
         filtered_attributes.push(Value::Object(attr_map(&exemplar.filtered_attributes)));
     }
-    (trace_ids, span_ids, timestamps, values, filtered_attributes)
+    EncodedExemplars {
+        trace_ids,
+        span_ids,
+        timestamps,
+        values,
+        filtered_attributes,
+    }
 }
 
 fn push_json(
@@ -2696,13 +2810,13 @@ fn push_json(
     value: Value,
 ) -> Result<(), PipelineError> {
     by_datasource
-        .entry(datasource.to_string())
+        .entry(datasource.to_owned())
         .or_default()
         .push(json_line(value)?);
     Ok(())
 }
 
-fn extend(mut base: Value, extra: Value) -> Value {
+fn extend(mut base: Value, extra: &Value) -> Value {
     if let (Some(base), Some(extra)) = (base.as_object_mut(), extra.as_object()) {
         for (key, value) in extra {
             base.insert(key.clone(), value.clone());
@@ -2716,19 +2830,19 @@ fn rows_to_frames(
     routing_key: u64,
     signal: TelemetrySignal,
     datasource: String,
-    rows: Vec<Vec<u8>>,
+    rows: &[Vec<u8>],
 ) -> Vec<EncodedFrame> {
     if rows.is_empty() {
         return Vec::new();
     }
     let mut payload = Vec::with_capacity(rows.iter().map(Vec::len).sum::<usize>() + rows.len());
-    for row in &rows {
+    for row in rows {
         payload.extend_from_slice(row);
         payload.push(b'\n');
     }
     vec![EncodedFrame {
         routing_key,
-        org_id: org_id.to_string(),
+        org_id: org_id.to_owned(),
         signal,
         destination: ExportDestination::Tinybird,
         datasource,
@@ -2768,18 +2882,32 @@ fn should_keep_trace(org_id: &str, trace_id: &str, span: &Span, policy: &Samplin
     } else {
         format!("{org_id}:{trace_id}")
     };
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "float-to-int casts saturate, so ratios of 0.0 and 1.0 land exactly on 0 and \
+                  u64::MAX; the mantissa loss in between moves the threshold by less than one trace"
+    )]
     let threshold = (ratio * u64::MAX as f64) as u64;
     hash64(&key) <= threshold
 }
 
 fn format_sample_rate(sample_rate: f64) -> String {
     if sample_rate.fract() == 0.0 {
-        format!("{}", sample_rate as u64)
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the branch has already established an integral value, and saturation is the \
+                      right answer for the out-of-range rates that never reach here"
+        )]
+        let whole = sample_rate as u64;
+        format!("{whole}")
     } else {
         format!("{sample_rate:.6}")
             .trim_end_matches('0')
             .trim_end_matches('.')
-            .to_string()
+            .to_owned()
     }
 }
 
@@ -2863,12 +2991,16 @@ fn bytes_hex(bytes: &[u8]) -> String {
 
 fn format_timestamp_nano(unix_nano: u64) -> String {
     if unix_nano == 0 {
-        return "1970-01-01 00:00:00.000000000".to_string();
+        return "1970-01-01 00:00:00.000000000".to_owned();
     }
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "u64 nanoseconds divided by a billion cannot reach i64::MAX seconds"
+    )]
     let secs = (unix_nano / 1_000_000_000) as i64;
     let nanos = (unix_nano % 1_000_000_000) as u32;
     let Some(dt) = chrono::DateTime::from_timestamp(secs, nanos) else {
-        return "1970-01-01 00:00:00.000000000".to_string();
+        return "1970-01-01 00:00:00.000000000".to_owned();
     };
     dt.format("%Y-%m-%d %H:%M:%S.%f").to_string()
 }
@@ -2931,11 +3063,11 @@ mod tests {
             shard: 0,
             start: 0,
             end: 0,
-            org_id: "org_test".to_string(),
+            org_id: "org_test".to_owned(),
             queued_bytes: 0,
             signal: TelemetrySignal::Traces,
             destination: ExportDestination::Tinybird,
-            datasource: "spans".to_string(),
+            datasource: "spans".to_owned(),
             row_count: 0,
             payload: Vec::new(),
             source_span,
@@ -3008,8 +3140,8 @@ mod tests {
 
     fn test_cfg() -> TinybirdConfig {
         TinybirdConfig {
-            endpoint: "http://tinybird.test".to_string(),
-            token: "token".to_string(),
+            endpoint: "http://tinybird.test".to_owned(),
+            token: "token".to_owned(),
             queue_dir: std::env::temp_dir(),
             queue_max_bytes: 1024 * 1024,
             org_queue_max_bytes: 1024 * 1024,
@@ -3023,9 +3155,9 @@ mod tests {
             clickhouse_export_timeout: Duration::from_secs(5),
             clickhouse_breaker: ClickHouseBreakerConfig::default(),
             datasources: DatasourceNames::defaults(),
-            datasource_session_replays: "session_replays".to_string(),
-            datasource_session_replay_events: "session_replay_events".to_string(),
-            datasource_session_events: "session_events".to_string(),
+            datasource_session_replays: "session_replays".to_owned(),
+            datasource_session_replay_events: "session_replay_events".to_owned(),
+            datasource_session_events: "session_events".to_owned(),
         }
     }
 
@@ -3039,10 +3171,10 @@ mod tests {
 
         let provider = Arc::new(StaticClickHouseTargetProvider {
             target: ClickHouseTarget {
-                endpoint: "http://127.0.0.1:1".to_string(),
-                user: "ingest".to_string(),
+                endpoint: "http://127.0.0.1:1".to_owned(),
+                user: "ingest".to_owned(),
                 password: String::new(),
-                database: "maple".to_string(),
+                database: "maple".to_owned(),
             },
         });
 
@@ -3055,7 +3187,7 @@ mod tests {
         .await
         .expect("ClickHouse-only pipeline should not require Tinybird credentials");
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     fn unique_test_dir(name: &str) -> PathBuf {
@@ -3084,20 +3216,22 @@ mod tests {
             .read_to_string(&mut decoded)
             .expect("fake Tinybird should receive gzip NDJSON");
 
-        let _ = tx.send(FakeTinybirdImport {
-            datasource: query.get("name").cloned().unwrap_or_default(),
-            authorization: headers
-                .get(AUTHORIZATION)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or_default()
-                .to_string(),
-            content_encoding: headers
-                .get(CONTENT_ENCODING)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or_default()
-                .to_string(),
-            body: decoded,
-        });
+        drop(
+            tx.send(FakeTinybirdImport {
+                datasource: query.get("name").cloned().unwrap_or_default(),
+                authorization: headers
+                    .get(AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+                content_encoding: headers
+                    .get(CONTENT_ENCODING)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+                body: decoded,
+            }),
+        );
 
         StatusCode::OK
     }
@@ -3113,31 +3247,33 @@ mod tests {
             .read_to_string(&mut decoded)
             .expect("fake ClickHouse should receive gzip NDJSON");
 
-        let _ = tx.send(FakeClickHouseImport {
-            query: query.get("query").cloned().unwrap_or_default(),
-            database: query.get("database").cloned().unwrap_or_default(),
-            user: headers
-                .get("x-clickhouse-user")
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or_default()
-                .to_string(),
-            key: headers
-                .get("x-clickhouse-key")
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or_default()
-                .to_string(),
-            content_type: headers
-                .get(CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or_default()
-                .to_string(),
-            content_encoding: headers
-                .get(CONTENT_ENCODING)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or_default()
-                .to_string(),
-            body: decoded,
-        });
+        drop(
+            tx.send(FakeClickHouseImport {
+                query: query.get("query").cloned().unwrap_or_default(),
+                database: query.get("database").cloned().unwrap_or_default(),
+                user: headers
+                    .get("x-clickhouse-user")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+                key: headers
+                    .get("x-clickhouse-key")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+                content_type: headers
+                    .get(CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+                content_encoding: headers
+                    .get(CONTENT_ENCODING)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+                body: decoded,
+            }),
+        );
 
         StatusCode::OK
     }
@@ -3160,8 +3296,7 @@ mod tests {
                     .and_then(|raw| raw.trim().parse::<u64>().ok())
                     .unwrap_or(0);
                 let shard_size = std::fs::metadata(&shard_path)
-                    .map(|meta| meta.len())
-                    .unwrap_or(u64::MAX);
+                    .map_or(u64::MAX, |meta| meta.len());
                 if cursor_offset > 0 || shard_size == 0 {
                     return;
                 }
@@ -3169,21 +3304,21 @@ mod tests {
             }
         })
         .await
-        .expect("export worker should drain the shard (cursor advance or truncation) after Tinybird success")
+        .expect("export worker should drain the shard (cursor advance or truncation) after Tinybird success");
     }
 
     fn string_kv(key: &str, value: &str) -> KeyValue {
         KeyValue {
-            key: key.to_string(),
+            key: key.to_owned(),
             value: Some(AnyValue {
-                value: Some(any_value::Value::StringValue(value.to_string())),
+                value: Some(any_value::Value::StringValue(value.to_owned())),
             }),
         }
     }
 
     fn bool_kv(key: &str, value: bool) -> KeyValue {
         KeyValue {
-            key: key.to_string(),
+            key: key.to_owned(),
             value: Some(AnyValue {
                 value: Some(any_value::Value::BoolValue(value)),
             }),
@@ -3220,7 +3355,7 @@ mod tests {
     #[test]
     fn sampling_keeps_errors_even_when_ratio_low() {
         let policy = SamplingPolicy {
-            trace_sample_ratio: 0.000001,
+            trace_sample_ratio: 0.000_001,
             always_keep_error_spans: true,
             always_keep_slow_spans_ms: None,
         };
@@ -3240,10 +3375,10 @@ mod tests {
     fn wal_round_trips_frame() {
         let frame = EncodedFrame {
             routing_key: 1,
-            org_id: "org_1".to_string(),
+            org_id: "org_1".to_owned(),
             signal: TelemetrySignal::Traces,
             destination: ExportDestination::ClickHouse,
-            datasource: "traces".to_string(),
+            datasource: "traces".to_owned(),
             row_count: 1,
             payload: br#"{"a":1}"#.to_vec(),
         };
@@ -3258,7 +3393,7 @@ mod tests {
         assert_eq!(decoded.datasource, "traces");
         assert_eq!(decoded.payload, br#"{"a":1}"#);
         assert!(decoded.end > 0);
-        let _ = std::fs::remove_file(path);
+        drop(std::fs::remove_file(path));
     }
 
     #[test]
@@ -3275,8 +3410,8 @@ mod tests {
                 }),
                 scope_spans: vec![ScopeSpans {
                     scope: Some(InstrumentationScope {
-                        name: "maple-sdk".to_string(),
-                        version: "1.2.3".to_string(),
+                        name: "maple-sdk".to_owned(),
+                        version: "1.2.3".to_owned(),
                         attributes: vec![string_kv("scope.attr", "scope-value")],
                         dropped_attributes_count: 0,
                     }),
@@ -3284,20 +3419,20 @@ mod tests {
                         trace_id: vec![0x11; 16],
                         span_id: vec![0x22; 8],
                         parent_span_id: vec![0x33; 8],
-                        name: "POST /checkout".to_string(),
+                        name: "POST /checkout".to_owned(),
                         kind: span::SpanKind::Server as i32,
                         start_time_unix_nano: 1_700_000_000_000_000_000,
                         end_time_unix_nano: 1_700_000_000_250_000_000,
                         attributes: vec![string_kv("http.route", "/checkout")],
                         status: Some(Status {
                             code: status::StatusCode::Ok as i32,
-                            message: "ok".to_string(),
+                            message: "ok".to_owned(),
                         }),
                         ..Default::default()
                     }],
-                    schema_url: "https://scope.schema".to_string(),
+                    schema_url: "https://scope.schema".to_owned(),
                 }],
-                schema_url: "https://resource.schema".to_string(),
+                schema_url: "https://resource.schema".to_owned(),
             }],
         };
 
@@ -3334,14 +3469,14 @@ mod tests {
         let rule =
             |source_context, source_key: &str, target_key: &str, operation| AttributeMappingRule {
                 source_context,
-                source_key: source_key.to_string(),
-                target_key: target_key.to_string(),
+                source_key: source_key.to_owned(),
+                target_key: target_key.to_owned(),
                 operation,
             };
 
         // span -> span copy keeps the source key.
         let mut span_attrs = Map::new();
-        span_attrs.insert("http.status_code".to_string(), json!("200"));
+        span_attrs.insert("http.status_code".to_owned(), json!("200"));
         apply_attribute_mappings(
             &[rule(
                 MappingSourceContext::Span,
@@ -3357,7 +3492,7 @@ mod tests {
 
         // span -> span move deletes the source key.
         let mut span_attrs = Map::new();
-        span_attrs.insert("old.key".to_string(), json!("v"));
+        span_attrs.insert("old.key".to_owned(), json!("v"));
         apply_attribute_mappings(
             &[rule(
                 MappingSourceContext::Span,
@@ -3373,7 +3508,7 @@ mod tests {
 
         // resource -> span promotes a resource attribute onto the span.
         let mut resource_attrs = Map::new();
-        resource_attrs.insert("deployment.env".to_string(), json!("prod"));
+        resource_attrs.insert("deployment.env".to_owned(), json!("prod"));
         let mut span_attrs = Map::new();
         apply_attribute_mappings(
             &[rule(
@@ -3391,8 +3526,8 @@ mod tests {
 
         // an existing target key is never overwritten.
         let mut span_attrs = Map::new();
-        span_attrs.insert("src".to_string(), json!("from-src"));
-        span_attrs.insert("dst".to_string(), json!("customer-set"));
+        span_attrs.insert("src".to_owned(), json!("from-src"));
+        span_attrs.insert("dst".to_owned(), json!("customer-set"));
         apply_attribute_mappings(
             &[rule(
                 MappingSourceContext::Span,
@@ -3429,7 +3564,7 @@ mod tests {
             severity_number: 17,
             severity_text: String::new(),
             body: Some(AnyValue {
-                value: Some(any_value::Value::StringValue("payment failed".to_string())),
+                value: Some(any_value::Value::StringValue("payment failed".to_owned())),
             }),
             attributes: vec![bool_kv("retryable", true)],
             trace_id: vec![0xaa; 16],
@@ -3446,8 +3581,8 @@ mod tests {
                 }),
                 scope_logs: vec![opentelemetry_proto::tonic::logs::v1::ScopeLogs {
                     scope: Some(InstrumentationScope {
-                        name: "logger".to_string(),
-                        version: "4.5.6".to_string(),
+                        name: "logger".to_owned(),
+                        version: "4.5.6".to_owned(),
                         attributes: Vec::new(),
                         dropped_attributes_count: 0,
                     }),
@@ -3513,8 +3648,8 @@ mod tests {
                 }),
                 scope_logs: vec![opentelemetry_proto::tonic::logs::v1::ScopeLogs {
                     scope: Some(InstrumentationScope {
-                        name: "e2e-logger".to_string(),
-                        version: "1.0.0".to_string(),
+                        name: "e2e-logger".to_owned(),
+                        version: "1.0.0".to_owned(),
                         attributes: Vec::new(),
                         dropped_attributes_count: 0,
                     }),
@@ -3522,10 +3657,10 @@ mod tests {
                         time_unix_nano: 1_700_000_002_000_000_000,
                         observed_time_unix_nano: 1_700_000_002_000_000_000,
                         severity_number: 9,
-                        severity_text: "INFO".to_string(),
+                        severity_text: "INFO".to_owned(),
                         body: Some(AnyValue {
                             value: Some(any_value::Value::StringValue(
-                                "hello fake tinybird".to_string(),
+                                "hello fake tinybird".to_owned(),
                             )),
                         }),
                         attributes: vec![string_kv("component", "pipeline-e2e")],
@@ -3561,10 +3696,14 @@ mod tests {
         assert_eq!(row["span_id"], "dddddddddddddddd");
 
         wait_for_export_drain(queue_dir.clone(), 0, ExportDestination::Tinybird).await;
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "an end-to-end scenario test; the setup is the test"
+    )]
     async fn pipeline_exports_ready_org_to_clickhouse_without_tinybird_calls() {
         let (ch_tx, mut ch_rx) = mpsc::unbounded_channel();
         let ch_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -3601,9 +3740,9 @@ mod tests {
         let provider = Arc::new(StaticClickHouseTargetProvider {
             target: ClickHouseTarget {
                 endpoint: format!("http://{ch_addr}"),
-                user: "ingest".to_string(),
+                user: "ingest".to_owned(),
                 password: String::new(),
-                database: "maple".to_string(),
+                database: "maple".to_owned(),
             },
         });
         let pipeline = TelemetryPipeline::new_with_clickhouse(
@@ -3690,13 +3829,13 @@ mod tests {
             assert!(!import.query.contains(import.body.trim()));
         }
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
         assert!(
             tb_rx.try_recv().is_err(),
             "ready org should not export native frames to Tinybird"
         );
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[tokio::test]
@@ -3736,9 +3875,9 @@ mod tests {
         let provider = Arc::new(StaticClickHouseTargetProvider {
             target: ClickHouseTarget {
                 endpoint: format!("http://{ch_addr}"),
-                user: "ingest".to_string(),
-                password: "secret".to_string(),
-                database: "maple".to_string(),
+                user: "ingest".to_owned(),
+                password: "secret".to_owned(),
+                database: "maple".to_owned(),
             },
         });
         let pipeline = TelemetryPipeline::new_with_clickhouse(
@@ -3771,7 +3910,7 @@ mod tests {
             "ClickHouse-routed frames should not fall back to Tinybird"
         );
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     /// Holds the request open ~forever so the ClickHouse lane worker stays
@@ -3831,15 +3970,15 @@ mod tests {
         let provider = Arc::new(StaticClickHouseTargetProvider {
             target: ClickHouseTarget {
                 endpoint: format!("http://{ch_addr}"),
-                user: "ingest".to_string(),
+                user: "ingest".to_owned(),
                 password: String::new(),
-                database: "maple".to_string(),
+                database: "maple".to_owned(),
             },
         });
         let pipeline = TelemetryPipeline::new_with_clickhouse(
             cfg,
             Client::builder()
-                .timeout(Duration::from_secs(120))
+                .timeout(Duration::from_mins(2))
                 .build()
                 .unwrap(),
             Some(provider),
@@ -3879,7 +4018,7 @@ mod tests {
             .expect("fake Tinybird channel should stay open");
         assert_eq!(import.datasource, "logs");
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[tokio::test]
@@ -3918,9 +4057,9 @@ mod tests {
         let provider = Arc::new(StaticClickHouseTargetProvider {
             target: ClickHouseTarget {
                 endpoint: format!("http://{ch_addr}"),
-                user: "ingest".to_string(),
+                user: "ingest".to_owned(),
                 password: String::new(),
-                database: "maple".to_string(),
+                database: "maple".to_owned(),
             },
         });
         let pipeline = TelemetryPipeline::new_with_clickhouse_validation(
@@ -3969,7 +4108,7 @@ mod tests {
             "breaker-open batches must shed without hitting the target"
         );
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[test]
@@ -4082,19 +4221,19 @@ mod tests {
 
         let tb_frame = EncodedFrame {
             routing_key: 0,
-            org_id: "org_a".to_string(),
+            org_id: "org_a".to_owned(),
             signal: TelemetrySignal::Traces,
             destination: ExportDestination::Tinybird,
-            datasource: "traces".to_string(),
+            datasource: "traces".to_owned(),
             row_count: 1,
             payload: br#"{"a":1}"#.to_vec(),
         };
         let ch_frame = EncodedFrame {
             routing_key: 0,
-            org_id: "org_b".to_string(),
+            org_id: "org_b".to_owned(),
             signal: TelemetrySignal::Logs,
             destination: ExportDestination::ClickHouse,
-            datasource: "logs".to_string(),
+            datasource: "logs".to_owned(),
             row_count: 1,
             payload: br#"{"b":2}"#.to_vec(),
         };
@@ -4129,10 +4268,16 @@ mod tests {
         assert_eq!(ch_frames[0].datasource, "logs");
         assert_eq!(ch_frames[0].payload, br#"{"b":2}"#);
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[test]
+    #[expect(
+        clippy::cognitive_complexity,
+        clippy::too_many_lines,
+        reason = "one assertion block per metric datasource; the point of the test is that they \
+                  sit side by side"
+    )]
     fn metric_encoder_matches_all_tinybird_datasource_shapes() {
         let base_point = NumberDataPoint {
             attributes: vec![string_kv("route", "/checkout")],
@@ -4151,16 +4296,16 @@ mod tests {
                 }),
                 scope_metrics: vec![opentelemetry_proto::tonic::metrics::v1::ScopeMetrics {
                     scope: Some(InstrumentationScope {
-                        name: "meter".to_string(),
-                        version: "7.8.9".to_string(),
+                        name: "meter".to_owned(),
+                        version: "7.8.9".to_owned(),
                         attributes: Vec::new(),
                         dropped_attributes_count: 0,
                     }),
                     metrics: vec![
                         Metric {
-                            name: "requests_total".to_string(),
-                            description: "requests".to_string(),
-                            unit: "1".to_string(),
+                            name: "requests_total".to_owned(),
+                            description: "requests".to_owned(),
+                            unit: "1".to_owned(),
                             data: Some(metric::Data::Sum(Sum {
                                 data_points: vec![base_point.clone()],
                                 aggregation_temporality: AggregationTemporality::Delta as i32,
@@ -4169,9 +4314,9 @@ mod tests {
                             metadata: Vec::new(),
                         },
                         Metric {
-                            name: "cpu_ratio".to_string(),
-                            description: "cpu".to_string(),
-                            unit: "1".to_string(),
+                            name: "cpu_ratio".to_owned(),
+                            description: "cpu".to_owned(),
+                            unit: "1".to_owned(),
                             data: Some(metric::Data::Gauge(Gauge {
                                 data_points: vec![NumberDataPoint {
                                     value: Some(number_data_point::Value::AsDouble(0.75)),
@@ -4181,9 +4326,9 @@ mod tests {
                             metadata: Vec::new(),
                         },
                         Metric {
-                            name: "request_duration_ms".to_string(),
-                            description: "latency".to_string(),
-                            unit: "ms".to_string(),
+                            name: "request_duration_ms".to_owned(),
+                            description: "latency".to_owned(),
+                            unit: "ms".to_owned(),
                             data: Some(metric::Data::Histogram(Histogram {
                                 data_points: vec![HistogramDataPoint {
                                     attributes: vec![string_kv("route", "/checkout")],
@@ -4202,9 +4347,9 @@ mod tests {
                             metadata: Vec::new(),
                         },
                         Metric {
-                            name: "payload_bytes".to_string(),
-                            description: "payload".to_string(),
-                            unit: "By".to_string(),
+                            name: "payload_bytes".to_owned(),
+                            description: "payload".to_owned(),
+                            unit: "By".to_owned(),
                             data: Some(metric::Data::ExponentialHistogram(ExponentialHistogram {
                                 data_points: vec![ExponentialHistogramDataPoint {
                                     attributes: vec![string_kv("route", "/checkout")],
@@ -4298,7 +4443,7 @@ mod tests {
     // ResourceAttributes uses `$.resource_attributes.maple_org_id` for OrgId,
     // which is already covered by the `resource_attributes` map.
     mod schema_contract {
-        pub const LOGS: &[&str] = &[
+        pub(super) const LOGS: &[&str] = &[
             "timestamp",
             "trace_id",
             "span_id",
@@ -4316,7 +4461,7 @@ mod tests {
             "log_attributes",
         ];
 
-        pub const TRACES: &[&str] = &[
+        pub(super) const TRACES: &[&str] = &[
             "start_time",
             "trace_id",
             "span_id",
@@ -4372,13 +4517,13 @@ mod tests {
             v
         }
 
-        pub fn metrics_sum() -> Vec<&'static str> {
+        pub(super) fn metrics_sum() -> Vec<&'static str> {
             with(&["value", "aggregation_temporality", "is_monotonic"])
         }
-        pub fn metrics_gauge() -> Vec<&'static str> {
+        pub(super) fn metrics_gauge() -> Vec<&'static str> {
             with(&["value"])
         }
-        pub fn metrics_histogram() -> Vec<&'static str> {
+        pub(super) fn metrics_histogram() -> Vec<&'static str> {
             with(&[
                 "count",
                 "sum",
@@ -4389,7 +4534,7 @@ mod tests {
                 "aggregation_temporality",
             ])
         }
-        pub fn metrics_exponential_histogram() -> Vec<&'static str> {
+        pub(super) fn metrics_exponential_histogram() -> Vec<&'static str> {
             with(&[
                 "count",
                 "sum",
@@ -4426,7 +4571,7 @@ mod tests {
             time_unix_nano: 1_700_000_001_123_456_789,
             observed_time_unix_nano: 1_700_000_001_123_456_789,
             severity_number: 17,
-            severity_text: "ERROR".to_string(),
+            severity_text: "ERROR".to_owned(),
             body: Some(AnyValue {
                 value: Some(any_value::Value::StringValue("payment failed".into())),
             }),
@@ -4451,15 +4596,15 @@ mod tests {
                 }),
                 scope_logs: vec![opentelemetry_proto::tonic::logs::v1::ScopeLogs {
                     scope: Some(InstrumentationScope {
-                        name: "billing-logger".to_string(),
-                        version: "2.0.1".to_string(),
+                        name: "billing-logger".to_owned(),
+                        version: "2.0.1".to_owned(),
                         attributes: vec![string_kv("scope.key", "scope-value")],
                         dropped_attributes_count: 0,
                     }),
                     log_records: vec![populated_log()],
-                    schema_url: "https://scope.schema/logs".to_string(),
+                    schema_url: "https://scope.schema/logs".to_owned(),
                 }],
-                schema_url: "https://resource.schema/logs".to_string(),
+                schema_url: "https://resource.schema/logs".to_owned(),
             }],
         }
     }
@@ -4477,8 +4622,8 @@ mod tests {
                 }),
                 scope_spans: vec![ScopeSpans {
                     scope: Some(InstrumentationScope {
-                        name: "checkout-tracer".to_string(),
-                        version: "3.4.5".to_string(),
+                        name: "checkout-tracer".to_owned(),
+                        version: "3.4.5".to_owned(),
                         attributes: vec![string_kv("scope.key", "scope-value")],
                         dropped_attributes_count: 0,
                     }),
@@ -4486,25 +4631,29 @@ mod tests {
                         trace_id: vec![0x11; 16],
                         span_id: vec![0x22; 8],
                         parent_span_id: vec![0x33; 8],
-                        trace_state: "vendor=foo".to_string(),
-                        name: "POST /checkout".to_string(),
+                        trace_state: "vendor=foo".to_owned(),
+                        name: "POST /checkout".to_owned(),
                         kind: span::SpanKind::Server as i32,
                         start_time_unix_nano: 1_700_000_000_000_000_000,
                         end_time_unix_nano: 1_700_000_000_250_000_000,
                         attributes: vec![string_kv("http.route", "/checkout")],
                         status: Some(Status {
                             code: status::StatusCode::Ok as i32,
-                            message: "ok".to_string(),
+                            message: "ok".to_owned(),
                         }),
                         ..Default::default()
                     }],
-                    schema_url: "https://scope.schema/traces".to_string(),
+                    schema_url: "https://scope.schema/traces".to_owned(),
                 }],
-                schema_url: "https://resource.schema/traces".to_string(),
+                schema_url: "https://resource.schema/traces".to_owned(),
             }],
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a fixture that is one literal per metric shape"
+    )]
     fn one_of_each_metric_request() -> ExportMetricsServiceRequest {
         let base = NumberDataPoint {
             attributes: vec![string_kv("route", "/checkout")],
@@ -4526,16 +4675,16 @@ mod tests {
                 }),
                 scope_metrics: vec![opentelemetry_proto::tonic::metrics::v1::ScopeMetrics {
                     scope: Some(InstrumentationScope {
-                        name: "meter".to_string(),
-                        version: "7.8.9".to_string(),
+                        name: "meter".to_owned(),
+                        version: "7.8.9".to_owned(),
                         attributes: Vec::new(),
                         dropped_attributes_count: 0,
                     }),
                     metrics: vec![
                         Metric {
-                            name: "requests_total".to_string(),
-                            description: "requests".to_string(),
-                            unit: "1".to_string(),
+                            name: "requests_total".to_owned(),
+                            description: "requests".to_owned(),
+                            unit: "1".to_owned(),
                             data: Some(metric::Data::Sum(Sum {
                                 data_points: vec![base.clone()],
                                 aggregation_temporality: AggregationTemporality::Delta as i32,
@@ -4544,9 +4693,9 @@ mod tests {
                             metadata: Vec::new(),
                         },
                         Metric {
-                            name: "cpu_ratio".to_string(),
-                            description: "cpu".to_string(),
-                            unit: "1".to_string(),
+                            name: "cpu_ratio".to_owned(),
+                            description: "cpu".to_owned(),
+                            unit: "1".to_owned(),
                             data: Some(metric::Data::Gauge(Gauge {
                                 data_points: vec![NumberDataPoint {
                                     value: Some(number_data_point::Value::AsDouble(0.75)),
@@ -4556,9 +4705,9 @@ mod tests {
                             metadata: Vec::new(),
                         },
                         Metric {
-                            name: "request_duration_ms".to_string(),
-                            description: "latency".to_string(),
-                            unit: "ms".to_string(),
+                            name: "request_duration_ms".to_owned(),
+                            description: "latency".to_owned(),
+                            unit: "ms".to_owned(),
                             data: Some(metric::Data::Histogram(Histogram {
                                 data_points: vec![HistogramDataPoint {
                                     attributes: vec![string_kv("route", "/checkout")],
@@ -4577,9 +4726,9 @@ mod tests {
                             metadata: Vec::new(),
                         },
                         Metric {
-                            name: "payload_bytes".to_string(),
-                            description: "payload".to_string(),
-                            unit: "By".to_string(),
+                            name: "payload_bytes".to_owned(),
+                            description: "payload".to_owned(),
+                            unit: "By".to_owned(),
                             data: Some(metric::Data::ExponentialHistogram(ExponentialHistogram {
                                 data_points: vec![ExponentialHistogramDataPoint {
                                     attributes: vec![string_kv("route", "/checkout")],
@@ -4871,15 +5020,15 @@ mod tests {
                 }),
                 scope_metrics: vec![opentelemetry_proto::tonic::metrics::v1::ScopeMetrics {
                     scope: Some(InstrumentationScope {
-                        name: "meter".to_string(),
-                        version: "1.0.0".to_string(),
+                        name: "meter".to_owned(),
+                        version: "1.0.0".to_owned(),
                         attributes: Vec::new(),
                         dropped_attributes_count: 0,
                     }),
                     metrics: vec![Metric {
-                        name: "summary_metric".to_string(),
-                        description: "".into(),
-                        unit: "".into(),
+                        name: "summary_metric".to_owned(),
+                        description: String::new(),
+                        unit: String::new(),
                         data: Some(metric::Data::Summary(Summary {
                             data_points: vec![SummaryDataPoint {
                                 attributes: vec![],
@@ -4963,7 +5112,7 @@ mod tests {
         assert_eq!(row["status_code"], "Ok");
 
         wait_for_export_drain(queue_dir.clone(), 0, ExportDestination::Tinybird).await;
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[tokio::test]
@@ -5031,7 +5180,7 @@ mod tests {
             assert_row_keys_match(&row, &expected_keys, datasource);
         }
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[tokio::test]
@@ -5054,10 +5203,10 @@ mod tests {
 
         let frame = EncodedFrame {
             routing_key: 0,
-            org_id: "org_contract".to_string(),
+            org_id: "org_contract".to_owned(),
             signal: TelemetrySignal::Traces,
             destination: ExportDestination::Tinybird,
-            datasource: "traces".to_string(),
+            datasource: "traces".to_owned(),
             row_count: 1,
             payload: vec![0u8; 200],
         };
@@ -5071,8 +5220,7 @@ mod tests {
         // Third append would overflow before the fix would let us truncate.
         wal.append(0, &frame)
             .await
-            .err()
-            .expect("third append exceeds shard budget");
+            .expect_err("third append exceeds shard budget");
 
         // Drain the cursor to EOF — this should truncate the lane file.
         wal.mark_exported(0, end_b).await.expect("mark_exported");
@@ -5100,7 +5248,7 @@ mod tests {
             .expect("append after drain should succeed");
         assert_eq!(start_c, 0, "next append starts from a fresh file");
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[tokio::test]
@@ -5118,10 +5266,10 @@ mod tests {
         let wal = ShardedWal::open(&cfg).expect("open WAL");
         let frame = EncodedFrame {
             routing_key: 0,
-            org_id: "org_contract".to_string(),
+            org_id: "org_contract".to_owned(),
             signal: TelemetrySignal::Traces,
             destination: ExportDestination::Tinybird,
-            datasource: "traces".to_string(),
+            datasource: "traces".to_owned(),
             row_count: 1,
             payload: vec![0u8; 100],
         };
@@ -5144,7 +5292,7 @@ mod tests {
             std::fs::read_to_string(queue_dir.join("shard-000-tinybird.cursor")).unwrap();
         assert_eq!(cursor_after_partial.trim(), end_a.to_string());
 
-        let _ = std::fs::remove_dir_all(queue_dir);
+        drop(std::fs::remove_dir_all(queue_dir));
     }
 
     /// Cross-language contract with the Prometheus scraper (apps/scraper).
@@ -5170,12 +5318,12 @@ mod tests {
                     let payload = std::str::from_utf8(&frame.payload)
                         .unwrap()
                         .trim()
-                        .to_string();
+                        .to_owned();
                     let rows = payload
                         .lines()
                         .map(|line| serde_json::from_str(line).unwrap())
                         .collect();
-                    (frame.datasource.clone(), rows)
+                    (frame.datasource, rows)
                 })
                 .collect()
         }
@@ -5197,13 +5345,9 @@ mod tests {
                     .resource
                     .get_or_insert_with(Resource::default);
                 resource.attributes.push(KeyValue {
-                    key: "maple_org_id".to_string(),
+                    key: "maple_org_id".to_owned(),
                     value: Some(AnyValue {
-                        value: Some(
-                            opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
-                                "org_scraper".to_string(),
-                            ),
-                        ),
+                        value: Some(any_value::Value::StringValue("org_scraper".to_owned())),
                     }),
                 });
             }

@@ -1,6 +1,6 @@
 import * as React from "react"
-import { Area, AreaChart, ResponsiveContainer } from "recharts"
 
+import { PlotSparkline } from "../../plot/sparkline"
 import { validateCssColor } from "../../../lib/sanitizers"
 
 interface StatSparklineProps {
@@ -20,9 +20,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 /**
  * A minimal trend line for stat widgets — no axes, grid, legend, or tooltip.
  * Renders nothing when there are fewer than two plottable points.
+ *
+ * The drawing is `PlotSparkline`; what is left here is the part that is specific
+ * to a stat widget — finding which column of an arbitrary timeseries row carries
+ * the number.
  */
 export function StatSparkline({ data, color = "var(--chart-1)", className }: StatSparklineProps) {
-	const points = React.useMemo(() => {
+	const values = React.useMemo(() => {
 		const rows = data.map(asRecord)
 		if (rows.length === 0) return []
 
@@ -42,36 +46,17 @@ export function StatSparkline({ data, color = "var(--chart-1)", className }: Sta
 
 		return rows.map((row) => {
 			const value = row?.[valueKey]
-			return { v: typeof value === "number" && Number.isFinite(value) ? value : 0 }
+			return typeof value === "number" && Number.isFinite(value) ? value : 0
 		})
 	}, [data])
 
-	const gradientId = React.useId().replace(/:/g, "")
 	const stroke = validateCssColor(color) ?? "var(--chart-1)"
 
-	if (points.length < 2) return null
+	if (values.length < 2) return null
 
 	return (
 		<div className={className}>
-			<ResponsiveContainer width="100%" height="100%">
-				<AreaChart data={points} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-					<defs>
-						<linearGradient id={`spark-${gradientId}`} x1="0" y1="0" x2="0" y2="1">
-							<stop offset="0%" stopColor={stroke} stopOpacity={0.35} />
-							<stop offset="100%" stopColor={stroke} stopOpacity={0} />
-						</linearGradient>
-					</defs>
-					<Area
-						type="monotone"
-						dataKey="v"
-						stroke={stroke}
-						strokeWidth={1.5}
-						fill={`url(#spark-${gradientId})`}
-						dot={false}
-						isAnimationActive={false}
-					/>
-				</AreaChart>
-			</ResponsiveContainer>
+			<PlotSparkline values={values} color={stroke} curve="monotone" className="h-full w-full" />
 		</div>
 	)
 }

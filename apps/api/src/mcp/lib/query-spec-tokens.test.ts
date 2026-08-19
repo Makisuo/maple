@@ -62,9 +62,10 @@ describe("query-spec token table matches the domain schemas", () => {
 		it(`${source}/${kind}: every listed group_by is accepted`, () => {
 			for (const g of groupBys) {
 				const groupBy = kind === "timeseries" ? { groupBy: [g] } : { groupBy: g }
-				expect(accepts(specFor(source, kind, { metric: metrics[0], ...groupBy })), `groupBy=${g}`).toBe(
-					true,
-				)
+				expect(
+					accepts(specFor(source, kind, { metric: metrics[0], ...groupBy })),
+					`groupBy=${g}`,
+				).toBe(true)
 			}
 		})
 
@@ -75,9 +76,10 @@ describe("query-spec token table matches the domain schemas", () => {
 			for (const metric of allMetrics) {
 				if (metrics.includes(metric)) continue
 				const groupBy = kind === "timeseries" ? { groupBy: [groupBys[0]] } : { groupBy: groupBys[0] }
-				expect(accepts(specFor(source, kind, { metric, ...groupBy })), `unlisted metric=${metric}`).toBe(
-					false,
-				)
+				expect(
+					accepts(specFor(source, kind, { metric, ...groupBy })),
+					`unlisted metric=${metric}`,
+				).toBe(false)
 			}
 		})
 	}

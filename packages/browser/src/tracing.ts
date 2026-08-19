@@ -1,4 +1,11 @@
-import { consentAllowedSince, hasConsent, readSessionSink, recordTraceId } from "@maple/browser-session"
+import {
+	consentAllowedSince,
+	hasConsent,
+	readSessionSink,
+	recordTraceId,
+	SDK_HINT_HEADER,
+	sdkHint,
+} from "@maple/browser-session"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { registerInstrumentations } from "@opentelemetry/instrumentation"
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch"
@@ -8,6 +15,7 @@ import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import { WebTracerProvider } from "@opentelemetry/sdk-trace-web"
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions"
 import type { ResolvedConfig } from "./config"
+import { SDK_NAME, SDK_VERSION } from "./version"
 
 /**
  * Captures every span's trace id into the session sink. Lightweight — runs
@@ -112,7 +120,11 @@ export function setupTracing(config: ResolvedConfig): () => Promise<void> {
 	const exporter = new ConsentSpanExporter(
 		new OTLPTraceExporter({
 			url: `${config.endpoint}/v1/traces`,
-			headers: { Authorization: `Bearer ${config.ingestKey}` },
+			headers: {
+				Authorization: `Bearer ${config.ingestKey}`,
+				// Ingest records this as `maple.sdk`; a page cannot set `user-agent`.
+				[SDK_HINT_HEADER]: sdkHint(SDK_NAME, SDK_VERSION),
+			},
 		}),
 	)
 

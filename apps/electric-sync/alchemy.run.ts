@@ -75,7 +75,12 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 				...optionalPlain("MAPLE_ENDPOINT"),
 				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
-				...optionalPlain("COMMIT_SHA"),
+				// GITHUB_SHA fallback so a deploy that did not export COMMIT_SHA still
+				// stamps a build. An unstamped Worker reports no `service.version`, and
+				// the error evaluator treats a build it cannot identify as a regression —
+				// so a missing binding quietly restores the behaviour where any occurrence
+				// reopens a fixed issue. Matches what apps/ingest already does.
+				...optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim()),
 			},
 		})
 

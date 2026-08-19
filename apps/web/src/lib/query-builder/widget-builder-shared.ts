@@ -79,7 +79,13 @@ export interface QueryBuilderWidgetState {
 	listLimit: string
 	listColumns: ListColumnDraft[]
 	listRootOnly: boolean
-	heatmapColorScale: HeatmapColorScale
+	/**
+	 * `undefined` means "never chosen" — the rail shows
+	 * `DEFAULT_HEATMAP_COLOR_SCALE` (what the chart already renders) and Apply
+	 * leaves `display.heatmap.colorScale` absent, so opening the editor cannot
+	 * repaint a widget the user never touched the palette on.
+	 */
+	heatmapColorScale: HeatmapColorScale | undefined
 	heatmapScaleType: HeatmapScaleType
 	// Markdown-specific: the note body. Static — never hits the warehouse.
 	markdownContent: string

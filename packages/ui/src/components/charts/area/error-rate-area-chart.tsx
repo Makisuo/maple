@@ -1,147 +1,206 @@
-import { memo, useId, useMemo } from "react"
-import { Area, AreaChart } from "recharts"
+import { areaY, defineChart, lineY } from "@tanstack/charts"
+import { memo, useMemo } from "react"
 
-import type { BaseChartProps } from "../_shared/chart-types"
-import { errorRateTimeSeriesData } from "../_shared/sample-data"
-import { VerticalGradient } from "../_shared/svg-patterns"
-import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
+import { formatErrorRate } from "../../../lib/format"
+import { cn } from "../../../lib/utils"
 import {
-	type ChartConfig,
-	ChartContainer,
-	ChartLegend,
-	ChartLegendContent,
-	ChartTooltip,
-	ChartTooltipContent,
-	ChartGrid,
-	ChartXAxis,
-	ChartYAxis,
-} from "../../ui/chart"
-import { formatErrorRate, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
+	FixedMetricLegend,
+	PlotFrame,
+	asFiniteNumber,
+	dashedGridY,
+	fixedMetricTooltipBody,
+	focusCrosshair,
+	focusDot,
+	hoistsLegend,
+	maybeTooltip,
+	roundCapDasharray,
+	splitAtFirstPartial,
+	timeseriesXAxis,
+	timeseriesYAxis,
+	useChartId,
+	useFixedMetricModel,
+	usePlotColors,
+	usePlotLegendSlot,
+	verticalGradient,
+	type FixedMetricSeries,
+	type PlotColorToken,
+	type PlotTooltipSeries,
+	type TimeseriesRow,
+} from "../../plot"
+import type { ServiceChartProps } from "../_shared/chart-types"
+import { errorRateTimeSeriesData } from "../_shared/sample-data"
 
-const VALUE_KEYS = ["errorRate"]
+const VALUE_KEY = "errorRate"
+const VALUE_KEYS = [VALUE_KEY]
+const STROKE_WIDTH = 2
 
-const baseChartConfig = {
-	errorRate: { label: "Error Rate", color: "var(--chart-error)" },
-} satisfies ChartConfig
+/** See `apdex-area-chart` — `areaY` defaults to 0.2, Recharts' `<Area>` to 0.6. */
+const FILL_OPACITY = 0.6
+
+/** How much headroom the axis leaves above the worst bucket. */
+const HEADROOM = 1.2
+/** The floor the axis never drops below, so a near-perfect hour still has a scale. */
+const MIN_CEILING = 0.01
+
+/** Module scope — see `usePlotColors` on why a fresh literal defeats the memo. */
+const ERROR_RATE_TOKENS = {
+	errorRate: ["--chart-error", "#e5484d"],
+} as const satisfies Record<string, readonly [PlotColorToken, string]>
+
+/**
+ * The top of the axis: the worst bucket plus headroom, never below 1% and never
+ * above 100%.
+ *
+ * Recharts took this as a `domain` callback receiving `dataMax`. TanStack has no
+ * such hook — a domain is a resolved pair — so the ceiling is computed here and
+ * handed to `timeseriesYAxis` as `softMax`. It only ever WIDENS the data extent
+ * (the headroom multiplier guarantees `ceiling >= dataMax` for any rate at or
+ * below 100%), which is exactly what `softMax` means.
+ */
+export function errorRateCeiling(rows: ReadonlyArray<Record<string, unknown>>): number {
+	let dataMax = 0
+	for (const row of rows) {
+		const value = row[VALUE_KEY]
+		if (typeof value === "number" && Number.isFinite(value) && value > dataMax) dataMax = value
+	}
+	return Math.min(1, Math.max(dataMax * HEADROOM, MIN_CEILING))
+}
 
 // Memoized: these charts sit in synced grids whose parent rerenders on every
-// atom/query settle; with stable props the whole Recharts subtree is skipped.
+// atom/query settle; with stable props the whole chart subtree is skipped.
 export const ErrorRateAreaChart = memo(function ErrorRateAreaChart({
 	data,
 	className,
 	legend,
 	tooltip,
-	syncId,
 	overlay,
 	yAxisWidth,
-}: BaseChartProps) {
-	const id = useId()
-	const gradientId = `errorRateGradient-${id.replace(/:/g, "")}`
-	const fadedGradientId = `errorRateGradientFaded-${id.replace(/:/g, "")}`
-	const chartData = data ?? errorRateTimeSeriesData
+}: ServiceChartProps) {
+	const model = useFixedMetricModel(data ?? errorRateTimeSeriesData)
+	const { plotRows, trimOptions, axisContext, chromeColors, focusStore, suppressed } = model
 
-	const {
-		data: processedData,
-		hasIncomplete,
-		incompleteKeys,
-	} = useIncompleteSegments(chartData, VALUE_KEYS)
+	const colors = usePlotColors(ERROR_RATE_TOKENS)
+	const gradientPrefix = useChartId("errorRate")
 
-	const chartConfig = useMemo(
-		() => extendConfigWithIncomplete(baseChartConfig, incompleteKeys),
-		[incompleteKeys],
+	const series = useMemo<FixedMetricSeries[]>(
+		() => [{ key: VALUE_KEY, label: "Error Rate", color: colors.errorRate }],
+		[colors],
 	)
 
-	const axisContext = useMemo(
-		() => ({
-			rangeMs: inferRangeMs(chartData as Array<Record<string, unknown>>),
-			bucketSeconds: inferBucketSeconds(chartData as Array<{ bucket: string }>),
-		}),
-		[chartData],
+	// The card header's series chips, top-right of the tile. A no-op outside a
+	// `WidgetShell` — the service pages draw their own always-on legend.
+	//
+	// `hoistsLegend` is the gate, not an unconditional publish: a chart already
+	// drawing the strip under its plot would otherwise print its series twice,
+	// once bottom-left and once in the header. See `hoistsLegend`.
+	usePlotLegendSlot(hoistsLegend(legend) ? series : null)
+
+	const tooltipSeries = useMemo<PlotTooltipSeries<TimeseriesRow>[]>(
+		() => [
+			{
+				label: "Error Rate",
+				color: colors.errorRate,
+				value: (row: TimeseriesRow) => {
+					const value = row[VALUE_KEY]
+					return typeof value === "number" ? value : null
+				},
+				format: formatErrorRate,
+			},
+		],
+		[colors],
 	)
+
+	const definition = useMemo(() => {
+		// `plotRows`, not `rows`: everything inside this definition becomes a mark,
+		// and a mark's channels feed scale inference whether or not it paints.
+		const { solid, dashed } = splitAtFirstPartial(plotRows, VALUE_KEYS, trimOptions)
+		const partialDash = roundCapDasharray(4, 4, STROKE_WIDTH)
+		const gradientId = `${gradientPrefix}-fill`
+		const fadedGradientId = `${gradientPrefix}-fill-partial`
+		const color = colors.errorRate
+
+		const value = (row: TimeseriesRow) => asFiniteNumber(row[VALUE_KEY])
+
+		// Fill only, with the top edge as its own `lineY` — see `apdex-area-chart`
+		// for why `areaY` cannot stroke one edge on its own. The floor is 0 because
+		// the domain below is anchored there: an error rate is measured against
+		// zero errors, not against the quietest bucket in the window.
+		const band = (rowSlice: readonly TimeseriesRow[], fill: string) =>
+			areaY(rowSlice, {
+				id: fill === gradientId ? "error-rate-area" : "error-rate-area-partial",
+				x: (row: TimeseriesRow) => row.date,
+				y: value,
+				y1: () => 0,
+				fill: `url(#${fill})`,
+				fillOpacity: FILL_OPACITY,
+				stroke: "none",
+			})
+
+		const edge = (rowSlice: readonly TimeseriesRow[], partial: boolean) =>
+			lineY(rowSlice, {
+				id: partial ? "error-rate-partial" : "error-rate",
+				x: (row: TimeseriesRow) => row.date,
+				y: value,
+				stroke: color,
+				strokeWidth: STROKE_WIDTH,
+				strokeDasharray: partial ? partialDash : undefined,
+			})
+
+		const hasDashed = dashed.length > 0
+
+		return defineChart({
+			// A left-margin LOCK, not an axis width: `resolveMarginLocks` pins the
+			// side named here and leaves the rest to the automatic solver, which is
+			// what keeps plot rects aligned across a grid. See `PlotOverlayProps`.
+			margin: yAxisWidth == null ? undefined : { left: yAxisWidth },
+			gradients: [
+				verticalGradient(gradientId, color),
+				...(hasDashed ? [verticalGradient(fadedGradientId, color, 0.15, 0)] : []),
+			],
+			marks: [
+				dashedGridY(),
+				band(solid, gradientId),
+				...(hasDashed ? [band(dashed, fadedGradientId)] : []),
+				edge(solid, false),
+				...(hasDashed ? [edge(dashed, true)] : []),
+				// `plotRows`: a focus dot over a bucket no band draws is what kept the
+				// dropped in-flight slot on the axis and hoverable.
+				focusDot(plotRows, (row: TimeseriesRow) => row.date, value, color, chromeColors),
+				focusCrosshair(chromeColors),
+			],
+			x: timeseriesXAxis(axisContext),
+			y: timeseriesYAxis({
+				rows: plotRows,
+				visibleKeys: VALUE_KEYS,
+				softMin: 0,
+				softMax: errorRateCeiling(plotRows),
+				format: formatErrorRate,
+			}).y,
+			focus: "group-x",
+			focusRing: false,
+			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),
+		})
+	}, [
+		plotRows,
+		trimOptions,
+		colors,
+		gradientPrefix,
+		chromeColors,
+		axisContext,
+		focusStore,
+		tooltip,
+		suppressed,
+		yAxisWidth,
+	])
 
 	return (
-		<ChartContainer config={chartConfig} className={className}>
-			<AreaChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
-				<defs>
-					<VerticalGradient id={gradientId} color="var(--color-errorRate)" />
-					{hasIncomplete && (
-						<VerticalGradient
-							id={fadedGradientId}
-							color="var(--color-errorRate)"
-							startOpacity={0.15}
-							endOpacity={0}
-						/>
-					)}
-				</defs>
-				<ChartGrid />
-				<ChartXAxis
-					dataKey="bucket"
-					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
-				/>
-				<ChartYAxis
-					tickMargin={8}
-					width={yAxisWidth ?? 60}
-					domain={[0, (dataMax: number) => Math.min(1, Math.max(dataMax * 1.2, 0.01))]}
-					tickFormatter={(v) => formatErrorRate(v)}
-				/>
-				{tooltip !== "hidden" && (
-					<ChartTooltip
-						content={
-							<ChartTooltipContent
-								labelFormatter={(_, payload) => {
-									if (!payload?.[0]?.payload?.bucket) return ""
-									const bucket = payload[0].payload.bucket as string
-									return formatBucketLabel(bucket, axisContext, "tooltip")
-								}}
-								formatter={(value, name, item) => {
-									const nameStr = String(name)
-									const isIncomplete = nameStr.endsWith("_incomplete")
-									const baseKey = isIncomplete
-										? nameStr.replace(/_incomplete$/, "")
-										: nameStr
-									if (isIncomplete && item.payload?.[baseKey] != null) return null
-									if (!isIncomplete && value == null) return null
-									return (
-										<span className="flex items-center gap-2">
-											<span
-												className="shrink-0 size-2.5 rounded-[2px]"
-												style={{ backgroundColor: item.color }}
-											/>
-											<span className="text-muted-foreground">Error Rate</span>
-											<span className="font-mono font-medium">
-												{formatErrorRate(value as number)}
-											</span>
-										</span>
-									)
-								}}
-							/>
-						}
-					/>
-				)}
-				{legend === "visible" && <ChartLegend content={<ChartLegendContent />} />}
-				<Area
-					type="linear"
-					dataKey="errorRate"
-					stroke="var(--color-errorRate)"
-					fill={`url(#${gradientId})`}
-					isAnimationActive={false}
-				/>
-				{hasIncomplete && (
-					<Area
-						type="linear"
-						dataKey="errorRate_incomplete"
-						stroke="var(--color-errorRate)"
-						fill={`url(#${fadedGradientId})`}
-						strokeWidth={2}
-						strokeDasharray="4 4"
-						dot={false}
-						connectNulls
-						legendType="none"
-						isAnimationActive={false}
-					/>
-				)}
-				{overlay}
-			</AreaChart>
-		</ChartContainer>
+		<PlotFrame
+			className={cn("h-full w-full", className)}
+			ariaLabel="Error rate"
+			definition={definition}
+			legend={legend === "visible" ? <FixedMetricLegend series={series} /> : undefined}
+			overlay={overlay}
+			renderTooltipBody={({ points }) => fixedMetricTooltipBody(model, points, tooltipSeries)}
+		/>
 	)
 })

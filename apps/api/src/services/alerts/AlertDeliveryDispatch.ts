@@ -160,8 +160,12 @@ const buildSlackActionsBlock = (linkUrl: string, chatUrl: string) => ({
  * Footer: brand + incident reference + a `<!date^…>` timestamp so Slack renders
  * the fire time in each viewer's local timezone (ISO fallback for exports).
  */
-const buildSlackContextBlock = (context: Pick<DispatchContext, "sentAtMs" | "incidentId">) => {
+const buildSlackContextBlock = (context: Pick<DispatchContext, "sentAtMs" | "incidentId" | "sparkline">) => {
 	const parts = ["\u{1F341} Maple Alerts"]
+	// Ahead of the incident id and the timestamp: on a renotify this is the only
+	// part of the message that differs from the last one, and it is the answer
+	// to the question the reader actually has — better or worse than before?
+	if (context.sparkline) parts.push(`\`${context.sparkline}\``)
 	if (context.incidentId) parts.push(`Incident \`${escapeSlackMrkdwn(context.incidentId)}\``)
 	if (context.sentAtMs != null) {
 		const seconds = Math.floor(context.sentAtMs / 1000)
@@ -180,6 +184,25 @@ const groupField = (groupKey: string | null) => {
 	const group = displayGroupKey(groupKey)
 	return group == null ? [] : [{ type: "mrkdwn", text: `*Group*\n\`${escapeSlackMrkdwn(group)}\`` }]
 }
+
+/**
+ * The chart, as a Slack image block.
+ *
+ * `alt_text` is not decoration: it is what a screen reader announces and what
+ * shows if the image will not load, so it repeats the numbers rather than
+ * naming the picture. Returns nothing when there is no chart, so the caller
+ * spreads an empty list and the message shape is otherwise unchanged.
+ */
+const slackChartBlocks = (context: Pick<DispatchContext, "chartUrl" | "ruleName">) =>
+	context.chartUrl
+		? [
+				{
+					type: "image",
+					image_url: context.chartUrl,
+					alt_text: truncate(`${context.ruleName} over the alert window`, 2000),
+				},
+			]
+		: []
 
 export const buildSlackBlocks = (context: TemplateRenderContext, linkUrl: string, chatUrl: string) => [
 	{
@@ -204,6 +227,7 @@ export const buildSlackBlocks = (context: TemplateRenderContext, linkUrl: string
 			...groupField(context.groupKey),
 		],
 	},
+	...slackChartBlocks(context),
 	buildSlackActionsBlock(linkUrl, chatUrl),
 	buildSlackContextBlock(context),
 ]
@@ -214,6 +238,18 @@ export const buildSlackBlocks = (context: TemplateRenderContext, linkUrl: string
  */
 export const buildSlackFallbackText = (context: TemplateRenderContext): string =>
 	`${eventTypeEmoji(context.eventType)} ${escapeSlackMrkdwn(context.ruleName)} — ${formatEventTypeLabel(context.eventType)} · ${formatSignalLabel(context)} ${formatObservedSummary(context)}`
+
+/**
+ * Discord has no context block, so the sparkline rides in the footer — the one
+ * line that is small enough not to compete with the numbers above it. Shared by
+ * both embed builders: they had drifted apart once already.
+ */
+/** Discord renders `embed.image` full width under the fields — the same slot Slack's image block occupies. */
+const discordImage = (context: Pick<DispatchContext, "chartUrl">) =>
+	context.chartUrl ? { image: { url: context.chartUrl } } : {}
+
+const discordFooterText = (context: Pick<DispatchContext, "sparkline">): string =>
+	context.sparkline ? `\u{1F341} Maple Alerts  ·  ${context.sparkline}` : "\u{1F341} Maple Alerts"
 
 export const buildDiscordEmbeds = (context: DispatchContext, linkUrl: string, chatUrl: string) => [
 	{
@@ -232,7 +268,8 @@ export const buildDiscordEmbeds = (context: DispatchContext, linkUrl: string, ch
 				inline: false,
 			},
 		],
-		footer: { text: "\u{1F341} Maple Alerts" },
+		...discordImage(context),
+		footer: { text: discordFooterText(context) },
 	},
 ]
 
@@ -338,7 +375,10 @@ export const renderTitleBody = (
 export const buildSlackBlocksFromTemplate = (
 	title: string,
 	body: string,
-	context: Pick<DispatchContext, "eventType" | "sentAtMs" | "incidentId">,
+	context: Pick<
+		DispatchContext,
+		"eventType" | "sentAtMs" | "incidentId" | "sparkline" | "chartUrl" | "ruleName"
+	>,
 	linkUrl: string,
 	chatUrl: string,
 ) => [
@@ -350,6 +390,7 @@ export const buildSlackBlocksFromTemplate = (
 		type: "section",
 		text: { type: "mrkdwn", text: markdownToSlackMrkdwn(body) },
 	},
+	...slackChartBlocks(context),
 	buildSlackActionsBlock(linkUrl, chatUrl),
 	buildSlackContextBlock(context),
 ]
@@ -357,7 +398,7 @@ export const buildSlackBlocksFromTemplate = (
 export const buildDiscordEmbedsFromTemplate = (
 	title: string,
 	body: string,
-	context: Pick<DispatchContext, "eventType" | "severity">,
+	context: Pick<DispatchContext, "eventType" | "severity" | "sparkline" | "chartUrl">,
 	linkUrl: string,
 	chatUrl: string,
 ) => [
@@ -373,7 +414,8 @@ export const buildDiscordEmbedsFromTemplate = (
 				inline: false,
 			},
 		],
-		footer: { text: "\u{1F341} Maple Alerts" },
+		...discordImage(context),
+		footer: { text: discordFooterText(context) },
 	},
 ]
 
@@ -382,4 +424,4 @@ export const buildDiscordEmbedsFromTemplate = (
  * types from here. They now live in `./delivery/context`; the collapse onto one
  * canonical notification value is a later stage.
  */
-export type { DispatchContext, DispatchResult } from "./delivery/context"
+export type { DispatchContext } from "./delivery/context"

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
-import { usePlotArea, useXAxisScale, ZIndexLayer } from "recharts"
+import type { ResolvedScale } from "@tanstack/charts"
 
-import { useSuppressChartTooltip } from "@maple/ui/components/ui/chart"
+import { usePlotRect, usePlotScales, useSuppressChartTooltip, type PlotRect } from "@maple/ui/components/plot"
+import { parseBucketMs } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { CommitDetailBody, CommitListBody } from "../commit-sha-hover-card"
@@ -24,49 +25,104 @@ const LABEL_OPEN_DELAY = 400
 // Kept short so a genuine exit to empty space feels immediate, not laggy — it only
 // needs to survive the few-frame hop across the small gaps between dash/label/card.
 const CLOSE_GRACE = 60
-// Above every recharts layer (the highest default zIndex is the label at 2000).
-const MARKER_Z = 3000
 const LABEL_HEIGHT = 18
 // Distance between the chip's lower edge and the top of the plot. The chip sits ABOVE
 // the plot — it overflows out of the chart's top edge into the card's header/padding
-// gap (the recharts surface is un-clipped by ChartContainer) rather than reserving an
-// inner margin, so the series keeps its full height. Each dash rises through this gap
-// to meet the chip's underside.
+// gap rather than reserving an inner margin, so the series keeps its full height. Each
+// dash rises through this gap to meet the chip's underside.
+//
+// Overflowing upward used to cost something: under Recharts this layer lived in a
+// `foreignObject`, which only dispatches pointer events inside its own box, so the box
+// had to be grown upward by a matching `LABEL_OVERHANG` or a chip drawn above y=0 would
+// paint but never hover. `PlotFrame`'s overlay slot is an ordinary DOM sibling with
+// visible overflow, so the overhang is pure layout now and the workaround is gone.
 const LABEL_GAP = 4
-// How far the chip row rises above the plot top. The overlay's foreignObject is
-// extended upward by this much so the chips fall inside its hit-test region —
-// foreignObject only dispatches pointer events within its own box, so a chip drawn
-// above y=0 would render (overflow visible) but be unhoverable without this.
-const LABEL_OVERHANG = LABEL_HEIGHT + LABEL_GAP
 // Hitbox half-width around a dash (so a thin line is still easy to hover).
 const DASH_HIT = 5
-
-// Freeze the chart cursor while the pointer is over a marker (dash/label) or the
-// overlay is swallowing events: stop the move/press/click from reaching recharts'
-// wrapper handlers, which listen on an ancestor and so receive the synthetic event
-// as it bubbles up the React tree unless we halt it here.
-const stopPropagation = (e: { stopPropagation: () => void }) => e.stopPropagation()
-// Spreadable handler set for the dash/label hitboxes (their propagation is always
-// stopped; the root's is conditional so it stays inline there).
-const stopHandlers = {
-	onMouseMove: stopPropagation,
-	onMouseDown: stopPropagation,
-	onClick: stopPropagation,
-}
 
 export interface CommitMarkersLayerProps {
 	/** Deploy markers, pre-snapped to chart buckets (see `buildCommitMarkers`). */
 	markers: CommitMarker[]
 }
 
+export interface CommitMarkersOverlayProps extends CommitMarkersLayerProps {
+	/** The plot region, in the overlay's own coordinates. `null` until it resolves. */
+	plotRect: PlotRect | null
+	/** The chart's resolved x scale. `null` until it resolves. */
+	xScale: ResolvedScale | null
+}
+
+/**
+ * The x value to hand a resolved scale for a marker's bucket string.
+ *
+ * Recharts placed these charts on a CATEGORICAL x axis, where the bucket string was
+ * itself the axis value. The TanStack timeseries plots on a real time scale over
+ * `Date`s, so the same string has to be parsed first. Which shape a given chart wants
+ * is read off the scale's own domain rather than its `type`: `type` is the opaque
+ * `"configured"` for any scale a chart supplied itself, which says nothing about the
+ * value shape, while the domain is always a sample of what the scale accepts.
+ */
+function scaleInputForBucket(bucket: string, scale: ResolvedScale): Date | number | string | null {
+	const sample = scale.domain[0]
+	// An empty domain means the chart resolved no data; there is nothing to align to.
+	if (sample === undefined) return null
+	if (typeof sample === "string") return bucket
+	const ms = parseBucketMs(bucket)
+	if (ms === null) return null
+	return sample instanceof Date ? new Date(ms) : ms
+}
+
+// A marker that lands within this many pixels of an edge counts as on it: the
+// last bucket's own pixel is the plot's right edge up to float error.
+const EDGE_EPSILON = 0.5
+
+/**
+ * Where a marker's dash belongs, or `null` if it does not belong on this plot.
+ *
+ * A continuous d3 scale EXTRAPOLATES: a bucket outside the domain still maps to a
+ * finite number, just one outside the plot rect — and since the overlay is
+ * `inset-0` with visible overflow, nothing clips the result, so the dash lands on
+ * the y-axis labels or out in the card's padding. That is reachable in
+ * production: markers are built from the REQUESTED time range while the chart's
+ * rows can be shortened by `trimEmptyTrailingBuckets`, so a deploy in the trimmed
+ * in-flight tail maps past the right edge.
+ *
+ * Out of range means NOT RENDERED, rather than clamped to the edge. A dash claims
+ * "the deploy happened at this x", and a clamped one is indistinguishable from a
+ * genuine marker at the edge — the reader has no way to tell it is approximate,
+ * and its hover card would name a time the position contradicts. Dropping it is
+ * the behaviour a marker outside the window already gets (it is never built at
+ * all), and in the trimmed-tail case it is self-healing: the marker reappears as
+ * soon as the bucket it belongs to carries data.
+ */
+function markerPixel(
+	bucket: string,
+	scale: ResolvedScale,
+	plotLeft: number,
+	plotRight: number,
+): number | null {
+	const input = scaleInputForBucket(bucket, scale)
+	if (input === null) return null
+	const mapped = scale.map(input)
+	if (!Number.isFinite(mapped)) return null
+	// A band scale maps a category to its column's LEFT EDGE. A marker means "in
+	// this bucket", so it belongs in the column's middle — otherwise every dash on
+	// a categorical x sits half a column to the left of the bar it annotates.
+	const x = typeof input === "string" ? mapped + scale.bandwidth / 2 : mapped
+	if (x < plotLeft - EDGE_EPSILON || x > plotRight + EDGE_EPSILON) return null
+	return x
+}
+
 /**
  * Renders commit deploy markers (dashed verticals + labels + hover cards) over a
- * time-series chart. Mounted as a child of the recharts chart so it can read the
- * x-scale and plot rect; one instance per chart, each owning its own hover state.
+ * time-series chart. Mounted through `PlotFrame`'s `overlay` slot; one instance per
+ * chart, each owning its own hover state.
+ *
+ * The geometry arrives as PROPS rather than being read here, so the whole layout — the
+ * one thing that actually broke in the port — can be exercised at known pixel values.
+ * `CommitMarkersLayer` below is the connector that supplies them from the frame.
  */
-export function CommitMarkersLayer({ markers }: CommitMarkersLayerProps) {
-	const xScale = useXAxisScale()
-	const plotArea = usePlotArea()
+export function CommitMarkersOverlay({ markers, plotRect, xScale }: CommitMarkersOverlayProps) {
 	const setSuppressed = useSuppressChartTooltip()
 
 	const [hoverKey, setHoverKey] = useState<string | null>(null)
@@ -118,17 +174,15 @@ export function CommitMarkersLayer({ markers }: CommitMarkersLayerProps) {
 	}, [])
 
 	const { groups, labeled } = useMemo(() => {
-		if (!xScale || !plotArea || markers.length === 0) return { groups: [] as LabelGroup[], labeled: true }
+		if (!xScale || !plotRect || markers.length === 0) return { groups: [] as LabelGroup[], labeled: true }
+		const plotLeft = plotRect.x
+		const plotRight = plotRect.x + plotRect.width
 		const positioned: PositionedMarker[] = []
 		for (const marker of markers) {
-			const x = xScale(marker.bucket)
-			if (typeof x === "number" && Number.isFinite(x)) {
-				positioned.push({ marker, x })
-			}
+			const x = markerPixel(marker.bucket, xScale, plotLeft, plotRight)
+			if (x !== null) positioned.push({ marker, x })
 		}
 		positioned.sort((a, b) => a.x - b.x)
-		const plotLeft = plotArea.x
-		const plotRight = plotArea.x + plotArea.width
 		if (!shouldRenderLabels(positioned, plotLeft, plotRight)) {
 			// Dashes-only mode: no label merging — every marker keeps its own dash and
 			// hover card (a zero-width "box" makes the card anchor sit on the dash).
@@ -147,62 +201,58 @@ export function CommitMarkersLayer({ markers }: CommitMarkersLayerProps) {
 			}
 		}
 		return { groups: layoutMarkerLabels(positioned, plotLeft, plotRight), labeled: true }
-	}, [markers, xScale, plotArea])
+	}, [markers, xScale, plotRect])
 
-	if (!plotArea || groups.length === 0) return null
+	if (!plotRect || groups.length === 0) return null
 
-	// Once a card is OPEN, the overlay swallows pointer events over the whole plot so
-	// they never reach the chart underneath — no ghost cursor or data tooltip fighting
-	// the commit card. While merely hovering (before the card opens) or idle it stays
-	// transparent so the plot area still drives the chart's own tooltip.
+	// Once a card is OPEN, the layer swallows pointer events over the whole plot so they
+	// never reach the chart underneath — no focus ring or crosshair fighting the commit
+	// card. While merely hovering (before the card opens) or idle it stays transparent so
+	// the plot still drives the chart's own focus and tooltip.
+	//
+	// This is a plain `pointer-events` gate now. Under Recharts it also needed
+	// `stopPropagation` on every hitbox, because Recharts listened with REACT handlers on
+	// an ancestor of the overlay and so saw the synthetic event bubble up the React tree.
+	// The TanStack renderer binds native listeners to its own container element, which is
+	// a sibling of this layer rather than an ancestor, so an event this layer takes never
+	// reaches the chart in the first place.
 	const blockChart = openKey !== null
 
 	return (
-		<ZIndexLayer zIndex={MARKER_Z}>
-			{/* Extended upward by LABEL_OVERHANG so the chip row (drawn above the plot,
-			    overflowing into the card's header gap) is inside the hit-test box and stays
-			    hoverable; the inner div is pushed back down by the same amount so every
-			    child's `top` still reads in plot coordinates (origin at the plot's SVG y=0). */}
-			<foreignObject
-				x={0}
-				y={-LABEL_OVERHANG}
-				width={plotArea.x + plotArea.width}
-				height={plotArea.y + plotArea.height + LABEL_OVERHANG}
-				style={{ pointerEvents: "none", overflow: "visible" }}
-			>
-				{/* Idle: events pass through to the chart. Active: the root captures them
-				    so nothing reaches the series; the dashes/labels/card still handle their
-				    own hover on top. */}
-				<div
-					onMouseMove={blockChart ? stopPropagation : undefined}
-					onMouseDown={blockChart ? stopPropagation : undefined}
-					onClick={blockChart ? stopPropagation : undefined}
-					style={{
-						position: "relative",
-						top: LABEL_OVERHANG,
-						width: "100%",
-						height: "100%",
-						pointerEvents: blockChart ? "auto" : "none",
-					}}
-				>
-					{groups.map((group) => (
-						<MarkerGroup
-							key={group.key}
-							group={group}
-							plotTop={plotArea.y}
-							plotHeight={plotArea.height}
-							showLabel={labeled}
-							active={hoverKey === group.key || openKey === group.key}
-							open={openKey === group.key}
-							onArmLine={() => arm(group.key, LINE_OPEN_DELAY)}
-							onArmLabel={() => arm(group.key, LABEL_OPEN_DELAY)}
-							onLeave={scheduleClose}
-						/>
-					))}
-				</div>
-			</foreignObject>
-		</ZIndexLayer>
+		<div
+			data-commit-markers=""
+			className={cn("absolute inset-0", blockChart ? "pointer-events-auto" : "pointer-events-none")}
+		>
+			{groups.map((group) => (
+				<MarkerGroup
+					key={group.key}
+					group={group}
+					plotTop={plotRect.y}
+					plotHeight={plotRect.height}
+					showLabel={labeled}
+					active={hoverKey === group.key || openKey === group.key}
+					open={openKey === group.key}
+					onArmLine={() => arm(group.key, LINE_OPEN_DELAY)}
+					onArmLabel={() => arm(group.key, LABEL_OPEN_DELAY)}
+					onLeave={scheduleClose}
+				/>
+			))}
+		</div>
 	)
+}
+
+/**
+ * Binds the overlay to the enclosing `PlotFrame`.
+ *
+ * Both hooks publish from the chart's RENDER CALLBACK rather than from render, so this
+ * component is always one store notification behind the scene it annotates, and both
+ * return `null` outside a frame or before the first render. Neither is an error state —
+ * the overlay simply draws nothing until the plot has a shape.
+ */
+export function CommitMarkersLayer({ markers }: CommitMarkersLayerProps) {
+	const scales = usePlotScales()
+	const plotRect = usePlotRect()
+	return <CommitMarkersOverlay markers={markers} plotRect={plotRect} xScale={scales?.x ?? null} />
 }
 
 interface MarkerGroupProps {
@@ -250,11 +300,14 @@ function MarkerGroup({
 	return (
 		<>
 			{group.dashXs.map((x, i) => (
+				// `pointer-events-auto`: the layer above is `pointer-events-none` while idle
+				// so the plot keeps its own hover, and each annotation opts back in.
 				<div
 					key={`${group.key}-dash-${i}`}
+					data-commit-marker-dash=""
+					className="pointer-events-auto"
 					onMouseEnter={onArmLine}
 					onMouseLeave={onLeave}
-					{...stopHandlers}
 					style={{
 						position: "absolute",
 						left: x - DASH_HIT,
@@ -263,7 +316,6 @@ function MarkerGroup({
 						height: dashHeight,
 						display: "flex",
 						justifyContent: "center",
-						pointerEvents: "auto",
 					}}
 				>
 					<div
@@ -286,9 +338,9 @@ function MarkerGroup({
 
 			{showLabel ? (
 				<div
+					data-commit-marker-label=""
 					onMouseEnter={onArmLabel}
 					onMouseLeave={onLeave}
-					{...stopHandlers}
 					style={{
 						position: "absolute",
 						left: group.boxLeft,
@@ -298,10 +350,9 @@ function MarkerGroup({
 						// vertical connects. Text is centered and truncates within.
 						width: group.boxWidth,
 						height: LABEL_HEIGHT,
-						pointerEvents: "auto",
 					}}
 					className={cn(
-						"flex cursor-pointer items-center justify-center gap-1 rounded-[5px] border px-1.5 font-mono text-[11px] leading-none backdrop-blur-sm transition-colors",
+						"pointer-events-auto flex cursor-pointer items-center justify-center gap-1 rounded-[5px] border px-1.5 font-mono text-[11px] leading-none backdrop-blur-sm transition-colors",
 						active
 							? "border-border bg-popover text-popover-foreground shadow-sm"
 							: "border-border/60 bg-popover/85 text-muted-foreground hover:text-popover-foreground",

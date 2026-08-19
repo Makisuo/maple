@@ -4,14 +4,14 @@ import SwiftUI
 @MainActor
 @Observable
 final class IncidentsListModel {
-	private(set) var state: LoadState<[IncidentCard]> = .loading
+	private(set) var loader: ScreenLoader<[IncidentCard]>!
 	private(set) var isLoadingMore = false
 
 	/// Open only by default: the hub is for triage, and history is one tap
 	/// away. Resolved incidents are still listed after the open ones when
 	/// the filter is off.
 	var openOnly = true {
-		didSet { if openOnly != oldValue { Task { await load() } } }
+		didSet { if openOnly != oldValue { Task { await loader.load(.replace) } } }
 	}
 
 	private var nextCursor: String?
@@ -19,52 +19,45 @@ final class IncidentsListModel {
 	private var rules: [String: AlertRule] = [:]
 
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
-		self.session = session
+		self.loader = ScreenLoader(session: session, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetchFirstPage() }
 	}
 
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-		nextCursor = nil
-		let next = await session.perform { () -> [IncidentCard] in
-			async let rulesTask = self.api.alertRules(limit: 100, cursor: nil)
-			let page = try await self.api.alertIncidents(
-				status: self.openOnly ? .open : nil, ruleId: nil, limit: 30, cursor: nil
-			)
-			self.rules = Dictionary(
-				((try? await rulesTask.items) ?? []).map { ($0.id, $0) },
-				uniquingKeysWith: { first, _ in first }
-			)
-			self.nextCursor = page.nextCursor
-			self.hasMore = page.hasMore
-			return page.items.map(self.card)
-		}
-		guard let next else { return }
-		if case .loaded(let cards) = next, cards.isEmpty {
-			state = .empty
-		} else {
-			state = next
-		}
+	var state: LoadState<[IncidentCard]> { loader.state }
+
+	private func fetchFirstPage() async throws -> [IncidentCard] {
+		async let rulesTask = api.alertRules(limit: 100, cursor: nil)
+		let page = try await api.alertIncidents(
+			status: openOnly ? .open : nil, ruleId: nil, limit: 30, cursor: nil
+		)
+		rules = Dictionary(
+			((try? await rulesTask.items) ?? []).map { ($0.id, $0) },
+			uniquingKeysWith: { first, _ in first }
+		)
+		nextCursor = page.nextCursor
+		hasMore = page.hasMore
+		return page.items.map(card)
 	}
 
 	func loadMore() async {
-		guard hasMore, !isLoadingMore, let cursor = nextCursor, let existing = state.value else { return }
+		guard hasMore, !isLoadingMore, let cursor = nextCursor, state.value != nil else { return }
 		isLoadingMore = true
 		defer { isLoadingMore = false }
+		let generation = loader.generation
 		guard
 			let page = try? await api.alertIncidents(
 				status: openOnly ? .open : nil, ruleId: nil, limit: 30, cursor: cursor
 			)
 		else {
-			hasMore = false
+			if generation == loader.generation { hasMore = false }
 			return
 		}
+		guard generation == loader.generation else { return }
 		nextCursor = page.nextCursor
 		hasMore = page.hasMore
-		state = .loaded(existing + page.items.map(card))
+		loader.update(ifGeneration: generation) { $0 + page.items.map(card) }
 	}
 
 	var canLoadMore: Bool { hasMore }
@@ -81,60 +74,46 @@ final class IncidentsListModel {
 }
 
 struct IncidentsListView: View {
-	@Environment(SessionController.self) private var session
-	@State private var model: IncidentsListModel?
+	/// Owned by the hub so switching segments doesn't refetch; see
+	/// `AlertsHubModels`.
+	let model: IncidentsListModel
 
 	var body: some View {
-		Group {
-			if let model {
-				LoadableView(
-					state: model.state,
-					emptyTitle: model.openOnly ? "No open alerts" : "No incidents",
-					emptyMessage: model.openOnly
-						? "Every alert rule is within its threshold."
-						: "No alert rule has fired yet.",
-					skeletonRowHeight: 72,
-					retry: { Task { await model.load() } }
-				) { cards in
-					ScrollView {
-						LazyVStack(spacing: 0) {
-							ForEach(cards) { card in
-								NavigationLink(value: Route.incident(id: card.id)) {
-									IncidentRow(card: card)
-								}
-								.buttonStyle(RowButtonStyle())
-								Hairline()
-							}
-							if model.canLoadMore {
-								SkeletonList(rowHeight: 72, rows: 2)
-									.frame(height: 144)
-									.task { await model.loadMore() }
-							}
-						}
+		LoadableView(
+			loader: model.loader,
+			emptyTitle: model.openOnly ? "No open alerts" : "No incidents",
+			emptyMessage: model.openOnly
+				? "Every alert rule is within its threshold."
+				: "No alert rule has fired yet.",
+			skeletonRowHeight: 72
+		) { cards in
+			LazyVStack(spacing: 0) {
+				ForEach(cards) { card in
+					NavigationLink(value: Route.incident(id: card.id)) {
+						IncidentRow(card: card)
 					}
-					.scrollContentBackground(.hidden)
+					.buttonStyle(RowButtonStyle())
+					Hairline()
 				}
-				.refreshable { await model.load(showPlaceholder: false) }
-				.toolbar {
-					ToolbarItem(placement: .topBarTrailing) {
-						Button {
-							model.openOnly.toggle()
-						} label: {
-							Text(model.openOnly ? "Open" : "All")
-								.font(Typo.smallMedium)
-								.foregroundStyle(model.openOnly ? Token.primary : Token.foreground)
-						}
-					}
+				if model.canLoadMore {
+					SkeletonList(rowHeight: 72, rows: 2)
+						.frame(height: 144)
+						.task { await model.loadMore() }
 				}
-			} else {
-				SkeletonList(rowHeight: 72)
 			}
 		}
-		.task(id: session.dataGeneration) {
-			let model = model ?? IncidentsListModel(api: session.api, session: session)
-			self.model = model
-			await model.load()
+		.toolbar {
+			ToolbarItem(placement: .topBarTrailing) {
+				Button {
+					model.openOnly.toggle()
+				} label: {
+					Text(model.openOnly ? "Open" : "All")
+						.font(Typo.smallMedium)
+						.foregroundStyle(model.openOnly ? Token.primary : Token.foreground)
+				}
+			}
 		}
+		.task { await model.loader.loadIfNeeded() }
 	}
 }
 

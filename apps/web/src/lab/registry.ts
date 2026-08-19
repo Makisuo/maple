@@ -112,6 +112,22 @@ export const LAB_ENTRIES: ReadonlyArray<LabEntry> = [
 		kind: "bench",
 		session: "none",
 	},
+	{
+		path: "/lab/charts",
+		title: "TanStack charts",
+		description:
+			"Production charts beside their TanStack counterparts over identical rows; ?renderer=tanstack-svg|tanstack-canvas.",
+		kind: "lab",
+		session: "none",
+	},
+	{
+		path: "/lab/bench/tanstack",
+		title: "TanStack Charts pilot",
+		description:
+			"The three overview charts off identical rows; ?renderer=recharts|tanstack-svg|tanstack-canvas.",
+		kind: "bench",
+		session: "none",
+	},
 ]
 
 /** Anything under the `/lab` tree, index included. */

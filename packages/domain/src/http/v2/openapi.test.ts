@@ -198,6 +198,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/scrape_targets/{id}/probe",
 			"POST /v2/session_replays/for_trace",
 			"POST /v2/session_replays/search",
+			"POST /v2/share/alert-chart",
 			"POST /v2/share/og-card",
 			"POST /v2/share/og-meta",
 			"POST /v2/share/resolve",
@@ -252,6 +253,7 @@ describe("MapleApiV2 OpenAPI", () => {
 		"resolveShareWidgetData",
 		"resolveShareOgMeta",
 		"resolveShareOgCard",
+		"resolveAlertChart",
 	])
 
 	/**

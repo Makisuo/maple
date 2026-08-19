@@ -27,16 +27,16 @@ Model: `moonshotai/kimi-k2.7-code` · scope: `src/mcp/__evals__` only.
 
 ### Eval scores
 
-| Suite | Cases | Mean score | Threshold |
-| --- | --- | --- | --- |
-| `cli-scenarios.eval.ts` | 19 | 1.00 | 0.7 |
-| `observability.eval.ts` | 10 | 1.00 | 0.7 |
-| `disambiguation.eval.ts` | 5 | 1.00 | 0.7 |
-| `execution.eval.ts` | 1 | 1.00 | 0.7 |
-| **Total** | **35** | **1.00** | — |
+| Suite                    | Cases  | Mean score | Threshold |
+| ------------------------ | ------ | ---------- | --------- |
+| `cli-scenarios.eval.ts`  | 19     | 1.00       | 0.7       |
+| `observability.eval.ts`  | 10     | 1.00       | 0.7       |
+| `disambiguation.eval.ts` | 5      | 1.00       | 0.7       |
+| `execution.eval.ts`      | 1      | 1.00       | 0.7       |
+| **Total**                | **35** | **1.00**   | —         |
 
 **These suites are at ceiling.** Every case scores 1.00, so a before/after comparison against
-them can only demonstrate *absence of regression* — it cannot demonstrate improvement. Any
+them can only demonstrate _absence of regression_ — it cannot demonstrate improvement. Any
 change claiming to make tool selection better must ship a case that fails before it and passes
 after. Treat the table above as a guardrail, not a scoreboard.
 
@@ -62,18 +62,18 @@ re-baselined.
 
 Ten most expensive:
 
-| Tool | Total | Description | Schema |
-| --- | ---: | ---: | ---: |
-| `create_alert_rule` | 1314 | 63 | 1248 |
-| `create_dashboard` | 1219 | 820 | 397 |
-| `add_dashboard_widget` | 1166 | 287 | 876 |
-| `query_data` | 1021 | 57 | 962 |
-| `search_sessions` | 934 | 144 | 788 |
-| `update_alert_rule` | 924 | 46 | 875 |
-| `search_traces` | 558 | 57 | 498 |
-| `inspect_chart_data` | 440 | 294 | 143 |
-| `run_sql` | 410 | 102 | 306 |
-| `mine_log_patterns` | 402 | 97 | 302 |
+| Tool                   | Total | Description | Schema |
+| ---------------------- | ----: | ----------: | -----: |
+| `create_alert_rule`    |  1314 |          63 |   1248 |
+| `create_dashboard`     |  1219 |         820 |    397 |
+| `add_dashboard_widget` |  1166 |         287 |    876 |
+| `query_data`           |  1021 |          57 |    962 |
+| `search_sessions`      |   934 |         144 |    788 |
+| `update_alert_rule`    |   924 |          46 |    875 |
+| `search_traces`        |   558 |          57 |    498 |
+| `inspect_chart_data`   |   440 |         294 |    143 |
+| `run_sql`              |   410 |         102 |    306 |
+| `mine_log_patterns`    |   402 |          97 |    302 |
 
 The top six are 6,578 tokens — **37% of the catalog**. Note the split: for five of the six the
 cost is the **input schema**, not the prose. Only `create_dashboard` is description-dominant.
@@ -86,12 +86,12 @@ budget actually goes.
 
 Same model, same scope.
 
-| | Before | After | Δ |
-| --- | ---: | ---: | ---: |
-| Tools | 57 | 56 | −1 |
-| Catalog tokens | 17,692 | 15,225 | **−2,467 (−13.9%)** |
-| Eval cases | 35 | 35 | — |
-| Reproducible failures | 0 | 0 | — |
+|                       | Before |  After |                   Δ |
+| --------------------- | -----: | -----: | ------------------: |
+| Tools                 |     57 |     56 |                  −1 |
+| Catalog tokens        | 17,692 | 15,225 | **−2,467 (−13.9%)** |
+| Eval cases            |     35 |     35 |                   — |
+| Reproducible failures |      0 |      0 |                   — |
 
 ### Where the 2,467 tokens came from
 
@@ -107,7 +107,7 @@ are 58% of the catalog but they are mostly load-bearing; do not expect a diet to
 
 ### Verdict on tool selection
 
-Two full runs, each with exactly **one** failing case — but a *different* case each time
+Two full runs, each with exactly **one** failing case — but a _different_ case each time
 ("deep health investigation" in the first, "list all the error types" in the second). The first
 was then re-run twice in isolation and scored **1.00 both times**.
 

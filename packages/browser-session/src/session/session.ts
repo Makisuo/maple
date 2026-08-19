@@ -1,5 +1,5 @@
 import { claimNewVisitor } from "../identity/visitor"
-import * as Schema from "effect/Schema"
+import { isStringRecord, parseJsonObject } from "../platform/json"
 
 const STORAGE_KEY = "maple.session"
 
@@ -77,23 +77,59 @@ export interface SessionRecord {
 	errorCount?: number
 }
 
-const SessionRecordFromJson = Schema.fromJsonString(
-	Schema.Struct({
-		id: Schema.String,
-		startedAt: Schema.Number,
-		lastActivityAt: Schema.Number,
-		chunkSeq: Schema.Number,
-		metaVersion: Schema.optionalKey(Schema.Number),
-		entryUrl: Schema.optionalKey(Schema.String),
-		entryReferrer: Schema.optionalKey(Schema.String),
-		utm: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-		visitorIsNew: Schema.optionalKey(Schema.Boolean),
-		lastUrl: Schema.optionalKey(Schema.String),
-		pageViews: Schema.optionalKey(Schema.Number),
-		clickCount: Schema.optionalKey(Schema.Number),
-		errorCount: Schema.optionalKey(Schema.Number),
-	}),
-)
+/** Optional keys carrying a plain number. Absent is fine; wrongly typed is not. */
+const OPTIONAL_NUMBERS = ["metaVersion", "pageViews", "clickCount", "errorCount"] as const
+/** Optional keys carrying a plain string. */
+const OPTIONAL_STRINGS = ["entryUrl", "entryReferrer", "lastUrl"] as const
+
+/**
+ * Validate a persisted session record. Deliberately still accepts records
+ * written by older SDKs, which have none of the optional fields — see the
+ * `SessionRecord` field comments.
+ *
+ * Returns `undefined` rather than throwing: the sole caller treats a corrupt
+ * record exactly as it treats unreadable storage.
+ */
+function parseSessionRecord(raw: string): SessionRecord | undefined {
+	const value = parseJsonObject(raw)
+	if (!value) return undefined
+
+	const { id, startedAt, lastActivityAt, chunkSeq } = value
+	if (
+		typeof id !== "string" ||
+		typeof startedAt !== "number" ||
+		typeof lastActivityAt !== "number" ||
+		typeof chunkSeq !== "number"
+	) {
+		return undefined
+	}
+
+	// Rebuilt key by key rather than spread, so an unknown key written by a
+	// newer SDK is dropped instead of riding along into the typed record.
+	const record: SessionRecord = { id, startedAt, lastActivityAt, chunkSeq }
+
+	for (const key of OPTIONAL_NUMBERS) {
+		const entry = value[key]
+		if (entry === undefined) continue
+		if (typeof entry !== "number") return undefined
+		record[key] = entry
+	}
+	for (const key of OPTIONAL_STRINGS) {
+		const entry = value[key]
+		if (entry === undefined) continue
+		if (typeof entry !== "string") return undefined
+		record[key] = entry
+	}
+	if (value.visitorIsNew !== undefined) {
+		if (typeof value.visitorIsNew !== "boolean") return undefined
+		record.visitorIsNew = value.visitorIsNew
+	}
+	if (value.utm !== undefined) {
+		if (!isStringRecord(value.utm)) return undefined
+		record.utm = value.utm
+	}
+	return record
+}
 
 /** The immutable acquisition context of a session. */
 export interface EntryContext {
@@ -160,7 +196,9 @@ function readRecord(): SessionRecord | undefined {
 	try {
 		const raw = window.sessionStorage.getItem(STORAGE_KEY)
 		if (!raw) return undefined
-		return Schema.decodeUnknownSync(SessionRecordFromJson)(raw)
+		// A corrupt record falls back to the in-memory copy, exactly as an
+		// unreadable sessionStorage does — it is the same loss of the durable copy.
+		return parseSessionRecord(raw) ?? ephemeral
 	} catch {
 		return ephemeral
 	}

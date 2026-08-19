@@ -289,6 +289,20 @@ const EXPECTED_EMPTY_MESSAGES = new Set([
 	"No enabled queries to run",
 ])
 
+/**
+ * A successful response that carried no rows.
+ *
+ * `getQueryBuilderTimeseries` used to *fail* on an empty window, which is what
+ * put "No query data found in selected time range" on the error path here. It
+ * now answers with an empty envelope, so the emptiness has to be recognised on
+ * the success path instead — otherwise a stat tile would format a transformed
+ * empty array (a `sum` of nothing is `0`) as a real reading.
+ */
+const isEmptyDataEnvelope = (raw: unknown): boolean => {
+	if (typeof raw !== "object" || raw === null || !("data" in raw)) return false
+	return Array.isArray(raw.data) && raw.data.length === 0
+}
+
 const isExpectedEmptyDataError = (error: unknown): boolean => {
 	if (typeof error !== "object" || error === null) return false
 	const message = (error as { message?: unknown }).message
@@ -572,8 +586,12 @@ export function useWidgetDataSource(
 				const kind = classifyWidgetErrorKind(error)
 				return { status: "error", title, message, kind } as const
 			})
-			.onSuccess(
-				(rawData) => ({ status: "ready", data: toReadyWidgetData(rawData, transform) }) as const,
+			.onSuccess((rawData) =>
+				isEmptyDataEnvelope(rawData)
+					? // Same muted "No data" frame the empty-window failure used to
+						// produce; `WidgetFrame` keys off this exact message.
+						({ status: "error", message: "No query data found in selected time range" } as const)
+					: ({ status: "ready", data: toReadyWidgetData(rawData, transform) } as const),
 			)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)
 	}, [result, transform, disableReason, isStatic, enabled, waitingOnVariables, exceedsListCap, narrowed])
@@ -599,6 +617,7 @@ export function useWidgetData(widget: DashboardWidget, enabled = true, options?:
 
 export const __testables = {
 	applyTransform,
+	isEmptyDataEnvelope,
 	filterHiddenSeriesRows,
 	isSeriesNameHidden,
 }

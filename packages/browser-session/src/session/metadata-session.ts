@@ -5,6 +5,8 @@ import { type SessionLifecycleHandle, type SessionLifecycleOptions, startSession
 export interface MetadataSessionOptions extends SessionLifecycleOptions {
 	readonly endpoint: string
 	readonly ingestKey: string
+	/** `x-maple-sdk` value — `sdkHint(name, version)`. */
+	readonly sdk: string
 	/** Called after idle rotation installs the next session. */
 	readonly onSessionChange?: ((sessionId: string) => void) | undefined
 }
@@ -21,7 +23,7 @@ export function startMetadataSession(options: MetadataSessionOptions): MetadataS
 	return startSessionLifecycle(options, {
 		recorded: false,
 		post: (row, keepalive) => {
-			void postSessionMetaRow(options.endpoint, options.ingestKey, row, keepalive)
+			void postSessionMetaRow(options, row, keepalive)
 		},
 		onSuspend: ({ flush, keepalive }) => {
 			// Only on the way out: a rotation drains the outgoing sink itself, and a

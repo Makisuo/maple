@@ -10,6 +10,7 @@ import type {
 	VcsProviderError,
 	VcsProviderId,
 	VcsRateLimitedError,
+	VcsRepositoryBlockedError,
 	VcsRepositoryRef,
 	VcsRepoUnavailableError,
 	VcsSyncJob,
@@ -64,7 +65,11 @@ export interface VcsProviderClient {
 		installation: VcsInstallation,
 	) => Effect.Effect<
 		ReadonlyArray<RepoUpsertInput>,
-		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRateLimitedError
+		| VcsProviderError
+		| VcsInstallationGoneError
+		| VcsRepoUnavailableError
+		| VcsRepositoryBlockedError
+		| VcsRateLimitedError
 	>
 
 	/**
@@ -96,7 +101,10 @@ export interface VcsProviderClient {
 		installation: VcsInstallation,
 		repo: VcsRepositoryRef,
 		opts: { readonly sinceMs: number; readonly untilMs?: number; readonly branch: string },
-	) => Effect.Effect<VcsCommitFetch, VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError>
+	) => Effect.Effect<
+		VcsCommitFetch,
+		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRepositoryBlockedError
+	>
 
 	/**
 	 * All branch names of a repo (never the commits on them), normalized. `truncated`
@@ -109,7 +117,11 @@ export interface VcsProviderClient {
 		repo: VcsRepositoryRef,
 	) => Effect.Effect<
 		{ readonly branches: ReadonlyArray<BranchUpsertInput>; readonly truncated: boolean },
-		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRateLimitedError
+		| VcsProviderError
+		| VcsInstallationGoneError
+		| VcsRepoUnavailableError
+		| VcsRepositoryBlockedError
+		| VcsRateLimitedError
 	>
 
 	/**
@@ -124,7 +136,7 @@ export interface VcsProviderClient {
 		sha: GitCommitSha,
 	) => Effect.Effect<
 		Option.Option<CommitUpsertInput>,
-		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError
+		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRepositoryBlockedError
 	>
 
 	/** Search source within one repository visible to this installation. */
@@ -135,7 +147,11 @@ export interface VcsProviderClient {
 		opts: { readonly path?: string; readonly limit: number },
 	) => Effect.Effect<
 		ReadonlyArray<VcsCodeSearchMatch>,
-		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRateLimitedError
+		| VcsProviderError
+		| VcsInstallationGoneError
+		| VcsRepoUnavailableError
+		| VcsRepositoryBlockedError
+		| VcsRateLimitedError
 	>
 
 	/** Fetch a UTF-8 source file. `Option.none` is an expected missing path/ref. */
@@ -146,6 +162,6 @@ export interface VcsProviderClient {
 		ref: string,
 	) => Effect.Effect<
 		Option.Option<VcsSourceFile>,
-		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError
+		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRepositoryBlockedError
 	>
 }

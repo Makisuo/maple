@@ -54,18 +54,14 @@ describe("toInputSchema nullable-union collapse", () => {
 	})
 
 	it("leaves a non-nullable union alone", () => {
-		const schema = toInputSchema(
-			Schema.Struct({ a: Schema.Union([Schema.String, Schema.Number]) }),
-		)
+		const schema = toInputSchema(Schema.Struct({ a: Schema.Union([Schema.String, Schema.Number]) }))
 		const properties = schema.properties as Record<string, Record<string, unknown>>
 		expect(Array.isArray(properties.a?.anyOf)).toBe(true)
 		expect((properties.a?.anyOf as unknown[]).length).toBe(2)
 	})
 
 	it("still marks optional parameters as not required", () => {
-		const schema = toInputSchema(
-			Schema.Struct({ a: Schema.optional(Schema.String), b: Schema.String }),
-		)
+		const schema = toInputSchema(Schema.Struct({ a: Schema.optional(Schema.String), b: Schema.String }))
 		expect(schema.required).toEqual(["b"])
 	})
 })

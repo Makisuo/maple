@@ -121,10 +121,21 @@ export function ServiceTopOperationsPanel({
 									</span>
 									<LatencyValue ms={op.p95DurationMs} scale="p95" />
 								</span>
-								<Sparkline
-									data={op.sparkline.map((point) => ({ value: point.count }))}
-									className="relative hidden h-5 w-[88px] shrink-0 sm:block"
-								/>
+								{/*
+									The responsive `hidden`/`sm:block` lives on a WRAPPER, never on the
+									chart itself: `PlotFrame` merges the caller's className over its own
+									`flex flex-col` with tailwind-merge, so a display utility passed
+									through silently deletes that `flex` — the plot box's `flex-1` goes
+									inert, it takes its height from its content instead, and the chart
+									locks at the 320px pre-measurement fallback, spilling over the rows
+									below.
+								*/}
+								<div className="relative hidden shrink-0 sm:block">
+									<Sparkline
+										data={op.sparkline.map((point) => ({ value: point.count }))}
+										className="h-5 w-[88px]"
+									/>
+								</div>
 							</button>
 						</li>
 					)

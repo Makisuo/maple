@@ -16,27 +16,23 @@ struct ServiceDetail {
 @MainActor
 @Observable
 final class ServiceDetailModel {
-	private(set) var state: LoadState<ServiceDetail> = .loading
+	private(set) var loader: ScreenLoader<ServiceDetail>!
 
 	let serviceName: String
 	var window: TimeWindow
+	let generation: Int
 
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(serviceName: String, window: TimeWindow, api: any MapleAPI, session: SessionController) {
 		self.serviceName = serviceName
 		self.window = window
 		self.api = api
-		self.session = session
+		self.generation = session.dataGeneration
+		self.loader = ScreenLoader(session: session) { [unowned self] in try await self.fetch() }
 	}
 
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-		if let next = await session.perform({ try await self.fetch() }) {
-			state = next
-		}
-	}
+	var state: LoadState<ServiceDetail> { loader.state }
 
 	private func fetch() async throws -> ServiceDetail {
 		let resolved = window.resolve()
@@ -107,18 +103,13 @@ struct ServiceDetailView: View {
 	var body: some View {
 		ZStack {
 			Token.background.ignoresSafeArea()
-			if let model {
-				LoadableView(
-					state: model.state,
-					emptyTitle: "No data",
-					emptyMessage: "This service reported nothing in \(model.window.phrase).",
-					retry: { Task { await model.load() } }
-				) { detail in
-					ServiceDetailContent(detail: detail, window: model.window)
-				}
-				.refreshable { await model.load(showPlaceholder: false) }
-			} else {
-				SkeletonList()
+			LoadableView(
+				loader: model?.loader,
+				emptyTitle: "No data",
+				emptyMessage: "This service reported nothing in \((model?.window ?? window).phrase).",
+				skeleton: { DetailSkeleton() }
+			) { detail in
+				ServiceDetailContent(detail: detail, window: model?.window ?? window)
 			}
 		}
 		.navigationBarTitleDisplayMode(.inline)
@@ -144,7 +135,7 @@ struct ServiceDetailView: View {
 							get: { model.window },
 							set: { newValue in
 								model.window = newValue
-								Task { await model.load() }
+								Task { await model.loader.load(.replace) }
 							}
 						)
 					)
@@ -153,10 +144,11 @@ struct ServiceDetailView: View {
 		}
 		.task(id: session.dataGeneration) {
 			let model =
-				model
-				?? ServiceDetailModel(serviceName: serviceName, window: window, api: session.api, session: session)
+				model?.generation == session.dataGeneration
+				? model!
+				: ServiceDetailModel(serviceName: serviceName, window: window, api: session.api, session: session)
 			self.model = model
-			await model.load()
+			await model.loader.loadIfNeeded()
 		}
 	}
 }
@@ -168,122 +160,119 @@ private struct ServiceDetailContent: View {
 	private var service: Service { detail.service }
 
 	var body: some View {
-		ScrollView {
-			VStack(alignment: .leading, spacing: 24) {
-				section("Golden signals") {
-					// The number is the window aggregate the API computed; the
-					// line under it is the shape of that window.
-					StatGrid(columns: 3) {
-						SignalTile(
-							label: "Error rate",
-							value: Format.errorRate(service.errorRate),
-							valueTint: Tone.errorRate(service.errorRate),
-							values: detail.errorRate,
-							tint: Token.chartError
-						)
-						SignalTile(
-							label: "p95",
-							value: Format.latency(service.p95LatencyMs),
-							valueTint: Tone.latency(service.p95LatencyMs, scale: .p95),
-							values: detail.p95,
-							tint: Token.chartP95
-						)
-						SignalTile(
-							label: "Throughput",
-							value: Format.throughput(service.throughput),
-							values: detail.throughput,
-							tint: Token.mutedForeground
-						)
-					}
-					.padding(.horizontal, 16)
-
-					StatGrid(columns: 3) {
-						StatTile(
-							label: "p50",
-							value: Format.latency(service.p50LatencyMs),
-							tint: Tone.latency(service.p50LatencyMs, scale: .p50)
-						)
-						StatTile(
-							label: "p99",
-							value: Format.latency(service.p99LatencyMs),
-							tint: Tone.latency(service.p99LatencyMs, scale: .p99)
-						)
-						StatTile(label: "Errors", value: Format.count(service.errorCount))
-					}
-					.padding(.horizontal, 16)
+		VStack(alignment: .leading, spacing: 24) {
+			section("Golden signals") {
+				// The number is the window aggregate the API computed; the
+				// line under it is the shape of that window.
+				StatGrid(columns: 3) {
+					SignalTile(
+						label: "Error rate",
+						value: Format.errorRate(service.errorRate),
+						valueTint: Tone.errorRate(service.errorRate),
+						values: detail.errorRate,
+						tint: Token.chartError
+					)
+					SignalTile(
+						label: "p95",
+						value: Format.latency(service.p95LatencyMs),
+						valueTint: Tone.latency(service.p95LatencyMs, scale: .p95),
+						values: detail.p95,
+						tint: Token.chartP95
+					)
+					SignalTile(
+						label: "Throughput",
+						value: Format.throughput(service.throughput),
+						values: detail.throughput,
+						tint: Token.mutedForeground
+					)
 				}
+				.padding(.horizontal, 16)
 
-				if !detail.incidents.isEmpty {
-					section("Open alerts") {
-						VStack(spacing: 8) {
-							ForEach(detail.incidents) { card in
-								NavigationLink(value: Route.incident(id: card.id)) {
-									IncidentCardView(card: card)
-								}
-								.buttonStyle(.plain)
+				StatGrid(columns: 3) {
+					StatTile(
+						label: "p50",
+						value: Format.latency(service.p50LatencyMs),
+						tint: Tone.latency(service.p50LatencyMs, scale: .p50)
+					)
+					StatTile(
+						label: "p99",
+						value: Format.latency(service.p99LatencyMs),
+						tint: Tone.latency(service.p99LatencyMs, scale: .p99)
+					)
+					StatTile(label: "Errors", value: Format.count(service.errorCount))
+				}
+				.padding(.horizontal, 16)
+			}
+
+			if !detail.incidents.isEmpty {
+				section("Open alerts") {
+					VStack(spacing: 8) {
+						ForEach(detail.incidents) { card in
+							NavigationLink(value: Route.incident(id: card.id)) {
+								IncidentCardView(card: card)
 							}
-						}
-						.padding(.horizontal, 16)
-					}
-				}
-
-				section("Open issues") {
-					if detail.issues.isEmpty {
-						Text("Nothing needs attention in \(window.phrase).")
-							.font(Typo.small)
-							.foregroundStyle(Token.mutedForeground)
-							.padding(.horizontal, 16)
-					} else {
-						VStack(spacing: 0) {
-							ForEach(detail.issues, id: \.id) { issue in
-								NavigationLink(value: Route.issue(id: issue.id)) {
-									IssueRow(issue: issue, showsService: false)
-								}
-								.buttonStyle(RowButtonStyle())
-								Hairline()
-							}
-						}
-					}
-				}
-
-				if !detail.failingOperations.isEmpty {
-					section("Failing operations") {
-						BreakdownList(items: detail.failingOperations, unit: .count, tint: Token.chartError)
-					}
-				}
-
-				if !detail.slowestOperations.isEmpty {
-					section("Slowest operations (p95)") {
-						BreakdownList(items: detail.slowestOperations, unit: .milliseconds, tint: Token.chartP95)
-					}
-				}
-
-				section("Volume") {
-					VStack(spacing: 0) {
-						DetailRow("Spans", Format.count(service.spanCount))
-						Hairline()
-						if service.hasSampling {
-							// Sampled data means the raw counts understate reality;
-							// saying so is more useful than silently scaling.
-							DetailRow("Sampling", "1 in \(Format.count(service.samplingWeight))")
-							Hairline()
-							DetailRow("Est. throughput", Format.throughput(service.tracedThroughput))
-							Hairline()
-						}
-						if !service.deploymentEnvironments.isEmpty {
-							DetailRow("Environments", service.deploymentEnvironments.joined(separator: ", "))
-							Hairline()
-						}
-						if !service.serviceNamespaces.isEmpty {
-							DetailRow("Namespaces", service.serviceNamespaces.joined(separator: ", "))
+							.buttonStyle(.plain)
 						}
 					}
 					.padding(.horizontal, 16)
 				}
 			}
-			.padding(.vertical, 16)
+
+			section("Open issues") {
+				if detail.issues.isEmpty {
+					Text("Nothing needs attention in \(window.phrase).")
+						.font(Typo.small)
+						.foregroundStyle(Token.mutedForeground)
+						.padding(.horizontal, 16)
+				} else {
+					VStack(spacing: 0) {
+						ForEach(detail.issues, id: \.id) { issue in
+							NavigationLink(value: Route.issue(id: issue.id)) {
+								IssueRow(issue: issue, showsService: false)
+							}
+							.buttonStyle(RowButtonStyle())
+							Hairline()
+						}
+					}
+				}
+			}
+
+			if !detail.failingOperations.isEmpty {
+				section("Failing operations") {
+					BreakdownList(items: detail.failingOperations, unit: .count, tint: Token.chartError)
+				}
+			}
+
+			if !detail.slowestOperations.isEmpty {
+				section("Slowest operations (p95)") {
+					BreakdownList(items: detail.slowestOperations, unit: .milliseconds, tint: Token.chartP95)
+				}
+			}
+
+			section("Volume") {
+				VStack(spacing: 0) {
+					DetailRow("Spans", Format.count(service.spanCount))
+					Hairline()
+					if service.hasSampling {
+						// Sampled data means the raw counts understate reality;
+						// saying so is more useful than silently scaling.
+						DetailRow("Sampling", "1 in \(Format.count(service.samplingWeight))")
+						Hairline()
+						DetailRow("Est. throughput", Format.throughput(service.tracedThroughput))
+						Hairline()
+					}
+					if !service.deploymentEnvironments.isEmpty {
+						DetailRow("Environments", service.deploymentEnvironments.joined(separator: ", "))
+						Hairline()
+					}
+					if !service.serviceNamespaces.isEmpty {
+						DetailRow("Namespaces", service.serviceNamespaces.joined(separator: ", "))
+					}
+				}
+				.padding(.horizontal, 16)
+			}
 		}
-		.scrollContentBackground(.hidden)
+		.padding(.vertical, 16)
 	}
 
 	@ViewBuilder

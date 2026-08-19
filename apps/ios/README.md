@@ -68,8 +68,10 @@ The server side is `apps/api/src/services/push` + `platform/Apns.ts`; it sends
 only when `APNS_TEAM_ID` / `APNS_KEY_ID` / `APNS_PRIVATE_KEY` are set on the
 alerting worker. `aps-environment` in the entitlements is `development` and
 Xcode flips it for archives; the app reads whichever landed in the embedded
-profile to pick the APNs host. The simulator on Apple silicon does get a
-token, but nothing is delivered to it from a Worker.
+profile to pick the APNs host, and treats a missing profile (TestFlight and App Store
+installs have none — Apple re-signs and strips it) as production. The simulator on Apple silicon does get a token, but
+nothing is delivered to it from a Worker — registering from the simulator
+leaves a row Apple rejects with `BadDeviceToken`, which disables it.
 
 ## Running without a sign-in
 
@@ -79,6 +81,10 @@ Run → Arguments), or from the CLI:
 ```bash
 SIMCTL_CHILD_MAPLE_FIXTURES=1 xcrun simctl launch booted com.maple.mobile
 ```
+
+Add `MAPLE_FIXTURES_FAIL_EVERY=3` (any `n`) to make every nth request fail as
+if offline — the way to see the error state, the "Couldn't refresh" strip, and
+"Try again" without pulling the plug.
 
 `FixtureAPI` then stands in for the network with one believable organization
 (nine services, a critical incident, a warning, issues, an anomaly), generated

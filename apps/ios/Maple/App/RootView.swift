@@ -10,6 +10,7 @@ import SwiftUI
 struct RootView: View {
 	@Environment(Clerk.self) private var clerk
 	@Environment(SessionController.self) private var session
+	@Environment(AppNavigation.self) private var navigation
 
 	var body: some View {
 		Group {
@@ -38,8 +39,19 @@ struct RootView: View {
 		}
 		.background(Token.background)
 		.tint(Token.primary)
+		// Clerk draws `AuthView` itself; this is what stops sign-in from being
+		// the one screen in system colours and San Francisco.
+		.environment(\.clerkTheme, .maple)
 		.animation(.default, value: session.phase)
-		.onAppear { Typo.assertAvailable() }
+		// A widget tap arrives here whatever the phase is; the tabs may not
+		// exist yet, and `AppNavigation` holds the destination until they do.
+		.onOpenURL { navigation.open($0) }
+		.onAppear {
+			Typo.assertAvailable()
+			// After the font check, so a missing face is reported as a missing
+			// face rather than as a silently system-font navigation bar.
+			NavigationAppearance.apply()
+		}
 	}
 
 	/// Everything about Clerk's state that should re-derive the phase.
@@ -57,7 +69,9 @@ struct RootView: View {
 struct MainTabView: View {
 	@Environment(AppNavigation.self) private var navigation
 	@Environment(SessionController.self) private var session
+	@Environment(\.scenePhase) private var scenePhase
 	private let push = PushRegistrar.shared
+	private let widgets = IssuesWidgetPublisher.shared
 
 	var body: some View {
 		@Bindable var navigation = navigation
@@ -79,6 +93,33 @@ struct MainTabView: View {
 			await push.refreshAuthorization()
 			guard let orgId = session.currentOrganizationId else { return }
 			await push.sync(api: session.api, orgId: orgId)
+		}
+		// The Home Screen widget's data. Keyed on the org so a switch republishes
+		// immediately rather than leaving the previous org's counts on the Home
+		// Screen until the next background refresh.
+		.task(id: session.currentOrganizationId) {
+			guard let orgId = session.currentOrganizationId else { return }
+			widgets.configure(
+				api: session.api,
+				organizationId: orgId,
+				organizationName: session.activeOrganization?.name
+			)
+			await widgets.refresh()
+		}
+		.onChange(of: scenePhase) { _, phase in
+			switch phase {
+			case .active:
+				// Coming back to the app is the cheapest fresh data there is —
+				// the throttle inside `refresh` keeps this from being a request
+				// per app switch.
+				Task { await widgets.refresh() }
+			case .background:
+				// Queue the next opportunistic refresh on the way out, which is
+				// the only moment iOS accepts one.
+				WidgetRefreshScheduler.schedule()
+			default:
+				break
+			}
 		}
 	}
 }

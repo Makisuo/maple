@@ -49,3 +49,36 @@ describe("resolveStrategy (wire shape → package shape)", () => {
 		).toEqual(LAB_EMPTY_RANGE_STRATEGY)
 	})
 })
+
+/**
+ * An empty window used to fail with `WarehouseInvalidInputError`, which marked
+ * the span `Error` and billed an exception event per tile per refresh (24 in 20
+ * minutes from one user paging a quiet dashboard). It is an answer now, and
+ * every caller already renders zero rows as its own empty state.
+ */
+describe("empty window response", () => {
+	it("answers with zero rows and diagnostics describing the requested window", () => {
+		expect(
+			__testables.emptyTimeseriesResponse({
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 01:00:00",
+				queries: [],
+				comparison: { mode: "previous_period" },
+			}),
+		).toEqual({
+			data: [],
+			diagnostics: {
+				primaryWindow: { startTime: "2026-01-01 00:00:00", endTime: "2026-01-01 01:00:00" },
+				comparison: {
+					mode: "previous_period",
+					includePercentChange: true,
+					shiftedByMs: 0,
+					previousStartTime: null,
+					previousEndTime: null,
+				},
+				queries: [],
+				previousQueries: [],
+			},
+		})
+	})
+})
