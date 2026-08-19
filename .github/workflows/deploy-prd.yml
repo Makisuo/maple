@@ -81,7 +81,7 @@ jobs:
             # between runs, so an unchanged ingest is a no-op and a one-crate
             # change is about a minute. Dockerfile.prebuilt then COPYs the result.
             #
-            # Inside rust:1.88-bookworm rather than on the runner: the runtime base
+            # Inside rust:1.94-bookworm rather than on the runner: the runtime base
             # is debian:bookworm-slim (glibc 2.36) and ubuntu-24.04 ships 2.39, so a
             # host-built binary starts and immediately dies with
             # `version 'GLIBC_2.39' not found`.
@@ -113,7 +113,7 @@ jobs:
                       -v "$PWD/apps/ingest:/app" \
                       -v "$RUNNER_TEMP/ingest-target:/target" \
                       -w /app \
-                      rust:1.88-bookworm \
+                      rust:1.94-bookworm \
                       cargo build --release --target-dir /target
                   cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
 
