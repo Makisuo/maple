@@ -36,7 +36,6 @@ import { Route as DashboardsIndexRouteImport } from './routes/dashboards/index'
 import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards/$dashboardId'
 import { Route as DashboardsTemplatesRouteImport } from './routes/dashboards/templates'
 import { Route as ErrorsIndexRouteImport } from './routes/errors/index'
-import { Route as ErrorsErrorTypeRouteImport } from './routes/errors/$errorType'
 import { Route as InfraIndexRouteImport } from './routes/infra/index'
 import { Route as InfraHostNameRouteImport } from './routes/infra/$hostName'
 import { Route as InvestigationsIndexRouteImport } from './routes/investigations/index'
@@ -214,11 +213,6 @@ const DashboardsTemplatesRoute = DashboardsTemplatesRouteImport.update({
 const ErrorsIndexRoute = ErrorsIndexRouteImport.update({
   id: '/errors/',
   path: '/errors/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ErrorsErrorTypeRoute = ErrorsErrorTypeRouteImport.update({
-  id: '/errors/$errorType',
-  path: '/errors/$errorType',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InfraIndexRoute = InfraIndexRouteImport.update({
@@ -469,7 +463,6 @@ export interface FileRoutesByFullPath {
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/dashboards/templates': typeof DashboardsTemplatesRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/lab/charts': typeof LabChartsRoute
@@ -541,7 +534,6 @@ export interface FileRoutesByTo {
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/dashboards/templates': typeof DashboardsTemplatesRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/lab/charts': typeof LabChartsRoute
@@ -615,7 +607,6 @@ export interface FileRoutesById {
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/dashboards/templates': typeof DashboardsTemplatesRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/lab/charts': typeof LabChartsRoute
@@ -690,7 +681,6 @@ export interface FileRouteTypes {
     | '/anomalies/$incidentId'
     | '/dashboards/$dashboardId'
     | '/dashboards/templates'
-    | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
     | '/lab/charts'
@@ -762,7 +752,6 @@ export interface FileRouteTypes {
     | '/anomalies/$incidentId'
     | '/dashboards/$dashboardId'
     | '/dashboards/templates'
-    | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
     | '/lab/charts'
@@ -835,7 +824,6 @@ export interface FileRouteTypes {
     | '/anomalies/$incidentId'
     | '/dashboards/$dashboardId'
     | '/dashboards/templates'
-    | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
     | '/lab/charts'
@@ -909,7 +897,6 @@ export interface RootRouteChildren {
   AnomaliesIncidentIdRoute: typeof AnomaliesIncidentIdRoute
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
   DashboardsTemplatesRoute: typeof DashboardsTemplatesRoute
-  ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute
   InfraHostNameRoute: typeof InfraHostNameRoute
   InvestigationsIdRoute: typeof InvestigationsIdRoute
   LogsLogIdRoute: typeof LogsLogIdRoute
@@ -1136,13 +1123,6 @@ declare module '@tanstack/react-router' {
       path: '/errors'
       fullPath: '/errors/'
       preLoaderRoute: typeof ErrorsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/errors/$errorType': {
-      id: '/errors/$errorType'
-      path: '/errors/$errorType'
-      fullPath: '/errors/$errorType'
-      preLoaderRoute: typeof ErrorsErrorTypeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/infra/': {
@@ -1508,7 +1488,6 @@ const rootRouteChildren: RootRouteChildren = {
   AnomaliesIncidentIdRoute: AnomaliesIncidentIdRoute,
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
   DashboardsTemplatesRoute: DashboardsTemplatesRoute,
-  ErrorsErrorTypeRoute: ErrorsErrorTypeRoute,
   InfraHostNameRoute: InfraHostNameRoute,
   InvestigationsIdRoute: InvestigationsIdRoute,
   LogsLogIdRoute: LogsLogIdRoute,

@@ -108,6 +108,10 @@ export const ErrorsFilters = Schema.Struct({
 	services: Schema.optional(Schema.Array(ServiceName)),
 	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	fingerprintHashes: Schema.optional(Schema.Array(FingerprintHash)),
+	// The sidebar's "Error Type" facet, matched against the stored ErrorLabel.
+	errorLabels: Schema.optional(Schema.Array(Schema.String)),
+	// The sidebar's "Version" facet, matched against ServiceVersion.
+	serviceVersions: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ErrorsFilters = Schema.Schema.Type<typeof ErrorsFilters>
 

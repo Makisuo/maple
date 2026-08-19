@@ -1,4 +1,4 @@
-import type { ErrorIssueId, IssueSeverity, WorkflowState } from "@maple/domain/http"
+import type { ErrorIssueId, WorkflowState } from "@maple/domain/http"
 import { allowedTransitionsForAll } from "@maple/domain/http"
 import type { ReactNode } from "react"
 import { Button } from "@maple/ui/components/ui/button"
@@ -14,9 +14,8 @@ import {
 
 import { WORKFLOW_LABEL } from "@/components/icons/workflow-ring"
 import { XmarkIcon } from "@/components/icons"
+import { SEVERITY_LABEL, SEVERITY_ORDER, SeverityDot } from "./severity-badge"
 import type { IssueMutations } from "./use-issue-mutations"
-
-const SEVERITIES: ReadonlyArray<IssueSeverity> = ["critical", "high", "medium", "low"]
 
 /**
  * A selected row carries its workflow state, not just its id: the "Move to"
@@ -66,24 +65,27 @@ export function IssuesBulkBar({
 			<BulkMenu label="Severity">
 				<DropdownMenuLabel>Set severity</DropdownMenuLabel>
 				<DropdownMenuSeparator />
-				{SEVERITIES.map((severity) => (
+				{SEVERITY_ORDER.map((severity) => (
 					<DropdownMenuItem
 						key={severity}
-						className="capitalize"
+						className="flex items-center gap-2"
 						onClick={() => {
 							void mutations.setSeverityMany(selectedIds, severity)
 							onClear()
 						}}
 					>
-						{severity}
+						<SeverityDot severity={severity} />
+						{SEVERITY_LABEL[severity]}
 					</DropdownMenuItem>
 				))}
 				<DropdownMenuItem
+					className="flex items-center gap-2"
 					onClick={() => {
 						void mutations.setSeverityMany(selectedIds, null)
 						onClear()
 					}}
 				>
+					<SeverityDot severity={null} />
 					Clear severity
 				</DropdownMenuItem>
 			</BulkMenu>

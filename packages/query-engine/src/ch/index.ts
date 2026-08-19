@@ -212,6 +212,8 @@ export {
 export {
 	errorsByTypeQuery,
 	errorsTimeseriesQuery,
+	errorsSparkQuery,
+	ErrorsSparkOutputSchema,
 	spanHierarchyQuery,
 	SPAN_HIERARCHY_MAX_SPANS,
 	spanDetailQuery,
@@ -232,6 +234,8 @@ export {
 	type ErrorsByTypeOutput,
 	type ErrorsTimeseriesOpts,
 	type ErrorsTimeseriesOutput,
+	type ErrorsSparkOpts,
+	type ErrorsSparkOutput,
 	type SpanHierarchyOpts,
 	type SpanHierarchyOutput,
 	type SpanDetailOpts,

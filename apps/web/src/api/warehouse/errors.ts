@@ -11,6 +11,7 @@ import {
 	ErrorsByTypeRequest,
 	ErrorsSummaryRequest,
 	ErrorDetailTracesRequest,
+	ErrorsSparkRequest,
 	ErrorsTimeseriesRequest,
 	FingerprintHash,
 	ServiceName,
@@ -27,6 +28,8 @@ import {
 const OptionalServiceArray = Schema.optional(Schema.mutable(Schema.Array(ServiceName)))
 const OptionalDeploymentEnvArray = Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment)))
 const OptionalFingerprintHashArray = Schema.optional(Schema.mutable(Schema.Array(FingerprintHash)))
+/** "Error Type" / "Version" sidebar facets — plain strings, not branded. */
+const OptionalStringArray = Schema.optional(Schema.mutable(Schema.Array(Schema.String)))
 
 export interface ErrorByType {
 	fingerprintHash: string
@@ -44,6 +47,8 @@ const GetErrorsByTypeInputSchema = Schema.Struct({
 	services: OptionalServiceArray,
 	deploymentEnvs: OptionalDeploymentEnvArray,
 	fingerprintHashes: OptionalFingerprintHashArray,
+	errorLabels: OptionalStringArray,
+	serviceVersions: OptionalStringArray,
 	limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
 	showSpam: Schema.optional(Schema.Boolean),
 	rootOnly: Schema.optional(Schema.Boolean),
@@ -74,6 +79,8 @@ const getErrorsByTypeEffect = Effect.fn("QueryEngine.getErrorsByType")(function*
 					services: input.services,
 					deploymentEnvs: input.deploymentEnvs,
 					fingerprintHashes: input.fingerprintHashes,
+					errorLabels: input.errorLabels,
+					serviceVersions: input.serviceVersions,
 					limit: input.limit,
 				}),
 			})
@@ -95,6 +102,8 @@ const GetErrorsFacetsInputSchema = Schema.Struct({
 	services: OptionalServiceArray,
 	deploymentEnvs: OptionalDeploymentEnvArray,
 	fingerprintHashes: OptionalFingerprintHashArray,
+	errorLabels: OptionalStringArray,
+	serviceVersions: OptionalStringArray,
 	showSpam: Schema.optional(Schema.Boolean),
 	rootOnly: Schema.optional(Schema.Boolean),
 })
@@ -133,6 +142,8 @@ const getErrorsFacetsEffect = Effect.fn("QueryEngine.getErrorsFacets")(function*
 					services: input.services,
 					deploymentEnvs: input.deploymentEnvs,
 					fingerprintHashes: input.fingerprintHashes,
+					errorLabels: input.errorLabels,
+					serviceVersions: input.serviceVersions,
 				},
 			},
 		}),
@@ -142,24 +153,32 @@ const getErrorsFacetsEffect = Effect.fn("QueryEngine.getErrorsFacets")(function*
 	const services: FacetItem[] = []
 	const deploymentEnvs: FacetItem[] = []
 	const errorTypes: FacetItem[] = []
+	const serviceVersions: FacetItem[] = []
 
 	for (const row of facetsData) {
 		const item = { name: row.name, count: Number(row.count) }
+		// These strings must match the `facetType` literals in `errorsFacetsQuery`.
+		// They did not: the query emits "environment"/"error_type" and this read
+		// "deploymentEnv"/"errorType", so those two sections rendered with zero
+		// options and the sidebar looked like it had no environment filter at all.
 		switch (row.facetType) {
 			case "service":
 				services.push(item)
 				break
-			case "deploymentEnv":
+			case "environment":
 				deploymentEnvs.push(item)
 				break
-			case "errorType":
+			case "error_type":
 				errorTypes.push(item)
+				break
+			case "version":
+				serviceVersions.push(item)
 				break
 		}
 	}
 
 	return {
-		data: { services, deploymentEnvs, errorTypes },
+		data: { services, deploymentEnvs, errorTypes, serviceVersions },
 	}
 })
 
@@ -169,6 +188,8 @@ const GetErrorsSummaryInputSchema = Schema.Struct({
 	services: OptionalServiceArray,
 	deploymentEnvs: OptionalDeploymentEnvArray,
 	fingerprintHashes: OptionalFingerprintHashArray,
+	errorLabels: OptionalStringArray,
+	serviceVersions: OptionalStringArray,
 	showSpam: Schema.optional(Schema.Boolean),
 	rootOnly: Schema.optional(Schema.Boolean),
 })
@@ -198,6 +219,8 @@ const getErrorsSummaryEffect = Effect.fn("QueryEngine.getErrorsSummary")(functio
 					services: input.services,
 					deploymentEnvs: input.deploymentEnvs,
 					fingerprintHashes: input.fingerprintHashes,
+					errorLabels: input.errorLabels,
+					serviceVersions: input.serviceVersions,
 				}),
 			})
 		}),
@@ -318,5 +341,79 @@ const getErrorsTimeseriesEffect = Effect.fn("QueryEngine.getErrorsTimeseries")(f
 			bucket: String(raw.bucket),
 			count: Number(raw.count),
 		})),
+	}
+})
+
+/**
+ * Bucketed counts for many fingerprints at once, pivoted into one series per
+ * fingerprint. The warehouse returns tall rows; the list draws one sparkline
+ * per row, so the pivot happens once here rather than in every row component.
+ *
+ * Buckets are sparse — a fingerprint that was quiet for an hour has no row for
+ * it. Densifying is the caller's job, since only it knows the bucket grid.
+ */
+export interface ErrorsSparkSeries {
+	fingerprintHash: string
+	points: ReadonlyArray<ErrorsTimeseriesItem>
+}
+
+const GetErrorsSparkInputSchema = Schema.Struct({
+	fingerprintHashes: Schema.mutable(Schema.Array(FingerprintHash)),
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
+	services: OptionalServiceArray,
+	deploymentEnvs: OptionalDeploymentEnvArray,
+	errorLabels: OptionalStringArray,
+	serviceVersions: OptionalStringArray,
+	bucketSeconds: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+})
+
+export type GetErrorsSparkInput = (typeof GetErrorsSparkInputSchema)["Encoded"]
+
+export function getErrorsSpark({ data }: { data: GetErrorsSparkInput }) {
+	return getErrorsSparkEffect({ data })
+}
+
+const getErrorsSparkEffect = Effect.fn("QueryEngine.getErrorsSpark")(function* ({
+	data,
+}: {
+	data: GetErrorsSparkInput
+}) {
+	const input = yield* decodeInput(GetErrorsSparkInputSchema, data ?? {}, "getErrorsSpark")
+	const fallback = defaultErrorsTimeRange(yield* Clock.currentTimeMillis)
+
+	// No fingerprints means nothing to chart — skipping the round-trip matters
+	// here because the list renders before its issues have loaded.
+	if (input.fingerprintHashes.length === 0) return { data: [] as ErrorsSparkSeries[] }
+
+	const result = yield* runWarehouseQuery("errorsSpark", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			return yield* client.queryEngine.errorsSpark({
+				payload: new ErrorsSparkRequest({
+					startTime: input.startTime ?? fallback.startTime,
+					endTime: input.endTime ?? fallback.endTime,
+					fingerprintHashes: input.fingerprintHashes,
+					services: input.services,
+					deploymentEnvs: input.deploymentEnvs,
+					errorLabels: input.errorLabels,
+					serviceVersions: input.serviceVersions,
+					bucketSeconds: input.bucketSeconds,
+				}),
+			})
+		}),
+	)
+
+	const byFingerprint = new Map<string, ErrorsTimeseriesItem[]>()
+	for (const raw of result.data) {
+		const hash = String(raw.fingerprintHash)
+		const points = byFingerprint.get(hash)
+		const point = { bucket: String(raw.bucket), count: Number(raw.count) }
+		if (points) points.push(point)
+		else byFingerprint.set(hash, [point])
+	}
+
+	return {
+		data: [...byFingerprint].map(([fingerprintHash, points]) => ({ fingerprintHash, points })),
 	}
 })

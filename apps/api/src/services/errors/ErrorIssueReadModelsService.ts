@@ -89,6 +89,9 @@ export interface ErrorIssueReadModelsPublicApi {
 			readonly severity?: IssueSeverity | "unset"
 			readonly kind?: IssueKind
 			readonly service?: string
+			/** Restrict to these fingerprint hashes (volume-ranked lists ask for an
+			 *  explicit set). An empty array matches nothing, as it should. */
+			readonly fingerprintHashes?: ReadonlyArray<string>
 			/** Only issues whose fingerprint the warehouse observed in this
 			 * deployment environment (within startTime/endTime, defaulting to the
 			 * trailing 30d). Costs one warehouse round-trip; excludes alert-kind
@@ -183,6 +186,8 @@ const make: Effect.Effect<
 			else if (opts.severity) conditions.push(eq(errorIssues.severity, opts.severity))
 			if (opts.kind) conditions.push(eq(errorIssues.kind, opts.kind))
 			if (opts.service) conditions.push(eq(errorIssues.serviceName, opts.service))
+			if (opts.fingerprintHashes !== undefined)
+				conditions.push(inArray(errorIssues.fingerprintHash, opts.fingerprintHashes))
 
 			// `""` is a real filter (raw spans without a deployment env), so check
 			// for undefined rather than truthiness.

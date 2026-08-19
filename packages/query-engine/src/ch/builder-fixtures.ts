@@ -345,6 +345,16 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 	},
 	{
 		module: "errors",
+		name: "errorsSparkQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(CH.errorsSparkQuery({ fingerprintHashes: [FINGERPRINT] }), {
+				...window,
+				bucketSeconds: 300,
+			}),
+	},
+	{
+		module: "errors",
 		name: "errorIssueSampleTracesQuery",
 		label: "default",
 		compile: () =>

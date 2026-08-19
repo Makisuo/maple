@@ -114,6 +114,19 @@ const decodeCursor = (
 	)
 }
 
+/**
+ * `fingerprint_hash=1,2,3` -> `["1","2","3"]`, or `undefined` when the caller
+ * did not filter. A param that is present but yields nothing stays an empty
+ * array so it matches no issues, rather than silently widening to everything.
+ */
+function parseFingerprintHashes(raw: string | undefined): ReadonlyArray<string> | undefined {
+	if (raw === undefined) return undefined
+	return raw
+		.split(",")
+		.map((hash) => hash.trim())
+		.filter((hash) => hash.length > 0)
+}
+
 export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssues", (handlers) =>
 	Effect.gen(function* () {
 		const readModels = yield* ErrorIssueReadModelsService
@@ -128,6 +141,7 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 						severity: query.severity,
 						kind: query.kind,
 						service: query.service_name,
+						fingerprintHashes: parseFingerprintHashes(query.fingerprint_hash),
 						deploymentEnv: query.deployment_environment,
 						startTime: query.start_time,
 						endTime: query.end_time,
