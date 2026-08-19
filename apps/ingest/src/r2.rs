@@ -39,8 +39,8 @@ pub enum R2Error {
 impl std::fmt::Display for R2Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            R2Error::Transport(message) => write!(f, "r2 transport error: {message}"),
-            R2Error::Status { status, body } => {
+            Self::Transport(message) => write!(f, "r2 transport error: {message}"),
+            Self::Status { status, body } => {
                 write!(f, "r2 responded {status}: {body}")
             }
         }
@@ -76,18 +76,30 @@ pub struct ReplayBlobStore {
     region: String,
     timeout: Duration,
 }
+/// Hand-written: a derived `Debug` would put the signing credentials one
+/// `{:?}` away from a log line.
+impl std::fmt::Debug for ReplayBlobStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplayBlobStore")
+            .field("endpoint", &self.endpoint)
+            .field("bucket", &self.bucket)
+            .field("region", &self.region)
+            .field("timeout", &self.timeout)
+            .finish_non_exhaustive()
+    }
+}
 
 impl ReplayBlobStore {
     pub fn new(
         client: impl Into<crate::telemetry::HttpClient>,
-        endpoint: String,
+        endpoint: &str,
         bucket: String,
         access_key_id: String,
         secret_access_key: String,
         region: String,
         timeout: Duration,
     ) -> Self {
-        let endpoint = endpoint.trim_end_matches('/').to_string();
+        let endpoint = endpoint.trim_end_matches('/').to_owned();
         let host = host_from_endpoint(&endpoint);
         Self {
             client: client.into(),
@@ -125,13 +137,13 @@ impl ReplayBlobStore {
         let payload_sha256 = hex(&Sha256::digest(&body));
 
         let mut headers: Vec<(String, String)> = vec![
-            ("content-type".to_string(), content_type.to_string()),
-            ("host".to_string(), self.host.clone()),
-            ("x-amz-content-sha256".to_string(), payload_sha256.clone()),
-            ("x-amz-date".to_string(), amz_date(now)),
+            ("content-type".to_owned(), content_type.to_owned()),
+            ("host".to_owned(), self.host.clone()),
+            ("x-amz-content-sha256".to_owned(), payload_sha256.clone()),
+            ("x-amz-date".to_owned(), amz_date(now)),
         ];
         if let Some(encoding) = content_encoding {
-            headers.push(("content-encoding".to_string(), encoding.to_string()));
+            headers.push(("content-encoding".to_owned(), encoding.to_owned()));
         }
 
         let authorization = authorization_header(&SigningParams {
@@ -197,7 +209,7 @@ fn authorization_header(params: &SigningParams) -> String {
     let mut headers: Vec<(String, String)> = params
         .headers
         .iter()
-        .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string()))
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_owned()))
         .collect();
     headers.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -208,8 +220,13 @@ fn authorization_header(params: &SigningParams) -> String {
         .join(";");
     let canonical_headers = headers
         .iter()
-        .map(|(name, value)| format!("{name}:{value}\n"))
-        .collect::<String>();
+        .fold(String::new(), |mut out, (name, value)| {
+            out.push_str(name);
+            out.push(':');
+            out.push_str(value);
+            out.push('\n');
+            out
+        });
 
     let canonical_request = format!(
         "{}\n{}\n{}\n{}\n{}\n{}",
@@ -258,6 +275,10 @@ fn signing_key(secret_access_key: &str, datestamp: &str, region: &str, service: 
     hmac(&key, b"aws4_request")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "HMAC accepts keys of any length, so `new_from_slice` cannot fail here"
+)]
 fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
     let mut mac = HmacSha256::new_from_slice(key).expect("hmac accepts any key length");
     mac.update(data);
@@ -265,8 +286,16 @@ fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(char::from(HEX_LOWER[usize::from(byte >> 4)]));
+        out.push(char::from(HEX_LOWER[usize::from(byte & 0x0f)]));
+    }
+    out
 }
+
+const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
+const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
 
 fn amz_date(now: DateTime<Utc>) -> String {
     now.format("%Y%m%dT%H%M%SZ").to_string()
@@ -282,9 +311,13 @@ fn uri_encode_path(path: &str) -> String {
     for byte in path.as_bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
-                out.push(*byte as char)
+                out.push(*byte as char);
             }
-            _ => out.push_str(&format!("%{byte:02X}")),
+            _ => {
+                out.push('%');
+                out.push(char::from(HEX_UPPER[usize::from(byte >> 4)]));
+                out.push(char::from(HEX_UPPER[usize::from(byte & 0x0f)]));
+            }
         }
     }
     out
@@ -293,12 +326,11 @@ fn uri_encode_path(path: &str) -> String {
 fn host_from_endpoint(endpoint: &str) -> String {
     endpoint
         .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(endpoint)
+        .map_or(endpoint, |(_, rest)| rest)
         .split('/')
         .next()
         .unwrap_or("")
-        .to_string()
+        .to_owned()
 }
 
 #[cfg(test)]
@@ -376,18 +408,21 @@ mod tests {
     fn matches_the_aws_put_object_vector() {
         let now = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
         let payload_sha256 =
-            "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072".to_string();
+            "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072".to_owned();
         let headers = vec![
             (
-                "date".to_string(),
-                "Fri, 24 May 2013 00:00:00 GMT".to_string(),
+                "date".to_owned(),
+                "Fri, 24 May 2013 00:00:00 GMT".to_owned(),
             ),
-            ("host".to_string(), "examplebucket.s3.amazonaws.com".to_string()),
-            ("x-amz-content-sha256".to_string(), payload_sha256.clone()),
-            ("x-amz-date".to_string(), "20130524T000000Z".to_string()),
             (
-                "x-amz-storage-class".to_string(),
-                "REDUCED_REDUNDANCY".to_string(),
+                "host".to_owned(),
+                "examplebucket.s3.amazonaws.com".to_owned(),
+            ),
+            ("x-amz-content-sha256".to_owned(), payload_sha256.clone()),
+            ("x-amz-date".to_owned(), "20130524T000000Z".to_owned()),
+            (
+                "x-amz-storage-class".to_owned(),
+                "REDUCED_REDUNDANCY".to_owned(),
             ),
         ];
 
@@ -416,7 +451,7 @@ mod tests {
     #[test]
     fn sorts_headers_regardless_of_call_order() {
         let now = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
-        let sha = "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072".to_string();
+        let sha = "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072".to_owned();
         let build = |headers: Vec<(String, String)>| {
             authorization_header(&SigningParams {
                 method: "PUT",
@@ -432,12 +467,12 @@ mod tests {
             })
         };
         let forward = build(vec![
-            ("host".to_string(), "h".to_string()),
-            ("x-amz-date".to_string(), "20130524T000000Z".to_string()),
+            ("host".to_owned(), "h".to_owned()),
+            ("x-amz-date".to_owned(), "20130524T000000Z".to_owned()),
         ]);
         let reversed = build(vec![
-            ("x-amz-date".to_string(), "20130524T000000Z".to_string()),
-            ("HOST".to_string(), "h".to_string()),
+            ("x-amz-date".to_owned(), "20130524T000000Z".to_owned()),
+            ("HOST".to_owned(), "h".to_owned()),
         ]);
         assert_eq!(forward, reversed);
     }
