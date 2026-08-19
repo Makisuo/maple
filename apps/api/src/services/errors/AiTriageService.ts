@@ -5,6 +5,7 @@ import {
 	AiTriageUsage,
 	AiTriageValidationError,
 	IsoDateTimeString,
+	type IssueSeverity,
 	type OrgId,
 	type UserId,
 } from "@maple/domain/http"
@@ -12,6 +13,7 @@ import { aiTriageSettings, type AiTriageSettingsRow } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
+import { widthFor } from "@/workflows/plan-normalize"
 import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import {
 	DEFAULT_MAX_PASSES_PER_DAY,
@@ -57,38 +59,52 @@ export class AiTriageService extends Context.Service<AiTriageService, AiTriageSe
 			})
 
 			/**
-			 * Exhaustion is asked of the same verdict the enqueue path uses, with the
-			 * cost of a typical planned start, rather than recomputed from the raw
-			 * numbers here. A second copy of the arithmetic is a second thing to get
-			 * out of step with the rule that actually refuses starts.
+			 * What a start of this severity would actually reserve.
+			 *
+			 * Derived from `widthFor` rather than pinned to a constant, because the
+			 * enqueue path judges a start against its *reservation* (`width + 2`), not
+			 * against what the run eventually settles at. Probing with the settled
+			 * cost reported triage as healthy across the last two passes of the
+			 * budget — exactly the window in which starts were already being refused.
 			 */
-			const TYPICAL_PLANNED_PASSES = 4
+			const probeCost = (severity: IssueSeverity) => widthFor(severity, "error") + 2
 
+			/**
+			 * Pause state is asked of the same verdict the enqueue path uses, twice:
+			 * once as an ordinary incident and once as a critical. One probe cannot
+			 * answer both questions — with a reserve configured, a medium-severity
+			 * probe reports `passes_reserved` whether the reserve is untouched or long
+			 * gone, so it can never say whether criticals are still starting.
+			 */
 			const settingsToDocument = (
 				row: AiTriageSettingsRow | undefined,
 				usage: InvestigationUsage,
 				nowMs: number,
 			): AiTriageSettingsDocument => {
-				const verdict = evaluateInvestigationQuota({
-					usage,
-					limits: row,
-					passCount: TYPICAL_PLANNED_PASSES,
-					nowMs,
-					// The banner speaks for ordinary incidents; `high`/`critical` keep
-					// starting from the reserve while this reads exhausted.
-					severity: "medium",
-				})
-				const exhausted = verdict.kind === "exceeded"
+				const probe = (severity: IssueSeverity) =>
+					evaluateInvestigationQuota({
+						usage,
+						limits: row,
+						passCount: probeCost(severity),
+						nowMs,
+						severity,
+					})
+				const ordinary = probe("medium")
+				const priority = probe("critical")
+				// The runs ceiling is checked before any pass arithmetic and has no
+				// reserve, so it refuses both — reporting it as a pass problem would
+				// send the reader to raise a number that was never the constraint.
+				const paused = ordinary.kind === "exceeded" ? ordinary : null
 				return new AiTriageSettingsDocument({
 					enabled: row?.enabled ?? false,
 					maxRunsPerDay: row?.maxRunsPerDay ?? DEFAULT_MAX_RUNS_PER_DAY,
 					maxPassesPerDay: row?.maxPassesPerDay ?? DEFAULT_MAX_PASSES_PER_DAY,
 					usage: new AiTriageUsage({ runs: usage.runs, passes: usage.passes }),
-					passesExhausted: exhausted,
+					ordinaryPaused: ordinary.kind === "exceeded",
+					priorityPaused: priority.kind === "exceeded",
+					pausedDimension: paused?.dimension ?? null,
 					resumesAt:
-						verdict.kind === "exceeded"
-							? decodeIsoSync(new Date(verdict.retryableAtMs).toISOString())
-							: null,
+						paused === null ? null : decodeIsoSync(new Date(paused.retryableAtMs).toISOString()),
 					updatedAt: row?.updatedAt ? decodeIsoSync(row.updatedAt.toISOString()) : null,
 					updatedBy: row?.updatedBy ?? null,
 				})

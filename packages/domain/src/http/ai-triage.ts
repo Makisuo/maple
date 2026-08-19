@@ -92,12 +92,29 @@ export class AiTriageSettingsDocument extends Schema.Class<AiTriageSettingsDocum
 	/**
 	 * Whether an ordinary-severity incident would be refused right now.
 	 *
-	 * Derived server-side from the same verdict the enqueue path uses, so the
-	 * banner cannot drift from the rule that actually refuses starts. `high` and
-	 * `critical` may still start while this is true — they draw on the reserve.
+	 * Derived server-side from the same verdict the enqueue path uses, at the same
+	 * cost a real start reserves, so the banner cannot drift from the rule that
+	 * actually refuses starts.
 	 */
-	passesExhausted: Schema.Boolean,
-	/** When the budget resets — the next UTC midnight. Null when nothing is exhausted. */
+	ordinaryPaused: Schema.Boolean,
+	/**
+	 * Whether a `critical` would be refused too.
+	 *
+	 * Separate from {@link ordinaryPaused} because the two are different outages
+	 * and the honest sentence differs: with only the ordinary slice gone, urgent
+	 * incidents are still being investigated from the reserve; with this set,
+	 * nothing is starting at all. Collapsing them tells an operator that criticals
+	 * are covered at exactly the moment they are not.
+	 */
+	priorityPaused: Schema.Boolean,
+	/**
+	 * Which ceiling refused the start, so the copy can name the right number.
+	 *
+	 * `runs` has no reserve, so it pauses ordinary and priority together — which is
+	 * why this cannot be inferred from the two booleans alone.
+	 */
+	pausedDimension: Schema.NullOr(Schema.Literals(["runs", "passes", "passes_reserved"])),
+	/** When the budget resets — the next UTC midnight. Null when nothing is paused. */
 	resumesAt: Schema.NullOr(IsoDateTimeString),
 	updatedAt: Schema.NullOr(IsoDateTimeString),
 	updatedBy: Schema.NullOr(UserId),
