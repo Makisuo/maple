@@ -7,11 +7,14 @@
 // `AiSessionSpanRow`, so `mapAiSpans(rows)` is the whole read path.
 
 export {
+	aiSessionFacetsQuery,
+	aiSessionFacetsRowSchema,
 	aiSessionListQuery,
 	aiSessionListRowSchema,
 	AI_SESSION_SPANS_MAX_SPANS,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
+	type AiSessionFacetsOutput,
 	type AiSessionListOpts,
 	type AiSessionListOutput,
 	type AiSessionSpansOpts,

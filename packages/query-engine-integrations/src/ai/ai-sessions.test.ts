@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCH, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { compileCH, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
+	aiSessionFacetsQuery,
+	aiSessionFacetsRowSchema,
 	aiSessionListQuery,
 	aiSessionListRowSchema,
 	aiSessionSpansQuery,
@@ -132,6 +134,73 @@ describe("aiSessionListQuery", () => {
 			endTime: "2026-08-19 10:33:36.242000000",
 			durationMs: 10_417,
 		})
+	})
+})
+
+describe("aiSessionFacetsQuery", () => {
+	it("groups the detection scan only — no fan-out over trace_detail_spans", () => {
+		const { sql } = compileUnion(aiSessionFacetsQuery(), params)
+
+		expect(sql).toContain("FROM traces")
+		expect(sql).not.toContain("trace_detail_spans")
+		expect(sql).not.toContain("TraceId IN (SELECT")
+		expect(sql).toContain("UNION ALL")
+	})
+
+	it("counts distinct sessions per vendor and per service", () => {
+		const { sql } = compileUnion(aiSessionFacetsQuery(), params)
+
+		expect(sql).toContain("SpanAttributes['maple_ai.vendor.id'] AS name")
+		expect(sql).toContain("ServiceName AS name")
+		expect(sql).toContain("'vendor' AS facetType")
+		expect(sql).toContain("'service' AS facetType")
+		expect(sql.split("uniqExact(SpanAttributes['maple_ai.session.id']) AS count").length - 1).toBe(2)
+		expect(sql.split("GROUP BY name").length - 1).toBe(2)
+		expect(sql.split("ORDER BY count DESC").length - 1).toBe(2)
+	})
+
+	it("repeats the org and window predicates on every union branch", () => {
+		const { sql } = compileUnion(aiSessionFacetsQuery(), params)
+
+		expect(orgPredicateCount(sql)).toBe(2)
+		expect(sql.split(`Timestamp >= '${params.startTime}'`).length - 1).toBe(2)
+		expect(sql.split(`Timestamp <= '${params.endTime}'`).length - 1).toBe(2)
+	})
+
+	it("is org-scoped", () => {
+		expect(compileUnion(aiSessionFacetsQuery(), params).tenantScope).toBe("org")
+	})
+
+	it("counts only session-bearing spans, and drops the blank option", () => {
+		const { sql } = compileUnion(aiSessionFacetsQuery(), params)
+
+		expect(
+			sql.split(
+				"(mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')",
+			).length - 1,
+		).toBe(2)
+		expect(sql).toContain("SpanAttributes['maple_ai.vendor.id'] != ''")
+		expect(sql).toContain("ServiceName != ''")
+	})
+
+	it("leaves no unresolved param placeholder", () => {
+		expect(compileUnion(aiSessionFacetsQuery(), params).sql).not.toContain("__PARAM_")
+	})
+
+	it("decodes the quoted 64-bit uniqExact count", () => {
+		const compiled = compileUnion(aiSessionFacetsQuery(), params, {
+			rowSchema: aiSessionFacetsRowSchema,
+		})
+
+		expect(
+			decodeRows(compiled, [
+				{ name: "eve", count: "12", facetType: "vendor" },
+				{ name: "maple-slack-agent", count: 9, facetType: "service" },
+			]),
+		).toEqual([
+			{ name: "eve", count: 12, facetType: "vendor" },
+			{ name: "maple-slack-agent", count: 9, facetType: "service" },
+		])
 	})
 })
 

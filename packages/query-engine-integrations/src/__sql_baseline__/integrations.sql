@@ -1,3 +1,33 @@
+-- builder:ai-sessions:aiSessionFacetsQuery:default
+SELECT
+          SpanAttributes['maple_ai.vendor.id'] AS name,
+          uniqExact(SpanAttributes['maple_ai.session.id']) AS count,
+          'vendor' AS facetType
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
+          AND SpanAttributes['maple_ai.vendor.id'] != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          ServiceName AS name,
+          uniqExact(SpanAttributes['maple_ai.session.id']) AS count,
+          'service' AS facetType
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
+          AND ServiceName != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+FORMAT JSON
+
 -- builder:ai-sessions:aiSessionListQuery:default
 SELECT
           sessionId AS sessionId,
