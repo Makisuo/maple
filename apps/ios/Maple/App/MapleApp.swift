@@ -64,11 +64,12 @@ struct MapleApp: App {
 		// Only our own API carries `traceparent`. Clerk is a third party and has
 		// no use for our trace ids; the default would send the header everywhere.
 		options.tracing.tracePropagationTargets = ["api.maple.dev", "api-staging.maple.dev", "localhost"]
-		// The dashboard renders customers' telemetry, so every masking default
-		// stays on. Set explicitly rather than inherited: this is the one app
-		// where a future default flip would leak someone else's data.
-		options.replay.maskAllText = true
-		options.replay.maskAllImages = true
+		// Masking off: a fully masked replay of this app is a screen of grey
+		// rectangles and tells us nothing about how the dashboard is used.
+		// Set explicitly rather than inherited so the trade-off stays visible —
+		// recorded frames of this app do contain customers' telemetry.
+		options.replay.maskAllText = false
+		options.replay.maskAllImages = false
 		Maple.start(options: options)
 	}
 
