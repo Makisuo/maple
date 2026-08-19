@@ -1,6 +1,5 @@
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
-import { cn } from "@maple/ui/lib/utils"
-import { formatSessionDuration, gradientFor } from "@maple/ui/lib/replay-format"
+import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { ChatBubbleSparkleIcon } from "@/components/icons"
 
 /** The wire row from `listAiSessions` — one AI agent session, newest first. */
@@ -80,14 +79,9 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 							<span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-destructive" />
 						)}
 
-						<div
-							className={cn(
-								"grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold",
-								`bg-gradient-to-br ${gradientFor(session.sessionId)} text-white shadow-sm`,
-							)}
-						>
-							{(vendor[0] ?? "?").toUpperCase()}
-						</div>
+						{/* No leading avatar: the replays list uses one because a gradient
+						    initial encodes a *person*; an initial for a framework just reads
+						    as a counterfeit vendor logo. The framework is named in text. */}
 
 						{/* Identity lane: session id, framework underneath */}
 						<div className="min-w-0 flex-1 overflow-hidden">
