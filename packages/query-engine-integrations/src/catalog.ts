@@ -27,6 +27,33 @@ const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 
 export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 	{
+		module: "ai-sessions",
+		name: "aiSessionListQuery",
+		label: "default",
+		compile: () => compile(CH.aiSessionListQuery(), window),
+	},
+	{
+		// The vendor/service filters the AI sessions list page sends.
+		module: "ai-sessions",
+		name: "aiSessionListQuery",
+		label: "filtered",
+		compile: () =>
+			compile(
+				CH.aiSessionListQuery({
+					limit: 25,
+					vendorIds: ["eve"],
+					serviceNames: ["maple-slack-agent"],
+				}),
+				window,
+			),
+	},
+	{
+		module: "ai-sessions",
+		name: "aiSessionSpansQuery",
+		label: "default",
+		compile: () => compile(CH.aiSessionSpansQuery(), { ...window, sessionId: "wrun_sql_catalog" }),
+	},
+	{
 		module: "cloudflare-infra",
 		name: "cloudflareZoneLatencySQL",
 		label: "default",
