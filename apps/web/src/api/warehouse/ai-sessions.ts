@@ -19,7 +19,7 @@ const defaultTimeRange = (nowMs: number) => {
 	}
 }
 
-export const listAiSessions = Effect.fn("AiSessions.list")(function* ({
+export const listAiSessions = Effect.fn("AiSessions.listAiSessions")(function* ({
 	data,
 }: {
 	data: ListAiSessionsInput

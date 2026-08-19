@@ -2,8 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { TinybirdDateTime } from "../query-engine"
 import { SessionAuthorization } from "./current-tenant"
-import { QueryEngineExecutionError, QueryEngineTimeoutError } from "./query-engine"
-import { warehouseHttpErrors } from "./warehouse"
+import { warehouseReadHttpErrors } from "./warehouse"
 
 // AI agent session endpoint schemas
 //
@@ -17,9 +16,9 @@ import { warehouseHttpErrors } from "./warehouse"
 export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("ListAiSessionsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	// `Schema.optional`, not `optionalKey`: the web client constructs the payload
-	// JS-side and passes explicit `undefined` for an unset field. See the note in
-	// session-replay.ts (and CLAUDE.md, optional vs optionalKey).
+	// `Schema.optional`, not `optionalKey` — matches the `ListReplaysRequest`
+	// optional-payload contract for JS-constructed clients (see the note in
+	// session-replay.ts and CLAUDE.md, optional vs optionalKey).
 	limit: Schema.optional(Schema.Number),
 }) {}
 
@@ -44,11 +43,10 @@ export class ListAiSessionsResponse extends Schema.Class<ListAiSessionsResponse>
 	data: Schema.Array(AiSessionListItem),
 }) {}
 
-const aiSessionEndpointErrors = [
-	QueryEngineExecutionError,
-	QueryEngineTimeoutError,
-	...warehouseHttpErrors,
-] as const
+// Exactly what a compiled warehouse read can fail with — not the wider
+// `sessionReplayEndpointErrors` union, whose extra members (the legacy
+// QueryEngine wrappers, token-mint errors) this endpoint can never produce.
+const aiSessionEndpointErrors = warehouseReadHttpErrors
 
 export class AiSessionsInternalApiGroup extends HttpApiGroup.make("aiSessionsInternal")
 	.add(

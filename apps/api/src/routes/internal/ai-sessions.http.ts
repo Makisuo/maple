@@ -28,13 +28,14 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 						{ rowSchema: Integrations.aiSessionListRowSchema },
 					)
-					// The row schema already coerces the UInt64 aggregates, so no
-					// per-field Number() at this edge (unlike listReplays).
+					// The row schema already coerces the UInt64 aggregates and decodes
+					// exactly the response's fields, so rows pass through unmapped
+					// (unlike listReplays, which re-brands and re-coerces per field).
 					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 						profile: "list",
 						context: "listAiSessions",
 					})
-					return new ListAiSessionsResponse({ data: rows.map((row) => ({ ...row })) })
+					return new ListAiSessionsResponse({ data: rows })
 				}),
 			)
 		}),

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { isNavItemActive, isPathActive, navGroups, paletteNavItems, type NavItem } from "./nav-items"
-import { ENABLED_ORGANIZATION_FEATURE_FLAGS } from "@/lib/organization-feature-flags"
+import {
+	DISABLED_ORGANIZATION_FEATURE_FLAGS,
+	ENABLED_ORGANIZATION_FEATURE_FLAGS,
+	type OrganizationFeatureFlags,
+} from "@/lib/organization-feature-flags"
 
-function findItem(title: string): NavItem {
-	const item = navGroups()
+function findItem(title: string, flags?: OrganizationFeatureFlags): NavItem {
+	const item = navGroups(flags)
 		.flatMap((group) => group.items)
 		.find((candidate) => candidate.title === title)
 	if (!item) throw new Error(`no nav item titled ${title}`)
@@ -78,30 +82,34 @@ describe("navGroups", () => {
 		// The closed row previews its children by drawing their glyphs (see
 		// `NavRow`), and draws nothing at all unless *every* child has one — so
 		// dropping an icon here silently removes the preview rather than
-		// rendering a gap.
+		// rendering a gap. Runs with every flag on so the invariant also covers
+		// flagged children (Agent Sessions), not just the unconditional rows.
 		for (const title of ["Explore", "Infrastructure"]) {
-			const item = findItem(title)
+			const item = findItem(title, ENABLED_ORGANIZATION_FEATURE_FLAGS)
 			expect(item.subItems?.length).toBeGreaterThan(0)
 			expect(item.subItems?.every((sub) => sub.icon)).toBe(true)
 		}
 	})
 
 	it("shows Agent Sessions only behind the agentTracing flag", () => {
-		// No flags (or flags still loading) hides the row — a row that appears and
-		// then vanishes is worse than one that arrives a beat late.
-		const withoutFlags = findItem("Explore").subItems?.map((sub) => sub.href)
-		expect(withoutFlags).not.toContain("/agent-sessions")
+		// The off state is asserted with the shape production actually passes: a
+		// fully-populated all-false object (what the hook returns while Clerk
+		// loads and for unentitled orgs), not just an absent argument. A presence
+		// check instead of `flags?.agentTracing` must fail here.
+		for (const off of [undefined, DISABLED_ORGANIZATION_FEATURE_FLAGS]) {
+			expect(findItem("Explore", off).subItems?.map((sub) => sub.href)).not.toContain(
+				"/agent-sessions",
+			)
+			expect(paletteNavItems(off).map((entry) => entry.href)).not.toContain("/agent-sessions")
+		}
 
-		const explore = navGroups(ENABLED_ORGANIZATION_FEATURE_FLAGS)
-			.flatMap((group) => group.items)
-			.find((item) => item.title === "Explore")
-		expect(explore?.subItems?.map((sub) => sub.href)).toContain("/agent-sessions")
+		const explore = findItem("Explore", ENABLED_ORGANIZATION_FEATURE_FLAGS)
+		expect(explore.subItems?.map((sub) => sub.href)).toContain("/agent-sessions")
 		// The palette derives from navGroups, so the flag must gate both surfaces
 		// together — findable by name exactly when the sidebar shows it.
 		expect(paletteNavItems(ENABLED_ORGANIZATION_FEATURE_FLAGS).map((entry) => entry.href)).toContain(
 			"/agent-sessions",
 		)
-		expect(paletteNavItems().map((entry) => entry.href)).not.toContain("/agent-sessions")
 	})
 
 	it("keeps Infrastructure's preview to four marks once repeats collapse", () => {

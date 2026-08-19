@@ -1,4 +1,5 @@
 import { useOrganization } from "@clerk/clerk-react"
+import { useMemo } from "react"
 
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import {
@@ -31,12 +32,17 @@ export interface OrganizationFeatureFlagsState {
  */
 function useClerkOrganizationFeatureFlags(): OrganizationFeatureFlagsState {
 	const { organization, isLoaded } = useOrganization()
-	return {
-		flags: isLoaded
-			? organizationFeatureFlagsFrom(organization?.publicMetadata)
-			: DISABLED_ORGANIZATION_FEATURE_FLAGS,
-		isLoaded,
-	}
+	const metadata = organization?.publicMetadata
+	// Memoized so the state (and the decoded flags object) keeps its identity
+	// across Clerk resource ticks that leave the metadata untouched — consumers
+	// put `flags` in dependency arrays.
+	return useMemo(
+		() => ({
+			flags: isLoaded ? organizationFeatureFlagsFrom(metadata) : DISABLED_ORGANIZATION_FEATURE_FLAGS,
+			isLoaded,
+		}),
+		[metadata, isLoaded],
+	)
 }
 
 /** Self-hosted: nothing to load, and every rollout is on. Touches no Clerk hook. */

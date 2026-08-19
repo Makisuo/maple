@@ -17,18 +17,41 @@ export interface AgentSessionRow {
 }
 
 /**
- * Vendor ids the ingest gateway stamps → display names. Anything unlisted shows
- * its raw id, minus the `unknown:` prefix the gateway uses for dialect-detected
- * spans with no framework identity.
+ * Vendor ids the ingest gateway stamps (`AI_VENDORS` in
+ * apps/ingest/src/ai_session.rs) → brand names. Listed here are the ids whose
+ * brand casing the title-case fallback below can't derive — acronyms (SDK,
+ * ADK), camel brands (LiteLLM, DSPy), and deliberately lowercase ones (eve,
+ * smolagents). Anything unlisted falls back to Title Case with the `unknown:`
+ * dialect prefix stripped, so a newly stamped vendor degrades to a readable
+ * name instead of a raw id.
  */
 const VENDOR_LABELS = new Map<string, string>([
+	["claude_agent_sdk", "Claude Agent SDK"],
+	["crewai", "CrewAI"],
+	["dspy", "DSPy"],
+	["effect_ai", "Effect AI"],
 	["eve", "eve"],
-	["vercel_ai_sdk", "Vercel AI SDK"],
+	["google_adk", "Google ADK"],
+	["langchain", "LangChain"],
+	["litellm", "LiteLLM"],
+	["llamaindex", "LlamaIndex"],
+	["openai_agents_sdk", "OpenAI Agents SDK"],
 	["openinference-openai", "OpenInference · OpenAI"],
+	["pydantic_ai", "Pydantic AI"],
+	["smolagents", "smolagents"],
+	["spring_ai", "Spring AI"],
+	["vercel_ai_sdk", "Vercel AI SDK"],
 ])
 
 function vendorLabel(vendorId: string): string {
-	return VENDOR_LABELS.get(vendorId) ?? vendorId.replace(/^unknown:/, "")
+	const known = VENDOR_LABELS.get(vendorId)
+	if (known) return known
+	return vendorId
+		.replace(/^unknown:/, "")
+		.split(/[_-]+/)
+		.filter(Boolean)
+		.map((word) => word[0]!.toUpperCase() + word.slice(1))
+		.join(" ")
 }
 
 function absoluteTs(startTime: string): string {

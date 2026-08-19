@@ -5,13 +5,14 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { AgentSessionsList } from "@/components/agent-sessions/agent-sessions-list"
 import { NotFoundError } from "@/components/route-error"
 import { QueryErrorState } from "@/components/common/query-error-state"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 import { listAiSessionsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import type { TimeRange } from "@/components/time-range-picker/types"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ToolbarStat } from "@maple/ui/components/toolbar"
@@ -32,7 +33,11 @@ export const Route = createFileRoute("/agent-sessions/")({
  * (not `beforeLoad`) because router context carries no flags, and it checks
  * `isLoaded` first so an entitled org doesn't get a not-found flash while Clerk
  * answers. The warehouse read lives in the gated content component, so an
- * unflagged org never fires the query.
+ * unflagged org never fires the query — which is also why there is no route
+ * `loader` warming the atom the way `/replays` does: a loader runs regardless
+ * of the flag, so the prefetch-on-hover win would cost every unflagged org a
+ * warehouse query. Entitled orgs pay full latency on mount instead; revisit
+ * when the flag retires.
  */
 function AgentSessionsPage() {
 	const { flags, isLoaded } = useOrganizationFeatureFlags()
@@ -53,7 +58,9 @@ function AgentSessionsPageContent() {
 	}
 
 	return (
-		<PageRefreshProvider timePreset={search.timePreset ?? "24h"}>
+		// No preset default while an absolute range is active — mirrors the
+		// picker's own presetValue expression below.
+		<PageRefreshProvider timePreset={search.timePreset ?? (search.startTime ? undefined : "24h")}>
 			<DashboardLayout.Root>
 				<DashboardLayout.Breadcrumbs items={[{ label: "Agent Sessions" }]} />
 				<DashboardLayout.Body>
@@ -82,7 +89,9 @@ function AgentSessionsBody({
 		search.endTime,
 		search.timePreset ?? "24h",
 	)
-	const result = useAtomValue(
+	// Refreshable (not plain useAtomValue): on an absolute time range the atom
+	// key never rolls, so Reload only works through the refresh subscription.
+	const result = useRetainedRefreshableResultValue(
 		listAiSessionsResultAtom({ data: { startTime, endTime, limit: AGENT_SESSIONS_LIMIT } }),
 	)
 	const sessions = Result.isSuccess(result) ? result.value.data : []
