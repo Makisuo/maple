@@ -831,7 +831,21 @@ jobs:
             # Deliberately NOT folded into `install --with-deps`: system libs go to
             # apt paths that ~/.cache/ms-playwright does not cover, so on a cache hit
             # the combined form would skip them and webkit would fail to launch.
+            #
+            # Skipped for chromium, where it installed nothing we need and cost more
+            # than the tests. On ubuntu-latest the runner image already carries every
+            # shared library chromium links, so `install-deps chromium` resolved to
+            # exactly nine font packages -- fonts-{wqy-zenhei,ipafont-gothic,unifont,
+            # tlwg-loma-otf,freefont-ttf} and xfonts-* -- i.e. CJK, Cyrillic and Thai
+            # glyph coverage. The bench pages render latin service names only, so those
+            # fonts change no pixel we measure, yet the 21 MB pull off the Azure mirror
+            # ran 12s on a good day and 205s on a bad one, against a 55s test body.
+            # firefox (40 packages) and webkit (100+) do pull real libraries -- keep it.
+            #
+            # If chromium ever fails to launch here, the runner image dropped a library:
+            # re-enable this for chromium rather than debugging the browser.
             - name: Install Playwright system deps
+              if: ${{ matrix.browser != 'chromium' }}
               env:
                   PW_BROWSER: ${{ matrix.browser }}
               run: bunx playwright install-deps "$PW_BROWSER"
