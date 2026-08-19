@@ -110,6 +110,7 @@ import {
 	getSessionTraceSummaries,
 	listReplays,
 } from "@/api/warehouse/replays"
+import { listAiSessions } from "@/api/warehouse/ai-sessions"
 import {
 	getWebAnalyticsBreakdowns,
 	getWebAnalyticsPages,
@@ -243,6 +244,10 @@ export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy, 
 })
 
 export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
+	staleTime: 30_000,
+})
+
+export const listAiSessionsResultAtom = makeQueryAtomFamily(listAiSessions, {
 	staleTime: 30_000,
 })
 

@@ -142,7 +142,7 @@ function PaletteContent({
 		// the K8s lists and the integration pages are all reachable by name here,
 		// which is what lets the sidebar fold them into two sections.
 		const navigation: PaletteEntry[] = [
-			...paletteNavItems().map((item) => ({
+			...paletteNavItems(featureFlags).map((item) => ({
 				id: item.id,
 				title: item.title,
 				group: "Navigation" as const,

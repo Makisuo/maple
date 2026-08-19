@@ -2,6 +2,7 @@ import {
 	BellIcon,
 	ChartBarHorizontalIcon,
 	ChartLineIcon,
+	ChatBubbleSparkleIcon,
 	CircleWarningIcon,
 	CloudflareIcon,
 	ComputerIcon,
@@ -18,6 +19,7 @@ import {
 	ServerIcon,
 } from "@/components/icons"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
+import type { OrganizationFeatureFlags } from "@/lib/organization-feature-flags"
 
 export interface NavSubItem {
 	title: string
@@ -101,7 +103,7 @@ const infrastructureItem: NavItem = {
  * (see `NavRow`) — a section named "Explore" says nothing about the four
  * signals it hides.
  */
-const exploreItem: NavItem = {
+const exploreItem = (flags?: OrganizationFeatureFlags): NavItem => ({
 	title: "Explore",
 	href: "/traces",
 	icon: LayersIcon,
@@ -110,24 +112,28 @@ const exploreItem: NavItem = {
 		{ title: "Logs", href: "/logs", icon: FileIcon },
 		{ title: "Metrics", href: "/metrics", icon: ChartLineIcon },
 		{ title: "Replays", href: "/replays", icon: PlayRotateClockwiseIcon },
+		// Behind the `agent_tracing` rollout flag. The parameter is optional on
+		// purpose: a caller with no organization context yet hides the row rather
+		// than flashing it (see `navGroups`).
+		...(flags?.agentTracing
+			? [{ title: "Agent Sessions", href: "/agent-sessions", icon: ChatBubbleSparkleIcon }]
+			: []),
 	],
-}
+})
 
 /**
  * The sidebar's information architecture, and the single source the command
  * palette flattens. Anomalies is reachable at /anomalies but stays out of both
  * until the detector has been validated against production baselines.
  *
- * Takes no flags: no row is behind a staged rollout right now (Web Analytics was
- * the last, and shipped to everyone). Re-gating one means taking an
- * `OrganizationFeatureFlags` parameter back and threading it from
- * `useOrganizationFeatureFlags` — and making it *optional*, so a caller with no
- * organization context yet hides the row rather than flashing it. A row that
- * appears and then vanishes is worse than one that arrives a beat late.
+ * `flags` is *optional*, so a caller with no organization context yet hides a
+ * flagged row rather than flashing it — a row that appears and then vanishes is
+ * worse than one that arrives a beat late. Agent Sessions is the one row behind
+ * a staged rollout right now (`agentTracing`).
  */
-export function navGroups(): NavGroup[] {
+export function navGroups(flags?: OrganizationFeatureFlags): NavGroup[] {
 	const analyzeItems: NavItem[] = [
-		exploreItem,
+		exploreItem(flags),
 		{ title: "Web Analytics", href: "/analytics", icon: ChartBarHorizontalIcon },
 		{ title: "Dashboards", href: "/dashboards", icon: GridSquareCirclePlusIcon },
 	]
@@ -188,7 +194,7 @@ export interface PaletteNavEntry {
  * are the entries that keep muscle memory working, and they were never in the
  * palette before this.
  */
-export function paletteNavItems(): PaletteNavEntry[] {
+export function paletteNavItems(flags?: OrganizationFeatureFlags): PaletteNavEntry[] {
 	const entries: PaletteNavEntry[] = []
 	const seen = new Set<string>()
 	const push = (entry: PaletteNavEntry) => {
@@ -198,7 +204,7 @@ export function paletteNavItems(): PaletteNavEntry[] {
 		entries.push(entry)
 	}
 
-	for (const group of navGroups()) {
+	for (const group of navGroups(flags)) {
 		for (const item of group.items) {
 			push({ id: `nav:${item.title}`, title: item.title, href: item.href, icon: item.icon })
 			for (const sub of item.subItems ?? []) {

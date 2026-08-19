@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { isNavItemActive, isPathActive, navGroups, paletteNavItems, type NavItem } from "./nav-items"
+import { ENABLED_ORGANIZATION_FEATURE_FLAGS } from "@/lib/organization-feature-flags"
 
 function findItem(title: string): NavItem {
 	const item = navGroups()
@@ -83,6 +84,24 @@ describe("navGroups", () => {
 			expect(item.subItems?.length).toBeGreaterThan(0)
 			expect(item.subItems?.every((sub) => sub.icon)).toBe(true)
 		}
+	})
+
+	it("shows Agent Sessions only behind the agentTracing flag", () => {
+		// No flags (or flags still loading) hides the row — a row that appears and
+		// then vanishes is worse than one that arrives a beat late.
+		const withoutFlags = findItem("Explore").subItems?.map((sub) => sub.href)
+		expect(withoutFlags).not.toContain("/agent-sessions")
+
+		const explore = navGroups(ENABLED_ORGANIZATION_FEATURE_FLAGS)
+			.flatMap((group) => group.items)
+			.find((item) => item.title === "Explore")
+		expect(explore?.subItems?.map((sub) => sub.href)).toContain("/agent-sessions")
+		// The palette derives from navGroups, so the flag must gate both surfaces
+		// together — findable by name exactly when the sidebar shows it.
+		expect(paletteNavItems(ENABLED_ORGANIZATION_FEATURE_FLAGS).map((entry) => entry.href)).toContain(
+			"/agent-sessions",
+		)
+		expect(paletteNavItems().map((entry) => entry.href)).not.toContain("/agent-sessions")
 	})
 
 	it("keeps Infrastructure's preview to four marks once repeats collapse", () => {

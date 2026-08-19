@@ -1,5 +1,6 @@
 export * from "./api"
 export * from "./internal-api"
+export * from "./ai-sessions"
 export * from "./ai-triage"
 export * from "./investigations"
 export * from "./anomalies"
