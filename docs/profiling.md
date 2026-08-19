@@ -30,15 +30,15 @@ and item 17 of [`otel-coverage-roadmap.md`](otel-coverage-roadmap.md)._
 
 ## 1. Where the standard actually is
 
-| Aspect | State (Aug 2026) | Source |
-| --- | --- | --- |
-| Signal / data model | **Alpha** (pre-Experimental; "should not be used for critical production workloads") | [spec](https://opentelemetry.io/docs/specs/otel/profiles/), [alpha post](https://opentelemetry.io/blog/2026/profiles-alpha/) |
-| OTLP transport | **Development** — Stable only for traces/metrics/logs | [OTLP spec](https://opentelemetry.io/docs/specs/otlp/) |
-| HTTP path / RPC | `POST /v1development/profiles`, `ProfilesService/Export`, `ExportProfilesServiceRequest{resource_profiles}` / `partial_success.rejected_profiles` | [OTLP spec](https://opentelemetry.io/docs/specs/otlp/) |
-| Wire format | pprof-derived, `ProfilesDictionary` (string / function / location / stack / link / attribute tables shared per request), ~40% smaller than pprof | [alpha post](https://opentelemetry.io/blog/2026/profiles-alpha/) |
-| Rust proto crate | `opentelemetry-proto 0.31` ships `profiles.v1development` behind a `profiles` cargo feature (present in our registry copy, **not enabled** in `apps/ingest/Cargo.toml`) | local crate |
-| Collector | v0.148+: eBPF profiler receiver (donated by Elastic, in the official distribution), `pprof` receiver, `k8sattributes` enrichment, OTTL on profiles | [alpha post](https://opentelemetry.io/blog/2026/profiles-alpha/) |
-| Backends | Pyroscope: experimental OTLP ingest; Elastic: yes; ClickStack: no; others "being built" | [ClickHouse](https://clickhouse.com/resources/engineering/otel-news-profiles-signal), [Pyroscope docs](https://grafana.com/docs/pyroscope/latest/configure-client/opentelemetry/ebpf-profiler/) |
+| Aspect              | State (Aug 2026)                                                                                                                                                        | Source                                                                                                                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Signal / data model | **Alpha** (pre-Experimental; "should not be used for critical production workloads")                                                                                    | [spec](https://opentelemetry.io/docs/specs/otel/profiles/), [alpha post](https://opentelemetry.io/blog/2026/profiles-alpha/)                                                                    |
+| OTLP transport      | **Development** — Stable only for traces/metrics/logs                                                                                                                   | [OTLP spec](https://opentelemetry.io/docs/specs/otlp/)                                                                                                                                          |
+| HTTP path / RPC     | `POST /v1development/profiles`, `ProfilesService/Export`, `ExportProfilesServiceRequest{resource_profiles}` / `partial_success.rejected_profiles`                       | [OTLP spec](https://opentelemetry.io/docs/specs/otlp/)                                                                                                                                          |
+| Wire format         | pprof-derived, `ProfilesDictionary` (string / function / location / stack / link / attribute tables shared per request), ~40% smaller than pprof                        | [alpha post](https://opentelemetry.io/blog/2026/profiles-alpha/)                                                                                                                                |
+| Rust proto crate    | `opentelemetry-proto 0.31` ships `profiles.v1development` behind a `profiles` cargo feature (present in our registry copy, **not enabled** in `apps/ingest/Cargo.toml`) | local crate                                                                                                                                                                                     |
+| Collector           | v0.148+: eBPF profiler receiver (donated by Elastic, in the official distribution), `pprof` receiver, `k8sattributes` enrichment, OTTL on profiles                      | [alpha post](https://opentelemetry.io/blog/2026/profiles-alpha/)                                                                                                                                |
+| Backends            | Pyroscope: experimental OTLP ingest; Elastic: yes; ClickStack: no; others "being built"                                                                                 | [ClickHouse](https://clickhouse.com/resources/engineering/otel-news-profiles-signal), [Pyroscope docs](https://grafana.com/docs/pyroscope/latest/configure-client/opentelemetry/ebpf-profiler/) |
 
 Implications we design around:
 
@@ -56,12 +56,12 @@ Implications we design around:
 This is the make-or-break question for a signal — the spec being real does not mean customers
 have producers. Four tiers, from zero-code to bespoke:
 
-| Producer | Languages | Where it runs | Trace link | Effort for customer |
-| --- | --- | --- | --- | --- |
-| **OTel eBPF profiler** (in the collector distro) | Go, JVM, Node, .NET, Ruby, Python, PHP, BEAM, native | Linux hosts / k8s DaemonSet, privileged | per-runtime, partial | Deploy the collector with the receiver + point at Maple. No app changes. |
-| **pprof-emitting profilers** → collector `pprof` receiver → OTLP | Go `runtime/pprof`, Rust `pprof`, Node `pprof` npm, Python `py-spy`, JVM `async-profiler` (which now also emits OTLP directly) | anywhere | no (time-window only) | App-side profiler + a collector hop |
-| **`effect-sdk` built-in** (new, this plan) | Node ≥18, Bun | Node/Bun servers. **Not Cloudflare Workers** (no profiler API) — must no-op there | time-window in MVP; span-linked later | `profiling: { cpu: true }` |
-| **`packages/browser`** | — | — | — | Out of scope: browsers expose no sampling profiler worth shipping (JS Self-Profiling API is Chromium-only, origin-trial-grade). |
+| Producer                                                         | Languages                                                                                                                      | Where it runs                                                                     | Trace link                            | Effort for customer                                                                                                             |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **OTel eBPF profiler** (in the collector distro)                 | Go, JVM, Node, .NET, Ruby, Python, PHP, BEAM, native                                                                           | Linux hosts / k8s DaemonSet, privileged                                           | per-runtime, partial                  | Deploy the collector with the receiver + point at Maple. No app changes.                                                        |
+| **pprof-emitting profilers** → collector `pprof` receiver → OTLP | Go `runtime/pprof`, Rust `pprof`, Node `pprof` npm, Python `py-spy`, JVM `async-profiler` (which now also emits OTLP directly) | anywhere                                                                          | no (time-window only)                 | App-side profiler + a collector hop                                                                                             |
+| **`effect-sdk` built-in** (new, this plan)                       | Node ≥18, Bun                                                                                                                  | Node/Bun servers. **Not Cloudflare Workers** (no profiler API) — must no-op there | time-window in MVP; span-linked later | `profiling: { cpu: true }`                                                                                                      |
+| **`packages/browser`**                                           | —                                                                                                                              | —                                                                                 | —                                     | Out of scope: browsers expose no sampling profiler worth shipping (JS Self-Profiling API is Chromium-only, origin-trial-grade). |
 
 **Verified this session:** `node:inspector` `Profiler.start/stop` returns a full V8 sampling
 profile (`nodes`, `samples`, `timeDeltas`, `callFrame{functionName,url,lineNumber}`) with **no
@@ -148,7 +148,7 @@ profiles_stacks_hourly_mv → profiles_stacks_hourly (SummingMergeTree, 30d TTL)
 Queries this supports (all in `packages/query-engine/src/ch/queries/profiles.ts`):
 
 - **flameGraph** — `SELECT Frames, sum(Value) FROM … WHERE OrgId, ServiceName, SampleType,
-  window [AND SpanId = ?] GROUP BY Frames` → the client folds the (frames[], value) list into a
+window [AND SpanId = ?] GROUP BY Frames` → the client folds the (frames[], value) list into a
   tree. Wire size is bounded by distinct stacks, not samples; cap at N stacks by value and
   report the tail as an "other" node.
 - **topFunctions** — `arrayJoin(Frames)` for total; `Frames[1]` for self; both `sum(Value)`.
@@ -171,21 +171,21 @@ at 1 kHz over a 10 s window is ~10 k samples/10 s _before_ we aggregate them by 
 
 Everything a new signal touches, from the code as it is on `main` today:
 
-| Seam | File | Change |
-| --- | --- | --- |
-| Proto | `Cargo.toml` `opentelemetry-proto` features | add `"profiles"`; pin the exact version and note it in the plan doc |
-| Signal enums | `main.rs` `Signal` (`Traces\|Logs\|Metrics`), `DecodedPayload`, `item_count`, `encode`; `telemetry.rs` `TelemetrySignal`, `DatasourceNames` | add `Profiles`; `INGEST_TINYBIRD_DATASOURCE_PROFILES` |
-| HTTP route | `main.rs` router (`/v1/traces` …) | `POST /v1development/profiles` **and** `/v1/profiles` (future RC path); both map to `Signal::Profiles`. `format!("/v1/{}", signal.path())` at the `ingest` span and `forward_to_collector` needs a `Signal::route_path()` — the profiles path breaks that assumption. |
-| gRPC | `run_grpc_server` | 4th service, `ProfilesServiceServer`, same `export` shape as logs |
-| Decode + enrich | `decode_and_enrich_payload` (6-arm match), `otlp_json::normalize` root field | `resourceProfiles` arm for protobuf + JSON; `enrich_profiles_request` writes `maple_org_id` etc. into resource attributes exactly like the others |
-| Flatten | new `telemetry.rs::encode_profiles` | the real work: resolve dictionary indices → frame name/file/line arrays, `cityHash64` stack, one row per `(sample, value_index)`, link → `TraceId`/`SpanId`, `routing_key = hash64(trace_id)` when linked else `hash64(profile_id)` so a span's samples land in one lane |
-| Pipeline | `accept_native_decoded_payload` arm → `accept_profiles_to` (copy of `accept_logs_to`) | export lanes are destination-major, so profiles ride the same WAL/lanes for free |
-| Insert mapping | `scripts/generate-clickhouse-insert-mappings.ts` `OTLP_DATASOURCES` | add `"profiles"`; regenerates `apps/ingest/src/clickhouse_insert_mappings.rs` and `apps/cli/src/server/schema/local-inserts.json` |
-| BYO ClickHouse | `packages/domain/src/clickhouse/migrations/00NN_profiles.ts` + `migrations/index.ts` | new delta migration; bumps `clickHouseSchemaVersion` → ingest `SCHEMA_VERSION` gate |
-| Billing | `usage_metrics.rs` (`"logs" \| "traces" \| "metrics"`), `reserve_autumn_usage`, Autumn feature ids | new feature id `profiles`; re-size `USAGE_CARDINALITY_LIMIT` (sized for 3 signals × orgs) |
-| Forward mode | `forward_to_collector` | forward profiles too — collectors ≥0.148 accept them |
-| Local CLI | `apps/cli/src/server/serve.ts` `Signal` union, decode/encode/route, `local-schema.sql` | same table in chDB so `maple local` shows profiles too |
-| Self-obs | `metrics::native_rows` etc. keyed by `signal.path()` | falls out once the enum exists; add `maple.ingest.frame_count` to the encode span |
+| Seam            | File                                                                                                                                        | Change                                                                                                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Proto           | `Cargo.toml` `opentelemetry-proto` features                                                                                                 | add `"profiles"`; pin the exact version and note it in the plan doc                                                                                                                                                                                                      |
+| Signal enums    | `main.rs` `Signal` (`Traces\|Logs\|Metrics`), `DecodedPayload`, `item_count`, `encode`; `telemetry.rs` `TelemetrySignal`, `DatasourceNames` | add `Profiles`; `INGEST_TINYBIRD_DATASOURCE_PROFILES`                                                                                                                                                                                                                    |
+| HTTP route      | `main.rs` router (`/v1/traces` …)                                                                                                           | `POST /v1development/profiles` **and** `/v1/profiles` (future RC path); both map to `Signal::Profiles`. `format!("/v1/{}", signal.path())` at the `ingest` span and `forward_to_collector` needs a `Signal::route_path()` — the profiles path breaks that assumption.    |
+| gRPC            | `run_grpc_server`                                                                                                                           | 4th service, `ProfilesServiceServer`, same `export` shape as logs                                                                                                                                                                                                        |
+| Decode + enrich | `decode_and_enrich_payload` (6-arm match), `otlp_json::normalize` root field                                                                | `resourceProfiles` arm for protobuf + JSON; `enrich_profiles_request` writes `maple_org_id` etc. into resource attributes exactly like the others                                                                                                                        |
+| Flatten         | new `telemetry.rs::encode_profiles`                                                                                                         | the real work: resolve dictionary indices → frame name/file/line arrays, `cityHash64` stack, one row per `(sample, value_index)`, link → `TraceId`/`SpanId`, `routing_key = hash64(trace_id)` when linked else `hash64(profile_id)` so a span's samples land in one lane |
+| Pipeline        | `accept_native_decoded_payload` arm → `accept_profiles_to` (copy of `accept_logs_to`)                                                       | export lanes are destination-major, so profiles ride the same WAL/lanes for free                                                                                                                                                                                         |
+| Insert mapping  | `scripts/generate-clickhouse-insert-mappings.ts` `OTLP_DATASOURCES`                                                                         | add `"profiles"`; regenerates `apps/ingest/src/clickhouse_insert_mappings.rs` and `apps/cli/src/server/schema/local-inserts.json`                                                                                                                                        |
+| BYO ClickHouse  | `packages/domain/src/clickhouse/migrations/00NN_profiles.ts` + `migrations/index.ts`                                                        | new delta migration; bumps `clickHouseSchemaVersion` → ingest `SCHEMA_VERSION` gate                                                                                                                                                                                      |
+| Billing         | `usage_metrics.rs` (`"logs" \| "traces" \| "metrics"`), `reserve_autumn_usage`, Autumn feature ids                                          | new feature id `profiles`; re-size `USAGE_CARDINALITY_LIMIT` (sized for 3 signals × orgs)                                                                                                                                                                                |
+| Forward mode    | `forward_to_collector`                                                                                                                      | forward profiles too — collectors ≥0.148 accept them                                                                                                                                                                                                                     |
+| Local CLI       | `apps/cli/src/server/serve.ts` `Signal` union, decode/encode/route, `local-schema.sql`                                                      | same table in chDB so `maple local` shows profiles too                                                                                                                                                                                                                   |
+| Self-obs        | `metrics::native_rows` etc. keyed by `signal.path()`                                                                                        | falls out once the enum exists; add `maple.ingest.frame_count` to the encode span                                                                                                                                                                                        |
 
 Frames come from the producer as-is. eBPF/native frames arrive **unsymbolized** (addresses +
 mapping filename); we render those as `mapping!0x1234` in MVP and treat symbolization
@@ -230,22 +230,18 @@ route; the SDK overview stops saying "traces, logs, and metrics" (nine files say
   gate), exported from `ch/index.ts`; registry entries in `registry/profiles.ts` with
   `profile: "aggregation"` and cache policy like the service-overview queries.
 - **API:** `V2ProfilesApiGroup` in `packages/domain/src/http/v2/telemetry.ts` (`/v2/profiles/
-  flamegraph`, `/top-functions`, `/timeseries`, `/sample-types`) + `HttpV2ProfilesLive` in
+flamegraph`, `/top-functions`, `/timeseries`, `/sample-types`) + `HttpV2ProfilesLive` in
   `apps/api/src/routes/v2/telemetry.http.ts`, following the logs group exactly. Flame graph is
   the one user-data-sized response → `compiledQueryBounded`.
-- **UI:**
-  - `routes/services/$serviceName.tsx`: `ServiceDetailTab` gains `"profiles"` (tab literal +
-    trigger + body) → new `components/services/service-profiles-tab.tsx`.
-  - `components/traces/span-detail-panel.tsx`: a `profile` tab next to `details / logs /
-    infrastructure`, hidden when the service has no profiles in range (one cheap `sampleTypes`
-    call).
-  - New `packages/ui/src/components/profiles/flame-graph.tsx`: an **aggregate icicle**, not the
-    trace waterfall — it folds `(frames[], value)` rows into a tree, lays out by share, and
-    renders on canvas (the TanStack-canvas evaluation showed canvas is the right call for dense
-    rectangles). Reuse the waterfall's tooltip and `color-by` palette so it reads as one family.
-    Click-to-zoom, hover tooltip (self / total / share), text search that highlights matching
-    frames. Keep it to that.
-  - Data reads through `makeQueryAtomFamily` in `warehouse-query-atoms.ts` like everything else.
+- **UI:** - `routes/services/$serviceName.tsx`: `ServiceDetailTab` gains `"profiles"` (tab literal +
+  trigger + body) → new `components/services/service-profiles-tab.tsx`. - `components/traces/span-detail-panel.tsx`: a `profile` tab next to `details / logs /
+infrastructure`, hidden when the service has no profiles in range (one cheap `sampleTypes`
+  call). - New `packages/ui/src/components/profiles/flame-graph.tsx`: an **aggregate icicle**, not the
+  trace waterfall — it folds `(frames[], value)` rows into a tree, lays out by share, and
+  renders on canvas (the TanStack-canvas evaluation showed canvas is the right call for dense
+  rectangles). Reuse the waterfall's tooltip and `color-by` palette so it reads as one family.
+  Click-to-zoom, hover tooltip (self / total / share), text search that highlights matching
+  frames. Keep it to that. - Data reads through `makeQueryAtomFamily` in `warehouse-query-atoms.ts` like everything else.
 
 ## 8. Phasing
 
@@ -257,6 +253,7 @@ and bytes/row for real producers, and see what unsymbolized eBPF frames look lik
 If the numbers or the shape surprise us, §4 changes _before_ any of the codegen work.
 
 **Phase 1 — MVP (~3 engineer-weeks).**
+
 1. Schema: datasource + MV + migration + insert-mapping regen + `ttl-override` (2 d).
 2. Ingest: enums/routes/gRPC/decode/flatten/pipeline/billing + tests with recorded eBPF and
    SDK payloads (4–5 d).
@@ -274,15 +271,15 @@ keep accepting `/v1development/`. Consider symbolization for native frames.
 
 ## 9. Risks and how the plan absorbs them
 
-| Risk | Mitigation |
-| --- | --- |
-| Proto churn while Alpha | pinned crate; ingest is the only place that reads the wire; storage is our shape |
-| Producer scarcity | three tiers in §2 — eBPF (zero-code, k8s), pprof via collector, our SDK; the spike proves two of them |
-| Volume / cost | producers pre-aggregate; SDK aggregates per window; 7 d raw + 30 d hourly rollup; `Frames` LC-encoded; profiles metered as its own Autumn feature |
-| Unsymbolized native frames look bad | render `mapping!addr`, document that symbolization is out of scope, keep JS/JVM/Go/.NET (which arrive symbolized) as the headline |
-| Node inspector overhead / Workers | configurable rate, off by default, no-op on Workers |
-| Trace correlation over-promised | MVP labels time-window correlation as such; span-linked lands in Phase 2 |
-| Cardinality in ingest usage metrics | re-size `USAGE_CARDINALITY_LIMIT` when the 4th signal is added |
+| Risk                                | Mitigation                                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Proto churn while Alpha             | pinned crate; ingest is the only place that reads the wire; storage is our shape                                                                  |
+| Producer scarcity                   | three tiers in §2 — eBPF (zero-code, k8s), pprof via collector, our SDK; the spike proves two of them                                             |
+| Volume / cost                       | producers pre-aggregate; SDK aggregates per window; 7 d raw + 30 d hourly rollup; `Frames` LC-encoded; profiles metered as its own Autumn feature |
+| Unsymbolized native frames look bad | render `mapping!addr`, document that symbolization is out of scope, keep JS/JVM/Go/.NET (which arrive symbolized) as the headline                 |
+| Node inspector overhead / Workers   | configurable rate, off by default, no-op on Workers                                                                                               |
+| Trace correlation over-promised     | MVP labels time-window correlation as such; span-linked lands in Phase 2                                                                          |
+| Cardinality in ingest usage metrics | re-size `USAGE_CARDINALITY_LIMIT` when the 4th signal is added                                                                                    |
 
 ## 10. Decisions needed from you
 

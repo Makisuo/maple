@@ -1371,25 +1371,25 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			 * streak is over. Guarded on `> 0` so the overwhelmingly common case (a
 			 * healthy destination) costs no write.
 			 */
-			const clearDestinationFailureStreak = Effect.fn(
-				"AlertsService.clearDestinationFailureStreak",
-			)(function* (destinationId: AlertDestinationRow["id"], currentTime: number) {
-				yield* dbExecute((db) =>
-					db
-						.update(alertDestinations)
-						.set({
-							consecutiveFailures: 0,
-							lastFailureAt: null,
-							updatedAt: msToDate(currentTime),
-						})
-						.where(
-							and(
-								eq(alertDestinations.id, destinationId),
-								gte(alertDestinations.consecutiveFailures, 1),
+			const clearDestinationFailureStreak = Effect.fn("AlertsService.clearDestinationFailureStreak")(
+				function* (destinationId: AlertDestinationRow["id"], currentTime: number) {
+					yield* dbExecute((db) =>
+						db
+							.update(alertDestinations)
+							.set({
+								consecutiveFailures: 0,
+								lastFailureAt: null,
+								updatedAt: msToDate(currentTime),
+							})
+							.where(
+								and(
+									eq(alertDestinations.id, destinationId),
+									gte(alertDestinations.consecutiveFailures, 1),
+								),
 							),
-						),
-				)
-			})
+					)
+				},
+			)
 
 			/**
 			 * Count a terminal (`retry: "never"`) failure against the destination and
@@ -1401,68 +1401,68 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			 * whoever crosses the threshold second finds `enabled = false` and counts
 			 * nothing.
 			 */
-			const noteTerminalDestinationFailure = Effect.fn(
-				"AlertsService.noteTerminalDestinationFailure",
-			)(function* (
-				row: AlertDeliveryEventRow,
-				destinationType: string | null,
-				currentTime: number,
-				failure: DeliveryAttemptFailure,
-			) {
-				const counted = yield* dbExecute((db) =>
-					db
-						.update(alertDestinations)
-						.set({
-							consecutiveFailures: sql`${alertDestinations.consecutiveFailures} + 1`,
-							lastFailureAt: msToDate(currentTime),
-							updatedAt: msToDate(currentTime),
-						})
-						.where(
-							and(
-								eq(alertDestinations.id, row.destinationId),
-								eq(alertDestinations.enabled, true),
-							),
-						)
-						.returning({ consecutiveFailures: alertDestinations.consecutiveFailures }),
-				)
+			const noteTerminalDestinationFailure = Effect.fn("AlertsService.noteTerminalDestinationFailure")(
+				function* (
+					row: AlertDeliveryEventRow,
+					destinationType: string | null,
+					currentTime: number,
+					failure: DeliveryAttemptFailure,
+				) {
+					const counted = yield* dbExecute((db) =>
+						db
+							.update(alertDestinations)
+							.set({
+								consecutiveFailures: sql`${alertDestinations.consecutiveFailures} + 1`,
+								lastFailureAt: msToDate(currentTime),
+								updatedAt: msToDate(currentTime),
+							})
+							.where(
+								and(
+									eq(alertDestinations.id, row.destinationId),
+									eq(alertDestinations.enabled, true),
+								),
+							)
+							.returning({ consecutiveFailures: alertDestinations.consecutiveFailures }),
+					)
 
-				const streak = counted[0]?.consecutiveFailures
-				if (streak === undefined || streak < DESTINATION_DISABLE_AFTER_FAILURES) return
+					const streak = counted[0]?.consecutiveFailures
+					if (streak === undefined || streak < DESTINATION_DISABLE_AFTER_FAILURES) return
 
-				const reason = failure.message.slice(0, DISABLED_REASON_MAX_LENGTH)
-				yield* dbExecute((db) =>
-					db
-						.update(alertDestinations)
-						.set({
-							enabled: false,
-							disabledAt: msToDate(currentTime),
-							disabledReason: reason,
-							updatedAt: msToDate(currentTime),
-						})
-						.where(eq(alertDestinations.id, row.destinationId)),
-				)
+					const reason = failure.message.slice(0, DISABLED_REASON_MAX_LENGTH)
+					yield* dbExecute((db) =>
+						db
+							.update(alertDestinations)
+							.set({
+								enabled: false,
+								disabledAt: msToDate(currentTime),
+								disabledReason: reason,
+								updatedAt: msToDate(currentTime),
+							})
+							.where(eq(alertDestinations.id, row.destinationId)),
+					)
 
-				// The in-product signal is the setup audit: a disabled destination
-				// makes every rule that selects it fail CFG-ALERT-03 ("will evaluate
-				// and breach but deliver to nobody"), and `disabledReason` names the
-				// provider sentence on the destination itself. There is no org-level
-				// notification channel that does not itself go through a destination,
-				// so this log is the operator-side signal — same shape as the dead
-				// push token path in `MobilePushService`.
-				yield* Effect.logWarning(
-					"Alert destination auto-disabled after repeated terminal delivery failures",
-				).pipe(
-					Effect.annotateLogs({
-						workerId,
-						orgId: row.orgId,
-						destinationId: row.destinationId,
-						destinationType: destinationType ?? "",
-						consecutiveFailures: streak,
-						failureKind: failure.kind,
-						reason,
-					}),
-				)
-			})
+					// The in-product signal is the setup audit: a disabled destination
+					// makes every rule that selects it fail CFG-ALERT-03 ("will evaluate
+					// and breach but deliver to nobody"), and `disabledReason` names the
+					// provider sentence on the destination itself. There is no org-level
+					// notification channel that does not itself go through a destination,
+					// so this log is the operator-side signal — same shape as the dead
+					// push token path in `MobilePushService`.
+					yield* Effect.logWarning(
+						"Alert destination auto-disabled after repeated terminal delivery failures",
+					).pipe(
+						Effect.annotateLogs({
+							workerId,
+							orgId: row.orgId,
+							destinationId: row.destinationId,
+							destinationType: destinationType ?? "",
+							consecutiveFailures: streak,
+							failureKind: failure.kind,
+							reason,
+						}),
+					)
+				},
+			)
 
 			const processQueuedDeliveries = Effect.fn("AlertsService.processQueuedDeliveries")(function* () {
 				const currentTime = yield* now

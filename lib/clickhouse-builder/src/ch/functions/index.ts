@@ -17,6 +17,7 @@ export {
 	maxIf,
 	minIf,
 	groupUniqArray,
+	groupUniqArrayArray,
 	groupUniqArrayIf,
 	argMin,
 	argMax,

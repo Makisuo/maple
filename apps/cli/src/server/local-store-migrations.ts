@@ -39,6 +39,7 @@ import { v2ToV3ServiceMapIngestBridgeModule } from "./local-store-migrations/v2-
 import { v3ToV4WebEventsModule } from "./local-store-migrations/v3-to-v4-web-events"
 import { v4ToV5ServiceOverviewMinutelyModule } from "./local-store-migrations/v4-to-v5-service-overview-minutely"
 import { v5ToV6ErrorEventsFingerprintHygieneModule } from "./local-store-migrations/v5-to-v6-error-events-fingerprint-hygiene"
+import { v6ToV7ErrorServiceVersionModule } from "./local-store-migrations/v6-to-v7-error-service-version"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -124,6 +125,7 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v3ToV4WebEventsModule,
 	v4ToV5ServiceOverviewMinutelyModule,
 	v5ToV6ErrorEventsFingerprintHygieneModule,
+	v6ToV7ErrorServiceVersionModule,
 ]
 
 export const validateMigrationRegistry = (

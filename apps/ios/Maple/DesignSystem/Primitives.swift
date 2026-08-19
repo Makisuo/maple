@@ -76,6 +76,7 @@ extension WorkflowState {
 	var label: String {
 		switch self {
 		case .triage: "Triage"
+		case .regressed: "Regressed"
 		case .todo: "Todo"
 		case .inProgress: "In progress"
 		case .inReview: "In review"
@@ -89,6 +90,9 @@ extension WorkflowState {
 	var tint: Color {
 		switch self {
 		case .triage: Token.amberText
+		// Red, not amber, matching `workflow-badge.tsx`: a regression is a fix
+		// that did not hold, and it reads as more urgent than untriaged.
+		case .regressed: Token.destructive
 		case .inProgress: Token.blueText
 		case .inReview: Token.purpleText
 		case .done: Token.success
@@ -99,6 +103,7 @@ extension WorkflowState {
 	var fill: Color {
 		switch self {
 		case .triage: Token.amberFill
+		case .regressed: Token.destructive
 		case .inProgress: Token.blueFill
 		case .inReview: Token.purpleFill
 		case .done: Token.success

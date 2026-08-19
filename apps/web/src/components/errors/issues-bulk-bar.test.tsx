@@ -87,6 +87,8 @@ describe("IssuesBulkBar move-to menu follows the transition matrix", () => {
 		renderBar({ selected: [issue("a", "done")] })
 		openMoveTo()
 
+		// `Regressed` is absent even though `done -> regressed` is a legal edge: the
+		// errors tick sets it from which build fired, so it is not a human choice.
 		expect(moveItems()).toEqual(["Triage", "In progress", "Cancelled", "Won't fix"])
 	})
 

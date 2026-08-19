@@ -150,22 +150,10 @@ struct IssueRow: View {
 	let issue: ErrorIssue
 	let showsService: Bool
 
-	/// Some issue kinds (integration and alert issues) carry no exception type.
-	/// The label then becomes the row's identity.
-	private var title: String {
-		let type = issue.exceptionType.trimmingCharacters(in: .whitespacesAndNewlines)
-		if !type.isEmpty { return type }
-		let label = issue.errorLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-		return label.isEmpty ? issue.exceptionMessage : label
-	}
-
-	/// Suppressed when it would merely restate the title, which is what happens
-	/// once the title has fallen back to the label.
-	private var subtitle: String? {
-		let message = issue.exceptionMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !message.isEmpty, !message.hasPrefix(title), !title.hasPrefix(message) else { return nil }
-		return message
-	}
+	/// See `ErrorIssue.displayTitle` — shared with the Home Screen widget, so
+	/// the same issue names itself the same way on both surfaces.
+	private var title: String { issue.displayTitle }
+	private var subtitle: String? { issue.displaySubtitle }
 
 	var body: some View {
 		HStack(alignment: .top, spacing: 10) {
