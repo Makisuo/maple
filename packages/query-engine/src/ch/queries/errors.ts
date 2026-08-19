@@ -861,7 +861,9 @@ export function errorTickIssuesQuery() {
 			exceptionMessage: CH.any_($.ExceptionMessage),
 			errorLabel: CH.any_($.ErrorLabel),
 			topFrame: CH.any_($.TopFrame),
-			serviceVersion: CH.any_($.ServiceVersion),
+			// Every build seen in the window, not one sampled build — the issue's
+			// build set is what separates a real regression from an old client.
+			serviceVersions: CH.groupUniqArrayArray($.ServiceVersions),
 			count: CH.sum($.OccurrenceCount),
 			firstSeen: CH.min_($.FirstSeen),
 			lastSeen: CH.max_($.LastSeen),
@@ -889,7 +891,9 @@ export function errorTickBootstrapIssuesQuery() {
 			exceptionMessage: CH.any_($.ExceptionMessage),
 			errorLabel: CH.any_($.ErrorLabel),
 			topFrame: CH.any_($.TopFrame),
-			serviceVersion: CH.any_($.ServiceVersion),
+			// Per-occurrence rows here, so the distinct set comes straight from the
+			// scalar column rather than from a pre-aggregated one.
+			serviceVersions: CH.groupUniqArray($.ServiceVersion),
 			count: CH.count(),
 			firstSeen: CH.min_($.Timestamp),
 			lastSeen: CH.max_($.Timestamp),

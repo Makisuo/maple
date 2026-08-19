@@ -113,7 +113,10 @@ export const errorIssues = pgTable(
 		// while the Workers report git SHAs, so "newer than the fix" is not a
 		// question these strings can answer. An occurrence from a build that was
 		// already running at resolution time is an old client still in the wild,
-		// not a regression. Capped — see MAX_TRACKED_VERSIONS.
+		// not a regression. Every build seen in a window is unioned in, not one
+		// sampled per tick — a sampled set makes the rule a lottery precisely
+		// where clients run many versions at once. Capped, least-recently-seen
+		// evicted first — see MAX_TRACKED_VERSIONS.
 		seenVersionsJson: jsonb("seen_versions_json").$type<ReadonlyArray<string>>().notNull().default([]),
 		resolvedVersionsJson: jsonb("resolved_versions_json")
 			.$type<ReadonlyArray<string>>()
@@ -169,7 +172,12 @@ export const errorFingerprintCandidates = pgTable(
 		exceptionMessage: text("exception_message").notNull(),
 		errorLabel: text("error_label").notNull().default(""),
 		topFrame: text("top_frame").notNull(),
-		serviceVersion: text("service_version").notNull().default(""),
+		// Builds seen while the fingerprint was still a candidate, so a promoted
+		// issue starts with the set it earned rather than one window's worth.
+		serviceVersionsJson: jsonb("service_versions_json")
+			.$type<ReadonlyArray<string>>()
+			.notNull()
+			.default([]),
 		occurrenceCount: integer("occurrence_count").notNull().default(0),
 		firstSeenAt: timestamp("first_seen_at", { withTimezone: true, mode: "date" }).notNull(),
 		lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }).notNull(),

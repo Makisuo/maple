@@ -5,6 +5,7 @@ import type {
 	AlertSignalType,
 	OrgId,
 } from "@maple/domain/http"
+import { PublicIdPrefixes, encodePublicId } from "@maple/domain/http/v2"
 import { Context, Duration, Effect, Layer } from "effect"
 import { ApnsClient, type ApnsPush } from "@/platform/Apns"
 import {
@@ -206,8 +207,15 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 								data: {
 									maple_kind: "alert_incident",
 									maple_event: event.eventType,
-									maple_incident_id: event.incidentId,
-									maple_rule_id: event.ruleId,
+									// The phone hands this straight back to `GET
+									// /v2/alerts/incidents/{id}`, which only accepts the
+									// `inc_…` public form — the internal id 400s and the
+									// tapped notification lands on an error screen.
+									maple_incident_id: encodePublicId(
+										PublicIdPrefixes.alertIncident,
+										event.incidentId,
+									),
+									maple_rule_id: encodePublicId(PublicIdPrefixes.alertRule, event.ruleId),
 									maple_org_id: event.orgId,
 									maple_url: event.linkUrl,
 								},

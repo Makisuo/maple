@@ -6,7 +6,7 @@ CREATE TABLE "error_fingerprint_candidates" (
 	"exception_message" text NOT NULL,
 	"error_label" text DEFAULT '' NOT NULL,
 	"top_frame" text NOT NULL,
-	"service_version" text DEFAULT '' NOT NULL,
+	"service_versions_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"occurrence_count" integer DEFAULT 0 NOT NULL,
 	"first_seen_at" timestamp with time zone NOT NULL,
 	"last_seen_at" timestamp with time zone NOT NULL,

@@ -16,9 +16,9 @@ const priorRow = (
 	resolvedVersionsJson: overrides.resolvedVersionsJson ?? [],
 })
 
-const occurrence = (afterHours: number, serviceVersion = "") => ({
+const occurrence = (afterHours: number, ...serviceVersions: ReadonlyArray<string>) => ({
 	lastSeenMs: resolvedAt.getTime() + afterHours * HOUR,
-	serviceVersion,
+	serviceVersions: serviceVersions.filter((version) => version !== ""),
 })
 
 describe("isRegression", () => {
@@ -63,7 +63,17 @@ describe("isRegression", () => {
 	it("treats an unknown build as a regression", () => {
 		// A service that reports no version cannot be ruled out, so it stays a
 		// regression rather than being silently suppressed.
-		expect(isRegression(priorRow({ resolvedVersionsJson: ["0.0.18"] }), occurrence(99, ""))).toBe(true)
+		expect(isRegression(priorRow({ resolvedVersionsJson: ["0.0.18"] }), occurrence(99))).toBe(true)
+	})
+
+	it("reopens when ANY build in the window is new, not just when all are", () => {
+		// A window carries every build the fingerprint fired from. Old clients in
+		// the wild keep reporting alongside the new build, so requiring all of them
+		// to be unseen would mask the one occurrence that actually matters.
+		const prior = priorRow({ resolvedVersionsJson: ["0.0.14", "0.0.18"] })
+
+		expect(isRegression(prior, occurrence(99, "0.0.14", "0.0.18"))).toBe(false)
+		expect(isRegression(prior, occurrence(99, "0.0.14", "0.0.18", "0.0.19"))).toBe(true)
 	})
 
 	it("reopens when the resolution recorded no builds at all", () => {

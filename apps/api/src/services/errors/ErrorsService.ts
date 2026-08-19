@@ -1079,7 +1079,11 @@ const make: Effect.Effect<
 			exceptionMessage: String(raw.exceptionMessage ?? ""),
 			errorLabel: String(raw.errorLabel ?? ""),
 			topFrame: String(raw.topFrame ?? ""),
-			serviceVersion: String(raw.serviceVersion ?? ""),
+			// The warehouse returns every distinct build seen for the fingerprint in
+			// the window; an older cluster that predates the column returns nothing.
+			serviceVersions: Array.isArray(raw.serviceVersions)
+				? raw.serviceVersions.map((version) => String(version)).filter((version) => version !== "")
+				: [],
 			count: Number(raw.count ?? 0),
 			firstSeen: String(raw.firstSeen ?? ""),
 			lastSeen: String(raw.lastSeen ?? ""),
@@ -1096,7 +1100,7 @@ const make: Effect.Effect<
 					exceptionMessage: row.exceptionMessage,
 					errorLabel: row.errorLabel,
 					topFrame: row.topFrame,
-					serviceVersion: row.serviceVersion,
+					serviceVersions: row.serviceVersions,
 					count: row.count,
 					firstSeenMs: parseWarehouseDateTime(row.firstSeen),
 					lastSeenMs: parseWarehouseDateTime(row.lastSeen),

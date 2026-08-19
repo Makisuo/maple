@@ -196,8 +196,7 @@ const destinationDocumentFromRow = (
 		consecutiveFailures: row.consecutiveFailures,
 		lastFailureAt:
 			row.lastFailureAt == null ? null : decodeIsoDateTimeStringSync(row.lastFailureAt.toISOString()),
-		disabledAt:
-			row.disabledAt == null ? null : decodeIsoDateTimeStringSync(row.disabledAt.toISOString()),
+		disabledAt: row.disabledAt == null ? null : decodeIsoDateTimeStringSync(row.disabledAt.toISOString()),
 		disabledReason: row.disabledReason,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
 		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),

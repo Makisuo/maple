@@ -69,7 +69,7 @@ Run the binary as usual; the report prints on exit (SIGINT). The load harness
 SIGKILLs ingest and discards its stdout, so there the easiest route is the live
 TUI: `cargo install hotpath --features tui`, then `hotpath console` while the
 run is going (ingest serves profiler metrics on port 6770). To get a file
-instead, make ingest write the report and exit on a timer that fires *before*
+instead, make ingest write the report and exit on a timer that fires _before_
 the harness finishes — the harness will report the tail as failures, which is
 expected:
 

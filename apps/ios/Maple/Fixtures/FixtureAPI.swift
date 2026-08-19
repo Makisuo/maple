@@ -94,7 +94,8 @@ struct FixtureAPI: MapleAPI {
 			issue(
 				id: "iss_search_es", service: "search", type: "ElasticsearchException",
 				message: "circuit_breaking_exception: [parent] Data too large", frame: "search/query.ts:211",
-				severity: .medium, state: .inProgress, count: 41, firstSeen: -3 * 86_400, lastSeen: -900, incident: false
+				severity: .medium, state: .inProgress, count: 41, firstSeen: -3 * 86_400, lastSeen: -900,
+				incident: false, regressions: 2
 			),
 			issue(
 				id: "iss_payments_decline", service: "payments", type: "CardDeclined",
@@ -106,7 +107,8 @@ struct FixtureAPI: MapleAPI {
 
 	private func issue(
 		id: String, service: String, type: String, message: String, frame: String, severity: IssueSeverity,
-		state: WorkflowState, count: Double, firstSeen: TimeInterval, lastSeen: TimeInterval, incident: Bool
+		state: WorkflowState, count: Double, firstSeen: TimeInterval, lastSeen: TimeInterval, incident: Bool,
+		regressions: Double = 0
 	) -> ErrorIssue {
 		ErrorIssue(
 			errorLabel: type,
@@ -121,6 +123,12 @@ struct FixtureAPI: MapleAPI {
 			object: .errorIssue,
 			occurrenceCount: count,
 			priority: 1,
+			// Fixed, then seen again — the state the issue list and the widget
+			// both mark. Fixtures carry one so the mark is visible without a
+			// real regression to hand.
+			regressionCount: regressions,
+			// No release tracking in fixtures.
+			resolvedVersions: [],
 			serviceName: service,
 			severity: severity,
 			severitySource: .manual,
@@ -169,6 +177,8 @@ struct FixtureAPI: MapleAPI {
 			object: .errorIssue,
 			occurrenceCount: issue.occurrenceCount,
 			priority: issue.priority,
+			regressionCount: issue.regressionCount,
+			resolvedVersions: issue.resolvedVersions,
 			sampleTraces: [],
 			serviceName: issue.serviceName,
 			severity: issue.severity,

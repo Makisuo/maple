@@ -1,4 +1,5 @@
 import { assert, describe, expect, it } from "@effect/vitest"
+import { encodePublicId } from "@maple/domain/http/v2"
 import { MobileDeviceId, OrgId, UserId } from "@maple/domain/primitives"
 import { Effect, Layer, Schema } from "effect"
 import { ApnsClient, type ApnsPush, type ApnsSendResult } from "@/platform/Apns"
@@ -142,8 +143,10 @@ describe("MobilePushService.notifyIncident", () => {
 			assert.deepStrictEqual(sent[0]!.data, {
 				maple_kind: "alert_incident",
 				maple_event: "trigger",
-				maple_incident_id: "inc-1",
-				maple_rule_id: "rule-1",
+				// Public ids, not the internal ones: the phone hands these back to
+				// the v2 API, which rejects anything unprefixed.
+				maple_incident_id: encodePublicId("inc", "inc-1"),
+				maple_rule_id: encodePublicId("alrt", "rule-1"),
 				maple_org_id: ORG,
 				maple_url: "https://app.maple.dev/alerts",
 			})

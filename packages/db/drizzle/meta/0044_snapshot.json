@@ -1,5 +1,5 @@
 {
-  "id": "5164cf86-c6cc-408d-8f91-8b6314b7e6d7",
+  "id": "329a2256-51ef-42a9-9ba8-8e1409203033",
   "prevId": "4b64da6a-ce63-44a7-9c27-e4fdb89af9f2",
   "version": "7",
   "dialect": "postgresql",
@@ -3694,12 +3694,12 @@
           "primaryKey": false,
           "notNull": true
         },
-        "service_version": {
-          "name": "service_version",
-          "type": "text",
+        "service_versions_json": {
+          "name": "service_versions_json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "''"
+          "default": "'[]'::jsonb"
         },
         "occurrence_count": {
           "name": "occurrence_count",

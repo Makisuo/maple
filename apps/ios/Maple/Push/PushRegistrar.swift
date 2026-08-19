@@ -205,7 +205,27 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
 	) -> Bool {
 		UNUserNotificationCenter.current().delegate = self
+		// Must happen before `didFinishLaunching` returns — registering a
+		// BGTaskScheduler handler later throws.
+		WidgetRefreshScheduler.register()
 		return true
+	}
+
+	/// A push arrived. Whatever it was about, the org's issues just changed —
+	/// this is the freshest the widget ever gets without the app being opened.
+	///
+	/// Runs for a silent (`content-available`) push and for a visible one
+	/// delivered while the app has background time; iOS ignores the completion
+	/// result beyond deciding how generous to be next time.
+	func application(
+		_ application: UIApplication,
+		didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+		fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+	) {
+		Task { @MainActor in
+			await IssuesWidgetPublisher.shared.refresh(force: true)
+			completionHandler(.newData)
+		}
 	}
 
 	func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

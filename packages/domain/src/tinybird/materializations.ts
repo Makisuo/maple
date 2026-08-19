@@ -1,5 +1,16 @@
 import { defineMaterializedView, node } from "@tinybirdco/sdk"
 import {
+	chPattern,
+	chRedactChain,
+	FRAME_LINE_PATTERN,
+	FRAME_REDACTIONS,
+	JSON_VALUE_REDACTIONS,
+	MAX_FINGERPRINT_FRAMES,
+	MSG_SCAN_CHARS,
+	MSG_SIGNATURE_CHARS,
+	MSG_TEXT_REDACTIONS,
+} from "./fingerprint"
+import {
 	serviceUsage,
 	serviceMapEdgesHourly,
 	serviceMapSpans,
@@ -738,6 +749,13 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
  * datasource's sort key differs. Keep the fingerprint/label logic in ONE place so the
  * two tables can never diverge — see the long note above about mirroring `fingerprint.ts`.
  */
+/**
+ * Exported so the fingerprint tests can assert the SQL is really rendered from
+ * the shared constants. The tests exercise the TypeScript mirror; without this
+ * they would prove nothing about what the warehouse actually computes.
+ */
+export { errorEventsSelectSql as ERROR_EVENTS_MV_SQL }
+
 const errorEventsSelectSql = `
         WITH
           arrayFirstIndex(n -> n = 'exception', EventsName) AS _ei,
@@ -751,39 +769,26 @@ const errorEventsSelectSql = `
           -- and message text then entered the hash and split one bug into
           -- thousands of issues — 23,035 fingerprints for six real
           -- AnomalyPersistenceError call sites, 15,051 for thirteen DatabaseError
-          -- ones. Each alternative below is one runtime's frame syntax; anything
-          -- that is not shaped like a frame is skipped, which is what the
-          -- language-header note above always intended.
+          -- ones.
+          --
+          -- The pattern is rendered from FRAME_LINE_PATTERN in fingerprint.ts,
+          -- as is every redaction below. They used to be hand-copied here, which
+          -- let the reference implementation the tests exercise drift away from
+          -- the SQL that actually runs, silently.
           arraySlice(
             arrayFilter(
-              line -> match(
-                line,
-                '^[ \\\\t]*at |^[ \\\\t]*File "|^[ \\\\t]+from [^ ]+:[0-9]+|^[^ \\\\t@]+@[^ \\\\t]*:[0-9]+|^[ \\\\t]+[^ \\\\t]+\\\\.(go|rs):[0-9]+'
-              ),
+              line -> match(line, ${chPattern(FRAME_LINE_PATTERN)}),
               splitByChar('\\n', _exStack)
             ),
-            1, 3
+            1, ${MAX_FINGERPRINT_FRAMES}
           ) AS _rawFrames,
-          -- Redact every volatile token a frame line can carry, outermost first:
-          --   1. the URL origin, so app.maple.dev and app-pr-246.maple.dev (and
-          --      every other preview host) share one fingerprint;
-          --   2. Vite's 8-char content hash on bundle filenames — without this
-          --      every deploy rotates \`index-s17g7I3p.js\` and re-splits every
-          --      browser and Worker issue that has ever been triaged;
-          --   3. line numbers, hex pointers, long hex runs and 6+ digit runs — a
-          --      trace/span or request id embedded in a stack line otherwise
-          --      splits one bug into one issue per occurrence.
+          -- Redact every volatile token a frame line can carry: the URL origin
+          -- (so preview hosts share one fingerprint), Vite's 8-char bundle
+          -- content hash (so a deploy does not re-split every triaged browser and
+          -- Worker issue), then line numbers, hex pointers and long id runs. See
+          -- FRAME_REDACTIONS for the order and the reasoning.
           arrayMap(
-            line -> replaceRegexpAll(
-              replaceRegexpAll(
-                replaceRegexpAll(
-                  replaceRegexpAll(line, 'https?://[^/ )]+', ''),
-                  '-[A-Za-z0-9_-]{8}\\\\.js', '.js'
-                ),
-                '-[A-Za-z0-9_-]{8}\\\\.css', '.css'
-              ),
-              ':[0-9]+|line [0-9]+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}', ''
-            ),
+            line -> ${chRedactChain("line", FRAME_REDACTIONS)},
             _rawFrames
           ) AS _topFrames,
           if(length(_topFrames) > 0, _topFrames[1], '') AS _topFrame,
@@ -799,7 +804,7 @@ const errorEventsSelectSql = `
           arrayStringConcat(
             arraySort(
               arrayMap(
-                kv -> concat(kv.1, '=', replaceRegexpAll(kv.2, '[0-9a-fA-F]{8,}|[0-9]+', '#')),
+                kv -> concat(kv.1, '=', ${chRedactChain("kv.2", JSON_VALUE_REDACTIONS)}),
                 JSONExtractKeysAndValuesRaw(StatusMessage)
               )
             ),
@@ -811,32 +816,15 @@ const errorEventsSelectSql = `
           -- every failing query alike: on frames alone, 25 distinct DatabaseError
           -- bugs (316k occurrences) collapse into a single issue. The signature
           -- restores that discrimination, and it cannot reinflate cardinality the
-          -- way the old 200-char raw prefix did because everything variable is
-          -- redacted first — emails, URLs and paths, then ids and every digit run
-          -- (the old rule kept runs shorter than 6, which is why a timestamp's hour
-          -- survived and split one bug into one issue per hour of the day).
+          -- way a raw prefix would because everything variable is redacted first:
+          -- emails, URL origins, home directories, query strings, quoted values,
+          -- then ids and every digit run. See MSG_TEXT_REDACTIONS for the order,
+          -- what is deliberately kept, and the one residual it cannot reach.
           multiIf(
             _isJsonObj, _jsonSig,
-            -- Route and file paths are deliberately KEPT: the endpoint that
-            -- failed is signal, and collapsing every path to a placeholder merges
-            -- unrelated bugs. Only the volatile parts go — the origin (so preview
-            -- hosts don't split an issue) and the home directory (so two users'
-            -- local store paths are one bug, not two).
-            substring(
-              replaceRegexpAll(
-                replaceRegexpAll(
-                  replaceRegexpAll(
-                    replaceRegexpAll(
-                      substring(StatusMessage, 1, 400),
-                      '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}', 'EMAIL'
-                    ),
-                    'https?://[^/ )"]+', ''
-                  ),
-                  '/(Users|home)/[^/ ]+', '/~'
-                ),
-                '[0-9a-fA-F-]{6,}|[0-9]+', '#'
-              ),
-              1, 120
+            substringUTF8(
+              ${chRedactChain(`substringUTF8(StatusMessage, 1, ${MSG_SCAN_CHARS})`, MSG_TEXT_REDACTIONS)},
+              1, ${MSG_SIGNATURE_CHARS}
             )
           ) AS _msgSig,
           -- Display-only, best-effort human label (decoupled from the fingerprint:
@@ -966,7 +954,8 @@ export const errorFingerprintsMinutelyMv = defineMaterializedView("error_fingerp
           count() AS OccurrenceCount,
           min(Timestamp) AS FirstSeen,
           max(Timestamp) AS LastSeen,
-          anyLast(ServiceVersion) AS ServiceVersion
+          -- Distinct builds, not a sample: see ServiceVersions on the datasource.
+          groupUniqArray(ServiceVersion) AS ServiceVersions
         FROM error_events
         GROUP BY OrgId, Minute, FingerprintHash
       `,

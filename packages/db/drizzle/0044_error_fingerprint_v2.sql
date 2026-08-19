@@ -12,6 +12,12 @@ CREATE INDEX "error_issues_org_fp_version_idx" ON "error_issues" USING btree ("o
 -- `alert:{ruleId}:{groupKey}`-style identifiers, not the ClickHouse fingerprint,
 -- so their state is still valid and is deliberately left alone.
 --
+-- Warehouse side: changing the materialized view does NOT rewrite history.
+-- Rows already in error_events keep their v1 hashes for the rest of their
+-- 90-day TTL, so every issue created after this migration starts with an empty
+-- detail view, sparkline and sample-trace list and fills from here forward.
+-- Expected, not a bug report — there is no backfill short of replaying traces.
+--
 -- The tick cursor (error_tick_states) is NOT reset: the evaluator picks up from
 -- where it left off and re-creates an issue the next time each live bug fires,
 -- which for anything actually firing is within a tick. Resetting it would force

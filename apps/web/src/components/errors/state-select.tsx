@@ -1,6 +1,17 @@
 import type { WorkflowState } from "@maple/domain/http"
-import { allowedTransitionsForAll, WORKFLOW_STATE_ORDER } from "@maple/domain/http"
+import {
+	allowedTransitionsForAll,
+	MACHINE_OWNED_WORKFLOW_STATES,
+	WORKFLOW_STATE_ORDER,
+} from "@maple/domain/http"
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
+
+/**
+ * `regressed` is set by the errors tick, never chosen. It still renders as the
+ * CURRENT value when an issue is in it — it is only absent from the choices.
+ */
+const OFFERED_STATES = WORKFLOW_STATE_ORDER.filter((state) => !MACHINE_OWNED_WORKFLOW_STATES.has(state))
 
 const LABEL: Record<WorkflowState, string> = {
 	triage: "Triage",
@@ -33,7 +44,7 @@ export function StateSelect({
 				<SelectValue placeholder="State" />
 			</SelectTrigger>
 			<SelectContent>
-				{WORKFLOW_STATE_ORDER.map((state) => {
+				{OFFERED_STATES.map((state) => {
 					const reachable = state === current || allowed.has(state)
 					return (
 						<SelectItem key={state} value={state} disabled={!reachable}>

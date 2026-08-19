@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { computeFingerprintInputs } from "./fingerprint"
+import {
+	chPattern,
+	computeFingerprintInputs,
+	FRAME_LINE_PATTERN,
+	FRAME_REDACTIONS,
+	JSON_VALUE_REDACTIONS,
+	MAX_FINGERPRINT_FRAMES,
+	MSG_SCAN_CHARS,
+	MSG_SIGNATURE_CHARS,
+	MSG_TEXT_REDACTIONS,
+} from "./fingerprint"
+import { ERROR_EVENTS_MV_SQL } from "./materializations"
 
 describe("error fingerprint normalization", () => {
 	it("extracts and normalizes top 3 Node.js frames", () => {
@@ -350,6 +361,64 @@ describe("error fingerprint normalization", () => {
 			expect(result.msgSignature).toBe("status only #")
 		})
 
+		it("collapses a query string, which is pure value", () => {
+			const sig = (url: string) =>
+				computeFingerprintInputs({
+					exceptionType: "TransportError",
+					exceptionStacktrace: "",
+					statusMessage: `Transport error (GET ${url})`,
+				}).msgSignature
+
+			expect(sig("/api/traces?org=acme&cursor=deadbeefcafe")).toBe(
+				sig("/api/traces?org=wayne&cursor=0f8fad5bd9cb"),
+			)
+			// The route itself still separates two different endpoints failing.
+			expect(sig("/api/traces?org=acme")).not.toBe(sig("/api/spans?org=acme"))
+		})
+
+		it("collapses a quoted path but keeps a quoted identifier", () => {
+			const sig = (message: string) =>
+				computeFingerprintInputs({
+					exceptionType: "StoreError",
+					exceptionStacktrace: "",
+					statusMessage: message,
+				}).msgSignature
+
+			// A path in quotes is a value: two developers' stores are one bug.
+			expect(sig("cannot open '/Users/ada/.maple/store/local.db'")).toBe(
+				sig("cannot open '/Users/grace/.maple/store/local.db'"),
+			)
+			// A quoted schema identifier is bounded, and naming it is the signal.
+			expect(sig("column 'occurrence_count' missing")).not.toBe(
+				sig("column 'fingerprint_hash' missing"),
+			)
+		})
+
+		it("collapses a long opaque token in quotes", () => {
+			const sig = (token: string) =>
+				computeFingerprintInputs({
+					exceptionType: "AuthError",
+					exceptionStacktrace: "",
+					statusMessage: `rejected key '${token}'`,
+				}).msgSignature
+
+			expect(sig("mk_live_QZmxNbPvWyKdTgHsRjLcVuAeXo")).toBe(sig("mk_live_JpFwTnBkYdSaHgMzXeRvCuLqOi"))
+		})
+
+		it("does not let an apostrophe in prose swallow the rest of the message", () => {
+			const result = computeFingerprintInputs({
+				exceptionType: "DatabaseError",
+				exceptionStacktrace: "",
+				statusMessage: `Table 'orders' doesn't exist in schema '/tenants/acme/public'`,
+			})
+
+			// The trailing quoted path is redacted; the prose and the bounded
+			// identifier either side of it survive intact.
+			expect(result.msgSignature).toContain("Table 'orders' doesn")
+			expect(result.msgSignature).toContain("'#'")
+			expect(result.msgSignature).not.toContain("acme")
+		})
+
 		it("separates two bugs that share identical minified frames", () => {
 			const frames = "    at toDatabaseError (worker.js:1542:13655)\n    at worker.js:14:7233"
 			const a = computeFingerprintInputs({
@@ -501,5 +570,58 @@ describe("error fingerprint normalization", () => {
 			expect(label("RouteNotFound (GET /robots.txt)")).toBe("RouteNotFound")
 			expect(label("")).toBe("Unknown Error")
 		})
+	})
+})
+
+describe("SQL parity", () => {
+	// These tests exercise the TypeScript mirror, but production hashes come from
+	// the `error_events_mv` SQL. That only proves anything if the SQL is built
+	// from the same constants — it used to carry hand-copied duplicates, which
+	// nothing could see drift. Assert the rendered SQL really does contain them.
+	const sql = ERROR_EVENTS_MV_SQL
+
+	it("renders the frame matcher and every redaction from the shared constants", () => {
+		expect(sql).toContain(`match(line, ${chPattern(FRAME_LINE_PATTERN)})`)
+		for (const [pattern, replacement] of [
+			...FRAME_REDACTIONS,
+			...JSON_VALUE_REDACTIONS,
+			...MSG_TEXT_REDACTIONS,
+		]) {
+			expect(sql).toContain(`${chPattern(pattern)}, ${chPattern(replacement)}`)
+		}
+	})
+
+	it("truncates by character in both implementations, not by byte", () => {
+		// ClickHouse `substring` counts bytes while JS `slice` counts UTF-16 units,
+		// so a non-ASCII message would truncate at a different point on each side.
+		expect(sql).toContain(`substringUTF8(StatusMessage, 1, ${MSG_SCAN_CHARS})`)
+		expect(sql).toContain(`1, ${MSG_SIGNATURE_CHARS}`)
+		expect(sql).not.toMatch(/substring\(StatusMessage/)
+	})
+
+	it("keeps the frame limit in step", () => {
+		expect(sql).toContain(`1, ${MAX_FINGERPRINT_FRAMES}\n          ) AS _rawFrames`)
+	})
+
+	it("emits patterns ClickHouse's RE2 can compile", () => {
+		// RE2 rejects backreferences and lookaround; JS accepts both, so a pattern
+		// written here can typecheck, pass every test above, and still fail at
+		// deploy time against the warehouse.
+		for (const [pattern] of [...FRAME_REDACTIONS, ...JSON_VALUE_REDACTIONS, ...MSG_TEXT_REDACTIONS]) {
+			expect(pattern).not.toMatch(/\(\?[=!<]/)
+			expect(pattern).not.toMatch(/\\[1-9]/)
+		}
+		expect(FRAME_LINE_PATTERN).not.toMatch(/\(\?[=!<]/)
+	})
+
+	it("uses replacements neither engine reinterprets", () => {
+		for (const [, replacement] of [
+			...FRAME_REDACTIONS,
+			...JSON_VALUE_REDACTIONS,
+			...MSG_TEXT_REDACTIONS,
+		]) {
+			expect(replacement).not.toContain("$")
+			expect(replacement).not.toContain("\\")
+		}
 	})
 })

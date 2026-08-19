@@ -33,7 +33,8 @@ export interface ErrorTickScanRow {
 	readonly exceptionMessage: string
 	readonly errorLabel: string
 	readonly topFrame: string
-	readonly serviceVersion: string
+	/** Every distinct build the fingerprint was seen from in this window. */
+	readonly serviceVersions: ReadonlyArray<string>
 	readonly count: number
 	readonly firstSeenMs: number
 	readonly lastSeenMs: number
@@ -105,24 +106,16 @@ const PROMOTION_MIN_OCCURRENCES = 3
  */
 const REGRESSION_GRACE_MS = 60 * 60 * 1000
 
-/** Cap on the per-issue build set, so a long-lived issue cannot grow unbounded. */
+/**
+ * Cap on the per-issue build set, so a long-lived issue cannot grow unbounded.
+ *
+ * Overflow evicts the LEAST RECENTLY SEEN build, not the oldest-inserted one.
+ * Those differ for exactly the builds that matter here: a stale client still
+ * reporting the bug keeps re-observing its own version, and evicting it because
+ * it was added first is what would make it look like a regression.
+ */
 const MAX_TRACKED_VERSIONS = 50
 
-/**
- * Whether an occurrence on a resolved issue is a genuine regression.
- *
- * Two guards, and the second is the one that matters for shipped clients.
- * `maple-cli` runs on other people's machines: after a fix ships, every old
- * binary in the wild keeps emitting the bug forever. Under the previous rule —
- * any occurrence on a `done` issue reopens it — those issues could never stay
- * fixed, which is why agents kept re-fixing the same bug.
- *
- * Version comparison is set MEMBERSHIP, never ordering: `maple-cli` reports
- * semver ("0.0.18") while the Workers report git SHAs, so "newer than the fix"
- * is not a question these strings can answer. A build already running when the
- * issue was resolved is an old client; a build we had not seen then is a real
- * regression, which is exactly the signal wanted.
- */
 /** The transaction handle `persistErrorTickWindow` runs its statements on. */
 type ErrorTickTransaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
 
@@ -152,7 +145,7 @@ const promoteCandidates = async (
 				exceptionMessage: row.exceptionMessage,
 				errorLabel: row.errorLabel,
 				topFrame: row.topFrame,
-				serviceVersion: row.serviceVersion,
+				serviceVersionsJson: mergeVersions([], row.serviceVersions),
 				occurrenceCount: row.count,
 				firstSeenAt: msToDate(row.firstSeenMs),
 				lastSeenAt: msToDate(row.lastSeenMs),
@@ -167,7 +160,20 @@ const promoteCandidates = async (
 				exceptionMessage: sql`excluded.exception_message`,
 				errorLabel: sql`excluded.error_label`,
 				topFrame: sql`excluded.top_frame`,
-				serviceVersion: sql`excluded.service_version`,
+				// Union rather than overwrite: a candidate accumulates across ticks and
+				// the builds it was seen from seed the issue it is promoted into. The
+				// cap mirrors MAX_TRACKED_VERSIONS; which build is dropped past it is
+				// unordered, which is fine for a row that lives at most a day.
+				serviceVersionsJson: sql`(
+					select coalesce(jsonb_agg(version), '[]'::jsonb)
+					from (
+						select distinct value as version
+						from jsonb_array_elements(
+							${errorFingerprintCandidates.serviceVersionsJson} || excluded.service_versions_json
+						)
+						limit ${sql.raw(String(MAX_TRACKED_VERSIONS))}
+					) as versions
+				)`,
 				occurrenceCount: sql`${errorFingerprintCandidates.occurrenceCount} + excluded.occurrence_count`,
 				firstSeenAt: sql`least(${errorFingerprintCandidates.firstSeenAt}, excluded.first_seen_at)`,
 				lastSeenAt: sql`greatest(${errorFingerprintCandidates.lastSeenAt}, excluded.last_seen_at)`,
@@ -196,34 +202,65 @@ const promoteCandidates = async (
 		exceptionMessage: row.exceptionMessage,
 		errorLabel: row.errorLabel,
 		topFrame: row.topFrame,
-		serviceVersion: row.serviceVersion,
+		serviceVersions: row.serviceVersionsJson,
 		count: row.occurrenceCount,
 		firstSeenMs: row.firstSeenAt.getTime(),
 		lastSeenMs: row.lastSeenAt.getTime(),
 	}))
 }
 
+/**
+ * Whether an occurrence on a resolved issue is a genuine regression.
+ *
+ * Two guards, and the second is the one that matters for shipped clients.
+ * `maple-cli` runs on other people's machines: after a fix ships, every old
+ * binary in the wild keeps emitting the bug forever. Under the previous rule —
+ * any occurrence on a `done` issue reopens it — those issues could never stay
+ * fixed, which is why agents kept re-fixing the same bug.
+ *
+ * Version comparison is set MEMBERSHIP, never ordering: `maple-cli` reports
+ * semver ("0.0.18") while the Workers report git SHAs, so "newer than the fix"
+ * is not a question these strings can answer. A build already running when the
+ * issue was resolved is an old client; a build we had not seen then is a real
+ * regression, which is exactly the signal wanted.
+ *
+ * The rule only engages for services that actually report `service.version`.
+ * Where it is absent the guard degrades to the old behaviour — any occurrence
+ * reopens — which is the safe direction but silent, so the binding matters:
+ * `COMMIT_SHA` is bound for the api/alerting/electric-sync Workers and reaches
+ * `service.version` via `resolveResourceFromEnv`, the web build stamps
+ * `VITE_COMMIT_SHA`, and `maple-cli` reports `MAPLE_VERSION`.
+ */
 export const isRegression = (
 	prior: Pick<ErrorIssueRow, "workflowState" | "resolvedAt" | "resolvedVersionsJson">,
-	row: Pick<ErrorTickScanRow, "lastSeenMs" | "serviceVersion">,
+	row: Pick<ErrorTickScanRow, "lastSeenMs" | "serviceVersions">,
 ): boolean => {
 	if (prior.workflowState !== "done") return false
 
 	const resolvedAtMs = prior.resolvedAt?.getTime()
 	if (resolvedAtMs !== undefined && row.lastSeenMs < resolvedAtMs + REGRESSION_GRACE_MS) return false
 
-	// An unknown build cannot be ruled out, so it stays a regression.
-	if (row.serviceVersion !== "" && prior.resolvedVersionsJson.includes(row.serviceVersion)) {
-		return false
-	}
-
-	return true
+	// A window can carry several builds. It is a regression if ANY of them was
+	// not already running when the issue was resolved — one new build firing is
+	// the signal, and it must not be masked by old clients in the same window.
+	// A window with no build information at all cannot be ruled out either.
+	if (row.serviceVersions.length === 0) return true
+	return row.serviceVersions.some((version) => !prior.resolvedVersionsJson.includes(version))
 }
 
-/** Union a newly observed build into an issue's tracked set, oldest dropped first. */
-const mergeVersions = (existing: ReadonlyArray<string>, observed: string): ReadonlyArray<string> => {
-	if (observed === "" || existing.includes(observed)) return existing
-	const next = [...existing, observed]
+/**
+ * Union the builds observed this window into an issue's tracked set.
+ *
+ * Re-observing a build moves it to the end, so the cap evicts by least-recently-
+ * seen rather than by insertion order.
+ */
+const mergeVersions = (
+	existing: ReadonlyArray<string>,
+	observed: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+	const fresh = observed.filter((version) => version !== "")
+	if (fresh.length === 0) return existing
+	const next = [...existing.filter((version) => !fresh.includes(version)), ...new Set(fresh)]
 	return next.length > MAX_TRACKED_VERSIONS ? next.slice(next.length - MAX_TRACKED_VERSIONS) : next
 }
 
@@ -404,7 +441,20 @@ export const persistErrorTickWindow = (
 		}> = []
 		for (const scanned of rows) {
 			const prior = issueByFingerprint.get(scanned.fingerprintHash)
-			const row = promotedByFingerprint.get(scanned.fingerprintHash) ?? scanned
+			const promotedRow = promotedByFingerprint.get(scanned.fingerprintHash)
+			// A promoted row carries the candidate's ACCUMULATED totals, which the
+			// upsert below writes verbatim. Its build set still has to pick up the
+			// builds seen in the promoting window itself.
+			const row =
+				promotedRow === undefined
+					? scanned
+					: {
+							...promotedRow,
+							serviceVersions: mergeVersions(
+								promotedRow.serviceVersions,
+								scanned.serviceVersions,
+							),
+						}
 
 			// Still short of the promotion threshold — it stays a candidate.
 			if (prior === undefined && !promotedByFingerprint.has(scanned.fingerprintHash)) continue
@@ -467,7 +517,7 @@ export const persistErrorTickWindow = (
 						firstSeenAt: msToDate(row.firstSeenMs),
 						lastSeenAt: msToDate(row.lastSeenMs),
 						occurrenceCount: row.count,
-						seenVersionsJson: mergeVersions(prior?.seenVersionsJson ?? [], row.serviceVersion),
+						seenVersionsJson: mergeVersions(prior?.seenVersionsJson ?? [], row.serviceVersions),
 						resolvedAt: null,
 						resolvedByActorId: null,
 						snoozeUntil: null,

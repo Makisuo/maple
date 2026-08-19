@@ -37,46 +37,149 @@ export interface FingerprintInputs {
 	readonly label: string
 }
 
-// Matches frame lines by SHAPE — one alternative per runtime — rather than by
-// "contains a colon-digit". The old rule (`/:\d+|line \d+/`) accepted any line
-// with a colon-digit in it, which let two very common NON-frame lines through:
-// Drizzle's `params: <actual row values>` line, and the `Type: message` header
-// (`Code: 62`, `position 1628`, embedded timestamps). Row values and message text
-// then entered the hash, splitting a single bug into thousands of issues.
-//   V8/JVM:          `    at getUser (/app/users.ts:42:18)`
-//   Python:          `  File "/app/main.py", line 42, in get_user`
-//   Ruby:            `    from /app/user.rb:12:in 'find'`
-//   Firefox/Safari:  `getUser@https://app/assets/index.js:42:18`
-//   Go/Rust:         `    /app/main.go:42 +0x1d`
-const FRAME_LINE_RE =
-	/^[ \t]*at |^[ \t]*File "|^[ \t]+from [^ ]+:\d+|^[^ \t@]+@[^ \t]*:\d+|^[ \t]+[^ \t]+\.(?:go|rs):\d+/
-// Volatile tokens stripped from a frame line, outermost first. Origin and bundle
-// hash come before the id/number pass: without them every preview host splits an
-// issue, and every deploy rotates Vite's 8-char content hash and re-splits every
-// browser and Worker issue that has already been triaged.
-const FRAME_ORIGIN_RE = /https?:\/\/[^/ )]+/g
-const FRAME_BUNDLE_JS_RE = /-[A-Za-z0-9_-]{8}\.js/g
-const FRAME_BUNDLE_CSS_RE = /-[A-Za-z0-9_-]{8}\.css/g
-const LINE_NUM_OR_HEX_RE = /:\d+|line \d+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}/g
-// Redaction for the JSON-object branch of the signature (unchanged).
-const MSG_REDACT_RE = /[0-9a-fA-F]{8,}|[0-9]+/g
-// Redaction for the plain-text branch, in order: emails, then the URL origin,
-// then the user's home directory, then ids and numbers.
-//
-// Route and file paths are deliberately KEPT. `Transport error (POST
-// /api/query-engine/service-overview)` names the endpoint that failed, and
-// collapsing every path to a placeholder merges unrelated bugs into one issue.
-// Only the volatile parts of a path are redacted: the origin (so preview hosts
-// don't split an issue) and the home directory (so `/Users/riordan/...` and
-// `/Users/juanbermudez/...` are one bug, not two).
-//
-// The id pass takes every digit run, not runs of 6+ — under the old threshold a
-// timestamp's two-digit hour survived and split one bug into one issue per hour
-// of the day.
-const MSG_EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
-const MSG_URL_ORIGIN_RE = /https?:\/\/[^/ )"]+/g
-const MSG_HOME_RE = /\/(?:Users|home)\/[^/ ]+/g
-const MSG_ID_RE = /[0-9a-fA-F-]{6,}|[0-9]+/g
+/**
+ * Canonical pattern source for the fingerprint, shared by this module and by
+ * the `error_events_mv` SQL in materializations.ts.
+ *
+ * Written as plain strings rather than regex literals because they have two
+ * consumers with different syntax layers: `new RegExp()` here, and a ClickHouse
+ * string literal there. The SQL used to carry a hand-copied duplicate of every
+ * pattern below, which left the reference implementation and the thing
+ * production actually runs free to drift — invisibly, because the tests only
+ * ever exercise this file. `chRedactChain` renders the SQL from these same
+ * constants, so a change here reaches both or neither.
+ *
+ * Everything must stay inside the RE2 subset ClickHouse supports: no
+ * backreferences, no lookaround. Replacements must contain no `$` (JS) and no
+ * backslash (ClickHouse), since both treat those as capture-group syntax.
+ */
+
+/** Frames considered for the hash, from the top of the stack down. */
+export const MAX_FINGERPRINT_FRAMES = 3
+/** How much of StatusMessage is scanned before redaction. */
+export const MSG_SCAN_CHARS = 400
+/** How much of the redacted result reaches the hash. */
+export const MSG_SIGNATURE_CHARS = 120
+
+/**
+ * Matches frame lines by SHAPE — one alternative per runtime — rather than by
+ * "contains a colon-digit". The old rule (`:\d+|line \d+`) accepted any line
+ * with a colon-digit in it, which let two very common NON-frame lines through:
+ * Drizzle's `params: <actual row values>` line, and the `Type: message` header
+ * (`Code: 62`, `position 1628`, embedded timestamps). Row values and message
+ * text then entered the hash, splitting a single bug into thousands of issues.
+ *   V8/JVM:          `    at getUser (/app/users.ts:42:18)`
+ *   Python:          `  File "/app/main.py", line 42, in get_user`
+ *   Ruby:            `    from /app/user.rb:12:in 'find'`
+ *   Firefox/Safari:  `getUser@https://app/assets/index.js:42:18`
+ *   Go/Rust:         `    /app/main.go:42 +0x1d`
+ */
+export const FRAME_LINE_PATTERN =
+	'^[ \\t]*at |^[ \\t]*File "|^[ \\t]+from [^ ]+:[0-9]+|^[^ \\t@]+@[^ \\t]*:[0-9]+|^[ \\t]+[^ \\t]+\\.(go|rs):[0-9]+'
+
+/** An ordered `[pattern, replacement]` list, applied outermost-first. */
+export type Redactions = ReadonlyArray<readonly [pattern: string, replacement: string]>
+
+/**
+ * Volatile tokens stripped from a frame line, outermost first. Origin and
+ * bundle hash come before the id/number pass: without them every preview host
+ * splits an issue, and every deploy rotates Vite's 8-char content hash and
+ * re-splits every browser and Worker issue that has already been triaged.
+ */
+export const FRAME_REDACTIONS: Redactions = [
+	["https?://[^/ )]+", ""],
+	["-[A-Za-z0-9_-]{8}\\.js", ".js"],
+	["-[A-Za-z0-9_-]{8}\\.css", ".css"],
+	[":[0-9]+|line [0-9]+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}", ""],
+]
+
+/** Redaction for the JSON-object branch of the signature. */
+export const JSON_VALUE_REDACTIONS: Redactions = [["[0-9a-fA-F]{8,}|[0-9]+", "#"]]
+
+/**
+ * Redaction for the plain-text branch, outermost first.
+ *
+ * The signature is folded into the hash for EVERY error, not just ones without
+ * frames, so anything variable that survives this chain splits one bug into one
+ * issue per value. The numeric passes alone were not enough: quoted identifiers
+ * (`Table 'checkout_events' doesn't exist`) and query strings are pure runtime
+ * values with no digit in them, and each distinct value minted its own issue.
+ *
+ * A quoted run is redacted only when it is unambiguously a VALUE: it contains a
+ * path separator, or it is a single long token. Everything shorter is left
+ * alone, because in error text a quoted short word is usually a schema
+ * identifier and identifiers are bounded — `insert into "planetscale_events"`
+ * and `insert into "anomaly_detector_states"` are two different bugs, and they
+ * are exactly the discrimination the always-on signature exists to provide.
+ * `reading 'id'` versus `reading 'name'` is the same argument.
+ *
+ * Both quote styles are treated alike. SQL convention says double quotes are
+ * identifiers and single quotes are values, but the messages here are error
+ * prose from many runtimes, not SQL, so the convention does not hold.
+ *
+ * The no-space rule inside each alternative is what keeps prose out: an
+ * apostrophe in `doesn't` would otherwise pair with the next quote and swallow
+ * the text between them.
+ *
+ * Route and file paths outside quotes are deliberately KEPT. `Transport error
+ * (POST /api/query-engine/service-overview)` names the endpoint that failed,
+ * and collapsing every path to a placeholder merges unrelated bugs into one
+ * issue. Only the volatile parts of a path go: the origin (so preview hosts
+ * don't split an issue), the home directory (so two users' local store paths
+ * are one bug), and the query string (pure value).
+ *
+ * KNOWN RESIDUAL: a short entity slug still splits an issue, whether it is a
+ * path segment (`/api/orgs/acme-corp/dashboards/latency-overview`) or a quoted
+ * word. Nothing in the string distinguishes an org slug from a route name or a
+ * table name, and every rule wide enough to catch `acme-corp` also catches
+ * `service-overview` and `planetscale_events`. This is not recoverable with
+ * another regex: it needs the emitting SDK to report the parameterized
+ * `http.route` rather than the resolved URL. Fix it there.
+ *
+ * The id pass takes every digit run, not runs of 6+ — under the old threshold a
+ * timestamp's two-digit hour survived and split one bug into one issue per hour
+ * of the day.
+ */
+export const MSG_TEXT_REDACTIONS: Redactions = [
+	["[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "EMAIL"],
+	['https?://[^/ )"]+', ""],
+	["/(Users|home)/[^/ ]+", "/~"],
+	['[?][A-Za-z0-9_]+=[^ )"]*', "?#"],
+	["'[^' ]*/[^' ]*'|'[^' ]{25,}'", "'#'"],
+	['"[^" ]*/[^" ]*"|"[^" ]{25,}"', '"#"'],
+	["`[^` ]*/[^` ]*`|`[^` ]{25,}`", "`#`"],
+	["[0-9a-fA-F-]{6,}|[0-9]+", "#"],
+]
+
+/**
+ * Escape a pattern or replacement for embedding in a ClickHouse single-quoted
+ * string literal.
+ */
+export const chPattern = (value: string): string => `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
+
+/**
+ * Render a redaction list as the nested `replaceRegexpAll` chain ClickHouse
+ * needs. The first entry ends up innermost, so the emitted SQL applies them in
+ * the same order `applyRedactions` does.
+ */
+export const chRedactChain = (expr: string, redactions: Redactions): string =>
+	redactions.reduce(
+		(inner, [pattern, replacement]) =>
+			`replaceRegexpAll(${inner}, ${chPattern(pattern)}, ${chPattern(replacement)})`,
+		expr,
+	)
+
+/**
+ * Apply a redaction list in TypeScript. The replacement is passed as a function
+ * so JS never reinterprets `$&` and friends — ClickHouse would not.
+ */
+const applyRedactions = (value: string, redactions: Redactions): string =>
+	redactions.reduce(
+		(acc, [pattern, replacement]) => acc.replace(new RegExp(pattern, "g"), () => replacement),
+		value,
+	)
+
+const FRAME_LINE_RE = new RegExp(FRAME_LINE_PATTERN)
 
 // Display-only candidate keys for the human label (NOT used by the fingerprint).
 const LABEL_KEYS = ["title", "message", "error", "_tag", "reason", "name"] as const
@@ -109,7 +212,7 @@ function tryParseJsonObject(s: string): Record<string, unknown> | undefined {
  */
 function jsonSignature(obj: Record<string, unknown>): string {
 	return Object.keys(obj)
-		.map((key) => `${key}=${JSON.stringify(obj[key]).replace(MSG_REDACT_RE, "#")}`)
+		.map((key) => `${key}=${applyRedactions(JSON.stringify(obj[key]), JSON_VALUE_REDACTIONS)}`)
 		.sort()
 		.join("|")
 }
@@ -151,24 +254,17 @@ function statusLabel(statusMessage: string): string {
 
 /** Mirrors the nested `replaceRegexpAll` chain applied to each frame line. */
 function normalizeFrame(line: string): string {
-	return line
-		.replace(FRAME_ORIGIN_RE, "")
-		.replace(FRAME_BUNDLE_JS_RE, ".js")
-		.replace(FRAME_BUNDLE_CSS_RE, ".css")
-		.replace(LINE_NUM_OR_HEX_RE, "")
+	return applyRedactions(line, FRAME_REDACTIONS)
 }
 
 /** Mirrors the `_msgSig` multiIf: JSON objects take the canonical key signature. */
 function messageSignature(statusMessage: string): string {
 	const obj = tryParseJsonObject(statusMessage)
 	if (obj !== undefined) return jsonSignature(obj)
-	return statusMessage
-		.slice(0, 400)
-		.replace(MSG_EMAIL_RE, "EMAIL")
-		.replace(MSG_URL_ORIGIN_RE, "")
-		.replace(MSG_HOME_RE, "/~")
-		.replace(MSG_ID_RE, "#")
-		.slice(0, 120)
+	return applyRedactions(statusMessage.slice(0, MSG_SCAN_CHARS), MSG_TEXT_REDACTIONS).slice(
+		0,
+		MSG_SIGNATURE_CHARS,
+	)
 }
 
 export function computeFingerprintInputs(args: {
@@ -179,7 +275,7 @@ export function computeFingerprintInputs(args: {
 	const rawFrames = args.exceptionStacktrace
 		.split("\n")
 		.filter((line) => FRAME_LINE_RE.test(line))
-		.slice(0, 3)
+		.slice(0, MAX_FINGERPRINT_FRAMES)
 
 	const topFrames = rawFrames.map(normalizeFrame)
 	const topFrame = topFrames[0] ?? ""
@@ -207,7 +303,14 @@ export function computeFingerprintInputs(args: {
  * it there means a future bump is a constant change plus a sweep, with no
  * datasource migration or materialized-view backfill.
  *
+ * Changing the view does NOT rewrite history: rows already in `error_events`
+ * keep their v1 hashes for the rest of their 90-day TTL, so a v2 issue's detail
+ * view, occurrence sparkline and sample traces all start empty and fill from
+ * cutover forward. That is expected, not a regression — there is no backfill
+ * short of replaying the raw traces.
+ *
  * v1 → v2 (this change): frame lines are matched by shape rather than by
- * "contains a colon-digit", and the message signature is always folded in.
+ * "contains a colon-digit", and the message signature is always folded in and
+ * additionally strips quoted values and query strings.
  */
 export const FINGERPRINT_VERSION = 2

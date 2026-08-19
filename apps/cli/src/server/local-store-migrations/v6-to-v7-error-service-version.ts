@@ -25,14 +25,19 @@ const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 const ERROR_VIEWS = ["error_events_mv", "error_events_by_time_mv", "error_fingerprints_minutely_mv"] as const
 
 /**
- * Tables gaining `ServiceVersion`, with the column type the v7 DDL declares.
- * `error_fingerprints_minutely` is an AggregatingMergeTree, so its column is a
- * SimpleAggregateFunction rather than a plain string.
+ * Columns gaining the emitting build, with the type the v7 DDL declares.
+ * The per-occurrence tables carry one build per row; the minutely rollup is an
+ * AggregatingMergeTree carrying the DISTINCT SET of builds seen in the minute,
+ * so its column is both plural and a SimpleAggregateFunction.
  */
 const SERVICE_VERSION_COLUMNS = [
-	["error_events", "LowCardinality(String)"],
-	["error_events_by_time", "LowCardinality(String)"],
-	["error_fingerprints_minutely", "SimpleAggregateFunction(anyLast, String)"],
+	["error_events", "ServiceVersion", "LowCardinality(String)"],
+	["error_events_by_time", "ServiceVersion", "LowCardinality(String)"],
+	[
+		"error_fingerprints_minutely",
+		"ServiceVersions",
+		"SimpleAggregateFunction(groupUniqArrayArray, Array(String))",
+	],
 ] as const
 
 interface V6ToV7State {
@@ -146,7 +151,7 @@ const prepareTarget = async (context: MigrationModuleContext, state: V6ToV7State
 /**
  * Two changes land together, both confined to the error-events family.
  *
- * 1. `ServiceVersion` is added to `error_events`, `error_events_by_time` and
+ * 1. The emitting build is added to `error_events`, `error_events_by_time` and
  *    `error_fingerprints_minutely`. This is the one step the bundled DDL cannot
  *    perform on its own: it uses `CREATE TABLE IF NOT EXISTS`, which is a no-op
  *    against a table that already exists, so an existing store would keep the v6
@@ -162,7 +167,7 @@ const prepareTarget = async (context: MigrationModuleContext, state: V6ToV7State
  * a colon-digit", which stops Drizzle `params:` lines and `Type: message`
  * headers being hashed as frames.
  *
- * Historical rows keep their v6 fingerprint and an empty `ServiceVersion`.
+ * Historical rows keep their v6 fingerprint and an empty build.
  * Recomputing hashes would re-bucket every existing local issue, and the stored
  * rows carry no resource attributes to recover the build from. Both effects are
  * forward-only and the stale rows age out with the tables' 90-day TTL — the same
@@ -173,8 +178,8 @@ const apply = async (context: MigrationModuleContext): Promise<V6ToV7Progress> =
 	await context.openTarget(
 		(db) => {
 			for (const view of ERROR_VIEWS) db.exec(`DROP TABLE IF EXISTS ${view}`)
-			for (const [table, type] of SERVICE_VERSION_COLUMNS) {
-				db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ServiceVersion ${type}`)
+			for (const [table, column, type] of SERVICE_VERSION_COLUMNS) {
+				db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`)
 			}
 		},
 		{ schemaSql: LOCAL_SCHEMA_V6_SQL, bootstrapSchema: false },

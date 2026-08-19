@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The only channel between the app and this extension: the app writes the
+	     issues snapshot here, the widget reads it. Must match the app's own
+	     entitlement and IssuesSnapshotStore.appGroupIdentifier exactly. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.maple.mobile</string>
+	</array>
+</dict>
+</plist>

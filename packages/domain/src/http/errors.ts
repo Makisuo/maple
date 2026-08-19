@@ -78,6 +78,18 @@ export const WORKFLOW_TRANSITIONS: Record<WorkflowState, ReadonlyArray<WorkflowS
 export const WORKFLOW_STATE_ORDER: ReadonlyArray<WorkflowState> = WorkflowState.literals
 
 /**
+ * States only the errors tick may move an issue into.
+ *
+ * `regressed` records something observed — a fixed issue started firing from a
+ * build that was not running when it was resolved. A human picking it from a
+ * menu would be asserting that observation rather than making it, and the
+ * evaluator would overwrite the claim on its next tick anyway. The edge stays
+ * legal in {@link WORKFLOW_TRANSITIONS} because the tick does travel it; it is
+ * the human-facing surfaces that filter it out.
+ */
+export const MACHINE_OWNED_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>(["regressed"])
+
+/**
  * The states that *every* one of `from` can legally move to — the intersection
  * of their rows in {@link WORKFLOW_TRANSITIONS}, in canonical order.
  *
@@ -86,12 +98,15 @@ export const WORKFLOW_STATE_ORDER: ReadonlyArray<WorkflowState> = WorkflowState.
  * of them, so a bulk action can never half-apply. A state with no outgoing
  * moves (`cancelled`) contributes an empty row and therefore collapses the
  * result to nothing, and an empty input yields nothing (nothing selected, no
- * legal move).
+ * legal move). Machine-owned targets are excluded — see
+ * {@link MACHINE_OWNED_WORKFLOW_STATES}.
  */
 export const allowedTransitionsForAll = (from: Iterable<WorkflowState>): ReadonlyArray<WorkflowState> => {
 	const rows = Array.from(from, (state) => WORKFLOW_TRANSITIONS[state])
 	if (rows.length === 0) return []
-	return WORKFLOW_STATE_ORDER.filter((target) => rows.every((row) => row.includes(target)))
+	return WORKFLOW_STATE_ORDER.filter(
+		(target) => !MACHINE_OWNED_WORKFLOW_STATES.has(target) && rows.every((row) => row.includes(target)),
+	)
 }
 
 /** States from which no further transition is possible. */

@@ -224,7 +224,7 @@ export const ErrorFingerprintsMinutely = table("error_fingerprints_minutely", {
 	OccurrenceCount: T.uint64,
 	FirstSeen: T.dateTime,
 	LastSeen: T.dateTime,
-	ServiceVersion: T.string,
+	ServiceVersions: T.array(T.string),
 })
 
 export const MetricsSum = table("metrics_sum", {

@@ -12,6 +12,7 @@ import { resolveActorId } from "@/mcp/lib/resolve-actor"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import {
 	ErrorIssueId,
+	MACHINE_OWNED_WORKFLOW_STATES,
 	WORKFLOW_STATE_ORDER,
 	WorkflowState,
 	describeWorkflowTransitions,
@@ -19,6 +20,8 @@ import {
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
 const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)
+/** What a caller may ask for — machine-owned states are not offered. */
+const SELECTABLE_STATES = WORKFLOW_STATE_ORDER.filter((state) => !MACHINE_OWNED_WORKFLOW_STATES.has(state))
 
 export function registerTransitionErrorIssueTool(server: McpToolRegistrar) {
 	server.tool(
@@ -26,7 +29,7 @@ export function registerTransitionErrorIssueTool(server: McpToolRegistrar) {
 		`Move an error issue to a new workflow state. Valid transitions: ${describeWorkflowTransitions()}.`,
 		Schema.Struct({
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),
-			to_state: requiredStringParam(`Target workflow state: ${WORKFLOW_STATE_ORDER.join(", ")}`),
+			to_state: requiredStringParam(`Target workflow state: ${SELECTABLE_STATES.join(", ")}`),
 			note: optionalStringParam("Optional reasoning / context, stored on the event"),
 			snooze_until: optionalStringParam(
 				"ISO datetime for 'wontfix' transition. The issue re-opens as 'triage' if new events arrive after this time.",
@@ -43,7 +46,14 @@ export function registerTransitionErrorIssueTool(server: McpToolRegistrar) {
 			const decodedState = decodeWorkflowState(to_state)
 			if (Option.isNone(decodedState)) {
 				return validationError(
-					`Invalid to_state: '${to_state}'. Must be one of: ${WORKFLOW_STATE_ORDER.join(", ")}.`,
+					`Invalid to_state: '${to_state}'. Must be one of: ${SELECTABLE_STATES.join(", ")}.`,
+				)
+			}
+			// `regressed` is an observation the errors tick makes, not a state an
+			// agent asserts — and the next tick would overwrite the claim anyway.
+			if (MACHINE_OWNED_WORKFLOW_STATES.has(decodedState.value)) {
+				return validationError(
+					`'${to_state}' is set by the errors tick when a resolved issue fires from a build that was not running when it was fixed. Move the issue to one of: ${SELECTABLE_STATES.join(", ")}.`,
 				)
 			}
 

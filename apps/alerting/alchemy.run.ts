@@ -110,7 +110,12 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				// Non-prod stages skip all crons (they share live org data via the prod
 				// DB); set to "1" on a stage to deliberately exercise crons there.
 				...optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
-				...optionalPlain("COMMIT_SHA"),
+				// GITHUB_SHA fallback so a deploy that did not export COMMIT_SHA still
+				// stamps a build. An unstamped Worker reports no `service.version`, and
+				// the error evaluator treats a build it cannot identify as a regression —
+				// so a missing binding quietly restores the behaviour where any occurrence
+				// reopens a fixed issue. Matches what apps/ingest already does.
+				...optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim()),
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 				...optionalSecret("MAPLE_ROOT_PASSWORD"),
 				...optionalSecret("CLERK_SECRET_KEY"),

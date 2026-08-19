@@ -59,8 +59,8 @@ import { join } from "node:path"
 
 describe("current local schema identity", () => {
 	it("matches the generated v7 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("a7af048e80aca54a")
-		expect(SCHEMA_DIGEST).toBe("a7af048e80aca54a28dc113401da08a7d2d130792241e3012864cadf303d65e5")
+		expect(SCHEMA_FINGERPRINT).toBe("bc124f30765c8c56")
+		expect(SCHEMA_DIGEST).toBe("bc124f30765c8c567daccab1872a0e15afbc8ef2123c264bcb5bcdd8d16b6c3c")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)

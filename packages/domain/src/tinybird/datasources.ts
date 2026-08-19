@@ -996,10 +996,15 @@ export const errorFingerprintsMinutely = defineDatasource("error_fingerprints_mi
 		OccurrenceCount: t.simpleAggregateFunction("sum", t.uint64()),
 		FirstSeen: t.simpleAggregateFunction("min", t.dateTime()),
 		LastSeen: t.simpleAggregateFunction("max", t.dateTime()),
-		// One build per fingerprint-minute is enough: the evaluator unions these
-		// into a per-issue set over time, so a service running several builds at
-		// once converges within a few ticks.
-		ServiceVersion: t.simpleAggregateFunction("anyLast", t.string()),
+		// EVERY build seen in the minute, not one sampled build. The evaluator
+		// unions these into the issue's build set, and that set is what decides
+		// whether an occurrence on a resolved issue is a real regression or an old
+		// client still in the wild. Sampling one build per minute made the set a
+		// lottery for exactly the case the rule exists for: `maple-cli` runs on
+		// other people's machines with many versions live at once, so the builds
+		// that happened not to be sampled before the fix shipped would each look
+		// like a regression and reopen the issue.
+		ServiceVersions: t.simpleAggregateFunction("groupUniqArrayArray", t.array(t.string())),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toYYYYMM(Minute)",

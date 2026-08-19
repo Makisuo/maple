@@ -1692,7 +1692,7 @@ describe("ErrorsService.runTick", () => {
 				const incidentsBefore = yield* loadIncidentsForIssue(issue.id)
 				const openBefore = incidentsBefore.filter((i) => i.status === "open").length
 
-				rows[0] = scanRow({ serviceVersion: "1.2.3" })
+				rows[0] = scanRow({ serviceVersions: ["1.2.3"] })
 				yield* TestClock.setTime(TICK_MS + 120_000)
 				const second = yield* errors.runTick()
 

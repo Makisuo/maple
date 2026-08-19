@@ -29,7 +29,7 @@ export const LEGACY_SCHEMA_PROJECT_REVISION =
 export const LEGACY_SCHEMA_FINGERPRINT = "428701854f9fd30e"
 
 export const CURRENT_SCHEMA_PROJECT_REVISION =
-	"5d24e4511fb65afbb0bc90a4e6e31fe78a5b7389ba5807fb48eada2b04f7d7d8"
+	"73f8f3249a508cd05598289b67b3773a049e38db0302efa6aa9e45e3501d2182"
 /** Revision recorded by the issue-297 recovery report. The refreshed upstream
  * generator currently emits CURRENT_SCHEMA_PROJECT_REVISION; the structural
  * fingerprint is the compatibility identity used by the migration. */
