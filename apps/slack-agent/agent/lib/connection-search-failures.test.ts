@@ -69,6 +69,10 @@ describe("connection_search tool name", () => {
 	test("matches the name eve's own connection-search code filters on", async () => {
 		const require_ = createRequire(import.meta.url)
 		const eveRoot = new URL(".", `file://${require_.resolve("eve/package.json")}`).href
+		// BOUNDARY: eve ships this internal dist module without types, so the
+		// shape below is our own declaration of someone else's function. Naming a
+		// domain type for `messages` would assert a contract eve never published;
+		// the literal passed in is the only thing this test actually pins.
 		const module_ = (await import(
 			`${eveRoot}dist/src/runtime/framework-tools/connection-search-dynamic.js`
 		)) as {
