@@ -766,6 +766,42 @@ export const readCheckpointState = async (dataDir: string): Promise<CheckpointSt
 	return state
 }
 
+/**
+ * Whether `maple restore` has anything to restore, and if not, why.
+ *
+ * Checkpoints are only ever created by the explicit `maple checkpoint` command,
+ * so "none" is the ordinary state for a store nobody has checkpointed — not a
+ * fault. Recovery advice has to branch on it: telling someone to run
+ * `maple restore --yes` when no checkpoint exists sends them into a dead end
+ * where every suggested command fails.
+ */
+export type CheckpointAvailability =
+	| { readonly available: true; readonly checkpointId: CheckpointId }
+	| { readonly available: false; readonly reason: "none" }
+	| { readonly available: false; readonly reason: "unusable"; readonly detail: string }
+
+export const checkpointAvailability = async (dataDir: string): Promise<CheckpointAvailability> => {
+	try {
+		const state = await readCheckpointState(dataDir)
+		return { available: true, checkpointId: state.current }
+	} catch (error) {
+		const detail = errorMessage(error)
+		try {
+			// A present-but-unreadable state file, or stray checkpoint data beside a
+			// missing one, is a fault to surface rather than an empty registry.
+			if (
+				!existsSync(checkpointStatePath(dataDir)) &&
+				(await checkpointLikePaths(dataDir)).length === 0
+			) {
+				return { available: false, reason: "none" }
+			}
+		} catch {
+			// Fall through: an unreadable registry is itself "unusable".
+		}
+		return { available: false, reason: "unusable", detail }
+	}
+}
+
 const resolveCheckpointById = async (
 	dataDir: string,
 	checkpointId: CheckpointId,
