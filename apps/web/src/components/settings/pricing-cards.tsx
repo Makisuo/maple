@@ -5,7 +5,7 @@ import type { CatalogPlan, CatalogPlanItem } from "@maple/domain/http"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { billingCustomerAtom, billingPlansAtom } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
-import { billingErrorMessage } from "@/lib/billing/billing-errors"
+import { displayError } from "@/lib/error-messages"
 import { getTrialStatus } from "@/lib/billing/plan-gating"
 import { formatCurrency } from "@/lib/billing/currency"
 
@@ -267,7 +267,7 @@ export function PricingCards() {
 						: undefined,
 				})
 			} catch (err) {
-				toastManager.add({ title: billingErrorMessage(err), type: "error" })
+				toastManager.add({ title: displayError(err).message, type: "error" })
 			} finally {
 				setLoadingPlanId(null)
 			}
@@ -293,7 +293,7 @@ export function PricingCards() {
 			refreshCustomer()
 			setLoadingPlanId(null)
 		} catch (err) {
-			toastManager.add({ title: billingErrorMessage(err), type: "error" })
+			toastManager.add({ title: displayError(err).message, type: "error" })
 			setLoadingPlanId(null)
 		}
 	}
@@ -312,7 +312,7 @@ export function PricingCards() {
 			setConfirmDialog(null)
 			setIsAttaching(false)
 		} catch (err) {
-			toastManager.add({ title: billingErrorMessage(err), type: "error" })
+			toastManager.add({ title: displayError(err).message, type: "error" })
 			setIsAttaching(false)
 		}
 	}

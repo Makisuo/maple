@@ -10,7 +10,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { billingCustomerAtom, billingPlansAtom } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
-import { billingErrorMessage } from "@/lib/billing/billing-errors"
+import { displayError } from "@/lib/error-messages"
 import { getTrialStatus } from "@/lib/billing/plan-gating"
 import { getPlanFeatures, TRIAL_DURATION_DAYS } from "@/lib/billing/plans"
 import { featureUnit, type SpendModel } from "@/lib/billing/spend"
@@ -168,7 +168,7 @@ export function PlanOffer({
 			refreshCustomer()
 			setAttaching(null)
 		} catch (error) {
-			toastManager.add({ title: billingErrorMessage(error), type: "error" })
+			toastManager.add({ title: displayError(error).message, type: "error" })
 			setAttaching(null)
 		}
 	}

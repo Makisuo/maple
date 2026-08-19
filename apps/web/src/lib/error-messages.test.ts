@@ -2,6 +2,7 @@ import { Cause } from "effect"
 import { HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { describe, expect, it } from "vitest"
 import { QueryEngineExecutionError, WarehouseQuotaExceededError } from "@maple/domain"
+import { BillingConflictError, BillingPaymentRequiredError } from "@maple/domain/http"
 import {
 	NetworkErrorTag,
 	UnexpectedErrorTag,
@@ -218,5 +219,38 @@ describe("displayError", () => {
 			retryable: false,
 			recovery: "refresh",
 		})
+	})
+})
+
+// Billing failures carry their public presentation on the error class, so the
+// settings screens need no per-tag switch — `displayError(err).message` is the
+// whole mapping. These pin that, since a regression here would silently send
+// every billing toast back to generic "unexpected error" copy.
+describe("self-describing domain errors", () => {
+	it("reads a redacted policy message rather than the upstream wording", () => {
+		const body = displayError(
+			new BillingConflictError({
+				code: "already_attached",
+				upstreamStatus: 409,
+				message: "already attached",
+			}),
+		)
+		expect(body._tag).toBe("@maple/http/errors/BillingConflictError")
+		expect(body.message).not.toContain("already attached")
+		expect(body.recovery).toBe("refresh")
+		expect(body.retryable).toBe(false)
+	})
+
+	it("keeps an upstream decline reason verbatim, where it is the only detail we have", () => {
+		const body = displayError(
+			new BillingPaymentRequiredError({
+				code: "card_declined",
+				upstreamStatus: 402,
+				message: "Card declined",
+			}),
+		)
+		expect(body.type).toBe("payment_error")
+		expect(body.message).toBe("Card declined")
+		expect(body.recovery).toBe("fix_request")
 	})
 })
