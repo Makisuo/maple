@@ -20,6 +20,11 @@ export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("
 	// optional-payload contract for JS-constructed clients (see the note in
 	// session-replay.ts and CLAUDE.md, optional vs optionalKey).
 	limit: Schema.optional(Schema.Number),
+	// Both filters land on the session-detection subquery, so `serviceNames`
+	// means "the session-bearing spans came from this service", not "the trace
+	// touched it" — see `aiSessionListQuery`.
+	vendorIds: Schema.optional(Schema.Array(Schema.String)),
+	serviceNames: Schema.optional(Schema.Array(Schema.String)),
 }) {}
 
 export const AiSessionListItem = Schema.Struct({

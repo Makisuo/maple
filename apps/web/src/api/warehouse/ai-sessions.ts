@@ -9,6 +9,8 @@ const ListAiSessionsInput = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	limit: Schema.optional(Schema.Number),
+	vendorIds: Schema.optional(Schema.Array(Schema.String)),
+	serviceNames: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ListAiSessionsInput = Schema.Schema.Type<typeof ListAiSessionsInput>
 
@@ -34,6 +36,8 @@ export const listAiSessions = Effect.fn("AiSessions.listAiSessions")(function* (
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
 					limit: input.limit ?? 50,
+					vendorIds: input.vendorIds,
+					serviceNames: input.serviceNames,
 				}),
 			})
 		}),

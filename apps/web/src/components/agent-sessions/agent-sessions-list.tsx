@@ -43,7 +43,7 @@ const VENDOR_LABELS = new Map<string, string>([
 	["vercel_ai_sdk", "Vercel AI SDK"],
 ])
 
-function vendorLabel(vendorId: string): string {
+export function vendorLabel(vendorId: string): string {
 	const known = VENDOR_LABELS.get(vendorId)
 	if (known) return known
 	return vendorId

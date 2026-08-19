@@ -24,7 +24,11 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 					const compiled = CH.compile(
-						Integrations.aiSessionListQuery({ limit: payload.limit }),
+						Integrations.aiSessionListQuery({
+							limit: payload.limit,
+							vendorIds: payload.vendorIds,
+							serviceNames: payload.serviceNames,
+						}),
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 						{ rowSchema: Integrations.aiSessionListRowSchema },
 					)
