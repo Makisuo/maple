@@ -92,6 +92,11 @@ const NumericString = Schema.String.check(
 	Schema.makeFilter((value: string) => value.trim().length > 0, {
 		title: "nonBlankNumericString",
 		description: "a non-blank string that will be decoded as a finite number",
+		// Without `expected` the failure renders as the useless `Expected <filter>`.
+		// These messages are read by models mid-tool-call and are their only chance
+		// to self-correct, so the blank case has to name the fix — `Schema.Finite`
+		// already supplies "Expected a finite number" for the non-numeric case.
+		expected: "a number, or omit the parameter (an empty string is not a number)",
 	}),
 ).pipe(Schema.decodeTo(Schema.Finite, SchemaTransformation.numberFromString))
 

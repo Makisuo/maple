@@ -117,6 +117,20 @@ describe("optionalNumberParam", () => {
 		}
 	})
 
+	// These strings are read by a model mid-tool-call and are its only chance to
+	// self-correct, so a rejection has to name the fix. The blank case originally
+	// rendered as the useless `Expected <filter>`.
+	it("explains how to correct a rejected value", () => {
+		const message = (p: unknown) => {
+			const exit = decode(p)
+			return Exit.isFailure(exit) ? String(exit.cause) : "ACCEPTED"
+		}
+		expect(message("")).toContain("omit the parameter")
+		expect(message("   ")).toContain("omit the parameter")
+		expect(message("soon")).toContain("Expected a finite number")
+		expect(message("")).not.toContain("<filter>")
+	})
+
 	// Absence still means absence — the leniency is about encoding, not presence.
 	it("leaves an omitted parameter omitted", () => {
 		expect(Effect.runSync(Schema.decodeUnknownEffect(schema)({}))).toEqual({})

@@ -31,6 +31,7 @@ import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { investigationLensRuns, investigations } from "@maple/db"
 import type { MaplePgClient } from "@maple/db/client"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
+import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "@/mcp/expected-failures"
 import {
 	AiTriageResult,
 	InvestigationPlan,
@@ -154,11 +155,19 @@ const HYPOTHESIS_STEP = { retries: { limit: 1, delay: "5 seconds" }, timeout: "1
 const VALIDATE_STEP = { retries: { limit: 1, delay: "5 seconds" }, timeout: "5 minutes" } as const
 const PERSIST_STEP = { retries: { limit: 5, delay: "2 seconds", backoff: "exponential" } } as const
 
+// The MCP identifiers belong here for the same reason they do in `worker.ts` and
+// `turn-runner.ts`: this runtime builds `McpServicesLive` and the hypothesis agent
+// calls MCP tools through it. Without them a decode failure — an anticipated 400,
+// already recorded as a Warn plus span attributes by `recordExpectedMcpFailure` —
+// exported as an Error span WITH an exception event, so every model that sent a
+// numeric parameter the schema refused landed in error tracking as an unexpected
+// error. It was the top `investigation.hypothesis` error in production and none of
+// it was a bug.
 const fanoutTelemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
-	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS, ...MCP_ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 /**
