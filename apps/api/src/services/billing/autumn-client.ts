@@ -1,8 +1,17 @@
 import { Effect, Schema } from "effect"
 import type { EdgeCacheServiceApi } from "@maple/cache"
 import { isActivePlanSubscription } from "@maple/domain/billing"
-import { BillingUpstreamError } from "@maple/domain/http"
-import type { AutumnResult } from "./autumn-http"
+import {
+	BillingConflictError,
+	BillingCustomer,
+	BillingNotConfiguredError,
+	BillingPaymentRequiredError,
+	BillingRateLimitedError,
+	BillingRequestError,
+	BillingUpstreamError,
+} from "@maple/domain/http"
+import type { AutumnFailure } from "@maple/domain/http"
+import type { AutumnResult, AutumnTransportFailure } from "./autumn-http"
 
 /**
  * Caching and decoding plumbing shared by the billing routes.
@@ -57,8 +66,8 @@ class UncacheableAutumnResult extends Schema.TaggedError<UncacheableAutumnResult
 export const readCustomerCached = (
 	edgeCache: Pick<EdgeCacheServiceApi, "getOrCompute">,
 	orgId: string,
-	runAutumn: Effect.Effect<AutumnResult, BillingUpstreamError>,
-): Effect.Effect<{ readonly result: AutumnResult; readonly hit: boolean }, BillingUpstreamError> =>
+	runAutumn: Effect.Effect<AutumnResult, AutumnTransportFailure>,
+): Effect.Effect<{ readonly result: AutumnResult; readonly hit: boolean }, AutumnTransportFailure> =>
 	edgeCache
 		.getOrCompute(
 			{
@@ -97,10 +106,120 @@ const upstreamMessage = (result: AutumnResult): string => {
 	return typeof message === "string" ? message : `Billing request failed (${result.statusCode})`
 }
 
-export const ensureOk = (result: AutumnResult): Effect.Effect<unknown, BillingUpstreamError> =>
-	result.statusCode >= 200 && result.statusCode < 300
-		? Effect.succeed(result.response)
-		: Effect.fail(new BillingUpstreamError({ message: upstreamMessage(result) }))
+// Autumn's own error identifier. `errorResponse` in `autumn-http.ts` always
+// stamps one (falling back to "autumn_api_error"), but this is defensive: the
+// value crosses a boundary marked as carrying opaque data.
+const upstreamCode = (result: AutumnResult): string => {
+	const code = (result.response as { code?: unknown } | null)?.code
+	return typeof code === "string" ? code : "autumn_api_error"
+}
+
+/**
+ * Turn an Autumn response into a success value or a *classified* failure.
+ *
+ * The status class is the only signal we can trust here — Autumn's `code`
+ * vocabulary is theirs to extend, so it rides along as context rather than
+ * driving the branch. Anything that is not a recognised 4xx, including every
+ * 5xx, stays `BillingUpstreamError` (502).
+ *
+ * Callers that take user input use this directly. Pure reads use {@link ensureOk}.
+ */
+export const classifyAutumn = (result: AutumnResult): Effect.Effect<unknown, AutumnFailure> => {
+	if (result.statusCode >= 200 && result.statusCode < 300) return Effect.succeed(result.response)
+
+	const context = {
+		message: upstreamMessage(result),
+		code: upstreamCode(result),
+		upstreamStatus: result.statusCode,
+	}
+
+	switch (result.statusCode) {
+		case 401:
+		case 403:
+			// Autumn rejected OUR credentials — a revoked or rotated key. Never the
+			// caller's fault, so it must not become a 400: that would both blame the
+			// shopper and, because 4xx spans record as Ok, hide a total checkout
+			// outage from error tracking. Same operator remedy as a missing key.
+			return Effect.fail(
+				new BillingNotConfiguredError({
+					message: `Autumn rejected our credentials (HTTP ${result.statusCode}, ${context.code})`,
+				}),
+			)
+		case 402:
+			return Effect.fail(new BillingPaymentRequiredError(context))
+		case 409:
+			return Effect.fail(new BillingConflictError(context))
+		case 429:
+			return Effect.fail(new BillingRateLimitedError(context))
+	}
+
+	return result.statusCode >= 400 && result.statusCode < 500
+		? Effect.fail(new BillingRequestError(context))
+		: Effect.fail(new BillingUpstreamError({ message: context.message }))
+}
+
+/**
+ * Classify, then collapse the caller-input failures back into a 502.
+ *
+ * For an endpoint that sends no user input — `getCustomer`, `getUsage`,
+ * `listInvoices`, `listPlans`, `openCustomerPortal` — an upstream 4xx means
+ * *we* built a bad request. Answering the browser with a 400/402/409 would
+ * blame a caller who supplied nothing, so those endpoints keep reporting 502
+ * and the real status stays visible on the `autumn.request` span (which carries
+ * `http.response.status_code` and `autumn.code`). Nothing is lost by collapsing
+ * here; the diagnosis lives in telemetry, where it belongs.
+ */
+export const ensureOk = (
+	result: AutumnResult,
+): Effect.Effect<unknown, BillingUpstreamError | BillingNotConfiguredError> =>
+	classifyAutumn(result).pipe(
+		Effect.catchTags({
+			"@maple/http/errors/BillingPaymentRequiredError": collapseToUpstream,
+			"@maple/http/errors/BillingConflictError": collapseToUpstream,
+			"@maple/http/errors/BillingRateLimitedError": collapseToUpstream,
+			"@maple/http/errors/BillingRequestError": collapseToUpstream,
+		}),
+	)
+
+const collapseToUpstream = (error: {
+	readonly message: string
+	readonly code: string
+	readonly upstreamStatus: number
+}) =>
+	Effect.fail(
+		new BillingUpstreamError({
+			message: `Autumn rejected our request (HTTP ${error.upstreamStatus}, ${error.code}): ${error.message}`,
+		}),
+	)
+
+/**
+ * Decide whether an attach conflict is really "you already bought this".
+ *
+ * Re-reads the customer instead of trusting the 409, then asks the narrow
+ * question: is there an active subscription for THIS plan id? Deliberately not
+ * `isActivePlanSubscription` — that helper answers "should we redirect to
+ * quick-start", so it excludes add-ons and free tiers, which are perfectly
+ * legitimate things to have just attached.
+ *
+ * A match resolves to an empty `AttachResult` — no `paymentUrl`, which is
+ * exactly what an attach needing no redirect returns. Anything else re-fails
+ * with the original conflict: 409 is not exclusively "already attached".
+ */
+export const resolveAttachConflict = (
+	refreshCustomer: Effect.Effect<AutumnResult, AutumnTransportFailure>,
+	planId: string,
+	conflict: BillingConflictError,
+): Effect.Effect<unknown, AutumnFailure> =>
+	Effect.gen(function* () {
+		const refreshed = yield* refreshCustomer
+		if (refreshed.statusCode < 200 || refreshed.statusCode >= 300) return yield* conflict
+		const customer = yield* decodeUpstream(BillingCustomer, refreshed.response)
+		const holdsPlan = customer.subscriptions.some(
+			(sub) => sub.planId === planId && sub.status === "active",
+		)
+		yield* Effect.annotateCurrentSpan({ "billing.attach_conflict_resolved": holdsPlan })
+		return holdsPlan ? {} : yield* conflict
+	})
 
 export const decodeUpstream = <S extends Schema.Top>(
 	schema: S,

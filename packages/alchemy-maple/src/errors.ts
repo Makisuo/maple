@@ -3,6 +3,7 @@ import { Schema } from "effect"
 export const MaplePublicErrorType = Schema.Literals([
 	"invalid_request_error",
 	"authentication_error",
+	"payment_error",
 	"permission_error",
 	"not_found_error",
 	"conflict_error",

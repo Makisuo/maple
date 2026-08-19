@@ -99,7 +99,7 @@ Every error response body uses this envelope:
 }
 ```
 
-- `type` is closed: `invalid_request_error` (400), `authentication_error` (401), `permission_error` (403), `not_found_error` (404), `conflict_error` (409), `rate_limit_error` (429), `api_error` (500/502/503/504).
+- `type` is closed: `invalid_request_error` (400), `authentication_error` (401), `payment_error` (402), `permission_error` (403), `not_found_error` (404), `conflict_error` (409), `rate_limit_error` (429), `api_error` (500/502/503/504).
 - `_tag` is required and is the stable semantic identity of the failure. Maple clients branch on it directly. Each operation's OpenAPI response is an `anyOf` of the literal tags that operation can actually return; `_tag: string` and generic status-family schemas are not valid endpoint contracts. Adding a new safe, documented tag is preferable to collapsing distinct failures into a generic unavailable/not-found error. Errors created at the v2 boundary use an explicit `defineV2Error` definition whose constructor and literal-tag schema cannot drift apart.
 - `code` is a compact presentation category (`api_key_not_found`, `alert_destination_in_use`, `integration_upstream_error`, `parameter_invalid`, …). Several semantic tags may share a code, and a code may change when errors are regrouped. Clients that need exact branching use `_tag`.
 - `title` and `message` are safe, human-readable presentation copy. `retryable` says whether the same logical request can plausibly succeed later without correcting its input; automatic mutation replay still requires an idempotency key. `recovery` is one of `none`, `fix_request`, `reauthenticate`, `request_access`, `reconnect`, `refresh`, `retry`, or `contact_support`.
