@@ -545,6 +545,11 @@ describe("classifyAutumn", () => {
 		[402, "@maple/http/errors/BillingPaymentRequiredError"],
 		[409, "@maple/http/errors/BillingConflictError"],
 		[429, "@maple/http/errors/BillingRateLimitedError"],
+		// An auth rejection is our revoked/rotated key, not a bad request from the
+		// caller — and it has to stay 5xx so a total checkout outage keeps counting
+		// as an error rather than recording as an Ok 4xx span.
+		[401, "@maple/http/errors/BillingNotConfiguredError"],
+		[403, "@maple/http/errors/BillingNotConfiguredError"],
 		[400, "@maple/http/errors/BillingRequestError"],
 		[404, "@maple/http/errors/BillingRequestError"],
 		[422, "@maple/http/errors/BillingRequestError"],
@@ -567,13 +572,20 @@ describe("classifyAutumn", () => {
 		assert.strictEqual("code" in error ? error.code : undefined, "a_code_autumn_invented_yesterday")
 	})
 
+	it("keeps an auth rejection out of the caller-blaming 400 bucket on reads too", async () => {
+		// `ensureOk` collapses caller-input 4xx into 502; a credentials fault must
+		// pass through untouched so it stays distinguishable from "Autumn is down".
+		const error = await Effect.runPromise(Effect.flip(ensureOk(rejection(401, "unauthorized"))))
+		assert.strictEqual(error._tag, "@maple/http/errors/BillingNotConfiguredError")
+	})
+
 	it("passes a 2xx body straight through", async () => {
 		const body = await Effect.runPromise(classifyAutumn({ statusCode: 200, response: { ok: 1 } }))
 		assert.deepStrictEqual(body, { ok: 1 })
 	})
 
 	it("collapses every classified 4xx back to 502 under ensureOk, keeping the status in the message", async () => {
-		for (const [status] of cases.filter(([code]) => code < 500)) {
+		for (const [status] of cases.filter(([code]) => code < 500 && code !== 401 && code !== 403)) {
 			const error = await Effect.runPromise(Effect.flip(ensureOk(rejection(status))))
 			assert.strictEqual(error._tag, "@maple/http/errors/BillingUpstreamError")
 			assert.include(error.message, String(status))

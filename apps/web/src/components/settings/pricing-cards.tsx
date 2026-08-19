@@ -267,8 +267,7 @@ export function PricingCards() {
 						: undefined,
 				})
 			} catch (err) {
-				const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-				toastManager.add({ title: message, type: "error" })
+				toastManager.add({ title: billingErrorMessage(err), type: "error" })
 			} finally {
 				setLoadingPlanId(null)
 			}

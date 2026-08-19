@@ -4,12 +4,13 @@ import { isActivePlanSubscription } from "@maple/domain/billing"
 import {
 	BillingConflictError,
 	BillingCustomer,
+	BillingNotConfiguredError,
 	BillingPaymentRequiredError,
 	BillingRateLimitedError,
 	BillingRequestError,
 	BillingUpstreamError,
 } from "@maple/domain/http"
-import type { AutumnFailure, BillingNotConfiguredError } from "@maple/domain/http"
+import type { AutumnFailure } from "@maple/domain/http"
 import type { AutumnResult, AutumnTransportFailure } from "./autumn-http"
 
 /**
@@ -133,6 +134,17 @@ export const classifyAutumn = (result: AutumnResult): Effect.Effect<unknown, Aut
 	}
 
 	switch (result.statusCode) {
+		case 401:
+		case 403:
+			// Autumn rejected OUR credentials — a revoked or rotated key. Never the
+			// caller's fault, so it must not become a 400: that would both blame the
+			// shopper and, because 4xx spans record as Ok, hide a total checkout
+			// outage from error tracking. Same operator remedy as a missing key.
+			return Effect.fail(
+				new BillingNotConfiguredError({
+					message: `Autumn rejected our credentials (HTTP ${result.statusCode}, ${context.code})`,
+				}),
+			)
 		case 402:
 			return Effect.fail(new BillingPaymentRequiredError(context))
 		case 409:
