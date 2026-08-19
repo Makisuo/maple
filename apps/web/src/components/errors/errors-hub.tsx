@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useReducer } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
-import type { ErrorIssueDocument, ErrorIssueId, IssueSeverity, WorkflowState } from "@maple/domain/http"
+import type { ErrorIssueDocument, ErrorIssueId, WorkflowState } from "@maple/domain/http"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -574,5 +574,3 @@ function scrollIntoView(issueId: string) {
 	const el = document.querySelector<HTMLElement>(`[data-issue-id="${CSS.escape(issueId)}"]`)
 	el?.scrollIntoView({ block: "nearest", behavior: "smooth" })
 }
-
-export type { IssueSeverity }

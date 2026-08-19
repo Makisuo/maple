@@ -12,7 +12,6 @@ import {
 	ErrorsSummaryRequest,
 	ErrorDetailTracesRequest,
 	ErrorsSparkRequest,
-	ErrorsTimeseriesRequest,
 	FingerprintHash,
 	ServiceName,
 } from "@maple/domain/http"
@@ -230,16 +229,6 @@ const getErrorsSummaryEffect = Effect.fn("QueryEngine.getErrorsSummary")(functio
 	return { data: coerceErrorsSummary(result.data) }
 })
 
-export interface ErrorDetailTrace {
-	traceId: string
-	startTime: Date
-	durationMicros: number
-	spanCount: number
-	services: string[]
-	rootSpanName: string
-	errorMessage: string
-}
-
 const GetErrorDetailTracesInputSchema = Schema.Struct({
 	fingerprintHash: FingerprintHash,
 	startTime: Schema.optional(WarehouseDateTimeString),
@@ -297,52 +286,6 @@ export interface ErrorsTimeseriesItem {
 	bucket: string
 	count: number
 }
-
-const GetErrorsTimeseriesInputSchema = Schema.Struct({
-	fingerprintHash: FingerprintHash,
-	startTime: Schema.optional(WarehouseDateTimeString),
-	endTime: Schema.optional(WarehouseDateTimeString),
-	services: OptionalServiceArray,
-	bucketSeconds: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
-	showSpam: Schema.optional(Schema.Boolean),
-})
-
-export type GetErrorsTimeseriesInput = (typeof GetErrorsTimeseriesInputSchema)["Encoded"]
-
-export function getErrorsTimeseries({ data }: { data: GetErrorsTimeseriesInput }) {
-	return getErrorsTimeseriesEffect({ data })
-}
-
-const getErrorsTimeseriesEffect = Effect.fn("QueryEngine.getErrorsTimeseries")(function* ({
-	data,
-}: {
-	data: GetErrorsTimeseriesInput
-}) {
-	const input = yield* decodeInput(GetErrorsTimeseriesInputSchema, data ?? {}, "getErrorsTimeseries")
-	const fallback = defaultErrorsTimeRange(yield* Clock.currentTimeMillis)
-
-	const result = yield* runWarehouseQuery("errorsTimeseries", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleInternalAtomClient
-			return yield* client.queryEngine.errorsTimeseries({
-				payload: new ErrorsTimeseriesRequest({
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
-					fingerprintHash: input.fingerprintHash,
-					services: input.services,
-					bucketSeconds: input.bucketSeconds,
-				}),
-			})
-		}),
-	)
-
-	return {
-		data: result.data.map((raw) => ({
-			bucket: String(raw.bucket),
-			count: Number(raw.count),
-		})),
-	}
-})
 
 /**
  * Bucketed counts for many fingerprints at once, pivoted into one series per

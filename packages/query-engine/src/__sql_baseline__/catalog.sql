@@ -86,6 +86,20 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
+-- builder:errors:errorsSparkQuery:default  [89ec2bb4]
+SELECT
+          toString(FingerprintHash) AS fingerprintHash,
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          count() AS count
+        FROM error_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND FingerprintHash IN (toUInt64('11640393269246331608'))
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY fingerprintHash, bucket
+        ORDER BY bucket ASC
+        FORMAT JSON
+
 -- builder:errors:errorTickBootstrapIssuesQuery:bootstrap-window  [733ef0e1]
 SELECT
           toString(FingerprintHash) AS fingerprintHash,
@@ -3808,7 +3822,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:errors_facets:default:baseline  [d5afc6d2]
+-- pipe:errors_facets:default:baseline  [64eb8e74]
 SELECT
           ServiceName AS name,
           count() AS count,
@@ -3842,6 +3856,19 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          ServiceVersion AS name,
+          count() AS count,
+          'version' AS facetType
+        FROM error_events_by_time
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceVersion != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -7093,7 +7120,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- spec:errors-facets:baseline  [d5afc6d2]
+-- spec:errors-facets:baseline  [64eb8e74]
 SELECT
           ServiceName AS name,
           count() AS count,
@@ -7127,6 +7154,19 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          ServiceVersion AS name,
+          count() AS count,
+          'version' AS facetType
+        FROM error_events_by_time
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceVersion != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50

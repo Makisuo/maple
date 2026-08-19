@@ -51,6 +51,8 @@ const IOS_OPERATIONS = [
 	"listMobileDevices",
 	"registerMobileDevice",
 	"unregisterMobileDevice",
+	"registerLiveActivity",
+	"endLiveActivity",
 ] as const
 
 /**
