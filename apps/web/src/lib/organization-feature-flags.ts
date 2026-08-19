@@ -19,9 +19,12 @@ const DisabledByDefaultFeatureFlag = Schema.Unknown.pipe(
  */
 export const OrganizationFeatureFlags = Schema.Struct({
 	aiAutoTriage: DisabledByDefaultFeatureFlag,
+	/** Gates the Agent Sessions page under Explore (AI agent trace sessions). */
+	agentTracing: DisabledByDefaultFeatureFlag,
 }).pipe(
 	Schema.encodeKeys({
 		aiAutoTriage: "aiautotriage",
+		agentTracing: "agent_tracing",
 	}),
 )
 
@@ -32,6 +35,7 @@ const decodeOrganizationFeatureFlags = Schema.decodeUnknownOption(OrganizationFe
 /** Every rollout off — the value for malformed metadata, and for the pre-load window. */
 export const DISABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
 	aiAutoTriage: false,
+	agentTracing: false,
 }
 
 /**
@@ -42,6 +46,7 @@ export const DISABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
  */
 export const ENABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
 	aiAutoTriage: true,
+	agentTracing: true,
 }
 
 /** Decode Clerk metadata, falling back to every rollout disabled for non-object input. */

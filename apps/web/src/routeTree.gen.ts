@@ -26,6 +26,7 @@ import { Route as ServiceMapRouteImport } from './routes/service-map'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
+import { Route as AgentSessionsIndexRouteImport } from './routes/agent-sessions/index'
 import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
@@ -163,6 +164,11 @@ const SignInRoute = SignInRouteImport.update({
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
   path: '/sign-up',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentSessionsIndexRoute = AgentSessionsIndexRouteImport.update({
+  id: '/agent-sessions/',
+  path: '/agent-sessions/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsIndexRoute = AlertsIndexRouteImport.update({
@@ -478,6 +484,7 @@ export interface FileRoutesByFullPath {
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/share/$token': typeof ShareTokenRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agent-sessions/': typeof AgentSessionsIndexRoute
   '/alerts/': typeof AlertsIndexRoute
   '/analytics/': typeof AnalyticsIndexRoute
   '/anomalies/': typeof AnomaliesIndexRoute
@@ -549,6 +556,7 @@ export interface FileRoutesByTo {
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/share/$token': typeof ShareTokenRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agent-sessions': typeof AgentSessionsIndexRoute
   '/alerts': typeof AlertsIndexRoute
   '/analytics': typeof AnalyticsIndexRoute
   '/anomalies': typeof AnomaliesIndexRoute
@@ -622,6 +630,7 @@ export interface FileRoutesById {
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/share/$token': typeof ShareTokenRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agent-sessions/': typeof AgentSessionsIndexRoute
   '/alerts/': typeof AlertsIndexRoute
   '/analytics/': typeof AnalyticsIndexRoute
   '/anomalies/': typeof AnomaliesIndexRoute
@@ -696,6 +705,7 @@ export interface FileRouteTypes {
     | '/services/$serviceName'
     | '/share/$token'
     | '/traces/$traceId'
+    | '/agent-sessions/'
     | '/alerts/'
     | '/analytics/'
     | '/anomalies/'
@@ -767,6 +777,7 @@ export interface FileRouteTypes {
     | '/services/$serviceName'
     | '/share/$token'
     | '/traces/$traceId'
+    | '/agent-sessions'
     | '/alerts'
     | '/analytics'
     | '/anomalies'
@@ -839,6 +850,7 @@ export interface FileRouteTypes {
     | '/services/$serviceName'
     | '/share/$token'
     | '/traces/$traceId'
+    | '/agent-sessions/'
     | '/alerts/'
     | '/analytics/'
     | '/anomalies/'
@@ -906,6 +918,7 @@ export interface RootRouteChildren {
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
   ShareTokenRoute: typeof ShareTokenRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
+  AgentSessionsIndexRoute: typeof AgentSessionsIndexRoute
   AlertsIndexRoute: typeof AlertsIndexRoute
   AnalyticsIndexRoute: typeof AnalyticsIndexRoute
   AnomaliesIndexRoute: typeof AnomaliesIndexRoute
@@ -1053,6 +1066,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-up'
       fullPath: '/sign-up'
       preLoaderRoute: typeof SignUpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-sessions/': {
+      id: '/agent-sessions/'
+      path: '/agent-sessions'
+      fullPath: '/agent-sessions/'
+      preLoaderRoute: typeof AgentSessionsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/alerts/': {
@@ -1497,6 +1517,7 @@ const rootRouteChildren: RootRouteChildren = {
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   ShareTokenRoute: ShareTokenRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
+  AgentSessionsIndexRoute: AgentSessionsIndexRoute,
   AlertsIndexRoute: AlertsIndexRoute,
   AnalyticsIndexRoute: AnalyticsIndexRoute,
   AnomaliesIndexRoute: AnomaliesIndexRoute,
