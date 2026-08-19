@@ -65,14 +65,18 @@ function useClerkActorDirectory(): ActorDirectory {
 		return map
 	}, [data])
 
-	const me: DirectoryPerson | null = user
-		? {
-				userId: user.id,
-				name: user.fullName ?? user.username ?? user.primaryEmailAddress?.emailAddress ?? "You",
-				email: user.primaryEmailAddress?.emailAddress ?? null,
-				imageUrl: user.imageUrl ?? null,
-			}
-		: null
+	// Read the identity out as primitives before memoizing: Clerk's `user`
+	// resource is a new object on every poll, so a `[user]` dependency would
+	// rebuild the directory — and re-render every row that reads it — on a timer.
+	const meId = user?.id ?? null
+	const meName = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? null
+	const meEmail = user?.primaryEmailAddress?.emailAddress ?? null
+	const meImageUrl = user?.imageUrl ?? null
+
+	const me: DirectoryPerson | null = React.useMemo(
+		() => (meId ? { userId: meId, name: meName ?? "You", email: meEmail, imageUrl: meImageUrl } : null),
+		[meId, meName, meEmail, meImageUrl],
+	)
 
 	return React.useMemo(
 		() => ({

@@ -65,13 +65,13 @@ export function IssueCommentComposer({
 			>
 				{meIdentity ? <IdentityAvatar className="mt-0.5" identity={meIdentity} size="md" /> : null}
 				<div className="min-w-0 flex-1 space-y-2">
-					{/* The shared `Textarea`, chrome stripped — its `field-sizing-content`
-					    grows the box with the draft and shrinks it back on delete with no
-					    JS measurement, and its `w-full` wrapper span is what keeps that
-					    intrinsic sizing from resolving against the flex row and blowing
-					    the empty box up to its max height. */}
+					{/* The card around this already draws the border, background and
+					    focus ring, so the control comes in `unstyled` and only brings
+					    its own sizing. `field-sizing-content` (from the shared control)
+					    grows the box with the draft and shrinks it back on delete with
+					    no JS measurement. */}
 					<Textarea
-						className="min-h-0 max-h-80 resize-none border-0 bg-transparent p-0 shadow-none [&_textarea]:min-h-11 [&_textarea]:px-0 [&_textarea]:py-0 [&_textarea]:leading-relaxed"
+						controlClassName="max-h-80 min-h-11 resize-none px-0 py-0 text-sm leading-relaxed placeholder:text-muted-foreground"
 						disabled={disabled}
 						id="comment-input"
 						onChange={(e) => onChange(e.target.value)}
