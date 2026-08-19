@@ -52,6 +52,8 @@ const errorTypeForStatus = (status: number): MaplePublicErrorType | undefined =>
 			return "invalid_request_error"
 		case 401:
 			return "authentication_error"
+		case 402:
+			return "payment_error"
 		case 403:
 			return "permission_error"
 		case 404:
