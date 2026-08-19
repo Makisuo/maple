@@ -10,6 +10,8 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 import { createClerkClient } from "@clerk/backend"
 import {
 	AuthMode,
+	AuthorizationUnavailableError,
+	OrganizationAccessDeniedError,
 	OrgId,
 	RoleName,
 	SelfHostedAuthDisabledError,
@@ -494,14 +496,141 @@ export const makeRefreshSelfHostedSession = (env: Pick<AuthEnv, "MAPLE_AUTH_MODE
 		})
 	})
 
+/**
+ * The header a client uses to name an organization explicitly instead of
+ * relying on the session token's active-organization claim.
+ *
+ * It exists for one shape of caller: the iOS app publishing a Home Screen
+ * widget snapshot per organization. A Clerk token carries exactly one active
+ * organization, and `setActive` is global session state the foreground is
+ * using — so the only way to read another org's data without disturbing the
+ * user is to name it per request and prove membership server-side.
+ *
+ * Deliberately NOT `x-org-id`: that name belongs to the internal-service branch
+ * in `apps/api/src/mcp/lib/resolve-tenant.ts`, which trusts it wholesale behind
+ * a shared secret. Two very different trust models must not share a spelling.
+ */
+export const ORG_SELECTION_HEADER = "x-maple-org-id"
+
+export interface VerifiedOrgMembership {
+	readonly orgId: OrgId
+	readonly role: RoleName
+}
+
+/**
+ * Answers "is this user a member of this organization, and with what role".
+ * `Option.none()` is a definite no; a failure is "could not find out", which
+ * must never be treated as a no.
+ *
+ * Injected rather than implemented here, the same way `authenticateClerkRequest`
+ * is, so this package keeps its "no app Env, fake it in a test" property.
+ */
+export type VerifyOrgMembership = (
+	userId: UserId,
+	orgId: OrgId,
+) => Effect.Effect<Option.Option<VerifiedOrgMembership>, AuthorizationUnavailableError>
+
+const ORGANIZATION_ACCESS_DENIED_MESSAGE = "You are not a member of the requested organization."
+
+const organizationAccessDenied = (requestedOrgId?: OrgId) => {
+	// The id is included only when it decoded as an `OrgId`; an unparseable
+	// header value is never cast into the brand just to appear in an error.
+	if (requestedOrgId === undefined) {
+		return new OrganizationAccessDeniedError({ message: ORGANIZATION_ACCESS_DENIED_MESSAGE })
+	}
+	return new OrganizationAccessDeniedError({
+		message: ORGANIZATION_ACCESS_DENIED_MESSAGE,
+		requestedOrgId,
+	})
+}
+
+/**
+ * Resolves {@link ORG_SELECTION_HEADER} into a verified membership, or
+ * `Option.none()` when the request names no organization.
+ *
+ * Two invariants, and both are load-bearing:
+ *
+ * 1. **The header only ever selects among organizations the caller can already
+ *    be proven a member of.** Wherever that proof is unavailable — self-hosted
+ *    mode, `MAPLE_ORG_ID_OVERRIDE`, API keys, no verifier wired — the request is
+ *    rejected, never silently served under the credential's own organization.
+ *    Silently ignoring it is the failure mode where a widget renders one
+ *    organization's incidents under another's name and nobody notices.
+ * 2. **Naming the organization you already have is free** — see
+ *    {@link applyRequestedOrg}, which short-circuits before reaching here. That
+ *    is what lets a client send the header unconditionally instead of branching.
+ */
+const selectRequestedOrg = Effect.fnUntraced(function* (
+	userId: UserId,
+	headers: HeaderRecord,
+	verify: VerifyOrgMembership | undefined,
+): Effect.fn.Return<
+	Option.Option<VerifiedOrgMembership>,
+	UnauthorizedError | OrganizationAccessDeniedError | AuthorizationUnavailableError
+> {
+	const requested = getHeader(headers, ORG_SELECTION_HEADER)
+	if (!requested) return Option.none()
+
+	const requestedOrgId = yield* decodeOrgId(requested, "Invalid organization selection")
+	if (!verify) return yield* Effect.fail(organizationAccessDenied(requestedOrgId))
+
+	// Stamped only when the header actually decides the organization, so
+	// `maple.auth.org_source` answers "how much traffic selects an organization
+	// explicitly" rather than "how many clients send the header unconditionally".
+	yield* Effect.annotateCurrentSpan({
+		"maple.auth.org_source": "header",
+		"tenant.requested_org_id": requestedOrgId,
+	})
+
+	const membership = yield* verify(userId, requestedOrgId)
+	if (Option.isNone(membership)) {
+		return yield* Effect.fail(organizationAccessDenied(requestedOrgId))
+	}
+	return membership
+})
+
+/** {@link selectRequestedOrg}, applied to a tenant that already has an organization. */
+const applyRequestedOrg = Effect.fnUntraced(function* (
+	tenant: TenantContext,
+	headers: HeaderRecord,
+	verify: VerifyOrgMembership | undefined,
+): Effect.fn.Return<
+	TenantContext,
+	UnauthorizedError | OrganizationAccessDeniedError | AuthorizationUnavailableError
+> {
+	const requested = getHeader(headers, ORG_SELECTION_HEADER)
+	if (!requested) return tenant
+	// The free no-op. Decoded first so an unparseable value is still rejected.
+	const requestedOrgId = yield* decodeOrgId(requested, "Invalid organization selection")
+	if (requestedOrgId === tenant.orgId) return tenant
+
+	const membership = yield* selectRequestedOrg(tenant.userId, headers, verify)
+	if (Option.isNone(membership)) return tenant
+
+	// The role travels with the organization. Carrying the token's `orgRole`
+	// across would grant an admin of org A admin of org B.
+	return { ...tenant, orgId: membership.value.orgId, roles: [membership.value.role] }
+})
+
 export const makeResolveTenant = (
 	env: AuthEnv,
 	authenticateClerkRequest = makeClerkAuthenticateRequest(env),
 	acceptsToken: string | string[] = "session_token",
+	/**
+	 * Omit to disable {@link ORG_SELECTION_HEADER} entirely — the header is then
+	 * rejected rather than ignored. Callers that have no membership directory to
+	 * check against (electric-sync) and callers where the header has no meaning
+	 * (`makeResolveMcpTenant`, whose credentials include org-bound API keys)
+	 * deliberately pass nothing.
+	 */
+	verifyOrgMembership?: VerifyOrgMembership,
 ) =>
 	Effect.fn("AuthService.resolveTenant")(function* (
 		headers: HeaderRecord,
-	): Effect.fn.Return<TenantContext, UnauthorizedError> {
+	): Effect.fn.Return<
+		TenantContext,
+		UnauthorizedError | OrganizationAccessDeniedError | AuthorizationUnavailableError
+	> {
 		const authMode = getAuthMode(env.MAPLE_AUTH_MODE)
 
 		if (authMode === "clerk") {
@@ -539,9 +668,36 @@ export const makeResolveTenant = (
 			}
 
 			const orgIdOverride = getOptionalString(env.MAPLE_ORG_ID_OVERRIDE)
+			const userId = yield* decodeUserId(auth.userId, "Invalid user in Clerk session token")
+
+			// Two credentials must not be allowed to select an organization, and in
+			// both cases the header is a rejection rather than a silent ignore:
+			//
+			// - an API key is already organization-bound, so a selection could only
+			//   ever widen it (`acceptsToken` is what admits keys here — the MCP
+			//   resolver — and that path passes no verifier anyway);
+			// - `MAPLE_ORG_ID_OVERRIDE` pins a deployment to one organization, and
+			//   honouring a selection would defeat the pin.
+			const selectable =
+				auth.tokenType === "session_token" && orgIdOverride === undefined
+					? verifyOrgMembership
+					: undefined
 
 			if (!auth.orgId && !orgIdOverride) {
-				return yield* unauthorized("Active organization is required")
+				// No active organization in the session. A request that names one it
+				// can prove membership of is still serviceable — this is the widget
+				// publishing path, whose whole point is not to disturb whatever the
+				// foreground has active.
+				const selected = yield* selectRequestedOrg(userId, headers, selectable)
+				if (Option.isNone(selected)) {
+					return yield* unauthorized("Active organization is required")
+				}
+				return {
+					orgId: selected.value.orgId,
+					userId,
+					roles: [selected.value.role],
+					authMode: "clerk",
+				}
 			}
 
 			const clerkTenant: TenantContext = {
@@ -549,7 +705,7 @@ export const makeResolveTenant = (
 					orgIdOverride ?? auth.orgId!,
 					"Invalid organization in Clerk session token",
 				),
-				userId: yield* decodeUserId(auth.userId, "Invalid user in Clerk session token"),
+				userId,
 				roles:
 					typeof auth.orgRole === "string"
 						? yield* Effect.map(
@@ -560,7 +716,7 @@ export const makeResolveTenant = (
 				authMode: "clerk",
 			}
 
-			return clerkTenant
+			return yield* applyRequestedOrg(clerkTenant, headers, selectable)
 		}
 
 		const token = getBearerToken(headers)
@@ -581,14 +737,17 @@ export const makeResolveTenant = (
 		}
 
 		const orgIdOverride = getOptionalString(env.MAPLE_ORG_ID_OVERRIDE)
-		if (orgIdOverride) {
-			return {
-				...tenant,
-				orgId: yield* decodeOrgId(orgIdOverride, "Invalid MAPLE_ORG_ID_OVERRIDE value"),
-			}
-		}
+		const resolved = orgIdOverride
+			? {
+					...tenant,
+					orgId: yield* decodeOrgId(orgIdOverride, "Invalid MAPLE_ORG_ID_OVERRIDE value"),
+				}
+			: tenant
 
-		return tenant
+		// Self-hosted mode has no membership directory to check a selection
+		// against, so an honoured header here would be unconditional cross-tenant
+		// access. Passing no verifier makes it a rejection.
+		return yield* applyRequestedOrg(resolved, headers, undefined)
 	})
 
 export const makeResolveMcpTenant = (

@@ -1,6 +1,7 @@
 import Foundation
 import Maple
 import MapleAPI
+import MapleWidgetData
 import Observation
 import UIKit
 import UserNotifications
@@ -35,8 +36,9 @@ final class PushRegistrar: NSObject {
 	/// True while a sync is in flight; the settings sheet dims its toggles.
 	private(set) var isSyncing = false
 
-	/// Set by the app at launch so a notification tap can navigate.
-	var navigation: AppNavigation?
+	/// Set by the app at launch so a notification tap can be routed — including
+	/// into the organization the alert actually fired in.
+	var opener: DestinationOpener?
 
 	private let defaults = UserDefaults.standard
 	private let center = UNUserNotificationCenter.current()
@@ -221,7 +223,7 @@ enum PushEnvironmentDetector {
 }
 
 /// APNs and notification callbacks arrive on UIKit's app delegate; this
-/// forwards them to the registrar and to navigation.
+/// forwards them to the registrar and to `DestinationOpener`.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 	func application(
 		_ application: UIApplication,
@@ -282,6 +284,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		let userInfo = response.notification.request.content.userInfo
 		let kind = userInfo["maple_kind"] as? String
 		let incidentId = userInfo["maple_incident_id"] as? String
+		// The organization the alert fired in. Every push has carried it since
+		// `MobilePushService` was written; until `DestinationOpener` existed
+		// nothing on the device read it, so a tap on another org's alert opened
+		// an incident id the active token could not fetch.
+		let organizationId = userInfo["maple_org_id"] as? String
 		Task { @MainActor in
 			switch kind {
 			case "alert_incident":
@@ -296,7 +303,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 					coldStart: Telemetry.Launch.isColdStart
 				)
 				Telemetry.track(Telemetry.Event.pushOpened, ["kind": "alert_incident"])
-				PushRegistrar.shared.navigation?.openIncident(id: incidentId)
+				await PushRegistrar.shared.opener?.open(
+					WidgetDeepLink(target: .incident(id: incidentId), organizationId: organizationId),
+					source: .push
+				)
 			default:
 				break
 			}

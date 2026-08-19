@@ -40,10 +40,24 @@ struct ThroughputEntry: TimelineEntry {
 	/// The row to draw, or nil when the configured service is not in the
 	/// snapshot — it went quiet, or the org changed under the widget.
 	var service: ServiceThroughput? { snapshot?.service(named: serviceName) }
+
+	/// The organization whose numbers are on screen, carried into deep links.
+	var organizationId: String?
+	var organizationName: String?
+	/// Only worth showing when the account has more than one.
+	var showsOrganization = false
+	/// Pinned to an organization the app no longer publishes.
+	var isOrganizationUnavailable = false
+
+	/// The organization to name in the header, or nil when naming it is noise.
+	var headerOrganizationName: String? {
+		guard showsOrganization else { return nil }
+		return organizationName ?? organizationId
+	}
 }
 
 struct ThroughputProvider: AppIntentTimelineProvider {
-	private let store = WidgetSnapshotStore<ThroughputSnapshot>.throughput
+	private let index = PublishedOrganizationIndex()
 
 	func placeholder(in context: Context) -> ThroughputEntry {
 		ThroughputEntry(date: Date(), snapshot: .sample, serviceName: nil, isPlaceholder: true)
@@ -52,27 +66,59 @@ struct ThroughputProvider: AppIntentTimelineProvider {
 	/// The gallery. Never the empty state: someone browsing widgets should see
 	/// what this looks like with traffic in it.
 	func snapshot(for configuration: SelectServiceIntent, in context: Context) async -> ThroughputEntry {
-		let stored = store.load()
+		var entry = makeEntry(for: configuration, at: Date())
+		if context.isPreview, entry.snapshot == nil {
+			entry.snapshot = .sample
+			entry.isOrganizationUnavailable = false
+		}
+		return entry
+	}
+
+	/// Resolves the configured organization — nil meaning the active one, which
+	/// is every widget configured before the organization parameter existed.
+	private func makeEntry(for configuration: SelectServiceIntent, at date: Date) -> ThroughputEntry {
+		let published = index.load()
+		let configuredId = configuration.organization?.id
+		let organizationId = configuredId ?? index.activeOrganizationId
+		let serviceName = configuration.service?.id
+
+		guard let organizationId else {
+			return ThroughputEntry(date: date, snapshot: legacySnapshot(), serviceName: serviceName)
+		}
+
+		let stored = WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organizationId).load()
+		// No fallback to another organization's snapshot — see `IssuesProvider`.
+		let snapshot = stored ?? (configuredId == nil ? legacySnapshot() : nil)
+
 		return ThroughputEntry(
-			date: Date(),
-			snapshot: context.isPreview ? (stored ?? .sample) : stored,
-			serviceName: configuration.service?.id
+			date: date,
+			snapshot: snapshot,
+			serviceName: serviceName,
+			organizationId: organizationId,
+			organizationName: published.first { $0.id == organizationId }?.name,
+			showsOrganization: published.count > 1,
+			isOrganizationUnavailable: snapshot == nil
+				&& configuredId != nil
+				&& !published.contains { $0.id == organizationId }
 		)
+	}
+
+	/// The pre-per-organization key; see `IssuesProvider.legacySnapshot`.
+	private func legacySnapshot() -> ThroughputSnapshot? {
+		WidgetSnapshotStore<ThroughputSnapshot>.legacyThroughput.load()
 	}
 
 	/// One read, several entries — the numbers do not change between them,
 	/// only how old they are. The app's `reloadTimelines` is what actually
 	/// keeps this current; the entries are the floor.
 	func timeline(for configuration: SelectServiceIntent, in context: Context) async -> Timeline<ThroughputEntry> {
-		let snapshot = store.load()
 		let now = Date()
 		let step: TimeInterval = 15 * 60
-		let entries = (0..<8).map { index in
-			ThroughputEntry(
-				date: now.addingTimeInterval(Double(index) * step),
-				snapshot: snapshot,
-				serviceName: configuration.service?.id
-			)
+		let base = makeEntry(for: configuration, at: now)
+		let entries = (0..<8).map { offset -> ThroughputEntry in
+			var entry = base
+			entry.date = now.addingTimeInterval(Double(offset) * step)
+			return entry
 		}
 		return Timeline(entries: entries, policy: .after(now.addingTimeInterval(8 * step)))
 	}

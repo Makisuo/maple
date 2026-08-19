@@ -1,4 +1,6 @@
 import {
+	AuthorizationUnavailableError,
+	OrganizationAccessDeniedError,
 	SelfHostedAuthDisabledError,
 	SelfHostedInvalidPasswordError,
 	SelfHostedLoginResponse,
@@ -13,8 +15,9 @@ import {
 	makeResolveTenant,
 	type TenantContext,
 } from "@maple/auth"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option } from "effect"
 import { Env } from "@/platform/Env"
+import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
 
 // The pure tenant-resolution + self-hosted login primitives live in the shared
 // `@maple/auth` package (consumed by apps/api AND the standalone
@@ -27,8 +30,24 @@ export { makeResolveTenant, type TenantContext }
 type HeaderRecord = Record<string, string | undefined>
 
 export interface AuthServiceApi {
-	readonly resolveTenant: (headers: HeaderRecord) => Effect.Effect<TenantContext, UnauthorizedError>
-	readonly resolveMcpTenant: (headers: HeaderRecord) => Effect.Effect<TenantContext, UnauthorizedError>
+	readonly resolveTenant: (
+		headers: HeaderRecord,
+	) => Effect.Effect<
+		TenantContext,
+		UnauthorizedError | OrganizationAccessDeniedError | AuthorizationUnavailableError
+	>
+	/**
+	 * Same resolver, wider credentials. It can reject an organization selection
+	 * too: `makeResolveMcpTenant` passes no membership verifier, so
+	 * `x-maple-org-id` naming anything other than the credential's own
+	 * organization is a 403 rather than a silent ignore.
+	 */
+	readonly resolveMcpTenant: (
+		headers: HeaderRecord,
+	) => Effect.Effect<
+		TenantContext,
+		UnauthorizedError | OrganizationAccessDeniedError | AuthorizationUnavailableError
+	>
 	readonly loginSelfHosted: (
 		password: string,
 	) => Effect.Effect<SelfHostedLoginResponse, SelfHostedAuthDisabledError | SelfHostedInvalidPasswordError>
@@ -46,7 +65,16 @@ export class AuthService extends Context.Service<AuthService, AuthServiceApi>()(
 	{
 		make: Effect.gen(function* () {
 			const env = yield* Env
-			const resolveTenant = makeResolveTenant(env)
+			// Optional on purpose. Where it is absent — tests, and any runtime that
+			// has not wired it — `makeResolveTenant` rejects `x-maple-org-id`
+			// outright rather than ignoring it, which is the safe half of the
+			// no-silent-ignore rule.
+			const membership = yield* Effect.serviceOption(OrgMembershipService)
+			const verifyOrgMembership = Option.match(membership, {
+				onNone: () => undefined,
+				onSome: (service) => service.verify,
+			})
+			const resolveTenant = makeResolveTenant(env, undefined, undefined, verifyOrgMembership)
 			const resolveMcpTenant = makeResolveMcpTenant(env)
 			const loginSelfHosted = makeLoginSelfHosted(env)
 			const refreshSelfHostedSession = makeRefreshSelfHostedSession(env)

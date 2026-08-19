@@ -510,6 +510,9 @@ describe("MapleApiV2 OpenAPI", () => {
 		const adminTags = [
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		]
 		expect([...responseErrorTags("post", "/v2/integrations/slack/install", "403")].sort()).toEqual(
 			adminTags,
@@ -524,6 +527,9 @@ describe("MapleApiV2 OpenAPI", () => {
 		// for every member, so its 403 comes from the scope middleware alone.
 		expect(responseErrorTags("get", "/v2/integrations/slack", "403")).toEqual([
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 	})
 
@@ -628,10 +634,16 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(responseErrorTags("post", "/v2/api_keys", "403")).toEqual([
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 		expect(responseErrorTags("get", "/v2/ingest_keys", "403")).toEqual([
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 	})
 

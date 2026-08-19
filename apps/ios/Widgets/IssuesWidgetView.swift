@@ -32,7 +32,7 @@ private struct SmallView: View {
 	var body: some View {
 		WidgetFrame(entry: entry) { snapshot in
 			VStack(alignment: .leading, spacing: 0) {
-				SectionHeader(snapshot: snapshot)
+				SectionHeader(snapshot: snapshot, organization: entry.headerOrganization)
 				CountLine(snapshot: snapshot)
 				SeverityLine(snapshot: snapshot)
 
@@ -47,7 +47,7 @@ private struct SmallView: View {
 				StalenessFooter(snapshot: snapshot, now: entry.date)
 			}
 		}
-		.widgetURL(IssuesWidgetKind.issuesListURL)
+		.widgetURL(IssuesWidgetKind.issuesListURL(organizationId: entry.organizationId))
 	}
 }
 
@@ -60,7 +60,7 @@ private struct ListView: View {
 		WidgetFrame(entry: entry) { snapshot in
 			VStack(alignment: .leading, spacing: 0) {
 				HStack(alignment: .firstTextBaseline) {
-					SectionHeader(snapshot: snapshot)
+					SectionHeader(snapshot: snapshot, organization: entry.headerOrganization)
 					Spacer()
 					CountLine(snapshot: snapshot, isCompact: true)
 				}
@@ -82,7 +82,7 @@ private struct ListView: View {
 						}
 						// Per-row deep link: the point of showing the rows is
 						// that one of them is the reason to open the app.
-						Link(destination: IssuesWidgetKind.issueURL(id: issue.id) ?? fallbackURL) {
+						Link(destination: IssuesWidgetKind.issueURL(id: issue.id, organizationId: entry.organizationId) ?? fallbackURL) {
 							IssueRowView(issue: issue, now: entry.date, showsCount: true)
 						}
 					}
@@ -91,7 +91,7 @@ private struct ListView: View {
 				Spacer(minLength: 0)
 			}
 		}
-		.widgetURL(IssuesWidgetKind.issuesListURL)
+		.widgetURL(IssuesWidgetKind.issuesListURL(organizationId: entry.organizationId))
 	}
 
 	/// Only reachable if the scheme itself failed to parse, which it cannot.
@@ -106,7 +106,7 @@ private struct RectangularView: View {
 	var body: some View {
 		WidgetFrame(entry: entry, isAccessory: true) { snapshot in
 			VStack(alignment: .leading, spacing: 2) {
-				Text(snapshot.isEmpty ? "No ongoing issues" : "\(snapshot.countLabel) ongoing")
+				Text(rectangularHeadline(snapshot: snapshot))
 					.font(.headline)
 					.widgetAccentable()
 				if let top = snapshot.issues.first {
@@ -120,7 +120,16 @@ private struct RectangularView: View {
 			}
 			.frame(maxWidth: .infinity, alignment: .leading)
 		}
-		.widgetURL(IssuesWidgetKind.issuesListURL)
+		.widgetURL(IssuesWidgetKind.issuesListURL(organizationId: entry.organizationId))
+	}
+
+	/// Rectangular is the only accessory family with room for the organization;
+	/// truncating a name to two glyphs on circular or inline is worse than
+	/// leaving it out.
+	private func rectangularHeadline(snapshot: IssuesSnapshot) -> String {
+		let base = snapshot.isEmpty ? "No ongoing issues" : "\(snapshot.countLabel) ongoing"
+		guard let organization = entry.headerOrganization else { return base }
+		return "\(base) · \(organization.name)"
 	}
 }
 
@@ -139,7 +148,7 @@ private struct CircularView: View {
 					.foregroundStyle(.secondary)
 			}
 		}
-		.widgetURL(IssuesWidgetKind.issuesListURL)
+		.widgetURL(IssuesWidgetKind.issuesListURL(organizationId: entry.organizationId))
 	}
 }
 
@@ -163,9 +172,10 @@ private struct InlineView: View {
 
 // MARK: - Shared chrome
 
-/// The three states every family shares: never published, nothing ongoing, and
-/// content. Written once so a signed-out phone cannot show "0 issues" — which
-/// would read as "all clear" when the truth is "Maple has no idea".
+/// The states every family shares: never published, no longer a member, waiting
+/// on an organization, nothing ongoing, and content. Written once so a
+/// signed-out phone cannot show "0 issues" — which would read as "all clear"
+/// when the truth is "Maple has no idea".
 private struct WidgetFrame<Content: View>: View {
 	let entry: IssuesEntry
 	var isAccessory = false
@@ -182,6 +192,18 @@ private struct WidgetFrame<Content: View>: View {
 						// truth we had — but stops looking like live data.
 						.opacity(snapshot.isStale(at: entry.date) ? 0.55 : 1)
 				}
+			} else if entry.isOrganizationUnavailable {
+				// Terminal, not a loading state: no amount of opening the app
+				// will fill this in.
+				UnavailableOrganizationView(
+					organizationName: entry.organizationName,
+					isAccessory: isAccessory
+				)
+			} else if let organizationName = entry.organizationName {
+				// Pinned to an organization this round did not publish — outside
+				// the refresh budget, or added since. Names the action that fixes
+				// it rather than looking broken.
+				WaitingOrganizationView(organizationName: organizationName, isAccessory: isAccessory)
 			} else {
 				DisconnectedView(isAccessory: isAccessory)
 			}
@@ -193,11 +215,85 @@ private struct WidgetFrame<Content: View>: View {
 
 private struct SectionHeader: View {
 	let snapshot: IssuesSnapshot
+	/// Only when the account has more than one organization published — a
+	/// single-organization Home Screen does not need its own name repeated back.
+	var organization: (name: String, id: String)?
 
 	var body: some View {
-		Text("Ongoing issues")
-			.sectionLabelStyle()
-			.lineLimit(1)
+		VStack(alignment: .leading, spacing: 1) {
+			Text("Ongoing issues")
+				.sectionLabelStyle()
+				.lineLimit(1)
+			if let organization {
+				HStack(spacing: 4) {
+					// The same categorical colour the app's organization
+					// switcher uses, so the two read as one thing.
+					OrganizationDot(organizationId: organization.id)
+					Text(organization.name)
+						.font(Typo.micro)
+						.foregroundStyle(Token.mutedForeground)
+						.lineLimit(1)
+				}
+			}
+		}
+	}
+}
+
+/// The organization's categorical colour, from the same `ServiceColor` the app
+/// uses for `OrganizationRow` and the switcher — so the Home Screen and the
+/// toolbar agree on what an organization looks like.
+private struct OrganizationDot: View {
+	let organizationId: String
+
+	var body: some View {
+		ServiceDot(serviceName: organizationId, size: 7)
+	}
+}
+
+/// The organization a widget is pinned to no longer publishes anything: the
+/// user left it, or was removed.
+private struct UnavailableOrganizationView: View {
+	let organizationName: String?
+	let isAccessory: Bool
+
+	var body: some View {
+		if isAccessory {
+			Text(organizationName ?? "Unavailable").font(.headline).widgetAccentable()
+		} else {
+			VStack(alignment: .leading, spacing: 4) {
+				Text(organizationName ?? "Organization").sectionLabelStyle()
+				Text("Unavailable")
+					.font(Typo.heading)
+					.foregroundStyle(Token.foreground)
+				Text("You're no longer a member. Edit this widget to pick another organization.")
+					.font(Typo.tiny)
+					.foregroundStyle(Token.mutedForeground)
+					.fixedSize(horizontal: false, vertical: true)
+			}
+		}
+	}
+}
+
+/// Pinned to a real organization that has not been published yet.
+private struct WaitingOrganizationView: View {
+	let organizationName: String
+	let isAccessory: Bool
+
+	var body: some View {
+		if isAccessory {
+			Text("Open Maple").font(.headline).widgetAccentable()
+		} else {
+			VStack(alignment: .leading, spacing: 4) {
+				Text(organizationName).sectionLabelStyle()
+				Text("Open Maple")
+					.font(Typo.heading)
+					.foregroundStyle(Token.foreground)
+				Text("Open the app once to load this organization's issues.")
+					.font(Typo.tiny)
+					.foregroundStyle(Token.mutedForeground)
+					.fixedSize(horizontal: false, vertical: true)
+			}
+		}
 	}
 }
 

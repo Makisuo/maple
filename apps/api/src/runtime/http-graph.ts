@@ -60,6 +60,9 @@ import { ApiAuthorizationLayer } from "@/services/auth/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { SessionAuthorizationLayer } from "@/services/auth/SessionAuthorizationLayer"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 
 const HealthRouter = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
@@ -166,6 +169,14 @@ export const ApiAuthLive = Layer.mergeAll(
 ).pipe(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
+	// Membership verification for `x-maple-org-id`. Only the v2 layer asks for
+	// it; without it that layer cannot build, which is deliberate — the header
+	// must never end up silently ignored in a runtime that forgot to wire this.
+	Layer.provideMerge(
+		OrgMembershipService.layer.pipe(
+			Layer.provide(EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))),
+		),
+	),
 	Layer.provideMerge(Env.layer),
 )
 

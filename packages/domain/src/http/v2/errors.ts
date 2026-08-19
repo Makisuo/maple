@@ -147,6 +147,25 @@ export const V2InsufficientScope = defineV2Error({
 	identifier: "InsufficientScopeError",
 })
 
+/**
+ * The caller named an organization (`x-maple-org-id`) it cannot prove
+ * membership of.
+ *
+ * Not `V2InsufficientPermissions`: that one says "only organization
+ * administrators can perform this operation", which would send a widget owner
+ * looking for an admin instead of unpinning the organization.
+ */
+export const V2OrganizationAccessDenied = defineV2Error({
+	tag: "@maple/http/v2/OrganizationAccessDeniedError",
+	status: 403,
+	code: "organization_access_denied",
+	title: "Organization not available",
+	message: "You are not a member of the requested organization.",
+	retry: "never",
+	recovery: "request_access",
+	identifier: "OrganizationAccessDeniedError",
+})
+
 export const V2InsufficientPermissions = defineV2Error({
 	tag: "@maple/http/v2/InsufficientPermissionsError",
 	status: 403,

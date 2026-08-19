@@ -97,19 +97,30 @@ public struct IncidentActivityAttributes: Codable, Hashable, Sendable {
 	/// What is being measured ("Error Rate", "p95 Latency").
 	public var signalLabel: String
 	public var startedAt: Date
+	/// Which organization's incident this is, so a tap lands in the right one.
+	///
+	/// **Optional, and it has to stay optional.** Attributes are the static half
+	/// of an activity: an activity already running when this shipped has no such
+	/// field and no later push can add one. Making it required would also mean
+	/// iOS silently dropping every start push from a server that has not yet
+	/// shipped the matching change — and, per the notes at the top of this file,
+	/// a failed decode here is silence, not an error.
+	public var organizationId: String?
 
 	public init(
 		incidentId: String,
 		ruleName: String,
 		service: String?,
 		signalLabel: String,
-		startedAt: Date
+		startedAt: Date,
+		organizationId: String? = nil
 	) {
 		self.incidentId = incidentId
 		self.ruleName = ruleName
 		self.service = service
 		self.signalLabel = signalLabel
 		self.startedAt = startedAt
+		self.organizationId = organizationId
 	}
 
 	private enum CodingKeys: String, CodingKey {
@@ -118,6 +129,7 @@ public struct IncidentActivityAttributes: Codable, Hashable, Sendable {
 		case service
 		case signalLabel = "signal_label"
 		case startedAt = "started_at"
+		case organizationId = "organization_id"
 	}
 
 	public init(from decoder: any Decoder) throws {
@@ -127,6 +139,7 @@ public struct IncidentActivityAttributes: Codable, Hashable, Sendable {
 		service = try container.decodeIfPresent(String.self, forKey: .service)
 		signalLabel = try container.decode(String.self, forKey: .signalLabel)
 		startedAt = Date(timeIntervalSince1970: try container.decode(Double.self, forKey: .startedAt))
+		organizationId = try container.decodeIfPresent(String.self, forKey: .organizationId)
 	}
 
 	public func encode(to encoder: any Encoder) throws {
@@ -136,6 +149,7 @@ public struct IncidentActivityAttributes: Codable, Hashable, Sendable {
 		try container.encodeIfPresent(service, forKey: .service)
 		try container.encode(signalLabel, forKey: .signalLabel)
 		try container.encode(startedAt.timeIntervalSince1970, forKey: .startedAt)
+		try container.encodeIfPresent(organizationId, forKey: .organizationId)
 	}
 }
 
@@ -148,7 +162,9 @@ public enum IncidentActivityStatus: String, Codable, Hashable, Sendable {
 extension IncidentActivityAttributes {
 	/// Where a tap on the activity lands: the incident, on the Alerts tab.
 	public var deepLinkURL: URL? {
-		URL(string: "\(IssuesWidgetKind.urlScheme)://incident/\(incidentId)")
+		// No `?org=` for a legacy activity, which keeps its pre-multi-org meaning:
+		// open in whichever organization is active.
+		WidgetDeepLink(target: .incident(id: incidentId), organizationId: organizationId).url
 	}
 
 	/// Previews and the widget gallery.
@@ -158,7 +174,8 @@ extension IncidentActivityAttributes {
 			ruleName: "Checkout error rate",
 			service: "checkout-api",
 			signalLabel: "Error Rate",
-			startedAt: Date().addingTimeInterval(-14 * 60)
+			startedAt: Date().addingTimeInterval(-14 * 60),
+			organizationId: "org_sample"
 		)
 	}
 }

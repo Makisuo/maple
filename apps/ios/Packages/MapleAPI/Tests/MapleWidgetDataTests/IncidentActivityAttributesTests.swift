@@ -110,7 +110,8 @@ struct IncidentActivityAttributesTests {
 		let encoded = try JSONEncoder().encode(IncidentActivityAttributes.sample)
 		let json = try object(String(decoding: encoded, as: UTF8.self))
 		#expect(
-			Set(json.keys) == ["incident_id", "rule_name", "service", "signal_label", "started_at"]
+			Set(json.keys)
+				== ["incident_id", "rule_name", "service", "signal_label", "started_at", "organization_id"]
 		)
 		#expect(json["started_at"] is NSNumber)
 
@@ -121,11 +122,46 @@ struct IncidentActivityAttributesTests {
 		)
 	}
 
-	@Test("A tap opens the incident")
+	@Test("A tap opens the incident, in its own organization")
 	func deepLink() {
 		#expect(
 			IncidentActivityAttributes.sample.deepLinkURL?.absoluteString
-				== "maple://incident/inc_YofPTrK9782DWwcnXhpcCw"
+				== "maple://incident/inc_YofPTrK9782DWwcnXhpcCw?org=org_sample"
 		)
+	}
+
+	@Test("Decodes the organization when the server sends it")
+	func decodesOrganization() throws {
+		let json = """
+			{
+			  "incident_id": "inc_1",
+			  "rule_name": "Latency",
+			  "signal_label": "p95 Latency",
+			  "started_at": 1800000000,
+			  "organization_id": "org_2abc"
+			}
+			"""
+		let decoded = try JSONDecoder().decode(IncidentActivityAttributes.self, from: Data(json.utf8))
+		#expect(decoded.organizationId == "org_2abc")
+		#expect(decoded.deepLinkURL?.absoluteString == "maple://incident/inc_1?org=org_2abc")
+	}
+
+	/// The case that must never regress: an activity started before the
+	/// organization id existed, or by a server that has not deployed it yet.
+	/// Attributes are the static half of an activity — a required field here
+	/// would make iOS drop the start push in silence.
+	@Test("Decodes attributes with no organization at all, and links without one")
+	func decodesWithoutOrganization() throws {
+		let json = """
+			{
+			  "incident_id": "inc_1",
+			  "rule_name": "Latency",
+			  "signal_label": "p95 Latency",
+			  "started_at": 1800000000
+			}
+			"""
+		let decoded = try JSONDecoder().decode(IncidentActivityAttributes.self, from: Data(json.utf8))
+		#expect(decoded.organizationId == nil)
+		#expect(decoded.deepLinkURL?.absoluteString == "maple://incident/inc_1")
 	}
 }

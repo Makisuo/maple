@@ -108,6 +108,16 @@ public struct IssueQuery: Hashable, Sendable {
 /// A protocol so screens can be driven by a stub in tests and previews without
 /// a network, a token, or a signed-in user.
 public protocol MapleAPI: Sendable {
+	/// A view of this client that names `organizationId` explicitly instead of
+	/// relying on the session token's active-organization claim.
+	///
+	/// A scoped *instance* rather than a per-call argument: the alternative is a
+	/// parameter on all twenty methods below and every stub that implements
+	/// them. A task-local would read better still, but its failure mode —
+	/// "forgot to wrap, request silently went to the active organization" — is
+	/// the exact bug this exists to prevent.
+	func scoped(to organizationId: String) -> any MapleAPI
+
 	func services(window: ResolvedTimeWindow, limit: Int) async throws -> Page<Service>
 	func service(named name: String, window: ResolvedTimeWindow) async throws -> Service
 	func issues(query: IssueQuery, window: ResolvedTimeWindow?, limit: Int, cursor: String?) async throws
@@ -143,10 +153,18 @@ public protocol MapleAPI: Sendable {
 	func traceBreakdown(_ request: TraceBreakdownRequest) async throws -> TraceBreakdownResult
 }
 
+extension MapleAPI {
+	/// Stubs and fixtures serve one organization and ignore the scope.
+	public func scoped(to organizationId: String) -> any MapleAPI { self }
+}
+
 /// The live client: generated operations, wrapped so call sites see plain
 /// values and one error type.
 public struct MapleClient: MapleAPI {
 	let client: Client
+	private let tokens: any MapleTokenProvider
+	private let serverURL: URL
+	private let transport: any ClientTransport
 
 	/// - Parameters:
 	///   - tokens: supplies the Clerk session JWT.
@@ -154,12 +172,48 @@ public struct MapleClient: MapleAPI {
 	///     (`https://api.maple.dev`), so the production URL is never hardcoded
 	///     in Swift. Override for a locally-run API.
 	public init(tokens: any MapleTokenProvider, baseURL: URL? = nil) throws {
-		self.client = Client(
+		self.init(
+			tokens: tokens,
 			serverURL: try baseURL ?? Servers.Server1.url(),
 			transport: URLSessionTransport(),
-			// Order matters: auth runs outermost so the error mapper sees the
-			// response to a request that actually carried a token.
-			middlewares: [BearerAuthMiddleware(tokens: tokens), ErrorMappingMiddleware()]
+			organizationId: nil
+		)
+	}
+
+	private init(
+		tokens: any MapleTokenProvider,
+		serverURL: URL,
+		transport: any ClientTransport,
+		organizationId: String?
+	) {
+		self.tokens = tokens
+		self.serverURL = serverURL
+		self.transport = transport
+
+		// Order matters: auth runs outermost so the error mapper sees the
+		// response to a request that actually carried a token.
+		var middlewares: [any ClientMiddleware] = [BearerAuthMiddleware(tokens: tokens)]
+		if let organizationId {
+			middlewares.append(OrganizationMiddleware(organizationId: organizationId))
+		}
+		middlewares.append(ErrorMappingMiddleware())
+
+		self.client = Client(serverURL: serverURL, transport: transport, middlewares: middlewares)
+	}
+
+	/// The transport is shared rather than rebuilt, so scoping to three
+	/// organizations does not mean three `URLSession`s and three connection
+	/// pools.
+	///
+	/// A scoped call must never invalidate the token: it does not depend on the
+	/// active-organization claim, so a background fetch for one organization
+	/// must not perturb the token the foreground is using for another.
+	public func scoped(to organizationId: String) -> any MapleAPI {
+		MapleClient(
+			tokens: tokens,
+			serverURL: serverURL,
+			transport: transport,
+			organizationId: organizationId
 		)
 	}
 

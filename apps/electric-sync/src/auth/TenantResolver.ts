@@ -1,12 +1,19 @@
 import { makeResolveTenant, type TenantContext } from "@maple/auth"
-import type { UnauthorizedError } from "@maple/domain/http"
+import type {
+	AuthorizationUnavailableError,
+	OrganizationAccessDeniedError,
+	UnauthorizedError,
+} from "@maple/domain/http"
 import { Context, Effect, Layer } from "effect"
 import { SyncConfig } from "../config"
 
 export interface TenantResolverApi {
 	readonly resolve: (
 		headers: Record<string, string | undefined>,
-	) => Effect.Effect<TenantContext, UnauthorizedError>
+	) => Effect.Effect<
+		TenantContext,
+		UnauthorizedError | OrganizationAccessDeniedError | AuthorizationUnavailableError
+	>
 }
 
 /**
@@ -22,6 +29,11 @@ export interface TenantResolverApi {
  * Clerk and self-hosted are both covered by `makeResolveTenant`; there is no
  * API-key path here, because this worker has no database and the browser's
  * shape-fetch only ever sends the session bearer.
+ *
+ * No membership verifier is passed, and that is deliberate: this worker has no
+ * membership directory, so `x-maple-org-id` is REJECTED here rather than
+ * ignored. A silently ignored selection would serve the token's own rows under
+ * another organization's name.
  */
 export class TenantResolver extends Context.Service<TenantResolver, TenantResolverApi>()(
 	"@maple/electric-sync/TenantResolver",

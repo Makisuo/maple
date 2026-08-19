@@ -17,7 +17,7 @@ struct ThroughputWidgetView: View {
 		content
 			// A configured widget opens its service; the org-wide one opens the
 			// Services tab. `AppNavigation.open(_:)` handles both.
-			.widgetURL(ThroughputWidgetKind.serviceURL(name: entry.serviceName))
+			.widgetURL(ThroughputWidgetKind.serviceURL(name: entry.serviceName, organizationId: entry.organizationId))
 	}
 
 	@ViewBuilder
@@ -40,7 +40,7 @@ private struct SmallThroughputView: View {
 	var body: some View {
 		ThroughputFrame(entry: entry) { service, snapshot in
 			VStack(alignment: .leading, spacing: 0) {
-				ThroughputHeader(service: service, snapshot: snapshot)
+				ThroughputHeader(service: service, snapshot: snapshot, organizationName: entry.headerOrganizationName)
 				RateLine(service: service)
 				TrendLine(service: service, snapshot: snapshot)
 
@@ -63,7 +63,7 @@ private struct MediumThroughputView: View {
 		ThroughputFrame(entry: entry) { service, snapshot in
 			HStack(alignment: .top, spacing: 14) {
 				VStack(alignment: .leading, spacing: 0) {
-					ThroughputHeader(service: service, snapshot: snapshot)
+					ThroughputHeader(service: service, snapshot: snapshot, organizationName: entry.headerOrganizationName)
 					RateLine(service: service)
 					TrendLine(service: service, snapshot: snapshot)
 					Spacer(minLength: 4)
@@ -86,7 +86,7 @@ private struct LargeThroughputView: View {
 	var body: some View {
 		ThroughputFrame(entry: entry) { service, snapshot in
 			VStack(alignment: .leading, spacing: 0) {
-				ThroughputHeader(service: service, snapshot: snapshot)
+				ThroughputHeader(service: service, snapshot: snapshot, organizationName: entry.headerOrganizationName)
 				RateLine(service: service)
 				TrendLine(service: service, snapshot: snapshot)
 
@@ -209,6 +209,15 @@ private struct ThroughputFrame<Content: View>: View {
 				// so is the whole point: falling back to the org total here
 				// would read as "your service is fine".
 				MissingServiceView(name: entry.serviceName, isAccessory: isAccessory)
+			} else if entry.isOrganizationUnavailable {
+				MissingOrganizationView(
+					name: entry.organizationName,
+					isMember: false,
+					isAccessory: isAccessory
+				)
+			} else if let organizationName = entry.organizationName {
+				// Pinned to an organization this round did not publish.
+				MissingOrganizationView(name: organizationName, isMember: true, isAccessory: isAccessory)
 			} else {
 				DisconnectedThroughputView(isAccessory: isAccessory)
 			}
@@ -221,15 +230,62 @@ private struct ThroughputFrame<Content: View>: View {
 private struct ThroughputHeader: View {
 	let service: ServiceThroughput
 	let snapshot: ThroughputSnapshot
+	/// Only when the account publishes more than one organization.
+	var organizationName: String?
 
 	var body: some View {
-		HStack(spacing: 5) {
-			if service.name != nil {
-				ServiceDot(serviceName: service.displayName, size: 6)
+		VStack(alignment: .leading, spacing: 1) {
+			HStack(spacing: 5) {
+				if service.name != nil {
+					ServiceDot(serviceName: service.displayName, size: 6)
+				}
+				Text(service.displayName)
+					.sectionLabelStyle()
+					.lineLimit(1)
 			}
-			Text(service.displayName)
-				.sectionLabelStyle()
-				.lineLimit(1)
+			if let organizationName {
+				HStack(spacing: 4) {
+					ServiceDot(serviceName: snapshot.organizationId, size: 6)
+					Text(organizationName)
+						.font(Typo.micro)
+						.foregroundStyle(Token.mutedForeground)
+						.lineLimit(1)
+				}
+			}
+		}
+	}
+}
+
+/// The widget is pinned to an organization that has nothing published — either
+/// because the app has not covered it yet, or because the user is no longer in
+/// it. Never falls back to another organization's numbers: one organization's
+/// traffic under another's name is the same error as opening the wrong
+/// organization from a notification.
+private struct MissingOrganizationView: View {
+	let name: String?
+	let isMember: Bool
+	let isAccessory: Bool
+
+	var body: some View {
+		if isAccessory {
+			Text(isMember ? "Open Maple" : (name ?? "Unavailable"))
+				.font(.headline)
+				.widgetAccentable()
+		} else {
+			VStack(alignment: .leading, spacing: 4) {
+				Text(name ?? "Organization").sectionLabelStyle()
+				Text(isMember ? "Open Maple" : "Unavailable")
+					.font(Typo.heading)
+					.foregroundStyle(Token.foreground)
+				Text(
+					isMember
+						? "Open the app once to load this organization's traffic."
+						: "You're no longer a member. Edit this widget to pick another organization."
+				)
+				.font(Typo.tiny)
+				.foregroundStyle(Token.mutedForeground)
+				.fixedSize(horizontal: false, vertical: true)
+			}
 		}
 	}
 }

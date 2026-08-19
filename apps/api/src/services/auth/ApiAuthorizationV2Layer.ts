@@ -6,11 +6,14 @@ import {
 	scopeAllows,
 	V2InsufficientScope,
 	V2InvalidCredentials,
+	V2OrganizationAccessDenied,
 	V2RateLimited,
 } from "@maple/domain/http/v2"
 import { Effect, Layer, Option, Schema } from "effect"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { ORG_SELECTION_HEADER } from "@maple/auth"
 import { makeResolveTenant } from "./AuthService"
+import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
 import { annotateAuthSpan } from "@/services/auth/auth-span"
 import { Env } from "@/platform/Env"
 import {
@@ -31,6 +34,9 @@ const getBearerToken = (headers: Record<string, string | undefined>): string | u
 	return token
 }
 
+const getOrgSelectionHeader = (headers: Record<string, string | undefined>): string | undefined =>
+	headers[ORG_SELECTION_HEADER] ?? headers[ORG_SELECTION_HEADER.toUpperCase()]
+
 const requestPath = (url: string): string => {
 	const queryStart = url.indexOf("?")
 	return queryStart === -1 ? url : url.slice(0, queryStart)
@@ -49,7 +55,20 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 		const env = yield* Env
 		const apiKeys = yield* ApiKeysService
 		const rateLimiter = yield* ApiV2RateLimiter
-		const resolveTenant = makeResolveTenant(env)
+		// The one resolver wired for organization selection: `x-maple-org-id` is
+		// a v2-client affordance (the iOS app publishing a widget snapshot per
+		// organization), and every other resolver rejects the header instead.
+		//
+		// Optional so a route test can build this layer without a membership
+		// directory. Absent, the header is *rejected* rather than ignored — a
+		// runtime that forgot to wire it serves 403s, never another org's data.
+		const membership = yield* Effect.serviceOption(OrgMembershipService)
+		const resolveTenant = makeResolveTenant(
+			env,
+			undefined,
+			undefined,
+			Option.match(membership, { onNone: () => undefined, onSome: (service) => service.verify }),
+		)
 
 		return AuthorizationV2.of({
 			bearer: (httpEffect) =>
@@ -99,6 +118,19 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							)
 						}
 
+						// An API key is already organization-bound, so a selection could
+						// only ever widen it. This path returns before `resolveTenant`
+						// runs, so the guard inside the resolver never sees it — the
+						// check has to be here too.
+						const requestedOrg = getOrgSelectionHeader(request.headers)
+						if (requestedOrg !== undefined && requestedOrg !== resolved.orgId) {
+							return yield* Effect.fail(
+								V2OrganizationAccessDenied.make(
+									"An API key cannot select a different organization.",
+								),
+							)
+						}
+
 						const tenant = new CurrentTenant.TenantSchema({
 							orgId: resolved.orgId,
 							userId: resolved.userId,
@@ -109,7 +141,11 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						return yield* Effect.provideService(httpEffect, CurrentTenant.Context, tenant)
 					}
 
-					const tenant = yield* resolveTenant(request.headers)
+					const tenant = yield* resolveTenant(request.headers).pipe(
+						Effect.catchTag("@maple/http/errors/OrganizationAccessDeniedError", (error) =>
+							Effect.fail(V2OrganizationAccessDenied.make(error.message)),
+						),
+					)
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })
 					return yield* Effect.provideService(
 						httpEffect,
