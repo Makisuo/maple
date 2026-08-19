@@ -12,6 +12,15 @@ final class IssuesListModel {
 			// The server rejects a cursor carried across a sort change
 			// (`cursor_sort_mismatch`), so any filter edit restarts pagination.
 			guard query != oldValue else { return }
+			Telemetry.track(
+				Telemetry.Event.issuesFiltered,
+				[
+					"sort": query.sort.rawValue,
+					"actionable_only": String(query.actionableOnly),
+					"severity": query.severity?.rawValue ?? "any",
+					"state": query.workflowState?.rawValue ?? "any",
+				]
+			)
 			Task { await loader.load(.replace) }
 		}
 	}
@@ -23,7 +32,7 @@ final class IssuesListModel {
 
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
-		self.loader = ScreenLoader(session: session, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetchFirstPage() }
+		self.loader = ScreenLoader(session: session, screen: Screen.issues, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetchFirstPage() }
 	}
 
 	var state: LoadState<[ErrorIssue]> { loader.state }
@@ -102,6 +111,7 @@ struct IssuesListContent: View {
 		.task {
 			await model.loader.loadIfNeeded()
 		}
+		.mapleScreen(Screen.issues)
 	}
 }
 

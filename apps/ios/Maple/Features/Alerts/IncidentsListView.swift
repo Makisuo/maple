@@ -22,7 +22,7 @@ final class IncidentsListModel {
 
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
-		self.loader = ScreenLoader(session: session, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetchFirstPage() }
+		self.loader = ScreenLoader(session: session, screen: Screen.incidents, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetchFirstPage() }
 	}
 
 	var state: LoadState<[IncidentCard]> { loader.state }
@@ -114,6 +114,7 @@ struct IncidentsListView: View {
 			}
 		}
 		.task { await model.loader.loadIfNeeded() }
+		.mapleScreen(Screen.incidents)
 	}
 }
 

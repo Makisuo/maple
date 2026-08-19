@@ -1,4 +1,5 @@
 import Foundation
+import Maple
 import MapleAPI
 import Observation
 import UIKit
@@ -78,6 +79,9 @@ final class PushRegistrar: NSObject {
 	func requestAuthorization() async -> Bool {
 		defaults.set(true, forKey: Key.prompted)
 		let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+		// The system prompt is shown once per install and never again — so the
+		// answer to it is a fact about this device that no later state records.
+		Telemetry.track(Telemetry.Event.notificationsPrompted, ["granted": String(granted)])
 		await refreshAuthorization()
 		return granted
 	}
@@ -130,6 +134,15 @@ final class PushRegistrar: NSObject {
 		guard authorization == .authorized, let deviceToken else { return }
 		isSyncing = true
 		defer { isSyncing = false }
+		await Telemetry.span(
+			Telemetry.Name.pushSync,
+			attributes: [Telemetry.Key.organizationId: .string(orgId)]
+		) { span in
+			await self.sync(api: api, orgId: orgId, deviceToken: deviceToken, span: span)
+		}
+	}
+
+	private func sync(api: any MapleAPI, orgId: String, deviceToken: String, span: Span?) async {
 		do {
 			_ = try await api.registerDevice(
 				DeviceRegistration(
@@ -145,7 +158,12 @@ final class PushRegistrar: NSObject {
 			lastError = nil
 		} catch is CancellationError {
 		} catch {
-			lastError = (error as? MapleAPIError)?.message ?? error.localizedDescription
+			// A phone that failed to register is a phone that will not be told
+			// about the next incident — the one push failure worth an alert.
+			let apiError = error as? MapleAPIError
+			lastError = apiError?.message ?? error.localizedDescription
+			span?.setAttribute(Telemetry.Key.errorType, apiError?.telemetryType ?? "transport")
+			span?.setStatus(.error(lastError ?? "registration failed"))
 		}
 	}
 
@@ -228,7 +246,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
 	) {
 		Task { @MainActor in
-			await WidgetPublisher.shared.refresh(force: true)
+			await WidgetPublisher.shared.refresh(trigger: .push, force: true)
 			completionHandler(.newData)
 		}
 	}
@@ -267,7 +285,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		Task { @MainActor in
 			switch kind {
 			case "alert_incident":
-				if let incidentId { PushRegistrar.shared.navigation?.openIncident(id: incidentId) }
+				guard let incidentId else { break }
+				// Opens the span that stays live until the incident screen has
+				// its data — the alert-to-eyes number. `Telemetry.PushOpen` also
+				// makes it the parent of that screen's load, so one trace runs
+				// from the tap through to the API spans it caused.
+				Telemetry.PushOpen.begin(
+					kind: "alert_incident",
+					screen: Screen.incidentDetail,
+					coldStart: Telemetry.Launch.isColdStart
+				)
+				Telemetry.track(Telemetry.Event.pushOpened, ["kind": "alert_incident"])
+				PushRegistrar.shared.navigation?.openIncident(id: incidentId)
 			default:
 				break
 			}

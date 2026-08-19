@@ -13,7 +13,7 @@ final class AnomaliesListModel {
 
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
-		self.loader = ScreenLoader(session: session, isEmpty: { $0.isEmpty }) { [unowned self] in
+		self.loader = ScreenLoader(session: session, screen: Screen.anomalies, isEmpty: { $0.isEmpty }) { [unowned self] in
 			try await self.api.anomalyIncidents(
 				status: self.openOnly ? .open : nil,
 				serviceName: nil,
@@ -63,6 +63,7 @@ struct AnomaliesListView: View {
 			}
 		}
 		.task { await model.loader.loadIfNeeded() }
+		.mapleScreen(Screen.anomalies)
 	}
 }
 

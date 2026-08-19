@@ -105,6 +105,9 @@ final class AppNavigation {
 	/// nothing, and the scheme is ours alone.
 	func open(_ url: URL) {
 		guard url.scheme == IssuesWidgetKind.urlScheme else { return }
+		// The host alone: a path can carry an issue id or a service name, and
+		// neither belongs in an event property.
+		Telemetry.track(Telemetry.Event.widgetOpened, ["target": url.host() ?? "unknown"])
 		switch url.host() {
 		case "incident":
 			// `maple://incident/<id>` — a tapped Live Activity. The id is the

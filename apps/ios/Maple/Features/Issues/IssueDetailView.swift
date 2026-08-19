@@ -15,7 +15,7 @@ final class IssueDetailModel {
 		self.issueID = issueID
 		self.api = api
 		self.generation = session.dataGeneration
-		self.loader = ScreenLoader(session: session) { [unowned self] in try await self.api.issue(id: self.issueID) }
+		self.loader = ScreenLoader(session: session, screen: Screen.issueDetail) { [unowned self] in try await self.api.issue(id: self.issueID) }
 	}
 
 	var state: LoadState<ErrorIssueDetail> { loader.state }
@@ -48,6 +48,7 @@ struct IssueDetailView: View {
 		}
 		.navigationTitle("Issue")
 		.navigationBarTitleDisplayMode(.inline)
+		.mapleScreen(Screen.issueDetail)
 		.task(id: session.dataGeneration) {
 			let model = model?.generation == session.dataGeneration
 				? model! : IssueDetailModel(issueID: issueID, api: session.api, session: session)

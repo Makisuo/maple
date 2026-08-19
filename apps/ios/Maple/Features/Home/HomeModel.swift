@@ -136,7 +136,7 @@ final class HomeModel {
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
 		self.generation = session.dataGeneration
-		self.loader = ScreenLoader(session: session) { [unowned self] in try await self.fetch() }
+		self.loader = ScreenLoader(session: session, screen: Screen.home) { [unowned self] in try await self.fetch() }
 	}
 
 	var state: LoadState<HomeSnapshot> { loader.state }

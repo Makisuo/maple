@@ -29,7 +29,7 @@ final class ServiceDetailModel {
 		self.window = window
 		self.api = api
 		self.generation = session.dataGeneration
-		self.loader = ScreenLoader(session: session) { [unowned self] in try await self.fetch() }
+		self.loader = ScreenLoader(session: session, screen: Screen.serviceDetail) { [unowned self] in try await self.fetch() }
 	}
 
 	var state: LoadState<ServiceDetail> { loader.state }
@@ -135,6 +135,10 @@ struct ServiceDetailView: View {
 							get: { model.window },
 							set: { newValue in
 								model.window = newValue
+								Telemetry.track(
+									Telemetry.Event.timeWindowChanged,
+									["screen": Screen.serviceDetail, "window": newValue.rawValue]
+								)
 								Task { await model.loader.load(.replace) }
 							}
 						)
@@ -142,6 +146,7 @@ struct ServiceDetailView: View {
 				}
 			}
 		}
+		.mapleScreen(Screen.serviceDetail)
 		.task(id: session.dataGeneration) {
 			let model =
 				model?.generation == session.dataGeneration

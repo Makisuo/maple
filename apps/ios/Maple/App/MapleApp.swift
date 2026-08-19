@@ -26,20 +26,29 @@ struct MapleApp: App {
 		PushRegistrar.shared.navigation = navigation
 		// Before Clerk and the API client, so a cold launch is inside a session.
 		Self.startTelemetry()
+		// And before anything it should measure. Ends at the first frame, in
+		// `RootView.onAppear`.
+		Telemetry.Launch.begin()
 		if FixtureAPI.isEnabled {
 			_clerk = State(initialValue: Clerk.configure(publishableKey: FixtureSession.publishableKey))
 			_session = State(initialValue: SessionController.fixture(api: FixtureAPI(), tokens: tokens))
 			return
 		}
 
-		let clerk = Clerk.configure(publishableKey: AppConfig.clerkPublishableKey)
+		// Restores the session from the keychain, so it is the one launch step
+		// that reaches disk — and the first suspect when a cold start drags.
+		let clerk = Telemetry.Launch.step(Telemetry.Name.clerkConfigure) {
+			Clerk.configure(publishableKey: AppConfig.clerkPublishableKey)
+		}
 		_clerk = State(initialValue: clerk)
 
 		// The client is constructed once: it holds no per-org state, because the
 		// organization travels in the token rather than in a header.
 		let api: any MapleAPI
 		do {
-			api = try MapleClient(tokens: tokens, baseURL: AppConfig.apiBaseURL)
+			api = try Telemetry.Launch.step(Telemetry.Name.apiClientInit) {
+				try MapleClient(tokens: tokens, baseURL: AppConfig.apiBaseURL)
+			}
 		} catch {
 			fatalError("Invalid API base URL: \(error)")
 		}

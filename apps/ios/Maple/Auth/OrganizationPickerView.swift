@@ -44,6 +44,7 @@ struct OrganizationPickerView: View {
 			.navigationTitle(mode == .gate ? "Organization" : "Switch organization")
 			.navigationBarTitleDisplayMode(.inline)
 			.toolbar { toolbar }
+			.mapleScreen(Screen.organizationPicker)
 		}
 		.tint(Token.primary)
 		.task {

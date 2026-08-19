@@ -16,7 +16,7 @@ final class ServicesListModel {
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
 		self.generation = session.dataGeneration
-		self.loader = ScreenLoader(session: session, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetch() }
+		self.loader = ScreenLoader(session: session, screen: Screen.services, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetch() }
 	}
 
 	var state: LoadState<[Service]> { loader.state }
@@ -75,6 +75,7 @@ struct ServicesListView: View {
 				}
 			}
 			.mapleDestinations()
+			.mapleScreen(Screen.services)
 		}
 		// Re-runs on org switch, which is what clears one org's services before
 		// the next org's arrive.
@@ -128,6 +129,10 @@ struct ServicesListView: View {
 			get: { model.window },
 			set: { newValue in
 				model.window = newValue
+				Telemetry.track(
+					Telemetry.Event.timeWindowChanged,
+					["screen": Screen.services, "window": newValue.rawValue]
+				)
 				Task { await model.loader.load(.replace) }
 			}
 		)

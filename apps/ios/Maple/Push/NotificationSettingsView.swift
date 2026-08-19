@@ -54,6 +54,7 @@ struct NotificationSettingsView: View {
 						.foregroundStyle(Token.foreground)
 				}
 			}
+			.mapleScreen(Screen.notificationSettings)
 			.task {
 				await push.refreshAuthorization()
 				liveActivities.refreshAuthorization()

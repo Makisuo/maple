@@ -36,7 +36,7 @@ final class IncidentDetailModel {
 		self.incidentID = incidentID
 		self.api = api
 		self.generation = session.dataGeneration
-		self.loader = ScreenLoader(session: session) { [unowned self] in try await self.fetch() }
+		self.loader = ScreenLoader(session: session, screen: Screen.incidentDetail) { [unowned self] in try await self.fetch() }
 	}
 
 	var state: LoadState<IncidentDetail> { loader.state }
@@ -167,6 +167,7 @@ struct IncidentDetailView: View {
 				}
 			}
 		}
+		.mapleScreen(Screen.incidentDetail)
 		.task(id: session.dataGeneration) {
 			let model = model?.generation == session.dataGeneration
 				? model! : IncidentDetailModel(incidentID: incidentID, api: session.api, session: session)

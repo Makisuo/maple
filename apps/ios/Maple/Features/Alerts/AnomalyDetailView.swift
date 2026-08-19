@@ -21,7 +21,7 @@ final class AnomalyDetailModel {
 		self.anomalyID = anomalyID
 		self.api = api
 		self.generation = session.dataGeneration
-		self.loader = ScreenLoader(session: session) { [unowned self] in
+		self.loader = ScreenLoader(session: session, screen: Screen.anomalyDetail) { [unowned self] in
 			let anomaly = try await self.api.anomalyIncident(id: self.anomalyID)
 			async let series = self.api.anomalyIncidentTimeseries(id: anomaly.id)
 			async let issue: ErrorIssueDetail? = {
@@ -55,6 +55,7 @@ struct AnomalyDetailView: View {
 		}
 		.navigationTitle("Anomaly")
 		.navigationBarTitleDisplayMode(.inline)
+		.mapleScreen(Screen.anomalyDetail)
 		.task(id: session.dataGeneration) {
 			let model = model?.generation == session.dataGeneration
 				? model! : AnomalyDetailModel(anomalyID: anomalyID, api: session.api, session: session)

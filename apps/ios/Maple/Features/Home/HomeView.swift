@@ -48,6 +48,7 @@ struct HomeView: View {
 				NotificationSettingsView().environment(session)
 			}
 			.mapleDestinations()
+			.mapleScreen(Screen.home)
 		}
 		.task(id: session.dataGeneration) {
 			// A new org means a new model: the old board is dropped rather than

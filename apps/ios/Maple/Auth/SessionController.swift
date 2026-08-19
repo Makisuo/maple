@@ -1,5 +1,6 @@
 import ClerkKit
 import Foundation
+import Maple
 import MapleAPI
 import Observation
 
@@ -127,7 +128,12 @@ final class SessionController {
 	/// Fetch every membership, paging until the reported total is reached.
 	func loadMemberships() async {
 		guard let user = Clerk.shared.user else { return }
+		await Telemetry.span(Telemetry.Name.authMemberships) { span in
+			await self.loadMemberships(user: user, span: span)
+		}
+	}
 
+	private func loadMemberships(user: User, span: Span?) async {
 		var collected: [OrganizationMembership] = []
 		var page = 1
 		let pageSize = 50
@@ -145,6 +151,7 @@ final class SessionController {
 			memberships = collected
 			membershipsLoaded = true
 			organizationError = nil
+			span?.setAttribute(Telemetry.Key.membershipCount, collected.count)
 		} catch {
 			// An expired session fails this fetch too, and the fallback below
 			// would then offer the stale payload's organizations under a banner
@@ -176,7 +183,13 @@ final class SessionController {
 
 		organizationError = nil
 		do {
-			try await Clerk.shared.auth.setActive(sessionId: sessionId, organizationId: organizationId)
+			try await Telemetry.span(
+				Telemetry.Name.authSetActive,
+				attributes: [Telemetry.Key.organizationId: .string(organizationId)]
+			) { _ in
+				try await Clerk.shared.auth.setActive(sessionId: sessionId, organizationId: organizationId)
+			}
+			Telemetry.track(Telemetry.Event.organizationSwitched, ["organization.id": organizationId])
 
 			// Order matters. Drop the old-org token *before* anything can use it;
 			// only then let screens start fetching.

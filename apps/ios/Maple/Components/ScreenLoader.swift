@@ -44,6 +44,10 @@ final class ScreenLoader<Value: Sendable> {
 	private(set) var generation = 0
 
 	private let session: SessionController
+	/// This screen's name, for `screen.load` and the session transcript. Passed
+	/// in rather than derived from `Value`: `ScreenLoader<[ErrorIssue]>` is both
+	/// the Issues tab and a service's issue list.
+	let screen: String
 	private let isEmpty: @MainActor (Value) -> Bool
 	private let fetch: @MainActor () async throws -> Value
 	private var current: Task<Void, Never>?
@@ -55,10 +59,12 @@ final class ScreenLoader<Value: Sendable> {
 	///     `CancellationError`.
 	init(
 		session: SessionController,
+		screen: String,
 		isEmpty: @escaping @MainActor (Value) -> Bool = { _ in false },
 		fetch: @escaping @MainActor () async throws -> Value
 	) {
 		self.session = session
+		self.screen = screen
 		self.isEmpty = isEmpty
 		self.fetch = fetch
 	}
@@ -92,8 +98,17 @@ final class ScreenLoader<Value: Sendable> {
 		}
 		isLoading = true
 
-		let task = Task { [session, fetch] in
-			let next = await session.perform { try await fetch() }
+		let task = Task { [session, fetch, screen] in
+			// The span opened here is the parent of every request `fetch` makes
+			// — including the retry `perform` runs after a 401, which is the
+			// only place that retry is visible at all.
+			let next = await Telemetry.screenLoad(
+				screen: screen,
+				reason: reason,
+				organizationId: session.currentOrganizationId
+			) {
+				await session.perform { try await fetch() }
+			}
 			// A superseded load, or a cancelled one (`nil`), writes nothing:
 			// the load that replaced it owns the screen now.
 			guard mine == self.generation else { return }

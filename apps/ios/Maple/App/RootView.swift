@@ -47,6 +47,10 @@ struct RootView: View {
 		// exist yet, and `AppNavigation` holds the destination until they do.
 		.onOpenURL { navigation.open($0) }
 		.onAppear {
+			// The first frame — the end of `app.launch`. The phase rides along
+			// because "slow launch" means something different when it ended on
+			// the sign-in screen than when it ended on a loaded Home.
+			Telemetry.Launch.firstFrame(phase: session.phase.telemetryName)
 			Typo.assertAvailable()
 			// After the font check, so a missing face is reported as a missing
 			// face rather than as a silently system-font navigation bar.
@@ -112,7 +116,7 @@ struct MainTabView: View {
 				organizationId: orgId,
 				organizationName: session.activeOrganization?.name
 			)
-			await widgets.refresh()
+			await widgets.refresh(trigger: .organization)
 		}
 		.onChange(of: scenePhase) { _, phase in
 			switch phase {
@@ -120,7 +124,7 @@ struct MainTabView: View {
 				// Coming back to the app is the cheapest fresh data there is —
 				// the throttle inside `refresh` keeps this from being a request
 				// per app switch.
-				Task { await widgets.refresh() }
+				Task { await widgets.refresh(trigger: .foreground) }
 			case .background:
 				// Queue the next opportunistic refresh on the way out, which is
 				// the only moment iOS accepts one.

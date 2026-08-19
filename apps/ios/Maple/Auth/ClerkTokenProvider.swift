@@ -1,5 +1,6 @@
 import ClerkKit
 import Foundation
+import Maple
 import MapleAPI
 
 /// Supplies the Clerk session JWT that every v2 request carries.
@@ -23,16 +24,31 @@ actor ClerkTokenProvider: MapleTokenProvider {
 		needsFreshToken = true
 	}
 
+	/// Traced because it sits on the critical path of **every** request while
+	/// belonging to someone else's SDK. A cache hit is microseconds; a miss is a
+	/// round-trip to Clerk that, untraced, presents as a slow Maple API call and
+	/// sends you looking at the wrong service. Clerk uses `URLSession`, so the
+	/// round-trip shows up as a child client span for free — and `traceparent`
+	/// is not sent to it, because `tracePropagationTargets` names only our API.
 	func token(forceRefresh: Bool = false) async throws -> String? {
 		let skipCache = forceRefresh || needsFreshToken
-		let options = Session.GetTokenOptions(skipCache: skipCache)
+		let token = try await Maple.span(
+			Telemetry.Name.authToken,
+			attributes: [Telemetry.Key.authSkipCache: .bool(skipCache)]
+		) { span in
+			let options = Session.GetTokenOptions(skipCache: skipCache)
 
-		// No JWT template: the API verifies the raw Clerk session token, matching
-		// what apps/web sends.
-		let token = try await Clerk.shared.auth.getToken(options)
+			// No JWT template: the API verifies the raw Clerk session token, matching
+			// what apps/web sends.
+			let token = try await Clerk.shared.auth.getToken(options)
+			span?.setAttribute(Telemetry.Key.authHasToken, token != nil)
+			return token
+		}
 
-		// Only clear the flag once a fetch actually succeeded — a thrown error
-		// must not leave a stale-org token as the next thing we hand out.
+		// Outside the span, and only once a fetch actually succeeded — a thrown
+		// error must not leave a stale-org token as the next thing we hand out.
+		// (The span body is `sending`, so it is nonisolated and cannot touch
+		// this actor's state itself.)
 		if skipCache { needsFreshToken = false }
 		return token
 	}

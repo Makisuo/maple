@@ -1,4 +1,5 @@
 import Foundation
+import Maple
 import MapleAPI
 import MapleWidgetData
 import WidgetKit
@@ -56,6 +57,17 @@ final class WidgetPublisher {
 		var organizationName: String?
 	}
 
+	/// What asked for this refresh. Recorded on every `widget.refresh` span,
+	/// because the interesting question about the Home Screen is which of the
+	/// four paths actually keeps it current — and `background` answering rarely
+	/// is exactly what iOS not granting background time looks like.
+	enum Trigger: String {
+		case foreground
+		case organization
+		case push
+		case background
+	}
+
 	init(
 		issuesStore: WidgetSnapshotStore<IssuesSnapshot> = .issues,
 		throughputStore: WidgetSnapshotStore<ThroughputSnapshot> = .throughput
@@ -80,14 +92,38 @@ final class WidgetPublisher {
 	/// ask to refresh. The last good snapshot stays and the widget ages it
 	/// honestly. The two halves are independent: throughput failing must not
 	/// cost the Home Screen its issue list.
-	func refresh(force: Bool = false) async {
+	func refresh(trigger: Trigger, force: Bool = false) async {
 		guard let context else { return }
 		if !force, let lastRefreshedAt, Date().timeIntervalSince(lastRefreshedAt) < Self.minimumInterval { return }
 		lastRefreshedAt = Date()
 
-		async let issues: Void = refreshIssues(context)
-		async let throughput: Void = refreshThroughput(context)
-		_ = await (issues, throughput)
+		await Telemetry.span(
+			Telemetry.Name.widgetRefresh,
+			attributes: [
+				Telemetry.Key.widgetTrigger: .string(trigger.rawValue),
+				Telemetry.Key.organizationId: .string(context.organizationId),
+			]
+		) { _ in
+			async let issues: Void = self.refreshIssues(context)
+			async let throughput: Void = self.refreshThroughput(context)
+			_ = await (issues, throughput)
+		}
+	}
+
+	/// One surface's fetch-and-publish, as a child of the refresh.
+	///
+	/// Both halves are silent by design — a widget must never surface an error
+	/// on a screen nobody asked to refresh — which before this made a widget
+	/// stuck on yesterday's numbers completely undiagnosable. The span carries
+	/// what the UI deliberately swallows.
+	private func snapshot(_ surface: String, _ body: @MainActor @Sendable @escaping () async -> Bool) async {
+		await Telemetry.span(
+			Telemetry.Name.widgetSnapshot,
+			attributes: [Telemetry.Key.widgetSurface: .string(surface)]
+		) { span in
+			let published = await body()
+			span?.setStatus(published ? .ok : .error("snapshot not published"))
+		}
 	}
 
 	/// Sign-out. The widgets outlive the session, so the previous account's
@@ -103,6 +139,10 @@ final class WidgetPublisher {
 	// MARK: Issues
 
 	private func refreshIssues(_ context: Context) async {
+		await snapshot("issues") { await self.publishIssues(context) }
+	}
+
+	private func publishIssues(_ context: Context) async -> Bool {
 		guard
 			let page = try? await context.api.issues(
 				query: IssueQuery(actionableOnly: true, sort: .severity),
@@ -110,7 +150,7 @@ final class WidgetPublisher {
 				limit: Self.issueFetchLimit,
 				cursor: nil
 			)
-		else { return }
+		else { return false }
 
 		let snapshot = IssuesSnapshot.make(
 			organizationId: context.organizationId,
@@ -119,16 +159,21 @@ final class WidgetPublisher {
 			issues: page.items.map(WidgetIssue.init(issue:)),
 			hasMore: page.hasMore
 		)
-		guard issuesStore.save(snapshot) else { return }
+		guard issuesStore.save(snapshot) else { return false }
 		// Reload rather than wait for the next timeline entry: the whole point
 		// of publishing from the app is that the Home Screen updates the moment
 		// the app learns something.
 		WidgetCenter.shared.reloadTimelines(ofKind: IssuesWidgetKind.identifier)
+		return true
 	}
 
 	// MARK: Throughput
 
 	private func refreshThroughput(_ context: Context) async {
+		await snapshot("throughput") { await self.publishThroughput(context) }
+	}
+
+	private func publishThroughput(_ context: Context) async -> Bool {
 		let window = Self.throughputWindow.resolve()
 
 		// Three requests, not one per service: `group_by: service` returns
@@ -148,7 +193,7 @@ final class WidgetPublisher {
 			TraceTimeseriesRequest(aggregation: .count, window: window)
 		)
 
-		guard let services = try? await servicesTask.items else { return }
+		guard let services = try? await servicesTask.items else { return false }
 		let grouped = try? await groupedTask
 		let total = try? await totalTask
 
@@ -177,8 +222,9 @@ final class WidgetPublisher {
 			services: rows,
 			overall: overall
 		)
-		guard throughputStore.save(snapshot) else { return }
+		guard throughputStore.save(snapshot) else { return false }
 		WidgetCenter.shared.reloadTimelines(ofKind: ThroughputWidgetKind.identifier)
+		return true
 	}
 
 	/// Spans per bucket → spans per second, so the sparkline carries the same

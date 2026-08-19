@@ -1,5 +1,6 @@
 import ActivityKit
 import Foundation
+import Maple
 import MapleAPI
 import MapleWidgetData
 import Observation
@@ -182,8 +183,34 @@ final class LiveActivityController {
 
 	// MARK: Server
 
+	/// Posting an activity's update token is what stops a Lock Screen card
+	/// freezing on the numbers it started with. It fails silently by design, so
+	/// the span is the only place that failure is ever recorded.
 	private func submit(activityId: String, incidentId: String, pushToken: String) async {
 		guard let context, let deviceToken = PushRegistrar.shared.deviceToken else { return }
+		await Telemetry.span(
+			Telemetry.Name.liveActivitySubmit,
+			attributes: [Telemetry.Key.liveActivityAction: .string("register")]
+		) { span in
+			await self.submit(
+				context: context,
+				deviceToken: deviceToken,
+				activityId: activityId,
+				incidentId: incidentId,
+				pushToken: pushToken,
+				span: span
+			)
+		}
+	}
+
+	private func submit(
+		context: Context,
+		deviceToken: String,
+		activityId: String,
+		incidentId: String,
+		pushToken: String,
+		span: Span?
+	) async {
 		do {
 			try await context.api.registerLiveActivity(
 				deviceToken: deviceToken,
@@ -196,13 +223,21 @@ final class LiveActivityController {
 		} catch {
 			// The activity keeps whatever content it started with rather than
 			// updating — degraded, not broken, so nothing is torn down here.
-			lastError = (error as? MapleAPIError)?.message ?? error.localizedDescription
+			let apiError = error as? MapleAPIError
+			lastError = apiError?.message ?? error.localizedDescription
+			span?.setAttribute(Telemetry.Key.errorType, apiError?.telemetryType ?? "transport")
+			span?.setStatus(.error(lastError ?? "live activity registration failed"))
 		}
 	}
 
 	private func forget(activityId: String, incidentId: String) async {
 		if let context, let deviceToken = PushRegistrar.shared.deviceToken {
-			try? await context.api.endLiveActivity(deviceToken: deviceToken, incidentId: incidentId)
+			await Telemetry.span(
+				Telemetry.Name.liveActivityEnd,
+				attributes: [Telemetry.Key.liveActivityAction: .string("end")]
+			) { _ in
+				try? await context.api.endLiveActivity(deviceToken: deviceToken, incidentId: incidentId)
+			}
 		}
 		// After the request, not before: this cancels the task that is running
 		// this very function, and a cancelled task cannot make a network call.

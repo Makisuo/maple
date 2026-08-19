@@ -28,6 +28,11 @@ enum LoadState<Value> {
 	}
 }
 
+/// Sendable exactly when its payload is, so a load can be traced across the
+/// span helper's isolation boundary without an unchecked escape hatch.
+/// `ScreenLoader` already constrains `Value: Sendable`, so this costs nothing.
+extension LoadState: Sendable where Value: Sendable {}
+
 /// Renders a screen's `ScreenLoader` uniformly, and owns the scroll view.
 ///
 /// One `ScrollView` for all four states, so pull-to-refresh works on the empty
@@ -99,6 +104,7 @@ struct LoadableView<Value: Sendable, Skeleton: View, Content: View>: View {
 		}
 		.scrollContentBackground(.hidden)
 		.refreshable {
+			if let loader { Telemetry.track(Telemetry.Event.screenRefreshed, ["screen": loader.screen]) }
 			await loader?.load(.refresh)
 		}
 	}
