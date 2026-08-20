@@ -159,10 +159,10 @@ describe("getLapsedPlan / hasLapsedPlan", () => {
 		expect(getLapsedPlan(customer)?.planId).toBe("recent")
 	})
 
-	it("fails open on an unusable customer, so an Autumn error is never read as lapsed", () => {
+	it("returns nothing when there is no customer at all", () => {
 		expect(hasLapsedPlan(null)).toBe(false)
 		expect(hasLapsedPlan(undefined)).toBe(false)
-		expect(hasLapsedPlan({ id: "cus_1" } as unknown as Customer)).toBe(false)
+		expect(getLapsedPlan(null)).toBeNull()
 	})
 })
 
@@ -217,6 +217,10 @@ describe("malformed / error-shaped customer payloads", () => {
 	it("gating helpers never throw on an error payload and fail closed", () => {
 		expect(() => hasSelectedPlan(errorPayload)).not.toThrow()
 		expect(hasSelectedPlan(errorPayload)).toBe(false)
+		// An Autumn error must never read as "this org used to have a plan" — that
+		// would wave a brand-new org past the onboarding gate.
+		expect(() => hasLapsedPlan(errorPayload)).not.toThrow()
+		expect(hasLapsedPlan(errorPayload)).toBe(false)
 		expect(hasBringYourOwnCloudAddOn(errorPayload)).toBe(false)
 		expect(isUsageBasedPlan(errorPayload)).toBe(false)
 		expect(getQuotaStatus(errorPayload)).toBe("ok")
