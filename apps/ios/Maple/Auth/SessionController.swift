@@ -46,6 +46,13 @@ final class SessionController {
 	private(set) var organizationError: String?
 
 	let api: any MapleAPI
+	/// Which load is running for each screen, across model instances.
+	///
+	/// It lives here rather than on a model because that is the whole point: the
+	/// models are rebuilt whenever `dataGeneration` moves, and a load started by
+	/// the instance before the switch has to be cancellable by the one after it.
+	/// See `LoadRegistry`.
+	let loads = LoadRegistry()
 	private let tokens: ClerkTokenProvider
 	/// True when the phase is pinned by `fixture(api:tokens:)` and Clerk's
 	/// state must be ignored.
