@@ -193,7 +193,7 @@ struct OrganizationSwitcherButton: View {
 					if let id = session.activeOrganizationId {
 						ServiceDot(serviceName: id, size: 7)
 					}
-					Text(session.activeOrganization?.name ?? "Organization")
+					Text(session.activeOrganizationName ?? "Organization")
 						.font(Typo.smallMedium)
 						.foregroundStyle(Token.foreground)
 						.lineLimit(1)

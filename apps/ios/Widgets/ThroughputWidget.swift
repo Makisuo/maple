@@ -57,7 +57,7 @@ struct ThroughputEntry: TimelineEntry {
 }
 
 struct ThroughputProvider: AppIntentTimelineProvider {
-	private let index = PublishedOrganizationIndex()
+	private let index = WidgetOrganizationIndex()
 
 	func placeholder(in context: Context) -> ThroughputEntry {
 		ThroughputEntry(date: Date(), snapshot: .sample, serviceName: nil, isPlaceholder: true)
@@ -77,7 +77,7 @@ struct ThroughputProvider: AppIntentTimelineProvider {
 	/// Resolves the configured organization — nil meaning the active one, which
 	/// is every widget configured before the organization parameter existed.
 	private func makeEntry(for configuration: SelectServiceIntent, at date: Date) -> ThroughputEntry {
-		let published = index.load()
+		let known = index.load()
 		let configuredId = configuration.organization?.id
 		let organizationId = configuredId ?? index.activeOrganizationId
 		let serviceName = configuration.service?.id
@@ -95,11 +95,12 @@ struct ThroughputProvider: AppIntentTimelineProvider {
 			snapshot: snapshot,
 			serviceName: serviceName,
 			organizationId: organizationId,
-			organizationName: published.first { $0.id == organizationId }?.name,
-			showsOrganization: published.count > 1,
-			isOrganizationUnavailable: snapshot == nil
-				&& configuredId != nil
-				&& !published.contains { $0.id == organizationId }
+			organizationName: known.first { $0.id == organizationId }?.name,
+			showsOrganization: known.count > 1,
+			// "Not a member any more", not "nothing fetched yet" — see
+			// `IssuesProvider.makeEntry`.
+			isOrganizationUnavailable: configuredId != nil
+				&& !known.contains { $0.id == organizationId }
 		)
 	}
 

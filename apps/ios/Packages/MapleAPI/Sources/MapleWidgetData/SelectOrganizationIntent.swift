@@ -41,13 +41,13 @@ public struct OrganizationEntity: AppEntity {
 	}
 }
 
-/// The options come from what the app has published. The extension has no
-/// session, so this index is the only thing here that knows an organization
-/// exists.
+/// The options come from the App Group index, which carries every organization
+/// the user belongs to. The extension has no session, so this is the only thing
+/// here that knows an organization exists.
 public struct OrganizationEntityQuery: EntityQuery {
 	public init() {}
 
-	private var published: [PublishedOrganization] { PublishedOrganizationIndex().load() }
+	private var known: [WidgetOrganization] { WidgetOrganizationIndex().load() }
 
 	/// Resolving what a configured widget already holds. An organization the
 	/// user has since left still resolves, by id — dropping it would silently
@@ -55,14 +55,14 @@ public struct OrganizationEntityQuery: EntityQuery {
 	/// failure this configuration exists to prevent. The widget renders it as
 	/// unavailable instead.
 	public func entities(for identifiers: [String]) async throws -> [OrganizationEntity] {
-		let known = published
+		let organizations = known
 		return identifiers.map { identifier in
-			OrganizationEntity(id: identifier, name: known.first { $0.id == identifier }?.name)
+			OrganizationEntity(id: identifier, name: organizations.first { $0.id == identifier }?.name)
 		}
 	}
 
 	public func suggestedEntities() async throws -> [OrganizationEntity] {
-		published.map { OrganizationEntity(id: $0.id, name: $0.name) }
+		known.map { OrganizationEntity(id: $0.id, name: $0.name) }
 	}
 
 	/// A newly placed widget lands on the organization the user is already in,
@@ -70,10 +70,10 @@ public struct OrganizationEntityQuery: EntityQuery {
 	/// anything. It is also what a widget migrated from the pre-configuration
 	/// build resolves to.
 	public func defaultResult() async -> OrganizationEntity? {
-		let known = published
-		guard let activeId = PublishedOrganizationIndex().activeOrganizationId else {
-			return known.first.map { OrganizationEntity(id: $0.id, name: $0.name) }
+		let organizations = known
+		guard let activeId = WidgetOrganizationIndex().activeOrganizationId else {
+			return organizations.first.map { OrganizationEntity(id: $0.id, name: $0.name) }
 		}
-		return OrganizationEntity(id: activeId, name: known.first { $0.id == activeId }?.name)
+		return OrganizationEntity(id: activeId, name: organizations.first { $0.id == activeId }?.name)
 	}
 }

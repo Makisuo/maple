@@ -68,8 +68,12 @@ final class WidgetPublisher {
 	/// `refresh` too.
 	private static let maximumConcurrentOrganizations = 2
 
-	private let index: PublishedOrganizationIndex
+	private let index: WidgetOrganizationIndex
 	private var lastRefreshedAt: Date?
+	/// Something other than a snapshot's contents changed what the widgets
+	/// would render — a corrected name, or a newly known organization. Set
+	/// outside a round, consumed by the next one; see `refresh`.
+	private var resolutionChanged = false
 	/// Set once the app knows who is signed in — from the view tree by
 	/// `configure`, or at launch by `bootstrap`, which is the only one of the
 	/// two a background launch gets.
@@ -79,10 +83,10 @@ final class WidgetPublisher {
 		/// Unscoped. Each organization fetches through `api.scoped(to:)`; the
 		/// client itself stays on the token's own claim.
 		var api: any MapleAPI
-		var active: PublishedOrganization
+		var active: WidgetOrganization
 		/// Every organization the user belongs to, for widgets pinned to one
 		/// that is not active.
-		var memberships: [PublishedOrganization]
+		var memberships: [WidgetOrganization]
 	}
 
 	/// What asked for this refresh. Recorded on every `widget.refresh` span,
@@ -96,7 +100,7 @@ final class WidgetPublisher {
 		case background
 	}
 
-	init(index: PublishedOrganizationIndex = PublishedOrganizationIndex()) {
+	init(index: WidgetOrganizationIndex = WidgetOrganizationIndex()) {
 		self.index = index
 	}
 
@@ -136,23 +140,45 @@ final class WidgetPublisher {
 
 	/// Called whenever the signed-in organization, or the set the user belongs
 	/// to, is known or changes.
+	///
+	/// There is deliberately no `organizationName` parameter. It used to take
+	/// one, filled from `Clerk.shared.organization` while the id came from the
+	/// session's active-organization claim — two sources that disagree while a
+	/// `setActive` settles, or when the client payload is partial. The index
+	/// then held organization B's id under organization A's name: the picker
+	/// showed two rows reading "A", and the widget put A's name over B's
+	/// numbers. Names come from `memberships`, which is keyed by id.
+	///
+	/// - Parameter membershipsVerified: false when the list came from Clerk's
+	///   client payload, which can be partial. Only a verified list may be
+	///   written to the index — the same rule `prune` documents.
 	func configure(
 		api: any MapleAPI,
 		organizationId: String,
-		organizationName: String?,
-		memberships: [PublishedOrganization] = []
+		memberships: [WidgetOrganization] = [],
+		membershipsVerified: Bool = false
 	) {
 		let isNewOrganization = context?.active.id != organizationId
-		let active = PublishedOrganization(
+		let active = WidgetOrganization(
 			id: organizationId,
-			name: organizationName,
-			lastPublishedAt: .distantPast
+			name: WidgetOrganizationIndex.resolveName(
+				id: organizationId,
+				memberships: memberships,
+				existing: index.load()
+			)
 		)
 		context = Context(
 			api: api,
 			active: active,
 			memberships: memberships.isEmpty ? [active] : memberships
 		)
+		// Every membership goes into the index, not just the ones a round will
+		// fetch for: the picker reads it, and an organization the app has never
+		// published for still has to be pickable. Additive — `prune` runs next
+		// and is what removes, because removal has snapshots to wipe with it.
+		if membershipsVerified, index.record(memberships: memberships) {
+			resolutionChanged = true
+		}
 		// A switch invalidates the throttle: the numbers on the Home Screen
 		// belong to the organization the user just left.
 		if isNewOrganization { lastRefreshedAt = nil }
@@ -205,7 +231,16 @@ final class WidgetPublisher {
 		if !force, let lastRefreshedAt, Date().timeIntervalSince(lastRefreshedAt) < Self.minimumInterval { return }
 		lastRefreshedAt = Date()
 
-		let organizations = await organizationsToPublish(context, trigger: trigger)
+		let plan = await organizationsToPublish(context, trigger: trigger)
+		let organizations = plan.organizations
+		// A widget with no configuration — every instance migrated from before
+		// the picker — resolves through the index's active organization, so a
+		// switch changes what it renders without changing any snapshot's
+		// contents. The per-kind decision below compares one organization's new
+		// snapshot against its own stored one, and cannot see that.
+		let previousActiveId = index.activeOrganizationId
+		// Read once. Every read decodes the whole index out of `UserDefaults`.
+		let known = index.load()
 
 		await Telemetry.span(
 			Telemetry.Name.widgetRefresh,
@@ -213,11 +248,29 @@ final class WidgetPublisher {
 				Telemetry.Key.widgetTrigger: .string(trigger.rawValue),
 				Telemetry.Key.organizationId: .string(context.active.id),
 				Telemetry.Key.widgetOrganizationCount: .int(Int64(organizations.count)),
+				// How many widgets are actually placed, and how many
+				// organizations the picker can offer. `currentConfigurations()`
+				// failing is indistinguishable from "nothing pinned" at the
+				// call site, and both silently narrow a round.
+				Telemetry.Key.widgetPinnedCount: .int(Int64(plan.pinnedCount)),
+				Telemetry.Key.widgetKnownOrganizationCount: .int(Int64(known.count)),
 			]
 		) { span in
 			let rounds = organizations.map { organization in
 				PublishRound(
-					organization: organization,
+					// Resolved again here, not taken as assembled: this name is
+					// baked into `IssuesSnapshot.organizationName`, and a
+					// snapshot that carries the wrong organization's name
+					// outlives every correction until the next round.
+					organization: WidgetOrganization(
+						id: organization.id,
+						name: WidgetOrganizationIndex.resolveName(
+							id: organization.id,
+							memberships: context.memberships,
+							existing: known
+						),
+						lastPublishedAt: organization.lastPublishedAt
+					),
 					api: context.api.scoped(to: organization.id),
 					isActive: organization.id == context.active.id
 				)
@@ -229,11 +282,13 @@ final class WidgetPublisher {
 			// which also keeps the whole round on one actor rather than making
 			// `Context` `Sendable` for no gain.
 			var outcome = RoundOutcome()
-			var index = rounds.startIndex
-			while index < rounds.endIndex {
-				let first = rounds[index]
-				let second = rounds.indices.contains(index + 1) ? rounds[index + 1] : nil
-				index += Self.maximumConcurrentOrganizations
+			// `cursor`, not `index`: `self.index` is the organization index and
+			// is read again below, and a shadow here would resolve to an `Int`.
+			var cursor = rounds.startIndex
+			while cursor < rounds.endIndex {
+				let first = rounds[cursor]
+				let second = rounds.indices.contains(cursor + 1) ? rounds[cursor + 1] : nil
+				cursor += Self.maximumConcurrentOrganizations
 
 				async let firstDone = self.publish(first)
 				if let second {
@@ -257,6 +312,17 @@ final class WidgetPublisher {
 			// timeline rebuilds that keep the widget alive while the app is
 			// closed, and spending it on identical redraws is what left the Home
 			// Screen looking frozen for the rest of the day.
+			// Not only "did the numbers move". If the widgets would now resolve
+			// a different organization, or render a name that has just been
+			// corrected, every instance is wrong until it rebuilds — and both
+			// are things the user just did, which is when a reload is most
+			// worth its budget. Both are guarded on an actual change, so a
+			// quiet launch still spends nothing.
+			let resolutionMoved = self.resolutionChanged || self.index.activeOrganizationId != previousActiveId
+			self.resolutionChanged = false
+			outcome.issuesChanged = outcome.issuesChanged || resolutionMoved
+			outcome.throughputChanged = outcome.throughputChanged || resolutionMoved
+
 			var reloads = 0
 			if outcome.issuesChanged {
 				WidgetCenter.shared.reloadTimelines(ofKind: IssuesWidgetKind.identifier)
@@ -267,6 +333,7 @@ final class WidgetPublisher {
 				reloads += 1
 			}
 			span?.setAttribute(Telemetry.Key.widgetReloadCount, reloads)
+			span?.setAttribute(Telemetry.Key.widgetResolutionChanged, resolutionMoved)
 		}
 	}
 
@@ -294,7 +361,7 @@ final class WidgetPublisher {
 	/// `Sendable` — `Context` holds the unscoped client and stays on the main
 	/// actor.
 	private struct PublishRound: Sendable {
-		let organization: PublishedOrganization
+		let organization: WidgetOrganization
 		let api: any MapleAPI
 		let isActive: Bool
 	}
@@ -306,11 +373,17 @@ final class WidgetPublisher {
 		async let throughput = refreshThroughput(round.organization, api: round.api)
 		let outcome = await (issues: issues, throughput: throughput)
 
+		// Only a round that actually published stamps the time. It used to
+		// stamp unconditionally, which made a repeatedly failing organization
+		// look freshly published to the oldest-first ordering in
+		// `organizationsToPublish` — so the one organization that needed
+		// another attempt was the one that stopped getting them.
+		let published = outcome.issues != .failed || outcome.throughput != .failed
 		index.record(
-			PublishedOrganization(
+			WidgetOrganization(
 				id: round.organization.id,
 				name: round.organization.name,
-				lastPublishedAt: Date()
+				lastPublishedAt: published ? Date() : round.organization.lastPublishedAt
 			),
 			isActive: round.isActive
 		)
@@ -328,12 +401,17 @@ final class WidgetPublisher {
 	private func organizationsToPublish(
 		_ context: Context,
 		trigger: Trigger
-	) async -> [PublishedOrganization] {
+	) async -> (organizations: [WidgetOrganization], pinnedCount: Int) {
 		let pinned = await pinnedOrganizationIds()
 		// Read once. Inside the comparator this decoded the whole index from
 		// UserDefaults on every comparison.
+		// Never-published organizations are simply absent, so they fall to
+		// `.distantPast` below and sort first — which is what a newly pinned
+		// organization with an empty widget needs.
 		let publishedAt = Dictionary(
-			index.load().map { ($0.id, $0.lastPublishedAt) },
+			index.load().compactMap { organization in
+				organization.lastPublishedAt.map { (organization.id, $0) }
+			},
 			uniquingKeysWith: { first, _ in first }
 		)
 		let others = context.memberships
@@ -347,7 +425,7 @@ final class WidgetPublisher {
 		// A `BGAppRefreshTask` gets tens of seconds; twelve requests inside one
 		// is how the whole chain gets deprioritized.
 		let budget = trigger == .background ? 1 : Self.maximumOrganizations - 1
-		return [context.active] + others.prefix(budget)
+		return ([context.active] + others.prefix(budget), pinned.count)
 	}
 
 	/// The organizations the user actually pinned a widget to.
@@ -414,11 +492,11 @@ final class WidgetPublisher {
 
 	// MARK: Issues
 
-	private func refreshIssues(_ organization: PublishedOrganization, api: any MapleAPI) async -> PublishOutcome {
+	private func refreshIssues(_ organization: WidgetOrganization, api: any MapleAPI) async -> PublishOutcome {
 		await snapshot("issues") { await self.publishIssues(organization, api: api) }
 	}
 
-	private func publishIssues(_ organization: PublishedOrganization, api: any MapleAPI) async -> PublishOutcome {
+	private func publishIssues(_ organization: WidgetOrganization, api: any MapleAPI) async -> PublishOutcome {
 		guard
 			let page = try? await api.issues(
 				query: IssueQuery(actionableOnly: true, sort: .severity),
@@ -453,11 +531,11 @@ final class WidgetPublisher {
 
 	// MARK: Throughput
 
-	private func refreshThroughput(_ organization: PublishedOrganization, api: any MapleAPI) async -> PublishOutcome {
+	private func refreshThroughput(_ organization: WidgetOrganization, api: any MapleAPI) async -> PublishOutcome {
 		await snapshot("throughput") { await self.publishThroughput(organization, api: api) }
 	}
 
-	private func publishThroughput(_ organization: PublishedOrganization, api: any MapleAPI) async -> PublishOutcome {
+	private func publishThroughput(_ organization: WidgetOrganization, api: any MapleAPI) async -> PublishOutcome {
 		let window = Self.throughputWindow.resolve()
 
 		// Three requests, not one per service: `group_by: service` returns

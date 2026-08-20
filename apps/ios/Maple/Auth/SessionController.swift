@@ -70,10 +70,6 @@ final class SessionController {
 		SessionController(fixtureAPI: api, tokens: tokens)
 	}
 
-	var activeOrganization: Organization? {
-		Clerk.shared.organization
-	}
-
 	var activeOrganizationId: String? {
 		Clerk.shared.session?.lastActiveOrganizationId
 	}
@@ -100,14 +96,12 @@ final class SessionController {
 
 	/// Every membership, in the shape the widget publisher and the widget
 	/// extension's organization picker use.
-	var publishableOrganizations: [PublishedOrganization] {
-		memberships.map {
-			PublishedOrganization(
-				id: $0.organization.id,
-				name: $0.organization.name,
-				lastPublishedAt: .distantPast
-			)
-		}
+	///
+	/// No `lastPublishedAt`: a membership says nothing about whether a snapshot
+	/// has ever been fetched for it, and the index keeps the timestamp it
+	/// already had.
+	var widgetOrganizations: [WidgetOrganization] {
+		memberships.map { WidgetOrganization(id: $0.organization.id, name: $0.organization.name) }
 	}
 
 	/// Re-runs the widget publish when the active organization *or* the set the
@@ -115,6 +109,17 @@ final class SessionController {
 	/// a snapshot without waiting for a switch.
 	var widgetPublishKey: String {
 		([currentOrganizationId ?? "none"] + memberIds.sorted()).joined(separator: "|")
+	}
+
+	/// The active organization's display name.
+	///
+	/// Looked up by id in the membership list rather than read off
+	/// `Clerk.shared.organization`, which is a separate object fed by the client
+	/// payload and can still be naming the previous organization while a
+	/// `setActive` settles. Reading the two together is what let the widgets
+	/// record one organization's id under another's name.
+	var activeOrganizationName: String? {
+		currentOrganizationId.flatMap(name(of:))
 	}
 
 	/// The display name for an organization the user belongs to, for the line

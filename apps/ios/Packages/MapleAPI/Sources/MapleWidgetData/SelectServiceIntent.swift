@@ -71,7 +71,7 @@ public struct ServiceEntityQuery: EntityQuery {
 	/// empty service picker on first open reads as broken — so fall back to the
 	/// organization the app is in.
 	private var organizationId: String? {
-		configuration?.organization.id ?? PublishedOrganizationIndex().activeOrganizationId
+		configuration?.organization.id ?? WidgetOrganizationIndex().activeOrganizationId
 	}
 
 	private var snapshot: ThroughputSnapshot? {

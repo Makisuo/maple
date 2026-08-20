@@ -43,8 +43,7 @@ struct MapleApp: App {
 			// and screenshots would have no widgets to take.
 			WidgetPublisher.shared.configure(
 				api: fixtureAPI,
-				organizationId: FixtureSession.organizationId,
-				organizationName: nil
+				organizationId: FixtureSession.organizationId
 			)
 			return
 		}

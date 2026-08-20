@@ -67,7 +67,7 @@ struct IssuesEntry: TimelineEntry {
 }
 
 struct IssuesProvider: AppIntentTimelineProvider {
-	private let index = PublishedOrganizationIndex()
+	private let index = WidgetOrganizationIndex()
 
 	/// The redacted skeleton iOS shows while placing a widget. Real-shaped
 	/// sample data, so the outline is the widget's own layout rather than a
@@ -93,13 +93,13 @@ struct IssuesProvider: AppIntentTimelineProvider {
 	/// picker — follows the active organization, which is also what
 	/// `OrganizationEntityQuery.defaultResult()` gives a fresh one.
 	private func makeEntry(for configuration: SelectOrganizationIntent, at date: Date) -> IssuesEntry {
-		let published = index.load()
+		let known = index.load()
 		let configuredId = configuration.organization?.id
 		let organizationId = configuredId ?? index.activeOrganizationId
 
 		guard let organizationId else {
-			// Nothing published at all: a fresh install, or a widget added
-			// before signing in.
+			// Nothing known at all: a fresh install, or a widget added before
+			// signing in.
 			return IssuesEntry(date: date, snapshot: legacySnapshot())
 		}
 
@@ -108,19 +108,23 @@ struct IssuesProvider: AppIntentTimelineProvider {
 		// one organization's counts under another's name is the same class of
 		// error as opening the wrong organization from a notification.
 		let snapshot = stored ?? (configuredId == nil ? legacySnapshot() : nil)
-		let name = published.first { $0.id == organizationId }?.name ?? snapshot?.organizationName
+		// The index first: it is corrected the moment the membership list
+		// loads, whereas a name inside a snapshot is only as current as the
+		// round that wrote it.
+		let name = known.first { $0.id == organizationId }?.name ?? snapshot?.organizationName
 
 		return IssuesEntry(
 			date: date,
 			snapshot: snapshot,
 			organizationId: organizationId,
 			organizationName: name,
-			showsOrganization: published.count > 1,
-			// Configured, published nothing, and not in the index either: the
-			// user is no longer a member.
-			isOrganizationUnavailable: snapshot == nil
-				&& configuredId != nil
-				&& !published.contains { $0.id == organizationId }
+			showsOrganization: known.count > 1,
+			// Configured, and not an organization the user belongs to: they
+			// were removed from it. An organization that is known but has no
+			// snapshot yet is a different statement — "Open Maple" — and the
+			// index carrying every membership is what tells the two apart.
+			isOrganizationUnavailable: configuredId != nil
+				&& !known.contains { $0.id == organizationId }
 		)
 	}
 

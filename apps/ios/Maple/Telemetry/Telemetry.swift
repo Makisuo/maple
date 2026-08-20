@@ -81,6 +81,17 @@ enum Telemetry {
 		/// so a widget that stopped updating is usually this number being too
 		/// high on the rounds where nothing happened.
 		static let widgetReloadCount = "maple.app.widget.reload_count"
+		/// Organizations a placed widget is pinned to. `currentConfigurations()`
+		/// failing is indistinguishable from "nothing is pinned" at the call
+		/// site, and both silently shrink a round to the active organization.
+		static let widgetPinnedCount = "maple.app.widget.pinned_count"
+		/// Organizations the picker can offer. Below the account's membership
+		/// count means the index write is not reaching it — the bug where an
+		/// organization could not be picked until it had been picked.
+		static let widgetKnownOrganizationCount = "maple.app.widget.known_organization_count"
+		/// The round reloaded because the widgets would resolve a *different*
+		/// organization or name, not because any snapshot's numbers moved.
+		static let widgetResolutionChanged = "maple.app.widget.resolution_changed"
 		/// How the publisher got its session: the view tree, or a headless
 		/// bootstrap in a background launch.
 		static let widgetContextSource = "maple.app.widget.context_source"

@@ -127,8 +127,8 @@ struct MainTabView: View {
 			widgets.configure(
 				api: session.api,
 				organizationId: orgId,
-				organizationName: session.activeOrganization?.name,
-				memberships: session.publishableOrganizations
+				memberships: session.widgetOrganizations,
+				membershipsVerified: session.membershipsLoaded
 			)
 			// Only a verified list may prune: `membershipsLoaded` is false when
 			// Clerk's client payload was the source, and that list can be partial —

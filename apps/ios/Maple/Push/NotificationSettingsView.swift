@@ -121,7 +121,7 @@ struct NotificationSettingsView: View {
 	}
 
 	private var orgName: String {
-		session.activeOrganization?.name ?? "this organization"
+		session.activeOrganizationName ?? "this organization"
 	}
 
 	private func statusRow(dot: Color, title: String, detail: String) -> some View {
