@@ -1,5 +1,9 @@
 import { Clock, Effect, Schema } from "effect"
-import { ListAiSessionsFacetsRequest, ListAiSessionsRequest } from "@maple/domain/http"
+import {
+	GetAiSessionSpansRequest,
+	ListAiSessionsFacetsRequest,
+	ListAiSessionsRequest,
+} from "@maple/domain/http"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
@@ -72,4 +76,37 @@ export const getAiSessionsFacets = Effect.fn("AiSessions.aiSessionsFacets")(func
 		}),
 	)
 	return { vendors: result.vendors, services: result.services }
+})
+
+// Session spans (detail page)
+
+const AiSessionSpansInput = Schema.Struct({
+	sessionId: Schema.String.check(Schema.isMinLength(1)),
+	// No `defaultTimeRange` fallback: the window bounds which spans of the
+	// session are found at all, so the caller supplies one derived from the
+	// session it is opening rather than inheriting the list page's 24h default.
+	startTime: WarehouseDateTimeString,
+	endTime: WarehouseDateTimeString,
+})
+export type AiSessionSpansInput = Schema.Schema.Type<typeof AiSessionSpansInput>
+
+export const getAiSessionSpans = Effect.fn("AiSessions.aiSessionSpans")(function* ({
+	data,
+}: {
+	data: AiSessionSpansInput
+}) {
+	const input = yield* decodeInput(AiSessionSpansInput, data, "aiSessionSpans")
+	const result = yield* runWarehouseQuery("aiSessionSpans", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			return yield* client.aiSessionsInternal.spans({
+				payload: new GetAiSessionSpansRequest({
+					sessionId: input.sessionId,
+					startTime: input.startTime,
+					endTime: input.endTime,
+				}),
+			})
+		}),
+	)
+	return { data: result.data, truncated: result.truncated }
 })
