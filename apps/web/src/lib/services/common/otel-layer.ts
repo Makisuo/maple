@@ -27,7 +27,16 @@ const telemetry = MapleFlush.make({
 	},
 	// Expected 4xx API responses (the maple-web → maple-api edge surfaces these
 	// as client-span failures) record as Ok instead of errors.
-	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
+	//
+	// `WarehouseUnreachableError` joins them as the one non-4xx member: a browser
+	// that briefly could not reach the API has not hit a fault worth
+	// fingerprinting, and the span still carries the failure. Only failures
+	// outlasting `PEER_OUTAGE_GRACE_MS` keep their reporting tag, so a genuine
+	// outage is unaffected — see `peer-reachability.ts`.
+	anticipatedErrorIdentifiers: [
+		...ANTICIPATED_ERROR_IDENTIFIERS,
+		"@maple/web/errors/WarehouseUnreachableError",
+	],
 	// rrweb self-recording. #225 disabled this while the recorder was pathological
 	// (full-buffer re-stringify per flush, 30s DOM checkouts, unbounded buffer);
 	// that same PR fixed all three (serialize-once at emit, 5-min checkouts, 4MB

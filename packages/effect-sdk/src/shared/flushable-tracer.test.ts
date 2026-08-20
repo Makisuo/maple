@@ -105,6 +105,48 @@ describe("makeSpanBuffer anticipated-error classification", () => {
 		}),
 	)
 
+	// The shape a decoded HTTP error body actually has on the client: an `{ error }`
+	// envelope, not a class. Without the unwrap an API using that convention
+	// matches *no* configured identifier at all, and every expected 4xx records
+	// `Error` with the stringified envelope as its whole message.
+	it.effect("classifies a decoded `{ error: { _tag } }` envelope by the body's tag", () =>
+		Effect.gen(function* () {
+			const buffer = makeSpanBuffer({
+				anticipatedErrorIdentifiers: new Set(["@maple/http/v2/SessionReplayRangeTooLargeError"]),
+			})
+			yield* runSpan(
+				buffer,
+				Effect.fail({
+					error: {
+						_tag: "@maple/http/v2/SessionReplayRangeTooLargeError",
+						type: "invalid_request_error",
+						code: "range_too_large",
+						message: "That part of the recording is too large to load in one request.",
+					},
+				}),
+			)
+			const [span] = buffer.drain()
+			assert.isDefined(span)
+			assert.strictEqual(span!.status.code, 1 /* Ok */)
+			assert.strictEqual(
+				span!.events.some((event) => event.name === "exception"),
+				false,
+			)
+		}),
+	)
+
+	it.effect("leaves an envelope whose tag is not anticipated an Error span", () =>
+		Effect.gen(function* () {
+			const buffer = makeSpanBuffer({
+				anticipatedErrorIdentifiers: new Set(["@maple/http/v2/SessionReplayRangeTooLargeError"]),
+			})
+			yield* runSpan(buffer, Effect.fail({ error: { _tag: "@maple/http/errors/PersistenceError" } }))
+			const [span] = buffer.drain()
+			assert.isDefined(span)
+			assert.strictEqual(span!.status.code, 2 /* Error */)
+		}),
+	)
+
 	it.effect("still marks an unclassified failure as an Error span with an exception event", () =>
 		Effect.gen(function* () {
 			const buffer = makeSpanBuffer({ anticipatedErrorTags: tags })

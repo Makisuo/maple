@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { noteReachable, noteUnreachable, PEER_OUTAGE_GRACE_MS } from "./peer-reachability"
 import { runtime } from "./runtime"
 
 const requestUrl = (input: RequestInfo | URL): string =>
@@ -18,8 +19,12 @@ const PAUSE_STREAM = "pause-stream"
  * Every ShapeStream fetch flows through `tracedFetch`, and Electric aborts them
  * routinely by design: `pause-stream` on pause/resume, a bare `AbortError` on
  * teardown. The server side of those traces completes `Ok` — nothing failed, the
- * browser just stopped listening. Reporting them as span errors is what put
- * maple-web at a ~15% error rate that was ~99% cancellations.
+ * browser just stopped listening, so reporting them as span errors inflated
+ * maple-web's error rate with cancellations.
+ *
+ * This covers only the aborts *we* issue. A connection that dies on its own
+ * rejects with a `TypeError`, which no abort signal explains and which this
+ * therefore declines; `PEER_OUTAGE_GRACE_MS` is what tells those apart.
  *
  * HTTP error responses are unaffected: a 5xx resolves the promise, so it never
  * reaches here and still lands on the `Error` path via `http.response.status_code`.
@@ -121,6 +126,7 @@ export const tracedFetch = (
 						),
 					)
 					if (outcome.ok) {
+						noteReachable(parsed.origin)
 						yield* Effect.annotateCurrentSpan(
 							"http.response.status_code",
 							outcome.response.status,
@@ -130,16 +136,28 @@ export const tracedFetch = (
 					if (isCancellation(outcome.cause, init?.signal)) {
 						// An abort is an expected outcome (navigation away, Electric
 						// pause/resume), so the span stays `Ok` and only says what happened.
+						// The peer's reachability is untouched: we stopped listening, so
+						// the attempt is evidence of nothing either way.
 						yield* Effect.annotateCurrentSpan({
 							"maple.http.cancelled": true,
 							"error.type": "aborted",
 						})
 						return outcome
 					}
-					yield* Effect.annotateCurrentSpan(
-						"error.type",
-						causeName(outcome.cause) ?? "TracedFetchError",
-					)
+					const unreachableMs = noteUnreachable(parsed.origin, Date.now())
+					yield* Effect.annotateCurrentSpan({
+						"error.type": causeName(outcome.cause) ?? "TracedFetchError",
+						"maple.http.unreachable_ms": unreachableMs,
+					})
+					if (unreachableMs < PEER_OUTAGE_GRACE_MS) {
+						// Inside the grace window this is a connectivity blip, not a
+						// failure of the application: the span stays `Ok` and carries the
+						// annotations above, so the loss is still charted and alertable
+						// without fingerprinting an exception. The caller is rejected
+						// exactly as before and retries on its own.
+						yield* Effect.annotateCurrentSpan("maple.http.unreachable", true)
+						return outcome
+					}
 					return yield* new TracedFetchError({
 						cause: outcome.cause,
 						message: describeFetchFailure({

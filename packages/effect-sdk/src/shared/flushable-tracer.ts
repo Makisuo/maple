@@ -216,6 +216,15 @@ const generateId = (len: number): string => {
 const failureIdentifier = (error: unknown): string | undefined => {
 	if (Predicate.hasProperty(error, "_tag") && typeof error._tag === "string") return error._tag
 	if (Predicate.hasProperty(error, "name") && typeof error.name === "string") return error.name
+	// An error that crossed an HTTP boundary arrives as a decoded *body*, not as
+	// the class that raised it. An API that wraps its bodies in `{ error: … }` —
+	// a common envelope convention — therefore hands the failure channel a plain
+	// object with no identifier of its own, and every identifier a caller
+	// configured goes unmatched: expected 4xx answers record as `Error` spans
+	// whose entire message is the JSON-stringified envelope. Unwrap one level, and
+	// only for the body's own tag.
+	const body = Predicate.hasProperty(error, "error") ? error.error : undefined
+	if (Predicate.hasProperty(body, "_tag") && typeof body._tag === "string") return body._tag
 	return undefined
 }
 
