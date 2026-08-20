@@ -81,23 +81,33 @@ export const writeNativeCredential = (
 ): Effect.Effect<boolean, never, ChildProcessSpawner> =>
 	Effect.gen(function* () {
 		const account = credentialAccount(apiUrl)
-		if (process.platform === "darwin") {
-			// With -w as the final option and no argument, `security` reads the secret
-			// from stdin instead of exposing it in the process list.
-			const result = yield* run(
-				["/usr/bin/security", "add-generic-password", "-U", "-s", SERVICE, "-a", account, "-w"],
-				`${token}\n`,
-			)
-			return result.ok
-		}
-		if (process.platform === "linux") {
-			const result = yield* run(
-				["secret-tool", "store", "--label=Maple CLI", "service", SERVICE, "origin", account],
-				`${token}\n`,
-			)
-			return result.ok
-		}
-		return false
+		const stored = yield* Effect.gen(function* () {
+			if (process.platform === "darwin") {
+				// With -w as the final option and no argument, `security` prompts for
+				// the secret rather than taking it as an argv word, so it never shows
+				// up in the process list. It then asks the caller to RETYPE it, and a
+				// single piped line fails that confirmation, silently stores an empty
+				// password, and still exits 0 — hence the secret is written twice.
+				const result = yield* run(
+					["/usr/bin/security", "add-generic-password", "-U", "-s", SERVICE, "-a", account, "-w"],
+					`${token}\n${token}\n`,
+				)
+				return result.ok
+			}
+			if (process.platform === "linux") {
+				const result = yield* run(
+					["secret-tool", "store", "--label=Maple CLI", "service", SERVICE, "origin", account],
+					`${token}\n`,
+				)
+				return result.ok
+			}
+			return false
+		})
+		if (!stored) return false
+		// Neither helper reports a partial write through its exit status, and the
+		// caller drops the file fallback whenever this returns true — so prove the
+		// secret is actually retrievable before claiming the keychain owns it.
+		return (yield* readNativeCredential(apiUrl)) === token
 	})
 
 export const deleteNativeCredential = (apiUrl: string): Effect.Effect<void, never, ChildProcessSpawner> =>
