@@ -5,7 +5,7 @@ import { Schema } from "effect"
 import { RocketIcon } from "@/components/icons"
 import { BootSplash } from "@/components/boot-splash"
 import { PricingCards } from "@/components/settings/pricing-cards"
-import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { hasLapsedPlan, hasSelectedPlan } from "@/lib/billing/plan-gating"
 import { TRIAL_DURATION_DAYS } from "@/lib/billing/plans"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
@@ -18,6 +18,14 @@ export const Route = createFileRoute("/select-plan")({
 	component: SelectPlanPage,
 	validateSearch: Schema.toStandardSchemaV1(SelectPlanSearch),
 })
+
+// Dev-only escape hatch, mirroring `SubscriptionEndedBanner`'s: load the page
+// with `?subscription_ended_preview=1` to review the reactivation framing without
+// a lapsed Autumn customer. Compiled out of production builds.
+function previewLapsed(): boolean {
+	if (!import.meta.env.DEV || typeof window === "undefined") return false
+	return new URLSearchParams(window.location.search).get("subscription_ended_preview") === "1"
+}
 
 function resolveRedirectTarget(target: string | undefined): string {
 	if (!target) return "/"
@@ -59,6 +67,10 @@ function SelectPlanPageInner() {
 		return <Navigate to={target.pathname} search={target.search} replace />
 	}
 
+	// A returning subscriber whose plan lapsed is not trial-eligible and does not
+	// need the pitch — they need to restart ingestion. Same cards, different frame.
+	const isReactivating = previewLapsed() || hasLapsedPlan(customer)
+
 	return (
 		<main className="relative min-h-screen overflow-hidden bg-background flex flex-col items-center justify-center py-12">
 			{/* Premium Background Grid / Glow */}
@@ -72,16 +84,19 @@ function SelectPlanPageInner() {
 
 			<section className="relative mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 md:px-8 z-10">
 				<div className="text-center flex flex-col items-center">
-					<div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-medium tracking-wider text-primary uppercase mb-6">
-						<RocketIcon size={14} />
-						{TRIAL_DURATION_DAYS}-day free trial
-					</div>
+					{!isReactivating && (
+						<div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-medium tracking-wider text-primary uppercase mb-6">
+							<RocketIcon size={14} />
+							{TRIAL_DURATION_DAYS}-day free trial
+						</div>
+					)}
 					<h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground [text-wrap:balance]">
-						Start your free trial
+						{isReactivating ? "Pick up where you left off" : "Start your free trial"}
 					</h1>
 					<p className="text-muted-foreground mt-4 text-sm md:text-base leading-relaxed max-w-lg mx-auto [text-wrap:balance]">
-						Try Maple free for {TRIAL_DURATION_DAYS} days. You won't be charged until the trial
-						ends. Cancel anytime.
+						{isReactivating
+							? "Your data is still here. Choose a plan to start ingesting again — cancel anytime."
+							: `Try Maple free for ${TRIAL_DURATION_DAYS} days. You won't be charged until the trial ends. Cancel anytime.`}
 					</p>
 				</div>
 

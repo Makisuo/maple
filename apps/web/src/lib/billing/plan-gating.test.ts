@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest"
 import type { BillingBalance, BillingCustomer, BillingSubscription, CatalogPlan } from "@maple/domain/http"
 import {
 	getFeatureQuotas,
+	getLapsedPlan,
 	getLegacyPlanInfo,
 	getPastDueSubscription,
 	getQuotaStatus,
 	hasBringYourOwnCloudAddOn,
+	hasLapsedPlan,
 	hasSelectedPlan,
 	isLegacyPlan,
 	isUsableCustomer,
@@ -107,6 +109,60 @@ describe("hasSelectedPlan", () => {
 		expect(hasSelectedPlan(addOnCustomer)).toBe(false)
 		expect(hasSelectedPlan(defaultCustomer)).toBe(false)
 		expect(hasSelectedPlan(scheduledCustomer)).toBe(false)
+	})
+})
+
+describe("getLapsedPlan / hasLapsedPlan", () => {
+	it("returns nothing for an org that never held a plan", () => {
+		expect(hasLapsedPlan(buildCustomer([]))).toBe(false)
+		expect(hasLapsedPlan(buildCustomer([buildSubscription({ status: "expired", addOn: true })]))).toBe(
+			false,
+		)
+		expect(
+			hasLapsedPlan(buildCustomer([buildSubscription({ status: "expired", autoEnable: true })])),
+		).toBe(false)
+		expect(
+			hasLapsedPlan(
+				buildCustomer([
+					buildSubscription({
+						status: "expired",
+						planId: "free",
+						plan: { name: "Free", archived: false },
+					}),
+				]),
+			),
+		).toBe(false)
+	})
+
+	it("returns the plan for an org whose subscription lapsed", () => {
+		const expired = buildCustomer([buildSubscription({ status: "expired" })])
+		const canceled = buildCustomer([buildSubscription({ status: "canceled" })])
+
+		expect(hasLapsedPlan(expired)).toBe(true)
+		expect(hasLapsedPlan(canceled)).toBe(true)
+		expect(getLapsedPlan(expired)?.planId).toBe("starter")
+	})
+
+	it("returns nothing while an active plan exists, even alongside an expired one", () => {
+		const customer = buildCustomer([
+			buildSubscription({ planId: "old", status: "expired" }),
+			buildSubscription({ planId: "startup", status: "active" }),
+		])
+		expect(hasLapsedPlan(customer)).toBe(false)
+	})
+
+	it("picks the most recently ended subscription", () => {
+		const customer = buildCustomer([
+			buildSubscription({ planId: "old", status: "expired", currentPeriodEnd: 1_000 }),
+			buildSubscription({ planId: "recent", status: "expired", currentPeriodEnd: 5_000 }),
+		])
+		expect(getLapsedPlan(customer)?.planId).toBe("recent")
+	})
+
+	it("fails open on an unusable customer, so an Autumn error is never read as lapsed", () => {
+		expect(hasLapsedPlan(null)).toBe(false)
+		expect(hasLapsedPlan(undefined)).toBe(false)
+		expect(hasLapsedPlan({ id: "cus_1" } as unknown as Customer)).toBe(false)
 	})
 })
 
