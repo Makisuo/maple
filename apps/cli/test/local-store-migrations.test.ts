@@ -1,3 +1,4 @@
+import { v7ToV8AppleCrashFramesModule } from "../src/server/local-store-migrations/v7-to-v8-apple-crash-frames"
 import { describe, expect, it } from "vitest"
 import {
 	CURRENT_LOCAL_SCHEMA,
@@ -15,8 +16,10 @@ import {
 	LOCAL_SCHEMA_V4_MANIFEST,
 	LOCAL_SCHEMA_V5,
 	LOCAL_SCHEMA_V5_MANIFEST,
+	LOCAL_SCHEMA_V7_MANIFEST,
 	LOCAL_SCHEMA_V6,
 	LOCAL_SCHEMA_V7,
+	LOCAL_SCHEMA_V8,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -58,16 +61,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v7 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("bc124f30765c8c56")
-		expect(SCHEMA_DIGEST).toBe("bc124f30765c8c567daccab1872a0e15afbc8ef2123c264bcb5bcdd8d16b6c3c")
+	it("matches the generated v8 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("51081e951066442a")
+		expect(SCHEMA_DIGEST).toBe("51081e951066442a8e5b53df2c4bdda933edd20fc89132a54ed9b4dbb7e55a05")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(7)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V7)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(8)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V8)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -149,6 +152,18 @@ describe("current local schema identity", () => {
 		)
 		expect(v5ErrorEventsView?.definition).not.toContain("_httpStatus")
 	})
+
+	it("recognises Apple crash frames at v8 but not before", () => {
+		const applePattern = "^[0-9]+ +\\\\S.* +0x[0-9a-fA-F]+"
+		for (const name of ["error_events_mv", "error_events_by_time_mv"]) {
+			const view = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === name)
+			expect(view?.definition).toContain(applePattern)
+		}
+		// v7 matched no Apple frame at all, so every iOS crash fell through to the
+		// message hash and collapsed into one issue per exception type.
+		const v7View = LOCAL_SCHEMA_V7_MANIFEST.objects.find((object) => object.name === "error_events_mv")
+		expect(v7View?.definition).not.toContain(applePattern)
+	})
 })
 
 describe("local migration registry", () => {
@@ -162,6 +177,7 @@ describe("local migration registry", () => {
 			"local-0004-to-0005-service-overview-minutely",
 			"local-0005-to-0006-error-events-fingerprint-hygiene",
 			"local-0006-to-0007-error-service-version",
+			"local-0007-to-0008-apple-crash-frames",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -208,7 +224,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 8, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 9, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -420,7 +436,9 @@ describe("durable migration recovery", () => {
 				...base,
 				chain: [{ ...base.chain[0]!, progress: { sourceInventory: [], copied: {} } }],
 			})
-			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/sourceInventory must be an object/)
+			// The message is the schema's, so this asserts the failing field rather
+			// than the phrasing: an array where the inventory map belongs.
+			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/sourceInventory/)
 		} finally {
 			await rm(root, { recursive: true, force: true })
 		}
@@ -998,5 +1016,180 @@ describe("legacy raw replay cursor", () => {
 			},
 		}
 		expect(() => legacyToCurrentModule.decodeProgress(progress)).toThrow(/lastHash/)
+	})
+})
+
+describe("v7 -> v8 journal state decoding", () => {
+	const RAW_TABLES = [
+		"logs",
+		"traces",
+		"metrics_sum",
+		"metrics_gauge",
+		"metrics_histogram",
+		"metrics_exponential_histogram",
+	]
+	const rawRows = Object.fromEntries(RAW_TABLES.map((table) => [table, "12"]))
+	const state = { module: "local-0007-to-0008-apple-crash-frames", version: 1, rawRows }
+
+	it("round-trips a valid state, with and without a retention floor", () => {
+		expect(v7ToV8AppleCrashFramesModule.decodeState(state)).toEqual(state)
+		expect(v7ToV8AppleCrashFramesModule.decodeState({ ...state, retentionDays: 90 })).toEqual({
+			...state,
+			retentionDays: 90,
+		})
+	})
+
+	it("rejects a field this build does not know about", () => {
+		// A journal carrying an unknown field was written by a different build.
+		// Dropping it silently would resume someone else's migration under our
+		// assumptions.
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, somethingElse: 1 })).toThrow()
+	})
+
+	it("rejects another module's state", () => {
+		expect(() =>
+			v7ToV8AppleCrashFramesModule.decodeState({
+				...state,
+				module: "local-0006-to-0007-error-service-version",
+			}),
+		).toThrow()
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, version: 2 })).toThrow()
+	})
+
+	it("rejects row counts that are not unsigned decimal strings", () => {
+		// They are strings precisely because a count can exceed
+		// Number.MAX_SAFE_INTEGER, so anything lossy has to fail loudly.
+		for (const bad of [12, "-1", "1.5", "1e3", ""]) {
+			expect(() =>
+				v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: { ...rawRows, logs: bad } }),
+			).toThrow()
+		}
+	})
+
+	it("rejects a missing or unknown raw table", () => {
+		const { logs: _dropped, ...missing } = rawRows
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: missing })).toThrow()
+		expect(() =>
+			v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: { ...rawRows, not_a_table: "1" } }),
+		).toThrow()
+	})
+
+	it("rejects a non-integer retention floor", () => {
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, retentionDays: 1.5 })).toThrow()
+	})
+
+	it("decodes progress, and treats absent progress as absent", () => {
+		expect(v7ToV8AppleCrashFramesModule.decodeProgress(undefined)).toBeUndefined()
+		expect(v7ToV8AppleCrashFramesModule.decodeProgress({ installed: true })).toEqual({ installed: true })
+		expect(() => v7ToV8AppleCrashFramesModule.decodeProgress({ installed: false })).toThrow()
+		expect(() => v7ToV8AppleCrashFramesModule.decodeProgress({})).toThrow()
+	})
+})
+
+/**
+ * Characterization of the legacy raw-replay journal decoder.
+ *
+ * It guards a resumable copy out of a pre-v1 store: a journal it wrongly
+ * accepts resumes someone else's copy under this build's assumptions, and one
+ * it wrongly rejects strands a user mid-migration. Only one case was pinned
+ * before this, so these lock the accept/reject boundary in place.
+ */
+describe("legacy raw replay progress decoding", () => {
+	const inventory = {
+		table: "logs",
+		rowCount: "10",
+		retentionStartAt: "2026-01-01 00:00:00",
+		minTime: null,
+		maxTime: null,
+		hashSum: "1",
+		hashXor: "2",
+	}
+	const copied = {
+		rows: 1,
+		bytes: 2,
+		lastTimestamp: null,
+		lastHash: "12",
+		lastTieBreak: "13",
+		duplicateCount: 0,
+		duplicateGroupExhausted: false,
+	}
+	const pendingBatch = {
+		table: "logs",
+		rowCount: 1,
+		byteLength: 2,
+		firstTimestamp: null,
+		firstHash: "1",
+		firstTieBreak: "2",
+		lastTimestamp: null,
+		lastHash: "3",
+		lastTieBreak: "4",
+		lastKeyCount: 1,
+		lastKeyExhausted: false,
+		signature: "a".repeat(64),
+	}
+	const progress = { sourceInventory: { logs: inventory }, copied: { logs: copied } }
+	const decode = (value: unknown) => legacyToCurrentModule.decodeProgress(value)
+
+	it("accepts a well-formed progress, with and without a pending batch", () => {
+		expect(decode(progress)).toEqual(progress)
+		expect(decode({ ...progress, pendingBatch })).toEqual({ ...progress, pendingBatch })
+		// Absent progress is "not started", which is not the same as invalid.
+		expect(decode(undefined)).toBeUndefined()
+	})
+
+	it("rejects a non-object, and unknown top-level fields", () => {
+		for (const bad of [null, [], "x", 1]) expect(() => decode(bad)).toThrow()
+		expect(() => decode({ ...progress, somethingElse: 1 })).toThrow()
+	})
+
+	it("rejects tables that are not registered raw tables", () => {
+		expect(() => decode({ ...progress, sourceInventory: { not_a_table: inventory } })).toThrow()
+		expect(() => decode({ ...progress, copied: { not_a_table: copied } })).toThrow()
+		expect(() =>
+			decode({ ...progress, pendingBatch: { ...pendingBatch, table: "not_a_table" } }),
+		).toThrow()
+	})
+
+	it("rejects an inventory whose table disagrees with its key", () => {
+		expect(() =>
+			decode({ ...progress, sourceInventory: { logs: { ...inventory, table: "traces" } } }),
+		).toThrow()
+	})
+
+	it("rejects cursors that are not unsigned decimal strings", () => {
+		// These are interpolated into numeric SQL comparisons, so anything that
+		// could change their meaning has to fail here rather than there.
+		for (const bad of ["-1", "1.5", "0x10", "", 12]) {
+			expect(() => decode({ ...progress, copied: { logs: { ...copied, lastHash: bad } } })).toThrow()
+		}
+		// null is a legitimate "no cursor yet".
+		expect(decode({ ...progress, copied: { logs: { ...copied, lastHash: null } } })).toBeDefined()
+	})
+
+	it("rejects counters that are not non-negative safe integers", () => {
+		for (const bad of [-1, 1.5, Number.MAX_SAFE_INTEGER + 2, "1", null]) {
+			expect(() => decode({ ...progress, copied: { logs: { ...copied, rows: bad } } })).toThrow()
+		}
+	})
+
+	it("rejects a non-boolean exhaustion flag", () => {
+		expect(() =>
+			decode({ ...progress, copied: { logs: { ...copied, duplicateGroupExhausted: "no" } } }),
+		).toThrow()
+	})
+
+	it("rejects a pending batch that is empty or wrongly signed", () => {
+		// An empty batch would commit nothing while advancing the cursor past it.
+		expect(() => decode({ ...progress, pendingBatch: { ...pendingBatch, rowCount: 0 } })).toThrow()
+		for (const bad of ["a".repeat(63), "z".repeat(64), ""]) {
+			expect(() => decode({ ...progress, pendingBatch: { ...pendingBatch, signature: bad } })).toThrow()
+		}
+	})
+
+	it("rejects missing fields anywhere in the tree", () => {
+		const { hashSum: _h, ...shortInventory } = inventory
+		expect(() => decode({ ...progress, sourceInventory: { logs: shortInventory } })).toThrow()
+		const { rows: _r, ...shortCopied } = copied
+		expect(() => decode({ ...progress, copied: { logs: shortCopied } })).toThrow()
 	})
 })

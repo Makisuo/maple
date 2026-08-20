@@ -12,6 +12,8 @@ import {
 	validateArchiveId,
 	validateRangeDate,
 } from "./paths"
+import { Schema } from "effect"
+import { NonEmptyString, NonNegativeSafeInt, Sha256Lower } from "./schemas"
 import { parseArchiveActivePointer } from "./manifest"
 import { archiveSignal } from "./signals"
 
@@ -177,6 +179,19 @@ const intentPath = (archiveDir: string, operationId: string): string =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null
 
+const decodeCountValue = Schema.decodeUnknownSync(NonNegativeSafeInt)
+
+/** Same rule as the GC targets' byte counts, with the field named in the error. */
+const decodeCount = (value: unknown, field: string): number => {
+	try {
+		return decodeCountValue(value)
+	} catch {
+		throw new Error(`archive operation gc intent has invalid ${field}: ${String(value)}`)
+	}
+}
+
+const decodeSha256 = Schema.decodeUnknownSync(Sha256Lower)
+
 const requiredString = (value: unknown, field: string): string => {
 	if (typeof value !== "string" || value.length === 0)
 		throw new Error(`journal field ${field} missing or not a string`)
@@ -289,9 +304,10 @@ const parseCreateIntent = (
 		throw new Error(`archive operation pin purpose does not match generation: ${pinPurpose}`)
 	}
 	const manifestSha256Raw = raw.manifestSha256
-	const manifestSha256 =
-		manifestSha256Raw === null ? null : requiredString(manifestSha256Raw, "manifestSha256").toLowerCase()
-	if (manifestSha256 !== null && !/^[0-9a-f]{64}$/.test(manifestSha256)) {
+	let manifestSha256: string | null
+	try {
+		manifestSha256 = manifestSha256Raw === null ? null : decodeSha256(manifestSha256Raw)
+	} catch {
 		throw new Error("invalid archive operation manifestSha256")
 	}
 	if (phaseRequiresManifest(phase) !== (manifestSha256 !== null)) {
@@ -337,20 +353,8 @@ const parseGcIntent = (
 	createdAt: string,
 	updatedAt: string,
 ): GcOperationIntent => {
-	const keepRaw = raw.keep
-	if (typeof keepRaw !== "number" || !Number.isSafeInteger(keepRaw) || keepRaw < 0) {
-		throw new Error(`archive operation gc intent has invalid keep: ${String(keepRaw)}`)
-	}
-	const completedTargetsRaw = raw.completedTargets
-	if (
-		typeof completedTargetsRaw !== "number" ||
-		!Number.isSafeInteger(completedTargetsRaw) ||
-		completedTargetsRaw < 0
-	) {
-		throw new Error(
-			`archive operation gc intent has invalid completedTargets: ${String(completedTargetsRaw)}`,
-		)
-	}
+	const keepRaw = decodeCount(raw.keep, "keep")
+	const completedTargetsRaw = decodeCount(raw.completedTargets, "completedTargets")
 	const targetsRaw = raw.targets
 	if (!Array.isArray(targetsRaw)) {
 		throw new Error("archive operation gc intent targets is not an array")
@@ -402,50 +406,54 @@ const parseGcIntent = (
 	}
 }
 
+/**
+ * One GC target exactly as the journal recorded it.
+ *
+ * Only the recorded fields are decoded here. The identities are re-validated
+ * through the same
+ * canonicalizing validators the writer used, because a hand-edited journal must
+ * not be able to point collection at an arbitrary path.
+ */
+const RecordedGcTarget = Schema.Struct({
+	signal: NonEmptyString,
+	rangeStart: NonEmptyString,
+	generationId: NonEmptyString,
+	createdAt: NonEmptyString,
+	manifestSha256: Sha256Lower,
+	bytes: NonNegativeSafeInt,
+	recordedActiveGenerationId: NonEmptyString,
+	shards: Schema.Array(
+		Schema.Struct({
+			name: NonEmptyString,
+			bytes: NonNegativeSafeInt,
+			sha256: Sha256Lower,
+		}),
+	),
+})
+
+const decodeRecordedGcTarget = Schema.decodeUnknownSync(RecordedGcTarget)
+
 const parseGcTarget = (raw: unknown, index: number): GcTarget => {
-	if (!isRecord(raw)) throw new Error(`archive gc target ${index} is not a record`)
-	const signal = archiveSignal(requiredString(raw.signal, "signal")).name
-	const rangeStart = validateRangeDate(requiredString(raw.rangeStart, "rangeStart"))
-	const generationId = validateArchiveId(requiredString(raw.generationId, "generationId"), "generation")
-	const createdAt = requiredString(raw.createdAt, "createdAt")
-	const manifestSha256 = requiredString(raw.manifestSha256, "manifestSha256").toLowerCase()
-	if (!/^[0-9a-f]{64}$/.test(manifestSha256)) {
-		throw new Error(`archive gc target ${index} has invalid manifestSha256`)
+	let recorded: typeof RecordedGcTarget.Type
+	try {
+		recorded = decodeRecordedGcTarget(raw)
+	} catch (error) {
+		throw new Error(
+			`archive gc target ${index} is malformed: ${error instanceof Error ? error.message : String(error)}`,
+		)
 	}
-	const bytesRaw = raw.bytes
-	if (typeof bytesRaw !== "number" || !Number.isSafeInteger(bytesRaw) || bytesRaw < 0) {
-		throw new Error(`archive gc target ${index} has invalid bytes: ${String(bytesRaw)}`)
-	}
-	const recordedActiveGenerationId = validateArchiveId(
-		requiredString(raw.recordedActiveGenerationId, "recordedActiveGenerationId"),
-		"active generation",
-	)
-	const shardsRaw = raw.shards
-	if (!Array.isArray(shardsRaw)) {
-		throw new Error(`archive gc target ${index} shards is not an array`)
-	}
-	const shards = shardsRaw.map((s, j) => {
-		if (!isRecord(s)) throw new Error(`archive gc target ${index} shard ${j} is not a record`)
-		const name = requiredString(s.name, "name")
-		const bytes = s.bytes
-		if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) {
-			throw new Error(`archive gc target ${index} shard ${j} invalid bytes`)
-		}
-		const sha256 = requiredString(s.sha256, "sha256").toLowerCase()
-		if (!/^[0-9a-f]{64}$/.test(sha256)) {
-			throw new Error(`archive gc target ${index} shard ${j} invalid sha256`)
-		}
-		return { name, bytes, sha256 }
-	})
 	return {
-		signal,
-		rangeStart,
-		generationId,
-		createdAt,
-		manifestSha256,
-		bytes: bytesRaw,
-		shards,
-		recordedActiveGenerationId,
+		signal: archiveSignal(recorded.signal).name,
+		rangeStart: validateRangeDate(recorded.rangeStart),
+		generationId: validateArchiveId(recorded.generationId, "generation"),
+		createdAt: recorded.createdAt,
+		manifestSha256: recorded.manifestSha256,
+		bytes: recorded.bytes,
+		shards: recorded.shards,
+		recordedActiveGenerationId: validateArchiveId(
+			recorded.recordedActiveGenerationId,
+			"active generation",
+		),
 	}
 }
 

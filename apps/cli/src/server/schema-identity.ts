@@ -6,6 +6,7 @@ import schemaV4Sql from "./schema/local-schema-v4.sql" with { type: "text" }
 import schemaV5Sql from "./schema/local-schema-v5.sql" with { type: "text" }
 import schemaV6Sql from "./schema/local-schema-v6.sql" with { type: "text" }
 import schemaV7Sql from "./schema/local-schema-v7.sql" with { type: "text" }
+import schemaV8Sql from "./schema/local-schema-v8.sql" with { type: "text" }
 import { schemaDigest as digestSchema, schemaFingerprint as fingerprintSchema } from "./store-version"
 import { buildLocalSchemaManifest, type LocalSchemaManifest } from "./schema-manifest"
 import { LOCAL_SCHEMA_VERSION } from "./local-schema-version"
@@ -29,7 +30,7 @@ export const LEGACY_SCHEMA_PROJECT_REVISION =
 export const LEGACY_SCHEMA_FINGERPRINT = "428701854f9fd30e"
 
 export const CURRENT_SCHEMA_PROJECT_REVISION =
-	"73f8f3249a508cd05598289b67b3773a049e38db0302efa6aa9e45e3501d2182"
+	"bb7da950a3a65af75fcf627bf4ed0436308c98fee86906048b05b6d40d9f7534"
 /** Revision recorded by the issue-297 recovery report. The refreshed upstream
  * generator currently emits CURRENT_SCHEMA_PROJECT_REVISION; the structural
  * fingerprint is the compatibility identity used by the migration. */
@@ -40,41 +41,73 @@ export const SCHEMA_FINGERPRINT = fingerprintSchema(schemaSql)
 export const SCHEMA_DIGEST = digestSchema(schemaSql)
 export const LOCAL_SCHEMA_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaSql)
 export const LOCAL_SCHEMA_MANIFEST_DIGEST = LOCAL_SCHEMA_MANIFEST.digest
-/** Immutable v1 DDL/manifest snapshot used by the v0 -> v1 module even after
- * the generated current schema advances. */
-export const LOCAL_SCHEMA_V1_SQL = schemaV1Sql
-export const LOCAL_SCHEMA_V1_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV1Sql)
-export const LOCAL_SCHEMA_V1_MANIFEST_DIGEST = LOCAL_SCHEMA_V1_MANIFEST.digest
-/** Immutable v2 DDL/manifest snapshot used by the v1 -> v2 module even after
- * the generated current schema advances. */
-export const LOCAL_SCHEMA_V2_SQL = schemaV2Sql
-export const LOCAL_SCHEMA_V2_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV2Sql)
-export const LOCAL_SCHEMA_V2_MANIFEST_DIGEST = LOCAL_SCHEMA_V2_MANIFEST.digest
-/** Immutable v3 DDL/manifest snapshot used by the v2 -> v3 module after the
- * generated current schema advances. */
-export const LOCAL_SCHEMA_V3_SQL = schemaV3Sql
-export const LOCAL_SCHEMA_V3_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV3Sql)
-export const LOCAL_SCHEMA_V3_MANIFEST_DIGEST = LOCAL_SCHEMA_V3_MANIFEST.digest
-/** Immutable v4 DDL/manifest snapshot used by the v3 -> v4 module after the
- * generated current schema advances. */
-export const LOCAL_SCHEMA_V4_SQL = schemaV4Sql
-export const LOCAL_SCHEMA_V4_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV4Sql)
-export const LOCAL_SCHEMA_V4_MANIFEST_DIGEST = LOCAL_SCHEMA_V4_MANIFEST.digest
-/** Immutable v5 DDL/manifest snapshot used by the v4 -> v5 module after the
- * generated current schema advances. */
-export const LOCAL_SCHEMA_V5_SQL = schemaV5Sql
-export const LOCAL_SCHEMA_V5_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV5Sql)
-export const LOCAL_SCHEMA_V5_MANIFEST_DIGEST = LOCAL_SCHEMA_V5_MANIFEST.digest
-/** Immutable v6 DDL/manifest snapshot used by the v5 -> v6 module after the
- * generated current schema advances. */
-export const LOCAL_SCHEMA_V6_SQL = schemaV6Sql
-export const LOCAL_SCHEMA_V6_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV6Sql)
-export const LOCAL_SCHEMA_V6_MANIFEST_DIGEST = LOCAL_SCHEMA_V6_MANIFEST.digest
-/** Immutable v7 DDL/manifest snapshot used by the v6 -> v7 module after the
- * generated current schema advances. */
-export const LOCAL_SCHEMA_V7_SQL = schemaV7Sql
-export const LOCAL_SCHEMA_V7_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV7Sql)
-export const LOCAL_SCHEMA_V7_MANIFEST_DIGEST = LOCAL_SCHEMA_V7_MANIFEST.digest
+/**
+ * Immutable per-version DDL and manifest snapshots.
+ *
+ * A historical edge must keep constructing and verifying the schema it was
+ * written for: when v9 ships, v7 -> v8 must still produce v8 rather than
+ * silently retargeting whatever the generator currently emits. The SQL is
+ * imported literally because Bun resolves text imports statically; everything
+ * derived from it is built once, here.
+ */
+const SNAPSHOT_SQL: ReadonlyArray<string> = [
+	schemaV1Sql,
+	schemaV2Sql,
+	schemaV3Sql,
+	schemaV4Sql,
+	schemaV5Sql,
+	schemaV6Sql,
+	schemaV7Sql,
+	schemaV8Sql,
+]
+
+export interface LocalSchemaSnapshot {
+	readonly version: number
+	readonly sql: string
+	readonly manifest: LocalSchemaManifest
+	readonly manifestDigest: string
+}
+
+/** Indexed by schema version; index 0 is the fingerprint-only legacy store, which has no DDL. */
+export const LOCAL_SCHEMA_SNAPSHOTS: ReadonlyArray<LocalSchemaSnapshot | undefined> = Object.freeze([
+	undefined,
+	...SNAPSHOT_SQL.map((sql, index) => {
+		const manifest = buildLocalSchemaManifest(sql)
+		return Object.freeze({ version: index + 1, sql, manifest, manifestDigest: manifest.digest })
+	}),
+])
+
+const snapshotAt = (version: number): LocalSchemaSnapshot => {
+	const snapshot = LOCAL_SCHEMA_SNAPSHOTS[version]
+	if (!snapshot) throw new Error(`no bundled DDL snapshot for local schema version ${version}`)
+	return snapshot
+}
+
+export const LOCAL_SCHEMA_V1_SQL = snapshotAt(1).sql
+export const LOCAL_SCHEMA_V1_MANIFEST = snapshotAt(1).manifest
+export const LOCAL_SCHEMA_V1_MANIFEST_DIGEST = snapshotAt(1).manifestDigest
+export const LOCAL_SCHEMA_V2_SQL = snapshotAt(2).sql
+export const LOCAL_SCHEMA_V2_MANIFEST = snapshotAt(2).manifest
+export const LOCAL_SCHEMA_V2_MANIFEST_DIGEST = snapshotAt(2).manifestDigest
+export const LOCAL_SCHEMA_V3_SQL = snapshotAt(3).sql
+export const LOCAL_SCHEMA_V3_MANIFEST = snapshotAt(3).manifest
+export const LOCAL_SCHEMA_V3_MANIFEST_DIGEST = snapshotAt(3).manifestDigest
+export const LOCAL_SCHEMA_V4_SQL = snapshotAt(4).sql
+export const LOCAL_SCHEMA_V4_MANIFEST = snapshotAt(4).manifest
+export const LOCAL_SCHEMA_V4_MANIFEST_DIGEST = snapshotAt(4).manifestDigest
+export const LOCAL_SCHEMA_V5_SQL = snapshotAt(5).sql
+export const LOCAL_SCHEMA_V5_MANIFEST = snapshotAt(5).manifest
+export const LOCAL_SCHEMA_V5_MANIFEST_DIGEST = snapshotAt(5).manifestDigest
+export const LOCAL_SCHEMA_V6_SQL = snapshotAt(6).sql
+export const LOCAL_SCHEMA_V6_MANIFEST = snapshotAt(6).manifest
+export const LOCAL_SCHEMA_V6_MANIFEST_DIGEST = snapshotAt(6).manifestDigest
+export const LOCAL_SCHEMA_V7_SQL = snapshotAt(7).sql
+export const LOCAL_SCHEMA_V7_MANIFEST = snapshotAt(7).manifest
+export const LOCAL_SCHEMA_V7_MANIFEST_DIGEST = snapshotAt(7).manifestDigest
+export const LOCAL_SCHEMA_V8_SQL = snapshotAt(8).sql
+export const LOCAL_SCHEMA_V8_MANIFEST = snapshotAt(8).manifest
+export const LOCAL_SCHEMA_V8_MANIFEST_DIGEST = snapshotAt(8).manifestDigest
+
 export interface LocalSchemaIdentity {
 	readonly version: number
 	readonly fingerprint: string
@@ -85,72 +118,33 @@ export interface LocalSchemaIdentity {
 }
 
 /**
- * The v1 identity is deliberately frozen. Historical migration edges must
- * never point at CURRENT_LOCAL_SCHEMA: when v2 ships, v0 -> v1 must still
- * construct and verify v1 rather than silently changing its destination.
+ * Per-version identities, frozen and read straight from the append-only
+ * history. Historical migration edges must never point at
+ * CURRENT_LOCAL_SCHEMA: when v9 ships, v0 -> v1 must still construct and verify
+ * v1 rather than silently changing its destination.
  */
-export const LOCAL_SCHEMA_V1: LocalSchemaIdentity = Object.freeze({
-	version: LOCAL_SCHEMA_HISTORY[1]!.version,
-	fingerprint: LOCAL_SCHEMA_HISTORY[1]!.fingerprint,
-	digest: LOCAL_SCHEMA_HISTORY[1]!.digest,
-	manifestDigest: LOCAL_SCHEMA_HISTORY[1]!.manifestDigest,
-	chdb: CHDB_VERSION,
-	projectRevision: LOCAL_SCHEMA_HISTORY[1]!.projectRevision,
-})
+const identityAt = (version: number): LocalSchemaIdentity => {
+	const entry = LOCAL_SCHEMA_HISTORY[version]
+	if (!entry || entry.version !== version)
+		throw new Error(`local schema history has no entry for version ${version}`)
+	return Object.freeze({
+		version: entry.version,
+		fingerprint: entry.fingerprint,
+		digest: entry.digest,
+		manifestDigest: entry.manifestDigest,
+		chdb: CHDB_VERSION,
+		projectRevision: entry.projectRevision,
+	})
+}
 
-export const LOCAL_SCHEMA_V2: LocalSchemaIdentity = Object.freeze({
-	version: LOCAL_SCHEMA_HISTORY[2]!.version,
-	fingerprint: LOCAL_SCHEMA_HISTORY[2]!.fingerprint,
-	digest: LOCAL_SCHEMA_HISTORY[2]!.digest,
-	manifestDigest: LOCAL_SCHEMA_HISTORY[2]!.manifestDigest,
-	chdb: CHDB_VERSION,
-	projectRevision: LOCAL_SCHEMA_HISTORY[2]!.projectRevision,
-})
-
-export const LOCAL_SCHEMA_V3: LocalSchemaIdentity = Object.freeze({
-	version: LOCAL_SCHEMA_HISTORY[3]!.version,
-	fingerprint: LOCAL_SCHEMA_HISTORY[3]!.fingerprint,
-	digest: LOCAL_SCHEMA_HISTORY[3]!.digest,
-	manifestDigest: LOCAL_SCHEMA_HISTORY[3]!.manifestDigest,
-	chdb: CHDB_VERSION,
-	projectRevision: LOCAL_SCHEMA_HISTORY[3]!.projectRevision,
-})
-
-export const LOCAL_SCHEMA_V4: LocalSchemaIdentity = Object.freeze({
-	version: LOCAL_SCHEMA_HISTORY[4]!.version,
-	fingerprint: LOCAL_SCHEMA_HISTORY[4]!.fingerprint,
-	digest: LOCAL_SCHEMA_HISTORY[4]!.digest,
-	manifestDigest: LOCAL_SCHEMA_HISTORY[4]!.manifestDigest,
-	chdb: CHDB_VERSION,
-	projectRevision: LOCAL_SCHEMA_HISTORY[4]!.projectRevision,
-})
-
-export const LOCAL_SCHEMA_V5: LocalSchemaIdentity = Object.freeze({
-	version: LOCAL_SCHEMA_HISTORY[5]!.version,
-	fingerprint: LOCAL_SCHEMA_HISTORY[5]!.fingerprint,
-	digest: LOCAL_SCHEMA_HISTORY[5]!.digest,
-	manifestDigest: LOCAL_SCHEMA_HISTORY[5]!.manifestDigest,
-	chdb: CHDB_VERSION,
-	projectRevision: LOCAL_SCHEMA_HISTORY[5]!.projectRevision,
-})
-
-export const LOCAL_SCHEMA_V6: LocalSchemaIdentity = Object.freeze({
-	version: LOCAL_SCHEMA_HISTORY[6]!.version,
-	fingerprint: LOCAL_SCHEMA_HISTORY[6]!.fingerprint,
-	digest: LOCAL_SCHEMA_HISTORY[6]!.digest,
-	manifestDigest: LOCAL_SCHEMA_HISTORY[6]!.manifestDigest,
-	chdb: CHDB_VERSION,
-	projectRevision: LOCAL_SCHEMA_HISTORY[6]!.projectRevision,
-})
-
-export const LOCAL_SCHEMA_V7: LocalSchemaIdentity = Object.freeze({
-	version: LOCAL_SCHEMA_HISTORY[7]!.version,
-	fingerprint: LOCAL_SCHEMA_HISTORY[7]!.fingerprint,
-	digest: LOCAL_SCHEMA_HISTORY[7]!.digest,
-	manifestDigest: LOCAL_SCHEMA_HISTORY[7]!.manifestDigest,
-	chdb: CHDB_VERSION,
-	projectRevision: LOCAL_SCHEMA_HISTORY[7]!.projectRevision,
-})
+export const LOCAL_SCHEMA_V1 = identityAt(1)
+export const LOCAL_SCHEMA_V2 = identityAt(2)
+export const LOCAL_SCHEMA_V3 = identityAt(3)
+export const LOCAL_SCHEMA_V4 = identityAt(4)
+export const LOCAL_SCHEMA_V5 = identityAt(5)
+export const LOCAL_SCHEMA_V6 = identityAt(6)
+export const LOCAL_SCHEMA_V7 = identityAt(7)
+export const LOCAL_SCHEMA_V8 = identityAt(8)
 
 export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = Object.freeze({
 	version: LOCAL_SCHEMA_VERSION,
