@@ -71,9 +71,18 @@ describe("buildSessionAxis", () => {
 	it("labels a ruler that starts at zero and ends at the axis length", () => {
 		const axis = buildSessionAxis({ startMs: START, endMs: START + 4 * MINUTE, collapsedGaps: [] })
 
-		expect(axis.ticks).toHaveLength(6)
 		expect(axis.ticks[0]).toEqual({ axisMs: 0, label: "0s" })
-		expect(axis.ticks[5]!.axisMs).toBe(axis.totalMs)
+		expect(axis.ticks.at(-1)!.axisMs).toBe(axis.totalMs)
+	})
+
+	it("steps the ruler in clock values rather than fifths of the total", () => {
+		// 52s: 15s steps, not the 13s an even division would give.
+		const short = buildSessionAxis({ startMs: START, endMs: START + 52 * SECOND, collapsedGaps: [] })
+		expect(short.ticks.map((tick) => tick.label)).toEqual(["0s", "15s", "30s", "45s", "52s"])
+
+		// 4m: a minute a tick, written out with the seconds the rows below carry.
+		const long = buildSessionAxis({ startMs: START, endMs: START + 4 * MINUTE, collapsedGaps: [] })
+		expect(long.ticks.map((tick) => tick.label)).toEqual(["0s", "1m 00s", "2m 00s", "3m 00s", "4m 00s"])
 	})
 
 	it("survives a session with no measurable duration", () => {

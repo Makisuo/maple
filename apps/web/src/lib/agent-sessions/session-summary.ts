@@ -249,7 +249,10 @@ function computeOccupancy(
 
 	const ttft = union(ttftIntervals)
 	const inference = subtract(union(inferenceIntervals), ttft)
-	const tool = subtract(union(toolIntervals), [...ttft, ...inference].sort((a, b) => a.startMs - b.startMs))
+	const tool = subtract(
+		union(toolIntervals),
+		[...ttft, ...inference].sort((a, b) => a.startMs - b.startMs),
+	)
 
 	const ttftMs = totalMs(ttft)
 	const inferenceMs = totalMs(inference)
@@ -268,10 +271,12 @@ function computeOccupancy(
 }
 
 function sessionStatus(turns: readonly SessionTurn[], endMs: number, nowMs: number): SessionStatus {
-	if (nowMs - endMs < SESSION_ACTIVE_WINDOW_MS) return "active"
 	const lastTurn = turns[turns.length - 1]
+	// Failure is checked before the active window: the window measures silence,
+	// and a session that errored two minutes ago is silent for a known reason.
+	if (lastTurn?.failed === true) return "failed"
+	if (nowMs - endMs < SESSION_ACTIVE_WINDOW_MS) return "active"
 	if (lastTurn === undefined) return "abandoned"
-	if (lastTurn.failed) return "failed"
 	// Completion needs positive evidence. Turns recovered from trace boundaries
 	// carry none — nothing in the data says the agent finished — so a session
 	// that simply stopped reads as abandoned rather than quietly successful.
@@ -303,48 +308,87 @@ function spanTokens(span: AiSessionSpan): SessionTokenTotals | undefined {
 	) {
 		return undefined
 	}
-	const input = usageInputTokens ?? 0
-	const cacheRead = usageCacheReadInputTokens ?? 0
-	const cacheWrite = usageCacheCreationInputTokens ?? 0
-	const output = usageOutputTokens ?? 0
-	const reasoning = usageReasoningOutputTokens ?? 0
-	return {
-		input,
-		cacheRead,
-		cacheWrite,
-		output,
-		reasoning,
-		total: input + cacheRead + cacheWrite + output + reasoning,
-	}
+	return tokenTotals({
+		input: usageInputTokens ?? 0,
+		cacheRead: usageCacheReadInputTokens ?? 0,
+		cacheWrite: usageCacheCreationInputTokens ?? 0,
+		output: usageOutputTokens ?? 0,
+		reasoning: usageReasoningOutputTokens ?? 0,
+	})
 }
 
 /**
- * Usage per span, counted only where it is not also reported deeper.
+ * The five buckets plus the headline total.
+ *
+ * Cached input is a SUBSET of `gen_ai.usage.input_tokens` under the dominant
+ * vendor convention — one production call reports 4935 input against 4932 cache
+ * writes — so adding the cache buckets to input nearly doubles the figure the
+ * header prints. Where they exceed input they are evidently reported beside it,
+ * and the additive total is the honest one. The bucket legend is unaffected
+ * either way: it shows what was reported.
+ */
+function tokenTotals(buckets: Omit<SessionTokenTotals, "total">): SessionTokenTotals {
+	const cached = buckets.cacheRead + buckets.cacheWrite
+	const total =
+		cached <= buckets.input
+			? buckets.input + buckets.output + buckets.reasoning
+			: buckets.input + cached + buckets.output + buckets.reasoning
+	return { ...buckets, total }
+}
+
+/**
+ * Usage per span, with what a deeper span already reported taken off it.
  *
  * Several frameworks stamp `gen_ai.usage.*` on the model span AND sum it onto
- * the agent span that wraps it. Taking the deepest reporter keeps the session
- * total equal to what was actually billed, and leaves usage visible for the
- * frameworks that only report it at the top.
+ * the agent span that wraps it. Counting the deepest reporter keeps the session
+ * total equal to what was actually billed. The wrapper is not dropped outright,
+ * though: it keeps whatever it reported ABOVE the sum of the reporters beneath
+ * it — zero for a clean roll-up, and the missing call's usage when one of its
+ * children reported none.
  */
 function countableUsageSpans(spans: readonly AiSessionSpan[]): Map<string, SessionTokenTotals> {
 	const byId = new Map(spans.map((span) => [span.spanId, span]))
-	const withUsage = new Map<string, SessionTokenTotals>()
+	const reported = new Map<string, SessionTokenTotals>()
 	for (const span of spans) {
 		const tokens = spanTokens(span)
-		if (tokens !== undefined) withUsage.set(span.spanId, tokens)
+		if (tokens !== undefined) reported.set(span.spanId, tokens)
 	}
 
-	const rolledUp = new Set<string>()
-	for (const spanId of withUsage.keys()) {
+	// Each reporter is charged to the NEAREST ancestor that also reports, so a
+	// two-level roll-up subtracts each figure once rather than at every level.
+	const claimed = new Map<string, SessionTokenTotals[]>()
+	for (const [spanId, tokens] of reported) {
+		const seen = new Set<string>([spanId])
 		let parent = byId.get(byId.get(spanId)!.parentSpanId)
-		while (parent !== undefined && !rolledUp.has(parent.spanId)) {
-			rolledUp.add(parent.spanId)
+		while (parent !== undefined && !seen.has(parent.spanId)) {
+			seen.add(parent.spanId)
+			if (reported.has(parent.spanId)) {
+				claimed.set(parent.spanId, [...(claimed.get(parent.spanId) ?? []), tokens])
+				break
+			}
 			parent = byId.get(parent.parentSpanId)
 		}
 	}
 
-	for (const spanId of rolledUp) withUsage.delete(spanId)
-	return withUsage
+	const countable = new Map<string, SessionTokenTotals>()
+	for (const [spanId, tokens] of reported) {
+		const beneath = claimed.get(spanId)
+		const countableTokens = beneath === undefined ? tokens : excessTokens(tokens, sumTokens(beneath))
+		if (countableTokens.total > 0) countable.set(spanId, countableTokens)
+	}
+	return countable
+}
+
+/** Per bucket, what `reported` claims over `counted`. Never negative: a wrapper
+ *  that under-reports its own children adds nothing rather than subtracting. */
+function excessTokens(reported: SessionTokenTotals, counted: SessionTokenTotals): SessionTokenTotals {
+	return tokenTotals({
+		input: Math.max(0, reported.input - counted.input),
+		cacheRead: Math.max(0, reported.cacheRead - counted.cacheRead),
+		cacheWrite: Math.max(0, reported.cacheWrite - counted.cacheWrite),
+		output: Math.max(0, reported.output - counted.output),
+		reasoning: Math.max(0, reported.reasoning - counted.reasoning),
+	})
 }
 
 /**
@@ -407,27 +451,83 @@ function errorSignal(span: AiSessionSpan): string {
 		.join(" ")
 }
 
+/** The error a span reports, or nothing — for a span that did not fail, or one
+ *  that failed without saying anything an ancestor could be matched against. */
+function failureSignal(span: AiSessionSpan): string | undefined {
+	if (span.statusCode !== "Error") return undefined
+	const signal = errorSignal(span)
+	return signal === "" ? undefined : signal
+}
+
+function refusalSignal(span: AiSessionSpan): string | undefined {
+	const reasons = (span.genAi.responseFinishReasons ?? [])
+		.map((reason) => reason.toLowerCase())
+		.filter((reason) => REFUSAL_FINISH_REASONS.has(reason))
+	return reasons.length === 0 ? undefined : reasons.join(",")
+}
+
 /**
- * Retries, as errored-then-resent inference.
+ * Ancestors carrying a signal a span below them already carries.
+ *
+ * Frameworks stamp the model call's error and its finish reasons on the agent
+ * span wrapping it as well. Counted at both levels, one refusal is two, and the
+ * outer copy of a failed call becomes a retry that never happened — so only the
+ * deepest span carrying a given signal counts.
+ */
+function shadowedAncestorIds(
+	spans: readonly AiSessionSpan[],
+	signalOf: (span: AiSessionSpan) => string | undefined,
+): ReadonlySet<string> {
+	const byId = new Map(spans.map((span) => [span.spanId, span]))
+	const shadowed = new Set<string>()
+	for (const span of spans) {
+		const signal = signalOf(span)
+		if (signal === undefined) continue
+		const seen = new Set<string>([span.spanId])
+		let parent = byId.get(span.parentSpanId)
+		while (parent !== undefined && !seen.has(parent.spanId)) {
+			if (signalOf(parent) === signal) shadowed.add(parent.spanId)
+			seen.add(parent.spanId)
+			parent = byId.get(parent.parentSpanId)
+		}
+	}
+	return shadowed
+}
+
+/**
+ * The spans counted as retries: errored-then-resent inference.
  *
  * No convention field records "this was attempt 2", so the heuristic is: a model
  * span that failed with a rate limit or a server error, and was followed by
- * another model span in the same turn. It counts the failures the agent had to
+ * another model span in the same turn. It names the failures the agent had to
  * pay for again — the successful attempt is the call, not the retry — and it
  * misses a retry the client swallowed without emitting a span for the failure.
+ *
+ * Exported as a set of span ids so the waterfall can mark the same spans the
+ * header counted, rather than re-deriving the rule beside it.
  */
-function countRetries(turns: readonly SessionTurn[]): number {
-	let retries = 0
+export function retriedSpanIds(turns: readonly SessionTurn[]): ReadonlySet<string> {
+	const shadowed = shadowedAncestorIds(
+		turns.flatMap((turn) => [...turn.spans]),
+		failureSignal,
+	)
+	const retried = new Set<string>()
 	for (const turn of turns) {
 		const llmSpans = turn.spans.filter(isLlmCall)
 		for (let i = 0; i < llmSpans.length - 1; i++) {
 			const span = llmSpans[i]!
-			if (span.statusCode !== "Error") continue
+			if (span.statusCode !== "Error" || shadowed.has(span.spanId)) continue
 			const signal = errorSignal(span)
-			if (RATE_LIMIT_PATTERN.test(signal) || SERVER_ERROR_PATTERN.test(signal)) retries++
+			if (RATE_LIMIT_PATTERN.test(signal) || SERVER_ERROR_PATTERN.test(signal)) {
+				retried.add(span.spanId)
+			}
 		}
 	}
-	return retries
+	return retried
+}
+
+function countRetries(turns: readonly SessionTurn[]): number {
+	return retriedSpanIds(turns).size
 }
 
 /**
@@ -438,17 +538,22 @@ function countRetries(turns: readonly SessionTurn[]): number {
  *
  * Refusals are the exception: they are a finish reason on a span that succeeded,
  * so they are counted independently of span status.
+ *
+ * Both counts take the deepest reporter, because a framework that copies the
+ * model's error or finish reason onto the agent span would otherwise report one
+ * failure as two.
  */
 function countFailures(spans: readonly AiSessionSpan[]): SessionFailureCounts {
+	const shadowedFailures = shadowedAncestorIds(spans, failureSignal)
+	const shadowedRefusals = shadowedAncestorIds(spans, refusalSignal)
 	let toolErrors = 0
 	let rateLimited = 0
 	let contextExceeded = 0
 	let refusals = 0
 
 	for (const span of spans) {
-		const finishReasons = span.genAi.responseFinishReasons ?? []
-		if (finishReasons.some((reason) => REFUSAL_FINISH_REASONS.has(reason.toLowerCase()))) refusals++
-		if (span.statusCode !== "Error") continue
+		if (refusalSignal(span) !== undefined && !shadowedRefusals.has(span.spanId)) refusals++
+		if (span.statusCode !== "Error" || shadowedFailures.has(span.spanId)) continue
 		const signal = errorSignal(span)
 		if (RATE_LIMIT_PATTERN.test(signal)) rateLimited++
 		else if (CONTEXT_EXCEEDED_PATTERN.test(signal)) contextExceeded++

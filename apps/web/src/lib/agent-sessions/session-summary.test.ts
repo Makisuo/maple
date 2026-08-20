@@ -5,6 +5,7 @@ import { buildSessionTurns } from "./session-turns"
 import {
 	buildSessionSummary,
 	findIdleGaps,
+	retriedSpanIds,
 	SESSION_ACTIVE_WINDOW_MS,
 	type OccupancyKind,
 } from "./session-summary"
@@ -144,6 +145,15 @@ describe("buildSessionSummary — status", () => {
 		expect(summary.status).toBe("failed")
 	})
 
+	it("is failed rather than active when the error landed moments ago", () => {
+		const failedSpans = [
+			agentSpan({ spanId: "agent-1", startMs: 0, durationMs: 10 * SECOND }),
+			agentSpan({ spanId: "agent-2", startMs: 5 * MINUTE, durationMs: SECOND, statusCode: "Error" }),
+		]
+
+		expect(summarize(failedSpans, T0 + 5 * MINUTE + 2 * MINUTE).status).toBe("failed")
+	})
+
 	it("is abandoned when nothing in the data says the agent ever finished", () => {
 		// No conversation id and no agent invocation: turns came from trace
 		// boundaries, which are not evidence of completion.
@@ -172,15 +182,22 @@ describe("buildSessionSummary — tokens and models", () => {
 
 	it("counts usage at the deepest span that reports it", () => {
 		const summary = summarize([
-			// The framework reports the turn total on the agent span AND on each
-			// model span underneath it.
+			// The framework reports a turn total on the agent span AND on each model
+			// span underneath it. Its own figure is lower than theirs here, so a
+			// total that read 250 would be the roll-up rather than the model calls.
 			agentSpan({
 				spanId: "agent",
 				startMs: 0,
 				durationMs: 10 * SECOND,
-				genAi: { usageInputTokens: 300, usageOutputTokens: 30 },
+				genAi: { usageInputTokens: 250, usageOutputTokens: 25 },
 			}),
-			llmSpan({ spanId: "a", parentSpanId: "agent", startMs: 0, durationMs: SECOND, tokens: [100, 0, 0, 10, 0] }),
+			llmSpan({
+				spanId: "a",
+				parentSpanId: "agent",
+				startMs: 0,
+				durationMs: SECOND,
+				tokens: [100, 0, 0, 10, 0],
+			}),
 			llmSpan({
 				spanId: "b",
 				parentSpanId: "agent",
@@ -192,6 +209,48 @@ describe("buildSessionSummary — tokens and models", () => {
 
 		expect(summary.tokens.input).toBe(300)
 		expect(summary.tokens.output).toBe(30)
+	})
+
+	it("keeps what a roll-up reported above the children that reported", () => {
+		const summary = summarize([
+			// Three model calls under one agent span, and the middle one carries no
+			// usage at all — its tokens survive as the agent span's excess.
+			agentSpan({
+				spanId: "agent",
+				startMs: 0,
+				durationMs: 10 * SECOND,
+				genAi: { usageInputTokens: 300, usageOutputTokens: 30 },
+			}),
+			llmSpan({
+				spanId: "a",
+				parentSpanId: "agent",
+				startMs: 0,
+				durationMs: SECOND,
+				tokens: [100, 0, 0, 10, 0],
+			}),
+			llmSpan({ spanId: "b", parentSpanId: "agent", startMs: 2 * SECOND, durationMs: SECOND }),
+			llmSpan({
+				spanId: "c",
+				parentSpanId: "agent",
+				startMs: 4 * SECOND,
+				durationMs: SECOND,
+				tokens: [100, 0, 0, 10, 0],
+			}),
+		])
+
+		expect(summary.tokens.input).toBe(300)
+		expect(summary.tokens.output).toBe(30)
+	})
+
+	it("does not add cached tokens to input when they are a subset of it", () => {
+		const summary = summarize([
+			// The dominant convention: cache reads are part of the input count, not
+			// beside it.
+			llmSpan({ spanId: "a", startMs: 0, durationMs: SECOND, tokens: [1000, 900, 0, 100, 0] }),
+		])
+
+		expect(summary.tokens.cacheRead).toBe(900)
+		expect(summary.tokens.total).toBe(1100)
 	})
 
 	it("keeps usage reported only at the top of the tree", () => {
@@ -251,6 +310,56 @@ describe("buildSessionSummary — work and failures", () => {
 
 		expect(summary.work.retries).toBe(1)
 		expect(summary.failures.rateLimited).toBe(1)
+	})
+
+	it("counts a failure once when a wrapper span restates it", () => {
+		const spans = [
+			agentSpan({ spanId: "agent", startMs: 0, durationMs: 20 * SECOND }),
+			// The framework's own container span around the model call, carrying the
+			// same error verbatim.
+			llmSpan({
+				spanId: "container",
+				parentSpanId: "agent",
+				startMs: SECOND,
+				durationMs: 2 * SECOND,
+				statusCode: "Error",
+				genAi: { errorType: "429" },
+			}),
+			llmSpan({
+				spanId: "inner",
+				parentSpanId: "container",
+				startMs: SECOND,
+				durationMs: SECOND,
+				statusCode: "Error",
+				genAi: { errorType: "429" },
+			}),
+			llmSpan({ spanId: "retry", parentSpanId: "agent", startMs: 10 * SECOND, durationMs: SECOND }),
+		]
+		const summary = summarize(spans)
+
+		expect(summary.work.retries).toBe(1)
+		expect(summary.failures.rateLimited).toBe(1)
+		expect([...retriedSpanIds(buildSessionTurns(spans))]).toEqual(["inner"])
+	})
+
+	it("counts a refusal once when the agent span repeats the finish reason", () => {
+		const summary = summarize([
+			agentSpan({
+				spanId: "agent",
+				startMs: 0,
+				durationMs: 20 * SECOND,
+				genAi: { operationName: "invoke_agent", responseFinishReasons: ["refusal"] },
+			}),
+			llmSpan({
+				spanId: "llm",
+				parentSpanId: "agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				genAi: { responseFinishReasons: ["refusal"] },
+			}),
+		])
+
+		expect(summary.failures.refusals).toBe(1)
 	})
 
 	it("does not call the turn's last model call a retry, however it ended", () => {
@@ -327,7 +436,13 @@ describe("buildSessionSummary — work and failures", () => {
 describe("buildSessionSummary — identity", () => {
 	it("names services busiest first and vendors in first-seen order", () => {
 		const summary = summarize([
-			agentSpan({ spanId: "a", startMs: 0, durationMs: 30 * SECOND, serviceName: "gateway", vendorId: "eve" }),
+			agentSpan({
+				spanId: "a",
+				startMs: 0,
+				durationMs: 30 * SECOND,
+				serviceName: "gateway",
+				vendorId: "eve",
+			}),
 			llmSpan({ spanId: "b", startMs: SECOND, durationMs: SECOND, serviceName: "agent-runner" }),
 			llmSpan({ spanId: "c", startMs: 3 * SECOND, durationMs: SECOND, serviceName: "agent-runner" }),
 			makeSpan({

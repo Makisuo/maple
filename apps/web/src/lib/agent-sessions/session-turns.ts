@@ -72,10 +72,15 @@ export function classifySpan(span: AiSessionSpan): SpanCategory {
  * as an "llm call". Embeddings and retrieval are excluded: they are inference
  * time, but counting them here would make the calls-per-turn ratio (the agent's
  * loop depth) meaningless.
+ *
+ * Everything else `classifySpan` reads as inference counts, including the
+ * open-set operation names vendors invent (`generate_text`): matching only the
+ * documented four would color a span as inference and then leave it out of the
+ * call count, the model rows and the token column.
  */
 export function isLlmCall(span: AiSessionSpan): boolean {
 	const operation = span.genAi.operationName
-	if (operation !== undefined) return INFERENCE_OPS.has(operation)
+	if (operation !== undefined && RETRIEVAL_OPS.has(operation)) return false
 	return classifySpan(span) === "inference"
 }
 
@@ -127,9 +132,10 @@ interface TurnAnchor {
  * "the user said something new":
  *
  * 1. `gen_ai.conversation.id` — the only turn key the convention has, and the
- *    one eve stamps with its turn id. One id, one turn.
- * 2. Root agent invocations — a session with no conversation id still opens each
- *    turn by invoking the agent, and that span has no parent inside the session.
+ *    one eve stamps with its turn id. One id, one turn, but only where the ids
+ *    actually partition the session (see `findAnchors`).
+ * 2. Agent invocations with no agent above them — a session with no usable
+ *    conversation id still opens each turn by invoking the agent.
  * 3. One turn per trace — the floor. Wrong for a trace holding several turns,
  *    but it never merges two traces into one turn, and it always renders.
  *
@@ -153,46 +159,54 @@ export function buildSessionTurns(spans: readonly AiSessionSpan[]): readonly Ses
 		buckets[cursor]!.push(span)
 	}
 
-	return anchors.map((anchor, index) => {
-		const turnSpans = buckets[index]!
-		const spanIds = new Set(turnSpans.map((span) => span.spanId))
-		const startMs = Math.min(...turnSpans.map(spanStartMs))
-		const endMs = Math.max(...turnSpans.map(spanEndMs))
-		const traceIds: string[] = []
-		for (const span of turnSpans) if (!traceIds.includes(span.traceId)) traceIds.push(span.traceId)
+	// Two anchors starting in the same millisecond leave the earlier one's bucket
+	// empty, and a turn with no spans has no start, no end and nothing to draw.
+	return anchors
+		.map((anchor, index) => ({ anchor, turnSpans: buckets[index]! }))
+		.filter((entry) => entry.turnSpans.length > 0)
+		.map(({ anchor, turnSpans }, index) => {
+			const spanIds = new Set(turnSpans.map((span) => span.spanId))
+			const startMs = Math.min(...turnSpans.map(spanStartMs))
+			const endMs = Math.max(...turnSpans.map(spanEndMs))
+			const traceIds: string[] = []
+			for (const span of turnSpans) if (!traceIds.includes(span.traceId)) traceIds.push(span.traceId)
 
-		return {
-			id: anchor.id,
-			index: index + 1,
-			anchorKind: anchor.kind,
-			anchor: anchor.span,
-			label: turnLabel(turnSpans),
-			agentName: anchor.span.genAi.agentName ?? turnSpans.find((s) => s.genAi.agentName)?.genAi.agentName,
-			startMs,
-			endMs,
-			durationMs: endMs - startMs,
-			spans: turnSpans,
-			// Only spans that root the turn count: a retried inference that errored
-			// and then succeeded is a retry, not a failed turn.
-			failed: turnSpans.some(
-				(span) =>
-					span.statusCode === "Error" &&
-					(span.parentSpanId === "" || !spanIds.has(span.parentSpanId)),
-			),
-			traceIds,
-		}
-	})
+			return {
+				id: anchor.id,
+				index: index + 1,
+				anchorKind: anchor.kind,
+				anchor: anchor.span,
+				label: turnLabel(turnSpans),
+				agentName:
+					anchor.span.genAi.agentName ?? turnSpans.find((s) => s.genAi.agentName)?.genAi.agentName,
+				startMs,
+				endMs,
+				durationMs: endMs - startMs,
+				spans: turnSpans,
+				// Only spans that root the turn count: a retried inference that errored
+				// and then succeeded is a retry, not a failed turn.
+				failed: turnSpans.some(
+					(span) =>
+						span.statusCode === "Error" &&
+						(span.parentSpanId === "" || !spanIds.has(span.parentSpanId)),
+				),
+				traceIds,
+			}
+		})
 }
 
 function findAnchors(ordered: readonly AiSessionSpan[]): readonly TurnAnchor[] {
 	const byConversation = new Map<string, AiSessionSpan>()
 	for (const span of ordered) {
 		const conversationId = span.genAi.conversationId
-		if (conversationId !== undefined && !byConversation.has(conversationId)) {
-			byConversation.set(conversationId, span)
-		}
+		// Six vendors (flue, google_adk, mastra, microsoft_agent_framework,
+		// openai_agents_sdk, pydantic_ai) derive `maple_ai.session.id` FROM
+		// `gen_ai.conversation.id`, so for them the id names the session and
+		// repeats on every span — a partition of one, not a turn key.
+		if (conversationId === undefined || conversationId === span.sessionId) continue
+		if (!byConversation.has(conversationId)) byConversation.set(conversationId, span)
 	}
-	if (byConversation.size > 0) {
+	if (byConversation.size > 1) {
 		return [...byConversation].map(([conversationId, span]) => ({
 			span,
 			kind: "conversation" as const,
@@ -200,12 +214,23 @@ function findAnchors(ordered: readonly AiSessionSpan[]): readonly TurnAnchor[] {
 		}))
 	}
 
-	const present = new Set(ordered.map((span) => span.spanId))
+	const byId = new Map(ordered.map((span) => [span.spanId, span]))
+	// Not "no parent in the session": the query returns the app's own spans too,
+	// so the trace root is an HTTP or workflow span and every agent span has an
+	// in-session parent. A turn opens where agent work starts, which is an agent
+	// span with no agent work above it anywhere in the chain.
+	const underAgent = (span: AiSessionSpan): boolean => {
+		const seen = new Set<string>([span.spanId])
+		let parent = byId.get(span.parentSpanId)
+		while (parent !== undefined && !seen.has(parent.spanId)) {
+			if (parent.isAiSpan || classifySpan(parent) === "agent") return true
+			seen.add(parent.spanId)
+			parent = byId.get(parent.parentSpanId)
+		}
+		return false
+	}
 	const agentRoots = ordered.filter(
-		(span) =>
-			(span.parentSpanId === "" || !present.has(span.parentSpanId)) &&
-			span.isAiSpan &&
-			classifySpan(span) === "agent",
+		(span) => span.isAiSpan && classifySpan(span) === "agent" && !underAgent(span),
 	)
 	if (agentRoots.length > 0) {
 		return agentRoots.map((span) => ({ span, kind: "agent-root" as const, id: `span:${span.spanId}` }))
@@ -226,7 +251,17 @@ function turnLabel(turnSpans: readonly AiSessionSpan[]): string | undefined {
 
 /** Longest turn label the page will render before eliding — a captured prompt
  *  can be tens of kilobytes, and the title is one line. */
-const MAX_LABEL_LENGTH = 160
+const MAX_LABEL_LENGTH = 80
+
+// Frameworks prepend pseudo-XML context blocks to the user's message
+// (`<current_time>…</current_time>`, `<slack_channel_context>…`). They are
+// identical on every turn, so a label taken from one names nothing — it would
+// print the same title above the session and the same row on all eight turns.
+const TAG_BLOCK = /<([a-z_][\w.-]*)\b[^>]*>[\s\S]*?<\/\1>/gi
+const ORPHAN_TAG = /<\/?[a-z_][\w.-]*\b[^>]*>/gi
+// What survives the blocks is often injected metadata rather than prose: a
+// single `key: value` with no sentence around it.
+const KEY_VALUE_LINE = /^[\w .-]{1,32}:\s*\S*$/
 
 /**
  * The first user text inside a `gen_ai.input.messages` value.
@@ -248,27 +283,39 @@ export function firstUserMessageText(value: unknown): string | undefined {
 }
 
 function messageText(value: unknown): string | undefined {
-	if (typeof value === "string") return clip(value)
+	if (typeof value === "string") return proseLine(value)
 	if (!Array.isArray(value)) return undefined
 	for (const part of value) {
 		if (typeof part === "string") {
-			const text = clip(part)
+			const text = proseLine(part)
 			if (text !== undefined) return text
 		}
 		if (!isRecord(part)) continue
 		const content = typeof part.content === "string" ? part.content : part.text
 		if (typeof content === "string") {
-			const text = clip(content)
+			const text = proseLine(content)
 			if (text !== undefined) return text
 		}
 	}
 	return undefined
 }
 
-function clip(value: string): string | undefined {
-	const text = value.trim().replace(/\s+/g, " ")
-	if (text.length === 0) return undefined
-	return text.length > MAX_LABEL_LENGTH ? `${text.slice(0, MAX_LABEL_LENGTH - 1)}…` : text
+/**
+ * The first line of a captured message that reads as something a person wrote.
+ *
+ * Injected context is dropped rather than truncated, and a message that is only
+ * injected context has no label at all — the callers' fallbacks (the agent name
+ * and start time for the title, "no captured message" for a turn row) say more
+ * than `<current_time>2026-08-…` would.
+ */
+function proseLine(value: string): string | undefined {
+	const stripped = value.replace(TAG_BLOCK, "\n").replace(ORPHAN_TAG, "\n")
+	for (const rawLine of stripped.split("\n")) {
+		const line = rawLine.trim().replace(/\s+/g, " ")
+		if (line.length === 0 || !/\p{L}/u.test(line) || KEY_VALUE_LINE.test(line)) continue
+		return line.length > MAX_LABEL_LENGTH ? `${line.slice(0, MAX_LABEL_LENGTH - 1)}…` : line
+	}
+	return undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

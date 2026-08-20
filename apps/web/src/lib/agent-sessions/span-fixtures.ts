@@ -26,6 +26,7 @@ export interface SpanInput {
 	readonly statusMessage?: string
 	readonly isAiSpan?: boolean
 	readonly vendorId?: string
+	readonly sessionId?: string
 	readonly genAi?: AiSessionGenAiValues
 }
 
@@ -45,9 +46,10 @@ export function makeSpan(input: SpanInput): AiSessionSpan {
 		isAiSpan: input.isAiSpan ?? true,
 		genAi: input.genAi ?? {},
 	}
-	// `vendorId` is an optional key on the wire shape: present or absent, never
-	// present-and-undefined.
-	return input.vendorId === undefined ? span : { ...span, vendorId: input.vendorId }
+	// `vendorId` and `sessionId` are optional keys on the wire shape: present or
+	// absent, never present-and-undefined.
+	const withVendor = input.vendorId === undefined ? span : { ...span, vendorId: input.vendorId }
+	return input.sessionId === undefined ? withVendor : { ...withVendor, sessionId: input.sessionId }
 }
 
 /** A model call. Tokens are the five `gen_ai.usage.*` buckets, in order. */
@@ -64,9 +66,7 @@ export function llmSpan({
 	const base: AiSessionGenAiValues = { operationName: "chat" }
 	const withModel = model === undefined ? base : { ...base, responseModel: model }
 	const withTtft =
-		ttftSeconds === undefined
-			? withModel
-			: { ...withModel, responseTimeToFirstChunk: ttftSeconds }
+		ttftSeconds === undefined ? withModel : { ...withModel, responseTimeToFirstChunk: ttftSeconds }
 	const withUsage =
 		tokens === undefined
 			? withTtft
@@ -85,10 +85,7 @@ export function llmSpan({
 	})
 }
 
-export function toolSpan({
-	toolName,
-	...input
-}: SpanInput & { readonly toolName?: string }): AiSessionSpan {
+export function toolSpan({ toolName, ...input }: SpanInput & { readonly toolName?: string }): AiSessionSpan {
 	return makeSpan({
 		...input,
 		spanName: input.spanName ?? "execute_tool",

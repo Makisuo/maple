@@ -4,20 +4,19 @@ import { computeModelSpend, lookupModelPrice, PRICE_TABLE_DATE } from "./model-p
 
 const noTokens = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0 }
 
+// The arithmetic is what these assert; the rates come from the table so a price
+// revision does not read as a broken sum.
+const SONNET = lookupModelPrice("claude-sonnet-4-5")!
+const HAIKU = lookupModelPrice("claude-haiku-4-5")!
+
 describe("lookupModelPrice", () => {
 	it("prices a dated release id off its family", () => {
-		expect(lookupModelPrice("claude-sonnet-4-5-20250929")).toEqual(
-			lookupModelPrice("claude-sonnet-4-5"),
-		)
+		expect(lookupModelPrice("claude-sonnet-4-5-20250929")).toEqual(lookupModelPrice("claude-sonnet-4-5"))
 	})
 
 	it("prefers the longest matching prefix", () => {
-		const sonnet45 = lookupModelPrice("claude-sonnet-4-5-20250929")
-		const sonnet4 = lookupModelPrice("claude-sonnet-4-20250514")
-		const gpt5Mini = lookupModelPrice("gpt-5-mini-2025-08-07")
-
-		expect(sonnet45).not.toBe(sonnet4)
-		expect(gpt5Mini?.input).toBe(0.25)
+		// Two rows either of which the id starts with, at very different prices.
+		expect(lookupModelPrice("gpt-5-mini-2025-08-07")?.input).toBe(0.25)
 		expect(lookupModelPrice("gpt-5")?.input).toBe(1.25)
 	})
 
@@ -28,6 +27,16 @@ describe("lookupModelPrice", () => {
 
 	it("has no answer for a model it does not list", () => {
 		expect(lookupModelPrice("some-internal-model")).toBeUndefined()
+	})
+
+	it("will not price a model off a neighbouring row", () => {
+		// Each of these starts with a row that is not its family: a bare prefix
+		// match would read gpt-4o's price for the mini (16.7x too high), o3's for
+		// o3-pro (10x too low), and gpt-5's for whatever ships next.
+		expect(lookupModelPrice("gpt-4o-mini")).not.toEqual(lookupModelPrice("gpt-4o"))
+		expect(lookupModelPrice("o3-pro")).not.toEqual(lookupModelPrice("o3"))
+		expect(lookupModelPrice("gpt-5.6-luna")).toBeUndefined()
+		expect(lookupModelPrice("o3-deep-research")).toBeUndefined()
 	})
 
 	it("carries a date to show beside the estimate", () => {
@@ -45,7 +54,7 @@ describe("computeModelSpend", () => {
 			},
 		])
 
-		expect(totalUsd).toBeCloseTo(3 + 0.3 + 3.75 + 15, 6)
+		expect(totalUsd).toBeCloseTo(SONNET.input + SONNET.cacheRead + SONNET.cacheWrite + SONNET.output, 6)
 	})
 
 	it("bills reasoning tokens as output", () => {
@@ -65,7 +74,7 @@ describe("computeModelSpend", () => {
 			{ model: "claude-haiku-4-5", tokens: { ...noTokens, output: 1e6 } },
 		])
 
-		expect(totalUsd).toBeCloseTo(20, 6)
+		expect(totalUsd).toBeCloseTo(SONNET.output + HAIKU.output, 6)
 		expect(unpricedModels).toEqual([])
 	})
 
@@ -75,7 +84,7 @@ describe("computeModelSpend", () => {
 			{ model: "an-unreleased-model", tokens: { ...noTokens, input: 5000, output: 500 } },
 		])
 
-		expect(totalUsd).toBeCloseTo(15, 6)
+		expect(totalUsd).toBeCloseTo(SONNET.output, 6)
 		expect(unpricedModels).toEqual(["an-unreleased-model"])
 	})
 

@@ -29,7 +29,17 @@ export interface SessionAxis {
 	readonly fraction: (ms: number) => number
 }
 
-const TICK_COUNT = 6
+/**
+ * Ruler steps a reader can hold: the 1/2/5 × 10ⁿ ladder plus the clock values a
+ * duration axis wants. Splitting the total into equal fifths instead prints
+ * ticks like "1m 07s", which nothing in the rows below lines up with.
+ */
+const AXIS_STEPS_MS = [
+	1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000,
+	600_000, 900_000, 1_800_000, 3_600_000,
+]
+const AXIS_TICK_TARGET = 6
+const HOUR_MS = 3_600_000
 
 export function buildSessionAxis(options: {
 	readonly startMs: number
@@ -54,21 +64,28 @@ export function buildSessionAxis(options: {
 		return Math.min(Math.max(axisMs, 0), totalMs)
 	}
 
-	const step = totalMs / (TICK_COUNT - 1)
-	const ticks = Array.from({ length: TICK_COUNT }, (_, index) => {
-		const axisMs = index === TICK_COUNT - 1 ? totalMs : index * step
-		return { axisMs, label: formatAxisTick(axisMs, step) }
-	})
-
 	return {
 		startMs,
 		totalMs,
 		removedMs,
 		removedGapCount: collapsedGaps.length,
-		ticks,
+		ticks: axisTicks(totalMs),
 		toAxisMs,
 		fraction: (ms) => toAxisMs(ms) / totalMs,
 	}
+}
+
+function axisTicks(totalMs: number): readonly AxisTick[] {
+	const rough = totalMs / (AXIS_TICK_TARGET - 1)
+	const step = AXIS_STEPS_MS.find((candidate) => candidate >= rough) ?? Math.ceil(rough / HOUR_MS) * HOUR_MS
+	const ticks: AxisTick[] = []
+	// The closing tick is the axis length itself, drawn right-aligned against the
+	// edge — a stepped tick landing next to it would overprint the label.
+	for (let axisMs = 0; axisMs < totalMs * 0.94; axisMs += step) {
+		ticks.push({ axisMs, label: formatAxisTick(axisMs, step) })
+	}
+	ticks.push({ axisMs: totalMs, label: formatAxisTick(totalMs, step) })
+	return ticks
 }
 
 /**
