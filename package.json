@@ -74,7 +74,7 @@
 	"overrides": {
 		"@effect/sql-d1": "4.0.0-rc.108"
 	},
-	"packageManager": "bun@1.3.11",
+	"packageManager": "bun@1.4.0",
 	"catalog": {
 		"vite": "^8.0.16",
 		"vitest": "^4.1.9"

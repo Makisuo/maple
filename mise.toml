@@ -14,7 +14,7 @@
 # `mise install` resolves byte-identical toolchains locally and in CI — that's
 # the whole point of this file. Bump a patch here and CI follows automatically.
 [tools]
-bun = "1.3.11" # keep in sync with `packageManager` in package.json
+bun = "1.4.0" # keep in sync with `packageManager` in package.json
 node = "24.18.0" # some scripts shell out to `node`
 rust = "1.94.1" # apps/ingest (Rust gateway); was a floating `stable` in CI
 python = "3.12.13" # Tinybird tooling + .github/scripts/format-ingest-benchmark-comment.py
