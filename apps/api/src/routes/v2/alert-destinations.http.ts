@@ -8,6 +8,7 @@ import {
 	AlertDestinationNotFoundError,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
+	TelegramAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "@maple/domain/http"
 import type {
@@ -89,6 +90,14 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				webhookUrl: params.webhook_url,
 				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
+		case "telegram":
+			return new TelegramAlertDestinationConfig({
+				type: "telegram",
+				name: params.name,
+				botToken: params.bot_token,
+				chatId: params.chat_id,
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
+			})
 		case "email":
 			return new EmailAlertDestinationConfig({
 				type: "email",
@@ -162,6 +171,13 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 				type: "discord",
 				...shared,
 				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : undefined),
+			}
+		case "telegram":
+			return {
+				type: "telegram",
+				...shared,
+				...(params.bot_token !== undefined ? { botToken: params.bot_token } : undefined),
+				...(params.chat_id !== undefined ? { chatId: params.chat_id } : undefined),
 			}
 		case "email":
 			return {

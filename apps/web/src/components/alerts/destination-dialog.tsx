@@ -98,6 +98,13 @@ function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 		// stored one.
 		case "discord":
 			return isEditing || form.webhookUrl.trim().length > 0
+		case "telegram":
+			// The chat id is not a secret and is never returned, so editing always
+			// requires it; the token may stay blank to keep the stored one.
+			return (
+				form.telegramChatId.trim().length > 0 &&
+				(isEditing || form.telegramBotToken.trim().length > 0)
+			)
 		case "pagerduty":
 			// Editing with a blank key keeps the stored one; otherwise require a
 			// well-formed routing key.
@@ -1048,6 +1055,60 @@ export function DestinationDialog({
 										then copy the URL.
 									</p>
 								</div>
+							)}
+
+							{form.type === "telegram" && (
+								<>
+									<div className="space-y-1.5">
+										<Label htmlFor="destination-telegram-token" className="text-xs">
+											Bot token
+										</Label>
+										<Input
+											id="destination-telegram-token"
+											type="password"
+											autoComplete="off"
+											value={form.telegramBotToken}
+											onChange={(event) =>
+												onFormChange((current) => ({
+													...current,
+													telegramBotToken: event.target.value,
+												}))
+											}
+											placeholder={
+												isEditing
+													? "Leave blank to keep current token"
+													: "123456789:ABC-DEF..."
+											}
+											className="font-mono text-xs"
+										/>
+										<p className="text-[11px] text-muted-foreground">
+											In Telegram: message @BotFather, send <code>/newbot</code>, then
+											copy the token it replies with.
+										</p>
+									</div>
+									<div className="space-y-1.5">
+										<Label htmlFor="destination-telegram-chat" className="text-xs">
+											Chat ID
+										</Label>
+										<Input
+											id="destination-telegram-chat"
+											value={form.telegramChatId}
+											onChange={(event) =>
+												onFormChange((current) => ({
+													...current,
+													telegramChatId: event.target.value,
+												}))
+											}
+											placeholder="-1001234567890 or @mychannel"
+											className="font-mono text-xs"
+										/>
+										<p className="text-[11px] text-muted-foreground">
+											Add the bot to the chat, then read the id from{" "}
+											<code>api.telegram.org/bot&lt;token&gt;/getUpdates</code>. Maple
+											checks the bot can reach it when you save.
+										</p>
+									</div>
+								</>
 							)}
 
 							{form.type === "webhook" && (

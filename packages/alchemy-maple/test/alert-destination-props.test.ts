@@ -16,6 +16,12 @@ export const accepts = Effect.gen(function* () {
 	yield* AlertDestination("pagerduty", { type: "pagerduty", name: "p", integration_key: "k" })
 	yield* AlertDestination("webhook", { type: "webhook", name: "w", url: "https://x", signing_secret: "s" })
 	yield* AlertDestination("discord", { type: "discord", name: "d", webhook_url: "u" })
+	yield* AlertDestination("telegram", {
+		type: "telegram",
+		name: "t",
+		bot_token: "123456789:AAtoken",
+		chat_id: "-1001234567890",
+	})
 	yield* AlertDestination("email", { type: "email", name: "e", member_user_ids: ["u_1"] })
 })
 
@@ -27,6 +33,8 @@ export const rejects = Effect.gen(function* () {
 	yield* AlertDestination("b", { type: "pagerduty", name: "x", integration_key: "k", url: "u" })
 	// @ts-expect-error email requires member_user_ids
 	yield* AlertDestination("c", { type: "email", name: "x" })
+	// @ts-expect-error telegram requires chat_id alongside the token
+	yield* AlertDestination("d", { type: "telegram", name: "x", bot_token: "123456789:AAtoken" })
 })
 
 it("keeps the compile-time destination examples", () => {

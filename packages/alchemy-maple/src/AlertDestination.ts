@@ -28,6 +28,7 @@ export type AlertDestinationProps =
 	| (DestinationBaseProps & { type: "pagerduty"; integration_key: SecretInput })
 	| (DestinationBaseProps & { type: "webhook"; url: string; signing_secret?: SecretInput })
 	| (DestinationBaseProps & { type: "discord"; webhook_url: SecretInput })
+	| (DestinationBaseProps & { type: "telegram"; bot_token: SecretInput; chat_id: string })
 	| (DestinationBaseProps & { type: "email"; member_user_ids: string[] })
 
 export type AlertDestination = Resource<
@@ -45,9 +46,9 @@ export type AlertDestination = Resource<
 >
 
 /**
- * A notification channel (PagerDuty, webhook, Discord, or workspace-member
- * email) that `Maple.AlertRule`s deliver to. Slack and Hazel destinations use
- * their installed integrations and are managed in Maple.
+ * A notification channel (PagerDuty, webhook, Discord, Telegram, or
+ * workspace-member email) that `Maple.AlertRule`s deliver to. Slack and Hazel
+ * destinations use their installed integrations and are managed in Maple.
  *
  * @example
  * ```typescript
@@ -64,7 +65,7 @@ const AlertDestinationResource = Resource<AlertDestination>("Maple.AlertDestinat
  * Alchemy types resource props as `InputProps<Props>` — a mapped type, which
  * collapses a discriminated union to the keys its members share. That erases
  * every channel-specific field (`webhook_url`, `integration_key`, `url`,
- * `member_user_ids`), making the resource uncallable. Restore the union on the
+ * `bot_token`, `member_user_ids`), making the resource uncallable. Restore the union on the
  * call signature; props are forwarded untouched, and `alertDestinationProps`
  * keeps the round-trip honest in the type test.
  */
@@ -101,6 +102,10 @@ const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
 			break
 		case "discord":
 			body.webhook_url = unwrap(props.webhook_url)
+			break
+		case "telegram":
+			body.bot_token = unwrap(props.bot_token)
+			body.chat_id = props.chat_id
 			break
 		case "email":
 			body.member_user_ids = props.member_user_ids

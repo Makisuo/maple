@@ -105,6 +105,12 @@ describe("provider request bodies decode against the real v2 create-param schema
 				webhook_url: "https://discord.com/api/webhooks/x",
 			}),
 			_alertDestinationCreateBody({
+				type: "telegram",
+				name: "Telegram",
+				bot_token: "123456789:AAHqwertyuiopasdfghjklzxcvbnm123456",
+				chat_id: "-1001234567890",
+			}),
+			_alertDestinationCreateBody({
 				type: "email",
 				name: "Email",
 				member_user_ids: ["user_2Nk8mXqPfR3yZ1aB4cD5eF6g"],
