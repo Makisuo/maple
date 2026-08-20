@@ -16,6 +16,7 @@ import type {
 	V2AlertDestinationCreateParams,
 	V2AlertDestinationMutationResponse,
 	V2AlertDestinationUpdateParams,
+	V2TelegramChatList,
 } from "@maple/domain/http/v2"
 import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import { Effect } from "effect"
@@ -218,6 +219,16 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 							}),
 						)
 					return toV2Destination(destination)
+				}),
+			)
+			.handle("telegramChats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const chats = yield* destinations.listTelegramChats(tenant.roles, payload.bot_token)
+					return {
+						object: "alert_destination.telegram_chat_list" as const,
+						chats,
+					} satisfies V2TelegramChatList
 				}),
 			)
 			.handle("create", ({ payload }) =>

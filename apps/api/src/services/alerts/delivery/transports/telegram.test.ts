@@ -4,7 +4,12 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Result, Schema } from "effect"
 import type { DispatchContext } from "../context"
 import type { RenderInput, SecretConfigOf } from "../Transport"
-import { TELEGRAM_BOT_TOKEN_PATTERN, telegramTransport, verifyTelegramCredentials } from "./telegram"
+import {
+	fetchTelegramChats,
+	TELEGRAM_BOT_TOKEN_PATTERN,
+	telegramTransport,
+	verifyTelegramCredentials,
+} from "./telegram"
 
 const DESTINATION_ID = Schema.decodeUnknownSync(AlertDestinationId)("7c6b5a49-3821-4e0f-9d8c-7b6a59483726")
 
@@ -275,6 +280,122 @@ describe("verifyTelegramCredentials", () => {
 			const fetchFn: typeof fetch = () => Promise.reject(new Error("network down"))
 			const result = yield* verifyTelegramCredentials(BOT_TOKEN, CHAT_ID, fetchFn, 1000)
 			assert.deepStrictEqual(result, { status: "unknown" })
+		}),
+	)
+})
+
+describe("fetchTelegramChats", () => {
+	const respondWith = (status: number, body: unknown) => {
+		const calls: string[] = []
+		const fetchFn: typeof fetch = async (input) => {
+			calls.push(String(input))
+			return new Response(JSON.stringify(body), {
+				status,
+				headers: { "content-type": "application/json" },
+			})
+		}
+		return { fetchFn, calls }
+	}
+
+	const chatOf = (id: number, title: string, type: string) => ({ id, type, title })
+
+	/**
+	 * The case this feature exists for. Bots join groups with privacy mode ON,
+	 * so an ordinary group message never reaches `getUpdates` — only
+	 * `my_chat_member` (fired when the bot is added) does. If this stops being
+	 * collected, "Detect chats" silently returns nothing for the most common
+	 * setup there is.
+	 */
+	it.effect("finds a group from the bot-added update alone, with no message sent", () =>
+		Effect.gen(function* () {
+			const { fetchFn } = respondWith(200, {
+				ok: true,
+				result: [{ my_chat_member: { chat: chatOf(-1001234567890, "Acme On-call", "supergroup") } }],
+			})
+			const result = yield* fetchTelegramChats(BOT_TOKEN, fetchFn, 1000)
+			assert.deepStrictEqual(result, {
+				status: "ok",
+				chats: [{ id: "-1001234567890", title: "Acme On-call", type: "supergroup" }],
+			})
+		}),
+	)
+
+	/**
+	 * `getUpdates` CONFIRMS (and discards) every update before `offset`, so
+	 * sending one would delete the bot owner's pending updates as a side effect
+	 * of them clicking a button in our UI.
+	 */
+	it.effect("does not confirm updates — no offset is ever sent", () =>
+		Effect.gen(function* () {
+			const { fetchFn, calls } = respondWith(200, { ok: true, result: [] })
+			yield* fetchTelegramChats(BOT_TOKEN, fetchFn, 1000)
+			assert.lengthOf(calls, 1)
+			assert.notInclude(calls[0]!, "offset")
+		}),
+	)
+
+	it.effect("dedupes chats and returns the most recent first", () =>
+		Effect.gen(function* () {
+			const { fetchFn } = respondWith(200, {
+				ok: true,
+				result: [
+					{ message: { chat: chatOf(-100111, "Older", "supergroup") } },
+					{ message: { chat: chatOf(-100111, "Older", "supergroup") } },
+					{ channel_post: { chat: chatOf(-100222, "Newer", "channel") } },
+				],
+			})
+			const result = yield* fetchTelegramChats(BOT_TOKEN, fetchFn, 1000)
+			assert.strictEqual(result.status, "ok")
+			if (result.status === "ok") {
+				assert.deepStrictEqual(
+					result.chats.map((chat) => chat.id),
+					["-100222", "-100111"],
+				)
+			}
+		}),
+	)
+
+	it.effect("names a one-to-one chat by username when it has no title", () =>
+		Effect.gen(function* () {
+			const { fetchFn } = respondWith(200, {
+				ok: true,
+				result: [{ message: { chat: { id: 42, type: "private", username: "ada" } } }],
+			})
+			const result = yield* fetchTelegramChats(BOT_TOKEN, fetchFn, 1000)
+			assert.strictEqual(result.status, "ok")
+			if (result.status === "ok") {
+				assert.deepStrictEqual(result.chats, [{ id: "42", title: "ada", type: "private" }])
+			}
+		}),
+	)
+
+	/** A fixable state, and nothing like a bad token — it earns its own sentence. */
+	it.effect("explains a webhook conflict instead of reporting a generic failure", () =>
+		Effect.gen(function* () {
+			const { fetchFn } = respondWith(409, {
+				ok: false,
+				error_code: 409,
+				description: "Conflict: can't use getUpdates method while webhook is active",
+			})
+			const result = yield* fetchTelegramChats(BOT_TOKEN, fetchFn, 1000)
+			assert.strictEqual(result.status, "invalid")
+			if (result.status === "invalid") assert.include(result.reason, "webhook")
+		}),
+	)
+
+	it.effect("reports a rejected token as such", () =>
+		Effect.gen(function* () {
+			const { fetchFn } = respondWith(401, { ok: false, error_code: 401, description: "Unauthorized" })
+			const result = yield* fetchTelegramChats(BOT_TOKEN, fetchFn, 1000)
+			assert.deepStrictEqual(result, { status: "invalid", reason: "Telegram rejected the bot token" })
+		}),
+	)
+
+	it.effect("never throws when the request fails", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = () => Promise.reject(new Error("network down"))
+			const result = yield* fetchTelegramChats(BOT_TOKEN, fetchFn, 1000)
+			assert.strictEqual(result.status, "invalid")
 		}),
 	)
 })

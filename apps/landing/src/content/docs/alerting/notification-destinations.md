@@ -68,15 +68,23 @@ token** field. Copy it without the `bot` prefix.
 add it as an administrator with permission to post messages). A bot cannot message a chat it isn't
 a member of.
 
-**3. Find the chat ID.** Post any message in the chat, then open:
+**3. Pick the chat.** Back in Maple, paste the bot token and click **Detect chats** — Maple asks
+Telegram which chats the bot can currently see and lists them by name. Pick one and the chat ID
+fills itself in.
 
-```
-https://api.telegram.org/bot<your-token>/getUpdates
-```
+Detection reads the bot's recent updates, so a few things are worth knowing:
 
-and read `result[].message.chat.id`. Group and channel ids are negative (`-1001234567890`); a
-one-to-one chat with the bot is a positive number. A public channel can use `@channelusername`
-instead.
+- **Adding the bot is enough.** You don't need to send a message first — Telegram notifies the bot
+  when it's added to a chat, and that's what Maple reads.
+- **Telegram keeps about 24 hours of history.** An empty list usually means the bot was added
+  longer ago than that. Send it a message (or remove and re-add it) and detect again.
+- **A bot with a webhook registered can't be inspected this way.** Telegram allows only one reader
+  at a time. If you've pointed this bot at your own webhook, enter the chat ID by hand instead.
+
+To find the ID manually, post a message in the chat and open
+`https://api.telegram.org/bot<your-token>/getUpdates`, then read `result[].message.chat.id`. Group
+and channel IDs are negative (`-1001234567890`); a one-to-one chat is positive. Public channels can
+use `@channelusername` instead.
 
 | Field         | Notes                                                                       |
 | ------------- | --------------------------------------------------------------------------- |

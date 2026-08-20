@@ -214,3 +214,164 @@ export const verifyTelegramCredentials = (
 		}),
 		Effect.orElseSucceed(() => ({ status: "unknown" as const })),
 	)
+
+/* -------------------------------------------------------------------------- */
+/*  Chat discovery                                                            */
+/* -------------------------------------------------------------------------- */
+
+export interface TelegramChat {
+	readonly id: string
+	readonly title: string
+	readonly type: "private" | "group" | "supergroup" | "channel"
+}
+
+export type TelegramChatDiscovery =
+	| { status: "ok"; chats: ReadonlyArray<TelegramChat> }
+	| { status: "invalid"; reason: string }
+
+/**
+ * Telegram identifies a chat by a signed integer — negative for groups and
+ * channels. Well inside 2^53 (a supergroup id is ~1e12), but it is carried as a
+ * string from here on because that is what the destination stores and what the
+ * form field holds.
+ */
+const TelegramChatSchema = Schema.Struct({
+	id: Schema.Number,
+	type: Schema.String,
+	title: Schema.optionalKey(Schema.String),
+	username: Schema.optionalKey(Schema.String),
+	first_name: Schema.optionalKey(Schema.String),
+})
+
+/**
+ * The update kinds that can name a chat.
+ *
+ * `my_chat_member` is the one that makes this feature work at all. Bots join
+ * groups with privacy mode ON, so an ordinary message in a group is invisible
+ * to `getUpdates` unless it is a command, a mention, or a reply — meaning
+ * "send a message and we'll find the chat" fails for exactly the setup people
+ * are most likely to have. A `my_chat_member` update fires when the bot is
+ * added, promoted, or removed, regardless of privacy mode, so simply adding
+ * the bot is enough to surface the chat.
+ */
+const TelegramUpdateSchema = Schema.Struct({
+	message: Schema.optionalKey(Schema.Struct({ chat: TelegramChatSchema })),
+	edited_message: Schema.optionalKey(Schema.Struct({ chat: TelegramChatSchema })),
+	channel_post: Schema.optionalKey(Schema.Struct({ chat: TelegramChatSchema })),
+	my_chat_member: Schema.optionalKey(Schema.Struct({ chat: TelegramChatSchema })),
+})
+
+const GetUpdatesResponseSchema = Schema.Struct({
+	ok: Schema.optionalKey(Schema.Boolean),
+	description: Schema.optionalKey(Schema.String),
+	error_code: Schema.optionalKey(Schema.Number),
+	result: Schema.optionalKey(Schema.Array(TelegramUpdateSchema)),
+})
+const decodeGetUpdates = Schema.decodeUnknownResult(GetUpdatesResponseSchema)
+
+const CHAT_TYPES = ["private", "group", "supergroup", "channel"] as const
+
+const chatLabel = (chat: Schema.Schema.Type<typeof TelegramChatSchema>): string =>
+	chat.title ?? chat.username ?? chat.first_name ?? `Chat ${chat.id}`
+
+const narrowChatType = (raw: string): TelegramChat["type"] | null =>
+	CHAT_TYPES.find((candidate) => candidate === raw) ?? null
+
+/**
+ * The chats a bot can currently see, for the destination form's chat picker.
+ *
+ * Transcribing a negative chat id out of a raw `getUpdates` payload is where
+ * this setup fails in practice, so the server does the reading. Two properties
+ * this deliberately holds:
+ *
+ * - **It does not consume updates.** `getUpdates` confirms (and discards)
+ *   everything before `offset`, so passing one would delete the bot owner's
+ *   pending updates as a side effect of them clicking a button in our UI. With
+ *   no offset the call is a read, and it stays repeatable.
+ * - **It reports a webhook conflict as its own reason.** A bot with a webhook
+ *   registered answers `getUpdates` with 409, which is a fixable state, not a
+ *   bad token — saying so is the difference between a 10-second fix and a
+ *   confused support ticket.
+ *
+ * Telegram only retains updates for ~24 hours, so an empty list is a normal
+ * answer meaning "nothing recent", not a failure.
+ */
+export const fetchTelegramChats = (
+	botToken: string,
+	fetchFn: typeof fetch,
+	timeoutMs: number,
+): Effect.Effect<TelegramChatDiscovery> =>
+	Effect.tryPromise(() =>
+		fetchFn(
+			`${TELEGRAM_API_ORIGIN}/bot${botToken}/getUpdates?limit=100&timeout=0&allowed_updates=${encodeURIComponent(
+				JSON.stringify(["message", "edited_message", "channel_post", "my_chat_member"]),
+			)}`,
+			{ method: "GET" },
+		),
+	).pipe(
+		Effect.flatMap((response) =>
+			Effect.promise(() => response.text().catch(() => "")).pipe(
+				Effect.map((raw): TelegramChatDiscovery => {
+					const parsed = Result.try({ try: (): unknown => JSON.parse(raw), catch: () => null })
+					const decoded = decodeGetUpdates(Result.getOrElse(parsed, () => null))
+					if (Result.isFailure(decoded)) {
+						return response.ok
+							? { status: "invalid", reason: "Telegram returned an unexpected response" }
+							: {
+									status: "invalid",
+									reason: `Telegram rejected the request (${response.status})`,
+								}
+					}
+					const payload = decoded.success
+					if (!payload.ok) {
+						const description = payload.description ?? ""
+						if (payload.error_code === 409 || description.includes("webhook is active")) {
+							return {
+								status: "invalid",
+								reason: "This bot has a webhook registered, so Maple cannot read its recent chats. Delete the webhook (or enter the chat ID by hand).",
+							}
+						}
+						if (payload.error_code === 401) {
+							return { status: "invalid", reason: "Telegram rejected the bot token" }
+						}
+						return {
+							status: "invalid",
+							reason:
+								truncate(description.replace(/\s+/g, " ").trim(), 300) ||
+								"Telegram rejected the request",
+						}
+					}
+
+					const byId = new Map<string, TelegramChat>()
+					// Newest first: `getUpdates` returns ascending `update_id`, and the
+					// chat someone just added the bot to is the one they are looking for.
+					for (const update of [...(payload.result ?? [])].reverse()) {
+						const chat = (
+							update.my_chat_member ??
+							update.message ??
+							update.channel_post ??
+							update.edited_message
+						)?.chat
+						if (chat === undefined) continue
+						const type = narrowChatType(chat.type)
+						if (type === null) continue
+						const id = String(chat.id)
+						if (!byId.has(id)) byId.set(id, { id, title: chatLabel(chat), type })
+					}
+					return { status: "ok", chats: [...byId.values()] }
+				}),
+			),
+		),
+		Effect.timeoutOrElse({
+			duration: Duration.millis(timeoutMs),
+			orElse: () =>
+				Effect.succeed<TelegramChatDiscovery>({
+					status: "invalid",
+					reason: "Telegram did not respond in time",
+				}),
+		}),
+		Effect.orElseSucceed(() => ({
+			status: "invalid" as const,
+			reason: "Could not reach Telegram",
+		})),
+	)

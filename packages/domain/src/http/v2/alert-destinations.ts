@@ -407,6 +407,61 @@ const emailRecipientErrors = publicErrors(
 	AlertMemberDirectoryNotConfiguredError,
 	AlertMemberDirectoryUnavailableError,
 )
+export const V2TelegramChatsParams = Schema.Struct({
+	bot_token: NonEmptyString.annotate({
+		description:
+			"The bot token to inspect. Write-only, and not stored by this call — it is used for one `getUpdates` read and discarded.",
+	}),
+}).annotate({
+	identifier: "TelegramChatsParams",
+	title: "Telegram chat discovery parameters",
+})
+export type V2TelegramChatsParams = Schema.Schema.Type<typeof V2TelegramChatsParams>
+
+export const V2TelegramChat = Schema.Struct({
+	id: Schema.String.annotate({
+		description:
+			"The chat ID, as a string. Negative for groups and channels — pass it verbatim as `chat_id` when creating the destination.",
+		examples: ["-1001234567890"],
+	}),
+	title: Schema.String.annotate({
+		description: "Display name of the chat: its title, or the username for a one-to-one chat.",
+		examples: ["Acme On-call"],
+	}),
+	type: Schema.Literals(["private", "group", "supergroup", "channel"]).annotate({
+		description: "Telegram's chat type.",
+		examples: ["supergroup"],
+	}),
+}).annotate({
+	identifier: "TelegramChat",
+	title: "Telegram chat",
+	description: "A chat the bot can currently see.",
+	examples: [wireExample({ id: "-1001234567890", title: "Acme On-call", type: "supergroup" })],
+})
+export type V2TelegramChat = Schema.Schema.Type<typeof V2TelegramChat>
+
+export const V2TelegramChatList = Schema.Struct({
+	object: Schema.Literal("alert_destination.telegram_chat_list").annotate({
+		description: 'The object type — always `"alert_destination.telegram_chat_list"`.',
+	}),
+	chats: Schema.Array(V2TelegramChat).annotate({
+		description:
+			'The chats the bot has seen recently, most recent first. Telegram retains updates for about 24 hours, so an empty array means "nothing recent" — add the bot to the chat, or send it a message, and try again.',
+	}),
+}).annotate({
+	identifier: "TelegramChatList",
+	title: "Telegram chat list",
+	description:
+		"Chats discovered from the bot's pending updates. Not the standard list envelope: there is no cursor, because Telegram exposes a short retention window rather than a paginated inventory.",
+	examples: [
+		wireExample({
+			object: "alert_destination.telegram_chat_list",
+			chats: [{ id: "-1001234567890", title: "Acme On-call", type: "supergroup" }],
+		}),
+	],
+})
+export type V2TelegramChatList = Schema.Schema.Type<typeof V2TelegramChatList>
+
 const [destinationEncryption, destinationDecryption, destinationStoredConfigInvalid] = publicErrors(
 	AlertDestinationEncryptionError,
 	AlertDestinationDecryptionError,
@@ -454,6 +509,20 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 				summary: "Create an alert destination",
 				description:
 					"Creates a notification channel that alert rules can deliver to. The request body is discriminated on `type`; channel secrets are write-only. Requires an org-admin role and the `alerts:write` scope.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("telegramChats", "/telegram/chats", {
+			payload: V2TelegramChatsParams,
+			success: V2TelegramChatList,
+			error: [alertForbidden, alertValidation],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "listTelegramChats",
+				summary: "List the chats a Telegram bot can see",
+				description:
+					"Reads a bot's pending updates and returns the chats it can currently post to, so a destination can be created by picking a chat instead of transcribing its numeric ID. The token is used for one read and never stored. Telegram retains updates for about 24 hours; a bot with a webhook registered cannot be inspected this way. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)

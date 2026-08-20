@@ -41,7 +41,12 @@ import {
 } from "@/services/org/OrgMembersService"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./delivery/transports/pagerduty"
-import { TELEGRAM_BOT_TOKEN_PATTERN, verifyTelegramCredentials } from "./delivery/transports/telegram"
+import {
+	fetchTelegramChats,
+	TELEGRAM_BOT_TOKEN_PATTERN,
+	verifyTelegramCredentials,
+	type TelegramChat,
+} from "./delivery/transports/telegram"
 import {
 	DestinationPublicConfigSchema,
 	type DestinationPublicConfig,
@@ -119,6 +124,9 @@ const summarizeWebhookUrl = (url: string) =>
 		onNone: () => "Webhook endpoint",
 		onSome: (parsed) => `POST ${parsed.host}`,
 	})
+
+const TELEGRAM_MALFORMED_TOKEN_MESSAGE =
+	"Telegram bot token must look like `123456789:ABC-DEF…` — copy it from @BotFather without the `bot` prefix."
 
 /** A chat id is not a secret, but it is also not a name — label it as what it is. */
 const telegramSummary = (chatId: string) => `Chat ${chatId.trim()}`
@@ -280,6 +288,10 @@ export interface AlertDestinationsServiceApi {
 		| AlertDestinationInUseError
 		| AlertRuleStoredConfigInvalidError
 	>
+	readonly listTelegramChats: (
+		roles: ReadonlyArray<RoleName>,
+		botToken: string,
+	) => Effect.Effect<ReadonlyArray<TelegramChat>, AlertForbiddenError | AlertValidationError>
 	readonly testDestination: (
 		orgId: OrgId,
 		userId: UserId,
@@ -431,11 +443,7 @@ export class AlertDestinationsService extends Context.Service<
 			chatId: string,
 		) {
 			if (!TELEGRAM_BOT_TOKEN_PATTERN.test(botToken)) {
-				return yield* Effect.fail(
-					makeValidationError(
-						"Telegram bot token must look like `123456789:ABC-DEF…` — copy it from @BotFather without the `bot` prefix.",
-					),
-				)
+				return yield* Effect.fail(makeValidationError(TELEGRAM_MALFORMED_TOKEN_MESSAGE))
 			}
 			const result = yield* verifyTelegramCredentials(
 				botToken,
@@ -446,6 +454,22 @@ export class AlertDestinationsService extends Context.Service<
 			if (result.status === "invalid") {
 				return yield* Effect.fail(makeValidationError(result.reason))
 			}
+		})
+
+		const listTelegramChats: AlertDestinationsServiceApi["listTelegramChats"] = Effect.fn(
+			"AlertsService.listTelegramChats",
+		)(function* (roles, botToken) {
+			// Admin-gated for the same reason the Slack channel list is: it reads
+			// somebody's chat inventory, and it accepts an arbitrary token, so it
+			// must not be a probe any org member can drive.
+			yield* requireAdmin(roles)
+			const trimmed = botToken.trim()
+			if (!TELEGRAM_BOT_TOKEN_PATTERN.test(trimmed)) {
+				return yield* Effect.fail(makeValidationError(TELEGRAM_MALFORMED_TOKEN_MESSAGE))
+			}
+			const result = yield* fetchTelegramChats(trimmed, runtime.fetch, runtime.deliveryTimeoutMs())
+			if (result.status === "invalid") return yield* Effect.fail(makeValidationError(result.reason))
+			return result.chats
 		})
 
 		const createDestination: AlertDestinationsServiceApi["createDestination"] = Effect.fn(
@@ -888,6 +912,7 @@ export class AlertDestinationsService extends Context.Service<
 			createDestination,
 			updateDestination,
 			deleteDestination,
+			listTelegramChats,
 			testDestination,
 		} satisfies AlertDestinationsServiceApi
 	}),
