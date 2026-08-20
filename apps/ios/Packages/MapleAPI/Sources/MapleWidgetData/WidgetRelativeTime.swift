@@ -24,13 +24,23 @@ public enum WidgetTime {
 		)
 	}
 
-	/// "as of 12m ago" for the footer. Spelled out rather than terse, because
-	/// here the age is the subject rather than a column.
+	/// "12m ago" for the footer. Spelled out rather than terse, because here the
+	/// age is the subject rather than a column.
 	public static func age(_ interval: TimeInterval) -> String {
 		if interval < 60 { return "just now" }
 		if interval < 3600 { return "\(Int(interval / 60))m ago" }
 		if interval < 86_400 { return "\(Int(interval / 3600))h ago" }
 		return "\(Int(interval / 86_400))d ago"
+	}
+
+	/// The footer copy, in one place so both widgets say it identically:
+	/// "updated 12m ago", "updated just now".
+	///
+	/// Always shown, not only when stale. A widget that states its age is a
+	/// widget you can trust at a glance; one that goes quiet about it is asking
+	/// to be believed.
+	public static func updated(_ interval: TimeInterval) -> String {
+		"updated \(age(interval))"
 	}
 
 	/// `Format.count`'s K/M/B abbreviation, for the per-row event count.

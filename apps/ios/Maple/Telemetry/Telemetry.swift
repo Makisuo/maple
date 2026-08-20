@@ -74,6 +74,16 @@ enum Telemetry {
 		static let pushAbandonReason = "maple.app.push.abandon_reason"
 		static let pushOrganizationSwitched = "maple.app.push.org_switched"
 		static let widgetSurface = "maple.app.widget.surface"
+		/// Whether this surface's fetch found anything the widget would draw
+		/// differently. False means the round deliberately spent no reload.
+		static let widgetChanged = "maple.app.widget.changed"
+		/// `WidgetCenter` reloads this round actually spent. iOS meters these,
+		/// so a widget that stopped updating is usually this number being too
+		/// high on the rounds where nothing happened.
+		static let widgetReloadCount = "maple.app.widget.reload_count"
+		/// How the publisher got its session: the view tree, or a headless
+		/// bootstrap in a background launch.
+		static let widgetContextSource = "maple.app.widget.context_source"
 		static let liveActivityAction = "maple.app.live_activity.action"
 	}
 

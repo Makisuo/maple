@@ -19,7 +19,7 @@ struct IssuesWidgetView: View {
 		case .accessoryCircular: CircularView(entry: entry)
 		case .accessoryRectangular: RectangularView(entry: entry)
 		case .systemSmall: SmallView(entry: entry)
-		default: ListView(entry: entry, rowLimit: family == .systemLarge ? 6 : 3)
+		default: ListView(entry: entry, isLarge: family == .systemLarge)
 		}
 	}
 }
@@ -44,7 +44,7 @@ private struct SmallView: View {
 					IssueRowView(issue: top, now: entry.date, showsCount: false, showsTrailingTime: false)
 				}
 
-				StalenessFooter(snapshot: snapshot, now: entry.date)
+				UpdatedFooter(snapshot: snapshot, now: entry.date)
 			}
 		}
 		.widgetURL(IssuesWidgetKind.issuesListURL(organizationId: entry.organizationId))
@@ -54,7 +54,9 @@ private struct SmallView: View {
 /// Medium and large: the same list, cut to what fits.
 private struct ListView: View {
 	let entry: IssuesEntry
-	let rowLimit: Int
+	let isLarge: Bool
+
+	private var rowLimit: Int { isLarge ? 6 : 3 }
 
 	var body: some View {
 		WidgetFrame(entry: entry) { snapshot in
@@ -67,10 +69,12 @@ private struct ListView: View {
 
 				// Everything secondary on one line: at 155pt tall the medium
 				// family has room for a header, three rows, and nothing else —
-				// a separate footer row got clipped.
+				// a separate footer row got clipped. So medium is the one family
+				// where the age rides this line instead of a footer, and large —
+				// which has the room — takes the footer below.
 				SeverityLine(
 					snapshot: snapshot,
-					now: entry.date,
+					now: isLarge ? nil : entry.date,
 					extra: snapshot.openCount > rowLimit ? "+\(snapshot.openCount - rowLimit) more" : nil
 				)
 				.padding(.bottom, 6)
@@ -89,6 +93,10 @@ private struct ListView: View {
 				}
 
 				Spacer(minLength: 0)
+
+				if isLarge {
+					UpdatedFooter(snapshot: snapshot, now: entry.date)
+				}
 			}
 		}
 		.widgetURL(IssuesWidgetKind.issuesListURL(organizationId: entry.organizationId))
@@ -325,6 +333,11 @@ private struct SeverityLine: View {
 			.tabularNumbers()
 			.foregroundStyle(Token.mutedForeground)
 			.lineLimit(1)
+			// The age is the last segment, so plain truncation would drop
+			// exactly the thing this line was widened to carry. A worst-case
+			// medium ("3 critical · 2 high · +5 more · updated 12m ago") fits at
+			// full size; this is the margin for a wider accessibility face.
+			.minimumScaleFactor(0.85)
 	}
 
 	private var summary: String {
@@ -333,7 +346,9 @@ private struct SeverityLine: View {
 		if snapshot.highCount > 0 { parts.append("\(snapshot.highCount) high") }
 		if parts.isEmpty { parts.append("needs attention") }
 		if let extra { parts.append(extra) }
-		if let now, snapshot.isStale(at: now) { parts.append("as of \(WidgetTime.age(snapshot.age(at: now)))") }
+		// Only the families with no room for `UpdatedFooter` pass `now` — see
+		// `ListView`. Exactly one age per family, never two.
+		if let now { parts.append(WidgetTime.updated(snapshot.age(at: now))) }
 		return parts.joined(separator: " · ")
 	}
 }
@@ -432,7 +447,7 @@ private struct EmptyStateView: View {
 					.font(Typo.tiny)
 					.foregroundStyle(Token.mutedForeground)
 				Spacer(minLength: 0)
-				StalenessFooter(snapshot: snapshot, now: now)
+				UpdatedFooter(snapshot: snapshot, now: now)
 			}
 		}
 	}
@@ -461,19 +476,24 @@ private struct DisconnectedView: View {
 	}
 }
 
-/// Shown only once the data is old enough to mislead. A timestamp on fresh
-/// data is noise; on stale data it is the most important thing on the widget.
-private struct StalenessFooter: View {
+/// How old the numbers are, always.
+///
+/// It used to appear only past `staleAfter`, on the theory that a timestamp on
+/// fresh data is noise. That was wrong in the one way that matters: a widget
+/// silent about its age is asking to be taken as live, and a reader who has
+/// never seen the line has no reason to expect it — so on the day it does
+/// appear, it reads as a new kind of error rather than as an age. Stated every
+/// time, it is a fact you learn to glance at, and the dimming past `staleAfter`
+/// is what escalates it.
+private struct UpdatedFooter: View {
 	let snapshot: IssuesSnapshot
 	let now: Date
 
 	var body: some View {
-		if snapshot.isStale(at: now) {
-			Text("as of \(WidgetTime.age(snapshot.age(at: now)))")
-				.font(Typo.micro)
-				.tabularNumbers()
-				.foregroundStyle(Token.mutedForeground)
-		}
+		Text(WidgetTime.updated(snapshot.age(at: now)))
+			.font(Typo.micro)
+			.tabularNumbers()
+			.foregroundStyle(Token.mutedForeground)
 	}
 }
 

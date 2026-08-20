@@ -233,6 +233,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		// Must happen before `didFinishLaunching` returns — registering a
 		// BGTaskScheduler handler later throws.
 		WidgetRefreshScheduler.register()
+		// The only other caller lives inside `MainTabView`, which exists only in
+		// the `.ready` phase — so a user sitting on the sign-in screen, or one
+		// who launches and immediately force-quits, never queued a background
+		// refresh at all.
+		Task { await WidgetRefreshScheduler.scheduleIfNeeded() }
 		return true
 	}
 

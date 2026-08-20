@@ -1,3 +1,4 @@
+import ClerkKit
 import Foundation
 import Maple
 import MapleAPI
@@ -20,6 +21,16 @@ import WidgetKit
 /// - an organization switch (same place, keyed on the org),
 /// - `BGAppRefreshTask` while the app is not running (`WidgetRefreshScheduler`),
 /// - a push arriving, silent or tapped (`AppDelegate`).
+///
+/// The last two are the ones that keep a Home Screen current on a phone in a
+/// pocket, and they run with no view tree — so the session they fetch with comes
+/// from `bootstrap`, not `configure`. See there for what that fixes.
+///
+/// Publishing is not the same as reloading. iOS meters `WidgetCenter` reloads,
+/// and the widgets' own timelines are drawn from the same budget, so a round
+/// only spends a reload on a kind whose numbers a reader could actually see
+/// change — one per kind at most, however many organizations it covered. See
+/// `WidgetReloadDecision`.
 @MainActor
 @Observable
 final class WidgetPublisher {
@@ -59,8 +70,9 @@ final class WidgetPublisher {
 
 	private let index: PublishedOrganizationIndex
 	private var lastRefreshedAt: Date?
-	/// Set once the app knows who is signed in, so the background task — which
-	/// runs with no view tree — has something to fetch with.
+	/// Set once the app knows who is signed in — from the view tree by
+	/// `configure`, or at launch by `bootstrap`, which is the only one of the
+	/// two a background launch gets.
 	private var context: Context?
 
 	struct Context {
@@ -86,6 +98,40 @@ final class WidgetPublisher {
 
 	init(index: PublishedOrganizationIndex = PublishedOrganizationIndex()) {
 		self.index = index
+	}
+
+	/// The context a launch with **no view tree** can assemble for itself.
+	///
+	/// This is the fix for the quietest bug the widgets had: `configure` is
+	/// reached only from `MainTabView`, so when iOS woke the app for a
+	/// `BGAppRefreshTask` or a silent push after it had been terminated, there
+	/// was no view tree, no context, and `refresh` returned at its first guard.
+	/// The two triggers that exist precisely to keep the Home Screen current
+	/// while the app is closed only ever worked when the app happened to still
+	/// be alive in memory — which is most of what "the widgets don't update"
+	/// was.
+	///
+	/// Everything it needs is already on disk by the end of `MapleApp.init`:
+	/// Clerk restores its session from the keychain synchronously during
+	/// `configure(publishableKey:)`, and the App Group index carries the
+	/// organizations the app has published before.
+	///
+	/// Sign-out needs no separate flag. `clear()` empties the index, so the
+	/// `published.contains` check below fails and a signed-out install cannot
+	/// resurrect a context on its next background wake.
+	func bootstrap(api: any MapleAPI) {
+		// The view tree always knows better — this only ever fills a gap.
+		guard context == nil else { return }
+		let published = index.load()
+		guard
+			let organizationId = Clerk.shared.session?.lastActiveOrganizationId,
+			let organization = published.first(where: { $0.id == organizationId })
+		else { return }
+		// Memberships are the published set rather than Clerk's full list, which
+		// costs nothing: `organizationsToPublish` intersects with what is
+		// actually pinned anyway, and a background round's budget is one extra
+		// organization.
+		context = Context(api: api, active: organization, memberships: published)
 	}
 
 	/// Called whenever the signed-in organization, or the set the user belongs
@@ -168,7 +214,7 @@ final class WidgetPublisher {
 				Telemetry.Key.organizationId: .string(context.active.id),
 				Telemetry.Key.widgetOrganizationCount: .int(Int64(organizations.count)),
 			]
-		) { _ in
+		) { span in
 			let rounds = organizations.map { organization in
 				PublishRound(
 					organization: organization,
@@ -182,21 +228,66 @@ final class WidgetPublisher {
 			// inside `publish`, so this is `async let` rather than a task group —
 			// which also keeps the whole round on one actor rather than making
 			// `Context` `Sendable` for no gain.
+			var outcome = RoundOutcome()
 			var index = rounds.startIndex
 			while index < rounds.endIndex {
 				let first = rounds[index]
 				let second = rounds.indices.contains(index + 1) ? rounds[index + 1] : nil
 				index += Self.maximumConcurrentOrganizations
 
-				async let firstDone: Void = self.publish(first)
+				async let firstDone = self.publish(first)
 				if let second {
-					async let secondDone: Void = self.publish(second)
-					_ = await (firstDone, secondDone)
+					async let secondDone = self.publish(second)
+					let (left, right) = await (firstDone, secondDone)
+					outcome.merge(left)
+					outcome.merge(right)
 				} else {
-					await firstDone
+					outcome.merge(await firstDone)
 				}
 			}
+
+			// **One reload per kind, per round, and only when something a reader
+			// could see has changed.**
+			//
+			// This used to fire inside each surface's publish, so a three-organization
+			// round spent six — and `reloadTimelines(ofKind:)` rebuilds *every*
+			// instance of that kind, so publishing organization B was also
+			// dragging organization A's pinned widget through a rebuild with no
+			// new data for it. iOS meters reloads, that budget is shared with the
+			// timeline rebuilds that keep the widget alive while the app is
+			// closed, and spending it on identical redraws is what left the Home
+			// Screen looking frozen for the rest of the day.
+			var reloads = 0
+			if outcome.issuesChanged {
+				WidgetCenter.shared.reloadTimelines(ofKind: IssuesWidgetKind.identifier)
+				reloads += 1
+			}
+			if outcome.throughputChanged {
+				WidgetCenter.shared.reloadTimelines(ofKind: ThroughputWidgetKind.identifier)
+				reloads += 1
+			}
+			span?.setAttribute(Telemetry.Key.widgetReloadCount, reloads)
 		}
+	}
+
+	/// What a whole round decided, folded across its organizations: if any one
+	/// of them has news, that kind reloads once for all of them.
+	private struct RoundOutcome {
+		var issuesChanged = false
+		var throughputChanged = false
+
+		mutating func merge(_ other: (issues: PublishOutcome, throughput: PublishOutcome)) {
+			issuesChanged = issuesChanged || other.issues == .changed
+			throughputChanged = throughputChanged || other.throughput == .changed
+		}
+	}
+
+	/// One surface's result. `unchanged` is a success that deliberately costs no
+	/// reload; `failed` is the fetch or the save going wrong.
+	private enum PublishOutcome: Sendable {
+		case failed
+		case unchanged
+		case changed
 	}
 
 	/// Everything one organization's round needs, and nothing that is not
@@ -210,10 +301,10 @@ final class WidgetPublisher {
 
 	/// One organization's round: both surfaces, then record it in the index the
 	/// widget extension reads.
-	private func publish(_ round: PublishRound) async {
-		async let issues: Void = refreshIssues(round.organization, api: round.api)
-		async let throughput: Void = refreshThroughput(round.organization, api: round.api)
-		_ = await (issues, throughput)
+	private func publish(_ round: PublishRound) async -> (issues: PublishOutcome, throughput: PublishOutcome) {
+		async let issues = refreshIssues(round.organization, api: round.api)
+		async let throughput = refreshThroughput(round.organization, api: round.api)
+		let outcome = await (issues: issues, throughput: throughput)
 
 		index.record(
 			PublishedOrganization(
@@ -223,6 +314,7 @@ final class WidgetPublisher {
 			),
 			isActive: round.isActive
 		)
+		return outcome
 	}
 
 	/// Which organizations this round covers.
@@ -283,13 +375,21 @@ final class WidgetPublisher {
 	/// on a screen nobody asked to refresh — which before this made a widget
 	/// stuck on yesterday's numbers completely undiagnosable. The span carries
 	/// what the UI deliberately swallows.
-	private func snapshot(_ surface: String, _ body: @MainActor @Sendable @escaping () async -> Bool) async {
+	private func snapshot(
+		_ surface: String,
+		_ body: @MainActor @Sendable @escaping () async -> PublishOutcome
+	) async -> PublishOutcome {
 		await Telemetry.span(
 			Telemetry.Name.widgetSnapshot,
 			attributes: [Telemetry.Key.widgetSurface: .string(surface)]
 		) { span in
-			let published = await body()
-			span?.setStatus(published ? .ok : .error("snapshot not published"))
+			let outcome = await body()
+			span?.setStatus(outcome == .failed ? .error("snapshot not published") : .ok)
+			// The other half of the reload-budget story: a round of all-`false`
+			// here is the widget correctly staying put, not the publisher
+			// failing, and the two are indistinguishable without this.
+			span?.setAttribute(Telemetry.Key.widgetChanged, outcome == .changed)
+			return outcome
 		}
 	}
 
@@ -314,11 +414,11 @@ final class WidgetPublisher {
 
 	// MARK: Issues
 
-	private func refreshIssues(_ organization: PublishedOrganization, api: any MapleAPI) async {
+	private func refreshIssues(_ organization: PublishedOrganization, api: any MapleAPI) async -> PublishOutcome {
 		await snapshot("issues") { await self.publishIssues(organization, api: api) }
 	}
 
-	private func publishIssues(_ organization: PublishedOrganization, api: any MapleAPI) async -> Bool {
+	private func publishIssues(_ organization: PublishedOrganization, api: any MapleAPI) async -> PublishOutcome {
 		guard
 			let page = try? await api.issues(
 				query: IssueQuery(actionableOnly: true, sort: .severity),
@@ -326,31 +426,38 @@ final class WidgetPublisher {
 				limit: Self.issueFetchLimit,
 				cursor: nil
 			)
-		else { return false }
+		else { return .failed }
 
+		let now = Date()
 		let snapshot = IssuesSnapshot.make(
 			organizationId: organization.id,
 			organizationName: organization.name,
-			generatedAt: Date(),
+			generatedAt: now,
 			issues: page.items.map(WidgetIssue.init(issue:)),
 			hasMore: page.hasMore
 		)
-		guard WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organization.id).save(snapshot)
-		else { return false }
-		// Reload rather than wait for the next timeline entry: the whole point
-		// of publishing from the app is that the Home Screen updates the moment
-		// the app learns something.
-		WidgetCenter.shared.reloadTimelines(ofKind: IssuesWidgetKind.identifier)
-		return true
+		let store = WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organization.id)
+		// Read before writing: the reload decision is "does this differ from
+		// what is on screen", and after the save there is nothing to compare to.
+		let stored = store.load()
+		// Saved unconditionally even when nothing changed, so `generatedAt`
+		// advances and the widget's footer is honest the next time it is built
+		// for any reason.
+		guard store.save(snapshot) else { return .failed }
+		return WidgetReloadDecision.shouldReload(
+			stored: stored,
+			incoming: snapshot,
+			storedIsStale: stored?.isStale(at: now) ?? false
+		) ? .changed : .unchanged
 	}
 
 	// MARK: Throughput
 
-	private func refreshThroughput(_ organization: PublishedOrganization, api: any MapleAPI) async {
+	private func refreshThroughput(_ organization: PublishedOrganization, api: any MapleAPI) async -> PublishOutcome {
 		await snapshot("throughput") { await self.publishThroughput(organization, api: api) }
 	}
 
-	private func publishThroughput(_ organization: PublishedOrganization, api: any MapleAPI) async -> Bool {
+	private func publishThroughput(_ organization: PublishedOrganization, api: any MapleAPI) async -> PublishOutcome {
 		let window = Self.throughputWindow.resolve()
 
 		// Three requests, not one per service: `group_by: service` returns
@@ -370,7 +477,7 @@ final class WidgetPublisher {
 			TraceTimeseriesRequest(aggregation: .count, window: window)
 		)
 
-		guard let services = try? await servicesTask.items else { return false }
+		guard let services = try? await servicesTask.items else { return .failed }
 		let grouped = try? await groupedTask
 		let total = try? await totalTask
 
@@ -392,18 +499,25 @@ final class WidgetPublisher {
 			overall.points = Self.perSecond(total.values, bucketSeconds: total.bucketSeconds)
 		}
 
+		let now = Date()
 		let snapshot = ThroughputSnapshot.make(
 			organizationId: organization.id,
-			generatedAt: Date(),
+			generatedAt: now,
 			windowMinutes: Int(Self.throughputWindow.duration / 60),
 			services: rows,
 			overall: overall
 		)
-		guard
-			WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organization.id).save(snapshot)
-		else { return false }
-		WidgetCenter.shared.reloadTimelines(ofKind: ThroughputWidgetKind.identifier)
-		return true
+		let store = WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organization.id)
+		let stored = store.load()
+		guard store.save(snapshot) else { return .failed }
+		// Throughput is the surface where suppression earns the most: its floats
+		// differ on every fetch, but `contentFingerprint` compares the rendered
+		// strings, so a rate that still reads "12.5/s" costs nothing.
+		return WidgetReloadDecision.shouldReload(
+			stored: stored,
+			incoming: snapshot,
+			storedIsStale: stored?.isStale(at: now) ?? false
+		) ? .changed : .unchanged
 	}
 
 	/// Spans per bucket → spans per second, so the sparkline carries the same
