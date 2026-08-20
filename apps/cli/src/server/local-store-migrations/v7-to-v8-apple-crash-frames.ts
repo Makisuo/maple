@@ -1,6 +1,7 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
+import { Schema } from "effect"
 import { RAW_TELEMETRY_TTL_COLUMNS, readRawTelemetryRetentionDays, type Chdb } from "../chdb"
 import type {
 	LocalStoreMigrationModule,
@@ -21,60 +22,61 @@ import { assertPhysicalSchema } from "../schema-physical"
 
 const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
-interface V7ToV8State {
-	readonly module: "local-0007-to-0008-apple-crash-frames"
-	readonly version: 1
-	readonly rawRows: Readonly<Record<string, string>>
-	readonly retentionDays?: number
-}
+/** Stamped into the journal and matched on the way back out. */
+const MODULE_ID = "local-0007-to-0008-apple-crash-frames" as const
 
-interface V7ToV8Progress {
-	readonly installed: true
-}
+/**
+ * Unsigned decimal string, because a raw-telemetry row count can exceed
+ * `Number.MAX_SAFE_INTEGER` and the journal has to round-trip it exactly.
+ */
+const RowCount = Schema.String.check(Schema.isPattern(/^\d+$/))
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
+/**
+ * Exactly the raw tables, each required.
+ *
+ * Built from `RAW_TABLES` rather than written out, so a table added to
+ * `RAW_TELEMETRY_TTL_COLUMNS` is covered here without this file changing.
+ * Combined with `onExcessProperty: "error"` at the decode site, this rejects a
+ * missing table and an unknown one alike.
+ */
+const RawRowsSchema = Schema.Struct(Object.fromEntries(RAW_TABLES.map((table) => [table, RowCount])))
 
-const decodeCounts = (value: unknown): Readonly<Record<string, string>> => {
-	if (!isRecord(value)) throw new Error("v7 -> v8 rawRows must be an object")
-	const counts: Record<string, string> = {}
-	for (const table of RAW_TABLES) {
-		const count = value[table]
-		if (typeof count !== "string" || !/^\d+$/.test(count))
-			throw new Error(`v7 -> v8 rawRows.${table} must be an unsigned decimal string`)
-		counts[table] = count
-	}
-	if (Object.keys(value).some((table) => !RAW_TABLES.includes(table as (typeof RAW_TABLES)[number])))
-		throw new Error("v7 -> v8 rawRows contains an unknown table")
-	return counts
-}
+/**
+ * The journal state this edge round-trips.
+ *
+ * `retentionDays` is `optionalKey`, not `optional`: the journal is JSON, where
+ * an absent retention floor is an absent key rather than a present `undefined`.
+ */
+const V7ToV8StateSchema = Schema.Struct({
+	module: Schema.Literal(MODULE_ID),
+	version: Schema.Literal(1),
+	rawRows: RawRowsSchema,
+	retentionDays: Schema.optionalKey(Schema.Int),
+})
 
-const decodeState = (value: unknown): V7ToV8State => {
-	if (!isRecord(value)) throw new Error("v7 -> v8 state must be an object")
-	const allowed = new Set(["module", "version", "rawRows", "retentionDays"])
-	if (Object.keys(value).some((key) => !allowed.has(key)))
-		throw new Error("v7 -> v8 state contains an unknown field")
-	if (value.module !== "local-0007-to-0008-apple-crash-frames" || value.version !== 1)
-		throw new Error("v7 -> v8 state has an unsupported module or version")
-	if (
-		value.retentionDays !== undefined &&
-		(typeof value.retentionDays !== "number" || !Number.isSafeInteger(value.retentionDays))
-	)
-		throw new Error("v7 -> v8 retentionDays must be an integer")
-	return {
-		module: "local-0007-to-0008-apple-crash-frames",
-		version: 1,
-		rawRows: decodeCounts(value.rawRows),
-		...(!(value.retentionDays === undefined) ? { retentionDays: value.retentionDays } : undefined),
-	}
-}
+const V7ToV8ProgressSchema = Schema.Struct({ installed: Schema.Literal(true) })
 
-const decodeProgress = (value: unknown): V7ToV8Progress | undefined => {
-	if (value === undefined) return undefined
-	if (!isRecord(value) || Object.keys(value).some((key) => key !== "installed") || value.installed !== true)
-		throw new Error("v7 -> v8 progress is invalid")
-	return { installed: true }
-}
+type V7ToV8State = typeof V7ToV8StateSchema.Type
+type V7ToV8Progress = typeof V7ToV8ProgressSchema.Type
+
+/**
+ * `decodeUnknownSync` because `LocalStoreMigrationModule.decodeState` is a
+ * synchronous throwing contract shared with seven sibling modules and the
+ * plain-TS runner that drives them. The schema is the declarative part;
+ * swapping in `decodeUnknownEffect` is a one-liner if that runner ever moves
+ * into Effect.
+ *
+ * `onExcessProperty: "error"` is not decoration. A journal carrying a field
+ * this build does not know about was written by a different build, and
+ * silently dropping it would resume someone else's migration under our
+ * assumptions.
+ */
+const decodeState = Schema.decodeUnknownSync(V7ToV8StateSchema, { onExcessProperty: "error" })
+
+const decodeProgress = (value: unknown): V7ToV8Progress | undefined =>
+	value === undefined
+		? undefined
+		: Schema.decodeUnknownSync(V7ToV8ProgressSchema, { onExcessProperty: "error" })(value)
 
 const parseJsonEachRow = <A>(value: string): A[] =>
 	value
@@ -109,12 +111,12 @@ const preflight = async (context: MigrationModuleContext): Promise<V7ToV8State> 
 		},
 		{ schemaSql: LOCAL_SCHEMA_V7_SQL, bootstrapSchema: false },
 	)
-	return {
-		module: "local-0007-to-0008-apple-crash-frames",
-		version: 1,
-		rawRows,
-		...(!(retentionDays === undefined) ? { retentionDays } : undefined),
-	}
+	// Two literals rather than a conditional spread: `retentionDays` is an
+	// `optionalKey`, so an absent floor has to be an absent key, not a present
+	// `undefined`.
+	return retentionDays === undefined
+		? { module: MODULE_ID, version: 1, rawRows }
+		: { module: MODULE_ID, version: 1, rawRows, retentionDays }
 }
 
 const prepareTarget = async (context: MigrationModuleContext, state: V7ToV8State): Promise<V7ToV8State> => {
@@ -240,7 +242,7 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 ]
 
 export const v7ToV8AppleCrashFramesModule: LocalStoreMigrationModule<V7ToV8State, V7ToV8Progress> = {
-	id: "local-0007-to-0008-apple-crash-frames",
+	id: MODULE_ID,
 	moduleVersion: 1,
 	description: "Rebuild the error-events views so the fingerprint recognises Apple crash frames",
 	from: LOCAL_SCHEMA_V7,

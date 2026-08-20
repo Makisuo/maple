@@ -1,3 +1,4 @@
+import { v7ToV8AppleCrashFramesModule } from "../src/server/local-store-migrations/v7-to-v8-apple-crash-frames"
 import { describe, expect, it } from "vitest"
 import {
 	CURRENT_LOCAL_SCHEMA,
@@ -1013,5 +1014,72 @@ describe("legacy raw replay cursor", () => {
 			},
 		}
 		expect(() => legacyToCurrentModule.decodeProgress(progress)).toThrow(/lastHash/)
+	})
+})
+
+describe("v7 -> v8 journal state decoding", () => {
+	const RAW_TABLES = [
+		"logs",
+		"traces",
+		"metrics_sum",
+		"metrics_gauge",
+		"metrics_histogram",
+		"metrics_exponential_histogram",
+	]
+	const rawRows = Object.fromEntries(RAW_TABLES.map((table) => [table, "12"]))
+	const state = { module: "local-0007-to-0008-apple-crash-frames", version: 1, rawRows }
+
+	it("round-trips a valid state, with and without a retention floor", () => {
+		expect(v7ToV8AppleCrashFramesModule.decodeState(state)).toEqual(state)
+		expect(v7ToV8AppleCrashFramesModule.decodeState({ ...state, retentionDays: 90 })).toEqual({
+			...state,
+			retentionDays: 90,
+		})
+	})
+
+	it("rejects a field this build does not know about", () => {
+		// A journal carrying an unknown field was written by a different build.
+		// Dropping it silently would resume someone else's migration under our
+		// assumptions.
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, somethingElse: 1 })).toThrow()
+	})
+
+	it("rejects another module's state", () => {
+		expect(() =>
+			v7ToV8AppleCrashFramesModule.decodeState({
+				...state,
+				module: "local-0006-to-0007-error-service-version",
+			}),
+		).toThrow()
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, version: 2 })).toThrow()
+	})
+
+	it("rejects row counts that are not unsigned decimal strings", () => {
+		// They are strings precisely because a count can exceed
+		// Number.MAX_SAFE_INTEGER, so anything lossy has to fail loudly.
+		for (const bad of [12, "-1", "1.5", "1e3", ""]) {
+			expect(() =>
+				v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: { ...rawRows, logs: bad } }),
+			).toThrow()
+		}
+	})
+
+	it("rejects a missing or unknown raw table", () => {
+		const { logs: _dropped, ...missing } = rawRows
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: missing })).toThrow()
+		expect(() =>
+			v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: { ...rawRows, not_a_table: "1" } }),
+		).toThrow()
+	})
+
+	it("rejects a non-integer retention floor", () => {
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, retentionDays: 1.5 })).toThrow()
+	})
+
+	it("decodes progress, and treats absent progress as absent", () => {
+		expect(v7ToV8AppleCrashFramesModule.decodeProgress(undefined)).toBeUndefined()
+		expect(v7ToV8AppleCrashFramesModule.decodeProgress({ installed: true })).toEqual({ installed: true })
+		expect(() => v7ToV8AppleCrashFramesModule.decodeProgress({ installed: false })).toThrow()
+		expect(() => v7ToV8AppleCrashFramesModule.decodeProgress({})).toThrow()
 	})
 })
