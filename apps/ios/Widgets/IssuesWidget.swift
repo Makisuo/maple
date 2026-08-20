@@ -131,22 +131,21 @@ struct IssuesProvider: AppIntentTimelineProvider {
 		WidgetSnapshotStore<IssuesSnapshot>.legacyIssues.load()
 	}
 
-	/// Entries every quarter hour for the next two, from a single read.
+	/// One read, rendered at every point on `WidgetTimelineSchedule`'s ladder.
 	///
 	/// The data does not change between them — only its age does, and the row
-	/// times ("2m", "3h") are relative, so without these the widget would still
-	/// claim "2m" an hour later. WidgetKit is told to come back after the last
-	/// one; the app's own `reloadTimelines` is what actually keeps it current
-	/// when something happens.
+	/// times ("2m", "3h") and the footer are relative, so without these the
+	/// widget would still claim "2m" an hour later. WidgetKit is told to come
+	/// back after the last one; the app's own `reloadTimelines` is what actually
+	/// keeps it current when something happens.
 	func timeline(for configuration: SelectOrganizationIntent, in context: Context) async -> Timeline<IssuesEntry> {
 		let now = Date()
-		let step: TimeInterval = 15 * 60
 		let base = makeEntry(for: configuration, at: now)
-		let entries = (0..<8).map { offset -> IssuesEntry in
+		let entries = WidgetTimelineSchedule.entryDates(from: now).map { date -> IssuesEntry in
 			var entry = base
-			entry.date = now.addingTimeInterval(Double(offset) * step)
+			entry.date = date
 			return entry
 		}
-		return Timeline(entries: entries, policy: .after(now.addingTimeInterval(8 * step)))
+		return Timeline(entries: entries, policy: .after(WidgetTimelineSchedule.refreshDate(from: now)))
 	}
 }

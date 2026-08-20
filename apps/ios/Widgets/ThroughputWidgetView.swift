@@ -51,6 +51,9 @@ private struct SmallThroughputView: View {
 
 				QualityLine(service: service)
 					.padding(.top, 6)
+
+				ThroughputUpdatedFooter(snapshot: snapshot, now: entry.date)
+					.padding(.top, 4)
 			}
 		}
 	}
@@ -68,6 +71,8 @@ private struct MediumThroughputView: View {
 					TrendLine(service: service, snapshot: snapshot)
 					Spacer(minLength: 4)
 					QualityLine(service: service, isStacked: true)
+					ThroughputUpdatedFooter(snapshot: snapshot, now: entry.date)
+						.padding(.top, 4)
 				}
 				.frame(maxWidth: 150, alignment: .leading)
 
@@ -112,8 +117,13 @@ private struct LargeThroughputView: View {
 
 				Spacer(minLength: 0)
 
-				Text(windowLabel(snapshot))
+				// The window and the age are different facts — "last hour" is
+				// what the numbers measure, "updated 4m ago" is when we last
+				// asked. Same line because large already ends here, but joined
+				// so neither can be read as the other.
+				Text("\(windowLabel(snapshot)) · \(WidgetTime.updated(snapshot.age(at: entry.date)))")
 					.font(Typo.micro)
+					.tabularNumbers()
 					.foregroundStyle(Token.mutedForeground)
 			}
 		}
@@ -287,6 +297,20 @@ private struct MissingOrganizationView: View {
 				.fixedSize(horizontal: false, vertical: true)
 			}
 		}
+	}
+}
+
+/// How old the numbers are, always — the twin of `UpdatedFooter` on the issues
+/// widget, so the two read as one system on the same Home Screen.
+private struct ThroughputUpdatedFooter: View {
+	let snapshot: ThroughputSnapshot
+	let now: Date
+
+	var body: some View {
+		Text(WidgetTime.updated(snapshot.age(at: now)))
+			.font(Typo.micro)
+			.tabularNumbers()
+			.foregroundStyle(Token.mutedForeground)
 	}
 }
 

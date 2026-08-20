@@ -53,6 +53,20 @@ enum WidgetRefreshScheduler {
 		}
 	}
 
+	/// Queue one only if nothing is queued already.
+	///
+	/// For the launch path, where `schedule()` alone would be actively harmful:
+	/// `submit` *replaces* the pending request for an identifier, pushing
+	/// `earliestBeginDate` out another fifteen minutes. Someone who opens the
+	/// app every ten would reset the timer forever and the task would never once
+	/// fire. The `.background` transition keeps calling `schedule()` directly —
+	/// there, moving the window is the intent.
+	static func scheduleIfNeeded() async {
+		let pending = await BGTaskScheduler.shared.pendingTaskRequests()
+		guard !pending.contains(where: { $0.identifier == taskIdentifier }) else { return }
+		schedule()
+	}
+
 	private static func handle(_ task: BGAppRefreshTask) {
 		// Chain the next one first: if the refresh below hangs and the system
 		// kills us, a request is already queued rather than the chain quietly

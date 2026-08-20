@@ -109,17 +109,17 @@ struct ThroughputProvider: AppIntentTimelineProvider {
 	}
 
 	/// One read, several entries — the numbers do not change between them,
-	/// only how old they are. The app's `reloadTimelines` is what actually
-	/// keeps this current; the entries are the floor.
+	/// only how old they are. Same ladder as the issues widget, so the two
+	/// widgets' footers never disagree about the time; see
+	/// `WidgetTimelineSchedule`.
 	func timeline(for configuration: SelectServiceIntent, in context: Context) async -> Timeline<ThroughputEntry> {
 		let now = Date()
-		let step: TimeInterval = 15 * 60
 		let base = makeEntry(for: configuration, at: now)
-		let entries = (0..<8).map { offset -> ThroughputEntry in
+		let entries = WidgetTimelineSchedule.entryDates(from: now).map { date -> ThroughputEntry in
 			var entry = base
-			entry.date = now.addingTimeInterval(Double(offset) * step)
+			entry.date = date
 			return entry
 		}
-		return Timeline(entries: entries, policy: .after(now.addingTimeInterval(8 * step)))
+		return Timeline(entries: entries, policy: .after(WidgetTimelineSchedule.refreshDate(from: now)))
 	}
 }
