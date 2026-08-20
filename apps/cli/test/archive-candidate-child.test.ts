@@ -128,25 +128,56 @@ describe("runCandidateChild", () => {
 		)
 	})
 
-	it("captures output written immediately before the child exits", () => {
+	it("drains stdout to EOF, including the line written immediately before exit", () => {
 		const dir = mkdtempSync(join(tmpdir(), "maple-candidate-drain-"))
 		return Effect.runPromise(
 			Effect.gen(function* () {
 				// `exit` fires before Node guarantees the stdio pipes have drained, so a
-				// completion gate built on exit alone would truncate this payload.
+				// completion gate built on exit alone would lose the tail of this payload.
+				//
+				// The payload is kept SMALL on purpose. The diagnostic is
+				// `stderr\n stdout\n <time report>`, and truncation keeps only the first
+				// and last 800 chars — so once it truncates, the surviving tail is the
+				// time report and NO assertion about stdout's end is possible. GNU
+				// `time -v` alone is ~23 lines, so a large payload makes this platform
+				// dependent; that is what the first version of this test got wrong.
+				const bundle = bundleScript(
+					dir,
+					`i=0\nwhile [ $i -lt 6 ]; do printf 'PAYLOAD-%03d\\n' $i; i=$((i+1)); done\nexit 1`,
+				)
+				const result = yield* run(dir, bundle)
+				strictEqual(result.ok, false)
+				ok(
+					!result.error?.includes("diagnostics truncated"),
+					`payload must stay under the truncation limit on every platform: ${result.error}`,
+				)
+				// First AND last: the head alone would also survive a stdout that was
+				// cut short at exit, so only the final line proves the fold ran to EOF.
+				ok(result.error?.includes("PAYLOAD-000"), `first line missing from: ${result.error}`)
+				ok(result.error?.includes("PAYLOAD-005"), `last line missing from: ${result.error}`)
+			}).pipe(Effect.ensuring(Effect.sync(() => rmSync(dir, { recursive: true, force: true })))),
+		)
+	})
+
+	it("truncates an oversized diagnostic to a head and a tail", () => {
+		const dir = mkdtempSync(join(tmpdir(), "maple-candidate-truncate-"))
+		return Effect.runPromise(
+			Effect.gen(function* () {
 				const bundle = bundleScript(
 					dir,
 					`i=0\nwhile [ $i -lt 200 ]; do printf 'PAYLOAD-%03d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' $i; i=$((i+1)); done\nexit 1`,
 				)
 				const result = yield* run(dir, bundle)
 				strictEqual(result.ok, false)
-				// The tail of a >1600-char diagnostic is the last 800 chars, so the final
-				// line proves the fold consumed stdout all the way to EOF.
 				ok(result.error?.includes("diagnostics truncated"), "expected the diagnostic to be truncated")
+				// 800 + marker + 800, plus this branch's own prefix. Asserted as a bound
+				// rather than on content, so it holds whatever `/usr/bin/time` reports.
 				ok(
-					result.error?.includes("PAYLOAD-199"),
-					`last payload line missing from: ${result.error?.slice(-200)}`,
+					(result.error?.length ?? 0) < 2000,
+					`truncation did not bound the diagnostic: ${result.error?.length} chars`,
 				)
+				// The head is always kept, so the first line must survive.
+				ok(result.error?.includes("PAYLOAD-000"), "expected the head of stdout to survive")
 			}).pipe(Effect.ensuring(Effect.sync(() => rmSync(dir, { recursive: true, force: true })))),
 		)
 	})
