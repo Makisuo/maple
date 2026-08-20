@@ -48,7 +48,15 @@ export interface ResolvedMobileDevicePreferences {
 	readonly anomalies: boolean
 }
 
-/** Critical + warning + resolved on by default; issue and anomaly pushes are opt-in. */
+/**
+ * **Only critical incidents by default.** Everything else — warnings,
+ * resolutions, issues, anomalies — is opt-in.
+ *
+ * A phone is not a dashboard. The default has to be the set of events worth
+ * interrupting someone for wherever they are, and that is exactly one of them;
+ * anyone who wants the rest can say so in Settings, whereas someone buried in
+ * warnings turns the whole thing off and loses the criticals too.
+ */
 export const resolveMobileDevicePreferences = (
 	stored:
 		| {
@@ -62,8 +70,8 @@ export const resolveMobileDevicePreferences = (
 		| undefined,
 ): ResolvedMobileDevicePreferences => ({
 	criticalIncidents: stored?.criticalIncidents ?? true,
-	warningIncidents: stored?.warningIncidents ?? true,
-	resolvedIncidents: stored?.resolvedIncidents ?? true,
+	warningIncidents: stored?.warningIncidents ?? false,
+	resolvedIncidents: stored?.resolvedIncidents ?? false,
 	newErrorIssues: stored?.newErrorIssues ?? false,
 	anomalies: stored?.anomalies ?? false,
 })

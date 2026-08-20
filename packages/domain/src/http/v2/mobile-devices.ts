@@ -26,7 +26,7 @@ const LiveActivityStartToken = Schema.String.check(Schema.isMinLength(16), Schem
 
 const preferencesField = MobileDevicePreferences.annotate({
 	description:
-		"Which events this device is pushed. Omitted keys keep their default: `critical_incidents`, `warning_incidents`, and `resolved_incidents` default to `true`; `new_error_issues` and `anomalies` to `false`.",
+		"Which events this device is pushed. Omitted keys keep their default: `critical_incidents` defaults to `true`, and every other key to `false`.",
 	examples: [{ critical_incidents: true, warning_incidents: true, resolved_incidents: false }],
 })
 
@@ -41,8 +41,8 @@ const mobileDeviceExample = {
 	device_name: "iPhone",
 	preferences: {
 		critical_incidents: true,
-		warning_incidents: true,
-		resolved_incidents: true,
+		warning_incidents: false,
+		resolved_incidents: false,
 		new_error_issues: false,
 		anomalies: false,
 	},

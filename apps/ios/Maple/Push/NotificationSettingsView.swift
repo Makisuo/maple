@@ -93,7 +93,7 @@ struct NotificationSettingsView: View {
 					statusRow(
 						dot: Token.mutedForeground,
 						title: "Not asked yet",
-						detail: "Get a push when an alert opens or resolves in \(orgName)."
+						detail: "Get a push when a critical alert opens in \(orgName). Warnings and resolutions stay off until you turn them on."
 					)
 					actionButton("Turn on notifications") {
 						Task { await push.requestAuthorization() }
