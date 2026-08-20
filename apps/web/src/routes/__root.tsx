@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-router"
 import { selectedPlanKnownAtomFor } from "@/atoms/selected-plan-atoms"
 import { useAtom } from "@/lib/effect-atom"
-import { hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
+import { hasLapsedPlan, hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
 import { isFixturePath, isPublicPath } from "@/lib/public-routes"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { AnchoredToastProvider, ToastProvider } from "@maple/ui/components/ui/toast"
@@ -141,23 +141,27 @@ function ClerkReverseRedirects() {
 
 	const redirectUrl = pathname + (searchStr ?? "")
 	const selectedPlan = hasSelectedPlan(customer)
+	// An org that held a plan and no longer does. Never onboarded again — it gets
+	// the app plus the reactivation banner (`SubscriptionEndedBanner`) instead.
+	const lapsedPlan = hasLapsedPlan(customer)
+	const mayRenderApp = selectedPlan || lapsedPlan
 
 	// Per-org, localStorage-backed memory (effect-atom KVS) of whether this org
-	// was last seen on an active selected plan. Drives the optimistic "render the
+	// was last seen entitled to render the app. Drives the optimistic "render the
 	// dashboard while the plan is still loading" fast path below. Falls back to an
 	// inert in-memory atom while there's no org (org-less / still-settling auth).
-	const [knownSelectedPlan, setKnownSelectedPlan] = useAtom(selectedPlanKnownAtomFor(orgId))
+	const [knownMayRenderApp, setKnownMayRenderApp] = useAtom(selectedPlanKnownAtomFor(orgId))
 
 	// Once the customer query settles to a usable payload, record whether this
-	// org holds an active selected plan, so the flag only ever reflects a
-	// genuinely-known plan state — skip while loading or on an error/unusable
-	// payload so a transient blip can't flip it. A planless settle (e.g.
-	// unsubscribe) clears it here, ending the optimistic flash. See MAP-45.
+	// org may render the app, so the flag only ever reflects a genuinely-known
+	// billing state — skip while loading or on an error/unusable payload so a
+	// transient blip can't flip it. A never-subscribed settle clears it here,
+	// ending the optimistic flash. See MAP-45.
 	useEffect(() => {
 		if (!isSignedIn || !orgId || isCustomerLoading) return
 		if (customerError || !isUsableCustomer(customer)) return
-		setKnownSelectedPlan(selectedPlan)
-	}, [isSignedIn, orgId, isCustomerLoading, customerError, customer, selectedPlan, setKnownSelectedPlan])
+		setKnownMayRenderApp(mayRenderApp)
+	}, [isSignedIn, orgId, isCustomerLoading, customerError, customer, mayRenderApp, setKnownMayRenderApp])
 
 	if (isSignedIn && pathname === "/sign-in") {
 		const target = getRedirectTarget(searchStr)
@@ -199,19 +203,19 @@ function ClerkReverseRedirects() {
 		// Plan not yet known (query still loading/retrying). Allowed-without-plan
 		// routes render their own onboarding UI, so let them through. For every
 		// other route, only optimistically render the dashboard when this browser
-		// already knows the org holds a selected plan — otherwise show a loading
+		// already knows the org may render the app — otherwise show a loading
 		// screen until the query settles, so we never flash the dashboard before
-		// bouncing a planless user to /quick-start. The flag is cleared on
-		// unsubscribe, so that case flashes once and then takes the wait path.
+		// bouncing a never-subscribed user to /quick-start.
 		if (isCustomerLoading && !quotaPreview) {
-			if (ALLOWED_WITHOUT_PLAN.includes(pathname) || knownSelectedPlan) {
+			if (ALLOWED_WITHOUT_PLAN.includes(pathname) || knownMayRenderApp) {
 				return <AppFrame />
 			}
 			return <BootSplash />
 		}
 
-		// Plan known (or dev quota preview): apply the gate.
-		if (!selectedPlan && !quotaPreview && !ALLOWED_WITHOUT_PLAN.includes(pathname)) {
+		// Plan known (or dev quota preview): apply the gate. Only an org that has
+		// never held a plan is sent to onboarding — a lapsed one gets the app.
+		if (!mayRenderApp && !quotaPreview && !ALLOWED_WITHOUT_PLAN.includes(pathname)) {
 			return <Navigate to="/quick-start" search={{ redirect_url: redirectUrl }} replace />
 		}
 		if (selectedPlan && pathname === "/select-plan") {

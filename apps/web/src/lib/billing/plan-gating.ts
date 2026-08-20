@@ -1,4 +1,4 @@
-import { isActivePlanSubscription } from "@maple/domain/billing"
+import { isActivePlanSubscription, isPlanSubscription } from "@maple/domain/billing"
 import type { BillingBalance, BillingCustomer, BillingSubscription, CatalogPlan } from "@maple/domain/http"
 
 type Customer = BillingCustomer
@@ -70,6 +70,39 @@ export function getActivePlan(customer: Customer | null | undefined): Subscripti
 
 export function hasSelectedPlan(customer: Customer | null | undefined): boolean {
 	return getActivePlan(customer) !== null
+}
+
+/**
+ * The plan this org used to hold and no longer does — cancelled, expired, or
+ * otherwise lapsed. Non-null only when there is no active plan, so a returning
+ * customer is distinguishable from a brand-new org whose customer carries no
+ * plan history at all. That distinction is the whole point: without it the
+ * `__root` gate bounces a lapsed subscriber into the new-user onboarding wizard.
+ *
+ * Autumn keeps lapsed subscription rows on the customer, so this reads history
+ * straight off the payload. When several have lapsed, the one that ended last
+ * wins — it's the plan the customer actually remembers being on.
+ */
+export function getLapsedPlan(customer: Customer | null | undefined): Subscription | null {
+	if (!isUsableCustomer(customer)) return null
+	if (getActivePlan(customer) !== null) return null
+
+	let lapsed: Subscription | null = null
+	for (const sub of customer.subscriptions) {
+		if (!isPlanSubscription(sub)) continue
+		if (lapsed === null) {
+			lapsed = sub
+			continue
+		}
+		// `currentPeriodEnd` is optional upstream; a row that carries one is
+		// always a better answer than one that doesn't.
+		if ((sub.currentPeriodEnd ?? -1) > (lapsed.currentPeriodEnd ?? -1)) lapsed = sub
+	}
+	return lapsed
+}
+
+export function hasLapsedPlan(customer: Customer | null | undefined): boolean {
+	return getLapsedPlan(customer) !== null
 }
 
 export interface TrialStatus {

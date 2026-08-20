@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
 	cycleSpend,
 	isActivePlanSubscription,
+	isPlanSubscription,
 	isPricedPlan,
 	overageUnits,
 	projectCycleSpend,
@@ -116,6 +117,27 @@ describe("isActivePlanSubscription", () => {
 		expect(isActivePlanSubscription({})).toBe(false)
 		expect(isActivePlanSubscription(null)).toBe(false)
 		expect(isActivePlanSubscription(undefined)).toBe(false)
+	})
+})
+
+describe("isPlanSubscription", () => {
+	it("is true for a real base plan whatever its status", () => {
+		expect(isPlanSubscription({ planId: "startup", status: "active" })).toBe(true)
+		expect(isPlanSubscription({ planId: "startup", status: "expired" })).toBe(true)
+		expect(isPlanSubscription({ planId: "startup", status: "canceled" })).toBe(true)
+		expect(isPlanSubscription({ planId: "startup", status: "scheduled" })).toBe(true)
+	})
+
+	it("is false for add-on, auto-enabled, and free plans", () => {
+		expect(isPlanSubscription({ planId: "byoc", status: "expired", addOn: true })).toBe(false)
+		expect(isPlanSubscription({ planId: "starter", status: "expired", autoEnable: true })).toBe(false)
+		expect(isPlanSubscription({ planId: "free", status: "expired" })).toBe(false)
+		expect(isPlanSubscription({ planId: "x", status: "expired", plan: { name: "Free" } })).toBe(false)
+	})
+
+	it("is false for missing input", () => {
+		expect(isPlanSubscription(null)).toBe(false)
+		expect(isPlanSubscription(undefined)).toBe(false)
 	})
 })
 

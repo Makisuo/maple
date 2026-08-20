@@ -6,10 +6,12 @@ import { Env } from "@/platform/Env"
 import {
 	CUSTOMER_CACHE_BUCKET,
 	CUSTOMER_CACHE_TTL_SECONDS,
+	CUSTOMER_CACHE_LAPSED_TTL_SECONDS,
 	CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
 	readCustomerCached,
 	resolveAttachConflict,
 	responseHasActivePlan,
+	responseHasPlanHistory,
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
 import {
@@ -47,6 +49,10 @@ const activePlanResponse = {
 	subscriptions: [{ planId: "startup", status: "active", trialEndsAt: 9_999_999_999_000, addOn: false }],
 }
 const noPlanResponse = { id: ORG, subscriptions: [] }
+const lapsedPlanResponse = {
+	id: ORG,
+	subscriptions: [{ planId: "startup", status: "expired", addOn: false }],
+}
 
 // `AutumnClient` reads its credentials from `Env` and captures the HttpClient at
 // layer build; the fetch stub is provided as the `FetchHttpClient.Fetch`
@@ -238,12 +244,21 @@ describe("readCustomerCached", () => {
 		}),
 	)
 
-	it.effect("caches a planless customer for the short TTL so the gate re-checks soon", () =>
+	it.effect("caches a never-subscribed customer for the short TTL — checkout is imminent", () =>
 		Effect.gen(function* () {
 			const { cache, puts } = makeRecordingBackend()
 			const run = Effect.succeed({ statusCode: 200, response: noPlanResponse })
 			yield* readCustomerCached(cache, ORG, run)
 			assert.deepStrictEqual(puts, [CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS])
+		}),
+	)
+
+	it.effect("caches a lapsed customer for the middle TTL — durably planless, not mid-signup", () =>
+		Effect.gen(function* () {
+			const { cache, puts } = makeRecordingBackend()
+			const run = Effect.succeed({ statusCode: 200, response: lapsedPlanResponse })
+			yield* readCustomerCached(cache, ORG, run)
+			assert.deepStrictEqual(puts, [CUSTOMER_CACHE_LAPSED_TTL_SECONDS])
 		}),
 	)
 
@@ -358,6 +373,22 @@ describe("responseHasActivePlan", () => {
 		assert.isFalse(responseHasActivePlan(noPlanResponse))
 		assert.isFalse(responseHasActivePlan({ id: ORG }))
 		assert.isFalse(responseHasActivePlan({ subscriptions: [{ planId: "startup", status: "expired" }] }))
+	})
+})
+
+describe("responseHasPlanHistory", () => {
+	it("separates a lapsed customer from one that never subscribed", () => {
+		assert.isTrue(responseHasPlanHistory(lapsedPlanResponse))
+		assert.isTrue(responseHasPlanHistory(activePlanResponse))
+		assert.isFalse(responseHasPlanHistory(noPlanResponse))
+		assert.isFalse(responseHasPlanHistory({ id: ORG }))
+	})
+
+	it("ignores add-on, auto-enabled and free rows — they never gated anything", () => {
+		assert.isFalse(
+			responseHasPlanHistory({ subscriptions: [{ planId: "byoc", status: "expired", addOn: true }] }),
+		)
+		assert.isFalse(responseHasPlanHistory({ subscriptions: [{ planId: "free", status: "expired" }] }))
 	})
 })
 

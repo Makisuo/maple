@@ -4,13 +4,14 @@ import { useAuth } from "@clerk/clerk-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
 
+import { BootSplash } from "@/components/boot-splash"
 import { OnboardingLayout } from "@/components/onboarding/onboarding-layout"
 import { QUALIFY_QUESTIONS, StepQualifyQuestion } from "@/components/onboarding/step-qualify"
 import { StepPlan } from "@/components/onboarding/step-plan"
 import { StepDemo } from "@/components/onboarding/step-demo"
 
 import { useQuickStart, type StepId } from "@/hooks/use-quick-start"
-import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { hasLapsedPlan, hasSelectedPlan } from "@/lib/billing/plan-gating"
 import { STEP_IDS, type RoleOption } from "@/atoms/quick-start-atoms"
 
 export const Route = createFileRoute("/quick-start")({
@@ -34,8 +35,12 @@ function QuickStartPage() {
 		setDemoDataRequested,
 	} = useQuickStart(orgId)
 
-	const { data: customer } = useMapleCustomer()
+	const { data: customer, isLoading: isCustomerLoading } = useMapleCustomer()
 	const planSelected = hasSelectedPlan(customer)
+	// A returning subscriber whose plan lapsed can still land here by bookmark or
+	// back button. They have already onboarded, so send them to the app — the
+	// reactivation banner there is what they need, not the new-user wizard.
+	const planLapsed = hasLapsedPlan(customer)
 
 	// "plan" completion is the live Autumn plan state, never a persisted flag.
 	// A stale flag would disagree with __root.tsx's no-plan guard and trap the
@@ -53,7 +58,14 @@ function QuickStartPage() {
 	}
 	const direction = currentStepNumber >= stepWindow[0] ? 1 : -1
 
-	if (onboardingComplete) {
+	// Wait for the customer before rendering a step: deciding from an unsettled
+	// query flashes "what's your role?" at a returning subscriber before the
+	// bail-out below can fire.
+	if (isCustomerLoading) {
+		return <BootSplash />
+	}
+
+	if (onboardingComplete || planLapsed) {
 		return <Navigate to="/" replace />
 	}
 
