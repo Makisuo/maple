@@ -148,6 +148,17 @@ describe("AlertDelivery.http span", () => {
 			expectPath: null,
 			respond: () => new Response("", { status: 200 }),
 		},
+		{
+			name: "telegram",
+			config: { type: "telegram", botToken: "123456789:s3cr3t-token", chatId: "-100123" } as const,
+			peerService: "telegram",
+			host: "api.telegram.org",
+			// A fixed vendor host, but the bot token is a path segment — the first
+			// provider where the guard flag and the path flag disagree.
+			expectPath: null,
+			respond: () =>
+				new Response(JSON.stringify({ ok: true, result: { message_id: 7 } }), { status: 200 }),
+		},
 	]
 
 	for (const testCase of cases) {

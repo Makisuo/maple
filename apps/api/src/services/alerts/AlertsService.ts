@@ -3383,6 +3383,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				createDestination: destinations.createDestination,
 				updateDestination: destinations.updateDestination,
 				deleteDestination: destinations.deleteDestination,
+				listTelegramChats: destinations.listTelegramChats,
 				testDestination: destinations.testDestination,
 				listRules: rules.listRules,
 				createRule: rules.createRule,

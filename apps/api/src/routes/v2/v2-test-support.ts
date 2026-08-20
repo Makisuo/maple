@@ -324,6 +324,7 @@ const alertDestinationStubs = {
 	createDestination: die,
 	updateDestination: die,
 	deleteDestination: die,
+	listTelegramChats: die,
 	testDestination: die,
 }
 

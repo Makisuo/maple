@@ -207,6 +207,43 @@ describe("slack-bot destination params", () => {
 	})
 })
 
+describe("telegram destination params", () => {
+	it("builds create params with a trimmed token and chat id", () => {
+		const params = buildDestinationCreateParamsV2({
+			...defaultDestinationForm("telegram"),
+			name: "  On-call  ",
+			telegramBotToken: "  123456789:AAtoken  ",
+			telegramChatId: "  -1001234567890  ",
+		})
+		expect(params).toEqual({
+			type: "telegram",
+			name: "On-call",
+			enabled: true,
+			bot_token: "123456789:AAtoken",
+			chat_id: "-1001234567890",
+		})
+	})
+
+	/**
+	 * The chat id comes back on edit (via `channel_label`) but the token never
+	 * does — so a rename must not blank the stored token.
+	 */
+	it("keeps the stored token on update when the field is left blank", () => {
+		const params = buildDestinationUpdateParamsV2({
+			...defaultDestinationForm("telegram"),
+			name: "Renamed",
+			telegramBotToken: "",
+			telegramChatId: "-1001234567890",
+		})
+		expect(params).toEqual({
+			type: "telegram",
+			enabled: true,
+			name: "Renamed",
+			chat_id: "-1001234567890",
+		})
+	})
+})
+
 describe("raw SQL alert query validation", () => {
 	it("recognizes explicit value aliases and value columns", () => {
 		expect(rawSqlHasValueColumn("SELECT count() AS value FROM traces WHERE $__orgFilter")).toBe(true)

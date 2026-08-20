@@ -1,6 +1,6 @@
 ---
 title: "Notification destinations"
-description: "Route Maple alerts to Slack, PagerDuty, Discord, or any HTTP endpoint. How to add a destination, send a test, and get the right credentials for each provider."
+description: "Route Maple alerts to Slack, PagerDuty, Discord, Telegram, or any HTTP endpoint. How to add a destination, send a test, and get the right credentials for each provider."
 group: "Alerting"
 order: 0
 ---
@@ -53,6 +53,50 @@ Post alerts to a Discord channel via an incoming webhook.
 
 1. In Discord: **Channel settings → Integrations → Webhooks → New Webhook**.
 2. Copy the webhook URL (`https://discord.com/api/webhooks/...`) into the **Discord webhook URL** field.
+
+## Telegram
+
+Send alerts to a Telegram chat, group, or channel through a bot you create. Telegram has no
+per-channel webhook, so a destination needs two things: the bot's token, and the id of the chat it
+should post to.
+
+**1. Create the bot.** In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, and
+follow the prompts. BotFather replies with a token of the form `123456789:AAH…` — that is the **Bot
+token** field. Copy it without the `bot` prefix.
+
+**2. Add the bot to the chat.** Invite it to the group or channel you want alerts in (for a channel,
+add it as an administrator with permission to post messages). A bot cannot message a chat it isn't
+a member of.
+
+**3. Pick the chat.** Back in Maple, paste the bot token and click **Detect chats** — Maple asks
+Telegram which chats the bot can currently see and lists them by name. Pick one and the chat ID
+fills itself in.
+
+Detection reads the bot's recent updates, so a few things are worth knowing:
+
+- **Adding the bot is enough.** You don't need to send a message first — Telegram notifies the bot
+  when it's added to a chat, and that's what Maple reads.
+- **Telegram keeps about 24 hours of history.** An empty list usually means the bot was added
+  longer ago than that. Send it a message (or remove and re-add it) and detect again.
+- **A bot with a webhook registered can't be inspected this way.** Telegram allows only one reader
+  at a time. If you've pointed this bot at your own webhook, enter the chat ID by hand instead.
+
+To find the ID manually, post a message in the chat and open
+`https://api.telegram.org/bot<your-token>/getUpdates`, then read `result[].message.chat.id`. Group
+and channel IDs are negative (`-1001234567890`); a one-to-one chat is positive. Public channels can
+use `@channelusername` instead.
+
+| Field         | Notes                                                                       |
+| ------------- | --------------------------------------------------------------------------- |
+| **Bot token** | From @BotFather. Write-only — never returned after saving.                   |
+| **Chat ID**   | `-1001234567890`, or `@channelusername` for a public channel.                 |
+
+When you save, Maple verifies the token and checks that the bot can actually reach that chat, so the
+usual mistake — a valid token pointed at a group the bot was never added to — is caught immediately
+rather than at the first real alert.
+
+Alerts arrive as a formatted message with **Open in Maple** and **Ask Maple AI** buttons underneath,
+and the alert chart as the message preview when one is available.
 
 ## Webhook
 

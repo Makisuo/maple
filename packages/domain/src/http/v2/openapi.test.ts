@@ -162,6 +162,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"PATCH /v2/dashboards/{id}",
 			"PATCH /v2/scrape_targets/{id}",
 			"POST /v2/alerts/destinations",
+			"POST /v2/alerts/destinations/telegram/chats",
 			"POST /v2/alerts/destinations/{id}/test",
 			"POST /v2/alerts/rules",
 			"POST /v2/alerts/rules/preview",
