@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useRouterState } from "@tanstack/react-router"
 import { Schema } from "effect"
 
 import type { AiSessionSpan } from "@maple/domain/http"
@@ -31,9 +31,14 @@ const agentSessionSearchSchema = Schema.Struct({
 	end: Schema.optional(Schema.String),
 })
 
-/** Padding around the session's own window, so a session that straddles the
- *  list page's range edge still arrives whole. */
-const WINDOW_PADDING_MS = 60 * 60 * 1000
+// Padding around the session's own window, so a session that straddles the list
+// page's range edge still arrives whole. It is asymmetric because the hint is:
+// the list clamps a row's start to the list's own window, so a session that began
+// before the visible range reports its start as the range edge and reading from
+// there alone silently drops its opening turns. The end needs no such allowance —
+// a session running past the range edge is still running now.
+const WINDOW_START_PADDING_MS = 24 * 60 * 60 * 1000
+const WINDOW_END_PADDING_MS = 60 * 60 * 1000
 
 /** Deep link with no hints: look back far enough to find most sessions, and
  *  accept the slower read that comes with it. */
@@ -112,11 +117,7 @@ function AgentSessionDetailContent() {
 						<EmptySession sessionId={sessionId} />
 					</DashboardLayout.Scroll>
 				) : (
-					<SessionDetailBody
-						sessionId={sessionId}
-						spans={value.data}
-						truncated={value.truncated}
-					/>
+					<SessionDetailBody sessionId={sessionId} spans={value.data} truncated={value.truncated} />
 				)}
 			</SessionShell>
 		))
@@ -154,7 +155,12 @@ function SessionDetailBody({
 				)}
 			</DashboardLayout.Sticky>
 			<DashboardLayout.Fill>
-				<div className="flex min-h-0 flex-1 flex-col px-4 pb-2">
+				{/* A floor rather than `min-h-0`: the header above is a sticky sibling
+				    that cannot shrink, so on a short window this pane is what gives way,
+				    and at zero the tabs and the waterfall are gone rather than scrolled.
+				    16rem still lets the pane shrink far below its content — the waterfall
+				    owns its own scrolling. */}
+				<div className="flex min-h-64 flex-1 flex-col px-4 pb-2">
 					<SessionViews turns={turns} summary={summary} />
 				</div>
 			</DashboardLayout.Fill>
@@ -163,12 +169,14 @@ function SessionDetailBody({
 }
 
 function SessionShell({ sessionId, children }: { sessionId: string; children: ReactNode }) {
+	const searchStr = useRouterState({ select: (state) => state.location.searchStr })
+
 	return (
 		<DashboardLayout.Root>
 			<DashboardLayout.Breadcrumbs
 				items={[
-					{ label: "Agent Sessions", href: "/agent-sessions" },
-					{ label: sessionId.slice(0, 8) },
+					{ label: "Agent Sessions", href: buildBackToSessionsHref(searchStr) },
+					{ label: breadcrumbSessionId(sessionId) },
 				]}
 			/>
 			<DashboardLayout.Body>
@@ -193,6 +201,28 @@ function EmptySession({ sessionId }: { sessionId: string }) {
 	)
 }
 
+/** Everything but this page's own params, so Back lands on the list the reader
+ *  left — same time range, same filters. Mirrors `buildBackToTracesHref` in
+ *  traces/$traceId, including reading the raw `searchStr`: the list owns its
+ *  search schema, and re-encoding it through this route's would drop it. */
+function buildBackToSessionsHref(searchStr: string): string {
+	const params = new URLSearchParams(searchStr)
+	params.delete("t")
+	params.delete("end")
+	const nextSearch = params.toString()
+	return nextSearch ? `/agent-sessions?${nextSearch}` : "/agent-sessions"
+}
+
+/** Session ids belong to the framework that wrote them, and the long ones carry
+ *  their entropy at both ends — `slice(0, 8)` of a `wrun_01KZ…` id renders the
+ *  word "wrun_01K", which identifies nothing. */
+const BREADCRUMB_ID_MAX_CHARS = 24
+
+function breadcrumbSessionId(sessionId: string): string {
+	if (sessionId.length <= BREADCRUMB_ID_MAX_CHARS) return sessionId
+	return `${sessionId.slice(0, 9)}…${sessionId.slice(-4)}`
+}
+
 function primaryVendorLabel(vendorIds: readonly string[]): string {
 	const vendorId = vendorIds[0]
 	return vendorId === undefined ? "Agent session" : vendorLabel(vendorId)
@@ -213,7 +243,7 @@ function resolveWindow(t: string | undefined, end: string | undefined) {
 	}
 
 	return {
-		startTime: formatWarehouseDateTime(startHint - WINDOW_PADDING_MS),
-		endTime: formatWarehouseDateTime(endHint + WINDOW_PADDING_MS),
+		startTime: formatWarehouseDateTime(startHint - WINDOW_START_PADDING_MS),
+		endTime: formatWarehouseDateTime(endHint + WINDOW_END_PADDING_MS),
 	}
 }

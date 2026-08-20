@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 
 import { MenuIcon, NetworkNodesIcon } from "@/components/icons"
 import { SearchInput } from "@maple/ui/components/ui/search-input"
@@ -9,6 +9,7 @@ import { cn } from "@maple/ui/lib/utils"
 import type { SessionSummary } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { SessionFlow } from "./session-flow"
+import { filterSpans } from "./span-visuals"
 import { SessionWaterfall } from "./session-waterfall"
 
 /**
@@ -18,20 +19,29 @@ import { SessionWaterfall } from "./session-waterfall"
  * idle, and hiding the app's own spans — and all three are toggles here rather
  * than assumptions, because each one is occasionally the thing you need to see.
  */
-export function SessionViews({
-	turns,
-	summary,
-}: {
-	turns: readonly SessionTurn[]
-	summary: SessionSummary
-}) {
+export function SessionViews({ turns, summary }: { turns: readonly SessionTurn[]; summary: SessionSummary }) {
 	const [query, setQuery] = useState("")
 	const [agentSpansOnly, setAgentSpansOnly] = useState(true)
 	const [collapseIdle, setCollapseIdle] = useState(true)
 	const [mergeRepeats, setMergeRepeats] = useState(false)
 	const [view, setView] = useState("trace")
+	// The views unmount when the tab changes, so what the reader opened, collapsed
+	// or zoomed lives here — otherwise a look at Flow and back costs them the
+	// place they had found in a 600-span session.
+	const [collapsedTurns, setCollapsedTurns] = useState<ReadonlySet<string>>(() => new Set())
+	const [expandedGaps, setExpandedGaps] = useState<ReadonlySet<string>>(() => new Set())
+	const [zoom, setZoom] = useState(1)
 
-	const counts = `${summary.spanCount.toLocaleString()} spans · ${turns.length} turns · ${summary.traceCount} traces`
+	const visibleSpans = useMemo(
+		() => turns.reduce((total, turn) => total + filterSpans(turn.spans, query, agentSpansOnly).length, 0),
+		[turns, query, agentSpansOnly],
+	)
+
+	const spanCount =
+		query.trim() === ""
+			? `${summary.spanCount.toLocaleString()} spans`
+			: `${visibleSpans.toLocaleString()} of ${summary.spanCount.toLocaleString()} spans`
+	const counts = `${spanCount} · ${plural(turns.length, "turn")} · ${plural(summary.traceCount, "trace")}`
 
 	return (
 		<Tabs
@@ -85,13 +95,34 @@ export function SessionViews({
 					query={query}
 					agentSpansOnly={agentSpansOnly}
 					collapseIdle={collapseIdle}
+					collapsedTurns={collapsedTurns}
+					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
+					expandedGaps={expandedGaps}
+					onToggleGap={(gapId) => setExpandedGaps((previous) => toggled(previous, gapId))}
 				/>
 			</TabsContent>
 			<TabsContent value="flow" className="min-h-0 flex-1">
-				<SessionFlow turns={turns} mergeRepeats={mergeRepeats} />
+				<SessionFlow
+					turns={turns}
+					mergeRepeats={mergeRepeats}
+					query={query}
+					agentSpansOnly={agentSpansOnly}
+					zoom={zoom}
+					onZoomChange={setZoom}
+				/>
 			</TabsContent>
 		</Tabs>
 	)
+}
+
+function toggled(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
+	const next = new Set(set)
+	if (!next.delete(id)) next.add(id)
+	return next
+}
+
+function plural(count: number, noun: string): string {
+	return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`
 }
 
 function ViewChip({

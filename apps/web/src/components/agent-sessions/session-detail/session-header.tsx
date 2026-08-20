@@ -2,14 +2,14 @@ import { useMemo, useState, type ReactNode } from "react"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
-import { formatNumber, formatPercent } from "@maple/ui/lib/format"
+import { formatDuration, formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { computeModelSpend, PRICE_TABLE_DATE } from "@/lib/agent-sessions/model-pricing"
 import type { SessionStatus, SessionSummary } from "@/lib/agent-sessions/session-summary"
 import { vendorLabel } from "@/components/agent-sessions/agent-sessions-list"
-import { OCCUPANCY_FILL, OCCUPANCY_LABEL } from "./span-visuals"
+import { OCCUPANCY_DOT_FILL, OCCUPANCY_FILL, OCCUPANCY_LABEL, shortTarget } from "./span-visuals"
 
 /**
  * Which clock the header measures against.
@@ -62,8 +62,18 @@ export function SessionHeader({ summary, sessionId, fallbackTitle }: SessionHead
 	// pause reads as single digits and the bar says nothing.
 	const denominatorMs = axisMode === "wall" ? summary.wallClockMs : summary.activeMs
 	const segments = summary.occupancy.filter(
-		(segment) => axisMode === "wall" || segment.kind !== "idle",
+		(segment) =>
+			(axisMode === "wall" || segment.kind !== "idle") &&
+			// Under half a percent the segment is a sub-pixel sliver against a legend
+			// row that reads "0%" — the muted track behind the bar covers the loss.
+			sharePercent(segment.ms, denominatorMs) >= 0.5,
 	)
+	// A session nobody waited on has no contrast to draw: "active · 100%" beside
+	// the wall clock is the same number twice, and a toggle between two identical
+	// readings is a control that does nothing.
+	const hasIdle = summary.idleMs >= 1000
+	const hasTokens = summary.tokens.total > 0
+	const tokenBuckets = TOKEN_BUCKETS.filter((bucket) => summary.tokens[bucket.key] > 0)
 
 	return (
 		<section className="@container">
@@ -93,32 +103,37 @@ export function SessionHeader({ summary, sessionId, fallbackTitle }: SessionHead
 				<span className="text-muted-foreground text-xs">
 					{axisMode === "wall" ? "wall clock" : "active only"}
 				</span>
-				<span aria-hidden className="h-4 w-px self-center bg-border" />
-				<span className="whitespace-nowrap font-semibold text-sm tabular-nums">
-					{formatSessionDuration(axisMode === "wall" ? summary.activeMs : summary.idleMs)}
-				</span>
-				<span className="text-muted-foreground text-xs">
-					{axisMode === "wall" ? "active" : "idle"} ·{" "}
-					{formatPercent(
-						summary.wallClockMs === 0
-							? 0
-							: (axisMode === "wall" ? summary.activeMs : summary.idleMs) / summary.wallClockMs,
-					)}
-				</span>
-				<ToggleGroup
-					className="ml-auto"
-					size="sm"
-					variant="outline"
-					value={[axisMode]}
-					onValueChange={(values) => {
-						const next = values[0]
-						if (next === "wall" || next === "active") setAxisMode(next)
-					}}
-					aria-label="Time axis"
-				>
-					<ToggleGroupItem value="wall">Wall clock</ToggleGroupItem>
-					<ToggleGroupItem value="active">Active only</ToggleGroupItem>
-				</ToggleGroup>
+				{hasIdle && (
+					<>
+						<span aria-hidden className="h-4 w-px self-center bg-border" />
+						<span className="whitespace-nowrap font-semibold text-sm tabular-nums">
+							{formatSessionDuration(axisMode === "wall" ? summary.activeMs : summary.idleMs)}
+						</span>
+						<span className="text-muted-foreground text-xs">
+							{axisMode === "wall" ? "active" : "idle"} ·{" "}
+							{formatPercent(
+								summary.wallClockMs === 0
+									? 0
+									: (axisMode === "wall" ? summary.activeMs : summary.idleMs) /
+											summary.wallClockMs,
+							)}
+						</span>
+						<ToggleGroup
+							className="ml-auto"
+							size="sm"
+							variant="outline"
+							value={[axisMode]}
+							onValueChange={(values) => {
+								const next = values[0]
+								if (next === "wall" || next === "active") setAxisMode(next)
+							}}
+							aria-label="Time axis"
+						>
+							<ToggleGroupItem value="wall">Wall clock</ToggleGroupItem>
+							<ToggleGroupItem value="active">Active only</ToggleGroupItem>
+						</ToggleGroup>
+					</>
+				)}
 			</div>
 
 			<div className="mt-3">
@@ -136,10 +151,13 @@ export function SessionHeader({ summary, sessionId, fallbackTitle }: SessionHead
 						<span key={segment.kind} className="flex items-center gap-1.5">
 							<span
 								aria-hidden
-								className={cn("size-1.5 rounded-full", OCCUPANCY_FILL[segment.kind])}
+								className={cn("size-1.5 rounded-full", OCCUPANCY_DOT_FILL[segment.kind])}
 							/>
 							<span className="text-muted-foreground">{OCCUPANCY_LABEL[segment.kind]}</span>
-							<span className="tabular-nums">{formatSessionDuration(segment.ms)}</span>
+							{/* Not the session formatter: a segment is a sum of spans, and
+							    "0s" for 300ms of tool time is the page contradicting the rows
+							    below it. */}
+							<span className="tabular-nums">{formatDuration(segment.ms)}</span>
 							<span className="text-muted-foreground tabular-nums">
 								{formatPercent(denominatorMs === 0 ? 0 : segment.ms / denominatorMs)}
 							</span>
@@ -148,18 +166,30 @@ export function SessionHeader({ summary, sessionId, fallbackTitle }: SessionHead
 				</div>
 			</div>
 
-			<div className="mt-4 flex flex-col divide-y divide-border border-border border-t @5xl:grid @5xl:grid-cols-5 @5xl:divide-x @5xl:divide-y-0">
+			{/* Five columns is the design's band, and left to stack it is 645px of
+			    header at a 960px container — enough to push the tabs and the waterfall
+			    off the bottom of a 1280×800 window. Measured at that width: two columns
+			    441px, three 296px, five 164px. Four is missing on purpose — five stats
+			    in four columns still wrap to two rows, so it buys nothing three
+			    doesn't. */}
+			<div className="mt-4 flex flex-col divide-y divide-border border-border border-t @2xl:grid @2xl:grid-cols-2 @2xl:divide-x @3xl:grid-cols-3 @4xl:grid-cols-5 @4xl:divide-y-0">
 				<StatColumn title="Models & agents">
 					{summary.models.length === 0 ? (
 						<EmptyStat>no model calls</EmptyStat>
 					) : (
-						<div className="space-y-1">
+						<div className="max-w-sm space-y-1">
 							{summary.models.slice(0, 4).map((model) => (
 								<div key={model.model} className="flex items-center gap-2 text-xs">
+									{/* Gateways prefix the provider path, and two models from one
+									    gateway truncate to the same string in this column. */}
 									<span className="min-w-0 flex-1 truncate" title={model.model}>
-										{model.model}
+										{shortTarget(model.model)}
 									</span>
-									<span className="hidden h-1 w-14 overflow-hidden rounded-full bg-muted @5xl:block">
+									{/* The bar is the cell's least load-bearing element — it re-states
+									    the count beside it — so it is the first thing to go when the
+									    five columns pack into a ~180px cell and the model names
+									    themselves start truncating. */}
+									<span className="hidden h-1 w-14 overflow-hidden rounded-full bg-muted @2xl:block @4xl:hidden @5xl:block">
 										<span
 											className="block h-full rounded-full bg-chart-2"
 											style={{
@@ -182,40 +212,67 @@ export function SessionHeader({ summary, sessionId, fallbackTitle }: SessionHead
 					)}
 				</StatColumn>
 
-				<StatColumn title="Tokens" value={formatNumber(summary.tokens.total)}>
-					<div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
-						{TOKEN_BUCKETS.map((bucket) => (
-							<div
-								key={bucket.key}
-								className={bucket.fill}
-								style={{ width: `${sharePercent(summary.tokens[bucket.key], summary.tokens.total)}%` }}
-							/>
-						))}
-					</div>
-					<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-						{TOKEN_BUCKETS.map((bucket) => (
-							<span key={bucket.key} className="flex items-center gap-1.5">
-								<span aria-hidden className={cn("size-1.5 rounded-full", bucket.fill)} />
-								<span className="text-muted-foreground">{bucket.label}</span>
-								<span className="tabular-nums">{formatNumber(summary.tokens[bucket.key])}</span>
-							</span>
-						))}
-					</div>
+				{/* Usage capture is opt-in per framework, so "no tokens" is a real and
+				    common state — and 0 / $0.00 reads as a measurement rather than the
+				    absence of one. */}
+				<StatColumn title="Tokens" value={hasTokens ? formatNumber(summary.tokens.total) : undefined}>
+					{!hasTokens ? (
+						<EmptyStat>no token usage reported</EmptyStat>
+					) : (
+						<>
+							<div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+								{tokenBuckets.map((bucket) => (
+									<div
+										key={bucket.key}
+										className={bucket.fill}
+										style={{
+											width: `${sharePercent(summary.tokens[bucket.key], summary.tokens.total)}%`,
+										}}
+									/>
+								))}
+							</div>
+							<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+								{tokenBuckets.map((bucket) => (
+									<span key={bucket.key} className="flex items-center gap-1.5">
+										<span
+											aria-hidden
+											className={cn("size-1.5 rounded-full", bucket.fill)}
+										/>
+										<span className="text-muted-foreground">{bucket.label}</span>
+										<span className="tabular-nums">
+											{formatNumber(summary.tokens[bucket.key])}
+										</span>
+									</span>
+								))}
+							</div>
+						</>
+					)}
 				</StatColumn>
 
 				<StatColumn title="Model spend">
-					<div className="flex items-baseline gap-1.5">
-						<span className="font-semibold text-2xl text-primary tabular-nums">
-							${spend.totalUsd.toFixed(2)}
-						</span>
-						<span className="text-muted-foreground text-xs">est.</span>
-					</div>
-					<p className="mt-1 text-muted-foreground text-xs">list price · {PRICE_TABLE_DATE}</p>
-					{spend.unpricedModels.length > 0 && (
-						<p className="mt-0.5 text-primary text-xs" title={spend.unpricedModels.join(", ")}>
-							{spend.unpricedModels.length} model
-							{spend.unpricedModels.length === 1 ? "" : "s"} unpriced
-						</p>
+					{!hasTokens ? (
+						<EmptyStat>no token usage reported</EmptyStat>
+					) : (
+						<>
+							<div className="flex items-baseline gap-1.5">
+								<span className="font-semibold text-2xl text-primary tabular-nums">
+									${spend.totalUsd.toFixed(2)}
+								</span>
+								<span className="text-muted-foreground text-xs">est.</span>
+							</div>
+							<p className="mt-1 text-muted-foreground text-xs">
+								list price · {PRICE_TABLE_DATE}
+							</p>
+							{spend.unpricedModels.length > 0 && (
+								<p
+									className="mt-0.5 text-primary text-xs"
+									title={spend.unpricedModels.join(", ")}
+								>
+									{spend.unpricedModels.length} model
+									{spend.unpricedModels.length === 1 ? "" : "s"} unpriced
+								</p>
+							)}
+						</>
 					)}
 				</StatColumn>
 
@@ -272,8 +329,12 @@ function StatColumn({
 	danger?: boolean
 	children: ReactNode
 }) {
+	// `first:pl-0 last:pr-0` flushes the band with the heading above it, which
+	// only holds once the five columns are one row — in the two- and three-column
+	// grids "first" is one cell of several in the left column, so every cell there
+	// keeps its padding.
 	return (
-		<div className="py-3.5 @5xl:px-4 @5xl:py-3 @5xl:first:pl-0 @5xl:last:pr-0">
+		<div className="py-3.5 @2xl:px-4 @2xl:py-3 @4xl:first:pl-0 @4xl:last:pr-0">
 			<p className="mb-2 flex items-baseline gap-2">
 				<span
 					className={cn(
@@ -290,17 +351,12 @@ function StatColumn({
 	)
 }
 
-function StatRow({
-	label,
-	value,
-	tone,
-}: {
-	label: string
-	value: number
-	tone?: "warn" | "error"
-}) {
+function StatRow({ label, value, tone }: { label: string; value: number; tone?: "warn" | "error" }) {
 	return (
-		<div className="flex items-baseline justify-between gap-3 text-xs leading-6">
+		// Capped: in the stacked and two-column layouts the column is most of the
+		// page, and a label at one edge with its number at the other is two facts,
+		// not one.
+		<div className="flex max-w-sm items-baseline justify-between gap-3 text-xs leading-6">
 			<span className="text-muted-foreground">{label}</span>
 			<span
 				className={cn(

@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
 
 import type { AiSessionSpan } from "@maple/domain/http"
 import { MinusIcon, PlusIcon, SquareIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
-import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
 
 import {
@@ -17,7 +16,7 @@ import {
 	type SessionTurn,
 	type SpanCategory,
 } from "@/lib/agent-sessions/session-turns"
-import { CATEGORY_FILL, CATEGORY_LABEL } from "./span-visuals"
+import { CATEGORY_FILL, CATEGORY_LABEL, filterSpans, isDelegation, shortTarget } from "./span-visuals"
 
 // One lane per turn, laid out by hand. 612 spans in a single graph is a
 // hairball, and a graph library to draw fixed-size boxes in columns would be a
@@ -30,6 +29,9 @@ const STACK_GAP = 10
 const LANE_GAP = 40
 const LANE_LABEL_WIDTH = 120
 const CANVAS_PADDING = 20
+/** A long turn wraps into a block instead of an 8,000px ribbon nobody scrolls. */
+const MAX_COLUMNS = 8
+const WRAP_GAP = 24
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 1.5
@@ -39,6 +41,7 @@ interface FlowNode {
 	readonly key: string
 	readonly span: AiSessionSpan
 	readonly category: SpanCategory
+	/** Full value; the card renders its last path segment. */
 	readonly title: string
 	readonly subtitle: string
 	readonly errored: boolean
@@ -61,11 +64,25 @@ interface SessionFlowProps {
 	/** Collapse runs of identical calls into one `×N` node. Off by default —
 	 *  merging hides the retry loop that is often the bug. */
 	mergeRepeats: boolean
+	/** The toolbar's filter, which applies to both views. */
+	query: string
+	agentSpansOnly: boolean
+	zoom: number
+	onZoomChange: (zoom: number) => void
 }
 
-export function SessionFlow({ turns, mergeRepeats }: SessionFlowProps) {
-	const [zoom, setZoom] = useState(1)
-	const lanes = useMemo(() => layoutLanes(turns, mergeRepeats), [turns, mergeRepeats])
+export function SessionFlow({
+	turns,
+	mergeRepeats,
+	query,
+	agentSpansOnly,
+	zoom,
+	onZoomChange,
+}: SessionFlowProps) {
+	const lanes = useMemo(
+		() => layoutLanes(turns, { mergeRepeats, query, agentSpansOnly }),
+		[turns, mergeRepeats, query, agentSpansOnly],
+	)
 
 	const contentWidth =
 		CANVAS_PADDING +
@@ -79,33 +96,42 @@ export function SessionFlow({ turns, mergeRepeats }: SessionFlowProps) {
 	return (
 		<div className="relative h-full min-h-0">
 			<div className="h-full overflow-auto">
-				<div
-					style={{
-						width: contentWidth * zoom,
-						height: contentHeight * zoom,
-					}}
-				>
+				{lanes.length === 0 ? (
+					<p className="px-2.5 py-8 text-center text-muted-foreground text-sm">
+						No spans match this filter.
+					</p>
+				) : (
 					<div
-						className="relative"
 						style={{
-							width: contentWidth,
-							height: contentHeight,
-							transform: `scale(${zoom})`,
-							transformOrigin: "top left",
+							width: contentWidth * zoom,
+							height: contentHeight * zoom,
 						}}
 					>
-						{lanes.map((lane) => (
-							<Lane key={lane.turn.id} lane={lane} />
-						))}
+						<div
+							className="relative"
+							style={{
+								width: contentWidth,
+								height: contentHeight,
+								transform: `scale(${zoom})`,
+								transformOrigin: "top left",
+							}}
+						>
+							{lanes.map((lane) => (
+								<Lane key={lane.turn.id} lane={lane} />
+							))}
+						</div>
 					</div>
-				</div>
+				)}
 			</div>
 
 			<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 p-3">
 				<div className="pointer-events-auto flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-muted-foreground text-xs backdrop-blur-sm">
 					{(["agent", "inference", "tool"] as const).map((category) => (
 						<span key={category} className="flex items-center gap-1.5">
-							<span aria-hidden className={cn("size-1.5 rounded-xs", CATEGORY_FILL[category])} />
+							<span
+								aria-hidden
+								className={cn("size-1.5 rounded-xs", CATEGORY_FILL[category])}
+							/>
 							{CATEGORY_LABEL[category]}
 						</span>
 					))}
@@ -119,7 +145,7 @@ export function SessionFlow({ turns, mergeRepeats }: SessionFlowProps) {
 						variant="ghost"
 						size="icon-sm"
 						aria-label="Zoom in"
-						onClick={() => setZoom((value) => Math.min(MAX_ZOOM, value + ZOOM_STEP))}
+						onClick={() => onZoomChange(Math.min(MAX_ZOOM, zoom + ZOOM_STEP))}
 					>
 						<PlusIcon size={14} />
 					</Button>
@@ -127,11 +153,16 @@ export function SessionFlow({ turns, mergeRepeats }: SessionFlowProps) {
 						variant="ghost"
 						size="icon-sm"
 						aria-label="Zoom out"
-						onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value - ZOOM_STEP))}
+						onClick={() => onZoomChange(Math.max(MIN_ZOOM, zoom - ZOOM_STEP))}
 					>
 						<MinusIcon size={14} />
 					</Button>
-					<Button variant="ghost" size="icon-sm" aria-label="Reset zoom" onClick={() => setZoom(1)}>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Reset zoom"
+						onClick={() => onZoomChange(1)}
+					>
 						<SquareIcon size={14} />
 					</Button>
 				</div>
@@ -150,8 +181,13 @@ function Lane({ lane }: { lane: FlowLane }) {
 				<p className="font-medium text-[10px] text-primary uppercase tracking-wider">
 					Turn {lane.turn.index}
 				</p>
-				<p className={cn("tabular-nums", lane.turn.failed ? "text-destructive" : "text-muted-foreground")}>
-					{formatSessionDuration(lane.turn.durationMs)}
+				<p
+					className={cn(
+						"tabular-nums",
+						lane.turn.failed ? "text-destructive" : "text-muted-foreground",
+					)}
+				>
+					{formatDuration(lane.turn.durationMs)}
 				</p>
 				{lane.turn.failed && <p className="text-destructive text-xs">failed</p>}
 			</div>
@@ -198,7 +234,9 @@ function FlowNodeCard({ node }: { node: FlowNode }) {
 						node.errored ? "bg-destructive" : CATEGORY_FILL[node.category],
 					)}
 				/>
-				<span className="min-w-0 truncate text-xs">{node.title}</span>
+				<span className="min-w-0 truncate text-xs" title={node.title}>
+					{shortTarget(node.title)}
+				</span>
 				{node.count > 1 && (
 					<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
 						×{node.count}
@@ -221,16 +259,32 @@ function FlowNodeCard({ node }: { node: FlowNode }) {
 /* Layout                                                                     */
 /* -------------------------------------------------------------------------- */
 
-function layoutLanes(turns: readonly SessionTurn[], mergeRepeats: boolean): readonly FlowLane[] {
+function layoutLanes(
+	turns: readonly SessionTurn[],
+	options: { mergeRepeats: boolean; query: string; agentSpansOnly: boolean },
+): readonly FlowLane[] {
 	const lanes: FlowLane[] = []
 	let laneTop = CANVAS_PADDING
 
 	for (const turn of turns) {
-		const spans = turn.spans.filter((span) => classifySpan(span) !== "other")
+		const spans = flowSpans(turn, options.query, options.agentSpansOnly)
 		if (spans.length === 0) continue
 
-		const groups = mergeRepeats ? mergeConsecutive(spans) : spans.map((span) => [span])
+		const groups = options.mergeRepeats ? mergeConsecutive(spans) : spans.map((span) => [span])
 		const columns = assignColumns(groups, new Set(spans.map((span) => span.spanId)))
+
+		// Columns wrap into rows within the lane, and a row is as tall as its
+		// deepest stack.
+		const rowHeights: number[] = []
+		columns.forEach((column, index) => {
+			const row = Math.floor(index / MAX_COLUMNS)
+			const height = column.length * (NODE_HEIGHT + STACK_GAP) - STACK_GAP
+			rowHeights[row] = Math.max(rowHeights[row] ?? 0, height)
+		})
+		const rowTops = rowHeights.map(
+			(_, row) =>
+				laneTop + rowHeights.slice(0, row).reduce((top, height) => top + height + WRAP_GAP, 0),
+		)
 
 		const nodes: FlowNode[] = []
 		columns.forEach((column, columnIndex) => {
@@ -244,26 +298,69 @@ function layoutLanes(turns: readonly SessionTurn[], mergeRepeats: boolean): read
 					subtitle: nodeSubtitle(group),
 					errored: group.some((member) => member.statusCode === "Error"),
 					count: group.length,
-					x: LANE_LABEL_WIDTH + CANVAS_PADDING + columnIndex * (NODE_WIDTH + COLUMN_GAP),
-					y: laneTop + stackIndex * (NODE_HEIGHT + STACK_GAP),
+					x:
+						LANE_LABEL_WIDTH +
+						CANVAS_PADDING +
+						(columnIndex % MAX_COLUMNS) * (NODE_WIDTH + COLUMN_GAP),
+					y:
+						rowTops[Math.floor(columnIndex / MAX_COLUMNS)]! +
+						stackIndex * (NODE_HEIGHT + STACK_GAP),
 				})
 			})
 		})
 
 		const edges: (readonly [FlowNode, FlowNode])[] = []
 		for (let index = 1; index < columns.length; index++) {
+			// A connector across a wrap would run backwards up the block; the rows
+			// read in order the way lines of text do.
+			if (Math.floor(index / MAX_COLUMNS) !== Math.floor((index - 1) / MAX_COLUMNS)) continue
 			for (const from of nodesInColumn(nodes, columns, index - 1)) {
 				for (const to of nodesInColumn(nodes, columns, index)) edges.push([from, to])
 			}
 		}
 
 		const height =
-			Math.max(...columns.map((column) => column.length)) * (NODE_HEIGHT + STACK_GAP) - STACK_GAP
+			rowHeights.reduce((total, rowHeight) => total + rowHeight, 0) + (rowHeights.length - 1) * WRAP_GAP
 		lanes.push({ turn, nodes, edges, height })
 		laneTop += height + LANE_GAP
 	}
 
 	return lanes
+}
+
+/**
+ * The spans worth a node: the turn's anchor, the leaf work (model calls and
+ * tools), and real delegations.
+ *
+ * Frameworks wrap one model call in two or three spans — `invoke_agent` →
+ * `call_llm` → `generate_content` — and drawing each of them turns a single call
+ * into a chain of handoffs that never happened. The deepest span is the work;
+ * everything above it is scaffolding.
+ */
+function flowSpans(turn: SessionTurn, query: string, agentSpansOnly: boolean): readonly AiSessionSpan[] {
+	const spans = filterSpans(turn.spans, query, agentSpansOnly)
+	const byId = new Map(spans.map((span) => [span.spanId, span]))
+
+	const candidates = spans.filter((span) => {
+		const category = classifySpan(span)
+		if (category === "other") return false
+		if (span.spanId === turn.anchor.spanId) return true
+		return category === "agent" ? isDelegation(span, byId) : true
+	})
+
+	const wrappers = new Set<string>()
+	for (const span of candidates) {
+		const category = classifySpan(span)
+		let parent = byId.get(span.parentSpanId)
+		while (parent !== undefined) {
+			if (classifySpan(parent) === category) wrappers.add(parent.spanId)
+			parent = byId.get(parent.parentSpanId)
+		}
+	}
+
+	// The anchor and the delegations are structural, so only leaf work can be a
+	// wrapper of its own kind.
+	return candidates.filter((span) => classifySpan(span) === "agent" || !wrappers.has(span.spanId))
 }
 
 function nodesInColumn(
@@ -320,12 +417,7 @@ function assignColumns(
 	for (const group of groups) {
 		const span = group[0]!
 		const isContainer = parents.has(span.spanId)
-		if (
-			columns.length === 0 ||
-			isContainer ||
-			openIsContainer ||
-			spanStartMs(span) >= openEndMs
-		) {
+		if (columns.length === 0 || isContainer || openIsContainer || spanStartMs(span) >= openEndMs) {
 			columns.push([group])
 			openEndMs = spanEndMs(group[group.length - 1]!)
 			openIsContainer = isContainer
@@ -366,8 +458,9 @@ function nodeSubtitle(group: readonly AiSessionSpan[]): string {
 		const completion = (span.genAi.usageOutputTokens ?? 0) + (span.genAi.usageReasoningOutputTokens ?? 0)
 		if (prompt > 0 || completion > 0) {
 			parts.push(`${formatNumber(prompt)} → ${formatNumber(completion)}`)
-		} else if (spanModel(span) !== undefined) {
-			parts.push(spanModel(span)!)
+		} else {
+			const model = spanModel(span)
+			if (model !== undefined) parts.push(shortTarget(model))
 		}
 	} else if (span.genAi.agentName !== undefined) {
 		parts.push(span.genAi.agentName)
