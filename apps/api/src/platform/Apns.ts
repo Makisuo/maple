@@ -46,7 +46,14 @@ export interface ApnsPush {
 	/** Deep-link and grouping data delivered to the app alongside the alert. */
 	readonly data: Record<string, string>
 	readonly threadId?: string | undefined
-	readonly sound?: string | undefined
+	/**
+	 * `undefined` plays the default sound, an explicit `null` plays none.
+	 *
+	 * The distinction matters: an all-clear that buzzes the phone is the same
+	 * interruption as the alert it cancels, and a stream of them is why people
+	 * turn the app's notifications off entirely.
+	 */
+	readonly sound?: string | null | undefined
 }
 
 /**
@@ -254,7 +261,7 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 								: undefined),
 							body: push.alert.body,
 						},
-						sound: push.sound ?? "default",
+						...(push.sound === null ? undefined : { sound: push.sound ?? "default" }),
 						...(push.threadId !== undefined ? { "thread-id": push.threadId } : undefined),
 						...(push.interruptionLevel !== undefined
 							? { "interruption-level": push.interruptionLevel }

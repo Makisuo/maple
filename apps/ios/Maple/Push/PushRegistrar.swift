@@ -269,6 +269,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 	/// A push while the app is open still shows as a banner — the user asked
 	/// to be told, and the Home screen may be showing something else.
 	///
+	/// An all-clear arrives without a sound: it is delivered silently by APNs,
+	/// and playing one here would put the noise back for exactly the people
+	/// already looking at the app.
+	///
 	/// `nonisolated`: `UIApplicationDelegate` puts the class on the main actor,
 	/// but the notification centre calls these off it with non-Sendable
 	/// arguments. Everything read from them is reduced to strings before
@@ -278,7 +282,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		willPresent notification: UNNotification,
 		withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
 	) {
-		completionHandler([.banner, .sound, .list])
+		let event = notification.request.content.userInfo["maple_event"] as? String
+		completionHandler(event == "resolve" ? [.banner, .list] : [.banner, .sound, .list])
 	}
 
 	nonisolated func userNotificationCenter(
@@ -310,6 +315,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 				Telemetry.track(Telemetry.Event.pushOpened, ["kind": "alert_incident"])
 				await PushRegistrar.shared.opener?.open(
 					WidgetDeepLink(target: .incident(id: incidentId), organizationId: organizationId),
+					source: .push
+				)
+			case "alert_rule_digest":
+				// The stand-in for a storm: one card for the incidents a rule opened
+				// past its share of a tick. There is no single incident to open, so
+				// it lands on the list they are all in.
+				Telemetry.PushOpen.begin(
+					kind: "alert_rule_digest",
+					screen: Screen.incidents,
+					coldStart: Telemetry.Launch.isColdStart
+				)
+				Telemetry.track(Telemetry.Event.pushOpened, ["kind": "alert_rule_digest"])
+				await PushRegistrar.shared.opener?.open(
+					WidgetDeepLink(target: .incidentsList, organizationId: organizationId),
 					source: .push
 				)
 			default:

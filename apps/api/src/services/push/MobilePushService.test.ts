@@ -8,7 +8,9 @@ import { MobileDevicesService, type MobileDevice } from "./MobileDevicesService"
 import {
 	MobilePushService,
 	buildLiveActivitySeries,
+	renderDigestPush,
 	renderIncidentPush,
+	shouldPushRenotify,
 	type IncidentPushEvent,
 } from "./MobilePushService"
 
@@ -134,34 +136,99 @@ const makeLayer = (
 	)
 
 describe("renderIncidentPush", () => {
-	it("puts the rule up top, severity and service in the subtitle, and the breach in the body", () => {
+	it("leads with the state, then the rule, and puts the breach in the body", () => {
 		const rendered = renderIncidentPush(event())
 		expect(rendered.alert).toEqual({
-			title: "Checkout error rate",
-			subtitle: "Critical · checkout-api",
+			title: "Critical · Checkout error rate",
+			subtitle: "checkout-api",
 			body: "Error Rate 9.1% > 5% over 5m.",
 		})
 		expect(rendered.interruptionLevel).toBe("time-sensitive")
 		expect(rendered.priority).toBe(10)
 	})
 
-	it("keeps warnings out of Focus and resolutions quiet", () => {
+	it("keeps warnings out of Focus, and resolutions quiet and silent", () => {
 		expect(renderIncidentPush(event({ severity: "warning" })).interruptionLevel).toBe("active")
 		const resolved = renderIncidentPush(
 			event({ eventType: "resolve", value: 0.012, openForMs: 32 * 60_000 }),
 		)
-		expect(resolved.alert.title).toBe("Resolved: Checkout error rate")
+		expect(resolved.alert.title).toBe("Resolved · Checkout error rate")
 		expect(resolved.alert.body).toBe("Error Rate back to 1.2% after 32m.")
 		expect(resolved.interruptionLevel).toBe("passive")
 		expect(resolved.priority).toBe(5)
+		// Explicitly no sound — the APNs client defaults to one otherwise.
+		expect(resolved.sound).toBe(null)
+	})
+
+	it("says how long a repeat has been going on", () => {
+		const rendered = renderIncidentPush(event({ eventType: "renotify", openForMs: 2 * 3_600_000 }))
+		expect(rendered.alert.title).toBe("Still critical · Checkout error rate")
+		expect(rendered.alert.subtitle).toBe("checkout-api · open 2h")
 	})
 
 	it("names the group for grouped rules and counts extra services", () => {
-		expect(renderIncidentPush(event({ groupKey: "worker" })).alert.subtitle).toBe("Critical · worker")
-		expect(renderIncidentPush(event({ serviceNames: ["a", "b", "c"] })).alert.subtitle).toBe(
-			"Critical · a +2",
+		expect(renderIncidentPush(event({ groupKey: "worker" })).alert.subtitle).toBe("worker")
+		expect(renderIncidentPush(event({ serviceNames: ["a", "b", "c"] })).alert.subtitle).toBe("a +2")
+		expect(renderIncidentPush(event({ serviceNames: [] })).alert.subtitle).toBeUndefined()
+	})
+})
+
+describe("shouldPushRenotify", () => {
+	const repeat = (
+		previousMinutes: number,
+		minutes: number,
+		severity: "critical" | "warning" = "critical",
+	) =>
+		shouldPushRenotify(
+			event({
+				eventType: "renotify",
+				severity,
+				previousNotifiedOpenForMs: previousMinutes * 60_000,
+				openForMs: minutes * 60_000,
+			}),
 		)
-		expect(renderIncidentPush(event({ serviceNames: [] })).alert.subtitle).toBe("Critical")
+
+	it("repeats on the ladder and stays quiet between its rungs", () => {
+		// A rule renotifying every 30 minutes: 30m, 1h and 2h ring; 1h30 and
+		// 2h30 do not.
+		expect(repeat(0, 30)).toBe(true)
+		expect(repeat(30, 60)).toBe(true)
+		expect(repeat(60, 90)).toBe(false)
+		expect(repeat(90, 120)).toBe(true)
+		expect(repeat(120, 150)).toBe(false)
+		expect(repeat(210, 240)).toBe(true)
+	})
+
+	it("cannot skip a rung when a tick runs late or the interval is long", () => {
+		// A two-hour renotify interval crosses two rungs at once — still one push.
+		expect(repeat(0, 120)).toBe(true)
+		expect(repeat(120, 240)).toBe(true)
+		// Past the last rung, twice a day.
+		expect(repeat(480, 720)).toBe(false)
+		expect(repeat(480, 1200)).toBe(true)
+	})
+
+	it("never repeats a warning on a phone", () => {
+		expect(repeat(0, 30, "warning")).toBe(false)
+		expect(repeat(480, 1200, "warning")).toBe(false)
+	})
+})
+
+describe("renderDigestPush", () => {
+	it("counts the incidents it stands in for", () => {
+		const rendered = renderDigestPush({
+			orgId: ORG,
+			ruleId: "rule-1",
+			ruleName: "Checkout error rate",
+			severity: "critical",
+			suppressed: 17,
+			linkUrl: "https://app.maple.dev/alerts",
+		})
+		expect(rendered.alert.title).toBe("Critical · Checkout error rate")
+		expect(rendered.alert.subtitle).toBe("17 more groups breaching")
+		// Loud enough to be seen, never loud enough to break through Focus: the
+		// front of this storm already did that.
+		expect(rendered.interruptionLevel).toBe("active")
 	})
 })
 
@@ -224,6 +291,41 @@ describe("MobilePushService.notifyIncident", () => {
 					sent,
 					disabled,
 				),
+			),
+		)
+	})
+
+	it.effect("holds back a repeat between the ladder's rungs, and files resolutions separately", () => {
+		const sent: Array<ApnsPush> = []
+		const live: LiveActivityRecorder = { pushes: [], ended: [] }
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			// 1h30 open, last notified at 1h: no rung crossed, so no banner —
+			// but the Lock Screen still gets the new numbers.
+			const quiet = yield* push.notifyIncident(
+				event({
+					eventType: "renotify",
+					previousNotifiedOpenForMs: 60 * 60_000,
+					openForMs: 90 * 60_000,
+				}),
+			)
+			assert.deepStrictEqual(quiet, { sent: 0, failed: 0, unregistered: 0, skipped: 1 })
+			assert.strictEqual(sent.length, 0)
+			assert.deepStrictEqual(
+				live.pushes.map((p) => p.event),
+				["update"],
+			)
+
+			yield* push.notifyIncident(event({ eventType: "resolve", openForMs: 90 * 60_000 }))
+			assert.deepStrictEqual(
+				sent.map((p) => [p.threadId, p.sound]),
+				[["rule-1:resolved", null]],
+			)
+		}).pipe(
+			Effect.provide(
+				makeLayer([device(1)], () => ({ outcome: "sent", apnsId: null }), sent, [], true, live, [
+					activity(1),
+				]),
 			),
 		)
 	})

@@ -26,8 +26,12 @@ struct NotificationSettingsView: View {
 						permissionSection
 						if push.authorization == .authorized {
 							prefsSection("Alerts") {
-								toggle("Critical incidents", "Breaks through Focus.", \.criticalIncidents)
-								toggle("Warnings", nil, \.warningIncidents)
+								toggle(
+									"Critical incidents",
+									"Breaks through Focus. Reminders space out the longer one stays open.",
+									\.criticalIncidents
+								)
+								toggle("Warnings", "One notification each — warnings never repeat.", \.warningIncidents)
 								toggle("Resolved", "Quiet — no sound, no Focus.", \.resolvedIncidents)
 							}
 							liveActivitySection

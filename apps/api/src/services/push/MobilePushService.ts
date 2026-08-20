@@ -47,8 +47,15 @@ export interface IncidentPushEvent {
 	readonly serviceNames: ReadonlyArray<string>
 	readonly windowMinutes: number
 	readonly dedupeKey: string
-	/** Milliseconds the incident had been open when it resolved; null while open. */
+	/** Milliseconds the incident had been open when this event fired; null when unknown. */
 	readonly openForMs: number | null
+	/**
+	 * How long the incident had been open at the *previous* notification for it,
+	 * null when this is the first. Together with `openForMs` it says which slice
+	 * of the incident's life this renotify covers, which is what the escalation
+	 * ladder below is a function of — see `shouldPushRenotify`.
+	 */
+	readonly previousNotifiedOpenForMs?: number | null
 	/**
 	 * Recent observed values for this rule and group, newest first — the shape
 	 * the Lock Screen sparkline draws.
@@ -69,8 +76,23 @@ export interface MobilePushSummary {
 	readonly skipped: number
 }
 
+/**
+ * One push standing in for the incidents a rule opened past its per-tick share.
+ * Sent once, after the tick, instead of the banners it replaces.
+ */
+export interface IncidentDigestPushEvent {
+	readonly orgId: OrgId
+	readonly ruleId: string
+	readonly ruleName: string
+	readonly severity: AlertSeverity
+	/** How many incidents for this rule went unsent. Always at least one. */
+	readonly suppressed: number
+	readonly linkUrl: string
+}
+
 export interface MobilePushServiceApi {
 	readonly notifyIncident: (event: IncidentPushEvent) => Effect.Effect<MobilePushSummary>
+	readonly notifyIncidentDigest: (event: IncidentDigestPushEvent) => Effect.Effect<MobilePushSummary>
 }
 
 const SEND_CONCURRENCY = 8
@@ -108,6 +130,50 @@ const wantsEvent = (device: MobileDevice, event: IncidentPushEvent): boolean => 
 	}
 }
 
+/**
+ * How long an incident has been open when a repeat push is worth another
+ * interruption: 30m, 1h, 2h, 4h, 8h, then twice a day.
+ *
+ * A rule renotifies on a fixed interval (30 minutes by default) for as long as
+ * it stays breached, and every one of those used to buzz every phone in the
+ * org — an incident nobody can fix before the weekend is 48 identical banners.
+ * The ladder keeps the early repeats, when the situation is still moving and a
+ * reminder is information, and thins out the later ones, when it is not.
+ *
+ * Nothing is lost by the thinning: the incident stays in Notification Center
+ * (every event for it shares one `collapseId`), and on a critical incident the
+ * Lock Screen activity goes on refreshing its numbers silently on every
+ * renotify.
+ */
+const RENOTIFY_ESCALATION_MINUTES = [30, 60, 120, 240, 480] as const
+/** Past the last rung, one more push every twelve hours. */
+const RENOTIFY_TAIL_INTERVAL_MINUTES = 720
+
+const escalationRungsBelow = (openForMs: number): number => {
+	const minutes = openForMs / 60_000
+	const last = RENOTIFY_ESCALATION_MINUTES[RENOTIFY_ESCALATION_MINUTES.length - 1]
+	const rungs = RENOTIFY_ESCALATION_MINUTES.filter((rung) => minutes >= rung).length
+	return minutes >= last ? rungs + Math.floor((minutes - last) / RENOTIFY_TAIL_INTERVAL_MINUTES) : rungs
+}
+
+/**
+ * Whether this renotify crosses a rung of the ladder — i.e. whether it is the
+ * first repeat since the previous one that reached a new interval.
+ *
+ * Measured between the two notifications rather than counted, so it holds
+ * whatever the rule's renotify interval is and cannot skip a rung when a tick
+ * runs late.
+ */
+export const shouldPushRenotify = (event: IncidentPushEvent): boolean => {
+	// Warnings never repeat on a phone. The first banner said what is wrong and
+	// the incident is one tap away; a warning that repeats all afternoon is the
+	// single loudest source of notification fatigue, and the one people cite
+	// when they turn warnings off altogether — losing the first banner too.
+	if (event.severity !== "critical") return false
+	if (event.openForMs === null) return true
+	return escalationRungsBelow(event.openForMs) > escalationRungsBelow(event.previousNotifiedOpenForMs ?? 0)
+}
+
 const humanDuration = (ms: number): string => {
 	const minutes = Math.max(1, Math.round(ms / 60_000))
 	if (minutes < 60) return `${minutes}m`
@@ -119,13 +185,19 @@ const humanDuration = (ms: number): string => {
 }
 
 /**
- * The card on the phone: rule name up top, severity + service as the
- * subtitle, and the breach in the signal's unit as the body — the same three
- * lines Home shows, so the notification and the screen it opens agree.
+ * The card on the phone: **state first**, then the rule, then the breach in
+ * the signal's unit.
+ *
+ * The state leads the title because that is the only part of a notification
+ * anyone reads in the stack — a list of banners all headed by the rule name
+ * makes an all-clear look exactly like the alarm it cancels, and the two get
+ * confused in precisely the moment when confusing them is expensive. Nothing
+ * else on an iOS notification is available for this: the icon is the app's,
+ * and colour is not ours to set.
  */
 export const renderIncidentPush = (
 	event: IncidentPushEvent,
-): Pick<ApnsPush, "alert" | "interruptionLevel" | "priority"> => {
+): Pick<ApnsPush, "alert" | "interruptionLevel" | "priority" | "sound"> => {
 	const service =
 		displayGroupKey(event.groupKey) ??
 		(event.serviceNames.length === 1
@@ -144,25 +216,34 @@ export const renderIncidentPush = (
 	})
 	const label = event.signalDisplay.label
 
+	const rule = truncate(event.ruleName, 60)
+	const openFor = event.openForMs === null ? null : humanDuration(event.openForMs)
+
 	switch (event.eventType) {
 		case "resolve": {
 			const now = formatSignalMetric(event.value, event.signalDisplay)
-			const after = event.openForMs === null ? "" : ` after ${humanDuration(event.openForMs)}`
+			const after = openFor === null ? "" : ` after ${openFor}`
 			return {
 				alert: {
-					title: `Resolved: ${truncate(event.ruleName, 60)}`,
+					title: `Resolved · ${rule}`,
 					subtitle: service ?? undefined,
 					body: `${label} back to ${now}${after}.`,
 				},
 				interruptionLevel: "passive",
 				priority: 5,
+				// Silent, deliberately. An all-clear is good news that can wait for
+				// the next time the phone is picked up; making it sound turns every
+				// incident into two interruptions.
+				sound: null,
 			}
 		}
 		case "renotify":
 			return {
 				alert: {
-					title: truncate(event.ruleName, 60),
-					subtitle: `Still ${severity.toLowerCase()}${service ? ` · ${service}` : ""}`,
+					title: `Still ${severity.toLowerCase()} · ${rule}`,
+					subtitle: [service, openFor === null ? null : `open ${openFor}`]
+						.filter((part) => part !== null)
+						.join(" · "),
 					body: `${label} ${observed} over ${formatWindow(event.windowMinutes)}.`,
 				},
 				interruptionLevel: "active",
@@ -172,13 +253,44 @@ export const renderIncidentPush = (
 		case "test":
 			return {
 				alert: {
-					title: truncate(event.ruleName, 60),
-					subtitle: `${severity}${service ? ` · ${service}` : ""}`,
+					title: `${severity} · ${rule}`,
+					subtitle: service ?? undefined,
 					body: `${label} ${observed} over ${formatWindow(event.windowMinutes)}.`,
 				},
 				interruptionLevel: event.severity === "critical" ? "time-sensitive" : "active",
 				priority: 10,
 			}
+	}
+}
+
+/**
+ * iOS stacks notifications by thread, so firing and resolved incidents for the
+ * same rule are kept in separate stacks: an all-clear should never be the card
+ * on top of a pile of alarms, and a screen of resolutions should collapse into
+ * one row rather than crowd out what is still open.
+ */
+const threadIdFor = (event: IncidentPushEvent): string =>
+	event.eventType === "resolve" ? `${event.ruleId}:resolved` : event.ruleId
+
+/**
+ * The stand-in for a storm: one card saying how many groups of a rule broke,
+ * in place of the banners the per-rule budget held back.
+ */
+export const renderDigestPush = (
+	event: IncidentDigestPushEvent,
+): Pick<ApnsPush, "alert" | "interruptionLevel" | "priority"> => {
+	const severity = event.severity === "critical" ? "Critical" : "Warning"
+	const groups = event.suppressed === 1 ? "1 more group" : `${event.suppressed} more groups`
+	return {
+		alert: {
+			title: `${severity} · ${truncate(event.ruleName, 60)}`,
+			subtitle: `${groups} breaching`,
+			body: `${groups} opened an incident on this rule. Open Maple to see them all.`,
+		},
+		// Never time-sensitive: the incidents this stands for already sent their
+		// share of banners, and this one is the tail of a storm, not its front.
+		interruptionLevel: "active",
+		priority: 5,
 	}
 }
 
@@ -295,8 +407,12 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 							),
 						),
 					)
-				const targets = registered.filter((device) => wantsEvent(device, event))
+				// A repeat that has not reached the next rung of the escalation
+				// ladder still updates the Lock Screen below, but sends no banner.
+				const escalates = event.eventType !== "renotify" || shouldPushRenotify(event)
+				const targets = escalates ? registered.filter((device) => wantsEvent(device, event)) : []
 				const skipped = registered.length - targets.length
+				yield* Effect.annotateCurrentSpan({ "maple.push.escalates": escalates })
 				if (targets.length === 0) {
 					// Nobody wants the banner, but an activity already on someone's
 					// Lock Screen still has to be updated or ended — a resolve with
@@ -320,7 +436,8 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 								// One incident stream = one notification on the device;
 								// a renotify or resolve replaces the trigger.
 								collapseId: event.dedupeKey,
-								threadId: event.ruleId,
+								threadId: threadIdFor(event),
+								sound: rendered.sound,
 								data: {
 									maple_kind: "alert_incident",
 									maple_event: event.eventType,
@@ -575,7 +692,65 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 				)
 			})
 
-			return { notifyIncident } satisfies MobilePushServiceApi
+			const notifyIncidentDigest = Effect.fn("MobilePushService.notifyIncidentDigest")(function* (
+				event: IncidentDigestPushEvent,
+			) {
+				yield* Effect.annotateCurrentSpan({
+					orgId: event.orgId,
+					"maple.alert.rule_id": event.ruleId,
+					"maple.push.suppressed": event.suppressed,
+				})
+				const empty: MobilePushSummary = { sent: 0, failed: 0, unregistered: 0, skipped: 0 }
+				if (!apns.isConfigured) return empty
+
+				const registered = yield* devices
+					.listForOrg(event.orgId)
+					.pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<MobileDevice>))
+				const targets = registered.filter((device) =>
+					event.severity === "critical"
+						? device.preferences.criticalIncidents
+						: device.preferences.warningIncidents,
+				)
+				const skipped = registered.length - targets.length
+				if (targets.length === 0) return { ...empty, skipped }
+
+				const rendered = renderDigestPush(event)
+				const results = yield* Effect.forEach(
+					targets,
+					(device) =>
+						apns
+							.send({
+								deviceToken: device.token,
+								environment: device.environment,
+								bundleId: device.bundleId,
+								alert: rendered.alert,
+								interruptionLevel: rendered.interruptionLevel,
+								priority: rendered.priority,
+								// One digest per rule per tick, replacing the previous one:
+								// a rule breaking group after group must not itself become
+								// the storm the digest exists to prevent.
+								collapseId: `${event.orgId}:${event.ruleId}:digest`,
+								threadId: event.ruleId,
+								data: {
+									maple_kind: "alert_rule_digest",
+									maple_rule_id: encodePublicId(PublicIdPrefixes.alertRule, event.ruleId),
+									maple_org_id: event.orgId,
+									maple_url: event.linkUrl,
+								},
+							})
+							.pipe(
+								Effect.timeout(SEND_TIMEOUT),
+								Effect.map((result) => result.outcome),
+								Effect.orElseSucceed(() => "failed" as const),
+							),
+					{ concurrency: SEND_CONCURRENCY },
+				)
+				const sent = results.filter((outcome) => outcome === "sent").length
+				const unregistered = results.filter((outcome) => outcome === "unregistered").length
+				return { sent, failed: results.length - sent - unregistered, unregistered, skipped }
+			})
+
+			return { notifyIncident, notifyIncidentDigest } satisfies MobilePushServiceApi
 		}),
 	},
 ) {

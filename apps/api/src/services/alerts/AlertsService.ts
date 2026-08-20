@@ -83,6 +83,7 @@ import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { formatComparator } from "./alert-formatting"
+import { makeIncidentPushBudget, type IncidentPushBudget } from "./alert-push-budget"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
@@ -163,15 +164,11 @@ const ALERT_CHECK_INGEST_CONCURRENCY = 4
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
 // group-by rule opening hundreds of incidents can't stall the per-minute tick.
 const ISSUE_UPSERTS_PER_TICK = 50
-// The same fuse for phones, and it bounds two things at once. A grouped rule
-// opening many incidents at once would otherwise send one notification per
-// group to every registered device in the org — and because the send is awaited
-// inside the tick, the evaluation of every other rule that minute queues behind
-// it. Capping the events caps both the notification storm and the wall time the
-// tick can spend in APNs. Deliberately not solved by forking the send instead:
-// on Workers a fiber that outlives the invocation is simply cancelled, which
-// would trade a slow notification for a silently dropped one.
-const INCIDENT_PUSHES_PER_TICK = 25
+// The same fuse for phones lives in `alert-push-budget.ts`, which bounds both
+// the tick's total sends and any one rule's share of them. Deliberately not
+// solved by forking the sends instead: on Workers a fiber that outlives the
+// invocation is simply cancelled, which would trade a slow notification for a
+// silently dropped one.
 /**
  * Checks read for the Lock Screen sparkline. Rules evaluate about once a
  * minute, so this is the last ~half hour — enough to show the climb that opened
@@ -703,17 +700,23 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					scheduledAt: number,
 					// Null on the ad-hoc paths (a rule edit resolving its own
 					// incidents): those are one user action, not a storm.
-					pushBudget: Ref.Ref<number> | null,
+					pushBudget: IncidentPushBudget | null,
 				) {
 					// Phones first, and regardless of destinations: push is per person,
 					// not per rule, and a rule with no Slack channel still has people
 					// who installed the app. Best-effort by contract — it never fails
 					// the tick.
+					const linkUrl = resolveNotificationLinkUrl(rule, incident.groupKey)
 					const pushAllowed =
 						pushBudget === null ||
-						(yield* Ref.modify(pushBudget, (remaining): [boolean, number] =>
-							remaining > 0 ? [true, remaining - 1] : [false, remaining],
-						))
+						(yield* pushBudget.claim({
+							orgId,
+							ruleId: rule.id,
+							ruleName: rule.name,
+							severity: rule.severity,
+							linkUrl,
+							kind: eventType === "resolve" ? "resolve" : "firing",
+						}))
 					if (pushAllowed) {
 						yield* mobilePush
 							.notifyIncident({
@@ -737,11 +740,22 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 								serviceNames: rule.serviceNames,
 								windowMinutes: rule.windowMinutes,
 								dedupeKey: incident.dedupeKey,
-								openForMs:
-									eventType === "resolve"
-										? Math.max(0, scheduledAt - dateToMs(incident.firstTriggeredAt))
-										: null,
-								linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
+								// Always, not just on resolve: how long an incident has been
+								// open is what the renotify escalation ladder is a function
+								// of, and it is the subtitle of every repeat banner.
+								openForMs: Math.max(0, scheduledAt - dateToMs(incident.firstTriggeredAt)),
+								// Read from the incident BEFORE the tick advanced
+								// `lastNotifiedAt` — this is the previous notification, which
+								// is the other end of the interval the ladder measures.
+								previousNotifiedOpenForMs:
+									incident.lastNotifiedAt === null
+										? null
+										: Math.max(
+												0,
+												dateToMs(incident.lastNotifiedAt) -
+													dateToMs(incident.firstTriggeredAt),
+											),
+								linkUrl,
 								// Unevaluated: the Lock Screen sparkline is the only
 								// consumer, so this warehouse read happens for a critical
 								// incident on a phone that can show one, and nowhere else.
@@ -765,8 +779,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							})
 							.pipe(Effect.timeout("20 seconds"), Effect.ignoreCause)
 					} else {
-						yield* Effect.logWarning(
-							"Mobile push: per-tick budget exhausted, skipping incident notification",
+						yield* Effect.logInfo(
+							"Mobile push: over this rule's per-tick share, folding the incident into the digest",
 						).pipe(Effect.annotateLogs({ orgId, ruleId: rule.id, incidentId: incident.id }))
 					}
 
@@ -1770,7 +1784,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				timestamp: number,
 				pendingChecks: Ref.Ref<Chunk.Chunk<AlertChecksRow>>,
 				issueBudget: Ref.Ref<number>,
-				pushBudget: Ref.Ref<number>,
+				pushBudget: IncidentPushBudget,
 				prefetch: TickPrefetch,
 			) {
 				const stateConflictTarget: [
@@ -2316,7 +2330,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					readonly staleGroupKeys?: HashSet.HashSet<string>
 					readonly resolveAll?: boolean
 					/** Absent on the rule-edit paths, which are one user action. */
-					readonly pushBudget?: Ref.Ref<number>
+					readonly pushBudget?: IncidentPushBudget
 				},
 			) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": ruleId })
@@ -2417,7 +2431,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					evaluatedGroups: HashSet.HashSet<string>,
 					timestamp: number,
 					openIncidents: ReadonlyArray<AlertIncidentRow>,
-					pushBudget: Ref.Ref<number>,
+					pushBudget: IncidentPushBudget,
 				) {
 					// Supplied from the tick-head prefetch instead of re-read here — this
 					// was the single heaviest query shape in the service, because it read
@@ -2924,7 +2938,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				// Chunk makes concurrent appends immutable without copying the full buffer.
 				const pendingChecks = yield* Ref.make(Chunk.empty<AlertChecksRow>())
 				const issueBudget = yield* Ref.make(ISSUE_UPSERTS_PER_TICK)
-				const pushBudget = yield* Ref.make(INCIDENT_PUSHES_PER_TICK)
+				const pushBudget = yield* makeIncidentPushBudget
 
 				// Two housekeeping statements used to run per rule, inside the loop.
 				// Both are gated to touch zero rows in steady state (to keep the
@@ -3273,6 +3287,20 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					Chunk.toReadonlyArray(yield* Ref.get(selfHealTargets)),
 					Chunk.toReadonlyArray(yield* Ref.get(clearErrorTargets)),
 					tickStart,
+				)
+
+				// One card per rule for everything its share held back, in place of
+				// the banners themselves. After the whole rule loop, so a rule that
+				// broke across forty groups is one digest rather than one per chunk.
+				// Best-effort like every other push: a digest is a courtesy, and it
+				// must never fail the tick that produced it.
+				yield* Effect.forEach(
+					yield* pushBudget.suppressed,
+					(rule) =>
+						mobilePush
+							.notifyIncidentDigest(rule)
+							.pipe(Effect.timeout("20 seconds"), Effect.ignoreCause),
+					{ concurrency: 4, discard: true },
 				)
 
 				// Resolve stale incidents for disabled rules
