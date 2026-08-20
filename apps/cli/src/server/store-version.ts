@@ -9,7 +9,9 @@
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { Effect, Schema, SchemaGetter } from "effect"
 import { CHDB_VERSION } from "../version"
+import { Digest64, Fingerprint16, IsoOrUnknown } from "./identity-schema"
 import { durableRemove, durableWrite } from "./durable-files"
 
 export const STORE_MARKER_FORMAT_VERSION = 2 as const
@@ -112,83 +114,94 @@ export const markStoreClosedDurable = async (dataDir: string): Promise<void> => 
 export const isStoreDirty = (dataDir: string): boolean =>
 	storeHasData(dataDir) && existsSync(storeOpenMarkerPath(dataDir))
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
+/**
+ * Provenance fields are read leniently.
+ *
+ * `maple`, `createdAt`, and `createdByMaple` describe who made the store, not
+ * what it contains. A store whose provenance is missing or garbled is still a
+ * perfectly openable store, so a bad value degrades to "unknown" instead of
+ * making the marker malformed and refusing to start. Everything below this
+ * comment — the identity fields the loader actually acts on — is strict.
+ */
+const LenientProvenance = Schema.Unknown.pipe(
+	Schema.decodeTo(Schema.String, {
+		decode: SchemaGetter.transform((value) => (typeof value === "string" ? value : "unknown")),
+		encode: SchemaGetter.passthrough(),
+	}),
+	Schema.withDecodingDefaultKey(Effect.succeed(undefined)),
+)
 
-const isIsoOrUnknown = (value: unknown): value is string =>
-	typeof value === "string" && (value === "unknown" || Number.isFinite(Date.parse(value)))
+const StoreMigrationStampSchema = Schema.Struct({
+	id: Schema.String,
+	completedAt: IsoOrUnknown,
+	fromVersion: Schema.Int,
+	toVersion: Schema.Int,
+})
 
-const isHexDigest = (value: unknown): value is string =>
-	typeof value === "string" && /^[0-9a-f]{64}$/i.test(value)
+const StoreMarkerV2Schema = Schema.Struct({
+	formatVersion: Schema.Literal(STORE_MARKER_FORMAT_VERSION),
+	storeId: Schema.String.check(Schema.isMinLength(1)),
+	chdb: Schema.String.check(Schema.isMinLength(1)),
+	maple: LenientProvenance,
+	createdAt: LenientProvenance.check(
+		Schema.makeFilter((value: string) =>
+			value === "unknown" || Number.isFinite(Date.parse(value))
+				? undefined
+				: "marker createdAt is invalid",
+		),
+	),
+	createdByMaple: LenientProvenance,
+	schemaVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	schemaDigest: Digest64,
+	schema: Fingerprint16,
+	activation: Schema.Literals(["active", "staging"]),
+	lastMigration: Schema.optionalKey(StoreMigrationStampSchema),
+})
+
+/**
+ * The original marker had no `formatVersion` at all, so v1 is recognised by its
+ * absence. A malformed object must not silently become a legacy store, which is
+ * why `chdb` stays required here: it is the only field the original format
+ * guaranteed.
+ */
+const StoreMarkerV1Schema = Schema.Struct({
+	formatVersion: Schema.Literal(1).pipe(Schema.withDecodingDefaultKey(Effect.succeed(1 as const))),
+	chdb: Schema.String.check(Schema.isMinLength(1)),
+	maple: LenientProvenance,
+	createdAt: LenientProvenance.check(
+		Schema.makeFilter((value: string) =>
+			value === "unknown" || Number.isFinite(Date.parse(value))
+				? undefined
+				: "marker createdAt is invalid",
+		),
+	),
+	schema: Schema.Unknown.pipe(
+		Schema.decodeTo(Schema.String, {
+			decode: SchemaGetter.transform((value) => (typeof value === "string" ? value : "")),
+			encode: SchemaGetter.passthrough(),
+		}),
+		Schema.withDecodingDefaultKey(Effect.succeed(undefined)),
+	),
+})
+
+const decodeMarkerV1 = Schema.decodeUnknownSync(StoreMarkerV1Schema)
+const decodeMarkerV2 = Schema.decodeUnknownSync(StoreMarkerV2Schema)
 
 const parseMarker = (value: unknown): StoreMarker => {
-	if (!isRecord(value) || typeof value.chdb !== "string" || value.chdb.length === 0) {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		throw new Error("marker must contain a non-empty chdb string")
 	}
-	const maple = typeof value.maple === "string" ? value.maple : "unknown"
-	const createdAt = typeof value.createdAt === "string" ? value.createdAt : "unknown"
-	const schema = typeof value.schema === "string" ? value.schema : ""
-	if (!isIsoOrUnknown(createdAt)) throw new Error("marker createdAt is invalid")
-	if (
-		value.formatVersion !== undefined &&
-		value.formatVersion !== 1 &&
-		value.formatVersion !== STORE_MARKER_FORMAT_VERSION
-	) {
-		throw new Error(`unsupported marker format ${String(value.formatVersion)}`)
+	const formatVersion = (value as { readonly formatVersion?: unknown }).formatVersion
+	if (formatVersion !== undefined && formatVersion !== 1 && formatVersion !== STORE_MARKER_FORMAT_VERSION) {
+		throw new Error(`unsupported marker format ${String(formatVersion)}`)
 	}
-
-	if (value.formatVersion === STORE_MARKER_FORMAT_VERSION) {
-		if (typeof value.storeId !== "string" || value.storeId.length === 0) {
-			throw new Error("v2 marker storeId is missing")
-		}
-		if (!Number.isInteger(value.schemaVersion) || (value.schemaVersion as number) < 0) {
-			throw new Error("v2 marker schemaVersion is invalid")
-		}
-		if (!isHexDigest(value.schemaDigest)) throw new Error("v2 marker schemaDigest is invalid")
-		if (!/^[0-9a-f]{16}$/i.test(schema)) throw new Error("v2 marker schema fingerprint is invalid")
-		if (value.activation !== "active" && value.activation !== "staging") {
-			throw new Error("v2 marker activation is invalid")
-		}
-		const lastMigration = value.lastMigration
-		if (lastMigration !== undefined) {
-			if (
-				!isRecord(lastMigration) ||
-				typeof lastMigration.id !== "string" ||
-				!Number.isInteger(lastMigration.fromVersion) ||
-				!Number.isInteger(lastMigration.toVersion) ||
-				!isIsoOrUnknown(lastMigration.completedAt)
-			) {
-				throw new Error("v2 marker lastMigration is invalid")
-			}
-		}
-		return {
-			formatVersion: STORE_MARKER_FORMAT_VERSION,
-			storeId: value.storeId,
-			chdb: value.chdb,
-			maple,
-			createdAt,
-			createdByMaple: typeof value.createdByMaple === "string" ? value.createdByMaple : maple,
-			schemaVersion: value.schemaVersion as number,
-			schemaDigest: value.schemaDigest,
-			schema,
-			activation: value.activation,
-			...(!(lastMigration === undefined)
-				? {
-						lastMigration: {
-							id: lastMigration.id as string,
-							completedAt: lastMigration.completedAt as string,
-							fromVersion: lastMigration.fromVersion as number,
-							toVersion: lastMigration.toVersion as number,
-						},
-					}
-				: undefined),
-		}
+	if (formatVersion === STORE_MARKER_FORMAT_VERSION) {
+		const marker = decodeMarkerV2(value)
+		// The one default a struct cannot express: an unrecorded creator is the
+		// running version, not "unknown".
+		return marker.createdByMaple === "unknown" ? { ...marker, createdByMaple: marker.maple } : marker
 	}
-
-	// The original marker had no formatVersion. Treat it as v1. A malformed
-	// object must not silently become a legacy store, so the required chdb field
-	// above is the only compatibility relaxation.
-	return { formatVersion: 1, chdb: value.chdb, maple, createdAt, schema }
+	return decodeMarkerV1(value)
 }
 
 /** Read the marker with an explicit missing/malformed distinction. */
@@ -226,16 +239,13 @@ export const makeStoreMarker = (
 	schema: string,
 	options: StoreMarkerWriteOptions = {},
 ): StoreMarkerV2 => {
-	if (!/^[0-9a-f]{16}$/i.test(schema)) {
-		throw new Error("a 16-character schema fingerprint is required for a v2 marker")
-	}
-	if (!options.schemaDigest || !/^[0-9a-f]{64}$/i.test(options.schemaDigest)) {
-		throw new Error("a full 64-character schemaDigest is required for a v2 marker")
-	}
-	if (options.schemaVersion === undefined || !Number.isInteger(options.schemaVersion)) {
+	if (options.schemaVersion === undefined) {
 		throw new Error("a schemaVersion is required for a v2 marker")
 	}
-	return {
+	// Constructing through the same schema the reader decodes with is the point:
+	// the fingerprint and digest rules are stated once, and a marker this build
+	// writes is a marker this build can read back.
+	return decodeMarkerV2({
 		formatVersion: STORE_MARKER_FORMAT_VERSION,
 		storeId: options.storeId ?? randomUUID(),
 		chdb: CHDB_VERSION,
@@ -247,7 +257,7 @@ export const makeStoreMarker = (
 		schema,
 		activation: options.activation ?? "active",
 		...(!(options.lastMigration === undefined) ? { lastMigration: options.lastMigration } : undefined),
-	}
+	})
 }
 
 /** Serialize a current marker for a known identity. */

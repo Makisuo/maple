@@ -1,15 +1,21 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { decodeInstalledProgress, makeRawRowsState, type InstalledProgress } from "./journal-codecs"
-import { RAW_TELEMETRY_TTL_COLUMNS, readRawTelemetryRetentionDays, type Chdb } from "../chdb"
+import {
+	decodeInstalledProgress,
+	makeRawRowsState,
+	type InstalledProgress,
+	RAW_TABLES,
+	rawRowCounts,
+	expectedManifest,
+} from "./journal-codecs"
+import { readRawTelemetryRetentionDays } from "../chdb"
 import type {
 	LocalStoreMigrationModule,
 	MigrationModuleContext,
 	MigrationOperation,
 	StateDispositionEntry,
 } from "../local-store-migration-module"
-import { withRawTelemetryRetentionFloor } from "../schema-manifest"
 import {
 	LOCAL_SCHEMA_V7,
 	LOCAL_SCHEMA_V7_MANIFEST,
@@ -19,8 +25,6 @@ import {
 	LOCAL_SCHEMA_V8_SQL,
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
-
-const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
 /** Stamped into the journal and matched on the way back out. */
 const MODULE_ID = "local-0007-to-0008-apple-crash-frames" as const
@@ -32,29 +36,6 @@ type V7ToV8Progress = InstalledProgress
 
 const decodeState = V7ToV8StateCodec.decode
 const decodeProgress = decodeInstalledProgress
-
-const parseJsonEachRow = <A>(value: string): A[] =>
-	value
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.map((line) => JSON.parse(line) as A)
-
-const rawRowCounts = (db: Chdb): Readonly<Record<string, string>> => {
-	const quotedTables = RAW_TABLES.map((table) => `'${table}'`).join(", ")
-	const rows = parseJsonEachRow<{ table: string; rowCount: string }>(
-		db.query(
-			`SELECT table, toString(sum(rows)) AS rowCount FROM system.parts WHERE database = 'default' AND active = 1 AND table IN (${quotedTables}) GROUP BY table`,
-		),
-	)
-	const byTable = new Map(rows.map((row) => [row.table, row.rowCount]))
-	return Object.fromEntries(RAW_TABLES.map((table) => [table, byTable.get(table) ?? "0"]))
-}
-
-const expectedManifest = (manifest: typeof LOCAL_SCHEMA_V7_MANIFEST, retentionDays: number | undefined) =>
-	retentionDays === undefined
-		? manifest
-		: withRawTelemetryRetentionFloor(manifest, RAW_TABLES, retentionDays)
 
 const preflight = async (context: MigrationModuleContext): Promise<V7ToV8State> => {
 	await context.ensureCapacity()

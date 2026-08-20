@@ -1,6 +1,7 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { createHash } from "node:crypto"
 import { Schema } from "effect"
+import { decodeJsonEachRow, decodeJsonObjectRows } from "../chdb-rows"
 import {
 	LOCAL_SCHEMA_V1_MANIFEST,
 	LOCAL_SCHEMA_V1_SQL,
@@ -238,12 +239,41 @@ const decodeRawReplayProgress = (value: unknown): RawReplayProgress => {
 const asProgress = (value: RawReplayProgress | undefined): RawReplayProgress =>
 	value ?? { sourceInventory: {}, copied: {} }
 
-const parseJsonEachRow = <A>(value: string): A[] =>
-	value
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.map((line) => JSON.parse(line) as A)
+/**
+ * Row shapes read back out of chDB.
+ *
+ * `rowCount` and the hash aggregates are `string | number` on purpose: a UInt64
+ * arrives quoted or unquoted depending on the libchdb build, and `numberString`
+ * normalizes it. What must not happen is a `Number` decode above 2^53, which is
+ * why nothing here is `Schema.Number` alone.
+ */
+const Uint64Wire = Schema.Union([Schema.String, Schema.Number])
+
+const ColumnRowSchema = Schema.Struct({
+	name: Schema.String,
+	type: Schema.String,
+	position: Schema.Number,
+	default_kind: Schema.String,
+	default_expression: Schema.String,
+	compression_codec: Schema.String,
+})
+
+const NameRow = Schema.Struct({ name: Schema.String })
+
+const InventoryRow = Schema.Struct({
+	rowCount: Uint64Wire,
+	minTime: Schema.NullOr(Schema.String),
+	maxTime: Schema.NullOr(Schema.String),
+	hashSum: Uint64Wire,
+	hashXor: Uint64Wire,
+})
+
+const RowCountRow = Schema.Struct({ rowCount: Uint64Wire })
+
+const decodeColumnRows = decodeJsonEachRow(ColumnRowSchema)
+const decodeNameRows = decodeJsonEachRow(NameRow)
+const decodeInventoryRows = decodeJsonEachRow(InventoryRow)
+const decodeRowCountRows = decodeJsonEachRow(RowCountRow)
 
 const identifier = (value: string): string => {
 	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new Error(`unsafe ClickHouse identifier: ${value}`)
@@ -286,22 +316,13 @@ const queryTarget = (context: MigrationModuleContext, sql: string): Promise<stri
 const executeTarget = (context: MigrationModuleContext, sql: string): Promise<void> =>
 	context.openTarget((db) => db.exec(sql), { schemaSql: LOCAL_SCHEMA_V1_SQL, bootstrapSchema: false })
 
-interface ColumnRow {
-	name: string
-	type: string
-	position: number
-	default_kind: string
-	default_expression: string
-	compression_codec: string
-}
-
 const tableColumns = async (
 	context: MigrationModuleContext,
 	side: "source" | "target",
 	table: string,
 ): Promise<ReadonlyArray<LocalSchemaColumn>> => {
 	const query = `SELECT name, type, position, default_kind, default_expression, compression_codec FROM system.columns WHERE database = 'default' AND table = ${sqlString(table)} ORDER BY position`
-	const rows = parseJsonEachRow<ColumnRow>(
+	const rows = decodeColumnRows(
 		await (side === "source" ? querySource(context, query) : queryTarget(context, query)),
 	)
 	return rows.map((row) => ({
@@ -318,7 +339,7 @@ const tableColumns = async (
 }
 
 const tableExists = async (context: MigrationModuleContext, side: "source" | "target", table: string) => {
-	const rows = parseJsonEachRow<{ name: string }>(
+	const rows = decodeNameRows(
 		await (side === "source"
 			? querySource(
 					context,
@@ -334,7 +355,7 @@ const tableExists = async (context: MigrationModuleContext, side: "source" | "ta
 
 const assertKnownSourceObjects = async (context: MigrationModuleContext): Promise<void> => {
 	const known = new Set(LOCAL_SCHEMA_V1_MANIFEST.objects.map((object) => object.name))
-	const rows = parseJsonEachRow<{ name: string }>(
+	const rows = decodeNameRows(
 		await querySource(context, "SELECT name FROM system.tables WHERE database = 'default' ORDER BY name"),
 	)
 	for (const row of rows) {
@@ -389,13 +410,9 @@ const inventory = async (
 	// UInt64 aggregates leave SQL as strings: chDB emits 64-bit integers as
 	// JSON numbers, and JS Number rounding above 2^53 corrupts them.
 	const sql = `SELECT count() AS rowCount, min(${identifier(table.timeColumn)}) AS minTime, max(${identifier(table.timeColumn)}) AS maxTime, toString(sum(${hash})) AS hashSum, toString(groupBitXor(${hash})) AS hashXor FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(lowerBound)} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(cutoffAt)}`
-	const rows = parseJsonEachRow<{
-		rowCount: string | number
-		minTime: string | null
-		maxTime: string | null
-		hashSum: string | number
-		hashXor: string | number
-	}>(side === "source" ? await querySource(context, sql) : await queryTarget(context, sql))
+	const rows = decodeInventoryRows(
+		side === "source" ? await querySource(context, sql) : await queryTarget(context, sql),
+	)
 	const row = rows[0]
 	if (!row) throw new Error(`inventory query returned no row for ${table.name}`)
 	return {
@@ -424,7 +441,7 @@ const tableTotalRowCount = async (
 	table: string,
 ): Promise<string> => {
 	const sql = `SELECT count() AS rowCount FROM ${identifier(table)}`
-	const rows = parseJsonEachRow<{ rowCount: string | number }>(
+	const rows = decodeRowCountRows(
 		side === "source" ? await querySource(context, sql) : await queryTarget(context, sql),
 	)
 	if (!rows[0]) throw new Error(`row-count query returned no row for ${table}`)
@@ -507,7 +524,7 @@ const duplicateGroupCount = async (
 	const hash = `cityHash64(toString(tuple(${names})))`
 	const tie = `sipHash64(toString(tuple(${names})))`
 	const sql = `SELECT count() AS rowCount FROM ${identifier(table.name)} WHERE ${nsExpression(identifier(table.timeColumn))} = ${uint64Literal(progress.lastTimestamp, "lastTimestamp")} AND ${hash} = ${uint64Literal(progress.lastHash, "lastHash")} AND ${tie} = ${uint64Literal(progress.lastTieBreak, "lastTieBreak")}`
-	const rows = parseJsonEachRow<{ rowCount: string | number }>(await querySource(context, sql))
+	const rows = decodeRowCountRows(await querySource(context, sql))
 	return rows[0] === undefined ? 0 : Number(rows[0].rowCount)
 }
 
@@ -548,7 +565,7 @@ const copyTable = async (
 			context,
 			`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${table.batchRows}${offset}`,
 		)
-		const rawRows = parseJsonEachRow<Record<string, unknown>>(output)
+		const rawRows = decodeJsonObjectRows(output)
 		let rows = rawRows
 		if (rows.length === 0) break
 		const candidates = rows.map((row) => {
@@ -642,7 +659,7 @@ const recoverPendingBatch = async (
 				? ""
 				: `AND (${timeNs} > ${uint64Literal(previous.lastTimestamp, "lastTimestamp")} OR (${timeNs} = ${uint64Literal(previous.lastTimestamp, "lastTimestamp")} AND (${hashExpression} > ${uint64Literal(previous.lastHash, "lastHash")} OR (${hashExpression} = ${uint64Literal(previous.lastHash, "lastHash")} AND ${tieBreakExpression} ${continuation.comparison} ${uint64Literal(previous.lastTieBreak, "lastTieBreak")}))))`
 		const offset = continuation.offset === 0 ? "" : ` OFFSET ${continuation.offset}`
-		const inserted = parseJsonEachRow<Record<string, unknown>>(
+		const inserted = decodeJsonObjectRows(
 			await queryTarget(
 				context,
 				`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${pending.rowCount}${offset}`,

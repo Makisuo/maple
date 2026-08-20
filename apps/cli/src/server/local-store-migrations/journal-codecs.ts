@@ -12,9 +12,11 @@
 // `Schema.decodeUnknownEffect` is a one-line swap if that runner ever moves
 // into Effect.
 import { Schema } from "effect"
-import { RAW_TELEMETRY_TTL_COLUMNS } from "../chdb"
+import { RAW_TELEMETRY_TTL_COLUMNS, type Chdb } from "../chdb"
+import { decodeTableRowCounts } from "../chdb-rows"
+import { withRawTelemetryRetentionFloor, type LocalSchemaManifest } from "../schema-manifest"
 
-const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
+const RAW_TABLES_INTERNAL = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
 /**
  * Unsigned decimal string.
@@ -36,7 +38,7 @@ export const UnsignedDecimal = Schema.String.check(Schema.isPattern(/^\d+$/))
  * separate passes.
  */
 export const RawRowsSchema = Schema.Struct(
-	Object.fromEntries(RAW_TABLES.map((table) => [table, UnsignedDecimal])),
+	Object.fromEntries(RAW_TABLES_INTERNAL.map((table) => [table, UnsignedDecimal])),
 )
 
 /**
@@ -82,3 +84,39 @@ export const decodeInstalledProgress = (value: unknown): InstalledProgress | und
  */
 export const strictDecoder = <S extends Schema.Codec<unknown, unknown, never, never>>(schema: S) =>
 	Schema.decodeUnknownSync(schema, strict)
+
+/** Exactly the raw telemetry tables a migration must preserve, in a stable order. */
+export const RAW_TABLES: ReadonlyArray<string> = RAW_TABLES_INTERNAL
+
+/**
+ * Row counts per raw table, straight from `system.parts`.
+ *
+ * Every versioned edge carried a byte-identical copy of this. It is the input
+ * to the only guarantee those edges make — that a structural DDL change moves
+ * no telemetry — so it belongs in one place where that query can be reasoned
+ * about once.
+ */
+export const rawRowCounts = (db: Chdb): Readonly<Record<string, string>> => {
+	const quotedTables = RAW_TABLES_INTERNAL.map((table) => `'${table}'`).join(", ")
+	const rows = decodeTableRowCounts(
+		db.query(
+			`SELECT table, toString(sum(rows)) AS rowCount FROM system.parts WHERE database = 'default' AND active = 1 AND table IN (${quotedTables}) GROUP BY table`,
+		),
+	)
+	const byTable = new Map(rows.map((row) => [row.table, row.rowCount]))
+	return Object.fromEntries(RAW_TABLES_INTERNAL.map((table) => [table, byTable.get(table) ?? "0"]))
+}
+
+/**
+ * The manifest an edge should expect to find, given the retention floor an
+ * operator pinned for this store. A pinned floor rewrites the raw tables' TTL
+ * intervals, so comparing against the bundled manifest verbatim would report a
+ * drift the operator asked for.
+ */
+export const expectedManifest = (
+	manifest: LocalSchemaManifest,
+	retentionDays: number | undefined,
+): LocalSchemaManifest =>
+	retentionDays === undefined
+		? manifest
+		: withRawTelemetryRetentionFloor(manifest, RAW_TABLES_INTERNAL, retentionDays)

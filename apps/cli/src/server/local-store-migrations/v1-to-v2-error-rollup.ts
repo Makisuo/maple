@@ -2,20 +2,22 @@
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { Schema } from "effect"
-import { makeRawRowsState, strictDecoder, UnsignedDecimal } from "./journal-codecs"
+import { decodeRowCounts } from "../chdb-rows"
 import {
-	applyRawTelemetryRetentionFloor,
-	RAW_TELEMETRY_TTL_COLUMNS,
-	readRawTelemetryRetentionDays,
-	type Chdb,
-} from "../chdb"
+	UnsignedDecimal,
+	makeRawRowsState,
+	strictDecoder,
+	RAW_TABLES,
+	rawRowCounts,
+	expectedManifest,
+} from "./journal-codecs"
+import { applyRawTelemetryRetentionFloor, readRawTelemetryRetentionDays } from "../chdb"
 import type {
 	LocalStoreMigrationModule,
 	MigrationModuleContext,
 	MigrationOperation,
 	StateDispositionEntry,
 } from "../local-store-migration-module"
-import { withRawTelemetryRetentionFloor } from "../schema-manifest"
 import {
 	LOCAL_SCHEMA_V1,
 	LOCAL_SCHEMA_V1_MANIFEST,
@@ -25,8 +27,6 @@ import {
 	LOCAL_SCHEMA_V2_SQL,
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
-
-const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
 /** Stamped into the journal and matched on the way back out. */
 const MODULE_ID = "local-0001-to-0002-error-rollup" as const
@@ -48,29 +48,6 @@ const decodeState = V1ToV2StateCodec.decode
 const decodeV1ToV2Progress = strictDecoder(V1ToV2ProgressSchema)
 const decodeProgress = (value: unknown): V1ToV2Progress | undefined =>
 	value === undefined ? undefined : decodeV1ToV2Progress(value)
-
-const parseJsonEachRow = <A>(value: string): A[] =>
-	value
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.map((line) => JSON.parse(line) as A)
-
-const rawRowCounts = (db: Chdb): Readonly<Record<string, string>> => {
-	const quotedTables = RAW_TABLES.map((table) => `'${table}'`).join(", ")
-	const rows = parseJsonEachRow<{ table: string; rowCount: string }>(
-		db.query(
-			`SELECT table, toString(sum(rows)) AS rowCount FROM system.parts WHERE database = 'default' AND active = 1 AND table IN (${quotedTables}) GROUP BY table`,
-		),
-	)
-	const byTable = new Map(rows.map((row) => [row.table, row.rowCount]))
-	return Object.fromEntries(RAW_TABLES.map((table) => [table, byTable.get(table) ?? "0"]))
-}
-
-const expectedManifest = (manifest: typeof LOCAL_SCHEMA_V1_MANIFEST, retentionDays: number | undefined) =>
-	retentionDays === undefined
-		? manifest
-		: withRawTelemetryRetentionFloor(manifest, RAW_TABLES, retentionDays)
 
 const preflight = async (context: MigrationModuleContext): Promise<V1ToV2State> => {
 	await context.ensureCapacity()
@@ -135,7 +112,7 @@ const apply = async (
 		(db) => {
 			if (state.retentionDays !== undefined) applyRawTelemetryRetentionFloor(db, state.retentionDays)
 			db.exec(backfillSql)
-			const [row] = parseJsonEachRow<{ rowCount: string }>(
+			const [row] = decodeRowCounts(
 				db.query(
 					"SELECT toString(sum(OccurrenceCount)) AS rowCount FROM error_fingerprints_minutely",
 				),
@@ -159,9 +136,7 @@ const verify = async (
 				if (targetRows[table] !== state.rawRows[table])
 					throw new Error(`v1 -> v2 raw telemetry verification failed for ${table}`)
 			}
-			const [row] = parseJsonEachRow<{ rowCount: string }>(
-				db.query("SELECT toString(count()) AS rowCount FROM error_events"),
-			)
+			const [row] = decodeRowCounts(db.query("SELECT toString(count()) AS rowCount FROM error_events"))
 			if ((row?.rowCount ?? "0") !== progress.backfilledErrorEvents)
 				throw new Error("v1 -> v2 error rollup backfill verification failed")
 		},
