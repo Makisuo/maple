@@ -135,7 +135,12 @@ final class WidgetPublisher {
 	/// when the list came from Clerk's client payload, which can be partial —
 	/// pruning against that would wipe live organizations.
 	func prune(to memberIds: Set<String>) {
-		for organizationId in index.prune(to: memberIds) {
+		let evicted = index.prune(to: memberIds)
+		// Nothing changed on the common path — this runs on every launch and every
+		// organization switch, and `reloadAllTimelines` spends the widget refresh
+		// budget iOS is metering.
+		guard !evicted.isEmpty else { return }
+		for organizationId in evicted {
 			WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organizationId).clear()
 			WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organizationId).clear()
 		}
@@ -233,20 +238,24 @@ final class WidgetPublisher {
 		trigger: Trigger
 	) async -> [PublishedOrganization] {
 		let pinned = await pinnedOrganizationIds()
+		// Read once. Inside the comparator this decoded the whole index from
+		// UserDefaults on every comparison.
+		let publishedAt = Dictionary(
+			index.load().map { ($0.id, $0.lastPublishedAt) },
+			uniquingKeysWith: { first, _ in first }
+		)
 		let others = context.memberships
 			.filter { $0.id != context.active.id && pinned.contains($0.id) }
 			// Oldest first, so a background round that can only afford one
 			// extra organization round-robins rather than starving one.
-			.sorted { lastPublished(of: $0) < lastPublished(of: $1) }
+			.sorted {
+				publishedAt[$0.id] ?? .distantPast < publishedAt[$1.id] ?? .distantPast
+			}
 
 		// A `BGAppRefreshTask` gets tens of seconds; twelve requests inside one
 		// is how the whole chain gets deprioritized.
 		let budget = trigger == .background ? 1 : Self.maximumOrganizations - 1
 		return [context.active] + others.prefix(budget)
-	}
-
-	private func lastPublished(of organization: PublishedOrganization) -> Date {
-		index.load().first { $0.id == organization.id }?.lastPublishedAt ?? .distantPast
 	}
 
 	/// The organizations the user actually pinned a widget to.
@@ -295,6 +304,11 @@ final class WidgetPublisher {
 			WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organizationId).clear()
 			WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organizationId).clear()
 		}
+		// The pre-per-organization keys too. They are not in the index — nothing
+		// published them — so iterating it alone would leave a widget placed
+		// before this shipped rendering the signed-out account's issues.
+		WidgetSnapshotStore<IssuesSnapshot>.legacyIssues.clear()
+		WidgetSnapshotStore<ThroughputSnapshot>.legacyThroughput.clear()
 		WidgetCenter.shared.reloadAllTimelines()
 	}
 

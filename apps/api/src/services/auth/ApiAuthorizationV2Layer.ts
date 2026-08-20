@@ -34,8 +34,10 @@ const getBearerToken = (headers: Record<string, string | undefined>): string | u
 	return token
 }
 
+/** `HttpServerRequest` lowercases every incoming header, and the constant is
+ * already lowercase — so this is a plain lookup, not a case-insensitive one. */
 const getOrgSelectionHeader = (headers: Record<string, string | undefined>): string | undefined =>
-	headers[ORG_SELECTION_HEADER] ?? headers[ORG_SELECTION_HEADER.toUpperCase()]
+	headers[ORG_SELECTION_HEADER]
 
 const requestPath = (url: string): string => {
 	const queryStart = url.indexOf("?")

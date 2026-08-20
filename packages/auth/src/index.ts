@@ -604,8 +604,12 @@ const applyRequestedOrg = Effect.fnUntraced(function* (
 	const requestedOrgId = yield* decodeOrgId(requested, "Invalid organization selection")
 	if (requestedOrgId === tenant.orgId) return tenant
 
+	// `None` means "no header", which the guard above has already ruled out — so
+	// this either adopts an organization or fails. There is deliberately no
+	// branch here that returns the original tenant: that shape is what a silent
+	// ignore looks like, and it is the failure this whole path exists to avoid.
 	const membership = yield* selectRequestedOrg(tenant.userId, headers, verify)
-	if (Option.isNone(membership)) return tenant
+	if (Option.isNone(membership)) return yield* Effect.fail(organizationAccessDenied(requestedOrgId))
 
 	// The role travels with the organization. Carrying the token's `orgRole`
 	// across would grant an admin of org A admin of org B.
