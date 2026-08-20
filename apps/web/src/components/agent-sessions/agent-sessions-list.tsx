@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router"
+
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { ChatBubbleSparkleIcon } from "@/components/icons"
@@ -92,9 +94,15 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 						? `${vendor} · v${session.vendorVersion}`
 						: vendor
 				return (
-					<div
+					<Link
 						key={session.sessionId}
-						className="relative flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left @2xl:gap-4"
+						to="/agent-sessions/$sessionId"
+						params={{ sessionId: session.sessionId }}
+						// The session's own window, carried through so the detail page
+						// can bound its warehouse read instead of scanning every
+						// retained partition.
+						search={{ t: session.startTime, end: session.endTime }}
+						className="relative flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset @2xl:gap-4"
 					>
 						{/* Errored sessions get a left accent so they can be picked out
 						    while scanning — same signal as the replays list. */}
@@ -164,7 +172,7 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 								{formatRelativeTimeOrDate(session.startTime)}
 							</span>
 						</div>
-					</div>
+					</Link>
 				)
 			})}
 

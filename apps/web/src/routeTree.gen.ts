@@ -27,6 +27,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as AgentSessionsIndexRouteImport } from './routes/agent-sessions/index'
+import { Route as AgentSessionsSessionIdRouteImport } from './routes/agent-sessions/$sessionId'
 import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
@@ -169,6 +170,11 @@ const SignUpRoute = SignUpRouteImport.update({
 const AgentSessionsIndexRoute = AgentSessionsIndexRouteImport.update({
   id: '/agent-sessions/',
   path: '/agent-sessions/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentSessionsSessionIdRoute = AgentSessionsSessionIdRouteImport.update({
+  id: '/agent-sessions/$sessionId',
+  path: '/agent-sessions/$sessionId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsIndexRoute = AlertsIndexRouteImport.update({
@@ -464,6 +470,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/agent-sessions/$sessionId': typeof AgentSessionsSessionIdRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
@@ -536,6 +543,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/agent-sessions/$sessionId': typeof AgentSessionsSessionIdRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
@@ -610,6 +618,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/agent-sessions/$sessionId': typeof AgentSessionsSessionIdRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
@@ -685,6 +694,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/agent-sessions/$sessionId'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/anomalies/$incidentId'
@@ -757,6 +767,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/agent-sessions/$sessionId'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/anomalies/$incidentId'
@@ -830,6 +841,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/agent-sessions/$sessionId'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/anomalies/$incidentId'
@@ -904,6 +916,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
+  AgentSessionsSessionIdRoute: typeof AgentSessionsSessionIdRoute
   AlertsRuleIdRoute: typeof AlertsRuleIdRoute
   AlertsCreateRoute: typeof AlertsCreateRoute
   AnomaliesIncidentIdRoute: typeof AnomaliesIncidentIdRoute
@@ -1073,6 +1086,13 @@ declare module '@tanstack/react-router' {
       path: '/agent-sessions'
       fullPath: '/agent-sessions/'
       preLoaderRoute: typeof AgentSessionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-sessions/$sessionId': {
+      id: '/agent-sessions/$sessionId'
+      path: '/agent-sessions/$sessionId'
+      fullPath: '/agent-sessions/$sessionId'
+      preLoaderRoute: typeof AgentSessionsSessionIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/alerts/': {
@@ -1503,6 +1523,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
+  AgentSessionsSessionIdRoute: AgentSessionsSessionIdRoute,
   AlertsRuleIdRoute: AlertsRuleIdRoute,
   AlertsCreateRoute: AlertsCreateRoute,
   AnomaliesIncidentIdRoute: AnomaliesIncidentIdRoute,
