@@ -166,6 +166,7 @@ enum Screen {
 private struct ScreenSpanModifier: ViewModifier {
 	let name: String
 	@State private var span: Span?
+	@Environment(\.scenePhase) private var scenePhase
 
 	func body(content: Content) -> some View {
 		content
@@ -180,6 +181,21 @@ private struct ScreenSpanModifier: ViewModifier {
 			.onDisappear {
 				span?.end()
 				span = nil
+			}
+			.onChange(of: scenePhase) { _, phase in
+				// The SDK closes every open screen span when the app backgrounds,
+				// because neither `onDisappear` nor `viewDidDisappear` fires on the
+				// way out — a screen left open overnight used to report one span
+				// covering the whole night. Nothing re-opens it from that side: the
+				// SDK cannot hand a replacement to a `@State` it cannot see. So the
+				// second sitting is opened here.
+				//
+				// Guarded on `hasEnded` rather than on the phase alone: `.inactive`
+				// arrives for the app switcher and Control Center too, and those
+				// never reach `didEnterBackground`, so the span is still running and
+				// must not be replaced.
+				guard phase == .active, let current = span, current.hasEnded else { return }
+				span = Maple.trackScreen(name)
 			}
 	}
 }

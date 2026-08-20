@@ -544,9 +544,7 @@ const SidebarNavGroups = memo(function SidebarNavGroups({ currentPath }: { curre
 	// than flashing and vanishing — the trade `navGroups` documents.
 	const { flags } = useOrganizationFeatureFlags()
 	const groups = navGroups(flags)
-	return groups.map((group) => (
-		<NavGroupSection currentPath={currentPath} group={group} key={group.id} />
-	))
+	return groups.map((group) => <NavGroupSection currentPath={currentPath} group={group} key={group.id} />)
 })
 
 // Memoized: DashboardLayout renders this inside every page, so without memo the
