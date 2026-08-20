@@ -682,6 +682,24 @@ describe("Apple crash frames", () => {
 		expect(inUIKit.fpFrames).not.toBe(inApp.fpFrames)
 	})
 
+	it("matches a binary name containing spaces", () => {
+		// A Mach-O image name is the target's PRODUCT_NAME, and "My App" is an
+		// ordinary thing to call an app. Requiring one space-free token silently
+		// excluded those apps from frame matching and left them collapsed on the
+		// message hash — the exact failure this alternative exists to fix.
+		const result = computeFingerprintInputs({
+			exceptionType: "EXC_BAD_ACCESS",
+			exceptionStacktrace: [
+				"0   My App   0x104112600   +0x1d0f0",
+				"1   My App   0x1041125a0   +0xa112",
+			].join("\n"),
+			statusMessage: "",
+		})
+		expect(result.fpFrames.split("\n")).toHaveLength(2)
+		expect(result.topFrame).toContain("My App")
+		expect(result.msgSignature).toBe("")
+	})
+
 	it("does not swallow other runtimes' lines", () => {
 		// The alternative is anchored on a leading frame index, so a message that merely
 		// mentions an address must not be read as a frame.
@@ -691,5 +709,23 @@ describe("Apple crash frames", () => {
 			statusMessage: "",
 		})
 		expect(result.fpFrames).toBe("")
+	})
+
+	it("does not match other runtimes' address-bearing frames", () => {
+		// The alternative is anchored on a leading frame index with no punctuation
+		// after it, which is what keeps these out.
+		for (const line of [
+			" 1: 0xb09bc0 node::Abort() [node]",
+			"1: 0xb09bc0 node::Abort() [node]",
+			"    #00 pc 0000000000045e7c  /system/lib/libc.so",
+			"   0: rust_begin_unwind",
+		]) {
+			const result = computeFingerprintInputs({
+				exceptionType: "Error",
+				exceptionStacktrace: line,
+				statusMessage: "",
+			})
+			expect(result.fpFrames, line).toBe("")
+		}
 	})
 })

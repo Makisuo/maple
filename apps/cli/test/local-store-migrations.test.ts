@@ -61,8 +61,8 @@ import { join } from "node:path"
 
 describe("current local schema identity", () => {
 	it("matches the generated v8 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("d0750014b0f79c57")
-		expect(SCHEMA_DIGEST).toBe("d0750014b0f79c57995c31fcdb091049d3130dc97366c07c003e4d1198aa6660")
+		expect(SCHEMA_FINGERPRINT).toBe("51081e951066442a")
+		expect(SCHEMA_DIGEST).toBe("51081e951066442a8e5b53df2c4bdda933edd20fc89132a54ed9b4dbb7e55a05")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
@@ -153,7 +153,7 @@ describe("current local schema identity", () => {
 	})
 
 	it("recognises Apple crash frames at v8 but not before", () => {
-		const applePattern = "^[0-9]+ +[^ ]+ +0x[0-9a-fA-F]+"
+		const applePattern = "^[0-9]+ +\\\\S.* +0x[0-9a-fA-F]+"
 		for (const name of ["error_events_mv", "error_events_by_time_mv"]) {
 			const view = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === name)
 			expect(view?.definition).toContain(applePattern)

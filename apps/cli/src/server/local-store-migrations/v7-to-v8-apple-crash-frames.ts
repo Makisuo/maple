@@ -130,7 +130,7 @@ const prepareTarget = async (context: MigrationModuleContext, state: V7ToV8State
 }
 
 /**
- * Like v5 -> v7, this edge replaces the body of two existing views rather than
+ * Like v5 -> v6, this edge replaces the body of two existing views rather than
  * adding anything. A materialized view's SELECT is frozen at creation and the
  * bundled DDL uses `CREATE ... IF NOT EXISTS`, so both views must be dropped
  * before the v8 schema can install its versions. Dropping a view never touches

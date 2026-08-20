@@ -509,7 +509,7 @@ describe("migration 0018 — Apple crash frames", () => {
 		for (const sql of creates) {
 			// Frame index, binary name, hex address — an iOS crash has no source
 			// position to key on, because it arrives unsymbolicated.
-			expect(sql).toContain("^[0-9]+ +[^ ]+ +0x[0-9a-fA-F]+")
+			expect(sql).toContain("^[0-9]+ +\\\\S.* +0x[0-9a-fA-F]+")
 			// The other runtimes' alternatives are untouched; only iOS hashes rotate.
 			expect(sql).toContain('^[ \\\\t]*at |^[ \\\\t]*File "')
 		}
