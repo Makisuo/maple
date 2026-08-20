@@ -1,5 +1,6 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { createHash } from "node:crypto"
+import { Schema } from "effect"
 import {
 	LOCAL_SCHEMA_V1_MANIFEST,
 	LOCAL_SCHEMA_V1_SQL,
@@ -7,6 +8,7 @@ import {
 	LOCAL_SCHEMA_V1,
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
+import { strictDecoder, UnsignedDecimal } from "./journal-codecs"
 import type { LocalSchemaColumn } from "../schema-manifest"
 import type {
 	LocalStoreMigrationModule,
@@ -135,164 +137,102 @@ const emptyCopyProgress = (): CopyProgress => ({
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
-const record = (value: unknown, label: string): Record<string, unknown> => {
-	if (!isRecord(value)) throw new Error(`${label} must be an object`)
-	return value
-}
+const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
+const NullableString = Schema.NullOr(Schema.String)
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
-const nonEmptyString = (value: unknown, label: string): string => {
-	if (typeof value !== "string" || value.length === 0)
-		throw new Error(`${label} must be a non-empty string`)
-	return value
-}
+/**
+ * A ClickHouse UInt64 cursor, or `null` for "no cursor yet".
+ *
+ * Textual because a UInt64 does not survive a JS number, and pattern-checked
+ * because these values are interpolated into the numeric SQL comparisons that
+ * drive the resumable copy — anything that could change their meaning has to
+ * fail here rather than there.
+ */
+const Uint64Cursor = Schema.NullOr(UnsignedDecimal)
 
-const nullableString = (value: unknown, label: string): string | null => {
-	if (value !== null && typeof value !== "string") throw new Error(`${label} must be a string or null`)
-	return value
-}
+/** Only tables this build knows how to replay. */
+const RawTable = Schema.Literals([...RAW_TABLE_NAMES])
 
-/** ClickHouse emits UInt64 cursor values as decimal strings in JSONEachRow.
- * Keep the journal representation textual, but reject anything that could
- * change the meaning of the numeric SQL comparisons when interpolated. */
-const uint64String = (value: unknown, label: string): string | null => {
-	if (value === null) return null
-	if (typeof value !== "string" || !/^\d+$/.test(value))
-		throw new Error(`${label} must be an unsigned decimal string or null`)
-	return value
-}
+const Sha256Hex = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/i))
 
-const nonNegativeInteger = (value: unknown, label: string): number => {
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
-		throw new Error(`${label} must be a non-negative integer`)
-	return value
-}
+const TableInventorySchema = Schema.Struct({
+	table: NonEmptyString,
+	rowCount: NonEmptyString,
+	retentionStartAt: NonEmptyString,
+	minTime: NullableString,
+	maxTime: NullableString,
+	hashSum: NonEmptyString,
+	hashXor: NonEmptyString,
+})
 
-const exactKeys = (value: Record<string, unknown>, allowed: ReadonlyArray<string>, label: string): void => {
-	const allowedKeys = new Set(allowed)
-	for (const key of Object.keys(value)) {
-		if (!allowedKeys.has(key)) throw new Error(`${label} contains unknown field ${key}`)
-	}
-}
+const CopyProgressSchema = Schema.Struct({
+	rows: NonNegativeInt,
+	bytes: NonNegativeInt,
+	lastTimestamp: NullableString,
+	lastHash: Uint64Cursor,
+	lastTieBreak: Uint64Cursor,
+	/** Cumulative ordinal consumed within the final composite-key group. */
+	duplicateCount: NonNegativeInt,
+	duplicateGroupExhausted: Schema.Boolean,
+})
 
-const decodeTableInventory = (value: unknown, label: string): TableInventory => {
-	const inventory = record(value, label)
-	exactKeys(
-		inventory,
-		["table", "rowCount", "retentionStartAt", "minTime", "maxTime", "hashSum", "hashXor"],
-		label,
-	)
-	return {
-		table: nonEmptyString(inventory.table, `${label}.table`),
-		rowCount: nonEmptyString(inventory.rowCount, `${label}.rowCount`),
-		retentionStartAt: nonEmptyString(inventory.retentionStartAt, `${label}.retentionStartAt`),
-		minTime: nullableString(inventory.minTime, `${label}.minTime`),
-		maxTime: nullableString(inventory.maxTime, `${label}.maxTime`),
-		hashSum: nonEmptyString(inventory.hashSum, `${label}.hashSum`),
-		hashXor: nonEmptyString(inventory.hashXor, `${label}.hashXor`),
-	}
-}
+const PendingBatchSchema = Schema.Struct({
+	table: RawTable,
+	// Positive, not merely non-negative: an empty batch would commit nothing
+	// while advancing the cursor past the rows it claims to cover.
+	rowCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+	byteLength: NonNegativeInt,
+	firstTimestamp: NullableString,
+	firstHash: Uint64Cursor,
+	firstTieBreak: Uint64Cursor,
+	lastTimestamp: NullableString,
+	lastHash: Uint64Cursor,
+	lastTieBreak: Uint64Cursor,
+	lastKeyCount: NonNegativeInt,
+	lastKeyExhausted: Schema.Boolean,
+	signature: Sha256Hex,
+})
 
-const decodeCopyProgress = (value: unknown, label: string): CopyProgress => {
-	const progress = record(value, label)
-	exactKeys(
-		progress,
-		[
-			"rows",
-			"bytes",
-			"lastTimestamp",
-			"lastHash",
-			"lastTieBreak",
-			"duplicateCount",
-			"duplicateGroupExhausted",
-		],
-		label,
-	)
-	if (typeof progress.duplicateGroupExhausted !== "boolean")
-		throw new Error(`${label}.duplicateGroupExhausted must be a boolean`)
-	return {
-		rows: nonNegativeInteger(progress.rows, `${label}.rows`),
-		bytes: nonNegativeInteger(progress.bytes, `${label}.bytes`),
-		lastTimestamp: nullableString(progress.lastTimestamp, `${label}.lastTimestamp`),
-		lastHash: uint64String(progress.lastHash, `${label}.lastHash`),
-		lastTieBreak: uint64String(progress.lastTieBreak, `${label}.lastTieBreak`),
-		duplicateCount: nonNegativeInteger(progress.duplicateCount, `${label}.duplicateCount`),
-		duplicateGroupExhausted: progress.duplicateGroupExhausted,
-	}
-}
+/**
+ * Keyed by `Schema.String`, not by `RawTable`, and the keys are checked below.
+ *
+ * A record keyed on the literal union requires *every* table to be present, but
+ * both maps legitimately hold a subset: `copied` starts empty and fills one
+ * table at a time as the replay progresses. Keying it strictly would reject the
+ * journal of every partially-progressed migration and strand it.
+ */
+const RawReplayProgressSchema = Schema.Struct({
+	sourceInventory: Schema.Record(Schema.String, TableInventorySchema),
+	copied: Schema.Record(Schema.String, CopyProgressSchema),
+	pendingBatch: Schema.optionalKey(PendingBatchSchema),
+})
 
-const decodePendingBatch = (value: unknown, label: string): PendingBatch => {
-	const pending = record(value, label)
-	exactKeys(
-		pending,
-		[
-			"table",
-			"rowCount",
-			"byteLength",
-			"firstTimestamp",
-			"firstHash",
-			"firstTieBreak",
-			"lastTimestamp",
-			"lastHash",
-			"lastTieBreak",
-			"lastKeyCount",
-			"lastKeyExhausted",
-			"signature",
-		],
-		label,
-	)
-	const table = nonEmptyString(pending.table, `${label}.table`)
-	if (!RAW_TABLE_NAMES.has(table)) throw new Error(`${label}.table is not a registered raw table`)
-	if (typeof pending.lastKeyExhausted !== "boolean")
-		throw new Error(`${label}.lastKeyExhausted must be a boolean`)
-	if (typeof pending.signature !== "string" || !/^[0-9a-f]{64}$/i.test(pending.signature))
-		throw new Error(`${label}.signature must be a SHA-256 hex digest`)
-	const rowCount = nonNegativeInteger(pending.rowCount, `${label}.rowCount`)
-	if (rowCount === 0) throw new Error(`${label}.rowCount must be positive`)
-	return {
-		table,
-		rowCount,
-		byteLength: nonNegativeInteger(pending.byteLength, `${label}.byteLength`),
-		firstTimestamp: nullableString(pending.firstTimestamp, `${label}.firstTimestamp`),
-		firstHash: uint64String(pending.firstHash, `${label}.firstHash`),
-		firstTieBreak: uint64String(pending.firstTieBreak, `${label}.firstTieBreak`),
-		lastTimestamp: nullableString(pending.lastTimestamp, `${label}.lastTimestamp`),
-		lastHash: uint64String(pending.lastHash, `${label}.lastHash`),
-		lastTieBreak: uint64String(pending.lastTieBreak, `${label}.lastTieBreak`),
-		lastKeyCount: nonNegativeInteger(pending.lastKeyCount, `${label}.lastKeyCount`),
-		lastKeyExhausted: pending.lastKeyExhausted,
-		signature: pending.signature,
-	}
-}
+const LegacyStateSchema = Schema.Struct({
+	module: Schema.Literal("local-0000-to-0001-raw-replay"),
+	version: Schema.Literal(1),
+})
+
+const decodeProgressStrict = strictDecoder(RawReplayProgressSchema)
 
 const decodeRawReplayProgress = (value: unknown): RawReplayProgress => {
-	const progress = record(value, "legacy raw replay progress")
-	exactKeys(progress, ["sourceInventory", "copied", "pendingBatch"], "legacy raw replay progress")
-	const sourceInventoryRecord = record(progress.sourceInventory, "legacy raw replay sourceInventory")
-	const copiedRecord = record(progress.copied, "legacy raw replay copied")
-	const sourceInventory: Record<string, TableInventory> = {}
-	for (const [table, inventory] of Object.entries(sourceInventoryRecord)) {
+	const progress = decodeProgressStrict(value)
+	// Two invariants the schema is not the right place to state, both about the
+	// map *keys* rather than the values.
+	for (const [table, inventory] of Object.entries(progress.sourceInventory)) {
 		if (!RAW_TABLE_NAMES.has(table))
 			throw new Error(`legacy raw replay sourceInventory has unknown table ${table}`)
-		const decoded = decodeTableInventory(inventory, `legacy raw replay sourceInventory.${table}`)
-		if (decoded.table !== table)
+		// An inventory is keyed by table and also carries its own `table` field.
+		// If those disagree the journal describes a copy of one table under
+		// another's cursor.
+		if (inventory.table !== table)
 			throw new Error(`legacy raw replay sourceInventory.${table}.table does not match its key`)
-		sourceInventory[table] = decoded
 	}
-	const copied: Record<string, CopyProgress> = {}
-	for (const [table, progressValue] of Object.entries(copiedRecord)) {
+	for (const table of Object.keys(progress.copied)) {
 		if (!RAW_TABLE_NAMES.has(table))
 			throw new Error(`legacy raw replay copied has unknown table ${table}`)
-		copied[table] = decodeCopyProgress(progressValue, `legacy raw replay copied.${table}`)
 	}
-	return {
-		sourceInventory,
-		copied,
-		...(!(progress.pendingBatch === undefined)
-			? {
-					pendingBatch: decodePendingBatch(progress.pendingBatch, "legacy raw replay pendingBatch"),
-				}
-			: undefined),
-	}
+	return progress
 }
 
 const asProgress = (value: RawReplayProgress | undefined): RawReplayProgress =>
@@ -882,13 +822,7 @@ const legacyPreflight = async (context: MigrationModuleContext): Promise<LegacyM
 	return { module: "local-0000-to-0001-raw-replay", version: 1 } as const
 }
 
-const decodeLegacyState = (value: unknown): LegacyModuleState => {
-	const state = record(value, "legacy raw replay state")
-	exactKeys(state, ["module", "version"], "legacy raw replay state")
-	if (state.module !== "local-0000-to-0001-raw-replay" || state.version !== 1)
-		throw new Error("legacy raw replay state has an unsupported module or version")
-	return { module: "local-0000-to-0001-raw-replay", version: 1 }
-}
+const decodeLegacyState = strictDecoder(LegacyStateSchema)
 
 const decodeLegacyProgress = (value: unknown): RawReplayProgress | undefined =>
 	value === undefined ? undefined : decodeRawReplayProgress(value)

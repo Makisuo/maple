@@ -436,7 +436,9 @@ describe("durable migration recovery", () => {
 				...base,
 				chain: [{ ...base.chain[0]!, progress: { sourceInventory: [], copied: {} } }],
 			})
-			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/sourceInventory must be an object/)
+			// The message is the schema's, so this asserts the failing field rather
+			// than the phrasing: an array where the inventory map belongs.
+			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/sourceInventory/)
 		} finally {
 			await rm(root, { recursive: true, force: true })
 		}
@@ -1081,5 +1083,113 @@ describe("v7 -> v8 journal state decoding", () => {
 		expect(v7ToV8AppleCrashFramesModule.decodeProgress({ installed: true })).toEqual({ installed: true })
 		expect(() => v7ToV8AppleCrashFramesModule.decodeProgress({ installed: false })).toThrow()
 		expect(() => v7ToV8AppleCrashFramesModule.decodeProgress({})).toThrow()
+	})
+})
+
+/**
+ * Characterization of the legacy raw-replay journal decoder.
+ *
+ * It guards a resumable copy out of a pre-v1 store: a journal it wrongly
+ * accepts resumes someone else's copy under this build's assumptions, and one
+ * it wrongly rejects strands a user mid-migration. Only one case was pinned
+ * before this, so these lock the accept/reject boundary in place.
+ */
+describe("legacy raw replay progress decoding", () => {
+	const inventory = {
+		table: "logs",
+		rowCount: "10",
+		retentionStartAt: "2026-01-01 00:00:00",
+		minTime: null,
+		maxTime: null,
+		hashSum: "1",
+		hashXor: "2",
+	}
+	const copied = {
+		rows: 1,
+		bytes: 2,
+		lastTimestamp: null,
+		lastHash: "12",
+		lastTieBreak: "13",
+		duplicateCount: 0,
+		duplicateGroupExhausted: false,
+	}
+	const pendingBatch = {
+		table: "logs",
+		rowCount: 1,
+		byteLength: 2,
+		firstTimestamp: null,
+		firstHash: "1",
+		firstTieBreak: "2",
+		lastTimestamp: null,
+		lastHash: "3",
+		lastTieBreak: "4",
+		lastKeyCount: 1,
+		lastKeyExhausted: false,
+		signature: "a".repeat(64),
+	}
+	const progress = { sourceInventory: { logs: inventory }, copied: { logs: copied } }
+	const decode = (value: unknown) => legacyToCurrentModule.decodeProgress(value)
+
+	it("accepts a well-formed progress, with and without a pending batch", () => {
+		expect(decode(progress)).toEqual(progress)
+		expect(decode({ ...progress, pendingBatch })).toEqual({ ...progress, pendingBatch })
+		// Absent progress is "not started", which is not the same as invalid.
+		expect(decode(undefined)).toBeUndefined()
+	})
+
+	it("rejects a non-object, and unknown top-level fields", () => {
+		for (const bad of [null, [], "x", 1]) expect(() => decode(bad)).toThrow()
+		expect(() => decode({ ...progress, somethingElse: 1 })).toThrow()
+	})
+
+	it("rejects tables that are not registered raw tables", () => {
+		expect(() => decode({ ...progress, sourceInventory: { not_a_table: inventory } })).toThrow()
+		expect(() => decode({ ...progress, copied: { not_a_table: copied } })).toThrow()
+		expect(() =>
+			decode({ ...progress, pendingBatch: { ...pendingBatch, table: "not_a_table" } }),
+		).toThrow()
+	})
+
+	it("rejects an inventory whose table disagrees with its key", () => {
+		expect(() =>
+			decode({ ...progress, sourceInventory: { logs: { ...inventory, table: "traces" } } }),
+		).toThrow()
+	})
+
+	it("rejects cursors that are not unsigned decimal strings", () => {
+		// These are interpolated into numeric SQL comparisons, so anything that
+		// could change their meaning has to fail here rather than there.
+		for (const bad of ["-1", "1.5", "0x10", "", 12]) {
+			expect(() => decode({ ...progress, copied: { logs: { ...copied, lastHash: bad } } })).toThrow()
+		}
+		// null is a legitimate "no cursor yet".
+		expect(decode({ ...progress, copied: { logs: { ...copied, lastHash: null } } })).toBeDefined()
+	})
+
+	it("rejects counters that are not non-negative safe integers", () => {
+		for (const bad of [-1, 1.5, Number.MAX_SAFE_INTEGER + 2, "1", null]) {
+			expect(() => decode({ ...progress, copied: { logs: { ...copied, rows: bad } } })).toThrow()
+		}
+	})
+
+	it("rejects a non-boolean exhaustion flag", () => {
+		expect(() =>
+			decode({ ...progress, copied: { logs: { ...copied, duplicateGroupExhausted: "no" } } }),
+		).toThrow()
+	})
+
+	it("rejects a pending batch that is empty or wrongly signed", () => {
+		// An empty batch would commit nothing while advancing the cursor past it.
+		expect(() => decode({ ...progress, pendingBatch: { ...pendingBatch, rowCount: 0 } })).toThrow()
+		for (const bad of ["a".repeat(63), "z".repeat(64), ""]) {
+			expect(() => decode({ ...progress, pendingBatch: { ...pendingBatch, signature: bad } })).toThrow()
+		}
+	})
+
+	it("rejects missing fields anywhere in the tree", () => {
+		const { hashSum: _h, ...shortInventory } = inventory
+		expect(() => decode({ ...progress, sourceInventory: { logs: shortInventory } })).toThrow()
+		const { rows: _r, ...shortCopied } = copied
+		expect(() => decode({ ...progress, copied: { logs: shortCopied } })).toThrow()
 	})
 })

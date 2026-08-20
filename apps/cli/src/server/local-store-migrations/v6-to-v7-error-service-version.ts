@@ -1,6 +1,7 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
+import { decodeInstalledProgress, makeRawRowsState, type InstalledProgress } from "./journal-codecs"
 import { RAW_TELEMETRY_TTL_COLUMNS, readRawTelemetryRetentionDays, type Chdb } from "../chdb"
 import type {
 	LocalStoreMigrationModule,
@@ -40,60 +41,16 @@ const SERVICE_VERSION_COLUMNS = [
 	],
 ] as const
 
-interface V6ToV7State {
-	readonly module: "local-0006-to-0007-error-service-version"
-	readonly version: 1
-	readonly rawRows: Readonly<Record<string, string>>
-	readonly retentionDays?: number
-}
+/** Stamped into the journal and matched on the way back out. */
+const MODULE_ID = "local-0006-to-0007-error-service-version" as const
 
-interface V6ToV7Progress {
-	readonly installed: true
-}
+const V6ToV7StateCodec = makeRawRowsState(MODULE_ID)
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
+type V6ToV7State = typeof V6ToV7StateCodec.schema.Type
+type V6ToV7Progress = InstalledProgress
 
-const decodeCounts = (value: unknown): Readonly<Record<string, string>> => {
-	if (!isRecord(value)) throw new Error("v6 -> v7 rawRows must be an object")
-	const counts: Record<string, string> = {}
-	for (const table of RAW_TABLES) {
-		const count = value[table]
-		if (typeof count !== "string" || !/^\d+$/.test(count))
-			throw new Error(`v6 -> v7 rawRows.${table} must be an unsigned decimal string`)
-		counts[table] = count
-	}
-	if (Object.keys(value).some((table) => !RAW_TABLES.includes(table as (typeof RAW_TABLES)[number])))
-		throw new Error("v6 -> v7 rawRows contains an unknown table")
-	return counts
-}
-
-const decodeState = (value: unknown): V6ToV7State => {
-	if (!isRecord(value)) throw new Error("v6 -> v7 state must be an object")
-	const allowed = new Set(["module", "version", "rawRows", "retentionDays"])
-	if (Object.keys(value).some((key) => !allowed.has(key)))
-		throw new Error("v6 -> v7 state contains an unknown field")
-	if (value.module !== "local-0006-to-0007-error-service-version" || value.version !== 1)
-		throw new Error("v6 -> v7 state has an unsupported module or version")
-	if (
-		value.retentionDays !== undefined &&
-		(typeof value.retentionDays !== "number" || !Number.isSafeInteger(value.retentionDays))
-	)
-		throw new Error("v6 -> v7 retentionDays must be an integer")
-	return {
-		module: "local-0006-to-0007-error-service-version",
-		version: 1,
-		rawRows: decodeCounts(value.rawRows),
-		...(!(value.retentionDays === undefined) ? { retentionDays: value.retentionDays } : undefined),
-	}
-}
-
-const decodeProgress = (value: unknown): V6ToV7Progress | undefined => {
-	if (value === undefined) return undefined
-	if (!isRecord(value) || Object.keys(value).some((key) => key !== "installed") || value.installed !== true)
-		throw new Error("v6 -> v7 progress is invalid")
-	return { installed: true }
-}
+const decodeState = V6ToV7StateCodec.decode
+const decodeProgress = decodeInstalledProgress
 
 const parseJsonEachRow = <A>(value: string): A[] =>
 	value
@@ -128,12 +85,12 @@ const preflight = async (context: MigrationModuleContext): Promise<V6ToV7State> 
 		},
 		{ schemaSql: LOCAL_SCHEMA_V6_SQL, bootstrapSchema: false },
 	)
-	return {
-		module: "local-0006-to-0007-error-service-version",
-		version: 1,
-		rawRows,
-		...(!(retentionDays === undefined) ? { retentionDays } : undefined),
-	}
+	// Two literals rather than a conditional spread: `retentionDays` is an
+	// `optionalKey`, so an absent floor has to be an absent key, not a present
+	// `undefined`.
+	return retentionDays === undefined
+		? { module: MODULE_ID, version: 1, rawRows }
+		: { module: MODULE_ID, version: 1, rawRows, retentionDays }
 }
 
 const prepareTarget = async (context: MigrationModuleContext, state: V6ToV7State): Promise<V6ToV7State> => {
@@ -280,7 +237,7 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 ]
 
 export const v6ToV7ErrorServiceVersionModule: LocalStoreMigrationModule<V6ToV7State, V6ToV7Progress> = {
-	id: "local-0006-to-0007-error-service-version",
+	id: MODULE_ID,
 	moduleVersion: 1,
 	description:
 		"Add ServiceVersion to the error-events tables and rebuild the error-events views on fingerprint v2",

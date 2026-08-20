@@ -1,6 +1,7 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
+import { decodeInstalledProgress, makeRawRowsState, type InstalledProgress } from "./journal-codecs"
 import { RAW_TELEMETRY_TTL_COLUMNS, readRawTelemetryRetentionDays, type Chdb } from "../chdb"
 import type {
 	LocalStoreMigrationModule,
@@ -21,60 +22,16 @@ import { assertPhysicalSchema } from "../schema-physical"
 
 const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
-interface V3ToV4State {
-	readonly module: "local-0003-to-0004-web-events"
-	readonly version: 1
-	readonly rawRows: Readonly<Record<string, string>>
-	readonly retentionDays?: number
-}
+/** Stamped into the journal and matched on the way back out. */
+const MODULE_ID = "local-0003-to-0004-web-events" as const
 
-interface V3ToV4Progress {
-	readonly installed: true
-}
+const V3ToV4StateCodec = makeRawRowsState(MODULE_ID)
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
+type V3ToV4State = typeof V3ToV4StateCodec.schema.Type
+type V3ToV4Progress = InstalledProgress
 
-const decodeCounts = (value: unknown): Readonly<Record<string, string>> => {
-	if (!isRecord(value)) throw new Error("v3 -> v4 rawRows must be an object")
-	const counts: Record<string, string> = {}
-	for (const table of RAW_TABLES) {
-		const count = value[table]
-		if (typeof count !== "string" || !/^\d+$/.test(count))
-			throw new Error(`v3 -> v4 rawRows.${table} must be an unsigned decimal string`)
-		counts[table] = count
-	}
-	if (Object.keys(value).some((table) => !RAW_TABLES.includes(table as (typeof RAW_TABLES)[number])))
-		throw new Error("v3 -> v4 rawRows contains an unknown table")
-	return counts
-}
-
-const decodeState = (value: unknown): V3ToV4State => {
-	if (!isRecord(value)) throw new Error("v3 -> v4 state must be an object")
-	const allowed = new Set(["module", "version", "rawRows", "retentionDays"])
-	if (Object.keys(value).some((key) => !allowed.has(key)))
-		throw new Error("v3 -> v4 state contains an unknown field")
-	if (value.module !== "local-0003-to-0004-web-events" || value.version !== 1)
-		throw new Error("v3 -> v4 state has an unsupported module or version")
-	if (
-		value.retentionDays !== undefined &&
-		(typeof value.retentionDays !== "number" || !Number.isSafeInteger(value.retentionDays))
-	)
-		throw new Error("v3 -> v4 retentionDays must be an integer")
-	return {
-		module: "local-0003-to-0004-web-events",
-		version: 1,
-		rawRows: decodeCounts(value.rawRows),
-		...(!(value.retentionDays === undefined) ? { retentionDays: value.retentionDays } : undefined),
-	}
-}
-
-const decodeProgress = (value: unknown): V3ToV4Progress | undefined => {
-	if (value === undefined) return undefined
-	if (!isRecord(value) || Object.keys(value).some((key) => key !== "installed") || value.installed !== true)
-		throw new Error("v3 -> v4 progress is invalid")
-	return { installed: true }
-}
+const decodeState = V3ToV4StateCodec.decode
+const decodeProgress = decodeInstalledProgress
 
 const parseJsonEachRow = <A>(value: string): A[] =>
 	value
@@ -109,12 +66,12 @@ const preflight = async (context: MigrationModuleContext): Promise<V3ToV4State> 
 		},
 		{ schemaSql: LOCAL_SCHEMA_V3_SQL, bootstrapSchema: false },
 	)
-	return {
-		module: "local-0003-to-0004-web-events",
-		version: 1,
-		rawRows,
-		...(!(retentionDays === undefined) ? { retentionDays } : undefined),
-	}
+	// Two literals rather than a conditional spread: `retentionDays` is an
+	// `optionalKey`, so an absent floor has to be an absent key, not a present
+	// `undefined`.
+	return retentionDays === undefined
+		? { module: MODULE_ID, version: 1, rawRows }
+		: { module: MODULE_ID, version: 1, rawRows, retentionDays }
 }
 
 const prepareTarget = async (context: MigrationModuleContext, state: V3ToV4State): Promise<V3ToV4State> => {
@@ -220,7 +177,7 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 ]
 
 export const v3ToV4WebEventsModule: LocalStoreMigrationModule<V3ToV4State, V3ToV4Progress> = {
-	id: "local-0003-to-0004-web-events",
+	id: MODULE_ID,
 	moduleVersion: 1,
 	description: "Add the web_events analytics fact table and its materialized view to v3",
 	from: LOCAL_SCHEMA_V3,

@@ -1,6 +1,7 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
+import { decodeInstalledProgress, makeRawRowsState, type InstalledProgress } from "./journal-codecs"
 import { RAW_TELEMETRY_TTL_COLUMNS, readRawTelemetryRetentionDays, type Chdb } from "../chdb"
 import type {
 	LocalStoreMigrationModule,
@@ -21,60 +22,16 @@ import { assertPhysicalSchema } from "../schema-physical"
 
 const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
-interface V5ToV6State {
-	readonly module: "local-0005-to-0006-error-events-fingerprint-hygiene"
-	readonly version: 1
-	readonly rawRows: Readonly<Record<string, string>>
-	readonly retentionDays?: number
-}
+/** Stamped into the journal and matched on the way back out. */
+const MODULE_ID = "local-0005-to-0006-error-events-fingerprint-hygiene" as const
 
-interface V5ToV6Progress {
-	readonly installed: true
-}
+const V5ToV6StateCodec = makeRawRowsState(MODULE_ID)
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
+type V5ToV6State = typeof V5ToV6StateCodec.schema.Type
+type V5ToV6Progress = InstalledProgress
 
-const decodeCounts = (value: unknown): Readonly<Record<string, string>> => {
-	if (!isRecord(value)) throw new Error("v5 -> v6 rawRows must be an object")
-	const counts: Record<string, string> = {}
-	for (const table of RAW_TABLES) {
-		const count = value[table]
-		if (typeof count !== "string" || !/^\d+$/.test(count))
-			throw new Error(`v5 -> v6 rawRows.${table} must be an unsigned decimal string`)
-		counts[table] = count
-	}
-	if (Object.keys(value).some((table) => !RAW_TABLES.includes(table as (typeof RAW_TABLES)[number])))
-		throw new Error("v5 -> v6 rawRows contains an unknown table")
-	return counts
-}
-
-const decodeState = (value: unknown): V5ToV6State => {
-	if (!isRecord(value)) throw new Error("v5 -> v6 state must be an object")
-	const allowed = new Set(["module", "version", "rawRows", "retentionDays"])
-	if (Object.keys(value).some((key) => !allowed.has(key)))
-		throw new Error("v5 -> v6 state contains an unknown field")
-	if (value.module !== "local-0005-to-0006-error-events-fingerprint-hygiene" || value.version !== 1)
-		throw new Error("v5 -> v6 state has an unsupported module or version")
-	if (
-		value.retentionDays !== undefined &&
-		(typeof value.retentionDays !== "number" || !Number.isSafeInteger(value.retentionDays))
-	)
-		throw new Error("v5 -> v6 retentionDays must be an integer")
-	return {
-		module: "local-0005-to-0006-error-events-fingerprint-hygiene",
-		version: 1,
-		rawRows: decodeCounts(value.rawRows),
-		...(!(value.retentionDays === undefined) ? { retentionDays: value.retentionDays } : undefined),
-	}
-}
-
-const decodeProgress = (value: unknown): V5ToV6Progress | undefined => {
-	if (value === undefined) return undefined
-	if (!isRecord(value) || Object.keys(value).some((key) => key !== "installed") || value.installed !== true)
-		throw new Error("v5 -> v6 progress is invalid")
-	return { installed: true }
-}
+const decodeState = V5ToV6StateCodec.decode
+const decodeProgress = decodeInstalledProgress
 
 const parseJsonEachRow = <A>(value: string): A[] =>
 	value
@@ -109,12 +66,12 @@ const preflight = async (context: MigrationModuleContext): Promise<V5ToV6State> 
 		},
 		{ schemaSql: LOCAL_SCHEMA_V5_SQL, bootstrapSchema: false },
 	)
-	return {
-		module: "local-0005-to-0006-error-events-fingerprint-hygiene",
-		version: 1,
-		rawRows,
-		...(!(retentionDays === undefined) ? { retentionDays } : undefined),
-	}
+	// Two literals rather than a conditional spread: `retentionDays` is an
+	// `optionalKey`, so an absent floor has to be an absent key, not a present
+	// `undefined`.
+	return retentionDays === undefined
+		? { module: MODULE_ID, version: 1, rawRows }
+		: { module: MODULE_ID, version: 1, rawRows, retentionDays }
 }
 
 const prepareTarget = async (context: MigrationModuleContext, state: V5ToV6State): Promise<V5ToV6State> => {
@@ -246,7 +203,7 @@ export const v5ToV6ErrorEventsFingerprintHygieneModule: LocalStoreMigrationModul
 	V5ToV6State,
 	V5ToV6Progress
 > = {
-	id: "local-0005-to-0006-error-events-fingerprint-hygiene",
+	id: MODULE_ID,
 	moduleVersion: 1,
 	description:
 		"Rebuild the error-events views: exclude exception-less 4xx client spans and redact ids from fingerprint frames",
