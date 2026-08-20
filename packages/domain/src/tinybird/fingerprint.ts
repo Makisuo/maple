@@ -73,9 +73,20 @@ export const MSG_SIGNATURE_CHARS = 120
  *   Ruby:            `    from /app/user.rb:12:in 'find'`
  *   Firefox/Safari:  `getUser@https://app/assets/index.js:42:18`
  *   Go/Rust:         `    /app/main.go:42 +0x1d`
+ *   Apple:           `0   MyApp   0x104a2c1f0   +0x1d0f0`
+ *
+ * The Apple alternative has no source position to key on, because an iOS crash arrives
+ * unsymbolicated — the app's symbols live in a dSYM that never leaves the build machine.
+ * It keys on the shape instead: frame index, binary name, hex address. The offset is hex
+ * (the SDK renders it that way deliberately) so `FRAME_REDACTIONS` erases it along with
+ * the address, leaving `index binaryName +`. That is coarse — grouping by the sequence of
+ * binaries rather than of functions — but it is *stable across releases*, which the raw
+ * offsets are not: any code change shifts every offset below it and would re-split every
+ * issue on every build. When dSYM symbolication lands, function names drop into the same
+ * slot and grouping sharpens with one more version bump.
  */
 export const FRAME_LINE_PATTERN =
-	'^[ \\t]*at |^[ \\t]*File "|^[ \\t]+from [^ ]+:[0-9]+|^[^ \\t@]+@[^ \\t]*:[0-9]+|^[ \\t]+[^ \\t]+\\.(go|rs):[0-9]+'
+	'^[ \\t]*at |^[ \\t]*File "|^[ \\t]+from [^ ]+:[0-9]+|^[^ \\t@]+@[^ \\t]*:[0-9]+|^[ \\t]+[^ \\t]+\\.(go|rs):[0-9]+|^[0-9]+ +[^ ]+ +0x[0-9a-fA-F]+'
 
 /** An ordered `[pattern, replacement]` list, applied outermost-first. */
 export type Redactions = ReadonlyArray<readonly [pattern: string, replacement: string]>
@@ -309,8 +320,16 @@ export function computeFingerprintInputs(args: {
  * cutover forward. That is expected, not a regression — there is no backfill
  * short of replaying the raw traces.
  *
- * v1 → v2 (this change): frame lines are matched by shape rather than by
- * "contains a colon-digit", and the message signature is always folded in and
- * additionally strips quoted values and query strings.
+ * v1 → v2: frame lines are matched by shape rather than by "contains a
+ * colon-digit", and the message signature is always folded in and additionally
+ * strips quoted values and query strings.
+ *
+ * v2 → v3 (this change): an Apple alternative joins the frame shapes, so iOS
+ * crashes reported by `maple-swift` group on their stack. Before it, no Apple
+ * frame matched any alternative, `_fpFrames` was always empty, and every crash
+ * fell through to the message hash — which redacts hex and digit runs, so
+ * `EXC_BAD_ACCESS at 0x10` and `at 0xdeadbeef` were one issue. Every crash of a
+ * given type in a service collapsed into a single row. Only iOS hashes rotate;
+ * no other runtime's frame matching changed.
  */
-export const FINGERPRINT_VERSION = 2
+export const FINGERPRINT_VERSION = 3
