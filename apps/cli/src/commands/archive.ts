@@ -57,6 +57,7 @@ import {
 import {
 	acquireCheckpointPin,
 	parseCheckpointSelector,
+	maintenanceOperation,
 	resolveCheckpoint,
 	withMaintenanceLock,
 	withRestoredCheckpoint,
@@ -313,7 +314,8 @@ export const archiveCreate = Command.make("create", {
 						`\n`,
 				),
 			)
-			const result = yield* Effect.tryPromise({
+			const result = yield* maintenanceOperation({
+				operation: "archive.create",
 				try: () =>
 					createArchiveGeneration(
 						dataDir,
@@ -476,7 +478,8 @@ export const archiveRebuild = Command.make("rebuild", {
 			const dataDir = resolve(Option.getOrUndefined(a.dataDir) ?? defaultDataDir())
 			const archiveDir = resolve(Option.getOrUndefined(a.archiveDir) ?? defaultArchiveDir())
 			const signalName: ArchiveSignalName = a.signal
-			const entries = yield* Effect.tryPromise({
+			const entries = yield* maintenanceOperation({
+				operation: "archive.rebuild_catalog",
 				try: () => rebuildCatalogWithMaintenanceLock(dataDir, archiveDir, signalName, randomUUID()),
 				catch: (error) =>
 					new ArchiveError({
@@ -510,7 +513,8 @@ export const archiveReconcile = Command.make("reconcile", {
 			// entry point (blocker 2): dry-run returns the plan without mutating;
 			// apply acquires the maintenance lock, migrates any v2 intent, then
 			// reconciles — never racing create/GC planning or pointer/catalog repair.
-			const decision = yield* Effect.tryPromise({
+			const decision = yield* maintenanceOperation({
+				operation: "archive.reconcile",
 				try: () => runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: a.dryRun }),
 				catch: (error) =>
 					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
@@ -564,7 +568,8 @@ export const archiveGc = Command.make("gc", {
 				})
 			}
 			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
-			const result = yield* Effect.tryPromise({
+			const result = yield* maintenanceOperation({
+				operation: "archive.gc",
 				try: () => runArchiveGc({ dataDir, archiveDir, scratchRoot, keep: a.keep, dryRun: a.dryRun }),
 				catch: (error) =>
 					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
@@ -615,7 +620,8 @@ export const archiveExpire = Command.make("expire", {
 			if (!a.apply)
 				return yield* new ArchiveError({ message: "refusing archive expiration without --apply" })
 			const roots = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
-			yield* Effect.tryPromise({
+			yield* maintenanceOperation({
+				operation: "archive.expire_day",
 				try: () =>
 					expireArchiveDay({
 						dataDir: roots.dataDir,
@@ -648,7 +654,8 @@ export const archiveRetireLive = Command.make("retire-live", {
 			if (!a.apply)
 				return yield* new ArchiveError({ message: "refusing live retirement without --apply" })
 			const roots = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
-			yield* Effect.tryPromise({
+			yield* maintenanceOperation({
+				operation: "archive.retire_day",
 				try: () =>
 					retireLiveDay({
 						dataDir: roots.dataDir,
@@ -1248,7 +1255,8 @@ const runCalibrationMatrix = (
 		// ONE atomic bridge over the still-raw checkpoint session. The callback body
 		// stays raw on purpose: Effect must never be run from inside a callback
 		// handed to a promise-based module.
-		const session = yield* Effect.tryPromise({
+		const session = yield* maintenanceOperation({
+			operation: "archive.calibrate_open",
 			try: () =>
 				withMaintenanceLock(dataDir, operationId, async () => {
 					await reconcileCalibration(archiveDir, roots)
@@ -1308,7 +1316,8 @@ const runCalibrationMatrix = (
 		// Kept in the typed error channel rather than `orDie`d: a failed reconcile
 		// is an expected archive failure with a useful message, not a defect.
 		const closed = yield* Effect.exit(
-			Effect.tryPromise({
+			maintenanceOperation({
+				operation: "archive.calibrate_close",
 				try: () =>
 					withMaintenanceLock(dataDir, operationId, () => reconcileCalibration(archiveDir, roots)),
 				catch: (error) => new ArchiveError({ message: errorMessage(error) }),
@@ -1614,7 +1623,8 @@ export const archiveCalibrateRun = Command.make("calibrate-run", {
 			})
 			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
 			const checkpointSelector = Option.getOrUndefined(a.checkpointId) ?? "current"
-			yield* Effect.tryPromise({
+			yield* maintenanceOperation({
+				operation: "archive.calibrate_sample",
 				try: () =>
 					runCalibrateSample(a, dataDir, archiveDir, scratchRoot, checkpointSelector, rangeDate),
 				catch: (error) =>
@@ -1659,7 +1669,8 @@ export const archiveCalibrateSession = Command.make("calibrate-session", {
 			const checkpointSelector = Option.getOrUndefined(a.checkpointId) ?? "current"
 			const roots = { dataDir, archiveDir, scratchRoot }
 			if (action === "close") {
-				yield* Effect.tryPromise({
+				yield* maintenanceOperation({
+					operation: "archive.calibrate_session_close",
 					try: () =>
 						withMaintenanceLock(dataDir, randomUUID(), () =>
 							reconcileCalibration(archiveDir, roots),
@@ -1678,7 +1689,8 @@ export const archiveCalibrateSession = Command.make("calibrate-session", {
 			const pinPurpose = calibrationPinPurpose(operationId)
 			const scratchSubdir = derivedScratchSubdir(operationId)
 			const sampleDir = derivedSampleDir(archiveDir, operationId)
-			const result = yield* Effect.tryPromise({
+			const result = yield* maintenanceOperation({
+				operation: "archive.calibrate_session_open",
 				try: () =>
 					withMaintenanceLock(dataDir, operationId, async () => {
 						await reconcileCalibration(archiveDir, roots)
