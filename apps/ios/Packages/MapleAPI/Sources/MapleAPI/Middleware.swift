@@ -22,10 +22,10 @@ extension MapleTokenProvider {
 
 /// Attaches `Authorization: Bearer <clerk session jwt>` to every request.
 ///
-/// Note there is deliberately **no org header**: v2 resolves the organization
-/// from the token's own active-organization claim, so switching orgs means
-/// re-minting the token, not changing a header. Adding one here would do
-/// nothing.
+/// The token carries the organization: v2 reads the active-organization claim,
+/// so switching organizations means re-minting the token rather than changing a
+/// header. `OrganizationMiddleware` is the one exception, and it is deliberately
+/// not applied to the app's own client — see `MapleAPI.scoped(to:)`.
 public struct BearerAuthMiddleware: ClientMiddleware {
 	private let tokens: any MapleTokenProvider
 
@@ -45,6 +45,40 @@ public struct BearerAuthMiddleware: ClientMiddleware {
 		}
 		var request = request
 		request.headerFields[.authorization] = "Bearer \(token)"
+		return try await next(request, body, baseURL)
+	}
+}
+
+/// Names the organization explicitly, for the one caller that cannot use the
+/// token's own claim.
+///
+/// That caller is the widget publisher, fetching for an organization the user
+/// belongs to but has not made active. `Clerk.setActive` is global session
+/// state the foreground is using, so the only way to read another organization
+/// without disturbing the user is to name it per request. The server verifies
+/// the name against the caller's memberships (`packages/auth`,
+/// `ORG_SELECTION_HEADER`), so this header can never widen what the token
+/// already authorizes — and an organization it cannot verify is a 403, never a
+/// silent fallback to the active one.
+public struct OrganizationMiddleware: ClientMiddleware {
+	/// Must match `ORG_SELECTION_HEADER` in `packages/auth/src/index.ts`.
+	public static let headerName = HTTPField.Name("x-maple-org-id")!
+
+	private let organizationId: String
+
+	public init(organizationId: String) {
+		self.organizationId = organizationId
+	}
+
+	public func intercept(
+		_ request: HTTPRequest,
+		body: HTTPBody?,
+		baseURL: URL,
+		operationID: String,
+		next: (HTTPRequest, HTTPBody?, URL) async throws -> (HTTPResponse, HTTPBody?)
+	) async throws -> (HTTPResponse, HTTPBody?) {
+		var request = request
+		request.headerFields[Self.headerName] = organizationId
 		return try await next(request, body, baseURL)
 	}
 }

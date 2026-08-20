@@ -291,6 +291,7 @@ describe("MobilePushService live activities", () => {
 				// Epoch seconds, never an ISO string — ActivityKit decodes this
 				// dictionary with a plain JSONDecoder.
 				started_at: first!.attributes!.started_at,
+				organization_id: ORG,
 			})
 			assert.strictEqual(typeof first!.attributes!.started_at, "number")
 			assert.deepStrictEqual(

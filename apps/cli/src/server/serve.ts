@@ -151,8 +151,12 @@ export const describeThrown = (error: unknown): string => {
 		// Both reads are inside the try: `message` may be a getter that throws, and
 		// reading it outside would defeat the whole point of this function.
 		try {
-			const message = Reflect.get(error, "message")
-			if (typeof message === "string" && message !== "") return message
+			// `in` narrows without invoking the getter; the read below is what can
+			// throw, and it is inside the try for exactly that reason.
+			if ("message" in error) {
+				const message = error.message
+				if (typeof message === "string" && message !== "") return message
+			}
 			const json = JSON.stringify(error)
 			// `{}` here means every own property was non-enumerable or unserializable
 			// (a `Response`, a class instance) — the empty object is the bug, so say so.

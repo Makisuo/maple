@@ -208,6 +208,11 @@ export const renderLiveActivityAttributes = (
 				: null),
 	signal_label: event.signalDisplay.label,
 	started_at: Math.floor((nowMs - (event.openForMs ?? 0)) / 1000),
+	// Which organization the incident belongs to, so a tap on the Lock Screen
+	// opens it in that org rather than in whichever one the app happens to be
+	// showing. Optional on the client (`IncidentActivityAttributes`): an
+	// activity started before this field existed can never gain one.
+	organization_id: event.orgId,
 })
 
 /**

@@ -2,6 +2,7 @@ import ClerkKit
 import Foundation
 import Maple
 import MapleAPI
+import MapleWidgetData
 import Observation
 
 /// Owns "who is signed in, to which organization, and is the API usable yet".
@@ -88,6 +89,38 @@ final class SessionController {
 	/// switcher is worth showing.
 	var canSwitchOrganization: Bool {
 		memberships.count > 1
+	}
+
+	/// The organizations a destination is allowed to switch into. Paired with
+	/// `membershipsLoaded`, which says whether this set is trustworthy — an
+	/// unverified list must never be used to *refuse* anything.
+	var memberIds: Set<String> {
+		Set(memberships.map(\.organization.id))
+	}
+
+	/// Every membership, in the shape the widget publisher and the widget
+	/// extension's organization picker use.
+	var publishableOrganizations: [PublishedOrganization] {
+		memberships.map {
+			PublishedOrganization(
+				id: $0.organization.id,
+				name: $0.organization.name,
+				lastPublishedAt: .distantPast
+			)
+		}
+	}
+
+	/// Re-runs the widget publish when the active organization *or* the set the
+	/// user belongs to changes — an organization joined after launch should get
+	/// a snapshot without waiting for a switch.
+	var widgetPublishKey: String {
+		([currentOrganizationId ?? "none"] + memberIds.sorted()).joined(separator: "|")
+	}
+
+	/// The display name for an organization the user belongs to, for the line
+	/// shown after a switch. Nil when only the id is known.
+	func name(of organizationId: String) -> String? {
+		memberships.first { $0.organization.id == organizationId }?.organization.name
 	}
 
 	/// Recompute the phase from Clerk's current state.

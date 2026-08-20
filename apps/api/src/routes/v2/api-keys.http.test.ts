@@ -288,6 +288,54 @@ describe("v2 api_keys over HTTP", () => {
 		await harness.dispose()
 	})
 
+	// `x-maple-org-id` names an organization explicitly instead of relying on the
+	// credential's own. This deployment is self-hosted, which has no membership
+	// directory to check a selection against — so the header is REJECTED rather
+	// than ignored. Silently ignoring it is the failure that would render one
+	// organization's data under another's name.
+	it("rejects an organization selection it cannot verify, in the v2 envelope", async () => {
+		const harness = makeHarness()
+		const sessionToken = await harness.bootstrapSession()
+
+		const { status, body } = await harness.request("GET", "/v2/api_keys", {
+			token: sessionToken,
+			headers: { "x-maple-org-id": "org_other" },
+		})
+
+		// 403, not the 401 a missing organization produces: the credential is fine.
+		expect(status).toBe(403)
+		expect((body as { error?: { code?: string } }).error?.code).toBe("organization_access_denied")
+		await harness.dispose()
+	})
+
+	it("serves the credential's own organization when the header names it", async () => {
+		const harness = makeHarness()
+		const sessionToken = await harness.bootstrapSession()
+
+		const { status } = await harness.request("GET", "/v2/api_keys", {
+			token: sessionToken,
+			// The free no-op, which is what lets a client send the header always.
+			headers: { "x-maple-org-id": "default" },
+		})
+
+		expect(status).toBe(200)
+		await harness.dispose()
+	})
+
+	it("rejects an organization selection made with an API key", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+
+		const { status, body } = await harness.request("GET", "/v2/api_keys", {
+			token: key.secret,
+			headers: { "x-maple-org-id": "org_other" },
+		})
+
+		expect(status).toBe(403)
+		expect((body as { error?: { code?: string } }).error?.code).toBe("organization_access_denied")
+		await harness.dispose()
+	})
+
 	it("allows requests when the limiter fails open", async () => {
 		const harness = makeHarness(() => Effect.succeed("failed_open"))
 		const key = await harness.bootstrapKey()

@@ -97,45 +97,18 @@ final class AppNavigation {
 		tab = .alerts
 	}
 
-	/// The Home Screen widget's deep links — `maple://issues` and
-	/// `maple://issue/<id>`; see `IssuesWidgetKind`.
-	///
-	/// Anything else is ignored rather than guessed at: a URL this app does not
-	/// recognise landing the user on a random tab is worse than it doing
-	/// nothing, and the scheme is ours alone.
-	func open(_ url: URL) {
-		guard url.scheme == IssuesWidgetKind.urlScheme else { return }
-		// The host alone: a path can carry an issue id or a service name, and
-		// neither belongs in an event property.
-		Telemetry.track(Telemetry.Event.widgetOpened, ["target": url.host() ?? "unknown"])
-		switch url.host() {
-		case "incident":
-			// `maple://incident/<id>` — a tapped Live Activity. The id is the
-			// public `inc_…` form the activity was started with.
-			let id = url.pathComponents.first { $0 != "/" }
-			if let id, !id.isEmpty { openIncident(id: id) } else { open(.incidents) }
-		case "issues":
-			open(.errors)
-		case "issue":
-			// `maple://issue/<id>` — the id is the first path component, and an
-			// empty one means the widget's row lost its issue.
-			let id = url.pathComponents.first { $0 != "/" }
-			if let id, !id.isEmpty { openIssue(id: id) } else { open(.errors) }
-		case "services":
+	/// Put a destination on screen. Which organization it belongs to has already
+	/// been settled by `DestinationOpener`; this is only routing.
+	func go(_ target: WidgetDeepLink.Target) {
+		switch target {
+		case .incident(let id): openIncident(id: id)
+		case .issue(let id): openIssue(id: id)
+		case .service(let name): openService(name: name)
+		case .incidentsList: open(.incidents)
+		case .issuesList: open(.errors)
+		case .servicesList:
 			servicesPath = []
 			tab = .services
-		case "service":
-			// `maple://service/<name>`; service names can contain characters
-			// the widget percent-encoded, so decode before matching.
-			let name = url.pathComponents.first { $0 != "/" }?.removingPercentEncoding
-			if let name, !name.isEmpty {
-				openService(name: name)
-			} else {
-				servicesPath = []
-				tab = .services
-			}
-		default:
-			break
 		}
 	}
 }

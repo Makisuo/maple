@@ -78,10 +78,35 @@ public struct WidgetSnapshotStore<Value: Codable & Sendable>: Sendable {
 	}
 }
 
+// Keys are per organization, because a widget can be pinned to one. The `v1`
+// keys below are read-only leftovers: a widget placed before this shipped has a
+// snapshot under the old key and would otherwise render "Open Maple" until the
+// next publish. Delete them, and the fallbacks that read them, one release on.
+
 extension WidgetSnapshotStore where Value == IssuesSnapshot {
-	public static var issues: WidgetSnapshotStore<IssuesSnapshot> { .init(key: "issues.snapshot.v1") }
+	public static func issues(
+		organizationId: String,
+		appGroupIdentifier: String = WidgetAppGroup.identifier
+	) -> WidgetSnapshotStore<IssuesSnapshot> {
+		.init(key: "issues.snapshot.v2.\(organizationId)", appGroupIdentifier: appGroupIdentifier)
+	}
+
+	/// Read-only fallback for widgets placed before per-organization snapshots.
+	/// Delete one release after that shipped, along with its readers.
+	public static var legacyIssues: WidgetSnapshotStore<IssuesSnapshot> { .init(key: "issues.snapshot.v1") }
 }
 
 extension WidgetSnapshotStore where Value == ThroughputSnapshot {
-	public static var throughput: WidgetSnapshotStore<ThroughputSnapshot> { .init(key: "throughput.snapshot.v1") }
+	public static func throughput(
+		organizationId: String,
+		appGroupIdentifier: String = WidgetAppGroup.identifier
+	) -> WidgetSnapshotStore<ThroughputSnapshot> {
+		.init(key: "throughput.snapshot.v2.\(organizationId)", appGroupIdentifier: appGroupIdentifier)
+	}
+
+	/// Read-only fallback for widgets placed before per-organization snapshots.
+	/// Delete one release after that shipped, along with its readers.
+	public static var legacyThroughput: WidgetSnapshotStore<ThroughputSnapshot> {
+		.init(key: "throughput.snapshot.v1")
+	}
 }

@@ -70,6 +70,9 @@ enum Telemetry {
 		static let pushKind = "maple.app.push.kind"
 		static let pushColdStart = "maple.app.push.cold_start"
 		static let widgetTrigger = "maple.app.widget.trigger"
+		static let widgetOrganizationCount = "maple.app.widget.organization_count"
+		static let pushAbandonReason = "maple.app.push.abandon_reason"
+		static let pushOrganizationSwitched = "maple.app.push.org_switched"
 		static let widgetSurface = "maple.app.widget.surface"
 		static let liveActivityAction = "maple.app.live_activity.action"
 	}
@@ -247,7 +250,7 @@ extension Telemetry {
 		static func begin(kind: String, screen: String, coldStart: Bool) {
 			// A second tap before the first landed: the older one is abandoned,
 			// not left open beside it.
-			expire()
+			abandon(reason: "superseded")
 			let span = MapleTracing.shared.startSpan(
 				Name.pushOpen,
 				attributes: [
@@ -264,7 +267,7 @@ extension Telemetry {
 			let expiry = Task {
 				try? await Task.sleep(for: .seconds(30))
 				guard !Task.isCancelled else { return }
-				expire()
+				abandon(reason: "expired")
 			}
 			pending = Pending(span: span, screen: screen, expiry: expiry)
 		}
@@ -283,14 +286,25 @@ extension Telemetry {
 			self.pending = nil
 		}
 
-		private static func expire() {
+		/// The tap will never reach its screen. `reason` distinguishes the ways
+		/// that happens — a refused organization is a product problem worth
+		/// counting; a superseded tap is not.
+		static func abandon(reason: String) {
 			guard let pending else { return }
 			pending.expiry.cancel()
 			// Not an error: an abandoned open is a user changing their mind, and
 			// marking it `Error` would put it in the error dashboards.
 			pending.span.setAttribute("maple.app.push.abandoned", true)
+			pending.span.setAttribute(Key.pushAbandonReason, reason)
 			pending.span.end()
 			self.pending = nil
+		}
+
+		/// The tap landed in a different organization than the one on screen, so
+		/// answering it cost a `setActive` plus a forced token round-trip. That is
+		/// real latency on the alert-to-eyes number and is invisible otherwise.
+		static func recordOrganizationSwitch() {
+			pending?.span.setAttribute(Key.pushOrganizationSwitched, true)
 		}
 	}
 }

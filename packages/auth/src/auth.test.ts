@@ -2,13 +2,14 @@ import { assert, describe, it } from "@effect/vitest"
 import { createHmac } from "node:crypto"
 import { Effect, Exit, Option, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { OrgId, RoleName, UserId } from "@maple/domain/http"
+import { AuthorizationUnavailableError, OrgId, RoleName, UserId } from "@maple/domain/http"
 import {
 	makeGetCustomerData,
 	makeLoginSelfHosted,
 	makeRefreshSelfHostedSession,
 	makeResolveMcpTenant,
 	makeResolveTenant,
+	ORG_SELECTION_HEADER,
 	SELF_HOSTED_SESSION_MAX_LIFETIME_SECONDS,
 	SELF_HOSTED_SESSION_TTL_SECONDS,
 } from "./index"
@@ -992,6 +993,217 @@ describe("self-hosted JWT algorithm pinning", () => {
 				yield* resolveSignedClaims(validClaims, { alg: "hs256", typ: "JWT" }),
 				"Unsupported JWT algorithm",
 			)
+		}),
+	)
+})
+
+describe(`${ORG_SELECTION_HEADER} (organization selection)`, () => {
+	const clerkEnv = {
+		...baseEnv,
+		MAPLE_AUTH_MODE: "clerk",
+		CLERK_SECRET_KEY: Option.some(Redacted.make("sk_test_123")),
+		CLERK_JWT_KEY: Option.some(Redacted.make("jwt_test_123")),
+	} as const
+
+	const clerkAuth =
+		(overrides: { orgId?: string | null; tokenType?: string } = {}) =>
+		async () => ({
+			isAuthenticated: true,
+			message: null,
+			toAuth: () => ({
+				isAuthenticated: true,
+				tokenType: overrides.tokenType ?? "session_token",
+				userId: "user_123",
+				orgId: overrides.orgId === undefined ? "org_123" : overrides.orgId,
+				orgRole: "org:admin",
+			}),
+		})
+
+	/** Counts calls, because "never asked" is the assertion for the no-op path. */
+	const verifier = (memberships: ReadonlyArray<{ orgId: string; role: string }>) => {
+		let calls = 0
+		const verify = (_userId: UserId, orgId: OrgId) => {
+			calls += 1
+			const found = memberships.find((membership) => membership.orgId === orgId)
+			return Effect.succeed(
+				found
+					? Option.some({ orgId: asOrgId(found.orgId), role: asRoleName(found.role) })
+					: Option.none<{ orgId: OrgId; role: RoleName }>(),
+			)
+		}
+		return { verify, calls: () => calls }
+	}
+
+	const assertDenied = <A>(exit: Exit.Exit<A, unknown>) => {
+		const failure = getFailure(exit) as { _tag?: string } | undefined
+		assert.isTrue(Exit.isFailure(exit))
+		assert.strictEqual(failure?._tag, "@maple/http/errors/OrganizationAccessDeniedError")
+	}
+
+	it.effect("naming the organization you already have costs nothing", () =>
+		Effect.gen(function* () {
+			const membership = verifier([{ orgId: "org_123", role: "org:admin" }])
+			const resolveTenant = makeResolveTenant(clerkEnv, clerkAuth(), undefined, membership.verify)
+
+			const tenant = yield* resolveTenant({
+				authorization: "Bearer test-token",
+				[ORG_SELECTION_HEADER]: "org_123",
+			})
+
+			assert.strictEqual(tenant.orgId, asOrgId("org_123"))
+			// The invariant that keeps a client free to send the header always.
+			assert.strictEqual(membership.calls(), 0)
+		}),
+	)
+
+	it.effect("adopts a verified organization AND its role, not the token's", () =>
+		Effect.gen(function* () {
+			const membership = verifier([{ orgId: "org_other", role: "org:member" }])
+			const resolveTenant = makeResolveTenant(clerkEnv, clerkAuth(), undefined, membership.verify)
+
+			const tenant = yield* resolveTenant({
+				authorization: "Bearer test-token",
+				[ORG_SELECTION_HEADER]: "org_other",
+			})
+
+			assert.deepStrictEqual(tenant, {
+				orgId: asOrgId("org_other"),
+				// Carrying `org:admin` across would make an admin of one org an
+				// admin of every org they belong to.
+				roles: [asRoleName("org:member")],
+				userId: asUserId("user_123"),
+				authMode: "clerk",
+			})
+		}),
+	)
+
+	// The widget's cold case: a token whose session has no active organization
+	// at all still resolves when the request names one it can prove.
+	it.effect("works with no active organization in the token", () =>
+		Effect.gen(function* () {
+			const membership = verifier([{ orgId: "org_other", role: "org:member" }])
+			const resolveTenant = makeResolveTenant(
+				clerkEnv,
+				clerkAuth({ orgId: null }),
+				undefined,
+				membership.verify,
+			)
+
+			const tenant = yield* resolveTenant({
+				authorization: "Bearer test-token",
+				[ORG_SELECTION_HEADER]: "org_other",
+			})
+
+			assert.strictEqual(tenant.orgId, asOrgId("org_other"))
+		}),
+	)
+
+	it.effect("refuses an organization the user is not in", () =>
+		Effect.gen(function* () {
+			const membership = verifier([])
+			const resolveTenant = makeResolveTenant(clerkEnv, clerkAuth(), undefined, membership.verify)
+
+			const exit = yield* Effect.exit(
+				resolveTenant({
+					authorization: "Bearer test-token",
+					[ORG_SELECTION_HEADER]: "org_other",
+				}),
+			)
+
+			// 403, and deliberately not the 401 that a missing active organization
+			// produces — a client must be able to tell "stop asking for that org"
+			// from "sign in again".
+			assertDenied(exit)
+		}),
+	)
+
+	it.effect("a lookup failure rejects rather than falling back to the token's org", () =>
+		Effect.gen(function* () {
+			const resolveTenant = makeResolveTenant(clerkEnv, clerkAuth(), undefined, () =>
+				Effect.fail(new AuthorizationUnavailableError({ message: "Clerk unreachable" })),
+			)
+
+			const exit = yield* Effect.exit(
+				resolveTenant({
+					authorization: "Bearer test-token",
+					[ORG_SELECTION_HEADER]: "org_other",
+				}),
+			)
+			const failure = getFailure(exit) as { _tag?: string } | undefined
+
+			assert.isTrue(Exit.isFailure(exit))
+			assert.strictEqual(failure?._tag, "@maple/http/errors/AuthorizationUnavailableError")
+		}),
+	)
+
+	it.effect("rejects the header when no verifier is wired", () =>
+		Effect.gen(function* () {
+			const resolveTenant = makeResolveTenant(clerkEnv, clerkAuth())
+
+			const exit = yield* Effect.exit(
+				resolveTenant({
+					authorization: "Bearer test-token",
+					[ORG_SELECTION_HEADER]: "org_other",
+				}),
+			)
+
+			assertDenied(exit)
+		}),
+	)
+
+	it.effect("rejects the header for an API-key credential", () =>
+		Effect.gen(function* () {
+			const membership = verifier([{ orgId: "org_other", role: "org:admin" }])
+			const resolveTenant = makeResolveMcpTenant(clerkEnv, clerkAuth({ tokenType: "api_key" }))
+
+			const exit = yield* Effect.exit(
+				resolveTenant({
+					authorization: "Bearer test-token",
+					[ORG_SELECTION_HEADER]: "org_other",
+				}),
+			)
+
+			assertDenied(exit)
+			assert.strictEqual(membership.calls(), 0)
+		}),
+	)
+
+	it.effect("rejects the header when MAPLE_ORG_ID_OVERRIDE pins the deployment", () =>
+		Effect.gen(function* () {
+			const membership = verifier([{ orgId: "org_other", role: "org:admin" }])
+			const resolveTenant = makeResolveTenant(
+				{ ...clerkEnv, MAPLE_ORG_ID_OVERRIDE: Option.some("org_pinned") },
+				clerkAuth(),
+				undefined,
+				membership.verify,
+			)
+
+			const exit = yield* Effect.exit(
+				resolveTenant({
+					authorization: "Bearer test-token",
+					[ORG_SELECTION_HEADER]: "org_other",
+				}),
+			)
+
+			assertDenied(exit)
+			assert.strictEqual(membership.calls(), 0)
+		}),
+	)
+
+	// Self-hosted mode has no membership directory, so an honoured header would
+	// be unconditional cross-tenant access.
+	it.effect("rejects the header in self-hosted mode", () =>
+		Effect.gen(function* () {
+			const exit = yield* atFixedTime(
+				Effect.exit(
+					makeResolveTenant(baseEnv)({
+						authorization: `Bearer ${signClaims(validClaims)}`,
+						[ORG_SELECTION_HEADER]: "org_other",
+					}),
+				),
+			)
+
+			assertDenied(exit)
 		}),
 	)
 })
