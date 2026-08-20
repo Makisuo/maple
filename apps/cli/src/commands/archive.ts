@@ -1,8 +1,9 @@
-import { Effect, Option, Schema } from "effect"
+import { Deferred, Duration, Effect, Exit, Fiber, Option, Schema, Stream } from "effect"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
 import * as Argument from "effect/unstable/cli/Argument"
-import { spawn } from "node:child_process"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
@@ -72,12 +73,7 @@ import { ensurePrivateDirectory } from "../server/archives/paths"
 import { CHDB_VERSION, MAPLE_VERSION } from "../version"
 import { SCHEMA_FINGERPRINT } from "../server/schema-identity"
 import { amber, bold, dim, green, red } from "../lib/style"
-import {
-	collectChildOutputAfterClose,
-	createTimeReport,
-	parsePeakRss,
-	timeArgv,
-} from "../server/archives/timed-process"
+import { createTimeReport, parsePeakRss, timeArgv } from "../server/archives/timed-process"
 import { ArchiveError } from "../server/archives/errors"
 
 const defaultDataDir = (): string => join(homedir(), ".maple", "data")
@@ -765,24 +761,19 @@ export const archiveCalibrate = Command.make("calibrate", {
 			// /usr/bin/time so peak RSS is measured externally. A per-child watchdog
 			// enforces the candidate wall deadline and temp-disk ceiling DURING the
 			// run (SIGKILL on overrun -> candidate marked failed).
-			const rec = yield* Effect.tryPromise({
-				try: () =>
-					runCalibrationMatrix(
-						process.execPath,
-						dataDir,
-						checkpointId,
-						rangeDate,
-						scratchRoot,
-						archiveDir,
-						budget,
-						{
-							pauseAtPhase: Option.getOrUndefined(a.pauseAtSessionPhase),
-							markerDir: Option.getOrUndefined(a.sessionMarkerDir),
-						},
-					),
-				catch: (error) =>
-					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
-			})
+			const rec = yield* runCalibrationMatrix(
+				process.execPath,
+				dataDir,
+				checkpointId,
+				rangeDate,
+				scratchRoot,
+				archiveDir,
+				budget,
+				{
+					pauseAtPhase: Option.getOrUndefined(a.pauseAtSessionPhase),
+					markerDir: Option.getOrUndefined(a.sessionMarkerDir),
+				},
+			)
 			if (
 				Option.getOrUndefined(a.pauseAtSessionPhase) === "post-session-release" &&
 				Option.getOrUndefined(a.sessionMarkerDir)
@@ -796,15 +787,16 @@ export const archiveCalibrate = Command.make("calibrate", {
 							join(markerDir, "paused"),
 							`post-session-release\n${process.pid}\n${new Date().toISOString()}\n`,
 						)
-						await new Promise<void>(() => {
-							/* deterministic SIGKILL seam after reconcile, before config/no-config publication */
-						})
 					},
 					catch: (error) =>
 						new ArchiveError({
 							message: error instanceof Error ? error.message : String(error),
 						}),
 				})
+				// Deterministic SIGKILL seam after reconcile, before config/no-config
+				// publication. The probes kill -9 here, which is uncatchable, so
+				// interruptibility does not change the crash boundary.
+				return yield* Effect.never
 			}
 			yield* Effect.sync(() => {
 				for (const r of rec.results) {
@@ -912,7 +904,52 @@ export const decodeChildMetrics = (input: unknown, expected: ExpectedChildSample
  * the candidate). Peak RSS is FAIL-CLOSED: unparseable /usr/bin/time output
  * fails the candidate (no completion-RSS fallback).
  */
-const runCandidateChild = (
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+/**
+ * An internal short-circuit for a candidate that could not produce metrics. It
+ * never escapes `runCandidateChild` — the boundary `catchTag` turns it back
+ * into a `CandidateResult`. It exists only to replace the old `settled` flag:
+ * with a single fiber producing the result, the first failure short-circuits
+ * and the rest is interrupted, so there is no second resolution to guard.
+ */
+class CandidateFailure extends Schema.TaggedError<CandidateFailure>()("@maple/cli/CandidateFailure", {
+	reason: Schema.String,
+}) {}
+
+/**
+ * SIGKILL the child's whole process group, so the Maple descendant dies with
+ * `/usr/bin/time` rather than being orphaned.
+ *
+ * `handle.kill` already group-kills, but it falls back to a child-only kill
+ * when the group kill throws, so the explicit `-pgid` is the invariant we own.
+ * `process.kill` stays raw inside `Effect.sync` deliberately: it is a
+ * synchronous total syscall whose only realistic failure (ESRCH) means the
+ * target is already dead. What Effect contributes here is not wrapping the
+ * syscall but controlling WHEN it runs — as a finalizer it fires on every exit
+ * path, including interruption.
+ */
+const reapProcessGroup = (
+	handle: {
+		readonly kill: (options?: { readonly killSignal?: "SIGKILL" }) => Effect.Effect<unknown, unknown>
+	},
+	pgid: number,
+) =>
+	Effect.andThen(
+		Effect.ignore(handle.kill({ killSignal: "SIGKILL" })),
+		Effect.sync(() => {
+			// `-0` is `0`, and POSIX kill(0, sig) signals the CALLER's own process
+			// group — without this guard a missing child pid would SIGKILL the CLI.
+			if (pgid <= 0) return
+			try {
+				process.kill(-pgid, "SIGKILL")
+			} catch {
+				// ESRCH: the group is already reaped.
+			}
+		}),
+	)
+
+export const runCandidateChild = (
 	bundlePath: string,
 	dataDir: string,
 	checkpointId: string,
@@ -927,26 +964,26 @@ const runCandidateChild = (
 	startRow: number,
 	sampleRows: number,
 	matrixStart: number,
-): Promise<CandidateResult> => {
-	return new Promise((resolvePromise) => {
+): Effect.Effect<CandidateResult, never, ChildProcessSpawner> =>
+	Effect.gen(function* () {
+		const spawner = yield* ChildProcessSpawner
 		// Bun creates nonblocking stdio pipes for spawned children. GNU/BSD `time`
 		// writes a large multi-line report on exit, and that report can fail with
 		// EAGAIN when directed at the inherited stderr pipe. Write it to an
 		// independent temporary file instead; stderr remains available for real
-		// worker diagnostics and the report is removed after this one child closes.
-		let timeReport: ReturnType<typeof createTimeReport>
-		try {
-			timeReport = createTimeReport()
-		} catch (error) {
-			resolvePromise({
-				candidate,
-				signal,
-				metrics: null,
-				ok: false,
-				error: `failed to create time-report directory: ${error instanceof Error ? error.message : String(error)}`,
-			})
-			return
-		}
+		// worker diagnostics. The finalizer removes the report directory in EVERY
+		// outcome, interruption included — `remove()` is idempotent, so the happy
+		// path's `readAndRemove()` simply wins the race.
+		const timeReport = yield* Effect.acquireRelease(
+			Effect.try({
+				try: () => createTimeReport(),
+				catch: (error) =>
+					new CandidateFailure({
+						reason: `failed to create time-report directory: ${errorMessage(error)}`,
+					}),
+			}),
+			(report) => Effect.sync(() => report.remove()),
+		)
 		const args = [
 			"archive",
 			"calibrate-run",
@@ -983,119 +1020,144 @@ const runCandidateChild = (
 		]
 		// Spawn under /usr/bin/time in its own process group so the watchdog can
 		// kill the whole group (Maple descendant included), not just /usr/bin/time.
-		const child = spawn("/usr/bin/time", [...timeArgv(), "-o", timeReport.path, bundlePath, ...args], {
-			stdio: ["ignore", "pipe", "pipe"],
-			detached: true,
-		})
-		const childOutput = collectChildOutputAfterClose(child)
-		const pgid = child.pid ?? 0
-		let killedByWatchdog = false
-		let killReason = ""
-		let settled = false
-		const finish = (result: CandidateResult) => {
-			if (settled) return
-			settled = true
-			resolvePromise(result)
-		}
+		// `stdin` and `killSignal` are explicit: the spawner defaults to piping
+		// stdin and to SIGTERM, and a descendant that traps SIGTERM would turn a
+		// hard kill into a hang.
+		const handle = yield* spawner
+			.spawn(
+				ChildProcess.make(
+					"/usr/bin/time",
+					[...timeArgv(), "-o", timeReport.path, bundlePath, ...args],
+					{
+						stdin: "ignore",
+						stdout: "pipe",
+						stderr: "pipe",
+						detached: true,
+						killSignal: "SIGKILL",
+					},
+				),
+			)
+			.pipe(Effect.mapError((error) => new CandidateFailure({ reason: error.message })))
+		const pgid = handle.pid
+		// Reap the whole group on EVERY exit path — success, failure, defect, and
+		// interruption. The old timer-driven kill only ran from inside its own
+		// callback, so a Ctrl-C mid-candidate orphaned the Maple grandchild.
+		yield* Effect.addFinalizer(() => reapProcessGroup(handle, pgid))
+
 		// Watchdog deadline = min(remaining total budget, per-candidate wallMs).
 		const remaining = budget.timeBudget - (Date.now() - matrixStart)
 		const deadline = Math.max(1000, Math.min(budget.maxCandidateWallMs, remaining))
 		// The exact derived paths the parent polls for temp-disk enforcement.
 		const pollScratch = resolve(scratchRoot, `calibrate-${operationId}`)
 		const pollSample = resolve(archiveDir, "calibration", "samples", operationId)
-		const killGroup = (reason: string) => {
-			killedByWatchdog = true
-			killReason = reason
-			try {
-				process.kill(-pgid, "SIGKILL")
-			} catch {
-				try {
-					child.kill("SIGKILL")
-				} catch {
-					// best-effort
-				}
-			}
-		}
-		const watchdog = setTimeout(() => killGroup(`exceeded ${deadline}ms wall deadline`), deadline)
+		const watchdog = Effect.as(
+			Effect.sleep(Duration.millis(deadline)),
+			`exceeded ${deadline}ms wall deadline`,
+		)
 		// Poll temp-disk every 500ms during the run; kill on overrun. Read/symlink/
-		// special-file errors fail-loud (kill the candidate).
-		const diskPoll = setInterval(async () => {
-			try {
-				const sz = (await directoryTreeBytes(pollScratch)) + (await directoryTreeBytes(pollSample))
-				if (sz * budget.safetyMargin > budget.maxTempDiskBytes) {
-					clearInterval(diskPoll)
-					killGroup(`exceeded ${budget.maxTempDiskBytes}B temp-disk ceiling (saw ${sz}B)`)
-				}
-			} catch (error) {
-				clearInterval(diskPoll)
-				killGroup(
-					`temp-disk poll read error (fail-loud): ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-		}, 500)
-		child.on("error", (error) => {
-			clearTimeout(watchdog)
-			clearInterval(diskPoll)
-			timeReport.remove()
-			finish({ candidate, signal, metrics: null, ok: false, error: error.message })
-		})
-		// `exit` fires before stdio has necessarily drained.  Wait for `close` so
-		// the next candidate cannot start while this worker still owns its pipes,
-		// and so failure reports include the complete worker diagnostics.
-		void childOutput.then(({ code, stdout, stderr }) => {
-			if (settled) return
-			clearTimeout(watchdog)
-			clearInterval(diskPoll)
-			const timeOutput = timeReport.readAndRemove()
-			if (killedByWatchdog) {
-				finish({
-					candidate,
-					signal,
-					metrics: null,
-					ok: false,
-					error: `candidate killed by watchdog: ${killReason}`,
-				})
-				return
-			}
-			// A nonzero exit means the child failed (export error OR cleanup
-			// failure). The child emits its metrics JSON only after successful
-			// cleanup; a JSON line present with a nonzero exit still means the
-			// owned resources may not have been released. Treat nonzero as failure.
-			if (code !== 0) {
-				const fullDiagnostic = `${stderr}\n${stdout}\n${timeOutput.report}`
-				const diagnostic =
-					fullDiagnostic.length <= 1600
-						? fullDiagnostic
-						: `${fullDiagnostic.slice(0, 800)}\n… diagnostics truncated …\n${fullDiagnostic.slice(-800)}`
-				finish({
-					candidate,
-					signal,
-					metrics: null,
-					ok: false,
-					error: `calibrate-run exited ${code} (cleanup or export failure): ${diagnostic}${timeOutput.error ? `\n${timeOutput.error}` : ""}`,
-				})
-				return
-			}
-			// Peak RSS: FAIL-CLOSED. Unparseable /usr/bin/time output fails the
-			// candidate (no completion-RSS fallback).
-			const peakRssBytes =
-				timeOutput.error === undefined ? parsePeakRss(timeOutput.report, process.platform) : null
-			if (peakRssBytes === null) {
-				finish({
-					candidate,
-					signal,
-					metrics: null,
-					ok: false,
-					error: timeOutput.error
-						? `${timeOutput.error} (fail-closed)`
-						: `failed to parse peak RSS from /usr/bin/time report (fail-closed)`,
-				})
-				return
-			}
-			try {
+		// special-file errors fail-loud (kill the candidate) — the catch lives
+		// INSIDE the poll and yields a kill reason, so a read error can never
+		// silently kill the poller and downgrade fail-loud to fail-late.
+		const pollOnce = Effect.tryPromise({
+			try: async () => (await directoryTreeBytes(pollScratch)) + (await directoryTreeBytes(pollSample)),
+			catch: (error) => error,
+		}).pipe(
+			Effect.map((size) =>
+				size * budget.safetyMargin > budget.maxTempDiskBytes
+					? `exceeded ${budget.maxTempDiskBytes}B temp-disk ceiling (saw ${size}B)`
+					: null,
+			),
+			Effect.catch((error) =>
+				Effect.succeed(`temp-disk poll read error (fail-loud): ${errorMessage(error)}`),
+			),
+		)
+		// Sleep FIRST, like `setInterval`: `Schedule.spaced` would fire an
+		// immediate poll before the child has written anything.
+		const poller: Effect.Effect<string> = Effect.suspend(() =>
+			Effect.sleep(Duration.millis(500)).pipe(
+				Effect.andThen(pollOnce),
+				Effect.flatMap((reason) => (reason === null ? poller : Effect.succeed(reason))),
+			),
+		)
+		const killReason = yield* Deferred.make<string>()
+		// The killer is forked rather than raced against completion: after a kill
+		// the parent must STILL wait for the pipes to drain, both so the next
+		// candidate cannot start while this worker owns them and so the failure
+		// report carries the complete worker diagnostics.
+		const killer = yield* Effect.forkChild(
+			Effect.race(watchdog, poller).pipe(
+				Effect.tap((reason) => Deferred.succeed(killReason, reason)),
+				Effect.andThen(reapProcessGroup(handle, pgid)),
+			),
+		)
+
+		// Completion = the child exited AND both pipes drained. `handle.exitCode`
+		// alone resolves on `exit`, which Node emits before stdio is guaranteed to
+		// drain; the stream folds finish exactly when the readables end, which is
+		// the condition behind `close`.
+		//
+		// `exitCode` FAILS on signal death, and every watchdog kill is a signal
+		// death — collapse that to `null` so a killed candidate lands in the same
+		// `code !== 0` branch as before instead of escaping as an error and
+		// aborting the whole matrix.
+		const [code, stdout, stderr] = yield* Effect.all(
+			[
+				handle.exitCode.pipe(
+					Effect.map((value): number | null => value),
+					Effect.catchCause(() => Effect.succeed(null)),
+				),
+				Stream.mkString(Stream.decodeText(handle.stdout)),
+				Stream.mkString(Stream.decodeText(handle.stderr)),
+			],
+			{ concurrency: "unbounded" },
+		).pipe(
+			// A pipe that cannot be read leaves the candidate unmeasurable, which is
+			// a failed candidate — not a reason to abort the remaining matrix.
+			Effect.catchTag("PlatformError", (error) =>
+				Effect.fail(
+					new CandidateFailure({ reason: `failed to read calibrate-run output: ${error.message}` }),
+				),
+			),
+		)
+		yield* Fiber.interrupt(killer)
+		const killed = yield* Deferred.poll(killReason)
+		const timeOutput = timeReport.readAndRemove()
+		if (Option.isSome(killed)) {
+			// The killer writes its reason BEFORE it signals the group, so a child
+			// that died from the kill always has the reason recorded here.
+			const reason = yield* killed.value
+			return yield* new CandidateFailure({ reason: `candidate killed by watchdog: ${reason}` })
+		}
+		// A nonzero exit means the child failed (export error OR cleanup
+		// failure). The child emits its metrics JSON only after successful
+		// cleanup; a JSON line present with a nonzero exit still means the
+		// owned resources may not have been released. Treat nonzero as failure.
+		if (code !== 0) {
+			const fullDiagnostic = `${stderr}\n${stdout}\n${timeOutput.report}`
+			const diagnostic =
+				fullDiagnostic.length <= 1600
+					? fullDiagnostic
+					: `${fullDiagnostic.slice(0, 800)}\n… diagnostics truncated …\n${fullDiagnostic.slice(-800)}`
+			return yield* new CandidateFailure({
+				reason: `calibrate-run exited ${code} (cleanup or export failure): ${diagnostic}${timeOutput.error ? `\n${timeOutput.error}` : ""}`,
+			})
+		}
+		// Peak RSS: FAIL-CLOSED. Unparseable /usr/bin/time output fails the
+		// candidate (no completion-RSS fallback).
+		const peakRssBytes =
+			timeOutput.error === undefined ? parsePeakRss(timeOutput.report, process.platform) : null
+		if (peakRssBytes === null) {
+			return yield* new CandidateFailure({
+				reason: timeOutput.error
+					? `${timeOutput.error} (fail-closed)`
+					: `failed to parse peak RSS from /usr/bin/time report (fail-closed)`,
+			})
+		}
+		const raw = yield* Effect.try({
+			try: () => {
 				const lines = stdout.trim().split("\n")
 				const parsed: unknown = JSON.parse(lines[lines.length - 1]!)
-				const raw = decodeChildMetrics(parsed, {
+				return decodeChildMetrics(parsed, {
 					checkpointId,
 					checkpointManifestFingerprint,
 					rangeDate,
@@ -1103,36 +1165,43 @@ const runCandidateChild = (
 					startRow,
 					requestedRows: sampleRows,
 				})
-				const logicalBytes = raw.logicalBytes
-				const physicalBytes = raw.physicalBytes
-				const compressionRatio = logicalBytes > 0 ? physicalBytes / logicalBytes : 0
-				// Write throughput from the EXPORT section wall time, not process-launch-to-exit.
-				const writeThroughputBytesPerSec =
-					raw.exportWallMs > 0 ? logicalBytes / (raw.exportWallMs / 1000) : 0
-				const metrics: CandidateMetrics = {
-					logicalBytes,
-					physicalBytes,
-					compressionRatio,
-					writeThroughputBytesPerSec,
-					peakTempDiskBytes: raw.peakTempDiskBytes,
-					peakRssBytes,
-					wallMs: raw.exportWallMs,
-					rowCount: raw.rowCount,
-				}
-				const sample = raw.sample
-				finish({ candidate, signal, metrics, ok: true, sample })
-			} catch (error) {
-				finish({
-					candidate,
-					signal,
-					metrics: null,
-					ok: false,
-					error: `failed to parse calibrate-run output: ${error instanceof Error ? error.message : String(error)}`,
-				})
-			}
+			},
+			catch: (error) =>
+				new CandidateFailure({
+					reason: `failed to parse calibrate-run output: ${errorMessage(error)}`,
+				}),
 		})
-	})
-}
+		const logicalBytes = raw.logicalBytes
+		const physicalBytes = raw.physicalBytes
+		const compressionRatio = logicalBytes > 0 ? physicalBytes / logicalBytes : 0
+		// Write throughput from the EXPORT section wall time, not process-launch-to-exit.
+		const writeThroughputBytesPerSec = raw.exportWallMs > 0 ? logicalBytes / (raw.exportWallMs / 1000) : 0
+		const metrics: CandidateMetrics = {
+			logicalBytes,
+			physicalBytes,
+			compressionRatio,
+			writeThroughputBytesPerSec,
+			peakTempDiskBytes: raw.peakTempDiskBytes,
+			peakRssBytes,
+			wallMs: raw.exportWallMs,
+			rowCount: raw.rowCount,
+		}
+		return { candidate, signal, metrics, ok: true, sample: raw.sample } satisfies CandidateResult
+	}).pipe(
+		Effect.scoped,
+		// A failed candidate is DATA, not an error-channel failure: the matrix uses
+		// failures to eliminate cells, so short-circuiting here would abort all six
+		// signals on one bad candidate.
+		Effect.catchTag("@maple/cli/CandidateFailure", (failure) =>
+			Effect.succeed({
+				candidate,
+				signal,
+				metrics: null,
+				ok: false,
+				error: failure.reason,
+			} satisfies CandidateResult),
+		),
+	)
 
 /**
  * Run the full calibration matrix across all six signals, select the best
@@ -1142,7 +1211,7 @@ const runCandidateChild = (
  * held-out. Confidence "high" ⟺ a config is emitted; "low" ⟺ selected null
  * (small/unrepresentative data or insufficient disjoint held-out).
  */
-const runCalibrationMatrix = async (
+const runCalibrationMatrix = (
 	bundlePath: string,
 	dataDir: string,
 	checkpointSelector: string,
@@ -1151,77 +1220,108 @@ const runCalibrationMatrix = async (
 	archiveDir: string,
 	budget: CalibrationBudget,
 	faults: { pauseAtPhase?: string; markerDir?: string } = {},
-): Promise<CalibrationRecommendation> => {
-	if (!Number.isSafeInteger(budget.freeSpaceReserve) || budget.freeSpaceReserve <= 0) {
-		throw new Error("calibration free-space reserve must be a positive integer")
-	}
-	const operationId = randomUUID()
-	const pinId = randomUUID()
-	const pinPurpose = calibrationPinPurpose(operationId)
-	const scratchSubdir = derivedScratchSubdir(operationId)
-	const sampleDir = derivedSampleDir(archiveDir, operationId)
-	const roots = { dataDir, archiveDir, scratchRoot }
-	const maybePauseSession = async (phase: string): Promise<void> => {
-		if (faults.pauseAtPhase !== phase || !faults.markerDir) return
-		const { mkdirSync, writeFileSync } = await import("node:fs")
-		mkdirSync(faults.markerDir, { recursive: true })
-		writeFileSync(
-			join(faults.markerDir, "paused"),
-			`${phase}\n${process.pid}\n${new Date().toISOString()}\n`,
+): Effect.Effect<CalibrationRecommendation, ArchiveError, ChildProcessSpawner> =>
+	Effect.gen(function* () {
+		if (!Number.isSafeInteger(budget.freeSpaceReserve) || budget.freeSpaceReserve <= 0) {
+			return yield* new ArchiveError({
+				message: "calibration free-space reserve must be a positive integer",
+			})
+		}
+		const operationId = randomUUID()
+		const pinId = randomUUID()
+		const pinPurpose = calibrationPinPurpose(operationId)
+		const scratchSubdir = derivedScratchSubdir(operationId)
+		const sampleDir = derivedSampleDir(archiveDir, operationId)
+		const roots = { dataDir, archiveDir, scratchRoot }
+		const maybePauseSession = async (phase: string): Promise<void> => {
+			if (faults.pauseAtPhase !== phase || !faults.markerDir) return
+			const { mkdirSync, writeFileSync } = await import("node:fs")
+			mkdirSync(faults.markerDir, { recursive: true })
+			writeFileSync(
+				join(faults.markerDir, "paused"),
+				`${phase}\n${process.pid}\n${new Date().toISOString()}\n`,
+			)
+			await new Promise<void>(() => {
+				/* deterministic SIGKILL seam */
+			})
+		}
+		// ONE atomic bridge over the still-raw checkpoint session. The callback body
+		// stays raw on purpose: Effect must never be run from inside a callback
+		// handed to a promise-based module.
+		const session = yield* Effect.tryPromise({
+			try: () =>
+				withMaintenanceLock(dataDir, operationId, async () => {
+					await reconcileCalibration(archiveDir, roots)
+					const resolved = await resolveCheckpoint(
+						dataDir,
+						parseCheckpointSelector(checkpointSelector),
+					)
+					const manifestFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
+					await writeCalibrationRecord(archiveDir, {
+						phase: "intent",
+						operationId,
+						pinId,
+						pinPurpose,
+						pinPath: null,
+						checkpointId: resolved.checkpointId,
+						checkpointManifestFingerprint: manifestFingerprint,
+						boundRoots: roots,
+						ownedPaths: { scratchSubdir, sampleDir },
+					})
+					await maybePauseSession("intent")
+					const pinPath = await acquireCheckpointPin(
+						dataDir,
+						resolved.checkpointId,
+						pinPurpose,
+						pinId,
+					)
+					await writeCalibrationRecord(archiveDir, {
+						phase: "pin-acquired",
+						operationId,
+						pinId,
+						pinPurpose,
+						pinPath,
+						checkpointId: resolved.checkpointId,
+						checkpointManifestFingerprint: manifestFingerprint,
+						boundRoots: roots,
+						ownedPaths: { scratchSubdir, sampleDir },
+					})
+					await maybePauseSession("pin-acquired")
+					return { checkpointId: resolved.checkpointId, manifestFingerprint }
+				}),
+			catch: (error) => new ArchiveError({ message: errorMessage(error) }),
+		})
+		const matrix = yield* Effect.exit(
+			runBoundCalibrationMatrix(
+				bundlePath,
+				dataDir,
+				session.checkpointId,
+				session.manifestFingerprint,
+				operationId,
+				rangeDate,
+				scratchRoot,
+				archiveDir,
+				budget,
+			),
 		)
-		await new Promise<void>(() => {
-			/* deterministic SIGKILL seam */
-		})
-	}
-	const session = await withMaintenanceLock(dataDir, operationId, async () => {
-		await reconcileCalibration(archiveDir, roots)
-		const resolved = await resolveCheckpoint(dataDir, parseCheckpointSelector(checkpointSelector))
-		const manifestFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
-		await writeCalibrationRecord(archiveDir, {
-			phase: "intent",
-			operationId,
-			pinId,
-			pinPurpose,
-			pinPath: null,
-			checkpointId: resolved.checkpointId,
-			checkpointManifestFingerprint: manifestFingerprint,
-			boundRoots: roots,
-			ownedPaths: { scratchSubdir, sampleDir },
-		})
-		await maybePauseSession("intent")
-		const pinPath = await acquireCheckpointPin(dataDir, resolved.checkpointId, pinPurpose, pinId)
-		await writeCalibrationRecord(archiveDir, {
-			phase: "pin-acquired",
-			operationId,
-			pinId,
-			pinPurpose,
-			pinPath,
-			checkpointId: resolved.checkpointId,
-			checkpointManifestFingerprint: manifestFingerprint,
-			boundRoots: roots,
-			ownedPaths: { scratchSubdir, sampleDir },
-		})
-		await maybePauseSession("pin-acquired")
-		return { checkpointId: resolved.checkpointId, manifestFingerprint }
+		// Close the session in EVERY outcome, exactly like the original `finally`.
+		// Kept in the typed error channel rather than `orDie`d: a failed reconcile
+		// is an expected archive failure with a useful message, not a defect.
+		const closed = yield* Effect.exit(
+			Effect.tryPromise({
+				try: () =>
+					withMaintenanceLock(dataDir, operationId, () => reconcileCalibration(archiveDir, roots)),
+				catch: (error) => new ArchiveError({ message: errorMessage(error) }),
+			}),
+		)
+		// Unlike the original `finally`, a throwing reconcile no longer MASKS the
+		// matrix failure: the matrix error is the actionable one, and a close
+		// failure only decides the outcome when the matrix itself succeeded.
+		if (Exit.isSuccess(matrix)) return yield* Effect.andThen(closed, matrix)
+		return yield* matrix
 	})
-	try {
-		return await runBoundCalibrationMatrix(
-			bundlePath,
-			dataDir,
-			session.checkpointId,
-			session.manifestFingerprint,
-			operationId,
-			rangeDate,
-			scratchRoot,
-			archiveDir,
-			budget,
-		)
-	} finally {
-		await withMaintenanceLock(dataDir, operationId, () => reconcileCalibration(archiveDir, roots))
-	}
-}
 
-const runBoundCalibrationMatrix = async (
+const runBoundCalibrationMatrix = (
 	bundlePath: string,
 	dataDir: string,
 	checkpointId: string,
@@ -1231,65 +1331,26 @@ const runBoundCalibrationMatrix = async (
 	scratchRoot: string,
 	archiveDir: string,
 	budget: CalibrationBudget,
-): Promise<CalibrationRecommendation> => {
-	const volId = await archiveVolumeIdentity(archiveDir)
-	const environment = captureEnvironment(MAPLE_VERSION, CHDB_VERSION, SCHEMA_FINGERPRINT, archiveDir, volId)
-	const allResults: CandidateResult[] = []
-	const perSignal = new Map<CalibrationCandidate, CandidateResult[]>()
-	const matrixStart = Date.now()
-	for (const signal of ARCHIVE_SIGNALS) {
-		for (const candidate of CANDIDATE_MATRIX) {
-			if (Date.now() - matrixStart > budget.timeBudget) break
-			const result = await runCandidateChild(
-				bundlePath,
-				dataDir,
-				checkpointId,
-				checkpointManifestFingerprint,
-				rangeDate,
-				signal.name,
-				scratchRoot,
-				archiveDir,
-				candidate,
-				budget,
-				operationId,
-				0,
-				budget.sampleRows,
-				matrixStart,
-			)
-			allResults.push(result)
-			const list = perSignal.get(candidate) ?? []
-			list.push(result)
-			perSignal.set(candidate, list)
-		}
-		if (Date.now() - matrixStart > budget.timeBudget) break
-	}
-	// Select eligible candidates requiring EXACTLY six signals each.
-	const requiredSignals = ARCHIVE_SIGNALS.map((s) => s.name)
-	const eligible = selectCandidates(perSignal, budget, requiredSignals)
-	let selected: { candidate: CalibrationCandidate; worstCase: CandidateMetrics } | null = null
-	let selectedHeldOut: CalibrationRecommendation["heldOut"] = null
-	const heldOutAttempts: CalibrationRecommendation["heldOutAttempts"][number][] = []
-	let note: string
-	if (eligible.length === 0) {
-		note =
-			`no candidate met the declared goals across all six signals ` +
-			`(memory ${budget.memoryBudget}B, candidate ${budget.maxCandidateWallMs}ms, ` +
-			`throughput ${budget.minThroughputBytesPerSec}B/s, temp disk ${budget.maxTempDiskBytes}B) ` +
-			`with margin ${budget.safetyMargin.toFixed(3)}x; no configuration emitted`
-	} else {
-		// Held-out validation on a DISJOINT row window: startRow=sampleRows so the
-		// held-out sample is rows [sampleRows, 2*sampleRows) — not overlapping the
-		// training window [0, sampleRows). A candidate that fails held-out is
-		// REJECTED; try the next eligible. If none pass, no config.
-		for (const cand of eligible) {
-			const heldOutResults: CandidateResult[] = []
-			for (const signal of ARCHIVE_SIGNALS) {
+): Effect.Effect<CalibrationRecommendation, ArchiveError, ChildProcessSpawner> =>
+	Effect.gen(function* () {
+		const volId = yield* Effect.tryPromise({
+			try: () => archiveVolumeIdentity(archiveDir),
+			catch: (error) => new ArchiveError({ message: errorMessage(error) }),
+		})
+		const environment = captureEnvironment(
+			MAPLE_VERSION,
+			CHDB_VERSION,
+			SCHEMA_FINGERPRINT,
+			archiveDir,
+			volId,
+		)
+		const allResults: CandidateResult[] = []
+		const perSignal = new Map<CalibrationCandidate, CandidateResult[]>()
+		const matrixStart = Date.now()
+		for (const signal of ARCHIVE_SIGNALS) {
+			for (const candidate of CANDIDATE_MATRIX) {
 				if (Date.now() - matrixStart > budget.timeBudget) break
-				// Held-out: a STRICTLY LARGER, disjoint window. Training covered
-				// ordered rows [0, sampleRows); held-out covers
-				// [sampleRows, sampleRows + heldOutRows) where heldOutRows is a
-				// fixed multiple of the training size (plan-required larger sample).
-				const result = await runCandidateChild(
+				const result = yield* runCandidateChild(
 					bundlePath,
 					dataDir,
 					checkpointId,
@@ -1298,128 +1359,177 @@ const runBoundCalibrationMatrix = async (
 					signal.name,
 					scratchRoot,
 					archiveDir,
-					cand.candidate,
+					candidate,
 					budget,
 					operationId,
+					0,
 					budget.sampleRows,
-					heldOutSampleRows(budget.sampleRows),
 					matrixStart,
 				)
-				heldOutResults.push(result)
+				allResults.push(result)
+				const list = perSignal.get(candidate) ?? []
+				list.push(result)
+				perSignal.set(candidate, list)
 			}
-			// Require complete six-signal held-out evidence: every result within
-			// ceilings AND observing exactly heldOutSampleRows rows (a larger
-			// request is not a larger observed sample).
-			const heldOutComplete =
-				heldOutResults.length === requiredSignals.length &&
-				heldOutResults.every(
-					(r) =>
-						meetsCeilings(r, budget) &&
-						r.metrics?.rowCount === heldOutSampleRows(budget.sampleRows),
-				)
-			if (heldOutComplete) {
-				const heldWorst = selectCandidates(
-					new Map([[cand.candidate, heldOutResults]]),
-					budget,
-					requiredSignals,
-				)[0]!.worstCase
-				// PER-SIGNAL, like-for-like hybrid comparison: each signal's held-out
-				// result is paired with the same candidate's TRAINING result for that
-				// signal, and wallMs/physicalBytes are scaled by THAT signal's own
-				// heldOut/training logical-byte ratio. Aggregate extrema never decide
-				// acceptance; heldWorst is a descriptive summary only.
-				const perSignal = compareHeldOutPerSignal(
-					allResults,
-					heldOutResults,
-					requiredSignals,
-					cand.candidate,
-					HELD_OUT_TOLERANCES,
-				)
-				if (perSignal === null) {
-					// Unpairable or non-positive logical bytes: treat as incomplete.
+			if (Date.now() - matrixStart > budget.timeBudget) break
+		}
+		// Select eligible candidates requiring EXACTLY six signals each.
+		const requiredSignals = ARCHIVE_SIGNALS.map((s) => s.name)
+		const eligible = selectCandidates(perSignal, budget, requiredSignals)
+		let selected: { candidate: CalibrationCandidate; worstCase: CandidateMetrics } | null = null
+		let selectedHeldOut: CalibrationRecommendation["heldOut"] = null
+		const heldOutAttempts: CalibrationRecommendation["heldOutAttempts"][number][] = []
+		let note: string
+		if (eligible.length === 0) {
+			note =
+				`no candidate met the declared goals across all six signals ` +
+				`(memory ${budget.memoryBudget}B, candidate ${budget.maxCandidateWallMs}ms, ` +
+				`throughput ${budget.minThroughputBytesPerSec}B/s, temp disk ${budget.maxTempDiskBytes}B) ` +
+				`with margin ${budget.safetyMargin.toFixed(3)}x; no configuration emitted`
+		} else {
+			// Held-out validation on a DISJOINT row window: startRow=sampleRows so the
+			// held-out sample is rows [sampleRows, 2*sampleRows) — not overlapping the
+			// training window [0, sampleRows). A candidate that fails held-out is
+			// REJECTED; try the next eligible. If none pass, no config.
+			for (const cand of eligible) {
+				const heldOutResults: CandidateResult[] = []
+				for (const signal of ARCHIVE_SIGNALS) {
+					if (Date.now() - matrixStart > budget.timeBudget) break
+					// Held-out: a STRICTLY LARGER, disjoint window. Training covered
+					// ordered rows [0, sampleRows); held-out covers
+					// [sampleRows, sampleRows + heldOutRows) where heldOutRows is a
+					// fixed multiple of the training size (plan-required larger sample).
+					const result = yield* runCandidateChild(
+						bundlePath,
+						dataDir,
+						checkpointId,
+						checkpointManifestFingerprint,
+						rangeDate,
+						signal.name,
+						scratchRoot,
+						archiveDir,
+						cand.candidate,
+						budget,
+						operationId,
+						budget.sampleRows,
+						heldOutSampleRows(budget.sampleRows),
+						matrixStart,
+					)
+					heldOutResults.push(result)
+				}
+				// Require complete six-signal held-out evidence: every result within
+				// ceilings AND observing exactly heldOutSampleRows rows (a larger
+				// request is not a larger observed sample).
+				const heldOutComplete =
+					heldOutResults.length === requiredSignals.length &&
+					heldOutResults.every(
+						(r) =>
+							meetsCeilings(r, budget) &&
+							r.metrics?.rowCount === heldOutSampleRows(budget.sampleRows),
+					)
+				if (heldOutComplete) {
+					const heldWorst = selectCandidates(
+						new Map([[cand.candidate, heldOutResults]]),
+						budget,
+						requiredSignals,
+					)[0]!.worstCase
+					// PER-SIGNAL, like-for-like hybrid comparison: each signal's held-out
+					// result is paired with the same candidate's TRAINING result for that
+					// signal, and wallMs/physicalBytes are scaled by THAT signal's own
+					// heldOut/training logical-byte ratio. Aggregate extrema never decide
+					// acceptance; heldWorst is a descriptive summary only.
+					const perSignal = compareHeldOutPerSignal(
+						allResults,
+						heldOutResults,
+						requiredSignals,
+						cand.candidate,
+						HELD_OUT_TOLERANCES,
+					)
+					if (perSignal === null) {
+						// Unpairable or non-positive logical bytes: treat as incomplete.
+						heldOutAttempts.push({
+							candidate: cand.candidate,
+							results: heldOutResults,
+							worstCase: null,
+							signalComparisons: [],
+							passed: false,
+						})
+						continue
+					}
 					heldOutAttempts.push({
 						candidate: cand.candidate,
 						results: heldOutResults,
-						worstCase: null,
-						signalComparisons: [],
-						passed: false,
+						worstCase: heldWorst,
+						signalComparisons: perSignal.signalComparisons,
+						passed: perSignal.passed,
 					})
-					continue
+					if (!perSignal.passed) continue
+					selected = cand
+					selectedHeldOut = {
+						results: heldOutResults,
+						worstCase: heldWorst,
+						signalComparisons: perSignal.signalComparisons,
+						passed: true,
+						tolerances: HELD_OUT_TOLERANCES,
+					}
+					note =
+						`selected the lowest-worst-case-peak-RSS candidate that met every ceiling ` +
+						`on the disjoint held-out window across all six signals (per-signal comparison)`
+					break
 				}
 				heldOutAttempts.push({
 					candidate: cand.candidate,
 					results: heldOutResults,
-					worstCase: heldWorst,
-					signalComparisons: perSignal.signalComparisons,
-					passed: perSignal.passed,
+					worstCase: null,
+					// Incomplete/over-budget/short-window attempt: no comparisons ran.
+					signalComparisons: [],
+					passed: false,
 				})
-				if (!perSignal.passed) continue
-				selected = cand
-				selectedHeldOut = {
-					results: heldOutResults,
-					worstCase: heldWorst,
-					signalComparisons: perSignal.signalComparisons,
-					passed: true,
-					tolerances: HELD_OUT_TOLERANCES,
-				}
+			}
+			if (selected === null) {
 				note =
-					`selected the lowest-worst-case-peak-RSS candidate that met every ceiling ` +
-					`on the disjoint held-out window across all six signals (per-signal comparison)`
-				break
-			}
-			heldOutAttempts.push({
-				candidate: cand.candidate,
-				results: heldOutResults,
-				worstCase: null,
-				// Incomplete/over-budget/short-window attempt: no comparisons ran.
-				signalComparisons: [],
-				passed: false,
-			})
-		}
-		if (selected === null) {
-			note =
-				`every eligible candidate failed held-out validation (disjoint window) ` +
-				`or the data was insufficient for a complete six-signal held-out split; ` +
-				`no configuration emitted`
-		}
-	}
-	// Confidence "high" ⟺ selected !== null ⟺ a config is emitted. "low" means
-	// small/unrepresentative data OR no disjoint held-out — always paired with
-	// selected null and no config. Per-signal representative check (not a
-	// cross-candidate sum that repetition could inflate): every signal's
-	// training rowCount must reach at least the sampleRows target for the data
-	// to be representative.
-	const perSignalRepresentative = (() => {
-		if (selected === null) return true // no false-high; selected null → low anyway
-		const bySignal = new Map<string, number>()
-		for (const r of allResults) {
-			if (isSameCalibrationCandidate(r.candidate, selected.candidate) && r.ok && r.metrics) {
-				bySignal.set(r.signal, Math.max(bySignal.get(r.signal) ?? 0, r.metrics.rowCount))
+					`every eligible candidate failed held-out validation (disjoint window) ` +
+					`or the data was insufficient for a complete six-signal held-out split; ` +
+					`no configuration emitted`
 			}
 		}
-		return requiredSignals.every((s) => bySignal.get(s) === budget.sampleRows)
-	})()
-	const confidence: "high" | "low" = selected !== null && perSignalRepresentative ? "high" : "low"
-	if (confidence === "low" && selected !== null) {
-		// Downgrade to no-config: low confidence ⟺ selected null.
-		note = `selected candidate's per-signal data is unrepresentative (below the ${budget.sampleRows}-row target); no configuration emitted`
-		selected = null
-		selectedHeldOut = null
-	}
-	return {
-		formatVersion: TUNING_CONFIG_FORMAT_VERSION,
-		checkpoint: { checkpointId, manifestFingerprint: checkpointManifestFingerprint },
-		selected,
-		heldOut: selectedHeldOut,
-		heldOutAttempts,
-		results: allResults,
-		budget,
-		environment,
-		confidence,
-		measuredAt: new Date().toISOString(),
-		note: note!,
-	}
-}
+		// Confidence "high" ⟺ selected !== null ⟺ a config is emitted. "low" means
+		// small/unrepresentative data OR no disjoint held-out — always paired with
+		// selected null and no config. Per-signal representative check (not a
+		// cross-candidate sum that repetition could inflate): every signal's
+		// training rowCount must reach at least the sampleRows target for the data
+		// to be representative.
+		const perSignalRepresentative = (() => {
+			if (selected === null) return true // no false-high; selected null → low anyway
+			const bySignal = new Map<string, number>()
+			for (const r of allResults) {
+				if (isSameCalibrationCandidate(r.candidate, selected.candidate) && r.ok && r.metrics) {
+					bySignal.set(r.signal, Math.max(bySignal.get(r.signal) ?? 0, r.metrics.rowCount))
+				}
+			}
+			return requiredSignals.every((s) => bySignal.get(s) === budget.sampleRows)
+		})()
+		const confidence: "high" | "low" = selected !== null && perSignalRepresentative ? "high" : "low"
+		if (confidence === "low" && selected !== null) {
+			// Downgrade to no-config: low confidence ⟺ selected null.
+			note = `selected candidate's per-signal data is unrepresentative (below the ${budget.sampleRows}-row target); no configuration emitted`
+			selected = null
+			selectedHeldOut = null
+		}
+		return {
+			formatVersion: TUNING_CONFIG_FORMAT_VERSION,
+			checkpoint: { checkpointId, manifestFingerprint: checkpointManifestFingerprint },
+			selected,
+			heldOut: selectedHeldOut,
+			heldOutAttempts,
+			results: allResults,
+			budget,
+			environment,
+			confidence,
+			measuredAt: new Date().toISOString(),
+			note: note!,
+		}
+	})
 
 /**
  * Internal calibration worker. The PARENT generates the operation id and passes
