@@ -234,8 +234,6 @@ const fetchText = (
 		}),
 	)
 
-export const __testables = { downloadTo, fetchText }
-
 const sha256File = (path: string): Effect.Effect<string, UpdateError> =>
 	Effect.tryPromise({
 		try: async () => {
@@ -297,6 +295,8 @@ const clearQuarantine = (paths: ReadonlyArray<string>): Effect.Effect<void, neve
 		Effect.tapCause((cause) => Effect.logDebug("could not clear macOS quarantine flag", cause)),
 		Effect.ignore,
 	)
+
+export const __testables = { downloadTo, extractTar, fetchText, mapFsError }
 
 export interface UpdateResult {
 	readonly tag: string
