@@ -4,7 +4,7 @@
 // alone. Router navigation is stubbed to a plain anchor — these are rendering
 // tests, and mounting a router would only add a second thing that can fail.
 
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { agentSpan, llmSpan, makeSpan, toolSpan, userMessages } from "@/lib/agent-sessions/span-fixtures"
@@ -193,6 +193,50 @@ describe("SessionWaterfall", () => {
 
 		expect(screen.getAllByText(/run_tests/).length).toBeGreaterThan(0)
 		expect(screen.queryByText("Turn 2")).toBeNull()
+	})
+
+	it("moves a trace rule off a fully filtered-out turn instead of leaving it dangling", () => {
+		const crossTrace = [
+			agentSpan({ spanId: "t1-agent", startMs: 0, durationMs: 10 * SECOND }),
+			toolSpan({
+				spanId: "t1-tool",
+				parentSpanId: "t1-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "read_file",
+			}),
+			agentSpan({ spanId: "t2-agent", traceId: "trace-2", startMs: 20 * SECOND, durationMs: 30 * SECOND }),
+			toolSpan({
+				spanId: "t2-tool",
+				traceId: "trace-2",
+				parentSpanId: "t2-agent",
+				startMs: 21 * SECOND,
+				durationMs: 20 * SECOND,
+				toolName: "run_tests",
+			}),
+		]
+		const crossTurns = buildSessionTurns(crossTrace)
+		const crossSummary = buildSessionSummary(crossTrace, crossTurns, Date.UTC(2026, 7, 19, 18, 0, 0))
+		render(
+			<SessionWaterfall
+				turns={crossTurns}
+				summary={crossSummary}
+				query="run_tests"
+				agentSpansOnly
+				collapseIdle
+			/>,
+		)
+
+		expect(screen.queryByText(/Trace trace-1/)).toBeNull()
+		expect(screen.getByText(/Trace trace-2/)).toBeTruthy()
+	})
+
+	it("counts only the spans the filter shows on a collapsed turn", () => {
+		render(<SessionWaterfall turns={turns} summary={summary} query="" agentSpansOnly collapseIdle />)
+
+		fireEvent.click(screen.getByText("Turn 1"))
+		// Six spans in the turn, one an app HTTP span the agent-spans-only filter hides.
+		expect(screen.getByText("5 spans")).toBeTruthy()
 	})
 })
 

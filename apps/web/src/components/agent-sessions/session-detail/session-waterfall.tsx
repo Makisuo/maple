@@ -199,8 +199,9 @@ function buildRows(input: {
 	// Traces band the turns: a trace commonly holds several turns and a turn can
 	// cross traces, so neither nests inside the other and the rule is drawn where
 	// the trace changes.
-	const traceRanges = groupByTrace(input.turns)
+	const bands = traceBands(input.turns)
 	let gapIndex = 0
+	let lastBand = -1
 
 	input.turns.forEach((turn, index) => {
 		while (gapIndex < input.gaps.length && input.gaps[gapIndex]!.startMs < turn.startMs) {
@@ -214,21 +215,25 @@ function buildRows(input: {
 			gapIndex++
 		}
 
-		const range = traceRanges.get(index)
-		if (range !== undefined) {
+		const visible = filterSpans(turn.spans, input.query, input.agentSpansOnly)
+		// A turn whose every span was filtered out drops off the page entirely —
+		// keeping an empty header would make the filter look broken. Its trace
+		// rule moves to the trace's next surviving turn instead of dangling
+		// above nothing.
+		if (visible.length === 0) return
+
+		const band = bands.byTurn[index]!
+		if (band !== lastBand) {
+			const range = bands.ranges[band]!
 			rows.push({
 				kind: "trace",
-				key: `trace:${turn.traceIds[0]}:${index}`,
-				traceId: turn.traceIds[0] ?? "",
+				key: `trace:${range.traceId}:${band}`,
+				traceId: range.traceId,
 				turns: range.from === range.to ? `turn ${range.from}` : `turns ${range.from}–${range.to}`,
 				timestamp: turn.anchor.timestamp,
 			})
+			lastBand = band
 		}
-
-		const visible = filterSpans(turn.spans, input.query, input.agentSpansOnly)
-		// A turn whose every span was filtered out drops off the page entirely —
-		// keeping an empty header would make the filter look broken.
-		if (visible.length === 0) return
 
 		rows.push({
 			kind: "turn",
@@ -250,20 +255,24 @@ function buildRows(input: {
 	return rows
 }
 
-/** Turn index → the range of turns its trace rule covers, for the turns that open one. */
-function groupByTrace(turns: readonly SessionTurn[]): Map<number, { from: number; to: number }> {
-	const ranges = new Map<number, { from: number; to: number }>()
-	let openIndex = -1
-	turns.forEach((turn, index) => {
-		const traceId = turn.traceIds[0]
-		if (openIndex === -1 || traceId !== turns[openIndex]!.traceIds[0]) {
-			openIndex = index
-			ranges.set(index, { from: turn.index, to: turn.index })
+/** Contiguous runs of turns sharing a primary trace; one rule row opens each band. */
+function traceBands(turns: readonly SessionTurn[]): {
+	byTurn: readonly number[]
+	ranges: readonly { traceId: string; from: number; to: number }[]
+} {
+	const byTurn: number[] = []
+	const ranges: { traceId: string; from: number; to: number }[] = []
+	for (const turn of turns) {
+		const traceId = turn.traceIds[0] ?? ""
+		const open = ranges.at(-1)
+		if (open === undefined || traceId !== open.traceId) {
+			ranges.push({ traceId, from: turn.index, to: turn.index })
 		} else {
-			ranges.get(openIndex)!.to = turn.index
+			open.to = turn.index
 		}
-	})
-	return ranges
+		byTurn.push(ranges.length - 1)
+	}
+	return { byTurn, ranges }
 }
 
 function filterSpans(
@@ -376,7 +385,7 @@ function TurnHeader({
 				{turn.failed && <ErrorPill>Failed</ErrorPill>}
 				{collapsed && (
 					<span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] text-muted-foreground tabular-nums">
-						{turn.spans.length} spans
+						{turn.spans.length - row.hiddenCount} spans
 					</span>
 				)}
 			</span>
