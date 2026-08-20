@@ -68,7 +68,8 @@ use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, InstrumentationScope, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource;
-use opentelemetry_sdk::logs::{BatchLogProcessor, SdkLoggerProvider};
+use opentelemetry_sdk::logs::log_processor_with_async_runtime::BatchLogProcessor;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
 use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
 use opentelemetry_sdk::runtime::Tokio as OtelTokio;
@@ -1324,7 +1325,12 @@ fn init_tracing(
         .with_resource(resource.clone())
         .with_span_processor(processor)
         .build();
-    let log_processor = BatchLogProcessor::builder(log_exporter)
+    // The runtime argument is not optional here: the runtime-less
+    // `logs::BatchLogProcessor` drives exports from its own OS thread
+    // ("OpenTelemetry.Logs.BatchProcessor"), which has no Tokio reactor, and the
+    // reqwest-backed OTLP exporter panics there with "there is no reactor
+    // running". Spans and metrics already use their async-runtime variants.
+    let log_processor = BatchLogProcessor::builder(log_exporter, OtelTokio)
         .with_batch_config(
             opentelemetry_sdk::logs::BatchConfigBuilder::default()
                 .with_max_queue_size(2048)
