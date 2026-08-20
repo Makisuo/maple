@@ -242,24 +242,31 @@ export class GetAiSessionSpansResponse extends Schema.Class<GetAiSessionSpansRes
 }) {}
 
 /**
- * Encoded-response ceiling for one session's spans.
+ * Response ceiling for one session's spans, measured over the warehouse rows —
+ * which still carry the raw attribute maps, in production ~17KB on a single
+ * agent span.
  *
- * Bounds the warehouse read, which still carries the raw attribute maps — in
- * production a single agent span runs to ~17KB of them — so this is a memory
- * ceiling for the Worker, not a statement about the (much smaller) mapped
- * response. Above the 8MB one replay events request gets, because a session is
- * read whole: there is no range parameter to narrow, so a cap that refused
- * ordinary sessions would leave the caller nothing to do.
+ * The byte counter accumulates over rows that are already parsed, so the
+ * ceiling only trips once that much of the JS object graph is resident: it has
+ * to sit far below the 128MB isolate heap, not near it. Replay events get 8MB
+ * for opaque strings; 10MB here because these rows are attribute-map-heavy,
+ * and the 2,000-row cap bounds the ordinary session well before this does.
+ *
+ * For a pathologically attribute-heavy session the byte cap fires first and the
+ * request 413s instead of truncating. That is the designed outcome — the
+ * alternative is an OOM that takes the isolate with it.
  */
-export const MAX_AI_SESSION_SPANS_RESPONSE_BYTES = 20_000_000
+export const MAX_AI_SESSION_SPANS_RESPONSE_BYTES = 10_000_000
 
 /**
  * The session's spans exceed `MAX_AI_SESSION_SPANS_RESPONSE_BYTES`.
  *
  * Distinct from the row cap, which truncates and reports `truncated: true`: the
  * byte ceiling aborts the read before a response can be materialized, so there
- * is nothing to return. Nothing the caller sends changes the outcome — the
- * endpoint takes no size parameter — hence `recovery: "none"`.
+ * is nothing to return. The endpoint takes no size parameter, but it does take
+ * a window, and both the session detection and the span fan-out are bounded by
+ * it — so a narrower range genuinely returns fewer bytes, which is what
+ * `recovery: "fix_request"` points the caller at.
  */
 export class AiSessionTooLargeError extends HttpTaggedError<AiSessionTooLargeError>()(
 	"@maple/http/ai-sessions/AiSessionTooLargeError",
@@ -271,9 +278,10 @@ export class AiSessionTooLargeError extends HttpTaggedError<AiSessionTooLargeErr
 		status: 413,
 		code: "ai_session_too_large",
 		title: "Session is too large to load",
-		message: "This session's spans are too large to return in one response.",
+		message:
+			"This session's spans are too large to return in one response. Open it from the Agent Sessions list, or narrow the time range.",
 		retry: "never",
-		recovery: "none",
+		recovery: "fix_request",
 		exposure: "redacted",
 	},
 ) {}

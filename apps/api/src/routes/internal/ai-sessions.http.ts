@@ -36,6 +36,9 @@ type _MappedSpanMatchesWireSpan = Assert<
 >
 type _WireCarriesEveryCatalogField = Assert<NoExtraKeys<Integrations.AiGenAiValues, AiSessionGenAiValues>>
 type _WireInventsNoField = Assert<NoExtraKeys<AiSessionGenAiValues, Integrations.AiGenAiValues>>
+// Same hole one level up: the span's own optional top-level fields (`sessionId`,
+// `vendorId`, …) are invisible to assignability for exactly the same reason.
+type _SpanKeysMatch = Assert<NoExtraKeys<Integrations.AiAgentSpan, AiSessionSpan>>
 
 /**
  * Dashboard-only AI agent session reads.
@@ -138,13 +141,22 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 										),
 								),
 							)
+						const truncated = rows.length > Integrations.AI_SESSION_SPANS_MAX_SPANS
+						yield* Effect.annotateCurrentSpan({
+							"maple.ai.session_id": payload.sessionId,
+							"maple.ai.span_count": Math.min(
+								rows.length,
+								Integrations.AI_SESSION_SPANS_MAX_SPANS,
+							),
+							"maple.ai.truncated": truncated,
+						})
 						// Mapped server-side: the raw attribute maps are the dominant
 						// weight of this read and nothing downstream needs them.
 						return new GetAiSessionSpansResponse({
 							data: Integrations.mapAiSpans(
 								rows.slice(0, Integrations.AI_SESSION_SPANS_MAX_SPANS),
 							),
-							truncated: rows.length > Integrations.AI_SESSION_SPANS_MAX_SPANS,
+							truncated,
 						})
 					}),
 				)
