@@ -78,6 +78,34 @@ const subscriptionsOf = (response: unknown): ReadonlyArray<PlanGatingSubscriptio
 }
 
 /**
+ * A PII-free description of the subscription rows Autumn returned, for the
+ * `getCustomer` span.
+ *
+ * The plan gate ("does this org see the app or the new-user wizard?") is derived
+ * entirely from this array, so when an org is gated wrongly the array is the
+ * only thing worth looking at — and it is upstream data we otherwise never
+ * record. Statuses and plan ids are catalog identifiers, not customer data.
+ */
+export const summariseSubscriptions = (response: unknown): Record<string, string | number | boolean> => {
+	const subscriptions = subscriptionsOf(response)
+	// A row is positional: a missing field reads as "-" so the lists stay aligned.
+	const describe = (pick: (sub: PlanGatingSubscription) => string | null | undefined) =>
+		subscriptions.map((sub) => pick(sub) ?? "-").join(",")
+	return {
+		"billing.subscription_count": subscriptions.length,
+		"billing.subscription_statuses": describe((sub) => sub.status),
+		"billing.subscription_plan_ids": describe((sub) => sub.planId),
+		// Which rows the gate discards, positionally aligned with the two lists
+		// above: "addon" / "auto" / "-" per subscription.
+		"billing.subscription_excluded": subscriptions
+			.map((sub) => (sub.addOn ? "addon" : sub.autoEnable ? "auto" : "-"))
+			.join(","),
+		"billing.has_active_plan": responseHasActivePlan(response),
+		"billing.has_plan_history": responseHasPlanHistory(response),
+	}
+}
+
+/**
  * How long a `getOrCreateCustomer` response stays cached. Three tiers, because
  * "no active plan" covers two states with opposite cache economics: an org
  * seconds away from its first checkout, and one that lapsed weeks ago.

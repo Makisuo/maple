@@ -105,6 +105,40 @@ export function hasLapsedPlan(customer: Customer | null | undefined): boolean {
 	return getLapsedPlan(customer) !== null
 }
 
+/**
+ * What the plan gate may conclude from one customer-query outcome. The `__root`
+ * redirect and the `/quick-start` bail-out both derive their behaviour from this
+ * so they cannot disagree — the original lapsed-subscriber bug was exactly that
+ * disagreement: `__root` failed open on a broken customer read while
+ * `/quick-start` read the same failure as "brand new org, show the wizard".
+ *
+ * - `loading`  — nothing known yet; show a splash (or the optimistic shell).
+ * - `unknown`  — the read failed or came back unusable. Fail OPEN: an outage
+ *                must never push an existing customer into new-user onboarding.
+ * - `app`      — holds a plan, or held one and let it lapse. The app (plus the
+ *                reactivation banner) is where both belong.
+ * - `onboarding` — genuinely never subscribed. The only state that onboards.
+ */
+export type PlanAccess = "loading" | "unknown" | "app" | "onboarding"
+
+export function resolvePlanAccess({
+	customer,
+	error,
+	isLoading,
+}: {
+	customer: Customer | null | undefined
+	error?: unknown
+	isLoading: boolean
+}): PlanAccess {
+	if (isLoading) return "loading"
+	// A settled query with neither a customer nor an error is a state we have no
+	// reading for — treated as an outage rather than as "no plan", for the same
+	// reason as above.
+	if (error || !isUsableCustomer(customer)) return "unknown"
+	if (hasSelectedPlan(customer) || hasLapsedPlan(customer)) return "app"
+	return "onboarding"
+}
+
 export interface TrialStatus {
 	isTrialing: boolean
 	daysRemaining: number | null

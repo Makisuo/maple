@@ -12,6 +12,7 @@ import {
 	isLegacyPlan,
 	isUsableCustomer,
 	isUsageBasedPlan,
+	resolvePlanAccess,
 } from "./plan-gating"
 
 // The mock builders construct only the consumed subset of each domain schema;
@@ -163,6 +164,47 @@ describe("getLapsedPlan / hasLapsedPlan", () => {
 		expect(hasLapsedPlan(null)).toBe(false)
 		expect(hasLapsedPlan(undefined)).toBe(false)
 		expect(getLapsedPlan(null)).toBeNull()
+	})
+})
+
+describe("resolvePlanAccess", () => {
+	// The one gate both /quick-start and __root read. Every case here is a route
+	// decision: "onboarding" is the only verdict that shows the new-user wizard,
+	// so anything ambiguous must resolve to something else.
+	const active = buildCustomer([buildSubscription({ status: "active" })])
+	const lapsed = buildCustomer([buildSubscription({ status: "expired" })])
+	const neverSubscribed = buildCustomer([])
+
+	it("waits while the customer query is unsettled", () => {
+		expect(resolvePlanAccess({ customer: undefined, isLoading: true })).toBe("loading")
+		// Loading wins even over a retained previous value: the fresh answer is
+		// what the redirect will be applied to.
+		expect(resolvePlanAccess({ customer: active, isLoading: true })).toBe("loading")
+	})
+
+	it("sends a current subscriber to the app", () => {
+		expect(resolvePlanAccess({ customer: active, isLoading: false })).toBe("app")
+	})
+
+	it("sends a lapsed subscriber to the app, not back through onboarding", () => {
+		expect(resolvePlanAccess({ customer: lapsed, isLoading: false })).toBe("app")
+	})
+
+	it("onboards only an org that has never held a plan", () => {
+		expect(resolvePlanAccess({ customer: neverSubscribed, isLoading: false })).toBe("onboarding")
+	})
+
+	it("fails open when the customer read failed", () => {
+		// An Autumn outage reads as "no plan" through every predicate. Onboarding a
+		// paying customer because billing had a bad minute is the worse failure, so
+		// an unusable answer is never a verdict.
+		expect(resolvePlanAccess({ customer: undefined, error: new Error("502"), isLoading: false })).toBe(
+			"unknown",
+		)
+		// SAFETY: this test intentionally passes Autumn's malformed error body through the customer-shaped boundary.
+		const autumnErrorBody = { code: "autumn_api_error" } as unknown as Customer
+		expect(resolvePlanAccess({ customer: autumnErrorBody, isLoading: false })).toBe("unknown")
+		expect(resolvePlanAccess({ customer: undefined, isLoading: false })).toBe("unknown")
 	})
 })
 

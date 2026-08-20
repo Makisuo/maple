@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-router"
 import { selectedPlanKnownAtomFor } from "@/atoms/selected-plan-atoms"
 import { useAtom } from "@/lib/effect-atom"
-import { hasLapsedPlan, hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
+import { hasSelectedPlan, resolvePlanAccess } from "@/lib/billing/plan-gating"
 import { isFixturePath, isPublicPath } from "@/lib/public-routes"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { AnchoredToastProvider, ToastProvider } from "@maple/ui/components/ui/toast"
@@ -141,10 +141,12 @@ function ClerkReverseRedirects() {
 
 	const redirectUrl = pathname + (searchStr ?? "")
 	const selectedPlan = hasSelectedPlan(customer)
-	// An org that held a plan and no longer does. Never onboarded again — it gets
-	// the app plus the reactivation banner (`SubscriptionEndedBanner`) instead.
-	const lapsedPlan = hasLapsedPlan(customer)
-	const mayRenderApp = selectedPlan || lapsedPlan
+	// One reading of the customer query, shared with /quick-start's bail-out so
+	// the two gates cannot disagree. "app" covers both a current subscriber and an
+	// org that held a plan and let it lapse — the latter is never onboarded again,
+	// it gets the app plus the reactivation banner (`SubscriptionEndedBanner`).
+	const access = resolvePlanAccess({ customer, error: customerError, isLoading: isCustomerLoading })
+	const mayRenderApp = access === "app"
 
 	// Per-org, localStorage-backed memory (effect-atom KVS) of whether this org
 	// was last seen entitled to render the app. Drives the optimistic "render the
@@ -158,10 +160,10 @@ function ClerkReverseRedirects() {
 	// transient blip can't flip it. A never-subscribed settle clears it here,
 	// ending the optimistic flash. See MAP-45.
 	useEffect(() => {
-		if (!isSignedIn || !orgId || isCustomerLoading) return
-		if (customerError || !isUsableCustomer(customer)) return
+		if (!isSignedIn || !orgId) return
+		if (access === "loading" || access === "unknown") return
 		setKnownMayRenderApp(mayRenderApp)
-	}, [isSignedIn, orgId, isCustomerLoading, customerError, customer, mayRenderApp, setKnownMayRenderApp])
+	}, [isSignedIn, orgId, access, mayRenderApp, setKnownMayRenderApp])
 
 	if (isSignedIn && pathname === "/sign-in") {
 		const target = getRedirectTarget(searchStr)
@@ -190,7 +192,7 @@ function ClerkReverseRedirects() {
 		// a usable customer — let users through rather than blocking them. Without
 		// this, a malformed customer falls through as "no plan" and bounces the
 		// user into /quick-start onboarding.
-		if (customerError || (customer && !isUsableCustomer(customer))) {
+		if (access === "unknown") {
 			return <AppFrame />
 		}
 		// Dev-only: `?quota_preview=` forces the usage-alert banner for visual
@@ -206,7 +208,7 @@ function ClerkReverseRedirects() {
 		// already knows the org may render the app — otherwise show a loading
 		// screen until the query settles, so we never flash the dashboard before
 		// bouncing a never-subscribed user to /quick-start.
-		if (isCustomerLoading && !quotaPreview) {
+		if (access === "loading" && !quotaPreview) {
 			if (ALLOWED_WITHOUT_PLAN.includes(pathname) || knownMayRenderApp) {
 				return <AppFrame />
 			}

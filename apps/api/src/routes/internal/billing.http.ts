@@ -21,6 +21,7 @@ import {
 	ensureOk,
 	readCustomerCached,
 	resolveAttachConflict,
+	summariseSubscriptions,
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
 import { requireAdmin } from "@/services/auth/auth"
@@ -93,7 +94,14 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 							// them.
 							autumn.getOrCreateCustomer(tenant.orgId, { expand: ["subscriptions.plan"] }),
 						)
-						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, "cache.hit": hit })
+						yield* Effect.annotateCurrentSpan({
+							orgId: tenant.orgId,
+							"cache.hit": hit,
+							// The plan gate is derived from these rows; without them a
+							// wrongly-gated org can only be diagnosed by asking the customer
+							// to open devtools.
+							...summariseSubscriptions(result.response),
+						})
 						const response = yield* ensureOk(result)
 						return yield* decodeUpstream(BillingCustomer, response)
 					}),
