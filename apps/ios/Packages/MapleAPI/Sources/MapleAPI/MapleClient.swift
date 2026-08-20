@@ -165,6 +165,10 @@ public struct MapleClient: MapleAPI {
 	private let tokens: any MapleTokenProvider
 	private let serverURL: URL
 	private let transport: any ClientTransport
+	/// Shared with every client `scoped(to:)` produces, so a widget fetch for
+	/// one organization still dedupes against a foreground fetch for another
+	/// when they happen to be identical.
+	private let coalescer: RequestCoalescer
 
 	/// - Parameters:
 	///   - tokens: supplies the Clerk session JWT.
@@ -176,7 +180,25 @@ public struct MapleClient: MapleAPI {
 			tokens: tokens,
 			serverURL: try baseURL ?? Servers.Server1.url(),
 			transport: URLSessionTransport(),
-			organizationId: nil
+			organizationId: nil,
+			coalescer: RequestCoalescer()
+		)
+	}
+
+	/// Builds a client over a caller-supplied transport. For tests — it is what
+	/// lets the request-count assertions run without a network.
+	init(
+		tokens: any MapleTokenProvider,
+		serverURL: URL,
+		transport: any ClientTransport,
+		coalescer: RequestCoalescer = RequestCoalescer()
+	) {
+		self.init(
+			tokens: tokens,
+			serverURL: serverURL,
+			transport: transport,
+			organizationId: nil,
+			coalescer: coalescer
 		)
 	}
 
@@ -184,19 +206,25 @@ public struct MapleClient: MapleAPI {
 		tokens: any MapleTokenProvider,
 		serverURL: URL,
 		transport: any ClientTransport,
-		organizationId: String?
+		organizationId: String?,
+		coalescer: RequestCoalescer
 	) {
 		self.tokens = tokens
 		self.serverURL = serverURL
 		self.transport = transport
+		self.coalescer = coalescer
 
-		// Order matters: auth runs outermost so the error mapper sees the
-		// response to a request that actually carried a token.
+		// Order matters, outermost first: auth runs outermost so the error
+		// mapper sees the response to a request that actually carried a token,
+		// and coalescing runs innermost so its key is computed over the finished
+		// request — bearer token and organization header included — and so every
+		// waiter still gets its own typed error from the mapper above it.
 		var middlewares: [any ClientMiddleware] = [BearerAuthMiddleware(tokens: tokens)]
 		if let organizationId {
 			middlewares.append(OrganizationMiddleware(organizationId: organizationId))
 		}
 		middlewares.append(ErrorMappingMiddleware())
+		middlewares.append(CoalescingMiddleware(coalescer: coalescer))
 
 		self.client = Client(serverURL: serverURL, transport: transport, middlewares: middlewares)
 	}
@@ -213,7 +241,8 @@ public struct MapleClient: MapleAPI {
 			tokens: tokens,
 			serverURL: serverURL,
 			transport: transport,
-			organizationId: organizationId
+			organizationId: organizationId,
+			coalescer: coalescer
 		)
 	}
 
