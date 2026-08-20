@@ -17,7 +17,7 @@ import {
 } from "../shared/flush-core.js"
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
 import { makeMetricBuffer } from "../shared/flushable-metrics.js"
-import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
+import { type CaptureExceptionOptions, makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
 import { browserDocument, browserNavigator } from "./browser-globals.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
 import { withSessionLink } from "./session-link.js"
@@ -93,6 +93,16 @@ export interface MapleClientFlushableConfig {
 	 */
 	readonly replay?: ClientReplayConfig | undefined
 	/**
+	 * Capture uncaught errors and unhandled promise rejections from the page and
+	 * record them as error spans. Default `true`.
+	 *
+	 * Without this the SDK only ever sees failures that happened *inside* an
+	 * Effect span, which in a browser is the minority of them — a React render
+	 * crash, a throw in an event handler and a floating rejected promise all
+	 * bypass Effect entirely and would otherwise never reach Maple.
+	 */
+	readonly captureGlobalErrors?: boolean | undefined
+	/**
 	 * Consent gating, persistent-visitor-id storage, and whether `identify()`'s
 	 * email reaches the warehouse. Defaults capture everything except where a
 	 * browser signals otherwise: Global Privacy Control suppresses the
@@ -108,6 +118,16 @@ export interface FlushableTelemetry {
 	 * instrumented code.
 	 */
 	readonly layer: Layer.Layer<never>
+	/**
+	 * Record an error that never passed through an Effect span — the escape
+	 * hatch for the places a browser throws outside Effect. The canonical caller
+	 * is a React error boundary, which catches the error and, unless it reports
+	 * it here, is the reason nobody ever hears about the crash.
+	 *
+	 * BOUNDARY: a thrown value is unparsed by definition — JavaScript can throw
+	 * anything. It is narrowed on the way into the exception event.
+	 */
+	readonly captureException: (error: unknown, options?: CaptureExceptionOptions) => void
 	/** Drain the buffers and POST them now (keepalive). Never rejects. */
 	readonly flush: () => Promise<void>
 	/** Remove unload listeners, stop the auto-flush timer, then do one final flush. */
@@ -260,6 +280,60 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 		;(timer as { unref?: () => void }).unref?.()
 	}
 
+	/**
+	 * One error reaching two paths must still be one issue. React rethrows a
+	 * boundary-caught error in development, so a boundary that reports it *and*
+	 * `window.onerror` would otherwise fingerprint the same crash twice.
+	 */
+	const reported = new WeakSet<object>()
+	const captureException = (error: unknown, options: CaptureExceptionOptions = {}): void => {
+		if (typeof error === "object" && error !== null) {
+			if (reported.has(error)) return
+			reported.add(error)
+		}
+		const page = globalThis.location?.href
+		spans.captureException(error, {
+			...options,
+			attributes: {
+				...(page !== undefined ? { "url.full": page } : undefined),
+				...options.attributes,
+			},
+		})
+	}
+
+	const onWindowError = (event: ErrorEvent): void => {
+		// A cross-origin script reports as a bare "Script error." with no error
+		// object, no usable frames and no filename. It fingerprints to a single
+		// meaningless issue that buries the real ones, so it is dropped rather
+		// than recorded — the fix for those is CORS on the script tag, not a
+		// louder error tracker.
+		const error: unknown =
+			event.error ?? (event.message && event.filename ? new Error(event.message) : undefined)
+		if (error === undefined) return
+		captureException(error, {
+			name: "browser.uncaught_error",
+			attributes: {
+				"maple.exception.source": "window.onerror",
+				...(event.filename ? { "code.filepath": event.filename } : undefined),
+				...(event.lineno ? { "code.lineno": event.lineno } : undefined),
+			},
+		})
+	}
+
+	const onUnhandledRejection = (event: PromiseRejectionEvent): void => {
+		captureException(event.reason, {
+			name: "browser.unhandled_rejection",
+			attributes: { "maple.exception.source": "unhandledrejection" },
+		})
+	}
+
+	const canCaptureGlobals =
+		(config.captureGlobalErrors ?? true) && typeof globalThis.addEventListener === "function"
+	if (canCaptureGlobals) {
+		globalThis.addEventListener("error", onWindowError)
+		globalThis.addEventListener("unhandledrejection", onUnhandledRejection)
+	}
+
 	const onPageHide = (): void => {
 		void flush()
 	}
@@ -281,10 +355,14 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 			globalThis.removeEventListener("pagehide", onPageHide)
 			globalThis.removeEventListener("visibilitychange", onVisibilityChange)
 		}
+		if (canCaptureGlobals) {
+			globalThis.removeEventListener("error", onWindowError)
+			globalThis.removeEventListener("unhandledrejection", onUnhandledRejection)
+		}
 		stopConsentListener()
 		await flush()
 		await clientSession.stop()
 	}
 
-	return { layer, flush, dispose }
+	return { layer, captureException, flush, dispose }
 }

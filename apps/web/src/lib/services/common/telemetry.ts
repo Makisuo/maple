@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { runtime } from "./runtime"
 
 const requestUrl = (input: RequestInfo | URL): string =>
@@ -78,10 +78,10 @@ export const describeFetchFailure = (input: {
 	return `Fetch failed: ${where}${status}${detail.length > 0 ? ` — ${detail}` : ""}`
 }
 
-class TracedFetchError extends Data.TaggedError("@maple/web/TracedFetchError")<{
-	readonly message: string
-	readonly cause: unknown
-}> {}
+class TracedFetchError extends Schema.TaggedError<TracedFetchError>()("@maple/web/TracedFetchError", {
+	message: Schema.String,
+	cause: Schema.Defect(),
+}) {}
 
 export const tracedFetch = (
 	peerService: string,

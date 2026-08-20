@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
+import { Effect, Exit, Option, Result, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import {
@@ -45,6 +45,7 @@ import {
 	RAW_SQL_ENDPOINT,
 } from "@maple/widgets/dashboard"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { summarizeCause } from "@/platform/describe-cause"
 
 // `RAW_SQL_ENDPOINT` and `QUERY_SHAPE_ENDPOINTS` are used here as LABELS, not as
 // dispatch keys — dispatch goes through `dataSourceRawSql` / `dataSourceQuerySet`,
@@ -531,7 +532,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 						// carries a `message`. A defect (no typed failure) falls back to the
 						// pretty-printed cause.
 						const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-						const errorMessage = failure ? failure.message : Cause.pretty(exit.cause)
+						const errorMessage = failure ? failure.message : summarizeCause(exit.cause)
 						return {
 							queryId: draft.id,
 							queryName: draft.name,
@@ -765,7 +766,7 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 	Effect.catchCause((cause) =>
 		Effect.succeed<InspectionOutcome>({
 			kind: "inspection_error",
-			message: Cause.pretty(cause),
+			message: summarizeCause(cause),
 		}),
 	),
 )

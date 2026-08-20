@@ -34,6 +34,7 @@ const CONFIG = {
 	identity: undefined,
 	tracingEnabled: true,
 	tracingInstrumentFetch: false,
+	tracingCaptureErrors: false,
 	replayEnabled: false,
 	replaySampleRate: 0,
 	maskAllInputs: true,

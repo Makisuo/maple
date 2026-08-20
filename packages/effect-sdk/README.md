@@ -106,6 +106,35 @@ const program = Effect.log("Hello!").pipe(Effect.withSpan("hello"))
 Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 ```
 
+### Uncaught errors (built in)
+
+`MapleFlush.make` from `/client` registers `error` and `unhandledrejection`
+handlers, so a throw that never went through an Effect span still reaches error
+tracking. Each one becomes a span with status `Error` and an `exception` event —
+the same shape a failed Effect span produces, so browser crashes group beside
+server-side errors rather than in a silo.
+
+Turn it off with `captureGlobalErrors: false` when another tracker already owns
+the page's global handlers.
+
+An error your app _catches_ never reaches those handlers — catching it is what
+stops it. Report those explicitly; a React error boundary is the usual caller,
+and without this a boundary-caught crash is invisible in production:
+
+```typescript
+const telemetry = MapleFlush.make({ serviceName: "my-frontend", ... })
+
+class ErrorBoundary extends Component<Props, State> {
+	componentDidCatch(error: unknown, info: ErrorInfo) {
+		telemetry.captureException(error, {
+			name: "browser.react_error_boundary",
+			attributes: { "maple.react.component_stack": info.componentStack ?? "" },
+		})
+	}
+	// …
+}
+```
+
 ### Session replay & sessions (built in)
 
 The browser presets (`Maple.layer` and `MapleFlush.make`) record **rrweb session replays by default** — no separate browser SDK needed. Every span carries a `session.id`, the session appears in Maple's Sessions UI with its linked traces, and the recording is playable next to them.

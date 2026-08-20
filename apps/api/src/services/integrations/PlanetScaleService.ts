@@ -27,6 +27,7 @@ import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"
 import { insertPlanetScaleEvent } from "./planetscale/webhook-events"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /**
  * PlanetScale management-API poller: keeps the org's database/branch inventory
@@ -908,7 +909,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 											Effect.annotateLogs({
 												orgId: connection.orgId,
 												database: row.name,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 											Effect.map(() => 0),
 										),
@@ -936,7 +937,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 							: Effect.logWarning("PlanetScale deploy-request backfill failed for org").pipe(
 									Effect.annotateLogs({
 										orgId: connection.orgId,
-										error: Cause.pretty(cause),
+										error: summarizeCause(cause),
 									}),
 									Effect.map(() => 0),
 								),
@@ -1032,7 +1033,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 									: Effect.logWarning("PlanetScale org poll failed").pipe(
 											Effect.annotateLogs({
 												orgId: connection.orgId,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 											Effect.map(() => {
 												failures++

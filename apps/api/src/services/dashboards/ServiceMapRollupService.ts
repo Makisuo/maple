@@ -7,6 +7,7 @@ import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
+import { summarizeCause } from "@/platform/describe-cause"
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 
@@ -274,7 +275,7 @@ export class ServiceMapRollupService extends Context.Service<
 							: Effect.as(
 									Effect.logWarning(
 										"Service map rollup active-org discovery failed; processing every known org",
-									).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
+									).pipe(Effect.annotateLogs({ error: summarizeCause(cause) })),
 									undefined,
 								),
 					),
@@ -312,7 +313,7 @@ export class ServiceMapRollupService extends Context.Service<
 										Effect.logError("Service map rollup failed for org").pipe(
 											Effect.annotateLogs({
 												orgId,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 										),
 										{

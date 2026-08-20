@@ -42,6 +42,7 @@ import {
 	planetScaleBearerHeader,
 	type PlanetScaleAccessTokenError,
 } from "@/services/auth/PlanetScaleOAuthService"
+import { summarizeCause } from "@/platform/describe-cause"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -782,7 +783,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 								Effect.annotateLogs({
 									orgId,
 									scrapeTargetId: id,
-									error: Cause.pretty(cause),
+									error: summarizeCause(cause),
 								}),
 							),
 						),

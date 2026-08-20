@@ -30,6 +30,7 @@ import {
 } from "@/services/warehouse/warehouse-org-quarantine"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
+import { summarizeCause } from "@/platform/describe-cause"
 const SYSTEM_DIGEST_USER = UserId.make("system-digest")
 const ROOT_ROLE = RoleName.make("root")
 
@@ -687,7 +688,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 					Cause.hasInterruptsOnly(cause)
 						? Effect.interrupt
 						: Effect.logWarning("Failed to seed digest subscriptions").pipe(
-								Effect.annotateLogs({ error: Cause.pretty(cause) }),
+								Effect.annotateLogs({ error: summarizeCause(cause) }),
 							),
 				),
 			)
@@ -818,7 +819,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 															Effect.annotateLogs({
 																subscriptionId: sub.id,
 																orgId: rawOrgId,
-																error: Cause.pretty(cause),
+																error: summarizeCause(cause),
 															}),
 														),
 											),
@@ -850,14 +851,14 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 											).pipe(
 												Effect.annotateLogs({
 													orgId: rawOrgId,
-													error: Cause.pretty(cause),
+													error: summarizeCause(cause),
 												}),
 											)
 										} else {
 											yield* Effect.logError("Digest failed for org").pipe(
 												Effect.annotateLogs({
 													orgId: rawOrgId,
-													error: Cause.pretty(cause),
+													error: summarizeCause(cause),
 												}),
 											)
 										}

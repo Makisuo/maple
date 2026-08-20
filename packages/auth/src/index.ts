@@ -20,7 +20,7 @@ import {
 	UnauthorizedError,
 	UserId,
 } from "@maple/domain/http"
-import { Clock, Data, Effect, Option, Redacted, Schema, SchemaGetter } from "effect"
+import { Clock, Effect, Option, Redacted, Schema, SchemaGetter } from "effect"
 
 /**
  * A self-hosted session is bounded by TWO clocks, because the HMAC key IS the
@@ -769,10 +769,10 @@ export const makeResolveMcpTenant = (
 
 type ClerkUser = Awaited<ReturnType<ReturnType<typeof createClerkClient>["users"]["getUser"]>>
 
-class ClerkLookupError extends Data.TaggedError("@maple/auth/ClerkLookupError")<{
-	readonly operation: string
-	readonly cause: unknown
-}> {}
+class ClerkLookupError extends Schema.TaggedError<ClerkLookupError>()("@maple/auth/ClerkLookupError", {
+	operation: Schema.String,
+	cause: Schema.Defect(),
+}) {}
 
 const clerkLookup = <A>(
 	spanName: string,

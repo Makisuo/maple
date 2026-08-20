@@ -47,3 +47,13 @@ const telemetry = MapleFlush.make({
 })
 
 export const mapleOtelLayer = telemetry.layer
+
+/**
+ * Report an error that never went through an Effect span.
+ *
+ * The SDK's global handlers already cover uncaught throws and unhandled
+ * rejections. This is for the one case they cannot see: React error boundaries
+ * catch a render crash and, in production, swallow it — so the dashboard would
+ * paint its crash screen and Maple would never hear about its own outage.
+ */
+export const captureException = telemetry.captureException

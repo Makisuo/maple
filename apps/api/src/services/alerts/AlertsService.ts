@@ -59,7 +59,6 @@ import {
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import {
 	Array as Arr,
-	Cause,
 	Chunk,
 	Effect,
 	HashSet,
@@ -116,6 +115,7 @@ import {
 	type NormalizedRule,
 } from "./AlertRuleModel"
 import { mapSignalUnit, resolveSignalDisplay } from "./alert-signal-display"
+import { summarizeCause } from "@/platform/describe-cause"
 
 export { AlertRuntime, type AlertRuntimeApi } from "./AlertRuntime"
 
@@ -3355,7 +3355,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 											Effect.annotateLogs({
 												orgId,
 												rowCount: checks.length,
-												cause: Cause.pretty(cause),
+												cause: summarizeCause(cause),
 											}),
 										),
 									),

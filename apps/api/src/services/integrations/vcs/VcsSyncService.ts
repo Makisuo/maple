@@ -18,11 +18,12 @@ import {
 	type VcsRepoUnavailableError,
 	VcsSyncJob,
 } from "@maple/domain/http"
-import { Cause, Clock, Effect, Context, Layer, Option, Schema, Match } from "effect"
+import { Clock, Effect, Context, Layer, Option, Schema, Match } from "effect"
 import type { VcsProviderClient } from "./VcsProviderClient"
 import { VcsProviderRegistry } from "./VcsProviderRegistry"
 import { VcsRepository } from "./VcsRepository"
 import { VcsSyncQueue } from "./VcsSyncQueue"
+import { summarizeCause } from "@/platform/describe-cause"
 
 // Vendor-agnostic sync orchestrator. Decodes a queue message, resolves the
 // owning installation (→ orgId + provider auth), then dispatches by job kind:
@@ -940,7 +941,7 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 						}).pipe(
 							Effect.andThen(
 								Effect.logError("[VCS] Failed to record exhausted VCS sync failure").pipe(
-									Effect.annotateLogs({ error: Cause.pretty(cause) }),
+									Effect.annotateLogs({ error: summarizeCause(cause) }),
 								),
 							),
 						),

@@ -9,9 +9,9 @@
 import type * as cf from "@cloudflare/workers-types"
 
 import * as Cause from "effect/Cause"
-import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as Socket from "effect/unstable/socket/Socket"
@@ -41,18 +41,22 @@ export type RpcStreamEnvelope = {
 	body: ReadableStream<Uint8Array>
 }
 
-export class RpcDecodeError extends Data.TaggedError("@maple/effect-cloudflare/RpcDecodeError")<{
-	readonly cause: unknown
-}> {
+export class RpcDecodeError extends Schema.TaggedError<RpcDecodeError>()(
+	"@maple/effect-cloudflare/RpcDecodeError",
+	{ cause: Schema.Defect() },
+) {
 	override get message() {
 		return this.cause instanceof Error ? this.cause.message : String(this.cause)
 	}
 }
 
-export class RpcCallError extends Data.TaggedError("@maple/effect-cloudflare/RpcCallError")<{
-	readonly method: string
-	readonly cause: unknown
-}> {
+export class RpcCallError extends Schema.TaggedError<RpcCallError>()(
+	"@maple/effect-cloudflare/RpcCallError",
+	{
+		method: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {
 	override get message() {
 		return `RPC call to "${this.method}" failed: ${
 			this.cause instanceof Error ? this.cause.message : String(this.cause)
@@ -60,17 +64,18 @@ export class RpcCallError extends Data.TaggedError("@maple/effect-cloudflare/Rpc
 	}
 }
 
-class RpcRemoteError extends Data.TaggedError("@maple/effect-cloudflare/RpcRemoteError")<{
-	readonly error: unknown
-}> {
+class RpcRemoteError extends Schema.TaggedError<RpcRemoteError>()("@maple/effect-cloudflare/RpcRemoteError", {
+	error: Schema.Defect(),
+}) {
 	override get message() {
 		return remoteErrorMessage(this.error, "Remote RPC call failed")
 	}
 }
 
-export class RpcRemoteStreamError extends Data.TaggedError("@maple/effect-cloudflare/RpcRemoteStreamError")<{
-	readonly error: unknown
-}> {
+export class RpcRemoteStreamError extends Schema.TaggedError<RpcRemoteStreamError>()(
+	"@maple/effect-cloudflare/RpcRemoteStreamError",
+	{ error: Schema.Defect() },
+) {
 	override get message() {
 		return remoteErrorMessage(this.error, "Remote RPC stream failed")
 	}
