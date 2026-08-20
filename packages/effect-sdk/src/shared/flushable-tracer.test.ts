@@ -185,3 +185,60 @@ describe("makeSpanBuffer restore", () => {
 		}),
 	)
 })
+
+const attributeOf = (span: { attributes: ReadonlyArray<{ key: string; value: unknown }> }, key: string) =>
+	span.attributes.find((attribute) => attribute.key === key)?.value
+
+describe("makeSpanBuffer captureException", () => {
+	it("records a thrown error as an Error span with an exception event", () => {
+		const buffer = makeSpanBuffer()
+		buffer.captureException(new TypeError("Cannot read properties of undefined (reading 'spans')"))
+
+		const [span] = buffer.drain()
+		assert.isDefined(span)
+		assert.strictEqual(span?.name, "exception")
+		// StatusCode 2 is Error — `error_events_mv` keys off exactly this.
+		assert.strictEqual(span?.status.code, 2)
+
+		const event = span?.events.find((candidate) => candidate.name === "exception")
+		assert.isDefined(event)
+		const attribute = (key: string) => event?.attributes.find((candidate) => candidate.key === key)?.value
+		assert.deepStrictEqual(attribute("exception.type"), { stringValue: "TypeError" })
+		assert.deepStrictEqual(attribute("exception.message"), {
+			stringValue: "Cannot read properties of undefined (reading 'spans')",
+		})
+	})
+
+	it("carries caller attributes and a custom span name", () => {
+		const buffer = makeSpanBuffer()
+		buffer.captureException(new Error("boom"), {
+			name: "browser.uncaught_error",
+			attributes: { "maple.exception.source": "window.onerror" },
+		})
+
+		const [span] = buffer.drain()
+		assert.strictEqual(span?.name, "browser.uncaught_error")
+		assert.deepStrictEqual(attributeOf(span!, "maple.exception.source"), {
+			stringValue: "window.onerror",
+		})
+	})
+
+	it("is not silenceable through anticipatedErrorIdentifiers", () => {
+		// An uncaught throw is never an anticipated 4xx. Recording it as a defect
+		// keeps it clear of that filter, so a caller cannot accidentally suppress
+		// real crashes by listing a tag.
+		const buffer = makeSpanBuffer({ anticipatedErrorIdentifiers: new Set(["Error", "TypeError"]) })
+		buffer.captureException(new TypeError("still an error"))
+
+		const [span] = buffer.drain()
+		assert.strictEqual(span?.status.code, 2)
+		assert.isDefined(span?.events.find((candidate) => candidate.name === "exception"))
+	})
+
+	it("stays silent while capture is disabled by consent", () => {
+		const buffer = makeSpanBuffer()
+		buffer.setDisabled(true)
+		buffer.captureException(new Error("boom"))
+		assert.strictEqual(buffer.size(), 0)
+	})
+})

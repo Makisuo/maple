@@ -1,10 +1,11 @@
 import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
-import { Config, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /** Fatal misconfiguration discovered at startup — surfaces as a tagged defect in the Cause. */
-class EnvValidationError extends Data.TaggedError("@maple/api/lib/EnvValidationError")<{
-	readonly message: string
-}> {}
+class EnvValidationError extends Schema.TaggedError<EnvValidationError>()(
+	"@maple/api/lib/EnvValidationError",
+	{ message: Schema.String },
+) {}
 
 export interface EnvConfig {
 	readonly PORT: number

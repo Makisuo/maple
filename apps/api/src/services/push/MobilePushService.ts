@@ -6,8 +6,9 @@ import type {
 	OrgId,
 } from "@maple/domain/http"
 import { PublicIdPrefixes, encodePublicId } from "@maple/domain/http/v2"
-import { Clock, Context, Duration, Effect, Layer } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Layer } from "effect"
 import { ApnsClient, type ApnsPush } from "@/platform/Apns"
+import { summarizeCause } from "@/platform/describe-cause"
 import {
 	displayGroupKey,
 	formatObservedSummary,
@@ -29,6 +30,34 @@ import { MobileDevicesService, type MobileDevice } from "./MobileDevicesService"
  * log line and a metric, never an error on the scheduler tick that produced
  * the event.
  */
+
+/**
+ * A best-effort write that must not fail the tick, but must not vanish either.
+ *
+ * These are all bookkeeping that runs *after* the push has gone out, so there
+ * is nothing useful to do about a failure inside the tick — but a bare
+ * `Effect.ignore` costs the docstring's promise above. A dropped `markPushed`
+ * buzzes the same phone about the same incident on the next tick; a dropped
+ * `disable` keeps pushing a token Apple has already called dead; a dropped
+ * `activities.end` leaves a Lock Screen row that gets retried forever. Each one
+ * is invisible without this.
+ *
+ * Interrupts stay quiet: a cron isolate torn down mid-tick is not a failure,
+ * and the tick reruns anyway.
+ */
+const ignoreLogged =
+	(message: string, annotations: Record<string, unknown>) =>
+	<A, E>(effect: Effect.Effect<A, E>): Effect.Effect<void> =>
+		effect.pipe(
+			Effect.tapCause((cause) =>
+				Cause.hasInterruptsOnly(cause)
+					? Effect.void
+					: Effect.logWarning(message).pipe(
+							Effect.annotateLogs({ ...annotations, cause: summarizeCause(cause) }),
+						),
+			),
+			Effect.ignore,
+		)
 
 export interface IncidentPushEvent {
 	readonly orgId: OrgId
@@ -417,7 +446,12 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 					// Nobody wants the banner, but an activity already on someone's
 					// Lock Screen still has to be updated or ended — a resolve with
 					// `resolved_incidents` off is exactly this case.
-					yield* syncLiveActivities(event, registered).pipe(Effect.ignore)
+					yield* syncLiveActivities(event, registered).pipe(
+						ignoreLogged("Mobile push: Live Activity sync failed", {
+							orgId: event.orgId,
+							incidentId: event.incidentId,
+						}),
+					)
 					return { ...empty, skipped }
 				}
 
@@ -500,7 +534,12 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 									reason: result.reason,
 								}),
 							)
-							yield* devices.disable(device.id, result.reason).pipe(Effect.ignore)
+							yield* devices.disable(device.id, result.reason).pipe(
+								ignoreLogged("Mobile push: could not disable a dead device", {
+									orgId: event.orgId,
+									deviceId: device.id,
+								}),
+							)
 							break
 						case "failed":
 							failed += 1
@@ -516,10 +555,20 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 							break
 					}
 				}
-				yield* devices.markPushed(pushed).pipe(Effect.ignore)
+				yield* devices.markPushed(pushed).pipe(
+					ignoreLogged("Mobile push: could not record which devices were pushed", {
+						orgId: event.orgId,
+						deviceCount: pushed.length,
+					}),
+				)
 				// After the notifications, and never in front of them: a Lock Screen
 				// activity is the follow-up to the buzz, not a replacement for it.
-				yield* syncLiveActivities(event, registered).pipe(Effect.ignore)
+				yield* syncLiveActivities(event, registered).pipe(
+					ignoreLogged("Mobile push: Live Activity sync failed", {
+						orgId: event.orgId,
+						incidentId: event.incidentId,
+					}),
+				)
 				yield* Effect.annotateCurrentSpan({
 					"maple.push.sent": sent,
 					"maple.push.failed": failed,
@@ -642,7 +691,13 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 							// Nothing can be pushed without knowing which APNs host to
 							// use, so the row is closed rather than retried forever.
 							if (device === undefined) {
-								yield* activities.end(activity.id, "device_unregistered").pipe(Effect.ignore)
+								yield* activities.end(activity.id, "device_unregistered").pipe(
+									ignoreLogged("Live Activity: could not close the activity row", {
+										orgId: event.orgId,
+										incidentId: event.incidentId,
+										activityId: activity.id,
+									}),
+								)
 								return
 							}
 							const result = yield* apns
@@ -675,7 +730,13 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 									? result.reason
 									: null
 							if (endedReason !== null) {
-								yield* activities.end(activity.id, endedReason).pipe(Effect.ignore)
+								yield* activities.end(activity.id, endedReason).pipe(
+									ignoreLogged("Live Activity: could not close the activity row", {
+										orgId: event.orgId,
+										incidentId: event.incidentId,
+										activityId: activity.id,
+									}),
+								)
 							}
 							if (result.outcome === "failed") {
 								yield* Effect.logWarning("Live Activity: update push rejected").pipe(

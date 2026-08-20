@@ -93,6 +93,7 @@ import {
 	upsertFingerprintEntry,
 	type IncidentFingerprintEntry,
 } from "./anomaly/consolidation"
+import { summarizeCause } from "@/platform/describe-cause"
 
 const decodeIncidentIdSync = Schema.decodeUnknownSync(AnomalyIncidentDocument.fields.id)
 const decodeMutedSignalResult = Schema.decodeUnknownResult(AnomalySignalType)
@@ -344,7 +345,7 @@ const make = Effect.gen(function* () {
 					: Effect.gen(function* () {
 							yield* Effect.logWarning(
 								"Anomaly active-org discovery failed; reusing last-known active set",
-							).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+							).pipe(Effect.annotateLogs({ error: summarizeCause(cause) }))
 							const cached = yield* edgeCache
 								.rawGet<ReadonlyArray<string>>(
 									ANOMALY_ACTIVE_ORGS_CACHE_BUCKET,
@@ -2109,14 +2110,14 @@ const make = Effect.gen(function* () {
 											).pipe(
 												Effect.annotateLogs({
 													orgId: org,
-													error: Cause.pretty(cause),
+													error: summarizeCause(cause),
 												}),
 											)
 										} else {
 											yield* Effect.logError("Anomaly tick failed for org").pipe(
 												Effect.annotateLogs({
 													orgId: org,
-													error: Cause.pretty(cause),
+													error: summarizeCause(cause),
 												}),
 											)
 										}

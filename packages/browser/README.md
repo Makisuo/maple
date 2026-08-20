@@ -35,7 +35,35 @@ That single call:
   only once a session is sampled in, so a `sampleRate` below 1 costs the
   unsampled visitors nothing beyond the base SDK (see [Bundle size](#bundle-size));
 - writes session metadata at start (`active`) and on page hide (`ended`),
-  including the trace ids observed during the session.
+  including the trace ids observed during the session;
+- captures uncaught errors and unhandled promise rejections as error spans, so
+  browser crashes reach Maple's error tracking.
+
+## Errors
+
+Every uncaught error and unhandled rejection becomes a span with status `Error`
+and an `exception` event, which is the shape Maple fingerprints — so browser
+crashes group beside your server-side errors instead of in a silo.
+
+Errors your app _catches_ never reach the global handlers, because catching them
+is what stops them. Report those explicitly:
+
+```ts
+try {
+	render()
+} catch (error) {
+	MapleBrowser.captureException(error, { name: "browser.render_error" })
+}
+```
+
+Opt out of the global handlers with `tracing: { captureErrors: false }` — worth
+doing only when another tracker already owns them, or the same crash is recorded
+twice.
+
+A cross-origin script reports to the browser as a bare `"Script error."` with no
+stack and no filename. Those are dropped rather than recorded: they all
+fingerprint to one contentless issue that buries the real ones. Add
+`crossorigin` to the script tag to get the real error instead.
 
 ## Bundle size
 

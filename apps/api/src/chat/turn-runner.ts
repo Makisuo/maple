@@ -31,6 +31,7 @@ import { LLM, Message, type Model } from "@maple/llm"
 import { Cause, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { summarizeCause } from "@/platform/describe-cause"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
@@ -190,7 +191,7 @@ const compactIfNeeded = (
 								Effect.annotateLogs({
 									sessionId: input.sessionId,
 									messageId: input.messageId,
-									cause: Cause.pretty(cause),
+									cause: summarizeCause(cause),
 								}),
 							),
 						),
@@ -332,7 +333,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 						Effect.annotateLogs({
 							sessionId: input.sessionId,
 							messageId: input.messageId,
-							cause: Cause.pretty(cause),
+							cause: summarizeCause(cause),
 						}),
 					),
 				),

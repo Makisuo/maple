@@ -41,7 +41,7 @@ import {
 import { cloudflareAnalyticsState } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
 import { and, eq } from "drizzle-orm"
-import { Cause, Effect, Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { graphqlQuery } from "@/services/integrations/CloudflareApi"
@@ -63,6 +63,7 @@ import { GithubConnectService } from "@/services/integrations/vcs/vendor/github/
 import { VcsCommitService } from "@/services/integrations/vcs/VcsCommitService"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { requireAdmin as requireAdminRole } from "@/services/auth/auth"
+import { summarizeCause } from "@/platform/describe-cause"
 
 const asExternalUserId = Schema.decodeUnknownSync(ExternalUserId)
 const asUserId = Schema.decodeUnknownSync(UserId)
@@ -1034,7 +1035,7 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 						Effect.catchCause((cause) =>
 							Effect.logWarning("cloudflare post-connect state reset failed", {
 								orgId: result.orgId,
-								error: Cause.pretty(cause),
+								error: summarizeCause(cause),
 							}),
 						),
 					),

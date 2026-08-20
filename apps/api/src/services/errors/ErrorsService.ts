@@ -59,6 +59,7 @@ import {
 import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicApi } from "./ErrorIssueWorkflowService"
 import { ErrorPolicyService, type ErrorPolicyPublicApi } from "./ErrorPolicyService"
 import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
+import { summarizeCause } from "@/platform/describe-cause"
 
 export { describeCause, makePersistenceError } from "./error-persistence"
 
@@ -329,7 +330,7 @@ const make: Effect.Effect<
 						: Effect.gen(function* () {
 								yield* Effect.logWarning(
 									"Error active-org discovery failed; reusing last-known active set",
-								).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+								).pipe(Effect.annotateLogs({ error: summarizeCause(cause) }))
 								const cached = yield* edgeCache
 									.rawGet<ReadonlyArray<string>>(
 										ACTIVE_ORGS_CACHE_BUCKET,
@@ -1363,13 +1364,13 @@ const make: Effect.Effect<
 										yield* Effect.logInfo(
 											"Org warehouse rejected queries with a config-class error; quarantined",
 										).pipe(
-											Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+											Effect.annotateLogs({ orgId: org, error: summarizeCause(cause) }),
 										)
 									} else {
 										yield* Effect.logError("Error tick failed for org").pipe(
 											Effect.annotateLogs({
 												orgId: org,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 										)
 									}

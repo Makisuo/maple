@@ -16,6 +16,7 @@ import { mapleToolCatalog } from "@/mcp/tools/registry"
 import { MUTATING_TOOL_NAMES } from "@/mcp/tools/mutating"
 import { McpToolExecutor } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { summarizeCause } from "@/platform/describe-cause"
 
 const executionDefect = (tool: string, defect: unknown) =>
 	Effect.logError("Chat approval tool execution defect").pipe(
@@ -147,7 +148,7 @@ export const HttpChatLive = HttpApiBuilder.group(MapleInternalApi, "chat", (hand
 											sessionId: payload.sessionId ?? "(none)",
 											messageId: payload.messageId ?? "(none)",
 											toolCallId: payload.toolCallId ?? "(none)",
-											cause: Cause.pretty(cause),
+											cause: summarizeCause(cause),
 										}),
 									),
 								),

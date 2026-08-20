@@ -5,8 +5,9 @@ import { Button, buttonVariants } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { useNetworkAutoRetry } from "@/hooks/use-network-auto-retry"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { displayError, isAutomaticRetryError } from "@/lib/error-messages"
+import { displayError, isAutomaticRetryError, isUnexpectedError } from "@/lib/error-messages"
 import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
+import { captureException } from "@/lib/services/common/otel-layer"
 
 function RouteError({ error, reset }: ErrorComponentProps) {
 	const router = useRouter()
@@ -20,6 +21,19 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 		reset()
 		router.invalidate()
 	}
+	// Only the ones nothing could classify. A recognized API or network failure
+	// already has a failed client span from the Effect layer, so reporting it
+	// here would fingerprint the same outage twice — and a stale chunk is a
+	// deploy artifact, not a bug.
+	const shouldReport = isUnexpectedError(formatted) && !isStaleChunk
+	useMountEffect(() => {
+		if (!shouldReport) return
+		captureException(error, {
+			name: "browser.route_error",
+			attributes: { "maple.exception.source": "route_error_boundary" },
+		})
+	})
+
 	const autoRetrying = useNetworkAutoRetry(isAutomaticRetryError(formatted) && !isStaleChunk, retry)
 	const description = autoRetrying ? `${formatted.message} Retrying automatically…` : formatted.message
 	const canRetry = formatted.recovery === "retry" || formatted.recovery === "refresh"

@@ -12,11 +12,12 @@ import {
 } from "@maple/domain/http"
 import { actors, type ActorInsert, type ActorRow } from "@maple/db"
 import { and, desc, eq, inArray } from "drizzle-orm"
-import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { msToDate } from "@/platform/time"
 import { isReservedAgentName, SYSTEM_ERRORS_AGENT_NAME } from "@/services/auth/system-actors"
 import { makeErrorDatabaseExecute } from "./error-persistence"
+import { summarizeCause } from "@/platform/describe-cause"
 
 const decodeActorIdSync = Schema.decodeUnknownSync(ActorIdSchema)
 const decodeActorDateTimeSync = Schema.decodeUnknownSync(ActorDocument.fields.lastActiveAt)
@@ -117,7 +118,7 @@ const make: Effect.Effect<ErrorActorsServiceApi, never, Database> = Effect.gen(f
 		).pipe(
 			Effect.tapCause((cause) =>
 				Effect.logWarning("ErrorsService.touchActor failed to update lastActiveAt").pipe(
-					Effect.annotateLogs({ orgId, actorId, cause: Cause.pretty(cause) }),
+					Effect.annotateLogs({ orgId, actorId, cause: summarizeCause(cause) }),
 				),
 			),
 			Effect.ignore,

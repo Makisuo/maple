@@ -41,6 +41,12 @@ export interface MapleBrowserConfig {
 		 * sink, and disabling this avoids redundant duplicate network spans.
 		 */
 		readonly instrumentFetch?: boolean
+		/**
+		 * Capture uncaught errors and unhandled promise rejections as error
+		 * spans. Default true. Turn off only when another tracker already owns
+		 * the page's global error handlers, or the same crash lands twice.
+		 */
+		readonly captureErrors?: boolean
 	}
 	readonly replay?: {
 		/** Default true. */
@@ -95,6 +101,7 @@ export interface ResolvedConfig {
 	identity: ResolvedIdentity | undefined
 	readonly tracingEnabled: boolean
 	readonly tracingInstrumentFetch: boolean
+	readonly tracingCaptureErrors: boolean
 	readonly replayEnabled: boolean
 	readonly replaySampleRate: number
 	readonly maskAllInputs: boolean
@@ -131,6 +138,7 @@ export function resolveConfig(config: MapleBrowserConfig): ResolvedConfig {
 		identity: resolveIdentity(config),
 		tracingEnabled: config.tracing?.enabled ?? true,
 		tracingInstrumentFetch: config.tracing?.instrumentFetch ?? true,
+		tracingCaptureErrors: config.tracing?.captureErrors ?? true,
 		replayEnabled: config.replay?.enabled ?? true,
 		replaySampleRate: config.replay?.sampleRate ?? 1,
 		maskAllInputs: config.privacy?.maskAllInputs ?? true,

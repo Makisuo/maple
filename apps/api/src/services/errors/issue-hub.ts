@@ -9,11 +9,12 @@ import {
 } from "@maple/domain/primitives"
 import { actors, alertIncidents, errorIssues, errorIssueEvents, type ErrorIssueRow } from "@maple/db"
 import { and, eq, sql } from "drizzle-orm"
-import { Cause, Clock, Effect, Option, Redacted, Schema } from "effect"
+import { Clock, Effect, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { maybeEnqueueTriage } from "./ai-triage-enqueue"
 import { issueSeverityFromAlert } from "./severity-map"
 import { SYSTEM_ALERTS_AGENT_NAME } from "@/services/auth/system-actors"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /**
  * Issue-hub glue: alert incidents create/refresh `error_issues` rows
@@ -344,7 +345,7 @@ export const upsertAlertIssue: (
 						orgId: input.orgId,
 						ruleId: input.ruleId,
 						incidentId: input.incidentId,
-						error: Cause.pretty(cause),
+						error: summarizeCause(cause),
 					}),
 				)
 				return { issueId: null, action: "error" as const }
