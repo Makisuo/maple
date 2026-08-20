@@ -40,6 +40,14 @@ use tokio::time::sleep;
 use tracing::{error, info, warn, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+/// Most a lane compaction will copy while holding the append mutex. Compaction
+/// rewrites the *unexported tail*, so this bounds the append stall rather than
+/// the reclaim: a healthy lane keeps a tail of near zero (the symptom being
+/// fixed is a huge exported prefix in front of a tiny backlog), and a lane whose
+/// backlog genuinely exceeds this is not holding dead weight — it is full for
+/// real, and rejecting writes is the correct backpressure.
+const WAL_COMPACT_MAX_TAIL_BYTES: u64 = 64 * 1024 * 1024;
+
 const WAL_MAGIC: &[u8; 4] = b"MTW1";
 const WAL_V1_HEADER_LEN: usize = 20;
 const WAL_V2_HEADER_LEN: usize = 22;
@@ -1066,6 +1074,12 @@ struct WalShard {
     path: PathBuf,
     cursor_path: PathBuf,
     max_bytes: u64,
+    /// Bytes reclaimed from the front of this lane file since process start, by
+    /// truncation or compaction. Frames carry *virtual* offsets
+    /// (`base_offset + file position`), so a frame already in flight keeps a
+    /// meaningful offset after the bytes underneath it are rewritten. Only read
+    /// or written while holding `file`, which is what makes `Relaxed` sound.
+    base_offset: AtomicU64,
     file: Mutex<File>,
 }
 
@@ -1094,6 +1108,7 @@ impl ShardedWal {
                     path,
                     cursor_path,
                     max_bytes: max_bytes_per_lane,
+                    base_offset: AtomicU64::new(0),
                     file: Mutex::new(file),
                 }));
             }
@@ -1192,10 +1207,10 @@ impl ShardedWal {
                 .file
                 .lock()
                 .map_err(|_| "WAL lane mutex poisoned".to_owned())?;
-            let start = file
+            let position = file
                 .seek(SeekFrom::End(0))
                 .map_err(|error| format!("seek WAL: {error}"))?;
-            if enforce_cap && start.saturating_add(encoded.len() as u64) > lane_ref.max_bytes {
+            if enforce_cap && position.saturating_add(encoded.len() as u64) > lane_ref.max_bytes {
                 metrics::wal_shard_full(lane_ref.shard, lane_ref.destination.as_str());
                 return Err("Telemetry WAL lane is full".to_owned());
             }
@@ -1203,14 +1218,15 @@ impl ShardedWal {
                 .map_err(|error| format!("write WAL: {error}"))?;
             file.sync_data()
                 .map_err(|error| format!("sync WAL: {error}"))?;
-            let end = start + encoded.len() as u64;
+            let file_end = position + encoded.len() as u64;
+            let base = lane_ref.base_offset.load(Ordering::Relaxed);
             metrics::wal_commit_bytes(
                 lane_ref.shard,
                 lane_ref.destination.as_str(),
                 encoded.len() as u64,
             );
-            metrics::wal_shard_bytes(lane_ref.shard, lane_ref.destination.as_str(), end);
-            Ok((start, end))
+            metrics::wal_shard_bytes(lane_ref.shard, lane_ref.destination.as_str(), file_end);
+            Ok((base + position, base + file_end))
         })
         .await
         .map_err(|error| format!("join WAL append: {error}"))?
@@ -1235,45 +1251,139 @@ impl ShardedWal {
                 .ok_or_else(|| format!("invalid WAL lane {lane}"))?,
         );
         tokio::task::spawn_blocking(move || {
-            // If the cursor has caught up to the end of the shard file, free the disk
-            // by truncating the file and resetting the cursor to 0. Holding the
-            // append-side mutex serialises us against concurrent appenders so we
-            // never truncate bytes that a writer just committed.
-            let cursor_value = {
-                let mut file = shard_ref
-                    .file
-                    .lock()
-                    .map_err(|_| "WAL shard mutex poisoned".to_owned())?;
-                let size = file
-                    .seek(SeekFrom::End(0))
-                    .map_err(|error| format!("seek WAL: {error}"))?;
-                if offset >= size {
-                    file.set_len(0)
-                        .map_err(|error| format!("truncate WAL: {error}"))?;
-                    file.sync_all()
-                        .map_err(|error| format!("sync WAL truncate: {error}"))?;
-                    metrics::wal_shard_bytes(shard_ref.shard, shard_ref.destination.as_str(), 0);
-                    0
-                } else {
-                    offset
-                }
-            };
-            let mut cursor_file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&shard_ref.cursor_path)
-                .map_err(|error| format!("open WAL cursor: {error}"))?;
-            cursor_file
-                .write_all(cursor_value.to_string().as_bytes())
-                .map_err(|error| format!("write WAL cursor: {error}"))?;
-            cursor_file
-                .sync_data()
-                .map_err(|error| format!("sync WAL cursor: {error}"))
+            // Holding the append-side mutex serialises us against concurrent
+            // appenders, so nothing can commit bytes into a region we reclaim.
+            let mut file = shard_ref
+                .file
+                .lock()
+                .map_err(|_| "WAL shard mutex poisoned".to_owned())?;
+            let size = file
+                .seek(SeekFrom::End(0))
+                .map_err(|error| format!("seek WAL: {error}"))?;
+            // Frames carry virtual offsets; the file only knows about the bytes
+            // that survived the last reclaim.
+            let base = shard_ref.base_offset.load(Ordering::Relaxed);
+            let file_offset = offset.saturating_sub(base);
+            if file_offset >= size {
+                // The cursor caught up to EOF, so the whole file is dead weight.
+                file.set_len(0)
+                    .map_err(|error| format!("truncate WAL: {error}"))?;
+                file.sync_all()
+                    .map_err(|error| format!("sync WAL truncate: {error}"))?;
+                write_cursor(&shard_ref.cursor_path, 0)?;
+                shard_ref
+                    .base_offset
+                    .store(base.saturating_add(size), Ordering::Relaxed);
+                metrics::wal_shard_bytes(shard_ref.shard, shard_ref.destination.as_str(), 0);
+            } else if file_offset >= shard_ref.max_bytes / 2
+                && size - file_offset <= WAL_COMPACT_MAX_TAIL_BYTES
+            {
+                // A continuously busy lane almost never has a moment where the
+                // cursor sits exactly at EOF, so waiting for the full drain above
+                // means the file grows until it trips `max_bytes` and the lane
+                // starts rejecting writes — while the bytes it is holding are
+                // already exported. Rewrite the file from the cursor instead,
+                // which reclaims that prefix without needing a quiet moment.
+                // Gated on half the lane budget so the rewrite cost is amortised
+                // over a large reclaim rather than paid on every batch, and on
+                // `WAL_COMPACT_MAX_TAIL_BYTES` so the copy cannot hold the append
+                // mutex for long — production lanes are a gibibyte each.
+                compact_lane(&shard_ref, &mut file, file_offset, size)?;
+                shard_ref
+                    .base_offset
+                    .store(base.saturating_add(file_offset), Ordering::Relaxed);
+                metrics::wal_lane_compacted(
+                    shard_ref.shard,
+                    shard_ref.destination.as_str(),
+                    file_offset,
+                );
+                metrics::wal_shard_bytes(
+                    shard_ref.shard,
+                    shard_ref.destination.as_str(),
+                    size - file_offset,
+                );
+            } else {
+                write_cursor(&shard_ref.cursor_path, file_offset)?;
+            }
+            Ok(())
         })
         .await
         .map_err(|error| format!("join WAL cursor: {error}"))?
     }
+}
+
+fn write_cursor(path: &Path, value: u64) -> Result<(), String> {
+    let mut cursor_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|error| format!("open WAL cursor: {error}"))?;
+    cursor_file
+        .write_all(value.to_string().as_bytes())
+        .map_err(|error| format!("write WAL cursor: {error}"))?;
+    cursor_file
+        .sync_data()
+        .map_err(|error| format!("sync WAL cursor: {error}"))
+}
+
+/// Rewrite `lane_ref`'s file so it begins at `from`, dropping the exported prefix
+/// in front of it. The caller holds the append mutex, so no writer can race us,
+/// and swaps `base_offset` afterwards so in-flight frames keep resolving.
+///
+/// The cursor is reset to 0 *before* the rename publishes the shorter file. A
+/// crash in that window therefore leaves the original file paired with a zeroed
+/// cursor, which replays already-exported frames — at-least-once, the same
+/// guarantee an export retry already carries. The opposite order would pair a
+/// short file with a large cursor and skip frames that were never exported.
+fn compact_lane(lane_ref: &WalShard, file: &mut File, from: u64, size: u64) -> Result<(), String> {
+    let mut tail = Vec::with_capacity(usize::try_from(size - from).unwrap_or(0));
+    file.seek(SeekFrom::Start(from))
+        .map_err(|error| format!("seek WAL compaction: {error}"))?;
+    file.read_to_end(&mut tail)
+        .map_err(|error| format!("read WAL compaction: {error}"))?;
+
+    let temp_path = lane_ref.path.with_extension("wal.compacting");
+    {
+        let mut temp = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&temp_path)
+            .map_err(|error| format!("open WAL compaction temp: {error}"))?;
+        temp.write_all(&tail)
+            .map_err(|error| format!("write WAL compaction temp: {error}"))?;
+        temp.sync_all()
+            .map_err(|error| format!("sync WAL compaction temp: {error}"))?;
+    }
+    // Opened before the rename so that every fallible step still leaves the lane
+    // exactly as it was; after the swap only the directory fsync remains, and
+    // that one is advisory.
+    let replacement = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .append(true)
+        .open(&temp_path)
+        .map_err(|error| format!("reopen WAL compaction temp: {error}"))?;
+
+    write_cursor(&lane_ref.cursor_path, 0)?;
+    std::fs::rename(&temp_path, &lane_ref.path)
+        .map_err(|error| format!("rename WAL compaction temp: {error}"))?;
+    *file = replacement;
+
+    // Without this a power failure can lose the rename while keeping the zeroed
+    // cursor, which costs a replay of the reclaimed prefix.
+    if let Some(dir) = lane_ref.path.parent() {
+        if let Err(error) = File::open(dir).and_then(|handle| handle.sync_all()) {
+            warn!(
+                shard = lane_ref.shard,
+                destination = lane_ref.destination.as_str(),
+                %error,
+                "Failed to fsync WAL directory after lane compaction"
+            );
+        }
+    }
+    Ok(())
 }
 
 fn read_cursor(path: &Path) -> u64 {
@@ -1293,6 +1403,9 @@ fn replay_shard(lane: usize, lane_ref: &WalShard) -> Result<Vec<QueuedFrame>, St
         .map_err(|error| format!("seek WAL replay: {error}"))?;
 
     let shard = lane / LANES_PER_SHARD;
+    // Replay is a startup path, where nothing has been reclaimed yet, but reading
+    // the base keeps replayed frames on the same virtual axis as appended ones.
+    let base = lane_ref.base_offset.load(Ordering::Relaxed);
     let mut frames = Vec::new();
     loop {
         let start = offset;
@@ -1301,8 +1414,8 @@ fn replay_shard(lane: usize, lane_ref: &WalShard) -> Result<Vec<QueuedFrame>, St
         };
         frames.push(QueuedFrame {
             shard,
-            start,
-            end: frame.end,
+            start: base + start,
+            end: base + frame.end,
             org_id: frame.org_id,
             queued_bytes: frame.payload.len() as u64,
             signal: frame.signal,
@@ -5246,7 +5359,16 @@ mod tests {
             .append(0, &frame)
             .await
             .expect("append after drain should succeed");
-        assert_eq!(start_c, 0, "next append starts from a fresh file");
+        assert_eq!(
+            start_c, end_b,
+            "offsets stay monotonic across a reclaim so an in-flight frame's \
+             offset is never reused by a fresh file"
+        );
+        assert_eq!(
+            std::fs::metadata(&shard_path).unwrap().len(),
+            end_a,
+            "the append lands in a fresh file, one frame long"
+        );
 
         drop(std::fs::remove_dir_all(queue_dir));
     }
@@ -5291,6 +5413,154 @@ mod tests {
         let cursor_after_partial =
             std::fs::read_to_string(queue_dir.join("shard-000-tinybird.cursor")).unwrap();
         assert_eq!(cursor_after_partial.trim(), end_a.to_string());
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn wal_compacts_exported_prefix_without_a_full_drain() {
+        // Regression: mark_exported() only reclaimed disk when the cursor landed
+        // exactly at EOF. A continuously busy lane never has that moment, so its
+        // file grew until it tripped max_bytes and started rejecting writes —
+        // "Telemetry WAL lane is full" while export was healthy and the bytes it
+        // held were already exported. The prefix is now reclaimed in place.
+        let queue_dir = unique_test_dir("wal-compacts-prefix");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let mut cfg = test_cfg();
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        // ~1024 bytes per lane, so compaction arms once 512 bytes are exported.
+        cfg.queue_max_bytes = 1024 * LANES_PER_SHARD as u64;
+
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+        let frame = EncodedFrame {
+            routing_key: 0,
+            org_id: "org_contract".to_owned(),
+            signal: TelemetrySignal::Traces,
+            destination: ExportDestination::Tinybird,
+            datasource: "traces".to_owned(),
+            row_count: 1,
+            payload: vec![0u8; 200],
+        };
+
+        // Fill the lane, never letting the cursor reach EOF.
+        let (_, _end_a) = wal.append(0, &frame).await.expect("append a");
+        let (_, _end_b) = wal.append(0, &frame).await.expect("append b");
+        let (_, end_c) = wal.append(0, &frame).await.expect("append c");
+        let (_, end_d) = wal.append(0, &frame).await.expect("append d");
+        wal.append(0, &frame)
+            .await
+            .expect_err("lane is full before compaction");
+
+        // Writer is still ahead of the reader — the old code would only persist
+        // the offset here and leave the file at its full size forever.
+        wal.mark_exported(0, end_c).await.expect("mark_exported");
+
+        let shard_path = queue_dir.join("shard-000-tinybird.wal");
+        let unexported = end_d - end_c;
+        assert_eq!(
+            std::fs::metadata(&shard_path).unwrap().len(),
+            unexported,
+            "compaction keeps exactly the unexported tail"
+        );
+        assert_eq!(
+            std::fs::read_to_string(queue_dir.join("shard-000-tinybird.cursor"))
+                .unwrap()
+                .trim(),
+            "0",
+            "the surviving tail starts at the front of the compacted file"
+        );
+        assert!(
+            !queue_dir.join("shard-000-tinybird.wal.compacting").exists(),
+            "the compaction temp file is renamed away, not left behind"
+        );
+
+        // The lane accepts writes again, and offsets stay on one monotonic axis
+        // so the frames still in flight resolve against the rewritten file.
+        let (start_e, _end_e) = wal
+            .append(0, &frame)
+            .await
+            .expect("append after compaction should succeed");
+        assert_eq!(start_e, end_d, "virtual offsets survive the rewrite");
+
+        // Exactly the unexported frames replay — no loss, no duplicates.
+        let replayed = wal.replay(0).await.expect("replay");
+        assert_eq!(
+            replayed.len(),
+            2,
+            "only frame d and frame e survive the compaction"
+        );
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn wal_compaction_does_not_strand_frames_already_in_flight() {
+        // The hazard compaction introduces: a frame is appended, its offsets are
+        // handed to the export worker, and only *then* is the file rewritten
+        // underneath it. If those offsets were file-relative, the worker's later
+        // mark_exported() would carry a number far past the rewritten file's end,
+        // read as a full drain, and truncate away frames that were never
+        // exported. Frames therefore carry virtual offsets; this test fails with
+        // silent data loss if that translation is dropped.
+        let queue_dir = unique_test_dir("wal-compaction-in-flight");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let mut cfg = test_cfg();
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        cfg.queue_max_bytes = 1024 * LANES_PER_SHARD as u64;
+
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+        let frame = EncodedFrame {
+            routing_key: 0,
+            org_id: "org_contract".to_owned(),
+            signal: TelemetrySignal::Traces,
+            destination: ExportDestination::Tinybird,
+            datasource: "traces".to_owned(),
+            row_count: 1,
+            payload: vec![0u8; 200],
+        };
+
+        let (_, _end_a) = wal.append(0, &frame).await.expect("append a");
+        let (_, _end_b) = wal.append(0, &frame).await.expect("append b");
+        let (_, end_c) = wal.append(0, &frame).await.expect("append c");
+        // Frame d is "in flight": appended, offsets handed out, not yet exported.
+        let (_, end_d) = wal.append(0, &frame).await.expect("append d");
+
+        wal.mark_exported(0, end_c).await.expect("compacting drain");
+
+        // A frame that arrives after the rewrite, which the stale-offset bug
+        // would destroy along with everything else in the file.
+        let (_, end_e) = wal.append(0, &frame).await.expect("append e");
+
+        // The worker now retires frame d using the offset it captured *before*
+        // compaction. Frame e must survive.
+        wal.mark_exported(0, end_d).await.expect("in-flight drain");
+
+        let shard_path = queue_dir.join("shard-000-tinybird.wal");
+        assert_ne!(
+            std::fs::metadata(&shard_path).unwrap().len(),
+            0,
+            "a stale in-flight offset must not read as a full drain"
+        );
+        let replayed = wal.replay(0).await.expect("replay");
+        assert_eq!(
+            replayed.len(),
+            1,
+            "frame e is unexported and must still be replayable"
+        );
+        assert_eq!(
+            replayed[0].end, end_e,
+            "the surviving frame keeps its original virtual offset"
+        );
+
+        // Retiring frame e too now drains the lane for real.
+        wal.mark_exported(0, end_e).await.expect("final drain");
+        assert_eq!(
+            std::fs::metadata(&shard_path).unwrap().len(),
+            0,
+            "a genuine full drain still truncates"
+        );
 
         drop(std::fs::remove_dir_all(queue_dir));
     }

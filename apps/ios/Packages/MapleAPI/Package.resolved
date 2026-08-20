@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/MapleTechLabs/maple-swift",
       "state" : {
-        "revision" : "96e44a0e136fa87339131a45363c2427fa804ed7",
-        "version" : "0.2.1"
+        "revision" : "39cf7c0b01db01588a89ee0e7daf1b378d89e6d6",
+        "version" : "0.3.1"
       }
     },
     {
