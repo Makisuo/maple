@@ -263,7 +263,7 @@ describe("LocalEventingRuntime", () => {
 		strictEqual(signalA?.occurrenceId === signalB?.occurrenceId, false)
 	})
 
-	it("keeps retries byte-identical and rejects timestamp-less durable logs", () => {
+	it("keeps projectable retries byte-identical and skips timestamp-less durable logs", () => {
 		const first = normalizeOtlpLogs(exampleRecordObserved, "2026-08-07T20:00:00Z")
 		const retry = normalizeOtlpLogs(exampleRecordObserved, "2026-08-08T20:00:00Z")
 		deepStrictEqual(first, retry)
@@ -275,10 +275,7 @@ describe("LocalEventingRuntime", () => {
 		}
 		delete timestampLessRecord.timeUnixNano
 		delete timestampLessRecord.observedTimeUnixNano
-		throws(
-			() => normalizeOtlpLogs(timestampLess, "2026-08-07T20:00:00Z"),
-			/requires timeUnixNano or observedTimeUnixNano/,
-		)
+		deepStrictEqual(normalizeOtlpLogs(timestampLess, "2026-08-07T20:00:00Z"), [])
 	})
 
 	it("preserves __proto__ as ordinary OTLP data without prototype mutation", () => {
@@ -377,10 +374,11 @@ describe("LocalEventingRuntime", () => {
 					runtime.listStaged().events.map(({ event }) => event),
 					first.events,
 				)
-				const retry = runtime.evaluateOtlp("logs", exampleRecordObserved)
-				strictEqual(retry.events[0]?.id, first.events[0]?.id)
-				strictEqual(runtime.stage(retry.events).deduplicated, 1)
-				runtime.markReady(staged.eventIds)
+				runtime.activate(projection({ revision: 2, enabled: false }))
+				const retry = runtime.evaluateOtlp("logs", exampleRecordObserved, () => true)
+				deepStrictEqual(retry.events, [])
+				deepStrictEqual(retry.recoveredEventIds, staged.eventIds)
+				runtime.markReady(retry.recoveredEventIds)
 				deepStrictEqual(
 					runtime.listReady().events.map(({ event }) => event),
 					first.events,
@@ -427,6 +425,7 @@ describe("LocalEventingRuntime", () => {
 				const runtime = new LocalEventingRuntime(store)
 				deepStrictEqual(runtime.evaluateOtlp("logs", { malformed: Symbol("not decoded") }), {
 					events: [],
+					recoveredEventIds: [],
 					failures: [],
 					typeMismatchFields: [],
 				})

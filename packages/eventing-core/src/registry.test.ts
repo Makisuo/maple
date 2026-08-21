@@ -96,6 +96,7 @@ const sources = (): SignalSourceRegistry =>
 	})
 
 describe("CompiledProjectionRegistry", () => {
+	const acceptedAt = "2026-08-07T20:00:00Z"
 	it("canonicalizes JSON independently of object insertion order", () => {
 		expect(canonicalJson({ z: 1, nested: { b: true, a: [2, 1] }, a: "first" })).toBe(
 			'{"a":"first","nested":{"a":[2,1],"b":true},"z":1}',
@@ -113,8 +114,8 @@ describe("CompiledProjectionRegistry", () => {
 
 	it("projects every match into a deterministic CloudEvent", () => {
 		const registry = CompiledProjectionRegistry.compile([projection()], sources(), projectors())
-		const first = registry.evaluate(signal())
-		const second = registry.evaluate(signal())
+		const first = registry.evaluate(signal(), acceptedAt)
+		const second = registry.evaluate(signal(), acceptedAt)
 		expect(first.failures).toEqual([])
 		expect(first.events).toEqual(second.events)
 		expect(first.events).toHaveLength(1)
@@ -139,7 +140,7 @@ describe("CompiledProjectionRegistry", () => {
 
 	it("validates historical CloudEvents that predate source identity extensions", () => {
 		const registry = CompiledProjectionRegistry.compile([projection()], sources(), projectors())
-		const event = registry.evaluate(signal()).events[0]!
+		const event = registry.evaluate(signal(), acceptedAt).events[0]!
 		const { sourceoccurrenceid: _occurrence, sourceidentityquality: _quality, ...historical } = event
 		const validated = validateMapleCloudEvent(historical).event
 		expect(validated.id).toBe(event.id)
@@ -153,7 +154,7 @@ describe("CompiledProjectionRegistry", () => {
 			sources(),
 			projectors(),
 		)
-		const result = registry.evaluate(signal())
+		const result = registry.evaluate(signal(), acceptedAt)
 		expect(result.failures).toEqual([])
 		expect(result.events.map(({ projectionid }) => projectionid)).toEqual([
 			"example-record-observed",
@@ -198,7 +199,7 @@ describe("CompiledProjectionRegistry", () => {
 			sources(),
 			registryDefinitions,
 		)
-		const result = registry.evaluate(signal())
+		const result = registry.evaluate(signal(), acceptedAt)
 		expect(result.events).toHaveLength(1)
 		expect(result.failures).toEqual([
 			expect.objectContaining({
@@ -249,7 +250,7 @@ describe("CompiledProjectionRegistry", () => {
 			sources(),
 			registryDefinitions,
 		)
-		const result = registry.evaluate(signal())
+		const result = registry.evaluate(signal(), acceptedAt)
 		expect(result.events.map(({ projectionid }) => projectionid)).toEqual(["example-record-observed"])
 		expect(result.failures).toEqual(
 			expect.arrayContaining([
@@ -275,15 +276,22 @@ describe("CompiledProjectionRegistry", () => {
 			sources(),
 			projectors(),
 		)
-		expect(registry.evaluate(signal()).events.map(({ projectionid }) => projectionid)).toEqual([
-			"example-record-observed",
-		])
-		expect(registry.evaluate(signal({ sourceKind: "otel.span" })).events).toEqual([])
+		expect(
+			registry
+				.evaluate(signal({ observedAt: "1999-01-01T00:00:00Z" }), acceptedAt)
+				.events.map(({ projectionid }) => projectionid),
+		).toEqual(["example-record-observed"])
+		expect(registry.evaluate(signal({ sourceKind: "otel.span" }), acceptedAt).events).toEqual([])
+		expect(
+			registry
+				.evaluate(signal({ observedAt: "2099-01-01T00:00:00Z" }), "2026-08-07T00:00:00Z")
+				.events.map(({ projectionid }) => projectionid),
+		).toEqual(["example-record-observed"])
 	})
 
 	it("requires occurrence identity for durable projection", () => {
 		const registry = CompiledProjectionRegistry.compile([projection()], sources(), projectors())
-		const result = registry.evaluate(signal({ occurrenceId: null, identityQuality: "none" }))
+		const result = registry.evaluate(signal({ occurrenceId: null, identityQuality: "none" }), acceptedAt)
 		expect(result.events).toEqual([])
 		expect(result.failures[0]?.message).toBe(
 			"durable event projection requires stable or derived occurrence identity",

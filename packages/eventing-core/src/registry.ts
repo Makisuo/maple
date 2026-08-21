@@ -154,15 +154,16 @@ export class CompiledProjectionRegistry {
 		return new CompiledProjectionRegistry(bySourceKind)
 	}
 
-	evaluate(signal: NormalizedSignal): ProjectionBatchResult {
+	evaluate(signal: NormalizedSignal, acceptedAt: string): ProjectionBatchResult {
 		const events: MapleCloudEvent[] = []
 		const failures: ProjectionFailure[] = []
 		const typeMismatchFields = new Set<string>()
-		const observedAtNanos = timestampToEpochNanos(signal.observedAt)
+		const acceptedAtNanos = timestampToEpochNanos(acceptedAt)
+		if (acceptedAtNanos === null) throw new Error("projection acceptance time must be a valid instant")
 
 		for (const projection of this.#bySourceKind.get(signal.sourceKind) ?? []) {
 			if (projection.spec.tenantId !== signal.tenantId) continue
-			if (observedAtNanos === null || observedAtNanos < projection.activeFromNanos) continue
+			if (acceptedAtNanos < projection.activeFromNanos) continue
 			const evaluation = projection.evaluate(signal)
 			for (const field of evaluation.typeMismatches)
 				typeMismatchFields.add(`${field.namespace}:${field.key}`)

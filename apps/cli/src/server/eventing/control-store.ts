@@ -17,7 +17,7 @@ import { Schema } from "effect"
 import { durableWrite, ensurePrivateDirectory } from "../durable-files"
 import { NOOP_EVENTING_TELEMETRY, type EventingTelemetry } from "./telemetry"
 
-const CONTROL_SCHEMA_VERSION = 2
+const CONTROL_SCHEMA_VERSION = 3
 const CONTROL_DIRECTORY = "control"
 const CONTROL_DATABASE = "eventing.sqlite"
 const MAX_FAILURES_PER_TENANT = 10_000
@@ -58,6 +58,9 @@ CREATE TABLE outbox_events (
     tenant_id TEXT NOT NULL,
     projection_id TEXT NOT NULL,
     projection_revision INTEGER NOT NULL CHECK (projection_revision > 0),
+    source_kind TEXT,
+    source TEXT,
+    source_occurrence_id TEXT,
     state TEXT NOT NULL CHECK (state IN ('staged', 'ready')),
     event_json TEXT NOT NULL,
     staged_at TEXT NOT NULL,
@@ -66,6 +69,9 @@ CREATE TABLE outbox_events (
 
 CREATE INDEX outbox_events_staged_sequence
     ON outbox_events (state, sequence);
+
+CREATE INDEX outbox_events_staged_occurrence
+    ON outbox_events (tenant_id, source_kind, source, source_occurrence_id, state);
 
 CREATE TABLE outbox_ready_events (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,7 +120,7 @@ CREATE TABLE event_consumers (
 CREATE INDEX event_consumers_tenant_active_ack
     ON event_consumers (tenant_id, active, last_acked_sequence);
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 `
 
 const MIGRATE_SCHEMA_1_TO_2 = `
@@ -143,6 +149,28 @@ CREATE INDEX event_consumers_tenant_active_ack
     ON event_consumers (tenant_id, active, last_acked_sequence);
 
 PRAGMA user_version = 2;
+`
+
+const MIGRATE_SCHEMA_2_TO_3 = `
+ALTER TABLE outbox_events ADD COLUMN source_kind TEXT;
+ALTER TABLE outbox_events ADD COLUMN source TEXT;
+ALTER TABLE outbox_events ADD COLUMN source_occurrence_id TEXT;
+
+UPDATE outbox_events
+SET source_kind = (
+        SELECT json_extract(spec_json, '$.sourceKind')
+        FROM projection_revisions
+        WHERE projection_revisions.tenant_id = outbox_events.tenant_id
+          AND projection_revisions.projection_id = outbox_events.projection_id
+          AND projection_revisions.revision = outbox_events.projection_revision
+    ),
+    source = json_extract(event_json, '$.source'),
+    source_occurrence_id = json_extract(event_json, '$.sourceoccurrenceid');
+
+CREATE INDEX outbox_events_staged_occurrence
+    ON outbox_events (tenant_id, source_kind, source, source_occurrence_id, state);
+
+PRAGMA user_version = 3;
 `
 
 interface UserVersionRow {
@@ -207,6 +235,10 @@ interface ConsumerRow {
 
 interface EventIdRow {
 	readonly event_id: string
+}
+
+interface ActiveRevisionRow {
+	readonly revision: number | bigint
 }
 
 export interface StageEventsResult {
@@ -471,10 +503,20 @@ export class LocalEventingControlStore {
 			db.exec("PRAGMA synchronous = FULL")
 			const version = db.query<UserVersionRow, []>("PRAGMA user_version").get()
 			if (!version) throw new Error("eventing control database has no schema version")
-			const schemaVersion = asNumber(version.user_version)
-			if (schemaVersion === 0) db.transaction(() => db.exec(CREATE_SCHEMA)).exclusive()
-			else if (schemaVersion === 1) db.transaction(() => db.exec(MIGRATE_SCHEMA_1_TO_2)).exclusive()
-			else if (schemaVersion !== CONTROL_SCHEMA_VERSION)
+			let schemaVersion = asNumber(version.user_version)
+			if (schemaVersion === 0) {
+				db.transaction(() => db.exec(CREATE_SCHEMA)).exclusive()
+				schemaVersion = CONTROL_SCHEMA_VERSION
+			}
+			if (schemaVersion === 1) {
+				db.transaction(() => db.exec(MIGRATE_SCHEMA_1_TO_2)).exclusive()
+				schemaVersion = 2
+			}
+			if (schemaVersion === 2) {
+				db.transaction(() => db.exec(MIGRATE_SCHEMA_2_TO_3)).exclusive()
+				schemaVersion = 3
+			}
+			if (schemaVersion !== CONTROL_SCHEMA_VERSION)
 				throw new Error(
 					`unsupported eventing control schema ${schemaVersion}; expected ${CONTROL_SCHEMA_VERSION}`,
 				)
@@ -498,6 +540,12 @@ export class LocalEventingControlStore {
 		const specJson = canonicalJson(decoded)
 		this.#db
 			.transaction(() => {
+				const latest = this.#db
+					.query<RevisionRow, [string, string]>(
+						"SELECT max(revision) AS revision FROM projection_revisions WHERE tenant_id = ? AND projection_id = ?",
+					)
+					.get(decoded.tenantId, decoded.id)
+				const latestRevision = latest?.revision == null ? null : asNumber(latest.revision)
 				const existing = this.#db
 					.query<ProjectionJsonRow, [string, string, number]>(
 						"SELECT spec_json FROM projection_revisions WHERE tenant_id = ? AND projection_id = ? AND revision = ?",
@@ -508,13 +556,24 @@ export class LocalEventingControlStore {
 						throw new Error(
 							`projection revision is immutable: ${decoded.tenantId}:${decoded.id}@${decoded.revision}`,
 						)
-				} else {
-					const latest = this.#db
-						.query<RevisionRow, [string, string]>(
-							"SELECT max(revision) AS revision FROM projection_revisions WHERE tenant_id = ? AND projection_id = ?",
+					if (latestRevision !== decoded.revision)
+						throw new Error(
+							`stale projection revision: ${decoded.tenantId}:${decoded.id}@${decoded.revision}; latest is ${latestRevision}`,
+						)
+					const active = this.#db
+						.query<ActiveRevisionRow, [string, string]>(
+							"SELECT revision FROM active_projections WHERE tenant_id = ? AND projection_id = ?",
 						)
 						.get(decoded.tenantId, decoded.id)
-					const expected = latest?.revision == null ? 1 : asNumber(latest.revision) + 1
+					const activeRevision = active === null ? null : asNumber(active.revision)
+					const expectedActiveRevision = decoded.enabled ? decoded.revision : null
+					if (activeRevision !== expectedActiveRevision)
+						throw new Error(
+							`projection active state conflicts with exact revision replay: ${decoded.tenantId}:${decoded.id}@${decoded.revision}`,
+						)
+					return
+				} else {
+					const expected = latestRevision === null ? 1 : latestRevision + 1
 					if (decoded.revision !== expected)
 						throw new Error(
 							`projection revision must be ${expected}: ${decoded.tenantId}:${decoded.id}@${decoded.revision}`,
@@ -580,6 +639,19 @@ export class LocalEventingControlStore {
 					for (const candidate of events) {
 						const validated = validateMapleCloudEvent(candidate)
 						const { event, canonicalJson: eventJson, byteLength: eventBytes } = validated
+						let sourceKind: string | null = null
+						if (event.sourceoccurrenceid !== undefined) {
+							const projection = this.#db
+								.query<ProjectionJsonRow, [string, string, number]>(
+									"SELECT spec_json FROM projection_revisions WHERE tenant_id = ? AND projection_id = ? AND revision = ?",
+								)
+								.get(event.tenantid, event.projectionid, event.projectionrevision)
+							if (projection === null)
+								throw new Error(
+									`event references unknown projection revision: ${event.tenantid}:${event.projectionid}@${event.projectionrevision}`,
+								)
+							sourceKind = decodeProjection(projection.spec_json).sourceKind
+						}
 						const existing = this.#db
 							.query<EventRow, [string]>(
 								"SELECT event_id, event_json, state FROM outbox_events WHERE event_id = ?",
@@ -598,12 +670,15 @@ export class LocalEventingControlStore {
 									`event outbox capacity exceeded (${outboxEvents}/${this.#limits.maxOutboxEvents} events, ${outboxBytes}/${this.#limits.maxOutboxBytes} bytes)`,
 								)
 							this.#db.run(
-								"INSERT INTO outbox_events (event_id, tenant_id, projection_id, projection_revision, state, event_json, staged_at) VALUES (?, ?, ?, ?, 'staged', ?, ?)",
+								"INSERT INTO outbox_events (event_id, tenant_id, projection_id, projection_revision, source_kind, source, source_occurrence_id, state, event_json, staged_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'staged', ?, ?)",
 								[
 									event.id,
 									event.tenantid,
 									event.projectionid,
 									event.projectionrevision,
+									sourceKind,
+									event.sourceoccurrenceid === undefined ? null : event.source,
+									event.sourceoccurrenceid ?? null,
 									eventJson,
 									stagedAt,
 								],
@@ -623,6 +698,30 @@ export class LocalEventingControlStore {
 		this.#telemetry.record({ operation: "outbox_stage", outcome: "success", count: inserted })
 		this.#telemetry.record({ operation: "outbox_dedup", outcome: "success", count: deduplicated })
 		return { inserted, deduplicated, eventIds }
+	}
+
+	hasStagedSourceKind(tenantId: string, sourceKind: string): boolean {
+		const row = this.#db
+			.query<CountRow, [string, string]>(
+				"SELECT count(*) AS count FROM outbox_events WHERE tenant_id = ? AND source_kind = ? AND state = 'staged'",
+			)
+			.get(tenantId, sourceKind)
+		if (row === null) throw new Error("staged source-kind query returned no row")
+		return asNumber(row.count) > 0
+	}
+
+	stagedEventIdsForOccurrence(
+		tenantId: string,
+		sourceKind: string,
+		source: string,
+		sourceOccurrenceId: string,
+	): readonly string[] {
+		return this.#db
+			.query<EventIdRow, [string, string, string, string]>(
+				"SELECT event_id FROM outbox_events WHERE tenant_id = ? AND source_kind = ? AND source = ? AND source_occurrence_id = ? AND state = 'staged' ORDER BY sequence",
+			)
+			.all(tenantId, sourceKind, source, sourceOccurrenceId)
+			.map(({ event_id }) => event_id)
 	}
 
 	markReady(eventIds: readonly string[], readyAt = new Date().toISOString()): void {
@@ -1065,7 +1164,7 @@ export class LocalEventingControlStore {
 		const db = new Database(uri, sqliteConstants.SQLITE_OPEN_READONLY | sqliteConstants.SQLITE_OPEN_URI)
 		try {
 			configure(db)
-			return validateOpenDatabase(db, [1, CONTROL_SCHEMA_VERSION])
+			return validateOpenDatabase(db, [1, 2, CONTROL_SCHEMA_VERSION])
 		} finally {
 			db.close(true)
 		}

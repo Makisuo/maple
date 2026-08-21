@@ -18,6 +18,7 @@ const TENANT_ID = "local"
 
 export interface LocalProjectionEvaluation {
 	readonly events: readonly MapleCloudEvent[]
+	readonly recoveredEventIds: readonly string[]
 	readonly failures: readonly ProjectionFailure[]
 	readonly typeMismatchFields: readonly string[]
 }
@@ -31,6 +32,7 @@ export interface LocalProjectionActivation {
 
 const emptyEvaluation = (): LocalProjectionEvaluation => ({
 	events: [],
+	recoveredEventIds: [],
 	failures: [],
 	typeMismatchFields: [],
 })
@@ -98,16 +100,16 @@ export class LocalEventingRuntime {
 		isRetiredUtcDay: (rangeDate: string) => boolean = () => false,
 	): LocalProjectionEvaluation {
 		const sourceKind = signal === "logs" ? "otel.log" : signal === "traces" ? "otel.span" : "otel.metric"
-		if (!this.hasActiveSource(sourceKind)) return emptyEvaluation()
+		if (!this.hasActiveSource(sourceKind) && !this.#store.hasStagedSourceKind(TENANT_ID, sourceKind))
+			return emptyEvaluation()
 		const startedAt = performance.now()
 		const acceptedAt = new Date().toISOString()
 		let normalized
 		try {
-			normalized = (
+			normalized =
 				signal === "logs"
 					? OTLP_LOG_ADAPTER.normalize(decoded, { acceptedAt, tenantId: TENANT_ID })
 					: []
-			).filter((occurrence) => !isRetiredUtcDay(occurrence.occurredAt.slice(0, 10)))
 			this.#telemetry.record({
 				operation: "normalization",
 				outcome: "success",
@@ -126,10 +128,24 @@ export class LocalEventingRuntime {
 		}
 		const snapshot = this.#compiled
 		const events: MapleCloudEvent[] = []
+		const recoveredEventIds: string[] = []
 		const failures: ProjectionFailure[] = []
 		const typeMismatchFields = new Set<string>()
 		for (const occurrence of normalized) {
-			const result = snapshot.evaluate(occurrence)
+			if (occurrence.occurrenceId !== null) {
+				const staged = this.#store.stagedEventIdsForOccurrence(
+					occurrence.tenantId,
+					occurrence.sourceKind,
+					occurrence.source,
+					occurrence.occurrenceId,
+				)
+				if (staged.length > 0) {
+					recoveredEventIds.push(...staged)
+					continue
+				}
+			}
+			if (isRetiredUtcDay(occurrence.occurredAt.slice(0, 10))) continue
+			const result = snapshot.evaluate(occurrence, acceptedAt)
 			this.#telemetry.record({
 				operation: "projection",
 				outcome: "success",
@@ -153,7 +169,7 @@ export class LocalEventingRuntime {
 				count: typeMismatchFields.size,
 				sourceKind,
 			})
-		return { events, failures, typeMismatchFields: [...typeMismatchFields] }
+		return { events, recoveredEventIds, failures, typeMismatchFields: [...typeMismatchFields] }
 	}
 
 	persistFailures(failures: readonly ProjectionFailure[]): void {

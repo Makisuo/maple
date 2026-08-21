@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert"
 import { describe, it } from "vitest"
+import { normalizeOtlpLogs } from "../src/server/eventing/otlp"
 import { __testables } from "../src/server/serve"
 
 describe("Local eventing ingest seam", () => {
@@ -280,6 +281,7 @@ describe("Local eventing ingest seam", () => {
 				order.push("evaluate")
 				return {
 					events: [event],
+					recoveredEventIds: [],
 					failures: [
 						{
 							projectionId: "oversized-projector",
@@ -362,7 +364,12 @@ describe("Local eventing ingest seam", () => {
 				}),
 			} as never,
 			{
-				evaluateOtlp: () => ({ events: [{ id: "event-1" }], failures: [], typeMismatchFields: [] }),
+				evaluateOtlp: () => ({
+					events: [{ id: "event-1" }],
+					recoveredEventIds: [],
+					failures: [],
+					typeMismatchFields: [],
+				}),
 				persistFailures: () => undefined,
 				stage: () => ({ inserted: 1, deduplicated: 0, eventIds: ["event-1"] }),
 				markReady: () => {
@@ -374,5 +381,122 @@ describe("Local eventing ingest seam", () => {
 		)
 		strictEqual(result.response.status, 500)
 		strictEqual(markedReady, false)
+	})
+
+	it("promotes recovered staged IDs only after the retry reaches the warehouse commit point", async () => {
+		let readyIds: readonly string[] = []
+		const request = new Request("http://127.0.0.1/v1/logs", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				resourceLogs: [
+					{
+						scopeLogs: [
+							{
+								logRecords: [
+									{ timeUnixNano: "1786131720123456789", body: { stringValue: "retry" } },
+								],
+							},
+						],
+					},
+				],
+			}),
+		})
+		const result = await __testables.ingest(
+			{ exec: () => undefined } as never,
+			{
+				isRetired: () => false,
+				filterBatch: (_datasource: string, ndjson: string) => ({
+					ndjson,
+					accepted: 1,
+					rejected: 0,
+				}),
+			} as never,
+			{
+				evaluateOtlp: () => ({
+					events: [],
+					recoveredEventIds: ["revision-1-event"],
+					failures: [],
+					typeMismatchFields: [],
+				}),
+				persistFailures: () => undefined,
+				stage: () => ({ inserted: 0, deduplicated: 0, eventIds: [] }),
+				markReady: (eventIds: readonly string[]) => {
+					readyIds = eventIds
+				},
+			} as never,
+			"logs",
+			request,
+		)
+		strictEqual(result.response.status, 200)
+		deepStrictEqual(readyIds, ["revision-1-event"])
+	})
+
+	it("accepts mixed OTLP batches while projecting only records with durable source time", async () => {
+		let inserted = false
+		let stagedIds: readonly string[] = []
+		const body = {
+			resourceLogs: [
+				{
+					scopeLogs: [
+						{
+							logRecords: [
+								{
+									timeUnixNano: "1786131720123456789",
+									eventName: "project.me",
+									body: { stringValue: "projectable" },
+								},
+								{ eventName: "ignore.me", body: { stringValue: "timestamp-less" } },
+								{
+									timeUnixNano: "1786131721123456789",
+									eventName: "ignore.me",
+									body: { stringValue: "ordinary" },
+								},
+							],
+						},
+					],
+				},
+			],
+		}
+		const result = await __testables.ingest(
+			{ exec: () => (inserted = true) } as never,
+			{
+				isRetired: () => false,
+				filterBatch: (_datasource: string, ndjson: string) => ({
+					ndjson,
+					accepted: ndjson.trim().split("\n").length,
+					rejected: 0,
+				}),
+			} as never,
+			{
+				evaluateOtlp: (_signal: string, decoded: unknown) => {
+					const projected = normalizeOtlpLogs(decoded).filter(
+						(signal) => signal.fields.get("signal:event.name")?.value === "project.me",
+					)
+					return {
+						events: projected.map((_signal, index) => ({ id: `event-${index + 1}` })),
+						recoveredEventIds: [],
+						failures: [],
+						typeMismatchFields: [],
+					}
+				},
+				persistFailures: () => undefined,
+				stage: (events: readonly { readonly id: string }[]) => {
+					stagedIds = events.map(({ id }) => id)
+					return { inserted: events.length, deduplicated: 0, eventIds: stagedIds }
+				},
+				markReady: () => undefined,
+			} as never,
+			"logs",
+			new Request("http://127.0.0.1/v1/logs", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(body),
+			}),
+		)
+		strictEqual(result.response.status, 200)
+		strictEqual(result.accepted, 3)
+		strictEqual(inserted, true)
+		deepStrictEqual(stagedIds, ["event-1"])
 	})
 })

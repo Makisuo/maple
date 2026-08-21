@@ -142,8 +142,15 @@ describe("LocalEventingControlStore", () => {
 				deepStrictEqual(store.loadEnabledProjections("tenant-a"), [])
 				store.saveProjection(projection({ revision: 3 }))
 				deepStrictEqual(store.loadEnabledProjections("tenant-a"), [projection({ revision: 3 })])
+				throws(
+					() => store.saveProjection(projection({ revision: 2, enabled: false })),
+					/stale projection revision/,
+				)
+				throws(() => store.saveProjection(projection()), /stale projection revision/)
+				store.saveProjection(projection({ revision: 3 }))
+				deepStrictEqual(store.loadEnabledProjections("tenant-a"), [projection({ revision: 3 })])
 				deepStrictEqual(store.validate(), {
-					schemaVersion: 2,
+					schemaVersion: 3,
 					projectionRevisions: 3,
 					projectionFailures: 0,
 					stagedEvents: 0,
@@ -202,7 +209,7 @@ describe("LocalEventingControlStore", () => {
 			const snapshot = join(dataDir, "backups", "snapshot", "control.sqlite")
 			const validation = await store.backupTo(snapshot)
 			deepStrictEqual(validation, {
-				schemaVersion: 2,
+				schemaVersion: 3,
 				projectionRevisions: 1,
 				projectionFailures: 1,
 				stagedEvents: 0,
@@ -329,6 +336,10 @@ describe("LocalEventingControlStore", () => {
 				strict: true,
 				safeIntegers: true,
 			})
+			database.exec("DROP INDEX outbox_events_staged_occurrence")
+			database.exec("ALTER TABLE outbox_events DROP COLUMN source_kind")
+			database.exec("ALTER TABLE outbox_events DROP COLUMN source")
+			database.exec("ALTER TABLE outbox_events DROP COLUMN source_occurrence_id")
 			database.exec("DROP TABLE event_consumers")
 			database.exec("PRAGMA user_version = 1")
 			database.close(true)
@@ -339,7 +350,7 @@ describe("LocalEventingControlStore", () => {
 			)
 			store = await LocalEventingControlStore.open(dataDir)
 			try {
-				strictEqual(store.validate().schemaVersion, 2)
+				strictEqual(store.validate().schemaVersion, 3)
 				deepStrictEqual(
 					store.listReady().events.map(({ event }) => event.id),
 					[event().id],

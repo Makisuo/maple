@@ -267,10 +267,9 @@ export const normalizeOtlpLogs = (
 			for (const log of scopeLogs.logRecords ?? []) {
 				const record = attributes(log.attributes, "log.attributes")
 				const occurredNanos = epochNanos(log.timeUnixNano) ?? epochNanos(log.observedTimeUnixNano)
-				if (occurredNanos === null)
-					throw new OtlpFieldError(
-						"log record requires timeUnixNano or observedTimeUnixNano for durable projection",
-					)
+				// OTLP permits both timestamps to be absent or zero. Such records still
+				// belong in the warehouse, but cannot acquire a durable event identity.
+				if (occurredNanos === null) continue
 				const observedNanos = epochNanos(log.observedTimeUnixNano)
 				const occurredAt = nanosToTimestamp(occurredNanos)
 				const sourceObservedAt = observedNanos ? nanosToTimestamp(observedNanos) : occurredAt

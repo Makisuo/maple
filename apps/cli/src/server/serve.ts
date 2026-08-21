@@ -318,7 +318,8 @@ async function ingest(
 		}
 	}
 	try {
-		if (stagedEventIds.length > 0) eventing.markReady(stagedEventIds)
+		const readyEventIds = [...evaluation.recoveredEventIds, ...stagedEventIds]
+		if (readyEventIds.length > 0) eventing.markReady(readyEventIds)
 	} catch (error) {
 		return {
 			response: text(`event outbox readiness ${signal}: ${(error as Error).message}`, 503),
