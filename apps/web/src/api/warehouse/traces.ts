@@ -81,6 +81,15 @@ const ListTracesInputSchema = Schema.Struct({
 	attributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
 	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
 	rootOnly: Schema.optional(Schema.Boolean),
+	/**
+	 * Drop noise traces from the grouped list: single-span traces whose root is
+	 * not an entry-point kind (Server/Consumer) — mobile `ui.screen` breadcrumbs,
+	 * orphaned client spans, SDK self-flushes. Defaults on; ignored when
+	 * `rootOnly` is false (the span-level list has no trace structure to judge).
+	 */
+	hideNoise: Schema.optional(Schema.Boolean),
+	/** Keep only traces with at least this many spans (grouped list only). */
+	minSpanCount: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
 	serviceMatchMode: ContainsMatchMode,
 	spanNameMatchMode: ContainsMatchMode,
 	deploymentEnvMatchMode: ContainsMatchMode,
@@ -114,6 +123,7 @@ const LIST_PROJECTED_COLUMNS = [
 	"spanAttributes.url.path",
 	"spanAttributes.server.address",
 	"spanAttributes.net.peer.name",
+	"spanAttributes.screen.name",
 ] as const
 
 interface TraceRootSpanSummary {
@@ -144,6 +154,15 @@ export interface TracesResponse {
 	meta: {
 		limit: number
 		offset: number
+		/**
+		 * Rows the warehouse page actually produced before the noise filter ran.
+		 * Pagination must advance by pages, not by `data.length`: a filtered page
+		 * returns fewer rows than it consumed, and `scannedCount === limit` — not
+		 * a full `data` array — is what means "more pages exist".
+		 */
+		scannedCount: number
+		/** Noise traces dropped from this page (`scannedCount - data.length`). */
+		hiddenCount: number
 	}
 }
 
@@ -216,23 +235,25 @@ function buildResourceAttributeFilters(input: ListTracesDecoded): AttributeFilte
 	return filters
 }
 
+const PROJECTED_ATTR_KEYS = [
+	"http.method",
+	"http.request.method",
+	"http.route",
+	"http.target",
+	"http.status_code",
+	"http.response.status_code",
+	"http.url",
+	"url.full",
+	"url.path",
+	"server.address",
+	"net.peer.name",
+	"screen.name",
+] as const
+
 /** Transform a list row from tracesListQuery */
 function transformSpanListRow(row: Record<string, unknown>): Trace {
 	const spanAttrs = (row.spanAttributes ?? {}) as Record<string, string>
 	const rootSpanAttributes: Record<string, string> = {}
-	const PROJECTED_ATTR_KEYS = [
-		"http.method",
-		"http.request.method",
-		"http.route",
-		"http.target",
-		"http.status_code",
-		"http.response.status_code",
-		"http.url",
-		"url.full",
-		"url.path",
-		"server.address",
-		"net.peer.name",
-	] as const
 	for (const key of PROJECTED_ATTR_KEYS) {
 		if (spanAttrs[key]) rootSpanAttributes[key] = spanAttrs[key]
 	}
@@ -276,6 +297,60 @@ function transformSpanListRow(row: Record<string, unknown>): Trace {
 	}
 }
 
+/** Transform a grouped row from the `groupByTrace` list (one row per TraceId). */
+function transformTraceListRow(row: Record<string, unknown>): Trace {
+	const rootSpanAttributes: Record<string, string> = {}
+	if (typeof row.rootSpanAttributes === "object" && row.rootSpanAttributes !== null) {
+		for (const [key, value] of Object.entries(row.rootSpanAttributes)) {
+			if (typeof value === "string" && value.length > 0) rootSpanAttributes[key] = value
+		}
+	}
+	const services = Array.isArray(row.services)
+		? row.services.flatMap((service) => {
+				const name = String(service)
+				return name ? [name] : []
+			})
+		: []
+	const rootSpanName = String(row.rootSpanName)
+	const rootSpanKind = String(row.rootSpanKind)
+	return {
+		traceId: toTraceId(String(row.traceId)),
+		// Grouped rows are whole traces — there is no single span to deep-link.
+		spanId: "",
+		isRootSpan: true,
+		startTime: String(row.startTime),
+		endTime: String(row.endTime),
+		durationMs: Number(row.durationMs),
+		spanCount: Number(row.spanCount),
+		services,
+		rootSpan: {
+			name: rootSpanName,
+			kind: rootSpanKind,
+			statusCode: String(row.rootSpanStatusCode),
+			attributes: rootSpanAttributes,
+			http: getHttpInfo({
+				spanName: rootSpanName,
+				spanAttributes: rootSpanAttributes,
+				spanKind: rootSpanKind,
+			}),
+		},
+		rootSpanName,
+		hasError: row.hasError === true || row.hasError === 1,
+	}
+}
+
+const ENTRY_POINT_KINDS = new Set(["Server", "Consumer"])
+
+/**
+ * A single-span trace whose root is not an entry point carries no structure and
+ * no request identity — mobile `ui.screen` breadcrumbs, orphaned client spans,
+ * SDK self-flush spans. Single-span SERVER traces stay: an inbound request with
+ * no children is thin but real.
+ */
+function isNoiseTrace(trace: Trace): boolean {
+	return trace.spanCount <= 1 && !ENTRY_POINT_KINDS.has(trace.rootSpan.kind)
+}
+
 export function listTraces({ data }: { data: ListTracesInput }) {
 	return listTracesEffect({ data })
 }
@@ -295,9 +370,14 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 	if (input.namespaceMatchMode === "contains") matchModes.serviceNamespace = "contains"
 
 	const rootOnly = input.rootOnly ?? true
+	// The trace-grouped list only lists true roots; `rootOnly: false` is the
+	// explicit opt-out into the legacy per-span list (Datadog's "all spans" view).
+	const groupByTrace = rootOnly
+	const hideNoise = groupByTrace && (input.hideNoise ?? true)
 
 	if (input.services?.length) yield* Effect.annotateCurrentSpan("services", input.services.join(","))
 	yield* Effect.annotateCurrentSpan("rootOnly", rootOnly)
+	yield* Effect.annotateCurrentSpan("groupByTrace", groupByTrace)
 	yield* Effect.annotateCurrentSpan("limit", limit)
 
 	const request = new QueryEngineExecuteRequest({
@@ -306,6 +386,7 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 		query: {
 			kind: "list" as const,
 			source: "traces" as const,
+			...(groupByTrace ? { groupByTrace: true as const } : {}),
 			limit,
 			offset,
 			sortBy: input.sortBy,
@@ -313,6 +394,7 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 			// Only project the span attributes the list UI actually renders
 			// (via transformSpanListRow → getHttpInfo). Avoids reading the full
 			// SpanAttributes / ResourceAttributes maps — large win on wide traces.
+			// The grouped path ignores this and ships its own fixed projection.
 			columns: LIST_PROJECTED_COLUMNS,
 			filters: {
 				serviceNames: oneOrMany(input.services, input.service),
@@ -348,11 +430,25 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 		)
 	}
 
-	const traces = response.result.data.map(transformSpanListRow)
+	const scanned = groupByTrace
+		? response.result.data.map(transformTraceListRow)
+		: response.result.data.map(transformSpanListRow)
+
+	const minSpanCount = groupByTrace ? input.minSpanCount : undefined
+	const traces = scanned.filter(
+		(trace) =>
+			(!hideNoise || !isNoiseTrace(trace)) &&
+			(minSpanCount === undefined || trace.spanCount >= minSpanCount),
+	)
 
 	return {
 		data: traces,
-		meta: { limit, offset },
+		meta: {
+			limit,
+			offset,
+			scannedCount: scanned.length,
+			hiddenCount: scanned.length - traces.length,
+		},
 	}
 })
 

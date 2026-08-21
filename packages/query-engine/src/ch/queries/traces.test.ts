@@ -448,13 +448,16 @@ describe("traceListQuery", () => {
 		expect(inner).toContain("Timestamp >= '2024-01-01 00:00:00'")
 		expect(inner).toContain("Timestamp <= '2024-01-02 00:00:00'")
 
-		// The aggregate is scoped by OrgId + TraceId alone: re-applying the span
-		// filters there would drop the very children spanCount has to count, and
-		// a time bound would clip children that outlive the window.
+		// The aggregate is scoped by OrgId + TraceId + a PADDED window: re-applying
+		// the span filters there would drop the very children spanCount has to
+		// count, and an exact time bound would clip children that outlive the
+		// window — but a completely unbounded aggregate defeats partition pruning
+		// and times out on prod retention, hence the ±1h pad.
 		const outer = sql.slice(sql.indexOf("FROM trace_detail_spans")).replace(inner, "")
 		expect(outer).toContain("OrgId = 'org_1'")
 		expect(outer).not.toContain("ServiceName = 'api'")
-		expect(outer).not.toContain("Timestamp >=")
+		expect(outer).toContain("Timestamp >= subtractHours(toDateTime('2024-01-01 00:00:00'), 1)")
+		expect(outer).toContain("Timestamp <= addHours(toDateTime('2024-01-02 00:00:00'), 1)")
 	})
 })
 

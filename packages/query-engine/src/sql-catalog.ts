@@ -686,6 +686,24 @@ export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
 		query: { kind: "list", source: "traces", limit: 50, filters: TRACES_FILTERS },
 		allCapabilities: true,
 	},
+	{
+		label: "traces-list-grouped",
+		query: { kind: "list", source: "traces", groupByTrace: true, limit: 50, filters: TRACES_FILTERS },
+		allCapabilities: true,
+	},
+	{
+		label: "traces-list-grouped-duration-sort",
+		query: {
+			kind: "list",
+			source: "traces",
+			groupByTrace: true,
+			limit: 50,
+			offset: 100,
+			sortBy: "durationMs",
+			sortDir: "desc",
+			filters: TRACES_FILTERS,
+		},
+	},
 	// NB: `{kind: "list", source: "logs"}` is a declared QuerySpec variant that
 	// `QueryEngineService.execute` does not implement — log lists only reach the
 	// warehouse through the `list_logs` pipe, covered above.

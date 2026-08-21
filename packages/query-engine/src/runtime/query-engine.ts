@@ -255,6 +255,26 @@ function traceServicePartitionWindow(
 	}
 }
 
+/**
+ * `traceListQuery` ships its projected root-attribute map as a JSON string
+ * (`toJSONString` — Map columns can't survive an `argMin`). Decode defensively:
+ * a malformed value degrades to an empty map, never a thrown defect.
+ */
+function parseProjectedAttributes(raw: unknown): Record<string, string> {
+	if (typeof raw !== "string" || raw.length === 0) return {}
+	try {
+		const parsed: unknown = JSON.parse(raw)
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
+		const out: Record<string, string> = {}
+		for (const [key, value] of Object.entries(parsed)) {
+			if (typeof value === "string" && value.length > 0) out[key] = value
+		}
+		return out
+	} catch {
+		return {}
+	}
+}
+
 function servicesForTraceRow(
 	rowServiceName: string,
 	enrichedServices: readonly string[] | undefined,
@@ -1625,6 +1645,51 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const tracesQuery = request.query
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 			const requestedColumns = (tracesQuery as { columns?: readonly string[] }).columns
+
+			if (tracesQuery.groupByTrace) {
+				const rows = yield* executeCHQuery(
+					warehouse,
+					tenant,
+					(capabilities) =>
+						CH.traceListQuery({
+							...opts,
+							// Stage 1 pins `ParentSpanId = ''` itself; the broader
+							// entry-point predicate would only widen the OR for nothing.
+							// (`rootOnly` compiles via `whenTrue`, so `false` = no clause.)
+							rootOnly: false,
+							attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+							// The root-only predicate is as selective as the clamp's
+							// "indexed filter" tier, so grouped pages keep the 200 cap.
+							limit: Math.min(tracesQuery.limit ?? 25, 200),
+							offset: tracesQuery.offset,
+							sortBy: tracesQuery.sortBy,
+							sortDir: tracesQuery.sortDir,
+						}),
+					{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
+					"traceList",
+					"list",
+				)
+
+				return new QueryEngineExecuteResponse({
+					result: {
+						kind: "list",
+						source: "traces",
+						data: rows.map((row) => ({
+							traceId: row.traceId,
+							startTime: String(row.startTime),
+							endTime: String(row.endTime),
+							durationMs: Number(row.durationMicros) / 1000,
+							spanCount: Number(row.spanCount),
+							services: row.services.map(String),
+							rootSpanName: row.rootSpanName,
+							rootSpanKind: row.rootSpanKind,
+							rootSpanStatusCode: row.rootSpanStatusCode,
+							rootSpanAttributes: parseProjectedAttributes(row.rootSpanAttributes),
+							hasError: Number(row.hasError) === 1,
+						})),
+					},
+				})
+			}
 
 			// Graceful limit clamping: cap at 200, auto-reduce to 50 when no indexed filters
 			const hasIndexedFilter = !!(
