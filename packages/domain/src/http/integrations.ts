@@ -1,4 +1,4 @@
-import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ExternalUserId, ScrapeTargetId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
@@ -817,18 +817,15 @@ export type IntegrationHttpError =
 	| IntegrationsPersistenceError
 
 /**
- * Every `/api/integrations/planetscale/*` operation below is superseded by the
- * `/v2/integrations/planetscale` group (`http/v2/integrations-planetscale.ts`),
- * which is where new work goes: scoped API keys, snake_case + ISO wire format,
- * and the documented error envelope.
+ * The `/api/integrations/planetscale/*` operations are gone — `/v2/integrations/
+ * planetscale` (`http/v2/integrations-planetscale.ts`) is the whole surface now:
+ * scoped API keys, snake_case + ISO wire format, and the documented error
+ * envelope. The schemas below stay because v2 and `PlanetScaleService` use them.
  *
- * v1 stays mounted because customers may still be calling it — the dashboard no
- * longer does, so nothing in this repo will notice if it breaks. Marking the
- * operations deprecated puts that in `/docs` rather than leaving it as tribal
- * knowledge. Delete them only once the access logs show no external traffic.
+ * The OAuth callback and the webhook receiver are NOT part of that retirement.
+ * They keep their version-neutral raw-router paths because PlanetScale stores
+ * those URLs on its side — see `docs/api-v2.md`.
  */
-const PLANETSCALE_V1_DEPRECATED = OpenApi.annotations({ deprecated: true })
-
 export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 	.add(
 		HttpApiEndpoint.get("hazelStatus", "/hazel/status", {
@@ -931,112 +928,6 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			success: CloudflareHyperdrivesResponse,
 			error: IntegrationsPersistenceError,
 		}),
-	)
-	.add(
-		HttpApiEndpoint.get("planetscaleStatus", "/planetscale/status", {
-			success: PlanetScaleIntegrationStatus,
-			error: IntegrationsPersistenceError,
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		HttpApiEndpoint.post("planetscaleStart", "/planetscale/start", {
-			payload: PlanetScaleStartConnectRequest,
-			success: PlanetScaleStartConnectResponse,
-			error: [IntegrationsForbiddenError, IntegrationsConfigurationError, IntegrationsPersistenceError],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// Organizations the stored OAuth grant can access — drives the org picker
-		// while the connection is pendingOrgSelection (and "change organization").
-		HttpApiEndpoint.get("planetscaleOrganizations", "/planetscale/organizations", {
-			success: PlanetScaleOrganizationsResponse,
-			error: [
-				IntegrationsForbiddenError,
-				IntegrationsConfigurationError,
-				IntegrationsValidationError,
-				IntegrationsNotConnectedError,
-				IntegrationsRevokedError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// Binds the OAuth grant to one PlanetScale organization: probes API
-		// permissions, then auto-provisions (or adopts) the managed scrape target.
-		// Re-binding is an upsert.
-		HttpApiEndpoint.post("planetscaleSelectOrganization", "/planetscale/select-organization", {
-			payload: PlanetScaleSelectOrganizationRequest,
-			success: PlanetScaleIntegrationStatus,
-			error: [
-				IntegrationsForbiddenError,
-				IntegrationsConfigurationError,
-				IntegrationsValidationError,
-				IntegrationsNotConnectedError,
-				IntegrationsRevokedError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// Validates the token against the metrics discovery endpoint before
-		// storing it on the managed scrape target (re-submitting rotates it).
-		HttpApiEndpoint.post("planetscaleSetMetricsToken", "/planetscale/metrics-token", {
-			payload: PlanetScaleMetricsTokenRequest,
-			success: PlanetScaleIntegrationStatus,
-			error: [
-				IntegrationsForbiddenError,
-				IntegrationsConfigurationError,
-				IntegrationsNotConnectedError,
-				IntegrationsValidationError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		HttpApiEndpoint.delete("planetscaleDisconnect", "/planetscale", {
-			success: PlanetScaleDisconnectResponse,
-			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// The org's polled database/branch inventory — consumed by the service map
-		// (node branding + metric-overlay matching) and the infra page.
-		HttpApiEndpoint.get("planetscaleDatabases", "/planetscale/databases", {
-			success: PlanetScaleDatabasesResponse,
-			error: IntegrationsPersistenceError,
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		HttpApiEndpoint.get("planetscaleWebhookConfig", "/planetscale/webhook-config", {
-			success: PlanetScaleWebhookConfigResponse,
-			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		HttpApiEndpoint.post("planetscaleQueryInsights", "/planetscale/query-insights", {
-			payload: PlanetScaleQueryInsightsRequest,
-			success: PlanetScaleQueryInsightsResponse,
-			error: [
-				IntegrationsConfigurationError,
-				IntegrationsNotConnectedError,
-				IntegrationsValidationError,
-				IntegrationsRevokedError,
-				IntegrationsUpstreamError,
-				IntegrationsPersistenceError,
-			],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
-	)
-	.add(
-		// POST, matching query-insights: the window + filters make a long key that
-		// belongs in a body, and the handler edge-caches on a computed key anyway.
-		HttpApiEndpoint.post("planetscaleEvents", "/planetscale/events", {
-			payload: PlanetScaleEventsRequest,
-			success: PlanetScaleEventsResponse,
-			error: [IntegrationsValidationError, IntegrationsPersistenceError],
-		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		HttpApiEndpoint.get("githubStatus", "/github/status", {

@@ -1,0 +1,311 @@
+# Maple for iOS
+
+A native SwiftUI client for Maple, reading the **v2 public API**. Three tabs,
+in the order the questions get asked — see [`PRODUCT.md`](PRODUCT.md):
+
+- **Home** — is anything wrong right now? Status headline, open alerts with
+  the rule's own last hour, services needing attention, what's new in 24h.
+- **Services** — the list, and a detail with golden-signal sparklines, scoped
+  alerts, issues, and top failing/slowest operations.
+- **Alerts** — the triage hub: incidents (with a "why" detail: what the rule
+  saw, what changed on the service, likely cause, timeline), error issues,
+  anomalies.
+
+## Getting started
+
+```bash
+brew install xcodegen        # once
+cd apps/ios && ./scripts/bootstrap.sh
+```
+
+That generates `Maple.xcodeproj` and opens it. On first run it also copies
+`Config/Secrets.example.xcconfig` to `Config/Secrets.xcconfig` — put a Clerk
+publishable key in there before running, or the app stops at launch with a
+message telling you the same thing.
+
+Which key depends on which API you point at:
+
+| `MAPLE_API_BASE_URL`    | Clerk instance                | Key                                                            |
+| ----------------------- | ----------------------------- | -------------------------------------------------------------- |
+| `https://api.maple.dev` | production, `clerk.maple.dev` | `PUBLIC_CLERK_PUBLISHABLE_KEY` from `.env.local` (`pk_live_…`) |
+| `http://localhost:3472` | dev                           | `CLERK_PUBLISHABLE_KEY` from `.env.local` (`pk_test_…`)        |
+
+They are not interchangeable: the API verifies a token against its own Clerk
+instance, so a `pk_test_` session against `api.maple.dev` is rejected.
+
+Xcode will ask once to trust the swift-openapi-generator build-tool plugin.
+
+## Layout
+
+```
+project.yml                  XcodeGen source of truth; Maple.xcodeproj is generated + gitignored
+Config/                      xcconfigs; Secrets.xcconfig is gitignored
+Maple/App                    entry point, auth gate, build-time config, Route
+Maple/Auth                   token provider, session state machine, org picker
+Maple/DesignSystem           tokens, type scale, service colours, shared primitives
+Maple/Features               Home, Services, Alerts (incidents/anomalies), Issues
+Maple/Components             LoadableView, formatting, Sparkline, alert formatting
+Maple/Fixtures               FixtureAPI — the app without Clerk or a network
+Maple/Widgets                publishes the widget's snapshot; background refresh
+Maple/Resources/Fonts        Geist + Geist Mono (SIL OFL)
+Widgets/                     the Home Screen / Lock Screen widget extension
+Packages/MapleAPI            the generated API client — builds and tests with plain `swift test`
+```
+
+Everything that is worth unit-testing lives in `Packages/MapleAPI`, which has no
+UIKit, no simulator, and no signing requirement. That is why CI runs
+`swift test` there first: it fails in about a minute rather than after a full
+app build.
+
+## Push notifications
+
+`Maple/Push` owns it. `PushRegistrar` asks for permission the first time an
+incident is opened (or from the bell on Home), receives the APNs token via
+`AppDelegate`, and keeps `PUT /v2/mobile_devices/{token}` in step with
+(token, organization, permission, preferences) through one `.task(id:)` on the
+tab root. Registration is per organization; sign-out unregisters. A tapped
+notification lands on the incident (`AppNavigation.openIncident`).
+
+The server side is `apps/api/src/services/push` + `platform/Apns.ts`; it sends
+only when `APNS_TEAM_ID` / `APNS_KEY_ID` / `APNS_PRIVATE_KEY` are set on the
+alerting worker. `aps-environment` in the entitlements is `development` and
+Xcode flips it for archives; the app reads whichever landed in the embedded
+profile to pick the APNs host, and treats a missing profile (TestFlight and App Store
+installs have none — Apple re-signs and strips it) as production. The simulator on Apple silicon does get a token, but
+nothing is delivered to it from a Worker — registering from the simulator
+leaves a row Apple rejects with `BadDeviceToken`, which disables it.
+
+## The Lock Screen Live Activity
+
+A **critical** incident raises a Live Activity — the card that sits on the Lock
+Screen until the incident resolves, counting how long it has been going on. It
+is declared in the same widget extension (`Widgets/IncidentActivityWidget.swift`)
+but it is not on a timeline: what it shows is whatever the last APNs push said.
+
+Three tokens are in play, which is the whole complexity of the feature:
+
+| Token               | Who issues it             | What it does             |
+| ------------------- | ------------------------- | ------------------------ |
+| APNs device token   | iOS, once per install     | notifications            |
+| push-to-start token | ActivityKit, per install  | **creates** an activity  |
+| activity push token | ActivityKit, per activity | **updates and ends** one |
+
+The push-to-start token means the phone never has to have opened the app for an
+incident to appear: it rides along on the device registration, and the server
+pushes to it directly. The activity's own token only exists once the activity is
+running and is handed to the _app_, so `LiveActivityController` posts it back to
+`PUT /v2/mobile_devices/{token}/live_activities/{incident_id}`. Without that
+second token an activity would start and then freeze on the numbers it started
+with. Because both ride on the device row, a phone that refused notification
+permission gets no Live Activities either — the registration that carries the
+start token never happens.
+
+Server side, `MobilePushService.syncLiveActivities` starts on `trigger`, updates
+on `renotify`, and ends on `resolve` with a resolved state that clears itself
+after five minutes. The activity is sent **in addition to** the notification,
+never instead of it.
+
+The card carries a sparkline of the last twelve checks with the threshold ruled
+off dashed — the shape answers what the number cannot, which is whether this is
+still climbing. Two details make it honest: the current value is **appended** to
+the series server-side, because `alert_checks` goes through the ingest pipeline
+and the check that fired the push is usually not queryable yet; and the chart is
+**not zero-anchored** here (`Sparkline(anchorsToZero: false)`), because at 30pt
+tall a zero-anchored 2%→9% climb is a flat line. The checks are read lazily —
+`IncidentPushEvent.recentValues` is an unevaluated Effect, so the warehouse query
+happens only for a critical incident that has somewhere to draw itself.
+
+Two shapes are wire contracts with no runtime error when they drift, so both are
+pinned by tests in `MapleWidgetDataTests`:
+
+- the **type name** `IncidentActivityAttributes`, which the start push names in
+  `aps.attributes-type` (`LIVE_ACTIVITY_ATTRIBUTES_TYPE` on the server), and
+- the **snake_case coding keys and epoch-second dates** in
+  `IncidentActivityAttributes`. ActivityKit decodes with a plain `JSONDecoder`,
+  whose default date strategy is Apple's 2001 reference date — an ISO-8601
+  string does not decode, and a failed decode is silence, not an error.
+
+Live Activities render in the simulator but cannot receive pushes; verifying the
+push path needs a device. `NSSupportsLiveActivities` is on the **app's**
+Info.plist, not the extension's.
+
+## The Home Screen widgets
+
+`Widgets/` is a WidgetKit extension with two widgets:
+
+- **Ongoing issues** — what the app's "Needs attention" filter returns over the
+  last 24 hours, worst first (severity, then whether it is paging, then
+  recency). Small, medium and large, plus all three Lock Screen accessories. A
+  row taps through to that issue (`maple://issue/<id>`), the rest of the widget
+  to the Errors list (`maple://issues`).
+- **Throughput** — traffic over the last hour with its trend, error rate and
+  p95, for the whole organization or for **one service the user picks in the
+  widget itself** (long-press → Edit Widget → Service). That picker is an
+  `AppIntentConfiguration`: `SelectServiceIntent` with a `ServiceEntity` whose
+  query reads the published snapshot, so the choices are the services the app
+  last saw — the extension queries nothing. Unset means the organization total,
+  which is the useful default. Taps open the service (`maple://service/<name>`)
+  or the Services tab.
+
+Deep links are handled by `AppNavigation.open(_:)`, which owns both tab stacks.
+Every widget must also be listed in `MapleWidgetBundle` — one that compiles but
+is missing from that body never appears in the gallery, with no error anywhere.
+
+The extension makes **no network requests**. Every v2 request needs a Clerk
+session token with a one-minute TTL, and an extension has no interactive way to
+recover when refreshing one fails — so the app fetches and writes two small JSON
+snapshots into the App Group `group.com.maple.mobile`, and the widgets only
+render them. The snapshot types, their ranking, the shared store and the
+formatters live in `Packages/MapleAPI/Sources/MapleWidgetData` — a module with
+**no dependency on `MapleAPI`**, which is why the extension does not link the
+generated client. They are covered by `swift test` alongside the client's own
+tests.
+
+Throughput costs three requests per round: the service list (whose numbers the
+organization total is summed from), one `group_by: service` timeseries for every
+service's shape at once, and one ungrouped timeseries for the total's shape —
+summing only the charted services would under-report a big org. Bucket counts
+are divided by the bucket length before publishing, so the sparkline and the
+headline are both "per second" and cannot disagree.
+
+Four things republish it, which between them cover how a phone is used:
+
+- the tabs appearing, and every return to the foreground (`RootView`),
+- an organization switch — the counts belong to one org, so a switch republishes
+  at once rather than leaving the previous org's numbers on the Home Screen,
+- `BGAppRefreshTask` while the app is closed (`WidgetRefreshScheduler`),
+- a push arriving, silent or visible (`AppDelegate`).
+
+Background refresh is opportunistic — iOS decides whether to run it at all — so
+the widgets render their own age rather than implying the numbers are current:
+past thirty minutes they dim and say "as of 2h ago". Sign-out clears both
+snapshots; the Home Screen outlives the session.
+
+Both targets carry the App Group entitlement. With automatic signing Xcode
+creates the group on first build; a mismatch between the two entitlements files
+and `IssuesSnapshotStore.appGroupIdentifier` is silent — the widget simply
+renders "Open Maple" forever.
+
+## Running without a sign-in
+
+Set `MAPLE_FIXTURES=1` in the scheme's environment (Product → Scheme → Edit →
+Run → Arguments), or from the CLI:
+
+```bash
+SIMCTL_CHILD_MAPLE_FIXTURES=1 xcrun simctl launch booted com.maple.mobile
+```
+
+Add `MAPLE_FIXTURES_FAIL_EVERY=3` (any `n`) to make every nth request fail as
+if offline — the way to see the error state, the "Couldn't refresh" strip, and
+"Try again" without pulling the plug.
+
+`FixtureAPI` then stands in for the network with one believable organization
+(nine services, a critical incident, a warning, issues, an anomaly), generated
+relative to now so timestamps always read as current, and the session is pinned
+to `.ready` without touching Clerk. This is how screens get built and
+screenshotted; it is not a test double for logic — that stays in
+`Packages/MapleAPI`.
+
+## The API client is generated
+
+`Packages/MapleAPI/Sources/MapleAPI/openapi.json` is **generated and committed**.
+Regenerate it from the repo root after any change to the v2 contract:
+
+```bash
+bun run ios:openapi
+```
+
+`bun run ios:openapi:check` runs in CI's `quality` shard and fails if the two
+drift.
+
+The script (`scripts/generate-ios-openapi.ts`) does more than dump the spec. The
+full v2 document is 94 paths and 480+ schemas, and Effect's JSON-Schema output
+uses three idioms that generate unusable Swift:
+
+| Contract emits                    | Without normalization              | After     |
+| --------------------------------- | ---------------------------------- | --------- |
+| `anyOf: [T, null]`                | `Union_23` with `.value1: String?` | `String?` |
+| `anyOf: [number, enum["NaN", …]]` | a struct wrapping a `Double`       | `Double`  |
+| `allOf: [{minLength}, {pattern}]` | struct with `value1`/`value2`      | `String`  |
+
+It also prunes to the operations the app calls, merges the per-annotation-site
+copies of a domain enum (`_maple_AlertSignalType_2` → `_maple_AlertSignalType`)
+so one wire enum is one Swift enum, and collapses every error response to a
+single `MapleErrorEnvelope`. Result: ~75 schemas instead of 480.
+
+Adding a screen means adding its `operationId` to `IOS_OPERATIONS` in that
+script and re-running it. A removed or renamed operation makes the script exit
+non-zero rather than silently shrinking the client.
+
+## The organization constraint
+
+The v2 API has **no organization header**. It reads the org from the Clerk
+session token's active-organization claim, and rejects a token without one
+(`"Active organization is required"`). Two consequences shape the app:
+
+1. The tab bar exists only in `AuthPhase.ready`. Building it and hiding it would
+   let its `.task` modifiers fire requests that 401.
+2. Switching orgs means re-minting the token, not changing a header. After
+   `setActive`, `ClerkTokenProvider.invalidate()` forces the next fetch past
+   Clerk's own token cache, and `SessionController.dataGeneration` increments so
+   every screen's `.task(id:)` cancels and reloads.
+
+A 401 whose message mentions an active organization routes to the org picker,
+not to sign-out — the user is still authenticated.
+
+Memberships are fetched with `user.getOrganizationMemberships(page:pageSize:)`,
+paging to the reported total. Do **not** read `user.organizationMemberships`:
+it is an `Optional` populated from the client payload and can be absent or
+partial, which previously auto-selected multi-org accounts into whichever
+organization happened to be in that payload. The auto-select-when-one path only
+runs against a verified list.
+
+The switcher lives in the title slot on both tabs. The gate alone is not enough:
+once an organization is active the gate is unreachable, so without it a
+multi-org account is stuck.
+
+## Design system
+
+`Maple/DesignSystem` ports the product's visual language rather than inventing a
+native one — see `DESIGN.md` and `packages/ui/src/styles/tokens.css`.
+
+- **`Tokens.swift`** holds the palette in OKLCH, the same numbers as the
+  stylesheet, converted to sRGB at runtime so a token can be diffed against the
+  CSS by eye. Light and dark both resolve from one declaration.
+- **`Typography.swift`** — the defining choice is that **Geist Mono is the body
+  font**, with proportional Geist reserved for page titles and empty states.
+  That inversion does most of the identity work; don't undo it. The TTFs are
+  instanced from the `@fontsource-variable` packages and shipped under
+  `Maple/Resources/Fonts` with the SIL OFL licence.
+- **`ServiceColor.swift`** reproduces `packages/ui/src/lib/colors.ts` bit for
+  bit, including its 32-bit signed hash overflow, so a service is the same
+  colour on the phone as in a browser tab.
+- **`Primitives.swift`** carries the badge, health-dot, stat-tile, hairline, and
+  detail-row patterns, plus the error-rate and latency tone thresholds from
+  `latency-tone.ts` and `service-health.ts`.
+
+Conventions worth keeping: hairline borders (never 2px), depth from tonal steps
+rather than shadows, `tabularNumbers()` on every numeral, uppercase only for the
+`SectionLabel` idiom, skeletons instead of spinners, and the amber primary at
+most once per screen.
+
+To change a colour, change it in `tokens.css` first and mirror it here.
+
+## A note on Package.resolved
+
+`Packages/MapleAPI/Package.resolved` is committed and holds every pin including
+Clerk's, because `xcodebuild` resolves the app's dependencies through it. Running
+`swift test` in the package alone rewrites it to just the package's own
+dependencies. Both are valid; the committed superset is the reproducible one, so
+don't commit the shrunken version if a `swift test` run leaves it dirty.
+
+The durable Clerk pin is `exactVersion` in `project.yml` — the app-level resolved
+file lives inside the generated `.xcodeproj`, which is gitignored.
+
+## Testing
+
+```bash
+cd apps/ios/Packages/MapleAPI && swift test    # no simulator needed
+cd apps/ios && xcodegen generate && xcodebuild build -scheme Maple \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```

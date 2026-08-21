@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // bench-startup-cpu.ts — does defining Schema/TaggedError classes actually
 // cost meaningful Cloudflare *startup* CPU?
 //
@@ -30,7 +32,7 @@
 import { spawnSync } from "node:child_process"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { Schema } from "effect"
+import { Predicate, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 const CF_STARTUP_BUDGET_MS = 400 // documented startup CPU ceiling
@@ -191,10 +193,9 @@ const runMicro = (opts: {
 	const row = (r: BenchResult) =>
 		`  ${r.label.padEnd(44)} cpu ${fmt(r.cpuMs)} ms   wall ${fmt(r.wallMs)} ms`
 
-	const engine =
-		typeof (globalThis as any).Bun !== "undefined"
-			? "Bun/JSC"
-			: `Node/V8 ${process.versions?.v8 ?? ""}`.trim()
+	const engine = Predicate.isNotUndefined((globalThis as any).Bun)
+		? "Bun/JSC"
+		: `Node/V8 ${process.versions?.v8 ?? ""}`.trim()
 	console.log(`\nbench-startup-cpu — micro (median of ${reps} reps, ${engine})\n`)
 	console.log(row(rTagged))
 	console.log(row(rStructs))

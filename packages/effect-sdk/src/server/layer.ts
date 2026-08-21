@@ -2,12 +2,34 @@ import type { Duration } from "effect"
 import { Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Otlp } from "effect/unstable/observability"
-import { resolveResource } from "./resource.js"
+import { DEFAULT_MAPLE_ENDPOINT, type ResolvedResource, resolveResource } from "./resource.js"
+
+/**
+ * Warn once about the one configuration that cannot work: no ingest key, and
+ * the endpoint left at the public Maple ingest, which rejects unauthenticated
+ * writes with a 401. Every other keyless setup — a local `maple start` sink, a
+ * self-hosted collector — is legitimate and stays silent.
+ *
+ * A warning rather than a no-op: disabling export here would silently break
+ * those keyless-to-custom-endpoint setups.
+ */
+let doomWarned = false
+const warnIfDoomed = (resolved: ResolvedResource): void => {
+	if (doomWarned) return
+	if (resolved.ingestKey !== undefined) return
+	if (resolved.endpoint !== DEFAULT_MAPLE_ENDPOINT) return
+	doomWarned = true
+	console.warn(
+		"[MapleServerSDK] exporting to the public Maple ingest without an ingest key — " +
+			"every request will be rejected with 401. Set MAPLE_INGEST_KEY, or point MAPLE_ENDPOINT " +
+			"at your own collector.",
+	)
+}
 
 export interface MapleConfig {
 	/**
 	 * Service name reported in traces, logs, and metrics. When omitted, falls
-	 * back to `OTEL_SERVICE_NAME` env var, then `"unknown_service"`.
+	 * back to `OTEL_SERVICE_NAME` env var, then `"unknown"`.
 	 */
 	readonly serviceName?: string | undefined
 	/** Override auto-detected service version (commit SHA). */
@@ -51,8 +73,18 @@ export interface MapleConfig {
  * configured for Maple.
  *
  * Auto-detects commit SHA and deployment environment from common platform
- * env vars (Railway, Vercel, Cloudflare Pages, Render). Returns a no-op layer
- * when no endpoint is configured, making it safe for local development.
+ * env vars (Railway, Vercel, Cloudflare Pages, Render).
+ *
+ * This layer **always exports** — there is no disable switch. The endpoint
+ * defaults to the public Maple ingest, and a missing ingest key does not turn
+ * export off, so a keyless app pointed at a local `maple start` sink or a
+ * self-hosted collector still ships telemetry. Keyless against the public
+ * ingest is the one futile combination and logs a one-shot warning.
+ *
+ * Note the contrast with `MapleFlush.make` and the Cloudflare `make`, which DO
+ * no-op without an ingest key. If you want telemetry to switch itself off in
+ * local dev, use one of those, or leave `MAPLE_ENDPOINT` pointed at a sink you
+ * control.
  *
  * For Cloudflare Workers, prefer `@maple-dev/effect-sdk/cloudflare`'s `make()`
  * — it has no background fiber and exposes an explicit `flush` Effect that
@@ -75,7 +107,12 @@ export const layer = (config: MapleConfig = {}) =>
 	Layer.unwrap(
 		Effect.gen(function* () {
 			const resolved = yield* resolveResource({ ...config, sdkType: "server" })
-			if (!resolved.endpoint) return Layer.empty
+			// Always export. A missing ingest key is NOT a disable signal here:
+			// pointing a keyless app at a local `maple start` sink or a self-hosted
+			// OTLP collector is a supported setup, and those accept unauthenticated
+			// writes. Only the keyless-to-public-ingest combination is futile, and
+			// that one gets a warning rather than silence — see `warnIfDoomed`.
+			warnIfDoomed(resolved)
 
 			return Otlp.layerJson({
 				baseUrl: resolved.endpoint,

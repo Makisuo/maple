@@ -65,12 +65,12 @@ const COL_HEADER = "text-muted-foreground/70 font-mono text-[10px] uppercase tra
 const SOURCE_CONTEXT_LABELS: Record<IngestMappingSourceContext, string> = {
 	span: "Span attribute",
 	resource: "Resource attribute",
-}
+} satisfies Record<IngestMappingSourceContext, string>
 
 const OPERATION_LABELS: Record<IngestMappingOperation, string> = {
 	move: "Move",
 	copy: "Copy",
-}
+} satisfies Record<IngestMappingOperation, string>
 
 // Copy is additive (keeps the source) → calm blue; Move removes the source key → amber caution.
 const OPERATION_BADGE: Record<
@@ -79,12 +79,12 @@ const OPERATION_BADGE: Record<
 > = {
 	copy: { icon: CopyIcon, variant: "info", tone: "text-info" },
 	move: { icon: ArrowRightFromLineIcon, variant: "warning", tone: "text-warning" },
-}
+} satisfies Record<IngestMappingOperation, { icon: IconComponent; variant: "info" | "warning"; tone: string }>
 
 const SOURCE_CONTEXT_ICON: Record<IngestMappingSourceContext, IconComponent> = {
 	span: BracketsCurlyIcon,
 	resource: CubeIcon,
-}
+} satisfies Record<IngestMappingSourceContext, IconComponent>
 
 export function AttributeMappingsSection() {
 	const [dialogOpen, setDialogOpen] = useState(false)

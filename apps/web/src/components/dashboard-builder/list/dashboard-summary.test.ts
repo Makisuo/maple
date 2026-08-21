@@ -1,4 +1,4 @@
-import { QUERY_ENDPOINT_SHAPES } from "@maple/widgets/dashboard"
+import { QUERY_ENDPOINT_RESULT_KINDS } from "@maple/widgets/dashboard"
 import { describe, expect, it } from "vitest"
 import type {
 	Dashboard,
@@ -26,10 +26,10 @@ let widgetSeq = 0
 const dataSourceFor = (endpoint: DataSourceEndpoint): DashboardWidget["dataSource"] => {
 	if (endpoint === "markdown_static") return { kind: "static" }
 	if (endpoint === "raw_sql_chart") return { kind: "raw_sql", sql: "SELECT 1" }
-	const shape = QUERY_ENDPOINT_SHAPES[endpoint]
-	return shape === undefined
+	const resultKind = QUERY_ENDPOINT_RESULT_KINDS[endpoint]
+	return resultKind === undefined
 		? { kind: "route", endpoint }
-		: { kind: "query", resultShape: shape, queries: [] }
+		: { kind: "query", resultShape: resultKind, queries: [] }
 }
 
 const widget = (visualization: VisualizationType, endpoint: DataSourceEndpoint): DashboardWidget => ({

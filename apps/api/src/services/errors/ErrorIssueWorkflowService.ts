@@ -52,7 +52,7 @@ const decodeIssueDateTimeSync = Schema.decodeUnknownSync(ErrorIssueDocument.fiel
 const DEFAULT_EVENTS_LIMIT = 100
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 
-export interface ErrorIssueWorkflowPublicShape {
+export interface ErrorIssueWorkflowPublicApi {
 	readonly heartbeatIssue: (
 		orgId: OrgId,
 		actorId: ActorId,
@@ -107,7 +107,7 @@ export interface ErrorIssueWorkflowPublicShape {
 }
 
 /** Internal workflow kernel shared with the compatibility facade's broad operations and tick. */
-export interface ErrorIssueWorkflowServiceShape extends ErrorIssueWorkflowPublicShape {
+export interface ErrorIssueWorkflowServiceApi extends ErrorIssueWorkflowPublicApi {
 	readonly rowToIssue: (
 		row: ErrorIssueRow,
 		hasOpenIncident: boolean,
@@ -159,7 +159,7 @@ export interface ErrorIssueWorkflowServiceShape extends ErrorIssueWorkflowPublic
 	>
 }
 
-const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | ErrorActorsService> = Effect.gen(
+const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorActorsService> = Effect.gen(
 	function* () {
 		const database = yield* Database
 		const actors = yield* ErrorActorsService
@@ -177,7 +177,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			})
 		}
 
-		const rowToIssue: ErrorIssueWorkflowServiceShape["rowToIssue"] = (row, hasOpenIncident, actorMap) =>
+		const rowToIssue: ErrorIssueWorkflowServiceApi["rowToIssue"] = (row, hasOpenIncident, actorMap) =>
 			new ErrorIssueDocument({
 				id: row.id,
 				kind: row.kind,
@@ -203,6 +203,10 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				lastSeenAt: isoFromDate(row.lastSeenAt),
 				occurrenceCount: row.occurrenceCount,
 				resolvedAt: row.resolvedAt == null ? null : isoFromDate(row.resolvedAt),
+				lastResolvedAt: row.lastResolvedAt == null ? null : isoFromDate(row.lastResolvedAt),
+				lastRegressedAt: row.lastRegressedAt == null ? null : isoFromDate(row.lastRegressedAt),
+				regressionCount: row.regressionCount,
+				resolvedVersions: row.resolvedVersionsJson,
 				snoozeUntil: row.snoozeUntil == null ? null : isoFromDate(row.snoozeUntil),
 				archivedAt: row.archivedAt == null ? null : isoFromDate(row.archivedAt),
 				hasOpenIncident,
@@ -226,7 +230,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				createdAt: isoFromDate(row.createdAt),
 			})
 
-		const requireIssue: ErrorIssueWorkflowServiceShape["requireIssue"] = Effect.fn(
+		const requireIssue: ErrorIssueWorkflowServiceApi["requireIssue"] = Effect.fn(
 			"ErrorsService.requireIssue",
 		)(function* (orgId, issueId) {
 			const rows = yield* dbExecute((db) =>
@@ -248,7 +252,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return row
 		})
 
-		const issuesWithOpenIncidents: ErrorIssueWorkflowServiceShape["issuesWithOpenIncidents"] = (
+		const issuesWithOpenIncidents: ErrorIssueWorkflowServiceApi["issuesWithOpenIncidents"] = (
 			orgId,
 			issueIds,
 		) => {
@@ -291,7 +295,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			)
 		}
 
-		const hydrateIssueRows: ErrorIssueWorkflowServiceShape["hydrateIssueRows"] = (orgId, rows) =>
+		const hydrateIssueRows: ErrorIssueWorkflowServiceApi["hydrateIssueRows"] = (orgId, rows) =>
 			Effect.gen(function* () {
 				if (rows.length === 0) return []
 				const openSet = yield* issuesWithOpenIncidents(
@@ -305,14 +309,14 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				return rows.map((row) => rowToIssue(row, openSet.has(row.id), actorMap))
 			})
 
-		const hydrateIssue: ErrorIssueWorkflowServiceShape["hydrateIssue"] = Effect.fn(
+		const hydrateIssue: ErrorIssueWorkflowServiceApi["hydrateIssue"] = Effect.fn(
 			"ErrorsService.hydrateIssue",
 		)(function* (orgId, row) {
 			const hydrated = yield* hydrateIssueRows(orgId, [row])
 			return hydrated[0]!
 		})
 
-		const recordEvent: ErrorIssueWorkflowServiceShape["recordEvent"] = Effect.fn(
+		const recordEvent: ErrorIssueWorkflowServiceApi["recordEvent"] = Effect.fn(
 			"ErrorsService.recordEvent",
 		)(function* (orgId, issueId, actorId, type, opts = {}) {
 			const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
@@ -344,7 +348,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return Effect.void
 		}
 
-		const applyTransition: ErrorIssueWorkflowServiceShape["applyTransition"] = Effect.fn(
+		const applyTransition: ErrorIssueWorkflowServiceApi["applyTransition"] = Effect.fn(
 			"ErrorsService.applyTransition",
 		)(function* (orgId, actorId, row, toState, opts = {}) {
 			const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
@@ -359,6 +363,16 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			if (toState === "done") {
 				update.resolvedAt = msToDate(timestamp)
 				update.resolvedByActorId = actorId ?? null
+				// Survives the next reopen, so a regressed issue can still show when it
+				// was last fixed instead of looking untouched.
+				update.lastResolvedAt = msToDate(timestamp)
+				// Snapshot the builds this issue has been seen from. Occurrences from
+				// any of them afterwards are old clients still running the broken
+				// build, not a regression — see `isRegression` in
+				// error-tick-persistence.ts. Without this, `maple-cli` issues could
+				// never stay fixed: every binary already installed keeps reporting the
+				// bug for as long as it is in use.
+				update.resolvedVersionsJson = row.seenVersionsJson
 			} else if (fromState === "done") {
 				update.resolvedAt = null
 				update.resolvedByActorId = null
@@ -369,9 +383,18 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				update.snoozeUntil = null
 			}
 			if (TERMINAL_WORKFLOW_STATES.has(toState)) {
+				// Reaching a terminal state ends the work, so the lease ends with it.
 				update.leaseHolderActorId = null
 				update.leaseExpiresAt = null
 				update.claimedAt = null
+			} else if (actorId !== null && actorId !== undefined && row.leaseHolderActorId === actorId) {
+				// Still working, and just proved it. Folded into this same UPDATE rather
+				// than issued separately — the row is already being written.
+				const previous = dateToMs(row.leaseExpiresAt) ?? timestamp
+				update.leaseExpiresAt = msToDate(
+					timestamp +
+						Math.max(DEFAULT_LEASE_DURATION_MS, previous - (dateToMs(row.claimedAt) ?? previous)),
+				)
 			}
 
 			yield* dbExecute((db) =>
@@ -426,7 +449,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 				leaseExpiresAt: row?.leaseExpiresAt == null ? null : isoFromDate(row.leaseExpiresAt),
 			})
 
-		const heartbeatIssue: ErrorIssueWorkflowServiceShape["heartbeatIssue"] = Effect.fn(
+		const heartbeatIssue: ErrorIssueWorkflowServiceApi["heartbeatIssue"] = Effect.fn(
 			"ErrorsService.heartbeatIssue",
 		)(function* (orgId, actorId, issueId) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -463,7 +486,48 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		})
 
-		const releaseIssue: ErrorIssueWorkflowServiceShape["releaseIssue"] = Effect.fn(
+		/**
+		 * Push the lease deadline out because the holder is demonstrably still working.
+		 *
+		 * A lease used to expire on wall-clock time alone, renewable only by an explicit
+		 * `heartbeat` call — and in practice nothing ever called it: agents claimed
+		 * issues, worked them, and let the lease lapse, dropping the issue back to
+		 * `todo` underneath them. Any mutating action by the holder is better evidence
+		 * of liveness than a separate call the agent has to remember to make.
+		 *
+		 * Silent by design: a no-op for a non-holder (the caller's own conflict check
+		 * owns that decision) and never a reason to fail the action it accompanies.
+		 */
+		const refreshLeaseIfHolder = Effect.fn("ErrorsService.refreshLeaseIfHolder")(function* (
+			orgId: OrgId,
+			actorId: ActorId,
+			issueId: ErrorIssueId,
+			current: ErrorIssueRow,
+			timestamp: number,
+		) {
+			if (current.leaseHolderActorId !== actorId) return
+			const previous = dateToMs(current.leaseExpiresAt) ?? timestamp
+			// Preserve the lease LENGTH the holder originally asked for, exactly as
+			// `heartbeatIssue` does — a claim with a 2h lease should keep renewing at 2h.
+			const leaseMs = Math.max(
+				DEFAULT_LEASE_DURATION_MS,
+				previous - (dateToMs(current.claimedAt) ?? previous),
+			)
+			yield* dbExecute((db) =>
+				db
+					.update(errorIssues)
+					.set({ leaseExpiresAt: msToDate(timestamp + leaseMs) })
+					.where(
+						and(
+							eq(errorIssues.orgId, orgId),
+							eq(errorIssues.id, issueId),
+							eq(errorIssues.leaseHolderActorId, actorId),
+						),
+					),
+			)
+		})
+
+		const releaseIssue: ErrorIssueWorkflowServiceApi["releaseIssue"] = Effect.fn(
 			"ErrorsService.releaseIssue",
 		)(function* (orgId, actorId, issueId, opts) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -500,7 +564,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return yield* hydrateIssue(orgId, next)
 		})
 
-		const assignIssue: ErrorIssueWorkflowServiceShape["assignIssue"] = Effect.fn(
+		const assignIssue: ErrorIssueWorkflowServiceApi["assignIssue"] = Effect.fn(
 			"ErrorsService.assignIssue",
 		)(function* (orgId, byActorId, issueId, toActorId) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -566,7 +630,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			)
 		})
 
-		const setSeverity: ErrorIssueWorkflowServiceShape["setSeverity"] = Effect.fn(
+		const setSeverity: ErrorIssueWorkflowServiceApi["setSeverity"] = Effect.fn(
 			"ErrorsService.setSeverity",
 		)(function* (orgId, actorId, issueId, severity, opts) {
 			const timestamp = yield* Clock.currentTimeMillis
@@ -581,6 +645,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			if (source === "ai" && current.severitySource === "manual") {
 				return yield* hydrateIssue(orgId, current)
 			}
+			yield* refreshLeaseIfHolder(orgId, actorId, issueId, current, timestamp)
 			const nextSource: IssueSeveritySource | null = severity === null ? null : source
 			const changed = current.severity !== severity || current.severitySource !== nextSource
 			if (!changed) return yield* hydrateIssue(orgId, current)
@@ -615,11 +680,12 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		})
 
-		const commentOnIssue: ErrorIssueWorkflowServiceShape["commentOnIssue"] = Effect.fn(
+		const commentOnIssue: ErrorIssueWorkflowServiceApi["commentOnIssue"] = Effect.fn(
 			"ErrorsService.commentOnIssue",
 		)(function* (orgId, actorId, issueId, body, opts) {
 			const timestamp = yield* Clock.currentTimeMillis
-			yield* requireIssue(orgId, issueId)
+			const current = yield* requireIssue(orgId, issueId)
+			yield* refreshLeaseIfHolder(orgId, actorId, issueId, current, timestamp)
 			const type: ErrorIssueEventType = opts?.kind === "agent_note" ? "agent_note" : "comment"
 			const payload: StoredJsonRecord = {
 				body,
@@ -643,7 +709,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 			return rowToEvent(row, actorMap)
 		})
 
-		const listIssueEvents: ErrorIssueWorkflowServiceShape["listIssueEvents"] = Effect.fn(
+		const listIssueEvents: ErrorIssueWorkflowServiceApi["listIssueEvents"] = Effect.fn(
 			"ErrorsService.listIssueEvents",
 		)(function* (orgId, issueId, opts) {
 			yield* Effect.annotateCurrentSpan({ orgId, issueId })
@@ -686,7 +752,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceShape, never, Database | Erro
 
 export class ErrorIssueWorkflowService extends Context.Service<
 	ErrorIssueWorkflowService,
-	ErrorIssueWorkflowServiceShape
+	ErrorIssueWorkflowServiceApi
 >()("@maple/api/services/errors/ErrorIssueWorkflowService", { make }) {
 	static readonly layer = Layer.effect(this, this.make)
 }

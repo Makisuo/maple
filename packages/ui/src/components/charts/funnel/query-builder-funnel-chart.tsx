@@ -1,9 +1,8 @@
 import * as React from "react"
 
-import type { BaseChartProps } from "../_shared/chart-types"
+import type { QueryBuilderFunnelChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
-import { funnelSampleData } from "../_shared/sample-data"
 import { pickValueField, toBreakdownRows, type BreakdownRow } from "../_shared/breakdown-rows"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import { useContainerSize } from "../../../hooks/use-container-size"
@@ -51,11 +50,18 @@ const ROW_FULL_H = ROW_MIN_H + ROW_GAP
 const BAR_MIN_PCT = 0.04
 const MORE_ROW_H = 16
 
-export function QueryBuilderFunnelChart({ data, className, unit, funnel }: BaseChartProps) {
-	const source: ReadonlyArray<Record<string, unknown>> =
-		Array.isArray(data) && data.length > 0
-			? data
-			: (funnelSampleData as ReadonlyArray<Record<string, unknown>>)
+// No sample-data fallback: substituting fixtures for real rows made every
+// misconfigured or mis-fed chart draw a plausible-looking picture instead of an
+// empty one. Gallery thumbnails pass their sample rows in explicitly via `data`.
+const EMPTY_ROWS: ReadonlyArray<Record<string, unknown>> = []
+
+export function QueryBuilderFunnelChart({
+	data,
+	className,
+	unit,
+	showStepPercent,
+}: QueryBuilderFunnelChartProps) {
+	const source: ReadonlyArray<Record<string, unknown>> = Array.isArray(data) ? data : EMPTY_ROWS
 
 	const valueField = React.useMemo(() => pickValueField(source), [source])
 
@@ -96,8 +102,8 @@ export function QueryBuilderFunnelChart({ data, className, unit, funnel }: BaseC
 	// on screen, so a widget that explicitly asked for no percentages still got
 	// them. Unset keeps the long-standing default — share of the first stage,
 	// no step conversion — so persisted funnels render as before.
-	const showShareOfFirst = funnel?.showStepPercent !== false
-	const showStepPercent = funnel?.showStepPercent === true
+	const showShareOfFirst = showStepPercent !== false
+	const showStepConversion = showStepPercent === true
 
 	if (stages.length === 0) {
 		return (
@@ -147,7 +153,7 @@ export function QueryBuilderFunnelChart({ data, className, unit, funnel }: BaseC
 										<span>{fmtPct(stage.pctOfFirst)}</span>
 									</>
 								)}
-								{showStepPercent && stage.pctOfPrev != null && (
+								{showStepConversion && stage.pctOfPrev != null && (
 									<>
 										<span className="px-1 text-muted-foreground/50">↓</span>
 										<span>{fmtPct(stage.pctOfPrev)}</span>

@@ -31,19 +31,19 @@ const FACET_LABELS: Record<QueryFacet, string> = {
 	http_method: "HTTP method",
 	http_status_code: "HTTP status code",
 	log_severity: "Log severity",
-}
+} satisfies Record<QueryFacet, string>
 
 const TYPE_LABELS: Record<DashboardVariable["type"], string> = {
 	query: "Query",
 	custom: "Custom",
 	textbox: "Textbox",
-}
+} satisfies Record<DashboardVariable["type"], string>
 
 const TYPE_OPTIONS: Record<DashboardVariable["type"], string> = {
 	query: "Query (from telemetry)",
 	custom: "Custom (static list)",
 	textbox: "Textbox (free text)",
-}
+} satisfies Record<DashboardVariable["type"], string>
 
 function sourceSummary(variable: DashboardVariable): string {
 	if (variable.type === "custom") {

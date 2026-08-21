@@ -4,6 +4,7 @@ import {
 	MAX_REPLAY_CHUNKS_PER_REQUEST,
 	MAX_REPLAY_EVENTS_RESPONSE_BYTES,
 	MAX_REPLAY_MANIFEST_CHUNKS,
+	MAX_REPLAY_RANGE_PAYLOAD_BYTES,
 	LIST_LIMIT_DEFAULT,
 	MapleApiV2,
 	paginateOffsetQuery,
@@ -31,7 +32,7 @@ const decodeSessionId = Schema.decodeSync(SessionId)
 const decodeTraceId = Schema.decodeSync(TraceId)
 
 /**
- * Refuse a chunk range whose payload would blow the response budget, before a
+ * Refuse a chunk range whose payload would blow the request budget, before a
  * byte of it is fetched.
  *
  * Once payloads live in R2 the warehouse response is only an index — `Events` is
@@ -40,10 +41,15 @@ const decodeTraceId = Schema.decodeSync(TraceId)
  * uncompressed payload size and is right there in the index, so the range can be
  * rejected without touching the blob store at all. Cheaper and more honest than
  * discovering the problem mid-hydration.
+ *
+ * Measured against the payload budget the manifest advertises, so that this —
+ * a refusal the caller could have predicted from the manifest — is the only
+ * way a range is rejected. The encoded `responseLimits` ceiling above it stays
+ * a backstop for the pre-cutover inline rows, not the effective limit.
  */
 const assertRangeFitsBudget = (rows: ReadonlyArray<{ readonly byteSize: number }>) => {
 	const total = rows.reduce((sum, row) => sum + Number(row.byteSize), 0)
-	return total <= MAX_REPLAY_EVENTS_RESPONSE_BYTES
+	return total <= MAX_REPLAY_RANGE_PAYLOAD_BYTES
 		? Effect.void
 		: Effect.fail(V2SessionReplayRangeTooLarge.make(undefined, { param: "to_chunk_seq" }))
 }
@@ -107,39 +113,49 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 						const compiled = CH.compile(
 							CH.sessionReplaysListQuery({
 								...(payload.service_name !== undefined
-									? { serviceName: payload.service_name }
-									: {}),
-								...(payload.browser !== undefined ? { browser: payload.browser } : {}),
-								...(payload.country !== undefined ? { country: payload.country } : {}),
+									? {
+											serviceName: payload.service_name,
+										}
+									: undefined),
+								...(payload.browser !== undefined ? { browser: payload.browser } : undefined),
+								...(payload.country !== undefined ? { country: payload.country } : undefined),
 								...(payload.device_type !== undefined
 									? { deviceType: payload.device_type }
-									: {}),
-								...(payload.user_id !== undefined ? { userId: payload.user_id } : {}),
+									: undefined),
+								...(payload.user_id !== undefined ? { userId: payload.user_id } : undefined),
 								...(payload.user_search !== undefined
 									? { userSearch: payload.user_search }
-									: {}),
+									: undefined),
 								...(payload.group_name !== undefined
 									? { groupName: payload.group_name }
-									: {}),
+									: undefined),
 								...(payload.visitor_id !== undefined
 									? { visitorId: payload.visitor_id }
-									: {}),
+									: undefined),
 								...(payload.has_errors !== undefined
 									? { hasErrors: payload.has_errors }
-									: {}),
-								...(payload.search !== undefined ? { search: payload.search } : {}),
+									: undefined),
+								...(payload.search !== undefined ? { search: payload.search } : undefined),
 								...(payload.duration_min_ms !== undefined
-									? { durationMinMs: payload.duration_min_ms }
-									: {}),
+									? {
+											durationMinMs: payload.duration_min_ms,
+										}
+									: undefined),
 								...(payload.duration_max_ms !== undefined
-									? { durationMaxMs: payload.duration_max_ms }
-									: {}),
+									? {
+											durationMaxMs: payload.duration_max_ms,
+										}
+									: undefined),
 								...(payload.active_time_min_ms !== undefined
-									? { activeTimeMinMs: payload.active_time_min_ms }
-									: {}),
+									? {
+											activeTimeMinMs: payload.active_time_min_ms,
+										}
+									: undefined),
 								...(payload.active_time_max_ms !== undefined
-									? { activeTimeMaxMs: payload.active_time_max_ms }
-									: {}),
+									? {
+											activeTimeMaxMs: payload.active_time_max_ms,
+										}
+									: undefined),
 								limit,
 								offset,
 							}),
@@ -293,7 +309,7 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 						chunk_count: chunks.length,
 						total_byte_size: chunks.reduce((sum, chunk) => sum + chunk.byte_size, 0),
 						max_chunks_per_request: MAX_REPLAY_CHUNKS_PER_REQUEST,
-						max_bytes_per_request: MAX_REPLAY_EVENTS_RESPONSE_BYTES,
+						max_bytes_per_request: MAX_REPLAY_RANGE_PAYLOAD_BYTES,
 						truncated,
 					} satisfies V2SessionReplayManifest
 				}),

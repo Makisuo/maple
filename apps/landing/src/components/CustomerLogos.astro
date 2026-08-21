@@ -30,13 +30,13 @@ const { variant = "section" } = Astro.props;
 
 // Entry id (filename) → brand mark. Add a new customer by dropping a
 // src/content/logos/<id>.md file and registering its logo component here.
-const LOGOS: Record<string, typeof HazelLogo> = {
+const LOGOS: Record<string, typeof HazelLogo>  = {
 	hazel: HazelLogo,
 	sakura: SakuraLogo,
 	gymscore: GymscoreLogo,
 	superwall: SuperwallLogo,
 	hypen: HypenLogo,
-};
+} satisfies Record<string, typeof HazelLogo>;
 
 const entries = (await getCollection("logos"))
 	.filter((e) => LOGOS[e.id])

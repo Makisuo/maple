@@ -11,11 +11,9 @@ import {
 } from "@maple/domain/http"
 import { and, eq, inArray } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Redacted, Schema } from "effect"
-import {
-	buildAlertChatUrl,
-	dispatchDelivery as dispatchDeliveryImpl,
-	type DispatchContext,
-} from "./AlertDeliveryDispatch"
+import { buildAlertChatUrl } from "./AlertDeliveryDispatch"
+import { dispatchDelivery as dispatchDeliveryImpl } from "./delivery/dispatch"
+import type { DispatchContext } from "./delivery/context"
 import {
 	hydrateDestinationRow,
 	type DestinationSecretConfig,
@@ -70,7 +68,7 @@ export interface NotificationRequest {
 	readonly escalation?: Record<string, unknown>
 }
 
-export interface NotificationDispatcherShape {
+export interface NotificationDispatcherApi {
 	readonly dispatch: (
 		orgId: OrgId,
 		destinationIds: ReadonlyArray<AlertDestinationId>,
@@ -81,6 +79,18 @@ export interface NotificationDispatcherShape {
 		readonly destinations: ReadonlyArray<NotificationDestinationResult>
 	}>
 }
+
+/** Every failure this path can catch collapses to the same per-destination row. */
+const failedResult = (
+	row: AlertDestinationRow,
+	error: { readonly message: string },
+): Effect.Effect<NotificationDestinationResult> =>
+	Effect.succeed({
+		destinationId: row.id,
+		destinationName: row.name,
+		status: "failed",
+		error: error.message,
+	})
 
 export interface NotificationDestinationResult {
 	readonly destinationId: AlertDestinationId
@@ -95,7 +105,7 @@ export interface NotificationDestinationResult {
  * inference through the class's own base expression.
  */
 const make: Effect.Effect<
-	NotificationDispatcherShape,
+	NotificationDispatcherApi,
 	NotificationDispatchError,
 	Database | Env | EmailService | SlackBotTokenResolver
 > = Effect.gen(function* () {
@@ -173,7 +183,7 @@ const make: Effect.Effect<
 		})
 		const payloadJson = JSON.stringify({
 			eventType: request.escalation ? "escalation" : request.eventType,
-			...(request.escalation ? { escalation: request.escalation } : {}),
+			...(request.escalation ? { escalation: request.escalation } : undefined),
 			incidentId: request.incidentId,
 			incidentStatus: request.incidentStatus,
 			dedupeKey: request.dedupeKey,
@@ -207,12 +217,14 @@ const make: Effect.Effect<
 		).pipe(Effect.tapError(() => Effect.annotateCurrentSpan({ "maple.delivery.outcome": "failed" })))
 		yield* Effect.annotateCurrentSpan({
 			"maple.delivery.outcome": "delivered",
-			...(result.responseCode != null ? { "http.response.status_code": result.responseCode } : {}),
+			...(result.responseCode != null
+				? { "http.response.status_code": result.responseCode }
+				: undefined),
 		})
 		return result
 	})
 
-	const dispatch: NotificationDispatcherShape["dispatch"] = Effect.fn("NotificationDispatcher.dispatch")(
+	const dispatch: NotificationDispatcherApi["dispatch"] = Effect.fn("NotificationDispatcher.dispatch")(
 		function* (
 			orgId: OrgId,
 			destinationIds: ReadonlyArray<AlertDestinationId>,
@@ -285,19 +297,16 @@ const make: Effect.Effect<
 						),
 						Effect.catchTags({
 							"@maple/api/services/NotificationDispatchError": (error) =>
-								Effect.succeed<NotificationDestinationResult>({
-									destinationId: row.id,
-									destinationName: row.name,
-									status: "failed",
-									error: error.message,
-								}),
-							"@maple/http/errors/AlertDeliveryError": (error) =>
-								Effect.succeed<NotificationDestinationResult>({
-									destinationId: row.id,
-									destinationName: row.name,
-									status: "failed",
-									error: error.message,
-								}),
+								failedResult(row, error),
+							// Every delivery failure class reports the same way here. The
+							// distinction between them exists to drive the delivery
+							// queue's retry decision, which this path does not run.
+							"@maple/http/errors/AlertDeliveryError": (error) => failedResult(row, error),
+							"@maple/http/errors/AlertDeliveryAuthError": (error) => failedResult(row, error),
+							"@maple/http/errors/AlertDeliveryTargetMissingError": (error) =>
+								failedResult(row, error),
+							"@maple/http/errors/AlertDeliveryRejectedError": (error) =>
+								failedResult(row, error),
 						}),
 					)
 				},
@@ -317,7 +326,7 @@ const make: Effect.Effect<
 
 export class NotificationDispatcher extends Context.Service<
 	NotificationDispatcher,
-	NotificationDispatcherShape
+	NotificationDispatcherApi
 >()("@maple/api/services/NotificationDispatcher", { make }) {
 	// The resolver is self-provided (it needs only Database + Env, which every
 	// caller already supplies) so wiring stays unchanged in app.ts and the

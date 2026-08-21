@@ -6,7 +6,7 @@ export const SEVERITY_COLORS: Record<string, string> = {
 	WARNING: "var(--color-severity-warn)",
 	ERROR: "var(--color-severity-error)",
 	FATAL: "var(--color-severity-fatal)",
-}
+} satisfies Record<string, string>
 
 export const SEVERITY_ORDER = ["FATAL", "ERROR", "WARN", "WARNING", "INFO", "DEBUG", "TRACE"]
 

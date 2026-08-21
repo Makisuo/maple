@@ -10,14 +10,17 @@
 // API surface matches upstream so `yield* KVNamespace.bind(MY_KV)` is a
 // source-compatible call.
 import type * as runtime from "@cloudflare/workers-types"
-import * as Data from "effect/Data"
+import * as Schema from "effect/Schema"
 import * as Effect from "effect/Effect"
 import { WorkerEnvironment } from "./worker-environment.ts"
 
-export class KVNamespaceError extends Data.TaggedError("@maple/effect-cloudflare/KVNamespaceError")<{
-	message: string
-	cause: unknown
-}> {}
+export class KVNamespaceError extends Schema.TaggedError<KVNamespaceError>()(
+	"@maple/effect-cloudflare/KVNamespaceError",
+	{
+		message: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {}
 
 /**
  * A reference to a KV namespace binding declared in wrangler.jsonc.
@@ -83,6 +86,7 @@ const makeClient = (token: KVNamespaceToken): KVNamespaceClient => {
 	): Effect.Effect<T, KVNamespaceError, WorkerEnvironment> =>
 		raw.pipe(Effect.flatMap((r) => tryPromise(() => fn(r))))
 
+	// SAFETY: every KVNamespaceClient operation is implemented above by delegating to the bound runtime namespace.
 	return {
 		raw,
 		get: (...args: Parameters<runtime.KVNamespace["get"]>) => use((r) => (r.get as any)(...args)),

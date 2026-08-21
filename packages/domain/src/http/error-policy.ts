@@ -17,6 +17,7 @@ export type HttpErrorRecovery = Schema.Schema.Type<typeof HttpErrorRecovery>
 export const PublicHttpErrorType = Schema.Literals([
 	"invalid_request_error",
 	"authentication_error",
+	"payment_error",
 	"permission_error",
 	"not_found_error",
 	"conflict_error",
@@ -26,22 +27,40 @@ export const PublicHttpErrorType = Schema.Literals([
 export type PublicHttpErrorType = Schema.Schema.Type<typeof PublicHttpErrorType>
 
 export type HttpErrorRetry = "never" | "backoff" | "after"
-export type PublicHttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503 | 504
+export type PublicHttpErrorStatus =
+	| 400
+	| 401
+	| 402
+	| 403
+	| 404
+	| 409
+	| 413
+	| 422
+	| 429
+	| 500
+	| 502
+	| 503
+	| 504
 export type PublicHttpErrorTag = `@maple/http/${string}`
 
-export type PublicHttpErrorTypeForStatus<Status extends PublicHttpErrorStatus> = Status extends 400 | 413
+export type PublicHttpErrorTypeForStatus<Status extends PublicHttpErrorStatus> = Status extends
+	| 400
+	| 413
+	| 422
 	? "invalid_request_error"
 	: Status extends 401
 		? "authentication_error"
-		: Status extends 403
-			? "permission_error"
-			: Status extends 404
-				? "not_found_error"
-				: Status extends 409
-					? "conflict_error"
-					: Status extends 429
-						? "rate_limit_error"
-						: "api_error"
+		: Status extends 402
+			? "payment_error"
+			: Status extends 403
+				? "permission_error"
+				: Status extends 404
+					? "not_found_error"
+					: Status extends 409
+						? "conflict_error"
+						: Status extends 429
+							? "rate_limit_error"
+							: "api_error"
 
 /** The public representation every self-describing HTTP error exposes itself. */
 export interface PublicHttpErrorBody<Tag extends string, Status extends PublicHttpErrorStatus> {
@@ -245,6 +264,7 @@ export const HttpTaggedError =
 			fields,
 			{ httpApiStatus: policy.status },
 		)
+		// SAFETY: the generated TaggedError class is extended only to add the self-describing HTTP error view.
 		const SelfDescribingErrorClass = class extends (ErrorClass as unknown as new (
 			...args: Array<unknown>
 		) => SelfDescribingHttpError) {
@@ -303,6 +323,8 @@ export const publicHttpErrorTypeForStatus = <const Status extends PublicHttpErro
 			return "invalid_request_error" as PublicHttpErrorTypeForStatus<Status>
 		case 401:
 			return "authentication_error" as PublicHttpErrorTypeForStatus<Status>
+		case 402:
+			return "payment_error" as PublicHttpErrorTypeForStatus<Status>
 		case 403:
 			return "permission_error" as PublicHttpErrorTypeForStatus<Status>
 		case 404:
@@ -338,8 +360,8 @@ export const publicHttpErrorBody = <Error extends SelfDescribingHttpError>(
 		message: policy.exposure === "public_message" ? error.message : resolve(policy.message, error),
 		retryable: policy.retry !== "never",
 		recovery: policy.recovery,
-		...(retryAfterSeconds === undefined ? {} : { retry_after_seconds: retryAfterSeconds }),
-		...(retryAt === undefined ? {} : { retry_at: retryAt }),
-		...(param === undefined ? {} : { param }),
+		...(!(retryAfterSeconds === undefined) ? { retry_after_seconds: retryAfterSeconds } : undefined),
+		...(!(retryAt === undefined) ? { retry_at: retryAt } : undefined),
+		...(!(param === undefined) ? { param } : undefined),
 	}
 }

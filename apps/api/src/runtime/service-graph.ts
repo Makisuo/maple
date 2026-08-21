@@ -21,6 +21,8 @@ import { OAuthStateRepository } from "@/services/auth/OAuthStateRepository"
 import { DailySpendService } from "@/services/billing/DailySpendService"
 import { AutumnClient } from "@/services/billing/autumn-http"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
+import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
 import { DigestService } from "@/services/digest/DigestService"
 import { AiTriageService } from "@/services/errors/AiTriageService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
@@ -55,6 +57,8 @@ import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettin
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { OrgMembersService } from "@/services/org/OrgMembersService"
 import { OrganizationService } from "@/services/org/OrganizationService"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -80,12 +84,15 @@ const CoreServicesLive = Layer.mergeAll(
 	McpOAuthService.layer,
 	CloudflareOAuthService.layer,
 	DashboardPersistenceService.layer,
+	SharedDashboardService.layer,
 	HazelOAuthService.layer,
 	OnboardingService.layer,
 	OrgIngestKeysService.layer,
 	OrgClickHouseSettingsService.layer.pipe(Layer.provide(EdgeCacheServiceLive)),
 	TinybirdOrgTokenService.layer,
 	OrganizationService.layer,
+	MobileDevicesService.layer,
+	LiveActivitiesService.layer,
 	PlanetScaleOAuthLive,
 	PlanetScaleDiscoveryLive,
 	PlanetScaleWebhookQueue.layer,
@@ -115,6 +122,13 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 	Layer.provideMerge(WarehouseQueryServiceLive),
 	Layer.provideMerge(EdgeCacheServiceLive),
 	Layer.provideMerge(BucketCacheServiceLive),
+)
+
+// Server-side widget data for shared dashboards. Needs both the query engine
+// (query sets, caching) and the warehouse (raw SQL), so it composes after them
+// rather than sitting in CoreServicesLive.
+const DashboardWidgetDataServiceLive = DashboardWidgetDataService.layer.pipe(
+	Layer.provideMerge(QueryEngineServiceLive),
 )
 
 const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
@@ -247,6 +261,7 @@ const MainServicesLive = Layer.mergeAll(
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,
+	DashboardWidgetDataServiceLive,
 	AlertDestinationsServiceLive,
 	AlertReadModelsServiceLive,
 	AlertRulesServiceLive,

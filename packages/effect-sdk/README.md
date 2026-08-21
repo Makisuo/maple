@@ -10,7 +10,11 @@ npm install @maple-dev/effect-sdk effect
 
 ## Server
 
-Auto-detects commit SHA and deployment environment from common platform env vars (Railway, Vercel, Cloudflare Pages, Render). Returns a no-op layer when no endpoint is configured, making it safe for local development.
+Auto-detects commit SHA and deployment environment from common platform env vars (Railway, Vercel, Cloudflare Pages, Render).
+
+`Maple.layer` always exports. The endpoint defaults to the public Maple ingest (`https://ingest.maple.dev`), so supplying an ingest key is usually all you need. A missing key does **not** switch export off — that keeps keyless setups working against a local `maple start` sink or your own OTLP collector. Keyless against the public ingest is the one combination that can't work (it 401s), and it logs a one-shot warning.
+
+> `MapleFlush.make` and the Cloudflare `make()` behave differently: they **do** no-op when no ingest key resolves. Reach for those if you want telemetry to disable itself automatically.
 
 ```typescript
 import { Maple } from "@maple-dev/effect-sdk/server"
@@ -25,15 +29,19 @@ Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 
 ### Environment Variables
 
-| Variable            | Description                     |
-| ------------------- | ------------------------------- |
-| `MAPLE_ENDPOINT`    | Maple ingest endpoint URL       |
-| `MAPLE_INGEST_KEY`  | Maple ingest key                |
-| `MAPLE_ENVIRONMENT` | Deployment environment override |
+| Variable                      | Description                                                      |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `MAPLE_INGEST_KEY`            | Maple ingest key. Required by the public ingest                  |
+| `MAPLE_ENDPOINT`              | Ingest endpoint URL. Defaults to `https://ingest.maple.dev`      |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint fallback, honored when `MAPLE_ENDPOINT` is unset        |
+| `MAPLE_ENVIRONMENT`           | Deployment environment override                                  |
+| `MAPLE_REPOSITORY_URL`        | Repository URL, emitted as `vcs.repository.url.full`             |
+| `OTEL_SERVICE_NAME`           | Service name fallback when `serviceName` is omitted              |
+| `OTEL_RESOURCE_ATTRIBUTES`    | Extra resource attributes, `key=value` pairs (later writers win) |
 
 Commit SHA is auto-detected from `COMMIT_SHA`, `RAILWAY_GIT_COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, or `RENDER_GIT_COMMIT`.
 
-Environment is auto-detected from `MAPLE_ENVIRONMENT`, `RAILWAY_ENVIRONMENT`, `VERCEL_ENV`, or `NODE_ENV`.
+Environment is auto-detected from `MAPLE_ENVIRONMENT`, then `RAILWAY_ENVIRONMENT_NAME`, then `DEPLOYMENT_ENV`, falling back to `"development"`. On platforms outside that list (including Vercel), set `MAPLE_ENVIRONMENT` explicitly — `VERCEL_ENV` and `NODE_ENV` are not read.
 
 ## Cloudflare Workers
 
@@ -71,7 +79,7 @@ When `MAPLE_INGEST_KEY` is unset, the SDK runs in no-op mode: buffers are draine
 
 | Option                        | Description                                                                                                 |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `anticipatedErrorIdentifiers` | Stable `_tag` / `Error.name` identifiers for expected 4xx failures; exported as `Ok` without an exception   |
+| `anticipatedErrorIdentifiers` | Stable `_tag` / `Error.name` identifiers for expected 4xx failures; exported as `Ok` without an exception. A failure wrapped in an `{ error: … }` envelope is matched on the body's `_tag`, so an error decoded from an HTTP response classifies the same as the class that raised it |
 | `dropSpanNames`               | Span names whose prefix matches an entry are dropped before OTLP export (e.g. `"McpServer/Notifications."`) |
 | `excludeLogSpans`             | Skip Effect log spans in OTLP log attributes. Default `false`                                               |
 | `tracesPath`                  | OTLP traces path appended to `endpoint`. Default `/v1/traces`                                               |
@@ -98,6 +106,35 @@ const program = Effect.log("Hello!").pipe(Effect.withSpan("hello"))
 Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 ```
 
+### Uncaught errors (built in)
+
+`MapleFlush.make` from `/client` registers `error` and `unhandledrejection`
+handlers, so a throw that never went through an Effect span still reaches error
+tracking. Each one becomes a span with status `Error` and an `exception` event —
+the same shape a failed Effect span produces, so browser crashes group beside
+server-side errors rather than in a silo.
+
+Turn it off with `captureGlobalErrors: false` when another tracker already owns
+the page's global handlers.
+
+An error your app _catches_ never reaches those handlers — catching it is what
+stops it. Report those explicitly; a React error boundary is the usual caller,
+and without this a boundary-caught crash is invisible in production:
+
+```typescript
+const telemetry = MapleFlush.make({ serviceName: "my-frontend", ... })
+
+class ErrorBoundary extends Component<Props, State> {
+	componentDidCatch(error: unknown, info: ErrorInfo) {
+		telemetry.captureException(error, {
+			name: "browser.react_error_boundary",
+			attributes: { "maple.react.component_stack": info.componentStack ?? "" },
+		})
+	}
+	// …
+}
+```
+
 ### Session replay & sessions (built in)
 
 The browser presets (`Maple.layer` and `MapleFlush.make`) record **rrweb session replays by default** — no separate browser SDK needed. Every span carries a `session.id`, the session appears in Maple's Sessions UI with its linked traces, and the recording is playable next to them.
@@ -116,6 +153,7 @@ const TracerLive = Maple.layer({
 ```
 
 - **Bundle size:** the replay engine (rrweb included) loads through a dynamic import, so it lands in a code-split chunk (~360 kB) fetched only when replay is enabled _and_ the session is sampled. The base client bundle stays ~13 kB.
+- **Vendored dependency:** rrweb (MIT) is bundled into that chunk rather than declared in `dependencies`, so it will not appear in your lockfile or in `npm ls` output. Note it directly if your license or supply-chain audit enumerates transitive packages.
 - **Opt out** with `replay: { enabled: false }`. Unsampled or disabled sessions still appear in the Sessions UI (metadata rows + linked traces, no recording); turn that off too with `emitSessionMeta: false`.
 - **Tab lifecycle:** recording suspends on `visibilitychange → hidden` (flushing the tail with `keepalive`) and resumes when the tab becomes visible again, rotating to a fresh session after 30 minutes of inactivity.
 - **Identify users** at any point — the id is attached to the session's next-posted metadata row _and_ stamped as `user.id` on every span the client tracer creates from then on (traces become user-attributable, not just session-grouped). Spans created before you call it stay anonymous. Pass `null` or `undefined` after sign-out to make future telemetry anonymous again.
@@ -224,19 +262,31 @@ By default the client preset flushes on `pagehide` and `visibilitychange→hidde
 
 Both server and client layers accept these options:
 
-| Option                  | Required                                | Description                        |
-| ----------------------- | --------------------------------------- | ---------------------------------- |
-| `serviceName`           | Yes                                     | Service name reported in telemetry |
-| `endpoint`              | Server: env or config, Client: required | Maple ingest endpoint URL          |
-| `ingestKey`             | No                                      | Maple ingest key                   |
-| `serviceVersion`        | No                                      | Override auto-detected commit SHA  |
-| `environment`           | No                                      | Override auto-detected environment |
-| `attributes`            | No                                      | Additional resource attributes     |
-| `maxBatchSize`          | No                                      | Max batch size for export          |
-| `tracerExportInterval`  | No                                      | Trace export interval              |
-| `loggerExportInterval`  | No                                      | Log export interval                |
-| `metricsExportInterval` | No                                      | Metrics export interval            |
-| `shutdownTimeout`       | No                                      | Graceful shutdown timeout          |
+| Option                  | Required                             | Description                                           |
+| ----------------------- | ------------------------------------ | ----------------------------------------------------- |
+| `serviceName`           | Yes                                  | Service name reported in telemetry                    |
+| `endpoint`              | No (server: defaults) / Yes (client) | Maple ingest endpoint URL                             |
+| `ingestKey`             | Required by the public ingest        | Maple ingest key. Flushable presets no-op without one |
+| `serviceVersion`        | No                                   | Override auto-detected commit SHA                     |
+| `serviceNamespace`      | No                                   | Logical group, emitted as `service.namespace`         |
+| `repositoryUrl`         | No (server / Cloudflare only)        | Repository URL, emitted as `vcs.repository.url.full`  |
+| `environment`           | No                                   | Override auto-detected environment                    |
+| `attributes`            | No                                   | Additional resource attributes (highest precedence)   |
+| `maxBatchSize`          | No                                   | Max batch size for export                             |
+| `tracerExportInterval`  | No                                   | Trace export interval                                 |
+| `loggerExportInterval`  | No                                   | Log export interval                                   |
+| `metricsExportInterval` | No                                   | Metrics export interval                               |
+| `shutdownTimeout`       | No                                   | Graceful shutdown timeout                             |
+
+The flushable presets (`MapleFlush.make`, and the Cloudflare `make`) replace the
+four interval options with `autoFlushInterval`, and add `excludeLogSpans`,
+`dropSpanNames`, `anticipatedErrorIdentifiers`, `tracesPath`, `logsPath`, and
+`metricsPath`.
+
+> **`anticipatedErrorIdentifiers` is flushable/Cloudflare-only.** `Maple.layer`
+> builds on Effect's stock `Otlp.layerJson`, which has no hook for it — so with
+> the plain server layer, expected 4xx failures still export as `Error` spans.
+> Use `MapleFlush.make` if you need that suppression.
 
 Client-only options:
 

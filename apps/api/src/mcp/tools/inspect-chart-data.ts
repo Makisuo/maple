@@ -184,11 +184,11 @@ const inspectChartDataDescription =
 	"Inspect the actual data a dashboard chart will render. " +
 	"The mutation tools (`create_dashboard`, `add_dashboard_widget`, `update_dashboard_widget`) now run this validation automatically. " +
 	"Use this tool to re-verify a widget after fixing it, or to inspect any existing widget on demand. " +
-	"Returns row counts, series statistics, sample data points, and sanity flags (EMPTY, ALL_ZEROS, FLAT_LINE, UNIT_MISMATCH, NEGATIVE_VALUES, UNREALISTIC_MAGNITUDE, SINGLE_SERIES_DOMINATES, CARDINALITY_EXPLOSION, SUSPICIOUS_GAP, BROKEN_BREAKDOWN, SINGLE_POINT, ALL_NULLS, BUILDER_WARNINGS). " +
+	"Returns row counts, series statistics, sample data points, and sanity flags (EMPTY, ALL_ZEROS, FLAT_LINE, UNIT_MISMATCH, PERCENT_SCALE_MISMATCH, NEGATIVE_VALUES, UNREALISTIC_MAGNITUDE, SINGLE_SERIES_DOMINATES, CARDINALITY_EXPLOSION, SUSPICIOUS_GAP, BROKEN_BREAKDOWN, SINGLE_POINT, ALL_NULLS, BUILDER_WARNINGS). " +
 	"The verdict is one of `looks_healthy`, `suspicious`, or `broken`. **If the verdict is not `looks_healthy`, fix the widget via update_dashboard_widget and re-inspect.** " +
-	"Supports custom_query_builder_timeseries, custom_query_builder_breakdown, and raw_sql_chart widgets (raw SQL is executed and its rows returned). " +
+	"Supports widgets backed by a `query` data source (timeseries and breakdown result shapes) and by `raw_sql` (which is executed and its rows returned). " +
 	"Limitations: formula expressions in `formulas[]` are NOT evaluated server-side — only the base queries are inspected; " +
-	"checks only the requested window without the dashboard UI's auto-fallback. For other predefined-endpoint widgets (service_overview, errors_summary, etc.), this tool returns guidance to use `query_data` directly with the widget's params."
+	"checks only the requested window without the dashboard UI's auto-fallback. For widgets backed by a curated `route` data source (service_overview, errors_summary, etc.), this tool returns guidance to use `query_data` directly with the widget's params."
 
 export function registerInspectChartDataTool(server: McpToolRegistrar) {
 	server.tool(

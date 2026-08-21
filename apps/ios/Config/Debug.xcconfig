@@ -1,0 +1,9 @@
+#include "Base.xcconfig"
+// Optional: a developer's real keys. The `?` keeps a fresh checkout building.
+#include? "Secrets.xcconfig"
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DEBUG
+
+// Tags every span and session from a developer build, so local noise is one
+// filter away from the production data rather than mixed into it.
+MAPLE_ENVIRONMENT = development

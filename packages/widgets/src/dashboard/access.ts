@@ -1,5 +1,5 @@
-import type { QuerySet, QueryResultShape } from "@maple/query-model"
-import { QUERY_ENDPOINT_SHAPES, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
+import type { QuerySet, QueryResultContract } from "@maple/query-model"
+import { QUERY_ENDPOINT_RESULT_KINDS, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
 import type { WidgetDataSourceTransformV2 } from "./shared/transform"
 
 /**
@@ -21,11 +21,13 @@ import type { WidgetDataSourceTransformV2 } from "./shared/transform"
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
+const isString = (value: unknown): value is string => typeof value === "string"
+
 // The endpoint tables moved to `legacy-endpoints.ts` — they are wire
 // vocabularies rather than schema, and they outlive this file, which is deleted
 // once v3 is the only stored shape. Re-exported here so the ~30 consumers that
 // import them from `access.ts` today keep working until then.
-export { QUERY_SHAPE_ENDPOINTS, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
+export { QUERY_RESULT_ENDPOINTS, RAW_SQL_ENDPOINT } from "./legacy-endpoints"
 
 /**
  * The endpoint name, for consumers that still dispatch on it.
@@ -79,7 +81,7 @@ export const isQueryDataSource = (dataSource: unknown): boolean => dataSourceQue
  * is actually stored, not on what would survive a decode.
  */
 export interface WidgetQuerySet extends QuerySet {
-	readonly resultShape: QueryResultShape
+	readonly resultShape: QueryResultContract
 	/** Request shaping — see `QueryDataSourceInput` in `construct.ts`. */
 	readonly defaultLimit?: number
 	readonly limit?: number
@@ -90,25 +92,26 @@ export const dataSourceQuerySet = (dataSource: unknown): WidgetQuerySet | null =
 	if (!isRecord(dataSource)) return null
 
 	const source = (() => {
-		if (typeof dataSource.kind === "string") {
+		if (isString(dataSource.kind)) {
 			if (dataSource.kind !== "query") return null
-			const shape = dataSource.resultShape
+			const resultKind = dataSource.resultShape
 			return {
-				resultShape: typeof shape === "string" ? (shape as QueryResultShape) : "timeseries",
+				resultShape:
+					typeof resultKind === "string" ? (resultKind as QueryResultContract) : "timeseries",
 				fields: dataSource,
 			}
 		}
 		const endpoint = dataSource.endpoint
 		if (typeof endpoint !== "string") return null
-		const resultShape = QUERY_ENDPOINT_SHAPES[endpoint]
-		if (resultShape === undefined) return null
-		return { resultShape, fields: isRecord(dataSource.params) ? dataSource.params : {} }
+		const resultKind = QUERY_ENDPOINT_RESULT_KINDS[endpoint]
+		if (resultKind === undefined) return null
+		return { resultShape: resultKind, fields: isRecord(dataSource.params) ? dataSource.params : {} }
 	})()
 	if (source === null) return null
 
-	const { resultShape, fields } = source
+	const { resultShape: resultKind, fields } = source
 	return {
-		resultShape,
+		resultShape: resultKind,
 		queries: Array.isArray(fields.queries) ? (fields.queries as QuerySet["queries"]) : [],
 		formulas: Array.isArray(fields.formulas) ? (fields.formulas as QuerySet["formulas"]) : undefined,
 		comparison: isRecord(fields.comparison) ? (fields.comparison as QuerySet["comparison"]) : undefined,
@@ -129,7 +132,7 @@ export const dataSourceRawSql = (dataSource: unknown): RawSqlDataSource | null =
 	if (!isRecord(dataSource)) return null
 
 	const source = (() => {
-		if (typeof dataSource.kind === "string") {
+		if (isString(dataSource.kind)) {
 			return dataSource.kind === "raw_sql" ? dataSource : null
 		}
 		if (dataSource.endpoint !== RAW_SQL_ENDPOINT) return null

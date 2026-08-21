@@ -90,7 +90,7 @@ export function auditAttributeKeyInventoryQuery(opts: { limit?: number } = {}) {
 
 // A3 — per-service span shape
 
-export interface AuditSpanShapeRow {
+export interface AuditSpanProfileRow {
 	readonly serviceName: string
 	readonly weightedSpanCount: number
 	readonly weightedErrorCount: number
@@ -104,7 +104,7 @@ export interface AuditSpanShapeRow {
 	readonly badSpanKinds: ReadonlyArray<string>
 }
 
-export const auditSpanShapeRowSchema = Schema.Struct({
+export const auditSpanProfileRowSchema = Schema.Struct({
 	serviceName: Schema.String,
 	weightedSpanCount: CHNumber,
 	weightedErrorCount: CHNumber,
@@ -125,7 +125,7 @@ export const auditSpanShapeRowSchema = Schema.Struct({
  * Run this under the `list` profile, not `discovery`: an org whose span names carry IDs (exactly what
  * the span-name cardinality check detects) inflates this MV enough to exceed a 5s budget.
  */
-export function auditSpanShapeByServiceQuery(opts: { limit?: number } = {}) {
+export function auditSpanProfileByServiceQuery(opts: { limit?: number } = {}) {
 	return from(TracesAggregatesHourly)
 		.select(($) => ({
 			serviceName: $.ServiceName,

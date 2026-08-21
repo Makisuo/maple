@@ -899,20 +899,20 @@ describe("Unitflow", () => {
 		const combinedStore = Store.combine([store], (count) => count * 2)
 		const storeSink: Store.Sink<number> = store
 
-		const valid: Model.Shape = {
+		const valid: Model.Definition = {
 			inputs: { event, store },
 			outputs: { store, combinedStore },
 			ui: { store, event, combinedStore },
 		}
 
 		// @ts-expect-error inputs accept only sink-capable ports — a combined store is read-only
-		const sourceAsInput: Model.Shape = { inputs: { combinedStore }, outputs: {}, ui: {} }
+		const sourceAsInput: Model.Definition = { inputs: { combinedStore }, outputs: {}, ui: {} }
 		// @ts-expect-error outputs accept only source-capable ports — a bare sink cannot be read
-		const sinkAsOutput: Model.Shape = { inputs: {}, outputs: { storeSink }, ui: {} }
+		const sinkAsOutput: Model.Definition = { inputs: {}, outputs: { storeSink }, ui: {} }
 		// @ts-expect-error ui accepts only source-capable ports or nested units
-		const sinkAsUi: Model.Shape = { inputs: {}, outputs: {}, ui: { storeSink } }
+		const sinkAsUi: Model.Definition = { inputs: {}, outputs: {}, ui: { storeSink } }
 		// @ts-expect-error plain data is not a port
-		const dataAsOutput: Model.Shape = { inputs: {}, outputs: { count: 1 }, ui: {} }
+		const dataAsOutput: Model.Definition = { inputs: {}, outputs: { count: 1 }, ui: {} }
 
 		assert.isDefined(valid)
 		assert.isDefined(sourceAsInput)

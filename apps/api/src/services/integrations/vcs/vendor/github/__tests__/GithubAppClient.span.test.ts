@@ -2,8 +2,9 @@ import { assert, describe, it } from "@effect/vitest"
 import { generateKeyPairSync } from "node:crypto"
 import { ConfigProvider, Effect, Layer, Tracer } from "effect"
 import { Env } from "@/platform/Env"
+import { makeRecordingTracer, spansNamed } from "@/testing/recording-tracer"
 import { GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
-import { GithubHttp, type GithubHttpShape } from "@/services/integrations/vcs/vendor/github/GithubHttp"
+import { GithubHttp, type GithubHttpApi } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 
 // The GitHub REST call must be a Client-kind span carrying `peer.service` —
 // that pair is what draws the GitHub node and its edge on the service map. An
@@ -35,27 +36,13 @@ const env = Env.layer.pipe(
 	),
 )
 
-/** Records every span so the request span's kind and attributes are assertable. */
-const makeRecordingTracer = () => {
-	const spans: Array<Tracer.NativeSpan> = []
-	const tracer = Tracer.make({
-		span(options) {
-			const span = new Tracer.NativeSpan(options)
-			spans.push(span)
-			return span
-		},
-	})
-	return { spans, tracer }
-}
-
-const requestSpans = (spans: ReadonlyArray<Tracer.NativeSpan>) =>
-	spans.filter((span) => span.name === "GithubAppClient.request")
+const requestSpans = (spans: ReadonlyArray<Tracer.NativeSpan>) => spansNamed(spans, "GithubAppClient.request")
 
 const jsonResponse = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
 const stubHttp = (respond: () => Response) =>
-	Layer.succeed(GithubHttp, { fetch: async () => respond() } satisfies GithubHttpShape)
+	Layer.succeed(GithubHttp, { fetch: async () => respond() } satisfies GithubHttpApi)
 
 describe("GithubAppClient request span", () => {
 	it.effect("emits a Client-kind span with peer.service and HTTP attributes", () => {

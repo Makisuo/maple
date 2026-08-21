@@ -20,6 +20,7 @@
  */
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
+import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "@/mcp/expected-failures"
 import {
 	decodeChatTurnTenant,
 	type ChatMessage,
@@ -30,12 +31,13 @@ import { LLM, Message, type Model } from "@maple/llm"
 import { Cause, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { summarizeCause } from "@/platform/describe-cause"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
-	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS, ...MCP_ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 export interface RunChatSessionTurnInput {
@@ -61,7 +63,7 @@ const toTenantContext = (encoded: ChatTurnTenantEncoded): TenantContext => {
 		userId: tenant.userId,
 		roles: [...tenant.roles],
 		authMode: tenant.authMode,
-		...(tenant.actorId === undefined ? {} : { actorId: tenant.actorId }),
+		...(!(tenant.actorId === undefined) ? { actorId: tenant.actorId } : undefined),
 	}
 }
 
@@ -189,7 +191,7 @@ const compactIfNeeded = (
 								Effect.annotateLogs({
 									sessionId: input.sessionId,
 									messageId: input.messageId,
-									cause: Cause.pretty(cause),
+									cause: summarizeCause(cause),
 								}),
 							),
 						),
@@ -216,7 +218,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		{ layerPg },
 		{ layerLlm, resolveTriageModel },
 		loop,
-		{ buildSubmitDiagnosisTool },
+		{ buildDiagnosisCompletion },
 		{ McpToolExecutor },
 	] = await Promise.all([
 		import("../runtime/mcp-service-graph"),
@@ -244,14 +246,18 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	const annotateTurn = () =>
 		Effect.annotateCurrentSpan({
 			"maple.chat.outcome": observability.outcome ?? "unknown",
-			...(observability.finishReason === undefined
-				? {}
-				: { "maple.chat.finish_reason": observability.finishReason }),
+			...(!(observability.finishReason === undefined)
+				? {
+						"maple.chat.finish_reason": observability.finishReason,
+					}
+				: undefined),
 			"maple.chat.empty_output": observability.emptyOutput,
 			"maple.chat.recovery_count": observability.recoveryCount,
-			...(observability.failureReason === undefined
-				? {}
-				: { "maple.chat.failure_reason": observability.failureReason }),
+			...(!(observability.failureReason === undefined)
+				? {
+						"maple.chat.failure_reason": observability.failureReason,
+					}
+				: undefined),
 		})
 
 	const program = Effect.gen(function* () {
@@ -266,7 +272,10 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
 		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
 		const usage = loop.makeTurnUsage()
-		const extraTools = buildSubmitDiagnosisTool(
+		// One value: the tool *and* whether this turn's answer is a call to it. Passing the tool alone
+		// is what left an autonomous investigation with no way to file its report once it ran out of
+		// steps — see `buildDiagnosisCompletion`.
+		const completion = buildDiagnosisCompletion(
 			input.sessionId,
 			tenant,
 			investigations.submitDiagnosis,
@@ -282,7 +291,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 				model,
 				messages: toLlmMessages(history, input.session.compaction()),
 				messageId: input.messageId,
-				extraTools,
+				...(completion === undefined ? undefined : { completion }),
 				usage,
 				observability,
 				// An abort clears the claim; the turn notices here and stops at the next event
@@ -324,7 +333,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 						Effect.annotateLogs({
 							sessionId: input.sessionId,
 							messageId: input.messageId,
-							cause: Cause.pretty(cause),
+							cause: summarizeCause(cause),
 						}),
 					),
 				),

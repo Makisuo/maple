@@ -201,7 +201,7 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 								errorCount: Number(s.errorCount),
 								traceCount: Number(s.traceCount),
 								urlInitial: truncate(s.urlInitial, 256),
-								...(hasEventFilter ? { matchCount: Number(s.matchCount ?? 0) } : {}),
+								...(hasEventFilter ? { matchCount: Number(s.matchCount ?? 0) } : undefined),
 							})),
 						),
 					},

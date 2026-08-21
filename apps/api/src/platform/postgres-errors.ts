@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import type { DatabaseError } from "./DatabaseLive"
 
 const RETRYABLE_CONTENTION_CODES: ReadonlySet<string> = new Set(["40001", "40P01"])

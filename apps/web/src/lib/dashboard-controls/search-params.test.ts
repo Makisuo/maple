@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import { pickDashboardControlParams } from "./search-params"
+import { pickDashboardControlParams, resolveRefreshIntervalSeconds } from "./search-params"
 
 describe("pickDashboardControlParams", () => {
 	it("retains every `var-*` selection", () => {
-		expect(
-			pickDashboardControlParams({ "var-service": "api", "var-env": "prod" }),
-		).toEqual({ "var-service": "api", "var-env": "prod" })
+		expect(pickDashboardControlParams({ "var-service": "api", "var-env": "prod" })).toEqual({
+			"var-service": "api",
+			"var-env": "prod",
+		})
 	})
 
 	it("retains every view param", () => {
@@ -18,6 +19,12 @@ describe("pickDashboardControlParams", () => {
 			widget: "w1",
 		}
 		expect(pickDashboardControlParams(search)).toEqual(search)
+	})
+
+	// The one numeric control param, so the string-only rule above would drop it.
+	it("retains a numeric `refresh`", () => {
+		expect(pickDashboardControlParams({ refresh: 30 })).toEqual({ refresh: 30 })
+		expect(pickDashboardControlParams({ refresh: 0 })).toEqual({ refresh: 0 })
 	})
 
 	// `mode` is set explicitly by whichever caller wants edit mode. Folding it in
@@ -56,5 +63,43 @@ describe("pickDashboardControlParams", () => {
 		const search = { "var-service": "api" }
 		const picked = pickDashboardControlParams(search)
 		expect(picked).not.toBe(search)
+	})
+})
+
+describe("resolveRefreshIntervalSeconds", () => {
+	it("prefers the URL override over the board's saved default", () => {
+		expect(resolveRefreshIntervalSeconds("30", 300)).toBe(30)
+	})
+
+	it("falls back to the saved default when there is no override", () => {
+		expect(resolveRefreshIntervalSeconds(undefined, 60)).toBe(60)
+	})
+
+	it("is off when neither is set", () => {
+		expect(resolveRefreshIntervalSeconds(undefined, undefined)).toBe(0)
+	})
+
+	// `0` is a real value, not "absent": a viewer must be able to silence a board
+	// that auto-refreshes for everyone else.
+	it("lets `?refresh=0` turn off a board whose default is on", () => {
+		expect(resolveRefreshIntervalSeconds("0", 60)).toBe(0)
+	})
+
+	// TanStack JSON-parses search values, so the same URL can hand us either form.
+	it("accepts a number as readily as a string", () => {
+		expect(resolveRefreshIntervalSeconds(10, undefined)).toBe(10)
+	})
+
+	// A hand-edited URL must not ask the browser to re-query every 100ms, so
+	// anything outside the closed set falls through to the saved default.
+	it("ignores an override outside the allowed set", () => {
+		expect(resolveRefreshIntervalSeconds("1", 60)).toBe(60)
+		expect(resolveRefreshIntervalSeconds("abc", 60)).toBe(60)
+		expect(resolveRefreshIntervalSeconds("", 60)).toBe(60)
+		expect(resolveRefreshIntervalSeconds(null, 60)).toBe(60)
+	})
+
+	it("ignores a stored value outside the allowed set", () => {
+		expect(resolveRefreshIntervalSeconds(undefined, 7)).toBe(0)
 	})
 })

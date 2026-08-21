@@ -1,12 +1,13 @@
 import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
-import { Config, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /** Fatal misconfiguration discovered at startup — surfaces as a tagged defect in the Cause. */
-class EnvValidationError extends Data.TaggedError("@maple/api/lib/EnvValidationError")<{
-	readonly message: string
-}> {}
+class EnvValidationError extends Schema.TaggedError<EnvValidationError>()(
+	"@maple/api/lib/EnvValidationError",
+	{ message: Schema.String },
+) {}
 
-export interface EnvShape {
+export interface EnvConfig {
 	readonly PORT: number
 	readonly TINYBIRD_HOST: string
 	readonly TINYBIRD_TOKEN: Redacted.Redacted<string>
@@ -25,6 +26,14 @@ export interface EnvShape {
 	readonly MAPLE_DEFAULT_ORG_ID: string
 	readonly MAPLE_INGEST_KEY_ENCRYPTION_KEY: Redacted.Redacted<string>
 	readonly MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Redacted.Redacted<string>
+	/**
+	 * Keyed HMAC for dashboard share-link tokens. Optional here, and required by
+	 * `alchemy.run.ts`, so a deploy without it fails loudly while the many test
+	 * suites that never touch sharing need no stub. Absent at runtime, every
+	 * share operation fails with `ShareNotConfiguredError` rather than silently
+	 * hashing under a fallback key.
+	 */
+	readonly MAPLE_SHARE_TOKEN_HMAC_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly MAPLE_INGEST_PUBLIC_URL: string
 	readonly MAPLE_APP_BASE_URL: string
 	/** Deployment environment (`production`, `staging`, `pr-<n>`, `development`) — set by alchemy from the stage. */
@@ -54,6 +63,16 @@ export interface EnvShape {
 	 * The endpoint answers 401 while this is unset.
 	 */
 	readonly SLACK_INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
+	/**
+	 * Apple Push Notification service — token auth for the iOS app. All three
+	 * must be set for push to be live; otherwise the fan-out is a no-op and
+	 * device registration still works (so a later key drop needs no client
+	 * change).
+	 */
+	readonly APNS_TEAM_ID: Option.Option<string>
+	readonly APNS_KEY_ID: Option.Option<string>
+	/** The `.p8` contents, PEM. */
+	readonly APNS_PRIVATE_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_APP_ID: Option.Option<string>
 	readonly GITHUB_APP_SLUG: Option.Option<string>
 	readonly GITHUB_APP_PRIVATE_KEY: Option.Option<Redacted.Redacted<string>>
@@ -113,6 +132,7 @@ const envConfig = Config.all({
 	MAPLE_DEFAULT_ORG_ID: stringWithDefault("MAPLE_DEFAULT_ORG_ID", "default"),
 	MAPLE_INGEST_KEY_ENCRYPTION_KEY: Config.redacted("MAPLE_INGEST_KEY_ENCRYPTION_KEY"),
 	MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Config.redacted("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
+	MAPLE_SHARE_TOKEN_HMAC_KEY: optionalRedacted("MAPLE_SHARE_TOKEN_HMAC_KEY"),
 	MAPLE_INGEST_PUBLIC_URL: stringWithDefault("MAPLE_INGEST_PUBLIC_URL", "http://127.0.0.1:3474"),
 	MAPLE_APP_BASE_URL: stringWithDefault("MAPLE_APP_BASE_URL", "http://127.0.0.1:3471"),
 	MAPLE_ENVIRONMENT: stringWithDefault("MAPLE_ENVIRONMENT", "development"),
@@ -140,6 +160,9 @@ const envConfig = Config.all({
 	SLACK_CLIENT_ID: optionalString("SLACK_CLIENT_ID"),
 	SLACK_CLIENT_SECRET: optionalRedacted("SLACK_CLIENT_SECRET"),
 	SLACK_INTERNAL_SERVICE_TOKEN: optionalRedacted("SLACK_INTERNAL_SERVICE_TOKEN"),
+	APNS_TEAM_ID: optionalString("APNS_TEAM_ID"),
+	APNS_KEY_ID: optionalString("APNS_KEY_ID"),
+	APNS_PRIVATE_KEY: optionalRedacted("APNS_PRIVATE_KEY"),
 	GITHUB_APP_ID: optionalString("GITHUB_APP_ID"),
 	GITHUB_APP_SLUG: optionalString("GITHUB_APP_SLUG"),
 	GITHUB_APP_PRIVATE_KEY: optionalRedacted("GITHUB_APP_PRIVATE_KEY"),
@@ -232,7 +255,7 @@ const envConfig = Config.all({
 })
 
 const makeEnv = Effect.gen(function* () {
-	const env: EnvShape = yield* envConfig
+	const env: EnvConfig = yield* envConfig
 
 	if (env.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
 		return yield* Effect.die(new EnvValidationError({ message: "MAPLE_DEFAULT_ORG_ID cannot be empty" }))
@@ -304,6 +327,6 @@ const makeEnv = Effect.gen(function* () {
 	return Env.of(env)
 })
 
-export class Env extends Context.Service<Env, EnvShape>()("@maple/api/lib/Env") {
+export class Env extends Context.Service<Env, EnvConfig>()("@maple/api/lib/Env") {
 	static readonly layer = Layer.effect(this, makeEnv)
 }

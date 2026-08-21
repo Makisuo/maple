@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { PGlite } from "@electric-sql/pglite"
+import { PGlite, type Transaction } from "@electric-sql/pglite"
 import { Effect, Layer } from "effect"
 import { snapshotPath } from "../../test/pglite-snapshot"
 import { Database } from "./DatabaseLive"
@@ -57,7 +57,9 @@ const assertNoDateParams = (sql: string, params: unknown[] | undefined): void =>
 const withDateParamGuard = <T extends object>(client: T): T =>
 	new Proxy(client, {
 		get(target, property) {
-			const value = Reflect.get(target, property)
+			// SAFETY: a Proxy get trap receives a key for its target; indexed access preserves
+			// the target's own property type while the runtime branch below validates callability.
+			const value = target[property as keyof T]
 			if (typeof value !== "function") return value
 			if (property === "query") {
 				return (sql: string, params?: unknown[], ...rest: unknown[]) => {
@@ -66,8 +68,8 @@ const withDateParamGuard = <T extends object>(client: T): T =>
 				}
 			}
 			if (property === "transaction") {
-				return (callback: (tx: object) => unknown, ...rest: unknown[]) =>
-					value.call(target, (tx: object) => callback(withDateParamGuard(tx)), ...rest)
+				return <Result>(callback: (tx: Transaction) => Promise<Result>) =>
+					value.call(target, (tx: Transaction) => callback(withDateParamGuard(tx)))
 			}
 			return value.bind(target)
 		},

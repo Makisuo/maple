@@ -127,7 +127,7 @@ export function WidgetActionsProvider({
 							search: {
 								dashboardId,
 								widgetId: widget.id,
-								...(chart ? { chart } : {}),
+								...(chart ? { chart } : undefined),
 							},
 						})
 					}
@@ -179,7 +179,7 @@ export function WidgetActionsProvider({
 								? { sectionId: widget.sectionId, tabId: widget.tabId }
 								: null,
 					}
-				: {}),
+				: undefined),
 		}
 	}, [
 		widget,

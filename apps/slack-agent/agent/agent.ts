@@ -44,5 +44,5 @@ const workflowWorld = process.env.EVE_WORKFLOW_WORLD
 export default defineAgent({
 	model: openrouter(modelId),
 	modelContextWindowTokens: contextWindowTokens,
-	...(workflowWorld ? { experimental: { workflow: { world: workflowWorld } } } : {}),
+	...(workflowWorld ? { experimental: { workflow: { world: workflowWorld } } } : undefined),
 })

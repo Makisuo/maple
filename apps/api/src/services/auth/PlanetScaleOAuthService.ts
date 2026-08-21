@@ -13,7 +13,7 @@ import { oauthAuthStates } from "@maple/db"
 import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Result, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "@/platform/DatabaseLive"
-import { Env, type EnvShape } from "@/platform/Env"
+import { Env, type EnvConfig } from "@/platform/Env"
 import { msToDate } from "@/platform/time"
 import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS, toUpstreamError } from "./oauth/connection-helpers"
 
@@ -55,7 +55,7 @@ interface ResolvedPlanetScaleOAuthConfig {
 	readonly scopes: string
 }
 
-const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(function* (env: EnvShape) {
+const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(function* (env: EnvConfig) {
 	const clientId = yield* Option.match(env.PLANETSCALE_OAUTH_CLIENT_ID, {
 		onNone: () =>
 			Effect.fail(
@@ -125,7 +125,7 @@ const CurrentUserSchema = Schema.Struct({
 })
 const decodeCurrentUser = Schema.decodeUnknownEffect(Schema.fromJsonString(CurrentUserSchema))
 
-export interface PlanetScaleOAuthServiceShape {
+export interface PlanetScaleOAuthServiceApi {
 	readonly startConnect: (
 		orgId: OrgId,
 		userId: UserId,
@@ -193,7 +193,7 @@ export interface PlanetScaleOAuthServiceShape {
 
 export class PlanetScaleOAuthService extends Context.Service<
 	PlanetScaleOAuthService,
-	PlanetScaleOAuthServiceShape
+	PlanetScaleOAuthServiceApi
 >()("@maple/api/services/PlanetScaleOAuthService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -561,7 +561,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 			connectedByUserId,
 			grantStatus,
 			disconnect,
-		} satisfies PlanetScaleOAuthServiceShape
+		} satisfies PlanetScaleOAuthServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

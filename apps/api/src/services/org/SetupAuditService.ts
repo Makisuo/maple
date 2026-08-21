@@ -45,14 +45,14 @@ const TRACE_WINDOW_MINUTES = 60
 const TRACE_WINDOW_LAG_MINUTES = 15
 const TRACE_PARENT_LOOKBACK_MINUTES = 60
 
-export interface SetupAuditServiceShape {
+export interface SetupAuditServiceApi {
 	/** Runs every check against a fresh snapshot of config + telemetry. */
 	readonly run: (tenant: TenantContext) => Effect.Effect<SetupAuditReport, SetupAuditUnavailableError>
 }
 
 const msOrNull = (value: Date | null | undefined): number | null => value?.getTime() ?? null
 
-const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQueryService> = Effect.gen(
+const make: Effect.Effect<SetupAuditServiceApi, never, Database | WarehouseQueryService> = Effect.gen(
 	function* () {
 		const database = yield* Database
 		const warehouse = yield* WarehouseQueryService
@@ -433,8 +433,8 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 					// `list`, not `discovery`: an org whose span names carry IDs — the very thing NAME-02
 					// detects — inflates traces_aggregates_hourly past a 5s budget.
 					spanShape: run(
-						CH.compile(Integrations.auditSpanShapeByServiceQuery(), window, {
-							rowSchema: Integrations.auditSpanShapeRowSchema,
+						CH.compile(Integrations.auditSpanProfileByServiceQuery(), window, {
+							rowSchema: Integrations.auditSpanProfileRowSchema,
 						}),
 						"list",
 					),
@@ -559,11 +559,11 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 			return report
 		})
 
-		return { run } satisfies SetupAuditServiceShape
+		return { run } satisfies SetupAuditServiceApi
 	},
 )
 
-export class SetupAuditService extends Context.Service<SetupAuditService, SetupAuditServiceShape>()(
+export class SetupAuditService extends Context.Service<SetupAuditService, SetupAuditServiceApi>()(
 	"@maple/api/services/SetupAuditService",
 	{ make },
 ) {

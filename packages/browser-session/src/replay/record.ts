@@ -1,7 +1,7 @@
 import { record } from "rrweb"
-import { markActivity, nextChunkSeq } from "../session"
-import type { ReplayEngineConfig } from "./transport"
-import { gzip, postSessionBlob, type ChunkMeta } from "./transport"
+import { markActivity, nextChunkSeq } from "../session/session"
+import type { IngestConfig } from "../platform/transport"
+import { gzip, postSessionBlob, type ChunkMeta } from "../platform/transport"
 
 // rrweb event shape — typed loosely to avoid coupling to @rrweb/types across
 // alpha releases. We only read `type`, `timestamp`, and incremental `data`.
@@ -28,6 +28,12 @@ const CHECKOUT_EVERY_MS = 300_000
 // bound — a gap in a replay beats an OOM-crashed tab.
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024
 
+function warnExhausted(sessionId: string): void {
+	console.warn(
+		`[maple] session replay ${sessionId} reached its maximum recorded size; recording stopped for this session (metadata and events continue)`,
+	)
+}
+
 // Dropped-batch warnings are rate-limited like transport failures.
 let lastDropWarnAt = 0
 function warnBufferDropped(bytes: number): void {
@@ -45,7 +51,7 @@ export interface Recorder {
 	getClickCount: () => number
 }
 
-export function startRecording(config: ReplayEngineConfig, sessionId: string): Recorder {
+export function startRecording(config: IngestConfig, sessionId: string): Recorder {
 	// Events are serialized once at emit time and buffered as JSON strings, so
 	// flushing is a cheap `join` instead of re-stringifying the whole buffer
 	// (which stalls the main thread for hundreds of ms on full snapshots).
@@ -56,6 +62,15 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 	let lastTimestamp = 0
 	let droppedChunk = false
 	let clickCount = 0
+	let stopped = false
+	// Set once ingest answers 413: the session hit its recorded-size ceiling and
+	// every further chunk would get the same answer. Recording and uploads end
+	// here for THIS session id (a rotation starts a fresh recorder with a fresh
+	// budget); the lifecycle — heartbeats, the `ended` row, distilled events —
+	// carries on. Before this existed one long session posted a rejected chunk
+	// every 5s for the rest of the page's life: 149k 413s against 14k accepted
+	// chunks for one org over two days.
+	let exhausted = false
 
 	const resetBuffer = () => {
 		parts = []
@@ -66,7 +81,10 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 	}
 
 	const flush = async (keepalive = false): Promise<void> => {
-		if (parts.length === 0) return
+		// A stopped recorder must not upload, ever. `stop()` is the consent-revoke
+		// path — it discards rather than sends — and the only thing that can still
+		// call in here afterwards is a flush scheduled before the revoke landed.
+		if (stopped || exhausted || parts.length === 0) return
 		const body = `[${parts.join(",")}]`
 		const isCheckpoint = bufferHasCheckpoint
 		const eventCount = parts.length
@@ -84,8 +102,17 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 			eventCount,
 			durationMs,
 		}
-		await postSessionBlob(config, meta, gzipped, keepalive)
+		const outcome = await postSessionBlob(config, meta, gzipped, keepalive)
+		if (outcome === "exhausted" && !exhausted) {
+			exhausted = true
+			warnExhausted(sessionId)
+			haltCapture()
+		}
 	}
+
+	// Assigned once rrweb is started below; `flush` may need it before then only
+	// in theory (nothing is buffered before the first emit), so a no-op default.
+	let haltCapture: () => void = () => {}
 
 	const stop = record({
 		emit: (event: unknown, isCheckpoint?: boolean) => {
@@ -139,26 +166,56 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 		},
 		maskAllInputs: config.maskAllInputs,
 		// rrweb has no `maskAllText` flag; selecting all elements masks every text node.
-		...(config.maskAllText ? { maskTextSelector: "*" } : {}),
+		...(config.maskAllText ? { maskTextSelector: "*" } : undefined),
 		checkoutEveryNms: CHECKOUT_EVERY_MS,
 	})
 
 	// The periodic flush yields to idle time so it never competes with an
 	// in-progress interaction; the timeout bounds staleness. Explicit flushes
 	// (pagehide/unload) bypass this and run immediately.
+	//
+	// The handle is retained so `stop()` can cancel it: a callback already
+	// queued when consent is revoked would otherwise still fire — up to the 2s
+	// timeout later — and upload the buffer the revoke was meant to discard.
+	let idleHandle: number | undefined
 	const scheduleFlush = () => {
 		if (typeof requestIdleCallback === "function") {
-			requestIdleCallback(() => void flush(), { timeout: 2_000 })
+			idleHandle = requestIdleCallback(
+				() => {
+					idleHandle = undefined
+					void flush()
+				},
+				{ timeout: 2_000 },
+			)
 		} else {
 			void flush()
 		}
 	}
 	const flushTimer = setInterval(scheduleFlush, FLUSH_INTERVAL_MS)
 
+	// Shared by consent revoke and budget exhaustion: end rrweb, cancel pending
+	// flush work, drop the buffer. Only `stopped` (revoke) also forbids the
+	// caller's later explicit `flush()`s — after exhaustion they are simply
+	// no-ops because ingest would refuse them.
+	let halted = false
+	haltCapture = () => {
+		if (halted) return
+		halted = true
+		clearInterval(flushTimer)
+		if (idleHandle !== undefined && typeof cancelIdleCallback === "function") {
+			cancelIdleCallback(idleHandle)
+			idleHandle = undefined
+		}
+		// Nothing may be uploaded from here on, so the buffer is dead weight —
+		// and on a revoke it is dead weight holding recorded user data.
+		resetBuffer()
+		stop?.()
+	}
+
 	return {
 		stop: () => {
-			clearInterval(flushTimer)
-			stop?.()
+			stopped = true
+			haltCapture()
 		},
 		flush,
 		getClickCount: () => clickCount,

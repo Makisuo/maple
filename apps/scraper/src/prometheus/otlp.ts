@@ -114,7 +114,7 @@ const mergeAttributes = (
 		...sampleLabels,
 		job: ctx.serviceName,
 		instance: ctx.instance,
-	}
+	} satisfies Record<string, string>
 	return Object.entries(merged).map(([key, value]) => ({ key, value: { stringValue: value } }))
 }
 
@@ -275,7 +275,7 @@ const convertHistogramFamily = (
 			startTimeUnixNano: EPOCH_NANO,
 			timeUnixNano: toUnixNano(entry.timestampMs ?? ctx.scrapeTimeMs),
 			count: totalCount,
-			...(entry.sum !== null && Number.isFinite(entry.sum) ? { sum: entry.sum } : {}),
+			...(entry.sum !== null && Number.isFinite(entry.sum) ? { sum: entry.sum } : undefined),
 			bucketCounts,
 			explicitBounds,
 		})

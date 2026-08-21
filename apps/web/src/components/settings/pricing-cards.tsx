@@ -5,6 +5,7 @@ import type { CatalogPlan, CatalogPlanItem } from "@maple/domain/http"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { billingCustomerAtom, billingPlansAtom } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
+import { displayError } from "@/lib/error-messages"
 import { getTrialStatus } from "@/lib/billing/plan-gating"
 import { formatCurrency } from "@/lib/billing/currency"
 
@@ -53,7 +54,7 @@ const FEATURE_ICONS: Record<string, IconComponent> = {
 	traces: PulseIcon,
 	metrics: ChartLineIcon,
 	browser_sessions: PlayRotateClockwiseIcon,
-}
+} satisfies Record<string, IconComponent>
 
 // Display labels for the metered data rows, keyed by Autumn featureId (Autumn
 // returns the raw featureId — e.g. "browser_sessions" — when a feature has no
@@ -63,7 +64,7 @@ const DATA_FEATURE_LABELS: Record<string, string> = {
 	traces: "Traces",
 	metrics: "Metrics",
 	browser_sessions: "Browser Sessions",
-}
+} satisfies Record<string, string>
 
 // Per-feature icons for the platform-feature rows, keyed by the `icon` strings
 // in lib/billing/plans.ts. Falls back to CircleCheckIcon for any unmapped key.
@@ -73,7 +74,7 @@ const PLATFORM_FEATURE_ICONS: Record<string, IconComponent> = {
 	bell: BellIcon,
 	code: CodeIcon,
 	shield: ShieldIcon,
-}
+} satisfies Record<string, IconComponent>
 
 const HIDDEN_FEATURE_IDS = new Set<string>(["ai_input_tokens", "ai_output_tokens"])
 
@@ -266,8 +267,7 @@ export function PricingCards() {
 						: undefined,
 				})
 			} catch (err) {
-				const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-				toastManager.add({ title: message, type: "error" })
+				toastManager.add({ title: displayError(err).message, type: "error" })
 			} finally {
 				setLoadingPlanId(null)
 			}
@@ -280,16 +280,20 @@ export function PricingCards() {
 			const result = await attach({ planId })
 
 			if (result.paymentUrl) {
+				// Deliberately NOT clearing `loadingPlanId`: assigning `location.href`
+				// starts a navigation without stopping JS, so the old DOM stays on
+				// screen until Stripe answers. Re-enabling the button here left an
+				// inviting "Subscribe" on an apparently frozen page — and every extra
+				// click became a 409 we reported back as a failed purchase.
 				window.location.href = result.paymentUrl
 				return
 			}
 
 			toastManager.add({ title: "Plan updated successfully.", type: "success" })
 			refreshCustomer()
+			setLoadingPlanId(null)
 		} catch (err) {
-			const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-			toastManager.add({ title: message, type: "error" })
-		} finally {
+			toastManager.add({ title: displayError(err).message, type: "error" })
 			setLoadingPlanId(null)
 		}
 	}
@@ -306,10 +310,9 @@ export function PricingCards() {
 			toastManager.add({ title: "Plan updated successfully.", type: "success" })
 			refreshCustomer()
 			setConfirmDialog(null)
+			setIsAttaching(false)
 		} catch (err) {
-			const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-			toastManager.add({ title: message, type: "error" })
-		} finally {
+			toastManager.add({ title: displayError(err).message, type: "error" })
 			setIsAttaching(false)
 		}
 	}

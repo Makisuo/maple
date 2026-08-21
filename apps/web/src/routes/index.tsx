@@ -75,7 +75,10 @@ const OVERVIEW_CHARTS: OverviewChartConfig[] = [
 		chartId: "latency-line",
 		title: "Latency",
 		layout: { x: 0, y: 4, w: 6, h: 4 },
-		legend: "visible",
+		// No `legend` — every tile here is a `WidgetShell`, whose header hosts the
+		// series chips in the top-right. `"visible"` would move them under the plot
+		// (bottom-left) and shorten it, which is the dashboard-builder default for a
+		// standalone chart, not for a card with a header.
 		tooltip: "visible",
 	},
 	{
@@ -311,7 +314,7 @@ function DashboardContent({
 						0,
 					)
 					return { bucket: point.bucket, throughput: total }
-				}) as unknown as Record<string, unknown>[],
+				}) as Record<string, unknown>[],
 		)
 		.orElse(() => EMPTY_ARRAY)
 
@@ -345,21 +348,21 @@ function DashboardContent({
 			"error-rate": overviewError,
 			latency: overviewError,
 			"log-volume": logVolumeError,
-		}
+		} satisfies Record<string, { error: unknown; onRetry?: () => void } | undefined>
 
 		const loadingMap: Record<string, boolean> = {
 			throughput: isOverviewLoading,
 			"error-rate": isOverviewLoading,
 			latency: isOverviewLoading,
 			"log-volume": isLogVolumeLoading,
-		}
+		} satisfies Record<string, boolean>
 
 		const dataMap: Record<string, Record<string, unknown>[]> = {
 			throughput: overviewPoints,
 			"error-rate": overviewPoints,
 			latency: overviewPoints,
 			"log-volume": logPoints,
-		}
+		} satisfies Record<string, Record<string, unknown>[]>
 
 		const totalVolume = overviewPoints.reduce(
 			(sum, point) => sum + (typeof point.throughput === "number" ? point.throughput : 0),

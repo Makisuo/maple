@@ -1,112 +1,50 @@
 {
 	"$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
-	"categories": {
-		"correctness": "off"
-	},
+	"extends": ["./.oxlintrc.json", "./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
+	"plugins": ["eslint", "unicorn", "typescript", "oxc", "react", "jsx-a11y", "effecttsgo"],
+	"jsPlugins": ["./scripts/oxlint-plugins/maple.mjs"],
 	"options": {
 		"typeAware": true
 	},
-	"plugins": ["effecttsgo"],
 	"rules": {
-		"effecttsgo/abort-controller-in-effect": "warn",
-		"effecttsgo/any-unknown-in-error-context": "warn",
-		"effecttsgo/async-function": "warn",
-		"effecttsgo/catch-all-to-map-error": "warn",
-		"effecttsgo/catch-chain-to-first-success-of": "warn",
-		"effecttsgo/catch-tag-to-catch-reason": "warn",
 		"effecttsgo/catch-to-ignore": "error",
 		"effecttsgo/catch-to-or-else-succeed": "error",
-		"effecttsgo/catch-unfailable-effect": "warn",
-		"effecttsgo/class-self-mismatch": "error",
-		"effecttsgo/crypto-random-uuid": "warn",
-		"effecttsgo/crypto-random-uuid-in-effect": "warn",
-		"effecttsgo/deterministic-keys": "off",
 		"effecttsgo/duplicate-package": "error",
 		"effecttsgo/effect-do-notation": "warn",
-		"effecttsgo/effect-fn-iife": "warn",
-		"effecttsgo/effect-fn-implicit-any": "error",
-		"effecttsgo/effect-fn-opportunity": "warn",
-		"effecttsgo/effect-gen-uses-adapter": "warn",
 		"effecttsgo/effect-in-failure": "error",
 		"effecttsgo/effect-in-void-success": "error",
-		"effecttsgo/effect-map-flatten": "warn",
-		"effecttsgo/effect-map-void": "warn",
-		"effecttsgo/effect-succeed-with-void": "warn",
 		"effecttsgo/extends-native-error": "error",
-		"effecttsgo/flat-map-to-map": "warn",
-		"effecttsgo/floating-effect": "error",
-		"effecttsgo/floating-effect-in-vitest": "error",
 		"effecttsgo/generic-effect-services": "error",
-		"effecttsgo/global-console": "warn",
 		"effecttsgo/global-console-in-effect": "error",
-		"effecttsgo/global-date": "warn",
-		"effecttsgo/global-date-in-effect": "warn",
-		"effecttsgo/global-error-in-effect-catch": "warn",
 		"effecttsgo/global-error-in-effect-failure": "error",
-		"effecttsgo/global-fetch": "warn",
 		"effecttsgo/global-fetch-in-effect": "error",
-		"effecttsgo/global-random": "warn",
 		"effecttsgo/global-random-in-effect": "error",
-		"effecttsgo/global-timers": "warn",
-		"effecttsgo/global-timers-in-effect": "warn",
-		"effecttsgo/instance-of-schema": "warn",
-		"effecttsgo/layer-merge-all-with-dependencies": "warn",
-		"effecttsgo/lazy-effect": "warn",
 		"effecttsgo/lazy-promise-in-effect-sync": "error",
 		"effecttsgo/leaking-requirements": "error",
-		"effecttsgo/missed-pipeable-opportunity": "off",
-		"effecttsgo/missing-effect-context": "error",
-		"effecttsgo/missing-effect-error": "error",
-		"effecttsgo/missing-effect-service-dependency": "off",
-		"effecttsgo/missing-layer-context": "error",
-		"effecttsgo/missing-pipeable-signature": "off",
-		"effecttsgo/missing-return-yield-star": "error",
-		"effecttsgo/missing-star-in-yield-effect-gen": "error",
 		"effecttsgo/multiple-catch-tag": "error",
 		"effecttsgo/multiple-effect-provide": "error",
 		"effecttsgo/nested-effect-gen-yield": "warn",
-		"effecttsgo/new-promise": "warn",
-		"effecttsgo/new-schema-class": "off",
-		"effecttsgo/node-builtin-import": "warn",
-		"effecttsgo/non-object-effect-service-type": "error",
 		"effecttsgo/outdated-api": "error",
-		"effecttsgo/overridden-schema-constructor": "error",
-		"effecttsgo/prefer-schema-over-json": "warn",
-		"effecttsgo/prefer-schema-type-property": "off",
-		"effecttsgo/prefer-typed-schema-decoder": "warn",
-		"effecttsgo/prefer-unsafe-constructor": "warn",
-		"effecttsgo/process-env": "warn",
-		"effecttsgo/process-env-in-effect": "warn",
 		"effecttsgo/promise-in-effect-success": "error",
 		"effecttsgo/redundant-map-error": "error",
-		"effecttsgo/redundant-or-die": "warn",
-		"effecttsgo/redundant-schema-tag-identifier": "warn",
 		"effecttsgo/return-effect-in-gen": "error",
 		"effecttsgo/run-effect-inside-effect": "error",
-		"effecttsgo/schema-literal-non-finite": "error",
-		"effecttsgo/schema-number": "warn",
-		"effecttsgo/schema-opaque-instance-member": "error",
-		"effecttsgo/schema-struct-with-tag": "warn",
-		"effecttsgo/schema-sync-in-effect": "warn",
-		"effecttsgo/schema-union-of-literals": "off",
-		"effecttsgo/scope-in-layer-effect": "warn",
 		"effecttsgo/service-not-as-class": "warn",
-		"effecttsgo/strict-boolean-expressions": "off",
 		"effecttsgo/strict-effect-provide": "error",
 		"effecttsgo/sync-to-succeed": "error",
-		"effecttsgo/try-catch-in-effect-gen": "warn",
-		"effecttsgo/unknown-in-effect-catch": "warn",
 		"effecttsgo/unnecessary-effect-gen": "error",
-		"effecttsgo/unnecessary-fail-yieldable-error": "warn",
-		"effecttsgo/unnecessary-arrow-block": "off",
-		"effecttsgo/unnecessary-pipe": "warn",
 		"effecttsgo/unnecessary-pipe-chain": "error",
-		"effecttsgo/unnecessary-typeof-type": "error",
-		"effecttsgo/unsafe-effect-type-assertion": "warn",
-		"require-yield": "off"
+		"effecttsgo/unnecessary-typeof-type": "error"
 	},
-	"ignorePatterns": [".context/**", "apps/slack-agent/**", "lib/llm/**", "lib/thinking-orbs/**"],
 	"overrides": [
+		// Framework composition roots, standalone libraries, generated-client CLI dispatch, and operational probes expose generic Effect channels.
+		{
+			"files": ["apps/api/src/worker.ts", "apps/cli/**", "examples/**/main.ts", "lib/**", "scripts/**"],
+			"rules": {
+				"effecttsgo/any-unknown-in-error-context": "off"
+			}
+		},
+		// Tests may use host globals and intentionally incomplete layers; production code may not.
 		{
 			"files": [
 				"**/*.test.ts",
@@ -131,50 +69,23 @@
 				"effecttsgo/process-env": "off",
 				"effecttsgo/strict-effect-provide": "off"
 			}
-		},
-		{
-			"files": [
-				"apps/api/src/mcp/tools/*.ts",
-				"apps/api/src/mcp/dispatcher.ts",
-				"apps/api/src/mcp/lib/query-warehouse.ts",
-				"apps/api/src/mcp/server.ts",
-				"apps/api/src/chat/tools.ts",
-				"apps/api/src/chat/loop/types.ts",
-				"apps/api/src/chat/loop/turn.ts",
-				"apps/api/src/chat/turn-runner.ts",
-				"apps/api/src/internal-rpc.ts",
-				"apps/api/src/workflows/agent-pass.ts",
-				"apps/api/src/routes/v1/chat.http.ts"
-			],
-			"rules": {
-				"effecttsgo/any-unknown-in-error-context": "error",
-				"effecttsgo/unsafe-effect-type-assertion": "error"
-			}
-		},
-		{
-			"files": [
-				"apps/api/src/mcp/tools/types.ts",
-				"apps/api/src/mcp/tools/registry.ts",
-				"apps/api/src/mcp/dispatcher.ts",
-				"apps/api/src/routes/v1/chat.http.ts"
-			],
-			"rules": {
-				"typescript/no-unsafe-type-assertion": "error"
-			}
-		},
-		{
-			"files": ["apps/api/src/mcp/tools/**/*.test.ts", "apps/api/src/mcp/tools/**/__tests__/**"],
-			"rules": {
-				"effecttsgo/unsafe-effect-type-assertion": "off",
-				"typescript/no-unsafe-type-assertion": "off"
-			}
-		},
-		{
-			"files": ["apps/api/src/worker.ts"],
-			"rules": {
-				"effecttsgo/any-unknown-in-error-context": "off",
-				"effecttsgo/unsafe-effect-type-assertion": "error"
-			}
 		}
+	],
+	"ignorePatterns": [
+		".agents/**",
+		".codex/**",
+		".context/**",
+		".deepsec/**",
+		".factory/**",
+		".impeccable/**",
+		".superset/**",
+		// apps/slack-agent sits outside the bun workspace, so a root install
+		// never fetches its `@types/bun` and this type-aware run rejects its
+		// tsconfig outright. It is linted with the base (AST-only) config in
+		// the `slack-agent` CI job instead, which installs its dependencies.
+		"apps/slack-agent/**",
+		"apps/web/src/routeTree.gen.ts",
+		"lib/llm/**",
+		"lib/thinking-orbs/**"
 	]
 }

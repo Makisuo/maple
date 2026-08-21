@@ -1,6 +1,7 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { BillingUpstreamError } from "@maple/domain/http"
+import { BillingNotConfiguredError, BillingUpstreamError } from "@maple/domain/http"
 import type { UpdateBillingControlsRequest } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
 import { AUTUMN_API_VERSION } from "./autumn-api"
@@ -27,6 +28,14 @@ export interface AutumnResult {
 	readonly statusCode: number
 	readonly response: unknown
 }
+
+/**
+ * How a call can fail before Autumn ever answers, or when its answer is
+ * unusable. An upstream *rejection* (any non-2xx) is NOT here — it flows
+ * through as an `AutumnResult` and is classified by `classifyAutumn` in
+ * `autumn-client.ts`.
+ */
+export type AutumnTransportFailure = BillingUpstreamError | BillingNotConfiguredError
 
 /**
  * Identity fields Autumn accepts on `customers.get_or_create`. Only that route
@@ -69,7 +78,7 @@ const ROUTE_PATHS: Record<AutumnRoute, string> = {
 	previewAttach: "/v1/billing.preview_attach",
 	openCustomerPortal: "/v1/billing.open_customer_portal",
 	listPlans: "/v1/plans.list",
-}
+} satisfies Record<AutumnRoute, string>
 
 /**
  * Autumn answers in snake_case; every schema in `@maple/domain/http` is
@@ -151,7 +160,7 @@ const errorResponse = (statusCode: number, text: string): Record<string, unknown
 	const raw = parsed?.message ?? parsed?.error
 	const code = parsed?.code
 	return {
-		...(typeof raw === "string" ? { message: raw } : {}),
+		...(typeof raw === "string" ? { message: raw } : undefined),
 		code: typeof code === "string" ? code : "autumn_api_error",
 		statusCode,
 	}
@@ -163,9 +172,12 @@ const callAutumn = (
 	apiUrl: string,
 	route: AutumnRoute,
 	body: Record<string, unknown>,
-): Effect.Effect<AutumnResult, BillingUpstreamError> =>
+): Effect.Effect<AutumnResult, AutumnTransportFailure> =>
 	secretKey === undefined
-		? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
+		? // A missing key is OUR deployment fault, not Autumn's. This used to answer
+			// 502, which pointed every investigation upstream at a service that was
+			// never even called.
+			Effect.fail(new BillingNotConfiguredError({ message: "Billing is not configured" }))
 		: Effect.gen(function* () {
 				const request = yield* HttpClientRequest.bodyJson(
 					HttpClientRequest.post(`${apiUrl}${ROUTE_PATHS[route]}`, {
@@ -210,12 +222,20 @@ const callAutumn = (
 				// and `invalidateCustomer` both branch on `statusCode`. Unlike the SDK
 				// we do not fail open — a 5xx stays a 5xx instead of being rewritten
 				// into a synthetic 200 with a stub customer.
-				return { statusCode: response.status, response: errorResponse(response.status, text) }
+				const errorBody = errorResponse(response.status, text)
+				// Autumn's own error identifier, on the span. This is the only place a
+				// rejection stays diagnosable once the route collapses it: on a pure
+				// read an upstream 4xx becomes a generic 502 by design, so without this
+				// attribute there is nothing left to tell us WHY Autumn refused.
+				if (typeof errorBody.code === "string") {
+					yield* Effect.annotateCurrentSpan({ "autumn.code": errorBody.code })
+				}
+				return { statusCode: response.status, response: errorBody }
 			}).pipe(Effect.withSpan("autumn.request", { attributes: { "autumn.route": route } }))
 
-type AutumnCall = Effect.Effect<AutumnResult, BillingUpstreamError>
+type AutumnCall = Effect.Effect<AutumnResult, AutumnTransportFailure>
 
-export interface AutumnClientShape {
+export interface AutumnClientApi {
 	readonly getOrCreateCustomer: (
 		customerId: string,
 		options: {
@@ -250,10 +270,10 @@ const customerDataFields = (data: AutumnCustomerData | undefined): Record<string
 	data === undefined
 		? {}
 		: {
-				...(data.name !== undefined ? { name: data.name } : {}),
-				...(data.email !== undefined ? { email: data.email } : {}),
-				...(data.fingerprint !== undefined ? { fingerprint: data.fingerprint } : {}),
-				...(data.metadata !== undefined ? { metadata: data.metadata } : {}),
+				...(data.name !== undefined ? { name: data.name } : undefined),
+				...(data.email !== undefined ? { email: data.email } : undefined),
+				...(data.fingerprint !== undefined ? { fingerprint: data.fingerprint } : undefined),
+				...(data.metadata !== undefined ? { metadata: data.metadata } : undefined),
 			}
 
 /**
@@ -268,9 +288,12 @@ const callUpdateBillingControls = (
 	apiUrl: string,
 	orgId: string,
 	controls: UpdateBillingControlsRequest,
-): Effect.Effect<AutumnResult, BillingUpstreamError> =>
+): Effect.Effect<AutumnResult, AutumnTransportFailure> =>
 	secretKey === undefined
-		? Effect.fail(new BillingUpstreamError({ message: "Billing is not configured" }))
+		? // A missing key is OUR deployment fault, not Autumn's. This used to answer
+			// 502, which pointed every investigation upstream at a service that was
+			// never even called.
+			Effect.fail(new BillingNotConfiguredError({ message: "Billing is not configured" }))
 		: Effect.gen(function* () {
 				const request = yield* HttpClientRequest.bodyJson(
 					HttpClientRequest.post(`${apiUrl}/v1/customers.update`, {
@@ -293,7 +316,7 @@ const callUpdateBillingControls = (
 								enabled: alert.enabled,
 								threshold: alert.threshold,
 								threshold_type: alert.thresholdType,
-								...(alert.name ? { name: alert.name } : {}),
+								...(alert.name ? { name: alert.name } : undefined),
 							})),
 						},
 					},
@@ -324,7 +347,7 @@ const callUpdateBillingControls = (
  * runs unconfigured and boot must not depend on billing. The unwrap happens once
  * here, the check stays per call.
  */
-export class AutumnClient extends Context.Service<AutumnClient, AutumnClientShape>()(
+export class AutumnClient extends Context.Service<AutumnClient, AutumnClientApi>()(
 	"@maple/api/services/billing/AutumnClient",
 	{
 		make: Effect.gen(function* () {
@@ -380,7 +403,7 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientShap
 				openCustomerPortal: (customerId, { returnUrl }) =>
 					call("openCustomerPortal", {
 						customer_id: customerId,
-						...(returnUrl !== undefined ? { return_url: returnUrl } : {}),
+						...(returnUrl !== undefined ? { return_url: returnUrl } : undefined),
 					}),
 
 				// The only route Autumn marks customer-optional: an onboarding token gap
@@ -390,7 +413,7 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientShap
 
 				updateCustomerBillingControls: (orgId, controls) =>
 					callUpdateBillingControls(httpClient, secretKey, apiUrl, orgId, controls),
-			} satisfies AutumnClientShape
+			} satisfies AutumnClientApi
 		}),
 	},
 ) {

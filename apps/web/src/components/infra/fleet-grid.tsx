@@ -104,7 +104,10 @@ export function FleetGrid({ hosts }: FleetGridProps) {
 	)
 
 	const legend = useMemo<HoneycombLegendItem[]>(() => {
-		const c: Record<HoneycombTone, number> = { ok: 0, warn: 0, crit: 0, stale: 0 }
+		const c: Record<HoneycombTone, number> = { ok: 0, warn: 0, crit: 0, stale: 0 } satisfies Record<
+			HoneycombTone,
+			number
+		>
 		for (const a of annotated) c[a.tone]++
 		return [
 			{ tone: "ok", label: "Healthy", count: c.ok },

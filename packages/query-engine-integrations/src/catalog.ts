@@ -4,7 +4,9 @@
 // import this package (the dependency runs one way), so the fixtures live with
 // the builders instead. Same contract as the core catalog — compile the REAL
 // exported builder with production-shaped params, so every SQL shape the
-// product can emit is enumerated and snapshotted.
+// product can emit is enumerated and snapshotted. The ClickHouse e2e sweep in
+// apps/api (`sql-catalog.clickhouse.e2e.test.ts`) analyzes these fixtures
+// against the real migrations alongside the core catalog.
 
 import { compile, compileUnion, type CompiledQuery } from "@maple/query-engine/ch"
 import * as CH from "./index"
@@ -26,6 +28,49 @@ const END_TIME = "2026-01-03 14:15:00"
 const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 
 export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
+	{
+		module: "ai-sessions",
+		name: "aiSessionListQuery",
+		label: "default",
+		// Row schemas are attached here, not just in the unit tests: the ClickHouse
+		// e2e sweep only runs its quoted/unquoted 64-bit decode assertion for
+		// fixtures whose compiled query carries one.
+		compile: () => compile(CH.aiSessionListQuery(), window, { rowSchema: CH.aiSessionListRowSchema }),
+	},
+	{
+		// The vendor/service filters the AI sessions list page sends.
+		module: "ai-sessions",
+		name: "aiSessionListQuery",
+		label: "filtered",
+		compile: () =>
+			compile(
+				CH.aiSessionListQuery({
+					limit: 25,
+					vendorIds: ["eve"],
+					serviceNames: ["maple-slack-agent"],
+				}),
+				window,
+				{ rowSchema: CH.aiSessionListRowSchema },
+			),
+	},
+	{
+		module: "ai-sessions",
+		name: "aiSessionFacetsQuery",
+		label: "default",
+		compile: () =>
+			compileUnion(CH.aiSessionFacetsQuery(), window, { rowSchema: CH.aiSessionFacetsRowSchema }),
+	},
+	{
+		module: "ai-sessions",
+		name: "aiSessionSpansQuery",
+		label: "default",
+		compile: () =>
+			compile(
+				CH.aiSessionSpansQuery(),
+				{ ...window, sessionId: "wrun_sql_catalog" },
+				{ rowSchema: CH.aiSessionSpansRowSchema },
+			),
+	},
 	{
 		module: "cloudflare-infra",
 		name: "cloudflareZoneLatencySQL",

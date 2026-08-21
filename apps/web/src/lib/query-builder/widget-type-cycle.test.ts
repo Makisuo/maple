@@ -74,6 +74,7 @@ function makeState(overrides: Partial<QueryBuilderWidgetState> = {}): QueryBuild
 		unit: "number",
 		legendPosition: "bottom",
 		seriesStatsEnabled: false,
+		pointsMode: "auto",
 		tableLimit: "",
 		listDataSource: "traces",
 		listWhereClause: "",

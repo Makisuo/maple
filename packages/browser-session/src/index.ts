@@ -1,4 +1,4 @@
-export type { PrivacyOptions } from "./consent"
+export type { PrivacyOptions } from "./identity/consent"
 export {
 	configurePrivacy,
 	consentAllowedSince,
@@ -9,24 +9,30 @@ export {
 	// a suite that turns the gate on needs the seam to turn it back off.
 	resetConsentForTests,
 	setConsent,
-} from "./consent"
-export type { SessionEvent, SessionEventSink } from "./events-sink"
-export { clearPendingEvents, getActiveSink, setActiveTraceIdProvider, startEventSink } from "./events-sink"
-export type { IdentifyInput, MapleIdentity, ResolvedIdentity, TraitValue } from "./identity"
-export { normalizeIdentity } from "./identity"
-export type { SessionMetaRowInput } from "./meta-row"
-export { formatCHDateTime, postSessionMetaRow } from "./meta-row"
-export type { MetadataSessionHandle, MetadataSessionOptions } from "./metadata-session"
-export { startMetadataSession } from "./metadata-session"
+} from "./identity/consent"
+export type { SessionEvent, SessionEventSink } from "./events/events-sink"
+export {
+	clearPendingEvents,
+	getActiveSink,
+	setActiveTraceIdProvider,
+	startEventSink,
+} from "./events/events-sink"
+export type { IdentifyInput, MapleIdentity, ResolvedIdentity, TraitValue } from "./identity/identity"
+export { normalizeIdentity } from "./identity/identity"
+export type { SessionMetaRowInput } from "./events/meta-row"
+export { formatCHDateTime, postSessionMetaRow } from "./events/meta-row"
+export type { MetadataSessionHandle, MetadataSessionOptions } from "./session/metadata-session"
+export { startMetadataSession } from "./session/metadata-session"
 // The session record's mutators (counts, navigation, rotation listeners) stay
 // package-internal: `startSessionLifecycle` owns those invariants, and an SDK
 // reaching past it would write counts the lifecycle then overwrites.
-export type { SessionRecord } from "./session"
-export { getSession, getSessionId, rotateSession } from "./session"
-export type { MapleBrowserSessionSink } from "./sink"
-export { clearSessionSink } from "./sink"
-export { getObservedTraceIds, publishSessionSink, readSessionSink, recordTraceId } from "./sink"
-export type { TrackProps } from "./track"
-export { track } from "./track"
-export { parseUserAgent } from "./user-agent"
-export { getVisitorId, isVisitorIdPersisted, setVisitorTracking } from "./visitor"
+export type { SessionRecord } from "./session/session"
+export { getSession, getSessionId, rotateSession } from "./session/session"
+export type { MapleBrowserSessionSink } from "./session/sink"
+export { clearSessionSink } from "./session/sink"
+export { getObservedTraceIds, publishSessionSink, readSessionSink, recordTraceId } from "./session/sink"
+export type { TrackProps } from "./events/track"
+export { track } from "./events/track"
+export { parseUserAgent } from "./platform/user-agent"
+export { SDK_HINT_HEADER, sdkHint } from "./platform/transport"
+export { getVisitorId, isVisitorIdPersisted, setVisitorTracking } from "./identity/visitor"

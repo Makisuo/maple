@@ -56,7 +56,7 @@ const KIND_LABEL: Record<WorkloadKind, string> = {
 	deployment: "Deployment",
 	statefulset: "StatefulSet",
 	daemonset: "DaemonSet",
-}
+} satisfies Record<WorkloadKind, string>
 
 function WorkloadDetailPage() {
 	const params = Route.useParams()

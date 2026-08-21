@@ -18,6 +18,7 @@ function TimeSeriesSettings({ stacked, curve }: { stacked: boolean; curve: boole
 		<>
 			{stacked && <WidgetSettings.Stacked />}
 			{curve && <WidgetSettings.Curve />}
+			{curve && <WidgetSettings.Points />}
 			<WidgetSettings.Divider />
 			<WidgetSettings.Unit label="Y-Axis Unit" />
 			<WidgetSettings.Legend />

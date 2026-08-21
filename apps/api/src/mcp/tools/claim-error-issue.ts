@@ -17,7 +17,7 @@ const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
 export function registerClaimErrorIssueTool(server: McpToolRegistrar) {
 	server.tool(
 		"claim_error_issue",
-		"Claim a lease on an error issue so other agents don't duplicate work. Issues in 'triage' or 'todo' auto-transition to 'in_progress' on claim. Lease defaults to 30 min; call heartbeat_error_issue before it expires or the issue drops back to 'todo'.",
+		"Claim a lease on an error issue so other agents don't duplicate work. Issues in 'triage' or 'todo' auto-transition to 'in_progress' on claim. The lease (default 30 min) renews automatically whenever you act on the issue — transition it, comment, or set its severity — and is released when you move it to a terminal state or call release_error_issue.",
 		Schema.Struct({
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),
 			lease_duration_seconds: optionalNumberParam(

@@ -8,15 +8,18 @@
 // would collide in the `http/index.ts` barrel.
 export {
 	chartFamilyForChartId,
+	DEFAULT_HEATMAP_COLOR_SCALE,
 	DEFAULT_LIST_LIMIT,
 	defaultWidgetLayout,
 	HEATMAP_COLOR_SCALES,
 	HEATMAP_SCALE_TYPES,
 	type HeatmapColorScale,
 	type HeatmapScaleType,
+	isMcpPanelType,
 	isMcpVisualization,
 	isPanelType,
 	isWidgetVisualization,
+	MCP_PANEL_TYPES,
 	MCP_VISUALIZATIONS,
 	type OwnedDisplayKey,
 	PANEL_TYPES,

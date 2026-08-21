@@ -1,4 +1,5 @@
 import * as React from "react"
+import * as Predicate from "effect/Predicate"
 import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/lib/utils"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -293,10 +294,8 @@ function EventProps({ attributes }: { attributes?: string }) {
 		if (!attributes) return []
 		try {
 			const parsed: unknown = JSON.parse(attributes)
-			if (!parsed || typeof parsed !== "object") return []
-			return Object.entries(parsed as Record<string, unknown>).map(
-				([key, value]) => [key, String(value)] as const,
-			)
+			if (!Predicate.isObject(parsed)) return []
+			return Object.entries(parsed).map(([key, value]) => [key, String(value)] as const)
 		} catch {
 			return []
 		}

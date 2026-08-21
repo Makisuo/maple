@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { Cause, Exit, Option, Schema } from "effect"
 import { HttpClientError } from "effect/unstable/http"
 import {
@@ -24,7 +25,12 @@ export const makeClientErrorBody = (definition: ClientErrorDefinition): AnyPubli
 	...definition,
 })
 
-const NetworkError = makeClientErrorBody({
+/**
+ * Shared so the warehouse layer can raise this same body as a typed failure —
+ * `WarehouseUnreachableError` — rather than only reaching it by unwrapping a
+ * cause chain. One copy, one tag, whichever way a dropped connection arrives.
+ */
+export const NetworkErrorBody = makeClientErrorBody({
 	_tag: NetworkErrorTag,
 	code: "network_unreachable",
 	title: "Cannot reach Maple API",
@@ -110,7 +116,7 @@ const displayErrorInternal = (input: unknown, depth: number): AnyPublicHttpError
 
 	if (HttpClientError.isHttpClientError(value)) {
 		if (value.reason._tag === "TransportError") {
-			return isTimeoutException(value.reason.cause) ? TimeoutError : NetworkError
+			return isTimeoutException(value.reason.cause) ? TimeoutError : NetworkErrorBody
 		}
 		return value.reason._tag === "InvalidUrlError" ? InvalidUrlError : HttpRequestError
 	}

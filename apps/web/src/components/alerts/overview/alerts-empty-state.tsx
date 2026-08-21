@@ -31,7 +31,7 @@ const TILE_TONE: Record<AlertTemplate["id"], { glyph: string; hoverBorder: strin
 		glyph: "bg-chart-throughput/10 text-chart-throughput",
 		hoverBorder: "hover:border-chart-throughput/50",
 	},
-}
+} satisfies Record<AlertTemplate["id"], { glyph: string; hoverBorder: string }>
 
 export function AlertsEmptyState({ isAdmin, serviceName }: { isAdmin: boolean; serviceName?: string }) {
 	return (

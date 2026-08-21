@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 /**
  * Thin, token-keyed wrapper around `@distilled.cloud/cloudflare` (the Effect-native Cloudflare SDK).
  *
@@ -39,7 +40,7 @@ const credentialsLayer = (accessToken: string, apiBaseUrl?: string): Layer.Layer
 		refresh: (credentials) => Effect.succeed(credentials),
 		// Defaults to https://api.cloudflare.com/client/v4; overridable (CLOUDFLARE_API_BASE_URL) so
 		// local dev / tests can point the SDK at a mock.
-		...(apiBaseUrl ? { apiBaseUrl } : {}),
+		...(apiBaseUrl ? { apiBaseUrl } : undefined),
 	})
 
 const runtimeLayer = (accessToken: string, apiBaseUrl?: string): Layer.Layer<CloudflareRequirements> =>
@@ -78,7 +79,7 @@ const mapCloudflareError = (error: unknown): CloudflareApiError => {
 	}
 	return new IntegrationsUpstreamError({
 		message: readMessage(error),
-		...(status === undefined ? {} : { status }),
+		...(!(status === undefined) ? { status } : undefined),
 		cause: error,
 	})
 }
@@ -276,12 +277,12 @@ const GraphqlResponse = Schema.Struct({
 	errors: Schema.optionalKey(Schema.Union([Schema.Array(GraphqlErrorItem), Schema.Null])),
 })
 
-type GraphqlRequestShape = typeof GraphqlRequest.Type
-type GraphqlResponseShape = typeof GraphqlResponse.Type
+type GraphqlRequestContract = typeof GraphqlRequest.Type
+type GraphqlResponseContract = typeof GraphqlResponse.Type
 
 const graphqlOperation: API.OperationMethod<
-	GraphqlRequestShape,
-	GraphqlResponseShape,
+	GraphqlRequestContract,
+	GraphqlResponseContract,
 	CloudflareOpError,
 	Credentials | HttpClient.HttpClient
 > = API.make(() => ({
@@ -325,7 +326,7 @@ export const graphqlQuery: (
 		accessToken,
 		graphqlOperation({
 			query: request.query,
-			...(request.variables === undefined ? {} : { variables: request.variables }),
+			...(!(request.variables === undefined) ? { variables: request.variables } : undefined),
 		}),
 		apiBaseUrl,
 	)

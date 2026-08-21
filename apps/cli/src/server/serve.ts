@@ -1,8 +1,9 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // The local Maple server: OTLP/HTTP ingest + a raw SQL query API + the bundled
 // SPA, all on one port, backed by an embedded chDB. Replaces the Rust
 // `apps/ingest/src/bin/local.rs`. `maple start` calls `startServer`.
 
-import { Effect, Schema, type Scope } from "effect"
+import { Effect, Predicate, Schema, type Scope } from "effect"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
@@ -116,8 +117,11 @@ export const corsHeadersForAllowedOrigin = (
 		? {
 				"access-control-allow-origin": origin,
 				"access-control-allow-methods": "GET, POST, OPTIONS",
+				// `x-maple-sdk` is the SDK identity hint every browser SDK sends on
+				// every request; a listener that does not allow it fails preflight
+				// for the whole SDK.
 				"access-control-allow-headers":
-					"content-type, content-encoding, authorization, x-maple-maintenance-token",
+					"content-type, content-encoding, authorization, x-maple-sdk, x-maple-maintenance-token",
 				"access-control-allow-private-network": "true",
 				vary: "Origin",
 			}
@@ -136,6 +140,45 @@ const json = (body: unknown, status = 200): Response =>
 
 const text = (body: string, status = 200, contentType = "text/plain"): Response =>
 	new Response(body, { status, headers: { "content-type": contentType } })
+
+/**
+ * A message for a thrown value of unknown shape that is never `{}` or
+ * `[object Object]`.
+ *
+ * `(error as Error).message` was the idiom here, and a throw that was not an
+ * `Error` — or was an `Error` subclass carrying its detail elsewhere — reduced to
+ * `undefined` or to an empty JSON object. Production carried 94 spans reading
+ * exactly `Error: {}` at `POST /v1/traces`: the throw survived all the way to the
+ * tracer, which fingerprinted it into one issue with no message, no type, and no
+ * stack beyond the span name. Nothing about it could be diagnosed.
+ *
+ * So every branch here must yield something a human can act on, and the last
+ * resort names the shape rather than pretending to describe it.
+ */
+export const describeThrown = (error: unknown): string => {
+	if (error instanceof Error && error.message !== "") return error.message
+	if (typeof error === "string" && error !== "") return error
+	if (error !== null && typeof error === "object") {
+		// Both reads are inside the try: `message` may be a getter that throws, and
+		// reading it outside would defeat the whole point of this function.
+		try {
+			// `in` narrows without invoking the getter; the read below is what can
+			// throw, and it is inside the try for exactly that reason.
+			if ("message" in error) {
+				const message = error.message
+				if (typeof message === "string" && message !== "") return message
+			}
+			const json = JSON.stringify(error)
+			// `{}` here means every own property was non-enumerable or unserializable
+			// (a `Response`, a class instance) — the empty object is the bug, so say so.
+			if (json !== undefined && json !== "{}") return json
+		} catch {
+			// Circular, or a getter that throws. Fall through to the constructor name.
+		}
+		return `non-serializable ${error.constructor?.name ?? "object"} thrown`
+	}
+	return `${typeof error} thrown: ${String(error)}`
+}
 
 type Signal = "traces" | "logs" | "metrics"
 
@@ -197,7 +240,7 @@ async function ingest(
 		// Effect *defect* — no `error.type`, no 4xx suppression, and a span reading
 		// only "The connection was closed." It is a caller outcome, so 400 it.
 		return {
-			response: text(`read ${signal} body: ${(error as Error).message}`, 400),
+			response: text(`read ${signal} body: ${describeThrown(error)}`, 400),
 			accepted: 0,
 			requestBytes: 0,
 		}
@@ -210,7 +253,7 @@ async function ingest(
 		decoded = decodeOtlp(signal, raw, contentType, contentEncoding)
 	} catch (error) {
 		return {
-			response: text(`decode ${signal}: ${(error as Error).message}`, 400),
+			response: text(`decode ${signal}: ${describeThrown(error)}`, 400),
 			accepted: 0,
 			requestBytes,
 		}
@@ -235,7 +278,7 @@ async function ingest(
 		const status = error instanceof OtlpFieldError ? 400 : 500
 		const stage = status === 400 ? "decode" : "encode"
 		return {
-			response: text(`${stage} ${signal}: ${(error as Error).message}`, status),
+			response: text(`${stage} ${signal}: ${describeThrown(error)}`, status),
 			accepted: 0,
 			requestBytes,
 		}
@@ -266,7 +309,7 @@ async function ingest(
 				db.exec(statement.sql)
 			} catch (error) {
 				return {
-					response: text(`chDB insert (${batch.datasource}): ${(error as Error).message}`, 500),
+					response: text(`chDB insert (${batch.datasource}): ${describeThrown(error)}`, 500),
 					accepted,
 					requestBytes,
 				}
@@ -364,7 +407,7 @@ async function handleQuery(db: Chdb, authority: RetiredDayAuthority, req: Reques
 		// and a 5xx would make the shared warehouse executor classify it as a
 		// transient upstream error and retry the identical query.
 		return {
-			response: text(`query failed: ${(error as Error).message}`, 400),
+			response: text(`query failed: ${describeThrown(error)}`, 400),
 			rowCount: 0,
 			durationMs: Math.round(performance.now() - started),
 			sql,
@@ -409,6 +452,12 @@ type SpanRunner = <A>(effect: Effect.Effect<A>) => Promise<A>
 // hand back to the client in `recoverResponse`. (Failing with a bare `Response`
 // recorded an empty `{}` — a `Response` has no enumerable own fields — which lost
 // the cause entirely and bucketed every failure under one "Error" fingerprint.)
+/** A rejection out of `ingest`, carried as a typed failure so it becomes a 500
+ *  with a real message rather than an untyped defect. */
+class IngestFailed extends Schema.TaggedError<IngestFailed>()("@maple/cli/IngestFailed", {
+	message: Schema.String,
+}) {}
+
 class IngestRejected extends Schema.TaggedError<IngestRejected>()("@maple/cli/IngestRejected", {
 	response: Schema.instanceOf(Response),
 	status: Schema.Number,
@@ -449,8 +498,22 @@ const ingestSpan = (
 	runSpan(
 		recoverResponse(
 			Effect.gen(function* () {
-				const { response, accepted, requestBytes } = yield* Effect.promise(() =>
-					ingest(db, authority, eventing, signal, req),
+				// `Effect.promise` is for promises that cannot reject, and `ingest`
+				// can: it awaits the request body and drives chDB. A rejection there
+				// became a DEFECT, which `recoverResponse`'s `Effect.match` does not
+				// catch — so it escaped as an untyped, unlabelled span error instead of
+				// the 500 the caller should have received.
+				const { response, accepted, requestBytes } = yield* Effect.tryPromise({
+					try: () => ingest(db, authority, eventing, signal, req),
+					catch: (error): IngestFailed => new IngestFailed({ message: describeThrown(error) }),
+				}).pipe(
+					Effect.catchTag("@maple/cli/IngestFailed", (error) =>
+						Effect.succeed({
+							response: text(`ingest ${signal}: ${error.message}`, 500),
+							accepted: 0,
+							requestBytes: 0,
+						}),
+					),
 				)
 				yield* Effect.annotateCurrentSpan({
 					"http.request.body.size": requestBytes,
@@ -489,7 +552,9 @@ const querySpan = (
 					"db.duration_ms": durationMs,
 					"result.rowCount": rowCount,
 					"http.response.status_code": response.status,
-					...(sql ? { "db.query.text": truncateSql(sql), "db.query.length": sql.length } : {}),
+					...(sql
+						? { "db.query.text": truncateSql(sql), "db.query.length": sql.length }
+						: undefined),
 				})
 				return yield* recordServerResponse(response)
 			}).pipe(
@@ -610,8 +675,8 @@ const handleRetirement = async (
 	} catch {
 		return text("invalid JSON body", 400)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
+	if (!Predicate.isObject(body)) return text("invalid body", 400)
+	const record = body
 	const keys = Object.keys(record).sort().join(",")
 	if (keys !== "archiveDir,rangeDate,sealingLagHours") return text("invalid retirement fields", 400)
 	if (
@@ -658,9 +723,9 @@ const handleCheckpointBackup = async (
 	} catch (error) {
 		return invalidJsonResponse(error)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
-	if (Object.keys(record).sort().join(",") !== "checkpointId" || typeof record.checkpointId !== "string")
+	if (!Predicate.isObject(body)) return text("invalid body", 400)
+	const record = body
+	if (Object.keys(record).sort().join(",") !== "checkpointId" || !Predicate.isString(record.checkpointId))
 		return text("invalid checkpoint fields", 400)
 	if (!CHECKPOINT_ID.test(record.checkpointId)) return text("invalid checkpoint ID", 400)
 	try {
@@ -729,6 +794,9 @@ const eventConsumerErrorResponse = (error: unknown): Response => {
 	return text(`event consumer operation failed: ${message}`, 500)
 }
 
+const isRequestRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
 const handleConsumerRegistration = async (
 	eventing: LocalEventingRuntime,
 	gate: RequestQuiescenceGate,
@@ -743,16 +811,16 @@ const handleConsumerRegistration = async (
 	} catch (error) {
 		return invalidJsonResponse(error)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
+	if (!isRequestRecord(body)) return text("invalid body", 400)
+	const record = body
+	const consumerId = record.consumerId
+	const startAt = record.startAt
 	if (
 		Object.keys(record).sort().join(",") !== "consumerId,startAt" ||
-		typeof record.consumerId !== "string" ||
-		(record.startAt !== "beginning" && record.startAt !== "latest")
+		!Schema.is(Schema.String)(consumerId) ||
+		(startAt !== "beginning" && startAt !== "latest")
 	)
 		return text("invalid event consumer registration fields", 400)
-	const consumerId = record.consumerId as string
-	const startAt = record.startAt as "beginning" | "latest"
 	return admitted(gate, async () => {
 		try {
 			return json(eventing.registerConsumer(consumerId, startAt), 201)
@@ -776,13 +844,14 @@ const handleConsumerDisable = async (
 	} catch (error) {
 		return invalidJsonResponse(error)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
-	if (Object.keys(record).join(",") !== "consumerId" || typeof record.consumerId !== "string")
+	if (!isRequestRecord(body)) return text("invalid body", 400)
+	const record = body
+	const consumerId = record.consumerId
+	if (Object.keys(record).join(",") !== "consumerId" || !Schema.is(Schema.String)(consumerId))
 		return text("invalid event consumer disable fields", 400)
 	return admitted(gate, async () => {
 		try {
-			return json(eventing.disableConsumer(record.consumerId as string))
+			return json(eventing.disableConsumer(consumerId))
 		} catch (error) {
 			return eventConsumerErrorResponse(error)
 		}
@@ -803,24 +872,21 @@ const handleConsumerClaim = async (
 	} catch (error) {
 		return invalidJsonResponse(error)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
+	if (!isRequestRecord(body)) return text("invalid body", 400)
+	const record = body
+	const consumerId = record.consumerId
+	const limit = record.limit
+	const leaseSeconds = record.leaseSeconds
 	if (
 		Object.keys(record).sort().join(",") !== "consumerId,leaseSeconds,limit" ||
-		typeof record.consumerId !== "string" ||
-		typeof record.limit !== "number" ||
-		typeof record.leaseSeconds !== "number"
+		!Schema.is(Schema.String)(consumerId) ||
+		!Schema.is(Schema.Number)(limit) ||
+		!Schema.is(Schema.Number)(leaseSeconds)
 	)
 		return text("invalid event consumer claim fields", 400)
 	return admitted(gate, async () => {
 		try {
-			return json(
-				eventing.claimReady(
-					record.consumerId as string,
-					record.limit as number,
-					record.leaseSeconds as number,
-				),
-			)
+			return json(eventing.claimReady(consumerId, limit, leaseSeconds))
 		} catch (error) {
 			return eventConsumerErrorResponse(error)
 		}
@@ -841,24 +907,21 @@ const handleConsumerAcknowledgement = async (
 	} catch (error) {
 		return invalidJsonResponse(error)
 	}
-	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
-	const record = body as Record<string, unknown>
+	if (!isRequestRecord(body)) return text("invalid body", 400)
+	const record = body
+	const consumerId = record.consumerId
+	const leaseToken = record.leaseToken
+	const throughSequence = record.throughSequence
 	if (
 		Object.keys(record).sort().join(",") !== "consumerId,leaseToken,throughSequence" ||
-		typeof record.consumerId !== "string" ||
-		typeof record.leaseToken !== "string" ||
-		typeof record.throughSequence !== "number"
+		!Schema.is(Schema.String)(consumerId) ||
+		!Schema.is(Schema.String)(leaseToken) ||
+		!Schema.is(Schema.Number)(throughSequence)
 	)
 		return text("invalid event consumer acknowledgement fields", 400)
 	return admitted(gate, async () => {
 		try {
-			return json(
-				eventing.acknowledgeClaim(
-					record.consumerId as string,
-					record.leaseToken as string,
-					record.throughSequence as number,
-				),
-			)
+			return json(eventing.acknowledgeClaim(consumerId, leaseToken, throughSequence))
 		} catch (error) {
 			return eventConsumerErrorResponse(error)
 		}

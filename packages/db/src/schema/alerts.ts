@@ -33,6 +33,18 @@ export const alertDestinations = pgTable(
 		secretTag: text("secret_tag").notNull(),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true, mode: "date" }),
 		lastTestError: text("last_test_error"),
+		/**
+		 * Consecutive *terminal* delivery failures (`retry: "never"` — a provider
+		 * 4xx, revoked credentials, a deleted channel). Reset to 0 by any
+		 * successful delivery and by an edit that could have fixed the config.
+		 * A retryable failure (5xx/429/timeout) does not touch it: those are the
+		 * provider having a bad minute, not the destination being broken.
+		 */
+		consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+		lastFailureAt: timestamp("last_failure_at", { withTimezone: true, mode: "date" }),
+		/** Set when the counter crossed the auto-disable threshold. */
+		disabledAt: timestamp("disabled_at", { withTimezone: true, mode: "date" }),
+		disabledReason: text("disabled_reason"),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 		createdBy: text("created_by").notNull(),

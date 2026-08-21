@@ -121,7 +121,7 @@ function compileFormula(expression: string): {
 		"-": 1,
 		"*": 2,
 		"/": 2,
-	}
+	} satisfies Record<FormulaOperator, number>
 
 	let previousToken: FormulaToken | null = null
 

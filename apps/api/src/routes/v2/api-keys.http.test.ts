@@ -10,8 +10,9 @@ import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglit
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
-import { ApiV2RateLimiter, type ApiV2RateLimiterShape } from "@/services/auth/ApiV2RateLimiter"
+import { ApiV2RateLimiter, type ApiV2RateLimiterApi } from "@/services/auth/ApiV2RateLimiter"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -48,7 +49,7 @@ const testConfig = () =>
 	)
 
 const makeHarness = (
-	checkRateLimit: ApiV2RateLimiterShape["check"] = () => Effect.succeed("allowed" as const),
+	checkRateLimit: ApiV2RateLimiterApi["check"] = () => Effect.succeed("allowed" as const),
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
@@ -56,6 +57,7 @@ const makeHarness = (
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
@@ -92,9 +94,11 @@ const makeHarness = (
 			new Request(`http://maple.test${path}`, {
 				method,
 				headers: {
-					...(options.token !== undefined ? { authorization: `Bearer ${options.token}` } : {}),
-					...(options.body !== undefined ? { "content-type": "application/json" } : {}),
-					...(options.origin !== undefined ? { origin: options.origin } : {}),
+					...(options.token !== undefined
+						? { authorization: `Bearer ${options.token}` }
+						: undefined),
+					...(options.body !== undefined ? { "content-type": "application/json" } : undefined),
+					...(options.origin !== undefined ? { origin: options.origin } : undefined),
 					...options.headers,
 				},
 				body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -124,7 +128,9 @@ const makeHarness = (
 					name: scopes === undefined ? "root-key" : `scoped:${scopes.join(",")}`,
 					scopes,
 					kind,
-					...(options.metadataJson !== undefined ? { metadataJson: options.metadataJson } : {}),
+					...(options.metadataJson !== undefined
+						? { metadataJson: options.metadataJson }
+						: undefined),
 				})
 			}),
 		)
@@ -279,6 +285,54 @@ describe("v2 api_keys over HTTP", () => {
 		const response = await harness.request("GET", "/v2/api_keys", { token: sessionToken })
 		expect(response.status).toBe(200)
 		expect(rateLimitChecks).toBe(0)
+		await harness.dispose()
+	})
+
+	// `x-maple-org-id` names an organization explicitly instead of relying on the
+	// credential's own. This deployment is self-hosted, which has no membership
+	// directory to check a selection against — so the header is REJECTED rather
+	// than ignored. Silently ignoring it is the failure that would render one
+	// organization's data under another's name.
+	it("rejects an organization selection it cannot verify, in the v2 envelope", async () => {
+		const harness = makeHarness()
+		const sessionToken = await harness.bootstrapSession()
+
+		const { status, body } = await harness.request("GET", "/v2/api_keys", {
+			token: sessionToken,
+			headers: { "x-maple-org-id": "org_other" },
+		})
+
+		// 403, not the 401 a missing organization produces: the credential is fine.
+		expect(status).toBe(403)
+		expect((body as { error?: { code?: string } }).error?.code).toBe("organization_access_denied")
+		await harness.dispose()
+	})
+
+	it("serves the credential's own organization when the header names it", async () => {
+		const harness = makeHarness()
+		const sessionToken = await harness.bootstrapSession()
+
+		const { status } = await harness.request("GET", "/v2/api_keys", {
+			token: sessionToken,
+			// The free no-op, which is what lets a client send the header always.
+			headers: { "x-maple-org-id": "default" },
+		})
+
+		expect(status).toBe(200)
+		await harness.dispose()
+	})
+
+	it("rejects an organization selection made with an API key", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+
+		const { status, body } = await harness.request("GET", "/v2/api_keys", {
+			token: key.secret,
+			headers: { "x-maple-org-id": "org_other" },
+		})
+
+		expect(status).toBe(403)
+		expect((body as { error?: { code?: string } }).error?.code).toBe("organization_access_denied")
 		await harness.dispose()
 	})
 

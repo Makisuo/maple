@@ -56,6 +56,12 @@ export const V2ErrorIssue = Schema.Struct({
 	last_seen_at: Timestamp,
 	occurrence_count: Schema.Number,
 	resolved_at: Schema.NullOr(Timestamp),
+	// Fix history, so a consumer can tell "never triaged" from "fixed before and
+	// came back" without replaying the event log.
+	last_resolved_at: Schema.NullOr(Timestamp),
+	last_regressed_at: Schema.NullOr(Timestamp),
+	regression_count: Schema.Number,
+	resolved_versions: Schema.Array(Schema.String),
 	snooze_until: Schema.NullOr(Timestamp),
 	archived_at: Schema.NullOr(Timestamp),
 	has_open_incident: Schema.Boolean,
@@ -113,6 +119,13 @@ export const V2ErrorIssueListQuery = Schema.Struct({
 	severity: Schema.optional(Schema.Union([IssueSeverity, Schema.Literal("unset")])),
 	kind: Schema.optional(IssueKind),
 	service_name: Schema.optional(Schema.String),
+	// Comma-separated fingerprint hashes. The unified errors list ranks
+	// fingerprints by warehouse volume first, then asks for exactly those
+	// issues — the reverse of the usual "list issues, then look up volume".
+	// A repeated param would be the other idiom; a delimited string keeps the
+	// v2 query surface to plain scalars, and these hashes are decimal digits so
+	// the delimiter is never ambiguous.
+	fingerprint_hash: Schema.optional(Schema.String),
 	// Only issues observed in this deployment environment (resolved against the
 	// warehouse's error events, scoped by start_time/end_time when provided).
 	// Alert-kind issues carry no environment and are excluded when this is set.

@@ -14,7 +14,7 @@ const AUTUMN_TRACK_PATH: &str = "/v1/balances.track";
 const AUTUMN_CHECK_PATH: &str = "/v1/balances.check";
 const AUTUMN_FINALIZE_PATH: &str = "/v1/balances.finalize";
 
-pub struct UsageEvent {
+pub(crate) struct UsageEvent {
     pub org_id: String,
     pub feature_id: &'static str,
     /// Quantity to bill for this event. Unit depends on `feature_id`: GB for
@@ -23,7 +23,7 @@ pub struct UsageEvent {
 }
 
 #[derive(Clone)]
-pub struct AutumnTracker {
+pub(crate) struct AutumnTracker {
     tx: mpsc::UnboundedSender<UsageEvent>,
 }
 
@@ -36,9 +36,9 @@ struct TrackRequest<'a> {
 }
 
 impl AutumnTracker {
-    pub fn spawn(secret_key: String, api_url: &str, flush_interval_secs: u64) -> Self {
+    pub(crate) fn spawn(secret_key: String, api_url: &str, flush_interval_secs: u64) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        let api_url = api_url.trim_end_matches('/').to_string();
+        let api_url = api_url.trim_end_matches('/').to_owned();
         let flush_interval = Duration::from_secs(flush_interval_secs);
 
         tokio::spawn(flush_loop(rx, secret_key, api_url, flush_interval));
@@ -48,12 +48,12 @@ impl AutumnTracker {
         Self { tx }
     }
 
-    pub fn track(&self, org_id: &str, feature_id: &'static str, value: f64) {
-        let _ = self.tx.send(UsageEvent {
-            org_id: org_id.to_string(),
+    pub(crate) fn track(&self, org_id: &str, feature_id: &'static str, value: f64) {
+        drop(self.tx.send(UsageEvent {
+            org_id: org_id.to_owned(),
             feature_id,
             value,
-        });
+        }));
     }
 }
 
@@ -92,6 +92,12 @@ impl PendingUsage {
     }
 }
 
+#[expect(
+    clippy::cognitive_complexity,
+    clippy::too_many_lines,
+    reason = "a `select!` loop whose arms are the accumulator's whole state machine; splitting an \
+              arm out hides which branch mutates what"
+)]
 async fn flush_loop(
     mut rx: mpsc::UnboundedReceiver<UsageEvent>,
     secret_key: String,
@@ -143,8 +149,8 @@ async fn flush_loop(
                         "peer.service" = "autumn",
                     );
                     let result: Result<reqwest::Response, reqwest::Error> = client
-                        .post(format!("{}{}", api_url, AUTUMN_TRACK_PATH))
-                        .header("Authorization", format!("Bearer {}", secret_key))
+                        .post(format!("{api_url}{AUTUMN_TRACK_PATH}"))
+                        .header("Authorization", format!("Bearer {secret_key}"))
                         .header("x-api-version", AUTUMN_API_VERSION)
                         .json(&body)
                         .send()
@@ -218,28 +224,25 @@ async fn flush_loop(
             }
 
             event = rx.recv() => {
-                match event {
-                    Some(event) => {
-                        let pending = accumulator
-                            .entry((event.org_id, event.feature_id))
-                            .or_insert_with(|| PendingUsage::new(0.0));
-                        if pending.sealed {
-                            pending.queued_value += event.value;
-                        } else {
-                            pending.value += event.value;
-                        }
+                if let Some(event) = event {
+                    let pending = accumulator
+                        .entry((event.org_id, event.feature_id))
+                        .or_insert_with(|| PendingUsage::new(0.0));
+                    if pending.sealed {
+                        pending.queued_value += event.value;
+                    } else {
+                        pending.value += event.value;
                     }
-                    None => {
-                        // Channel closed, do a final flush attempt
-                        if !accumulator.is_empty() {
-                            info!(
-                                pending_entries = accumulator.len(),
-                                "Autumn tracker shutting down, attempting final flush"
-                            );
-                            flush_all(&client, &secret_key, &api_url, &mut accumulator).await;
-                        }
-                        break;
+                } else {
+                    // Channel closed, do a final flush attempt
+                    if !accumulator.is_empty() {
+                        info!(
+                            pending_entries = accumulator.len(),
+                            "Autumn tracker shutting down, attempting final flush"
+                        );
+                        flush_all(&client, &secret_key, &api_url, &mut accumulator).await;
                     }
+                    break;
                 }
             }
         }
@@ -275,8 +278,8 @@ async fn flush_all(
             "peer.service" = "autumn",
         );
         let result: Result<reqwest::Response, reqwest::Error> = client
-            .post(format!("{}{}", api_url, AUTUMN_TRACK_PATH))
-            .header("Authorization", format!("Bearer {}", secret_key))
+            .post(format!("{api_url}{AUTUMN_TRACK_PATH}"))
+            .header("Authorization", format!("Bearer {secret_key}"))
             .header("x-api-version", AUTUMN_API_VERSION)
             .json(&body)
             .send()
@@ -319,8 +322,8 @@ async fn flush_all(
 /// storage; a failed storage write releases the lock. Plain `is_allowed` remains
 /// for replay payloads that belong to an already-metered browser session.
 #[derive(Clone)]
-pub struct AutumnEntitlements {
-    client: Client,
+pub(crate) struct AutumnEntitlements {
+    client: maple_ingest::telemetry::HttpClient,
     secret_key: String,
     api_url: String,
 }
@@ -351,11 +354,11 @@ struct FinalizeRequest<'a> {
 }
 
 #[derive(Debug)]
-pub struct AutumnReservation {
+pub(crate) struct AutumnReservation {
     lock_id: String,
 }
 
-pub enum AutumnReserveOutcome {
+pub(crate) enum AutumnReserveOutcome {
     Reserved(AutumnReservation),
     Denied,
     /// Autumn could not give a confirmed answer. The ingest path fails open and
@@ -364,8 +367,13 @@ pub enum AutumnReserveOutcome {
 }
 
 impl AutumnEntitlements {
-    pub fn new(client: Client, secret_key: String, api_url: &str) -> Self {
-        let api_url = api_url.trim_end_matches('/').to_string();
+    pub(crate) fn new(
+        client: impl Into<maple_ingest::telemetry::HttpClient>,
+        secret_key: String,
+        api_url: &str,
+    ) -> Self {
+        let client = client.into();
+        let api_url = api_url.trim_end_matches('/').to_owned();
         info!("Autumn native billing enforcement enabled");
 
         Self {
@@ -377,7 +385,7 @@ impl AutumnEntitlements {
 
     /// Check without consuming usage. Decisions are intentionally not cached:
     /// Autumn customer controls can change, or cross a limit, on any event.
-    pub async fn is_allowed(&self, org_id: &str, feature_id: &str) -> bool {
+    pub(crate) async fn is_allowed(&self, org_id: &str, feature_id: &str) -> bool {
         tracing::Span::current().record("maple.ingest.cache_hit", false);
         self.post_check(org_id, feature_id, None, None)
             .await
@@ -386,18 +394,21 @@ impl AutumnEntitlements {
     }
 
     /// Atomically check and reserve an exact usage quantity.
-    pub async fn reserve(
+    pub(crate) async fn reserve(
         &self,
         org_id: &str,
         feature_id: &str,
         value: f64,
     ) -> AutumnReserveOutcome {
         let lock_id = Uuid::new_v4().to_string();
-        let expires_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-            + 120_000;
+        let expires_at = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX)
+        .saturating_add(120_000);
         let lock = CheckLockRequest {
             lock_id: &lock_id,
             enabled: true,
@@ -416,7 +427,11 @@ impl AutumnEntitlements {
 
     /// Confirm a committed WAL write or release a failed one. A short retry
     /// handles transient downstream errors while the two-minute lock is valid.
-    pub async fn finalize(&self, reservation: &AutumnReservation, confirm: bool) -> bool {
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "one HTTP round trip plus the response classification it exists to do"
+    )]
+    pub(crate) async fn finalize(&self, reservation: &AutumnReservation, confirm: bool) -> bool {
         let action = if confirm { "confirm" } else { "release" };
         let body = FinalizeRequest {
             lock_id: &reservation.lock_id,
@@ -467,6 +482,10 @@ impl AutumnEntitlements {
         false
     }
 
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "one HTTP round trip plus the response classification it exists to do"
+    )]
     async fn post_check(
         &self,
         org_id: &str,
@@ -588,7 +607,7 @@ impl AutumnEntitlements {
 fn truncate_for_log(body: &str) -> String {
     const MAX: usize = 512;
     if body.len() <= MAX {
-        return body.to_string();
+        return body.to_owned();
     }
     // Step back to a char boundary so we never slice through a UTF-8 sequence.
     let mut end = MAX;
@@ -612,7 +631,8 @@ fn truncate_for_log(body: &str) -> String {
 /// control denies the next event. Older response shapes without `allowed` fall
 /// back to unlimited/overage/remaining for compatibility.
 fn decide_allowed(value: &serde_json::Value, required_balance: Option<f64>) -> Option<bool> {
-    let as_bool = |v: &serde_json::Value, key: &str| v.get(key).and_then(|x| x.as_bool());
+    let as_bool =
+        |v: &serde_json::Value, key: &str| v.get(key).and_then(serde_json::Value::as_bool);
 
     if let Some(allowed) = as_bool(value, "allowed") {
         return Some(allowed);
@@ -634,16 +654,19 @@ fn decide_allowed(value: &serde_json::Value, required_balance: Option<f64>) -> O
         }
         Some(serde_json::Value::Object(obj)) => {
             understood = true;
-            if obj.get("unlimited").and_then(|x| x.as_bool()) == Some(true) {
+            if obj.get("unlimited").and_then(serde_json::Value::as_bool) == Some(true) {
                 unlimited = true;
             }
-            if obj.get("overage_allowed").and_then(|x| x.as_bool()) == Some(true) {
+            if obj
+                .get("overage_allowed")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
                 overage = true;
             }
-            remaining = obj.get("remaining").and_then(|x| x.as_f64());
+            remaining = obj.get("remaining").and_then(serde_json::Value::as_f64);
         }
-        Some(serde_json::Value::Null) | None => {}
-        Some(_) => {}
+        _ => {}
     }
 
     if !understood {
@@ -803,7 +826,7 @@ mod tests {
     #[test]
     fn unrecognized_shape_returns_none() {
         assert_eq!(decide(r#"{"error": "internal", "code": 500}"#), None);
-        assert_eq!(decide(r#"{}"#), None);
+        assert_eq!(decide(r"{}"), None);
     }
 
     #[tokio::test]
@@ -811,12 +834,12 @@ mod tests {
         // Port 1 is closed => connection refused => we must fail open (allow),
         // never dropping customer data on a billing-provider outage.
         let entitlements =
-            AutumnEntitlements::new(Client::new(), "sk_test".to_string(), "http://127.0.0.1:1");
+            AutumnEntitlements::new(Client::new(), "sk_test".to_owned(), "http://127.0.0.1:1");
         assert!(entitlements.is_allowed("org_123", "logs").await);
     }
 
     async fn record_check(
-        State(tx): State<tokio::sync::mpsc::UnboundedSender<(serde_json::Value, Option<String>)>>,
+        State(tx): State<mpsc::UnboundedSender<(serde_json::Value, Option<String>)>>,
         headers: axum::http::HeaderMap,
         body: String,
     ) -> axum::Json<serde_json::Value> {
@@ -824,7 +847,7 @@ mod tests {
             .get("x-api-version")
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let _ = tx.send((serde_json::from_str(&body).unwrap(), api_version));
+        drop(tx.send((serde_json::from_str(&body).unwrap(), api_version)));
         axum::Json(serde_json::json!({
             "allowed": true,
             "balance": {
@@ -837,7 +860,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_uses_v23_canonical_route_and_header() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .unwrap();
@@ -851,7 +874,7 @@ mod tests {
 
         let entitlements = AutumnEntitlements::new(
             Client::new(),
-            "sk_test".to_string(),
+            "sk_test".to_owned(),
             &format!("http://{addr}"),
         );
         assert!(entitlements.is_allowed("org_123", "logs").await);
@@ -863,24 +886,24 @@ mod tests {
     }
 
     async fn record_atomic_check(
-        State(tx): State<tokio::sync::mpsc::UnboundedSender<(String, serde_json::Value)>>,
+        State(tx): State<mpsc::UnboundedSender<(String, serde_json::Value)>>,
         body: String,
     ) -> axum::Json<serde_json::Value> {
-        let _ = tx.send(("check".to_string(), serde_json::from_str(&body).unwrap()));
+        drop(tx.send(("check".to_owned(), serde_json::from_str(&body).unwrap())));
         axum::Json(serde_json::json!({ "allowed": true, "balance": 10 }))
     }
 
     async fn record_finalize(
-        State(tx): State<tokio::sync::mpsc::UnboundedSender<(String, serde_json::Value)>>,
+        State(tx): State<mpsc::UnboundedSender<(String, serde_json::Value)>>,
         body: String,
     ) -> axum::Json<serde_json::Value> {
-        let _ = tx.send(("finalize".to_string(), serde_json::from_str(&body).unwrap()));
+        drop(tx.send(("finalize".to_owned(), serde_json::from_str(&body).unwrap())));
         axum::Json(serde_json::json!({ "success": true }))
     }
 
     #[tokio::test]
     async fn reserve_tracks_exact_usage_under_a_lock_then_confirms() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .unwrap();
@@ -895,12 +918,13 @@ mod tests {
 
         let entitlements = AutumnEntitlements::new(
             Client::new(),
-            "sk_test".to_string(),
+            "sk_test".to_owned(),
             &format!("http://{addr}"),
         );
-        let reservation = match entitlements.reserve("org_123", "logs", 0.125).await {
-            AutumnReserveOutcome::Reserved(reservation) => reservation,
-            _ => panic!("usage should be reserved"),
+        let AutumnReserveOutcome::Reserved(reservation) =
+            entitlements.reserve("org_123", "logs", 0.125).await
+        else {
+            panic!("usage should be reserved")
         };
         assert!(entitlements.finalize(&reservation, true).await);
 
@@ -915,16 +939,18 @@ mod tests {
         assert_eq!(finalize["action"], "confirm");
     }
 
+    /// Every fake Autumn handler reports what it received down the same channel:
+    /// the decoded body, plus the `x-api-version` header if the client sent one.
+    type TrackSender = mpsc::UnboundedSender<(serde_json::Value, Option<String>)>;
+
     // One stable idempotency key per accumulated entry across retries.
 
     /// Stand-in for Autumn's `/v1/balances.track`. Records every body and API
     /// version it receives and answers with `status`, so a test can drive the
     /// flush loop through a failure and inspect what the retry sent.
     async fn record_track(
-        State((tx, status)): State<(
-            tokio::sync::mpsc::UnboundedSender<(serde_json::Value, Option<String>)>,
-            StatusCode,
-        )>,
+        State((tx, status)): State<(TrackSender, StatusCode)>,
+
         headers: axum::http::HeaderMap,
         body: String,
     ) -> StatusCode {
@@ -932,7 +958,7 @@ mod tests {
             .get("x-api-version")
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let _ = tx.send((serde_json::from_str(&body).unwrap(), api_version));
+        drop(tx.send((serde_json::from_str(&body).unwrap(), api_version)));
         status
     }
 
@@ -940,9 +966,9 @@ mod tests {
         status: StatusCode,
     ) -> (
         String,
-        tokio::sync::mpsc::UnboundedReceiver<(serde_json::Value, Option<String>)>,
+        mpsc::UnboundedReceiver<(serde_json::Value, Option<String>)>,
     ) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .unwrap();
@@ -957,10 +983,8 @@ mod tests {
     }
 
     async fn record_track_fail_once(
-        State((tx, attempts)): State<(
-            tokio::sync::mpsc::UnboundedSender<(serde_json::Value, Option<String>)>,
-            Arc<AtomicUsize>,
-        )>,
+        State((tx, attempts)): State<(TrackSender, Arc<AtomicUsize>)>,
+
         headers: axum::http::HeaderMap,
         body: String,
     ) -> StatusCode {
@@ -968,7 +992,7 @@ mod tests {
             .get("x-api-version")
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let _ = tx.send((serde_json::from_str(&body).unwrap(), api_version));
+        drop(tx.send((serde_json::from_str(&body).unwrap(), api_version)));
         if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
             StatusCode::INTERNAL_SERVER_ERROR
         } else {
@@ -978,9 +1002,9 @@ mod tests {
 
     async fn spawn_fail_once_autumn_stub() -> (
         String,
-        tokio::sync::mpsc::UnboundedReceiver<(serde_json::Value, Option<String>)>,
+        mpsc::UnboundedReceiver<(serde_json::Value, Option<String>)>,
     ) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .unwrap();
@@ -999,7 +1023,7 @@ mod tests {
         // The bug this pins: a per-attempt key means Autumn cannot recognize the
         // retry of a track it already committed, and bills the usage twice.
         let (api_url, mut rx) = spawn_autumn_stub(StatusCode::INTERNAL_SERVER_ERROR).await;
-        let tracker = AutumnTracker::spawn("sk_test".to_string(), &api_url, 1);
+        let tracker = AutumnTracker::spawn("sk_test".to_owned(), &api_url, 1);
         tracker.track("org_retry", "logs", 1.5);
 
         let (first, first_api_version) = rx.recv().await.expect("first flush attempt");
@@ -1024,7 +1048,7 @@ mod tests {
         // usage for the same (org, feature) must not reuse its key — Autumn
         // would dedupe it away and we'd under-bill.
         let (api_url, mut rx) = spawn_autumn_stub(StatusCode::OK).await;
-        let tracker = AutumnTracker::spawn("sk_test".to_string(), &api_url, 1);
+        let tracker = AutumnTracker::spawn("sk_test".to_owned(), &api_url, 1);
 
         tracker.track("org_fresh", "traces", 2.0);
         let (first, first_api_version) = rx.recv().await.expect("first flush");
@@ -1041,7 +1065,7 @@ mod tests {
     #[tokio::test]
     async fn usage_after_a_failed_flush_waits_for_a_fresh_batch_key() {
         let (api_url, mut rx) = spawn_fail_once_autumn_stub().await;
-        let tracker = AutumnTracker::spawn("sk_test".to_string(), &api_url, 1);
+        let tracker = AutumnTracker::spawn("sk_test".to_owned(), &api_url, 1);
 
         tracker.track("org_queued", "metrics", 1.5);
         let (failed, _) = rx.recv().await.expect("failed first flush");

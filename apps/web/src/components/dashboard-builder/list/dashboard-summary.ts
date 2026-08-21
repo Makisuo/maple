@@ -47,7 +47,7 @@ export const ENDPOINT_DOMAIN: Record<string, DashboardDomain> = {
 	metrics_summary: "Metrics",
 	custom_timeseries: "Metrics",
 	custom_breakdown: "Metrics",
-}
+} satisfies Record<string, DashboardDomain>
 
 /**
  * A query-builder draft's signal, as a domain.
@@ -60,7 +60,7 @@ const DRAFT_SOURCE_DOMAIN: Record<string, DashboardDomain> = {
 	traces: "Traces",
 	logs: "Logs",
 	metrics: "Metrics",
-}
+} satisfies Record<string, DashboardDomain>
 
 /**
  * What an empty query widget claims to read. Matches `createQueryDraft`'s own

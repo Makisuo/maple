@@ -22,8 +22,6 @@ import {
 	AlertCheckStatus as AlertCheckStatusSchema,
 	AlertValidationError,
 	OrgId,
-	RoleName,
-	UserId,
 	type AlertIncidentId,
 	type AlertRuleId,
 	type ManagedWarehouseError,
@@ -40,7 +38,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { makeDbExecute } from "@/platform/db-execute"
 import { makePersistenceError } from "./alert-persistence"
-import type { TenantContext } from "@/services/auth/AuthService"
+import { systemTenant } from "./system-tenant"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 export interface AlertChecksSummaryPoint {
@@ -80,9 +78,11 @@ export interface ListAlertIncidentsOptions {
 export interface ListAlertDeliveryEventsOptions {
 	readonly limit?: number
 	readonly offset?: number
+	readonly incidentId?: AlertIncidentId
+	readonly ruleId?: AlertRuleId
 }
 
-export interface AlertReadModelsServiceShape {
+export interface AlertReadModelsServiceApi {
 	readonly listIncidents: (
 		orgId: OrgId,
 		options?: ListAlertIncidentsOptions,
@@ -139,8 +139,6 @@ const decodeAlertIncidentStatusSync = Schema.decodeUnknownSync(AlertIncidentStat
 const decodeAlertEventTypeSync = Schema.decodeUnknownSync(AlertEventTypeSchema)
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.errorIssueId)
 const decodeAlertDeliveryStatusSync = Schema.decodeUnknownSync(AlertDeliveryStatus)
-const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 
 type IsoDateTimeValue = Schema.Schema.Type<typeof AlertDestinationDocument.fields.createdAt>
 
@@ -182,7 +180,7 @@ const toTinybirdSqlDateTime64 = (iso: string) => {
 
 export class AlertReadModelsService extends Context.Service<
 	AlertReadModelsService,
-	AlertReadModelsServiceShape
+	AlertReadModelsServiceApi
 >()("@maple/api/services/alerts/AlertReadModelsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -190,21 +188,14 @@ export class AlertReadModelsService extends Context.Service<
 
 		const dbExecute = makeDbExecute(database, "AlertReadModelsService", makePersistenceError)
 
-		const systemTenant = (orgId: OrgId): TenantContext => ({
-			orgId,
-			userId: decodeUserIdSync("system-alerting"),
-			roles: [decodeRoleNameSync("root")],
-			authMode: "self_hosted",
-		})
-
 		const listIncidents = Effect.fn("AlertsService.listIncidents")(function* (
 			orgId: OrgId,
 			options: ListAlertIncidentsOptions = {},
 		) {
 			yield* Effect.annotateCurrentSpan({
 				orgId,
-				...(options.status !== undefined ? { status: options.status } : {}),
-				...(options.ruleId !== undefined ? { ruleId: options.ruleId } : {}),
+				...(options.status !== undefined ? { status: options.status } : undefined),
+				...(options.ruleId !== undefined ? { ruleId: options.ruleId } : undefined),
 			})
 			const conditions = [
 				eq(alertIncidents.orgId, orgId),
@@ -302,16 +293,16 @@ export class AlertReadModelsService extends Context.Service<
 				{
 					orgId,
 					ruleId,
-					...(hasGroupKey ? { groupKey: options.groupKey } : {}),
-					...(options.status != null ? { status: options.status } : {}),
-					...(since != null ? { since } : {}),
-					...(until != null ? { until } : {}),
+					...(hasGroupKey ? { groupKey: options.groupKey } : undefined),
+					...(options.status != null ? { status: options.status } : undefined),
+					...(since != null ? { since } : undefined),
+					...(until != null ? { until } : undefined),
 					...(beforeTimestamp != null
 						? {
 								beforeTimestamp,
 								beforeGroupKey: options.beforeGroupKey ?? "",
 							}
-						: {}),
+						: undefined),
 				},
 			)
 
@@ -473,7 +464,17 @@ export class AlertReadModelsService extends Context.Service<
 				db
 					.select()
 					.from(alertDeliveryEvents)
-					.where(eq(alertDeliveryEvents.orgId, orgId))
+					.where(
+						and(
+							eq(alertDeliveryEvents.orgId, orgId),
+							options.incidentId === undefined
+								? undefined
+								: eq(alertDeliveryEvents.incidentId, options.incidentId),
+							options.ruleId === undefined
+								? undefined
+								: eq(alertDeliveryEvents.ruleId, options.ruleId),
+						),
+					)
 					.orderBy(desc(alertDeliveryEvents.createdAt), desc(alertDeliveryEvents.id))
 					.limit(options.limit ?? 100)
 					.offset(options.offset ?? 0),
@@ -525,7 +526,7 @@ export class AlertReadModelsService extends Context.Service<
 			listRuleChecks,
 			summarizeRuleChecks,
 			listDeliveryEvents,
-		} satisfies AlertReadModelsServiceShape
+		} satisfies AlertReadModelsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

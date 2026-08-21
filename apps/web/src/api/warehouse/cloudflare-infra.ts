@@ -608,7 +608,7 @@ export const getCloudflareZoneBreakdown = Effect.fn("QueryEngine.getCloudflareZo
 					startTime: input.startTime,
 					endTime: input.endTime,
 					bucketSeconds: input.bucketSeconds,
-					...(input.limit === undefined ? {} : { limit: input.limit }),
+					...(!(input.limit === undefined) ? { limit: input.limit } : undefined),
 					...cloudflareFilterPayload(input),
 				}),
 			})
@@ -722,14 +722,14 @@ export const getCloudflareTopTraffic = Effect.fn("Integrations.getCloudflareTopT
 					dimension: input.dimension,
 					startTime: input.startTime,
 					endTime: input.endTime,
-					...(input.limit === undefined ? {} : { limit: input.limit }),
+					...(!(input.limit === undefined) ? { limit: input.limit } : undefined),
 					...cloudflareFilterPayload({
 						hosts: input.hosts,
 						countries: input.countries,
 						methods: input.methods,
 						cacheStatuses: input.cacheStatuses,
 					}),
-					...(input.contains ? { contains: input.contains } : {}),
+					...(input.contains ? { contains: input.contains } : undefined),
 				}),
 			})
 		}),

@@ -18,8 +18,9 @@
 //
 // Deliberately NOT here:
 //   - Renderers, config panels and icons. They are DOM/Recharts through
-//     `@maple/ui`, and `apps/mobile` is React Native, so a component package
-//     would be web-only anyway. The web side keys its UI off `PanelType`
+//     `@maple/ui`, so a component package would be web-only anyway — the
+//     native app (`apps/ios`) renders its own. The web side keys its UI off
+//     `PanelType`
 //     (`apps/web/src/components/dashboard-builder/widgets/types/`).
 //   - `QueryBuilderQueryDraftSchema`. Alert rules persist it too, so it is a
 //     shared query primitive rather than a widget concept; it stays in

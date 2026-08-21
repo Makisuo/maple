@@ -21,12 +21,13 @@ import {
 	type PlanetScaleEventRow,
 } from "@maple/db"
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or } from "drizzle-orm"
-import { Cause, Clock, Context, Duration, Effect, Layer, Schema } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Layer, Schedule, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"
 import { insertPlanetScaleEvent } from "./planetscale/webhook-events"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /**
  * PlanetScale management-API poller: keeps the org's database/branch inventory
@@ -60,6 +61,25 @@ const DEPLOY_REQUESTS_CONCURRENCY = 2
 /** Tick-overlap lease. */
 const LEASE_MS = Duration.toMillis(Duration.minutes(4))
 const REQUEST_TIMEOUT = Duration.seconds(15)
+/**
+ * Extra attempts after a timed-out request, before the call fails. A PlanetScale
+ * slowdown timed out the inventory listing for 5+ orgs at once; a single retry
+ * rides out a stall that short without extending the tick meaningfully (worst
+ * case 3 × 15s for one path). Jittered so every org's tick doesn't re-hit a
+ * struggling API in lockstep. Only timeouts retry — an HTTP error is returned by
+ * the caller's own taxonomy (revoked / upstream) and must not be replayed.
+ */
+const REQUEST_TIMEOUT_RETRIES = 2
+const REQUEST_RETRY_BASE_DELAY = Duration.millis(500)
+/**
+ * Tagged onto the exhausted-timeout failure so the tick can tell "PlanetScale is
+ * slow" from "PlanetScale rejected us" without matching on a message string. A
+ * genuine upstream 504 classifies the same way, which is correct — both are the
+ * provider failing to answer in time.
+ */
+const UPSTREAM_TIMEOUT_STATUS = 504
+const isUpstreamTimeout = (error: { readonly _tag: string; readonly status?: number }) =>
+	error._tag === "@maple/http/errors/IntegrationsUpstreamError" && error.status === UPSTREAM_TIMEOUT_STATUS
 const ORG_CONCURRENCY = 3
 const INVENTORY_WRITE_CONCURRENCY = 4
 /** Pagination caps — a runaway org can't make a tick unbounded. */
@@ -96,7 +116,7 @@ export interface PlanetScaleListEventsOptions {
 	readonly cursor?: string | undefined
 }
 
-export interface PlanetScaleServiceShape {
+export interface PlanetScaleServiceApi {
 	readonly pollAllOrgs: () => Effect.Effect<PlanetScalePollSummary, IntegrationsPersistenceError>
 	/** The org's (non-deleted) database inventory, for the API surface. */
 	readonly listDatabases: (
@@ -294,9 +314,9 @@ const DEPLOY_BACKFILL_VERB: Record<string, string> = {
 	errored: "failed",
 	reverted: "was reverted",
 	closed: "closed",
-}
+} satisfies Record<string, string>
 
-export class PlanetScaleService extends Context.Service<PlanetScaleService, PlanetScaleServiceShape>()(
+export class PlanetScaleService extends Context.Service<PlanetScaleService, PlanetScaleServiceApi>()(
 	"@maple/api/services/PlanetScaleService",
 	{
 		make: Effect.gen(function* () {
@@ -328,15 +348,20 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 								cause: error,
 							}),
 					),
-					Effect.timeoutOrElse({
-						duration: REQUEST_TIMEOUT,
-						orElse: () =>
-							Effect.fail(
-								new IntegrationsUpstreamError({
-									message: `PlanetScale API request timed out: ${path}`,
-								}),
-							),
+					Effect.timeout(REQUEST_TIMEOUT),
+					Effect.retry({
+						while: (error) => error._tag === "TimeoutError",
+						times: REQUEST_TIMEOUT_RETRIES,
+						schedule: Schedule.exponential(REQUEST_RETRY_BASE_DELAY).pipe(Schedule.jittered),
 					}),
+					Effect.catchTag("TimeoutError", () =>
+						Effect.fail(
+							new IntegrationsUpstreamError({
+								message: `PlanetScale API request timed out: ${path}`,
+								status: UPSTREAM_TIMEOUT_STATUS,
+							}),
+						),
+					),
 				)
 			})
 
@@ -556,7 +581,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 											lastErrorAt: null,
 											leaseUntil: null,
 											updatedAt: new Date(now),
-											...(watermarkAt === null ? {} : { watermarkAt }),
+											...(!(watermarkAt === null) ? { watermarkAt } : undefined),
 										}
 									: {
 											lastError: error,
@@ -884,7 +909,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 											Effect.annotateLogs({
 												orgId: connection.orgId,
 												database: row.name,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 											Effect.map(() => 0),
 										),
@@ -912,7 +937,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 							: Effect.logWarning("PlanetScale deploy-request backfill failed for org").pipe(
 									Effect.annotateLogs({
 										orgId: connection.orgId,
-										error: Cause.pretty(cause),
+										error: summarizeCause(cause),
 									}),
 									Effect.map(() => 0),
 								),
@@ -945,20 +970,31 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					Effect.ignore,
 				)
 				// Fail inside a span so poll failures surface in find_errors, mirroring
-				// the Cloudflare poller's observeDatasetFailure seam.
-				yield* Effect.fail(result.error).pipe(
+				// the Cloudflare poller's observeDatasetFailure seam — EXCEPT an upstream
+				// timeout, which is a transient provider slowdown (theirs timed out 5+ orgs
+				// at once) that the next tick refreshes, not a Maple failure. That one is
+				// recorded on an Ok span as `error.type` + a Warn log, per CLAUDE.md's
+				// "only 5xx is Error" rule; both paths still log identically.
+				const timedOut = isUpstreamTimeout(result.error)
+				yield* (
+					timedOut
+						? Effect.annotateCurrentSpan({ "error.type": "upstream_timeout" })
+						: Effect.fail(result.error)
+				).pipe(
 					Effect.withSpan("PlanetScaleService.inventoryPollFailed", {
 						attributes: { orgId: connection.orgId },
 					}),
 					Effect.catchCause((cause) =>
-						Cause.hasInterruptsOnly(cause)
-							? Effect.interrupt
-							: Effect.logWarning("PlanetScale inventory refresh failed").pipe(
-									Effect.annotateLogs({
-										orgId: connection.orgId,
-										error: Cause.pretty(cause),
-									}),
-								),
+						Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.void,
+					),
+					Effect.andThen(
+						Effect.logWarning("PlanetScale inventory refresh failed").pipe(
+							Effect.annotateLogs({
+								orgId: connection.orgId,
+								"error.type": timedOut ? "upstream_timeout" : result.error._tag,
+								error: result.error.message,
+							}),
+						),
 					),
 				)
 				return { outcome: "failed" as const, deployEvents }
@@ -997,7 +1033,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 									: Effect.logWarning("PlanetScale org poll failed").pipe(
 											Effect.annotateLogs({
 												orgId: connection.orgId,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 											Effect.map(() => {
 												failures++
@@ -1216,7 +1252,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				listDatabases,
 				listEvents,
 				queryInsights,
-			} satisfies PlanetScaleServiceShape
+			} satisfies PlanetScaleServiceApi
 		}),
 	},
 ) {

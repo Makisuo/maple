@@ -1,4 +1,7 @@
 import { formatLatency, formatPercent } from "@maple/ui/lib/format"
+import { LatencyLineChart, QueryBuilderBarChart } from "@maple/ui/components/charts"
+import { ChartTooltipSuppressionProvider } from "@maple/ui/components/plot"
+import { LinkedCursorOverlay, linkedCursorChartProps, useLinkedCursor } from "@/hooks/use-linked-cursor"
 import {
 	useCallback,
 	useDeferredValue,
@@ -28,17 +31,10 @@ import { serviceMapViewPrefsAtomFamily } from "@/atoms/service-map-view-prefs-at
 import { Link } from "@tanstack/react-router"
 import { displayError } from "@/lib/error-messages"
 import { logClientError } from "@/lib/services/common/telemetry"
-import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
 
 import { cn } from "@maple/ui/lib/utils"
 import { getServiceColor, getValueHue } from "@maple/ui/lib/colors"
 import { latencyToneClass } from "@maple/ui/lib/latency-tone"
-import {
-	ChartContainer,
-	ChartTooltip,
-	ChartTooltipContent,
-	type ChartConfig,
-} from "@maple/ui/components/ui/chart"
 import { Popover, PopoverTrigger, PopoverContent } from "@maple/ui/components/ui/popover"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/components/ui/resizable"
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
@@ -52,7 +48,6 @@ import {
 } from "@maple/ui/components/ui/empty"
 import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
-import { formatBucketLabel } from "@maple/ui/lib/format"
 import {
 	ArrowRightIcon,
 	CloudflareIcon,
@@ -774,21 +769,6 @@ interface DatabaseDetailPanelProps {
 	onClose: () => void
 }
 
-const DB_QUERY_CHART_CONFIG = {
-	queryCount: {
-		label: "Queries",
-		color: "var(--chart-2)",
-	},
-	p50DurationMs: {
-		label: "P50",
-		color: "var(--chart-p50)",
-	},
-	p95DurationMs: {
-		label: "P95",
-		color: "var(--chart-p95)",
-	},
-} satisfies ChartConfig
-
 function pickDbSummaryBucketSeconds(durationSeconds: number): number {
 	if (durationSeconds <= 6 * 60 * 60) return 5 * 60
 	if (durationSeconds <= 24 * 60 * 60) return 15 * 60
@@ -808,6 +788,26 @@ function formatQueryLabel(value: string): string {
 	return `${collapsed.slice(0, 78)}…${collapsed.slice(-16)}`
 }
 
+/**
+ * Database query volume and latency over the same window.
+ *
+ * TWO plots, joined by the linked cursor, where this used to be one chart with a
+ * left "count" axis and a right "latency" axis. `@tanstack/charts` carries a
+ * single y scale per chart — `StoredChartSpec` has exactly `x` and `y`, and no
+ * mark can select a scale of its own — so a second axis is not expressible.
+ *
+ * That constraint landed somewhere better than a workaround. Every other place
+ * in the product that shows volume beside latency already does it this way:
+ * `MetricsGrid` on the service detail page, host detail, infra correlation, the
+ * Cloudflare zone panels. This chart was the outlier. Two plots also give each
+ * series a full readable range instead of one axis squashing the other, and the
+ * latency lines pick up the designated `--chart-p50`/`--chart-p95` tokens that
+ * carry the same meaning product-wide.
+ *
+ * What is genuinely lost: the two spikes no longer share a pixel row, so
+ * correlating them is a glance across a boundary rather than straight down. The
+ * linked cursor is what recovers most of that.
+ */
 function DbQueryActivityChart({
 	response,
 	waiting,
@@ -815,25 +815,26 @@ function DbQueryActivityChart({
 	response: ServiceDbQuerySummaryResponse | null
 	waiting: boolean
 }) {
-	const data = useMemo(
-		() =>
-			(response?.timeseries ?? []).map((point) => ({
-				...point,
-				queryCount: Math.round(point.estimatedQueryCount || point.queryCount),
-			})),
-		[response],
-	)
-	const axisContext = useMemo(() => {
-		if (data.length < 2) return { rangeMs: 0, bucketSeconds: undefined }
-		const first = new Date(data[0]!.bucket).getTime()
-		const second = new Date(data[1]!.bucket).getTime()
-		const last = new Date(data[data.length - 1]!.bucket).getTime()
-		const bucketMs = second - first
+	const { containerProps } = useLinkedCursor(true)
+
+	const { volumeRows, latencyRows } = useMemo(() => {
+		const points = response?.timeseries ?? []
 		return {
-			rangeMs: Number.isFinite(last - first) ? last - first : 0,
-			bucketSeconds: bucketMs > 0 && Number.isFinite(bucketMs) ? bucketMs / 1000 : undefined,
+			// One series named for what the bars are, so the chart's own legend and
+			// tooltip read "Queries" rather than a raw column name.
+			volumeRows: points.map((point) => ({
+				bucket: point.bucket,
+				Queries: Math.round(point.estimatedQueryCount || point.queryCount),
+			})),
+			// `LatencyLineChart` is a fixed-metric chart: it reads these exact keys
+			// and colours them from the shared percentile tokens.
+			latencyRows: points.map((point) => ({
+				bucket: point.bucket,
+				p50LatencyMs: point.p50DurationMs,
+				p95LatencyMs: point.p95DurationMs,
+			})),
 		}
-	}, [data])
+	}, [response])
 
 	if (!response && waiting) {
 		return (
@@ -843,7 +844,7 @@ function DbQueryActivityChart({
 		)
 	}
 
-	if (data.length === 0) {
+	if (volumeRows.length === 0) {
 		return (
 			<div className="flex h-44 items-center justify-center rounded-md border border-dashed border-border/60 bg-muted/10 text-xs text-muted-foreground">
 				No database query spans in this window
@@ -852,93 +853,21 @@ function DbQueryActivityChart({
 	}
 
 	return (
-		<ChartContainer config={DB_QUERY_CHART_CONFIG} className="h-44 w-full">
-			<BarChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
-				<CartesianGrid
-					// recharts v3 only draws grid lines for a matching axis id; this chart's
-					// y axes are "count"/"latency" (no default id=0), so pin to the primary "count" axis
-					yAxisId="count"
-					vertical={false}
-					strokeDasharray="3 3"
-				/>
-				<XAxis
-					dataKey="bucket"
-					axisLine={false}
-					tickLine={false}
-					tickMargin={8}
-					minTickGap={20}
-					fontSize={10}
-					tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
-				/>
-				<YAxis
-					yAxisId="count"
-					axisLine={false}
-					tickLine={false}
-					tickMargin={8}
-					width={34}
-					fontSize={10}
-					tickFormatter={(value) => formatCompactCount(Number(value))}
-				/>
-				<YAxis
-					yAxisId="latency"
-					orientation="right"
-					axisLine={false}
-					tickLine={false}
-					tickMargin={8}
-					width={42}
-					fontSize={10}
-					tickFormatter={(value) => formatLatency(Number(value))}
-				/>
-				<ChartTooltip
-					cursor={{ fill: "var(--muted)", opacity: 0.3 }}
-					content={
-						<ChartTooltipContent
-							labelFormatter={(value) => formatBucketLabel(value, axisContext, "tooltip")}
-							formatter={(value, name) => {
-								const label = name === "queryCount" ? "Queries" : String(name)
-								const formatted =
-									name === "queryCount"
-										? formatCompactCount(Number(value))
-										: formatLatency(Number(value))
-								return (
-									<span className="flex items-center gap-2">
-										<span className="text-muted-foreground">{label}</span>
-										<span className="font-mono font-medium tabular-nums">
-											{formatted}
-										</span>
-									</span>
-								)
-							}}
-						/>
-					}
-				/>
-				<Bar
-					yAxisId="count"
-					dataKey="queryCount"
-					fill="var(--color-queryCount)"
-					radius={[2, 2, 0, 0]}
-					isAnimationActive={false}
-				/>
-				<Line
-					yAxisId="latency"
-					type="monotone"
-					dataKey="p50DurationMs"
-					stroke="var(--color-p50DurationMs)"
-					strokeWidth={1.5}
-					dot={false}
-					isAnimationActive={false}
-				/>
-				<Line
-					yAxisId="latency"
-					type="monotone"
-					dataKey="p95DurationMs"
-					stroke="var(--color-p95DurationMs)"
-					strokeWidth={1.5}
-					dot={false}
-					isAnimationActive={false}
-				/>
-			</BarChart>
-		</ChartContainer>
+		// One suppression provider over the pair: two charts mean two tooltips, and
+		// only one should be open at a time. `MetricsGrid` mounts one for the same
+		// reason.
+		<ChartTooltipSuppressionProvider>
+			<div {...containerProps} className="space-y-2">
+				<div className="relative h-32 w-full" {...linkedCursorChartProps("db-query-volume")}>
+					<QueryBuilderBarChart data={volumeRows} legend="hidden" className="h-full w-full" />
+					<LinkedCursorOverlay chartId="db-query-volume" />
+				</div>
+				<div className="relative h-32 w-full" {...linkedCursorChartProps("db-query-latency")}>
+					<LatencyLineChart data={latencyRows} legend="visible" className="h-full w-full" />
+					<LinkedCursorOverlay chartId="db-query-latency" />
+				</div>
+			</div>
+		</ChartTooltipSuppressionProvider>
 	)
 }
 
@@ -1767,7 +1696,7 @@ export function ServiceMapCanvas({
 	/** Selected deployment environment (`undefined` = all); scopes the DB detail panel. */
 	deploymentEnv?: string
 	// Namespaces persisted drag positions / viewport. Lifted to a prop so the
-	// component renders without a Clerk session (e.g. the /service-map-bench
+	// component renders without a Clerk session (e.g. the /lab/bench/service-map
 	// perf harness, which runs in self-hosted mode with no ClerkProvider).
 	layoutKey: string
 	/**
@@ -2285,6 +2214,7 @@ export function ServiceMapCanvas({
 									onMoveEnd={onMoveEnd}
 									defaultViewport={savedViewport ?? undefined}
 									onInit={(instance) => {
+										// SAFETY: this ref intentionally erases the node/edge generics after ReactFlow initialization.
 										rfInstance.current = instance as unknown as ReactFlowInstance
 									}}
 									nodeTypes={nodeTypes}

@@ -25,14 +25,14 @@ const frameworkIconMap: Record<FrameworkId, React.ComponentType<{ size?: number;
 	go: GoIcon,
 	effect: EffectIcon,
 	otel: OpenTelemetryIcon,
-}
+} satisfies Record<FrameworkId, React.ComponentType<{ size?: number; className?: string }>>
 
 const ROLE_DEFAULT_FRAMEWORK: Record<RoleOption, FrameworkId> = {
 	engineer: "nodejs",
 	devops_sre: "otel",
 	eng_leader: "nodejs",
 	founder: "nextjs",
-}
+} satisfies Record<RoleOption, FrameworkId>
 
 interface GuidedSetupProps {
 	/** Public ingest key, interpolated into the instrument snippet. */

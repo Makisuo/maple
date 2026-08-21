@@ -42,9 +42,7 @@ export function useReplayKeyboardShortcuts(): void {
 	})
 
 	useMountEffect(() => {
-		// React Doctor cannot infer that useMountEffect is an Effect; wrap the
-		// Effect Event so the browser listener itself has explicit cleanup.
-		// oxlint-disable-next-line react-doctor/rules-of-hooks
+		// react-doctor-disable-next-line react-doctor/rules-of-hooks -- React Doctor does not recognize useMountEffect as an Effect Event boundary.
 		const listener = (event: KeyboardEvent) => handleKeyDown(event)
 		window.addEventListener("keydown", listener)
 		return () => window.removeEventListener("keydown", listener)

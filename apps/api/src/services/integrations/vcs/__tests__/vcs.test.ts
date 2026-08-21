@@ -6,6 +6,7 @@ import {
 	VcsProviderError,
 	VcsRateLimitedError,
 	VcsRepoDecodeError,
+	VcsRepositoryBlockedError,
 	VcsRepoUnavailableError,
 	VcsSyncJob,
 	VcsWebhookParseError,
@@ -22,7 +23,7 @@ import { GithubProvider } from "@/services/integrations/vcs/vendor/github/Github
 import type { VcsProviderClient } from "@/services/integrations/vcs/VcsProviderClient"
 import {
 	VcsProviderRegistry,
-	type VcsProviderRegistryShape,
+	type VcsProviderRegistryApi,
 } from "@/services/integrations/vcs/VcsProviderRegistry"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import { clampQueueDelaySeconds } from "@/services/integrations/vcs/VcsSyncQueue"
@@ -648,7 +649,7 @@ describe("GithubProvider.fetchBranches", () => {
 		Effect.gen(function* () {
 			const provider = yield* GithubProvider
 			// fetchBranches only reads externalInstallationId off the installation.
-			const installation = { externalInstallationId: "42" } as unknown as VcsInstallation
+			const installation = { externalInstallationId: "42" } as VcsInstallation
 			const result = yield* provider.fetchBranches(installation, {
 				externalRepoId: "7",
 				owner: "octo",
@@ -673,6 +674,65 @@ describe("GithubProvider.fetchBranches", () => {
 							{ name: "main", commit: { sha: "a".repeat(40) } },
 							{ name: "feature", commit: { sha: "b".repeat(40) } },
 						]),
+				]),
+			),
+		),
+	)
+
+	// A DMCA takedown answers 451 with a `block` body. It never clears on retry, so
+	// the provider must classify it as terminal rather than as a generic (retryable)
+	// VcsProviderError — the classification the year-long retry loop hinged on.
+	it.effect("classifies a 451 legal block as a terminal VcsRepositoryBlockedError", () =>
+		Effect.gen(function* () {
+			const provider = yield* GithubProvider
+			const installation = { externalInstallationId: "42" } as VcsInstallation
+			const error = yield* Effect.flip(
+				provider.fetchBranches(installation, {
+					externalRepoId: "7",
+					owner: "octo",
+					name: "repo",
+				}),
+			)
+			assert.strictEqual(error._tag, "@maple/http/errors/VcsRepositoryBlockedError")
+		}).pipe(
+			Effect.provide(
+				stubbedProviderLayer([
+					tokenResponse,
+					() =>
+						jsonResponse(
+							{ message: "Repository access blocked", block: { reason: "dmca" } },
+							{ status: 451 },
+						),
+				]),
+			),
+		),
+	)
+
+	// The same block body also arrives as a 403. A plain 403 (permissions) stays
+	// retryable — the body, not the status, is what makes it terminal.
+	it.effect("classifies a 403 carrying a block body as terminal, a plain 403 as transient", () =>
+		Effect.gen(function* () {
+			const provider = yield* GithubProvider
+			const installation = { externalInstallationId: "42" } as VcsInstallation
+			const ref = { externalRepoId: "7", owner: "octo", name: "repo" }
+			const blocked = yield* Effect.flip(provider.fetchBranches(installation, ref))
+			assert.strictEqual(blocked._tag, "@maple/http/errors/VcsRepositoryBlockedError")
+			const transient = yield* Effect.flip(provider.fetchBranches(installation, ref))
+			assert.strictEqual(transient._tag, "@maple/http/errors/VcsProviderError")
+		}).pipe(
+			Effect.provide(
+				stubbedProviderLayer([
+					tokenResponse,
+					() =>
+						jsonResponse(
+							{ message: "Repository access blocked", block: { reason: "dmca" } },
+							{ status: 403, headers: { "x-ratelimit-remaining": "42" } },
+						),
+					() =>
+						jsonResponse(
+							{ message: "Resource not accessible by integration" },
+							{ status: 403, headers: { "x-ratelimit-remaining": "42" } },
+						),
 				]),
 			),
 		),
@@ -1180,6 +1240,7 @@ describe("VcsSyncService orchestrator", () => {
 			| VcsProviderError
 			| VcsInstallationGoneError
 			| VcsRepoUnavailableError
+			| VcsRepositoryBlockedError
 			| VcsRateLimitedError
 	}
 
@@ -1197,7 +1258,7 @@ describe("VcsSyncService orchestrator", () => {
 					? Effect.fail(opts.fetchCommitsError)
 					: Effect.succeed({
 							commits: opts.commits ?? [],
-							...(opts.commitFetchNext ? { next: opts.commitFetchNext } : {}),
+							...(opts.commitFetchNext ? { next: opts.commitFetchNext } : undefined),
 						}),
 			fetchBranches: () =>
 				opts.fetchBranchesError
@@ -1210,7 +1271,7 @@ describe("VcsSyncService orchestrator", () => {
 		const registry = Layer.succeed(VcsProviderRegistry, {
 			ids: ["github"],
 			resolve: () => Effect.succeed(fakeProvider),
-		} satisfies VcsProviderRegistryShape)
+		} satisfies VcsProviderRegistryApi)
 		const queue = recordingQueueLayer(opts.sent, { sentDelays: opts.sentDelays })
 		const repoLive = testRepoLayer(testDb)
 		return VcsSyncService.layer.pipe(Layer.provideMerge(Layer.mergeAll(repoLive, registry, queue)))
@@ -2382,6 +2443,46 @@ describe("VcsSyncService orchestrator", () => {
 				orchestratorLayer(testDb, {
 					sent,
 					fetchBranchesError: new VcsProviderError({ message: "upstream", status: 503 }),
+				}),
+			),
+		)
+	})
+
+	// A 451 (DMCA/legal block) never clears on retry. Before this it arrived as a
+	// generic VcsProviderError and was retried ~12x per scheduled run, every 12h,
+	// for a year. It must drain and be recorded on the repo row instead.
+	it.effect("sync-branches drains a VcsRepositoryBlockedError and records it on the repo", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_orch")
+			yield* seedInstallation(repo, orgId)
+			yield* upsertReposFor(repo, "42", oneRepo)
+			// Succeeds (no failure → the queue never redelivers) and enqueues nothing.
+			yield* svc.processMessage(
+				Schema.encodeSync(VcsSyncJob)({
+					kind: "sync-branches",
+					provider: "github",
+					externalInstallationId: "42",
+					externalRepoId: "7",
+					owner: "octo",
+					name: "repo",
+				}),
+			)
+			assert.strictEqual(sent.length, 0)
+			const stored = yield* reposOfInstallation(repo, "42", "all")
+			assert.strictEqual(stored[0]!.syncStatus, "error")
+			assert.ok(stored[0]!.lastSyncError?.includes("Repository access blocked"))
+		}).pipe(
+			Effect.provide(
+				orchestratorLayer(testDb, {
+					sent,
+					fetchBranchesError: new VcsRepositoryBlockedError({
+						message: 'List branches failed: 451 {"message":"Repository access blocked"}',
+						status: 451,
+					}),
 				}),
 			),
 		)

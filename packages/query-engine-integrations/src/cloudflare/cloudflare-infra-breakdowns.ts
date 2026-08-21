@@ -92,7 +92,7 @@ const BREAKDOWNS: Record<CloudflareBreakdownDimension, BreakdownSpec> = {
 		errorsFromStatusClass: true,
 		filterKey: "statusClass",
 	},
-}
+} satisfies Record<CloudflareBreakdownDimension, BreakdownSpec>
 
 export const CLOUDFLARE_BREAKDOWN_DIMENSIONS = Object.keys(
 	BREAKDOWNS,

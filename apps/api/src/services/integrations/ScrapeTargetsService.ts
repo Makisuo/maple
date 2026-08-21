@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { randomUUID } from "node:crypto"
 import {
 	IsoDateTimeString,
@@ -41,6 +42,7 @@ import {
 	planetScaleBearerHeader,
 	type PlanetScaleAccessTokenError,
 } from "@/services/auth/PlanetScaleOAuthService"
+import { summarizeCause } from "@/platform/describe-cause"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -74,7 +76,7 @@ const parseRetryAfterSeconds = (value: string | null): number | null => {
 	return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }
 
-export interface ScrapeTargetsServiceShape {
+export interface ScrapeTargetsServiceApi {
 	readonly list: (
 		orgId: OrgId,
 	) => Effect.Effect<
@@ -199,7 +201,7 @@ const toPersistenceError = (error: unknown) =>
 	})
 
 const toUpstreamError = (message: string, status?: number) =>
-	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
+	new ScrapeTargetUpstreamError({ message, ...(!(status === undefined) ? { status } : undefined) })
 
 const toEncryptionError = (message: string) => new ScrapeTargetEncryptionError({ message })
 
@@ -479,11 +481,11 @@ const buildDiscoveryConfig = (
 	excludeBranches: ReadonlyArray<string>,
 ): { organization: string; includeBranches?: string[]; excludeBranches?: string[] } => ({
 	organization,
-	...(includeBranches.length > 0 ? { includeBranches: [...includeBranches] } : {}),
-	...(excludeBranches.length > 0 ? { excludeBranches: [...excludeBranches] } : {}),
+	...(includeBranches.length > 0 ? { includeBranches: [...includeBranches] } : undefined),
+	...(excludeBranches.length > 0 ? { excludeBranches: [...excludeBranches] } : undefined),
 })
 
-export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, ScrapeTargetsServiceShape>()(
+export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, ScrapeTargetsServiceApi>()(
 	"@maple/api/services/ScrapeTargetsService",
 	{
 		make: Effect.gen(function* () {
@@ -687,11 +689,12 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const name = request.name.trim()
 				const serviceName = request.serviceName ?? null
 
-				let credentialFields: {
+				interface EncryptedCredentialFields {
 					authCredentialsCiphertext: string | null
 					authCredentialsIv: string | null
 					authCredentialsTag: string | null
-				} = {
+				}
+				let credentialFields: EncryptedCredentialFields = {
 					authCredentialsCiphertext: null,
 					authCredentialsIv: null,
 					authCredentialsTag: null,
@@ -780,7 +783,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 								Effect.annotateLogs({
 									orgId,
 									scrapeTargetId: id,
-									error: Cause.pretty(cause),
+									error: summarizeCause(cause),
 								}),
 							),
 						),
@@ -852,7 +855,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const labels = yield* validateLabelsJson(request.labelsJson)
 
 				const now = yield* Clock.currentTimeMillis
-				const updates: Record<string, unknown> = { updatedAt: new Date(now) }
+				const updates: Record<string, unknown> = { updatedAt: new Date(now) } satisfies Record<
+					string,
+					unknown
+				>
 
 				if (request.name !== undefined) updates.name = request.name.trim()
 				if (request.url !== undefined && request.url !== null) updates.url = request.url.trim()
@@ -1043,8 +1049,11 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 						"http.request.method": "GET",
 						"maple.scrape.target_type": targetType,
 						...(Option.isSome(parsed)
-							? { "server.address": parsed.value.host, "url.path": parsed.value.pathname }
-							: {}),
+							? {
+									"server.address": parsed.value.host,
+									"url.path": parsed.value.pathname,
+								}
+							: undefined),
 					})
 
 					// `safeFetch` is retained for its SSRF protection + per-hop redirect
@@ -1172,6 +1181,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				// only this accumulated value was ever durable — ~95k writes a day to
 				// persist ~8k outcomes.
 				const outcomeByTarget = new Map<ScrapeTargetId, ScrapeTargetOutcome>()
+				// Newest `scrapedAt` per target, which is what the write below is
+				// allowed to advance the row to. Kept separate from the outcome
+				// because that object is handed straight to drizzle as the SET clause.
+				const reportedAtByTarget = new Map<ScrapeTargetId, Date>()
 				for (const result of results) {
 					// Rollup for discovered sub-targets: any branch success advances
 					// lastScrapeAt; any branch failure surfaces (branch-prefixed) as
@@ -1193,6 +1206,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					}
 					outcome.updatedAt = scrapedAt
 					outcomeByTarget.set(result.targetId, outcome)
+					const reportedAt = reportedAtByTarget.get(result.targetId)
+					if (reportedAt === undefined || scrapedAt > reportedAt) {
+						reportedAtByTarget.set(result.targetId, scrapedAt)
+					}
 				}
 
 				const recordChecks = options?.recordChecks !== false
@@ -1204,7 +1221,27 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				yield* database
 					.execute(async (db) => {
 						for (const [targetId, outcome] of outcomeByTarget) {
-							await db.update(scrapeTargets).set(outcome).where(eq(scrapeTargets.id, targetId))
+							const reportedAt = reportedAtByTarget.get(targetId) ?? outcome.updatedAt
+							// Apply only if nothing newer has touched the row. Results reach
+							// this method from two independent producers — the scraper loop,
+							// and the probe `create()` forks in the background — so a batch
+							// can land after a newer one has already been recorded. Without
+							// the guard the late writer wins: the target reports a stale
+							// `lastScrapeAt`, or resurrects an error a newer scrape cleared.
+							// `updatedAt` (not `lastScrapeAt`) is the comparison because a
+							// failing batch leaves `lastScrapeAt` untouched and so cannot
+							// order itself. Equal timestamps still apply, so re-reporting a
+							// batch stays a no-op rather than a drop, and a config edit at
+							// most costs the one in-flight scrape reported before it.
+							await db
+								.update(scrapeTargets)
+								.set(outcome)
+								.where(
+									and(
+										eq(scrapeTargets.id, targetId),
+										lte(scrapeTargets.updatedAt, reportedAt),
+									),
+								)
 						}
 
 						if (!recordChecks) return
@@ -1374,7 +1411,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				recordScrapeResults,
 				listChecks,
 				probe,
-			} satisfies ScrapeTargetsServiceShape
+			} satisfies ScrapeTargetsServiceApi
 		}),
 	},
 ) {

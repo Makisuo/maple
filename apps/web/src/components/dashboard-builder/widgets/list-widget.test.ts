@@ -1,3 +1,6 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
+// TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { assert, beforeEach, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { vi } from "vitest"
@@ -223,7 +226,7 @@ describe("widgetFetchAtom simulation", () => {
 				startTime: resolvedTimeRange.startTime,
 				endTime: resolvedTimeRange.endTime,
 				...widgetParams,
-			}
+			} satisfies Record<string, unknown>
 
 			// 2. Encode key like widgetFetchAtom
 			const key = encodeKey({ endpoint: "list_traces", params: resolvedParams })
@@ -260,7 +263,7 @@ describe("widgetFetchAtom simulation", () => {
 				startTime: resolvedTimeRange.startTime,
 				endTime: resolvedTimeRange.endTime,
 				...widgetParams,
-			}
+			} satisfies Record<string, unknown>
 
 			const key = encodeKey({ endpoint: "list_logs", params: resolvedParams })
 			const { endpoint, params } = JSON.parse(key)
@@ -294,7 +297,7 @@ describe("buildWidgetDataSource for list", () => {
 				limit: number,
 			): Record<string, unknown> {
 				const { clauses } = parseWhereClause(whereClause)
-				const params: Record<string, unknown> = { limit }
+				const params: Record<string, unknown> = { limit } satisfies Record<string, unknown>
 				if (dataSource === "traces") {
 					for (const clause of clauses) {
 						const key = normKey(clause.key)

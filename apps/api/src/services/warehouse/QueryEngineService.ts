@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { Clock, Context, Effect, Layer, Metric } from "effect"
 import { QueryEngineExecuteResponse, type QueryEngineExecuteRequest } from "@maple/query-engine"
 import type { QueryEngineTimeoutError } from "@maple/domain/http"
@@ -44,7 +45,7 @@ import * as QueryEngineMetrics from "@/observability/QueryEngineMetrics"
 // service composes those impls, wires the edge + bucket caches, and exposes the
 // tenant-scoped HTTP surface.
 
-export interface QueryEngineServiceShape {
+export interface QueryEngineServiceApi {
 	readonly execute: (
 		tenant: TenantContext,
 		request: QueryEngineExecuteRequest,
@@ -85,7 +86,7 @@ export interface QueryEngineServiceShape {
 		policy?: DirectRouteCachePolicyInput,
 	) => Effect.Effect<A, E | QueryEngineTimeoutError>
 }
-export class QueryEngineService extends Context.Service<QueryEngineService, QueryEngineServiceShape>()(
+export class QueryEngineService extends Context.Service<QueryEngineService, QueryEngineServiceApi>()(
 	"@maple/api/services/QueryEngineService",
 	{
 		make: Effect.gen(function* () {
@@ -382,6 +383,28 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				return yield* withTimeout(
 					Effect.gen(function* () {
 						const startMs = yield* Clock.currentTimeMillis
+						// Settle the org's warehouse route BEFORE opening the cache read
+						// below, not inside its `compute`.
+						//
+						// A Workers `cache.match()` holds one of the isolate's six
+						// connection slots until it returns headers, and an abandoned read
+						// is not cancellable — so a read issued while another is still
+						// outstanding queues behind it. `compute` runs `resolveRoute` →
+						// `resolveRuntimeConfig`, which used to issue exactly such a nested
+						// read on the `org-ch-config` bucket while this one was still open.
+						// Measured: every two-read request lost one of the two to the 40ms
+						// deadline (46 of 46), and losing it cost this span a p50 of 720ms
+						// against 140ms for a clean miss. One-read requests timed out 0
+						// times in 36.
+						//
+						// Hoisting it does not merely reorder the two reads, it removes the
+						// second: `resolveCachedSettings` keeps an isolate-level memo, so
+						// the call inside `compute` now answers from memory.
+						//
+						// `warmRoute` swallows its own failures — this is a warm, not a
+						// gate. A genuine config failure still surfaces from `compute`,
+						// with its own error channel and span, exactly as before.
+						yield* warehouse.warmRoute(tenant)
 						const policy = resolveDirectRouteCachePolicy(policyInput)
 						const key = buildDirectRouteCacheKey(tenant.orgId, routeName, payload, policy)
 						const { value, hit } = yield* edgeCache.getOrCompute(
@@ -426,7 +449,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				evaluate: cachedEvaluate,
 				evaluateSeries,
 				cachedDirect,
-			} satisfies QueryEngineServiceShape
+			} satisfies QueryEngineServiceApi
 		}),
 	},
 ) {

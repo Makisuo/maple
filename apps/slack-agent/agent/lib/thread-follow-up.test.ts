@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test"
 import type { SlackThreadMessage } from "eve/channels/slack"
 import { installFetchStub } from "./fetch-stub.js"

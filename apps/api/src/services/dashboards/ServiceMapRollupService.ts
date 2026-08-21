@@ -7,6 +7,7 @@ import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
+import { summarizeCause } from "@/platform/describe-cause"
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 
@@ -46,7 +47,7 @@ interface ServiceMapRollupResult {
 	readonly orgFailures: number
 }
 
-export interface ServiceMapRollupServiceShape {
+export interface ServiceMapRollupServiceApi {
 	/**
 	 * Aggregate service-to-service edges for any completed hour in the trailing
 	 * `LOOKBACK_HOURS` window not yet present in `service_map_edges_hourly`, and
@@ -68,7 +69,7 @@ export interface ServiceMapRollupServiceShape {
  */
 export class ServiceMapRollupService extends Context.Service<
 	ServiceMapRollupService,
-	ServiceMapRollupServiceShape
+	ServiceMapRollupServiceApi
 >()("@maple/api/services/ServiceMapRollupService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -274,14 +275,14 @@ export class ServiceMapRollupService extends Context.Service<
 							: Effect.as(
 									Effect.logWarning(
 										"Service map rollup active-org discovery failed; processing every known org",
-									).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
+									).pipe(Effect.annotateLogs({ error: summarizeCause(cause) })),
 									undefined,
 								),
 					),
 				)
 		})
 
-		const runRollupTick: ServiceMapRollupServiceShape["runRollupTick"] = Effect.fn(
+		const runRollupTick: ServiceMapRollupServiceApi["runRollupTick"] = Effect.fn(
 			"ServiceMapRollupService.runRollupTick",
 		)(function* () {
 			const orgRows = yield* database.execute((db) =>
@@ -312,7 +313,7 @@ export class ServiceMapRollupService extends Context.Service<
 										Effect.logError("Service map rollup failed for org").pipe(
 											Effect.annotateLogs({
 												orgId,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 										),
 										{

@@ -9,13 +9,16 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
-import { QueryEngineService, type QueryEngineServiceShape } from "@/services/warehouse/QueryEngineService"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
+import { QueryEngineService, type QueryEngineServiceApi } from "@/services/warehouse/QueryEngineService"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -144,6 +147,27 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 			},
 		]
 	}
+	if (sql.includes("AS baselineP95LatencyMs")) {
+		return [
+			// Two rows for one service: the catalog aggregates namespaces under a
+			// single name, so the busiest baseline row has to win rather than the
+			// last one read.
+			{
+				serviceName: "api",
+				serviceNamespace: "checkout",
+				environment: "production",
+				baselineP95LatencyMs: "35",
+				baselineSpanCount: "5000",
+			},
+			{
+				serviceName: "api",
+				serviceNamespace: "internal",
+				environment: "production",
+				baselineP95LatencyMs: "900",
+				baselineSpanCount: "120",
+			},
+		]
+	}
 	if (sql.includes("FROM service_overview_spans")) {
 		return [
 			{
@@ -212,11 +236,11 @@ const queryEngineStub = {
 	evaluate: () => Effect.die(new Error("not used")),
 	evaluateSeries: () => Effect.die(new Error("not used")),
 	cachedDirect: (_tenant, _route, _payload, effect) => effect,
-} satisfies QueryEngineServiceShape
+} satisfies QueryEngineServiceApi
 
 const makeHarness = (
-	warehouseService: WarehouseQueryServiceShape = warehouseStub,
-	queryEngineService: QueryEngineServiceShape = queryEngineStub,
+	warehouseService: WarehouseQueryServiceApi = warehouseStub,
+	queryEngineService: QueryEngineServiceApi = queryEngineStub,
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
@@ -224,6 +248,11 @@ const makeHarness = (
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
+		// Not read by any telemetry route, but the v2 group layer is built as one
+		// unit, so a group this suite never calls still has to resolve.
+		MobileDevicesService.layer,
+		LiveActivitiesService.layer,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 	const telemetryLive = Layer.mergeAll(
 		Layer.succeed(WarehouseQueryService, warehouseService),
@@ -258,7 +287,7 @@ const makeHarness = (
 				method,
 				headers: {
 					authorization: `Bearer ${token}`,
-					...(body ? { "content-type": "application/json" } : {}),
+					...(body ? { "content-type": "application/json" } : undefined),
 				},
 				body: body ? JSON.stringify(body) : undefined,
 			}),
@@ -353,7 +382,13 @@ describe("v2 telemetry reads over HTTP", () => {
 
 		const services = await harness.request("GET", `/v2/services?${windowQuery}`, key.secret)
 		expect(services.status).toBe(200)
-		expect(services.body.data[0]).toMatchObject({ name: "api", has_sampling: true, span_count: 10 })
+		expect(services.body.data[0]).toMatchObject({
+			name: "api",
+			has_sampling: true,
+			span_count: 10,
+			baseline_p95_latency_ms: 35,
+			baseline_span_count: 5000,
+		})
 		const service = await harness.request("GET", `/v2/services/api?${windowQuery}`, key.secret)
 		expect(service.status).toBe(200)
 
@@ -463,7 +498,7 @@ describe("v2 telemetry reads over HTTP", () => {
 
 	it("preserves fractional bounds and reads complete traces by their sorting-key identity", async () => {
 		const observedSql: string[] = []
-		const observingWarehouse: WarehouseQueryServiceShape = {
+		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
 				observedSql.push(compiled.sql)
@@ -494,6 +529,56 @@ describe("v2 telemetry reads over HTTP", () => {
 		expect(hierarchySql).not.toContain("Timestamp >=")
 		expect(hierarchySql).not.toContain("Timestamp <=")
 		expect(hierarchySql).toContain("LIMIT 5001")
+		await harness.dispose()
+	})
+
+	// Regression: the summary endpoints read the hourly rollups, whose Timestamp
+	// is a plain `DateTime`. They were formatting window bounds with millisecond
+	// precision, which ClickHouse rejects outright — `GET /v2/services` returned
+	// a 500 for three weeks. It survived because this file stubs the warehouse
+	// and the SQL-catalog sweep only ever compiles second-precision fixtures, so
+	// nothing checked the parameter VALUES the route actually sends.
+	it("sends second-precision window bounds to the rollup-backed summary endpoints", async () => {
+		const observedSql: string[] = []
+		const observingWarehouse: WarehouseQueryServiceApi = {
+			...warehouseStub,
+			compiledQuery: (tenant, compiled, options) => {
+				observedSql.push(compiled.sql)
+				return warehouseStub.compiledQuery(tenant, compiled, options)
+			},
+			compiledQueryFirst: (tenant, compiled, options) => {
+				observedSql.push(compiled.sql)
+				return warehouseStub.compiledQueryFirst(tenant, compiled, options)
+			},
+		}
+		const harness = makeHarness(observingWarehouse)
+		const key = await harness.bootstrapKey()
+
+		// Deliberately fractional inbound bounds — the route must round them.
+		const services = await harness.request(
+			"GET",
+			"/v2/services?start_time=2026-07-15T12:00:00.900Z&end_time=2026-07-16T12:00:00.100Z",
+			key.secret,
+		)
+		expect(services.status).toBe(200)
+
+		// The listing compiles two queries against the same rollups — the catalog
+		// and the latency baseline — so pick the catalog out by its own alias.
+		const catalogSql = observedSql.find((sql) => sql.includes("AS p95LatencyMs"))
+		expect(catalogSql).toBeDefined()
+		expect(catalogSql).toContain("'2026-07-15 12:00:00'")
+		expect(catalogSql).toContain("'2026-07-16 12:00:00'")
+		// A fractional literal is a TYPE_MISMATCH against a DateTime column.
+		expect(catalogSql).not.toMatch(/'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+'/)
+
+		// The baseline covers the seven days before the window, hour-floored so
+		// the cache key survives a drifting client window — and second-precision
+		// for the same DateTime reason.
+		const baselineSql = observedSql.find((sql) => sql.includes("AS baselineP95LatencyMs"))
+		expect(baselineSql).toBeDefined()
+		expect(baselineSql).toContain("'2026-07-08 12:00:00'")
+		expect(baselineSql).toContain("'2026-07-15 12:00:00'")
+		expect(baselineSql).not.toMatch(/'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+'/)
 		await harness.dispose()
 	})
 
@@ -550,7 +635,7 @@ describe("v2 telemetry reads over HTTP", () => {
 
 	it("maps public trace attribute grouping onto the validated internal query", async () => {
 		let observedRequest: QueryEngineExecuteRequest | undefined
-		const queryEngine: QueryEngineServiceShape = {
+		const queryEngine: QueryEngineServiceApi = {
 			...queryEngineStub,
 			execute: (tenant, request) => {
 				observedRequest = request
@@ -583,7 +668,7 @@ describe("v2 telemetry reads over HTTP", () => {
 	})
 
 	it("coerces BYO-ClickHouse numeric strings before encoding aggregation responses", async () => {
-		const queryEngine: QueryEngineServiceShape = {
+		const queryEngine: QueryEngineServiceApi = {
 			...queryEngineStub,
 			execute: (_tenant, request) =>
 				Effect.succeed(
@@ -601,7 +686,7 @@ describe("v2 telemetry reads over HTTP", () => {
 									source: "metrics",
 									data: [{ bucket: "2026-07-15 12:00:00", series: { all: "42" } }],
 								},
-							}) as unknown as QueryEngineExecuteResponse,
+							}) as QueryEngineExecuteResponse,
 				),
 		}
 		const harness = makeHarness(warehouseStub, queryEngine)
@@ -624,8 +709,8 @@ describe("v2 telemetry reads over HTTP", () => {
 	})
 
 	it("applies bounded ClickHouse settings to log body searches", async () => {
-		let observedOptions: Parameters<WarehouseQueryServiceShape["compiledQuery"]>[2]
-		const observingWarehouse: WarehouseQueryServiceShape = {
+		let observedOptions: Parameters<WarehouseQueryServiceApi["compiledQuery"]>[2]
+		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
 				observedOptions = options

@@ -88,12 +88,14 @@ export interface ValidatedMapleCloudEvent {
 /** Validate the complete persisted envelope, including its canonical byte budget. */
 export const validateMapleCloudEvent = (candidate: unknown): ValidatedMapleCloudEvent => {
 	const event = Schema.decodeUnknownSync(MapleCloudEventSchema)(candidate)
-	if (!isJsonValue(event as unknown)) throw new Error("CloudEvent must be finite JSON")
-	const eventJson = canonicalJson(event as unknown as JsonValue)
+	if (!isJsonValue(event)) throw new Error("CloudEvent must be finite JSON")
+	// SAFETY: the envelope schema and finite-JSON guard establish MapleCloudEvent's complete contract.
+	const validatedEvent = event as MapleCloudEvent
+	const eventJson = canonicalJson(event)
 	const byteLength = Buffer.byteLength(eventJson, "utf8")
 	if (byteLength > MAX_CLOUD_EVENT_BYTES)
 		throw new Error(`CloudEvent exceeds ${MAX_CLOUD_EVENT_BYTES} UTF-8 bytes`)
-	return { event: event as MapleCloudEvent, canonicalJson: eventJson, byteLength }
+	return { event: validatedEvent, canonicalJson: eventJson, byteLength }
 }
 
 export const makeCloudEvent = (input: {
@@ -121,7 +123,7 @@ export const makeCloudEvent = (input: {
 	const subject = input.subject ?? input.signal.subject
 	const time = input.time ?? input.signal.occurredAt
 	if (timestampToEpochNanos(time) === null) throw new Error("projected event time must be a valid instant")
-	return validateMapleCloudEvent({
+	const envelope = {
 		specversion: "1.0",
 		id: makeEventId({
 			tenantId: input.signal.tenantId,
@@ -133,7 +135,6 @@ export const makeCloudEvent = (input: {
 		}),
 		source: input.signal.source,
 		type: input.outputType,
-		...(subject == null ? {} : { subject }),
 		time,
 		datacontenttype: "application/json",
 		dataschema: input.dataSchema,
@@ -145,5 +146,6 @@ export const makeCloudEvent = (input: {
 		sourceoccurrenceid: input.signal.occurrenceId,
 		sourceidentityquality: input.signal.identityQuality,
 		data: input.data,
-	}).event
+	}
+	return validateMapleCloudEvent(subject == null ? envelope : { ...envelope, subject }).event
 }

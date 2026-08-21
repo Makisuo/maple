@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { Effect, Exit } from "effect"
 import { makeDbExecute, makePersistenceErrorMapper } from "./db-execute"
-import { DatabaseError, type DatabaseClient, type DatabaseShape } from "./DatabaseLive"
+import { DatabaseError, type DatabaseClient, type DatabaseApi } from "./DatabaseLive"
 
 class TestPersistenceError extends Schema.TaggedError<TestPersistenceError>()(
 	"@maple/api/test/TestPersistenceError",
@@ -20,7 +20,7 @@ const toTestError = makePersistenceErrorMapper(TestPersistenceError, "Test persi
  */
 const failingDatabase = (error: DatabaseError) => {
 	const attempts = { count: 0 }
-	const database: DatabaseShape = {
+	const database: DatabaseApi = {
 		execute: <T>(_fn: (db: DatabaseClient) => Promise<T>) =>
 			Effect.sync(() => {
 				attempts.count += 1

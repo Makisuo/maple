@@ -4,6 +4,13 @@
 		"module": "esnext",
 		"moduleResolution": "bundler",
 		"types": ["node", "bun"],
+		// Mirrors package.json's `imports` map. Redundant for tsc and for eve's
+		// build, but `bun test` does not rewrite `#lib/x.js` to the .ts source
+		// through the imports field, so without this no test can import a module
+		// that uses the `#` alias — which is nearly all of agent/.
+		"paths": {
+			"#*": ["./agent/*"]
+		},
 		"strict": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,

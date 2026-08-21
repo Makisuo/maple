@@ -1,9 +1,6 @@
 "use client"
 
-import { useId } from "react"
-import { Area, AreaChart } from "recharts"
-
-import { type ChartConfig, ChartContainer } from "./chart"
+import { PlotSparkline } from "../plot/sparkline"
 
 interface SparklineProps {
 	data: { value: number }[]
@@ -11,40 +8,26 @@ interface SparklineProps {
 	className?: string
 }
 
+/**
+ * The services table's trend line.
+ *
+ * Kept as its own component rather than folded into `StatSparkline`: the two
+ * take different inputs — this one is handed `{ value }` rows outright, while
+ * the stat widget has to discover which column of an arbitrary timeseries row
+ * holds the number — and they draw with different curves and gradient weights.
+ * The drawing itself is shared.
+ */
 export function Sparkline({ data, color = "var(--chart-1)", className }: SparklineProps) {
-	const id = useId()
-	const gradientId = `sparkline-gradient-${id}`
-
-	const chartConfig = {
-		value: {
-			label: "Value",
-			color,
-		},
-	} satisfies ChartConfig
-
 	if (data.length === 0) {
 		return <div className={className} />
 	}
 
 	return (
-		<ChartContainer config={chartConfig} className={className}>
-			<AreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-				<defs>
-					<linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-						<stop offset="5%" stopColor="var(--color-value)" stopOpacity={0.5} />
-						<stop offset="95%" stopColor="var(--color-value)" stopOpacity={0.1} />
-					</linearGradient>
-				</defs>
-				<Area
-					dataKey="value"
-					type="linear"
-					fill={`url(#${gradientId})`}
-					fillOpacity={0.4}
-					stroke="var(--color-value)"
-					strokeWidth={1.5}
-					isAnimationActive={false}
-				/>
-			</AreaChart>
-		</ChartContainer>
+		<PlotSparkline
+			values={data.map((point) => point.value)}
+			color={color}
+			fillOpacity={[0.5, 0.1]}
+			className={className}
+		/>
 	)
 }

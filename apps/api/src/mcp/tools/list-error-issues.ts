@@ -11,19 +11,35 @@ import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
-import { IssueKind, IssueSeverity, WorkflowState } from "@maple/domain/http"
+import { IssueKind, IssueSeverity, WORKFLOW_STATE_ORDER, WorkflowState } from "@maple/domain/http"
 
 const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)
 const decodeSeverity = Schema.decodeUnknownOption(IssueSeverity)
 const decodeKind = Schema.decodeUnknownOption(IssueKind)
 
+/**
+ * One-cell summary of whether this issue has been fixed before.
+ *
+ * `regression_count` alone reads as a number with no meaning; pairing it with
+ * the date it was last resolved is what tells an agent to read the event log
+ * before starting a fresh investigation.
+ */
+const describeFixHistory = (issue: {
+	readonly regressionCount: number
+	readonly lastResolvedAt: string | null
+}): string => {
+	if (issue.regressionCount === 0) return issue.lastResolvedAt === null ? "—" : "fixed once"
+	const when = issue.lastResolvedAt === null ? "" : `, last fixed ${issue.lastResolvedAt.slice(0, 10)}`
+	return `regressed ${issue.regressionCount}x${when}`
+}
+
 export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 	server.tool(
 		"list_error_issues",
-		"List persistent, triageable error issues (grouped by exception fingerprint) with workflow state, counts, and assignment. Each issue persists across occurrences so state/notes/assignee survive new events. Workflow states: triage, todo, in_progress, in_review, done, cancelled, wontfix.",
+		`List persistent, triageable error issues (grouped by exception fingerprint) with workflow state, counts, and assignment. Each issue persists across occurrences so state/notes/assignee survive new events. Workflow states: ${WORKFLOW_STATE_ORDER.join(", ")}. A "regressed" issue was fixed before and started firing again — read its events before investigating it as new.`,
 		Schema.Struct({
 			workflow_state: optionalStringParam(
-				"Filter by workflow state: triage, todo, in_progress, in_review, done, cancelled, wontfix (default: all non-archived)",
+				`Filter by workflow state: ${WORKFLOW_STATE_ORDER.join(", ")} (default: all non-archived)`,
 			),
 			severity: optionalStringParam(
 				"Filter by triage severity: critical, high, medium, low, or 'unset' for untriaged issues",
@@ -58,7 +74,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				const decoded = decodeWorkflowState(workflow_state)
 				if (Option.isNone(decoded)) {
 					return validationError(
-						`Invalid workflow_state: '${workflow_state}'. Must be one of: triage, todo, in_progress, in_review, done, cancelled, wontfix.`,
+						`Invalid workflow_state: '${workflow_state}'. Must be one of: ${WORKFLOW_STATE_ORDER.join(", ")}.`,
 					)
 				}
 				typedState = decoded.value
@@ -118,7 +134,10 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				lines.push("No error issues found.")
 			} else {
 				const headers = [
-					"ID",
+					// Full id, not a prefix. The 8-char truncation this used to render was
+					// being pasted into error_detail as if it were a fingerprint — a
+					// different identity space — where it died as a UInt64 parse error.
+					"Issue ID",
 					"Kind",
 					"State",
 					"Severity",
@@ -126,12 +145,16 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 					"Service",
 					"Exception",
 					"Events",
+					// An agent that cannot see an issue was fixed before will investigate
+					// it as if it were new. This column is the whole reason the same bug
+					// used to get fixed more than once.
+					"History",
 					"Last seen",
 					"Assigned",
 					"Holder",
 				]
 				const rows = issues.map((i) => [
-					i.id.slice(0, 8),
+					i.id,
 					i.kind,
 					i.hasOpenIncident ? `${i.workflowState} (incident)` : i.workflowState,
 					i.severity ?? "—",
@@ -139,6 +162,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 					i.serviceName,
 					truncate(i.errorLabel || `${i.exceptionType}: ${i.exceptionMessage}`, 50),
 					formatNumber(i.occurrenceCount),
+					describeFixHistory(i),
 					i.lastSeenAt.slice(0, 19),
 					i.assignedActor
 						? i.assignedActor.type === "agent"
@@ -154,11 +178,19 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				lines.push(formatTable(headers, rows))
 			}
 
+			const regressed = issues.filter((i) => i.workflowState === "regressed")
 			const triageIds = issues
 				.filter((i) => i.workflowState === "triage")
 				.slice(0, 3)
 				.map((i) => i.id)
 			const nextSteps: string[] = []
+			for (const issue of regressed.slice(0, 3)) {
+				nextSteps.push(
+					`\`list_error_issue_events issue_id="${issue.id}"\` — this issue was fixed ${
+						issue.lastResolvedAt === null ? "before" : `on ${issue.lastResolvedAt.slice(0, 10)}`
+					} and regressed; read what was already tried before investigating it as new`,
+				)
+			}
 			for (const id of triageIds) {
 				nextSteps.push(`\`claim_error_issue issue_id="${id}"\` — pick up this issue`)
 				nextSteps.push(

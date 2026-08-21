@@ -219,7 +219,7 @@ export interface AuditServiceUsage {
 	readonly metricCount: number
 }
 
-export interface AuditSpanShape {
+export interface AuditSpanProfile {
 	readonly serviceName: string
 	readonly spanCount: number
 	readonly errorCount: number
@@ -252,7 +252,7 @@ export interface WarehouseAuditInputs {
 	readonly attributeKeys: ReadonlyArray<AuditAttributeKey>
 	/** Per-service signal volumes — the answer to "what is this service actually sending". */
 	readonly serviceUsage: ReadonlyArray<AuditServiceUsage>
-	readonly spanShape: ReadonlyArray<AuditSpanShape>
+	readonly spanShape: ReadonlyArray<AuditSpanProfile>
 	readonly logSeverity: ReadonlyArray<{
 		readonly serviceName: string
 		readonly severityText: string

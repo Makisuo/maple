@@ -18,7 +18,7 @@ import {
 } from "../investigations"
 import { TraceId, UserId } from "../../primitives"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { encodePublicId, PublicIdPrefixes } from "./public-id"
 import { publicErrors } from "./public-error"
@@ -31,9 +31,6 @@ import {
 } from "./resource-ids"
 
 export { ErrorIssuePublicId, InvestigationPublicId } from "./resource-ids"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 // Subject (snake_case wire form of the internal InvestigationSubject union)
 

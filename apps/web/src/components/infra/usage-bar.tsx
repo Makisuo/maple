@@ -12,13 +12,13 @@ const FILL_BY_LEVEL: Record<SeverityLevel, string> = {
 	ok: "bg-[var(--severity-info)]",
 	warn: "bg-[var(--severity-warn)]",
 	crit: "bg-[var(--severity-error)]",
-}
+} satisfies Record<SeverityLevel, string>
 
 const VALUE_BY_LEVEL: Record<SeverityLevel, string> = {
 	ok: "text-foreground/80",
 	warn: "text-[var(--severity-warn)]",
 	crit: "text-[var(--severity-error)]",
-}
+} satisfies Record<SeverityLevel, string>
 
 export function UsageBar({ fraction, className, showValue = true }: UsageBarProps) {
 	const safe = Number.isFinite(fraction) ? fraction : 0

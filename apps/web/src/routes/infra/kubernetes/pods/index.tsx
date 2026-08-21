@@ -69,7 +69,7 @@ const SCOPE_LABEL: Record<PodScope, string> = {
 	elevated: "at or above 60% of a limit",
 	unbounded: "running with no limits set",
 	stale: "whose collector has gone quiet",
-}
+} satisfies Record<PodScope, string>
 
 function PodsPage() {
 	const search = Route.useSearch()

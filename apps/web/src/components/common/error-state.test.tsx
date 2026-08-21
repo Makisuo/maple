@@ -9,7 +9,7 @@ const transportError = (cause?: unknown) =>
 	new HttpClientError.HttpClientError({
 		reason: new HttpClientError.TransportError({
 			request: HttpClientRequest.get("https://api.maple.dev/v2/services"),
-			...(cause === undefined ? {} : { cause }),
+			...(!(cause === undefined) ? { cause } : undefined),
 		}),
 	})
 

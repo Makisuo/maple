@@ -7,16 +7,18 @@
 	"main": "./src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
-		"./replay": "./src/replay-session.ts"
+		"./replay": "./src/session/replay-session.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"bench": "vitest bench --run"
 	},
 	"dependencies": {
 		"rrweb": "^2.0.0-alpha.18"
 	},
 	"devDependencies": {
+		"jsdom": "^29.1.1",
 		"typescript": "catalog:tooling",
 		"vitest": "catalog:"
 	}

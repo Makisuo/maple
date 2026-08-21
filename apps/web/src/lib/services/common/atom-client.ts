@@ -58,10 +58,14 @@ const queryWithRetention = (
 	endpoint: string,
 	request: Record<string, unknown> | undefined,
 ) => {
-	const atom = MapleApiAtomClient.query(group as never, endpoint as never, {
-		timeToLive: DEFAULT_QUERY_TTL,
-		...request,
-	} as never)
+	const atom = MapleApiAtomClient.query(
+		group as never,
+		endpoint as never,
+		{
+			timeToLive: DEFAULT_QUERY_TTL,
+			...request,
+		} as never,
+	)
 
 	// Org-scoped, and with any time window stripped, so the identity is stable
 	// across windows but can never serve one org's rows to another. `group` and
@@ -74,4 +78,5 @@ const queryWithRetention = (
 	return withRetention(atom, identity)
 }
 
+// SAFETY: queryWithRetention preserves MapleApiAtomClient.query's arguments and narrows its retained atom result.
 export const retainedQuery = queryWithRetention as unknown as typeof MapleApiAtomClient.query

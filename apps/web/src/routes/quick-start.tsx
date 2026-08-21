@@ -4,13 +4,14 @@ import { useAuth } from "@clerk/clerk-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
 
+import { BootSplash } from "@/components/boot-splash"
 import { OnboardingLayout } from "@/components/onboarding/onboarding-layout"
 import { QUALIFY_QUESTIONS, StepQualifyQuestion } from "@/components/onboarding/step-qualify"
 import { StepPlan } from "@/components/onboarding/step-plan"
 import { StepDemo } from "@/components/onboarding/step-demo"
 
 import { useQuickStart, type StepId } from "@/hooks/use-quick-start"
-import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { hasSelectedPlan, resolvePlanAccess } from "@/lib/billing/plan-gating"
 import { STEP_IDS, type RoleOption } from "@/atoms/quick-start-atoms"
 
 export const Route = createFileRoute("/quick-start")({
@@ -34,8 +35,14 @@ function QuickStartPage() {
 		setDemoDataRequested,
 	} = useQuickStart(orgId)
 
-	const { data: customer } = useMapleCustomer()
+	const { data: customer, isLoading, error } = useMapleCustomer()
 	const planSelected = hasSelectedPlan(customer)
+	// Shared with __root's redirect gate. Anything but "onboarding" means this org
+	// is not a new one — a lapsed subscriber arriving by bookmark, back button or
+	// the post-signup redirect, or a customer read we could not trust. Both belong
+	// in the app (the reactivation banner is what a lapsed one needs), never in
+	// the new-user wizard.
+	const access = resolvePlanAccess({ customer, error, isLoading })
 
 	// "plan" completion is the live Autumn plan state, never a persisted flag.
 	// A stale flag would disagree with __root.tsx's no-plan guard and trap the
@@ -53,7 +60,14 @@ function QuickStartPage() {
 	}
 	const direction = currentStepNumber >= stepWindow[0] ? 1 : -1
 
-	if (onboardingComplete) {
+	// Wait for the customer before rendering a step: deciding from an unsettled
+	// query flashes "what's your role?" at a returning subscriber before the
+	// bail-out below can fire.
+	if (access === "loading") {
+		return <BootSplash />
+	}
+
+	if (onboardingComplete || access !== "onboarding") {
 		return <Navigate to="/" replace />
 	}
 

@@ -5,7 +5,7 @@ import type { CSSProperties } from "react"
 import "@/components/dotmatrix-loader.css"
 
 export type MatrixPattern = "diamond" | "full" | "outline" | "rose" | "cross" | "rings"
-type DotShape = "circle" | "square" | "diamond" | "hearts"
+type DotStyle = "circle" | "square" | "diamond" | "hearts"
 export type DotMatrixPhase = "idle" | "collapse" | "hoverRipple" | "loadingRipple"
 export type DotMatrixColorPreset =
 	| "solid-theme"
@@ -56,7 +56,13 @@ const DOT_MATRIX_COLOR_PRESETS: Record<
 		fill: "linear-gradient(145deg, #12c2e9 0%, #c471ed 45%, #f64f59 100%)",
 		glow: "#9e7de8",
 	},
-}
+} satisfies Record<
+	DotMatrixColorPreset,
+	{
+		fill: string
+		glow: string
+	}
+>
 
 function resolveDmxColorTokens(
 	color: string,
@@ -96,7 +102,7 @@ export interface DotMatrixCommonProps {
 	animated?: boolean
 	hoverAnimated?: boolean
 	dotClassName?: string
-	dotShape?: DotShape
+	dotShape?: DotStyle
 	opacityBase?: number
 	opacityMid?: number
 	opacityPeak?: number
@@ -174,7 +180,7 @@ const PATTERN_INDEXES: Record<MatrixPattern, number[]> = {
 	rose: ROSE_INDEXES,
 	cross: CROSS_INDEXES,
 	rings: RINGS_INDEXES,
-}
+} satisfies Record<MatrixPattern, number[]>
 
 function getPatternIndexes(pattern: MatrixPattern = "diamond"): number[] {
 	return PATTERN_INDEXES[pattern]
@@ -457,7 +463,7 @@ export function DotMatrixBase({
 	ariaLabel = "Loading",
 	className,
 	pattern = "diamond",
-	dotShape = "circle",
+	dotShape: dotStyle = "circle",
 	muted = false,
 	bloom = false,
 	halo = 0,
@@ -487,6 +493,7 @@ export function DotMatrixBase({
 	const unit = dotSize + gap
 	const { resolvedColor, dotFill } = resolveDmxColorTokens(color, colorPreset)
 
+	// SAFETY: React's CSSProperties omits custom properties even though React forwards these --dmx-* values.
 	const dmxVarStyle = {
 		width: matrixSpan,
 		height: matrixSpan,
@@ -495,9 +502,9 @@ export function DotMatrixBase({
 		["--dmx-halo-level" as const]: halo,
 		["--dmx-dot-fill" as const]: dotFill,
 		color: resolvedColor,
-		...(ob !== undefined && { ["--dmx-opacity-base" as const]: ob }),
-		...(om !== undefined && { ["--dmx-opacity-mid" as const]: om }),
-		...(op !== undefined && { ["--dmx-opacity-peak" as const]: op }),
+		...(ob !== undefined ? { ["--dmx-opacity-base" as const]: ob } : undefined),
+		...(om !== undefined ? { ["--dmx-opacity-mid" as const]: om } : undefined),
+		...(op !== undefined ? { ["--dmx-opacity-peak" as const]: op } : undefined),
 		...(useWrapper
 			? {
 					transform: `scale(${scale})`,
@@ -575,7 +582,7 @@ export function DotMatrixBase({
 						pointerEvents: "none" as const,
 						animation: "none",
 					}
-				: {}),
+				: undefined),
 		} as CSSProperties
 
 		return (
@@ -598,7 +605,7 @@ export function DotMatrixBase({
 		<div
 			className={cx(
 				"dmx-root",
-				`dmx-dot-shape-${dotShape}`,
+				`dmx-dot-shape-${dotStyle}`,
 				muted && "dmx-muted",
 				dmxBloomRootActive(bloom, halo) && "dmx-bloom",
 				dmxBloomHaloSpreadClass(halo),
@@ -644,7 +651,7 @@ export function DotMatrixBase({
 			aria-label={ariaLabel}
 			className={cx(
 				"dmx-root",
-				`dmx-dot-shape-${dotShape}`,
+				`dmx-dot-shape-${dotStyle}`,
 				muted && "dmx-muted",
 				dmxBloomRootActive(bloom, halo) && "dmx-bloom",
 				dmxBloomHaloSpreadClass(halo),

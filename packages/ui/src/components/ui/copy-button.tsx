@@ -53,7 +53,7 @@ const LAYER_ACTIVE: Record<CopyStatus, string> = {
 	copied: "group-data-[copy-status=copied]/copy:scale-100 group-data-[copy-status=copied]/copy:opacity-100",
 	error: "group-data-[copy-status=error]/copy:scale-100 group-data-[copy-status=error]/copy:opacity-100",
 	idle: "group-data-[copy-status=idle]/copy:scale-100 group-data-[copy-status=idle]/copy:opacity-100",
-}
+} satisfies Record<CopyStatus, string>
 
 /**
  * `pathLength="1"` renormalises the check to a unit length, so the dash pair is
@@ -77,7 +77,7 @@ const LABEL_ACTIVE: Record<CopyStatus, string> = {
 	copied: "group-data-[copy-status=copied]/copy:translate-y-0 group-data-[copy-status=copied]/copy:opacity-100 group-data-[copy-status=copied]/copy:blur-[0px]",
 	error: "group-data-[copy-status=error]/copy:translate-y-0 group-data-[copy-status=error]/copy:opacity-100 group-data-[copy-status=error]/copy:blur-[0px]",
 	idle: "group-data-[copy-status=idle]/copy:translate-y-0 group-data-[copy-status=idle]/copy:opacity-100 group-data-[copy-status=idle]/copy:blur-[0px]",
-}
+} satisfies Record<CopyStatus, string>
 
 export interface CopyTooltipLabels {
 	copiedLabel?: string

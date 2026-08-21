@@ -6,9 +6,6 @@
 
 import { formatBytesPerSecond, formatLoad, formatPercent } from "@maple/ui/lib/format"
 
-/** Recharts grid dash — one value across every infra chart. */
-export const CHART_GRID_DASH = "3 3"
-
 /**
  * Bucket width for the timeseries charts: aim for ~100 points, floored at the
  * poller's 5-minute granularity and rounded to whole 5-minute steps.

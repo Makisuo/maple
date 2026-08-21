@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import * as React from "react"
 import type { ReactNode } from "react"
 import type { DashboardId } from "@maple/domain/http"
@@ -80,12 +81,7 @@ interface DashboardActionsProviderProps {
 		) => DashboardWidget[] | undefined
 		addTab: (dashboardId: string, sectionId: string, title?: string) => string | undefined
 		renameTab: (dashboardId: string, sectionId: string, tabId: string, title: string) => void
-		deleteTab: (
-			dashboardId: string,
-			sectionId: string,
-			tabId: string,
-			action: "move" | "delete",
-		) => void
+		deleteTab: (dashboardId: string, sectionId: string, tabId: string, action: "move" | "delete") => void
 		moveWidgetToSection: (dashboardId: string, widgetId: string, target: SectionTarget) => void
 		removeWidget: (dashboardId: string, widgetId: string) => DashboardWidget | undefined
 		restoreWidget: (dashboardId: string, widget: DashboardWidget) => void
@@ -269,8 +265,25 @@ export function DashboardActionsProvider({
 	return <DashboardActionsContext value={ctx}>{children}</DashboardActionsContext>
 }
 
+/**
+ * The dashboard's actions, or `null` when rendered outside a provider.
+ *
+ * The read-only surfaces — a share link, a full-screen board — mount the same
+ * canvas with no store behind it, and every mutation here needs one. `null`
+ * says exactly that: on this surface no action exists.
+ *
+ * Deliberately not a no-op stub provider. A non-null context makes
+ * `WidgetActionsProvider` viable downstream, and that provider always defines
+ * `remove` and offers `createAlert`, which `WidgetShell` shows in view mode —
+ * so a stub would put edit affordances and authed-route navigation on a public
+ * page. Absence is the only honest empty action set.
+ */
+export function useDashboardActionsOptional(): DashboardActionsContextValue | null {
+	return React.use(DashboardActionsContext)
+}
+
 export function useDashboardActions(): DashboardActionsContextValue {
-	const ctx = React.use(DashboardActionsContext)
+	const ctx = useDashboardActionsOptional()
 	if (!ctx) throw new Error("useDashboardActions must be used within DashboardActionsProvider")
 	return ctx
 }

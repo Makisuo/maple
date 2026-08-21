@@ -74,12 +74,12 @@ const decodeWireDashboard = Schema.decodeUnknownEffect(WireDashboard)
 /** The request body for create/update: exactly the props the user set. */
 const desiredBody = (props: DashboardProps) => ({
 	name: props.name,
-	...(props.description !== undefined ? { description: props.description } : {}),
-	...(props.tags !== undefined ? { tags: props.tags } : {}),
-	...(props.time_range !== undefined ? { time_range: props.time_range } : {}),
-	...(props.widgets !== undefined ? { widgets: props.widgets } : {}),
-	...(props.sections !== undefined ? { sections: props.sections } : {}),
-	...(props.variables !== undefined ? { variables: props.variables } : {}),
+	...(props.description !== undefined ? { description: props.description } : undefined),
+	...(props.tags !== undefined ? { tags: props.tags } : undefined),
+	...(props.time_range !== undefined ? { time_range: props.time_range } : undefined),
+	...(props.widgets !== undefined ? { widgets: props.widgets } : undefined),
+	...(props.sections !== undefined ? { sections: props.sections } : undefined),
+	...(props.variables !== undefined ? { variables: props.variables } : undefined),
 })
 
 /** Compare only the fields the user declared against the observed wire object. */
@@ -88,9 +88,9 @@ const drifted = (props: DashboardProps, observed: Schema.Schema.Type<typeof Wire
 	// An API that predates sections omits the key entirely; treat that as "no
 	// groups" so declaring `sections: []` doesn't read as perpetual drift.
 	const seen: Record<string, unknown> = {
-		...(observed as unknown as Record<string, unknown>),
+		...(observed as Record<string, unknown>),
 		sections: observed.sections ?? [],
-	}
+	} satisfies Record<string, unknown>
 	return Object.keys(body).some((key) => !deepEqual(body[key], seen[key], { stripNullish: true }))
 }
 

@@ -17,6 +17,7 @@ import {
 	type FieldNamespace,
 	type FieldRef,
 	type NormalizedSignal,
+	type SignalPredicate,
 } from "./index"
 
 interface ConformanceFixture {
@@ -44,6 +45,7 @@ interface ConformanceFixture {
 	}>
 }
 
+// SAFETY: the conformance suite exercises every decoded fixture field below against its owning schema.
 const fixture = JSON.parse(
 	readFileSync(new URL("../fixtures/v1.json", import.meta.url), "utf8"),
 ) as ConformanceFixture
@@ -139,7 +141,7 @@ describe("selector validation", () => {
 	})
 
 	it("rejects hostile raw predicate topology before recursive schema decoding", () => {
-		let deeplyNested: unknown = {
+		let deeplyNested: SignalPredicate = {
 			op: "exists",
 			field: { namespace: "attribute", key: "x", type: "string" },
 		}

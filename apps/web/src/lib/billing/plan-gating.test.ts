@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest"
 import type { BillingBalance, BillingCustomer, BillingSubscription, CatalogPlan } from "@maple/domain/http"
 import {
 	getFeatureQuotas,
+	getLapsedPlan,
 	getLegacyPlanInfo,
 	getPastDueSubscription,
 	getQuotaStatus,
 	hasBringYourOwnCloudAddOn,
+	hasLapsedPlan,
 	hasSelectedPlan,
 	isLegacyPlan,
 	isUsableCustomer,
 	isUsageBasedPlan,
+	resolvePlanAccess,
 } from "./plan-gating"
 
 // The mock builders construct only the consumed subset of each domain schema;
@@ -110,6 +113,101 @@ describe("hasSelectedPlan", () => {
 	})
 })
 
+describe("getLapsedPlan / hasLapsedPlan", () => {
+	it("returns nothing for an org that never held a plan", () => {
+		expect(hasLapsedPlan(buildCustomer([]))).toBe(false)
+		expect(hasLapsedPlan(buildCustomer([buildSubscription({ status: "expired", addOn: true })]))).toBe(
+			false,
+		)
+		expect(
+			hasLapsedPlan(buildCustomer([buildSubscription({ status: "expired", autoEnable: true })])),
+		).toBe(false)
+		expect(
+			hasLapsedPlan(
+				buildCustomer([
+					buildSubscription({
+						status: "expired",
+						planId: "free",
+						plan: { name: "Free", archived: false },
+					}),
+				]),
+			),
+		).toBe(false)
+	})
+
+	it("returns the plan for an org whose subscription lapsed", () => {
+		const expired = buildCustomer([buildSubscription({ status: "expired" })])
+		const canceled = buildCustomer([buildSubscription({ status: "canceled" })])
+
+		expect(hasLapsedPlan(expired)).toBe(true)
+		expect(hasLapsedPlan(canceled)).toBe(true)
+		expect(getLapsedPlan(expired)?.planId).toBe("starter")
+	})
+
+	it("returns nothing while an active plan exists, even alongside an expired one", () => {
+		const customer = buildCustomer([
+			buildSubscription({ planId: "old", status: "expired" }),
+			buildSubscription({ planId: "startup", status: "active" }),
+		])
+		expect(hasLapsedPlan(customer)).toBe(false)
+	})
+
+	it("picks the most recently ended subscription", () => {
+		const customer = buildCustomer([
+			buildSubscription({ planId: "old", status: "expired", currentPeriodEnd: 1_000 }),
+			buildSubscription({ planId: "recent", status: "expired", currentPeriodEnd: 5_000 }),
+		])
+		expect(getLapsedPlan(customer)?.planId).toBe("recent")
+	})
+
+	it("returns nothing when there is no customer at all", () => {
+		expect(hasLapsedPlan(null)).toBe(false)
+		expect(hasLapsedPlan(undefined)).toBe(false)
+		expect(getLapsedPlan(null)).toBeNull()
+	})
+})
+
+describe("resolvePlanAccess", () => {
+	// The one gate both /quick-start and __root read. Every case here is a route
+	// decision: "onboarding" is the only verdict that shows the new-user wizard,
+	// so anything ambiguous must resolve to something else.
+	const active = buildCustomer([buildSubscription({ status: "active" })])
+	const lapsed = buildCustomer([buildSubscription({ status: "expired" })])
+	const neverSubscribed = buildCustomer([])
+
+	it("waits while the customer query is unsettled", () => {
+		expect(resolvePlanAccess({ customer: undefined, isLoading: true })).toBe("loading")
+		// Loading wins even over a retained previous value: the fresh answer is
+		// what the redirect will be applied to.
+		expect(resolvePlanAccess({ customer: active, isLoading: true })).toBe("loading")
+	})
+
+	it("sends a current subscriber to the app", () => {
+		expect(resolvePlanAccess({ customer: active, isLoading: false })).toBe("app")
+	})
+
+	it("sends a lapsed subscriber to the app, not back through onboarding", () => {
+		expect(resolvePlanAccess({ customer: lapsed, isLoading: false })).toBe("app")
+	})
+
+	it("onboards only an org that has never held a plan", () => {
+		expect(resolvePlanAccess({ customer: neverSubscribed, isLoading: false })).toBe("onboarding")
+	})
+
+	it("fails open when the customer read failed", () => {
+		// An Autumn outage reads as "no plan" through every predicate. Onboarding a
+		// paying customer because billing had a bad minute is the worse failure, so
+		// an unusable answer is never a verdict.
+		expect(resolvePlanAccess({ customer: undefined, error: new Error("502"), isLoading: false })).toBe(
+			"unknown",
+		)
+		// SAFETY: this test intentionally passes Autumn's malformed error body through the customer-shaped boundary.
+		const autumnErrorBody = { code: "autumn_api_error" } as unknown as Customer
+		expect(resolvePlanAccess({ customer: autumnErrorBody, isLoading: false })).toBe("unknown")
+		expect(resolvePlanAccess({ customer: undefined, isLoading: false })).toBe("unknown")
+	})
+})
+
 describe("hasBringYourOwnCloudAddOn", () => {
 	it("returns false when customer is missing", () => {
 		expect(hasBringYourOwnCloudAddOn(null)).toBe(false)
@@ -144,6 +242,7 @@ describe("malformed / error-shaped customer payloads", () => {
 	// `subscriptions`/`flags`. The gating helpers must treat it as "no usable
 	// customer" rather than throwing `Cannot read properties of undefined
 	// (reading 'find')`, which previously took down every route.
+	// SAFETY: this test intentionally passes Autumn's malformed error body through the customer-shaped boundary.
 	const errorPayload = {
 		message: "Response validation failed",
 		code: "autumn_api_error",
@@ -160,6 +259,10 @@ describe("malformed / error-shaped customer payloads", () => {
 	it("gating helpers never throw on an error payload and fail closed", () => {
 		expect(() => hasSelectedPlan(errorPayload)).not.toThrow()
 		expect(hasSelectedPlan(errorPayload)).toBe(false)
+		// An Autumn error must never read as "this org used to have a plan" — that
+		// would wave a brand-new org past the onboarding gate.
+		expect(() => hasLapsedPlan(errorPayload)).not.toThrow()
+		expect(hasLapsedPlan(errorPayload)).toBe(false)
 		expect(hasBringYourOwnCloudAddOn(errorPayload)).toBe(false)
 		expect(isUsageBasedPlan(errorPayload)).toBe(false)
 		expect(getQuotaStatus(errorPayload)).toBe("ok")

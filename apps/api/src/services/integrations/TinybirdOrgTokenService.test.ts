@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect"
 import { OrgId } from "@maple/domain"
@@ -20,7 +21,7 @@ const testConfig = (extra: Record<string, string> = {}, includeSigning = true) =
 						TINYBIRD_SIGNING_KEY: SIGNING_KEY,
 						TINYBIRD_WORKSPACE_ID: "ws-uuid-abc",
 					}
-				: {}),
+				: undefined),
 			MAPLE_AUTH_MODE: "self_hosted",
 			MAPLE_ROOT_PASSWORD: "test-root-password",
 			MAPLE_DEFAULT_ORG_ID: "default",

@@ -1,5 +1,6 @@
 import {
 	AlertDeliveryError,
+	type AlertDeliveryFailure,
 	AlertDestinationDecryptionError,
 	AlertDestinationStoredConfigInvalidError,
 	AlertValidationError,
@@ -11,20 +12,17 @@ import { projectAlertLifecycleEvent } from "@maple/alerting-core"
 import type { AlertDestinationRow } from "@maple/db"
 import { Effect } from "effect"
 import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
-import type { EmailServiceShape } from "@/platform/EmailService"
-import type { SlackBotTokenResolverShape } from "@/services/integrations/slack-bot-token"
-import {
-	buildAlertChatUrl,
-	dispatchDelivery as dispatchDeliveryImpl,
-	type DispatchContext as DeliveryDispatchContext,
-	type DispatchResult,
-} from "./AlertDeliveryDispatch"
+import type { EmailServiceApi } from "@/platform/EmailService"
+import type { SlackBotTokenResolverApi } from "@/services/integrations/slack-bot-token"
+import { buildAlertChatUrl, type DispatchContext as DeliveryDispatchContext } from "./AlertDeliveryDispatch"
+import { dispatchDelivery as dispatchDeliveryImpl } from "./delivery/dispatch"
+import type { DispatchResult } from "./delivery/context"
 import {
 	hydrateDestinationRow,
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
-import type { AlertRuntimeShape } from "./AlertRuntime"
+import type { AlertRuntimeApi } from "./AlertRuntime"
 
 export type AlertDispatchContext = Omit<
 	DeliveryDispatchContext,
@@ -62,9 +60,9 @@ export const parseAlertDestinationEncryptionKey = (
 export const makeAlertDestinationDelivery = (options: {
 	readonly encryptionKey: Buffer
 	readonly appBaseUrl: string
-	readonly runtime: AlertRuntimeShape
-	readonly email: EmailServiceShape
-	readonly resolveSlackBotToken: SlackBotTokenResolverShape["resolve"]
+	readonly runtime: AlertRuntimeApi
+	readonly email: EmailServiceApi
+	readonly resolveSlackBotToken: SlackBotTokenResolverApi["resolve"]
 }) => {
 	const hydrateDestination = Effect.fn("AlertsService.hydrateDestination")(function* (
 		row: AlertDestinationRow,
@@ -121,7 +119,7 @@ export const makeAlertDestinationDelivery = (options: {
 	const dispatchDelivery = (
 		context: AlertDispatchContext,
 		payloadJson: string,
-	): Effect.Effect<DispatchResult, AlertDeliveryError> =>
+	): Effect.Effect<DispatchResult, AlertDeliveryFailure> =>
 		dispatchDeliveryImpl(
 			context,
 			payloadJson,
@@ -172,6 +170,15 @@ export const makeAlertDestinationDelivery = (options: {
 				sampleCount: context.sampleCount,
 			},
 			template: context.template ?? null,
+			// Snapshotted at queue time, not re-derived at delivery: a retry an
+			// hour later must show what the alert saw, not what has happened since.
+			chart:
+				context.sparkline || context.chartUrl
+					? {
+							...(context.sparkline ? { sparkline: context.sparkline } : undefined),
+							...(context.chartUrl ? { url: context.chartUrl } : undefined),
+						}
+					: null,
 			linkUrl: context.linkUrl,
 			chatUrl: buildAlertChatUrl(options.appBaseUrl, context),
 			sentAt: new Date(context.sentAtMs).toISOString(),
@@ -184,6 +191,10 @@ export const makeAlertDestinationDelivery = (options: {
 			readonly rule: Record<string, unknown>
 			readonly observed: Record<string, unknown>
 			readonly template: AlertNotificationTemplate | null
+			readonly chart: {
+				readonly sparkline?: string
+				readonly url?: string
+			} | null
 			readonly linkUrl: string
 			readonly chatUrl: string
 			readonly sentAt: string

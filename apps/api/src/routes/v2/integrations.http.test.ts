@@ -21,23 +21,24 @@ import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglit
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import {
 	SLACK_CALLBACK_PATH,
 	SlackIntegrationService,
-	type SlackIntegrationServiceShape,
+	type SlackIntegrationServiceApi,
 } from "@/services/integrations/SlackIntegrationService"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import {
 	PLANETSCALE_CALLBACK_PATH,
 	PlanetScaleOAuthService,
-	type PlanetScaleOAuthServiceShape,
+	type PlanetScaleOAuthServiceApi,
 } from "@/services/auth/PlanetScaleOAuthService"
 import {
 	PlanetScaleConnectionService,
-	type PlanetScaleConnectionServiceShape,
+	type PlanetScaleConnectionServiceApi,
 } from "@/services/integrations/PlanetScaleConnectionService"
-import { PlanetScaleService, type PlanetScaleServiceShape } from "@/services/integrations/PlanetScaleService"
+import { PlanetScaleService, type PlanetScaleServiceApi } from "@/services/integrations/PlanetScaleService"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -90,7 +91,7 @@ const psDie = () => Effect.die(new Error("This PlanetScale service method is not
  * A real `SlackIntegrationService` with only the methods a test exercises —
  * anything else dies loudly rather than silently succeeding.
  */
-const slackServiceLayer = (overrides: Partial<SlackIntegrationServiceShape>) =>
+const slackServiceLayer = (overrides: Partial<SlackIntegrationServiceApi>) =>
 	Layer.succeed(
 		SlackIntegrationService,
 		SlackIntegrationService.of({
@@ -107,9 +108,9 @@ const slackServiceLayer = (overrides: Partial<SlackIntegrationServiceShape>) =>
 	)
 
 interface PlanetScaleFakes {
-	readonly connection?: Partial<PlanetScaleConnectionServiceShape>
-	readonly oauth?: Partial<PlanetScaleOAuthServiceShape>
-	readonly inventory?: Partial<PlanetScaleServiceShape>
+	readonly connection?: Partial<PlanetScaleConnectionServiceApi>
+	readonly oauth?: Partial<PlanetScaleOAuthServiceApi>
+	readonly inventory?: Partial<PlanetScaleServiceApi>
 }
 
 /**
@@ -150,16 +151,14 @@ const planetscaleServiceLayer = (fakes: PlanetScaleFakes) =>
 		EdgeCacheService.layer.pipe(Layer.provide(MemoryCacheBackendLive)),
 	)
 
-const makeHarness = (
-	slack: Partial<SlackIntegrationServiceShape> = {},
-	planetscale: PlanetScaleFakes = {},
-) => {
+const makeHarness = (slack: Partial<SlackIntegrationServiceApi> = {}, planetscale: PlanetScaleFakes = {}) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const servicesLive = Layer.mergeAll(
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
@@ -217,9 +216,9 @@ const makeHarness = (
 					// so the resolved origin does not depend on the web adapter's
 					// host-header handling.
 					"x-forwarded-host": options.forwardedHost ?? API_HOST,
-					...(options.body === undefined ? {} : { "content-type": "application/json" }),
+					...(!(options.body === undefined) ? { "content-type": "application/json" } : undefined),
 				},
-				...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+				...(!(options.body === undefined) ? { body: JSON.stringify(options.body) } : undefined),
 			}),
 			Context.empty() as never,
 		)

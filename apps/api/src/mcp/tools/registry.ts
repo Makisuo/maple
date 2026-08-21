@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { InternalRpcToolNotFoundError } from "@maple/domain/internal-rpc"
 import { Effect, Schema } from "effect"
 import { registerAddDashboardWidgetTool } from "./add-dashboard-widget"
@@ -7,6 +8,7 @@ import { registerCreateAlertRuleTool } from "./create-alert-rule"
 import { registerUpdateAlertRuleTool } from "./update-alert-rule"
 import { registerDeleteAlertRuleTool } from "./delete-alert-rule"
 import { registerCreateDashboardTool } from "./create-dashboard"
+import { registerDescribeDashboardSchemaTool } from "./describe-dashboard-schema"
 import { registerDiagnoseServiceTool } from "./diagnose-service"
 import { registerErrorDetailTool } from "./error-detail"
 import { registerExploreAttributesTool } from "./explore-attributes"
@@ -26,7 +28,6 @@ import { registerListAlertIncidentsTool } from "./list-alert-incidents"
 import { registerListAlertRulesTool } from "./list-alert-rules"
 import { registerClaimErrorIssueTool } from "./claim-error-issue"
 import { registerCommentOnErrorIssueTool } from "./comment-on-error-issue"
-import { registerHeartbeatErrorIssueTool } from "./heartbeat-error-issue"
 import { registerListErrorIncidentsTool } from "./list-error-incidents"
 import { registerListErrorIssueEventsTool } from "./list-error-issue-events"
 import { registerListErrorIssuesTool } from "./list-error-issues"
@@ -94,12 +95,50 @@ const isEmptyStructSchema = (base: Record<string, unknown>): boolean => {
 	})
 }
 
+/**
+ * Rewrite `anyOf: [T, {type: "null"}]` to plain `T`, keeping the sibling keys
+ * (`description`, and anything else attached to the property).
+ *
+ * `Schema.optional(X)` — which CLAUDE.md mandates for MCP tool params — has type
+ * `X | undefined`, but `toJsonSchemaDocument` renders that absence as a JSON
+ * `null` branch. The published schema therefore told every MCP client that
+ * `{"service": null}` was valid on every optional parameter of all 57 tools,
+ * while the decoder rejects it with `Expected string | undefined`. An agent that
+ * read the schema literally got "Invalid parameters" for doing what it was told.
+ *
+ * So this is a correctness fix first; it also happens to remove ~2.3k tokens
+ * (17% of the published schema bytes) of union wrapper.
+ *
+ * Safe only while no MCP parameter is GENUINELY nullable — `Schema.NullOr` would
+ * render identically and be wrongly narrowed here. `registry.test.ts` pins that
+ * invariant by decoding `null` into every parameter of every tool.
+ */
+const collapseNullableUnions = (node: unknown): unknown => {
+	if (Array.isArray(node)) return node.map(collapseNullableUnions)
+	if (node === null || typeof node !== "object") return node
+	const obj = node as Record<string, unknown>
+	const anyOf = obj.anyOf
+	if (Array.isArray(anyOf) && anyOf.length === 2) {
+		const nullIndex = anyOf.findIndex(
+			(member) => (member as Record<string, unknown> | null)?.type === "null",
+		)
+		if (nullIndex !== -1) {
+			const { anyOf: _replaced, ...siblings } = obj
+			const kept = anyOf[1 - nullIndex] as Record<string, unknown>
+			// Siblings last: a `description` on the property outranks one on the branch.
+			return collapseNullableUnions({ ...kept, ...siblings })
+		}
+	}
+	return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, collapseNullableUnions(value)]))
+}
+
 export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
 	const document = Schema.toJsonSchemaDocument(schema)
-	const base =
+	const rawBase =
 		Object.keys(document.definitions).length > 0
 			? { ...document.schema, $defs: document.definitions }
 			: document.schema
+	const base = collapseNullableUnions(rawBase) as typeof rawBase
 	// MCP requires the top-level inputSchema to be an object schema (`type: "object"`).
 	// An empty `Struct({})` (a no-parameter tool) comes out untyped, which strict MCP
 	// clients reject — the Vercel AI SDK's `tools/list` Zod validator fails on
@@ -111,7 +150,7 @@ export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
 			type: "object",
 			properties: {},
 			additionalProperties: false,
-			...("$defs" in record ? { $defs: record.$defs } : {}),
+			...("$defs" in record ? { $defs: record.$defs } : undefined),
 		}
 	}
 	// A genuinely non-object root (a top-level `Schema.Union`/`Schema.Literals`/array)
@@ -162,6 +201,7 @@ const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
 	registerCreateAlertRuleTool(registrar)
 	registerUpdateAlertRuleTool(registrar)
 	registerDeleteAlertRuleTool(registrar)
+	registerDescribeDashboardSchemaTool(registrar)
 	registerListDashboardsTool(registrar)
 	registerGetDashboardTool(registrar)
 	registerCreateDashboardTool(registrar)
@@ -185,7 +225,6 @@ const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
 	registerSetIssueSeverityTool(registrar)
 	registerClaimErrorIssueTool(registrar)
 	registerReleaseErrorIssueTool(registrar)
-	registerHeartbeatErrorIssueTool(registrar)
 	registerCommentOnErrorIssueTool(registrar)
 	registerProposeFixTool(registrar)
 	registerListErrorIssueEventsTool(registrar)

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
+	MACHINE_OWNED_WORKFLOW_STATES,
 	TERMINAL_WORKFLOW_STATES,
+	WORKFLOW_STATE_ORDER,
 	WORKFLOW_TRANSITIONS,
+	allowedTransitionsForAll,
 	WorkflowState,
 	describeWorkflowTransitions,
 } from "./errors"
@@ -61,5 +64,80 @@ describe("describeWorkflowTransitions", () => {
 		expect(description).toContain("wontfix→(triage|cancelled)")
 		// `cancelled` has no legal moves, so listing it would only mislead the model.
 		expect(description).not.toContain("cancelled→")
+	})
+})
+
+describe("allowedTransitionsForAll", () => {
+	it("offers the matrix row for a single issue in each state, less machine-owned targets", () => {
+		for (const state of ALL_STATES) {
+			expect(allowedTransitionsForAll([state]), state).toEqual(
+				WORKFLOW_STATE_ORDER.filter(
+					(target) =>
+						!MACHINE_OWNED_WORKFLOW_STATES.has(target) &&
+						WORKFLOW_TRANSITIONS[state].includes(target),
+				),
+			)
+		}
+	})
+
+	it("never offers a machine-owned state, even where the matrix allows it", () => {
+		// `done -> regressed` is a legal edge because the errors tick travels it,
+		// but it records an observation about which build fired. A human choosing
+		// it from a menu would be asserting that, and the next tick would overwrite
+		// the claim anyway.
+		expect(WORKFLOW_TRANSITIONS.done).toContain("regressed")
+		for (const state of ALL_STATES) {
+			expect(allowedTransitionsForAll([state]), state).not.toContain("regressed")
+		}
+	})
+
+	it("offers nothing for an issue in a state with no outgoing moves", () => {
+		expect(allowedTransitionsForAll(["cancelled"])).toEqual([])
+	})
+
+	it("returns the intersection for a mixed selection", () => {
+		// triage: todo, in_progress, done, cancelled, wontfix
+		// in_review: triage, in_progress, done, cancelled, wontfix
+		expect(allowedTransitionsForAll(["triage", "in_review"])).toEqual([
+			"in_progress",
+			"done",
+			"cancelled",
+			"wontfix",
+		])
+	})
+
+	it("returns nothing when a mixed selection has an empty intersection", () => {
+		// One dead-end issue kills the whole selection's options: every other
+		// row still allows `cancelled`, so `cancelled`'s empty row is the only
+		// thing that can empty an intersection.
+		expect(allowedTransitionsForAll(["triage", "todo", "cancelled"])).toEqual([])
+		expect(allowedTransitionsForAll(["cancelled", "wontfix"])).toEqual([])
+	})
+
+	it("narrows a mixed selection to the one move a dissimilar pair shares", () => {
+		// `wontfix` only reaches triage/cancelled; `triage` reaches neither
+		// triage nor itself, leaving `cancelled` as the single common move.
+		expect(allowedTransitionsForAll(["triage", "wontfix"])).toEqual(["cancelled"])
+	})
+
+	it("returns nothing for an empty selection", () => {
+		expect(allowedTransitionsForAll([])).toEqual([])
+	})
+
+	it("never offers a move the matrix rejects for any selected state", () => {
+		for (const a of ALL_STATES) {
+			for (const b of ALL_STATES) {
+				for (const target of allowedTransitionsForAll([a, b])) {
+					expect(WORKFLOW_TRANSITIONS[a], `${a}→${target}`).toContain(target)
+					expect(WORKFLOW_TRANSITIONS[b], `${b}→${target}`).toContain(target)
+				}
+			}
+		}
+	})
+
+	it("orders results canonically regardless of input order", () => {
+		expect(allowedTransitionsForAll(["in_review", "triage"])).toEqual(
+			allowedTransitionsForAll(["triage", "in_review"]),
+		)
 	})
 })

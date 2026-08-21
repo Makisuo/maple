@@ -8,6 +8,7 @@ import {
 	AlertDestinationNotFoundError,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
+	TelegramAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "@maple/domain/http"
 import type {
@@ -15,6 +16,7 @@ import type {
 	V2AlertDestinationCreateParams,
 	V2AlertDestinationMutationResponse,
 	V2AlertDestinationUpdateParams,
+	V2TelegramChatList,
 } from "@maple/domain/http/v2"
 import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import { Effect } from "effect"
@@ -37,7 +39,7 @@ const toV2Destination = (doc: AlertDestinationDocument): V2AlertDestination => (
 
 const toV2DestinationMutation = (doc: AlertDestinationDocument): V2AlertDestinationMutationResponse => ({
 	...toV2Destination(doc),
-	...(doc.txid !== undefined ? { txid: doc.txid } : {}),
+	...(doc.txid !== undefined ? { txid: doc.txid } : undefined),
 })
 
 const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
@@ -47,23 +49,25 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				type: "slack-bot",
 				name: params.name,
 				channelId: params.channel_id,
-				...(params.channel_name !== undefined ? { channelName: params.channel_name } : {}),
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.channel_name !== undefined ? { channelName: params.channel_name } : undefined),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "pagerduty":
 			return new PagerDutyAlertDestinationConfig({
 				type: "pagerduty",
 				name: params.name,
 				integrationKey: params.integration_key,
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "webhook":
 			return new WebhookAlertDestinationConfig({
 				type: "webhook",
 				name: params.name,
 				url: params.url,
-				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.signing_secret !== undefined
+					? { signingSecret: params.signing_secret }
+					: undefined),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "hazel-oauth":
 			return new HazelOAuthAlertDestinationConfig({
@@ -72,84 +76,117 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				hazelOrganizationId: params.hazel_organization_id,
 				hazelOrganizationName: params.hazel_organization_name,
 				...(params.hazel_organization_logo_url !== undefined
-					? { hazelOrganizationLogoUrl: params.hazel_organization_logo_url }
-					: {}),
+					? {
+							hazelOrganizationLogoUrl: params.hazel_organization_logo_url,
+						}
+					: undefined),
 				hazelChannelId: params.hazel_channel_id,
 				hazelChannelName: params.hazel_channel_name,
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "discord":
 			return new DiscordAlertDestinationConfig({
 				type: "discord",
 				name: params.name,
 				webhookUrl: params.webhook_url,
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
+			})
+		case "telegram":
+			return new TelegramAlertDestinationConfig({
+				type: "telegram",
+				name: params.name,
+				botToken: params.bot_token,
+				chatId: params.chat_id,
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "email":
 			return new EmailAlertDestinationConfig({
 				type: "email",
 				name: params.name,
 				memberUserIds: params.member_user_ids,
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 	}
 }
 
 const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinationUpdateRequest => {
 	const shared = {
-		...(params.name !== undefined ? { name: params.name } : {}),
-		...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+		...(params.name !== undefined ? { name: params.name } : undefined),
+		...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 	}
 	switch (params.type) {
 		case "slack-bot":
 			return {
 				type: "slack-bot",
 				...shared,
-				...(params.channel_id !== undefined ? { channelId: params.channel_id } : {}),
-				...(params.channel_name !== undefined ? { channelName: params.channel_name } : {}),
+				...(params.channel_id !== undefined ? { channelId: params.channel_id } : undefined),
+				...(params.channel_name !== undefined ? { channelName: params.channel_name } : undefined),
 			}
 		case "pagerduty":
 			return {
 				type: "pagerduty",
 				...shared,
-				...(params.integration_key !== undefined ? { integrationKey: params.integration_key } : {}),
+				...(params.integration_key !== undefined
+					? { integrationKey: params.integration_key }
+					: undefined),
 			}
 		case "webhook":
 			return {
 				type: "webhook",
 				...shared,
-				...(params.url !== undefined ? { url: params.url } : {}),
-				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
+				...(params.url !== undefined ? { url: params.url } : undefined),
+				...(params.signing_secret !== undefined
+					? { signingSecret: params.signing_secret }
+					: undefined),
 			}
 		case "hazel-oauth":
 			return {
 				type: "hazel-oauth",
 				...shared,
 				...(params.hazel_organization_id !== undefined
-					? { hazelOrganizationId: params.hazel_organization_id }
-					: {}),
+					? {
+							hazelOrganizationId: params.hazel_organization_id,
+						}
+					: undefined),
 				...(params.hazel_organization_name !== undefined
-					? { hazelOrganizationName: params.hazel_organization_name }
-					: {}),
+					? {
+							hazelOrganizationName: params.hazel_organization_name,
+						}
+					: undefined),
 				...(params.hazel_organization_logo_url !== undefined
-					? { hazelOrganizationLogoUrl: params.hazel_organization_logo_url }
-					: {}),
-				...(params.hazel_channel_id !== undefined ? { hazelChannelId: params.hazel_channel_id } : {}),
+					? {
+							hazelOrganizationLogoUrl: params.hazel_organization_logo_url,
+						}
+					: undefined),
+				...(params.hazel_channel_id !== undefined
+					? { hazelChannelId: params.hazel_channel_id }
+					: undefined),
 				...(params.hazel_channel_name !== undefined
-					? { hazelChannelName: params.hazel_channel_name }
-					: {}),
+					? {
+							hazelChannelName: params.hazel_channel_name,
+						}
+					: undefined),
 			}
 		case "discord":
 			return {
 				type: "discord",
 				...shared,
-				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : {}),
+				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : undefined),
+			}
+		case "telegram":
+			return {
+				type: "telegram",
+				...shared,
+				...(params.bot_token !== undefined ? { botToken: params.bot_token } : undefined),
+				...(params.chat_id !== undefined ? { chatId: params.chat_id } : undefined),
 			}
 		case "email":
 			return {
 				type: "email",
 				...shared,
-				...(params.member_user_ids !== undefined ? { memberUserIds: params.member_user_ids } : {}),
+				...(params.member_user_ids !== undefined
+					? { memberUserIds: params.member_user_ids }
+					: undefined),
 			}
 	}
 }
@@ -182,6 +219,16 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 							}),
 						)
 					return toV2Destination(destination)
+				}),
+			)
+			.handle("telegramChats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const chats = yield* destinations.listTelegramChats(tenant.roles, payload.bot_token)
+					return {
+						object: "alert_destination.telegram_chat_list" as const,
+						chats,
+					} satisfies V2TelegramChatList
 				}),
 			)
 			.handle("create", ({ payload }) =>
@@ -224,7 +271,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 						id: deleted.id,
 						object: "alert_destination" as const,
 						deleted: true as const,
-						...(deleted.txid !== undefined ? { txid: deleted.txid } : {}),
+						...(deleted.txid !== undefined ? { txid: deleted.txid } : undefined),
 					}
 				}),
 			)

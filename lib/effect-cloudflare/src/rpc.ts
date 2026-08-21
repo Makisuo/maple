@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Copied from alchemy-effect to stay API-compatible for a future migration:
 //   https://github.com/alchemy-run/alchemy-effect/blob/main/packages/alchemy/src/Cloudflare/Workers/Rpc.ts
 //
@@ -8,9 +9,9 @@
 import type * as cf from "@cloudflare/workers-types"
 
 import * as Cause from "effect/Cause"
-import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as Socket from "effect/unstable/socket/Socket"
@@ -21,7 +22,7 @@ import { fromWebSocket } from "./websocket.ts"
 
 // Local redeclaration to avoid importing from durable-object-namespace.ts
 // (which imports from this file). Must match the exported shape there.
-interface DurableObjectShapeLocal {
+interface DurableObjectApiLocal {
 	fetch?: HttpEffect<any>
 	alarm?: (alarmInfo?: cf.AlarmInvocationInfo) => Effect.Effect<void, never, never>
 	webSocketMessage?: (socket: any, message: string | ArrayBuffer) => Effect.Effect<void>
@@ -40,18 +41,22 @@ export type RpcStreamEnvelope = {
 	body: ReadableStream<Uint8Array>
 }
 
-export class RpcDecodeError extends Data.TaggedError("@maple/effect-cloudflare/RpcDecodeError")<{
-	readonly cause: unknown
-}> {
+export class RpcDecodeError extends Schema.TaggedError<RpcDecodeError>()(
+	"@maple/effect-cloudflare/RpcDecodeError",
+	{ cause: Schema.Defect() },
+) {
 	override get message() {
 		return this.cause instanceof Error ? this.cause.message : String(this.cause)
 	}
 }
 
-export class RpcCallError extends Data.TaggedError("@maple/effect-cloudflare/RpcCallError")<{
-	readonly method: string
-	readonly cause: unknown
-}> {
+export class RpcCallError extends Schema.TaggedError<RpcCallError>()(
+	"@maple/effect-cloudflare/RpcCallError",
+	{
+		method: Schema.String,
+		cause: Schema.Defect(),
+	},
+) {
 	override get message() {
 		return `RPC call to "${this.method}" failed: ${
 			this.cause instanceof Error ? this.cause.message : String(this.cause)
@@ -59,17 +64,18 @@ export class RpcCallError extends Data.TaggedError("@maple/effect-cloudflare/Rpc
 	}
 }
 
-class RpcRemoteError extends Data.TaggedError("@maple/effect-cloudflare/RpcRemoteError")<{
-	readonly error: unknown
-}> {
+class RpcRemoteError extends Schema.TaggedError<RpcRemoteError>()("@maple/effect-cloudflare/RpcRemoteError", {
+	error: Schema.Defect(),
+}) {
 	override get message() {
 		return remoteErrorMessage(this.error, "Remote RPC call failed")
 	}
 }
 
-export class RpcRemoteStreamError extends Data.TaggedError("@maple/effect-cloudflare/RpcRemoteStreamError")<{
-	readonly error: unknown
-}> {
+export class RpcRemoteStreamError extends Schema.TaggedError<RpcRemoteStreamError>()(
+	"@maple/effect-cloudflare/RpcRemoteStreamError",
+	{ error: Schema.Defect() },
+) {
 	override get message() {
 		return remoteErrorMessage(this.error, "Remote RPC stream failed")
 	}
@@ -197,7 +203,7 @@ export const decodeRpcResult = (value: unknown): Effect.Effect<unknown, RpcRemot
 	return Effect.succeed(decodeRpcValue(value))
 }
 
-export const makeRpcStub = <Shape>(stub: any): Shape => {
+export const makeRpcStub = <Definition>(stub: any): Definition => {
 	const fetcher = fromCloudflareFetcher(stub)
 
 	return new Proxy(fetcher, {
@@ -209,7 +215,7 @@ export const makeRpcStub = <Shape>(stub: any): Shape => {
 							try: () => stub[prop](...args),
 							catch: (cause) => new RpcCallError({ method: String(prop), cause }),
 						}).pipe(Effect.flatMap(decodeRpcResult)),
-	}) as Shape
+	}) as Definition
 }
 
 export const makeDurableObjectBridge =
@@ -221,12 +227,13 @@ export const makeDurableObjectBridge =
 	) =>
 	(className: string) =>
 		class DurableObjectBridge extends DurableObject {
-			readonly object: Promise<DurableObjectShapeLocal>
+			readonly object: Promise<DurableObjectApiLocal>
 
 			async fetch(request: cf.Request): Promise<cf.Response> {
 				const methods = await this.object
 				if (methods.fetch) {
 					const fetch = methods.fetch as HttpEffect<never>
+					// SAFETY: the Workers and DOM Request declarations describe the same runtime request object.
 					const response = await serveWebRequest(
 						request as unknown as globalThis.Request,
 						fetch,
@@ -285,7 +292,7 @@ export const makeDurableObjectBridge =
 							? target[prop]
 							: async (...args: unknown[]) => {
 									const methods = await this.object
-									const method = methods[prop as keyof DurableObjectShapeLocal] as any
+									const method = methods[prop as keyof DurableObjectApiLocal] as any
 									const value = method(...args)
 									if (Effect.isEffect(value)) {
 										const exit = await Effect.runPromiseExit(

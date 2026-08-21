@@ -27,6 +27,15 @@ const recordSpan = (spans: ReturnType<typeof makeSpanBuffer>, name: string) =>
 const recordLog = (logs: ReturnType<typeof makeLogBuffer>, message: string) =>
 	Effect.logInfo(message).pipe(Effect.provide(logs.loggerLayer))
 
+describe("buildResolved", () => {
+	vitestIt("stamps the SDK identity on a header browsers allow, alongside user-agent", () => {
+		// A page cannot set `user-agent`; ingest reads `x-maple-sdk` as `maple.sdk`.
+		expect(resolved.headers["user-agent"]).toBe("test")
+		expect(resolved.headers["x-maple-sdk"]).toBe("test")
+		expect(resolved.headers.authorization).toBe("Bearer test-key")
+	})
+})
+
 describe("runFlush", () => {
 	afterEach(() => {
 		vi.useRealTimers()

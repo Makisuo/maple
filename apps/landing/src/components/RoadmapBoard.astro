@@ -7,14 +7,14 @@ const total = sorted.length
 
 type StatusKey = "shipped" | "in-progress" | "planned" | "exploring"
 
-const STATUS: Record<StatusKey, { label: string; dot: string; text: string; bar: string }> = {
+const STATUS: Record<StatusKey, { label: string; dot: string; text: string; bar: string }>  = {
 	shipped: { label: "Shipped", dot: "bg-chart-2", text: "text-chart-2", bar: "bg-chart-2" },
 	"in-progress": { label: "In progress", dot: "bg-chart-3", text: "text-chart-3", bar: "bg-chart-3" },
 	planned: { label: "Planned", dot: "bg-primary", text: "text-primary", bar: "bg-primary" },
 	exploring: { label: "Exploring", dot: "bg-chart-4", text: "text-chart-4", bar: "bg-chart-4" },
-}
+} satisfies Record<StatusKey, { label: string; dot: string; text: string; bar: string }>
 
-const categoryStyles: Record<string, string> = {
+const categoryStyles: Record<string, string>  = {
 	traces: "border-chart-1/30 bg-chart-1/10 text-chart-1",
 	logs: "border-chart-2/30 bg-chart-2/10 text-chart-2",
 	metrics: "border-chart-3/30 bg-chart-3/10 text-chart-3",
@@ -22,7 +22,7 @@ const categoryStyles: Record<string, string> = {
 	integrations: "border-primary/30 bg-primary/10 text-primary",
 	platform: "border-chart-4/30 bg-chart-4/10 text-chart-4",
 	ai: "border-chart-p50/30 bg-chart-p50/10 text-chart-p50",
-}
+} satisfies Record<string, string>
 
 const meterOrder: StatusKey[] = ["shipped", "in-progress", "planned", "exploring"]
 const counts = Object.fromEntries(

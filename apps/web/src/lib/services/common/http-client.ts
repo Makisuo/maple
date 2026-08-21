@@ -2,6 +2,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { Layer } from "effect"
 import { apiBaseUrl } from "./api-base-url"
 import { getMapleAuthHeaders } from "./auth-headers"
+import { noteReachable, noteUnreachable, originOf } from "./peer-reachability"
 
 const CLIENT_TIMEOUT_MS = 45_000
 
@@ -23,12 +24,33 @@ const mapleFetch: typeof globalThis.fetch = async (input, init) => {
 		}
 	}
 
-	return globalThis.fetch(input, {
-		...init,
-		headers,
-		signal: init?.signal ?? AbortSignal.timeout(CLIENT_TIMEOUT_MS),
-	})
+	const origin = originOf(resolveRequestUrl(input))
+	// Every API call the app makes passes through here, so this is where the app
+	// learns whether an origin is reachable at all — the same clock `tracedFetch`
+	// feeds from the ShapeStream side, since a blip takes both down at once. It
+	// only observes; `normalizeWarehouseError` is what reads it to decide whether
+	// a failure is the network's fault. An abort is evidence of nothing either
+	// way: we stopped listening.
+	return globalThis
+		.fetch(input, {
+			...init,
+			headers,
+			signal: init?.signal ?? AbortSignal.timeout(CLIENT_TIMEOUT_MS),
+		})
+		.then(
+			(response) => {
+				noteReachable(origin)
+				return response
+			},
+			(cause: unknown) => {
+				if (!isAbort(cause)) noteUnreachable(origin, Date.now())
+				throw cause
+			},
+		)
 }
+
+const isAbort = (cause: unknown): boolean =>
+	typeof cause === "object" && cause !== null && "name" in cause && cause.name === "AbortError"
 
 export const MapleFetchHttpClientLive = FetchHttpClient.layer.pipe(
 	Layer.provideMerge(Layer.succeed(FetchHttpClient.Fetch, mapleFetch)),

@@ -112,7 +112,8 @@ export const PLANETSCALE_WEBHOOK_ADAPTER: SignalSourceAdapter<
 		const observedAtDate = new Date(context.acceptedAt)
 		if (Number.isNaN(observedAtDate.getTime()))
 			throw new Error("PlanetScale receipt time is outside the supported date range")
-		const payloadJson = payload as unknown as JsonValue
+		if (!isJsonValue(payload)) throw new Error("PlanetScale webhook payload must be finite JSON")
+		const payloadJson = payload
 		const occurredAtMs = planetScaleWebhookTimestampMillis(payload)
 		if (occurredAtMs === null) throw new Error("PlanetScale webhook requires a positive source timestamp")
 		const occurredAt = validDate(occurredAtMs, "PlanetScale event timestamp").toISOString()
@@ -414,14 +415,14 @@ const DEPLOY_STATE_VERB: Record<string, string> = {
 	"deploy_request.errored": "failed",
 	"deploy_request.reverted": "was reverted",
 	"deploy_request.closed": "closed",
-}
+} satisfies Record<string, string>
 
 const BRANCH_STATE_VERB: Record<string, string> = {
 	"branch.ready": "is ready",
 	"branch.sleeping": "went to sleep",
 	"branch.primary_promoted": "was promoted to primary",
 	"branch.start_maintenance": "entered maintenance",
-}
+} satisfies Record<string, string>
 
 /**
  * PlanetScale webhook `timestamp` is epoch SECONDS; the deploy-request REST

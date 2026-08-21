@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
-import { BillingControls, BillingSpendLimit, BillingUsageAlert } from "./billing"
+import {
+	BillingConflictError,
+	BillingControls,
+	BillingNotConfiguredError,
+	BillingPaymentRequiredError,
+	BillingRateLimitedError,
+	BillingRequestError,
+	BillingSpendLimit,
+	BillingUpstreamError,
+	BillingUsageAlert,
+} from "./billing"
+import { publicHttpErrorBody } from "./error-policy"
 
 // Autumn omits a billing control's `enabled` when it holds the API default, and
 // the two defaults differ. `autumn-js` injected them in its inbound Zod schemas
@@ -49,5 +60,73 @@ describe("billing control enabled defaults", () => {
 				{ featureId: "logs", enabled: true, threshold: 80, thresholdType: "usage_percentage" },
 			],
 		})
+	})
+})
+
+// Each billing failure owns its public presentation, so the web needs no
+// tag switch: `displayError(err).message` reads whatever the class declares.
+// These assertions are the contract that makes deleting that switch safe.
+describe("billing error presentation", () => {
+	const context = { code: "autumn_code", upstreamStatus: 402 }
+
+	it("shows the upstream decline reason verbatim — it is the only place that detail exists", () => {
+		const body = publicHttpErrorBody(
+			new BillingPaymentRequiredError({ ...context, message: "Card declined" }),
+		)
+		expect(body).toMatchObject({
+			type: "payment_error",
+			code: "billing_payment_required",
+			message: "Card declined",
+			retryable: false,
+			recovery: "fix_request",
+		})
+	})
+
+	it("never advises retrying a conflict, and redacts the upstream wording", () => {
+		// Retrying a 409 can only produce another 409 — this was the copy shown to
+		// customers whose subscription had already succeeded.
+		const body = publicHttpErrorBody(
+			new BillingConflictError({ ...context, upstreamStatus: 409, message: "already attached" }),
+		)
+		expect(body.type).toBe("conflict_error")
+		expect(body.message).not.toContain("already attached")
+		expect(body.retryable).toBe(false)
+		expect(body.recovery).toBe("refresh")
+	})
+
+	it("marks throttling as the one retryable rejection", () => {
+		const body = publicHttpErrorBody(
+			new BillingRateLimitedError({ ...context, upstreamStatus: 429, message: "slow down" }),
+		)
+		expect(body).toMatchObject({ type: "rate_limit_error", retryable: true, recovery: "retry" })
+	})
+
+	it("owns a credentials fault instead of blaming the customer or the upstream", () => {
+		// A revoked key is our deployment fault: 5xx so it stays in error tracking,
+		// and contact_support because no amount of retrying fixes it.
+		const body = publicHttpErrorBody(
+			new BillingNotConfiguredError({ message: "Autumn rejected our credentials (HTTP 401)" }),
+		)
+		expect(body).toMatchObject({
+			type: "api_error",
+			code: "billing_not_configured",
+			retryable: false,
+			recovery: "contact_support",
+		})
+		expect(body.message).not.toContain("Autumn")
+	})
+
+	it("keeps a dependency's wording out of a public 5xx", () => {
+		const body = publicHttpErrorBody(new BillingUpstreamError({ message: "ECONNREFUSED 10.0.0.1" }))
+		expect(body.type).toBe("api_error")
+		expect(body.message).not.toContain("ECONNREFUSED")
+		expect(body.retryable).toBe(true)
+	})
+
+	it("passes an upstream request rejection through in the upstream's words", () => {
+		const body = publicHttpErrorBody(
+			new BillingRequestError({ ...context, upstreamStatus: 400, message: "Unknown plan id" }),
+		)
+		expect(body).toMatchObject({ type: "invalid_request_error", message: "Unknown plan id" })
 	})
 })

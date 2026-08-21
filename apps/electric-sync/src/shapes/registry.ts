@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { Schema } from "effect"
 
 /**
@@ -25,7 +26,7 @@ import { Schema } from "effect"
 // replication cost, so drop it from the publication instead of leaving it. That
 // is why the errors vertical (error_issues / actors / open_error_incidents) and
 // scrape_target_checks are gone — see 0022_electric_publication_prune.
-const SHAPES = {
+const SUBSCRIPTIONS = {
 	dashboards: { table: "dashboards" },
 	alert_rules: { table: "alert_rules" },
 	alert_rule_states: { table: "alert_rule_states" },
@@ -142,9 +143,9 @@ const SHAPES = {
 			"started_at",
 		],
 	},
-} as const satisfies Record<string, ShapeDefinition>
+} as const satisfies Record<string, SubscriptionDefinition>
 
-export interface ShapeDefinition {
+export interface SubscriptionDefinition {
 	readonly table: string
 	readonly extraWhere?: string
 	readonly columns?: ReadonlyArray<string>
@@ -156,7 +157,7 @@ export interface ShapeDefinition {
 	readonly scope?: string
 }
 
-export type ShapeName = keyof typeof SHAPES
+export type SubscriptionName = keyof typeof SUBSCRIPTIONS
 
 /**
  * The whitelist widened to one uniform record type.
@@ -167,10 +168,13 @@ export type ShapeName = keyof typeof SHAPES
  * by `ShapeName` rather than `string` is what makes `lookupShape` total: the index
  * is already proven to be a member, so there is nothing to assert away.
  */
-const SHAPE_DEFS: Record<ShapeName, ShapeDefinition> = SHAPES
+const SUBSCRIPTION_DEFS: Record<SubscriptionName, SubscriptionDefinition> = SUBSCRIPTIONS satisfies Record<
+	SubscriptionName,
+	SubscriptionDefinition
+>
 
 /** Every whitelisted shape, so tests can assert invariants across the whole set. */
-export const SHAPE_NAMES = Object.keys(SHAPES) as ReadonlyArray<ShapeName>
+export const SUBSCRIPTION_NAMES = Object.keys(SUBSCRIPTIONS) as ReadonlyArray<SubscriptionName>
 
 /**
  * The shape selector as a schema, so the whitelist is a literal union rather than
@@ -178,15 +182,19 @@ export const SHAPE_NAMES = Object.keys(SHAPES) as ReadonlyArray<ShapeName>
  * (`toString`, `constructor`) non-members by construction instead of by a guard
  * someone has to remember to write.
  */
-export const ShapeNameSchema: Schema.Literals<ReadonlyArray<ShapeName>> = Schema.Literals(SHAPE_NAMES)
+export const SubscriptionNameSchema: Schema.Literals<ReadonlyArray<SubscriptionName>> =
+	Schema.Literals(SUBSCRIPTION_NAMES)
 
-export const isShapeName: (value: unknown) => value is ShapeName = Schema.is(ShapeNameSchema)
+export const isSubscriptionName: (value: unknown) => value is SubscriptionName =
+	Schema.is(SubscriptionNameSchema)
 
 /** The pinned definition for a shape. Total — `ShapeName` is proof of membership. */
-export const lookupShape = (shape: ShapeName): ShapeDefinition => SHAPE_DEFS[shape]
+export const lookupSubscription = (subscription: SubscriptionName): SubscriptionDefinition =>
+	SUBSCRIPTION_DEFS[subscription]
 
 /** The column a shape narrows to a single client-supplied value, or null if it is org-wide. */
-export const shapeScopeColumn = (shape: ShapeName): string | null => lookupShape(shape).scope ?? null
+export const subscriptionScopeColumn = (subscription: SubscriptionName): string | null =>
+	lookupSubscription(subscription).scope ?? null
 
 /**
  * Whether a client-supplied scope value is acceptable.

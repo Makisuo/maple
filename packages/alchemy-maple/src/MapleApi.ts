@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import * as Context from "effect/Context"
 import * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
@@ -31,14 +32,14 @@ import { MapleEnvironment } from "./MapleEnvironment"
  * Declared non-2xx responses retain the server's complete public error body.
  * Retry behavior comes from that body rather than being inferred from status.
  */
-export interface MapleApiShape {
+export interface MapleApiContract {
 	readonly get: (path: string) => Effect.Effect<unknown, MapleError>
 	readonly post: (path: string, body?: unknown) => Effect.Effect<unknown, MapleError>
 	readonly patch: (path: string, body: unknown) => Effect.Effect<unknown, MapleError>
 	readonly delete: (path: string) => Effect.Effect<unknown, MapleError>
 }
 
-export class MapleApi extends Context.Service<MapleApi, MapleApiShape>()("Maple::Api") {}
+export class MapleApi extends Context.Service<MapleApi, MapleApiContract>()("Maple::Api") {}
 
 const ErrorEnvelope = Schema.Struct({ error: MaplePublicErrorBodySchema })
 const decodeErrorEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(ErrorEnvelope))
@@ -51,6 +52,8 @@ const errorTypeForStatus = (status: number): MaplePublicErrorType | undefined =>
 			return "invalid_request_error"
 		case 401:
 			return "authentication_error"
+		case 402:
+			return "payment_error"
 		case 403:
 			return "permission_error"
 		case 404:
@@ -226,7 +229,7 @@ export const MapleApiLive = () => MapleApiFromHttpClient().pipe(Layer.provide(Fe
  * next_cursor }`), following cursors until exhausted.
  */
 export const listAll = (
-	api: MapleApiShape,
+	api: MapleApiContract,
 	path: string,
 ): Effect.Effect<ReadonlyArray<unknown>, MapleError> =>
 	Effect.gen(function* () {

@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import { useState } from "react"
 
 import {
@@ -33,19 +34,22 @@ import { deriveDefaultWidgetTitle } from "@/lib/query-builder/widget-builder-uti
 const CHART_STYLES = [
 	{
 		chartId: "query-builder-bar",
-		previewChartId: "default-bar",
+		// The preview IS the chart the card creates. It used to be a separate
+		// Recharts demo entry (`default-bar`, a dotted-pattern bar nothing else
+		// rendered), so the thumbnail showed something no widget could produce.
+		previewChartId: "query-builder-bar",
 		label: "Bar Chart",
 		description: "Compare values across categories",
 	},
 	{
 		chartId: "query-builder-area",
-		previewChartId: "gradient-area",
+		previewChartId: "query-builder-area",
 		label: "Area Chart",
 		description: "Visualize trends over time",
 	},
 	{
 		chartId: "query-builder-line",
-		previewChartId: "dotted-line",
+		previewChartId: "query-builder-line",
 		label: "Line Chart",
 		description: "Track metrics over time",
 	},

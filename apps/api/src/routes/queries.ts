@@ -332,7 +332,7 @@ const planetscaleStatsParams = (payload: ServicePlanetScaleStatsRequest, orgId: 
 	orgId,
 	startTime: payload.startTime,
 	endTime: payload.endTime,
-	...(payload.database !== undefined ? { database: payload.database } : {}),
+	...(payload.database !== undefined ? { database: payload.database } : undefined),
 })
 
 const planetscaleServiceGauges = defineQuery({
@@ -454,8 +454,8 @@ const cloudflareInfraZoneBreakdownTotals = defineQuery({
 	id: "cloudflareInfraZoneBreakdownTotals",
 	profile: "aggregation",
 	cache: 15,
-	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) =>
-		CH.compile(
+	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) => {
+		return CH.compile(
 			Integrations.cloudflareZoneBreakdownTotalsSQL(
 				payload.dimension,
 				toCloudflareFilters(payload),
@@ -463,7 +463,8 @@ const cloudflareInfraZoneBreakdownTotals = defineQuery({
 			),
 			zoneBreakdownParams(payload, orgId),
 			{ rowSchema: Integrations.cloudflareZoneBreakdownTotalsRowSchema },
-		),
+		)
+	},
 })
 
 /**

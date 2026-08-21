@@ -83,11 +83,13 @@ export const applyDiagnosisWrites = async (db: MaplePgClient, input: ApplyDiagno
 			error: null,
 			diagnosedAt: now,
 			updatedAt: now,
-			...(input.fanoutState === undefined ? {} : { fanoutState: input.fanoutState }),
-			...(input.validatorNote === undefined ? {} : { validatorNote: input.validatorNote }),
-			...(input.validatorElapsedMs === undefined
-				? {}
-				: { validatorElapsedMs: input.validatorElapsedMs }),
+			...(!(input.fanoutState === undefined) ? { fanoutState: input.fanoutState } : undefined),
+			...(!(input.validatorNote === undefined) ? { validatorNote: input.validatorNote } : undefined),
+			...(!(input.validatorElapsedMs === undefined)
+				? {
+						validatorElapsedMs: input.validatorElapsedMs,
+					}
+				: undefined),
 		})
 		.where(and(eq(investigations.orgId, input.orgId), eq(investigations.id, input.investigationId)))
 

@@ -31,7 +31,7 @@ import {
 	subTargetsFromGroup,
 } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"
-import { ScrapeTargetsService, type ScrapeTargetsServiceShape } from "./ScrapeTargetsService"
+import { ScrapeTargetsService, type ScrapeTargetsServiceApi } from "./ScrapeTargetsService"
 
 /**
  * First-class PlanetScale integration: one OAuth-backed connection per org.
@@ -56,10 +56,10 @@ export interface PlanetScaleDetectedPermissions {
 }
 
 type ScrapeTargetMutationError =
-	| Effect.Error<ReturnType<ScrapeTargetsServiceShape["create"]>>
-	| Effect.Error<ReturnType<ScrapeTargetsServiceShape["update"]>>
+	| Effect.Error<ReturnType<ScrapeTargetsServiceApi["create"]>>
+	| Effect.Error<ReturnType<ScrapeTargetsServiceApi["update"]>>
 
-export interface PlanetScaleConnectionServiceShape {
+export interface PlanetScaleConnectionServiceApi {
 	readonly getStatus: (
 		orgId: OrgId,
 	) => Effect.Effect<
@@ -147,7 +147,7 @@ const decodeStoredDiscoveryConfig = (row: typeof scrapeTargets.$inferSelect) =>
 
 export class PlanetScaleConnectionService extends Context.Service<
 	PlanetScaleConnectionService,
-	PlanetScaleConnectionServiceShape
+	PlanetScaleConnectionServiceApi
 >()("@maple/api/services/PlanetScaleConnectionService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -489,13 +489,17 @@ export class PlanetScaleConnectionService extends Context.Service<
 					const keepsToken =
 						adoptable.authType === "token" && adoptable.authCredentialsCiphertext !== null
 					yield* scrapeTargetsService.update(orgId, adoptable.id, {
-						...(keepsToken ? {} : { authType: "planetscale_oauth" }),
+						...(!keepsToken ? { authType: "planetscale_oauth" } : undefined),
 						...(request.includeBranches !== undefined
-							? { includeBranches: request.includeBranches }
-							: {}),
+							? {
+									includeBranches: request.includeBranches,
+								}
+							: undefined),
 						...(request.excludeBranches !== undefined
-							? { excludeBranches: request.excludeBranches }
-							: {}),
+							? {
+									excludeBranches: request.excludeBranches,
+								}
+							: undefined),
 						enabled: keepsToken || permissions.readMetricsEndpoints,
 					})
 					scrapeTargetId = adoptable.id
@@ -506,11 +510,15 @@ export class PlanetScaleConnectionService extends Context.Service<
 						organization,
 						authType: "planetscale_oauth",
 						...(request.includeBranches !== undefined
-							? { includeBranches: request.includeBranches }
-							: {}),
+							? {
+									includeBranches: request.includeBranches,
+								}
+							: undefined),
 						...(request.excludeBranches !== undefined
-							? { excludeBranches: request.excludeBranches }
-							: {}),
+							? {
+									excludeBranches: request.excludeBranches,
+								}
+							: undefined),
 						// Paused until a service token arrives when the bearer probe
 						// failed — an enabled target would just 401 every scrape.
 						enabled: permissions.readMetricsEndpoints,
@@ -779,7 +787,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 			disconnect,
 			loadConnection,
 			webhookConfig,
-		} satisfies PlanetScaleConnectionServiceShape
+		} satisfies PlanetScaleConnectionServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

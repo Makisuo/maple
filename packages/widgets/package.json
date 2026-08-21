@@ -4,7 +4,8 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
-		"./dashboard": "./src/dashboard/index.ts"
+		"./dashboard": "./src/dashboard/index.ts",
+		"./chart/static-chart": "./src/chart/static-chart.ts"
 	},
 	"scripts": {
 		"test": "vitest run",

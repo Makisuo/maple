@@ -21,7 +21,7 @@ const KIND_LABEL: Record<DashboardVersionChangeKind, string> = {
 	section_updated: "Groups",
 	restored: "Restored",
 	multiple: "Edited",
-}
+} satisfies Record<DashboardVersionChangeKind, string>
 
 // Marker color keyed off changeKind. Pulled from the existing chart/severity
 // tokens so the timeline reads against the rest of the app.
@@ -45,7 +45,7 @@ const KIND_DOT: Record<DashboardVersionChangeKind, string> = {
 	section_updated: "bg-muted-foreground",
 	restored: "bg-primary ring-[3px] ring-primary/18",
 	multiple: "bg-chart-5",
-}
+} satisfies Record<DashboardVersionChangeKind, string>
 
 function actorInitials(userId: string): string {
 	const trimmed = userId.trim()

@@ -15,7 +15,7 @@
 //     can see paths the stored top-N never kept. The chart hides there, because
 //     live mode has no history. Live is an action, never a side effect of
 //     typing — every keystroke used to be a Cloudflare GraphQL round trip.
-//   - Rank. Rows carry a share-proportional tint, so a hundred keys read as a
+//   - Rank. Rows carry a share-proportional bar, so a hundred keys read as a
 //     decaying shape instead of a flat wall of names.
 
 import { useDeferredValue, useMemo, useState, type ReactNode } from "react"
@@ -37,7 +37,7 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 import { formatNumber } from "@maple/ui/lib/format"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { ColumnHead, DataTable, useTableSort } from "../primitives/data-table"
-import { shareTint } from "../primitives/share-tint"
+import { shareBar } from "../primitives/share-bar"
 import { formatBytes, formatPercent } from "@maple/ui/lib/format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
 import {
@@ -356,11 +356,7 @@ function BreakdownTable({
 			{sorted.map((row) => {
 				const selected = selectedValues.includes(row.key)
 				return (
-					<div
-						key={row.key}
-						className={ROW_CLASS}
-						style={{ backgroundImage: shareTint(row.share) }}
-					>
+					<div key={row.key} className={ROW_CLASS} style={shareBar(row.share)}>
 						<div className="min-w-[220px] flex-1 truncate">
 							{interactive && onToggleFilter ? (
 								<button

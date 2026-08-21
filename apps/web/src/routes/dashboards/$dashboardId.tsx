@@ -5,6 +5,7 @@ import { Atom, useAtom } from "@/lib/effect-atom"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { DashboardSections } from "@/components/dashboard-builder/sections/dashboard-sections"
+import { LiveWidgetRenderer } from "@/components/dashboard-builder/canvas/live-widget-renderer"
 import {
 	withActiveTab,
 	withSectionCollapsed,
@@ -22,7 +23,9 @@ import {
 	VARIABLE_PARAM_PREFIX,
 	dashboardViewParamsSchema,
 	pickDashboardControlParams,
+	resolveRefreshIntervalSeconds,
 	variableSearchRest,
+	variableValuesFromSearch,
 } from "@/lib/dashboard-controls/search-params"
 import {
 	DashboardActionsProvider,
@@ -38,7 +41,7 @@ import { historyPanelOpenAtom, previewedVersionAtom } from "@/atoms/dashboard-hi
 import { useDashboardVersions } from "@/components/dashboard-builder/history/use-dashboard-history"
 import { Result } from "@/lib/effect-atom"
 import { useMemo, useState, type ReactNode } from "react"
-import type { SectionTarget } from "@maple/domain/http"
+import type { DashboardRefreshIntervalSeconds, SectionTarget } from "@maple/domain/http"
 
 // Module-level atoms — singleton (only one dashboard page visible at a time)
 const chartPickerOpenAtom = Atom.make(false)
@@ -60,30 +63,33 @@ const dashboardViewSearchSchema = Schema.StructWithRest(
 	[variableSearchRest],
 )
 
-function variableValuesFromSearch(search: Record<string, unknown>): Record<string, string> {
-	const values: Record<string, string> = {}
-	for (const [key, value] of Object.entries(search)) {
-		if (!key.startsWith(VARIABLE_PARAM_PREFIX)) continue
-		if (typeof value === "string") {
-			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = value
-		} else if (typeof value === "number" || typeof value === "boolean") {
-			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = String(value)
-		}
-	}
-	return values
-}
-
 export const Route = createFileRoute("/dashboards/$dashboardId")({
 	component: DashboardViewPage,
 	validateSearch: Schema.toStandardSchemaV1(dashboardViewSearchSchema),
 })
 
-function DashboardRefreshBridge({ children }: { children: ReactNode }) {
+function DashboardRefreshBridge({
+	children,
+	refreshIntervalSeconds,
+	paused,
+}: {
+	children: ReactNode
+	refreshIntervalSeconds: DashboardRefreshIntervalSeconds
+	paused: boolean
+}) {
 	const {
 		state: { timeRange },
 	} = useDashboardTimeRange()
 	const timePreset = timeRange.type === "relative" ? timeRange.value : undefined
-	return <PageRefreshProvider timePreset={timePreset}>{children}</PageRefreshProvider>
+	return (
+		<PageRefreshProvider
+			timePreset={timePreset}
+			autoRefreshMs={refreshIntervalSeconds * 1000}
+			autoRefreshPaused={paused}
+		>
+			{children}
+		</PageRefreshProvider>
+	)
 }
 
 function DashboardViewPage() {
@@ -102,6 +108,7 @@ function DashboardViewPage() {
 		persistenceError,
 		updateDashboard,
 		updateDashboardTimeRange,
+		updateDashboardRefreshInterval,
 		addWidget,
 		cloneWidget,
 		removeWidget,
@@ -148,6 +155,31 @@ function DashboardViewPage() {
 		})
 	}
 
+	// `?refresh=` is per-viewer and wins over the board's saved cadence, so a
+	// read-only viewer can start (or silence) auto-refresh without touching the
+	// document. Picking one always writes the param; in edit mode it *also*
+	// becomes the dashboard's default, which is the only path that cuts a version.
+	const refreshIntervalSeconds = resolveRefreshIntervalSeconds(
+		search.refresh,
+		activeDashboard?.refreshIntervalSeconds,
+	)
+
+	const handleRefreshIntervalChange = (next: DashboardRefreshIntervalSeconds) => {
+		if (mode === "edit" && !readOnly && !isPreviewing) {
+			updateDashboardRefreshInterval(dashboardId, next)
+		}
+		navigate({
+			to: "/dashboards/$dashboardId",
+			params: { dashboardId },
+			replace: true,
+			search: (prev) => ({
+				...pickDashboardControlParams(prev),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
+				refresh: next,
+			}),
+		})
+	}
+
 	const urlVariableValues = useMemo(() => variableValuesFromSearch(search), [search])
 
 	const handleVariableChange = (name: string, value: string) => {
@@ -157,7 +189,7 @@ function DashboardViewPage() {
 			replace: true,
 			search: (prev) => ({
 				...pickDashboardControlParams(prev),
-				...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
 				[`${VARIABLE_PARAM_PREFIX}${name}`]: value,
 			}),
 		})
@@ -188,7 +220,7 @@ function DashboardViewPage() {
 			replace: true,
 			search: (prev) => ({
 				...update(pickDashboardControlParams(prev)),
-				...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
 			}),
 		})
 	}
@@ -306,7 +338,10 @@ function DashboardViewPage() {
 						moveWidgetToSection,
 					}}
 				>
-					<DashboardRefreshBridge>
+					<DashboardRefreshBridge
+						refreshIntervalSeconds={refreshIntervalSeconds}
+						paused={mode === "edit" || isPreviewing}
+					>
 						<DashboardLayout.Root>
 							<DashboardLayout.Breadcrumbs
 								items={[
@@ -333,6 +368,8 @@ function DashboardViewPage() {
 												onToggleEdit={handleToggleEdit}
 												onAddWidget={() => setChartPickerOpen(true)}
 												onOpenHistory={openHistory}
+												refreshIntervalSeconds={refreshIntervalSeconds}
+												onRefreshIntervalChange={handleRefreshIntervalChange}
 											/>
 										</DashboardLayout.Header>
 									</DashboardLayout.Sticky>
@@ -389,6 +426,7 @@ function DashboardViewPage() {
 											</div>
 										) : (
 											<DashboardSections
+												renderWidget={LiveWidgetRenderer}
 												widgets={activeDashboard.widgets}
 												sections={activeDashboard.sections ?? []}
 												search={sectionViewSearch}
@@ -398,7 +436,9 @@ function DashboardViewPage() {
 													)
 												}
 												onSelectTab={(sectionId, tabId) =>
-													applySectionView((prev) => withActiveTab(prev, sectionId, tabId))
+													applySectionView((prev) =>
+														withActiveTab(prev, sectionId, tabId),
+													)
 												}
 												onAddWidget={(sectionId, tabId) => {
 													setPendingSectionTarget({ sectionId, tabId })

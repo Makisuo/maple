@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 /**
  * Cloudflare edge-analytics collector.
  *
@@ -131,10 +132,11 @@ import {
 	workersSelection,
 	zoneAnalyticsDocument,
 	zoneChunkSizeFor,
-	type DatasetSettingsShape,
-	type SettingsResponseShape,
+	type DatasetSettingsContract,
+	type SettingsResponseContract,
 } from "./cloudflare-analytics/queries"
 import * as Integrations from "@maple/query-engine-integrations"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /**
  * OAuth scopes the poller needs (space-delimited ids in `oauth_connections.scope`). Kept next to
@@ -164,9 +166,23 @@ const BACKFILL_MS = 24 * 60 * 60_000
  * comfortably under Cloudflare's 5000-rows-per-selection cap.
  */
 const MAX_WINDOW_MS = 60 * 60_000
-/** Hard per-org call budget per tick so a pathological backfill can't blow the 300/5min limit. */
-const MAX_CALLS_PER_ORG_TICK = 50
+/**
+ * Hard per-org call budget per tick so a pathological backfill can't blow the 300/5min limit.
+ * Cloudflare's GraphQL rate limit is per ACCOUNT-holder, but our budget is per org and the tick
+ * runs `ORG_CONCURRENCY` orgs at a time: at 50 the six polled orgs could ask for 300 queries in
+ * one tick — exactly the limit — which is how we rate-limited ourselves into ~1.7k
+ * `Rate limiter budget depleted` errors a day. 20 keeps a full tick well under the ceiling;
+ * backfill is resumable by construction, so a smaller budget only makes history land slower.
+ */
+const MAX_CALLS_PER_ORG_TICK = 20
 const LEASE_MS = 4 * 60_000
+/**
+ * How long an org sits out after Cloudflare rate-limits it — Cloudflare's own message says "try
+ * again after 5 minutes". Implemented by leaving the tick lease in place until then (see
+ * `releaseLease`), so the backoff is persisted in the mechanism the poller already has and
+ * survives isolate recycling without a new column.
+ */
+const RATE_LIMIT_BACKOFF_MS = 5 * 60_000
 const SETTINGS_TTL_MS = 24 * 60 * 60_000
 /** Zone discovery (REST pagination) runs hourly; poll ticks in between reuse the state rows. */
 const DISCOVERY_TTL_MS = 60 * 60_000
@@ -244,9 +260,9 @@ interface DatasetDef {
 	 * response carried nothing for this row (its cached settings stay untouched).
 	 */
 	readonly settingsNode: (
-		decoded: SettingsResponseShape,
+		decoded: SettingsResponseContract,
 		row: CloudflareAnalyticsStateRow,
-	) => DatasetSettingsShape | null | undefined
+	) => DatasetSettingsContract | null | undefined
 }
 
 const decodeError = (dataset: string) =>
@@ -259,9 +275,9 @@ const decodeError = (dataset: string) =>
  * the path/dimension datasets ride the existing `settingsQuery` unchanged.
  */
 const httpZoneSettingsNode = (
-	decoded: SettingsResponseShape,
+	decoded: SettingsResponseContract,
 	row: CloudflareAnalyticsStateRow,
-): DatasetSettingsShape | null | undefined => {
+): DatasetSettingsContract | null | undefined => {
 	const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
 	return zone === undefined ? undefined : (zone.settings?.httpRequestsAdaptiveGroups ?? null)
 }
@@ -503,7 +519,7 @@ const ACCOUNT_DATASETS = DATASETS.filter((dataset) => dataset.scope === "account
 // GraphQL error classification
 
 /** Classify GraphQL-level errors (HTTP 200 + errors[]) into the poller's reaction. */
-type GraphqlErrorKind = "authz" | "disabled" | "quantiles-unavailable" | "other"
+type GraphqlErrorKind = "authz" | "disabled" | "quantiles-unavailable" | "rate-limited" | "other"
 
 const graphqlErrorCode = (error: CloudflareGraphqlError): string | null => {
 	const extensions = error.extensions
@@ -528,10 +544,39 @@ const isPlanGatedMessage = (message: string): boolean => {
 	)
 }
 
+/**
+ * Cloudflare enforces ~300 GraphQL queries / 5 min per account and reports exhaustion as an
+ * HTTP 200 + `errors[]` payload ("Rate limiter budget depleted. Please try again after 5
+ * minutes."), so the SDK-level Retry/Retry-After handling never sees it. It is a property of the
+ * ACCOUNT and of our own tick pacing — not of a dataset, a zone, or a tenant — so it must never
+ * become a per-dataset failure event.
+ */
+const isRateLimitedMessage = (message: string): boolean => {
+	const lower = message.toLowerCase()
+	return (
+		lower.includes("rate limiter budget depleted") ||
+		lower.includes("rate limit") ||
+		lower.includes("limit exceeded") ||
+		lower.includes("too many requests")
+	)
+}
+
+const isRateLimitedCode = (code: string | null): boolean =>
+	code != null && /rate[_-]?limit|too[_-]?many[_-]?requests/i.test(code)
+
 const classifyGraphqlErrors = (
 	errors: ReadonlyArray<CloudflareGraphqlError>,
 	quantileNeedles: ReadonlyArray<string>,
 ): GraphqlErrorKind => {
+	// Checked first: a depleted budget voids the whole document, so any other classification of the
+	// same payload would be an artifact of which selection Cloudflare happened to name.
+	if (
+		errors.some(
+			(error) => isRateLimitedMessage(error.message) || isRateLimitedCode(graphqlErrorCode(error)),
+		)
+	) {
+		return "rate-limited"
+	}
 	const messages = errors.map((error) => error.message.toLowerCase())
 	// Plan lacks the dataset's timing-quantile fields → the query referenced an "unknown"/"cannot
 	// query" field, or Cloudflare reports the plan "does not have access to the field". Degrade to
@@ -612,7 +657,7 @@ const parseStoredSettings = (settingsJson: string | null): ParsedSettings => {
 
 /** `availableFields` naming isn't pinned by docs — match on substring, defaulting to available. */
 const quantilesFromAvailableFields = (
-	settings: DatasetSettingsShape | null | undefined,
+	settings: DatasetSettingsContract | null | undefined,
 	needle: string,
 ): boolean => {
 	const fields = settings?.availableFields
@@ -839,6 +884,7 @@ type PollOutcome =
 	| { readonly kind: "advanced"; readonly ingested: number }
 	| { readonly kind: "quantiles-downgraded" }
 	| { readonly kind: "disabled" }
+	| { readonly kind: "rate-limited"; readonly message: string }
 	| { readonly kind: "failed"; readonly failure: DatasetPollFailure }
 
 /** Typed constructor so each failure site returns `PollOutcome` (widens the failure off `as const`). */
@@ -899,6 +945,19 @@ const documentFailed = (
 }
 
 /**
+ * The rate-limit twin of {@link documentFailed}: one quiet outcome for the whole document. A
+ * depleted GraphQL budget voids every selection at once, so fanning it out per dataset × zone-chunk
+ * turned one self-inflicted pacing problem into ~1,700 `CloudflareAnalyticsPollError` events a day.
+ * It is expected degradation (like `quantiles-unavailable`), not an incident: the caller logs a
+ * warning, marks the org's tick, and backs off.
+ */
+const documentRateLimited = (item: WorkItem, message: string): Array<PartResult> => {
+	const part = item.parts[0]
+	if (!part) return []
+	return [{ part, outcome: { kind: "rate-limited", message } }]
+}
+
+/**
  * The single seam that turns a poll failure into signal: record health to Postgres (as before) AND
  * record an OTel exception event + ERROR log so the failure is visible in Maple's own tooling. This
  * is the ONLY place that reacts to a `DatasetPollFailure`; every failure path just classifies and
@@ -940,7 +999,7 @@ const observeDatasetFailure = (orgId: OrgId, failure: DatasetPollFailure) =>
 		Effect.ignore,
 	)
 
-interface CloudflareAnalyticsZoneStatusShape {
+interface CloudflareAnalyticsZoneStatusFields {
 	readonly id: string
 	readonly name: string
 	readonly enabled: boolean
@@ -950,7 +1009,7 @@ interface CloudflareAnalyticsZoneStatusShape {
 }
 
 interface CloudflareAnalyticsStatus {
-	readonly zones: ReadonlyArray<CloudflareAnalyticsZoneStatusShape>
+	readonly zones: ReadonlyArray<CloudflareAnalyticsZoneStatusFields>
 	readonly workers: {
 		readonly enabled: boolean
 		readonly lastSyncedAt: number | null
@@ -981,7 +1040,7 @@ interface PollAllOrgsSummary {
 	}>
 }
 
-export interface CloudflareAnalyticsServiceShape {
+export interface CloudflareAnalyticsServiceApi {
 	readonly pollAllOrgs: () => Effect.Effect<PollAllOrgsSummary, IntegrationsPersistenceError>
 	readonly pollOrg: (orgId: OrgId) => Effect.Effect<PollOrgSummary, IntegrationsPersistenceError>
 	readonly getStatus: (
@@ -1001,7 +1060,7 @@ export interface CloudflareAnalyticsServiceShape {
 
 export class CloudflareAnalyticsService extends Context.Service<
 	CloudflareAnalyticsService,
-	CloudflareAnalyticsServiceShape
+	CloudflareAnalyticsServiceApi
 >()("@maple/api/services/CloudflareAnalyticsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -1050,7 +1109,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			updateRows(rowIds, {
 				lastError: message.slice(0, 500),
 				lastErrorAt: new Date(now),
-				...(options?.disable ? { enabled: false } : {}),
+				...(options?.disable ? { enabled: false } : undefined),
 				updatedAt: new Date(now),
 			})
 
@@ -1066,7 +1125,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					.set({
 						lastError: message.slice(0, 500),
 						lastErrorAt: new Date(now),
-						...(options?.disable ? { enabled: false } : {}),
+						...(options?.disable ? { enabled: false } : undefined),
 						updatedAt: new Date(now),
 					})
 					.where(eq(cloudflareAnalyticsState.orgId, orgId)),
@@ -1167,11 +1226,19 @@ export class CloudflareAnalyticsService extends Context.Service<
 					.returning(),
 			).pipe(Effect.map((rows) => rows[0] ?? null))
 
-		const releaseLease = (orgId: OrgId, now: number) =>
+		/**
+		 * Release the tick lease. `holdUntilMs` keeps it held instead of clearing it, which is how a
+		 * rate-limited org sits out the next tick(s) — `claimLease` already refuses a live lease, and
+		 * a hold under `2 * LEASE_MS` stays inside its corrupt-lease escape hatch.
+		 */
+		const releaseLease = (orgId: OrgId, now: number, holdUntilMs?: number) =>
 			dbExecute((db) =>
 				db
 					.update(cloudflareAnalyticsState)
-					.set({ leaseUntil: null, updatedAt: new Date(now) })
+					.set({
+						leaseUntil: holdUntilMs == null ? null : new Date(holdUntilMs),
+						updatedAt: new Date(now),
+					})
 					.where(
 						and(
 							eq(cloudflareAnalyticsState.orgId, orgId),
@@ -1317,7 +1384,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						query: settingsQuery({ withZones: plan.zoneIds.length > 0 }),
 						variables: {
 							accountTag: accountId,
-							...(plan.zoneIds.length > 0 ? { zoneTags: plan.zoneIds } : {}),
+							...(plan.zoneIds.length > 0 ? { zoneTags: plan.zoneIds } : undefined),
 						},
 					},
 					apiBaseUrl,
@@ -1367,7 +1434,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 							settings,
 							dataset.availableFieldsNeedle,
 						),
-						...(settings?.enabled === false ? { enabled: false } : {}),
+						...(settings?.enabled === false ? { enabled: false } : undefined),
 						updatedAt: new Date(now),
 					}
 					const key = `${set.settingsJson}|${set.quantilesAvailable}|${set.enabled ?? ""}`
@@ -1474,6 +1541,13 @@ export class CloudflareAnalyticsService extends Context.Service<
 				apiBaseUrl,
 			)
 
+			// Rate limiting is decided over the WHOLE error set before attribution: the budget belongs
+			// to the Cloudflare account, so per-part attribution would multiply one cause into one
+			// failure per dataset × zone-chunk. Collapse to a single quiet outcome instead.
+			if (result.errors.length > 0 && classifyGraphqlErrors(result.errors, []) === "rate-limited") {
+				return documentRateLimited(item, graphqlErrorMessage(result.errors))
+			}
+
 			const results: Array<PartResult> = []
 			const errorsByPart = new Map<WorkPart, CloudflareGraphqlError[]>()
 			const unattributed: CloudflareGraphqlError[] = []
@@ -1526,6 +1600,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 					// this tenant's plan), not an incident — record health quietly and stop polling it.
 					yield* recordError(rowIds, graphqlErrorMessage(partErrors), now, { disable: true })
 					results.push({ part, outcome: { kind: "disabled" } })
+				} else if (kind === "rate-limited") {
+					// Unreachable in practice — each part's error set is a subset of `result.errors`,
+					// which the document-level check above already collapsed. Kept so the branch stays
+					// total: a rate limit is never a per-dataset failure.
+					return documentRateLimited(item, graphqlErrorMessage(partErrors))
 				} else {
 					// authz / other → a genuine failure. Hand it to the org-loop seam, which records
 					// health AND emits telemetry.
@@ -1769,6 +1848,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 			if (claimed == null) return yield* skip("lease held by another tick")
 			const anchor = claimed
 
+			// Set when Cloudflare's GraphQL rate limiter refuses the account. Lives outside the body
+			// below so the lease-releasing finalizer can convert it into the backoff hold.
+			const rateLimitedRef = yield* Ref.make(false)
+
 			return yield* Effect.gen(function* () {
 				// Token failures: revocation disables all rows until reconnect; transient upstream
 				// failures record and retry next tick.
@@ -1880,6 +1963,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				while (
 					!(yield* Ref.get(revokedRef)) &&
 					!(yield* Ref.get(deliveryBlockedRef)) &&
+					!(yield* Ref.get(rateLimitedRef)) &&
 					budget.calls < MAX_CALLS_PER_ORG_TICK
 				) {
 					const work = buildWorkItems(rows, now)
@@ -1890,7 +1974,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 						if (
 							budget.calls >= MAX_CALLS_PER_ORG_TICK ||
 							(yield* Ref.get(revokedRef)) ||
-							(yield* Ref.get(deliveryBlockedRef))
+							(yield* Ref.get(deliveryBlockedRef)) ||
+							(yield* Ref.get(rateLimitedRef))
 						)
 							break
 						budget.calls += 1
@@ -1960,6 +2045,29 @@ export class CloudflareAnalyticsService extends Context.Service<
 										Effect.sync(() => {
 											for (const row of part.rows) row.enabled = false
 										}),
+									// Expected degradation, handled like `quantiles-downgraded`: a warning and a
+									// span attribute, NOT an exception event. Nothing is written to the state
+									// rows — the windows simply didn't advance and are retried after the
+									// backoff, and stamping `lastError` would surface our own pacing as a
+									// tenant-facing integration error.
+									"rate-limited": ({ message }) =>
+										Effect.logWarning("cloudflare-analytics rate limited by Cloudflare", {
+											orgId,
+											dataset: part.dataset.id,
+											callsMade: budget.calls,
+											backoffMs: RATE_LIMIT_BACKOFF_MS,
+											error: message,
+										}).pipe(
+											Effect.andThen(
+												Effect.annotateCurrentSpan({
+													"cloudflare.poll.outcome": "rate_limited",
+													"maple.cloudflare.rate_limited": true,
+												}),
+											),
+											// Ends the org's tick: every further document would deplete the same
+											// account budget, and the frontier only advances on success.
+											Effect.andThen(Ref.set(rateLimitedRef, true)),
+										),
 									// The one seam: record health to Postgres AND emit an observable signal.
 									failed: ({ failure }) =>
 										Effect.gen(function* () {
@@ -2000,9 +2108,16 @@ export class CloudflareAnalyticsService extends Context.Service<
 				} satisfies PollOrgSummary
 			}).pipe(
 				Effect.ensuring(
-					Clock.currentTimeMillis.pipe(
-						Effect.flatMap((end) =>
-							releaseLease(orgId, end).pipe(
+					Effect.all([Clock.currentTimeMillis, Ref.get(rateLimitedRef)]).pipe(
+						Effect.flatMap(([end, rateLimited]) =>
+							// A rate-limited tick doesn't release the lease — it holds it for the backoff
+							// window, so the next cron tick skips this org instead of re-depleting the
+							// account's GraphQL budget.
+							releaseLease(
+								orgId,
+								end,
+								rateLimited ? end + RATE_LIMIT_BACKOFF_MS : undefined,
+							).pipe(
 								// The ensuring must never fail (that would mask whatever this tick actually
 								// did), but a lease release failure is not nothing — it silently wedges the
 								// org behind a lease until the corrupt-lease escape hatch reclaims it, so log
@@ -2010,7 +2125,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 								Effect.catchCause((cause) =>
 									Effect.logWarning("cloudflare-analytics lease release failed", {
 										orgId,
-										error: Cause.pretty(cause),
+										error: summarizeCause(cause),
 									}),
 								),
 							),
@@ -2067,7 +2182,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 								? Effect.interrupt
 								: Effect.logWarning("cloudflare-analytics org poll failed", {
 										orgId: row.orgId,
-										error: Cause.pretty(cause),
+										error: summarizeCause(cause),
 									}).pipe(
 										// A crashed org must still appear in the rollup — otherwise perOrg
 										// silently omits it, `skipped` undercounts, and the zero-rows warning
@@ -2292,7 +2407,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 				["queue", QUEUE_SERVICE_PREFIX],
 				["zone", ZONE_SERVICE_PREFIX],
 			]
-			const KIND_ORDER: Record<"zone" | "worker" | "queue", number> = { zone: 0, worker: 1, queue: 2 }
+			const KIND_ORDER: Record<"zone" | "worker" | "queue", number> = {
+				zone: 0,
+				worker: 1,
+				queue: 2,
+			} satisfies Record<"zone" | "worker" | "queue", number>
 			const services = [...byService.entries()]
 				.map(([serviceName, agg]) => {
 					const match = SERVICE_KINDS.find(([, prefix]) => serviceName.startsWith(prefix))
@@ -2399,7 +2518,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			getUsage,
 			listHyperdriveConfigs: listHyperdriveConfigsForOrg,
 			resetOrgState,
-		} satisfies CloudflareAnalyticsServiceShape
+		} satisfies CloudflareAnalyticsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))

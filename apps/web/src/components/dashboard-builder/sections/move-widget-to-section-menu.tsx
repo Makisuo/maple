@@ -57,7 +57,9 @@ export function MoveWidgetToSectionMenu({ sections, current, onMove }: MoveWidge
 							>
 								{/* One tab means the header is the label, so repeating it
 								    would read as "Overview · Overview". */}
-								{section.tabs.length === 1 ? section.title : `${section.title} · ${tab.title}`}
+								{section.tabs.length === 1
+									? section.title
+									: `${section.title} · ${tab.title}`}
 							</DropdownMenuItem>
 						)
 					}),

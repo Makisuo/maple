@@ -163,9 +163,9 @@ const runTask = (
 			taskBudget: budget,
 			// Usage rolls up: a delegated search is still this turn's spend, and the org is billed
 			// for it either way.
-			...(input.usage ? { usage: input.usage } : {}),
-			...(input.isCurrent ? { isCurrent: input.isCurrent } : {}),
-			...(input.emit ? { emit: input.emit } : {}),
+			...(input.usage ? { usage: input.usage } : undefined),
+			...(input.isCurrent ? { isCurrent: input.isCurrent } : undefined),
+			...(input.emit ? { emit: input.emit } : undefined),
 		}).pipe(
 			Stream.runForEach((event) =>
 				Effect.sync(() => {

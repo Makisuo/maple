@@ -69,7 +69,7 @@ export function presetLabel(shorthand: string): string {
 		d: ["day", "days"],
 		w: ["week", "weeks"],
 		mo: ["month", "months"],
-	}
+	} satisfies Record<string, [string, string]>
 
 	const [singular, plural] = unitLabels[unit] ?? [unit, unit]
 	return `Last ${amount} ${amount === 1 ? singular : plural}`

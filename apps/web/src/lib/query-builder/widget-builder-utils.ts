@@ -15,6 +15,8 @@ import {
 	isVisibleQuery,
 	legacyQueryDraft,
 	loadQueryDrafts,
+	pointsModeFromShowPoints,
+	showPointsFromPointsMode,
 	toHiddenSeriesBaseNames,
 	type BuildDataSourceContext,
 	type QueryBuilderWidgetState,
@@ -105,6 +107,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		// before the flag existed carry no `seriesStats` and therefore lose the
 		// table — that is the intent, and re-ticking the box restores it.
 		seriesStatsEnabled: chartPresentation?.seriesStats ?? false,
+		pointsMode: pointsModeFromShowPoints(chartPresentation?.showPoints),
 		tableLimit: "",
 		thresholds: (widget.display.thresholds ?? []).map((threshold) => ({
 			value: threshold.value,
@@ -118,7 +121,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		listLimit: "",
 		listColumns: TRACE_DEFAULT_COLUMNS as ListColumnDraft[],
 		listRootOnly: true,
-		heatmapColorScale: "blues",
+		heatmapColorScale: undefined,
 		heatmapScaleType: "linear",
 		markdownContent: "",
 		...definition.initialState?.(widget),
@@ -159,7 +162,7 @@ function timeseriesDataSource(state: QueryBuilderWidgetState): {
 				mode: state.comparisonMode,
 				includePercentChange: state.includePercentChange,
 			},
-			...(sharedTransform === undefined ? {} : { transform: sharedTransform }),
+			...(!(sharedTransform === undefined) ? { transform: sharedTransform } : undefined),
 		}),
 	}
 }
@@ -207,6 +210,7 @@ export function buildWidgetDisplay(
 				? ("right" as const)
 				: ("visible" as const)
 
+	const showPoints = showPointsFromPointsMode(state.pointsMode)
 	const base: WidgetDisplayConfig = {
 		...widget.display,
 		// Query-driven widgets saved without a title get a derived one
@@ -222,8 +226,13 @@ export function buildWidgetDisplay(
 			...widget.display.chartPresentation,
 			legend: legendValue,
 			seriesStats: state.seriesStatsEnabled,
+			showPoints,
 		},
 	}
+	// Auto is the ABSENCE of a preference: drop the key rather than persist
+	// `undefined`, and so the spread above cannot carry a stale value forward
+	// once the user switches back to Auto.
+	if (showPoints === undefined) delete base.chartPresentation?.showPoints
 
 	for (const key of OWNED_DISPLAY_KEYS) {
 		delete base[key]

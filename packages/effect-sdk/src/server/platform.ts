@@ -93,11 +93,17 @@ const providerAttrs = (prov: string, env: PlatformInputs["env"]): Attrs =>
 	Match.value(prov).pipe(
 		Match.when(
 			"cloudflare_workers",
-			(): Attrs => ({ "cloud.provider": "cloudflare", "cloud.platform": "cloudflare.workers" }),
+			(): Attrs => ({
+				"cloud.provider": "cloudflare",
+				"cloud.platform": "cloudflare.workers",
+			}),
 		),
 		Match.when(
 			"cloudflare_pages",
-			(): Attrs => ({ "cloud.provider": "cloudflare", "cloud.platform": "cloudflare.pages" }),
+			(): Attrs => ({
+				"cloud.provider": "cloudflare",
+				"cloud.platform": "cloudflare.pages",
+			}),
 		),
 		Match.when(
 			"vercel",
@@ -122,7 +128,10 @@ const providerAttrs = (prov: string, env: PlatformInputs["env"]): Attrs =>
 		),
 		Match.when(
 			"firebase_app_hosting",
-			(): Attrs => ({ "cloud.provider": "gcp", "cloud.platform": "gcp_firebase_app_hosting" }),
+			(): Attrs => ({
+				"cloud.provider": "gcp",
+				"cloud.platform": "gcp_firebase_app_hosting",
+			}),
 		),
 		Match.when(
 			"aws_amplify",
@@ -155,7 +164,10 @@ const providerAttrs = (prov: string, env: PlatformInputs["env"]): Attrs =>
 		),
 		Match.when(
 			"edgeone_pages",
-			(): Attrs => ({ "cloud.provider": "tencent_cloud", "cloud.platform": "tencent_edgeone_pages" }),
+			(): Attrs => ({
+				"cloud.provider": "tencent_cloud",
+				"cloud.platform": "tencent_edgeone_pages",
+			}),
 		),
 		Match.orElse((): Attrs => empty),
 	)

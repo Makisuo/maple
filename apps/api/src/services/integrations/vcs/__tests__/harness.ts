@@ -1,15 +1,16 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { assert } from "@effect/vitest"
 import { createHmac, generateKeyPairSync } from "node:crypto"
 import { OrgId, UserId, type VcsSyncJob } from "@maple/domain/http"
 import { Cause, ConfigProvider, type Context, Effect, Exit, Layer, Option, Schema } from "effect"
 import type { TestDb } from "@/platform/test-pglite"
 import { Env } from "@/platform/Env"
-import { GithubHttp, type GithubHttpShape } from "@/services/integrations/vcs/vendor/github/GithubHttp"
+import { GithubHttp, type GithubHttpApi } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import {
 	clampQueueDelaySeconds,
 	VcsSyncQueue,
-	type VcsSyncQueueShape,
+	type VcsSyncQueueApi,
 } from "@/services/integrations/vcs/VcsSyncQueue"
 
 // Shared test harness for the GitHub / VCS integration. The id-resolver
@@ -84,7 +85,7 @@ export const scriptedHttp = (responders: ReadonlyArray<() => Response>) => {
 			i += 1
 			return make()
 		},
-	} satisfies GithubHttpShape)
+	} satisfies GithubHttpApi)
 }
 
 // A recording VcsSyncQueue: captures every enqueued job (and per-send delay).
@@ -97,7 +98,7 @@ export const scriptedHttp = (responders: ReadonlyArray<() => Response>) => {
 export const recordingQueue = (
 	sent: Array<VcsSyncJob>,
 	opts?: { readonly sentDelays?: Array<number | undefined>; readonly failBatch?: () => unknown },
-): VcsSyncQueueShape => ({
+): VcsSyncQueueApi => ({
 	send: (job, options) =>
 		Effect.sync(() => {
 			sent.push(job)

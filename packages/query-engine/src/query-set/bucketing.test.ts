@@ -25,6 +25,19 @@ describe("resolveTimeseriesBucketSpec", () => {
 		expect(resolved.bucketSeconds).toBe(900)
 	})
 
+	it("switches to the width model when maxDataPoints is given", () => {
+		const spec: QuerySpec = { kind: "timeseries", source: "traces", metric: "count" }
+		const wide = resolveTimeseriesBucketSpec(spec, "2026-01-01 00:00:00", "2026-01-01 12:00:00", {
+			maxDataPoints: 1400,
+		})
+		const narrow = resolveTimeseriesBucketSpec(spec, "2026-01-01 00:00:00", "2026-01-01 12:00:00", {
+			maxDataPoints: 300,
+		})
+		if (wide.kind !== "timeseries" || narrow.kind !== "timeseries") throw new Error("timeseries")
+		expect(wide.bucketSeconds).toBe(60)
+		expect(narrow.bucketSeconds).toBe(120)
+	})
+
 	it("does not mutate explicit bucket seconds", () => {
 		const spec: QuerySpec = {
 			kind: "timeseries",
@@ -68,6 +81,19 @@ describe("resolveExecutionSpecForWindow", () => {
 
 		expect(primary.bucketSeconds).toBe(60)
 		expect(fallback.bucketSeconds).toBe(900)
+	})
+
+	it("applies the width model to the fallback window too", () => {
+		const spec: QuerySpec = { kind: "timeseries", source: "traces", metric: "count" }
+		const fallback = resolveExecutionSpecForWindow(
+			spec,
+			{ startTime: "2026-01-01 01:00:00", endTime: "2026-01-02 01:00:00", kind: "fallback" },
+			{ maxDataPoints: 1400 },
+		)
+		if (fallback.kind !== "timeseries") throw new Error("timeseries")
+		// 24h @ 1400px → 62s → 1m = 1440 points, over the 1000 cap → 2m. Not the
+		// 100-point policy's 15m.
+		expect(fallback.bucketSeconds).toBe(120)
 	})
 
 	it("widens explicit bucket on fallback windows to stay within point budget", () => {

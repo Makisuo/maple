@@ -3,10 +3,10 @@ import { Duration, Effect, Fiber, Layer, Option, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { type RecordedRequest, stubFetch, syncConfigLayer } from "../test-support"
-import { SHAPE_NAMES, type ShapeName, shapeScopeColumn } from "../shapes/registry"
-import type { ShapeRequest } from "../shapes/request"
+import { SUBSCRIPTION_NAMES, type SubscriptionName, subscriptionScopeColumn } from "../shapes/registry"
+import type { SyncRequest } from "../shapes/request"
 import {
-	buildUpstreamShapeUrl,
+	buildUpstreamSyncUrl,
 	describeUpstreamFailure,
 	ElectricClient,
 	isElectricConfigCoherent,
@@ -17,13 +17,13 @@ const parse = (raw: string) => {
 	return { url, params: url.searchParams }
 }
 
-const shapeRequest = (
-	shape: ShapeName,
+const syncRequest = (
+	subscription: SubscriptionName,
 	options: { scopeValue?: string; query?: string } = {},
-): ShapeRequest => {
-	const column = shapeScopeColumn(shape)
+): SyncRequest => {
+	const column = subscriptionScopeColumn(subscription)
 	return {
-		shape,
+		shape: subscription,
 		scope:
 			column === null || options.scopeValue === undefined
 				? null
@@ -35,7 +35,7 @@ const shapeRequest = (
 const base = { electricUrl: "http://electric:3000", orgId: "org_123" }
 
 const buildUrl = (
-	shape: ShapeName,
+	subscription: SubscriptionName,
 	options: {
 		scopeValue?: string
 		query?: string
@@ -45,10 +45,10 @@ const buildUrl = (
 	} = {},
 ) =>
 	parse(
-		buildUpstreamShapeUrl({
+		buildUpstreamSyncUrl({
 			...base,
-			...(options.electricUrl ? { electricUrl: options.electricUrl } : {}),
-			request: shapeRequest(shape, options),
+			...(options.electricUrl ? { electricUrl: options.electricUrl } : undefined),
+			request: syncRequest(subscription, options),
 			sourceId: options.sourceId,
 			secret: options.secret,
 		}),
@@ -140,10 +140,10 @@ describe("buildUpstreamShapeUrl", () => {
 		// The tenant boundary, asserted across the whole whitelist rather than one
 		// shape: a new entry can never ship without `"org_id" = $1` leading its WHERE
 		// (a shape's own `extraWhere` may only narrow it further, never replace it).
-		for (const shape of SHAPE_NAMES) {
-			const { params } = buildUrl(shape, { scopeValue: "scope_1" })
-			assert.match(params.get("where") ?? "", /^"org_id" = \$1(?: AND |$)/, shape)
-			assert.strictEqual(params.get("params[1]"), "org_123", shape)
+		for (const subscription of SUBSCRIPTION_NAMES) {
+			const { params } = buildUrl(subscription, { scopeValue: "scope_1" })
+			assert.match(params.get("where") ?? "", /^"org_id" = \$1(?: AND |$)/, subscription)
+			assert.strictEqual(params.get("params[1]"), "org_123", subscription)
 		}
 	})
 
@@ -306,7 +306,7 @@ describe("ElectricClient.fetchShape", () => {
 			const recorded: Array<RecordedRequest> = []
 			const electric = yield* ElectricClient
 			const response = yield* electric
-				.fetchShape(shapeRequest("dashboards", { query: "offset=-1" }), "org_live")
+				.fetchShape(syncRequest("dashboards", { query: "offset=-1" }), "org_live")
 				.pipe(
 					withFetch(recorded, () =>
 						Response.json([{ key: "row" }], { headers: { "electric-handle": "h1" } }),
@@ -332,7 +332,7 @@ describe("ElectricClient.fetchShape", () => {
 			const recorded: Array<RecordedRequest> = []
 			const electric = yield* ElectricClient
 			yield* electric
-				.fetchShape(shapeRequest("dashboards"), "org_live")
+				.fetchShape(syncRequest("dashboards"), "org_live")
 				.pipe(withFetch(recorded, () => Response.json([])))
 
 			assert.isUndefined(recorded[0]?.headers.authorization)
@@ -344,7 +344,7 @@ describe("ElectricClient.fetchShape", () => {
 			const recorded: Array<RecordedRequest> = []
 			const electric = yield* ElectricClient
 			yield* electric
-				.fetchShape(shapeRequest("dashboards"), "org_live")
+				.fetchShape(syncRequest("dashboards"), "org_live")
 				.pipe(withFetch(recorded, () => Response.json([])))
 
 			const { params } = parse(recorded[0]?.url ?? "")
@@ -363,7 +363,7 @@ describe("ElectricClient.fetchShape", () => {
 	it.effect("turns a transport failure into a typed unreachable error", () =>
 		Effect.gen(function* () {
 			const electric = yield* ElectricClient
-			const error = yield* electric.fetchShape(shapeRequest("dashboards"), "org_live").pipe(
+			const error = yield* electric.fetchShape(syncRequest("dashboards"), "org_live").pipe(
 				Effect.provideService(FetchHttpClient.Fetch, () => {
 					throw new Error("ECONNREFUSED")
 				}),
@@ -381,7 +381,7 @@ describe("ElectricClient.fetchShape", () => {
 	it.effect("turns an upstream 5xx into a typed error carrying status, body and headers", () =>
 		Effect.gen(function* () {
 			const electric = yield* ElectricClient
-			const error = yield* electric.fetchShape(shapeRequest("dashboards"), "org_live").pipe(
+			const error = yield* electric.fetchShape(syncRequest("dashboards"), "org_live").pipe(
 				withFetch([], () => new Response("electric exploded", { status: 503 })),
 				Effect.flip,
 			)
@@ -398,7 +398,7 @@ describe("ElectricClient.fetchShape", () => {
 		Effect.gen(function* () {
 			const electric = yield* ElectricClient
 			const huge = "x".repeat(1000)
-			const error = yield* electric.fetchShape(shapeRequest("dashboards"), "org_live").pipe(
+			const error = yield* electric.fetchShape(syncRequest("dashboards"), "org_live").pipe(
 				withFetch([], () => new Response(huge, { status: 500 })),
 				Effect.flip,
 			)
@@ -426,7 +426,7 @@ describe("ElectricClient.fetchShape", () => {
 			const upstream = pendingFetch()
 			const fiber = yield* Effect.forkChild(
 				electric
-					.fetchShape(shapeRequest("dashboards", { query: "offset=-1" }), "org_live")
+					.fetchShape(syncRequest("dashboards", { query: "offset=-1" }), "org_live")
 					.pipe(Effect.provideService(FetchHttpClient.Fetch, upstream.fetch), Effect.flip),
 			)
 			yield* TestClock.adjust(Duration.millis(0))
@@ -452,7 +452,7 @@ describe("ElectricClient.fetchShape", () => {
 			const upstream = pendingFetch()
 			const fiber = yield* Effect.forkChild(
 				electric
-					.fetchShape(shapeRequest("dashboards", { query: "live=true&offset=42_7" }), "org_live")
+					.fetchShape(syncRequest("dashboards", { query: "live=true&offset=42_7" }), "org_live")
 					.pipe(Effect.provideService(FetchHttpClient.Fetch, upstream.fetch)),
 			)
 			yield* TestClock.adjust(Duration.millis(0))

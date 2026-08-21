@@ -5,7 +5,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { decodePublicId, MapleApiV2 } from "@maple/domain/http/v2"
 import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
-import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -13,6 +13,7 @@ import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { PlanetScaleDiscoveryService } from "@/services/integrations/PlanetScaleDiscoveryService"
@@ -70,7 +71,7 @@ const testConfig = () =>
  */
 const warehouseStub = (
 	rowsByTable: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {},
-): WarehouseQueryServiceShape =>
+): WarehouseQueryServiceApi =>
 	makeWarehouseServiceStub({
 		query: () => Effect.die(new Error("unexpected warehouse pipe query")),
 		rawSqlQuery: () => Effect.succeed([]),
@@ -85,7 +86,7 @@ const warehouseStub = (
 		ingest: () => Effect.void,
 	})
 
-const unavailableWarehouse: WarehouseQueryServiceShape = {
+const unavailableWarehouse: WarehouseQueryServiceApi = {
 	...warehouseStub(),
 	compiledQuery: () => Effect.die(new Error("warehouse unreachable")),
 }
@@ -108,7 +109,7 @@ const planetScaleStubs = Layer.mergeAll(
 	}),
 )
 
-const makeHarness = (warehouse: WarehouseQueryServiceShape = warehouseStub()) => {
+const makeHarness = (warehouse: WarehouseQueryServiceApi = warehouseStub()) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const warehouseLive = Layer.succeed(WarehouseQueryService, warehouse)
@@ -118,6 +119,7 @@ const makeHarness = (warehouse: WarehouseQueryServiceShape = warehouseStub()) =>
 		ApiKeysService.layer,
 		AuthService.layer,
 		DashboardPersistenceService.layer,
+		SharedDashboardService.layer,
 		IngestAttributeMappingService.layer,
 		OrgIngestKeysService.layer,
 		RecommendationIssueService.layer.pipe(Layer.provide(warehouseLive)),

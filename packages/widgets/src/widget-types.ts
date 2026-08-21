@@ -151,9 +151,13 @@ const chartPanel = (
 	isScalar: false,
 	ownedDisplayKeys: ["chartId", "stacked", "curveType", "thresholds"],
 	requiresGroupBy: false,
-	// One `chart` entry covers line/bar/area for the MCP tools; the display type
-	// is chosen separately there.
-	mcpExposed: panelType === "line",
+	// All three are MCP-exposed as *panel types*. `MCP_VISUALIZATIONS` still
+	// dedupes them to a single `"chart"`, which is what the legacy
+	// `visualization` parameter accepts; `MCP_PANEL_TYPES` is what lets a caller
+	// ask for a bar or an area chart by name. Before that existed, the only way
+	// to get one through the structured-query path was to hand-write an
+	// undocumented `display.chartId`.
+	mcpExposed: true,
 	persesKinds,
 })
 
@@ -289,7 +293,7 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		mcpExposed: true,
 		persesKinds: ["Markdown"],
 	},
-}
+} satisfies Record<PanelType, WidgetTypeMeta>
 
 export const PANEL_TYPES: ReadonlyArray<WidgetTypeMeta> = [
 	// Ordered as the Type picker shows them, not alphabetically.
@@ -355,6 +359,22 @@ export const MCP_VISUALIZATIONS: ReadonlyArray<WidgetVisualization> = [
 export const isMcpVisualization = (value: unknown): value is WidgetVisualization =>
 	MCP_VISUALIZATIONS.some((candidate) => candidate === value)
 
+/**
+ * Panel types the MCP dashboard tools accept for `panel_type`.
+ *
+ * The preferred spelling. `visualization` collapses line/bar/area into `"chart"`
+ * and then needs `display.chartId` to tell them apart, and `display_type` is a
+ * third spelling for the raw-SQL path — three fields for one decision, which is
+ * why agents picked the wrong chart type. A panel type is the whole decision.
+ */
+export const MCP_PANEL_TYPES: ReadonlyArray<PanelType> = PANEL_TYPES.filter((meta) => meta.mcpExposed).map(
+	(meta) => meta.panelType,
+)
+
+/** Narrows to the MCP-exposed panel types — what `panel_type` accepts. */
+export const isMcpPanelType = (value: unknown): value is PanelType =>
+	typeof value === "string" && isPanelType(value) && WIDGET_TYPES[value].mcpExposed
+
 /** Grid size for an auto-placed widget, by persisted `visualization`. */
 export const defaultWidgetLayout = (
 	visualization: string,
@@ -413,6 +433,14 @@ export const rawSqlDisplayTypeFor = (visualization: string, chartId?: string): R
 export const HEATMAP_COLOR_SCALES = ["amber", "blues", "reds", "viridis", "magma", "cividis"] as const
 
 export type HeatmapColorScale = (typeof HEATMAP_COLOR_SCALES)[number]
+
+/**
+ * The ramp an unconfigured heatmap renders in. The chart falls back to it when
+ * `display.heatmap.colorScale` is absent, and the settings rail shows it as the
+ * ticked option for the same case — one constant, so opening a never-configured
+ * widget in the editor cannot repaint it on Apply.
+ */
+export const DEFAULT_HEATMAP_COLOR_SCALE: HeatmapColorScale = "amber"
 
 export const HEATMAP_SCALE_TYPES = ["linear", "log"] as const
 

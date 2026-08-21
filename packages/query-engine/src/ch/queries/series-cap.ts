@@ -80,5 +80,5 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 		.orderBy(["bucket", "asc"], ["groupName", "asc"])
 		.format("JSON")
 
-	return capped as unknown as CHQuery<ColumnDefs, Output, Record<string, ColumnDefs>>
+	return capped as CHQuery<ColumnDefs, Output, Record<string, ColumnDefs>>
 }

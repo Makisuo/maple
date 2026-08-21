@@ -1,18 +1,23 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
+import { Schema } from "effect"
+import { decodeRowCounts } from "../chdb-rows"
 import {
-	applyRawTelemetryRetentionFloor,
-	RAW_TELEMETRY_TTL_COLUMNS,
-	readRawTelemetryRetentionDays,
-	type Chdb,
-} from "../chdb"
+	UnsignedDecimal,
+	makeRawRowsState,
+	strictDecoder,
+	RAW_TABLES,
+	rawRowCounts,
+	expectedManifest,
+} from "./journal-codecs"
+import { applyRawTelemetryRetentionFloor, readRawTelemetryRetentionDays } from "../chdb"
 import type {
 	LocalStoreMigrationModule,
 	MigrationModuleContext,
 	MigrationOperation,
 	StateDispositionEntry,
 } from "../local-store-migration-module"
-import { withRawTelemetryRetentionFloor } from "../schema-manifest"
 import {
 	LOCAL_SCHEMA_V1,
 	LOCAL_SCHEMA_V1_MANIFEST,
@@ -23,90 +28,26 @@ import {
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
 
-const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
+/** Stamped into the journal and matched on the way back out. */
+const MODULE_ID = "local-0001-to-0002-error-rollup" as const
 
-interface V1ToV2State {
-	readonly module: "local-0001-to-0002-error-rollup"
-	readonly version: 1
-	readonly rawRows: Readonly<Record<string, string>>
-	readonly retentionDays?: number
-}
+const V1ToV2StateCodec = makeRawRowsState(MODULE_ID)
 
-interface V1ToV2Progress {
-	readonly backfilledErrorEvents: string
-}
+/**
+ * Unlike its siblings this edge backfills, so its progress is a resumable
+ * cursor rather than an installed flag: how many `error_events` rows the
+ * backfill has written so far, as an unsigned decimal because the count is a
+ * ClickHouse UInt64.
+ */
+const V1ToV2ProgressSchema = Schema.Struct({ backfilledErrorEvents: UnsignedDecimal })
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
+type V1ToV2State = typeof V1ToV2StateCodec.schema.Type
+type V1ToV2Progress = typeof V1ToV2ProgressSchema.Type
 
-const decodeCounts = (value: unknown): Readonly<Record<string, string>> => {
-	if (!isRecord(value)) throw new Error("v1 -> v2 rawRows must be an object")
-	const counts: Record<string, string> = {}
-	for (const table of RAW_TABLES) {
-		const count = value[table]
-		if (typeof count !== "string" || !/^\d+$/.test(count))
-			throw new Error(`v1 -> v2 rawRows.${table} must be an unsigned decimal string`)
-		counts[table] = count
-	}
-	if (Object.keys(value).some((table) => !RAW_TABLES.includes(table as (typeof RAW_TABLES)[number])))
-		throw new Error("v1 -> v2 rawRows contains an unknown table")
-	return counts
-}
-
-const decodeState = (value: unknown): V1ToV2State => {
-	if (!isRecord(value)) throw new Error("v1 -> v2 state must be an object")
-	const allowed = new Set(["module", "version", "rawRows", "retentionDays"])
-	if (Object.keys(value).some((key) => !allowed.has(key)))
-		throw new Error("v1 -> v2 state contains an unknown field")
-	if (value.module !== "local-0001-to-0002-error-rollup" || value.version !== 1)
-		throw new Error("v1 -> v2 state has an unsupported module or version")
-	if (
-		value.retentionDays !== undefined &&
-		(typeof value.retentionDays !== "number" || !Number.isSafeInteger(value.retentionDays))
-	)
-		throw new Error("v1 -> v2 retentionDays must be an integer")
-	return {
-		module: "local-0001-to-0002-error-rollup",
-		version: 1,
-		rawRows: decodeCounts(value.rawRows),
-		...(value.retentionDays === undefined ? {} : { retentionDays: value.retentionDays }),
-	}
-}
-
-const decodeProgress = (value: unknown): V1ToV2Progress | undefined => {
-	if (value === undefined) return undefined
-	if (
-		!isRecord(value) ||
-		Object.keys(value).some((key) => key !== "backfilledErrorEvents") ||
-		typeof value.backfilledErrorEvents !== "string" ||
-		!/^\d+$/.test(value.backfilledErrorEvents)
-	)
-		throw new Error("v1 -> v2 progress is invalid")
-	return { backfilledErrorEvents: value.backfilledErrorEvents }
-}
-
-const parseJsonEachRow = <A>(value: string): A[] =>
-	value
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.map((line) => JSON.parse(line) as A)
-
-const rawRowCounts = (db: Chdb): Readonly<Record<string, string>> => {
-	const quotedTables = RAW_TABLES.map((table) => `'${table}'`).join(", ")
-	const rows = parseJsonEachRow<{ table: string; rowCount: string }>(
-		db.query(
-			`SELECT table, toString(sum(rows)) AS rowCount FROM system.parts WHERE database = 'default' AND active = 1 AND table IN (${quotedTables}) GROUP BY table`,
-		),
-	)
-	const byTable = new Map(rows.map((row) => [row.table, row.rowCount]))
-	return Object.fromEntries(RAW_TABLES.map((table) => [table, byTable.get(table) ?? "0"]))
-}
-
-const expectedManifest = (manifest: typeof LOCAL_SCHEMA_V1_MANIFEST, retentionDays: number | undefined) =>
-	retentionDays === undefined
-		? manifest
-		: withRawTelemetryRetentionFloor(manifest, RAW_TABLES, retentionDays)
+const decodeState = V1ToV2StateCodec.decode
+const decodeV1ToV2Progress = strictDecoder(V1ToV2ProgressSchema)
+const decodeProgress = (value: unknown): V1ToV2Progress | undefined =>
+	value === undefined ? undefined : decodeV1ToV2Progress(value)
 
 const preflight = async (context: MigrationModuleContext): Promise<V1ToV2State> => {
 	await context.ensureCapacity()
@@ -118,12 +59,12 @@ const preflight = async (context: MigrationModuleContext): Promise<V1ToV2State> 
 		},
 		{ schemaSql: LOCAL_SCHEMA_V1_SQL, bootstrapSchema: false },
 	)
-	return {
-		module: "local-0001-to-0002-error-rollup",
-		version: 1,
-		rawRows,
-		...(retentionDays === undefined ? {} : { retentionDays }),
-	}
+	// Two literals rather than a conditional spread: `retentionDays` is an
+	// `optionalKey`, so an absent floor has to be an absent key, not a present
+	// `undefined`.
+	return retentionDays === undefined
+		? { module: MODULE_ID, version: 1, rawRows }
+		: { module: MODULE_ID, version: 1, rawRows, retentionDays }
 }
 
 const prepareTarget = async (context: MigrationModuleContext, state: V1ToV2State): Promise<V1ToV2State> => {
@@ -171,7 +112,7 @@ const apply = async (
 		(db) => {
 			if (state.retentionDays !== undefined) applyRawTelemetryRetentionFloor(db, state.retentionDays)
 			db.exec(backfillSql)
-			const [row] = parseJsonEachRow<{ rowCount: string }>(
+			const [row] = decodeRowCounts(
 				db.query(
 					"SELECT toString(sum(OccurrenceCount)) AS rowCount FROM error_fingerprints_minutely",
 				),
@@ -195,9 +136,7 @@ const verify = async (
 				if (targetRows[table] !== state.rawRows[table])
 					throw new Error(`v1 -> v2 raw telemetry verification failed for ${table}`)
 			}
-			const [row] = parseJsonEachRow<{ rowCount: string }>(
-				db.query("SELECT toString(count()) AS rowCount FROM error_events"),
-			)
+			const [row] = decodeRowCounts(db.query("SELECT toString(count()) AS rowCount FROM error_events"))
 			if ((row?.rowCount ?? "0") !== progress.backfilledErrorEvents)
 				throw new Error("v1 -> v2 error rollup backfill verification failed")
 		},
@@ -245,7 +184,7 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 ]
 
 export const v1ToV2ErrorRollupModule: LocalStoreMigrationModule<V1ToV2State, V1ToV2Progress> = {
-	id: "local-0001-to-0002-error-rollup",
+	id: MODULE_ID,
 	moduleVersion: 1,
 	description: "Add the durable minutely error-fingerprint rollup to a v1 local store",
 	from: LOCAL_SCHEMA_V1,

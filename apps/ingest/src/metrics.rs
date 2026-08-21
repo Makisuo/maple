@@ -126,6 +126,13 @@ static WAL_SHARD_FULL_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static WAL_COMPACTED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_compacted_bytes_total")
+        .with_description("Exported WAL bytes reclaimed by rewriting a lane file from its cursor")
+        .build()
+});
+
 static FORWARD_RESPONSES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_forward_responses_total")
@@ -355,23 +362,23 @@ pub fn request_completed(signal: &str, status: &str, error_kind: &str, duration_
     REQUEST_DURATION_SECONDS.record(
         duration_secs,
         &[
-            KeyValue::new("signal", signal.to_string()),
-            KeyValue::new("status", status.to_string()),
+            KeyValue::new("signal", signal.to_owned()),
+            KeyValue::new("status", status.to_owned()),
         ],
     );
     REQUESTS_TOTAL.add(
         1,
         &[
-            KeyValue::new("signal", signal.to_string()),
-            KeyValue::new("status", status.to_string()),
-            KeyValue::new("error_kind", error_kind.to_string()),
+            KeyValue::new("signal", signal.to_owned()),
+            KeyValue::new("status", status.to_owned()),
+            KeyValue::new("error_kind", error_kind.to_owned()),
         ],
     );
 }
 
 /// Telemetry items accepted from a request payload.
 pub fn items_accepted(signal: &str, count: u64) {
-    ITEMS_TOTAL.add(count, &[KeyValue::new("signal", signal.to_string())]);
+    ITEMS_TOTAL.add(count, &[KeyValue::new("signal", signal.to_owned())]);
 }
 
 /// A request was rejected by a per-org limit (`reason` is `in_flight` or `queue_bytes`).
@@ -379,7 +386,7 @@ pub fn org_throttled(org_id: &str, reason: &'static str) {
     ORG_THROTTLED_TOTAL.add(
         1,
         &[
-            KeyValue::new("org_id", org_id.to_string()),
+            KeyValue::new("org_id", org_id.to_owned()),
             KeyValue::new("reason", reason),
         ],
     );
@@ -398,9 +405,9 @@ pub fn org_data_loss(org_id: &str, signal: &str, error_kind: &str) {
     ORG_DATA_LOSS_TOTAL.add(
         1,
         &[
-            KeyValue::new("org_id", org_id.to_string()),
-            KeyValue::new("signal", signal.to_string()),
-            KeyValue::new("error_kind", error_kind.to_string()),
+            KeyValue::new("org_id", org_id.to_owned()),
+            KeyValue::new("signal", signal.to_owned()),
+            KeyValue::new("error_kind", error_kind.to_owned()),
         ],
     );
 }
@@ -412,9 +419,9 @@ pub fn backpressure_shed(org_id: &str, destination: &str, signal: &str) {
     BACKPRESSURE_SHED_TOTAL.add(
         1,
         &[
-            KeyValue::new("org_id", org_id.to_string()),
-            KeyValue::new("destination", destination.to_string()),
-            KeyValue::new("signal", signal.to_string()),
+            KeyValue::new("org_id", org_id.to_owned()),
+            KeyValue::new("destination", destination.to_owned()),
+            KeyValue::new("signal", signal.to_owned()),
         ],
     );
 }
@@ -423,14 +430,14 @@ pub fn backpressure_shed(org_id: &str, destination: &str, signal: &str) {
 /// crossed it. Recording stops here; every later chunk lands in
 /// `replay_session_chunk_dropped`.
 pub fn replay_session_truncated(org_id: &str) {
-    REPLAY_SESSION_TRUNCATED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_string())]);
+    REPLAY_SESSION_TRUNCATED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_owned())]);
 }
 
 /// A chunk was rejected because its session had already been truncated. A high
 /// ratio against `replay_session_truncated` means one org keeps recording long
 /// after it stopped being stored — worth an SDK-side sampling conversation.
 pub fn replay_session_chunk_dropped(org_id: &str) {
-    REPLAY_SESSION_CHUNK_DROPPED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_string())]);
+    REPLAY_SESSION_CHUNK_DROPPED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_owned())]);
 }
 
 /// A replay chunk's payload could not be written to the blob store, so the
@@ -438,17 +445,17 @@ pub fn replay_session_chunk_dropped(org_id: &str) {
 /// every increment here is a permanent gap in a recording — this should sit at
 /// zero, and it is the signal to watch during the R2 cutover.
 pub fn replay_blob_put_failed(org_id: &str) {
-    REPLAY_BLOB_PUT_FAILED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_string())]);
+    REPLAY_BLOB_PUT_FAILED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_owned())]);
 }
 
 /// Current in-flight request count for an org.
 pub fn org_requests_in_flight(org_id: &str, value: u64) {
-    ORG_REQUESTS_IN_FLIGHT.record(value, &[KeyValue::new("org_id", org_id.to_string())]);
+    ORG_REQUESTS_IN_FLIGHT.record(value, &[KeyValue::new("org_id", org_id.to_owned())]);
 }
 
 /// A request used the sentinel test token.
 pub fn sentinel(signal: &str) {
-    SENTINEL_TOTAL.add(1, &[KeyValue::new("signal", signal.to_string())]);
+    SENTINEL_TOTAL.add(1, &[KeyValue::new("signal", signal.to_owned())]);
 }
 
 /// Ingest key resolution latency.
@@ -458,12 +465,12 @@ pub fn key_resolution_duration(duration_secs: f64) {
 
 /// Raw request body size.
 pub fn request_body_bytes(signal: &str, bytes: u64) {
-    REQUEST_BODY_BYTES.record(bytes, &[KeyValue::new("signal", signal.to_string())]);
+    REQUEST_BODY_BYTES.record(bytes, &[KeyValue::new("signal", signal.to_owned())]);
 }
 
 /// Decompressed request payload size.
 pub fn decoded_body_bytes(signal: &str, bytes: u64) {
-    DECODED_BODY_BYTES.record(bytes, &[KeyValue::new("signal", signal.to_string())]);
+    DECODED_BODY_BYTES.record(bytes, &[KeyValue::new("signal", signal.to_owned())]);
 }
 
 /// A Cloudflare Logpush batch was received.
@@ -471,28 +478,28 @@ pub fn cloudflare_batch(dataset: &str, is_validation: bool) {
     CLOUDFLARE_BATCHES_TOTAL.add(
         1,
         &[
-            KeyValue::new("dataset", dataset.to_string()),
+            KeyValue::new("dataset", dataset.to_owned()),
             KeyValue::new("validation", if is_validation { "true" } else { "false" }),
         ],
     );
     if is_validation {
-        CLOUDFLARE_VALIDATION_TOTAL.add(1, &[KeyValue::new("dataset", dataset.to_string())]);
+        CLOUDFLARE_VALIDATION_TOTAL.add(1, &[KeyValue::new("dataset", dataset.to_owned())]);
     }
 }
 
 /// A Cloudflare Logpush request failed authentication.
 pub fn cloudflare_auth_failure(dataset: &str) {
-    CLOUDFLARE_AUTH_FAILURES_TOTAL.add(1, &[KeyValue::new("dataset", dataset.to_string())]);
+    CLOUDFLARE_AUTH_FAILURES_TOTAL.add(1, &[KeyValue::new("dataset", dataset.to_owned())]);
 }
 
 /// A Cloudflare Logpush request failed parsing.
 pub fn cloudflare_parse_failure(dataset: &str) {
-    CLOUDFLARE_PARSE_FAILURES_TOTAL.add(1, &[KeyValue::new("dataset", dataset.to_string())]);
+    CLOUDFLARE_PARSE_FAILURES_TOTAL.add(1, &[KeyValue::new("dataset", dataset.to_owned())]);
 }
 
 /// Log records parsed from a Cloudflare Logpush batch.
 pub fn cloudflare_records(dataset: &str, count: u64) {
-    CLOUDFLARE_RECORDS_TOTAL.add(count, &[KeyValue::new("dataset", dataset.to_string())]);
+    CLOUDFLARE_RECORDS_TOTAL.add(count, &[KeyValue::new("dataset", dataset.to_owned())]);
 }
 
 /// A WAL append was rejected because the lane file is full. `shard` is the real
@@ -502,7 +509,7 @@ pub fn wal_shard_full(shard: usize, destination: &str) {
         1,
         &[
             KeyValue::new("shard", shard.to_string()),
-            KeyValue::new("destination", destination.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
         ],
     );
 }
@@ -513,7 +520,7 @@ pub fn wal_commit_bytes(shard: usize, destination: &str, bytes: u64) {
         bytes,
         &[
             KeyValue::new("shard", shard.to_string()),
-            KeyValue::new("destination", destination.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
         ],
     );
 }
@@ -524,14 +531,25 @@ pub fn wal_shard_bytes(shard: usize, destination: &str, bytes: u64) {
         bytes,
         &[
             KeyValue::new("shard", shard.to_string()),
-            KeyValue::new("destination", destination.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+        ],
+    );
+}
+
+/// Exported bytes reclaimed by compacting a WAL lane file.
+pub fn wal_lane_compacted(shard: usize, destination: &str, reclaimed_bytes: u64) {
+    WAL_COMPACTED_BYTES_TOTAL.add(
+        reclaimed_bytes,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
         ],
     );
 }
 
 /// Current bytes queued for export for an org.
 pub fn org_queue_bytes(org_id: &str, bytes: u64) {
-    ORG_QUEUE_BYTES.record(bytes, &[KeyValue::new("org_id", org_id.to_string())]);
+    ORG_QUEUE_BYTES.record(bytes, &[KeyValue::new("org_id", org_id.to_owned())]);
 }
 
 /// Latency and exported-byte size of a completed WAL export batch.
@@ -541,7 +559,7 @@ pub fn export_batch_completed(shard: usize, signal: &str, duration_secs: f64, ex
     WAL_EXPORTED_BYTES.record(
         exported_bytes,
         &[
-            KeyValue::new("signal", signal.to_string()),
+            KeyValue::new("signal", signal.to_owned()),
             KeyValue::new("shard", shard.to_string()),
         ],
     );
@@ -552,9 +570,9 @@ pub fn forward_response(signal: &str, upstream_status: &'static str, upstream_po
     FORWARD_RESPONSES_TOTAL.add(
         1,
         &[
-            KeyValue::new("signal", signal.to_string()),
+            KeyValue::new("signal", signal.to_owned()),
             KeyValue::new("upstream_status", upstream_status),
-            KeyValue::new("upstream_pool", upstream_pool.to_string()),
+            KeyValue::new("upstream_pool", upstream_pool.to_owned()),
         ],
     );
 }
@@ -564,28 +582,26 @@ pub fn forward_duration(signal: &str, upstream_pool: &str, duration_secs: f64) {
     FORWARD_DURATION_SECONDS.record(
         duration_secs,
         &[
-            KeyValue::new("signal", signal.to_string()),
-            KeyValue::new("upstream_pool", upstream_pool.to_string()),
+            KeyValue::new("signal", signal.to_owned()),
+            KeyValue::new("upstream_pool", upstream_pool.to_owned()),
         ],
     );
 }
 
 /// Native warehouse pipeline accept latency.
 pub fn native_accept_duration(signal: &str, duration_secs: f64) {
-    NATIVE_ACCEPT_DURATION_SECONDS.record(
-        duration_secs,
-        &[KeyValue::new("signal", signal.to_string())],
-    );
+    NATIVE_ACCEPT_DURATION_SECONDS
+        .record(duration_secs, &[KeyValue::new("signal", signal.to_owned())]);
 }
 
 /// Rows accepted by the native warehouse pipeline.
 pub fn native_rows(signal: &str, count: u64) {
-    NATIVE_ROWS_TOTAL.add(count, &[KeyValue::new("signal", signal.to_string())]);
+    NATIVE_ROWS_TOTAL.add(count, &[KeyValue::new("signal", signal.to_owned())]);
 }
 
 /// Rows dropped by sampling in the native pipeline.
 pub fn native_sampled_dropped(signal: &str, count: u64) {
-    NATIVE_SAMPLED_DROPPED_TOTAL.add(count, &[KeyValue::new("signal", signal.to_string())]);
+    NATIVE_SAMPLED_DROPPED_TOTAL.add(count, &[KeyValue::new("signal", signal.to_owned())]);
 }
 
 /// A successful Tinybird export: latency and exported row count.
@@ -593,11 +609,11 @@ pub fn tinybird_export_succeeded(datasource: &str, duration_secs: f64, rows: u64
     TINYBIRD_EXPORT_DURATION_SECONDS.record(
         duration_secs,
         &[
-            KeyValue::new("datasource", datasource.to_string()),
+            KeyValue::new("datasource", datasource.to_owned()),
             KeyValue::new("status", "2xx"),
         ],
     );
-    TINYBIRD_EXPORT_ROWS_TOTAL.add(rows, &[KeyValue::new("datasource", datasource.to_string())]);
+    TINYBIRD_EXPORT_ROWS_TOTAL.add(rows, &[KeyValue::new("datasource", datasource.to_owned())]);
 }
 
 /// Rows dropped while exporting to Tinybird (`status` is an HTTP code or `retries_exhausted`).
@@ -605,8 +621,8 @@ pub fn tinybird_export_dropped(datasource: &str, status: &str, rows: u64) {
     TINYBIRD_EXPORT_DROPPED_TOTAL.add(
         rows,
         &[
-            KeyValue::new("datasource", datasource.to_string()),
-            KeyValue::new("status", status.to_string()),
+            KeyValue::new("datasource", datasource.to_owned()),
+            KeyValue::new("status", status.to_owned()),
         ],
     );
 }
@@ -616,8 +632,8 @@ pub fn tinybird_export_retry(datasource: &str, status: &str) {
     TINYBIRD_EXPORT_RETRIES_TOTAL.add(
         1,
         &[
-            KeyValue::new("datasource", datasource.to_string()),
-            KeyValue::new("status", status.to_string()),
+            KeyValue::new("datasource", datasource.to_owned()),
+            KeyValue::new("status", status.to_owned()),
         ],
     );
 }
@@ -625,8 +641,8 @@ pub fn tinybird_export_retry(datasource: &str, status: &str) {
 /// A successful ClickHouse export: latency and exported row count.
 pub fn clickhouse_export_succeeded(datasource: &str, status: &str, duration_secs: f64, rows: u64) {
     let attrs = [
-        KeyValue::new("datasource", datasource.to_string()),
-        KeyValue::new("status", status.to_string()),
+        KeyValue::new("datasource", datasource.to_owned()),
+        KeyValue::new("status", status.to_owned()),
     ];
     CLICKHOUSE_EXPORT_DURATION_SECONDS.record(duration_secs, &attrs);
     CLICKHOUSE_EXPORT_ROWS_TOTAL.add(rows, &attrs);
@@ -637,8 +653,8 @@ pub fn clickhouse_export_dropped(datasource: &str, status: &str, rows: u64) {
     CLICKHOUSE_EXPORT_DROPPED_TOTAL.add(
         rows,
         &[
-            KeyValue::new("datasource", datasource.to_string()),
-            KeyValue::new("status", status.to_string()),
+            KeyValue::new("datasource", datasource.to_owned()),
+            KeyValue::new("status", status.to_owned()),
         ],
     );
 }
@@ -648,8 +664,8 @@ pub fn clickhouse_export_retry(datasource: &str, status: &str) {
     CLICKHOUSE_EXPORT_RETRIES_TOTAL.add(
         1,
         &[
-            KeyValue::new("datasource", datasource.to_string()),
-            KeyValue::new("status", status.to_string()),
+            KeyValue::new("datasource", datasource.to_owned()),
+            KeyValue::new("status", status.to_owned()),
         ],
     );
 }

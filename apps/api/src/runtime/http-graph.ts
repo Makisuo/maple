@@ -6,21 +6,20 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { API_CORS_OPTIONS } from "@/http/api-cors"
 import { McpLive } from "@/mcp/app"
 import { Env } from "@/platform/Env"
-import { HttpAiTriageLive } from "@/routes/v1/ai-triage.http"
-import { HttpAnomaliesLive } from "@/routes/v1/anomalies.http"
+import { HttpAiSessionsInternalLive } from "@/routes/internal/ai-sessions.http"
+import { HttpAiTriageLive } from "@/routes/internal/ai-triage.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "@/routes/v1/auth.http"
-import { HttpBillingLive, HttpBillingPublicLive } from "@/routes/v1/billing.http"
+import { HttpBillingLive } from "@/routes/internal/billing.http"
+import { HttpBillingPublicLive } from "@/routes/v1/billing-public.http"
+import { HttpV2SharePublicLive } from "@/routes/v2/share.http"
 import { ChatSessionsRouter } from "@/routes/v1/chat-sessions.http"
-import { HttpChatLive } from "@/routes/v1/chat.http"
-import { HttpDashboardsLive } from "@/routes/v1/dashboards.http"
+import { HttpChatLive } from "@/routes/internal/chat.http"
 import { V1ErrorBoundaryLive } from "@/routes/v1/error-boundary"
-import { HttpDemoLive } from "@/routes/v1/demo.http"
-import { HttpDigestLive } from "@/routes/v1/digest.http"
+import { HttpDemoLive } from "@/routes/internal/demo.http"
+import { HttpDigestLive } from "@/routes/internal/digest.http"
 import { HttpErrorsLive } from "@/routes/v1/errors.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "@/routes/v1/integrations.http"
-import { HttpObservabilityLive } from "@/routes/v1/observability.http"
 import { OAuthDiscoveryRouter } from "@/routes/v1/oauth-discovery.http"
-import { HttpOnboardingLive } from "@/routes/v1/onboarding.http"
 import { HttpOrgClickHouseSettingsLive } from "@/routes/v1/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "@/routes/v1/organizations.http"
 import { PlanetScaleWebhookRouter } from "@/routes/v1/planetscale-webhook.http"
@@ -31,7 +30,6 @@ import { ScraperInternalRouter } from "@/routes/v1/scraper-internal.http"
 import { HttpSessionReplaysLive } from "@/routes/v1/session-replay.http"
 import { SlackCallbackRouter, SlackInternalRouter } from "@/routes/v1/slack-integration.http"
 import { VcsWebhookRouter } from "@/routes/v1/vcs-webhook.http"
-import { HttpWarehouseLive } from "@/routes/v1/warehouse.http"
 import { HttpV2AlertDeliveriesLive } from "@/routes/v2/alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "@/routes/v2/alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "@/routes/v2/alert-incidents.http"
@@ -45,6 +43,7 @@ import { HttpV2ErrorIssuesLive } from "@/routes/v2/error-issues.http"
 import { HttpV2IngestKeysLive } from "@/routes/v2/ingest-keys.http"
 import { HttpV2PlanetScaleIntegrationsLive, HttpV2SlackIntegrationsLive } from "@/routes/v2/integrations.http"
 import { HttpV2InvestigationsLive } from "@/routes/v2/investigations.http"
+import { HttpV2MobileDevicesLive } from "@/routes/v2/mobile-devices.http"
 import { HttpV2OrganizationLive } from "@/routes/v2/organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "@/routes/v2/recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "@/routes/v2/scrape-targets.http"
@@ -61,6 +60,9 @@ import { ApiAuthorizationLayer } from "@/services/auth/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { SessionAuthorizationLayer } from "@/services/auth/SessionAuthorizationLayer"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 
 const HealthRouter = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
@@ -82,18 +84,12 @@ const DocsV2Route = HttpApiScalar.layerCdn(MapleApiV2, {
 const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpAuthPublicLive),
 	Layer.provide(HttpAuthLive),
-	Layer.provide(Layer.mergeAll(HttpAiTriageLive, HttpAnomaliesLive, HttpChatLive)),
-	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
+	Layer.provide(HttpBillingPublicLive),
 	Layer.provide(HttpErrorsLive),
-	Layer.provide(HttpDashboardsLive),
-	Layer.provide(HttpDemoLive),
-	Layer.provide(HttpDigestLive),
 	Layer.provide(HttpIntegrationsLive),
-	Layer.provide(HttpObservabilityLive),
-	Layer.provide(HttpOnboardingLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
 	Layer.provide(HttpOrganizationsLive),
-	Layer.provide(Layer.mergeAll(HttpSessionReplaysLive, HttpWarehouseLive)),
+	Layer.provide(HttpSessionReplaysLive),
 	Layer.provide(V1ErrorBoundaryLive),
 )
 
@@ -105,7 +101,12 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
  * which is generated from `MapleApi`.
  */
 const ApiInternalRoutes = HttpApiBuilder.layer(MapleInternalApi).pipe(
-	Layer.provide(Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive)),
+	Layer.provide(
+		Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive, HttpAiSessionsInternalLive),
+	),
+	Layer.provide(
+		Layer.mergeAll(HttpAiTriageLive, HttpBillingLive, HttpChatLive, HttpDemoLive, HttpDigestLive),
+	),
 	Layer.provide(V1ErrorBoundaryLive),
 )
 
@@ -126,9 +127,11 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2ScrapeTargetsLive,
 			HttpV2InstrumentationRecommendationsLive,
 			HttpV2InstrumentationAuditLive,
+			HttpV2SharePublicLive,
 			HttpV2InvestigationsLive,
 			HttpV2AnomaliesLive,
 			HttpV2OrganizationLive,
+			HttpV2MobileDevicesLive,
 			HttpV2SessionReplaysLive,
 			HttpV2TracesLive,
 			HttpV2LogsLive,
@@ -166,6 +169,14 @@ export const ApiAuthLive = Layer.mergeAll(
 ).pipe(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
+	// Membership verification for `x-maple-org-id`. Only the v2 layer asks for
+	// it; without it that layer cannot build, which is deliberate — the header
+	// must never end up silently ignored in a runtime that forgot to wire this.
+	Layer.provideMerge(
+		OrgMembershipService.layer.pipe(
+			Layer.provide(EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))),
+		),
+	),
 	Layer.provideMerge(Env.layer),
 )
 

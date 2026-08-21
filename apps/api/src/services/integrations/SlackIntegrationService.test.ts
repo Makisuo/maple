@@ -45,7 +45,7 @@ const makeConfig = (slackConfigured = true) =>
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: ENCRYPTION_KEY_B64,
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
 			MAPLE_APP_BASE_URL: "https://web.localhost",
-			...(slackConfigured ? { SLACK_CLIENT_ID: "123.abc", SLACK_CLIENT_SECRET: "shhh" } : {}),
+			...(slackConfigured ? { SLACK_CLIENT_ID: "123.abc", SLACK_CLIENT_SECRET: "shhh" } : undefined),
 		}),
 	)
 

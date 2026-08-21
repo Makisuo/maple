@@ -8,6 +8,7 @@ import {
 } from "@/lib/dashboards/section-view-state"
 import type { DashboardSection, DashboardWidget } from "@/components/dashboard-builder/types"
 import { DashboardSections } from "@/components/dashboard-builder/sections/dashboard-sections"
+import { LiveWidgetRenderer } from "@/components/dashboard-builder/canvas/live-widget-renderer"
 import { PreviewBanner } from "./preview-banner"
 import { useDashboardVersionDetail } from "./use-dashboard-history"
 import type { PreviewedVersion } from "@/atoms/dashboard-history-atoms"
@@ -39,8 +40,9 @@ export function PreviewedCanvas({ dashboardId, preview, onCancel, onRestored }: 
 				// restoring it would actually produce. Read-only, and the view
 				// callbacks are inert — a preview has no URL state of its own.
 				<DashboardSections
-					widgets={result.value.snapshot.widgets as unknown as DashboardWidget[]}
-					sections={(result.value.snapshot.sections ?? []) as unknown as DashboardSection[]}
+					renderWidget={LiveWidgetRenderer}
+					widgets={result.value.snapshot.widgets as DashboardWidget[]}
+					sections={(result.value.snapshot.sections ?? []) as DashboardSection[]}
 					// Local, not URL-backed: browsing a preview's groups is throwaway
 					// state, and writing it to the URL would leave collapse/tab params
 					// behind after the preview is dismissed. Inert callbacks were the

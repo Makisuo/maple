@@ -32,6 +32,14 @@ import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } fro
 // The single widget-side spelling of the shared reducer table.
 export { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
 
+export type PointsMode = "auto" | "always" | "never"
+
+/** `chartPresentation.showPoints` ⇄ `PointsMode`: absent is Auto. */
+export const pointsModeFromShowPoints = (showPoints: boolean | undefined): PointsMode =>
+	showPoints === undefined ? "auto" : showPoints ? "always" : "never"
+export const showPointsFromPointsMode = (mode: PointsMode): boolean | undefined =>
+	mode === "auto" ? undefined : mode === "always"
+
 export interface QueryBuilderWidgetState {
 	visualization: VisualizationType
 	title: string
@@ -53,6 +61,12 @@ export interface QueryBuilderWidgetState {
 	unit: ValueUnit
 	legendPosition: LegendPosition
 	seriesStatsEnabled: boolean
+	/**
+	 * Point dots on line/area series. `auto` (no stored preference) dots isolated
+	 * points always and every point only when they fit the width; the other two
+	 * pin `chartPresentation.showPoints`.
+	 */
+	pointsMode: PointsMode
 	tableLimit: string
 	// Threshold lines (chart) / threshold coloring (stat, gauge)
 	thresholds: Array<{ value: number; color: string }>
@@ -65,7 +79,13 @@ export interface QueryBuilderWidgetState {
 	listLimit: string
 	listColumns: ListColumnDraft[]
 	listRootOnly: boolean
-	heatmapColorScale: HeatmapColorScale
+	/**
+	 * `undefined` means "never chosen" — the rail shows
+	 * `DEFAULT_HEATMAP_COLOR_SCALE` (what the chart already renders) and Apply
+	 * leaves `display.heatmap.colorScale` absent, so opening the editor cannot
+	 * repaint a widget the user never touched the palette on.
+	 */
+	heatmapColorScale: HeatmapColorScale | undefined
 	heatmapScaleType: HeatmapScaleType
 	// Markdown-specific: the note body. Static — never hits the warehouse.
 	markdownContent: string
@@ -276,7 +296,7 @@ const TRACES_AGGREGATION_TITLES: Record<string, string> = {
 	p99_duration: "P99 duration",
 	error_rate: "Error rate",
 	apdex: "Apdex",
-}
+} satisfies Record<string, string>
 
 /**
  * Human-readable fallback title derived from the first visible query, e.g.
@@ -410,7 +430,7 @@ export function buildListEndpointParams(
 	const { clauses } = parseWhereClauses(whereClause)
 	// NOTE: startTime/endTime are injected by useWidgetData from the dashboard
 	// time range — do NOT include them here or they'll clash with interpolation.
-	const params: Record<string, unknown> = { limit }
+	const params: Record<string, unknown> = { limit } satisfies Record<string, unknown>
 
 	if (dataSource === "traces") {
 		const attributeFilters: Array<{ key: string; value: string; matchMode?: string }> = []

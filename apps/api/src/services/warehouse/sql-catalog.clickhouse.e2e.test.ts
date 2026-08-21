@@ -9,11 +9,18 @@
 // `DESCRIBE (SELECT …)` type-checks without reading a row, so this is cheap:
 // ~80 unique shapes, a few seconds on top of a job that already boots the
 // server and replays the migrations.
+//
+// Covers both catalogs: `@maple/query-engine`'s own (pipes, query specs, core
+// builders) and `@maple/query-engine-integrations`' (Cloudflare, PlanetScale,
+// AI builders), which lives with those builders because the core package must
+// not depend on the integrations package.
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
+import type { CompiledQuery } from "@maple/query-engine/ch"
 import { collectSqlCatalog, dedupeByFingerprint } from "@maple/query-engine/sql-catalog"
 import { normalizeSqlForClickHouseClient } from "@maple/query-engine/execution"
+import { collectIntegrationCatalog } from "@maple/query-engine-integrations/catalog"
 import {
 	applyRealMigrations,
 	clickhouseE2eEnabled,
@@ -35,8 +42,23 @@ const IDENTITY_COLUMN_ALLOWLIST: ReadonlySet<string> = new Set([])
 
 const database = uniqueDatabase("maple_sql_catalog_e2e")
 
-/** Deduped so N fixtures over one shape cost one analyzer round trip. */
-const catalog = dedupeByFingerprint(collectSqlCatalog())
+/** The subset of a catalog entry the sweep reads — the core and integration
+ *  catalogs are separate types (`@maple/query-engine` must not import the
+ *  integrations package), but both satisfy this shape. */
+interface SweepEntry {
+	readonly id: string
+	readonly sql: string
+	readonly compiled?: CompiledQuery<unknown>
+	readonly sampleValues?: Readonly<Record<string, unknown>>
+}
+
+/** Core catalog deduped so N fixtures over one shape cost one analyzer round
+ *  trip; the integration catalog has no fingerprints and every fixture is a
+ *  distinct shape, so it is appended as-is. */
+const catalog: ReadonlyArray<SweepEntry> = [
+	...dedupeByFingerprint(collectSqlCatalog()),
+	...collectIntegrationCatalog(),
+]
 
 describe.skipIf(!clickhouseE2eEnabled)("SQL catalog analyzer sweep", () => {
 	beforeAll(async () => {

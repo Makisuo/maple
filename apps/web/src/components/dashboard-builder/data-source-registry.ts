@@ -1,14 +1,6 @@
 import { Effect } from "effect"
 import type { DataSourceEndpoint } from "@/components/dashboard-builder/types"
 import type { BackendError, WarehouseApiError } from "@/api/warehouse/effect-utils"
-import {
-	dataSourceEndpoint,
-	dataSourceQuerySet,
-	dataSourceRawSql,
-	dataSourceRouteParams,
-	QUERY_SHAPE_ENDPOINTS,
-	RAW_SQL_ENDPOINT,
-} from "@maple/widgets/dashboard"
 
 import { getServiceUsage } from "@/api/warehouse/service-usage"
 import { getServiceOverview, getServiceApdexTimeSeries, getServicesFacets } from "@/api/warehouse/services"
@@ -75,7 +67,7 @@ export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
 	custom_query_builder_list: getQueryBuilderList,
 	raw_sql_chart: getRawSqlChart,
 	markdown_static: markdownStaticServerFn,
-}
+} satisfies Record<DataSourceEndpoint, ServerFunction>
 
 /**
  * Looks up a data-source server function by endpoint name. Accepts an
@@ -88,54 +80,7 @@ export function getServerFunction(endpoint: string): ServerFunction | undefined 
 		: undefined
 }
 
-/**
- * A stored data source, resolved to the request the fetch layer sends.
- *
- * The single place the web app turns "what this widget is" into "which server
- * function, with which params". Everything downstream of it — the atom family
- * key, the retention namespace, `fetchWidgetData`'s dispatch — stays keyed by
- * endpoint string, because that string is the transport identity and works
- * unchanged either way.
- *
- * It is also the one function the v3 flip touches on the read path: a
- * `kind: "query"` data source has no endpoint of its own, so its result shape is
- * mapped onto the server function that already serves that shape. Returns null
- * for a data source nothing can serve, which the caller reports as a disabled
- * tile rather than a failed fetch.
- */
-export function toWidgetRequest(
-	dataSource: unknown,
-): { endpoint: string; params: Record<string, unknown> } | null {
-	const rawSql = dataSourceRawSql(dataSource)
-	if (rawSql !== null) {
-		return {
-			endpoint: RAW_SQL_ENDPOINT,
-			params: {
-				sql: rawSql.sql,
-				...(rawSql.displayType === undefined ? {} : { displayType: rawSql.displayType }),
-				...(rawSql.granularitySeconds === undefined
-					? {}
-					: { granularitySeconds: rawSql.granularitySeconds }),
-			},
-		}
-	}
-
-	const querySet = dataSourceQuerySet(dataSource)
-	if (querySet !== null) {
-		return {
-			endpoint: QUERY_SHAPE_ENDPOINTS[querySet.resultShape],
-			params: {
-				queries: querySet.queries,
-				...(querySet.formulas === undefined ? {} : { formulas: querySet.formulas }),
-				...(querySet.comparison === undefined ? {} : { comparison: querySet.comparison }),
-				...(querySet.defaultLimit === undefined ? {} : { defaultLimit: querySet.defaultLimit }),
-				...(querySet.limit === undefined ? {} : { limit: querySet.limit }),
-				...(querySet.columns === undefined ? {} : { columns: querySet.columns }),
-			},
-		}
-	}
-
-	const endpoint = dataSourceEndpoint(dataSource)
-	if (endpoint === null) return null
-	return { endpoint, params: dataSourceRouteParams(dataSource) ?? {} }
-}
+// `toWidgetRequest` moved to `@maple/widgets/dashboard` so the share API lowers
+// a stored data source through the exact function the browser does. Re-exported
+// here because this file is where the web app has always looked for it.
+export { toWidgetRequest } from "@maple/widgets/dashboard"

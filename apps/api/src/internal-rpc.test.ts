@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { callMcpToolRpc, submitDiagnosisRpc } from "./internal-rpc"
-import { McpToolExecutor, type McpToolExecutorShape } from "./mcp/dispatcher"
-import { InvestigationService, type InvestigationServiceShape } from "./services/errors/InvestigationService"
+import { McpToolExecutor, type McpToolExecutorApi } from "./mcp/dispatcher"
+import { InvestigationService, type InvestigationServiceApi } from "./services/errors/InvestigationService"
 
 const investigationId = "00000000-0000-4000-8000-000000000001"
 const report = {
@@ -22,7 +22,7 @@ const report = {
 	confidence: "high",
 } as const
 
-const unusedInvestigationService: InvestigationServiceShape = {
+const unusedInvestigationService: InvestigationServiceApi = {
 	listInvestigations: () => Effect.die("unused"),
 	getInvestigation: () => Effect.die("unused"),
 	createInvestigation: () => Effect.die("unused"),
@@ -32,7 +32,7 @@ const unusedInvestigationService: InvestigationServiceShape = {
 	submitDiagnosis: () => Effect.die("unused"),
 }
 
-const unusedMcpToolExecutor: McpToolExecutorShape = {
+const unusedMcpToolExecutor: McpToolExecutorApi = {
 	execute: () => Effect.die("unused"),
 }
 
@@ -76,7 +76,7 @@ describe("internal RPC boundary", () => {
 		Effect.gen(function* () {
 			const calls: Array<{ orgId: string; investigationId: string; summary: string }> = []
 			const expected = { id: investigationId, status: "diagnosed" } as never
-			const service: InvestigationServiceShape = {
+			const service: InvestigationServiceApi = {
 				...unusedInvestigationService,
 				submitDiagnosis: (orgId, id, request) =>
 					Effect.sync(() => {

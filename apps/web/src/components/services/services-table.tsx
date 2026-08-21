@@ -87,7 +87,7 @@ const ENVIRONMENT_PRIORITY: Record<string, number> = {
 	production: 0,
 	staging: 1,
 	development: 2,
-}
+} satisfies Record<string, number>
 
 function groupByEnvironment(services: ServiceOverview[]): [string, ServiceOverview[]][] {
 	const groups = new Map<string, ServiceOverview[]>()
@@ -116,7 +116,7 @@ const HEALTH_DOT_CLASS: Record<ServiceHealth, string> = {
 	healthy: "bg-success",
 	degraded: "bg-severity-warn",
 	unhealthy: "bg-destructive",
-}
+} satisfies Record<ServiceHealth, string>
 
 /** Quiet health marker next to the service name — rendered only when there is
  *  something to say (degraded/unhealthy); healthy rows stay unadorned. */

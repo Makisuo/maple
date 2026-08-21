@@ -22,6 +22,12 @@ import { HttpTaggedError } from "./error-policy"
 
 export const WorkflowState = Schema.Literals([
 	"triage",
+	// Set by the errors tick when a resolved issue starts firing again. Distinct
+	// from `triage` on purpose: reopening into `triage` erased the fact that the
+	// issue had ever been fixed, so the next person or agent to pick it up saw a
+	// brand-new bug and fixed it again. Ordered second so it surfaces near the top
+	// of the hub.
+	"regressed",
 	"todo",
 	"in_progress",
 	"in_review",
@@ -49,17 +55,58 @@ export type WorkflowState = Schema.Schema.Type<typeof WorkflowState>
  * nothing ever advances them through review, so requiring `in_review` first
  * left them with no way to be retired at all — by a human or by auto-resolve.
  *
- * `cancelled` stays terminal, and `done → triage` stays legal so the errors
- * tick's regression path can reopen a resolved issue when it recurs.
+ * `cancelled` stays terminal. `done → regressed` is the errors tick's reopen
+ * path; `done → triage` stays legal for a human who wants to re-triage a fixed
+ * issue by hand.
  */
 export const WORKFLOW_TRANSITIONS: Record<WorkflowState, ReadonlyArray<WorkflowState>> = {
 	triage: ["todo", "in_progress", "done", "cancelled", "wontfix"],
+	regressed: ["triage", "todo", "in_progress", "done", "cancelled", "wontfix"],
 	todo: ["triage", "in_progress", "done", "cancelled", "wontfix"],
 	in_progress: ["triage", "todo", "in_review", "done", "cancelled", "wontfix"],
 	in_review: ["triage", "in_progress", "done", "cancelled", "wontfix"],
-	done: ["triage", "in_progress", "cancelled", "wontfix"],
+	done: ["triage", "regressed", "in_progress", "cancelled", "wontfix"],
 	cancelled: [],
 	wontfix: ["triage", "cancelled"],
+} satisfies Record<WorkflowState, ReadonlyArray<WorkflowState>>
+
+/**
+ * Every workflow state in canonical display order. The order the issue hub
+ * shows states in — groups, selects, and status menus — so a list of states
+ * reads the same everywhere.
+ */
+export const WORKFLOW_STATE_ORDER: ReadonlyArray<WorkflowState> = WorkflowState.literals
+
+/**
+ * States only the errors tick may move an issue into.
+ *
+ * `regressed` records something observed — a fixed issue started firing from a
+ * build that was not running when it was resolved. A human picking it from a
+ * menu would be asserting that observation rather than making it, and the
+ * evaluator would overwrite the claim on its next tick anyway. The edge stays
+ * legal in {@link WORKFLOW_TRANSITIONS} because the tick does travel it; it is
+ * the human-facing surfaces that filter it out.
+ */
+export const MACHINE_OWNED_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>(["regressed"])
+
+/**
+ * The states that *every* one of `from` can legally move to — the intersection
+ * of their rows in {@link WORKFLOW_TRANSITIONS}, in canonical order.
+ *
+ * This is what a menu should offer: for one issue it is that issue's row, and
+ * for a multi-issue selection it is the moves the server would accept for all
+ * of them, so a bulk action can never half-apply. A state with no outgoing
+ * moves (`cancelled`) contributes an empty row and therefore collapses the
+ * result to nothing, and an empty input yields nothing (nothing selected, no
+ * legal move). Machine-owned targets are excluded — see
+ * {@link MACHINE_OWNED_WORKFLOW_STATES}.
+ */
+export const allowedTransitionsForAll = (from: Iterable<WorkflowState>): ReadonlyArray<WorkflowState> => {
+	const rows = Array.from(from, (state) => WORKFLOW_TRANSITIONS[state])
+	if (rows.length === 0) return []
+	return WORKFLOW_STATE_ORDER.filter(
+		(target) => !MACHINE_OWNED_WORKFLOW_STATES.has(target) && rows.every((row) => row.includes(target)),
+	)
 }
 
 /** States from which no further transition is possible. */
@@ -194,6 +241,16 @@ export class ErrorIssueDocument extends Schema.Class<ErrorIssueDocument>("ErrorI
 	lastSeenAt: IsoDateTimeString,
 	occurrenceCount: Schema.Number,
 	resolvedAt: Schema.NullOr(IsoDateTimeString),
+	// Fix history. Carried on the document rather than left in the event log
+	// because the event log is not what a triaging human or agent reads first:
+	// with only `workflowState`, an issue that was fixed last week and came back
+	// looked exactly like one nobody had ever touched, so the same bug got
+	// investigated and fixed from scratch more than once.
+	lastResolvedAt: Schema.NullOr(IsoDateTimeString),
+	lastRegressedAt: Schema.NullOr(IsoDateTimeString),
+	regressionCount: Schema.Number,
+	/** Builds this issue was known to affect when it was last marked done. */
+	resolvedVersions: Schema.Array(Schema.String),
 	snoozeUntil: Schema.NullOr(IsoDateTimeString),
 	archivedAt: Schema.NullOr(IsoDateTimeString),
 	hasOpenIncident: Schema.Boolean,

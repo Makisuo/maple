@@ -3,7 +3,7 @@ import { Suspense, type ReactNode } from "react"
 import { cn } from "@maple/ui/lib/utils"
 import { getChartById } from "@maple/ui/components/charts/registry"
 import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
-import { ChartTooltipSuppressionProvider } from "@maple/ui/components/ui/chart"
+import { ChartTooltipSuppressionProvider } from "@maple/ui/components/plot"
 import type { ChartLegendMode, ChartTooltipMode } from "@maple/ui/components/charts/_shared/chart-types"
 import { ReadonlyWidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
 import { ErrorState } from "@/components/common/error-state"
@@ -32,49 +32,45 @@ interface MetricsGridProps {
 	className?: string
 	waiting?: boolean
 	/**
-	 * `recharts` uses Recharts' event bus to synchronize every chart store and
-	 * tooltip. `cursor` keeps each chart independent and paints a lightweight
-	 * linked cursor across the sibling plots without scheduling React work.
-	 */
-	syncMode?: "recharts" | "cursor"
-	/**
-	 * If provided, every chart in the grid is given the same syncId so
-	 * hovering one chart highlights the same time bucket on the others. In
-	 * `cursor` mode the id enables the linked cursor but is not sent to Recharts.
+	 * Groups the grid's charts under one linked cursor: hovering any chart paints
+	 * a cursor line at the same time-bucket ratio on every sibling. Omit it and
+	 * each chart is fully independent.
+	 *
+	 * There is no longer a second sync mode. `syncMode="recharts"` used to hand
+	 * this id to Recharts' event bus, which re-rendered every synced chart's
+	 * tooltip store on each pointer tick; the linked cursor replaced it (CSS
+	 * variables, no React state) and the Recharts arm had been dead in production
+	 * since it became the default.
 	 */
 	syncId?: string
 	/**
-	 * Overlay element rendered inside every time-series chart (e.g. commit deploy
-	 * markers). The same element is handed to each chart; recharts renders one
-	 * instance per chart against its own axis scale.
+	 * Overlay element rendered over every time-series chart (e.g. commit deploy
+	 * markers). The same element is handed to each chart, which mounts its own
+	 * instance in `PlotFrame`'s overlay slot against that chart's own scale.
 	 */
 	overlay?: ReactNode
 	/**
-	 * Fixed y-axis width applied to every chart so their plot areas line up exactly.
-	 * Pass this whenever charts are synced and/or share an `overlay`, so the cursor and
-	 * the deploy markers align (and group identically) across charts instead of drifting
-	 * with each chart's own y-axis width.
+	 * Pins every chart's plot to the same left edge, in pixels.
+	 *
+	 * Pass it whenever the grid shares an `overlay`: the commit markers decide
+	 * whether two deploys merge into one label chip from the plot WIDTH, so
+	 * charts whose y-axis gutters differ (they do — the four service metrics span
+	 * ~38px to ~65px, "0.9" against "155.0ms") group the same commits differently
+	 * on adjacent cards. The linked cursor itself does not need this; it works in
+	 * per-plot ratios.
 	 */
 	yAxisWidth?: number
 }
 
-export function MetricsGrid({
-	items,
-	className,
-	waiting,
-	syncMode = "cursor",
-	syncId,
-	overlay,
-	yAxisWidth,
-}: MetricsGridProps) {
-	const linkedCursorEnabled = syncMode === "cursor" && syncId != null
+export function MetricsGrid({ items, className, waiting, syncId, overlay, yAxisWidth }: MetricsGridProps) {
+	const linkedCursorEnabled = syncId != null
 	const { containerProps } = useLinkedCursor(linkedCursorEnabled)
 
 	return (
 		<ChartTooltipSuppressionProvider>
 			<div
 				{...containerProps}
-				data-metrics-grid-sync-mode={syncMode}
+				data-metrics-grid=""
 				className={cn(
 					"grid grid-cols-1 md:grid-cols-2 gap-3 transition-opacity",
 					waiting && "opacity-60",
@@ -128,7 +124,6 @@ export function MetricsGrid({
 												legend={item.legend}
 												tooltip={item.tooltip}
 												rateMode={item.rateMode}
-												syncId={syncMode === "recharts" ? syncId : undefined}
 												overlay={overlay}
 												yAxisWidth={yAxisWidth}
 											/>

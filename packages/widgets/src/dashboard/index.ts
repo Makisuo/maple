@@ -14,6 +14,12 @@
 // version — a migration step, or a test asserting a legacy document still reads.
 
 export {
+	redactForShare,
+	type RedactedDashboard,
+	type RedactedDataSource,
+	type RedactedWidget,
+} from "./redact"
+export {
 	DASHBOARD_MIGRATIONS,
 	type DashboardMigration,
 	detectSchemaVersion,
@@ -26,11 +32,12 @@ export {
 	dataSourceRouteParams,
 	dataSourceTransform,
 	isQueryDataSource,
-	QUERY_SHAPE_ENDPOINTS,
+	QUERY_RESULT_ENDPOINTS,
 	RAW_SQL_ENDPOINT,
 	type RawSqlDataSource,
 	type WidgetQuerySet,
 } from "./access"
+export { toWidgetRequest, type WidgetRequest } from "./request"
 export {
 	makeQueryDataSource,
 	makeRawSqlDataSource,
@@ -53,7 +60,7 @@ export {
 } from "./v3/data-source"
 export { DashboardDocumentV3, PortableDashboardDocumentV3 } from "./v3/document"
 export { DashboardWidgetV3, WidgetDisplayConfigV3 } from "./v3/widget"
-export { MARKDOWN_STATIC_ENDPOINT, QUERY_ENDPOINT_SHAPES } from "./legacy-endpoints"
+export { MARKDOWN_STATIC_ENDPOINT, QUERY_ENDPOINT_RESULT_KINDS } from "./legacy-endpoints"
 // The one-shot upgrade the backfill script runs against Postgres. Deliberately
 // not a `DashboardMigration` — see the header of `upgrade-to-v3.ts`.
 export {
@@ -76,6 +83,13 @@ export {
 	DashboardSectionTabSchema,
 } from "./shared/sections"
 export { type TimeRange, TimeRangeSchema } from "./shared/time-range"
+export {
+	isWidgetUnit,
+	suggestWidgetUnit,
+	WIDGET_UNIT_TOKENS,
+	WIDGET_UNITS,
+	type WidgetUnitMeta,
+} from "./shared/units"
 export {
 	SORT_DIRECTIONS,
 	type SortDirection,

@@ -10,6 +10,7 @@ import type {
 	WidgetLayoutSchema,
 	WidgetVisualization,
 } from "@maple/domain/http"
+import { WIDGET_UNIT_TOKENS } from "@maple/domain/http"
 
 // The domain schemas decode to deeply-readonly types; web widgets are mutable
 // React/builder state, so the derived types are unwrapped to mutable form.
@@ -82,19 +83,17 @@ export type DataSourceEndpoint =
 // the readonly modifiers that make the arms discriminate cleanly.
 export type WidgetDataSource = typeof WidgetDataSourceSchema.Type
 
-export type ValueUnit =
-	| "none"
-	| "number"
-	| "percent"
-	| "percent_100"
-	| "duration_ms"
-	| "duration_us"
-	| "duration_s"
-	| "duration_ns"
-	| "bytes"
-	| "requests_per_sec"
-	| "short"
-	| (string & {})
+/**
+ * A `display.unit` token.
+ *
+ * Derived from `WIDGET_UNITS` rather than retyped, so the web picker, the MCP
+ * schema doc and the MCP write-path validator all offer one vocabulary. The
+ * `(string & {})` arm stays: the stored schema is an open string on purpose
+ * (closing it would make a legacy widget carrying `"GB"` fail to decode and lock
+ * its dashboard out of editing), so a value outside the catalog is
+ * representable — it just renders as a plain number.
+ */
+export type ValueUnit = (typeof WIDGET_UNIT_TOKENS)[number] | (string & {})
 
 export type WidgetDisplayConfig = DeepMutable<typeof WidgetDisplayConfigSchema.Type>
 
@@ -140,7 +139,6 @@ export type DashboardWidget = Omit<
 export type DashboardVariable = DeepMutable<typeof DashboardVariableSchema.Type>
 
 export type DashboardSection = DeepMutable<typeof DashboardSectionSchema.Type>
-export type DashboardSectionTab = DashboardSection["tabs"][number]
 
 export interface Dashboard {
 	id: string

@@ -1,20 +1,41 @@
 import * as React from "react"
-import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts"
+import { areaY, d3Curve, defineChart, lineY, rect } from "@tanstack/charts"
+import { decorative } from "@tanstack/charts/mark/decorative"
+import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { scalePoint } from "@tanstack/charts-scales/point"
+import { curveMonotoneX } from "d3-shape"
 import type { AnomalyIncidentDocument, AnomalyIncidentTimeseriesResponse } from "@maple/domain/http"
 import {
-	type ChartConfig,
-	ChartContainer,
-	ChartTooltip,
-	ChartTooltipContent,
-} from "@maple/ui/components/ui/chart"
+	PlotFrame,
+	PlotTooltipBody,
+	createTooltipFocusStore,
+	cursorTooltip,
+	dashedGridY,
+	focusCrosshair,
+	focusDot,
+	resolvePlotColor,
+	thresholdRules,
+	useChartId,
+	usePlotChromeColors,
+	verticalGradient,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
+import { useTheme } from "@maple/ui/hooks/use-theme"
 import { formatBucketLabel } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { formatSignalValue } from "./anomaly-format"
 
-const SEVERITY_STROKE: Record<"critical" | "warning", string> = {
-	critical: "var(--destructive)",
-	warning: "var(--chart-4)",
+/** Tokens plus the literal each falls back to — canvas cannot read `var()`. */
+const SEVERITY_STROKE = {
+	critical: ["--destructive", "#ef4444"],
+	warning: ["--chart-4", "#fbbf24"],
+} satisfies Record<"critical" | "warning", readonly [string, string]>
+
+/** One bucket of the observed signal. */
+interface SignalPoint {
+	bucket: string
+	value: number
 }
 
 export function AnomalyTimeseriesChart({
@@ -27,9 +48,19 @@ export function AnomalyTimeseriesChart({
 	className?: string
 }) {
 	const { signalType, baselineMedian, thresholdValue } = timeseries
-	const stroke = SEVERITY_STROKE[incident.severity]
+	const { theme } = useTheme()
+	// `theme` is in the deps but not in the body on purpose: `resolvePlotColor`
+	// reads computed style, so the colour has to be re-resolved when the theme
+	// flips even though nothing here references it.
+	const stroke = React.useMemo(() => {
+		const [token, fallback] = SEVERITY_STROKE[incident.severity]
+		return resolvePlotColor(token, fallback)
+	}, [incident.severity, theme])
+	const chromeColors = usePlotChromeColors()
+	const gradientId = useChartId("anomaly-observed")
+	const focusStore = React.useMemo(() => createTooltipFocusStore(), [])
 
-	const data = React.useMemo(
+	const data = React.useMemo<SignalPoint[]>(
 		() =>
 			[...timeseries.buckets]
 				.sort((a, b) => Date.parse(a.bucket) - Date.parse(b.bucket))
@@ -63,25 +94,121 @@ export function AnomalyTimeseriesChart({
 		return { x1, x2 }
 	}, [data, incident.firstTriggeredAt, incident.resolvedAt])
 
-	// Pad the y-domain so both reference lines stay visible.
-	const yDomain = React.useMemo(() => {
+	// Pad the y-domain so both reference lines stay visible. Also the band's
+	// vertical extent: a `rect` needs both edges, unlike `ReferenceArea`.
+	const yDomain = React.useMemo<[number, number]>(() => {
 		let maxVal = Math.max(thresholdValue, baselineMedian)
 		for (const point of data) maxVal = Math.max(maxVal, point.value)
 		return [0, maxVal * 1.15]
 	}, [data, thresholdValue, baselineMedian])
 
-	const chartConfig: ChartConfig = React.useMemo(
-		() => ({ value: { label: "Observed", color: stroke } }),
-		[stroke],
-	)
-
 	const valueFormatter = React.useCallback(
-		(value: unknown) => {
-			const parsed = typeof value === "number" ? value : Number(value)
-			return formatSignalValue(signalType, Number.isFinite(parsed) ? parsed : 0)
-		},
+		(value: number) => formatSignalValue(signalType, Number.isFinite(value) ? value : 0),
 		[signalType],
 	)
+
+	const tooltipSeries = React.useMemo<PlotTooltipSeries<SignalPoint>[]>(
+		() => [
+			{
+				label: "Observed",
+				color: stroke,
+				value: (point: SignalPoint) => point.value,
+				format: valueFormatter,
+			},
+		],
+		[stroke, valueFormatter],
+	)
+
+	const definition = React.useMemo(() => {
+		const at = (point: SignalPoint) => point.bucket
+		const value = (point: SignalPoint) => point.value
+
+		return defineChart({
+			gradients: [verticalGradient(gradientId, stroke, 0.3, 0.03)],
+			marks: [
+				dashedGridY(),
+				// The incident window. `decorative` so the shading never takes the
+				// pointer away from the series underneath it.
+				...(window
+					? [
+							decorative(
+								rect([window], {
+									x1: (w: { x1: string; x2: string }) => w.x1,
+									x2: (w: { x1: string; x2: string }) => w.x2,
+									y1: () => yDomain[0],
+									y2: () => yDomain[1],
+									fill: stroke,
+									fillOpacity: 0.06,
+									stroke: "none",
+								}),
+							),
+						]
+					: []),
+				// Baseline and threshold, as labelled rules. `labelX` anchors both at
+				// the last bucket, which is where `insideTopRight` put them.
+				...thresholdRules(
+					[
+						{
+							value: baselineMedian,
+							color: "--muted-foreground",
+							label: "Baseline",
+						},
+						{ value: thresholdValue, color: "--destructive", label: "Threshold" },
+					],
+					{ labelX: data.at(-1)?.bucket },
+				),
+				areaY(data, {
+					x: at,
+					y: value,
+					y1: () => yDomain[0],
+					fill: `url(#${gradientId})`,
+					stroke: "none",
+					curve: d3Curve(curveMonotoneX),
+				}),
+				lineY(data, {
+					x: at,
+					y: value,
+					stroke,
+					strokeWidth: 2,
+					curve: d3Curve(curveMonotoneX),
+				}),
+				focusDot(data, at, value, stroke, chromeColors),
+				focusCrosshair(chromeColors),
+			],
+			x: {
+				scale: scalePoint,
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 8,
+						format: (v: string) => formatBucketLabel(v, axisContext, "tick"),
+					},
+					tickLabels: { thin: { minGap: 12 } },
+				},
+			},
+			y: {
+				scale: scaleLinear().domain(yDomain),
+				axis: { line: false, ticks: { size: 0, padding: 8, format: valueFormatter } },
+			},
+			margin: { top: 8, right: 8, bottom: 0, left: 70 },
+			focus: "group-x",
+			focusRing: false,
+			tooltip: cursorTooltip(focusStore.anchor),
+		})
+	}, [
+		data,
+		window,
+		yDomain,
+		stroke,
+		chromeColors,
+		gradientId,
+		baselineMedian,
+		thresholdValue,
+		axisContext,
+		valueFormatter,
+		focusStore,
+	])
 
 	if (data.length === 0) {
 		return (
@@ -98,93 +225,21 @@ export function AnomalyTimeseriesChart({
 
 	return (
 		<div className={cn("space-y-2", className)}>
-			<ChartContainer config={chartConfig} className="aspect-auto h-64 w-full">
-				<AreaChart data={data} accessibilityLayer margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-					<defs>
-						<linearGradient id="anomaly-observed-fill" x1="0" y1="0" x2="0" y2="1">
-							<stop offset="5%" stopColor={stroke} stopOpacity={0.3} />
-							<stop offset="95%" stopColor={stroke} stopOpacity={0.03} />
-						</linearGradient>
-					</defs>
-					<CartesianGrid vertical={false} />
-					<XAxis
-						dataKey="bucket"
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
-						tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
-					/>
-					<YAxis
-						tickLine={false}
-						axisLine={false}
-						tickMargin={8}
-						width={70}
-						tickFormatter={valueFormatter}
-						domain={yDomain}
-					/>
-					{window ? (
-						<ReferenceArea
-							x1={window.x1}
-							x2={window.x2}
-							fill={stroke}
-							fillOpacity={0.06}
-							stroke="none"
-						/>
-					) : null}
-					<ChartTooltip
-						content={
-							<ChartTooltipContent
-								labelFormatter={(_, payload) => {
-									const bucket = payload?.[0]?.payload?.bucket
-									return bucket ? formatBucketLabel(bucket, axisContext, "tooltip") : ""
-								}}
-								formatter={(value) => (
-									<span className="flex items-center gap-2">
-										<span
-											className="size-2.5 shrink-0 rounded-[2px]"
-											style={{ backgroundColor: stroke }}
-										/>
-										<span className="text-muted-foreground">Observed</span>
-										<span className="font-mono font-medium">{valueFormatter(value)}</span>
-									</span>
-								)}
-							/>
+			<PlotFrame
+				definition={definition}
+				ariaLabel="Observed signal"
+				className="h-64 w-full"
+				renderTooltipBody={({ points }) => (
+					<PlotTooltipBody
+						points={points}
+						series={tooltipSeries}
+						focusStore={focusStore}
+						heading={(point: SignalPoint) =>
+							formatBucketLabel(point.bucket, axisContext, "tooltip")
 						}
 					/>
-					<ReferenceLine
-						y={baselineMedian}
-						stroke="var(--muted-foreground)"
-						strokeDasharray="4 4"
-						strokeWidth={1}
-						label={{
-							value: "Baseline",
-							position: "insideBottomRight",
-							fill: "var(--muted-foreground)",
-							fontSize: 11,
-						}}
-					/>
-					<ReferenceLine
-						y={thresholdValue}
-						stroke="var(--destructive)"
-						strokeDasharray="6 4"
-						strokeWidth={1.5}
-						label={{
-							value: "Threshold",
-							position: "insideTopRight",
-							fill: "var(--destructive)",
-							fontSize: 11,
-						}}
-					/>
-					<Area
-						type="monotone"
-						dataKey="value"
-						stroke={stroke}
-						fill="url(#anomaly-observed-fill)"
-						strokeWidth={2}
-						isAnimationActive={false}
-					/>
-				</AreaChart>
-			</ChartContainer>
+				)}
+			/>
 			<div className="flex items-center gap-4 text-[11px] text-muted-foreground">
 				<span className="flex items-center gap-1.5">
 					<span className="h-0.5 w-4 rounded-full" style={{ backgroundColor: stroke }} />

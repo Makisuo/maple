@@ -28,7 +28,7 @@ import {
 	ServiceExternalEdgesHourly,
 	ServiceMapChildren,
 	ServiceMapDbEdgesHourly,
-	ServiceMapDbQueryShapesHourly,
+	ServiceMapDbQuerySignaturesHourly,
 	ServiceMapEdgesHourly,
 	ServiceMapSpans,
 	ServicePlatformsHourly,
@@ -683,7 +683,7 @@ const clampTopN = (value: number | undefined): number => {
 // Filters for the sealed hourly-rollup branch (service_map_db_query_shapes_hourly).
 // Covers only complete hours: [startHour, endHour) — the in-progress hour comes
 // from the raw branch below.
-const shapesHourlyFilters = (
+const signaturesHourlyFilters = (
 	$: {
 		OrgId: CH.Expr<string>
 		Hour: CH.Expr<string>
@@ -757,7 +757,7 @@ export function serviceDbQuerySummarySQL(
 ): CompiledQuery<ServiceDbQuerySummaryOutput> {
 	// Sealed hours from the rollup; ServiceName/DurationQuantiles re-aggregated at
 	// read time (the table is queried without FINAL).
-	const sealed = from(ServiceMapDbQueryShapesHourly)
+	const sealed = from(ServiceMapDbQuerySignaturesHourly)
 		.select(($) => ({
 			bCount: CH.sum($.CallCount),
 			bEst: CH.sum($.EstimatedCount),
@@ -767,7 +767,7 @@ export function serviceDbQuerySummarySQL(
 			bSvc: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
 			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
 		}))
-		.where(($) => shapesHourlyFilters($, params))
+		.where(($) => signaturesHourlyFilters($, params))
 	const recent = from(Traces)
 		.select(($) => ({
 			bCount: CH.count(),
@@ -839,7 +839,7 @@ export function serviceDbQueryTimeseriesSQL(
 
 	// Hour-aligned buckets (≥1h — pickDbSummaryBucketSeconds gives 1h/6h for >24h):
 	// sealed rollup hours UNION the in-progress hour from raw traces.
-	const sealed = from(ServiceMapDbQueryShapesHourly)
+	const sealed = from(ServiceMapDbQuerySignaturesHourly)
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.Hour, bucketSeconds),
 			bCount: CH.sum($.CallCount),
@@ -849,7 +849,7 @@ export function serviceDbQueryTimeseriesSQL(
 			bWDur: CH.sum($.WeightedDurationSumMs),
 			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
 		}))
-		.where(($) => shapesHourlyFilters($, params))
+		.where(($) => signaturesHourlyFilters($, params))
 		.groupBy("bucket")
 	const recent = from(Traces)
 		.select(($) => ({
@@ -890,7 +890,7 @@ export function serviceDbTopQueriesSQL(
 
 	// Sealed rollup shapes — pre-computed QueryKey/QueryLabel, so no per-row
 	// fingerprinting on this branch.
-	const sealed = from(ServiceMapDbQueryShapesHourly)
+	const sealed = from(ServiceMapDbQuerySignaturesHourly)
 		.select(($) => ({
 			queryKey: $.QueryKey,
 			bLabel: CH.any_($.QueryLabel),
@@ -905,7 +905,7 @@ export function serviceDbTopQueriesSQL(
 			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
 			bLastSeen: CH.max_($.Hour),
 		}))
-		.where(($) => shapesHourlyFilters($, params))
+		.where(($) => signaturesHourlyFilters($, params))
 		.groupBy("queryKey")
 	// In-progress hour — derives QueryKey/QueryLabel from the SAME shared SQL the
 	// rollup MV uses (raw exprs, no DSL equivalent), so a shape's key matches

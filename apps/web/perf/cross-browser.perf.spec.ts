@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { PLOT_SELECTOR } from "./plot-locator"
 
 test("@cross-browser sustained dashboard interactions stay responsive without replay capture", async ({
 	page,
@@ -13,11 +14,11 @@ test("@cross-browser sustained dashboard interactions stay responsive without re
 		}
 	})
 
-	await page.goto("/overview-bench")
+	await page.goto("/lab/bench/overview")
 	await page.waitForFunction(() => window.__serviceDetailBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
-	const overviewPlot = page.locator("[data-linked-cursor-chart] .recharts-cartesian-grid").first()
+	const overviewPlot = page.locator(`[data-linked-cursor-chart] :is(${PLOT_SELECTOR})`).first()
 	const overviewBounds = await overviewPlot.boundingBox()
 	if (!overviewBounds) throw new Error("Overview plot did not become interactive")
 	await page.mouse.move(
@@ -25,11 +26,11 @@ test("@cross-browser sustained dashboard interactions stay responsive without re
 		overviewBounds.y + overviewBounds.height / 2,
 	)
 
-	await page.goto("/service-detail-bench?mode=cursor")
+	await page.goto("/lab/bench/service-detail?mode=cursor")
 	await page.waitForFunction(() => window.__serviceDetailBench?.ready === true, undefined, {
 		timeout: 30_000,
 	})
-	const detailPlot = page.locator("[data-linked-cursor-chart] .recharts-cartesian-grid").first()
+	const detailPlot = page.locator(`[data-linked-cursor-chart] :is(${PLOT_SELECTOR})`).first()
 	const detailBounds = await detailPlot.boundingBox()
 	if (!detailBounds) throw new Error("Service detail plot did not become interactive")
 	await page.mouse.move(detailBounds.x + 2, detailBounds.y + detailBounds.height / 2)
@@ -37,7 +38,7 @@ test("@cross-browser sustained dashboard interactions stay responsive without re
 		steps: 80,
 	})
 
-	await page.goto("/logs-bench")
+	await page.goto("/lab/bench/logs")
 	await page.waitForFunction(() => window.__logsBench?.ready === true, undefined, { timeout: 30_000 })
 	const logs = await page.evaluate(() => window.__logsBench!.runScroll())
 	expect(logs.frames, "Logs stayed responsive").toBeGreaterThan(100)
@@ -52,7 +53,7 @@ test("@cross-browser sustained dashboard interactions stay responsive without re
 	const webkitOnCi = !!process.env.CI && test.info().project.name.includes("webkit")
 	const mapDurationMs = webkitOnCi ? 6_000 : 1_200
 
-	await page.goto("/service-map-bench?services=40&edges=100&rps=high&seed=7")
+	await page.goto("/lab/bench/service-map?services=40&edges=100&rps=high&seed=7")
 	await page.waitForFunction(() => window.__smBench?.ready === true, undefined, { timeout: 60_000 })
 	const map = await page.evaluate(
 		(durationMs) => window.__smBench!.run({ durationMs, pan: true }),

@@ -1,4 +1,7 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { createHash } from "node:crypto"
+import { Schema } from "effect"
+import { decodeJsonEachRow, decodeJsonObjectRows } from "../chdb-rows"
 import {
 	LOCAL_SCHEMA_V1_MANIFEST,
 	LOCAL_SCHEMA_V1_SQL,
@@ -6,6 +9,7 @@ import {
 	LOCAL_SCHEMA_V1,
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
+import { strictDecoder, UnsignedDecimal } from "./journal-codecs"
 import type { LocalSchemaColumn } from "../schema-manifest"
 import type {
 	LocalStoreMigrationModule,
@@ -134,173 +138,142 @@ const emptyCopyProgress = (): CopyProgress => ({
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
-const record = (value: unknown, label: string): Record<string, unknown> => {
-	if (!isRecord(value)) throw new Error(`${label} must be an object`)
-	return value
-}
+const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
+const NullableString = Schema.NullOr(Schema.String)
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
-const nonEmptyString = (value: unknown, label: string): string => {
-	if (typeof value !== "string" || value.length === 0)
-		throw new Error(`${label} must be a non-empty string`)
-	return value
-}
+/**
+ * A ClickHouse UInt64 cursor, or `null` for "no cursor yet".
+ *
+ * Textual because a UInt64 does not survive a JS number, and pattern-checked
+ * because these values are interpolated into the numeric SQL comparisons that
+ * drive the resumable copy — anything that could change their meaning has to
+ * fail here rather than there.
+ */
+const Uint64Cursor = Schema.NullOr(UnsignedDecimal)
 
-const nullableString = (value: unknown, label: string): string | null => {
-	if (value !== null && typeof value !== "string") throw new Error(`${label} must be a string or null`)
-	return value
-}
+/** Only tables this build knows how to replay. */
+const RawTable = Schema.Literals([...RAW_TABLE_NAMES])
 
-/** ClickHouse emits UInt64 cursor values as decimal strings in JSONEachRow.
- * Keep the journal representation textual, but reject anything that could
- * change the meaning of the numeric SQL comparisons when interpolated. */
-const uint64String = (value: unknown, label: string): string | null => {
-	if (value === null) return null
-	if (typeof value !== "string" || !/^\d+$/.test(value))
-		throw new Error(`${label} must be an unsigned decimal string or null`)
-	return value
-}
+const Sha256Hex = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/i))
 
-const nonNegativeInteger = (value: unknown, label: string): number => {
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
-		throw new Error(`${label} must be a non-negative integer`)
-	return value
-}
+const TableInventorySchema = Schema.Struct({
+	table: NonEmptyString,
+	rowCount: NonEmptyString,
+	retentionStartAt: NonEmptyString,
+	minTime: NullableString,
+	maxTime: NullableString,
+	hashSum: NonEmptyString,
+	hashXor: NonEmptyString,
+})
 
-const exactKeys = (value: Record<string, unknown>, allowed: ReadonlyArray<string>, label: string): void => {
-	const allowedKeys = new Set(allowed)
-	for (const key of Object.keys(value)) {
-		if (!allowedKeys.has(key)) throw new Error(`${label} contains unknown field ${key}`)
-	}
-}
+const CopyProgressSchema = Schema.Struct({
+	rows: NonNegativeInt,
+	bytes: NonNegativeInt,
+	lastTimestamp: NullableString,
+	lastHash: Uint64Cursor,
+	lastTieBreak: Uint64Cursor,
+	/** Cumulative ordinal consumed within the final composite-key group. */
+	duplicateCount: NonNegativeInt,
+	duplicateGroupExhausted: Schema.Boolean,
+})
 
-const decodeTableInventory = (value: unknown, label: string): TableInventory => {
-	const inventory = record(value, label)
-	exactKeys(
-		inventory,
-		["table", "rowCount", "retentionStartAt", "minTime", "maxTime", "hashSum", "hashXor"],
-		label,
-	)
-	return {
-		table: nonEmptyString(inventory.table, `${label}.table`),
-		rowCount: nonEmptyString(inventory.rowCount, `${label}.rowCount`),
-		retentionStartAt: nonEmptyString(inventory.retentionStartAt, `${label}.retentionStartAt`),
-		minTime: nullableString(inventory.minTime, `${label}.minTime`),
-		maxTime: nullableString(inventory.maxTime, `${label}.maxTime`),
-		hashSum: nonEmptyString(inventory.hashSum, `${label}.hashSum`),
-		hashXor: nonEmptyString(inventory.hashXor, `${label}.hashXor`),
-	}
-}
+const PendingBatchSchema = Schema.Struct({
+	table: RawTable,
+	// Positive, not merely non-negative: an empty batch would commit nothing
+	// while advancing the cursor past the rows it claims to cover.
+	rowCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+	byteLength: NonNegativeInt,
+	firstTimestamp: NullableString,
+	firstHash: Uint64Cursor,
+	firstTieBreak: Uint64Cursor,
+	lastTimestamp: NullableString,
+	lastHash: Uint64Cursor,
+	lastTieBreak: Uint64Cursor,
+	lastKeyCount: NonNegativeInt,
+	lastKeyExhausted: Schema.Boolean,
+	signature: Sha256Hex,
+})
 
-const decodeCopyProgress = (value: unknown, label: string): CopyProgress => {
-	const progress = record(value, label)
-	exactKeys(
-		progress,
-		[
-			"rows",
-			"bytes",
-			"lastTimestamp",
-			"lastHash",
-			"lastTieBreak",
-			"duplicateCount",
-			"duplicateGroupExhausted",
-		],
-		label,
-	)
-	if (typeof progress.duplicateGroupExhausted !== "boolean")
-		throw new Error(`${label}.duplicateGroupExhausted must be a boolean`)
-	return {
-		rows: nonNegativeInteger(progress.rows, `${label}.rows`),
-		bytes: nonNegativeInteger(progress.bytes, `${label}.bytes`),
-		lastTimestamp: nullableString(progress.lastTimestamp, `${label}.lastTimestamp`),
-		lastHash: uint64String(progress.lastHash, `${label}.lastHash`),
-		lastTieBreak: uint64String(progress.lastTieBreak, `${label}.lastTieBreak`),
-		duplicateCount: nonNegativeInteger(progress.duplicateCount, `${label}.duplicateCount`),
-		duplicateGroupExhausted: progress.duplicateGroupExhausted,
-	}
-}
+/**
+ * Keyed by `Schema.String`, not by `RawTable`, and the keys are checked below.
+ *
+ * A record keyed on the literal union requires *every* table to be present, but
+ * both maps legitimately hold a subset: `copied` starts empty and fills one
+ * table at a time as the replay progresses. Keying it strictly would reject the
+ * journal of every partially-progressed migration and strand it.
+ */
+const RawReplayProgressSchema = Schema.Struct({
+	sourceInventory: Schema.Record(Schema.String, TableInventorySchema),
+	copied: Schema.Record(Schema.String, CopyProgressSchema),
+	pendingBatch: Schema.optionalKey(PendingBatchSchema),
+})
 
-const decodePendingBatch = (value: unknown, label: string): PendingBatch => {
-	const pending = record(value, label)
-	exactKeys(
-		pending,
-		[
-			"table",
-			"rowCount",
-			"byteLength",
-			"firstTimestamp",
-			"firstHash",
-			"firstTieBreak",
-			"lastTimestamp",
-			"lastHash",
-			"lastTieBreak",
-			"lastKeyCount",
-			"lastKeyExhausted",
-			"signature",
-		],
-		label,
-	)
-	const table = nonEmptyString(pending.table, `${label}.table`)
-	if (!RAW_TABLE_NAMES.has(table)) throw new Error(`${label}.table is not a registered raw table`)
-	if (typeof pending.lastKeyExhausted !== "boolean")
-		throw new Error(`${label}.lastKeyExhausted must be a boolean`)
-	if (typeof pending.signature !== "string" || !/^[0-9a-f]{64}$/i.test(pending.signature))
-		throw new Error(`${label}.signature must be a SHA-256 hex digest`)
-	const rowCount = nonNegativeInteger(pending.rowCount, `${label}.rowCount`)
-	if (rowCount === 0) throw new Error(`${label}.rowCount must be positive`)
-	return {
-		table,
-		rowCount,
-		byteLength: nonNegativeInteger(pending.byteLength, `${label}.byteLength`),
-		firstTimestamp: nullableString(pending.firstTimestamp, `${label}.firstTimestamp`),
-		firstHash: uint64String(pending.firstHash, `${label}.firstHash`),
-		firstTieBreak: uint64String(pending.firstTieBreak, `${label}.firstTieBreak`),
-		lastTimestamp: nullableString(pending.lastTimestamp, `${label}.lastTimestamp`),
-		lastHash: uint64String(pending.lastHash, `${label}.lastHash`),
-		lastTieBreak: uint64String(pending.lastTieBreak, `${label}.lastTieBreak`),
-		lastKeyCount: nonNegativeInteger(pending.lastKeyCount, `${label}.lastKeyCount`),
-		lastKeyExhausted: pending.lastKeyExhausted,
-		signature: pending.signature,
-	}
-}
+const LegacyStateSchema = Schema.Struct({
+	module: Schema.Literal("local-0000-to-0001-raw-replay"),
+	version: Schema.Literal(1),
+})
+
+const decodeProgressStrict = strictDecoder(RawReplayProgressSchema)
 
 const decodeRawReplayProgress = (value: unknown): RawReplayProgress => {
-	const progress = record(value, "legacy raw replay progress")
-	exactKeys(progress, ["sourceInventory", "copied", "pendingBatch"], "legacy raw replay progress")
-	const sourceInventoryRecord = record(progress.sourceInventory, "legacy raw replay sourceInventory")
-	const copiedRecord = record(progress.copied, "legacy raw replay copied")
-	const sourceInventory: Record<string, TableInventory> = {}
-	for (const [table, inventory] of Object.entries(sourceInventoryRecord)) {
+	const progress = decodeProgressStrict(value)
+	// Two invariants the schema is not the right place to state, both about the
+	// map *keys* rather than the values.
+	for (const [table, inventory] of Object.entries(progress.sourceInventory)) {
 		if (!RAW_TABLE_NAMES.has(table))
 			throw new Error(`legacy raw replay sourceInventory has unknown table ${table}`)
-		const decoded = decodeTableInventory(inventory, `legacy raw replay sourceInventory.${table}`)
-		if (decoded.table !== table)
+		// An inventory is keyed by table and also carries its own `table` field.
+		// If those disagree the journal describes a copy of one table under
+		// another's cursor.
+		if (inventory.table !== table)
 			throw new Error(`legacy raw replay sourceInventory.${table}.table does not match its key`)
-		sourceInventory[table] = decoded
 	}
-	const copied: Record<string, CopyProgress> = {}
-	for (const [table, progressValue] of Object.entries(copiedRecord)) {
+	for (const table of Object.keys(progress.copied)) {
 		if (!RAW_TABLE_NAMES.has(table))
 			throw new Error(`legacy raw replay copied has unknown table ${table}`)
-		copied[table] = decodeCopyProgress(progressValue, `legacy raw replay copied.${table}`)
 	}
-	return {
-		sourceInventory,
-		copied,
-		...(progress.pendingBatch === undefined
-			? {}
-			: { pendingBatch: decodePendingBatch(progress.pendingBatch, "legacy raw replay pendingBatch") }),
-	}
+	return progress
 }
 
 const asProgress = (value: RawReplayProgress | undefined): RawReplayProgress =>
 	value ?? { sourceInventory: {}, copied: {} }
 
-const parseJsonEachRow = <A>(value: string): A[] =>
-	value
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.map((line) => JSON.parse(line) as A)
+/**
+ * Row shapes read back out of chDB.
+ *
+ * `rowCount` and the hash aggregates are `string | number` on purpose: a UInt64
+ * arrives quoted or unquoted depending on the libchdb build, and `numberString`
+ * normalizes it. What must not happen is a `Number` decode above 2^53, which is
+ * why nothing here is `Schema.Number` alone.
+ */
+const Uint64Wire = Schema.Union([Schema.String, Schema.Number])
+
+const ColumnRowSchema = Schema.Struct({
+	name: Schema.String,
+	type: Schema.String,
+	position: Schema.Number,
+	default_kind: Schema.String,
+	default_expression: Schema.String,
+	compression_codec: Schema.String,
+})
+
+const NameRow = Schema.Struct({ name: Schema.String })
+
+const InventoryRow = Schema.Struct({
+	rowCount: Uint64Wire,
+	minTime: Schema.NullOr(Schema.String),
+	maxTime: Schema.NullOr(Schema.String),
+	hashSum: Uint64Wire,
+	hashXor: Uint64Wire,
+})
+
+const RowCountRow = Schema.Struct({ rowCount: Uint64Wire })
+
+const decodeColumnRows = decodeJsonEachRow(ColumnRowSchema)
+const decodeNameRows = decodeJsonEachRow(NameRow)
+const decodeInventoryRows = decodeJsonEachRow(InventoryRow)
+const decodeRowCountRows = decodeJsonEachRow(RowCountRow)
 
 const identifier = (value: string): string => {
 	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new Error(`unsafe ClickHouse identifier: ${value}`)
@@ -343,37 +316,30 @@ const queryTarget = (context: MigrationModuleContext, sql: string): Promise<stri
 const executeTarget = (context: MigrationModuleContext, sql: string): Promise<void> =>
 	context.openTarget((db) => db.exec(sql), { schemaSql: LOCAL_SCHEMA_V1_SQL, bootstrapSchema: false })
 
-interface ColumnRow {
-	name: string
-	type: string
-	position: number
-	default_kind: string
-	default_expression: string
-	compression_codec: string
-}
-
 const tableColumns = async (
 	context: MigrationModuleContext,
 	side: "source" | "target",
 	table: string,
 ): Promise<ReadonlyArray<LocalSchemaColumn>> => {
 	const query = `SELECT name, type, position, default_kind, default_expression, compression_codec FROM system.columns WHERE database = 'default' AND table = ${sqlString(table)} ORDER BY position`
-	const rows = parseJsonEachRow<ColumnRow>(
+	const rows = decodeColumnRows(
 		await (side === "source" ? querySource(context, query) : queryTarget(context, query)),
 	)
 	return rows.map((row) => ({
 		name: row.name,
 		type: row.type,
-		...(!row.default_kind ? {} : { defaultKind: row.default_kind }),
-		...(!row.default_expression ? {} : { defaultExpression: row.default_expression }),
-		...(!row.compression_codec || row.compression_codec === "NONE"
-			? {}
-			: { codec: row.compression_codec }),
+		...(!!row.default_kind ? { defaultKind: row.default_kind } : undefined),
+		...(!!row.default_expression ? { defaultExpression: row.default_expression } : undefined),
+		...(!(!row.compression_codec || row.compression_codec === "NONE")
+			? {
+					codec: row.compression_codec,
+				}
+			: undefined),
 	}))
 }
 
 const tableExists = async (context: MigrationModuleContext, side: "source" | "target", table: string) => {
-	const rows = parseJsonEachRow<{ name: string }>(
+	const rows = decodeNameRows(
 		await (side === "source"
 			? querySource(
 					context,
@@ -389,7 +355,7 @@ const tableExists = async (context: MigrationModuleContext, side: "source" | "ta
 
 const assertKnownSourceObjects = async (context: MigrationModuleContext): Promise<void> => {
 	const known = new Set(LOCAL_SCHEMA_V1_MANIFEST.objects.map((object) => object.name))
-	const rows = parseJsonEachRow<{ name: string }>(
+	const rows = decodeNameRows(
 		await querySource(context, "SELECT name FROM system.tables WHERE database = 'default' ORDER BY name"),
 	)
 	for (const row of rows) {
@@ -444,13 +410,9 @@ const inventory = async (
 	// UInt64 aggregates leave SQL as strings: chDB emits 64-bit integers as
 	// JSON numbers, and JS Number rounding above 2^53 corrupts them.
 	const sql = `SELECT count() AS rowCount, min(${identifier(table.timeColumn)}) AS minTime, max(${identifier(table.timeColumn)}) AS maxTime, toString(sum(${hash})) AS hashSum, toString(groupBitXor(${hash})) AS hashXor FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(lowerBound)} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(cutoffAt)}`
-	const rows = parseJsonEachRow<{
-		rowCount: string | number
-		minTime: string | null
-		maxTime: string | null
-		hashSum: string | number
-		hashXor: string | number
-	}>(side === "source" ? await querySource(context, sql) : await queryTarget(context, sql))
+	const rows = decodeInventoryRows(
+		side === "source" ? await querySource(context, sql) : await queryTarget(context, sql),
+	)
 	const row = rows[0]
 	if (!row) throw new Error(`inventory query returned no row for ${table.name}`)
 	return {
@@ -479,7 +441,7 @@ const tableTotalRowCount = async (
 	table: string,
 ): Promise<string> => {
 	const sql = `SELECT count() AS rowCount FROM ${identifier(table)}`
-	const rows = parseJsonEachRow<{ rowCount: string | number }>(
+	const rows = decodeRowCountRows(
 		side === "source" ? await querySource(context, sql) : await queryTarget(context, sql),
 	)
 	if (!rows[0]) throw new Error(`row-count query returned no row for ${table}`)
@@ -562,7 +524,7 @@ const duplicateGroupCount = async (
 	const hash = `cityHash64(toString(tuple(${names})))`
 	const tie = `sipHash64(toString(tuple(${names})))`
 	const sql = `SELECT count() AS rowCount FROM ${identifier(table.name)} WHERE ${nsExpression(identifier(table.timeColumn))} = ${uint64Literal(progress.lastTimestamp, "lastTimestamp")} AND ${hash} = ${uint64Literal(progress.lastHash, "lastHash")} AND ${tie} = ${uint64Literal(progress.lastTieBreak, "lastTieBreak")}`
-	const rows = parseJsonEachRow<{ rowCount: string | number }>(await querySource(context, sql))
+	const rows = decodeRowCountRows(await querySource(context, sql))
 	return rows[0] === undefined ? 0 : Number(rows[0].rowCount)
 }
 
@@ -603,7 +565,7 @@ const copyTable = async (
 			context,
 			`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${table.batchRows}${offset}`,
 		)
-		const rawRows = parseJsonEachRow<Record<string, unknown>>(output)
+		const rawRows = decodeJsonObjectRows(output)
 		let rows = rawRows
 		if (rows.length === 0) break
 		const candidates = rows.map((row) => {
@@ -697,7 +659,7 @@ const recoverPendingBatch = async (
 				? ""
 				: `AND (${timeNs} > ${uint64Literal(previous.lastTimestamp, "lastTimestamp")} OR (${timeNs} = ${uint64Literal(previous.lastTimestamp, "lastTimestamp")} AND (${hashExpression} > ${uint64Literal(previous.lastHash, "lastHash")} OR (${hashExpression} = ${uint64Literal(previous.lastHash, "lastHash")} AND ${tieBreakExpression} ${continuation.comparison} ${uint64Literal(previous.lastTieBreak, "lastTieBreak")}))))`
 		const offset = continuation.offset === 0 ? "" : ` OFFSET ${continuation.offset}`
-		const inserted = parseJsonEachRow<Record<string, unknown>>(
+		const inserted = decodeJsonObjectRows(
 			await queryTarget(
 				context,
 				`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${pending.rowCount}${offset}`,
@@ -877,13 +839,7 @@ const legacyPreflight = async (context: MigrationModuleContext): Promise<LegacyM
 	return { module: "local-0000-to-0001-raw-replay", version: 1 } as const
 }
 
-const decodeLegacyState = (value: unknown): LegacyModuleState => {
-	const state = record(value, "legacy raw replay state")
-	exactKeys(state, ["module", "version"], "legacy raw replay state")
-	if (state.module !== "local-0000-to-0001-raw-replay" || state.version !== 1)
-		throw new Error("legacy raw replay state has an unsupported module or version")
-	return { module: "local-0000-to-0001-raw-replay", version: 1 }
-}
+const decodeLegacyState = strictDecoder(LegacyStateSchema)
 
 const decodeLegacyProgress = (value: unknown): RawReplayProgress | undefined =>
 	value === undefined ? undefined : decodeRawReplayProgress(value)

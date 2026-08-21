@@ -13,7 +13,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
 	database: "Databases",
 	infrastructure: "Infrastructure",
 	messaging: "Messaging",
-}
+} satisfies Record<string, string>
 
 export const CATEGORY_ORDER = ["application", "database", "infrastructure", "messaging"] as const
 

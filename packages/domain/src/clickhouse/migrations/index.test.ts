@@ -21,6 +21,9 @@ import {
 	migration_0015_service_overview_minutely,
 	serviceOverviewMinutelyBackfill,
 } from "./0015_service_overview_minutely"
+import { migration_0016_error_events_4xx_and_frame_redaction } from "./0016_error_events_4xx_and_frame_redaction"
+import { migration_0017_error_service_version_columns } from "./0017_error_service_version_columns"
+import { migration_0018_apple_crash_frames } from "./0018_apple_crash_frames"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -35,17 +38,102 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
-		expect(migrations.at(-1)).toBe(migration_0015_service_overview_minutely)
-		expect(latestMigrationVersion).toBe(15)
-		// 0010, 0014 and 0015 are performance-only, so the ingest-gating version
-		// skips all three and stays at 13 — nothing writes `web_events` or
-		// `service_overview_minutely` directly, and bumping it would un-ready every
-		// BYO-CH org's ingest routing for a read-path change.
+		expect(migrations.map((m) => m.version)).toEqual([
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+		])
+		expect(migrations.at(-1)).toBe(migration_0018_apple_crash_frames)
+		expect(latestMigrationVersion).toBe(18)
+		// 0010 and 0014-0018 are read-path only, so the ingest-gating version skips
+		// all six and stays at 13 — nothing writes `web_events`,
+		// `service_overview_minutely` or `error_events` directly, and bumping it
+		// would un-ready every BYO-CH org's ingest routing for a read-path change.
 		expect(clickHouseSchemaVersion).toBe("13")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
 		expect(migration_0015_service_overview_minutely.requiredForIngest).toBe(false)
+		expect(migration_0016_error_events_4xx_and_frame_redaction.requiredForIngest).toBe(false)
+		expect(migration_0017_error_service_version_columns.requiredForIngest).toBe(false)
+		expect(migration_0018_apple_crash_frames.requiredForIngest).toBe(false)
+	})
+
+	it("recreates both error-events MVs with the 4xx guard and the widened frame redaction", () => {
+		const sql = migration_0016_error_events_4xx_and_frame_redaction.statements
+			.filter((stmt) => !isBackfill(stmt))
+			.join("\n")
+
+		// An MV's SELECT is frozen at creation, so both views must be dropped.
+		// error_events_by_time_mv shares the projection byte-for-byte; leaving it
+		// behind would make the two tables disagree on what an error is.
+		expect(sql).toContain("DROP VIEW IF EXISTS error_events_mv")
+		expect(sql).toContain("DROP VIEW IF EXISTS error_events_by_time_mv")
+		expect(sql).toContain("CREATE MATERIALIZED VIEW IF NOT EXISTS error_events_mv TO error_events")
+		expect(sql).toContain(
+			"CREATE MATERIALIZED VIEW IF NOT EXISTS error_events_by_time_mv TO error_events_by_time",
+		)
+
+		// Both semconv spellings of the status attribute, and the guard itself.
+		expect(sql).toContain("SpanAttributes['http.response.status_code']")
+		expect(sql).toContain("SpanAttributes['http.status_code']")
+		expect(sql).toContain("_httpStatus >= 400 AND _httpStatus < 500")
+		// Only exception-less spans are dropped — never one carrying a real error.
+		expect(sql).toContain("_ei = 0")
+
+		// Frame redaction now matches _msgFallback's: ids in the top stack line
+		// must not split one bug into one issue per occurrence.
+		expect(sql).toContain(":[0-9]+|line [0-9]+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}")
+
+		// Nothing is rewritten: recomputing FingerprintHash would re-bucket every
+		// existing issue, and the 4xx noise already stored carries no HTTP status
+		// to filter on. New events only.
+		expect(sql).not.toContain("ALTER TABLE error_events")
+		expect(migration_0016_error_events_4xx_and_frame_redaction.statements.some(isBackfill)).toBe(false)
+	})
+
+	it("adds the ServiceVersion columns before recreating the MVs that write them", () => {
+		const statements: ReadonlyArray<string> =
+			migration_0017_error_service_version_columns.statements.filter((stmt) => !isBackfill(stmt))
+		const sql = statements.join("\n")
+
+		// The drifted columns: present in the 0001 snapshot, never ALTERed onto a
+		// server provisioned before they were added to the datasource definitions.
+		expect(sql).toContain(
+			"ALTER TABLE error_events ADD COLUMN IF NOT EXISTS ServiceVersion LowCardinality(String)",
+		)
+		expect(sql).toContain(
+			"ALTER TABLE error_events_by_time ADD COLUMN IF NOT EXISTS ServiceVersion LowCardinality(String)",
+		)
+		expect(sql).toContain(
+			"ALTER TABLE error_fingerprints_minutely ADD COLUMN IF NOT EXISTS ServiceVersions SimpleAggregateFunction(groupUniqArrayArray, Array(String))",
+		)
+
+		// An MV's SELECT is frozen at creation, so each view is dropped and
+		// recreated from the current snapshot body.
+		for (const view of ["error_events_mv", "error_events_by_time_mv", "error_fingerprints_minutely_mv"]) {
+			const dropAt = statements.findIndex((stmt) => stmt === `DROP VIEW IF EXISTS ${view}`)
+			const createAt = statements.findIndex((stmt) =>
+				stmt.startsWith(`CREATE MATERIALIZED VIEW IF NOT EXISTS ${view} `),
+			)
+			expect(dropAt).toBeGreaterThanOrEqual(0)
+			expect(createAt).toBeGreaterThan(dropAt)
+		}
+
+		// Every ALTER must land before the first view that writes into it — a
+		// recreated MV needs somewhere to put the new column.
+		const lastAlter = statements.reduce(
+			(last, stmt, index) => (stmt.startsWith("ALTER TABLE ") ? index : last),
+			-1,
+		)
+		const firstDrop = statements.findIndex((stmt) => stmt.startsWith("DROP VIEW "))
+		expect(lastAlter).toBeLessThan(firstDrop)
+
+		// The recreated bodies must actually populate the columns, or the ALTERs
+		// are cosmetic and errorIssuesScan keeps returning empty version arrays.
+		expect(sql).toContain("AS ServiceVersion")
+		expect(sql).toContain("groupUniqArray(ServiceVersion) AS ServiceVersions")
+
+		// Nothing is backfilled: ServiceVersion comes from the source span's
+		// resource attributes, which these target tables do not keep.
+		expect(migration_0017_error_service_version_columns.statements.some(isBackfill)).toBe(false)
 	})
 
 	it("installs service_overview_minutely with a live-write MV and no POPULATE", () => {
@@ -409,6 +497,29 @@ describe("ClickHouse migrations", () => {
 		)
 		expect(renderedSql).toContain(
 			"INSERT INTO `default`.`service_overview_spans` (OrgId, Timestamp, ServiceName,",
+		)
+	})
+})
+
+describe("migration 0018 — Apple crash frames", () => {
+	const creates = migration_0018_apple_crash_frames.statements.filter((stmt) => stmt.startsWith("CREATE"))
+
+	it("recreates both error-events MVs with the Apple frame alternative", () => {
+		expect(creates).toHaveLength(2)
+		for (const sql of creates) {
+			// Frame index, binary name, hex address — an iOS crash has no source
+			// position to key on, because it arrives unsymbolicated.
+			expect(sql).toContain("^[0-9]+ +\\\\S.* +0x[0-9a-fA-F]+")
+			// The other runtimes' alternatives are untouched; only iOS hashes rotate.
+			expect(sql).toContain('^[ \\\\t]*at |^[ \\\\t]*File "')
+		}
+	})
+
+	it("does not backfill", () => {
+		// Recomputing FingerprintHash would re-bucket every existing issue. The
+		// FINGERPRINT_VERSION bump retires the collapsed iOS issues instead.
+		expect(migration_0018_apple_crash_frames.statements.some((stmt) => stmt.includes("UPDATE"))).toBe(
+			false,
 		)
 	})
 })

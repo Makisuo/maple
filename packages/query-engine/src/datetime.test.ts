@@ -6,12 +6,18 @@ import {
 	alertWindowBucketSeconds,
 	computeBucketSeconds,
 	computeBucketSecondsForRange,
+	computeBucketSecondsForWidth,
+	computeBucketSecondsForWidthRange,
+	formatBucketSecondsShort,
 	formatWarehouseDateTime,
 	formatWarehouseDateTimeMs,
 	parseWarehouseDateTime,
 	relativeRangeSeconds,
 	resolveRelativeRange,
 	resolveRelativeRangeToWarehouse,
+	resolveTimeRangeWindow,
+	roundIntervalSeconds,
+	MAX_AUTO_DATA_POINTS,
 	snapRangeForCache,
 	warehouseDateTimeToIso,
 } from "./datetime"
@@ -191,6 +197,90 @@ describe("computeBucketSecondsForRange", () => {
 		expect(computeBucketSecondsForRange("2026-02-01T00:00:00Z", "2026-02-01T06:00:00Z")).toBe(
 			computeBucketSecondsForRange("2026-02-01 00:00:00", "2026-02-01 06:00:00"),
 		)
+	})
+})
+
+describe("roundIntervalSeconds", () => {
+	it("follows Grafana's roundInterval thresholds from the minute up", () => {
+		expect(roundIntervalSeconds(1)).toBe(60)
+		expect(roundIntervalSeconds(89)).toBe(60)
+		expect(roundIntervalSeconds(90)).toBe(120)
+		expect(roundIntervalSeconds(432)).toBe(300)
+		expect(roundIntervalSeconds(450)).toBe(600)
+		expect(roundIntervalSeconds(1000)).toBe(900)
+		expect(roundIntervalSeconds(1200)).toBe(1200)
+		expect(roundIntervalSeconds(2000)).toBe(1800)
+		expect(roundIntervalSeconds(3600)).toBe(3600)
+		expect(roundIntervalSeconds(8000)).toBe(7200)
+		expect(roundIntervalSeconds(16000)).toBe(10800)
+		expect(roundIntervalSeconds(30000)).toBe(21600)
+		expect(roundIntervalSeconds(80000)).toBe(43200)
+		expect(roundIntervalSeconds(200000)).toBe(86400)
+		expect(roundIntervalSeconds(10_000_000)).toBe(604800)
+	})
+})
+
+describe("computeBucketSecondsForWidth", () => {
+	const HOUR = 3600_000
+	const DAY = 24 * HOUR
+
+	it("takes range / maxDataPoints and rounds it — a wide tile is finer than a narrow one", () => {
+		// 12h @ 1400px → 31s → 1m; @ 400px → 108s → 2m; @ 100px → 432s → 5m.
+		expect(computeBucketSecondsForWidth(0, 12 * HOUR, { maxDataPoints: 1400 })).toBe(60)
+		expect(computeBucketSecondsForWidth(0, 12 * HOUR, { maxDataPoints: 400 })).toBe(120)
+		expect(computeBucketSecondsForWidth(0, 12 * HOUR, { maxDataPoints: 100 })).toBe(300)
+		// 30d @ 800px → 3240s → 1h.
+		expect(computeBucketSecondsForWidth(0, 30 * DAY, { maxDataPoints: 800 })).toBe(3600)
+	})
+
+	it("never yields more than MAX_AUTO_DATA_POINTS points, stepping the ladder coarser", () => {
+		// 7d @ 1400px → 432s → 5m = 2016 points → 10m = 1008 → 15m = 672.
+		const bucket = computeBucketSecondsForWidth(0, 7 * DAY, { maxDataPoints: 1400 })
+		expect(bucket).toBe(900)
+		expect(Math.ceil((7 * DAY) / 1000 / bucket)).toBeLessThanOrEqual(MAX_AUTO_DATA_POINTS)
+		// A ludicrous width is clamped to the same ceiling.
+		expect(computeBucketSecondsForWidth(0, 12 * HOUR, { maxDataPoints: 100_000 })).toBe(60)
+	})
+
+	it("floors maxDataPoints at 30 so a sliver of a tile still gets a chart", () => {
+		expect(computeBucketSecondsForWidth(0, 12 * HOUR, { maxDataPoints: 1 })).toBe(
+			computeBucketSecondsForWidth(0, 12 * HOUR, { maxDataPoints: 30 }),
+		)
+	})
+
+	it("keeps at least minBuckets over a short window", () => {
+		// 5 minutes at any width: 300/30 = 10s → 1m rung → 5 buckets < 6 → still 1m (the floor).
+		expect(computeBucketSecondsForWidth(0, 5 * 60_000, { maxDataPoints: 30 })).toBe(60)
+		// 30 minutes @ 30px → 60s → 30 buckets, fine.
+		expect(computeBucketSecondsForWidth(0, 30 * 60_000, { maxDataPoints: 30 })).toBe(60)
+	})
+
+	it("string form falls back to the chart policy width for a bad range", () => {
+		expect(
+			computeBucketSecondsForWidthRange(undefined, "2026-02-01 00:00:00", { maxDataPoints: 800 }),
+		).toBe(BUCKET_POLICIES.chart.fallbackSeconds)
+		expect(
+			computeBucketSecondsForWidthRange("2026-02-01 12:00:00", "2026-02-01 00:00:00", {
+				maxDataPoints: 800,
+			}),
+		).toBe(BUCKET_POLICIES.chart.fallbackSeconds)
+		expect(
+			computeBucketSecondsForWidthRange("2026-02-01 00:00:00", "2026-02-01 12:00:00", {
+				maxDataPoints: 800,
+			}),
+		).toBe(60)
+	})
+})
+
+describe("formatBucketSecondsShort", () => {
+	it("prints the shorthand parseBucketSeconds accepts", () => {
+		expect(formatBucketSecondsShort(30)).toBe("30s")
+		expect(formatBucketSecondsShort(60)).toBe("1m")
+		expect(formatBucketSecondsShort(900)).toBe("15m")
+		expect(formatBucketSecondsShort(3600)).toBe("1h")
+		expect(formatBucketSecondsShort(43200)).toBe("12h")
+		expect(formatBucketSecondsShort(86400)).toBe("1d")
+		expect(formatBucketSecondsShort(604800)).toBe("1w")
 	})
 })
 
@@ -449,5 +539,46 @@ describe("snapRangeForCache", () => {
 	it("passes an inverted range through untouched", () => {
 		const inverted = { startTime: "2026-03-08 14:30:00", endTime: "2026-03-08 02:30:00" }
 		expect(snapRangeForCache(inverted)).toBe(inverted)
+	})
+})
+
+describe("resolveTimeRangeWindow", () => {
+	const nowMs = Date.parse("2026-03-10T12:00:34Z")
+
+	it("resolves a relative preset and snaps it to the cache grid by default", () => {
+		const resolved = resolveTimeRangeWindow({ type: "relative", value: "1h" }, { nowMs })
+		expect(resolved).toEqual(
+			snapRangeForCache({ startTime: "2026-03-10 11:00:34", endTime: "2026-03-10 12:00:34" }),
+		)
+		// 1h snaps on the 15s rung: the endpoint is floored, the width kept.
+		expect(resolved?.endTime).toBe("2026-03-10 12:00:30")
+	})
+
+	it("leaves the endpoint on the clock when snapping is off", () => {
+		expect(resolveTimeRangeWindow({ type: "relative", value: "1h" }, { nowMs, snap: false })).toEqual({
+			startTime: "2026-03-10 11:00:34",
+			endTime: "2026-03-10 12:00:34",
+		})
+	})
+
+	it("normalises absolute bounds through the warehouse parser (tz-less is UTC)", () => {
+		expect(
+			resolveTimeRangeWindow({
+				type: "absolute",
+				startTime: "2026-03-01 00:00:00",
+				endTime: "2026-03-02T00:00:00.000Z",
+			}),
+		).toEqual({ startTime: "2026-03-01 00:00:00", endTime: "2026-03-02 00:00:00" })
+	})
+
+	it("returns null for an unknown preset or an unparseable bound", () => {
+		expect(resolveTimeRangeWindow({ type: "relative", value: "fortnight" }, { nowMs })).toBeNull()
+		expect(
+			resolveTimeRangeWindow({
+				type: "absolute",
+				startTime: "yesterday",
+				endTime: "2026-03-02 00:00:00",
+			}),
+		).toBeNull()
 	})
 })

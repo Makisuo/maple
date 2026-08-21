@@ -34,7 +34,7 @@ import {
 import type { AlertRuleRow } from "@maple/db"
 import { Array as Arr, Effect, Result, Schema } from "effect"
 import { dateToMs, msToDate } from "@/platform/time"
-import type { AlertRuntimeShape } from "./AlertRuntime"
+import type { AlertRuntimeApi } from "./AlertRuntime"
 import type { QueryBuilderDataSource } from "@maple/query-model"
 
 const StringArraySchema = Schema.Array(Schema.String)
@@ -131,7 +131,7 @@ export const normalizedRuleToDocument = (
 		updatedAt: timestamp,
 		createdBy: options.userId,
 		updatedBy: options.userId,
-		...(options.txid === undefined ? {} : { txid: options.txid }),
+		...(!(options.txid === undefined) ? { txid: options.txid } : undefined),
 	})
 }
 
@@ -148,7 +148,7 @@ export const makeAlertValidationError = (
 	new AlertValidationError({
 		message,
 		details,
-		...(cause === undefined ? {} : { cause }),
+		...(!(cause === undefined) ? { cause } : undefined),
 	})
 
 const normalizeTags = (tags: ReadonlyArray<string> | undefined): ReadonlyArray<string> => {
@@ -222,7 +222,7 @@ export const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(functi
 	const bucketSeconds = alertWindowBucketSeconds(rule.windowMinutes)
 	const envFilter = rule.environments.length > 0 ? { environments: rule.environments } : {}
 	const baseTraceFilters = {
-		...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
+		...(!(rule.serviceName == null) ? { serviceName: rule.serviceName } : undefined),
 		...envFilter,
 	}
 
@@ -234,7 +234,7 @@ export const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(functi
 		p99_latency: "p99_duration",
 		throughput: "count",
 		apdex: "apdex",
-	}
+	} satisfies Record<string, string>
 
 	const resolveRuleGroupBy = (
 		source: QueryBuilderDataSource,
@@ -304,7 +304,7 @@ export const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(functi
 		const filters: Record<string, unknown> = {
 			...baseTraceFilters,
 			rootSpansOnly: true,
-		}
+		} satisfies Record<string, unknown>
 		if (groupResolved && groupResolved.attributeKeys.length > 0) {
 			filters.groupByAttributeKeys = [...groupResolved.attributeKeys]
 		}
@@ -314,7 +314,7 @@ export const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(functi
 			metric: traceMetric,
 			groupBy: groupResolved ? [...groupResolved.tokens] : ["none"],
 			bucketSeconds,
-			...(rule.signalType === "apdex" ? { apdexThresholdMs: rule.apdexThresholdMs ?? 500 } : {}),
+			...(rule.signalType === "apdex" ? { apdexThresholdMs: rule.apdexThresholdMs ?? 500 } : undefined),
 			filters,
 		})
 		sampleCountStrategy = "trace_count"
@@ -564,7 +564,7 @@ export const rowToRuleDocument = (
 		})
 	})
 
-export const makeAlertRuleNormalizer = (runtime: AlertRuntimeShape) => {
+export const makeAlertRuleNormalizer = (runtime: AlertRuntimeApi) => {
 	const normalizeRuleRow = Effect.fn("AlertsService.normalizeRuleRow")(function* (
 		row: AlertRuleRow,
 	): Effect.fn.Return<NormalizedRule, AlertRuleStoredConfigInvalidError> {

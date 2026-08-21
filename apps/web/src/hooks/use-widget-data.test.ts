@@ -45,3 +45,24 @@ describe("use-widget-data hidden series transform", () => {
 		expect(transformed).toEqual([{ bucket: "2026-04-12T00:00:00.000Z", B: 20, F1: 0.5 }])
 	})
 })
+
+/**
+ * `getQueryBuilderTimeseries` answers an empty window with an empty envelope
+ * instead of failing (the failure was billed as an error event per tile per
+ * refresh). The tile still has to read as "no data": a `sum` transform over zero
+ * rows is `0`, which a stat tile would otherwise render as a real measurement.
+ */
+describe("use-widget-data empty envelope", () => {
+	it("recognizes a successful response that carried no rows", () => {
+		expect(__testables.isEmptyDataEnvelope({ data: [] })).toBe(true)
+		expect(__testables.isEmptyDataEnvelope({ data: [], diagnostics: { queries: [] } })).toBe(true)
+	})
+
+	it("leaves a response with rows, or no envelope at all, alone", () => {
+		expect(__testables.isEmptyDataEnvelope({ data: [{ bucket: "x", A: 1 }] })).toBe(false)
+		expect(__testables.isEmptyDataEnvelope([])).toBe(false)
+		expect(__testables.isEmptyDataEnvelope({ data: { total: 0 } })).toBe(false)
+		expect(__testables.isEmptyDataEnvelope(null)).toBe(false)
+		expect(__testables.isEmptyDataEnvelope(42)).toBe(false)
+	})
+})

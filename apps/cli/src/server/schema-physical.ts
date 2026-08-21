@@ -1,4 +1,7 @@
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
+import { Schema } from "effect"
 import { Chdb, RAW_TELEMETRY_TTL_COLUMNS } from "./chdb"
+import { decodeJsonEachRow } from "./chdb-rows"
 import { LOCAL_SCHEMA_MANIFEST } from "./schema-identity"
 import {
 	comparePhysicalSchema,
@@ -8,45 +11,52 @@ import {
 	withRawTelemetryRetentionFloor,
 } from "./schema-manifest"
 
-const parseJsonEachRow = <A>(value: string): A[] =>
-	value
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.map((line) => JSON.parse(line) as A)
+/** The `system.*` shapes this inspector reads. Each is fixed by the SELECT
+ * directly above its use, so a row that does not match means the query and the
+ * decoder have drifted apart. */
+const TableRow = Schema.Struct({
+	name: Schema.String,
+	engine: Schema.String,
+	partition_key: Schema.String,
+	sorting_key: Schema.String,
+	create_table_query: Schema.String,
+})
 
-interface ColumnRow {
-	table: string
-	name: string
-	type: string
-	position: number
-	default_kind: string
-	default_expression: string
-	compression_codec: string
-}
+const ColumnRowSchema = Schema.Struct({
+	table: Schema.String,
+	name: Schema.String,
+	type: Schema.String,
+	position: Schema.Number,
+	default_kind: Schema.String,
+	default_expression: Schema.String,
+	compression_codec: Schema.String,
+})
+
+const IndexRow = Schema.Struct({ table: Schema.String, name: Schema.String })
+
+const FormattedRow = Schema.Struct({ formatted: Schema.String })
+
+const decodeTableRows = decodeJsonEachRow(TableRow)
+const decodeColumnRows = decodeJsonEachRow(ColumnRowSchema)
+const decodeIndexRows = decodeJsonEachRow(IndexRow)
+const decodeFormattedRows = decodeJsonEachRow(FormattedRow)
 
 /** Inspect the physical definitions chDB reports, including the objects that
  * are easy to miss when relying on a bundled DDL fingerprint alone. */
 export const inspectPhysicalSchema = (db: Chdb): PhysicalSchema => {
-	const tables = parseJsonEachRow<{
-		name: string
-		engine: string
-		partition_key: string
-		sorting_key: string
-		create_table_query: string
-	}>(
+	const tables = decodeTableRows(
 		db.query(
 			"SELECT name, engine, partition_key, sorting_key, create_table_query FROM system.tables WHERE database = 'default'",
 		),
 	)
-	const columns = parseJsonEachRow<ColumnRow>(
+	const columns = decodeColumnRows(
 		db.query(
 			"SELECT table, name, type, position, default_kind, default_expression, compression_codec FROM system.columns WHERE database = 'default' ORDER BY table, position",
 		),
 	)
-	let indexes: Array<{ table: string; name: string }> = []
+	let indexes: ReadonlyArray<{ readonly table: string; readonly name: string }> = []
 	try {
-		indexes = parseJsonEachRow<{ table: string; name: string }>(
+		indexes = decodeIndexRows(
 			db.query("SELECT table, name FROM system.data_skipping_indices WHERE database = 'default'"),
 		)
 	} catch {
@@ -59,11 +69,13 @@ export const inspectPhysicalSchema = (db: Chdb): PhysicalSchema => {
 		list.push({
 			name: column.name,
 			type: column.type,
-			...(!column.default_kind ? {} : { defaultKind: column.default_kind }),
-			...(!column.default_expression ? {} : { defaultExpression: column.default_expression }),
-			...(!column.compression_codec || column.compression_codec === "NONE"
-				? {}
-				: { codec: column.compression_codec }),
+			...(!!column.default_kind ? { defaultKind: column.default_kind } : undefined),
+			...(!!column.default_expression ? { defaultExpression: column.default_expression } : undefined),
+			...(!(!column.compression_codec || column.compression_codec === "NONE")
+				? {
+						codec: column.compression_codec,
+					}
+				: undefined),
 		})
 		columnsByTable.set(column.table, list)
 	}
@@ -116,7 +128,7 @@ const formatViewBody = (db: Chdb): ((sql: string) => string | undefined) => {
 		if (cached !== undefined || cache.has(sql)) return cached
 		let formatted: string | undefined
 		try {
-			const rows = parseJsonEachRow<{ formatted: string }>(
+			const rows = decodeFormattedRows(
 				db.query(`SELECT formatQuery($maple_fmt$${sql}$maple_fmt$) AS formatted FORMAT JSONEachRow`),
 			)
 			// The local store is always the `default` database, and ClickHouse

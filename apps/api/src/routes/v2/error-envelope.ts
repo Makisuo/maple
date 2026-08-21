@@ -86,7 +86,7 @@ const V2SchemaErrorTransformLive = HttpApiMiddleware.layerSchemaErrorTransform(
 					: ` (and ${remaining} other invalid ${remaining === 1 ? "field" : "fields"})`
 			return Effect.fail(
 				V2InvalidRequest.make(`${first.line}${suffix}`, {
-					...(first.path === "" ? {} : { param: first.path }),
+					...(!(first.path === "") ? { param: first.path } : undefined),
 				}),
 			)
 		}),

@@ -177,7 +177,7 @@ describe("browser origin policy", () => {
 			"access-control-allow-origin": hostedOrigin,
 			"access-control-allow-methods": "GET, POST, OPTIONS",
 			"access-control-allow-headers":
-				"content-type, content-encoding, authorization, x-maple-maintenance-token",
+				"content-type, content-encoding, authorization, x-maple-sdk, x-maple-maintenance-token",
 			"access-control-allow-private-network": "true",
 			vary: "Origin",
 		})
@@ -203,6 +203,17 @@ describe("browser origin policy", () => {
 			corsHeadersForAllowedOrigin("http://localhost:4501")
 				?.["access-control-allow-headers"].split(", ")
 				.includes("authorization"),
+			true,
+		)
+	})
+
+	it("allows the x-maple-sdk identity hint every browser SDK sends", () => {
+		// Same failure mode as `authorization`: a header the SDK always sends that
+		// preflight refuses blocks every request from that SDK, not just the header.
+		strictEqual(
+			corsHeadersForAllowedOrigin("http://localhost:4501")
+				?.["access-control-allow-headers"].split(", ")
+				.includes("x-maple-sdk"),
 			true,
 		)
 	})

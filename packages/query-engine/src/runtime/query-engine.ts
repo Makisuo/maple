@@ -1,3 +1,4 @@
+// BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 // Query Engine — lowering core
 //
 // Validation, QuerySpec → CH lowering, row shaping, and the alert evaluate /
@@ -59,9 +60,12 @@ import { resolveDirectRouteCachePolicy, type DirectRouteCachePolicyInput } from 
 
 export {
 	makeDirectRouteCachePolicy,
+	makeTimeRangeCachePolicy,
 	resolveDirectRouteCachePolicy,
+	timeRangeCache,
 	type DirectRouteCachePolicy,
 	type DirectRouteCachePolicyInput,
+	type TimeRangeCachePayload,
 } from "./cache-policy"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
@@ -708,7 +712,7 @@ function groupAllMetricsTimeSeriesRows<
 		error_rate: 0,
 		apdex: 0,
 		estimated_span_count: 0,
-	}
+	} satisfies Record<string, number>
 	const bucketMap = new Map<string, Record<string, number>>()
 	const bucketOrder: string[] = fillOptions
 		? buildBucketTimeline(fillOptions.startMs, fillOptions.endMs, fillOptions.bucketSeconds)
@@ -1143,7 +1147,7 @@ function extractTracesDurationStatsOpts(
 	}
 }
 
-function shapeMetricsGroupRows<
+function signatureMetricsGroupRows<
 	T extends { bucket: string | Date; serviceName: string; attributeValue: string },
 >(
 	rows: ReadonlyArray<T>,
@@ -1386,7 +1390,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 			if (execution.kind === "rate") {
 				const rateValueField = request.query.metric === "rate" ? "rateValue" : "increaseValue"
-				const data = shapeMetricsGroupRows(
+				const data = signatureMetricsGroupRows(
 					execution.rows,
 					(row) => Number(row[rateValueField]),
 					request.query.groupBy,
@@ -1422,7 +1426,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 							(row) => row.value,
 							fillOptions,
 						)
-					: shapeMetricsGroupRows(
+					: signatureMetricsGroupRows(
 							execution.rows,
 							(row) => Number(row[valueField]),
 							request.query.groupBy,
@@ -1574,14 +1578,18 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				tenant,
 				CH.metricsBreakdownQuery({
 					metricType: request.query.filters.metricType,
-					...(request.query.groupBy === "attribute" &&
-						request.query.filters.groupByAttributeKey && {
-							groupByAttributeKey: request.query.filters.groupByAttributeKey,
-						}),
+					...(request.query.groupBy === "attribute" && request.query.filters.groupByAttributeKey
+						? {
+								groupByAttributeKey: request.query.filters.groupByAttributeKey,
+							}
+						: undefined),
 					...(request.query.groupBy === "resource_attribute" &&
-						request.query.filters.groupByResourceAttributeKey && {
-							groupByResourceAttributeKey: request.query.filters.groupByResourceAttributeKey,
-						}),
+					request.query.filters.groupByResourceAttributeKey
+						? {
+								groupByResourceAttributeKey:
+									request.query.filters.groupByResourceAttributeKey,
+							}
+						: undefined),
 					resourceAttributeFilters: request.query.filters.resourceAttributeFilters,
 					limit: request.query.limit,
 				}),
@@ -1739,7 +1747,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					orgId: tenant.orgId,
 					startTime: request.startTime,
 					endTime: request.endTime,
-					...(metricScoped ? { metricName: metricScoped.metricName } : {}),
+					...(metricScoped ? { metricName: metricScoped.metricName } : undefined),
 				},
 				metricScoped ? "attributeKeys:metric" : "attributeKeys",
 				"discovery",
@@ -1837,6 +1845,8 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						services: filters?.services as string[] | undefined,
 						deploymentEnvs: filters?.deploymentEnvs as string[] | undefined,
 						fingerprintHashes: filters?.fingerprintHashes as string[] | undefined,
+						errorLabels: filters?.errorLabels as string[] | undefined,
+						serviceVersions: filters?.serviceVersions as string[] | undefined,
 					}),
 					baseParams,
 					"errorsFacets",
@@ -1935,7 +1945,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					orgId: tenant.orgId,
 					startTime: request.startTime,
 					endTime: request.endTime,
-					...(metricScoped ? { metricName: metricScoped.metricName } : {}),
+					...(metricScoped ? { metricName: metricScoped.metricName } : undefined),
 				},
 				metricScoped ? "attributeValues:metric-scoped" : `attributeValues:${request.query.scope}`,
 				"discovery",

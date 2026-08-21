@@ -43,7 +43,9 @@ export const buildExecutionToolSet = (
 				execute: async (input: unknown) =>
 					runtime.runPromise(
 						McpToolExecutor.pipe(
-							Effect.flatMap((executor) => executor.execute(tenant, definition.name, input)),
+							Effect.flatMap((executor) =>
+								executor.execute(tenant, definition.name, input, "mcp"),
+							),
 						),
 					),
 			}),

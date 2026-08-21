@@ -1,6 +1,6 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
-	"ignoreWorkspaces": ["apps/ingest", "apps/mobile", "examples/*", "lib/llm", "lib/thinking-orbs"],
+	"ignoreWorkspaces": ["apps/ingest", "apps/ios", "examples/*", "lib/llm", "lib/thinking-orbs"],
 	"ignore": [".context/**", ".deepsec/**", "**/*.type-test.ts"],
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {
@@ -41,9 +41,6 @@
 				"test/native-service-map-ingest-bridge-probe.ts"
 			],
 			"ignoreBinaries": ["duckdb"]
-		},
-		"packages/domain": {
-			"entry": ["scripts/**/*.ts"]
 		},
 		"packages/db": {
 			"entry": ["scripts/**/*.ts"],

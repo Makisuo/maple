@@ -75,7 +75,7 @@ const WireApiKeyWithSecret = Schema.Struct({
 const decodeWireApiKeyWithSecret = Schema.decodeUnknownEffect(WireApiKeyWithSecret)
 
 const createBody = (props: ApiKeyProps): Record<string, unknown> => {
-	const body: Record<string, unknown> = { name: props.name }
+	const body: Record<string, unknown> = { name: props.name } satisfies Record<string, unknown>
 	if (props.description !== undefined) body.description = props.description
 	if (props.scopes !== undefined) body.scopes = props.scopes
 	if (props.kind !== undefined) body.kind = props.kind

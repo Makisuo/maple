@@ -61,7 +61,7 @@ const makeBatch = (body: unknown) => {
 			messages: [message],
 			ackAll: () => undefined,
 			retryAll: () => undefined,
-		} as unknown as MessageBatch<unknown>,
+		} as MessageBatch<unknown>,
 		acknowledged: () => acknowledged,
 		retried: () => retried,
 	}

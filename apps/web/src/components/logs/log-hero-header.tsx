@@ -20,7 +20,7 @@ const HERO_TONE: Record<string, string> = {
 	WARNING: "bg-severity-warn/5 border-severity-warn/20",
 	ERROR: "bg-severity-error/5 border-severity-error/20",
 	FATAL: "bg-severity-fatal/5 border-severity-fatal/20",
-}
+} satisfies Record<string, string>
 
 const BODY_LINE_THRESHOLD = 280
 

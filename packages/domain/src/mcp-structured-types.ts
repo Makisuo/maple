@@ -537,6 +537,7 @@ export type InspectChartFlag =
 	| "SINGLE_SERIES_DOMINATES"
 	| "CARDINALITY_EXPLOSION"
 	| "UNIT_MISMATCH"
+	| "PERCENT_SCALE_MISMATCH"
 	| "BROKEN_BREAKDOWN"
 	| "EMPTY_GROUPING"
 	| "METRIC_NOT_FOUND"
@@ -694,11 +695,6 @@ export interface ReleaseErrorIssueData {
 	id: string
 	workflowState: string
 	previousLeaseHolderActorId: string | null
-}
-
-export interface HeartbeatErrorIssueData {
-	id: string
-	leaseExpiresAt: string
 }
 
 export interface CommentOnErrorIssueData {
@@ -959,7 +955,6 @@ export type StructuredToolOutput =
 	| { tool: "set_issue_severity"; data: SetIssueSeverityData }
 	| { tool: "claim_error_issue"; data: ClaimErrorIssueData }
 	| { tool: "release_error_issue"; data: ReleaseErrorIssueData }
-	| { tool: "heartbeat_error_issue"; data: HeartbeatErrorIssueData }
 	| { tool: "comment_on_error_issue"; data: CommentOnErrorIssueData }
 	| { tool: "propose_fix"; data: ProposeFixData }
 	| { tool: "list_error_issue_events"; data: ListErrorIssueEventsData }

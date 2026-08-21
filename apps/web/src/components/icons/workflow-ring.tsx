@@ -3,23 +3,25 @@ import type { WorkflowState } from "@maple/domain/http"
 
 export const WORKFLOW_LABEL: Record<WorkflowState, string> = {
 	triage: "Triage",
+	regressed: "Regressed",
 	todo: "Todo",
 	in_progress: "In progress",
 	in_review: "In review",
 	done: "Done",
 	cancelled: "Cancelled",
 	wontfix: "Won't fix",
-}
+} satisfies Record<WorkflowState, string>
 
 const WORKFLOW_COLOR: Record<WorkflowState, string> = {
 	triage: "oklch(0.72 0.17 55)",
+	regressed: "oklch(0.58 0.20 25)",
 	todo: "oklch(0.60 0.02 286)",
 	in_progress: "oklch(0.75 0.15 85)",
 	in_review: "oklch(0.65 0.16 290)",
 	done: "oklch(0.60 0.14 250)",
 	cancelled: "oklch(0.55 0.01 286)",
 	wontfix: "oklch(0.55 0.01 286)",
-}
+} satisfies Record<WorkflowState, string>
 
 interface WorkflowRingIconProps extends IconProps {
 	state: WorkflowState

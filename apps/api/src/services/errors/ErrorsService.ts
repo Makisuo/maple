@@ -17,11 +17,13 @@ import {
 	type WorkflowState,
 	TERMINAL_WORKFLOW_STATES,
 } from "@maple/domain/http"
+import { FINGERPRINT_VERSION } from "@maple/domain/tinybird/fingerprint"
 import {
 	actors,
 	errorIncidents,
 	errorNotificationDeliveries,
 	type ErrorNotificationDeliveryRow,
+	errorFingerprintCandidates,
 	errorIssues,
 	errorIssueEvents,
 	type ErrorIssueRow,
@@ -49,14 +51,15 @@ import {
 	isOrgWarehouseQuarantined,
 	quarantineOnConfigClassCause,
 } from "@/services/warehouse/warehouse-org-quarantine"
-import { actorRowToDocument, ErrorActorsService, type ErrorActorsPublicShape } from "./ErrorActorsService"
+import { actorRowToDocument, ErrorActorsService, type ErrorActorsPublicApi } from "./ErrorActorsService"
 import {
 	ErrorIssueReadModelsService,
-	type ErrorIssueReadModelsPublicShape,
+	type ErrorIssueReadModelsPublicApi,
 } from "./ErrorIssueReadModelsService"
-import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicShape } from "./ErrorIssueWorkflowService"
-import { ErrorPolicyService, type ErrorPolicyPublicShape } from "./ErrorPolicyService"
+import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicApi } from "./ErrorIssueWorkflowService"
+import { ErrorPolicyService, type ErrorPolicyPublicApi } from "./ErrorPolicyService"
 import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
+import { summarizeCause } from "@/platform/describe-cause"
 
 export { describeCause, makePersistenceError } from "./error-persistence"
 
@@ -118,6 +121,12 @@ const ERROR_ACTIVE_DISCOVERY_WINDOW_MS = 15 * 60_000
 const ACTIVE_ORGS_CACHE_BUCKET = "errors-active-orgs"
 const ACTIVE_ORGS_CACHE_KEY = "active"
 const ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
+/**
+ * How long a fingerprint may sit below the promotion threshold before it is
+ * forgotten. Long enough that a genuinely intermittent error still accumulates
+ * across a day, short enough that one-off noise does not pile up.
+ */
+const CANDIDATE_RETENTION_MS = 24 * 60 * 60 * 1000
 const RESOLVED_RETENTION_DAYS = 14
 const ARCHIVED_RETENTION_DAYS = 90
 /**
@@ -130,12 +139,12 @@ const RETENTION_PHASE_EVERY_N_TICKS = 60
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = SYSTEM_ERRORS_AGENT_NAME
-export interface ErrorsServiceShape
+export interface ErrorsServiceApi
 	extends
-		ErrorActorsPublicShape,
-		ErrorIssueWorkflowPublicShape,
-		ErrorIssueReadModelsPublicShape,
-		ErrorPolicyPublicShape {
+		ErrorActorsPublicApi,
+		ErrorIssueWorkflowPublicApi,
+		ErrorIssueReadModelsPublicApi,
+		ErrorPolicyPublicApi {
 	readonly transitionIssue: (
 		orgId: OrgId,
 		actorId: ActorId,
@@ -200,7 +209,7 @@ export interface ErrorsServiceShape
 }
 
 const make: Effect.Effect<
-	ErrorsServiceShape,
+	ErrorsServiceApi,
 	never,
 	| Database
 	| WarehouseQueryService
@@ -321,7 +330,7 @@ const make: Effect.Effect<
 						: Effect.gen(function* () {
 								yield* Effect.logWarning(
 									"Error active-org discovery failed; reusing last-known active set",
-								).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+								).pipe(Effect.annotateLogs({ error: summarizeCause(cause) }))
 								const cached = yield* edgeCache
 									.rawGet<ReadonlyArray<string>>(
 										ACTIVE_ORGS_CACHE_BUCKET,
@@ -363,7 +372,7 @@ const make: Effect.Effect<
 	} = workflow
 	// Events / audit log
 
-	const recordAnomalyLinkEvent: ErrorsServiceShape["recordAnomalyLinkEvent"] = Effect.fn(
+	const recordAnomalyLinkEvent: ErrorsServiceApi["recordAnomalyLinkEvent"] = Effect.fn(
 		"ErrorsService.recordAnomalyLinkEvent",
 	)(function* (orgId, issueId, actorId, payload) {
 		yield* Effect.annotateCurrentSpan({ orgId, issueId, action: payload.action })
@@ -372,7 +381,7 @@ const make: Effect.Effect<
 
 	// State transitions
 
-	const transitionIssue: ErrorsServiceShape["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
+	const transitionIssue: ErrorsServiceApi["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
 		function* (orgId, actorId, issueId, toState, opts) {
 			yield* Effect.annotateCurrentSpan({ orgId, issueId, toState })
 			const current = yield* requireIssue(orgId, issueId)
@@ -416,7 +425,7 @@ const make: Effect.Effect<
 			leaseExpiresAt: row?.leaseExpiresAt == null ? null : isoFromDate(row.leaseExpiresAt),
 		})
 
-	const claimIssue: ErrorsServiceShape["claimIssue"] = Effect.fn("ErrorsService.claimIssue")(
+	const claimIssue: ErrorsServiceApi["claimIssue"] = Effect.fn("ErrorsService.claimIssue")(
 		function* (orgId, actorId, issueId, leaseDurationMs) {
 			const timestamp = yield* Clock.currentTimeMillis
 			const leaseMs = leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS
@@ -471,9 +480,16 @@ const make: Effect.Effect<
 
 			const row = claimed[0]!
 
-			// Move to in_progress if currently in triage/todo.
+			// Move to in_progress if the issue is still waiting to be picked up.
+			// `regressed` belongs here with triage/todo: claiming a bug that came back
+			// is starting work on it, and leaving it in `regressed` would strand it
+			// outside the in-progress views.
 			let next = row
-			if (row.workflowState === "triage" || row.workflowState === "todo") {
+			if (
+				row.workflowState === "triage" ||
+				row.workflowState === "regressed" ||
+				row.workflowState === "todo"
+			) {
 				next = yield* applyTransition(orgId, actorId, row, "in_progress", {
 					payload: { viaClaim: true },
 					timestamp,
@@ -507,15 +523,15 @@ const make: Effect.Effect<
 		},
 	)
 
-	const proposeFix: ErrorsServiceShape["proposeFix"] = Effect.fn("ErrorsService.proposeFix")(
+	const proposeFix: ErrorsServiceApi["proposeFix"] = Effect.fn("ErrorsService.proposeFix")(
 		function* (orgId, actorId, issueId, request) {
 			const timestamp = yield* Clock.currentTimeMillis
 			const current = yield* requireIssue(orgId, issueId)
 			const payload: Record<string, unknown> = {
 				patchSummary: request.patchSummary,
-				...(request.prUrl ? { prUrl: request.prUrl } : {}),
-				...(request.artifacts ? { artifacts: request.artifacts } : {}),
-			}
+				...(request.prUrl ? { prUrl: request.prUrl } : undefined),
+				...(request.artifacts ? { artifacts: request.artifacts } : undefined),
+			} satisfies Record<string, unknown>
 			yield* recordEvent(orgId, issueId, actorId, "fix_proposed", {
 				payload,
 				timestamp,
@@ -1064,6 +1080,11 @@ const make: Effect.Effect<
 			exceptionMessage: String(raw.exceptionMessage ?? ""),
 			errorLabel: String(raw.errorLabel ?? ""),
 			topFrame: String(raw.topFrame ?? ""),
+			// The warehouse returns every distinct build seen for the fingerprint in
+			// the window; an older cluster that predates the column returns nothing.
+			serviceVersions: Array.isArray(raw.serviceVersions)
+				? raw.serviceVersions.map((version) => String(version)).filter((version) => version !== "")
+				: [],
 			count: Number(raw.count ?? 0),
 			firstSeen: String(raw.firstSeen ?? ""),
 			lastSeen: String(raw.lastSeen ?? ""),
@@ -1080,6 +1101,7 @@ const make: Effect.Effect<
 					exceptionMessage: row.exceptionMessage,
 					errorLabel: row.errorLabel,
 					topFrame: row.topFrame,
+					serviceVersions: row.serviceVersions,
 					count: row.count,
 					firstSeenMs: parseWarehouseDateTime(row.firstSeen),
 					lastSeenMs: parseWarehouseDateTime(row.lastSeen),
@@ -1149,6 +1171,27 @@ const make: Effect.Effect<
 		let issuesDeleted = 0
 
 		if (runRetention) {
+			// Issues left behind by a fingerprint-algorithm bump. Their hashes can
+			// never be produced again (v1 and v2 hashes cannot collide), so there is
+			// nothing to wait for: archive them on sight instead of holding a dead
+			// issue in `triage` until the resolved window retires it. Scoped to
+			// error-kind — alert and integration issues key off their own
+			// identifiers, not the ClickHouse fingerprint.
+			const staleFingerprintRows = yield* dbExecute((db) =>
+				db
+					.update(errorIssues)
+					.set({ archivedAt: new Date(nowMs), updatedAt: new Date(nowMs) })
+					.where(
+						and(
+							eq(errorIssues.orgId, orgId),
+							eq(errorIssues.kind, "error"),
+							lt(errorIssues.fingerprintVersion, FINGERPRINT_VERSION),
+							isNull(errorIssues.archivedAt),
+						),
+					)
+					.returning({ id: errorIssues.id }),
+			)
+
 			const resolvedCutoff = nowMs - RESOLVED_RETENTION_DAYS * DAY_MS
 			const archivedRows = yield* dbExecute((db) =>
 				db
@@ -1165,7 +1208,23 @@ const make: Effect.Effect<
 					)
 					.returning({ id: errorIssues.id }),
 			)
-			issuesArchived = archivedRows.length
+			issuesArchived = archivedRows.length + staleFingerprintRows.length
+
+			// Candidates that never reached the promotion threshold. Without this the
+			// holding table would accumulate every one-off fingerprint forever.
+			yield* dbExecute((db) =>
+				db
+					.delete(errorFingerprintCandidates)
+					.where(
+						and(
+							eq(errorFingerprintCandidates.orgId, orgId),
+							lt(
+								errorFingerprintCandidates.lastSeenAt,
+								new Date(nowMs - CANDIDATE_RETENTION_MS),
+							),
+						),
+					),
+			)
 
 			const archivedCutoff = nowMs - ARCHIVED_RETENTION_DAYS * DAY_MS
 			const toDelete = yield* dbExecute((db) =>
@@ -1225,7 +1284,7 @@ const make: Effect.Effect<
 	// Align to the latest completed minute. Per-org cursor leases serialize
 	// overlapping cron invocations; the cursor advances atomically with issue,
 	// incident, audit-event, and notification-outbox writes.
-	const runTick: ErrorsServiceShape["runTick"] = Effect.fn("ErrorsService.runTick")(function* () {
+	const runTick: ErrorsServiceApi["runTick"] = Effect.fn("ErrorsService.runTick")(function* () {
 		const nowMs = yield* Clock.currentTimeMillis
 		const cutoffMs = Math.floor(nowMs / TICK_MINUTE_MS) * TICK_MINUTE_MS - TICK_INGESTION_LAG_MS
 
@@ -1305,13 +1364,13 @@ const make: Effect.Effect<
 										yield* Effect.logInfo(
 											"Org warehouse rejected queries with a config-class error; quarantined",
 										).pipe(
-											Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+											Effect.annotateLogs({ orgId: org, error: summarizeCause(cause) }),
 										)
 									} else {
 										yield* Effect.logError("Error tick failed for org").pipe(
 											Effect.annotateLogs({
 												orgId: org,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 										)
 									}
@@ -1385,7 +1444,7 @@ const make: Effect.Effect<
 	})
 })
 
-export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceShape>()(
+export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceApi>()(
 	"@maple/api/services/ErrorsService",
 	{ make },
 ) {

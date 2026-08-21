@@ -494,8 +494,8 @@ export class LocalEventingControlStore {
 
 	saveProjection(spec: SignalProjectionSpec, createdAt = new Date().toISOString()): void {
 		const decoded = Schema.decodeUnknownSync(SignalProjectionSpecSchema)(spec)
-		if (!isJsonValue(decoded as unknown)) throw new Error("projection spec must be finite JSON")
-		const specJson = canonicalJson(decoded as unknown as JsonValue)
+		if (!isJsonValue(decoded)) throw new Error("projection spec must be finite JSON")
+		const specJson = canonicalJson(decoded)
 		this.#db
 			.transaction(() => {
 				const existing = this.#db

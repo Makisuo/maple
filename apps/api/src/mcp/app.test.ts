@@ -6,14 +6,14 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
-import { McpToolExecutor, type McpToolExecutorShape } from "./dispatcher"
+import { McpToolExecutor, type McpToolExecutorApi } from "./dispatcher"
 import { McpLive } from "./app"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
 
 const makeMcpToolExecutorStubLayer = (
-	execute: McpToolExecutorShape["execute"] = () =>
+	execute: McpToolExecutorApi["execute"] = () =>
 		Effect.succeed({ content: [{ type: "text" as const, text: "ok" }] }),
 ) => Layer.succeed(McpToolExecutor, { execute })
 
@@ -183,6 +183,91 @@ describe("MCP HTTP authorization", () => {
 				body: expect.any(String),
 			})
 			expect(executedOrgId).toBe(orgId)
+		} finally {
+			await dispose()
+		}
+	})
+
+	it("negotiates a newer client protocol version down instead of rejecting it", async () => {
+		// Regression: the Slack agent's MCP client advertises `2025-11-25` in the
+		// `Mcp-Protocol-Version` header on the very first `initialize` request —
+		// where per the MCP spec that header is only the client's preference and
+		// negotiation belongs in the body. McpServer rejected it with a bare 400
+		// before parsing the body — and eve reads 400 as "wrong transport", retries
+		// over SSE, and gets 405 from a POST-only route. The bot never connected once.
+		const db = createTestDb(createdDbs)
+		const base = Layer.mergeAll(db.layer, Env.layer.pipe(Layer.provide(testConfig())))
+		const services = Layer.mergeAll(
+			ApiKeysService.layer,
+			AuthService.layer,
+			makeMcpToolExecutorStubLayer(),
+		).pipe(Layer.provideMerge(base))
+		const orgId = Schema.decodeUnknownSync(OrgId)("org_test")
+		const userId = Schema.decodeUnknownSync(UserId)("user_test")
+		const key = await Effect.runPromise(
+			Effect.gen(function* () {
+				const apiKeys = yield* ApiKeysService
+				return yield* apiKeys.create(orgId, userId, { name: "Newer protocol test", kind: "mcp" })
+			}).pipe(Effect.provide(services)),
+		)
+		const routes = McpLive.pipe(Layer.provideMerge(services))
+		const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true })
+		const headers = (extra: Record<string, string> = {}) => ({
+			authorization: `Bearer ${key.secret}`,
+			accept: "application/json, text/event-stream",
+			"content-type": "application/json",
+			host: "api.example.com",
+			"x-forwarded-proto": "https",
+			"mcp-protocol-version": "2025-11-25",
+			...extra,
+		})
+		try {
+			const initialized = await handler(
+				new Request("https://api.example.com/mcp", {
+					method: "POST",
+					headers: headers(),
+					body: JSON.stringify({
+						jsonrpc: "2.0",
+						id: 1,
+						method: "initialize",
+						params: {
+							protocolVersion: "2025-11-25",
+							capabilities: {},
+							clientInfo: { name: "test", version: "1.0.0" },
+						},
+					}),
+				}),
+				Context.empty() as never,
+			)
+			const initializedBody = await initialized.clone().json()
+			expect({
+				status: initialized.status,
+				protocolVersion: initializedBody.result?.protocolVersion,
+			}).toEqual({
+				status: 200,
+				protocolVersion: "2025-06-18",
+			})
+
+			const sessionId = initialized.headers.get("mcp-session-id")
+			expect(sessionId).not.toBeNull()
+
+			// The client keeps sending its own version on follow-ups; McpServer
+			// re-checks the header on every post-initialize request because
+			// v2025_06_18 sets `requiresVersionHeader`, so this must pass too.
+			const called = await handler(
+				new Request("https://api.example.com/mcp", {
+					method: "POST",
+					headers: headers({ "mcp-session-id": sessionId! }),
+					body: JSON.stringify({
+						jsonrpc: "2.0",
+						id: 2,
+						method: "tools/call",
+						params: { name: "inspect_trace", arguments: {} },
+					}),
+				}),
+				Context.empty() as never,
+			)
+			expect(called.status).toBe(200)
 		} finally {
 			await dispose()
 		}

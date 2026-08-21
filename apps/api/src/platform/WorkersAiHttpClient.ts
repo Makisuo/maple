@@ -23,7 +23,7 @@
  *
  * Requests that are not Workers AI chat completions fall through to the wrapped client untouched.
  */
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Predicate } from "effect"
 import { HttpClient, HttpClientError, HttpClientResponse, type HttpClientRequest } from "effect/unstable/http"
 
 /** The subset of the Cloudflare `Ai` binding this shim uses. */
@@ -86,7 +86,7 @@ const readJsonBody = (request: HttpClientRequest.HttpClientRequest) =>
 				throw new Error(`Workers AI request carries a ${body._tag} body, expected serialized JSON`)
 			}
 			const parsed: unknown = JSON.parse(text)
-			if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			if (!Predicate.isObject(parsed)) {
 				throw new Error("Workers AI request body is not a JSON object")
 			}
 			return { ...(parsed as Record<string, unknown>) }
@@ -107,8 +107,8 @@ const isNativeWorkersAiTrailer = (payload: string): boolean => {
 	if (payload === "[DONE]") return false
 	try {
 		const value: unknown = JSON.parse(payload)
-		if (typeof value !== "object" || value === null) return false
-		const frame = value as Record<string, unknown>
+		if (!Predicate.isObject(value)) return false
+		const frame = value
 		if ("choices" in frame || "object" in frame) return false
 		if (typeof frame.response !== "string") return false
 		const usage = frame.usage

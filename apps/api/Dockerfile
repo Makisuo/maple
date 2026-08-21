@@ -1,5 +1,5 @@
 # Build context: monorepo root (.)
-FROM oven/bun:1.3.11 AS base
+FROM oven/bun:1.4.0 AS base
 WORKDIR /app
 
 FROM base AS pruner
@@ -16,7 +16,7 @@ RUN bun install
 COPY --from=pruner /app/out/full/ ./
 RUN bunx turbo typecheck
 
-FROM oven/bun:1.3.11-slim AS runner
+FROM oven/bun:1.4.0-slim AS runner
 WORKDIR /app
 
 COPY --from=installer --chown=bun:bun /app /app

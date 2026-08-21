@@ -76,6 +76,10 @@ pub const BYTES_PER_BILLED_GB: f64 = 1_000_000_000.0;
 /// The single conversion from measured bytes to the billable GB value reported to
 /// Autumn. Exists so the counter in this module and `AutumnTracker::track` cannot
 /// drift onto different bases — `billable_gb_round_trips_measured_bytes` pins it.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a byte counter would have to pass 9 petabytes in one process before f64 loses a byte"
+)]
 pub fn billable_gb(bytes: u64) -> f64 {
     bytes as f64 / BYTES_PER_BILLED_GB
 }
@@ -105,6 +109,7 @@ pub fn usage_cardinality_view(instrument: &Instrument) -> Option<Stream> {
 /// Holder for the usage provider and its two counters. Lives in `AppState`
 /// rather than a `LazyLock` static (unlike `metrics.rs`) precisely because the
 /// provider is not global — there is nothing to look it up from.
+#[derive(Debug)]
 pub struct UsageMetrics {
     provider: SdkMeterProvider,
     bytes: Counter<u64>,
@@ -143,8 +148,8 @@ impl UsageMetrics {
     /// diverge — `billable_gb_round_trips_measured_bytes` pins that basis.
     pub fn record(&self, org_id: &str, signal: &str, bytes: u64, items: u64) {
         let attrs = [
-            KeyValue::new(ATTR_ORG_ID, org_id.to_string()),
-            KeyValue::new(ATTR_SIGNAL, signal.to_string()),
+            KeyValue::new(ATTR_ORG_ID, org_id.to_owned()),
+            KeyValue::new(ATTR_SIGNAL, signal.to_owned()),
         ];
         self.bytes.add(bytes, &attrs);
         self.items.add(items, &attrs);
@@ -233,7 +238,7 @@ mod tests {
                                 .map(|kv| kv.value.as_str().to_string())
                         };
                         captured.push(Point {
-                            metric: metric.name().to_string(),
+                            metric: metric.name().to_owned(),
                             org_id: attr(ATTR_ORG_ID),
                             signal: attr(ATTR_SIGNAL),
                             overflow: attr("otel.metric.overflow").is_some(),
@@ -272,7 +277,7 @@ mod tests {
     fn harness() -> (UsageMetrics, CaptureExporter) {
         let exporter = CaptureExporter::new(Temporality::Delta);
         let reader = PeriodicReader::builder(exporter.clone(), OtelTokio)
-            .with_interval(Duration::from_secs(3600))
+            .with_interval(Duration::from_hours(1))
             .build();
         let provider = SdkMeterProvider::builder()
             .with_reader(reader)
@@ -365,7 +370,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cardinality_view_admits_more_orgs_than_the_sdk_default() {
         const ORGS: usize = 3_000;
-        assert!(
+        const _: () = assert!(
             ORGS > 2_000 && ORGS < USAGE_CARDINALITY_LIMIT,
             "test must straddle the SDK default without exceeding our own limit"
         );
@@ -396,6 +401,11 @@ mod tests {
     /// same count through `billable_gb` to `AutumnTracker::track`, so a warehouse
     /// total divided by this divisor is directly comparable to an invoice.
     #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the cast back to u64 is what the assertion is testing"
+    )]
     fn billable_gb_round_trips_measured_bytes() {
         for bytes in [0_u64, 1, 999, 1_000_000_000, 2_500_000_000, 7_812_345_678] {
             assert_eq!(

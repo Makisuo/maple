@@ -6,7 +6,12 @@
  */
 
 import type { QuerySpec } from "@maple/domain/query-engine"
-import { computeBucketSecondsForRange, formatWarehouseDateTime, parseWarehouseDateTime } from "../datetime"
+import {
+	computeBucketSecondsForRange,
+	computeBucketSecondsForWidthRange,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+} from "../datetime"
 
 export interface ExecutionWindow {
 	readonly startTime: string
@@ -75,15 +80,37 @@ export function resolveFallbackStrategy(
 	}
 }
 
+/**
+ * How an unset `bucketSeconds` is filled in.
+ *
+ * `maxDataPoints` switches to the width model (Grafana's `$__interval`: the
+ * range divided by how many points the caller can show, i.e. its pixel width).
+ * Dashboard widgets send it because they know their tile width; every other
+ * caller omits it and keeps the fixed 100-point `chart` policy.
+ */
+export interface BucketResolutionOptions {
+	readonly maxDataPoints?: number
+}
+
+const autoBucketSeconds = (startTime: string, endTime: string, options?: BucketResolutionOptions): number =>
+	options?.maxDataPoints === undefined
+		? computeBucketSecondsForRange(startTime, endTime, "chart")
+		: computeBucketSecondsForWidthRange(startTime, endTime, { maxDataPoints: options.maxDataPoints })
+
 /** Fill in `bucketSeconds` from the range when the lowering left it unset. */
-export function resolveTimeseriesBucketSpec(spec: QuerySpec, startTime: string, endTime: string): QuerySpec {
+export function resolveTimeseriesBucketSpec(
+	spec: QuerySpec,
+	startTime: string,
+	endTime: string,
+	options?: BucketResolutionOptions,
+): QuerySpec {
 	if (spec.kind !== "timeseries" || spec.bucketSeconds) {
 		return spec
 	}
 
 	return {
 		...spec,
-		bucketSeconds: computeBucketSecondsForRange(startTime, endTime, "chart"),
+		bucketSeconds: autoBucketSeconds(startTime, endTime, options),
 	} satisfies QuerySpec
 }
 
@@ -94,8 +121,12 @@ export function resolveTimeseriesBucketSpec(spec: QuerySpec, startTime: string, 
  * two bucket widths — reusing the primary's width over a 31-day window would ask
  * for tens of thousands of points.
  */
-export function resolveExecutionSpecForWindow(spec: QuerySpec, window: ExecutionWindow): QuerySpec {
-	const resolved = resolveTimeseriesBucketSpec(spec, window.startTime, window.endTime)
+export function resolveExecutionSpecForWindow(
+	spec: QuerySpec,
+	window: ExecutionWindow,
+	options?: BucketResolutionOptions,
+): QuerySpec {
+	const resolved = resolveTimeseriesBucketSpec(spec, window.startTime, window.endTime, options)
 	if (resolved.kind !== "timeseries") {
 		return resolved
 	}
@@ -104,8 +135,11 @@ export function resolveExecutionSpecForWindow(spec: QuerySpec, window: Execution
 		return resolved
 	}
 
-	const autoBucketSeconds = computeBucketSecondsForRange(window.startTime, window.endTime, "chart")
-	const selectedBucketSeconds = Math.max(resolved.bucketSeconds ?? autoBucketSeconds, autoBucketSeconds)
+	const windowAutoBucketSeconds = autoBucketSeconds(window.startTime, window.endTime, options)
+	const selectedBucketSeconds = Math.max(
+		resolved.bucketSeconds ?? windowAutoBucketSeconds,
+		windowAutoBucketSeconds,
+	)
 	return {
 		...resolved,
 		bucketSeconds: selectedBucketSeconds,

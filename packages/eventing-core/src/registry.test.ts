@@ -14,6 +14,10 @@ import {
 	type SignalProjectionSpec,
 } from "./index"
 
+interface CyclicJsonFixture {
+	self?: CyclicJsonFixture
+}
+
 const decodeJsonOutput = (value: unknown): JsonValue => {
 	if (!isJsonValue(value)) throw new Error("projector output must be finite JSON")
 	return value
@@ -100,9 +104,10 @@ describe("CompiledProjectionRegistry", () => {
 		expect(canonicalJson({ left: shared, right: shared })).toBe(
 			'{"left":{"value":1},"right":{"value":1}}',
 		)
-		const cyclic: { self?: unknown } = {}
+		const cyclic: CyclicJsonFixture = {}
 		cyclic.self = cyclic
-		expect(() => canonicalJson(cyclic as never)).toThrow("finite acyclic JSON")
+		// SAFETY: this fixture deliberately violates JsonValue to exercise cycle rejection.
+		expect(() => canonicalJson(cyclic as JsonValue)).toThrow("finite acyclic JSON")
 		expect(() => canonicalJson({ invalid: Number.NaN })).toThrow("finite acyclic JSON")
 	})
 

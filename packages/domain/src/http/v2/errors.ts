@@ -105,9 +105,9 @@ export const defineV2Error = <
 		const retryAfterSeconds = options.retryAfterSeconds ?? definition.retryAfterSeconds
 		return new BoundaryError({
 			message,
-			...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
-			...(options.retryAt === undefined ? {} : { retryAt: options.retryAt }),
-			...(options.param === undefined ? {} : { param: options.param }),
+			...(!(retryAfterSeconds === undefined) ? { retryAfterSeconds } : undefined),
+			...(!(options.retryAt === undefined) ? { retryAt: options.retryAt } : undefined),
+			...(!(options.param === undefined) ? { param: options.param } : undefined),
 		})
 	}
 
@@ -145,6 +145,25 @@ export const V2InsufficientScope = defineV2Error({
 	retry: "never",
 	recovery: "request_access",
 	identifier: "InsufficientScopeError",
+})
+
+/**
+ * The caller named an organization (`x-maple-org-id`) it cannot prove
+ * membership of.
+ *
+ * Not `V2InsufficientPermissions`: that one says "only organization
+ * administrators can perform this operation", which would send a widget owner
+ * looking for an admin instead of unpinning the organization.
+ */
+export const V2OrganizationAccessDenied = defineV2Error({
+	tag: "@maple/http/v2/OrganizationAccessDeniedError",
+	status: 403,
+	code: "organization_access_denied",
+	title: "Organization not available",
+	message: "You are not a member of the requested organization.",
+	retry: "never",
+	recovery: "request_access",
+	identifier: "OrganizationAccessDeniedError",
 })
 
 export const V2InsufficientPermissions = defineV2Error({

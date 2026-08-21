@@ -298,7 +298,7 @@ describe("LocalEventingRuntime", () => {
 		const safe = record.attributes.safe as Record<string, JsonValue>
 		ok(Object.prototype.hasOwnProperty.call(safe, "__proto__"))
 		strictEqual(safe["__proto__"], "nested")
-		strictEqual(({} as { nested?: string }).nested, undefined)
+		strictEqual(Object.prototype.hasOwnProperty.call({}, "nested"), false)
 	})
 
 	it("catalogs only the scalar body field that the OTLP adapter can populate", async () =>

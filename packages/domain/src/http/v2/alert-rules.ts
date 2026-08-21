@@ -8,7 +8,10 @@ import {
 	AlertEvaluationStatus,
 	AlertIncidentTransition,
 	AlertNotificationTemplate,
+	AlertDeliveryAuthError,
 	AlertDeliveryError,
+	AlertDeliveryRejectedError,
+	AlertDeliveryTargetMissingError,
 	AlertDestinationDecryptionError,
 	AlertDestinationStoredConfigInvalidError,
 	AlertForbiddenError,
@@ -23,16 +26,13 @@ import {
 } from "../alerts"
 import { AlertDestinationPublicId } from "./alert-destinations"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ParameterInvalid } from "./errors"
 import { publicError, publicErrors } from "./public-error"
 import { V2ManagedWarehouseErrors, V2QueryEngineRouteErrors, V2WarehouseErrors } from "./query-errors"
 import { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
 
 export { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
 const PositiveInt = Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThan(0)))
@@ -630,12 +630,22 @@ const ChecksQuery = Schema.Struct({
 	description: "Pagination plus optional group/time filters for a rule's check history.",
 })
 
-const [alertForbidden, alertValidation, alertPersistence, alertRuleNotFound, alertDelivery] = publicErrors(
+const [alertForbidden, alertValidation, alertPersistence, alertRuleNotFound] = publicErrors(
 	AlertForbiddenError,
 	AlertValidationError,
 	AlertPersistenceError,
 	AlertRuleNotFoundError,
+)
+/**
+ * Delivery fails as one of four classes, split by whether the failure is worth
+ * retrying (see `alerts.ts`). All four must be declared here — an endpoint that
+ * can produce an error it cannot encode answers 500 instead of the real status.
+ */
+const alertDeliveryErrors = publicErrors(
 	AlertDeliveryError,
+	AlertDeliveryAuthError,
+	AlertDeliveryTargetMissingError,
+	AlertDeliveryRejectedError,
 )
 const alertRuleDestinationNotFound = publicError(AlertRuleDestinationNotFoundError)
 const alertRuleStoredConfigInvalid = publicError(AlertRuleStoredConfigInvalidError)
@@ -799,7 +809,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				alertValidation,
 				alertPersistence,
 				alertRuleDestinationNotFound,
-				alertDelivery,
+				...alertDeliveryErrors,
 				...alertDestinationStorageErrors,
 				...V2WarehouseErrors,
 				...V2QueryEngineRouteErrors,

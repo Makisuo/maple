@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { describe, it } from "@effect/vitest"
 import { ok, rejects, strictEqual } from "node:assert"
 import {
@@ -162,7 +163,7 @@ describe("archive operation journal strict parsing (fail-closed)", () => {
 			phase: "nope",
 			createdAt: "2026-06-01T00:00:00.000Z",
 			updatedAt: "2026-06-01T00:00:00.000Z",
-		}
+		} satisfies Record<string, unknown>
 		await rejects(async () => parseArchiveOperationIntent("/archive", raw), /invalid.*phase/)
 	})
 
@@ -172,7 +173,7 @@ describe("archive operation journal strict parsing (fail-closed)", () => {
 			kind: "create",
 			phase: "intent",
 			// missing operationId, generationId, etc.
-		}
+		} satisfies Record<string, unknown>
 		await rejects(async () => parseArchiveOperationIntent("/archive", raw), /operationId/)
 	})
 
@@ -472,7 +473,7 @@ describe("archive operation journal v2 → v3 migration (Gate 3b)", () => {
 			phase: "intent",
 			createdAt: "2026-06-01T00:00:00.000Z",
 			updatedAt: "2026-06-01T00:00:00.000Z",
-		}
+		} satisfies Record<string, unknown>
 		const lifted = migrateV2CreateIntent("/archive", v2)
 		strictEqual(lifted.formatVersion, 3)
 		strictEqual(lifted.kind, "create")
@@ -486,7 +487,7 @@ describe("archive operation journal v2 → v3 migration (Gate 3b)", () => {
 		const corrupt: Record<string, unknown> = {
 			formatVersion: 2,
 			// missing every required field
-		}
+		} satisfies Record<string, unknown>
 		rejects(
 			async () => migrateV2CreateIntent("/archive", corrupt),
 			/missing or not a string|operationId|phase|kind|invalid/,

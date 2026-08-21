@@ -66,7 +66,7 @@ const V1SchemaErrorTransformLive = HttpApiMiddleware.layerSchemaErrorTransform(
 			return Effect.fail(
 				new V1RequestValidationError({
 					message: summarizeSchemaError(schemaError.kind, details),
-					...(first === undefined || first.path === "" ? {} : { param: first.path }),
+					...(!(first === undefined || first.path === "") ? { param: first.path } : undefined),
 					details: details.map(({ line }) => line),
 				}),
 			)

@@ -16,7 +16,7 @@ const PUBLIC_ID_PREFIX_BY_KIND: Partial<Record<AuditAffectedEntity["kind"], Publ
 	alert_destination: PublicIdPrefixes.alertDestination,
 	attribute_mapping: PublicIdPrefixes.attributeMapping,
 	scrape_target: PublicIdPrefixes.scrapeTarget,
-}
+} satisfies Partial<Record<AuditAffectedEntity["kind"], PublicIdPrefix>>
 
 const toV2Affected = (entity: AuditAffectedEntity): V2SetupAuditAffectedEntity => {
 	const prefix = PUBLIC_ID_PREFIX_BY_KIND[entity.kind]

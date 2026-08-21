@@ -209,7 +209,7 @@ function AnomalyDetailBody({
 						type: "incident",
 						incident_kind: "anomaly",
 						incident_id: incidentId,
-						...(incident.errorIssueId ? { issue_id: incident.errorIssueId } : {}),
+						...(incident.errorIssueId ? { issue_id: incident.errorIssueId } : undefined),
 					} as never,
 					snapshot: {
 						title: `${SIGNAL_LABEL[incident.signalType]} · ${incident.serviceName}`,

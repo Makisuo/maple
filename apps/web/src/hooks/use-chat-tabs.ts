@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react"
+import * as Schema from "effect/Schema"
 
 const STORAGE_KEY_PREFIX = "maple-chat-tabs:"
 const DEFAULT_TAB_ID = "default"
@@ -17,6 +18,18 @@ interface ChatTabsState {
 	activeTabId: string
 }
 
+const StoredChatTabsState = Schema.Struct({
+	tabs: Schema.Array(
+		Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			createdAt: Schema.Number,
+			updatedAt: Schema.optionalKey(Schema.Number),
+		}),
+	),
+	activeTabId: Schema.String,
+})
+
 function defaultState(): ChatTabsState {
 	const now = Date.now()
 	return {
@@ -25,7 +38,7 @@ function defaultState(): ChatTabsState {
 	}
 }
 
-function migrateTab(tab: ChatTab & { updatedAt?: number }): ChatTab {
+function migrateTab(tab: Omit<ChatTab, "updatedAt"> & { readonly updatedAt?: number }): ChatTab {
 	return {
 		id: tab.id,
 		title: tab.title,
@@ -38,7 +51,7 @@ function loadState(orgId: string): ChatTabsState {
 	try {
 		const raw = localStorage.getItem(storageKey(orgId))
 		if (raw) {
-			const parsed = JSON.parse(raw) as ChatTabsState
+			const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(StoredChatTabsState))(raw)
 			if (parsed.tabs?.length > 0 && parsed.activeTabId) {
 				return { ...parsed, tabs: parsed.tabs.map(migrateTab) }
 			}

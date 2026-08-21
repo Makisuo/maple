@@ -20,6 +20,7 @@ import {
 } from "@maple/domain/primitives"
 import {
 	alertDestinations,
+	errorFingerprintCandidates,
 	errorIncidents,
 	errorNotificationDeliveries,
 	errorIssues,
@@ -37,7 +38,7 @@ import { Database, DatabaseError } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { isRetryablePostgresContention } from "@/platform/postgres-errors"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
-import type { SqlQueryOptions, WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import type { SqlQueryOptions, WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueReadModelsService } from "./ErrorIssueReadModelsService"
@@ -155,7 +156,7 @@ const makeWarehouseStub = (
 	scanRows: () => ReadonlyArray<Record<string, unknown>> = () => [],
 	onScan?: () => void,
 	fingerprintRows?: () => ReadonlyArray<Record<string, unknown>>,
-): WarehouseQueryServiceShape => ({
+): WarehouseQueryServiceApi => ({
 	query: () => Effect.die(new Error("unexpected warehouse query")),
 	rawSqlQuery: () => Effect.succeed([]),
 	// Active-org discovery is a declared cross-org read, so it arrives here
@@ -307,7 +308,7 @@ const makeGatingLayer = (opts: {
 		dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
 	})
 	const scanRows = opts.scanRows ?? (() => [])
-	const warehouseStub: WarehouseQueryServiceShape = {
+	const warehouseStub: WarehouseQueryServiceApi = {
 		query: () => Effect.die(new Error("unexpected warehouse query")),
 		rawSqlQuery: () => Effect.succeed([]),
 		crossOrgQuery: <T>(
@@ -899,6 +900,32 @@ const loadIssuesByFingerprint = (fingerprintHash: string) =>
 		)
 	})
 
+/**
+ * Push an issue's resolution into the past so the reopen grace window has
+ * elapsed. The tick steps through 5-minute windows, so advancing TestClock far
+ * enough to clear the one-hour grace would mean driving a dozen empty ticks;
+ * backdating the resolution expresses the same situation directly.
+ */
+const backdateResolution = (issueId: ErrorIssueId, resolvedAtMs: number) =>
+	Effect.gen(function* () {
+		const database = yield* Database
+		return yield* database.execute((db) =>
+			db
+				.update(errorIssues)
+				.set({ resolvedAt: new Date(resolvedAtMs) })
+				.where(eq(errorIssues.id, issueId)),
+		)
+	})
+
+/** Seed the build snapshot a resolution would have captured. */
+const setResolvedVersions = (issueId: ErrorIssueId, versions: ReadonlyArray<string>) =>
+	Effect.gen(function* () {
+		const database = yield* Database
+		return yield* database.execute((db) =>
+			db.update(errorIssues).set({ resolvedVersionsJson: versions }).where(eq(errorIssues.id, issueId)),
+		)
+	})
+
 const loadIncidentsForIssue = (issueId: ErrorIssueId) =>
 	Effect.gen(function* () {
 		const database = yield* Database
@@ -1329,17 +1356,23 @@ describe("ErrorsService.runTick", () => {
 				const resolved = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
 				assert.strictEqual(resolved.workflowState, "done")
 				assert.isNotNull(resolved.resolvedAt)
+				yield* backdateResolution(issue.id, TICK_MS - 3 * 60 * 60 * 1000)
 
 				yield* TestClock.setTime(TICK_MS + 120_000)
 				const second = yield* errors.runTick()
 				assert.strictEqual(second.issuesTouched, 1)
 				assert.strictEqual(second.incidentsOpened, 1)
 
-				// A done issue reopens immediately on re-observation — the errors tick
-				// has no reopen cool-down window.
+				// Reopening lands in `regressed`, not `triage`: an issue that was fixed
+				// and came back is not the same as one nobody has looked at, and
+				// flattening the two is what let the same bug be fixed twice.
 				const reopened = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
-				assert.strictEqual(reopened.workflowState, "triage")
+				assert.strictEqual(reopened.workflowState, "regressed")
 				assert.isNull(reopened.resolvedAt)
+				assert.strictEqual(reopened.regressionCount, 1)
+				assert.isNotNull(reopened.lastRegressedAt)
+				// The fix itself stays on record so the next reader knows it happened.
+				assert.isNotNull(reopened.lastResolvedAt)
 
 				const events = yield* loadEventsForIssue(issue.id)
 				assert.lengthOf(
@@ -1640,6 +1673,99 @@ describe("ErrorsService.runTick", () => {
 		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
 	})
 
+	it.effect("holds a rare fingerprint as a candidate and promotes it with its earned totals", () => {
+		// One occurrence per tick, under PROMOTION_MIN_OCCURRENCES. Nothing used to
+		// stand between "a fingerprint appeared once" and "a durable row plus a
+		// first-seen notification", which is how one unapplied migration minted
+		// 2,531 issues in three days.
+		const rows = [scanRow({ count: 1, serviceVersions: ["1.0.0"] })]
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const candidates = () =>
+				database.execute((db) =>
+					db
+						.select()
+						.from(errorFingerprintCandidates)
+						.where(eq(errorFingerprintCandidates.fingerprintHash, SCAN_FINGERPRINT)),
+				)
+
+			yield* TestClock.setTime(TICK_MS)
+			// An unrelated issue, purely so the org is discovered as active.
+			yield* seedIssue(asIssueId(randomUUID()))
+			yield* errors.runTick()
+			assert.lengthOf(yield* loadIssuesByFingerprint(SCAN_FINGERPRINT), 0)
+			assert.lengthOf(yield* candidates(), 1)
+
+			// Second tick, second build. The ON CONFLICT path has to accumulate the
+			// count AND union the build set rather than overwrite either.
+			rows[0] = scanRow({ count: 1, serviceVersions: ["1.1.0"] })
+			yield* TestClock.setTime(TICK_MS + 120_000)
+			yield* errors.runTick()
+			assert.lengthOf(yield* loadIssuesByFingerprint(SCAN_FINGERPRINT), 0)
+			const pending = (yield* candidates())[0]!
+			assert.strictEqual(pending.occurrenceCount, 2)
+			assert.sameMembers([...pending.serviceVersionsJson], ["1.0.0", "1.1.0"])
+
+			// Third occurrence clears the threshold.
+			rows[0] = scanRow({ count: 1, serviceVersions: ["1.1.0"] })
+			yield* TestClock.setTime(TICK_MS + 240_000)
+			yield* errors.runTick()
+
+			const promoted = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+			// The issue opens with the occurrences it earned across all three ticks,
+			// not just the one in the promoting window.
+			assert.strictEqual(promoted.occurrenceCount, 3)
+			assert.sameMembers([...promoted.seenVersionsJson], ["1.0.0", "1.1.0"])
+			// The candidate row is handed over, not left behind to double-count.
+			assert.lengthOf(yield* candidates(), 0)
+		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+	})
+
+	it.effect(
+		"an occurrence from a pre-fix build leaves a done issue alone and opens no incident",
+		() => {
+			const rows = [scanRow()]
+			return Effect.gen(function* () {
+				const errors = yield* ErrorsService
+				yield* TestClock.setTime(TICK_MS)
+				yield* seedIssue(asIssueId(randomUUID()))
+				yield* errors.runTick()
+				const issue = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+
+				const actor = yield* errors.ensureUserActor(ORG, USER)
+				yield* errors.transitionIssue(ORG, actor.id, issue.id, "done")
+				// Record the build the issue was fixed on, then backdate the fix so the
+				// rollout grace window is not what keeps the issue closed.
+				yield* setResolvedVersions(issue.id, ["1.2.3"])
+				yield* backdateResolution(issue.id, TICK_MS - 3 * 60 * 60 * 1000)
+				const incidentsBefore = yield* loadIncidentsForIssue(issue.id)
+				const openBefore = incidentsBefore.filter((i) => i.status === "open").length
+
+				rows[0] = scanRow({ serviceVersions: ["1.2.3"] })
+				yield* TestClock.setTime(TICK_MS + 120_000)
+				const second = yield* errors.runTick()
+
+				// An old client still running the pre-fix build is not new work: the
+				// issue stays fixed, and — the part that matters — no fresh incident,
+				// notification, or investigation is raised off the back of it.
+				const after = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+				assert.strictEqual(after.workflowState, "done")
+				assert.strictEqual(after.regressionCount, 0)
+				assert.strictEqual(second.incidentsOpened, 0)
+				assert.strictEqual(second.issuesTouched, 0)
+
+				const incidentsAfter = yield* loadIncidentsForIssue(issue.id)
+				assert.lengthOf(incidentsAfter, incidentsBefore.length)
+				assert.strictEqual(incidentsAfter.filter((i) => i.status === "open").length, openBefore)
+
+				// The occurrence still happened, so the counters stay truthful.
+				assert.isAbove(after.occurrenceCount, issue.occurrenceCount)
+			}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+		},
+		15_000,
+	)
+
 	it.effect("one batched window applies new, ongoing, regressed and snoozed fingerprints", () => {
 		const ONGOING = "11111111111111111111"
 		const REGRESSED = "22222222222222222222"
@@ -1665,7 +1791,8 @@ describe("ErrorsService.runTick", () => {
 			yield* seedIssue(regressedId, {
 				fingerprintHash: REGRESSED,
 				workflowState: "done",
-				resolvedAt: new Date(TICK_MS),
+				// Resolved well before this window, so the rollout grace has elapsed.
+				resolvedAt: new Date(TICK_MS - 3 * 60 * 60 * 1000),
 				occurrenceCount: 10,
 				firstSeenAt: new Date(TICK_MS - 600_000),
 				lastSeenAt: new Date(TICK_MS - 600_000),
@@ -1711,7 +1838,7 @@ describe("ErrorsService.runTick", () => {
 
 			// Regressed: reopened, resolution cleared, both audit events written.
 			const regressedAfter = (yield* loadIssuesByFingerprint(REGRESSED))[0]!
-			assert.strictEqual(regressedAfter.workflowState, "triage")
+			assert.strictEqual(regressedAfter.workflowState, "regressed")
 			assert.isNull(regressedAfter.resolvedAt)
 			assert.strictEqual(regressedAfter.occurrenceCount, 12)
 			const regressedEvents = yield* loadEventsForIssue(regressedId)
@@ -1880,6 +2007,59 @@ describe("ErrorsService.runTick", () => {
 				db.select().from(errorIssueStates).where(eq(errorIssueStates.issueId, purgeCandidate)),
 			)
 			assert.lengthOf(purgedStates, 0)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+})
+
+describe("ErrorsService.transitionIssue lease renewal", () => {
+	// Covers the non-terminal branch of `applyTransition`: an agent moving its own
+	// claimed issue along is working on it, so the lease should follow rather than
+	// lapse underneath it. `heartbeat_error_issue` used to be the only renewal and
+	// was called zero times in production.
+	it.effect("extends the holder's lease on a non-terminal transition", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const issueId = asIssueId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			const now = yield* Clock.currentTimeMillis
+			yield* seedIssue(issueId, {
+				workflowState: "in_progress",
+				leaseHolderActorId: actor.id,
+				claimedAt: new Date(now),
+				leaseExpiresAt: new Date(now + 60_000),
+			})
+
+			yield* errors.transitionIssue(ORG, actor.id, issueId, "in_review")
+
+			const [row] = yield* database.execute((db) =>
+				db
+					.select({ leaseExpiresAt: errorIssues.leaseExpiresAt })
+					.from(errorIssues)
+					.where(eq(errorIssues.id, issueId)),
+			)
+			assert.isNotNull(row?.leaseExpiresAt)
+			expect(row.leaseExpiresAt.getTime()).toBeGreaterThan(now + 60_000)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("clears the lease when the transition is terminal", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const issueId = asIssueId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			const now = yield* Clock.currentTimeMillis
+			yield* seedIssue(issueId, {
+				workflowState: "in_progress",
+				leaseHolderActorId: actor.id,
+				claimedAt: new Date(now),
+				leaseExpiresAt: new Date(now + 60_000),
+			})
+
+			const done = yield* errors.transitionIssue(ORG, actor.id, issueId, "done")
+
+			assert.strictEqual(done.workflowState, "done")
+			assert.isNull(done.leaseExpiresAt)
 		}).pipe(Effect.provide(makeErrorsLayer())),
 	)
 })

@@ -3,6 +3,7 @@ import { compileCH, compileUnion } from "@maple-dev/clickhouse-builder"
 import {
 	errorsByTypeQuery,
 	errorsTimeseriesQuery,
+	errorsSparkQuery,
 	errorsSummaryQuery,
 	errorDetailTracesQuery,
 	errorsFacetsQuery,
@@ -19,6 +20,26 @@ const baseParams = {
 	endTime: "2024-01-02 00:00:00",
 	bucketSeconds: 3600,
 }
+
+describe("errorsSparkQuery", () => {
+	it("buckets many fingerprints in one fingerprint-keyed scan", () => {
+		const q = errorsSparkQuery({ fingerprintHashes: ["123", "456"] })
+		const { sql } = compileCH(q, baseParams)
+		// Fingerprint-filtered, so it prunes on (OrgId, FingerprintHash, Timestamp).
+		expect(sql).toContain("FROM error_events")
+		expect(sql).not.toContain("FROM error_events_by_time")
+		// Identity UInt64 must survive JSON as a string.
+		expect(sql).toContain("toString(FingerprintHash) AS fingerprintHash")
+		expect(sql).toContain("GROUP BY fingerprintHash, bucket")
+		expect(sql).toContain("ORDER BY bucket ASC")
+	})
+
+	it("applies the services filter", () => {
+		const q = errorsSparkQuery({ fingerprintHashes: ["123"], services: ["api"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName IN")
+	})
+})
 
 // errorsByTypeQuery
 
@@ -177,15 +198,26 @@ describe("errorDetailTracesQuery", () => {
 // errorsFacetsQuery
 
 describe("errorsFacetsQuery", () => {
-	it("compiles UNION ALL with 3 facet dimensions", () => {
+	it("compiles UNION ALL with 4 facet dimensions", () => {
 		const q = errorsFacetsQuery({})
 		const { sql } = compileUnion(q, baseParams)
 		const unionCount = (sql.match(/UNION ALL/g) || []).length
-		expect(unionCount).toBe(2) // 3 queries = 2 UNION ALL
-		expect(sql).toContain("FROM error_events_by_time")
+		expect(unionCount).toBe(3) // 4 queries = 3 UNION ALL
 		expect(sql).toContain("'service' AS facetType")
 		expect(sql).toContain("'environment' AS facetType")
 		expect(sql).toContain("'error_type' AS facetType")
+		expect(sql).toContain("'version' AS facetType")
+		expect(sql).toContain("ServiceVersion != ''")
+	})
+
+	it("filters by error label and service version", () => {
+		// The "Error Type" sidebar section shipped without a filter behind it:
+		// the route passed `errorTypes` into a request schema that had no such
+		// field, so decode dropped it and selecting a type changed nothing.
+		const q = errorsFacetsQuery({ errorLabels: ["TypeError"], serviceVersions: ["1.4.2"] })
+		const { sql } = compileUnion(q, baseParams)
+		expect(sql).toContain("ErrorLabel IN ('TypeError')")
+		expect(sql).toContain("ServiceVersion IN ('1.4.2')")
 	})
 
 	it("applies all optional filters", () => {

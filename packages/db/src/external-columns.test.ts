@@ -44,7 +44,7 @@ const EXTERNALLY_CONSUMED: Readonly<Record<string, ReadonlyArray<string>>> = {
 	oauth_connections: ["org_id", "provider"],
 	dashboards: ["org_id"],
 	alert_rules: ["org_id"],
-}
+} satisfies Readonly<Record<string, ReadonlyArray<string>>>
 
 interface ColumnRow {
 	readonly table_name: string

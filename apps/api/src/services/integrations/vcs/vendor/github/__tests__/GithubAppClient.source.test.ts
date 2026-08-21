@@ -3,7 +3,7 @@ import { generateKeyPairSync } from "node:crypto"
 import { ConfigProvider, Effect, Layer } from "effect"
 import { Env } from "@/platform/Env"
 import { GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
-import { GithubHttp, type GithubHttpShape } from "@/services/integrations/vcs/vendor/github/GithubHttp"
+import { GithubHttp, type GithubHttpApi } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 
 const privateKey = generateKeyPairSync("rsa", {
 	modulusLength: 2048,
@@ -61,10 +61,10 @@ describe("GithubAppClient source access", () => {
 		let nextResponse = 0
 		const http = Layer.succeed(GithubHttp, {
 			fetch: async (url, init) => {
-				requests.push({ url, ...(init ? { init } : {}) })
+				requests.push({ url, ...(init ? { init } : undefined) })
 				return responses[nextResponse++]!
 			},
-		} satisfies GithubHttpShape)
+		} satisfies GithubHttpApi)
 		const layer = GithubAppClient.layer.pipe(Layer.provide(http), Layer.provide(env))
 
 		return Effect.gen(function* () {

@@ -69,7 +69,11 @@ export function useServiceHealthSummary(input: GetServiceOverviewInput): Service
 		}
 
 		const byRow = new Map<string, ServiceHealth>()
-		const counts: Record<ServiceHealth, number> = { healthy: 0, degraded: 0, unhealthy: 0 }
+		const counts: Record<ServiceHealth, number> = {
+			healthy: 0,
+			degraded: 0,
+			unhealthy: 0,
+		} satisfies Record<ServiceHealth, number>
 		for (const service of overview.data) {
 			const key = serviceHealthRowKey(service.serviceName, service.environment)
 			const health = deriveServiceHealthFromCauses([

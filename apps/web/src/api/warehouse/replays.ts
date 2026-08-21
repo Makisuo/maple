@@ -219,11 +219,15 @@ export const getReplayManifest = Effect.fn("SessionReplays.getReplayManifest")(f
 				params: { id: input.sessionId },
 				query: {
 					...(toIsoWindow(input.windowStart) !== undefined
-						? { window_start: toIsoWindow(input.windowStart)! }
-						: {}),
+						? {
+								window_start: toIsoWindow(input.windowStart)!,
+							}
+						: undefined),
 					...(toIsoWindow(input.windowEnd) !== undefined
-						? { window_end: toIsoWindow(input.windowEnd)! }
-						: {}),
+						? {
+								window_end: toIsoWindow(input.windowEnd)!,
+							}
+						: undefined),
 				},
 			})
 		}),
@@ -263,11 +267,15 @@ export const getReplayEvents = Effect.fn("SessionReplays.getReplayEvents")(funct
 					// only add round-trips.
 					limit: Math.max(1, input.toChunkSeq - input.fromChunkSeq + 1),
 					...(toIsoWindow(input.windowStart) !== undefined
-						? { window_start: toIsoWindow(input.windowStart)! }
-						: {}),
+						? {
+								window_start: toIsoWindow(input.windowStart)!,
+							}
+						: undefined),
 					...(toIsoWindow(input.windowEnd) !== undefined
-						? { window_end: toIsoWindow(input.windowEnd)! }
-						: {}),
+						? {
+								window_end: toIsoWindow(input.windowEnd)!,
+							}
+						: undefined),
 				},
 			})
 		}),

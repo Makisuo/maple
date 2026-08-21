@@ -1,7 +1,10 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
 import "@rrweb/replay/dist/style.css"
+import { Button } from "@maple/ui/components/ui/button"
 import { cn } from "@maple/ui/lib/utils"
-import { type DisplayMarker, type IdleBand, errorMessage, useReplayPlayer } from "./replay-player-context"
+import { displayError } from "@/lib/error-messages"
+import { type DisplayMarker, type IdleBand, useReplayPlayer } from "./replay-player-context"
 import {
 	GlobeIcon,
 	ArrowPathIcon,
@@ -43,7 +46,8 @@ export function ReplaySurface({
 	 *  corners so surface + transport read as one unit. */
 	docked?: boolean
 }) {
-	const { status, error, sessionActive, figureRef, surfaceRef, mountRef, isFullscreen } = useReplayPlayer()
+	const { status, error, retry, sessionActive, figureRef, surfaceRef, mountRef, isFullscreen } =
+		useReplayPlayer()
 	// A scrubber over a session that has no recording is a dead control; drop the
 	// whole transport rather than offer it.
 	const showTransport = status !== "unrecorded"
@@ -89,11 +93,7 @@ export function ReplaySurface({
 				{status !== "ready" && (
 					<div className="absolute inset-0 bg-muted/30">
 						{status === "loading" && <PlayerMessage spinner>Loading replay…</PlayerMessage>}
-						{status === "error" && (
-							<PlayerMessage tone="error">
-								Couldn’t load this replay — {errorMessage(error)}
-							</PlayerMessage>
-						)}
+						{status === "error" && <PlayerError error={error} onRetry={retry} />}
 						{status === "empty" && (
 							<PlayerMessage spinner={sessionActive}>
 								{sessionActive
@@ -288,10 +288,10 @@ function Scrubber({
 }) {
 	const trackRef = React.useRef<HTMLDivElement | null>(null)
 	const [dragging, setDragging] = React.useState(false)
-	const [hoverMs, setHoverMs] = React.useState<number | null>(null)
+	// The bubble is portalled out of the controls card (which is `overflow-hidden`
+	// for its rounded corners), so it needs the pointer's viewport x, not a percent.
+	const [hover, setHover] = React.useState<{ ms: number; clientX: number } | null>(null)
 	const pct = totalMs > 0 ? Math.min(100, (currentMs / totalMs) * 100) : 0
-	const hoverPct =
-		hoverMs != null && totalMs > 0 ? Math.min(100, Math.max(0, (hoverMs / totalMs) * 100)) : null
 
 	const msFromClientX = React.useCallback(
 		(clientX: number) => {
@@ -320,26 +320,17 @@ function Scrubber({
 			}}
 			onPointerMove={(e) => {
 				const ms = msFromClientX(e.clientX)
-				setHoverMs(ms)
+				setHover({ ms, clientX: e.clientX })
 				if (dragging) onSeek(ms)
 			}}
-			onPointerLeave={() => setHoverMs(null)}
+			onPointerLeave={() => setHover(null)}
 			onPointerUp={(e) => {
 				e.currentTarget.releasePointerCapture(e.pointerId)
 				setDragging(false)
 			}}
 			className="group relative h-6 flex-1 cursor-pointer touch-none select-none"
 		>
-			{/* Hover time bubble — surfaces the timestamp under the cursor while
-			    scanning, so seeking is precise. */}
-			{hoverPct != null && (
-				<div
-					className="pointer-events-none absolute -top-7 z-10 -translate-x-1/2 rounded bg-popover px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-popover-foreground shadow-sm ring-1 ring-border"
-					style={{ left: `${hoverPct}%` }}
-				>
-					{formatClock(hoverMs ?? 0)}
-				</div>
-			)}
+			<HoverTimeBubble hover={hover} trackRef={trackRef} />
 			{/* Track */}
 			<div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-muted">
 				{/* Idle bands — greyed/hatched, under the progress fill */}
@@ -392,25 +383,89 @@ function Scrubber({
 	)
 }
 
-function PlayerMessage({
-	children,
-	spinner,
-	tone,
+/**
+ * The timestamp under the cursor while scanning the scrubber, so seeking is precise.
+ *
+ * Portalled and fixed-positioned rather than absolute inside the track: the transport
+ * card is `overflow-hidden` (for its rounded corners) with only ~10px of padding above
+ * the track, and the page's stage is an `overflow-y-auto` scroller — an in-flow bubble
+ * gets clipped by both and reads as hidden behind the video. In fullscreen the controls
+ * live inside the fullscreen `<figure>`, so the portal targets the fullscreen element
+ * when there is one; `document.body` is invisible while it's active.
+ */
+function HoverTimeBubble({
+	hover,
+	trackRef,
 }: {
-	children: React.ReactNode
-	spinner?: boolean
-	tone?: "error"
+	hover: { ms: number; clientX: number } | null
+	trackRef: React.RefObject<HTMLDivElement | null>
 }) {
+	// Only ever non-null after a pointer event, so this never runs during SSR.
+	const track = trackRef.current
+	if (!hover || !track) return null
+	const rect = track.getBoundingClientRect()
+	// Keep the bubble on screen when the cursor is at either end of the track.
+	const left = Math.min(Math.max(hover.clientX, EDGE_MARGIN), window.innerWidth - EDGE_MARGIN)
+	return createPortal(
+		<div
+			className="pointer-events-none fixed z-55 -translate-x-1/2 -translate-y-full rounded bg-popover px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-popover-foreground shadow-sm ring-1 ring-border"
+			style={{ left, top: rect.top - 8 }}
+		>
+			{formatClock(hover.ms)}
+		</div>,
+		document.fullscreenElement ?? document.body,
+	)
+}
+
+/** Keeps the hover bubble clear of the viewport edges. */
+const EDGE_MARGIN = 8
+
+/**
+ * The load failure, read through the app's shared error contract.
+ *
+ * Not `String(error)`: every failure reaching here is a v2 error envelope,
+ * which carries its title, message and recovery inside a nested `error` body
+ * and stringifies to `[object Object]`. `displayError` unwraps that — and
+ * resolves a transport or unexpected failure to the same shape — so the reader
+ * gets the server's own words and a retry only when retrying can help.
+ *
+ * Styled like `PlayerMessage` rather than reusing the page-level `ErrorState`:
+ * this sits on the player's own always-dark surface, so it keeps the muted
+ * treatment that reads in both themes there instead of that component's
+ * `text-foreground`, which would wash out in light mode.
+ */
+function PlayerError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+	const formatted = displayError(error)
+	const canRetry = formatted.recovery === "retry" || formatted.recovery === "refresh"
+	return (
+		<div className="flex aspect-video w-full items-center justify-center p-8">
+			<div
+				className="flex max-w-sm flex-col items-center gap-3 text-center"
+				role="alert"
+				aria-live="polite"
+			>
+				<div className="grid size-11 place-items-center rounded-full bg-destructive/10 text-destructive">
+					<EyeIcon className="size-5" />
+				</div>
+				<div className="space-y-1">
+					<p className="text-sm font-medium text-muted-foreground">{formatted.title}</p>
+					<p className="text-sm leading-relaxed text-muted-foreground">{formatted.message}</p>
+				</div>
+				{canRetry && (
+					<Button size="sm" variant="outline" onClick={onRetry}>
+						Try again
+					</Button>
+				)}
+			</div>
+		</div>
+	)
+}
+
+function PlayerMessage({ children, spinner }: { children: React.ReactNode; spinner?: boolean }) {
 	return (
 		<div className="flex aspect-video w-full items-center justify-center p-8">
 			<div className="flex max-w-sm flex-col items-center gap-3 text-center">
-				<div
-					className={
-						tone === "error"
-							? "grid size-11 place-items-center rounded-full bg-destructive/10 text-destructive"
-							: "grid size-11 place-items-center rounded-full bg-muted text-muted-foreground"
-					}
-				>
+				<div className="grid size-11 place-items-center rounded-full bg-muted text-muted-foreground">
 					{spinner ? (
 						<ArrowPathIcon className="size-5 animate-spin" />
 					) : (

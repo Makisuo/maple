@@ -10,6 +10,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { billingCustomerAtom, billingPlansAtom } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
+import { displayError } from "@/lib/error-messages"
 import { getTrialStatus } from "@/lib/billing/plan-gating"
 import { getPlanFeatures, TRIAL_DURATION_DAYS } from "@/lib/billing/plans"
 import { featureUnit, type SpendModel } from "@/lib/billing/spend"
@@ -157,17 +158,17 @@ export function PlanOffer({
 		try {
 			const result = await attach({ planId })
 			if (result.paymentUrl) {
+				// Keep the button disabled through the redirect — see the note in
+				// pricing-cards.tsx. Clearing it here invites the double-click that
+				// Autumn answers with a 409.
 				window.location.href = result.paymentUrl
 				return
 			}
 			toastManager.add({ title: "Plan updated successfully.", type: "success" })
 			refreshCustomer()
+			setAttaching(null)
 		} catch (error) {
-			toastManager.add({
-				title: error instanceof Error ? error.message : "Something went wrong. Please try again.",
-				type: "error",
-			})
-		} finally {
+			toastManager.add({ title: displayError(error).message, type: "error" })
 			setAttaching(null)
 		}
 	}

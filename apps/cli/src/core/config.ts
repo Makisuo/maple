@@ -1,5 +1,6 @@
 import { Clock, Context, Effect, Layer, Option, Redacted, type PlatformError, Schema } from "effect"
 import { FileSystem } from "effect/FileSystem"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as os from "node:os"
 import * as path from "node:path"
 import { defaultLocalUrl } from "../lib/local-address"
@@ -66,7 +67,7 @@ const writeMerged = (
 		yield* fs.chmod(CONFIG_PATH, 0o600).pipe(Effect.ignore)
 	})
 
-export interface MapleConfigShape {
+export interface MapleConfigValues {
 	/** Remote API base URL (env `MAPLE_API_URL` overrides the stored value). */
 	readonly apiUrl: Option.Option<string>
 	/** Remote bearer token (env `MAPLE_API_TOKEN` overrides the stored value). */
@@ -105,16 +106,22 @@ export interface MapleConfigShape {
 	readonly recordUpdateCheck: (latestTag?: string) => Effect.Effect<void, PlatformError.PlatformError>
 }
 
-export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>()("@maple/cli/MapleConfig", {
+export class MapleConfig extends Context.Service<MapleConfig, MapleConfigValues>()("@maple/cli/MapleConfig", {
 	make: Effect.gen(function* () {
 		const fs = yield* FileSystem
+		// The native credential helpers spawn `security`/`secret-tool`. Capturing
+		// the spawner here keeps it out of MapleConfigValues' signatures, the same
+		// way `fs` is captured for the write helpers.
+		const spawner = yield* ChildProcessSpawner
+		const keychain = <A>(effect: Effect.Effect<A, never, ChildProcessSpawner>): Effect.Effect<A> =>
+			Effect.provideService(effect, ChildProcessSpawner, spawner)
 		const stored = yield* readStored(fs)
 		const env = process.env
 		const resolvedApiUrl = env.MAPLE_API_URL ?? stored.apiUrl
 		const envToken = env.MAPLE_API_TOKEN
 		const nativeToken =
 			!envToken && !stored.token && stored.credentialStore === "keychain" && resolvedApiUrl
-				? yield* Effect.promise(() => readNativeCredential(resolvedApiUrl))
+				? yield* keychain(readNativeCredential(resolvedApiUrl))
 				: undefined
 		const resolvedToken = envToken ?? stored.token ?? nativeToken
 		const tokenSource = envToken
@@ -141,11 +148,9 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 			write: (next) => writeMerged(fs, (cur) => ({ ...cur, ...next })),
 			saveRemoteCredential: (next) =>
 				Effect.gen(function* () {
-					const storedInKeychain = yield* Effect.promise(() =>
-						writeNativeCredential(next.apiUrl, next.token),
-					)
+					const storedInKeychain = yield* keychain(writeNativeCredential(next.apiUrl, next.token))
 					if (!storedInKeychain) {
-						yield* Effect.promise(() => deleteNativeCredential(next.apiUrl))
+						yield* keychain(deleteNativeCredential(next.apiUrl))
 					}
 					yield* writeMerged(fs, (cur) => {
 						const { token: _token, ...withoutToken } = cur
@@ -156,7 +161,7 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 							userId: next.userId,
 							credentialManaged: next.managed,
 							credentialStore: storedInKeychain ? "keychain" : "file",
-							...(storedInKeychain ? {} : { token: next.token }),
+							...(!storedInKeychain ? { token: next.token } : undefined),
 						}
 					})
 					return storedInKeychain ? "keychain" : "file"
@@ -165,7 +170,7 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 				Effect.gen(function* () {
 					const storedApiUrl = stored.apiUrl
 					if (storedApiUrl && stored.credentialStore === "keychain") {
-						yield* Effect.promise(() => deleteNativeCredential(storedApiUrl))
+						yield* keychain(deleteNativeCredential(storedApiUrl))
 					}
 					yield* writeMerged(fs, (cur) => {
 						const {
@@ -192,10 +197,10 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 					yield* writeMerged(fs, (cur) => ({
 						...cur,
 						lastUpdateCheck: nowIso,
-						...(latestTag ? { latestKnownVersion: latestTag } : {}),
+						...(latestTag ? { latestKnownVersion: latestTag } : undefined),
 					}))
 				}),
-		} satisfies MapleConfigShape
+		} satisfies MapleConfigValues
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

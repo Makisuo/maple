@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 "use client"
 
 import * as React from "react"
@@ -5,6 +6,7 @@ import { toastManager } from "../components/ui/toast"
 
 import { writeClipboardFallback } from "../lib/clipboard"
 import { useClipboard } from "./use-clipboard"
+import { useMountEffect } from "./use-mount-effect"
 
 export type CopyStatus = "idle" | "copied" | "error"
 
@@ -62,80 +64,69 @@ export function useCopy({
 	// rather than letting the first timer snap the status back early.
 	const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 	const mounted = React.useRef(true)
-	React.useEffect(() => {
+	useMountEffect(() => {
 		mounted.current = true
 		return () => {
 			mounted.current = false
 			clearTimeout(timer.current)
 		}
-	}, [])
-
-	// Kept in refs so `copy` stays referentially stable across renders.
-	const latest = React.useRef({ clipboard, label, onCopy, onError, successMessage, timeout, toast })
-	latest.current = { clipboard, label, onCopy, onError, successMessage, timeout, toast }
+	})
 
 	const reset = React.useCallback(() => {
 		clearTimeout(timer.current)
 		setStatus("idle")
 	}, [])
 
-	const copy = React.useCallback(async (text: string | null | undefined): Promise<boolean> => {
-		const {
-			clipboard: api,
-			label: name,
-			onCopy: copied,
-			onError: failed,
-			successMessage: message,
-			timeout: hold,
-			toast: notify,
-		} = latest.current
+	const copy = React.useCallback(
+		async (text: string | null | undefined): Promise<boolean> => {
+			let ok = false
+			let reason: Error | null = null
 
-		let ok = false
-		let reason: unknown = null
-
-		if (!text) {
-			reason = new Error("Nothing to copy")
-		} else {
-			try {
-				await api.copy(text)
-				ok = true
-			} catch (error) {
-				reason = error
+			if (!text) {
+				reason = new Error("Nothing to copy")
+			} else {
 				try {
-					ok = writeClipboardFallback(text)
-				} catch {
-					ok = false
+					await clipboard.copy(text)
+					ok = true
+				} catch (error) {
+					reason = error instanceof Error ? error : new Error(String(error))
+					try {
+						ok = writeClipboardFallback(text)
+					} catch {
+						ok = false
+					}
 				}
 			}
-		}
 
-		if (ok && text) copied?.(text)
-		if (!ok) failed?.(reason)
+			if (ok && text) onCopy?.(text)
+			if (!ok) onError?.(reason)
 
-		if (notify) {
-			if (ok) {
-				toastManager.add({
-					title: message ?? (name ? `${name} copied` : "Copied to clipboard"),
-					type: "success",
-				})
-			} else {
-				toastManager.add({
-					title: name ? `Failed to copy ${name.toLowerCase()}` : "Failed to copy",
-					type: "error",
-				})
+			if (toast) {
+				if (ok) {
+					toastManager.add({
+						title: successMessage ?? (label ? `${label} copied` : "Copied to clipboard"),
+						type: "success",
+					})
+				} else {
+					toastManager.add({
+						title: label ? `Failed to copy ${label.toLowerCase()}` : "Failed to copy",
+						type: "error",
+					})
+				}
 			}
-		}
 
-		if (!mounted.current) return ok
+			if (!mounted.current) return ok
 
-		setStatus(ok ? "copied" : "error")
-		clearTimeout(timer.current)
-		timer.current = setTimeout(() => {
-			if (mounted.current) setStatus("idle")
-		}, hold)
+			setStatus(ok ? "copied" : "error")
+			clearTimeout(timer.current)
+			timer.current = setTimeout(() => {
+				if (mounted.current) setStatus("idle")
+			}, timeout)
 
-		return ok
-	}, [])
+			return ok
+		},
+		[clipboard, label, onCopy, onError, successMessage, timeout, toast],
+	)
 
 	return { copied: status === "copied", copy, reset, status }
 }

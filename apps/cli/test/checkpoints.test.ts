@@ -1,3 +1,4 @@
+// BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { describe, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
 import { Effect, Exit, Option } from "effect"
@@ -21,6 +22,7 @@ import {
 	type CheckpointId,
 	type CheckpointOperationId,
 	type CheckpointQuarantineId,
+	checkpointAvailability,
 	checkpointRoot,
 	checkpointSnapshotDir,
 	checkpointStatePath,
@@ -374,6 +376,29 @@ describe("checkpoint state resolution", () => {
 			rmSync(checkpointRoot(dataDir), { recursive: true })
 			mkdirSync(join(checkpointRoot(dataDir), "current"), { recursive: true })
 			await rejects(readCheckpointState(dataDir), /legacy preview/)
+		})
+	})
+
+	it("reports checkpoint availability so recovery advice can name a command that works", async () => {
+		await withDataDir(async (dataDir) => {
+			// Never checkpointed: the ordinary state, not a fault.
+			deepStrictEqual(await checkpointAvailability(dataDir), { available: false, reason: "none" })
+
+			const current = newCheckpointId()
+			writeSnapshot(dataDir, current)
+			writeState(dataDir, current, null)
+			deepStrictEqual(await checkpointAvailability(dataDir), { available: true, checkpointId: current })
+
+			// Present but unreadable state is "unusable", never silently "none".
+			writeFileSync(checkpointStatePath(dataDir), "{bad json")
+			const corrupt = await checkpointAvailability(dataDir)
+			strictEqual(corrupt.available, false)
+			strictEqual(corrupt.available === false ? corrupt.reason : undefined, "unusable")
+
+			// Snapshot data beside a missing state file is a fault too.
+			rmSync(checkpointStatePath(dataDir))
+			const orphaned = await checkpointAvailability(dataDir)
+			strictEqual(orphaned.available === false ? orphaned.reason : undefined, "unusable")
 		})
 	})
 

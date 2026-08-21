@@ -1,4 +1,4 @@
-import type { Row, ShapeStreamOptions } from "@electric-sql/client"
+import type { Row, ShapeStreamOptions as SyncStreamOptions } from "@electric-sql/client"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Collection, CollectionConfig } from "@tanstack/db"
 import { BTreeIndex } from "@tanstack/db"
@@ -17,7 +17,7 @@ export type { CollectionStatus } from "@tanstack/db"
  * Type for the ShapeStream onError handler.
  * Returns void to stop syncing, or an object to continue with modified params/headers.
  */
-type OnErrorHandler = NonNullable<ShapeStreamOptions<unknown>["onError"]>
+type OnErrorHandler = NonNullable<SyncStreamOptions<unknown>["onError"]>
 
 /**
  * Default backoff configuration.
@@ -295,10 +295,10 @@ export function effectElectricCollectionOptions(config: AnyEffectElectricCollect
 
 	const backoffEnabled = config.backoff !== false
 	const backoffConfig: Required<BackoffConfig> = backoffEnabled
-		? { ...DEFAULT_BACKOFF_CONFIG, ...(typeof config.backoff === "object" ? config.backoff : {}) }
+		? { ...DEFAULT_BACKOFF_CONFIG, ...(typeof config.backoff === "object" ? config.backoff : undefined) }
 		: DEFAULT_BACKOFF_CONFIG
 
-	const modifiedShapeOptions = backoffEnabled
+	const modifiedSyncOptions = backoffEnabled
 		? {
 				...config.shapeOptions,
 				onError: createBackoffOnError(
@@ -314,7 +314,7 @@ export function effectElectricCollectionOptions(config: AnyEffectElectricCollect
 		autoIndex: "eager",
 		defaultIndexType: BTreeIndex,
 		...config,
-		shapeOptions: modifiedShapeOptions,
+		shapeOptions: modifiedSyncOptions,
 		onInsert: promiseOnInsert,
 		onUpdate: promiseOnUpdate,
 		onDelete: promiseOnDelete,
@@ -420,8 +420,8 @@ export function createEffectCollection<A extends Row<unknown>, TRuntime>(
 	const options = effectElectricCollectionOptions({
 		...config,
 		schema: standardSchema,
-	} as unknown as Parameters<typeof effectElectricCollectionOptions>[0])
+	} as Parameters<typeof effectElectricCollectionOptions>[0])
 
 	const collection = tanstackCreateCollection(options as any)
-	return collection as unknown as EffectCollection<A>
+	return collection as EffectCollection<A>
 }

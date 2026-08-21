@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Clerk stores the session in the Keychain. Without a keychain access
+	     group the SDK fails to configure with OSStatus -34018
+	     (errSecMissingEntitlement), which reads as a mysterious launch crash. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.maple.mobile</string>
+	</array>
+	<!-- Push. Xcode rewrites `development` to `production` for App Store and
+	     TestFlight archives; the app reads whichever landed in the embedded
+	     profile to pick the APNs host it registers with (PushEnvironment). -->
+	<!-- Shared with the widget extension, which has no session of its own and
+	     renders the snapshot the app publishes here. See IssuesSnapshotStore. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.maple.mobile</string>
+	</array>
+	<key>aps-environment</key>
+	<string>development</string>
+	<!-- Critical incidents break through Focus modes. Apple grants this
+	     entitlement on request; without it the level silently downgrades to
+	     `active`, which is the right fallback. -->
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
+</dict>
+</plist>

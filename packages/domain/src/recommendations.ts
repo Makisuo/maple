@@ -278,7 +278,7 @@ const KIND_RANK: Record<RecommendationKind, number> = {
 	rename: 0,
 	"double-emission": 1,
 	naming: 2,
-}
+} satisfies Record<RecommendationKind, number>
 
 /** camelCase, non-namespaced key (has an uppercase letter, no dot) — the clear naming violation. */
 function isCamelCaseNoDot(key: string): boolean {

@@ -1,3 +1,4 @@
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 // Shared flush core (platform-agnostic)
 //
 // The buffer-drain → OTLP-encode → POST machinery shared by every flushable
@@ -83,7 +84,11 @@ export const buildResolved = (
 	const headers: Record<string, string> = {
 		"content-type": "application/json",
 		"user-agent": opts.userAgent,
-	}
+		// Browsers refuse to let a page set `user-agent`, so the same
+		// `<sdk>/<version>` also rides a header they do allow. Ingest records it
+		// as `maple.sdk`; its CORS allow-list must include it (it does).
+		"x-maple-sdk": opts.userAgent,
+	} satisfies Record<string, string>
 	if (r.ingestKey) headers.authorization = `Bearer ${Redacted.value(r.ingestKey)}`
 	return {
 		tracesUrl,
@@ -286,7 +291,7 @@ const makeMetricsBody = (snapshots: ReadonlyArray<MetricSnapshot>, r: Resolved) 
 	for (const snapshot of snapshots) {
 		const base = {
 			name: snapshot.id,
-			...(snapshot.description ? { description: snapshot.description } : {}),
+			...(snapshot.description ? { description: snapshot.description } : undefined),
 		}
 		switch (snapshot.type) {
 			case "Counter":

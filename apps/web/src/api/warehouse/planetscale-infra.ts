@@ -111,10 +111,10 @@ export const getPlanetScaleQueryInsights = Effect.fn("Integrations.getPlanetScal
 			return yield* client.planetscaleIntegration.queryInsights({
 				payload: {
 					database: input.database,
-					...(input.branch === undefined ? {} : { branch: input.branch }),
+					...(!(input.branch === undefined) ? { branch: input.branch } : undefined),
 					start_time: toIso(input.startTime),
 					end_time: toIso(input.endTime),
-					...(input.limit === undefined ? {} : { limit: input.limit }),
+					...(!(input.limit === undefined) ? { limit: input.limit } : undefined),
 				},
 			})
 		}),
@@ -168,11 +168,11 @@ export const getPlanetScaleEvents = Effect.fn("Integrations.getPlanetScaleEvents
 			const client = yield* MapleApiV2AtomClient
 			return yield* client.planetscaleIntegration.events({
 				payload: {
-					...(input.database === undefined ? {} : { database: input.database }),
-					...(input.branch === undefined ? {} : { branch: input.branch }),
+					...(!(input.database === undefined) ? { database: input.database } : undefined),
+					...(!(input.branch === undefined) ? { branch: input.branch } : undefined),
 					start_time: toIso(input.startTime),
 					end_time: toIso(input.endTime),
-					...(input.limit === undefined ? {} : { limit: input.limit }),
+					...(!(input.limit === undefined) ? { limit: input.limit } : undefined),
 				},
 			})
 		}),
@@ -216,7 +216,7 @@ export const getPlanetScaleInfraTimeseries = Effect.fn("QueryEngine.getPlanetSca
 						endTime: input.endTime ?? fallback.endTime,
 						bucketSeconds: input.bucketSeconds,
 						database: input.database,
-						...(input.branch === undefined ? {} : { branch: input.branch }),
+						...(!(input.branch === undefined) ? { branch: input.branch } : undefined),
 					}),
 				})
 			}),

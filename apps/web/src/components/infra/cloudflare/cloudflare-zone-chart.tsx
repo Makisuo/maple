@@ -1,19 +1,33 @@
 import { useMemo } from "react"
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+
+import { d3Curve, defineChart, lineY } from "@tanstack/charts"
+import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { scalePoint } from "@tanstack/charts-scales/point"
+import { curveMonotoneX } from "d3-shape"
 
 import {
-	ChartContainer,
-	ChartTooltip,
-	ChartTooltipContent,
-	type ChartConfig,
-} from "@maple/ui/components/ui/chart"
+	PlotFrame,
+	PlotTooltipBody,
+	createTooltipFocusStore,
+	cursorTooltip,
+	dashedGridY,
+	focusCrosshair,
+	focusDot,
+	linearYDomain,
+	niceLinearDomain,
+	useResolvedSeriesColors,
+	usePlotChromeColors,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
 import { cn } from "@maple/ui/lib/utils"
+import { linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@maple/ui/lib/format"
 import { formatBytes, formatPercent } from "@maple/ui/lib/format"
-import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler, transformRows } from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, makeBucketLabeler, transformRows, type TransformedPoint } from "../chart-utils"
+import { CHART_HEIGHT, ChartCardMessage } from "../primitives/chart-card"
 import { OTHER_ZONES_COLOR, OTHER_ZONES_SERIES } from "./constants"
 
 export type CloudflareZoneMetric = "requests" | "errorRate" | "cacheHitRate" | "bytes"
@@ -23,9 +37,7 @@ const METRIC_LABELS: Record<CloudflareZoneMetric, string> = {
 	errorRate: "5xx error rate",
 	cacheHitRate: "Cache hit rate",
 	bytes: "Bandwidth",
-}
-
-const CHART_HEIGHT = 200
+} satisfies Record<CloudflareZoneMetric, string>
 
 function formatMetricValue(value: number, metric: CloudflareZoneMetric): string {
 	if (metric === "errorRate" || metric === "cacheHitRate") return formatPercent(value)
@@ -116,89 +128,105 @@ export function CloudflareZoneChart({
 		return map
 	}, [topZones])
 
-	const config = useMemo<ChartConfig>(
-		() => Object.fromEntries(series.map((name) => [name, { label: name, color: seriesColor.get(name) }])),
-		[series, seriesColor],
+	// Resolved to literals: canvas cannot read `var(--chart-3)`.
+	const chromeColors = usePlotChromeColors()
+	const colors = useResolvedSeriesColors(seriesColor, chromeColors.border)
+	const focusStore = useMemo(() => createTooltipFocusStore(), [])
+
+	const yDomain = useMemo<[number, number]>(
+		() => niceLinearDomain(linearYDomain({ rows: data, keys: series })),
+		[data, series],
 	)
 
+	const tooltipSeries = useMemo<PlotTooltipSeries<TransformedPoint>[]>(
+		() =>
+			series.map((name) => ({
+				label: name,
+				color: colors.get(name) ?? chromeColors.border,
+				value: (point: TransformedPoint) => {
+					const value = point[name]
+					return typeof value === "number" ? value : null
+				},
+				format: (value: number) => formatMetricValue(value, metric),
+			})),
+		[series, colors, chromeColors.border, metric],
+	)
+
+	const definition = useMemo(() => {
+		const at = (point: TransformedPoint) => point.time
+		const valueOf = (name: string) => (point: TransformedPoint) => {
+			const value = point[name]
+			return typeof value === "number" ? value : null
+		}
+		const colorOf = (name: string) => colors.get(name) ?? chromeColors.border
+
+		return defineChart({
+			marks: [
+				dashedGridY(),
+				...series.map((name) =>
+					lineY(data, {
+						id: name,
+						x: at,
+						y: valueOf(name),
+						stroke: colorOf(name),
+						strokeWidth: 1.5,
+						curve: d3Curve(curveMonotoneX),
+					}),
+				),
+				...series.map((name) => focusDot(data, at, valueOf(name), colorOf(name), chromeColors)),
+				focusCrosshair(chromeColors),
+			],
+			x: {
+				scale: scalePoint,
+				axis: {
+					line: false,
+					ticks: { size: 0, padding: 8 },
+					tickLabels: { thin: { minGap: 12 } },
+				},
+			},
+			y: {
+				scale: scaleLinear().domain(yDomain),
+				axis: {
+					line: false,
+					ticks: { size: 0, padding: 8, format: (v: number) => formatMetricValue(v, metric) },
+				},
+			},
+			margin: { top: 12, right: 12, bottom: 4, left: 52 },
+			focus: "group-x",
+			focusRing: false,
+			tooltip: cursorTooltip(focusStore.anchor),
+		})
+	}, [data, series, colors, chromeColors, yDomain, metric, focusStore])
+
 	return (
-		<div className={cn("rounded-md border bg-card transition-opacity", waiting && "opacity-60")}>
+		<div
+			className={cn("rounded-md border bg-card transition-opacity", waiting && "opacity-60")}
+			// `syncId` used to be handed to Recharts' hover-sync event bus. The linked
+			// cursor replaced that (CSS variables on a container, no React state), so
+			// it now names this chart within its group.
+			{...linkedCursorChartProps(syncId != null ? `cf-zone-${metric}` : undefined)}
+		>
 			<div className="flex items-center justify-between px-3 pt-2.5">
 				<span className="text-[11px] font-medium text-muted-foreground">{METRIC_LABELS[metric]}</span>
 			</div>
 			{data.length === 0 ? (
-				<div
-					className="flex items-center justify-center font-mono text-[11px] text-muted-foreground"
-					style={{ height: CHART_HEIGHT }}
-				>
-					{CHART_EMPTY_MESSAGE}
-				</div>
+				<ChartCardMessage>{CHART_EMPTY_MESSAGE}</ChartCardMessage>
 			) : (
-				<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
-					<LineChart
-						data={data}
-						margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
-						syncId={syncId}
-						syncMethod="value"
-					>
-						<CartesianGrid
-							strokeDasharray={CHART_GRID_DASH}
-							stroke="var(--border)"
-							vertical={false}
-						/>
-						<XAxis
-							dataKey="time"
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
-							stroke="var(--muted-foreground)"
-						/>
-						<YAxis
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
-							width={52}
-							stroke="var(--muted-foreground)"
-							tickFormatter={(v: number) => formatMetricValue(v, metric)}
-						/>
-						<ChartTooltip
-							cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
-							itemSorter={(item) => -Number(item.value ?? 0)}
-							content={
-								<ChartTooltipContent
-									indicator="dot"
-									formatter={(value, name) => (
-										<>
-											<div
-												className="size-2.5 shrink-0 rounded-[2px]"
-												style={{ background: seriesColor.get(String(name)) }}
-											/>
-											<div className="flex flex-1 items-center justify-between gap-3 leading-none">
-												<span className="text-muted-foreground">{String(name)}</span>
-												<span className="font-mono font-medium tabular-nums text-foreground">
-													{formatMetricValue(Number(value), metric)}
-												</span>
-											</div>
-										</>
-									)}
-								/>
-							}
-						/>
-						{series.map((s) => (
-							<Line
-								key={s}
-								type="monotone"
-								dataKey={s}
-								stroke={seriesColor.get(s)}
-								strokeWidth={1.5}
-								dot={false}
-								isAnimationActive={false}
+				<div className="w-full" style={{ height: CHART_HEIGHT }}>
+					<PlotFrame
+						definition={definition}
+						ariaLabel={METRIC_LABELS[metric]}
+						className="h-full w-full"
+						renderTooltipBody={({ points }) => (
+							<PlotTooltipBody
+								points={points}
+								series={tooltipSeries}
+								focusStore={focusStore}
+								heading={(point: TransformedPoint) => point.time}
 							/>
-						))}
-					</LineChart>
-				</ChartContainer>
+						)}
+					/>
+				</div>
 			)}
 		</div>
 	)

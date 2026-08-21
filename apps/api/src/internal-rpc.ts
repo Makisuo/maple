@@ -39,7 +39,7 @@ export const callMcpToolRpc = (input: unknown) =>
 		Effect.flatMap((request) =>
 			McpToolExecutor.pipe(
 				Effect.flatMap((executor) =>
-					executor.execute(makeInternalTenant(request.orgId), request.name, request.input),
+					executor.execute(makeInternalTenant(request.orgId), request.name, request.input, "rpc"),
 				),
 			),
 		),

@@ -115,9 +115,9 @@ function displayForPanel(args: {
 	const unit = asString(args.pluginSpec?.unit)
 	const base: Record<string, unknown> = {
 		title: args.title,
-		...(args.description ? { description: args.description } : {}),
-		...(unit ? { unit } : {}),
-	}
+		...(args.description ? { description: args.description } : undefined),
+		...(unit ? { unit } : undefined),
+	} satisfies Record<string, unknown>
 
 	switch (args.kind) {
 		// `seriesStats` follows the same rule as the dashboard templates: on for
@@ -153,8 +153,8 @@ function displayForPanel(args: {
 			return {
 				...base,
 				gauge: {
-					...(typeof args.pluginSpec?.min === "number" ? { min: args.pluginSpec.min } : {}),
-					...(typeof args.pluginSpec?.max === "number" ? { max: args.pluginSpec.max } : {}),
+					...(typeof args.pluginSpec?.min === "number" ? { min: args.pluginSpec.min } : undefined),
+					...(typeof args.pluginSpec?.max === "number" ? { max: args.pluginSpec.max } : undefined),
 				},
 			}
 		default:
@@ -288,7 +288,7 @@ function rawSqlDataSource(args: {
 	return makeRawSqlDataSource({
 		sql: args.sql,
 		displayType: args.displayType,
-		...(isScalar ? { transform: { reduceToValue: { field: "value", aggregate: "first" } } } : {}),
+		...(isScalar ? { transform: { reduceToValue: { field: "value", aggregate: "first" } } } : undefined),
 	})
 }
 
@@ -332,7 +332,7 @@ function placeholderWidget(args: {
 		dataSource: markdownDataSource(),
 		display: {
 			title: args.title,
-			...(args.description ? { description: args.description } : {}),
+			...(args.description ? { description: args.description } : undefined),
 			markdown: {
 				content: markdownWidgetContent({
 					reason: args.reason,
@@ -395,7 +395,7 @@ function convertPanel(args: {
 			dataSource: markdownDataSource(),
 			display: {
 				title,
-				...(display.description ? { description: display.description } : {}),
+				...(display.description ? { description: display.description } : undefined),
 				markdown: { content: text },
 			},
 			layout: args.layout,
@@ -589,7 +589,7 @@ function convertSync(input: unknown): PersesImportConversion {
 	return {
 		dashboard: decodePortableDashboard({
 			name,
-			...(description ? { description } : {}),
+			...(description ? { description } : undefined),
 			tags: ["perses-import"],
 			timeRange: { type: "relative", value: duration ?? "12h" },
 			widgets,

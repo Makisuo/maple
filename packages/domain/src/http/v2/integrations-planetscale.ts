@@ -17,13 +17,10 @@ import {
 	ScrapeTargetValidationError,
 } from "../scrape-targets"
 import { AuthorizationV2 } from "./auth"
-import { Timestamp } from "./envelopes"
+import { wireExample, Timestamp } from "./envelopes"
 import { V2CallbackHostUnavailable, V2InsufficientPermissions, V2TimeRangeInvalid } from "./errors"
 import { publicErrors } from "./public-error"
 import { ScrapeTargetPublicId } from "./scrape-targets"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 // PlanetScale integration. An org connects PlanetScale over OAuth, binds the
 // grant to one PlanetScale organization, and Maple provisions a managed scrape

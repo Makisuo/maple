@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 /**
  * `ChatSession` — the durable transcript, against real SQLite.
  *
@@ -31,7 +32,7 @@ const TENANT = encodeChatTurnTenant({
  */
 const makeSession = () => {
 	const state = makeFakeDurableObjectState()
-	const session = new ChatSession(state as unknown as DurableObjectState, {})
+	const session = new ChatSession(state as DurableObjectState, {})
 	/** The id the session minted for the in-flight turn — deliberately not the user message's. */
 	const turnId = (): string | undefined =>
 		(
@@ -40,6 +41,17 @@ const makeSession = () => {
 				| undefined
 		)?.running_message_id ?? undefined
 	return { session, state, turnId }
+}
+
+interface ChatSessionWaiterHarness {
+	readonly waiters: Set<() => void>
+	readonly waitForAppend: (timeoutMs: number) => Promise<boolean>
+}
+
+const waiterHarness = (session: ChatSession): ChatSessionWaiterHarness => {
+	// SAFETY: this test intentionally exercises ChatSession's private waiter lifecycle; the
+	// interface mirrors the two members declared by ChatSession and never escapes the test.
+	return session as ChatSessionWaiterHarness
 }
 
 describe("ChatSession.history", () => {
@@ -423,14 +435,11 @@ describe("ChatSession.subscribe", () => {
 
 	it("removes a timed-out waiter before the next idle reconnect", async () => {
 		const { session } = makeSession()
-		const waitForAppend: unknown = Reflect.get(session, "waitForAppend")
-		if (typeof waitForAppend !== "function") assert.fail("waitForAppend must be a function")
+		const harness = waiterHarness(session)
 
 		for (let reconnect = 0; reconnect < 3; reconnect++) {
-			assert.isFalse(await Reflect.apply(waitForAppend, session, [0]))
-			const waiters: unknown = Reflect.get(session, "waiters")
-			assert.instanceOf(waiters, Set)
-			assert.equal(waiters.size, 0)
+			assert.isFalse(await harness.waitForAppend.call(session, 0))
+			assert.equal(harness.waiters.size, 0)
 		}
 	})
 })

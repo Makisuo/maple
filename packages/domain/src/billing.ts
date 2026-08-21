@@ -14,12 +14,23 @@ export interface PlanGatingSubscription {
 	readonly plan?: { readonly name?: string | null } | null
 }
 
-/** Active, and not an add-on / auto-enabled / legacy-free tier. Trials count — Autumn reports them as `active`. */
-export function isActivePlanSubscription(sub: PlanGatingSubscription | null | undefined): boolean {
+/**
+ * A real plan subscription — not an add-on, an auto-enabled entitlement, or the
+ * legacy free tier — whatever its status. Status-blind on purpose: a lapsed
+ * (`expired` / `canceled`) row still identifies a returning customer, which is
+ * what tells the web gate to keep them in the app rather than dropping them back
+ * into new-user onboarding.
+ */
+export function isPlanSubscription(sub: PlanGatingSubscription | null | undefined): boolean {
 	if (!sub) return false
 	if (sub.addOn || sub.autoEnable) return false
 	if (sub.planId?.toLowerCase() === "free" || sub.plan?.name?.toLowerCase() === "free") return false
-	return sub.status === "active"
+	return true
+}
+
+/** Active, and not an add-on / auto-enabled / legacy-free tier. Trials count — Autumn reports them as `active`. */
+export function isActivePlanSubscription(sub: PlanGatingSubscription | null | undefined): boolean {
+	return isPlanSubscription(sub) && sub?.status === "active"
 }
 
 // Cycle pricing

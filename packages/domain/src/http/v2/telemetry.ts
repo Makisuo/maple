@@ -2,12 +2,11 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { MetricName, ServiceName, SpanId, TraceId } from "../../primitives"
 import { AuthorizationV2 } from "./auth"
-import { ListOf, ListQuery, Timestamp } from "./envelopes"
+import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { defineV2Error, V2CursorInvalid, V2ParameterInvalid, V2TimeRangeInvalid } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 import { V2QueryErrors, V2WarehouseReadErrors } from "./query-errors"
 
-const wireExample = <A>(example: object): A => example as A
 export const V2TelemetryRangeTooLarge = defineV2Error({
 	tag: "@maple/http/v2/TelemetryRangeTooLargeError",
 	status: 400,
@@ -970,6 +969,15 @@ export const V2Service = Schema.Struct({
 	p99_latency_ms: Schema.Number,
 	has_sampling: Schema.Boolean,
 	sampling_weight: Schema.Number,
+	// The service's own trailing-7d p95, ending where the requested window
+	// starts, so an ongoing regression can't inflate its own baseline. Absent
+	// when the service has no history in that window. Clients judge latency
+	// against this rather than an absolute threshold — a batch worker whose p95
+	// is always seconds is healthy, not degraded.
+	baseline_p95_latency_ms: Schema.optionalKey(Schema.Number),
+	// Spans behind `baseline_p95_latency_ms`. A baseline built from a handful of
+	// spans is noise; clients should ignore it below their own minimum.
+	baseline_span_count: Schema.optionalKey(Schema.Number),
 }).annotate({
 	identifier: "Service",
 	title: "Service",

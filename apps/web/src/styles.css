@@ -208,21 +208,302 @@
 }
 
 /* Cold-boot splash — branded self-assembling trace waterfall (see boot-splash.tsx
-   and the inline copy in index.html). The Maple tree on an amber tile sits still;
-   five span bars grow in, in start-time order, while a thin amber playhead scans
-   across them so it reads as a trace being collected in real time, not a skeleton
-   shimmering. Keep this in sync with the inline copy in index.html.
+   and the inline copy in index.html). The Maple tree blinks above five span bars
+   that grow in, in start-time order, while a thin amber playhead scans across them
+   so it reads as a trace being collected in real time, not a skeleton shimmering.
+   Keep this in sync with the inline copy in index.html.
 
-   The tile fill stays flat: the tree's eyes and the notch beside the trunk are
-   evenodd knockouts, so the tile reads THROUGH them, and a gradient shows through
-   at a different value than at the silhouette edge — the eyes stop reading as
-   eyes. Same rule the favicon variants are built on (see public/favicon.svg). */
+   The mark renders bare — no tile, no glow. Its eyes and the notch beside the trunk
+   are evenodd knockouts, so the page background reads THROUGH them; the fill stays
+   flat because a gradient shows through at a different value than at the silhouette
+   edge and the eyes stop reading as eyes. */
 .boot-mark {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: var(--primary);
-	box-shadow: 0 10px 30px -8px color-mix(in oklab, var(--primary) 50%, transparent);
+	color: var(--primary);
+	transform-origin: 50% 100%;
+	animation: maple-boot-squash 16.8s linear infinite;
+}
+
+/* Blink. The lid is a rect in tree colour over an eye knockout; scaling it up from
+   its own top edge fills the hole top-down, which reads as a lid closing. Resting
+   state is scaleY(0) — open — so if the animation never runs the eyes stay open.
+   The rects are unclipped and over-cover onto the canopy on purpose (see the note
+   in boot-splash.tsx — clipping them to the eye curve produces a seam).
+
+   `transform-box: fill-box` is load-bearing: without it `transform-origin` resolves
+   against the SVG viewport rather than the rect's own box and the lid slides across
+   the mark instead of closing over the eye.
+
+   A blink is not symmetric — the lid slams shut and drifts open — so the segment
+   easings differ: 90ms shut on an accelerating curve, 60ms held, 180ms open on a
+   decelerating one. Symmetric timing is most of what made this read mechanical.
+
+   The cycle is 16.8s with seven blinks at irregular gaps (first at 0.9s, then
+   2.5 / 2.7 / 1.25 / 2.85 / 2.6 / 0.95s apart) rather than a short loop with evenly
+   spaced blinks. Even spacing reads as a metronome no matter how good the easing
+   is, and 5.6s is short enough to consciously clock; at 16.8s a splash that shows
+   for the usual second or two never repeats at all. The first blink stays
+   front-loaded so a fast boot still catches one, and the two ~1s follow-ups do the
+   job the old explicit double-blink did without two squashes overlapping.
+
+   Both lids run on the same schedule. Offsetting one to suggest that real eyes
+   don't fire in lockstep backfires here: the close curve puts most of its travel at
+   the end, so even 20ms leaves one eye shut while the other is still half open,
+   which reads as a lazy eye rather than as softness.
+
+   The keyframes below are GENERATED — do not hand-edit; see the note above
+   @keyframes maple-boot-squash. */
+.boot-lid {
+	transform-box: fill-box;
+	transform-origin: 50% 0%;
+	transform: scaleY(0);
+	animation: maple-boot-blink 16.8s linear infinite;
+}
+
+@keyframes maple-boot-blink {
+	0% {
+		transform: scaleY(0);
+	}
+	5.357% {
+		transform: scaleY(0);
+		animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35);
+	}
+	5.893% {
+		transform: scaleY(1);
+	}
+	6.25% {
+		transform: scaleY(1);
+		animation-timing-function: cubic-bezier(0.16, 0.75, 0.3, 1);
+	}
+	7.321% {
+		transform: scaleY(0);
+	}
+	20.238% {
+		transform: scaleY(0);
+		animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35);
+	}
+	20.774% {
+		transform: scaleY(1);
+	}
+	21.131% {
+		transform: scaleY(1);
+		animation-timing-function: cubic-bezier(0.16, 0.75, 0.3, 1);
+	}
+	22.202% {
+		transform: scaleY(0);
+	}
+	36.31% {
+		transform: scaleY(0);
+		animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35);
+	}
+	36.845% {
+		transform: scaleY(1);
+	}
+	37.202% {
+		transform: scaleY(1);
+		animation-timing-function: cubic-bezier(0.16, 0.75, 0.3, 1);
+	}
+	38.274% {
+		transform: scaleY(0);
+	}
+	43.75% {
+		transform: scaleY(0);
+		animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35);
+	}
+	44.286% {
+		transform: scaleY(1);
+	}
+	44.643% {
+		transform: scaleY(1);
+		animation-timing-function: cubic-bezier(0.16, 0.75, 0.3, 1);
+	}
+	45.714% {
+		transform: scaleY(0);
+	}
+	60.714% {
+		transform: scaleY(0);
+		animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35);
+	}
+	61.25% {
+		transform: scaleY(1);
+	}
+	61.607% {
+		transform: scaleY(1);
+		animation-timing-function: cubic-bezier(0.16, 0.75, 0.3, 1);
+	}
+	62.679% {
+		transform: scaleY(0);
+	}
+	76.19% {
+		transform: scaleY(0);
+		animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35);
+	}
+	76.726% {
+		transform: scaleY(1);
+	}
+	77.083% {
+		transform: scaleY(1);
+		animation-timing-function: cubic-bezier(0.16, 0.75, 0.3, 1);
+	}
+	78.155% {
+		transform: scaleY(0);
+	}
+	81.845% {
+		transform: scaleY(0);
+		animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35);
+	}
+	82.381% {
+		transform: scaleY(1);
+	}
+	82.738% {
+		transform: scaleY(1);
+		animation-timing-function: cubic-bezier(0.16, 0.75, 0.3, 1);
+	}
+	83.81% {
+		transform: scaleY(0);
+	}
+	100% {
+		transform: scaleY(0);
+	}
+}
+
+/* Squash. The tree compresses as the lids come down and springs back a touch taller
+   than rest before settling — anchored at the roots, since the trunk meets the
+   ground and only the canopy has anywhere to give. This is what stops the blink
+   reading as a shutter dropping over a static shape.
+
+   VERTICAL ONLY — scaleX stays 1, which costs the volume preservation a classic
+   squash would have. It has to. The mark's eyes are not symmetric about its centre:
+   the left sits at x=190, the right at x=355, and the mark's midline is x=369.5, so
+   the right eye is almost exactly ON the scaling axis. Any scaleX moves the left eye
+   ~12x further than the right (7.2 units vs 0.6 at scaleX 1.04), and one eye visibly
+   sliding while the other stays pinned reads as the eyes blinking out of sync — even
+   though the lids are frame-identical. Vertical scaling has no such problem: both
+   eyes travel ~17 units, a difference of well under a tenth of a pixel at 56px.
+
+   It deliberately runs SLOWER than the lid and peaks LATE. The lid is shut at 90ms;
+   the body does not reach full compression until 150ms and takes 700ms to resolve
+   (compress → overshoot ~2% taller at 380ms → settle). Matching the lid's 90ms made
+   the mark read snappy and weightless — a light thing has no follow-through. The lag
+   IS the mass.
+
+   Generated together with maple-boot-blink; to retune, edit the constants in the
+   generator and re-splice both this file and the index.html twin, so the two copies
+   cannot drift. */
+@keyframes maple-boot-squash {
+	0% {
+		transform: scale(1, 1);
+	}
+	5.357% {
+		transform: scale(1, 1);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+	}
+	6.25% {
+		transform: scale(1, 0.95);
+		animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+	}
+	7.619% {
+		transform: scale(1, 1.022);
+		animation-timing-function: ease-out;
+	}
+	9.524% {
+		transform: scale(1, 1);
+	}
+	20.238% {
+		transform: scale(1, 1);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+	}
+	21.131% {
+		transform: scale(1, 0.95);
+		animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+	}
+	22.5% {
+		transform: scale(1, 1.022);
+		animation-timing-function: ease-out;
+	}
+	24.405% {
+		transform: scale(1, 1);
+	}
+	36.31% {
+		transform: scale(1, 1);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+	}
+	37.202% {
+		transform: scale(1, 0.95);
+		animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+	}
+	38.571% {
+		transform: scale(1, 1.022);
+		animation-timing-function: ease-out;
+	}
+	40.476% {
+		transform: scale(1, 1);
+	}
+	43.75% {
+		transform: scale(1, 1);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+	}
+	44.643% {
+		transform: scale(1, 0.95);
+		animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+	}
+	46.012% {
+		transform: scale(1, 1.022);
+		animation-timing-function: ease-out;
+	}
+	47.917% {
+		transform: scale(1, 1);
+	}
+	60.714% {
+		transform: scale(1, 1);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+	}
+	61.607% {
+		transform: scale(1, 0.95);
+		animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+	}
+	62.976% {
+		transform: scale(1, 1.022);
+		animation-timing-function: ease-out;
+	}
+	64.881% {
+		transform: scale(1, 1);
+	}
+	76.19% {
+		transform: scale(1, 1);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+	}
+	77.083% {
+		transform: scale(1, 0.95);
+		animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+	}
+	78.452% {
+		transform: scale(1, 1.022);
+		animation-timing-function: ease-out;
+	}
+	80.357% {
+		transform: scale(1, 1);
+	}
+	81.845% {
+		transform: scale(1, 1);
+		animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+	}
+	82.738% {
+		transform: scale(1, 0.95);
+		animation-timing-function: cubic-bezier(0.25, 0.9, 0.35, 1);
+	}
+	84.107% {
+		transform: scale(1, 1.022);
+		animation-timing-function: ease-out;
+	}
+	86.012% {
+		transform: scale(1, 1);
+	}
+	100% {
+		transform: scale(1, 1);
+	}
 }
 
 .boot-trace {
@@ -251,7 +532,10 @@
 	animation: maple-boot-land 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
-/* row geometry: left = the span's start time, width = its duration */
+/* row geometry: left = the span"s
+	start
+	time,
+width = its duration */
 .boot-track--1,
 .boot-span--1 {
 	top: 0;
@@ -368,7 +652,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-	/* settle to the fully-assembled trace; no streaming, no playhead */
+	/* settle to the fully-assembled trace; no streaming, no playhead, eyes open */
 	.boot-span {
 		transform: scaleX(1);
 		opacity: 1;
@@ -376,6 +660,14 @@
 	}
 	.boot-scan {
 		display: none;
+	}
+	.boot-lid {
+		transform: scaleY(0);
+		animation: none;
+	}
+	.boot-mark {
+		transform: none;
+		animation: none;
 	}
 }
 

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { cn } from "@maple/ui/lib/utils"
-import { ChartLegendSlotContext, type ChartLegendItem } from "@maple/ui/components/ui/chart"
+import { PlotLegendSlotContext, type PlotLegendItem } from "@maple/ui/components/plot"
 import {
 	GripDotsIcon,
 	TrashIcon,
@@ -65,7 +65,12 @@ export function WidgetShell({
 	// alerts can be spun off a chart without entering dashboard edit mode.
 	const showMenu = isEditable || createAlert != null
 	const [menuOpen, setMenuOpen] = useState(false)
-	const [legendItems, setLegendItems] = useState<ChartLegendItem[]>([])
+	const [legendItems, setLegendItems] = useState<readonly PlotLegendItem[]>([])
+	// One piece of state, two providers. The Recharts `ChartContainer` and the
+	// TanStack plot layer each publish through their own context — the plot layer
+	// declares its own so that importing it does not drag `recharts` into every
+	// ported chart's bundle — and a tile holds exactly one chart, so only one of
+	// them ever fires.
 	const legendSlot = useMemo(() => ({ setItems: setLegendItems }), [])
 
 	// Titles can reference dashboard variables ("Latency — $service"); render
@@ -108,11 +113,6 @@ export function WidgetShell({
 							{timeRangeLabel}
 						</span>
 					)}
-					{headerValue != null && (
-						<div className="ml-auto shrink-0 font-mono font-semibold text-xs tabular-nums">
-							{headerValue}
-						</div>
-					)}
 					{legendItems.length >= 2 &&
 						(() => {
 							// Keep the header to a single row: show a few items, then a
@@ -125,15 +125,26 @@ export function WidgetShell({
 								// Below ~380px the title alone fills the header row, so
 								// the legend is dropped entirely rather than squeezed to
 								// a row of unreadable truncated stubs.
-								<div className="hidden min-w-0 flex-1 items-center justify-end gap-x-3 overflow-hidden @min-[380px]/widget:flex">
+								<div className="ml-auto hidden min-w-0 flex-1 items-center justify-end gap-x-3 overflow-hidden @min-[380px]/widget:flex">
 									{visible.map((item) => (
 										<span
 											key={item.key}
 											className="flex min-w-0 shrink items-center gap-1.5 text-[10px] text-muted-foreground"
 										>
+											{/* A dashed outline, not a filled square, when the series is
+											    painted as a dashed stroke — an errors overlay drawn dashed
+											    in the plot and solid in the header would state something
+											    the chart does not. Mirrors `FixedMetricLegend`. */}
 											<span
-												className="size-2 shrink-0 rounded-[2px]"
-												style={{ backgroundColor: item.color }}
+												className={cn(
+													"size-2 shrink-0 rounded-[2px]",
+													item.dashed && "border border-dashed",
+												)}
+												style={
+													item.dashed
+														? { borderColor: item.color }
+														: { backgroundColor: item.color }
+												}
 											/>
 											<span className="truncate">{item.label}</span>
 										</span>
@@ -149,6 +160,20 @@ export function WidgetShell({
 								</div>
 							)
 						})()}
+					{headerValue != null && (
+						// LAST in the row, so the headline stat keeps the top-right corner.
+						// It used to come BEFORE the legend, which was invisible only because
+						// `legendItems` was permanently empty for every ported chart — the bug
+						// that restoring the legend slot fixed. With chips actually rendering,
+						// they landed to the right of the stat and took the corner.
+						//
+						// `ml-auto` stays on both: the legend's `flex-1` absorbs the free space
+						// when there is one, and this is what pushes the stat right when there
+						// is not.
+						<div className="ml-auto shrink-0 font-mono font-semibold text-xs tabular-nums">
+							{headerValue}
+						</div>
+					)}
 				</div>
 				{showMenu && (
 					<CardAction
@@ -211,9 +236,7 @@ export function WidgetShell({
 			    (list/table/markdown) override with overflow-auto, which wins the
 			    tailwind-merge conflict. */}
 			<CardContent className={cn("overflow-hidden", contentClassName ?? "flex-1 min-h-0 p-2")}>
-				<ChartLegendSlotContext.Provider value={legendSlot}>
-					{children}
-				</ChartLegendSlotContext.Provider>
+				<PlotLegendSlotContext.Provider value={legendSlot}>{children}</PlotLegendSlotContext.Provider>
 			</CardContent>
 			{footer != null && (
 				<div className="shrink-0 px-3 pb-2.5 text-[11px] text-muted-foreground">{footer}</div>
@@ -235,6 +258,19 @@ interface WidgetFrameProps {
 	/** Summary line under the content. Only rendered once data is ready. */
 	footer?: ReactNode
 	children: ReactNode
+}
+
+/**
+ * "Nothing to draw here": the muted empty state every tile shows when its query
+ * ran fine and simply returned no rows. Shared with the chart widgets, which
+ * used to hand an empty result to a chart that then drew its sample data.
+ */
+export function WidgetEmptyState() {
+	return (
+		<div className="flex items-center justify-center h-full">
+			<span className="text-xs text-muted-foreground">No data in selected time range</span>
+		</div>
+	)
 }
 
 export function WidgetFrame({
@@ -263,9 +299,7 @@ export function WidgetFrame({
 				loadingSkeleton
 			) : dataState.status === "error" ? (
 				dataState.message === "No query data found in selected time range" ? (
-					<div className="flex items-center justify-center h-full">
-						<span className="text-xs text-muted-foreground">No data in selected time range</span>
-					</div>
+					<WidgetEmptyState />
 				) : dataState.kind === "range" ? (
 					// A constraint, not a failure — muted like the empty state rather
 					// than destructive, since nothing is broken and the neighbouring

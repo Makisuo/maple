@@ -13,7 +13,7 @@ const REASON_LABEL: Record<ErrorIncidentDocument["reason"], string> = {
 	first_seen: "First seen",
 	regression: "Regression",
 	manual: "Manual",
-}
+} satisfies Record<ErrorIncidentDocument["reason"], string>
 
 export function IssueIncidentsTable({ incidents }: IssueIncidentsTableProps) {
 	if (incidents.length === 0) {

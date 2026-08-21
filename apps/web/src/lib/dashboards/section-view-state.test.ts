@@ -20,7 +20,7 @@ const section = (
 ): DashboardSection => ({
 	id,
 	title: id,
-	...(collapsed !== undefined ? { collapsed } : {}),
+	...(collapsed !== undefined ? { collapsed } : undefined),
 	tabs: tabIds.map((tabId) => ({ id: tabId, title: tabId })),
 })
 
@@ -180,7 +180,7 @@ describe("route composition", () => {
 	// Mirrors `applySectionView` in routes/dashboards/$dashboardId.tsx.
 	const apply = (prev: Record<string, unknown>, update: (p: SectionViewSearch) => SectionViewSearch) => ({
 		...update(pickDashboardControlParams(prev)),
-		...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+		...(prev.mode === "edit" ? { mode: "edit" as const } : undefined),
 	})
 
 	it("drops the opposite list key instead of resurrecting it", () => {

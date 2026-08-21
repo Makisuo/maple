@@ -4,8 +4,8 @@ import {
 	ElectricUpstreamError,
 	ElectricUpstreamUnreachable,
 	errorResponse,
-	type ShapeError,
-	ShapeRequestInvalid,
+	type SyncError,
+	SyncRequestInvalid,
 	Unauthorized,
 } from "./errors"
 
@@ -16,14 +16,14 @@ import {
  */
 const cases: ReadonlyArray<{
 	readonly name: string
-	readonly error: ShapeError
+	readonly error: SyncError
 	readonly status: number
 	readonly body: string
 	readonly errorType: string
 }> = [
 	{
 		name: "an unknown shape",
-		error: new ShapeRequestInvalid({ message: "Unknown or missing shape" }),
+		error: new SyncRequestInvalid({ message: "Unknown or missing shape" }),
 		status: 400,
 		// The validation message IS the client-facing body — it says what to fix
 		// and reveals nothing the caller did not already send.

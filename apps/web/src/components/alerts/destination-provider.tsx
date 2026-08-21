@@ -1,6 +1,6 @@
 import type { AlertDestinationType } from "@maple/domain/http"
 import { useState, type ReactNode } from "react"
-import { CodeIcon, DiscordIcon, EnvelopeIcon, HazelIcon, SlackIcon } from "@/components/icons"
+import { CodeIcon, DiscordIcon, EnvelopeIcon, HazelIcon, SlackIcon, TelegramIcon } from "@/components/icons"
 import { SLACK_ACCENT, SLACK_ACCENT_ON_LIGHT } from "@/components/integrations/integration-catalog"
 import { cn } from "@maple/ui/lib/utils"
 
@@ -151,6 +151,21 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		docsUrl: "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
 		docsLabel: "Discord webhook docs",
 	},
+	telegram: {
+		type: "telegram",
+		label: "Telegram",
+		description: "Send alerts to a Telegram chat, group, or channel via a bot you create.",
+		accent: "#26A5E4",
+		accentBg: "rgba(38,165,228,0.16)",
+		// The brand blue is 1.9:1 on its own light tint — deepen it for light
+		// (4.81:1), keep the brand hue on dark (4.87:1).
+		accentText: "light-dark(#0B6E9E, #26A5E4)",
+		// A mid-luminance blue: white lands at 2.77:1, #1E1B17 at 6.20:1.
+		accentOn: INK_ON_BRIGHT_ACCENT,
+		fallbackIcon: ({ size = 22, className }) => <TelegramIcon size={size} className={className} />,
+		docsUrl: "https://maple.dev/docs/alerting/notification-destinations#telegram",
+		docsLabel: "Telegram setup guide",
+	},
 	email: {
 		type: "email",
 		label: "Email",
@@ -163,11 +178,12 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accentOn: INK_ON_BRIGHT_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <EnvelopeIcon size={size} className={className} />,
 	},
-}
+} satisfies Record<AlertDestinationType, DestinationProvider>
 
 export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
 	"slack-bot",
 	"discord",
+	"telegram",
 	"email",
 	"pagerduty",
 	"webhook",

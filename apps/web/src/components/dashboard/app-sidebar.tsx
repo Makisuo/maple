@@ -57,6 +57,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
+import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 
 /**
  * A 2px lane is reserved on every row so icons share one vertical line whether
@@ -533,13 +534,25 @@ function FooterCluster() {
 	)
 }
 
+// The flag read lives in this small child rather than in `AppSidebar`: memo
+// gates props, not context, so a Clerk hook in the shell would subscribe the
+// whole sidebar to Clerk's provider and rerender it on every resource tick.
+// Confined here, a tick redraws only the nav groups — the subtree that already
+// redraws on every navigation.
+const SidebarNavGroups = memo(function SidebarNavGroups({ currentPath }: { currentPath: string }) {
+	// Fails closed while Clerk loads, so a flagged row arrives a beat late rather
+	// than flashing and vanishing — the trade `navGroups` documents.
+	const { flags } = useOrganizationFeatureFlags()
+	const groups = navGroups(flags)
+	return groups.map((group) => <NavGroupSection currentPath={currentPath} group={group} key={group.id} />)
+})
+
 // Memoized: DashboardLayout renders this inside every page, so without memo the
 // sidebar's ~500-fiber subtree rerenders on every page-level state change
 // (refresh version bumps, search-param updates, query settles). The selector
 // (instead of bare useRouterState) keeps it quiet during loader/pending ticks.
 export const AppSidebar = memo(function AppSidebar() {
 	const currentPath = useRouterState({ select: (s) => s.location.pathname })
-	const groups = navGroups()
 
 	return (
 		<Sidebar collapsible="icon">
@@ -548,9 +561,7 @@ export const AppSidebar = memo(function AppSidebar() {
 				<SearchRow />
 			</SidebarHeader>
 			<SidebarContent>
-				{groups.map((group) => (
-					<NavGroupSection currentPath={currentPath} group={group} key={group.id} />
-				))}
+				<SidebarNavGroups currentPath={currentPath} />
 				<PinnedGroup currentPath={currentPath} />
 			</SidebarContent>
 			{/* The rule belongs between Settings and the account cluster, not above

@@ -53,6 +53,10 @@ const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
 const ENV_FINGERPRINT_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const ACTIONABLE_WORKFLOW_STATES: ReadonlyArray<WorkflowState> = [
 	"triage",
+	// A fix that did not hold is the most actionable state there is; omitting it
+	// would hide exactly the issues that most need attention from the open-issue
+	// lists and the per-service open counts.
+	"regressed",
 	"todo",
 	"in_progress",
 	"in_review",
@@ -77,7 +81,7 @@ const severitySortRank = (severity: IssueSeverity | null): number =>
 		Match.exhaustive,
 	)
 
-export interface ErrorIssueReadModelsPublicShape {
+export interface ErrorIssueReadModelsPublicApi {
 	readonly listIssues: (
 		orgId: OrgId,
 		opts: {
@@ -85,6 +89,9 @@ export interface ErrorIssueReadModelsPublicShape {
 			readonly severity?: IssueSeverity | "unset"
 			readonly kind?: IssueKind
 			readonly service?: string
+			/** Restrict to these fingerprint hashes (volume-ranked lists ask for an
+			 *  explicit set). An empty array matches nothing, as it should. */
+			readonly fingerprintHashes?: ReadonlyArray<string>
 			/** Only issues whose fingerprint the warehouse observed in this
 			 * deployment environment (within startTime/endTime, defaulting to the
 			 * trailing 30d). Costs one warehouse round-trip; excludes alert-kind
@@ -129,10 +136,10 @@ export interface ErrorIssueReadModelsPublicShape {
 	) => Effect.Effect<ErrorIncidentsListResponse, ErrorPersistenceError>
 }
 
-export type ErrorIssueReadModelsServiceShape = ErrorIssueReadModelsPublicShape
+export type ErrorIssueReadModelsServiceApi = ErrorIssueReadModelsPublicApi
 
 const make: Effect.Effect<
-	ErrorIssueReadModelsServiceShape,
+	ErrorIssueReadModelsServiceApi,
 	never,
 	Database | WarehouseQueryService | ErrorIssueWorkflowService
 > = Effect.gen(function* () {
@@ -161,7 +168,7 @@ const make: Effect.Effect<
 			occurrenceCount: row.occurrenceCount,
 		})
 
-	const listIssues: ErrorIssueReadModelsServiceShape["listIssues"] = Effect.fn("ErrorsService.listIssues")(
+	const listIssues: ErrorIssueReadModelsServiceApi["listIssues"] = Effect.fn("ErrorsService.listIssues")(
 		function* (orgId, opts) {
 			const sort = opts.sort ?? "last_seen"
 			yield* Effect.annotateCurrentSpan({
@@ -169,7 +176,7 @@ const make: Effect.Effect<
 				workflowState: opts.workflowState ?? "all",
 				limit: opts.limit ?? 100,
 				sort,
-				...(opts.deploymentEnv ? { deploymentEnv: opts.deploymentEnv } : {}),
+				...(opts.deploymentEnv ? { deploymentEnv: opts.deploymentEnv } : undefined),
 			})
 			const conditions = [eq(errorIssues.orgId, orgId)]
 			if (opts.workflowState) conditions.push(eq(errorIssues.workflowState, opts.workflowState))
@@ -179,6 +186,8 @@ const make: Effect.Effect<
 			else if (opts.severity) conditions.push(eq(errorIssues.severity, opts.severity))
 			if (opts.kind) conditions.push(eq(errorIssues.kind, opts.kind))
 			if (opts.service) conditions.push(eq(errorIssues.serviceName, opts.service))
+			if (opts.fingerprintHashes !== undefined)
+				conditions.push(inArray(errorIssues.fingerprintHash, opts.fingerprintHashes))
 
 			// `""` is a real filter (raw spans without a deployment env), so check
 			// for undefined rather than truthiness.
@@ -290,7 +299,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	const countOpenIssuesByService: ErrorIssueReadModelsServiceShape["countOpenIssuesByService"] = Effect.fn(
+	const countOpenIssuesByService: ErrorIssueReadModelsServiceApi["countOpenIssuesByService"] = Effect.fn(
 		"ErrorsService.countOpenIssuesByService",
 	)(function* (orgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -316,7 +325,7 @@ const make: Effect.Effect<
 		return counts
 	})
 
-	const getIssue: ErrorIssueReadModelsServiceShape["getIssue"] = Effect.fn("ErrorsService.getIssue")(
+	const getIssue: ErrorIssueReadModelsServiceApi["getIssue"] = Effect.fn("ErrorsService.getIssue")(
 		function* (orgId, issueId, opts) {
 			yield* Effect.annotateCurrentSpan({ orgId, issueId })
 			const issueRow = yield* workflow.requireIssue(orgId, issueId)
@@ -400,7 +409,7 @@ const make: Effect.Effect<
 		},
 	)
 
-	const listIssueIncidents: ErrorIssueReadModelsServiceShape["listIssueIncidents"] = Effect.fn(
+	const listIssueIncidents: ErrorIssueReadModelsServiceApi["listIssueIncidents"] = Effect.fn(
 		"ErrorsService.listIssueIncidents",
 	)(function* (orgId, issueId) {
 		yield* Effect.annotateCurrentSpan({ orgId, issueId })
@@ -419,7 +428,7 @@ const make: Effect.Effect<
 		})
 	})
 
-	const listOpenIncidents: ErrorIssueReadModelsServiceShape["listOpenIncidents"] = Effect.fn(
+	const listOpenIncidents: ErrorIssueReadModelsServiceApi["listOpenIncidents"] = Effect.fn(
 		"ErrorsService.listOpenIncidents",
 	)(function* (orgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -448,7 +457,7 @@ const make: Effect.Effect<
 
 export class ErrorIssueReadModelsService extends Context.Service<
 	ErrorIssueReadModelsService,
-	ErrorIssueReadModelsServiceShape
+	ErrorIssueReadModelsServiceApi
 >()("@maple/api/services/errors/ErrorIssueReadModelsService", { make }) {
 	static readonly layer = Layer.effect(this, this.make)
 }

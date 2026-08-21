@@ -1,8 +1,10 @@
 import { Clock, Effect, Schema } from "effect"
 import {
 	QueryEngineExecuteRequest,
+	coerceServiceOverviewRows,
 	formatWarehouseDateTime,
 	parseWarehouseDateTime,
+	windowDurationSeconds,
 } from "@maple/query-engine"
 import {
 	CommitSha,
@@ -21,8 +23,6 @@ import {
 	toIsoBucket,
 	trimSparseLeadingBuckets,
 } from "@/api/warehouse/timeseries-utils"
-import { summarizeSampling } from "@/lib/sampling"
-import { resolveThroughput } from "@/api/warehouse/custom-charts"
 import {
 	WarehouseDateTimeString,
 	decodeInput,
@@ -34,31 +34,15 @@ import {
 // Date format: "YYYY-MM-DD HH:mm:ss" (Tinybird/ClickHouse compatible)
 const dateTimeString = WarehouseDateTimeString
 
-// Service overview types
-export interface CommitBreakdown {
-	commitSha: string
-	spanCount: number
-	percentage: number
-	errorCount: number
-	/** Earliest span for this commit inside the queried window ("" when unknown). */
-	firstSeen: string
-}
-
-export interface ServiceOverview {
-	serviceName: string
-	serviceNamespace: string
-	environment: string
-	commits: CommitBreakdown[]
-	p50LatencyMs: number
-	p95LatencyMs: number
-	p99LatencyMs: number
-	errorRate: number
-	throughput: number
-	tracedThroughput: number
-	hasSampling: boolean
-	samplingWeight: number
-	spanCount: number
-}
+// Service overview types and row shaping live in `@maple/query-engine`
+// (`route-rows.ts`) so the share API's `service_overview` plan produces the same
+// per-second, sampling-corrected rows this function does. Re-exported here for
+// the existing imports.
+export {
+	type CommitBreakdown,
+	type ServiceOverview,
+	coerceServiceOverviewRows as coerceOverviewRows,
+} from "@maple/query-engine"
 
 const GetServiceOverviewInput = Schema.Struct({
 	startTime: Schema.optional(dateTimeString),
@@ -69,80 +53,6 @@ const GetServiceOverviewInput = Schema.Struct({
 })
 
 export type GetServiceOverviewInput = (typeof GetServiceOverviewInput)["Encoded"]
-
-/**
- * ClickHouse serializes `tuple(...)` as a positional array in `FORMAT JSON`:
- * `[sha, spanCount, errorCount, firstSeen]`.
- */
-type RawCommitTuple = readonly [unknown, unknown, unknown, unknown]
-
-const isCommitTuple = (value: unknown): value is RawCommitTuple => Array.isArray(value) && value.length === 4
-
-/**
- * One services-list row, already collapsed to (service, environment) by
- * `serviceOverviewQuery`.
- *
- * There used to be a re-aggregation step here — the server returned one row per
- * (service, namespace, env, commit) and the client regrouped them, taking a
- * span-count-weighted MEAN of p50/p95/p99. A weighted mean of quantiles is not a
- * quantile. The tDigest states live in ClickHouse, so the merge happens there
- * now and this is a straight decode.
- *
- * `resolveThroughput` / `summarizeSampling` stay here: they need the window
- * duration, which is a property of the request rather than of the row.
- */
-export function coerceRow(raw: Record<string, unknown>, durationSeconds: number): ServiceOverview {
-	const spanCount = Number(raw.spanCount ?? 0)
-	const errorCount = Number(raw.errorCount ?? 0)
-	const estimatedSpanCount = Number(raw.estimatedSpanCount ?? 0)
-	const estimatedErrorCount = raw.estimatedErrorCount == null ? undefined : Number(raw.estimatedErrorCount)
-
-	const resolvedCount = resolveThroughput(spanCount, estimatedSpanCount, undefined)
-	const sampling = summarizeSampling(resolvedCount, spanCount, durationSeconds)
-
-	const rawCommits = Array.isArray(raw.commits) ? raw.commits : []
-	const commits: CommitBreakdown[] = rawCommits.filter(isCommitTuple).map((tuple) => {
-		const commitSpanCount = Number(tuple[1] ?? 0)
-		return {
-			commitSha: String(tuple[0] ?? "N/A"),
-			spanCount: commitSpanCount,
-			percentage: spanCount > 0 ? Math.round((commitSpanCount / spanCount) * 100) : 0,
-			errorCount: Number(tuple[2] ?? 0),
-			firstSeen: String(tuple[3] ?? ""),
-		}
-	})
-
-	return {
-		serviceName: String(raw.serviceName ?? ""),
-		serviceNamespace: String(raw.serviceNamespace ?? ""),
-		environment: String(raw.environment ?? "unknown"),
-		commits,
-		p50LatencyMs: Number(raw.p50LatencyMs ?? 0),
-		p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
-		p99LatencyMs: Number(raw.p99LatencyMs ?? 0),
-		// Prefer the sampling-corrected ratio; fall back to the raw one when the
-		// weighted error count is absent.
-		errorRate:
-			estimatedErrorCount != null && Number.isFinite(estimatedErrorCount) && estimatedSpanCount > 0
-				? estimatedErrorCount / estimatedSpanCount
-				: spanCount > 0
-					? errorCount / spanCount
-					: 0,
-		throughput: sampling.hasSampling ? sampling.estimated : sampling.traced,
-		tracedThroughput: sampling.traced,
-		hasSampling: sampling.hasSampling,
-		samplingWeight: sampling.weight,
-		spanCount,
-	}
-}
-
-/** Rows arrive pre-sorted by throughput from the query's `ORDER BY`. */
-export function coerceOverviewRows(
-	rows: ReadonlyArray<Record<string, unknown>>,
-	durationSeconds: number,
-): ServiceOverview[] {
-	return rows.map((row) => coerceRow(row, durationSeconds))
-}
 
 export function getServiceOverview({ data }: { data: GetServiceOverviewInput }) {
 	return getServiceOverviewEffect({ data })
@@ -160,7 +70,8 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 	const endTime = input.endTime ?? fallback.endTime
 
 	// Throughput resolves from the env-scoped sum(SampleRate) estimate (see
-	// `coerceRow`). The SpanMetrics `calls` counter is deliberately NOT consulted
+	// `coerceServiceOverviewRow` in `@maple/query-engine`). The SpanMetrics
+	// `calls` counter is deliberately NOT consulted
 	// here: it's service-level and all-environment (it can't be filtered by
 	// `DeploymentEnv`), so on these per-environment rows it would over-report and
 	// disagree with the env-scoped detail page.
@@ -179,12 +90,8 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 		}),
 	)
 
-	const startMs = input.startTime ? parseWarehouseDateTime(input.startTime) : 0
-	const endMs = input.endTime ? parseWarehouseDateTime(input.endTime) : 0
-	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
-
 	return {
-		data: coerceOverviewRows(result.data, durationSeconds),
+		data: coerceServiceOverviewRows(result.data, windowDurationSeconds(input.startTime, input.endTime)),
 	}
 })
 

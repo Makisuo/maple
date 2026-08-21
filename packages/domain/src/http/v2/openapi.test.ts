@@ -32,22 +32,26 @@ const spec = OpenApi.fromApi(MapleApiV2)
 // The generated document carries fields (info.contact, top-level externalDocs,
 // security bearerFormat, schema examples) beyond the pruned `OpenAPISpec` type,
 // so read the dynamic bits through an untyped view.
-const doc = spec as unknown as Record<string, any>
-const schemas = doc.components.schemas as Record<string, any>
-const operation = (method: string, path: string): Record<string, any> =>
-	(spec.paths as Record<string, any>)[path][method]
-const resolveSchema = (schema: Record<string, any>): Record<string, any> => {
+// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type, maple/no-record-string-any, typescript/no-explicit-any -- Effect's public OpenAPI type intentionally omits generated extension fields asserted by this contract test.
+type GeneratedOpenApiObject = Record<string, any>
+const doc = spec as GeneratedOpenApiObject
+const schemas = doc.components.schemas as GeneratedOpenApiObject
+const operation = (method: string, path: string): GeneratedOpenApiObject =>
+	(spec.paths as GeneratedOpenApiObject)[path][method]
+const resolveSchema = (schema: GeneratedOpenApiObject): GeneratedOpenApiObject => {
 	const ref = schema.$ref as string | undefined
 	return ref === undefined ? schema : schemas[ref.slice(ref.lastIndexOf("/") + 1)]
 }
-const schemaBranches = (schema: Record<string, any>): ReadonlyArray<Record<string, any>> => {
+const schemaBranches = (schema: GeneratedOpenApiObject): ReadonlyArray<GeneratedOpenApiObject> => {
 	const resolved = resolveSchema(schema)
-	const alternatives = (resolved.anyOf ?? resolved.oneOf) as ReadonlyArray<Record<string, any>> | undefined
+	const alternatives = (resolved.anyOf ?? resolved.oneOf) as
+		| ReadonlyArray<GeneratedOpenApiObject>
+		| undefined
 	return alternatives === undefined ? [resolved] : alternatives.flatMap(schemaBranches)
 }
 const responseErrorTags = (method: string, path: string, status: string): ReadonlyArray<string> => {
-	const response = operation(method, path).responses[status] as Record<string, any>
-	const responseSchema = response.content["application/json"].schema as Record<string, any>
+	const response = operation(method, path).responses[status] as GeneratedOpenApiObject
+	const responseSchema = response.content["application/json"].schema as GeneratedOpenApiObject
 	return schemaBranches(responseSchema).map((branch) => {
 		const tag = resolveSchema(branch).properties.error.properties._tag
 		expect(tag.type).toBe("string")
@@ -88,8 +92,12 @@ describe("MapleApiV2 OpenAPI", () => {
 			"DELETE /v2/api_keys/{id}",
 			"DELETE /v2/attribute_mappings/{id}",
 			"DELETE /v2/dashboards/{id}",
+			"DELETE /v2/dashboards/{id}/share",
+			"DELETE /v2/dashboards/{id}/widgets/{widget_id}/share",
 			"DELETE /v2/integrations/planetscale",
 			"DELETE /v2/integrations/slack",
+			"DELETE /v2/mobile_devices/{token}",
+			"DELETE /v2/mobile_devices/{token}/live_activities/{incident_id}",
 			"DELETE /v2/scrape_targets/{id}",
 			"GET /v2/alerts/deliveries",
 			"GET /v2/alerts/destinations",
@@ -112,8 +120,11 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/dashboards",
 			"GET /v2/dashboards/templates",
 			"GET /v2/dashboards/{id}",
+			"GET /v2/dashboards/{id}/share",
+			"GET /v2/dashboards/{id}/shares",
 			"GET /v2/dashboards/{id}/versions",
 			"GET /v2/dashboards/{id}/versions/{version_id}",
+			"GET /v2/dashboards/{id}/widgets/{widget_id}/share",
 			"GET /v2/error_issues",
 			"GET /v2/error_issues/service_counts",
 			"GET /v2/error_issues/{id}",
@@ -130,6 +141,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/investigations/{id}",
 			"GET /v2/logs/{id}",
 			"GET /v2/metrics",
+			"GET /v2/mobile_devices",
 			"GET /v2/organization",
 			"GET /v2/scrape_targets",
 			"GET /v2/scrape_targets/{id}",
@@ -150,6 +162,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"PATCH /v2/dashboards/{id}",
 			"PATCH /v2/scrape_targets/{id}",
 			"POST /v2/alerts/destinations",
+			"POST /v2/alerts/destinations/telegram/chats",
 			"POST /v2/alerts/destinations/{id}/test",
 			"POST /v2/alerts/rules",
 			"POST /v2/alerts/rules/preview",
@@ -162,7 +175,9 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/dashboards/import/perses",
 			"POST /v2/dashboards/templates/{template_id}/instantiate",
 			"POST /v2/dashboards/templates/{template_id}/preview",
+			"POST /v2/dashboards/{id}/share/rotate",
 			"POST /v2/dashboards/{id}/versions/{version_id}/restore",
+			"POST /v2/dashboards/{id}/widgets/{widget_id}/share/rotate",
 			"POST /v2/ingest_keys/private/roll",
 			"POST /v2/ingest_keys/public/roll",
 			"POST /v2/instrumentation/recommendations/{id}/dismiss",
@@ -185,10 +200,19 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/scrape_targets/{id}/probe",
 			"POST /v2/session_replays/for_trace",
 			"POST /v2/session_replays/search",
+			"POST /v2/share/alert-chart",
+			"POST /v2/share/og-card",
+			"POST /v2/share/og-meta",
+			"POST /v2/share/resolve",
+			"POST /v2/share/widget-data",
 			"POST /v2/traces/breakdown",
 			"POST /v2/traces/search",
 			"POST /v2/traces/timeseries",
 			"PUT /v2/anomalies/incidents/{id}/issue",
+			"PUT /v2/dashboards/{id}/share",
+			"PUT /v2/dashboards/{id}/widgets/{widget_id}/share",
+			"PUT /v2/mobile_devices/{token}",
+			"PUT /v2/mobile_devices/{token}/live_activities/{incident_id}",
 		])
 	})
 
@@ -210,6 +234,40 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(tag?.description).toEqual(expect.stringContaining("Programmatic credentials"))
 	})
 
+	/**
+	 * Operations served without a bearer credential.
+	 *
+	 * An allowlist by operationId, not a path prefix or a group check: the point
+	 * is that a further unauthenticated operation cannot appear in this API
+	 * without someone editing this constant. Share links are the only case — the
+	 * token in the request body *is* the credential, and requiring a bearer
+	 * alongside it would mean the link only worked for people who did not need it.
+	 *
+	 * The two OG operations are the same surface seen from the crawler side: one
+	 * is the page worker asking what tags to inline for a link, the other is the
+	 * preview image asking what to draw for a signed image id. Neither can be
+	 * bearer-authenticated, because the caller is a link preview.
+	 *
+	 * These still carry every other operation guarantee below, and every common
+	 * error envelope except `401`, which they cannot emit.
+	 */
+	const PUBLIC_OPERATION_IDS: ReadonlySet<string> = new Set([
+		"resolveShare",
+		"resolveShareWidgetData",
+		"resolveShareOgMeta",
+		"resolveShareOgCard",
+		"resolveAlertChart",
+	])
+
+	/**
+	 * The public operations that still *consult* a session when one is present,
+	 * which is what makes "wrong organization" an answer they can give.
+	 */
+	const SESSION_READING_PUBLIC_OPERATION_IDS: ReadonlySet<string> = new Set([
+		"resolveShare",
+		"resolveShareWidgetData",
+	])
+
 	it("gives every operation complete metadata, security, and common error envelopes", () => {
 		const operations = Object.entries(spec.paths ?? {}).flatMap(([path, item]) =>
 			Object.entries(item ?? {})
@@ -225,14 +283,28 @@ describe("MapleApiV2 OpenAPI", () => {
 			expect(op.summary.length).toBeGreaterThan(0)
 			expect(op.description.length).toBeGreaterThan(20)
 			expect(op.tags).toHaveLength(1)
-			expect(op.security).toEqual([{ bearer: [] }])
-			for (const status of ["400", "401", "403", "429", "500", "504"]) {
+			const isPublic = PUBLIC_OPERATION_IDS.has(op.operationId)
+			expect(op.security, `${op.operationId} security`).toEqual(isPublic ? [] : [{ bearer: [] }])
+			// 401 and 403 describe a credential being rejected, so an operation only
+			// declares them if presenting one can change its answer. Every authed
+			// operation can; among the public ones, only the two that read an
+			// optional session to decide whether an org-only link opens. The OG
+			// operations answer a link preview, which has no credential to present
+			// and no way to acquire one, so for them those statuses would be
+			// unreachable documentation.
+			const readsSession = SESSION_READING_PUBLIC_OPERATION_IDS.has(op.operationId)
+			const commonStatuses = !isPublic
+				? ["400", "401", "403", "429", "500", "504"]
+				: readsSession
+					? ["400", "403", "429", "500", "504"]
+					: ["400", "429", "500", "504"]
+			for (const status of commonStatuses) {
 				expect(
 					op.responses[status],
 					`${method.toUpperCase()} ${path} declares ${status}`,
 				).toBeDefined()
 			}
-			const rateLimitResponse = op.responses["429"] as Record<string, any>
+			const rateLimitResponse = op.responses["429"] as GeneratedOpenApiObject
 			expect(rateLimitResponse.headers?.["Retry-After"]).toMatchObject({
 				description: expect.any(String),
 				schema: {
@@ -325,7 +397,6 @@ describe("MapleApiV2 OpenAPI", () => {
 	})
 
 	it("documents the Phase-1 resource schemas with decodable wire examples", () => {
-		type ObjectDecoder = (input: unknown) => { readonly object: string }
 		const cases = [
 			["Investigation", Schema.decodeUnknownSync(V2Investigation), "investigation"],
 			["AnomalyIncident", Schema.decodeUnknownSync(V2AnomalyIncident), "anomaly_incident"],
@@ -338,7 +409,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			["Organization", Schema.decodeUnknownSync(V2Organization), "organization"],
 			["SessionReplayListItem", Schema.decodeUnknownSync(V2SessionReplayListItem), "session_replay"],
 			["SessionReplay", Schema.decodeUnknownSync(V2SessionReplay), "session_replay"],
-		] satisfies ReadonlyArray<readonly [string, ObjectDecoder, string]>
+		] as const
 		for (const [name, decode, objectType] of cases) {
 			const component = schemas[name]
 			expect(component, `component ${name} present`).toBeDefined()
@@ -440,6 +511,9 @@ describe("MapleApiV2 OpenAPI", () => {
 		const adminTags = [
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		]
 		expect([...responseErrorTags("post", "/v2/integrations/slack/install", "403")].sort()).toEqual(
 			adminTags,
@@ -454,6 +528,9 @@ describe("MapleApiV2 OpenAPI", () => {
 		// for every member, so its 403 comes from the scope middleware alone.
 		expect(responseErrorTags("get", "/v2/integrations/slack", "403")).toEqual([
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 	})
 
@@ -461,14 +538,14 @@ describe("MapleApiV2 OpenAPI", () => {
 		for (const [path, item] of Object.entries(spec.paths ?? {})) {
 			for (const [method, candidate] of Object.entries(item ?? {})) {
 				if (!["get", "post", "put", "patch", "delete"].includes(method)) continue
-				const op = candidate as Record<string, any>
+				const op = candidate as GeneratedOpenApiObject
 				for (const status of Object.keys(op.responses)) {
 					if (Number(status) < 400) continue
-					const response = (candidate as Record<string, any>).responses[status] as Record<
-						string,
-						any
-					>
-					const responseSchema = response.content["application/json"].schema as Record<string, any>
+					const response = (candidate as GeneratedOpenApiObject).responses[
+						status
+					] as GeneratedOpenApiObject
+					const responseSchema = response.content["application/json"]
+						.schema as GeneratedOpenApiObject
 					const branches = schemaBranches(responseSchema)
 					const tags = responseErrorTags(method, path, status)
 					expect(tags.length, `${method.toUpperCase()} ${path} ${status} has tags`).toBeGreaterThan(
@@ -485,7 +562,7 @@ describe("MapleApiV2 OpenAPI", () => {
 					}
 					for (const branch of branches) {
 						const envelope = resolveSchema(branch)
-						const body = envelope.properties.error as Record<string, any>
+						const body = envelope.properties.error as GeneratedOpenApiObject
 						const label = `${method.toUpperCase()} ${path} ${status}`
 						expect(envelope.required, `${label} envelope fields`).toEqual(["error"])
 						expect(envelope.additionalProperties, `${label} envelope is closed`).toBe(false)
@@ -558,10 +635,16 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(responseErrorTags("post", "/v2/api_keys", "403")).toEqual([
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 		expect(responseErrorTags("get", "/v2/ingest_keys", "403")).toEqual([
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 	})
 
@@ -945,6 +1028,124 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(bearer.scheme).toBe("Bearer")
 		expect(bearer.description).toContain("maple_ak_")
 		expect(bearer.bearerFormat.length).toBeGreaterThan(0)
+	})
+
+	/**
+	 * `Schema.optional(X)` is `optionalKey(UndefinedOr(X))`, and Effect's
+	 * JSON-Schema renderer emits `{type: "null"}` for the `Undefined` keyword just
+	 * as it does for `Null`. Left alone, every optional query parameter published
+	 * `anyOf: [X, {type: "null"}]` while the decoder rejected a present `null`.
+	 * `collapseQueryParameterNullBranches` removes that branch — see
+	 * `openapi-nullable.ts` for why the collapse stops at query parameters.
+	 */
+	describe("nullable-union rendering", () => {
+		const queryParameters = (): ReadonlyArray<GeneratedOpenApiObject> =>
+			Object.values(spec.paths as GeneratedOpenApiObject).flatMap((item) =>
+				Object.entries(item as GeneratedOpenApiObject)
+					.filter(([method]) => method !== "parameters")
+					.flatMap(([, operation]) =>
+						((operation as GeneratedOpenApiObject).parameters ?? []).filter(
+							(parameter: GeneratedOpenApiObject) => parameter.in === "query",
+						),
+					),
+			)
+
+		const hasNullBranch = (schema: GeneratedOpenApiObject): boolean => {
+			const resolved = resolveSchema(schema)
+			const members = resolved.anyOf as ReadonlyArray<GeneratedOpenApiObject> | undefined
+			return members?.some((member) => resolveSchema(member).type === "null") === true
+		}
+
+		it("publishes no query parameter that accepts null", () => {
+			const parameters = queryParameters()
+			expect(parameters.length).toBeGreaterThan(0)
+			const nullable = parameters
+				.filter((parameter) => hasNullBranch(parameter.schema as GeneratedOpenApiObject))
+				.map((parameter) => parameter.name as string)
+			expect(nullable).toEqual([])
+		})
+
+		/**
+		 * The collapse is only sound while no query field is a real `Schema.NullOr`,
+		 * which renders identically. This asserts it against the schema ASTs rather
+		 * than the document, because the document cannot tell the two apart — that
+		 * indistinguishability is exactly why the MCP-side blanket collapse could
+		 * not be reused here.
+		 */
+		it("declares no genuinely nullable query field", () => {
+			// SAFETY: `HttpApi` exposes no public reader for an endpoint's declared
+			// schemas, so the walk is structural. Every read below is optional-chained
+			// and the assertions are on the collected result, so a shape change in
+			// Effect surfaces as an empty walk failing the paired parameter test above,
+			// not as a throw here.
+			const readGroups = (api: unknown): GeneratedOpenApiObject =>
+				(api as GeneratedOpenApiObject).groups ?? {}
+			const record = (value: unknown): GeneratedOpenApiObject => (value as GeneratedOpenApiObject) ?? {}
+
+			const nullable: string[] = []
+			for (const [groupName, group] of Object.entries(readGroups(MapleApiV2))) {
+				for (const [endpointName, endpoint] of Object.entries(record(group).endpoints ?? {})) {
+					const ast = record(endpoint).query?.ast
+					for (const property of ast?.propertySignatures ?? []) {
+						const type = record(property).type
+						if (type?._tag !== "Union") continue
+						if (type.types.some((member: GeneratedOpenApiObject) => member?._tag === "Null")) {
+							nullable.push(`${groupName}.${endpointName}.${String(record(property).name)}`)
+						}
+					}
+				}
+			}
+			expect(nullable).toEqual([])
+		})
+
+		it("keeps the parameter's own documentation when it drops the null branch", () => {
+			const cursor = queryParameters().find((parameter) => parameter.name === "cursor")
+			expect(cursor?.schema).toMatchObject({
+				type: "string",
+				title: "Cursor",
+				examples: ["off_1k"],
+			})
+			expect(cursor?.required).toBe(false)
+			expect(cursor?.schema.description).toContain("next_cursor")
+		})
+
+		/**
+		 * The other half of the invariant: response and request-body fields declared
+		 * `Schema.NullOr` really do carry `null`, so narrowing them the way the MCP
+		 * registry narrows its tool inputs would publish a spec that rejects the
+		 * server's own output.
+		 */
+		it("leaves genuinely nullable body and response fields alone", () => {
+			for (const [schemaName, property] of [
+				["ApiKey", "description"],
+				["ApiKey", "revoked_at"],
+				["ApiKey", "expires_at"],
+				["ApiKeyList", "next_cursor"],
+			] as const) {
+				const field = (schemas[schemaName] as GeneratedOpenApiObject).properties[property]
+				expect(hasNullBranch(field as GeneratedOpenApiObject), `${schemaName}.${property}`).toBe(true)
+			}
+		})
+
+		it("carries no component left unreferenced by inlining a parameter schema", () => {
+			const referenced = new Set<string>()
+			const walk = (node: unknown): void => {
+				if (Array.isArray(node)) return node.forEach(walk)
+				if (node === null || typeof node !== "object") return
+				const object = node as GeneratedOpenApiObject
+				const ref = object.$ref as string | undefined
+				if (ref !== undefined) {
+					const name = ref.slice(ref.lastIndexOf("/") + 1)
+					if (!referenced.has(name)) {
+						referenced.add(name)
+						walk(schemas[name])
+					}
+				}
+				Object.values(object).forEach(walk)
+			}
+			walk(spec.paths)
+			expect(Object.keys(schemas).filter((name) => !referenced.has(name))).toEqual([])
+		})
 	})
 
 	it("documents every static error policy field as a literal", () => {

@@ -2,11 +2,8 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SetupAuditUnavailableError } from "../../setup-audit"
 import { AuthorizationV2 } from "./auth"
-import { Timestamp } from "./envelopes"
+import { wireExample, Timestamp } from "./envelopes"
 import { publicError } from "./public-error"
-
-/** See api-keys.ts: examples are authored in wire (encoded) shape. */
-const wireExample = <A>(example: object): A => example as A
 
 export const V2SetupAuditAffectedEntity = Schema.Struct({
 	kind: Schema.Literals([

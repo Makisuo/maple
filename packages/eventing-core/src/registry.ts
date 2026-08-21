@@ -11,6 +11,7 @@ import { SignalProjectionSpecSchema } from "./model"
 import { timestampToEpochNanos, compileSignalPredicate, validateSignalProjectionSpec } from "./predicate"
 import { SignalSourceRegistry, validatePredicateAgainstSource } from "./source"
 
+// BOUNDARY: projector codecs intentionally own decoding of untrusted configuration and output values.
 export interface SignalProjector<TConfig = unknown, TData extends JsonValue = JsonValue> {
 	readonly id: string
 	readonly version: number
@@ -38,7 +39,19 @@ export class ProjectorRegistry {
 			throw new Error("projector data schema must not be empty")
 		const key = ProjectorRegistry.key(projector.id, projector.version)
 		if (this.#projectors.has(key)) throw new Error(`duplicate projector registration: ${key}`)
-		this.#projectors.set(key, projector as unknown as ErasedSignalProjector)
+		this.#projectors.set(key, {
+			id: projector.id,
+			version: projector.version,
+			sourceKinds: projector.sourceKinds,
+			outputType: projector.outputType,
+			dataSchema: projector.dataSchema,
+			decodeConfig: projector.decodeConfig,
+			decodeOutput: projector.decodeOutput,
+			project: (signal, config) => {
+				// SAFETY: compiled projections pass only the value returned by this projector's decodeConfig.
+				return projector.project(signal, config as TConfig)
+			},
+		})
 		return this
 	}
 

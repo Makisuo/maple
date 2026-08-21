@@ -1,8 +1,5 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { warehouseQueries } from "../warehouse-queries"
-import { Authorization } from "./current-tenant"
-import { warehouseHttpErrors } from "./warehouse-errors"
 
 export { UnauthorizedError } from "./current-tenant"
 
@@ -24,14 +21,3 @@ export class WarehouseQueryRequest extends Schema.Class<WarehouseQueryRequest>("
 export class WarehouseQueryResponse extends Schema.Class<WarehouseQueryResponse>("WarehouseQueryResponse")({
 	data: Schema.Array(Schema.Unknown),
 }) {}
-
-export class WarehouseApiGroup extends HttpApiGroup.make("warehouse")
-	.add(
-		HttpApiEndpoint.post("query", "/query", {
-			payload: WarehouseQueryRequest,
-			success: WarehouseQueryResponse,
-			error: warehouseHttpErrors,
-		}),
-	)
-	.prefix("/api/tinybird")
-	.middleware(Authorization) {}

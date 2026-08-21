@@ -56,29 +56,43 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 						tenant.orgId,
 						new CreateScrapeTargetRequest({
 							name: payload.name,
-							...(payload.url !== undefined ? { url: payload.url } : {}),
-							...(payload.target_type !== undefined ? { targetType: payload.target_type } : {}),
+							...(payload.url !== undefined ? { url: payload.url } : undefined),
+							...(payload.target_type !== undefined
+								? { targetType: payload.target_type }
+								: undefined),
 							...(payload.organization !== undefined
 								? { organization: payload.organization }
-								: {}),
+								: undefined),
 							...(payload.include_branches !== undefined
-								? { includeBranches: payload.include_branches }
-								: {}),
+								? {
+										includeBranches: payload.include_branches,
+									}
+								: undefined),
 							...(payload.exclude_branches !== undefined
-								? { excludeBranches: payload.exclude_branches }
-								: {}),
+								? {
+										excludeBranches: payload.exclude_branches,
+									}
+								: undefined),
 							...(payload.scrape_interval_seconds !== undefined
-								? { scrapeIntervalSeconds: payload.scrape_interval_seconds }
-								: {}),
-							...(payload.labels_json !== undefined ? { labelsJson: payload.labels_json } : {}),
-							...(payload.auth_type !== undefined ? { authType: payload.auth_type } : {}),
+								? {
+										scrapeIntervalSeconds: payload.scrape_interval_seconds,
+									}
+								: undefined),
+							...(payload.labels_json !== undefined
+								? { labelsJson: payload.labels_json }
+								: undefined),
+							...(payload.auth_type !== undefined
+								? { authType: payload.auth_type }
+								: undefined),
 							...(payload.service_name !== undefined
 								? { serviceName: payload.service_name }
-								: {}),
+								: undefined),
 							...(payload.auth_credentials !== undefined
-								? { authCredentials: payload.auth_credentials }
-								: {}),
-							...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
+								? {
+										authCredentials: payload.auth_credentials,
+									}
+								: undefined),
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : undefined),
 						}),
 					)
 
@@ -92,29 +106,41 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 						tenant.orgId,
 						params.id,
 						new UpdateScrapeTargetRequest({
-							...(payload.name !== undefined ? { name: payload.name } : {}),
-							...(payload.url !== undefined ? { url: payload.url } : {}),
+							...(payload.name !== undefined ? { name: payload.name } : undefined),
+							...(payload.url !== undefined ? { url: payload.url } : undefined),
 							...(payload.organization !== undefined
 								? { organization: payload.organization }
-								: {}),
+								: undefined),
 							...(payload.include_branches !== undefined
-								? { includeBranches: payload.include_branches }
-								: {}),
+								? {
+										includeBranches: payload.include_branches,
+									}
+								: undefined),
 							...(payload.exclude_branches !== undefined
-								? { excludeBranches: payload.exclude_branches }
-								: {}),
+								? {
+										excludeBranches: payload.exclude_branches,
+									}
+								: undefined),
 							...(payload.scrape_interval_seconds !== undefined
-								? { scrapeIntervalSeconds: payload.scrape_interval_seconds }
-								: {}),
-							...(payload.labels_json !== undefined ? { labelsJson: payload.labels_json } : {}),
-							...(payload.auth_type !== undefined ? { authType: payload.auth_type } : {}),
+								? {
+										scrapeIntervalSeconds: payload.scrape_interval_seconds,
+									}
+								: undefined),
+							...(payload.labels_json !== undefined
+								? { labelsJson: payload.labels_json }
+								: undefined),
+							...(payload.auth_type !== undefined
+								? { authType: payload.auth_type }
+								: undefined),
 							...(payload.service_name !== undefined
 								? { serviceName: payload.service_name }
-								: {}),
+								: undefined),
 							...(payload.auth_credentials !== undefined
-								? { authCredentials: payload.auth_credentials }
-								: {}),
-							...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
+								? {
+										authCredentials: payload.auth_credentials,
+									}
+								: undefined),
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : undefined),
 						}),
 					)
 
@@ -148,8 +174,12 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
 						service
 							.listChecks(tenant.orgId, params.id, {
-								...(query.since !== undefined ? { startTime: Date.parse(query.since) } : {}),
-								...(query.until !== undefined ? { endTime: Date.parse(query.until) } : {}),
+								...(query.since !== undefined
+									? { startTime: Date.parse(query.since) }
+									: undefined),
+								...(query.until !== undefined
+									? { endTime: Date.parse(query.until) }
+									: undefined),
 								limit,
 								offset,
 							})

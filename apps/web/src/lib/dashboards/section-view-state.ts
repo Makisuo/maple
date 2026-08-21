@@ -1,4 +1,4 @@
-import type { DashboardSection, DashboardWidget } from "@/components/dashboard-builder/types"
+import type { DashboardSection, SectionMembership } from "@maple/widgets/dashboard"
 
 // Per-viewer section view state, encoded in the URL.
 //
@@ -145,13 +145,13 @@ export interface ResolvedSectionView {
  */
 export function resolveSectionView(
 	sections: ReadonlyArray<DashboardSection>,
-	widgets: ReadonlyArray<DashboardWidget>,
+	// Only `id`, `sectionId` and `tabId` are read, so a redacted share widget
+	// resolves its groups exactly as a stored one does.
+	widgets: ReadonlyArray<{ readonly id: string } & SectionMembership>,
 	search: SectionViewSearch,
 ): ResolvedSectionView {
 	const target =
-		search.widget === undefined
-			? undefined
-			: widgets.find((widget) => widget.id === search.widget)
+		search.widget === undefined ? undefined : widgets.find((widget) => widget.id === search.widget)
 
 	const collapsed = new Set<string>()
 	const activeTabs = new Map<string, string>()

@@ -33,9 +33,55 @@ That single call:
   gzipping them with the native `CompressionStream`, and uploading to
   `POST /v1/sessionReplays/blob`. rrweb ships in a lazy code-split chunk loaded
   only once a session is sampled in, so a `sampleRate` below 1 costs the
-  unsampled visitors nothing beyond the ~8 kB gzipped base SDK;
+  unsampled visitors nothing beyond the base SDK (see [Bundle size](#bundle-size));
 - writes session metadata at start (`active`) and on page hide (`ended`),
-  including the trace ids observed during the session.
+  including the trace ids observed during the session;
+- captures uncaught errors and unhandled promise rejections as error spans, so
+  browser crashes reach Maple's error tracking.
+
+## Errors
+
+Every uncaught error and unhandled rejection becomes a span with status `Error`
+and an `exception` event, which is the shape Maple fingerprints — so browser
+crashes group beside your server-side errors instead of in a silo.
+
+Errors your app _catches_ never reach the global handlers, because catching them
+is what stops them. Report those explicitly:
+
+```ts
+try {
+	render()
+} catch (error) {
+	MapleBrowser.captureException(error, { name: "browser.render_error" })
+}
+```
+
+Opt out of the global handlers with `tracing: { captureErrors: false }` — worth
+doing only when another tracker already owns them, or the same crash is recorded
+twice.
+
+A cross-origin script reports to the browser as a bare `"Script error."` with no
+stack and no filename. Those are dropped rather than recorded: they all
+fingerprint to one contentless issue that buries the real ones. Add
+`crossorigin` to the script tag to get the real error instead.
+
+## Bundle size
+
+Bundled, minified and gzipped, as your bundler would ship it:
+
+|                  | gzipped | what it is                                                |
+| ---------------- | ------- | --------------------------------------------------------- |
+| **eager**        | ~32 kB  | every page load, before any sampling decision             |
+| ↳ our code alone | ~3.5 kB | the marginal cost if your app already ships OpenTelemetry |
+| **lazy**         | ~61 kB  | rrweb — downloaded only by sessions sampled into replay   |
+
+The eager figure is ~90% OpenTelemetry. If your app already uses the OTel web
+SDK, your bundler should dedupe it and you pay closer to the second row; if it
+doesn't dedupe, you will ship two copies, so pin matching versions.
+
+Run `bun run size` in this package for the current numbers. It fails past a
+budget, so a regression has to be argued for in review rather than discovered
+in production.
 
 ## Identifying users
 

@@ -26,7 +26,7 @@ const routedTo = (dataSource: WidgetDataSource): string =>
 /** The query arm's request-shaping fields, which v2 kept in the `params` bag. */
 const queryFields = (dataSource: WidgetDataSource): Record<string, unknown> => {
 	if (dataSource.kind !== "query") throw new Error(`expected a query source, got ${dataSource.kind}`)
-	const { kind: _kind, resultShape: _shape, transform: _transform, ...fields } = dataSource
+	const { kind: _kind, resultShape: _resultKind, transform: _transform, ...fields } = dataSource
 	return fields
 }
 
@@ -62,6 +62,7 @@ function makeState(): QueryBuilderWidgetState {
 		unit: "number",
 		legendPosition: "bottom",
 		seriesStatsEnabled: false,
+		pointsMode: "auto",
 		tableLimit: "",
 		listDataSource: "traces",
 		listWhereClause: "",
@@ -304,6 +305,40 @@ describe("histogram data shape routing", () => {
 	})
 })
 
+describe("heatmap palette default", () => {
+	const heatmapWidget = (heatmap?: { colorScale?: "amber" | "blues"; scaleType?: "linear" }) => ({
+		...makeWidget(),
+		visualization: "heatmap" as const,
+		display: heatmap === undefined ? {} : { heatmap },
+	})
+
+	it("leaves the palette unset when the widget never stored one", () => {
+		expect(toInitialState(heatmapWidget()).heatmapColorScale).toBeUndefined()
+	})
+
+	it("does not materialise a palette on Apply for an untouched widget", () => {
+		// The bug this guards: the rail seeded "blues" while the chart renders
+		// amber, so opening a pre-`colorScale` heatmap and pressing Apply repainted
+		// it blue without the user touching the palette control.
+		const widget = heatmapWidget()
+		const state = toInitialState(widget)
+		const display = buildWidgetDisplay(widget, state)
+		expect(display.heatmap?.colorScale).toBeUndefined()
+		expect(display.heatmap?.scaleType).toBe("linear")
+	})
+
+	it("writes the palette once the user picks one", () => {
+		const widget = heatmapWidget()
+		const state = { ...toInitialState(widget), heatmapColorScale: "blues" as const }
+		expect(buildWidgetDisplay(widget, state).heatmap?.colorScale).toBe("blues")
+	})
+
+	it("round-trips a stored palette", () => {
+		const widget = heatmapWidget({ colorScale: "amber" })
+		expect(buildWidgetDisplay(widget, toInitialState(widget)).heatmap?.colorScale).toBe("amber")
+	})
+})
+
 describe("display key ownership across type switches", () => {
 	it("replaces a stale chartId when switching a line chart to a pie", () => {
 		// The bug this guards: `...widget.display` carried `query-builder-line` into
@@ -475,5 +510,37 @@ describe("widget-builder series stats default", () => {
 		const widget = widgetWithPresentation({ legend: "visible", seriesStats: true })
 		const state = toInitialState(widget)
 		expect(buildWidgetDisplay(widget, state).chartPresentation?.seriesStats).toBe(true)
+	})
+})
+
+// Point dots: Auto is the ABSENCE of `showPoints`, so switching back to Auto has
+// to remove a previously pinned value rather than leave it in the spread.
+describe("widget-builder points mode", () => {
+	function widgetWithPresentation(
+		chartPresentation: DashboardWidget["display"]["chartPresentation"],
+	): DashboardWidget {
+		const widget = makeWidget()
+		return { ...widget, display: { ...widget.display, chartPresentation } }
+	}
+
+	it("reads absent / true / false as auto / always / never", () => {
+		expect(toInitialState(widgetWithPresentation({ legend: "visible" })).pointsMode).toBe("auto")
+		expect(toInitialState(widgetWithPresentation(undefined)).pointsMode).toBe("auto")
+		expect(
+			toInitialState(widgetWithPresentation({ legend: "visible", showPoints: true })).pointsMode,
+		).toBe("always")
+		expect(
+			toInitialState(widgetWithPresentation({ legend: "visible", showPoints: false })).pointsMode,
+		).toBe("never")
+	})
+
+	it("writes always / never as showPoints and drops the key for auto", () => {
+		const widget = widgetWithPresentation({ legend: "visible", showPoints: true })
+		const state = toInitialState(widget)
+		expect(
+			buildWidgetDisplay(widget, { ...state, pointsMode: "never" }).chartPresentation?.showPoints,
+		).toBe(false)
+		const auto = buildWidgetDisplay(widget, { ...state, pointsMode: "auto" }).chartPresentation
+		expect(auto).not.toHaveProperty("showPoints")
 	})
 })

@@ -1,3 +1,4 @@
+// SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 /**
  * Wire-level proof that OpenRouter calls are attributed and tagged.
  *

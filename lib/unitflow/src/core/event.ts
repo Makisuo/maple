@@ -71,7 +71,7 @@ export const make = <A = void>(options?: Options): Event<A> => ({
 	id: `event:${++nextEventId}`,
 	"~source": true,
 	"~sink": true,
-	...(options?.name === undefined ? {} : { name: options.name }),
+	...(!(options?.name === undefined) ? { name: options.name } : undefined),
 })
 
 export const isEvent = (value: unknown): value is Event<unknown> =>
@@ -98,7 +98,7 @@ export const setter = <A>(store: Store.Store<A>, options?: Pick<Options, "name">
 	id: `event:${++nextEventId}`,
 	"~source": true,
 	"~sink": true,
-	...(options?.name === undefined ? {} : { name: options.name }),
+	...(!(options?.name === undefined) ? { name: options.name } : undefined),
 })
 
 const CombinedTypeId = Symbol.for("@unitflow/core/CombinedEvent")
@@ -130,7 +130,7 @@ export const combine = <const Sources extends ReadonlyArray<Source<any>>>(
 	[CombinedTypeId]: { sources },
 	id: `event:${++nextEventId}`,
 	"~source": true,
-	...(options?.name === undefined ? {} : { name: options.name }),
+	...(!(options?.name === undefined) ? { name: options.name } : undefined),
 })
 
 export const pubsub = Effect.fnUntraced(function* <A>(

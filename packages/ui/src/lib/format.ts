@@ -205,7 +205,7 @@ export function formatErrorRate(rate: number): string {
  * Infer the bucket interval in seconds from consecutive data points.
  * Expects data with a `bucket` string timestamp field.
  */
-export function inferBucketSeconds(data: Array<{ bucket: string }>): number | undefined {
+export function inferBucketSeconds(data: ReadonlyArray<{ bucket: string }>): number | undefined {
 	if (data.length < 2) return undefined
 	const t0 = toEpochMs(data[0].bucket)
 	const t1 = toEpochMs(data[1].bucket)
@@ -230,7 +230,7 @@ export function parseBucketMs(value: unknown): number | null {
 /**
  * Infer the total time range in milliseconds from an array of data points with a `bucket` key.
  */
-export function inferRangeMs(data: Array<Record<string, unknown>>): number {
+export function inferRangeMs(data: ReadonlyArray<Record<string, unknown>>): number {
 	const bucketTimes = data
 		.map((row) => parseBucketMs(row.bucket))
 		.filter((value): value is number => value != null)
@@ -262,10 +262,12 @@ export function formatBucketLabel(
 	const includeSeconds = context.rangeMs <= 30 * 60 * 1000 && !includeDate
 
 	if (mode === "tooltip") {
+		// The tooltip header always carries the full date — ticks stay terse, but a
+		// hovered point should never make the reader work out which day it was.
 		return date.toLocaleString(undefined, {
-			year: includeDate ? "numeric" : undefined,
-			month: includeDate ? "short" : undefined,
-			day: includeDate ? "numeric" : undefined,
+			year: "numeric",
+			month: "short",
+			day: "numeric",
 			hour: "2-digit",
 			minute: "2-digit",
 			second: includeSeconds ? "2-digit" : undefined,
@@ -300,7 +302,7 @@ const bucketLabelMap: Record<number, string> = {
 	3600: "/h",
 	14400: "/4h",
 	86400: "/d",
-}
+} satisfies Record<number, string>
 
 /**
  * Map bucket interval seconds to a human-readable rate suffix.

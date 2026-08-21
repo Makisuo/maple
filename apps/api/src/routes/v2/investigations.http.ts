@@ -98,7 +98,7 @@ const toInternalSubject = (subject: V2InvestigationCreateSubject): Investigation
 				type: "incident",
 				incidentKind: subject.incident_kind,
 				incidentId: subject.incident_id,
-				...(subject.issue_id !== undefined ? { issueId: subject.issue_id } : {}),
+				...(subject.issue_id !== undefined ? { issueId: subject.issue_id } : undefined),
 			})
 		: new InvestigationFreeformSubject({
 				type: "freeform",
@@ -192,8 +192,8 @@ const logSubjectDecodeError = (error: InvestigationDataCorruptionError) =>
 			investigationId: error.investigationId,
 			field: error.field,
 			value: error.value,
-			...(error.incidentKind !== undefined ? { incidentKind: error.incidentKind } : {}),
-			...(error.incidentId !== undefined ? { incidentId: error.incidentId } : {}),
+			...(error.incidentKind !== undefined ? { incidentKind: error.incidentKind } : undefined),
+			...(error.incidentId !== undefined ? { incidentId: error.incidentId } : undefined),
 		}),
 	)
 
@@ -211,12 +211,16 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
 						service
 							.listInvestigations(tenant.orgId, {
-								...(query.status !== undefined ? { status: query.status } : {}),
-								...(query.issue_id !== undefined ? { issueId: query.issue_id } : {}),
+								...(query.status !== undefined ? { status: query.status } : undefined),
+								...(query.issue_id !== undefined ? { issueId: query.issue_id } : undefined),
 								...(query.incident_kind !== undefined
-									? { incidentKind: query.incident_kind }
-									: {}),
-								...(query.incident_id !== undefined ? { incidentId: query.incident_id } : {}),
+									? {
+											incidentKind: query.incident_kind,
+										}
+									: undefined),
+								...(query.incident_id !== undefined
+									? { incidentId: query.incident_id }
+									: undefined),
 								limit,
 								offset,
 							})
@@ -246,8 +250,10 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 						new InvestigationCreateRequest({
 							subject: toInternalSubject(payload.subject),
 							...(payload.snapshot !== undefined
-								? { snapshot: toInternalSnapshot(payload.snapshot) }
-								: {}),
+								? {
+										snapshot: toInternalSnapshot(payload.snapshot),
+									}
+								: undefined),
 						}),
 					)
 

@@ -31,6 +31,7 @@ import type { TemplateParameterValues, WidgetDef } from "@/dashboard-templates"
 import { validateDashboardTimeRange } from "@/mcp/lib/resolve-dashboard-time-range"
 import { MAX_LIST_RANGE_SECONDS, MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
 import { makeRouteDataSource } from "@maple/widgets/dashboard"
+import { collectDocumentRenderWarnings } from "@/mcp/lib/validate-widget-renderability"
 
 const decodePortableDashboard = Schema.decodeUnknownEffect(PortableDashboardDocument)
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
@@ -49,7 +50,7 @@ const VALID_GROUP_BY: Record<string, readonly string[]> = {
 	traces: ["service.name", "span.name", "status.code", "http.method", "none"],
 	logs: ["service.name", "severity", "none"],
 	metrics: ["service.name", "none"],
-}
+} satisfies Record<string, readonly string[]>
 
 function validateGroupBy(rawGroupBy: string, source: string, widgetTitle: string): string | null {
 	const validOptions = VALID_GROUP_BY[source] ?? []
@@ -137,10 +138,10 @@ function simpleSpecToWidget(
 		whereClause: where,
 		groupBy,
 		metricName: spec.metric_name,
-		...(metricType === null || metricType === undefined ? {} : { metricType }),
+		...(!(metricType === null || metricType === undefined) ? { metricType } : undefined),
 	})
 
-	const display: Record<string, unknown> = { title: spec.title }
+	const display: Record<string, unknown> = { title: spec.title } satisfies Record<string, unknown>
 	display.unit = spec.unit ?? inferUnit(metric)
 
 	if (viz === "table") {
@@ -174,7 +175,7 @@ function simpleSpecToWidget(
 				id,
 				visualization: viz,
 				dataSource: makeRouteDataSource("list_logs", {
-					...(spec.service_name && { service: spec.service_name }),
+					...(spec.service_name ? { service: spec.service_name } : undefined),
 					limit: 10,
 				}),
 				display: { title: spec.title, listDataSource: "logs", listLimit: 10 },
@@ -185,7 +186,7 @@ function simpleSpecToWidget(
 			id,
 			visualization: viz,
 			dataSource: makeRouteDataSource("list_traces", {
-				...(spec.service_name && { service: spec.service_name }),
+				...(spec.service_name ? { service: spec.service_name } : undefined),
 				limit: 10,
 			}),
 			display: { title: spec.title, listDataSource: "traces", listLimit: 10 },
@@ -200,7 +201,7 @@ function simpleSpecToWidget(
 		// dashboard that did not go through the query builder — and so the only one
 		// `collectBlockingBuilderWarnings` could never inspect.
 		//
-		// `custom_query_builder_timeseries` returns wide rows (`{ bucket, <series>:
+		// A timeseries query source returns wide rows (`{ bucket, <series>:
 		// value }`), which `reduceToValue` reads directly — no flattening. Naming
 		// the series after the widget title is a best effort; `resolveField` falls
 		// back to the first numeric column, which for a single-query stat is the
@@ -293,19 +294,15 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 
 	server.tool(
 		"create_dashboard",
-		"Create a dashboard from a template, simplified widget specs, or custom JSON.\n\n" +
+		// Kept deliberately short: this is routing information — which of the three
+		// modes to use — not a schema reference. The per-parameter descriptions carry
+		// the shapes, and `describe_dashboard_schema` carries the full vocabulary.
+		"Create a dashboard one of three ways: from a `template`, from simplified `widgets` specs, or from full `dashboard_json`.\n\n" +
 			"Templates:\n" +
 			templateList +
-			"\n  custom — provide dashboard_json with full widget definitions\n\n" +
-			"Each template accepts optional service_name (for app templates) or its own params (see list_dashboard_templates).\n\n" +
-			"Simplified widgets (provide name + widgets JSON array, same params as query_data):\n" +
-			'  Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }\n' +
-			"  group_by: traces=service.name|span.name|status.code|http.method|none; logs=service.name|severity|none; metrics=service.name|attr.<key>|none\n" +
-			"  Note: table requires a group_by field. list shows recent traces or logs.\n" +
-			"Custom JSON: provide dashboard_json with full widget definitions (use get_dashboard to see schema). " +
-			"For raw widget JSON, trace/log queries omit the metric-only fields (`metricName`/`metricType`/`isMonotonic`); `whereClause` is a custom grammar (use `exists` not SQL `IS NULL`). See `maple://instructions` for the full widget JSON shape.\n\n" +
-			"After persistence, automatically validates every inspectable widget (custom_query_builder_timeseries/breakdown) and includes a per-widget verdict (looks_healthy/suspicious/broken) + sanity flags in the response. " +
-			'Pass `validate: "false"` to skip validation when creating dashboards with many widgets.',
+			"\n\nCreated widgets are inspected (up to 12) and returned with a per-widget verdict " +
+			"(looks_healthy/suspicious/broken). Use `inspect_chart_data` for any beyond that cap, " +
+			'or pass `validate: "false"` to skip inspection entirely.',
 		Schema.Struct({
 			name: requiredStringParam("Dashboard name"),
 			template: optionalStringParam(
@@ -323,10 +320,12 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				"Metric type for metric-overview template: sum, gauge, histogram, or exponential_histogram",
 			),
 			widgets: optionalStringParam(
-				"JSON array of simplified widget specs (alternative to templates and dashboard_json).",
+				'JSON array of simplified widget specs (same params as query_data). Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }. ' +
+					"group_by: traces=service.name|span.name|status.code|http.method|none; logs=service.name|severity|none; metrics=service.name|attr.<key>|none. " +
+					'"table" requires group_by; "list" shows recent traces or logs.',
 			),
 			dashboard_json: optionalStringParam(
-				"Full dashboard JSON string for complete control over widget configuration.",
+				"Full dashboard JSON for complete control over widget configuration. Call `describe_dashboard_schema` first for the panel types, the four kind-discriminated data-source shapes, the unit vocabulary and the aggregation/group-by tokens — all generated from the live schema.",
 			),
 			validate: optionalStringParam(
 				"Set to 'false' to skip automatic data validation on the created widgets. Default: validate.",
@@ -416,7 +415,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 
 				portable = yield* decodePortableDashboard({
 					name: params.name,
-					...(params.description && { description: params.description }),
+					...(params.description ? { description: params.description } : undefined),
 					timeRange: { type: "relative", value: timeRangeValue },
 					widgets: result,
 				}).pipe(
@@ -475,8 +474,8 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 						const description = params.description ?? built.description
 						return new PortableDashboardDocument({
 							name: params.name || built.name,
-							...(description && { description }),
-							...(built.tags && { tags: built.tags }),
+							...(description ? { description } : undefined),
+							...(built.tags ? { tags: built.tags } : undefined),
 							// An explicit time_range wins over the template's default —
 							// this branch used to drop the parameter entirely.
 							timeRange: params.time_range
@@ -548,6 +547,18 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				lines.push(`Source: simplified widget specs`)
 			}
 
+			// Advisory across every creation path, including `dashboard_json`, which
+			// previously received no widget validation at all despite the tool
+			// description implying otherwise.
+			const renderWarnings = collectDocumentRenderWarnings(dashboard.widgets)
+			if (renderWarnings.length > 0) {
+				lines.push(
+					"",
+					"### Render warnings (saved anyway)",
+					...renderWarnings.map((warning) => `- ${warning}`),
+				)
+			}
+
 			const validationBlock = formatValidationSummary(validation, false)
 			if (validationBlock) {
 				lines.push("", validationBlock)
@@ -566,7 +577,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 							createdAt: dashboard.createdAt,
 							updatedAt: dashboard.updatedAt,
 						},
-						...(validation.ran && { validation }),
+						...(validation.ran ? { validation } : undefined),
 					},
 				}),
 			}

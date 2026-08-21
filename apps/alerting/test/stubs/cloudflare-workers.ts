@@ -5,4 +5,4 @@ export const env: Record<string, unknown> = {
 	MAPLE_ROOT_PASSWORD: "test-password",
 	MAPLE_INGEST_KEY_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 	MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "test-hmac-key",
-}
+} satisfies Record<string, unknown>

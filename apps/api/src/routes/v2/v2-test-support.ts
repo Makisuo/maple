@@ -10,6 +10,8 @@ import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadMod
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { OrganizationService } from "@/services/org/OrganizationService"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
@@ -21,7 +23,7 @@ import { SetupAuditService } from "@/services/org/SetupAuditService"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
 import {
 	WarehouseQueryService,
-	type WarehouseQueryServiceShape,
+	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { HttpV2AlertDeliveriesLive } from "./alert-deliveries.http"
@@ -36,11 +38,14 @@ import { HttpV2PlanetScaleIntegrationsLive, HttpV2SlackIntegrationsLive } from "
 import { HttpV2ErrorIssuesLive } from "./error-issues.http"
 import { HttpV2AnomaliesLive } from "./anomalies.http"
 import { HttpV2InvestigationsLive } from "./investigations.http"
+import { HttpV2MobileDevicesLive } from "./mobile-devices.http"
 import { HttpV2OrganizationLive } from "./organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./session-replays.http"
 import { HttpV2InstrumentationAuditLive } from "./setup-audit.http"
+import { HttpV2SharePublicLive } from "./share.http"
+import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
 import {
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
@@ -74,12 +79,39 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2InvestigationsLive,
 	HttpV2AnomaliesLive,
 	HttpV2OrganizationLive,
+	// Real services, no stubs: they need only the Database every harness already
+	// provides, and their own route tests are the only places that call them.
+	HttpV2MobileDevicesLive.pipe(
+		Layer.provide(Layer.mergeAll(MobileDevicesService.layer, LiveActivitiesService.layer)),
+	),
 	HttpV2SessionReplaysLive,
 	HttpV2TracesLive,
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
+	// The share group's own dependencies are satisfied here rather than by every
+	// harness: most v2 route tests never touch the share endpoints, and threading
+	// inert services through two dozen call sites to register a group they never
+	// call is churn with no assertion behind it.
+	HttpV2SharePublicLive.pipe(
+		Layer.provide(
+			Layer.succeed(DashboardWidgetDataService, {
+				variableOptions: () => Effect.succeed({}),
+				resolve: () => Effect.die("share widget data is not exercised by v2 route harnesses"),
+			}),
+		),
+		Layer.provide(
+			// A directory with nobody in it, which is the self-hosted shape: the
+			// preview card carries no byline and everything else about it still
+			// renders. The share tests assert exactly that.
+			Layer.succeed(OrganizationService, {
+				retrieve: (orgId) =>
+					Effect.succeed({ id: orgId, name: null, slug: null, imageUrl: null, createdAtMs: null }),
+				delete: () => Effect.die("organization deletion is not exercised by v2 route harnesses"),
+			}),
+		),
+	),
 )
 
 export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {
@@ -164,8 +196,8 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 
 /** Inert WarehouseQueryService for harnesses that never touch warehouse-backed groups. */
 export const makeWarehouseServiceStub = (
-	overrides: Partial<WarehouseQueryServiceShape> = {},
-): WarehouseQueryServiceShape => ({
+	overrides: Partial<WarehouseQueryServiceApi> = {},
+): WarehouseQueryServiceApi => ({
 	query: die,
 	crossOrgQuery: die,
 	rawSqlQuery: die,
@@ -292,6 +324,7 @@ const alertDestinationStubs = {
 	createDestination: die,
 	updateDestination: die,
 	deleteDestination: die,
+	listTelegramChats: die,
 	testDestination: die,
 }
 

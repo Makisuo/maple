@@ -1,7 +1,7 @@
 import { ChatApplyRequest } from "@maple/domain/http"
 
 /**
- * `POST /api/chat/apply`'s payload.
+ * `POST /internal/chat/apply`'s payload.
  *
  * The `origin` triple is optional because the endpoint is a public v1 contract, but the web client
  * always sends it: without it the applied mutation never lands back in the transcript, so the
@@ -19,11 +19,11 @@ export const makeChatApplyPayload = (
 	new ChatApplyRequest({
 		tool,
 		input,
-		...(origin?.sessionId === undefined
-			? {}
-			: {
+		...(!(origin?.sessionId === undefined)
+			? {
 					sessionId: origin.sessionId,
 					messageId: origin.messageId,
 					toolCallId: origin.toolCallId,
-				}),
+				}
+			: undefined),
 	})

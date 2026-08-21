@@ -50,7 +50,7 @@ export class PlanetScaleWebhookQueueError extends Schema.TaggedError<PlanetScale
 	},
 ) {}
 
-export interface PlanetScaleWebhookQueueShape {
+export interface PlanetScaleWebhookQueueApi {
 	readonly send: (job: PlanetScaleWebhookJob) => Effect.Effect<void, PlanetScaleWebhookQueueError>
 }
 
@@ -61,7 +61,7 @@ export const planetScaleWebhookQueueJobBytes = (job: PlanetScaleWebhookJob): num
 
 export class PlanetScaleWebhookQueue extends Context.Service<
 	PlanetScaleWebhookQueue,
-	PlanetScaleWebhookQueueShape
+	PlanetScaleWebhookQueueApi
 >()("@maple/api/services/planetscale/PlanetScaleWebhookQueue", {
 	make: Effect.gen(function* () {
 		const workerEnv = yield* WorkerEnvironment
@@ -93,7 +93,7 @@ export class PlanetScaleWebhookQueue extends Context.Service<
 			})
 		})
 
-		return { send } satisfies PlanetScaleWebhookQueueShape
+		return { send } satisfies PlanetScaleWebhookQueueApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

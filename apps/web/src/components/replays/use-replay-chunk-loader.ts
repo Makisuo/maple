@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { getReplayEventsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { normalizeEvents } from "./replay-events"
 import type { ReplayPartitionWindow } from "./replay-format"
@@ -49,6 +49,16 @@ interface ChunkLoaderArgs {
 	readonly sessionId: string
 	readonly window: ReplayPartitionWindow | undefined
 	readonly chunks: ReadonlyArray<ReplayChunkMeta>
+	/**
+	 * The server's own per-request budgets, as advertised by the manifest.
+	 * Undefined before it lands, which is also when there is nothing to plan.
+	 *
+	 * Read from the manifest rather than assumed, so raising the server budget
+	 * takes effect without shipping web, and lowering it can't leave the player
+	 * planning ranges the server will refuse.
+	 */
+	readonly maxBytesPerRequest: number | undefined
+	readonly maxChunksPerRequest: number | undefined
 	/** False while the manifest is still loading, or when tests inject events. */
 	readonly enabled: boolean
 }
@@ -64,6 +74,8 @@ export interface ChunkLoaderState {
 	readonly trailingEvents: ReadonlyArray<unknown>
 	readonly bufferState: ReplayBufferState
 	readonly loadError: unknown
+	/** Refetch the range that failed, so a transient failure isn't terminal. */
+	readonly retryRange: () => void
 	/** Playback offset (ms from recording start) the engine should resume at. */
 	readonly seekTargetMs: number | null
 	/** Ask for a playback offset; rebuilds from a checkpoint if it isn't loaded. */
@@ -95,6 +107,8 @@ export function useReplayChunkLoader({
 	sessionId,
 	window,
 	chunks,
+	maxBytesPerRequest,
+	maxChunksPerRequest,
 	enabled,
 }: ChunkLoaderArgs): ChunkLoaderState {
 	// Ranges belonging to the current seed, in load order. Reset on a rebuild.
@@ -111,7 +125,11 @@ export function useReplayChunkLoader({
 	// so no range can exceed the server's byte ceiling — chunk sizes vary by more
 	// than an order of magnitude, and a fixed chunk count would 413 on a session
 	// whose snapshots are large.
-	const plan = React.useMemo(() => planRanges(chunks, MAX_BYTES_PER_RANGE, MAX_CHUNKS_PER_RANGE), [chunks])
+	// Never plan above our own ceilings: the byte budget bounds what the player
+	// holds in memory per range, and the chunk cap what one request may return.
+	const maxBytes = Math.min(maxBytesPerRequest ?? MAX_BYTES_PER_RANGE, MAX_BYTES_PER_RANGE)
+	const maxChunks = Math.min(maxChunksPerRequest ?? MAX_CHUNKS_PER_RANGE, MAX_CHUNKS_PER_RANGE)
+	const plan = React.useMemo(() => planRanges(chunks, maxBytes, maxChunks), [chunks, maxBytes, maxChunks])
 
 	// Plan the opening window once the manifest lands — and only once.
 	//
@@ -145,9 +163,11 @@ export function useReplayChunkLoader({
 	const subscribedRange = activeRange ??
 		loaded[loaded.length - 1]?.range ??
 		plan[0] ?? { fromChunkSeq: 0, toChunkSeq: 0 }
-	const rangeResult = useAtomValue(
-		getReplayEventsResultAtom({ data: replayRangeInput(sessionId, window, subscribedRange) }),
-	)
+	const rangeAtom = getReplayEventsResultAtom({
+		data: replayRangeInput(sessionId, window, subscribedRange),
+	})
+	const rangeResult = useAtomValue(rangeAtom)
+	const retryRange = useAtomRefresh(rangeAtom)
 
 	const loadError = React.useMemo(
 		() =>
@@ -306,6 +326,7 @@ export function useReplayChunkLoader({
 		trailingEvents,
 		bufferState,
 		loadError,
+		retryRange,
 		seekTargetMs,
 		requestSeek,
 		reportProgress,

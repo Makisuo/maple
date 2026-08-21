@@ -18,6 +18,7 @@ import {
 	VcsSyncQueue,
 } from "./services/integrations/vcs/VcsSyncQueue"
 import { VcsSyncService } from "./services/integrations/vcs/VcsSyncService"
+import { summarizeCause } from "@/platform/describe-cause"
 
 // Per-invocation runtime for the `VCS_SYNC_QUEUE` consumer. Mirrors the
 // alerting worker's `buildLayer`: its own light layer graph (NOT the fetch
@@ -121,7 +122,7 @@ export const runScheduledSync = Effect.gen(function* () {
 		Effect.annotateCurrentSpan({ "vcs.scheduled.outcome": "failed" }).pipe(
 			Effect.flatMap(() =>
 				Effect.logError("[VCS] scheduled sync tick failed").pipe(
-					Effect.annotateLogs({ error: Cause.pretty(cause) }),
+					Effect.annotateLogs({ error: summarizeCause(cause) }),
 				),
 			),
 		),
@@ -164,20 +165,24 @@ export const processBatch = (batch: MessageBatch<unknown>) =>
 								"vcs.queue.message.outcome": outcome,
 								// Tag rate-limit errors so `retry_delayed`/`exhausted` spans are filterable without parsing logs.
 								...(isRateLimited
-									? { "vcs.queue.failure.tag": "@maple/http/errors/VcsRateLimitedError" }
-									: {}),
+									? {
+											"vcs.queue.failure.tag": "@maple/http/errors/VcsRateLimitedError",
+										}
+									: undefined),
 								...(isDelaySecondsSet
 									? { "vcs.queue.retry.delay_seconds": delaySeconds }
-									: {}),
+									: undefined),
 							}).pipe(
 								Effect.flatMap(() =>
 									Effect.logError("[VCS] sync message failed").pipe(
 										Effect.annotateLogs({
-											error: Cause.pretty(cause),
+											error: summarizeCause(cause),
 											attempt: message.attempts,
 											outcome,
-											...(isFinalAttempt ? { exhausted: true } : {}),
-											...(isDelaySecondsSet ? { retryDelaySeconds: delaySeconds } : {}),
+											...(isFinalAttempt ? { exhausted: true } : undefined),
+											...(isDelaySecondsSet
+												? { retryDelaySeconds: delaySeconds }
+												: undefined),
 										}),
 									),
 								),

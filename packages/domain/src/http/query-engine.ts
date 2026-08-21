@@ -82,6 +82,10 @@ const OptionalDeploymentEnvs = Schema.optional(Schema.Array(DeploymentEnvironmen
 const OptionalServiceNamespaces = Schema.optional(Schema.Array(ServiceNamespace))
 const OptionalCommitShas = Schema.optional(Schema.Array(CommitSha))
 const OptionalFingerprintHashes = Schema.optional(Schema.Array(FingerprintHash))
+/** Sidebar "Error Type" / "Version" facets — plain string columns on the
+ *  error-events tables, so they carry no branded schema. */
+const OptionalErrorLabels = Schema.optional(Schema.Array(Schema.String))
+const OptionalServiceVersions = Schema.optional(Schema.Array(Schema.String))
 
 export class ErrorsByTypeRequest extends Schema.Class<ErrorsByTypeRequest>("ErrorsByTypeRequest")({
 	startTime: TinybirdDateTime,
@@ -90,6 +94,8 @@ export class ErrorsByTypeRequest extends Schema.Class<ErrorsByTypeRequest>("Erro
 	services: OptionalServiceNames,
 	deploymentEnvs: OptionalDeploymentEnvs,
 	fingerprintHashes: OptionalFingerprintHashes,
+	errorLabels: OptionalErrorLabels,
+	serviceVersions: OptionalServiceVersions,
 	limit: Schema.optional(Schema.Number),
 }) {}
 
@@ -128,6 +134,32 @@ export class ErrorsTimeseriesResponse extends Schema.Class<ErrorsTimeseriesRespo
 	),
 }) {}
 
+/**
+ * Bucketed counts for MANY fingerprints at once — the trend shape drawn on
+ * every row of the unified errors list. `ErrorsTimeseriesRequest` answers the
+ * same question for a single fingerprint on its detail page.
+ */
+export class ErrorsSparkRequest extends Schema.Class<ErrorsSparkRequest>("ErrorsSparkRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	fingerprintHashes: Schema.Array(FingerprintHash),
+	services: OptionalServiceNames,
+	deploymentEnvs: OptionalDeploymentEnvs,
+	errorLabels: OptionalErrorLabels,
+	serviceVersions: OptionalServiceVersions,
+	bucketSeconds: Schema.optional(Schema.Number),
+}) {}
+
+export class ErrorsSparkResponse extends Schema.Class<ErrorsSparkResponse>("ErrorsSparkResponse")({
+	data: Schema.Array(
+		Schema.Struct({
+			fingerprintHash: FingerprintHash,
+			bucket: Schema.String,
+			count: Schema.Number,
+		}),
+	),
+}) {}
+
 export class ErrorsSummaryRequest extends Schema.Class<ErrorsSummaryRequest>("ErrorsSummaryRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -135,6 +167,8 @@ export class ErrorsSummaryRequest extends Schema.Class<ErrorsSummaryRequest>("Er
 	services: OptionalServiceNames,
 	deploymentEnvs: OptionalDeploymentEnvs,
 	fingerprintHashes: OptionalFingerprintHashes,
+	errorLabels: OptionalErrorLabels,
+	serviceVersions: OptionalServiceVersions,
 }) {}
 
 export class ErrorsSummaryResponse extends Schema.Class<ErrorsSummaryResponse>("ErrorsSummaryResponse")({
@@ -1753,6 +1787,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("errorsTimeseries", "/errors-timeseries", {
 			payload: ErrorsTimeseriesRequest,
 			success: ErrorsTimeseriesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("errorsSpark", "/errors-spark", {
+			payload: ErrorsSparkRequest,
+			success: ErrorsSparkResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

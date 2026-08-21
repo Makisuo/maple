@@ -1,12 +1,13 @@
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Context, Data, Duration, Effect, Layer } from "effect"
+import { Context, Duration, Effect, Layer, Schema } from "effect"
 import { Env } from "./Env"
 
-class EmailDeliveryError extends Data.TaggedError("@maple/api/platform/EmailDeliveryError")<{
-	readonly message: string
-}> {}
+class EmailDeliveryError extends Schema.TaggedError<EmailDeliveryError>()(
+	"@maple/api/platform/EmailDeliveryError",
+	{ message: Schema.String },
+) {}
 
-export interface EmailServiceShape {
+export interface EmailServiceApi {
 	readonly isConfigured: boolean
 	readonly send: (
 		to: string,
@@ -34,7 +35,7 @@ interface SendEmailBinding {
 
 const EMAIL_TIMEOUT = Duration.seconds(15)
 
-export class EmailService extends Context.Service<EmailService, EmailServiceShape>()(
+export class EmailService extends Context.Service<EmailService, EmailServiceApi>()(
 	"@maple/api/lib/EmailService",
 	{
 		make: Effect.gen(function* () {
@@ -86,7 +87,7 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 							to,
 							subject,
 							html,
-							...(replyTo ? { replyTo } : {}),
+							...(replyTo ? { replyTo } : undefined),
 						}),
 					catch: (error) => {
 						const code =
@@ -118,7 +119,7 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 				)
 			})
 
-			return { isConfigured, send } satisfies EmailServiceShape
+			return { isConfigured, send } satisfies EmailServiceApi
 		}),
 	},
 ) {

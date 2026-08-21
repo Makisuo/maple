@@ -91,8 +91,8 @@ const makeConfig = (tokens: { slack?: string; shared?: string } = {}) =>
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: ENCRYPTION_KEY.toString("base64"),
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
 			MAPLE_APP_BASE_URL: "https://web.localhost",
-			...(tokens.slack !== undefined ? { SLACK_INTERNAL_SERVICE_TOKEN: tokens.slack } : {}),
-			...(tokens.shared !== undefined ? { INTERNAL_SERVICE_TOKEN: tokens.shared } : {}),
+			...(tokens.slack !== undefined ? { SLACK_INTERNAL_SERVICE_TOKEN: tokens.slack } : undefined),
+			...(tokens.shared !== undefined ? { INTERNAL_SERVICE_TOKEN: tokens.shared } : undefined),
 		}),
 	)
 
@@ -129,7 +129,7 @@ const postRevoke = (
 				method: "POST",
 				headers: {
 					"content-type": "application/json",
-					...(bearer !== undefined ? { authorization: bearer } : {}),
+					...(bearer !== undefined ? { authorization: bearer } : undefined),
 				},
 				body: JSON.stringify(body),
 			}),

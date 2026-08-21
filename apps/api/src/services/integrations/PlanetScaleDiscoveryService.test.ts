@@ -108,8 +108,12 @@ const createPlanetScaleTargetRow = (
 				targetType: "planetscale",
 				organization,
 				authCredentials: JSON.stringify({ tokenId: "tok_id", tokenSecret: "tok_secret" }),
-				...(branchFilters?.includeBranches ? { includeBranches: branchFilters.includeBranches } : {}),
-				...(branchFilters?.excludeBranches ? { excludeBranches: branchFilters.excludeBranches } : {}),
+				...(branchFilters?.includeBranches
+					? { includeBranches: branchFilters.includeBranches }
+					: undefined),
+				...(branchFilters?.excludeBranches
+					? { excludeBranches: branchFilters.excludeBranches }
+					: undefined),
 			}),
 		)
 		const rows = yield* service.listAllEnabled()

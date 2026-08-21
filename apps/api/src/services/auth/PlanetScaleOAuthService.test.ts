@@ -105,7 +105,7 @@ const mockPlanetScaleFetch = (options: MockOptions = {}): typeof globalThis.fetc
 				token_type: "Bearer",
 				expires_in: options.shortLivedAccessToken ? 1 : 3600,
 				scope: "read_organization read_databases read_metrics_endpoints",
-				...(options.withoutRefreshToken ? {} : { refresh_token: "ps-refresh-token" }),
+				...(!options.withoutRefreshToken ? { refresh_token: "ps-refresh-token" } : undefined),
 			})
 		}
 		if (url.includes("/v1/user")) {

@@ -2,7 +2,6 @@ import {
 	Cause,
 	Clock,
 	Context,
-	Data,
 	Duration,
 	Effect,
 	Fiber,
@@ -28,7 +27,7 @@ interface SchedulerStats {
 	readonly pendingResults: number
 }
 
-export interface ScrapeSchedulerShape {
+export interface ScrapeSchedulerApi {
 	/**
 	 * Run the scraper forever: reconcile the target list on an interval,
 	 * keep one scrape-loop fiber per target, flush scrape results back to the
@@ -50,47 +49,126 @@ const MAX_BUFFERED_RESULTS = 10_000
 const RESULTS_FLUSH_CHUNK_SIZE = 1_000
 /** Upper bound on rate-limit backoff so a target keeps probing for recovery. */
 const MAX_BACKOFF_MS = Duration.toMillis(Duration.minutes(5))
+/**
+ * Flat suspension for a target whose org is over its billing limit (HTTP 402
+ * from our own ingest gateway). Unlike a rate limit, nothing about scraping
+ * again makes this clear — it clears when a human fixes the subscription — so
+ * the loop parks for a long, constant period instead of climbing the 5-minute
+ * exponential ladder. One probe an hour is enough to notice recovery.
+ */
+export const DELIVERY_BLOCKED_BACKOFF = Duration.minutes(60)
+const DELIVERY_BLOCKED_BACKOFF_MS = Duration.toMillis(DELIVERY_BLOCKED_BACKOFF)
 
-export interface ScrapeOutcome {
-	readonly error: string | null
-	readonly samplesScraped?: number
-	readonly samplesPostMetricRelabeling?: number
-	/** Upstream signalled a rate limit (HTTP 429/503) — back off before retrying. */
-	readonly rateLimited: boolean
-	/**
-	 * Upstream rejected the credential (HTTP 401/403) — back off like a rate
-	 * limit: the failure won't clear until the org's auth is fixed, so retrying
-	 * every interval just hammers the target (prod hit this with PlanetScale
-	 * rejecting OAuth bearers on metrics.psdb.cloud every 60s).
-	 */
-	readonly authFailed: boolean
-	/**
-	 * Maple's own ingest gateway refused the metrics for billing reasons (HTTP
-	 * 402) — distinct from `authFailed`, which is about the *target's*
-	 * credential. Scraping the target again cannot help: the data has nowhere to
-	 * go until the org's subscription is fixed, so back off instead of paying for
-	 * a scrape whose result is discarded (prod hit this at full cadence, ~7.2k
-	 * failures in 6h across the fleet).
-	 */
-	readonly deliveryBlocked: boolean
-	/** Upstream `Retry-After` translated to ms, when present. */
-	readonly retryAfterMs: number | null
+/**
+ * Why a scrape failed. Every downstream decision — retry policy, the span's
+ * `error.type`, the backoff log line — is derived from this one field, so the
+ * four cases can never disagree the way parallel booleans did (a 402 delivery
+ * rejection used to back off correctly but log itself as "rate-limited").
+ *
+ * - `rate_limited` — upstream signalled HTTP 429/503; back off before retrying.
+ * - `auth_failed` — upstream rejected the credential (HTTP 401/403). Back off
+ *   like a rate limit: the failure won't clear until the org's auth is fixed,
+ *   so retrying every interval just hammers the target (prod hit this with
+ *   PlanetScale rejecting OAuth bearers on metrics.psdb.cloud every 60s).
+ * - `delivery_blocked` — Maple's own ingest gateway refused the metrics for
+ *   billing reasons (HTTP 402). Distinct from `auth_failed`, which is about the
+ *   *target's* credential. Scraping the target again cannot help: the data has
+ *   nowhere to go until the org's subscription is fixed, so back off instead of
+ *   paying for a scrape whose result is discarded (prod hit this at full
+ *   cadence, ~7.2k failures in 6h across the fleet).
+ * - `scrape_failed` — anything else; hold the configured cadence.
+ */
+export const ScrapeFailureReason = Schema.Literals([
+	"rate_limited",
+	"auth_failed",
+	"delivery_blocked",
+	"scrape_failed",
+])
+export type ScrapeFailureReason = typeof ScrapeFailureReason.Type
+
+export interface ScrapeSucceeded {
+	readonly _tag: "Success"
+	readonly samplesScraped: number
+	readonly samplesPostMetricRelabeling: number
 }
 
-class ScrapeAttemptFailed extends Data.TaggedError("@maple/scraper/ScrapeAttemptFailed")<{
-	/**
-	 * The SDK derives a span's `status.message` from the failure's `Error.message`
-	 * (`Cause.prettyErrors`), so without this field every failed scrape produced an
-	 * Error span with a blank description and the reason lived only in the log line
-	 * emitted after the span had already closed.
-	 */
+export interface ScrapeFailed {
+	readonly _tag: "Failure"
+	readonly reason: ScrapeFailureReason
+	/** Human-readable failure text; reported to the API and used as span status. */
 	readonly message: string
-	readonly outcome: ScrapeOutcome
-}> {}
+	/** Upstream `Retry-After` translated to ms, when present. */
+	readonly retryAfterMs?: number
+	/** HTTP status behind the failure, when one was seen (402, 429, 503, …). */
+	readonly statusCode?: number
+}
+
+/** The single value a resolved scrape produces. */
+export type ScrapeOutcome = ScrapeSucceeded | ScrapeFailed
+
+export const scrapeSucceeded = (fields: {
+	readonly samplesScraped: number
+	readonly samplesPostMetricRelabeling: number
+}): ScrapeOutcome => ({ _tag: "Success", ...fields })
+
+export const scrapeFailed = (fields: {
+	readonly reason: ScrapeFailureReason
+	readonly message: string
+	readonly retryAfterMs?: number | null
+	readonly statusCode?: number | null
+}): ScrapeOutcome => ({
+	_tag: "Failure",
+	reason: fields.reason,
+	message: fields.message,
+	...(fields.retryAfterMs != null ? { retryAfterMs: fields.retryAfterMs } : undefined),
+	...(fields.statusCode != null ? { statusCode: fields.statusCode } : undefined),
+})
+
+/**
+ * Carries a resolved {@link ScrapeFailed} out of the span so the span closes as
+ * an error. The SDK derives a span's `status.message` from the failure's
+ * `Error.message` (`Cause.prettyErrors`), so without `message` every failed
+ * scrape produced an Error span with a blank description and the reason lived
+ * only in the log line emitted after the span had already closed.
+ */
+class ScrapeAttemptFailed extends Schema.TaggedError<ScrapeAttemptFailed>()(
+	"@maple/scraper/ScrapeAttemptFailed",
+	{
+		message: Schema.String,
+		reason: ScrapeFailureReason,
+		retryAfterMs: Schema.NullOr(Schema.Number),
+	},
+) {
+	get outcome(): ScrapeOutcome {
+		return scrapeFailed({
+			reason: this.reason,
+			message: this.message,
+			retryAfterMs: this.retryAfterMs,
+		})
+	}
+}
+
+/** The failure text to report to the API, or `null` for a healthy scrape. */
+export const outcomeError = (outcome: ScrapeOutcome): string | null =>
+	outcome._tag === "Failure" ? outcome.message : null
 
 /** A scrape outcome that must escalate the delay instead of holding cadence. */
 export const shouldBackOff = (outcome: ScrapeOutcome): boolean =>
-	outcome.rateLimited || outcome.authFailed || outcome.deliveryBlocked
+	outcome._tag === "Failure" && outcome.reason !== "scrape_failed"
+
+/** The log line for a backing-off scrape — one per reason, exhaustively. */
+export const backoffLogMessage = (reason: ScrapeFailureReason): string => {
+	switch (reason) {
+		case "rate_limited":
+			return "Scrape rate-limited, backing off"
+		case "auth_failed":
+			return "Scrape auth rejected, backing off"
+		case "delivery_blocked":
+			return "Scrape delivery blocked by the ingest gateway, backing off"
+		case "scrape_failed":
+			return "Scrape failed, backing off"
+	}
+}
 
 /**
  * The target period before a target's next scrape. The happy path returns the
@@ -99,7 +177,8 @@ export const shouldBackOff = (outcome: ScrapeOutcome): boolean =>
  * start-to-start. A rate-limited or auth-rejected scrape escalates
  * exponentially — honoring `Retry-After` when it is longer — capped at
  * {@link MAX_BACKOFF_MS} so the target keeps probing for recovery (an auth fix
- * needs no restart: the credential is resolved server-side per scrape); that
+ * needs no restart: the credential is resolved server-side per scrape); a
+ * delivery-blocked one parks flat for {@link DELIVERY_BLOCKED_BACKOFF}. Either
  * delay runs from scrape end.
  */
 export const nextScrapeDelayMs = ({
@@ -112,10 +191,16 @@ export const nextScrapeDelayMs = ({
 	readonly consecutiveBackoffs: number
 }): number => {
 	if (!shouldBackOff(outcome)) return baseMs
+	// A billing block does not decay: park the target for a flat hour rather
+	// than climbing to the 5-minute ceiling and probing 12x as often for a
+	// condition only a subscription change can clear.
+	if (outcome._tag === "Failure" && outcome.reason === "delivery_blocked") {
+		return Math.max(DELIVERY_BLOCKED_BACKOFF_MS, outcome.retryAfterMs ?? 0)
+	}
 	// exponential is always >= baseMs (consecutiveBackoffs >= 0), so baseMs
 	// never needs to be a floor here.
 	const exponential = baseMs * 2 ** consecutiveBackoffs
-	const retryAfter = outcome.retryAfterMs ?? 0
+	const retryAfter = (outcome._tag === "Failure" ? outcome.retryAfterMs : undefined) ?? 0
 	return Math.min(MAX_BACKOFF_MS, Math.max(exponential, retryAfter))
 }
 
@@ -189,7 +274,66 @@ export const sendResultsInChunks = <E>(
 		return { unsent: [], error: null }
 	})
 
-export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSchedulerShape>()(
+/**
+ * The pending scrape-result buffer. Contents, capacity, ordering and the
+ * `scraper.buffered_results` gauge used to be four independent statements
+ * (`enqueue` never touched the gauge at all; a flush zeroed it, sent over the
+ * network, then set it to the unsent count — losing anything enqueued in the
+ * meantime, and losing the whole batch outright if the flush was interrupted
+ * after the drain). Every transition below is atomic under one mutex, and the
+ * gauge is written from the same critical section that changed the contents, so
+ * the reported size is always the size that is actually buffered.
+ *
+ * Network I/O must stay OUTSIDE the lock: `take` drains and returns, the caller
+ * sends, then `requeue` puts back whatever did not make it.
+ */
+export interface ResultBuffer {
+	/** Append one result, dropping the oldest when at capacity. */
+	readonly enqueue: (result: ScrapeResultReport) => Effect.Effect<void>
+	/** Atomically drain everything buffered (gauge → 0). */
+	readonly take: Effect.Effect<ReadonlyArray<ScrapeResultReport>>
+	/** Put undelivered results back in front, keeping the newest at capacity. */
+	readonly requeue: (results: ReadonlyArray<ScrapeResultReport>) => Effect.Effect<void>
+	readonly size: Effect.Effect<number>
+}
+
+export const makeResultBuffer = (capacity: number): Effect.Effect<ResultBuffer> =>
+	Effect.gen(function* () {
+		const ref = yield* Ref.make<ReadonlyArray<ScrapeResultReport>>([])
+		const mutex = yield* Semaphore.make(1)
+
+		// Every transition: mutate contents and publish the resulting size in one
+		// critical section, so no interleaving can leave the gauge disagreeing
+		// with the buffer.
+		const transition = (
+			update: (buffered: ReadonlyArray<ScrapeResultReport>) => ReadonlyArray<ScrapeResultReport>,
+		) =>
+			mutex.withPermits(1)(
+				Effect.gen(function* () {
+					const next = update(yield* Ref.get(ref))
+					yield* Ref.set(ref, next)
+					yield* Metric.update(bufferedResults, next.length)
+				}),
+			)
+
+		return {
+			enqueue: (result) => transition((buffered) => [...buffered, result].slice(-capacity)),
+			take: mutex.withPermits(1)(
+				Effect.gen(function* () {
+					const drained = yield* Ref.getAndSet(ref, [])
+					yield* Metric.update(bufferedResults, 0)
+					return drained
+				}),
+			),
+			requeue: (results) =>
+				results.length === 0
+					? Effect.void
+					: transition((buffered) => [...results, ...buffered].slice(-capacity)),
+			size: Effect.map(Ref.get(ref), (buffered) => buffered.length),
+		} satisfies ResultBuffer
+	})
+
+export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSchedulerApi>()(
 	"@maple/scraper/ScrapeScheduler",
 	{
 		make: Effect.gen(function* () {
@@ -198,16 +342,9 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 			const otlp = yield* OtlpIngest
 
 			const semaphore = yield* Semaphore.make(env.SCRAPER_CONCURRENCY)
-			const resultsRef = yield* Ref.make<ReadonlyArray<ScrapeResultReport>>([])
+			const results = yield* makeResultBuffer(MAX_BUFFERED_RESULTS)
 			const fibersRef = yield* Ref.make(new Map<string, TargetEntry>())
 			const lastReconcileRef = yield* Ref.make<number | null>(null)
-
-			const enqueueResult = (result: ScrapeResultReport) =>
-				Ref.update(resultsRef, (buffered) =>
-					buffered.length >= MAX_BUFFERED_RESULTS
-						? [...buffered.slice(1), result]
-						: [...buffered, result],
-				)
 
 			const recordOutcome = (
 				target: InternalScrapeTarget,
@@ -215,19 +352,19 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 				durationMs: number,
 				outcome: ScrapeOutcome,
 			) =>
-				enqueueResult(
+				results.enqueue(
 					new ScrapeResultReport({
 						targetId: target.id,
 						scrapedAt,
-						error: outcome.error,
+						error: outcomeError(outcome),
 						subTargetKey: target.subTargetKey,
 						durationMs,
-						...(outcome.samplesScraped !== undefined
-							? { samplesScraped: outcome.samplesScraped }
-							: {}),
-						...(outcome.samplesPostMetricRelabeling !== undefined
-							? { samplesPostMetricRelabeling: outcome.samplesPostMetricRelabeling }
-							: {}),
+						...(outcome._tag === "Success"
+							? {
+									samplesScraped: outcome.samplesScraped,
+									samplesPostMetricRelabeling: outcome.samplesPostMetricRelabeling,
+								}
+							: undefined),
 					}),
 				)
 
@@ -240,16 +377,19 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 							const attempt = yield* Effect.gen(function* () {
 								const response = yield* api.scrapeTarget(target.id, target.subTargetKey)
 								if (response.status < 200 || response.status >= 300) {
-									return {
-										error: `target returned HTTP ${response.status}`,
-										rateLimited: response.status === 429 || response.status === 503,
-										authFailed: response.status === 401 || response.status === 403,
-										deliveryBlocked: false,
+									return scrapeFailed({
+										message: `target returned HTTP ${response.status}`,
+										reason:
+											response.status === 429 || response.status === 503
+												? "rate_limited"
+												: response.status === 401 || response.status === 403
+													? "auth_failed"
+													: "scrape_failed",
 										retryAfterMs:
 											response.retryAfterSeconds !== null
 												? response.retryAfterSeconds * 1000
 												: null,
-									} satisfies ScrapeOutcome
+									})
 								}
 
 								const parsed = parsePrometheusText(response.body)
@@ -274,8 +414,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 									"maple.scraper.dropped_series": converted.droppedSeriesCount,
 									"maple.scraper.skipped_lines": parsed.skippedLineCount,
 								})
-								return {
-									error: null,
+								return scrapeSucceeded({
 									samplesScraped: parsed.families.reduce(
 										(total, family) => total + family.samples.length,
 										0,
@@ -284,52 +423,61 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 										converted.dataPointCounts.sum +
 										converted.dataPointCounts.gauge +
 										converted.dataPointCounts.histogram,
-									rateLimited: false,
-									authFailed: false,
-									deliveryBlocked: false,
-									retryAfterMs: null,
-								} satisfies ScrapeOutcome
+								})
 							}).pipe(
-								Effect.catch((error) =>
-									Effect.succeed<ScrapeOutcome>({
-										error: error.message,
-										rateLimited: false,
-										authFailed: false,
-										// The gateway's 402 is the one failure in here that a
-										// retry provably cannot clear.
-										deliveryBlocked:
-											error._tag === "@maple/scraper/OtlpIngestError" &&
-											error.status === 402,
-										retryAfterMs: null,
-									}),
-								),
+								Effect.catch((error) => {
+									const gatewayStatus =
+										error._tag === "@maple/scraper/OtlpIngestError" ? error.status : null
+									return Effect.succeed(
+										scrapeFailed({
+											message: error.message,
+											// The gateway's 402 is the one failure in here that a
+											// retry provably cannot clear.
+											reason:
+												gatewayStatus === 402 ? "delivery_blocked" : "scrape_failed",
+											statusCode: gatewayStatus,
+										}),
+									)
+								}),
 								Effect.catchDefect((defect) =>
-									Effect.succeed<ScrapeOutcome>({
-										error: Cause.pretty(Cause.die(defect)),
-										rateLimited: false,
-										authFailed: false,
-										deliveryBlocked: false,
-										retryAfterMs: null,
-									}),
+									Effect.succeed(
+										scrapeFailed({
+											message: Cause.pretty(Cause.die(defect)),
+											reason: "scrape_failed",
+										}),
+									),
 								),
 							)
 
-							if (attempt.error !== null) {
+							if (attempt._tag === "Failure") {
 								// `error.type` buckets the failure so the reason is groupable
-								// without parsing the free-text message.
-								yield* Effect.annotateCurrentSpan(
-									"error.type",
-									attempt.deliveryBlocked
-										? "delivery_blocked"
-										: attempt.rateLimited
-											? "rate_limited"
-											: attempt.authFailed
-												? "auth_failed"
-												: "scrape_failed",
-								)
+								// without parsing the free-text message — the same field the
+								// retry policy and the backoff log line read.
+								yield* Effect.annotateCurrentSpan("error.type", attempt.reason)
+								if (attempt.statusCode != null) {
+									yield* Effect.annotateCurrentSpan(
+										"http.response.status_code",
+										attempt.statusCode,
+									)
+								}
+								// A billing block is an expected, caller-side condition (our own
+								// gateway answering 402), not a fault of this scrape: per the
+								// repo's OTEL posture only 5xx is `Error`. Returning the outcome
+								// instead of failing leaves the span `Ok` with the reason on its
+								// attributes, so a blocked org stops minting an Error span (and a
+								// new error fingerprint) every single interval, forever. The Warn
+								// log below still reports it.
+								if (attempt.reason === "delivery_blocked") {
+									yield* Effect.annotateCurrentSpan(
+										"maple.scrape.outcome",
+										"delivery_blocked",
+									)
+									return attempt
+								}
 								return yield* new ScrapeAttemptFailed({
-									message: attempt.error,
-									outcome: attempt,
+									message: attempt.message,
+									reason: attempt.reason,
+									retryAfterMs: attempt.retryAfterMs ?? null,
 								})
 							}
 							return attempt
@@ -351,25 +499,28 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 									"maple.scraper.target_name": target.name,
 									"maple.scraper.interval_seconds": target.scrapeIntervalSeconds,
 									...(target.subTargetKey
-										? { "maple.scraper.sub_target_key": target.subTargetKey }
-										: {}),
+										? {
+												"maple.scraper.sub_target_key": target.subTargetKey,
+											}
+										: undefined),
 								},
 							}),
-							Effect.catchTag("@maple/scraper/ScrapeAttemptFailed", ({ outcome }) =>
-								Effect.succeed(outcome),
+							Effect.catchTag("@maple/scraper/ScrapeAttemptFailed", (failure) =>
+								Effect.succeed(failure.outcome),
 							),
 						)
 
 						const durationMs = (yield* Clock.currentTimeMillis) - scrapeTimeMs
 						yield* Metric.update(scrapeDurationMs, durationMs)
-						yield* Metric.update(scrapesTotal, outcome.error === null ? "ok" : "error")
+						yield* Metric.update(scrapesTotal, outcome._tag === "Success" ? "ok" : "error")
 						yield* recordOutcome(target, scrapeTimeMs, durationMs, outcome)
-						if (outcome.error !== null) {
+						if (outcome._tag === "Failure") {
 							yield* Effect.logWarning("Scrape failed").pipe(
 								Effect.annotateLogs({
 									targetId: target.id,
 									orgId: target.orgId,
-									error: outcome.error,
+									reason: outcome.reason,
+									error: outcome.message,
 								}),
 							)
 						}
@@ -391,18 +542,17 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 						const elapsedMs = (yield* Clock.currentTimeMillis) - startedAt
 						const backingOff = shouldBackOff(outcome)
 						const delayMs = nextScrapeDelayMs({ baseMs, outcome, consecutiveBackoffs })
-						if (backingOff) {
-							yield* Effect.logWarning(
-								outcome.authFailed
-									? "Scrape auth rejected, backing off"
-									: "Scrape rate-limited, backing off",
-							).pipe(
+						if (backingOff && outcome._tag === "Failure") {
+							yield* Effect.logWarning(backoffLogMessage(outcome.reason)).pipe(
 								Effect.annotateLogs({
 									targetId: target.id,
 									orgId: target.orgId,
-									...(target.subTargetKey ? { subTargetKey: target.subTargetKey } : {}),
+									...(target.subTargetKey
+										? { subTargetKey: target.subTargetKey }
+										: undefined),
+									reason: outcome.reason,
 									delayMs,
-									retryAfterMs: outcome.retryAfterMs,
+									retryAfterMs: outcome.retryAfterMs ?? null,
 									consecutiveBackoffs: consecutiveBackoffs + 1,
 								}),
 							)
@@ -485,27 +635,28 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 			)
 
 			const flushResults = Effect.gen(function* () {
-				const results = yield* Ref.getAndSet(resultsRef, [])
-				yield* Metric.update(bufferedResults, 0)
-				if (results.length === 0) return
+				const batch = yield* results.take
+				if (batch.length === 0) return
+				// `pending` shrinks as chunks land, so an interrupt mid-flush re-buffers
+				// exactly what was never delivered instead of dropping the whole batch
+				// (the drain already emptied the buffer).
+				const pending = yield* Ref.make(batch)
 				// Send in chunks so one POST never overwhelms the API Worker; re-buffer
 				// only what didn't make it (in front) and retry on the next flush.
-				const { unsent, error } = yield* sendResultsInChunks(
-					results,
-					RESULTS_FLUSH_CHUNK_SIZE,
-					api.reportResults,
-				)
+				const { error } = yield* sendResultsInChunks(batch, RESULTS_FLUSH_CHUNK_SIZE, (chunk) =>
+					api
+						.reportResults(chunk)
+						.pipe(Effect.tap(() => Ref.update(pending, (rest) => rest.slice(chunk.length)))),
+				).pipe(Effect.onInterrupt(() => Effect.flatMap(Ref.get(pending), results.requeue)))
+				const unsent = yield* Ref.get(pending)
 				if (unsent.length > 0) {
-					yield* Ref.update(resultsRef, (buffered) =>
-						[...unsent, ...buffered].slice(-MAX_BUFFERED_RESULTS),
-					)
+					yield* results.requeue(unsent)
 					yield* Effect.logWarning("Failed to report scrape results").pipe(
 						Effect.annotateLogs({
 							error: error?.message ?? "unknown",
 							bufferedResults: unsent.length,
 						}),
 					)
-					yield* Metric.update(bufferedResults, unsent.length)
 				}
 			}).pipe(Effect.withSpan("scraper.flush_results"))
 
@@ -522,15 +673,15 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 			const stats = Effect.gen(function* () {
 				const fibers = yield* Ref.get(fibersRef)
 				const lastReconcileAt = yield* Ref.get(lastReconcileRef)
-				const pending = yield* Ref.get(resultsRef)
+				const pendingResults = yield* results.size
 				return {
 					activeTargets: fibers.size,
 					lastReconcileAt,
-					pendingResults: pending.length,
+					pendingResults,
 				} satisfies SchedulerStats
 			})
 
-			return { run, stats } satisfies ScrapeSchedulerShape
+			return { run, stats } satisfies ScrapeSchedulerApi
 		}),
 	},
 ) {

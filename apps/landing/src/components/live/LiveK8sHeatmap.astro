@@ -34,7 +34,7 @@ const bands = [
 
 // Pre-marked outliers (col,row) → state. Hand-picked positions so the visual
 // reads as "a few bad pods scattered, not a totally healthy or totally broken cluster".
-const outliers: Record<string, CellState> = {
+const outliers: Record<string, CellState>  = {
 	"3,2":   "warn",   // payment-svc rolling
 	"3,3":   "warn",
 	"5,5":   "err",    // OOMKilled
@@ -43,7 +43,7 @@ const outliers: Record<string, CellState> = {
 	"19,2":  "err",    // ingress crashloop
 	"21,6":  "warn",
 	"22,1":  "warn",
-};
+} satisfies Record<string, CellState>;
 
 // Build a deterministic-but-varied heat distribution from the band base heat.
 const cells: Cell[] = [];

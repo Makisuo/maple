@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
+// BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 /**
  * One-shot backfill: rewrite every stored dashboard document's data sources from
  * the v2 `{ endpoint, params }` bag to the v3 discriminated union.

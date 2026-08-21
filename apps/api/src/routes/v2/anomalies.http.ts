@@ -110,17 +110,27 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
 						anomalies
 							.listIncidents(tenant.orgId, {
-								...(query.status !== undefined ? { status: query.status } : {}),
-								...(query.signal_type !== undefined ? { signalType: query.signal_type } : {}),
-								...(query.service_name !== undefined ? { service: query.service_name } : {}),
+								...(query.status !== undefined ? { status: query.status } : undefined),
+								...(query.signal_type !== undefined
+									? { signalType: query.signal_type }
+									: undefined),
+								...(query.service_name !== undefined
+									? { service: query.service_name }
+									: undefined),
 								...(query.deployment_env !== undefined
-									? { deploymentEnv: query.deployment_env }
-									: {}),
+									? {
+											deploymentEnv: query.deployment_env,
+										}
+									: undefined),
 								...(query.error_issue_id !== undefined
-									? { errorIssueId: query.error_issue_id }
-									: {}),
-								...(query.start_time !== undefined ? { startTime: query.start_time } : {}),
-								...(query.end_time !== undefined ? { endTime: query.end_time } : {}),
+									? {
+											errorIssueId: query.error_issue_id,
+										}
+									: undefined),
+								...(query.start_time !== undefined
+									? { startTime: query.start_time }
+									: undefined),
+								...(query.end_time !== undefined ? { endTime: query.end_time } : undefined),
 								limit,
 								offset,
 							})
@@ -165,8 +175,8 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const response = yield* anomalies.getIncidentTimeseries(tenant, params.id, {
-						...(query.start_time !== undefined ? { startTime: query.start_time } : {}),
-						...(query.end_time !== undefined ? { endTime: query.end_time } : {}),
+						...(query.start_time !== undefined ? { startTime: query.start_time } : undefined),
+						...(query.end_time !== undefined ? { endTime: query.end_time } : undefined),
 					})
 
 					return toV2Timeseries(response)
@@ -222,13 +232,15 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 						tenant.orgId,
 						tenant.userId,
 						new AnomalyDetectorSettingsUpdateRequest({
-							...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
+							...(payload.enabled !== undefined ? { enabled: payload.enabled } : undefined),
 							...(payload.sensitivity !== undefined
 								? { sensitivity: payload.sensitivity }
-								: {}),
+								: undefined),
 							...(payload.muted_signals !== undefined
-								? { mutedSignals: payload.muted_signals }
-								: {}),
+								? {
+										mutedSignals: payload.muted_signals,
+									}
+								: undefined),
 						}),
 					)
 

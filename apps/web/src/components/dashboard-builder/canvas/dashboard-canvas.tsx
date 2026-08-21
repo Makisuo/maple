@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { dataSourceTransform } from "@maple/widgets/dashboard"
+import { useCallback, useMemo, type ComponentType } from "react"
+import type { SectionMembership } from "@maple/widgets/dashboard"
 import { GridLayout, noCompactor, verticalCompactor } from "react-grid-layout"
 import type { Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
@@ -8,13 +8,9 @@ import {
 	GRID_ROW_HEIGHT,
 	projectLayout,
 	type GridTier,
+	type PlacedWidget,
 } from "@/components/dashboard-builder/canvas/grid-breakpoints"
-import type { DashboardWidget } from "@/components/dashboard-builder/types"
-import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
-import { WidgetActionsProvider } from "@/components/dashboard-builder/widgets/widget-actions-context"
-import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
-import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
-import { useWidgetData } from "@/hooks/use-widget-data"
+import { useDashboardActionsOptional } from "@/components/dashboard-builder/dashboard-actions-context"
 
 /** Same widgets in the same boxes, ignoring order. */
 function sameLayout(a: Layout, b: Layout): boolean {
@@ -32,83 +28,31 @@ function sameLayout(a: Layout, b: Layout): boolean {
 	})
 }
 
+/** What the canvas needs of a widget: somewhere to put it, and which group it's in. */
+export interface CanvasWidget extends PlacedWidget, SectionMembership {}
+
 /**
- * Latches `true` the first time the element scrolls into (near) the viewport,
- * then stays latched. Tiles fetch their data lazily on first reveal and keep it
- * — unlatching would unmount the tile's atom, and a non-sticky flag would then
- * refetch every time it scrolled back into view. The 200ms debounce absorbs
- * react-grid-layout's mount-time reflow, where tiles can briefly flash into
- * view before the layout settles.
+ * How one widget draws itself.
+ *
+ * A component type rather than a `(widget) => ReactNode` callback: renderers
+ * call hooks, and a function prop invoked inline would splice them into the
+ * grid child's hook slot. Mirrors `visualizationFor`, which already returns a
+ * component.
  */
-function useInViewportSticky() {
-	const ref = useRef<HTMLDivElement>(null)
-	const [visible, setVisible] = useState(false)
+export type WidgetRendererComponent<W> = ComponentType<{ widget: W }>
 
-	useEffect(() => {
-		if (visible) return
-		const element = ref.current
-		if (!element) return
-		if (typeof IntersectionObserver === "undefined") {
-			setVisible(true)
-			return
-		}
-
-		let timer: ReturnType<typeof setTimeout> | undefined
-		const observer = new IntersectionObserver(
-			(entries) => {
-				const isIntersecting = entries.some((entry) => entry.isIntersecting)
-				if (isIntersecting && timer == null) {
-					timer = setTimeout(() => setVisible(true), 200)
-				} else if (!isIntersecting && timer != null) {
-					clearTimeout(timer)
-					timer = undefined
-				}
-			},
-			{ rootMargin: "200px" },
-		)
-		observer.observe(element)
-		return () => {
-			if (timer != null) clearTimeout(timer)
-			observer.disconnect()
-		}
-	}, [visible])
-
-	return { ref, visible }
-}
-
-const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: DashboardWidget }) {
-	const { mode } = useDashboardActions()
-	const { ref, visible } = useInViewportSticky()
-	const { dataState, narrowRange, narrowRangeLabel } = useWidgetData(widget, visible)
-	const Visualization = visualizationFor(widget.visualization)
-
-	return (
-		<div ref={ref} className="h-full w-full">
-			<WidgetTimeRangeProvider timeRange={widget.timeRange}>
-				<WidgetActionsProvider
-					widget={widget}
-					dataState={dataState}
-					narrowRange={narrowRange}
-					narrowRangeLabel={narrowRangeLabel}
-				>
-					<Visualization
-						dataState={dataState}
-						display={widget.display}
-						mode={mode}
-						rowLimit={dataSourceTransform(widget.dataSource)?.limit}
-					/>
-				</WidgetActionsProvider>
-			</WidgetTimeRangeProvider>
-		</div>
-	)
-})
-
-interface DashboardGridProps {
-	widgets: DashboardWidget[]
+interface DashboardGridProps<W extends CanvasWidget> {
+	widgets: ReadonlyArray<W>
 	/** Measured container width in px. The caller owns measurement. */
 	width: number
 	tier: GridTier
 	editable: boolean
+	/**
+	 * Required, never defaulted: a default cannot type-check against an
+	 * arbitrary `W`, and naming the renderer at each mount point is what stops a
+	 * read-only surface silently inheriting the authed data path.
+	 */
+	renderWidget: WidgetRendererComponent<W>
 }
 
 /**
@@ -121,9 +65,21 @@ interface DashboardGridProps {
  *
  * Every widget's `layout.x/y` is relative to *this* grid, so each instance is an
  * independent coordinate space starting at (0, 0).
+ *
+ * Generic over the widget because the read-only surfaces render a redacted
+ * widget whose data source cannot inhabit the stored union. The type parameter
+ * carries that difference; nothing here needs a cast.
  */
-export function DashboardGrid({ widgets, width, tier, editable }: DashboardGridProps) {
-	const { updateWidgetLayouts } = useDashboardActions()
+export function DashboardGrid<W extends CanvasWidget>({
+	widgets,
+	width,
+	tier,
+	editable,
+	renderWidget: Renderer,
+}: DashboardGridProps<W>) {
+	// Optional: a share link and a full-screen board mount this grid with no
+	// store behind them. They are never editable, so there is nothing to persist.
+	const actions = useDashboardActionsOptional()
 
 	const layout = useMemo(() => projectLayout(widgets, tier), [widgets, tier])
 
@@ -143,9 +99,9 @@ export function DashboardGrid({ widgets, width, tier, editable }: DashboardGridP
 		(next: Layout) => {
 			if (!editable) return
 			if (sameLayout(next, layout)) return
-			updateWidgetLayouts(next.map((l) => ({ i: l.i, x: l.x, y: l.y, w: l.w, h: l.h })))
+			actions?.updateWidgetLayouts(next.map((l) => ({ i: l.i, x: l.x, y: l.y, w: l.w, h: l.h })))
 		},
-		[editable, layout, updateWidgetLayouts],
+		[editable, layout, actions],
 	)
 
 	return (
@@ -156,6 +112,14 @@ export function DashboardGrid({ widgets, width, tier, editable }: DashboardGridP
 				cols: tier.cols,
 				rowHeight: GRID_ROW_HEIGHT,
 				margin: tier.margin,
+				// `containerPadding` defaults to `margin`, which indents the first and
+				// last column by a gutter's width — so tiles sat inset from everything
+				// stacked above them (section headers, the share page's time-range
+				// label and refresh controls, the page title). The gutter belongs
+				// *between* tiles, not around them; the surrounding layout owns the
+				// outer padding. Vertical keeps the margin, so the gap under a section
+				// header is unchanged.
+				containerPadding: [0, tier.margin[1]],
 			}}
 			dragConfig={{
 				enabled: editable,
@@ -175,7 +139,7 @@ export function DashboardGrid({ widgets, width, tier, editable }: DashboardGridP
 		>
 			{widgets.map((widget) => (
 				<div key={widget.id}>
-					<WidgetRenderer widget={widget} />
+					<Renderer widget={widget} />
 				</div>
 			))}
 		</GridLayout>

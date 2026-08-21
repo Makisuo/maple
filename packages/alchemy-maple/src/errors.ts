@@ -3,6 +3,7 @@ import { Schema } from "effect"
 export const MaplePublicErrorType = Schema.Literals([
 	"invalid_request_error",
 	"authentication_error",
+	"payment_error",
 	"permission_error",
 	"not_found_error",
 	"conflict_error",
@@ -80,6 +81,7 @@ export const makeMapleApiResponseError = <const Tag extends MapleHttpErrorTag>(
 			return this.error.message
 		}
 	}
+	// SAFETY: TaggedResponseError carries the branded body and tag supplied to this factory.
 	return new TaggedResponseError({ status, error }) as unknown as MapleApiResponseError<Tag>
 }
 

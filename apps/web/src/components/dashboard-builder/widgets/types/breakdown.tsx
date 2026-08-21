@@ -61,8 +61,8 @@ const breakdownDataSource = (
 		// preserve them across a reopen fails the request decode and leaves the
 		// widget stuck on its loading skeleton.
 		queries: visibleQueries,
-		...(options?.defaultLimit ? { defaultLimit: options.defaultLimit } : {}),
-		...(sharedTransform === undefined ? {} : { transform: sharedTransform }),
+		...(options?.defaultLimit ? { defaultLimit: options.defaultLimit } : undefined),
+		...(!(sharedTransform === undefined) ? { transform: sharedTransform } : undefined),
 	}) satisfies WidgetDataSource
 
 export const pieWidgetType: WidgetTypeDefinition = {
@@ -131,14 +131,23 @@ export const heatmapWidgetType: WidgetTypeDefinition = {
 	PresetPreview: chartPresetPreview("query-builder-heatmap"),
 
 	initialState: (widget) => ({
-		heatmapColorScale: widget.display.heatmap?.colorScale ?? "blues",
+		heatmapColorScale: widget.display.heatmap?.colorScale,
 		heatmapScaleType: widget.display.heatmap?.scaleType ?? "linear",
 	}),
 
 	buildDataSource: breakdownDataSource,
+	// `colorScale` is written only once the user has actually picked a ramp:
+	// a widget saved before the setting existed renders in
+	// `DEFAULT_HEATMAP_COLOR_SCALE`, and Apply must not materialise a different
+	// palette behind their back.
 	buildDisplay: ({ base, state }) =>
 		extendDisplay(base, {
-			heatmap: { colorScale: state.heatmapColorScale, scaleType: state.heatmapScaleType },
+			heatmap: {
+				...(state.heatmapColorScale === undefined
+					? undefined
+					: { colorScale: state.heatmapColorScale }),
+				scaleType: state.heatmapScaleType,
+			},
 		}),
 }
 
@@ -167,8 +176,8 @@ export const histogramWidgetType: WidgetTypeDefinition = {
 			resultShape: "list",
 			queries: ctx.visibleQueries,
 			limit: parsePositiveNumber(ctx.state.tableLimit) ?? 200,
-			...(valueColumn ? { columns: [valueColumn] } : {}),
-			...(ctx.sharedTransform === undefined ? {} : { transform: ctx.sharedTransform }),
+			...(valueColumn ? { columns: [valueColumn] } : undefined),
+			...(!(ctx.sharedTransform === undefined) ? { transform: ctx.sharedTransform } : undefined),
 		})
 	},
 

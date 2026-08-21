@@ -64,18 +64,23 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 				// and inheriting the shared `dev` credentials would proxy preview shapes
 				// against another stage's data. Absent ELECTRIC_URL → 503 → the web app
 				// falls back to its effect-atom fetches.
-				...(stage.kind === "pr"
-					? {}
-					: {
+				...(!(stage.kind === "pr")
+					? {
 							...optionalPlain("ELECTRIC_URL"),
 							...optionalPlain("ELECTRIC_SOURCE_ID"),
 							...optionalSecret("ELECTRIC_SECRET"),
-						}),
+						}
+					: undefined),
 				// Self-observability (OTLP export through the ingest gateway).
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 				...optionalPlain("MAPLE_ENDPOINT"),
 				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
-				...optionalPlain("COMMIT_SHA"),
+				// GITHUB_SHA fallback so a deploy that did not export COMMIT_SHA still
+				// stamps a build. An unstamped Worker reports no `service.version`, and
+				// the error evaluator treats a build it cannot identify as a regression —
+				// so a missing binding quietly restores the behaviour where any occurrence
+				// reopens a fixed issue. Matches what apps/ingest already does.
+				...optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim()),
 			},
 		})
 

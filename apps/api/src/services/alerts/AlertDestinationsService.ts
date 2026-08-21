@@ -1,5 +1,6 @@
 import {
 	AlertDeliveryError,
+	type AlertDeliveryFailure,
 	AlertDestinationDecryptionError,
 	AlertDestinationDeleteResponse,
 	AlertDestinationDocument,
@@ -30,16 +31,22 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { validateExternalUrl } from "@/http/url-validator"
-import { HazelOAuthService, type HazelOAuthServiceShape } from "@/services/auth/HazelOAuthService"
+import { HazelOAuthService, type HazelOAuthServiceApi } from "@/services/auth/HazelOAuthService"
 import { makeDbExecute } from "@/platform/db-execute"
 import { makePersistenceError } from "./alert-persistence"
 import {
 	OrgMembersService,
 	type OrgMember,
-	type OrgMembersServiceShape,
+	type OrgMembersServiceApi,
 } from "@/services/org/OrgMembersService"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
-import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./AlertDeliveryDispatch"
+import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./delivery/transports/pagerduty"
+import {
+	fetchTelegramChats,
+	TELEGRAM_BOT_TOKEN_PATTERN,
+	verifyTelegramCredentials,
+	type TelegramChat,
+} from "./delivery/transports/telegram"
 import {
 	DestinationPublicConfigSchema,
 	type DestinationPublicConfig,
@@ -58,7 +65,7 @@ const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 
 const makeValidationError = (message: string, details: ReadonlyArray<string> = [], cause?: unknown) =>
-	new AlertValidationError({ message, details, ...(cause === undefined ? {} : { cause }) })
+	new AlertValidationError({ message, details, ...(!(cause === undefined) ? { cause } : undefined) })
 
 const normalizeOptionalString = (value: string | null | undefined) => {
 	const trimmed = value?.trim()
@@ -94,8 +101,8 @@ const emailSecretConfig = (members: ReadonlyArray<OrgMember>): DestinationSecret
 })
 
 type AlertDestinationDependencyError =
-	| Effect.Error<ReturnType<HazelOAuthServiceShape["createChannelWebhook"]>>
-	| Effect.Error<ReturnType<OrgMembersServiceShape["resolveMembers"]>>
+	| Effect.Error<ReturnType<HazelOAuthServiceApi["createChannelWebhook"]>>
+	| Effect.Error<ReturnType<OrgMembersServiceApi["resolveMembers"]>>
 
 const encryptSecret = (
 	plaintext: string,
@@ -118,6 +125,12 @@ const summarizeWebhookUrl = (url: string) =>
 		onSome: (parsed) => `POST ${parsed.host}`,
 	})
 
+const TELEGRAM_MALFORMED_TOKEN_MESSAGE =
+	"Telegram bot token must look like `123456789:ABC-DEF…` — copy it from @BotFather without the `bot` prefix."
+
+/** A chat id is not a secret, but it is also not a name — label it as what it is. */
+const telegramSummary = (chatId: string) => `Chat ${chatId.trim()}`
+
 const buildPublicConfig = (
 	request: Exclude<AlertDestinationCreateRequest, { readonly type: "email" }>,
 ): DestinationPublicConfig =>
@@ -139,6 +152,11 @@ const buildPublicConfig = (
 				hazelChannelName: r.hazelChannelName,
 			}),
 			discord: (r) => ({ summary: summarizeWebhookUrl(r.webhookUrl), channelLabel: null }),
+			// The chat id, not the token: this config is Electric-synced to the
+			// browser, so nothing secret may appear here. It rides in
+			// `channelLabel` as well as the summary so the edit form can prefill it
+			// — without that, renaming a destination would demand retyping the id.
+			telegram: (r) => ({ summary: telegramSummary(r.chatId), channelLabel: r.chatId.trim() }),
 		}),
 	)
 
@@ -159,6 +177,11 @@ const buildSecretConfig = (
 				signingSecret: normalizeOptionalString(r.signingSecret),
 			}),
 			discord: (r) => ({ type: "discord" as const, webhookUrl: r.webhookUrl.trim() }),
+			telegram: (r) => ({
+				type: "telegram" as const,
+				botToken: r.botToken.trim(),
+				chatId: r.chatId.trim(),
+			}),
 		}),
 	)
 
@@ -192,6 +215,11 @@ const destinationDocumentFromRow = (
 		lastTestedAt:
 			row.lastTestedAt == null ? null : decodeIsoDateTimeStringSync(row.lastTestedAt.toISOString()),
 		lastTestError: row.lastTestError,
+		consecutiveFailures: row.consecutiveFailures,
+		lastFailureAt:
+			row.lastFailureAt == null ? null : decodeIsoDateTimeStringSync(row.lastFailureAt.toISOString()),
+		disabledAt: row.disabledAt == null ? null : decodeIsoDateTimeStringSync(row.disabledAt.toISOString()),
+		disabledReason: row.disabledReason,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
 		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
 	})
@@ -211,7 +239,7 @@ const rowToDestinationDocument = (
 			}),
 	})
 
-export interface AlertDestinationsServiceShape {
+export interface AlertDestinationsServiceApi {
 	readonly listDestinations: (
 		orgId: OrgId,
 	) => Effect.Effect<
@@ -260,6 +288,10 @@ export interface AlertDestinationsServiceShape {
 		| AlertDestinationInUseError
 		| AlertRuleStoredConfigInvalidError
 	>
+	readonly listTelegramChats: (
+		roles: ReadonlyArray<RoleName>,
+		botToken: string,
+	) => Effect.Effect<ReadonlyArray<TelegramChat>, AlertForbiddenError | AlertValidationError>
 	readonly testDestination: (
 		orgId: OrgId,
 		userId: UserId,
@@ -270,7 +302,7 @@ export interface AlertDestinationsServiceShape {
 		| AlertForbiddenError
 		| AlertPersistenceError
 		| AlertDestinationNotFoundError
-		| AlertDeliveryError
+		| AlertDeliveryFailure
 		| AlertDestinationDecryptionError
 		| AlertDestinationStoredConfigInvalidError
 	>
@@ -278,7 +310,7 @@ export interface AlertDestinationsServiceShape {
 
 export class AlertDestinationsService extends Context.Service<
 	AlertDestinationsService,
-	AlertDestinationsServiceShape
+	AlertDestinationsServiceApi
 >()("@maple/api/services/alerts/AlertDestinationsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
@@ -308,7 +340,7 @@ export class AlertDestinationsService extends Context.Service<
 			return yield* Effect.fail(
 				new AlertForbiddenError({
 					message: "Only org admins can manage alerts",
-					...(roles.length > 0 ? { roles: [...roles] } : {}),
+					...(roles.length > 0 ? { roles: [...roles] } : undefined),
 				}),
 			)
 		})
@@ -356,6 +388,13 @@ export class AlertDestinationsService extends Context.Service<
 					.set({
 						lastTestedAt: new Date(timestamp),
 						lastTestError: errorMessage,
+						// A test that got through proves the destination is reachable, so
+						// it clears the auto-disable counter the same way a real delivery
+						// does. A failed test is left alone: only the delivery queue,
+						// which knows whether the failure was terminal, counts up.
+						...(errorMessage === null
+							? { consecutiveFailures: 0, lastFailureAt: null }
+							: undefined),
 						updatedAt: new Date(timestamp),
 					})
 					.where(and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId))),
@@ -399,7 +438,41 @@ export class AlertDestinationsService extends Context.Service<
 			}
 		})
 
-		const createDestination: AlertDestinationsServiceShape["createDestination"] = Effect.fn(
+		const validateTelegramCredentials = Effect.fn("AlertsService.validateTelegramCredentials")(function* (
+			botToken: string,
+			chatId: string,
+		) {
+			if (!TELEGRAM_BOT_TOKEN_PATTERN.test(botToken)) {
+				return yield* Effect.fail(makeValidationError(TELEGRAM_MALFORMED_TOKEN_MESSAGE))
+			}
+			const result = yield* verifyTelegramCredentials(
+				botToken,
+				chatId,
+				runtime.fetch,
+				runtime.deliveryTimeoutMs(),
+			)
+			if (result.status === "invalid") {
+				return yield* Effect.fail(makeValidationError(result.reason))
+			}
+		})
+
+		const listTelegramChats: AlertDestinationsServiceApi["listTelegramChats"] = Effect.fn(
+			"AlertsService.listTelegramChats",
+		)(function* (roles, botToken) {
+			// Admin-gated for the same reason the Slack channel list is: it reads
+			// somebody's chat inventory, and it accepts an arbitrary token, so it
+			// must not be a probe any org member can drive.
+			yield* requireAdmin(roles)
+			const trimmed = botToken.trim()
+			if (!TELEGRAM_BOT_TOKEN_PATTERN.test(trimmed)) {
+				return yield* Effect.fail(makeValidationError(TELEGRAM_MALFORMED_TOKEN_MESSAGE))
+			}
+			const result = yield* fetchTelegramChats(trimmed, runtime.fetch, runtime.deliveryTimeoutMs())
+			if (result.status === "invalid") return yield* Effect.fail(makeValidationError(result.reason))
+			return result.chats
+		})
+
+		const createDestination: AlertDestinationsServiceApi["createDestination"] = Effect.fn(
 			"AlertsService.createDestination",
 		)(function* (orgId, userId, roles, request) {
 			yield* requireAdmin(roles)
@@ -438,6 +511,9 @@ export class AlertDestinationsService extends Context.Service<
 						: buildSecretConfig(request)
 			}
 			if (secretConfig.type === "pagerduty") yield* validatePagerDutyKey(secretConfig.integrationKey)
+			if (secretConfig.type === "telegram") {
+				yield* validateTelegramCredentials(secretConfig.botToken, secretConfig.chatId)
+			}
 			const encryptedSecret = yield* encryptSecret(
 				JSON.stringify(secretConfig),
 				encryptionKey,
@@ -456,6 +532,10 @@ export class AlertDestinationsService extends Context.Service<
 				secretTag: encryptedSecret.tag,
 				lastTestedAt: null,
 				lastTestError: null,
+				consecutiveFailures: 0,
+				lastFailureAt: null,
+				disabledAt: null,
+				disabledReason: null,
 				createdAt: new Date(timestamp),
 				updatedAt: new Date(timestamp),
 				createdBy: userId,
@@ -469,7 +549,7 @@ export class AlertDestinationsService extends Context.Service<
 			return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 		})
 
-		const updateDestination: AlertDestinationsServiceShape["updateDestination"] = Effect.fn(
+		const updateDestination: AlertDestinationsServiceApi["updateDestination"] = Effect.fn(
 			"AlertsService.updateDestination",
 		)(function* (orgId, userId, roles, destinationId, request) {
 			yield* requireAdmin(roles)
@@ -626,6 +706,25 @@ export class AlertDestinationsService extends Context.Service<
 										: ""),
 							} satisfies DestinationSecretConfig,
 						}),
+					telegram: (r) => {
+						const previous =
+							hydrated.secretConfig.type === "telegram" ? hydrated.secretConfig : null
+						const nextChatId = normalizeOptionalString(r.chatId)
+						return Effect.succeed({
+							nextPublicConfig: {
+								summary:
+									nextChatId != null
+										? telegramSummary(nextChatId)
+										: hydrated.publicConfig.summary,
+								channelLabel: nextChatId ?? hydrated.publicConfig.channelLabel,
+							} satisfies DestinationPublicConfig,
+							nextSecretConfig: {
+								type: "telegram" as const,
+								botToken: normalizeOptionalString(r.botToken) ?? previous?.botToken ?? "",
+								chatId: nextChatId ?? previous?.chatId ?? "",
+							} satisfies DestinationSecretConfig,
+						})
+					},
 					email: (r) =>
 						Effect.gen(function* () {
 							const supplied =
@@ -654,6 +753,16 @@ export class AlertDestinationsService extends Context.Service<
 			) {
 				yield* validatePagerDutyKey(nextSecretConfig.integrationKey)
 			}
+			if (
+				request.type === "telegram" &&
+				// Either half changing can invalidate the pair — a new chat the old
+				// bot was never added to fails exactly like a new token would.
+				(normalizeOptionalString(request.botToken) != null ||
+					normalizeOptionalString(request.chatId) != null) &&
+				nextSecretConfig.type === "telegram"
+			) {
+				yield* validateTelegramCredentials(nextSecretConfig.botToken, nextSecretConfig.chatId)
+			}
 			const encryptedSecret = yield* encryptSecret(
 				JSON.stringify(nextSecretConfig),
 				encryptionKey,
@@ -662,6 +771,16 @@ export class AlertDestinationsService extends Context.Service<
 			const timestamp = yield* runtime.now
 			const nextName = normalizeOptionalString(request.name) ?? existing.name
 			const nextEnabled = request.enabled === undefined ? existing.enabled : request.enabled
+			// An edit is the fix for a destination Maple auto-disabled, so it clears
+			// the failure state. Without this the counter stays at the threshold and
+			// the very next terminal failure disables the destination again
+			// immediately, which reads as "editing did nothing".
+			const clearedFailureState = {
+				consecutiveFailures: 0,
+				lastFailureAt: null,
+				disabledAt: null,
+				disabledReason: null,
+			} as const
 			const writeRows = yield* dbExecute((db) =>
 				db
 					.update(alertDestinations)
@@ -672,6 +791,7 @@ export class AlertDestinationsService extends Context.Service<
 						secretCiphertext: encryptedSecret.ciphertext,
 						secretIv: encryptedSecret.iv,
 						secretTag: encryptedSecret.tag,
+						...clearedFailureState,
 						updatedAt: new Date(timestamp),
 						updatedBy: userId,
 					})
@@ -688,6 +808,7 @@ export class AlertDestinationsService extends Context.Service<
 					secretCiphertext: encryptedSecret.ciphertext,
 					secretIv: encryptedSecret.iv,
 					secretTag: encryptedSecret.tag,
+					...clearedFailureState,
 					updatedAt: new Date(timestamp),
 					updatedBy: userId,
 				},
@@ -696,7 +817,7 @@ export class AlertDestinationsService extends Context.Service<
 			return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 		})
 
-		const deleteDestination: AlertDestinationsServiceShape["deleteDestination"] = Effect.fn(
+		const deleteDestination: AlertDestinationsServiceApi["deleteDestination"] = Effect.fn(
 			"AlertsService.deleteDestination",
 		)(function* (orgId, roles, destinationId) {
 			yield* requireAdmin(roles)
@@ -740,11 +861,11 @@ export class AlertDestinationsService extends Context.Service<
 			const txid = readTxid(deleted)
 			return new AlertDestinationDeleteResponse({
 				id: destinationId,
-				...(txid !== undefined && { txid }),
+				...(txid !== undefined ? { txid } : undefined),
 			})
 		})
 
-		const testDestination: AlertDestinationsServiceShape["testDestination"] = Effect.fn(
+		const testDestination: AlertDestinationsServiceApi["testDestination"] = Effect.fn(
 			"AlertsService.testDestination",
 		)(function* (orgId, _userId, roles, destinationId) {
 			yield* requireAdmin(roles)
@@ -791,8 +912,9 @@ export class AlertDestinationsService extends Context.Service<
 			createDestination,
 			updateDestination,
 			deleteDestination,
+			listTelegramChats,
 			testDestination,
-		} satisfies AlertDestinationsServiceShape
+		} satisfies AlertDestinationsServiceApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))
