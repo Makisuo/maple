@@ -70,11 +70,7 @@ export function FunnelResults({ labels, rows, unitNoun, waiting = false, classNa
 						</div>
 					) : (
 						<Suspense fallback={<ChartSkeleton variant="funnel" />}>
-							<QueryBuilderFunnelChart
-								data={chartRows}
-								className="h-full w-full"
-								funnel={{ showStepPercent: true }}
-							/>
+							<QueryBuilderFunnelChart data={chartRows} className="h-full w-full" showStepPercent />
 						</Suspense>
 					)}
 				</div>
