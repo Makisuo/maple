@@ -386,7 +386,7 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 		query: {
 			kind: "list" as const,
 			source: "traces" as const,
-			...(groupByTrace ? { groupByTrace: true as const } : {}),
+			groupByTrace,
 			limit,
 			offset,
 			sortBy: input.sortBy,
