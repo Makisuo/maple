@@ -41,7 +41,7 @@ function QueueTable({ queues, waiting }: { queues: ReadonlyArray<CloudflareQueue
 					currentKey={sortKey}
 					dir={sortDir}
 					onSort={handleSort}
-					width="flex-1 min-w-[220px]"
+					width="w-0 flex-1 min-w-[220px]"
 				/>
 				<ColumnHead<QueueSortKey>
 					label="Backlog avg"
@@ -78,7 +78,7 @@ function QueueTable({ queues, waiting }: { queues: ReadonlyArray<CloudflareQueue
 
 			{sorted.map((queue) => (
 				<div key={queue.serviceName} className={ROW_CLASS}>
-					<div className="min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground">
+					<div className="w-0 min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground">
 						{queue.queueName}
 					</div>
 					{numCell(formatNumber(Math.round(queue.backlogMessages)))}
@@ -113,7 +113,7 @@ function DurableObjectTable({
 					currentKey={sortKey}
 					dir={sortDir}
 					onSort={handleSort}
-					width="flex-1 min-w-[220px]"
+					width="w-0 flex-1 min-w-[220px]"
 				/>
 				<ColumnHead<DoSortKey>
 					label="DO requests"
@@ -140,7 +140,7 @@ function DurableObjectTable({
 
 			{sorted.map((row) => (
 				<div key={row.serviceName} className={ROW_CLASS}>
-					<div className="min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground">
+					<div className="w-0 min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground">
 						{row.scriptName}
 					</div>
 					{numCell(formatNumber(row.requests))}

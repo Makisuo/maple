@@ -41,11 +41,30 @@ export interface ExecuteHooks {
 	readonly record: (attributes: Record<string, unknown>) => void
 }
 
+/**
+ * Drizzle's own message is `Failed query: <sql>\nparams: <params>` — with the
+ * params inlined, a batched upsert of error rows runs to tens of KB. Span status
+ * and log lines truncate, so whatever comes first is what survives.
+ */
+const MAX_QUERY_MESSAGE_CHARS = 600
+
+const capQueryMessage = (message: string): string =>
+	message.length <= MAX_QUERY_MESSAGE_CHARS
+		? message
+		: `${message.slice(0, MAX_QUERY_MESSAGE_CHARS)}…[truncated ${message.length - MAX_QUERY_MESSAGE_CHARS} chars]`
+
+/**
+ * Root cause first: the Postgres diagnostic (`invalid byte sequence for
+ * encoding "UTF8": 0x00`, `relation "x" does not exist`) is the half an
+ * operator needs, and the half that used to sit past the truncation point
+ * behind the quoted statement. The statement follows, capped — the full SQL is
+ * on the span as `db.query.text`.
+ */
 export const toDatabaseError = (cause: unknown): DatabaseError => {
 	const message = cause instanceof Error ? cause.message : "Database operation failed"
 	const rootCause = cause instanceof Error && cause.cause instanceof Error ? cause.cause.message : undefined
 	return new DatabaseError({
-		message: rootCause ? `${message} [caused by: ${rootCause}]` : message,
+		message: rootCause ? `${rootCause} [while: ${capQueryMessage(message)}]` : capQueryMessage(message),
 		cause,
 	})
 }

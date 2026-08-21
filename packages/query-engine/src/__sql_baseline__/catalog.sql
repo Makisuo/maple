@@ -555,411 +555,6 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:product-events:productEventNamesQuery:default  [7c7336c7]
-SELECT
-          EventName AS eventName,
-          Kind AS kind,
-          count() AS count,
-          uniqIf(SessionId, SessionId != '') AS sessions,
-          uniq(if(UserId != '', UserId, VisitorId)) AS persons
-        FROM product_events
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-        GROUP BY eventName, kind
-        ORDER BY count DESC, eventName ASC
-        LIMIT 100
-        FORMAT JSON
-
--- builder:product-events:productEventNamesQuery:filtered  [29add6ad]
-SELECT
-          EventName AS eventName,
-          Kind AS kind,
-          count() AS count,
-          uniqIf(SessionId, SessionId != '') AS sessions,
-          uniq(if(UserId != '', UserId, VisitorId)) AS persons
-        FROM product_events
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-          AND Host = 'maple.dev'
-          AND SessionId IN (SELECT
-          SessionId AS sessionId
-        FROM session_replays
-        WHERE OrgId = 'org_sql_catalog'
-          AND StartTime >= '2026-01-01 10:30:00'
-          AND StartTime <= '2026-01-03 14:15:00'
-          AND SessionId IN (SELECT
-          SessionId AS sessionId
-        FROM product_events
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-          AND Kind = 'navigation'
-          AND PagePath = '/pricing'
-        GROUP BY sessionId)
-          AND ReferrerHost = 't.co'
-          AND Country = 'DE'
-          AND DeviceType = 'desktop'
-          AND BrowserName = 'Chrome'
-          AND OsName = 'macOS'
-          AND Language = 'en-US'
-          AND UtmSource = 'twitter'
-          AND UtmMedium = 'social'
-          AND UtmCampaign = 'launch'
-          AND VisitorIsNew = 1
-        GROUP BY sessionId)
-        GROUP BY eventName, kind
-        ORDER BY count DESC, eventName ASC
-        LIMIT 100
-        FORMAT JSON
-
--- builder:product-events:productEventsFunnelBreakdownQuery:attribute-session-step  [ac39fa69]
-SELECT
-          group AS group,
-          arrayJoin([1, 2, 3, 4]) AS step,
-          arrayElement(counts, step) AS count
-        FROM (SELECT
-          group AS group,
-          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3), countIf(level >= 4)] AS counts,
-          countIf(level >= 1) AS entered
-        FROM (SELECT
-          key AS key,
-          windowFunnel(604800000)(ts, s1 = 1, s2 = 1, s3 = 1, s4 = 1) AS level,
-          argMinIf(dim, ts, dim != '') AS group
-        FROM (
-SELECT
-          UserId AS key,
-          toUInt64(toUnixTimestamp64Milli(StartTime)) AS ts,
-          1 AS s1,
-          0 AS s2,
-          0 AS s3,
-          0 AS s4,
-          '' AS dim
-        FROM session_replays AS s
-        WHERE OrgId = 'org_sql_catalog'
-          AND StartTime >= '2026-01-01 10:30:00'
-          AND StartTime <= '2026-01-03 14:15:00'
-          AND ReferrerHost = 'news.ycombinator.com'
-          AND UserId != ''
-UNION ALL
-SELECT
-          UserId AS key,
-          toUInt64(toUnixTimestamp64Milli(Timestamp)) AS ts,
-          0 AS s1,
-          toUInt8(((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev')) AS s2,
-          toUInt8(EventName = 'signup_completed') AS s3,
-          toUInt8((EventName = 'plan_started' AND Attributes['plan'] = 'startup')) AS s4,
-          Attributes['plan'] AS dim
-        FROM product_events AS e
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-          AND ((((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev') OR EventName = 'signup_completed') OR (EventName = 'plan_started' AND Attributes['plan'] = 'startup'))
-          AND UserId != ''
-) AS funnel_events
-        GROUP BY key) AS levels
-        GROUP BY group
-        ORDER BY entered DESC, group ASC
-        LIMIT 5) AS groups
-        ORDER BY group ASC, step ASC
-        FORMAT JSON
-
--- builder:product-events:productEventsFunnelBreakdownQuery:session-dimension  [f52bc5e1]
-SELECT
-          group AS group,
-          arrayJoin([1, 2, 3]) AS step,
-          arrayElement(counts, step) AS count
-        FROM (SELECT
-          group AS group,
-          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3)] AS counts,
-          countIf(level >= 1) AS entered
-        FROM (SELECT
-          key AS key,
-          windowFunnel(604800000)(ts, s1 = 1, s2 = 1, s3 = 1) AS level,
-          argMinIf(dim, ts, dim != '') AS group
-        FROM (SELECT
-          multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) AS key,
-          toUInt64(toUnixTimestamp64Milli(e.Timestamp)) AS ts,
-          toUInt8(((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev')) AS s1,
-          toUInt8(e.EventName = 'signup_completed') AS s2,
-          toUInt8((e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup')) AS s3,
-          coalesce(sd.Value, '') AS dim
-        FROM product_events AS e
-        LEFT JOIN (SELECT
-          VisitorId AS VisitorId,
-          argMin(UserId, FirstSeen) AS UserId
-        FROM (SELECT
-          VisitorId AS VisitorId,
-          UserId AS UserId,
-          min(FirstSeen) AS FirstSeen
-        FROM identity_links
-        WHERE OrgId = 'org_sql_catalog'
-        GROUP BY VisitorId, UserId) AS pair_links
-        GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
-        LEFT JOIN (SELECT
-          SessionId AS SessionId,
-          max(UtmSource) AS Value
-        FROM session_replays
-        WHERE OrgId = 'org_sql_catalog'
-          AND StartTime >= '2026-01-01 10:30:00'
-          AND StartTime <= '2026-01-03 14:15:00'
-        GROUP BY SessionId) AS sd ON e.SessionId = sd.SessionId
-        WHERE e.OrgId = 'org_sql_catalog'
-          AND e.Timestamp >= '2026-01-01 10:30:00'
-          AND e.Timestamp <= '2026-01-03 14:15:00'
-          AND ((((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev') OR e.EventName = 'signup_completed') OR (e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup'))
-          AND multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) != '') AS funnel_events
-        GROUP BY key) AS levels
-        GROUP BY group
-        ORDER BY entered DESC, group ASC
-        LIMIT 10) AS groups
-        ORDER BY group ASC, step ASC
-        FORMAT JSON
-
--- builder:product-events:productEventsFunnelQuery:person  [41bb75cc]
-SELECT
-          arrayJoin([1, 2, 3]) AS step,
-          arrayElement(counts, step) AS count
-        FROM (SELECT
-          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3)] AS counts
-        FROM (SELECT
-          key AS key,
-          windowFunnel(604800000)(ts, s1 = 1, s2 = 1, s3 = 1) AS level
-        FROM (SELECT
-          multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) AS key,
-          toUInt64(toUnixTimestamp64Milli(e.Timestamp)) AS ts,
-          toUInt8(((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev')) AS s1,
-          toUInt8(e.EventName = 'signup_completed') AS s2,
-          toUInt8((e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup')) AS s3
-        FROM product_events AS e
-        LEFT JOIN (SELECT
-          VisitorId AS VisitorId,
-          argMin(UserId, FirstSeen) AS UserId
-        FROM (SELECT
-          VisitorId AS VisitorId,
-          UserId AS UserId,
-          min(FirstSeen) AS FirstSeen
-        FROM identity_links
-        WHERE OrgId = 'org_sql_catalog'
-        GROUP BY VisitorId, UserId) AS pair_links
-        GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
-        WHERE e.OrgId = 'org_sql_catalog'
-          AND e.Timestamp >= '2026-01-01 10:30:00'
-          AND e.Timestamp <= '2026-01-03 14:15:00'
-          AND ((((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev') OR e.EventName = 'signup_completed') OR (e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup'))
-          AND multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) != '') AS funnel_events
-        GROUP BY key) AS levels) AS totals
-        ORDER BY step ASC
-        FORMAT JSON
-
--- builder:product-events:productEventsFunnelQuery:session-key  [619f95db]
-SELECT
-          arrayJoin([1, 2, 3]) AS step,
-          arrayElement(counts, step) AS count
-        FROM (SELECT
-          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3)] AS counts
-        FROM (SELECT
-          key AS key,
-          windowFunnel(1800000)(ts, s1 = 1, s2 = 1, s3 = 1) AS level
-        FROM (SELECT
-          SessionId AS key,
-          toUInt64(toUnixTimestamp64Milli(Timestamp)) AS ts,
-          toUInt8(((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev')) AS s1,
-          toUInt8(EventName = 'signup_completed') AS s2,
-          toUInt8((EventName = 'plan_started' AND Attributes['plan'] = 'startup')) AS s3
-        FROM product_events AS e
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-          AND ((((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev') OR EventName = 'signup_completed') OR (EventName = 'plan_started' AND Attributes['plan'] = 'startup'))
-          AND SessionId != '') AS funnel_events
-        GROUP BY key) AS levels) AS totals
-        ORDER BY step ASC
-        FORMAT JSON
-
--- builder:product-events:productEventsFunnelQuery:session-step-filtered  [bbc7eaed]
-SELECT
-          arrayJoin([1, 2, 3, 4]) AS step,
-          arrayElement(counts, step) AS count
-        FROM (SELECT
-          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3), countIf(level >= 4)] AS counts
-        FROM (SELECT
-          key AS key,
-          windowFunnel(604800000)(ts, s1 = 1, s2 = 1, s3 = 1, s4 = 1) AS level
-        FROM (
-SELECT
-          multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) AS key,
-          toUInt64(toUnixTimestamp64Milli(s.StartTime)) AS ts,
-          1 AS s1,
-          0 AS s2,
-          0 AS s3,
-          0 AS s4
-        FROM session_replays AS s
-        LEFT JOIN (SELECT
-          VisitorId AS VisitorId,
-          argMin(UserId, FirstSeen) AS UserId
-        FROM (SELECT
-          VisitorId AS VisitorId,
-          UserId AS UserId,
-          min(FirstSeen) AS FirstSeen
-        FROM identity_links
-        WHERE OrgId = 'org_sql_catalog'
-        GROUP BY VisitorId, UserId) AS pair_links
-        GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
-        WHERE s.OrgId = 'org_sql_catalog'
-          AND s.StartTime >= '2026-01-01 10:30:00'
-          AND s.StartTime <= '2026-01-03 14:15:00'
-          AND s.ReferrerHost = 'news.ycombinator.com'
-          AND multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) != ''
-          AND multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) IN (SELECT
-          multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) AS key
-        FROM session_replays AS s
-        LEFT JOIN (SELECT
-          VisitorId AS VisitorId,
-          argMin(UserId, FirstSeen) AS UserId
-        FROM (SELECT
-          VisitorId AS VisitorId,
-          UserId AS UserId,
-          min(FirstSeen) AS FirstSeen
-        FROM identity_links
-        WHERE OrgId = 'org_sql_catalog'
-        GROUP BY VisitorId, UserId) AS pair_links
-        GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
-        WHERE s.OrgId = 'org_sql_catalog'
-          AND s.StartTime >= '2026-01-01 10:30:00'
-          AND s.StartTime <= '2026-01-03 14:15:00'
-          AND s.SessionId IN (SELECT
-          SessionId AS sessionId
-        FROM product_events
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-          AND Kind = 'navigation'
-          AND Host = 'maple.dev'
-          AND PagePath = '/pricing'
-        GROUP BY sessionId)
-          AND s.ReferrerHost = 't.co'
-          AND s.Country = 'DE'
-          AND s.DeviceType = 'desktop'
-          AND s.BrowserName = 'Chrome'
-          AND s.OsName = 'macOS'
-          AND s.Language = 'en-US'
-          AND s.UtmSource = 'twitter'
-          AND s.UtmMedium = 'social'
-          AND s.UtmCampaign = 'launch'
-          AND s.VisitorIsNew = 1
-        GROUP BY key)
-UNION ALL
-SELECT
-          multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) AS key,
-          toUInt64(toUnixTimestamp64Milli(e.Timestamp)) AS ts,
-          0 AS s1,
-          toUInt8(((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev')) AS s2,
-          toUInt8(e.EventName = 'signup_completed') AS s3,
-          toUInt8((e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup')) AS s4
-        FROM product_events AS e
-        LEFT JOIN (SELECT
-          VisitorId AS VisitorId,
-          argMin(UserId, FirstSeen) AS UserId
-        FROM (SELECT
-          VisitorId AS VisitorId,
-          UserId AS UserId,
-          min(FirstSeen) AS FirstSeen
-        FROM identity_links
-        WHERE OrgId = 'org_sql_catalog'
-        GROUP BY VisitorId, UserId) AS pair_links
-        GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
-        WHERE e.OrgId = 'org_sql_catalog'
-          AND e.Timestamp >= '2026-01-01 10:30:00'
-          AND e.Timestamp <= '2026-01-03 14:15:00'
-          AND ((((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev') OR e.EventName = 'signup_completed') OR (e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup'))
-          AND multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) != ''
-          AND multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) IN (SELECT
-          multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) AS key
-        FROM session_replays AS s
-        LEFT JOIN (SELECT
-          VisitorId AS VisitorId,
-          argMin(UserId, FirstSeen) AS UserId
-        FROM (SELECT
-          VisitorId AS VisitorId,
-          UserId AS UserId,
-          min(FirstSeen) AS FirstSeen
-        FROM identity_links
-        WHERE OrgId = 'org_sql_catalog'
-        GROUP BY VisitorId, UserId) AS pair_links
-        GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
-        WHERE s.OrgId = 'org_sql_catalog'
-          AND s.StartTime >= '2026-01-01 10:30:00'
-          AND s.StartTime <= '2026-01-03 14:15:00'
-          AND s.SessionId IN (SELECT
-          SessionId AS sessionId
-        FROM product_events
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-          AND Kind = 'navigation'
-          AND Host = 'maple.dev'
-          AND PagePath = '/pricing'
-        GROUP BY sessionId)
-          AND s.ReferrerHost = 't.co'
-          AND s.Country = 'DE'
-          AND s.DeviceType = 'desktop'
-          AND s.BrowserName = 'Chrome'
-          AND s.OsName = 'macOS'
-          AND s.Language = 'en-US'
-          AND s.UtmSource = 'twitter'
-          AND s.UtmMedium = 'social'
-          AND s.UtmCampaign = 'launch'
-          AND s.VisitorIsNew = 1
-        GROUP BY key)
-) AS funnel_events
-        GROUP BY key) AS levels) AS totals
-        ORDER BY step ASC
-        FORMAT JSON
-
--- builder:product-events:productEventsFunnelQuery:visitor-session-step  [1eb9e5d6]
-SELECT
-          arrayJoin([1, 2, 3, 4]) AS step,
-          arrayElement(counts, step) AS count
-        FROM (SELECT
-          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3), countIf(level >= 4)] AS counts
-        FROM (SELECT
-          key AS key,
-          windowFunnel(3600000)(ts, s1 = 1, s2 = 1, s3 = 1, s4 = 1) AS level
-        FROM (
-SELECT
-          VisitorId AS key,
-          toUInt64(toUnixTimestamp64Milli(StartTime)) AS ts,
-          1 AS s1,
-          0 AS s2,
-          0 AS s3,
-          0 AS s4
-        FROM session_replays AS s
-        WHERE OrgId = 'org_sql_catalog'
-          AND StartTime >= '2026-01-01 10:30:00'
-          AND StartTime <= '2026-01-03 14:15:00'
-          AND ReferrerHost = 'news.ycombinator.com'
-          AND VisitorId != ''
-UNION ALL
-SELECT
-          VisitorId AS key,
-          toUInt64(toUnixTimestamp64Milli(Timestamp)) AS ts,
-          0 AS s1,
-          toUInt8(((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev')) AS s2,
-          toUInt8(EventName = 'signup_completed') AS s3,
-          toUInt8((EventName = 'plan_started' AND Attributes['plan'] = 'startup')) AS s4
-        FROM product_events AS e
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-          AND ((((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev') OR EventName = 'signup_completed') OR (EventName = 'plan_started' AND Attributes['plan'] = 'startup'))
-          AND VisitorId != ''
-) AS funnel_events
-        GROUP BY key) AS levels) AS totals
-        ORDER BY step ASC
-        FORMAT JSON
-
 -- builder:service-map-rollup:serviceMapEdgesExistingHoursSQL:default  [6a2a284a]
 SELECT
           toUnixTimestamp(Hour) AS hourTs
@@ -2384,9 +1979,9 @@ SELECT
         LIMIT 2
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered  [1cbe5313]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered  [81a04a1d]
 SELECT
-          ReferrerHost AS name,
+          if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
           'referrerHost' AS facetType
         FROM session_replays
@@ -2412,7 +2007,6 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND ReferrerHost != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2578,7 +2172,7 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          UtmSource AS name,
+          if(UtmSource = '', '(none)', UtmSource) AS name,
           uniq(SessionId) AS count,
           'utmSource' AS facetType
         FROM session_replays
@@ -2604,13 +2198,12 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND UtmSource != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmMedium AS name,
+          if(UtmMedium = '', '(none)', UtmMedium) AS name,
           uniq(SessionId) AS count,
           'utmMedium' AS facetType
         FROM session_replays
@@ -2636,13 +2229,12 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND UtmMedium != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmCampaign AS name,
+          if(UtmCampaign = '', '(none)', UtmCampaign) AS name,
           uniq(SessionId) AS count,
           'utmCampaign' AS facetType
         FROM session_replays
@@ -2668,7 +2260,6 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmMedium = 'social'
           AND VisitorIsNew = 1
-          AND UtmCampaign != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2770,9 +2361,9 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered-rollup  [87c76923]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered-rollup  [fd0344cd]
 SELECT
-          ReferrerHost AS name,
+          if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
           'referrerHost' AS facetType
         FROM session_replays
@@ -2781,7 +2372,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2798,7 +2389,6 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND ReferrerHost != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2813,7 +2403,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2845,7 +2435,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2877,7 +2467,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2909,7 +2499,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2941,7 +2531,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2964,7 +2554,7 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          UtmSource AS name,
+          if(UtmSource = '', '(none)', UtmSource) AS name,
           uniq(SessionId) AS count,
           'utmSource' AS facetType
         FROM session_replays
@@ -2973,7 +2563,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2990,13 +2580,12 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND UtmSource != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmMedium AS name,
+          if(UtmMedium = '', '(none)', UtmMedium) AS name,
           uniq(SessionId) AS count,
           'utmMedium' AS facetType
         FROM session_replays
@@ -3005,7 +2594,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3022,13 +2611,12 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND UtmMedium != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmCampaign AS name,
+          if(UtmCampaign = '', '(none)', UtmCampaign) AS name,
           uniq(SessionId) AS count,
           'utmCampaign' AS facetType
         FROM session_replays
@@ -3037,7 +2625,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3054,7 +2642,6 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmMedium = 'social'
           AND VisitorIsNew = 1
-          AND UtmCampaign != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -3069,7 +2656,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3101,7 +2688,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3133,7 +2720,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3156,16 +2743,15 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:default  [7db200be]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:default  [49a69b46]
 SELECT
-          ReferrerHost AS name,
+          if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
           'referrerHost' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND ReferrerHost != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -3236,40 +2822,37 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          UtmSource AS name,
+          if(UtmSource = '', '(none)', UtmSource) AS name,
           uniq(SessionId) AS count,
           'utmSource' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmSource != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmMedium AS name,
+          if(UtmMedium = '', '(none)', UtmMedium) AS name,
           uniq(SessionId) AS count,
           'utmMedium' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmMedium != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmCampaign AS name,
+          if(UtmCampaign = '', '(none)', UtmCampaign) AS name,
           uniq(SessionId) AS count,
           'utmCampaign' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmCampaign != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -3314,16 +2897,15 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:default-rollup  [7db200be]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:default-rollup  [49a69b46]
 SELECT
-          ReferrerHost AS name,
+          if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
           'referrerHost' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND ReferrerHost != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -3394,40 +2976,37 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          UtmSource AS name,
+          if(UtmSource = '', '(none)', UtmSource) AS name,
           uniq(SessionId) AS count,
           'utmSource' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmSource != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmMedium AS name,
+          if(UtmMedium = '', '(none)', UtmMedium) AS name,
           uniq(SessionId) AS count,
           'utmMedium' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmMedium != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmCampaign AS name,
+          if(UtmCampaign = '', '(none)', UtmCampaign) AS name,
           uniq(SessionId) AS count,
           'utmCampaign' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmCampaign != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -3489,13 +3068,13 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPagesQuery:default-rollup  [db25069a]
+-- builder:web-analytics:webAnalyticsPagesQuery:default-rollup  [89af71c3]
 SELECT
           Host AS host,
           PagePath AS pagePath,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3531,13 +3110,13 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPagesQuery:semi-joined-rollup  [95c72121]
+-- builder:web-analytics:webAnalyticsPagesQuery:semi-joined-rollup  [12fc3e6e]
 SELECT
           Host AS host,
           PagePath AS pagePath,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3574,13 +3153,13 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPagesQuery:url-filtered-rollup  [d0bf84d1]
+-- builder:web-analytics:webAnalyticsPagesQuery:url-filtered-rollup  [90a8dfda]
 SELECT
           Host AS host,
           PagePath AS pagePath,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3606,12 +3185,12 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPageviewsTimeseriesQuery:default-rollup  [f5af91eb]
+-- builder:web-analytics:webAnalyticsPageviewsTimeseriesQuery:default-rollup  [0e7c3b62]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3643,12 +3222,12 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPageviewsTimeseriesQuery:semi-joined-rollup  [6d125446]
+-- builder:web-analytics:webAnalyticsPageviewsTimeseriesQuery:semi-joined-rollup  [f3673589]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3728,7 +3307,7 @@ SELECT
           AND VisitorIsNew = 1
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsSummaryQuery:filtered-rollup  [2662de3d]
+-- builder:web-analytics:webAnalyticsSummaryQuery:filtered-rollup  [3746231e]
 SELECT
           uniqIf(VisitorId, VisitorId != '') AS visitors,
           uniq(SessionId) AS sessions,
@@ -3742,7 +3321,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM product_events
+        FROM web_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -4629,7 +4208,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- pipe:list_traces:contains-match:baseline  [608a1075]
+-- pipe:list_traces:contains-match:baseline  [15600e4e]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4643,7 +4222,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -4667,7 +4246,7 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- pipe:list_traces:contains-match:bloom  [608a1075]
+-- pipe:list_traces:contains-match:bloom  [15600e4e]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4681,7 +4260,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -4705,7 +4284,7 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- pipe:list_traces:contains-match:text  [608a1075]
+-- pipe:list_traces:contains-match:text  [15600e4e]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4719,7 +4298,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -4743,7 +4322,7 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- pipe:list_traces:default:baseline  [62bbe0b9]
+-- pipe:list_traces:default:baseline  [845d8dde]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4757,7 +4336,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -4779,7 +4358,7 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- pipe:list_traces:default:bloom  [62bbe0b9]
+-- pipe:list_traces:default:bloom  [845d8dde]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4793,7 +4372,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -4815,7 +4394,7 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- pipe:list_traces:default:text  [62bbe0b9]
+-- pipe:list_traces:default:text  [845d8dde]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4829,7 +4408,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -4851,7 +4430,7 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- pipe:list_traces:filtered:baseline  [53aa2fe9]
+-- pipe:list_traces:filtered:baseline  [5702a482]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4865,7 +4444,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -4901,7 +4480,7 @@ SELECT
         LIMIT 25
         FORMAT JSON
 
--- pipe:list_traces:filtered:bloom  [022c02f1]
+-- pipe:list_traces:filtered:bloom  [14239a36]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4915,7 +4494,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -4951,7 +4530,7 @@ SELECT
         LIMIT 25
         FORMAT JSON
 
--- pipe:list_traces:filtered:text  [d0aad5c1]
+-- pipe:list_traces:filtered:text  [2303278a]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4965,7 +4544,7 @@ SELECT
           SpanAttributes['http.method'] AS rootHttpMethod,
           SpanAttributes['http.route'] AS rootHttpRoute,
           SpanAttributes['http.status_code'] AS rootHttpStatusCode,
-          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'])) AS rootSpanAttributes,
+          toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])) AS rootSpanAttributes,
           if(StatusCode = 'Error', 1, 0) AS hasError
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
@@ -8603,6 +8182,279 @@ SELECT
           AND DeploymentEnv = 'production'
           AND HasError = 1
 FORMAT JSON
+
+-- spec:traces-list-grouped-attr-fallback:baseline  [6142bef1]
+SELECT
+          TraceId AS traceId,
+          argMin(Timestamp, (if(ParentSpanId = '', 0, 1), Timestamp)) AS startTime,
+          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) AS endTime,
+          intDiv(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
+          intDiv(argMin(Duration, (if(ParentSpanId = '', 0, 1), Timestamp)), 1000) AS rootDurationMicros,
+          count() AS spanCount,
+          arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services,
+          argMin(SpanName, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanName,
+          argMin(SpanKind, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanKind,
+          argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanStatusCode,
+          argMin(SpanAttributes['http.method'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpMethod,
+          argMin(SpanAttributes['http.route'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpRoute,
+          argMin(SpanAttributes['http.status_code'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpStatusCode,
+          argMin(toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])), (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanAttributes,
+          if(argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) = 'Error', 1, 0) AS hasError
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= subtractHours(toDateTime('2026-01-01 10:30:00'), 1)
+          AND Timestamp <= addHours(toDateTime('2026-01-03 14:15:00'), 1)
+          AND TraceId IN (SELECT traceId FROM (SELECT
+          TraceId AS traceId,
+          Timestamp AS ts,
+          Duration AS d
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
+          AND SpanAttributes['user.id'] = 'u1'
+          AND ParentSpanId = ''
+        ORDER BY ts DESC, traceId DESC
+        LIMIT 50))
+        GROUP BY traceId
+        ORDER BY startTime DESC, traceId DESC
+        LIMIT 50
+        FORMAT JSON
+
+-- spec:traces-list-grouped-attr-fallback:bloom  [a9a27f2b]
+SELECT
+          TraceId AS traceId,
+          argMin(Timestamp, (if(ParentSpanId = '', 0, 1), Timestamp)) AS startTime,
+          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) AS endTime,
+          intDiv(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
+          intDiv(argMin(Duration, (if(ParentSpanId = '', 0, 1), Timestamp)), 1000) AS rootDurationMicros,
+          count() AS spanCount,
+          arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services,
+          argMin(SpanName, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanName,
+          argMin(SpanKind, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanKind,
+          argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanStatusCode,
+          argMin(SpanAttributes['http.method'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpMethod,
+          argMin(SpanAttributes['http.route'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpRoute,
+          argMin(SpanAttributes['http.status_code'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpStatusCode,
+          argMin(toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])), (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanAttributes,
+          if(argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) = 'Error', 1, 0) AS hasError
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= subtractHours(toDateTime('2026-01-01 10:30:00'), 1)
+          AND Timestamp <= addHours(toDateTime('2026-01-03 14:15:00'), 1)
+          AND TraceId IN (SELECT traceId FROM (SELECT
+          TraceId AS traceId,
+          Timestamp AS ts,
+          Duration AS d
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
+          AND ((has(mapKeys(SpanAttributes), 'user.id') AND has(mapValues(SpanAttributes), 'u1')) AND SpanAttributes['user.id'] = 'u1')
+          AND ParentSpanId = ''
+        ORDER BY ts DESC, traceId DESC
+        LIMIT 50))
+        GROUP BY traceId
+        ORDER BY startTime DESC, traceId DESC
+        LIMIT 50
+        FORMAT JSON
+
+-- spec:traces-list-grouped-attr-fallback:text  [22bd2047]
+SELECT
+          TraceId AS traceId,
+          argMin(Timestamp, (if(ParentSpanId = '', 0, 1), Timestamp)) AS startTime,
+          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) AS endTime,
+          intDiv(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
+          intDiv(argMin(Duration, (if(ParentSpanId = '', 0, 1), Timestamp)), 1000) AS rootDurationMicros,
+          count() AS spanCount,
+          arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services,
+          argMin(SpanName, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanName,
+          argMin(SpanKind, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanKind,
+          argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanStatusCode,
+          argMin(SpanAttributes['http.method'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpMethod,
+          argMin(SpanAttributes['http.route'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpRoute,
+          argMin(SpanAttributes['http.status_code'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpStatusCode,
+          argMin(toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])), (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanAttributes,
+          if(argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) = 'Error', 1, 0) AS hasError
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= subtractHours(toDateTime('2026-01-01 10:30:00'), 1)
+          AND Timestamp <= addHours(toDateTime('2026-01-03 14:15:00'), 1)
+          AND TraceId IN (SELECT traceId FROM (SELECT
+          TraceId AS traceId,
+          Timestamp AS ts,
+          Duration AS d
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
+          AND (has(SpanAttributeItems, concat('user.id', char(31), 'u1')) AND SpanAttributes['user.id'] = 'u1')
+          AND ParentSpanId = ''
+        ORDER BY ts DESC, traceId DESC
+        LIMIT 50))
+        GROUP BY traceId
+        ORDER BY startTime DESC, traceId DESC
+        LIMIT 50
+        FORMAT JSON
+
+-- spec:traces-list-grouped-duration-sort:baseline  [3b6bcadc]
+SELECT
+          TraceId AS traceId,
+          argMin(Timestamp, (if(ParentSpanId = '', 0, 1), Timestamp)) AS startTime,
+          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) AS endTime,
+          intDiv(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
+          intDiv(argMin(Duration, (if(ParentSpanId = '', 0, 1), Timestamp)), 1000) AS rootDurationMicros,
+          count() AS spanCount,
+          arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services,
+          argMin(SpanName, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanName,
+          argMin(SpanKind, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanKind,
+          argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanStatusCode,
+          argMin(SpanAttributes['http.method'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpMethod,
+          argMin(SpanAttributes['http.route'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpRoute,
+          argMin(SpanAttributes['http.status_code'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpStatusCode,
+          argMin(toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])), (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanAttributes,
+          if(argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) = 'Error', 1, 0) AS hasError
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= subtractHours(toDateTime('2026-01-01 10:30:00'), 1)
+          AND Timestamp <= addHours(toDateTime('2026-01-03 14:15:00'), 1)
+          AND TraceId IN (SELECT traceId FROM (SELECT
+          TraceId AS traceId,
+          Timestamp AS ts,
+          Duration AS d
+        FROM trace_list_mv
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND DeploymentEnv = 'production'
+        ORDER BY d DESC, ts DESC, traceId DESC
+        LIMIT 50
+        OFFSET 100))
+        GROUP BY traceId
+        ORDER BY rootDurationMicros DESC, startTime DESC, traceId DESC
+        LIMIT 50
+        FORMAT JSON
+
+-- spec:traces-list-grouped:baseline  [da486ffd]
+SELECT
+          TraceId AS traceId,
+          argMin(Timestamp, (if(ParentSpanId = '', 0, 1), Timestamp)) AS startTime,
+          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) AS endTime,
+          intDiv(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
+          intDiv(argMin(Duration, (if(ParentSpanId = '', 0, 1), Timestamp)), 1000) AS rootDurationMicros,
+          count() AS spanCount,
+          arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services,
+          argMin(SpanName, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanName,
+          argMin(SpanKind, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanKind,
+          argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanStatusCode,
+          argMin(SpanAttributes['http.method'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpMethod,
+          argMin(SpanAttributes['http.route'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpRoute,
+          argMin(SpanAttributes['http.status_code'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpStatusCode,
+          argMin(toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])), (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanAttributes,
+          if(argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) = 'Error', 1, 0) AS hasError
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= subtractHours(toDateTime('2026-01-01 10:30:00'), 1)
+          AND Timestamp <= addHours(toDateTime('2026-01-03 14:15:00'), 1)
+          AND TraceId IN (SELECT traceId FROM (SELECT
+          TraceId AS traceId,
+          Timestamp AS ts,
+          Duration AS d
+        FROM trace_list_mv
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND DeploymentEnv = 'production'
+        ORDER BY ts DESC, traceId DESC
+        LIMIT 50))
+        GROUP BY traceId
+        ORDER BY startTime DESC, traceId DESC
+        LIMIT 50
+        FORMAT JSON
+
+-- spec:traces-list-grouped:bloom  [da486ffd]
+SELECT
+          TraceId AS traceId,
+          argMin(Timestamp, (if(ParentSpanId = '', 0, 1), Timestamp)) AS startTime,
+          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) AS endTime,
+          intDiv(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
+          intDiv(argMin(Duration, (if(ParentSpanId = '', 0, 1), Timestamp)), 1000) AS rootDurationMicros,
+          count() AS spanCount,
+          arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services,
+          argMin(SpanName, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanName,
+          argMin(SpanKind, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanKind,
+          argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanStatusCode,
+          argMin(SpanAttributes['http.method'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpMethod,
+          argMin(SpanAttributes['http.route'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpRoute,
+          argMin(SpanAttributes['http.status_code'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpStatusCode,
+          argMin(toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])), (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanAttributes,
+          if(argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) = 'Error', 1, 0) AS hasError
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= subtractHours(toDateTime('2026-01-01 10:30:00'), 1)
+          AND Timestamp <= addHours(toDateTime('2026-01-03 14:15:00'), 1)
+          AND TraceId IN (SELECT traceId FROM (SELECT
+          TraceId AS traceId,
+          Timestamp AS ts,
+          Duration AS d
+        FROM trace_list_mv
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND DeploymentEnv = 'production'
+        ORDER BY ts DESC, traceId DESC
+        LIMIT 50))
+        GROUP BY traceId
+        ORDER BY startTime DESC, traceId DESC
+        LIMIT 50
+        FORMAT JSON
+
+-- spec:traces-list-grouped:text  [da486ffd]
+SELECT
+          TraceId AS traceId,
+          argMin(Timestamp, (if(ParentSpanId = '', 0, 1), Timestamp)) AS startTime,
+          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) AS endTime,
+          intDiv(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
+          intDiv(argMin(Duration, (if(ParentSpanId = '', 0, 1), Timestamp)), 1000) AS rootDurationMicros,
+          count() AS spanCount,
+          arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services,
+          argMin(SpanName, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanName,
+          argMin(SpanKind, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanKind,
+          argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanStatusCode,
+          argMin(SpanAttributes['http.method'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpMethod,
+          argMin(SpanAttributes['http.route'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpRoute,
+          argMin(SpanAttributes['http.status_code'], (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootHttpStatusCode,
+          argMin(toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'http.url', SpanAttributes['http.url'], 'url.full', SpanAttributes['url.full'], 'url.path', SpanAttributes['url.path'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'screen.name', SpanAttributes['screen.name'])), (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanAttributes,
+          if(argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) = 'Error', 1, 0) AS hasError
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= subtractHours(toDateTime('2026-01-01 10:30:00'), 1)
+          AND Timestamp <= addHours(toDateTime('2026-01-03 14:15:00'), 1)
+          AND TraceId IN (SELECT traceId FROM (SELECT
+          TraceId AS traceId,
+          Timestamp AS ts,
+          Duration AS d
+        FROM trace_list_mv
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND DeploymentEnv = 'production'
+        ORDER BY ts DESC, traceId DESC
+        LIMIT 50))
+        GROUP BY traceId
+        ORDER BY startTime DESC, traceId DESC
+        LIMIT 50
+        FORMAT JSON
 
 -- spec:traces-list:baseline  [3ec2a2e9]
 SELECT

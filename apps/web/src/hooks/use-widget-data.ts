@@ -496,7 +496,9 @@ export function useWidgetDataSource(
 				: dashboardTimeRange === null
 					? "Unable to resolve dashboard time range"
 					: executed?.kind === "disabled"
-						? "Unable to resolve this widget's time range"
+						? executed.reason === "metric_not_selected"
+							? "No metric selected"
+							: "Unable to resolve this widget's time range"
 						: !hasServerFn
 							? `Unknown data source endpoint: ${request.endpoint}`
 							: null
@@ -562,6 +564,16 @@ export function useWidgetDataSource(
 		if (!enabled || waitingOnVariables) {
 			return { status: "loading" } as const
 		}
+		if (executed?.kind === "disabled" && executed.reason === "metric_not_selected") {
+			// Half-configured, not broken: the planner refused to send a metrics
+			// query with no metric, so the tile asks for one instead of 400-ing.
+			return {
+				status: "error",
+				kind: "config",
+				title: "No metric selected",
+				message: "Pick a metric in the query editor to run this tile.",
+			} as const
+		}
 		if (disableReason) {
 			return { status: "error", message: disableReason } as const
 		}
@@ -594,7 +606,17 @@ export function useWidgetDataSource(
 					: ({ status: "ready", data: toReadyWidgetData(rawData, transform) } as const),
 			)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)
-	}, [result, transform, disableReason, isStatic, enabled, waitingOnVariables, exceedsListCap, narrowed])
+	}, [
+		result,
+		transform,
+		disableReason,
+		executed,
+		isStatic,
+		enabled,
+		waitingOnVariables,
+		exceedsListCap,
+		narrowed,
+	])
 
 	// Offered only while the tile is actually blocked, so the frame can render
 	// the action without knowing anything about time ranges.

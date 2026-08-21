@@ -679,7 +679,7 @@ function ConnectedRow({
 				plateClassName="size-8 rounded-lg"
 				size={18}
 			/>
-			<span className="flex w-44 min-w-0 shrink-0 flex-col gap-0.5 2xl:w-52">
+			<span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:w-44 sm:flex-none 2xl:w-52">
 				<span className="truncate text-sm font-semibold">{entry.name}</span>
 				{connected?.context && (
 					<span className="truncate text-xs text-muted-foreground">{connected.context}</span>

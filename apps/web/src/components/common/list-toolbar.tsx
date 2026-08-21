@@ -32,8 +32,8 @@ export function ListToolbar<T extends string>({
 	trailing,
 }: ListToolbarProps<T>) {
 	return (
-		<div className="flex items-center gap-2 border-b border-border/60 px-2 py-1.5">
-			<div role="tablist" aria-label={label} className="flex items-center gap-0.5">
+		<div className="flex flex-wrap items-center gap-2 gap-y-1.5 border-b border-border/60 px-2 py-1.5">
+			<div role="tablist" aria-label={label} className="flex flex-wrap items-center gap-0.5">
 				{tabs.map((tab) => {
 					const isActive = active === tab.value
 					return (
@@ -65,7 +65,7 @@ export function ListToolbar<T extends string>({
 					)
 				})}
 			</div>
-			<div className="ml-auto flex items-center gap-2">
+			<div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
 				{trailing}
 				{countLabel !== undefined ? (
 					<span className="text-xs text-muted-foreground tabular-nums">{countLabel}</span>

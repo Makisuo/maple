@@ -118,7 +118,11 @@ export type WidgetMode = "view" | "edit"
  * renders a muted explanation with a one-click narrowing instead of a red
  * error block — and never issues the doomed request in the first place.
  */
-type WidgetErrorKind = "decode" | "runtime" | "range"
+/**
+ * `config` is a tile that is not finished being configured (no metric picked
+ * yet) — like `range`, a constraint rendered muted, not a failure.
+ */
+type WidgetErrorKind = "decode" | "runtime" | "range" | "config"
 export type WidgetDataState =
 	| { status: "loading" }
 	| { status: "error"; title?: string; message?: string; kind?: WidgetErrorKind }

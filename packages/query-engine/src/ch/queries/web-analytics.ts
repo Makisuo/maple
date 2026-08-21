@@ -13,6 +13,7 @@ import { param, from, inSubquery, unionAll, compileFnCall } from "@maple-dev/cli
 import type { ColumnAccessor, CHQuery, CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { SessionReplays, SessionEvents, ProductEvents } from "../tables"
 import type { FacetOutput } from "./query-helpers"
+import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
 
 /**
  * The page-view discriminator: `session_events.Type` on the raw path,
@@ -189,6 +190,14 @@ function navigationSessionsSubquery(
 }
 
 /**
+ * Filter equality for the acquisition columns: `WEB_ANALYTICS_UNSET` means "the
+ * column is empty" (the group the breakdown emits under that name), anything
+ * else is an exact match.
+ */
+const acquisitionEq = (column: CH.Expr<string>, value: string) =>
+	column.eq(value === WEB_ANALYTICS_UNSET ? "" : value)
+
+/**
  * WHERE conditions for `session_replays`.
  *
  * `exclude` drops one dimension's own equality filter so its facet branch
@@ -225,7 +234,7 @@ export function replaysWhere(
 		navigationFilter,
 		exclude === "referrerHost"
 			? undefined
-			: CH.when(filters.referrerHost, (v: string) => $.ReferrerHost.eq(v)),
+			: CH.when(filters.referrerHost, (v: string) => acquisitionEq($.ReferrerHost, v)),
 		exclude === "country" ? undefined : CH.when(filters.country, (v: string) => $.Country.eq(v)),
 		exclude === "deviceType" ? undefined : CH.when(filters.deviceType, (v: string) => $.DeviceType.eq(v)),
 		exclude === "browserName"
@@ -233,11 +242,15 @@ export function replaysWhere(
 			: CH.when(filters.browserName, (v: string) => $.BrowserName.eq(v)),
 		exclude === "osName" ? undefined : CH.when(filters.osName, (v: string) => $.OsName.eq(v)),
 		exclude === "language" ? undefined : CH.when(filters.language, (v: string) => $.Language.eq(v)),
-		exclude === "utmSource" ? undefined : CH.when(filters.utmSource, (v: string) => $.UtmSource.eq(v)),
-		exclude === "utmMedium" ? undefined : CH.when(filters.utmMedium, (v: string) => $.UtmMedium.eq(v)),
+		exclude === "utmSource"
+			? undefined
+			: CH.when(filters.utmSource, (v: string) => acquisitionEq($.UtmSource, v)),
+		exclude === "utmMedium"
+			? undefined
+			: CH.when(filters.utmMedium, (v: string) => acquisitionEq($.UtmMedium, v)),
 		exclude === "utmCampaign"
 			? undefined
-			: CH.when(filters.utmCampaign, (v: string) => $.UtmCampaign.eq(v)),
+			: CH.when(filters.utmCampaign, (v: string) => acquisitionEq($.UtmCampaign, v)),
 		CH.when(filters.visitorType, (v: "new" | "returning") =>
 			v === "new" ? $.VisitorIsNew.eq(1) : $.VisitorIsNew.eq(0),
 		),
@@ -552,40 +565,54 @@ export type WebAnalyticsBreakdownsOutput = FacetOutput
  * branch excludes its own filter so selecting a value leaves the alternatives
  * visible.
  *
- * `ReferrerHost = ''` is dropped here along with the rest. That is not a lost
- * "direct traffic" bucket — per the schema comment it also covers internal
- * navigation and `Referrer-Policy`-suppressed referrers, so it is not a
- * meaningful row to show. UTM is the reliable acquisition signal.
+ * The four acquisition dimensions are the exception to the first rule: there
+ * the empty group *is* the answer — direct traffic for the referrer, an
+ * untagged visit for UTM — and it is usually the largest bucket, so hiding it
+ * made every share figure on the card a share of the wrong total. Those
+ * branches emit it as `WEB_ANALYTICS_UNSET` so it can be selected as a filter.
+ * (An empty referrer also covers internal navigation and `Referrer-Policy`
+ * suppression; the UI still labels it "Direct", the way every analytics
+ * product does.)
  */
 export function webAnalyticsBreakdownsQuery(
 	opts: WebAnalyticsBreakdownsOpts = {},
 ): CHUnionQuery<WebAnalyticsBreakdownsOutput> {
 	const limit = opts.limitPerDimension ?? 50
 
-	const makeFacet = (facetType: WebAnalyticsFacetKey, column: ($: ReplaysAccessor) => CH.Expr<string>) =>
+	const makeFacet = (
+		facetType: WebAnalyticsFacetKey,
+		column: ($: ReplaysAccessor) => CH.Expr<string>,
+		empty: "drop" | "keep" = "drop",
+	) =>
 		from(SessionReplays)
 			.select(($) => ({
-				name: column($),
+				name:
+					empty === "keep"
+						? CH.if_(column($).eq(""), CH.lit(WEB_ANALYTICS_UNSET), column($))
+						: column($),
 				// uniq(SessionId), not count(): the v1/v2 rows of an un-merged session
 				// would otherwise weight it twice in every dimension.
 				count: CH.uniq($.SessionId),
 				facetType: CH.lit(facetType),
 			}))
-			.where(($) => [...replaysWhere($, opts, facetType), column($).neq("")])
+			.where(($) => [
+				...replaysWhere($, opts, facetType),
+				...(empty === "keep" ? [] : [column($).neq("")]),
+			])
 			.groupBy("name")
 			.orderBy(["count", "desc"])
 			.limit(limit)
 
 	return unionAll(
-		makeFacet("referrerHost", ($) => $.ReferrerHost),
+		makeFacet("referrerHost", ($) => $.ReferrerHost, "keep"),
 		makeFacet("country", ($) => $.Country),
 		makeFacet("deviceType", ($) => $.DeviceType),
 		makeFacet("browserName", ($) => $.BrowserName),
 		makeFacet("osName", ($) => $.OsName),
 		makeFacet("language", ($) => $.Language),
-		makeFacet("utmSource", ($) => $.UtmSource),
-		makeFacet("utmMedium", ($) => $.UtmMedium),
-		makeFacet("utmCampaign", ($) => $.UtmCampaign),
+		makeFacet("utmSource", ($) => $.UtmSource, "keep"),
+		makeFacet("utmMedium", ($) => $.UtmMedium, "keep"),
+		makeFacet("utmCampaign", ($) => $.UtmCampaign, "keep"),
 		makeFacet("entryPath", ($) => $.EntryPath),
 		makeFacet("exitPath", ($) => $.ExitPath),
 		makeFacet("host", ($) => $.Host),

@@ -86,14 +86,14 @@ export function PodTableLoading() {
 	return (
 		<DataTable.Root ariaLabel="Pods">
 			<DataTable.Head>
-				<ColumnHead label="Pod" width="flex-1 min-w-[260px]" />
+				<ColumnHead label="Pod" width="w-0 flex-1 min-w-[260px]" />
 				<ColumnHead label="Peak saturation" width="w-[176px]" hidden="hidden md:flex" />
 				<ColumnHead label="CPU cores" align="right" width="w-[132px]" hidden="hidden lg:flex" />
 				<ColumnHead label="Mem of limit" align="right" width="w-[120px]" hidden="hidden lg:flex" />
 				<ColumnHead label="Last seen" align="right" width="w-[100px]" />
 			</DataTable.Head>
 			<DataTable.SkeletonRows count={6}>
-				<div className="min-w-[260px] flex-1">
+				<div className="w-0 min-w-[260px] flex-1">
 					<Skeleton className="h-4 w-48" />
 					<Skeleton className="mt-1.5 h-3 w-40" />
 				</div>
@@ -126,7 +126,7 @@ export function PodTable({
 					currentKey={sortBy}
 					dir={sortDir}
 					onSort={onSortChange}
-					width="flex-1 min-w-[260px]"
+					width="w-0 flex-1 min-w-[260px]"
 				/>
 				<ColumnHead<PodSortKey>
 					label="Peak saturation"
@@ -179,7 +179,7 @@ export function PodTable({
 						search={pod.namespace ? { namespace: pod.namespace } : {}}
 						className={ROW_LINK_CLASS}
 					>
-						<div className="min-w-[260px] flex-1">
+						<div className="w-0 min-w-[260px] flex-1">
 							<div className="flex items-center gap-2">
 								<span className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 									{pod.podName}

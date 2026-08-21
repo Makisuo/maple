@@ -209,14 +209,19 @@ export function AnalyticsBreakdownPanel({
 	)
 
 	return (
-		<div className="rounded-md border bg-card">
+		// Its own container, not `/page`: the panel's width depends on both the page
+		// column and whether the breakdown grid is 1- or 2-up, so the panel itself
+		// is the only honest measure. The expand dialog portals out of this card —
+		// `/panel` classes are card-only (`!ranked`); the dialog keeps viewport
+		// queries, which are truthful there via its `max-w-[92vw]`.
+		<div className="@container/panel rounded-md border bg-card">
 			<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 pt-2.5 pb-2">
 				{tabs}
 				<FilterInput
 					value={query}
 					onChange={setQuery}
 					nounPlural={dimension.nounPlural}
-					className="w-40"
+					className="min-w-24 max-w-40 flex-1"
 				/>
 			</div>
 
@@ -407,7 +412,7 @@ function BreakdownTable({
 				) : null}
 				<ColumnHead<SortKey>
 					label={columnLabel(dimension.noun)}
-					width="flex-1 min-w-0"
+					width="w-0 flex-1 min-w-0"
 					sortKey="name"
 					currentKey={sortKey}
 					dir={sortDir}
@@ -432,13 +437,18 @@ function BreakdownTable({
 					currentKey={sortKey}
 					dir={sortDir}
 					onSort={onSort}
+					// In the card, Views is the ranking column for pages — Sessions is
+					// the number a very narrow panel can afford to drop.
+					hidden={!ranked && hasViews ? "hidden @min-[380px]/panel:flex" : undefined}
 				/>
 				{showShare ? (
 					<ColumnHead<SortKey>
 						label="Share"
 						width="w-16"
 						align="right"
-						hidden={ranked ? "max-sm:hidden" : undefined}
+						// Card mode sheds Share by panel width — the row's background bar
+						// already carries it. The dialog sheds by viewport, as before.
+						hidden={ranked ? "max-sm:hidden" : "hidden @min-[380px]/panel:flex"}
 					/>
 				) : null}
 			</DataTable.Head>
@@ -462,7 +472,7 @@ function BreakdownTable({
 							// selected row's background-color instead of overwriting it.
 							style={shareBar(row.share)}
 							className={cn(
-								"group flex w-full items-center gap-4 border-b border-border/40 px-4 py-2 text-left transition-colors last:border-0",
+								"group flex w-full items-center gap-3 border-b border-border/40 px-3 py-2 text-left transition-colors last:border-0 @min-[420px]/panel:gap-4 @min-[420px]/panel:px-4",
 								// Hover and focus lift the whole row from behind the fill, so a
 								// long bar and a short one light up by the same amount.
 								// `--foreground`, not `--muted`: muted is barely above this
@@ -484,7 +494,7 @@ function BreakdownTable({
 									{index + 1}
 								</span>
 							) : null}
-							<span className="flex min-w-0 flex-1 items-center gap-2">
+							<span className="flex w-0 min-w-0 flex-1 items-center gap-2">
 								{icon ?? (hasIcons ? <span className="size-4 shrink-0" aria-hidden /> : null)}
 								<span
 									className={cn(
@@ -513,6 +523,7 @@ function BreakdownTable({
 									"text-right font-mono text-[11px] tabular-nums",
 									ranked ? "w-16 sm:w-24" : hasViews ? "w-20" : "w-24",
 									hasViews && !ranked && "text-muted-foreground",
+									!ranked && hasViews && "hidden @min-[380px]/panel:inline-block",
 								)}
 							>
 								{formatNumber(row.count)}
@@ -521,7 +532,7 @@ function BreakdownTable({
 								<span
 									className={cn(
 										"w-16 text-right font-mono text-[11px] tabular-nums text-muted-foreground",
-										ranked && "max-sm:hidden",
+										ranked ? "max-sm:hidden" : "hidden @min-[380px]/panel:inline-block",
 									)}
 								>
 									{formatPercent(row.share)}

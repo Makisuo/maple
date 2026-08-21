@@ -7,6 +7,7 @@
 // union that neither the KPI row nor the coverage figure could attribute.
 
 import { Schema } from "effect"
+import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
 
 /** URL search-param fields. Spread into the route's `validateSearch` schema. */
 export const analyticsFilterSearchFields = {
@@ -97,11 +98,20 @@ export interface ActiveFilterChip {
 	readonly label: string
 }
 
+/**
+ * The empty-group sentinel as a chip reads — lower case like the rest of the
+ * chip, and the same words the breakdown row used (`referrerLabel`/`utmLabel`).
+ */
+const chipValue = (key: AnalyticsFilterKey, value: string): string => {
+	if (value !== WEB_ANALYTICS_UNSET) return value
+	return key === "referrerHost" ? "direct" : "not set"
+}
+
 /** Flatten the filter object into one removable chip per set filter. */
 export const activeFilterChips = (filters: AnalyticsFilters): ReadonlyArray<ActiveFilterChip> =>
 	FILTER_KEYS.flatMap((key) => {
 		const value = filters[key]
-		return value ? [{ key, value, label: `${FILTER_CHIP_LABEL[key]}:${value}` }] : []
+		return value ? [{ key, value, label: `${FILTER_CHIP_LABEL[key]}:${chipValue(key, value)}` }] : []
 	})
 
 /**

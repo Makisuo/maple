@@ -42,6 +42,11 @@ const tracesSearchSchema = Schema.Struct({
 	deploymentEnvs: OptionalStringArrayParam,
 	namespaces: OptionalStringArrayParam,
 	rootOnly: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
+	// Server-side drop of single-span non-entry-point traces (ui.screen
+	// breadcrumbs, orphaned client spans). Defaults on; `hideNoise=false` shows
+	// everything.
+	hideNoise: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
+	minSpanCount: Schema.optional(Schema.Union([Schema.Number, Schema.NumberFromString])),
 	whereClause: Schema.optional(Schema.String),
 	attributeFilters: Schema.optional(Schema.Array(AttributeFilterParam)),
 	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilterParam)),

@@ -24,8 +24,10 @@ import {
 	type AnalyticsFilterKey,
 	type AnalyticsFilters,
 } from "./filters"
-import { countryLabel, languageLabel } from "./labels"
+import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
+import { countryLabel, languageLabel, referrerLabel, utmLabel } from "./labels"
 import { Favicon, isHostLike } from "./row-icon"
+import { ArrowThroughLineRightIcon } from "@/components/icons"
 import { browserIconFor, deviceIconFor } from "@/components/replays/session-icons"
 
 interface AnalyticsFilterSidebarProps {
@@ -44,6 +46,14 @@ const toOptions = (rows: ReadonlyArray<{ name: string; count: number }>): Readon
  * marks below it.
  */
 const hostIcon = (name: string) => <Favicon host={name} className="size-3.5" />
+
+/** The referrer list's direct-traffic row gets the same mark as its breakdown row. */
+const referrerIcon = (name: string) =>
+	name === WEB_ANALYTICS_UNSET ? (
+		<ArrowThroughLineRightIcon className="size-3.5 shrink-0 text-foreground" />
+	) : (
+		hostIcon(name)
+	)
 
 /** `utm_source` is free text — only give it a favicon when it is actually a domain. */
 const utmSourceIcon = (name: string) => (isHostLike(name) ? hostIcon(name) : null)
@@ -139,7 +149,8 @@ function AnalyticsFilterSidebarView({
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.referrerHost}
 					options={toOptions(breakdowns.referrerHosts)}
-					renderOptionIcon={hostIcon}
+					getOptionLabel={referrerLabel}
+					renderOptionIcon={referrerIcon}
 					{...single("referrerHost")}
 				/>
 				<SearchableFilterSection
@@ -175,17 +186,20 @@ function AnalyticsFilterSidebarView({
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.utmSource}
 					options={toOptions(breakdowns.utmSources)}
+					getOptionLabel={utmLabel}
 					renderOptionIcon={utmSourceIcon}
 					{...single("utmSource")}
 				/>
 				<FilterSection
 					title={FILTER_SECTION_LABEL_TEXT.utmMedium}
 					options={toOptions(breakdowns.utmMediums)}
+					getOptionLabel={utmLabel}
 					{...single("utmMedium")}
 				/>
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.utmCampaign}
 					options={toOptions(breakdowns.utmCampaigns)}
+					getOptionLabel={utmLabel}
 					{...single("utmCampaign")}
 				/>
 			</FilterSidebarBody>

@@ -197,13 +197,18 @@ function installNavigationObserver(onNavigate: (url: string) => void): () => voi
 
 	const origPush = history.pushState
 	const origReplace = history.replaceState
-	history.pushState = function (this: History, ...args) {
-		const result = origPush.apply(this, args as never)
+	// Callers that grab `history.pushState` off the object and invoke it
+	// detached (or with something that isn't a History) would otherwise make the
+	// native method throw "Illegal invocation" from inside our wrapper, turning a
+	// working navigation into an unhandled rejection blamed on the SDK.
+	const receiver = (self: unknown): History => (self instanceof History ? self : history)
+	history.pushState = function (this: unknown, ...args) {
+		const result = origPush.apply(receiver(this), args as never)
 		emitNav()
 		return result
 	}
-	history.replaceState = function (this: History, ...args) {
-		const result = origReplace.apply(this, args as never)
+	history.replaceState = function (this: unknown, ...args) {
+		const result = origReplace.apply(receiver(this), args as never)
 		emitNav()
 		return result
 	}

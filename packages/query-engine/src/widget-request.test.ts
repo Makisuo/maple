@@ -103,6 +103,75 @@ describe("planWidgetRequest", () => {
 		expect(plan).toEqual({ kind: "disabled", reason: "invalid_widget_time_range" })
 	})
 
+	it("refuses a metrics query-set draft that names no metric", () => {
+		const plan = planWidgetRequest({
+			request: {
+				endpoint: "custom_query_builder_timeseries",
+				params: {
+					queries: [
+						{ id: "a", dataSource: "traces", aggregation: "count" },
+						{ id: "b", dataSource: "metrics", aggregation: "avg", metricName: "  " },
+					],
+				},
+			},
+			dashboardWindow: DASHBOARD,
+		})
+		expect(plan).toEqual({ kind: "disabled", reason: "metric_not_selected" })
+	})
+
+	it("ignores a disabled metrics draft with no metric", () => {
+		const plan = planWidgetRequest({
+			request: {
+				endpoint: "custom_query_builder_timeseries",
+				params: {
+					queries: [
+						{ id: "a", dataSource: "traces", aggregation: "count" },
+						{ id: "b", dataSource: "metrics", aggregation: "avg", enabled: false },
+					],
+				},
+			},
+			dashboardWindow: DASHBOARD,
+		})
+		expect(plan.kind).toBe("request")
+	})
+
+	it("judges the metric name after variable substitution", () => {
+		const request = {
+			endpoint: "custom_query_builder_timeseries",
+			params: {
+				queries: [{ id: "a", dataSource: "metrics", aggregation: "avg", metricName: "$metric" }],
+			},
+		}
+		const resolved = planWidgetRequest({
+			request,
+			dashboardWindow: DASHBOARD,
+			variableValues: { metric: single("http.server.duration") },
+		})
+		expect(resolved.kind).toBe("request")
+		const empty = planWidgetRequest({
+			request,
+			dashboardWindow: DASHBOARD,
+			variableValues: { metric: single("") },
+		})
+		expect(empty).toEqual({ kind: "disabled", reason: "metric_not_selected" })
+	})
+
+	it("refuses a legacy custom chart on the metrics source with no metric", () => {
+		const plan = planWidgetRequest({
+			request: {
+				endpoint: "custom_timeseries",
+				params: { source: "metrics", metric: "avg", filters: {} },
+			},
+			dashboardWindow: DASHBOARD,
+		})
+		expect(plan).toEqual({ kind: "disabled", reason: "metric_not_selected" })
+		const traces = planWidgetRequest({
+			request: { endpoint: "custom_timeseries", params: { source: "traces", metric: "count" } },
+			dashboardWindow: DASHBOARD,
+		})
+		expect(traces.kind).toBe("request")
+	})
+
 	it("flags a list endpoint over the list cap and nothing else", () => {
 		const wide = { startTime: "2026-02-01 00:00:00", endTime: "2026-03-10 00:00:00" }
 		const list = planWidgetRequest({

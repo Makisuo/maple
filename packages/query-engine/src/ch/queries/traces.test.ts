@@ -355,13 +355,62 @@ describe("traceListQuery", () => {
 		expect(sql).toContain("FORMAT JSON")
 	})
 
-	it("pages over true roots only, so a multi-service trace yields a single row", () => {
+	it("pages over the roots-only MV by default, read-in-order on its sort key", () => {
 		const inner = pageSubquery(compileCH(traceListQuery({}), baseParams).sql)
 
+		// trace_list_mv stores true roots only, sorted (OrgId, Timestamp,
+		// TraceId) — no ParentSpanId predicate needed, and "newest N" pages
+		// without scanning the window like raw `traces` would.
+		expect(inner).toContain("FROM trace_list_mv")
+		expect(inner).not.toContain("SpanKind IN ('Server', 'Consumer')")
+	})
+
+	it("falls back to raw traces paging when a filter the MV lacks is present", () => {
+		const { sql } = compileCH(
+			traceListQuery({ attributeFilters: [{ key: "user.id", value: "u1", mode: "equals" }] }),
+			baseParams,
+		)
+		const inner = pageSubquery(sql)
+
+		expect(inner).toContain("FROM traces")
 		expect(inner).toContain("ParentSpanId = ''")
 		// NOT the entry-point predicate tracesRootListQuery uses — that matches
 		// one span per service and would re-introduce duplicate rows per trace.
 		expect(inner).not.toContain("SpanKind IN ('Server', 'Consumer')")
+		expect(inner).toContain("SpanAttributes['user.id'] = 'u1'")
+	})
+
+	it("maps HTTP method/status attribute filters onto the MV's pre-extracted columns", () => {
+		const inner = pageSubquery(
+			compileCH(
+				traceListQuery({
+					attributeFilters: [
+						{ key: "http.method", value: "GET", mode: "equals" },
+						{ key: "http.status_code", values: ["500", "502"], mode: "in" },
+					],
+				}),
+				baseParams,
+			).sql,
+		)
+
+		expect(inner).toContain("FROM trace_list_mv")
+		expect(inner).toContain("HttpMethod = 'GET'")
+		expect(inner).toContain("HttpStatusCode IN ('500', '502')")
+	})
+
+	it("truncates the ns cursor to the MV's second-granularity Timestamp", () => {
+		const inner = pageSubquery(
+			compileCH(
+				traceListQuery({
+					cursor: { timestamp: "2024-01-01 12:00:00.123456789", traceId: "trace123" },
+				}),
+				baseParams,
+			).sql,
+		)
+
+		expect(inner).toContain("Timestamp < '2024-01-01 12:00:00'")
+		expect(inner).not.toContain("12:00:00.123456789")
+		expect(inner).toContain("TraceId < 'trace123'")
 	})
 
 	it("reads only TraceId + Timestamp in the paging stage", () => {
@@ -448,13 +497,16 @@ describe("traceListQuery", () => {
 		expect(inner).toContain("Timestamp >= '2024-01-01 00:00:00'")
 		expect(inner).toContain("Timestamp <= '2024-01-02 00:00:00'")
 
-		// The aggregate is scoped by OrgId + TraceId alone: re-applying the span
-		// filters there would drop the very children spanCount has to count, and
-		// a time bound would clip children that outlive the window.
+		// The aggregate is scoped by OrgId + TraceId + a PADDED window: re-applying
+		// the span filters there would drop the very children spanCount has to
+		// count, and an exact time bound would clip children that outlive the
+		// window — but a completely unbounded aggregate defeats partition pruning
+		// and times out on prod retention, hence the ±1h pad.
 		const outer = sql.slice(sql.indexOf("FROM trace_detail_spans")).replace(inner, "")
 		expect(outer).toContain("OrgId = 'org_1'")
 		expect(outer).not.toContain("ServiceName = 'api'")
-		expect(outer).not.toContain("Timestamp >=")
+		expect(outer).toContain("Timestamp >= subtractHours(toDateTime('2024-01-01 00:00:00'), 1)")
+		expect(outer).toContain("Timestamp <= addHours(toDateTime('2024-01-02 00:00:00'), 1)")
 	})
 })
 

@@ -34,7 +34,7 @@ import {
 	type AnalyticsMetricKey,
 	type AnalyticsMetricSource,
 } from "@/components/analytics/metrics"
-import { countryLabel, languageLabel } from "@/components/analytics/labels"
+import { countryLabel, languageLabel, referrerLabel, utmLabel } from "@/components/analytics/labels"
 import {
 	activeFilterChips,
 	analyticsFilterSearchFields,
@@ -428,7 +428,7 @@ function AnalyticsContent({
 
 			{Result.builder(breakdownsResult)
 				.onInitial(() => (
-					<div className="grid gap-4 lg:grid-cols-2">
+					<div className="grid gap-4 @min-[880px]/page:grid-cols-2">
 						<Skeleton className="h-72 w-full" />
 						<Skeleton className="h-72 w-full" />
 					</div>
@@ -450,8 +450,7 @@ function AnalyticsContent({
 							filterKey: "referrerHost",
 							noun: "referrer",
 							nounPlural: "referrers",
-							emptyMessage:
-								"No referrers recorded. Sessions with an empty referrer are excluded rather than bucketed as direct — an empty value also covers internal navigation and Referrer-Policy suppression.",
+							formatValue: referrerLabel,
 						},
 						{
 							tab: "UTM source",
@@ -459,6 +458,7 @@ function AnalyticsContent({
 							filterKey: "utmSource",
 							noun: "source",
 							nounPlural: "sources",
+							formatValue: utmLabel,
 						},
 						{
 							tab: "Medium",
@@ -466,6 +466,7 @@ function AnalyticsContent({
 							filterKey: "utmMedium",
 							noun: "medium",
 							nounPlural: "mediums",
+							formatValue: utmLabel,
 						},
 						{
 							tab: "Campaign",
@@ -473,6 +474,7 @@ function AnalyticsContent({
 							filterKey: "utmCampaign",
 							noun: "campaign",
 							nounPlural: "campaigns",
+							formatValue: utmLabel,
 						},
 					]
 
@@ -583,7 +585,7 @@ function AnalyticsContent({
 					]
 
 					return (
-						<div className="grid items-start gap-4 lg:grid-cols-2">
+						<div className="grid items-start gap-4 @min-[880px]/page:grid-cols-2">
 							{cards.map((card) => (
 								<AnalyticsBreakdownPanel
 									key={card.id}
