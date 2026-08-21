@@ -1,0 +1,18 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import SeoHead from "../components/SeoHead.astro";
+import CompanyContent from "../components/CompanyContent.astro";
+import { contactPage } from "../lib/company";
+
+const pageTitle = "Contact Maple — support, community, privacy and legal";
+const pageDescription = contactPage.description;
+---
+
+<Layout title={pageTitle} description={pageDescription} alternates={["en"]} mdHref="/contact.md">
+    <SeoHead title={pageTitle} description={pageDescription} includeOrganization={true} />
+    <Nav />
+    <CompanyContent page={contactPage} />
+    <Footer />
+</Layout>

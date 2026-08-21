@@ -116,6 +116,9 @@ const stars = await getGitHubStars();
                 <span class="rounded border border-border px-1.5 py-0.5 text-[10px] text-fg-muted">{m.bill_v_apache()}</span>
             </div>
             <div class="flex items-center gap-4">
+                <!-- English-only trust pages (see lib/company.ts): bare hrefs, not l(). -->
+                <a href="/about" class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_about()}</a>
+                <a href="/contact" class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_contact()}</a>
                 <a href={l("/privacy")} class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_privacy()}</a>
                 <a href={l("/terms")} class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_terms()}</a>
                 <!-- English-only page, so a bare href rather than l() — same as

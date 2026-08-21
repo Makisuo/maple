@@ -13,6 +13,7 @@
 		"./http/v2-worker-unavailable": "./src/http/v2/worker-unavailable.ts",
 		"./internal-rpc": "./src/internal-rpc.ts",
 		"./llm": "./src/llm.ts",
+		"./mcp-manifest": "./src/mcp-manifest.ts",
 		"./permission": "./src/permission.ts",
 		"./primitives": "./src/primitives.ts",
 		"./query-engine": "./src/query-engine.ts",
