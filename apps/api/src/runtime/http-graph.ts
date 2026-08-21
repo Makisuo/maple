@@ -16,6 +16,7 @@ import { ChatSessionsRouter } from "@/routes/v1/chat-sessions.http"
 import { HttpChatLive } from "@/routes/internal/chat.http"
 import { V1ErrorBoundaryLive } from "@/routes/v1/error-boundary"
 import { HttpDemoLive } from "@/routes/internal/demo.http"
+import { DiscoveryRouter, NotFoundRouter } from "@/routes/discovery.http"
 import { HttpDigestLive } from "@/routes/internal/digest.http"
 import { HttpErrorsLive } from "@/routes/v1/errors.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "@/routes/v1/integrations.http"
@@ -168,6 +169,10 @@ export const AllRoutes = Layer.mergeAll(
 	HealthRouter,
 	DocsRoute,
 	DocsV2Route,
+	DiscoveryRouter,
+	// Last by convention only — find-my-way ranks the wildcard below every other
+	// route regardless of registration order.
+	NotFoundRouter,
 ).pipe(Layer.provideMerge(HttpRouter.cors(API_CORS_OPTIONS)))
 
 export const ApiAuthLive = Layer.mergeAll(

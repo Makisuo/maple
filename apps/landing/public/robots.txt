@@ -46,5 +46,10 @@ Disallow:
 # <path>.md, indexed at /llms.txt. Content negotiation works too —
 # `Accept: text/markdown` on any page URL returns the same source.
 # https://maple.dev/llms.txt
+#
+# Machine-readable API surface:
+#   OpenAPI 3.1:      https://maple.dev/openapi.json
+#   MCP server.json:  https://maple.dev/.well-known/mcp.json
+#   API reference:    https://api.maple.dev/v2/docs
 
 Sitemap: https://maple.dev/sitemap-index.xml

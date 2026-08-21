@@ -1,5 +1,7 @@
 ---
 import { getRelativeLocaleUrl } from "astro:i18n";
+import { PRIVACY_EMAIL, SUPPORT_EMAIL } from "../lib/agent-resources";
+import { LEGAL_ENTITY } from "../lib/company";
 
 interface Props {
     title: string;
@@ -52,15 +54,48 @@ const jsonLd = {
           }) : undefined),
 };
 
+// contactPoint + address are what answer engines check to decide the
+// Organization is a real business before recommending it. The postal address
+// is country-level only until the registered office is published (lib/company.ts
+// names the legal entity; the terms page names the governing law).
 const organizationJsonLd = includeOrganization ? {
     "@context": "https://schema.org",
     "@type": "Organization",
     "name": "Maple",
+    "legalName": LEGAL_ENTITY,
     "url": siteUrl,
     "logo": `${siteUrl}/logo192.png`,
+    "email": SUPPORT_EMAIL,
+    "contactPoint": [
+        {
+            "@type": "ContactPoint",
+            "contactType": "customer support",
+            "email": SUPPORT_EMAIL,
+            "url": `${siteUrl}/contact`,
+            "availableLanguage": ["English"],
+        },
+        {
+            "@type": "ContactPoint",
+            "contactType": "sales",
+            "email": SUPPORT_EMAIL,
+            "url": `${siteUrl}/contact`,
+            "availableLanguage": ["English"],
+        },
+        {
+            "@type": "ContactPoint",
+            "contactType": "privacy",
+            "email": PRIVACY_EMAIL,
+            "url": `${siteUrl}/privacy`,
+        },
+    ],
+    "address": {
+        "@type": "PostalAddress",
+        "addressCountry": "US",
+    },
     "sameAs": [
         "https://github.com/Makisuo/maple",
         "https://x.com/maple_dev",
+        "https://discord.gg/BnXjKuwJqP",
     ],
 } : null;
 

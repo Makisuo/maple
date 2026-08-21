@@ -335,6 +335,8 @@
 	"footer_privacy": "\u30d7\u30e9\u30a4\u30d0\u30b7\u30fc\u30dd\u30ea\u30b7\u30fc",
 	"footer_terms": "\u5229\u7528\u898f\u7d04",
 	"footer_brand": "\u30d6\u30e9\u30f3\u30c9",
+	"footer_about": "\u4f1a\u793e\u6982\u8981",
+	"footer_contact": "\u304a\u554f\u3044\u5408\u308f\u305b",
 
 	"pricing_30day_retention": "30\u65e5\u9593\u306e\u4fdd\u6301",
 	"pricing_unlimited_dashboards": "\u7121\u5236\u9650\u306e\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9",

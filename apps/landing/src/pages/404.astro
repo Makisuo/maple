@@ -25,6 +25,21 @@ const l = (path: string) => getRelativeLocaleUrl(locale, path);
                     View features
                 </a>
             </div>
+            <!-- Same recovery links the markdown 404 (src/worker.ts) gives agents. -->
+            <p class="mt-10 text-xs text-fg-muted">
+                Looking for something specific?
+                <a href="/docs" class="text-fg underline underline-offset-4 hover:text-primary transition-colors">Docs</a>
+                ·
+                <a href={l("/pricing")} class="text-fg underline underline-offset-4 hover:text-primary transition-colors">Pricing</a>
+                ·
+                <a href="/changelog" class="text-fg underline underline-offset-4 hover:text-primary transition-colors">Changelog</a>
+                ·
+                <a href="/contact" class="text-fg underline underline-offset-4 hover:text-primary transition-colors">Contact</a>
+                ·
+                <a href="/sitemap-index.xml" class="text-fg underline underline-offset-4 hover:text-primary transition-colors">Sitemap</a>
+                ·
+                <a href="/llms.txt" class="text-fg underline underline-offset-4 hover:text-primary transition-colors">llms.txt</a>
+            </p>
         </div>
     </section>
     <Footer />
