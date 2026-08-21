@@ -239,16 +239,27 @@ export type MetricsSparklinesQuery = Schema.Schema.Type<typeof MetricsSparklines
 export const TracesListQuery = Schema.Struct({
 	kind: Schema.Literal("list"),
 	source: Schema.Literal("traces"),
+	/**
+	 * One row per TraceId (real span count, wall-clock duration, every
+	 * participating service) instead of one row per entry-point span. Grouped
+	 * rows have a different shape — see the `groupByTrace` branch of the list
+	 * dispatch. Ignores `cursor`; pages with `offset`.
+	 */
+	groupByTrace: Schema.optionalKey(Schema.Boolean),
 	filters: Schema.optional(TracesFilters),
 	columns: Schema.optional(Schema.Array(Schema.String)),
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(200)),
 	),
+	// Bound matches the web list's MAX_RETAINED_TRACES (2000): with server-side
+	// noise filtering the client pages by rows CONSUMED, so a 1000 cap would end
+	// pagination while far fewer rows are visible. Stage 1 only reads the three
+	// light sort columns, so a deep offset stays cheap.
 	offset: Schema.optional(
 		Schema.Number.check(
 			Schema.isInt(),
 			Schema.isGreaterThanOrEqualTo(0),
-			Schema.isLessThanOrEqualTo(1000),
+			Schema.isLessThanOrEqualTo(2000),
 		),
 	),
 	cursor: Schema.optional(Schema.String),

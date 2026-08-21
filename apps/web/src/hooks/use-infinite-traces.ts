@@ -19,6 +19,8 @@ export interface UseInfiniteTracesReturn {
 	isFetchingNextPage: boolean
 	hasNextPage: boolean
 	isCapped: boolean
+	/** Noise traces the server dropped across every loaded page (see `hideNoise`). */
+	hiddenCount: number
 	fetchNextPage: () => void
 }
 
@@ -51,6 +53,8 @@ function buildQueryParams(
 		excludedNamespaces: filters?.excludedNamespaces,
 		excludedHttpMethods: filters?.excludedHttpMethods,
 		excludedHttpStatusCodes: filters?.excludedHttpStatusCodes,
+		hideNoise: filters?.hideNoise,
+		minSpanCount: filters?.minSpanCount,
 		sortBy: filters?.sortBy,
 		sortDir: filters?.sortDir,
 	}
@@ -98,15 +102,23 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 	}, [firstPageResult, additionalPages])
 	const isCapped = allData.length >= MAX_RETAINED_TRACES
 
+	const hiddenCount = React.useMemo(() => {
+		const first = Result.isSuccess(firstPageResult) ? firstPageResult.value.meta.hiddenCount : 0
+		return first + additionalPages.reduce((sum, page) => sum + page.meta.hiddenCount, 0)
+	}, [firstPageResult, additionalPages])
+
+	// "More pages exist" means the warehouse page came back full BEFORE the
+	// server-side noise filter ran. `data.length === PAGE_SIZE` would end
+	// pagination on the first page with any hidden rows.
 	const hasNextPage = React.useMemo(() => {
 		if (isCapped) return false
 		if (paginationStopped) return false
 		if (!Result.isSuccess(firstPageResult)) return false
 		if (additionalPages.length === 0) {
-			return firstPageResult.value.data.length === PAGE_SIZE
+			return firstPageResult.value.meta.scannedCount === PAGE_SIZE
 		}
 		const lastPage = additionalPages[additionalPages.length - 1]
-		return lastPage.data.length === PAGE_SIZE
+		return lastPage.meta.scannedCount === PAGE_SIZE
 	}, [firstPageResult, additionalPages, paginationStopped, isCapped])
 
 	const fetchNextPage = React.useCallback(() => {
@@ -115,7 +127,10 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 		setIsFetchingNextPage(true)
 
 		const currentKey = filterKeyRef.current
-		const offset = allData.length
+		// Offset counts warehouse rows consumed, not rows kept: the server drops
+		// noise rows after paging, so offsetting by `allData.length` would rescan
+		// the filtered region and duplicate every kept row in it.
+		const offset = (additionalPages.length + 1) * PAGE_SIZE
 
 		mapleRuntime
 			.runPromise(listTraces({ data: { ...queryParams, limit: PAGE_SIZE, offset } }))
@@ -137,7 +152,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 				}
 				isFetchingRef.current = false
 			})
-	}, [queryParams, allData.length, hasNextPage])
+	}, [queryParams, additionalPages.length, hasNextPage])
 
 	return {
 		firstPageResult,
@@ -145,6 +160,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 		isFetchingNextPage,
 		hasNextPage,
 		isCapped,
+		hiddenCount,
 		fetchNextPage,
 	}
 }
