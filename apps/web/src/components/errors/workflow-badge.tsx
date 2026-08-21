@@ -6,6 +6,12 @@ const WORKFLOW_BADGE: Record<WorkflowState, { label: string; tone: string }> = {
 		label: "Triage",
 		tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
 	},
+	// Red, not amber: a regression is a fix that did not hold, and it should read
+	// as more urgent than an untriaged issue rather than the same.
+	regressed: {
+		label: "Regressed",
+		tone: "bg-destructive/10 text-destructive",
+	},
 	todo: { label: "Todo", tone: "bg-muted text-muted-foreground" },
 	in_progress: {
 		label: "In progress",

@@ -18,6 +18,8 @@ export { setActiveTraceIdProvider } from "../events/events-sink"
 export interface ReplaySessionOptions extends SessionLifecycleOptions {
 	readonly endpoint: string
 	readonly ingestKey: string
+	/** `x-maple-sdk` value — `sdkHint(name, version)`. */
+	readonly sdk: string
 	readonly maskAllInputs: boolean
 	readonly maskAllText: boolean
 	/** Notifies consumers that the session id used for span linking changed. */
@@ -42,6 +44,7 @@ export function startReplaySession(options: ReplaySessionOptions): ReplaySession
 	const engineConfig: IngestConfig = {
 		endpoint: options.endpoint.replace(/\/$/, ""),
 		ingestKey: options.ingestKey,
+		sdk: options.sdk,
 		maskAllInputs: options.maskAllInputs,
 		maskAllText: options.maskAllText,
 		getIdentity: options.getIdentity,

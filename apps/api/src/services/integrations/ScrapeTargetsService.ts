@@ -42,6 +42,7 @@ import {
 	planetScaleBearerHeader,
 	type PlanetScaleAccessTokenError,
 } from "@/services/auth/PlanetScaleOAuthService"
+import { summarizeCause } from "@/platform/describe-cause"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -782,7 +783,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 								Effect.annotateLogs({
 									orgId,
 									scrapeTargetId: id,
-									error: Cause.pretty(cause),
+									error: summarizeCause(cause),
 								}),
 							),
 						),
@@ -1180,6 +1181,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				// only this accumulated value was ever durable — ~95k writes a day to
 				// persist ~8k outcomes.
 				const outcomeByTarget = new Map<ScrapeTargetId, ScrapeTargetOutcome>()
+				// Newest `scrapedAt` per target, which is what the write below is
+				// allowed to advance the row to. Kept separate from the outcome
+				// because that object is handed straight to drizzle as the SET clause.
+				const reportedAtByTarget = new Map<ScrapeTargetId, Date>()
 				for (const result of results) {
 					// Rollup for discovered sub-targets: any branch success advances
 					// lastScrapeAt; any branch failure surfaces (branch-prefixed) as
@@ -1201,6 +1206,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					}
 					outcome.updatedAt = scrapedAt
 					outcomeByTarget.set(result.targetId, outcome)
+					const reportedAt = reportedAtByTarget.get(result.targetId)
+					if (reportedAt === undefined || scrapedAt > reportedAt) {
+						reportedAtByTarget.set(result.targetId, scrapedAt)
+					}
 				}
 
 				const recordChecks = options?.recordChecks !== false
@@ -1212,7 +1221,27 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				yield* database
 					.execute(async (db) => {
 						for (const [targetId, outcome] of outcomeByTarget) {
-							await db.update(scrapeTargets).set(outcome).where(eq(scrapeTargets.id, targetId))
+							const reportedAt = reportedAtByTarget.get(targetId) ?? outcome.updatedAt
+							// Apply only if nothing newer has touched the row. Results reach
+							// this method from two independent producers — the scraper loop,
+							// and the probe `create()` forks in the background — so a batch
+							// can land after a newer one has already been recorded. Without
+							// the guard the late writer wins: the target reports a stale
+							// `lastScrapeAt`, or resurrects an error a newer scrape cleared.
+							// `updatedAt` (not `lastScrapeAt`) is the comparison because a
+							// failing batch leaves `lastScrapeAt` untouched and so cannot
+							// order itself. Equal timestamps still apply, so re-reporting a
+							// batch stays a no-op rather than a drop, and a config edit at
+							// most costs the one in-flight scrape reported before it.
+							await db
+								.update(scrapeTargets)
+								.set(outcome)
+								.where(
+									and(
+										eq(scrapeTargets.id, targetId),
+										lte(scrapeTargets.updatedAt, reportedAt),
+									),
+								)
 						}
 
 						if (!recordChecks) return

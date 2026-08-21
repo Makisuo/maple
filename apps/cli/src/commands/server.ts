@@ -11,6 +11,8 @@ import { CURRENT_LOCAL_SCHEMA } from "../server/schema-identity"
 import { checkStoreCompatible, isSchemaIdentityStale, isStoreDirty } from "../server/store-version"
 import { abandonLocalStoreMigration, localMigrationIsIncomplete } from "../server/local-store-migrations"
 import {
+	type CheckpointAvailability,
+	checkpointAvailability,
 	createCheckpoint,
 	parseCheckpointId,
 	reconcileCheckpointRecovery,
@@ -280,6 +282,29 @@ export const resolveChdbConfigFile = (dataDir: string, supplied: string | undefi
 		}).pipe(Effect.orElseSucceed(() => undefined))
 	})
 
+/**
+ * What to tell someone whose local store was left dirty, given whether a
+ * checkpoint is actually restorable. Every branch names at least one command
+ * that will work from the state they are in.
+ */
+export const dirtyStoreRecoveryAdvice = (availability: CheckpointAvailability): string => {
+	if (availability.available) {
+		return (
+			`Run \`${bold("maple restore --yes")}\` to restore from the last checkpoint ` +
+			`(${dim(availability.checkpointId)}), or \`${bold("maple start --reset")}\` to wipe it.`
+		)
+	}
+	const why =
+		availability.reason === "none"
+			? "No checkpoint has ever been taken for this store, so there is nothing to restore from"
+			: `The checkpoint registry is unusable (${availability.detail}), so restoring from it is not safe`
+	return (
+		`${why} — the unreadable live data cannot be recovered. ` +
+		`Start fresh with \`${bold("maple start --reset")}\`; ` +
+		`once running, \`${bold("maple checkpoint")}\` creates a restore point for next time.`
+	)
+}
+
 /** Non-fatal `/health` probe used while waiting for a detached server to bind.
  *  A transport error or a >300ms timeout collapses to `false` (not yet up).
  *
@@ -352,15 +377,31 @@ const startDetached = (
 		const bindAddr = serverUrl(host, port)
 		const connectAddr = serverUrl(advertiseHost, port)
 		const probeAddr = serverProbeUrl(host, port)
-		let up = false
-		for (let i = 0; i < 100; i++) {
-			yield* Effect.sleep("100 millis")
-			if (yield* probeHealth(probeAddr)) {
-				up = true
-				break
+		// One span for the whole readiness wait, never one per probe. The probes
+		// themselves are untraced (see `probeHealth`), so a boot shows up as a
+		// single `server.wait_ready` carrying how many attempts it took — instead of
+		// ~10 `Error` client spans for the ECONNREFUSEDs that are the expected
+		// answer while the child is still binding. The span succeeds either way;
+		// missing the deadline is reported by the `ServerError` below, once.
+		const up = yield* Effect.gen(function* () {
+			for (let attempt = 1; attempt <= 100; attempt++) {
+				yield* Effect.sleep("100 millis")
+				if (yield* probeHealth(probeAddr)) {
+					yield* Effect.annotateCurrentSpan({ "maple.server.probe_attempt": attempt })
+					return true
+				}
+				if (!isProcessAlive(child.pid)) {
+					// Child died early — stop waiting.
+					yield* Effect.annotateCurrentSpan({
+						"maple.server.probe_attempt": attempt,
+						"maple.server.exited_early": true,
+					})
+					return false
+				}
 			}
-			if (!isProcessAlive(child.pid)) break // child died early — stop waiting
-		}
+			yield* Effect.annotateCurrentSpan({ "maple.server.probe_attempt": 100 })
+			return false
+		}).pipe(Effect.withSpan("server.wait_ready", { attributes: { "server.address": probeAddr } }))
 		if (!up) {
 			return yield* new ServerError({
 				message: `background server did not come up within 10s — check ${prettyPath(logPath)}`,
@@ -474,15 +515,29 @@ export const start = Command.make("start", {
 			// which we cannot catch. Auto-wipe and bootstrap fresh instead of walking
 			// into the crash. (`--reset` already wiped above, so the marker is gone.)
 			if (isStoreDirty(dataDir)) {
+				// Checkpoints only exist if someone ran `maple checkpoint`, so the
+				// recovery advice has to be conditioned on one actually being there.
+				// Offering `maple restore --yes` unconditionally stranded users whose
+				// store had never been checkpointed: start refused to open the store,
+				// restore aborted with "checkpoint state not found", and nothing in
+				// either message named a command that would work.
+				const availability = yield* Effect.promise(() => checkpointAvailability(dataDir))
 				if (a.onDirtyStore === "fail") {
 					return yield* new ServerError({
 						message:
 							`the local store at ${prettyPath(dataDir)} was not cleanly closed. ` +
-							`Run \`${bold("maple restore --yes")}\` to restore from the last checkpoint, ` +
-							`or \`${bold("maple start --reset")}\` to wipe it.`,
+							dirtyStoreRecoveryAdvice(availability),
 					})
 				}
 				if (a.onDirtyStore === "restore-checkpoint") {
+					if (!availability.available) {
+						return yield* new ServerError({
+							message:
+								`the local store at ${prettyPath(dataDir)} was not cleanly closed and ` +
+								`--on-dirty-store=restore-checkpoint cannot proceed. ` +
+								dirtyStoreRecoveryAdvice(availability),
+						})
+					}
 					yield* Effect.sync(() =>
 						process.stderr.write(
 							amber(
@@ -741,7 +796,17 @@ export const checkpoint = Command.make("checkpoint", { dataDir: dataDirFlag, hos
 				dataDir,
 				host: connectionHostForBindHost(a.host),
 				port: a.port,
-			}).pipe(Effect.mapError((e) => new ServerError({ message: e.message })))
+			}).pipe(
+				// Only genuine create failures become a `ServerError`. A refused
+				// precondition (`CheckpointPreconditionError`) passes straight through
+				// to `bin.ts`, which recovers it like any other expected outcome —
+				// re-wrapping it here is what billed a second error event per refusal.
+				Effect.mapError((e) =>
+					e._tag === "@maple/cli/CheckpointPreconditionError"
+						? e
+						: new ServerError({ message: e.message }),
+				),
+			)
 			yield* Effect.sync(() =>
 				process.stdout.write(
 					`${green("✓")} checkpoint created\n` +
@@ -784,6 +849,23 @@ export const restore = Command.make("restore", {
 					),
 				)
 				return
+			}
+
+			// Fail fast, and legibly, when there is nothing to restore: this used to
+			// surface as a raw "checkpoint state not found at …/backups/state.json"
+			// with a stack trace, which is exactly where `maple start`'s dirty-store
+			// advice sent people.
+			const availability = yield* Effect.promise(() => checkpointAvailability(dataDir))
+			if (!availability.available) {
+				return yield* new ServerError({
+					message:
+						availability.reason === "none"
+							? `no checkpoint exists under ${prettyPath(dataDir)} — nothing to restore. ` +
+								`Checkpoints are created by \`${bold("maple checkpoint")}\` while the server is running. ` +
+								`To start over from an unreadable store, use \`${bold("maple start --reset")}\`.`
+							: `the checkpoint registry under ${prettyPath(dataDir)} is unusable: ${availability.detail}. ` +
+								`Preserve it for inspection, or start over with \`${bold("maple start --reset")}\`.`,
+				})
 			}
 
 			const rawCheckpointId = Option.getOrUndefined(a.checkpointId)

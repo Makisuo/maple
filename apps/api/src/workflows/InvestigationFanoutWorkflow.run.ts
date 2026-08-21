@@ -31,6 +31,7 @@ import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { investigationLensRuns, investigations } from "@maple/db"
 import type { MaplePgClient } from "@maple/db/client"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
+import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "@/mcp/expected-failures"
 import {
 	AiTriageResult,
 	InvestigationPlan,
@@ -92,6 +93,19 @@ const decodeSnapshotOption = Schema.decodeUnknownOption(InvestigationSubjectSnap
 const decodePlanOption = Schema.decodeUnknownOption(InvestigationPlan)
 const decodeReport = Schema.decodeUnknownSync(AiTriageResult)
 const decodeReportOption = Schema.decodeUnknownOption(AiTriageResult)
+/**
+ * A `Schema.Class` instance is not structured-cloneable, and every value a
+ * Cloudflare Workflow step returns is structured-cloned into the step cache.
+ * Returning the validator's report as the class it decoded to killed the run
+ * with `Could not serialize object of type "AiTriageResult"` — recorded as
+ * `validation_failed`, i.e. a spent fan-out that published nothing.
+ *
+ * Everything downstream of `invokeValidator` already types the report as
+ * `unknown` and decodes it again, so the encoded form is the contract; this is
+ * what makes the real implementation honour it, the way the test stubs always
+ * did by returning plain objects.
+ */
+const encodeReport = Schema.encodeSync(AiTriageResult)
 
 /** Internal actor the lane tools run as — same identity the internal MCP RPC path uses. */
 const internalServiceUserId = Schema.decodeSync(UserId)("internal-service")
@@ -141,11 +155,19 @@ const HYPOTHESIS_STEP = { retries: { limit: 1, delay: "5 seconds" }, timeout: "1
 const VALIDATE_STEP = { retries: { limit: 1, delay: "5 seconds" }, timeout: "5 minutes" } as const
 const PERSIST_STEP = { retries: { limit: 5, delay: "2 seconds", backoff: "exponential" } } as const
 
+// The MCP identifiers belong here for the same reason they do in `worker.ts` and
+// `turn-runner.ts`: this runtime builds `McpServicesLive` and the hypothesis agent
+// calls MCP tools through it. Without them a decode failure — an anticipated 400,
+// already recorded as a Warn plus span attributes by `recordExpectedMcpFailure` —
+// exported as an Error span WITH an exception event, so every model that sent a
+// numeric parameter the schema refused landed in error tracking as an unexpected
+// error. It was the top `investigation.hypothesis` error in production and none of
+// it was a bug.
 const fanoutTelemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
-	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS, ...MCP_ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 /**
@@ -341,6 +363,10 @@ const invokeHypothesis = async (input: InvokeHypothesisInput): Promise<InvokeHyp
 	if (input.solo) {
 		const output = await input.runtime.runPromise(runSoloHypothesisAgent(agentInput))
 		const report = Option.getOrNull(output.report)
+		// Encoded for the same reason the validator's is: this leaves the lane as a
+		// plain JSON value, both for the `jsonb` write and for anything that carries
+		// it across a step boundary later.
+		const encodedReport = report === null ? null : encodeReport(report)
 		return {
 			// The collapsed path has no candidate to rank, but the lane row still
 			// renders: the claim slot carries the published cause so the Hypotheses tab
@@ -350,8 +376,8 @@ const invokeHypothesis = async (input: InvokeHypothesisInput): Promise<InvokeHyp
 			confidence: report?.confidence ?? null,
 			selfDoubt: null,
 			suggestedActions: report?.suggestedActions ?? [],
-			evidence: report?.evidence ?? [],
-			report,
+			evidence: encodedReport?.evidence ?? [],
+			report: encodedReport,
 			model: output.model,
 			inputTokens: output.usage.input,
 			outputTokens: output.usage.output,
@@ -439,7 +465,7 @@ const invokeValidator = async (input: InvokeValidatorInput): Promise<InvokeValid
 	)
 	return {
 		promotedLensId: output.verdict.promotedLensId,
-		report: output.verdict.report,
+		report: output.verdict.report === null ? null : encodeReport(output.verdict.report),
 		rivals: output.verdict.rivals.map((rival) => ({
 			lensId: rival.lensId,
 			verdict: rival.verdict as LensVerdict,

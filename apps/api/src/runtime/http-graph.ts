@@ -6,6 +6,7 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { API_CORS_OPTIONS } from "@/http/api-cors"
 import { McpLive } from "@/mcp/app"
 import { Env } from "@/platform/Env"
+import { HttpAiSessionsInternalLive } from "@/routes/internal/ai-sessions.http"
 import { HttpAiTriageLive } from "@/routes/internal/ai-triage.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "@/routes/v1/auth.http"
 import { HttpBillingLive } from "@/routes/internal/billing.http"
@@ -44,6 +45,7 @@ import { HttpV2ErrorIssuesLive } from "@/routes/v2/error-issues.http"
 import { HttpV2IngestKeysLive } from "@/routes/v2/ingest-keys.http"
 import { HttpV2PlanetScaleIntegrationsLive, HttpV2SlackIntegrationsLive } from "@/routes/v2/integrations.http"
 import { HttpV2InvestigationsLive } from "@/routes/v2/investigations.http"
+import { HttpV2MobileDevicesLive } from "@/routes/v2/mobile-devices.http"
 import { HttpV2OrganizationLive } from "@/routes/v2/organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "@/routes/v2/recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "@/routes/v2/scrape-targets.http"
@@ -56,10 +58,15 @@ import {
 	HttpV2ServicesLive,
 	HttpV2TracesLive,
 } from "@/routes/v2/telemetry.http"
+import { HttpV2WidgetSummaryLive } from "@/routes/v2/widget-summary.http"
+import { HttpV2WidgetCredentialsLive } from "@/routes/v2/widget-credentials.http"
 import { ApiAuthorizationLayer } from "@/services/auth/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { SessionAuthorizationLayer } from "@/services/auth/SessionAuthorizationLayer"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 
 const HealthRouter = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
@@ -98,7 +105,9 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
  * which is generated from `MapleApi`.
  */
 const ApiInternalRoutes = HttpApiBuilder.layer(MapleInternalApi).pipe(
-	Layer.provide(Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive)),
+	Layer.provide(
+		Layer.mergeAll(HttpQueryEngineLive, HttpSessionReplaysInternalLive, HttpAiSessionsInternalLive),
+	),
 	Layer.provide(
 		Layer.mergeAll(HttpAiTriageLive, HttpBillingLive, HttpChatLive, HttpDemoLive, HttpDigestLive),
 	),
@@ -126,12 +135,15 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2InvestigationsLive,
 			HttpV2AnomaliesLive,
 			HttpV2OrganizationLive,
+			HttpV2MobileDevicesLive,
 			HttpV2SessionReplaysLive,
 			HttpV2TracesLive,
 			HttpV2LogsLive,
 			HttpV2MetricsLive,
 			HttpV2ServicesLive,
 			HttpV2ServiceMapLive,
+			HttpV2WidgetSummaryLive,
+			HttpV2WidgetCredentialsLive,
 		),
 	),
 	Layer.provide(V2TransportErrorBoundaryLive),
@@ -165,6 +177,14 @@ export const ApiAuthLive = Layer.mergeAll(
 ).pipe(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
+	// Membership verification for `x-maple-org-id`. Only the v2 layer asks for
+	// it; without it that layer cannot build, which is deliberate — the header
+	// must never end up silently ignored in a runtime that forgot to wire this.
+	Layer.provideMerge(
+		OrgMembershipService.layer.pipe(
+			Layer.provide(EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))),
+		),
+	),
 	Layer.provideMerge(Env.layer),
 )
 

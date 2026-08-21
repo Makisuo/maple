@@ -22,8 +22,15 @@ export const MAX_CHUNKS_PER_RANGE = 16
 /**
  * Fallback byte budget for one range, used before the manifest reports the
  * server's own `max_bytes_per_request`. Matches the server default.
+ *
+ * This is a *payload* budget — the sum of the range's `byte_size` — and is
+ * deliberately below the server's 8 MB encoded-response ceiling, which counts
+ * the JSON-escaped row rather than the payload inside it. Budgeting to the
+ * encoded ceiling made a full range fail that guard by construction: 413
+ * `range_too_large`, `retry: never`, on exactly the recordings large enough to
+ * be ranged.
  */
-export const MAX_BYTES_PER_RANGE = 8_000_000
+export const MAX_BYTES_PER_RANGE = 6_000_000
 
 /**
  * Bytes to load before starting playback.
@@ -59,7 +66,7 @@ export interface ReplayRange {
  * 1. **Every range fits the server's byte budget.** Chunk sizes vary by more
  *    than an order of magnitude — a flush is ~100 KB but a full DOM snapshot
  *    runs to several hundred KB or more, and real sessions carry 838 KB chunks.
- *    A fixed 16-chunk slot of those is ~13 MB, well past the 8 MB ceiling, so
+ *    A fixed 16-chunk slot of those is ~13 MB, well past the budget, so
  *    the request comes back 413 and that stretch of the recording is unplayable.
  * 2. **Boundaries are stable**, because the atom family keys on the range. A
  *    range recomputed from the playhead would mint a new key every tick and
@@ -70,7 +77,7 @@ export interface ReplayRange {
  * plan without moving any boundary already in it.
  *
  * A single chunk always gets a range even if it alone exceeds the budget — the
- * SDK caps a chunk at 4 MB, so under an 8 MB budget that can't happen, but
+ * SDK caps a chunk at 4 MB, so under a 6 MB budget that can't happen, but
  * emitting nothing would stall playback rather than fail it.
  */
 export const planRanges = (

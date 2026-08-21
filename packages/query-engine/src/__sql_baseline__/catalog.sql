@@ -86,7 +86,21 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:errors:errorTickBootstrapIssuesQuery:bootstrap-window  [654cc034]
+-- builder:errors:errorsSparkQuery:default  [89ec2bb4]
+SELECT
+          toString(FingerprintHash) AS fingerprintHash,
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          count() AS count
+        FROM error_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND FingerprintHash IN (toUInt64('11640393269246331608'))
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY fingerprintHash, bucket
+        ORDER BY bucket ASC
+        FORMAT JSON
+
+-- builder:errors:errorTickBootstrapIssuesQuery:bootstrap-window  [733ef0e1]
 SELECT
           toString(FingerprintHash) AS fingerprintHash,
           any(ServiceName) AS serviceName,
@@ -94,6 +108,7 @@ SELECT
           any(ExceptionMessage) AS exceptionMessage,
           any(ErrorLabel) AS errorLabel,
           any(TopFrame) AS topFrame,
+          groupUniqArray(ServiceVersion) AS serviceVersions,
           count() AS count,
           min(Timestamp) AS firstSeen,
           max(Timestamp) AS lastSeen
@@ -104,7 +119,7 @@ SELECT
         GROUP BY fingerprintHash
         FORMAT JSON
 
--- builder:errors:errorTickIssuesQuery:cursor-window  [40cf1922]
+-- builder:errors:errorTickIssuesQuery:cursor-window  [7641e14b]
 SELECT
           toString(FingerprintHash) AS fingerprintHash,
           any(ServiceName) AS serviceName,
@@ -112,6 +127,7 @@ SELECT
           any(ExceptionMessage) AS exceptionMessage,
           any(ErrorLabel) AS errorLabel,
           any(TopFrame) AS topFrame,
+          groupUniqArrayArray(ServiceVersions) AS serviceVersions,
           sum(OccurrenceCount) AS count,
           min(FirstSeen) AS firstSeen,
           max(LastSeen) AS lastSeen
@@ -196,7 +212,7 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:infra:nodeFacetsQuery:default  [ecfd3ec1]
+-- builder:infra:nodeFacetsQuery:default  [483ce011]
 SELECT
           ResourceAttributes['k8s.node.name'] AS name,
           uniq(ResourceAttributes['k8s.node.name']) AS count,
@@ -230,7 +246,7 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          ResourceAttributes['deployment.environment.name'] AS name,
+          coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS name,
           uniq(ResourceAttributes['k8s.node.name']) AS count,
           'environment' AS facetType
         FROM metrics_gauge
@@ -240,7 +256,7 @@ SELECT
           AND ResourceAttributes['k8s.node.name'] != ''
           AND ResourceAttributes['k8s.pod.name'] = ''
           AND MetricName IN ('k8s.node.cpu.usage')
-          AND ResourceAttributes['deployment.environment.name'] != ''
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -262,7 +278,7 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:infra:podFacetsQuery:default  [b49456ea]
+-- builder:infra:podFacetsQuery:default  [c7a651d6]
 SELECT
           ResourceAttributes['k8s.pod.name'] AS name,
           uniq(ResourceAttributes['k8s.pod.uid']) AS count,
@@ -384,7 +400,7 @@ SELECT
         LIMIT 100
 UNION ALL
 SELECT
-          ResourceAttributes['deployment.environment.name'] AS name,
+          coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS name,
           uniq(ResourceAttributes['k8s.pod.uid']) AS count,
           'environment' AS facetType
         FROM metrics_gauge
@@ -393,7 +409,7 @@ SELECT
           AND TimeUnix <= '2026-01-03 14:15:00'
           AND ResourceAttributes['k8s.pod.name'] != ''
           AND MetricName IN ('k8s.pod.cpu.usage')
-          AND ResourceAttributes['deployment.environment.name'] != ''
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -430,7 +446,7 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:infra:workloadFacetsQuery:default  [e1f768b0]
+-- builder:infra:workloadFacetsQuery:default  [b424bb44]
 SELECT
           ResourceAttributes['k8s.deployment.name'] AS name,
           uniq(ResourceAttributes['k8s.deployment.name']) AS count,
@@ -477,7 +493,7 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          ResourceAttributes['deployment.environment.name'] AS name,
+          coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS name,
           uniq(ResourceAttributes['k8s.deployment.name']) AS count,
           'environment' AS facetType
         FROM metrics_gauge
@@ -486,7 +502,7 @@ SELECT
           AND TimeUnix <= '2026-01-03 14:15:00'
           AND ResourceAttributes['k8s.deployment.name'] != ''
           AND MetricName IN ('k8s.pod.cpu.usage')
-          AND ResourceAttributes['deployment.environment.name'] != ''
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -1304,7 +1320,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceExternalEdgesSQL:default  [4894e4c9]
+-- builder:service-map:serviceExternalEdgesSQL:default  [9e00902d]
 SELECT
           sourceService AS sourceService,
           targetType AS targetType,
@@ -1336,9 +1352,9 @@ SELECT
 UNION ALL
 SELECT
           ServiceName AS sourceService,
-          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), 'messaging', (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), 'rpc', 'http') AS targetType,
-          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), SpanAttributes['messaging.system'], (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), SpanAttributes['rpc.system'], '') AS targetSystem,
-          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']), (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']), if(SpanAttributes['server.address'] != '', SpanAttributes['server.address'], if(SpanAttributes['http.host'] != '', SpanAttributes['http.host'], SpanAttributes['url.authority']))) AS targetName,
+          multiIf((coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != ''), 'messaging', (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), 'rpc', 'http') AS targetType,
+          multiIf((coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != ''), SpanAttributes['messaging.system'], (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), SpanAttributes['rpc.system'], '') AS targetSystem,
+          multiIf((coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != ''), if(coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '', coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']), SpanAttributes['messaging.system']), (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']), if(SpanAttributes['server.address'] != '', SpanAttributes['server.address'], if(SpanAttributes['http.host'] != '', SpanAttributes['http.host'], SpanAttributes['url.authority']))) AS targetName,
           count() AS bucketCallCount,
           countIf(StatusCode = 'Error') AS bucketErrorCount,
           sum(Duration / 1000000) AS bucketDurationSumMs,
@@ -1351,7 +1367,7 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanKind IN ('Client', 'Producer')
           AND SpanAttributes['db.system.name'] = ''
-          AND ((((((SpanAttributes['server.address'] != '' OR SpanAttributes['http.host'] != '') OR SpanAttributes['url.authority'] != '') OR SpanAttributes['messaging.destination'] != '') OR SpanAttributes['messaging.system'] != '') OR SpanAttributes['rpc.service'] != '') OR SpanAttributes['rpc.system'] != '')
+          AND ((((((SpanAttributes['server.address'] != '' OR SpanAttributes['http.host'] != '') OR SpanAttributes['url.authority'] != '') OR coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '') OR SpanAttributes['messaging.system'] != '') OR SpanAttributes['rpc.service'] != '') OR SpanAttributes['rpc.system'] != '')
         GROUP BY sourceService, targetType, targetSystem, targetName
         HAVING targetName != ''
 ) AS edges
@@ -1369,7 +1385,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceExternalEdgesSQL:env-scoped  [2a7ffabc]
+-- builder:service-map:serviceExternalEdgesSQL:env-scoped  [f135f8aa]
 SELECT
           sourceService AS sourceService,
           targetType AS targetType,
@@ -1402,9 +1418,9 @@ SELECT
 UNION ALL
 SELECT
           ServiceName AS sourceService,
-          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), 'messaging', (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), 'rpc', 'http') AS targetType,
-          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), SpanAttributes['messaging.system'], (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), SpanAttributes['rpc.system'], '') AS targetSystem,
-          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']), (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']), if(SpanAttributes['server.address'] != '', SpanAttributes['server.address'], if(SpanAttributes['http.host'] != '', SpanAttributes['http.host'], SpanAttributes['url.authority']))) AS targetName,
+          multiIf((coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != ''), 'messaging', (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), 'rpc', 'http') AS targetType,
+          multiIf((coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != ''), SpanAttributes['messaging.system'], (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), SpanAttributes['rpc.system'], '') AS targetSystem,
+          multiIf((coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != ''), if(coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '', coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']), SpanAttributes['messaging.system']), (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']), if(SpanAttributes['server.address'] != '', SpanAttributes['server.address'], if(SpanAttributes['http.host'] != '', SpanAttributes['http.host'], SpanAttributes['url.authority']))) AS targetName,
           count() AS bucketCallCount,
           countIf(StatusCode = 'Error') AS bucketErrorCount,
           sum(Duration / 1000000) AS bucketDurationSumMs,
@@ -1417,8 +1433,8 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanKind IN ('Client', 'Producer')
           AND SpanAttributes['db.system.name'] = ''
-          AND ((((((SpanAttributes['server.address'] != '' OR SpanAttributes['http.host'] != '') OR SpanAttributes['url.authority'] != '') OR SpanAttributes['messaging.destination'] != '') OR SpanAttributes['messaging.system'] != '') OR SpanAttributes['rpc.service'] != '') OR SpanAttributes['rpc.system'] != '')
-          AND ResourceAttributes['deployment.environment'] = 'production'
+          AND ((((((SpanAttributes['server.address'] != '' OR SpanAttributes['http.host'] != '') OR SpanAttributes['url.authority'] != '') OR coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '') OR SpanAttributes['messaging.system'] != '') OR SpanAttributes['rpc.service'] != '') OR SpanAttributes['rpc.system'] != '')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) = 'production'
         GROUP BY sourceService, targetType, targetSystem, targetName
         HAVING targetName != ''
 ) AS edges
@@ -1586,7 +1602,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- builder:service-operations:serviceOperationsSummaryQuery:envFiltered  [66a9f885]
+-- builder:service-operations:serviceOperationsSummaryQuery:envFiltered  [54970693]
 SELECT
           bSpanName AS spanName,
           sum(bSpanCount) AS spanCount,
@@ -1611,7 +1627,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
         GROUP BY bSpanName
 UNION ALL
@@ -4211,7 +4227,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:errors_facets:default:baseline  [d5afc6d2]
+-- pipe:errors_facets:default:baseline  [64eb8e74]
 SELECT
           ServiceName AS name,
           count() AS count,
@@ -4245,6 +4261,19 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          ServiceVersion AS name,
+          count() AS count,
+          'version' AS facetType
+        FROM error_events_by_time
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceVersion != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -4822,7 +4851,7 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- pipe:list_traces:filtered:baseline  [b1aaf6f5]
+-- pipe:list_traces:filtered:baseline  [53aa2fe9]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4848,7 +4877,7 @@ SELECT
           AND StatusCode = 'Error'
           AND Duration >= 5000000
           AND Duration <= 5000000000
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET'
           AND ResourceAttributes['service.namespace'] = 'core'
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -4863,7 +4892,7 @@ SELECT
           AND StatusCode = 'Error'
           AND Duration >= 5000000
           AND Duration <= 5000000000
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET'
           AND ResourceAttributes['service.namespace'] = 'core'
         ORDER BY ts DESC
@@ -4872,7 +4901,7 @@ SELECT
         LIMIT 25
         FORMAT JSON
 
--- pipe:list_traces:filtered:bloom  [5d0533fd]
+-- pipe:list_traces:filtered:bloom  [022c02f1]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4898,7 +4927,7 @@ SELECT
           AND StatusCode = 'Error'
           AND Duration >= 5000000
           AND Duration <= 5000000000
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND (((has(mapKeys(SpanAttributes), 'http.method') OR has(mapKeys(SpanAttributes), 'http.request.method')) AND has(mapValues(SpanAttributes), 'GET')) AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET')
           AND ((has(mapKeys(ResourceAttributes), 'service.namespace') AND has(mapValues(ResourceAttributes), 'core')) AND ResourceAttributes['service.namespace'] = 'core')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -4913,7 +4942,7 @@ SELECT
           AND StatusCode = 'Error'
           AND Duration >= 5000000
           AND Duration <= 5000000000
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND (((has(mapKeys(SpanAttributes), 'http.method') OR has(mapKeys(SpanAttributes), 'http.request.method')) AND has(mapValues(SpanAttributes), 'GET')) AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET')
           AND ((has(mapKeys(ResourceAttributes), 'service.namespace') AND has(mapValues(ResourceAttributes), 'core')) AND ResourceAttributes['service.namespace'] = 'core')
         ORDER BY ts DESC
@@ -4922,7 +4951,7 @@ SELECT
         LIMIT 25
         FORMAT JSON
 
--- pipe:list_traces:filtered:text  [e5d9f1cd]
+-- pipe:list_traces:filtered:text  [d0aad5c1]
 SELECT
           TraceId AS traceId,
           Timestamp AS startTime,
@@ -4948,7 +4977,7 @@ SELECT
           AND StatusCode = 'Error'
           AND Duration >= 5000000
           AND Duration <= 5000000000
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND ((has(SpanAttributeItems, concat('http.method', char(31), 'GET')) OR has(SpanAttributeItems, concat('http.request.method', char(31), 'GET'))) AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET')
           AND (has(ResourceAttributeItems, concat('service.namespace', char(31), 'core')) AND ResourceAttributes['service.namespace'] = 'core')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -4963,7 +4992,7 @@ SELECT
           AND StatusCode = 'Error'
           AND Duration >= 5000000
           AND Duration <= 5000000000
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND ((has(SpanAttributeItems, concat('http.method', char(31), 'GET')) OR has(SpanAttributeItems, concat('http.request.method', char(31), 'GET'))) AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET')
           AND (has(ResourceAttributeItems, concat('service.namespace', char(31), 'core')) AND ResourceAttributes['service.namespace'] = 'core')
         ORDER BY ts DESC
@@ -7496,7 +7525,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- spec:errors-facets:baseline  [d5afc6d2]
+-- spec:errors-facets:baseline  [64eb8e74]
 SELECT
           ServiceName AS name,
           count() AS count,
@@ -7530,6 +7559,19 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          ServiceVersion AS name,
+          count() AS count,
+          'version' AS facetType
+        FROM error_events_by_time
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceVersion != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -8140,7 +8182,7 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
--- spec:traces-breakdown-by-attribute:baseline  [647b92c0]
+-- spec:traces-breakdown-by-attribute:baseline  [192e93fe]
 SELECT
           SpanAttributes['http.route'] AS name,
           sum(SampleRate) AS count,
@@ -8158,13 +8200,13 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY name
         ORDER BY count DESC
         LIMIT 10
         FORMAT JSON
 
--- spec:traces-breakdown-by-attribute:bloom  [647b92c0]
+-- spec:traces-breakdown-by-attribute:bloom  [192e93fe]
 SELECT
           SpanAttributes['http.route'] AS name,
           sum(SampleRate) AS count,
@@ -8182,13 +8224,13 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY name
         ORDER BY count DESC
         LIMIT 10
         FORMAT JSON
 
--- spec:traces-breakdown-by-attribute:text  [647b92c0]
+-- spec:traces-breakdown-by-attribute:text  [192e93fe]
 SELECT
           SpanAttributes['http.route'] AS name,
           sum(SampleRate) AS count,
@@ -8206,13 +8248,13 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY name
         ORDER BY count DESC
         LIMIT 10
         FORMAT JSON
 
--- spec:traces-breakdown:baseline  [35f449b0]
+-- spec:traces-breakdown:baseline  [948c682e]
 SELECT
           ServiceName AS name,
           sum(SampleRate) AS count,
@@ -8230,7 +8272,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY name
         ORDER BY count DESC
         LIMIT 10
@@ -8562,7 +8604,7 @@ SELECT
           AND HasError = 1
 FORMAT JSON
 
--- spec:traces-list:baseline  [c381db35]
+-- spec:traces-list:baseline  [3ec2a2e9]
 SELECT
           TraceId AS traceId,
           Timestamp AS timestamp,
@@ -8581,7 +8623,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
           Timestamp AS ts
         FROM traces
@@ -8589,14 +8631,14 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         ORDER BY ts DESC
         LIMIT 50))
         ORDER BY timestamp DESC
         LIMIT 50
         FORMAT JSON
 
--- spec:traces-list:bloom  [c381db35]
+-- spec:traces-list:bloom  [3ec2a2e9]
 SELECT
           TraceId AS traceId,
           Timestamp AS timestamp,
@@ -8615,7 +8657,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
           Timestamp AS ts
         FROM traces
@@ -8623,14 +8665,14 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         ORDER BY ts DESC
         LIMIT 50))
         ORDER BY timestamp DESC
         LIMIT 50
         FORMAT JSON
 
--- spec:traces-list:text  [c381db35]
+-- spec:traces-list:text  [3ec2a2e9]
 SELECT
           TraceId AS traceId,
           Timestamp AS timestamp,
@@ -8649,7 +8691,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
           Timestamp AS ts
         FROM traces
@@ -8657,7 +8699,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         ORDER BY ts DESC
         LIMIT 50))
         ORDER BY timestamp DESC
@@ -8678,7 +8720,7 @@ SELECT
           AND DeploymentEnv = 'production'
         FORMAT JSON
 
--- spec:traces-timeseries-aggregates-mv:baseline  [0cf473e6]
+-- spec:traces-timeseries-aggregates-mv:baseline  [cad07ec0]
 SELECT
           bucket AS bucket,
           groupName AS groupName,
@@ -8707,7 +8749,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
         GROUP BY bucket, groupName
 UNION ALL
@@ -8731,7 +8773,7 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-all-metrics-grouped:baseline  [800b31cb]
+-- spec:traces-timeseries-all-metrics-grouped:baseline  [bb89a9b1]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
           coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
@@ -8751,7 +8793,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
@@ -9132,7 +9174,7 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-apdex:baseline  [7368a4c9]
+-- spec:traces-timeseries-apdex:baseline  [40ead943]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
           'all' AS groupName,
@@ -9152,12 +9194,12 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-attribute-filtered:baseline  [b89f03f1]
+-- spec:traces-timeseries-attribute-filtered:baseline  [60608c7f]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
           'all' AS groupName,
@@ -9177,13 +9219,13 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET'
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-attribute-filtered:bloom  [0ed9323f]
+-- spec:traces-timeseries-attribute-filtered:bloom  [fa85ef4d]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
           'all' AS groupName,
@@ -9203,13 +9245,13 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND (((has(mapKeys(SpanAttributes), 'http.method') OR has(mapKeys(SpanAttributes), 'http.request.method')) AND has(mapValues(SpanAttributes), 'GET')) AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET')
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-attribute-filtered:text  [c4e0b61b]
+-- spec:traces-timeseries-attribute-filtered:text  [08a8ac59]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
           'all' AS groupName,
@@ -9229,13 +9271,13 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
           AND ((has(SpanAttributeItems, concat('http.method', char(31), 'GET')) OR has(SpanAttributeItems, concat('http.request.method', char(31), 'GET'))) AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) = 'GET')
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-raw:baseline  [ebfaf7db]
+-- spec:traces-timeseries-raw:baseline  [702c5f01]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket,
           'all' AS groupName,
@@ -9255,12 +9297,12 @@ SELECT
           AND Timestamp >= '2026-01-03 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-raw:bloom  [ebfaf7db]
+-- spec:traces-timeseries-raw:bloom  [702c5f01]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket,
           'all' AS groupName,
@@ -9280,12 +9322,12 @@ SELECT
           AND Timestamp >= '2026-01-03 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-raw:text  [ebfaf7db]
+-- spec:traces-timeseries-raw:text  [702c5f01]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket,
           'all' AS groupName,
@@ -9305,12 +9347,12 @@ SELECT
           AND Timestamp >= '2026-01-03 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-series-cap:baseline  [4bec4bd3]
+-- spec:traces-timeseries-series-cap:baseline  [3d39b07d]
 WITH __series_base AS (
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
@@ -9331,7 +9373,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND ResourceAttributes['deployment.environment'] IN ('production')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
 )

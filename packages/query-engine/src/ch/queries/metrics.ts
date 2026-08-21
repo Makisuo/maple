@@ -12,6 +12,7 @@ import { table } from "@maple-dev/clickhouse-builder"
 import { MetricsSum, MetricCatalog, SpanMetricsCallsHourly } from "../tables"
 import { compileCH } from "@maple-dev/clickhouse-builder"
 import { resolveMetricTable, metricsSelectExprs } from "./query-helpers"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition } from "../../traces-shared"
 import { finalizeTimeseries } from "./series-cap"
 
@@ -26,14 +27,6 @@ function resourceFilterConditions(
 ): ReadonlyArray<CH.Condition> {
 	return (filters ?? []).map((rf) => buildAttrFilterCondition(rf, "ResourceAttributes"))
 }
-
-/**
- * Resource-attribute key holding the deployment environment. Metrics tables
- * carry no pre-extracted `DeploymentEnv` column (unlike the trace MVs), so an
- * environment filter reads the map directly — the same key
- * `tracesBaseWhereConditions` uses on the raw `traces` table.
- */
-const DEPLOYMENT_ENV_KEY = "deployment.environment"
 
 // Shared options & output types
 
@@ -111,7 +104,7 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
 			opts.environments?.length
-				? CH.inList($.ResourceAttributes.get(DEPLOYMENT_ENV_KEY), opts.environments)
+				? CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments)
 				: undefined,
 			...resourceFilterConditions(opts.resourceAttributeFilters),
 		])
@@ -167,7 +160,11 @@ const metricsRateTimeseriesColumns = {
 	dataPointCount: T.uint64,
 }
 
-const SPAN_METRICS_CALLS_NAMES = new Set(["span.metrics.calls", "calls"])
+// Must stay in sync with the WHERE clause of `span_metrics_calls_hourly_mv`.
+// `traces.span.metrics.calls` is what the collector emits in practice
+// (spanmetricsconnector output is namespaced by its pipeline); it was missing
+// from both sides, so the rollup held 0 rows and every read took the raw path.
+const SPAN_METRICS_CALLS_NAMES = new Set(["span.metrics.calls", "calls", "traces.span.metrics.calls"])
 
 function canUseSpanMetricsCallsHourly(opts: MetricsRateTimeseriesOpts): boolean {
 	return (
@@ -380,7 +377,7 @@ export function metricsTimeseriesRateQuery(
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
 				opts.environments?.length
-					? CH.inList($.ResourceAttributes.get(DEPLOYMENT_ENV_KEY), opts.environments)
+					? CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments)
 					: undefined,
 				...resourceFilterConditions(opts.resourceAttributeFilters),
 			]),

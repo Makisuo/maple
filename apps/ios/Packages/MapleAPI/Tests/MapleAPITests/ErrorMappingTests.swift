@@ -1,4 +1,5 @@
 import Foundation
+import OpenAPIRuntime
 import Testing
 
 @testable import MapleAPI
@@ -24,6 +25,37 @@ struct ErrorMappingTests {
 			"message":"\(message)","retryable":\(retryable),"recovery":"\(recovery)"\(extra)}}
 			""".utf8
 		)
+	}
+
+	@Test("A cancelled request surfaces as CancellationError, not as a transport failure")
+	func cancellationUnwrapped() {
+		let wrapped = ClientError(
+			operationID: "listServices", operationInput: (), causeDescription: "cancelled",
+			underlyingError: CancellationError()
+		)
+		#expect(MapleClient.normalize(wrapped) is CancellationError)
+
+		let urlCancelled = ClientError(
+			operationID: "listServices", operationInput: (), causeDescription: "cancelled",
+			underlyingError: URLError(.cancelled)
+		)
+		#expect(MapleClient.normalize(urlCancelled) is CancellationError)
+		#expect(MapleClient.normalize(URLError(.cancelled)) is CancellationError)
+	}
+
+	@Test("A genuine transport failure still maps to a retryable transport error")
+	func transportFailure() throws {
+		let offline = ClientError(
+			operationID: "listServices", operationInput: (), causeDescription: "offline",
+			underlyingError: URLError(.notConnectedToInternet)
+		)
+		let mapped = try #require(MapleClient.normalize(offline) as? MapleAPIError)
+		guard case .transport = mapped else {
+			Issue.record("expected .transport, got \(mapped)")
+			return
+		}
+		#expect(mapped.isRetryable)
+		#expect(!mapped.isCancellation)
 	}
 
 	@Test("401 invalid_credentials asks for re-authentication")

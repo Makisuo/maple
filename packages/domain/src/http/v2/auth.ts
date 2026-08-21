@@ -1,10 +1,11 @@
 import { HttpApiMiddleware, HttpApiSecurity, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ApiKeyLookupPersistenceError } from "../api-keys"
-import { Context, UnauthorizedError } from "../current-tenant"
+import { AuthorizationUnavailableError, Context, UnauthorizedError } from "../current-tenant"
 import {
 	V2InsufficientScope,
 	V2InvalidCredentials,
+	V2OrganizationAccessDenied,
 	V2InvalidRequest,
 	V2RateLimited,
 	V2ResponseSchemaFailure,
@@ -31,8 +32,10 @@ export class AuthorizationV2 extends HttpApiMiddleware.Service<
 		V2InvalidCredentials.schema,
 		V2InsufficientScope.schema,
 		V2RateLimited.schema,
+		V2OrganizationAccessDenied.schema,
 		publicError(ApiKeyLookupPersistenceError),
 		publicError(UnauthorizedError),
+		publicError(AuthorizationUnavailableError),
 	],
 	security: {
 		bearer: HttpApiSecurity.bearer.pipe(

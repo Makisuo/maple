@@ -5,7 +5,7 @@
 # Swift property. Idiomatic gives `p95LatencyMs` with the CodingKeys mapping
 # preserved, so the wire format is untouched.
 generate:
-  - types
-  - client
+    - types
+    - client
 accessModifier: public
 namingStrategy: idiomatic

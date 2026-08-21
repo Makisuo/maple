@@ -1,5 +1,6 @@
 import Foundation
 import MapleAPI
+import MapleWidgetData
 
 /// A deterministic in-memory `MapleAPI` for previews, screenshots, and running
 /// the app without a Clerk session (`MAPLE_FIXTURES=1` in the scheme's
@@ -29,24 +30,30 @@ struct FixtureAPI: MapleAPI {
 		let p50: Double
 		let p95: Double
 		let p99: Double
+		/// The service's own trailing-7d p95. Most seeds sit at their baseline —
+		/// a batch worker whose p95 is always ~900ms is normal, not degraded —
+		/// so only `payments`, at 3.4× its own history, is latency-degraded.
+		let baselineP95: Double
 	}
 
 	private static let seeds: [Seed] = [
-		Seed(name: "checkout-api", namespace: "commerce", throughput: 42.1, errorRate: 0.091, p50: 84, p95: 640, p99: 1_480),
-		Seed(name: "search", namespace: "discovery", throughput: 118.4, errorRate: 0.004, p50: 210, p95: 1_340, p99: 2_900),
-		Seed(name: "payments", namespace: "commerce", throughput: 9.7, errorRate: 0.012, p50: 120, p95: 410, p99: 880),
-		Seed(name: "web", namespace: "edge", throughput: 380.2, errorRate: 0.0007, p50: 32, p95: 140, p99: 320),
-		Seed(name: "auth", namespace: "platform", throughput: 61.0, errorRate: 0.0002, p50: 18, p95: 61, p99: 140),
-		Seed(name: "catalog", namespace: "commerce", throughput: 27.5, errorRate: 0, p50: 44, p95: 190, p99: 410),
-		Seed(name: "notifications", namespace: "platform", throughput: 3.2, errorRate: 0.001, p50: 90, p95: 380, p99: 720),
-		Seed(name: "worker", namespace: "platform", throughput: 14.9, errorRate: 0, p50: 400, p95: 900, p99: 1_900),
-		Seed(name: "ingest-gateway", namespace: "edge", throughput: 1_240.0, errorRate: 0.0001, p50: 6, p95: 21, p99: 58),
+		Seed(name: "checkout-api", namespace: "commerce", throughput: 42.1, errorRate: 0.091, p50: 84, p95: 640, p99: 1_480, baselineP95: 610),
+		Seed(name: "search", namespace: "discovery", throughput: 118.4, errorRate: 0.004, p50: 210, p95: 1_340, p99: 2_900, baselineP95: 1_280),
+		Seed(name: "payments", namespace: "commerce", throughput: 9.7, errorRate: 0.012, p50: 120, p95: 410, p99: 880, baselineP95: 120),
+		Seed(name: "web", namespace: "edge", throughput: 380.2, errorRate: 0.0007, p50: 32, p95: 140, p99: 320, baselineP95: 135),
+		Seed(name: "auth", namespace: "platform", throughput: 61.0, errorRate: 0.0002, p50: 18, p95: 61, p99: 140, baselineP95: 58),
+		Seed(name: "catalog", namespace: "commerce", throughput: 27.5, errorRate: 0, p50: 44, p95: 190, p99: 410, baselineP95: 185),
+		Seed(name: "notifications", namespace: "platform", throughput: 3.2, errorRate: 0.001, p50: 90, p95: 380, p99: 720, baselineP95: 360),
+		Seed(name: "worker", namespace: "platform", throughput: 14.9, errorRate: 0, p50: 400, p95: 900, p99: 1_900, baselineP95: 880),
+		Seed(name: "ingest-gateway", namespace: "edge", throughput: 1_240.0, errorRate: 0.0001, p50: 6, p95: 21, p99: 58, baselineP95: 20),
 	]
 
 	private func service(_ seed: Seed, window: ResolvedTimeWindow) -> Service {
 		let seconds = window.end.timeIntervalSince(window.start)
 		let spans = seed.throughput * seconds
 		return Service(
+			baselineP95LatencyMs: seed.baselineP95,
+			baselineSpanCount: (seed.throughput * 7 * 24 * 3_600).rounded(),
 			deploymentEnvironments: ["production"],
 			errorCount: (spans * seed.errorRate).rounded(),
 			errorRate: seed.errorRate,
@@ -94,7 +101,8 @@ struct FixtureAPI: MapleAPI {
 			issue(
 				id: "iss_search_es", service: "search", type: "ElasticsearchException",
 				message: "circuit_breaking_exception: [parent] Data too large", frame: "search/query.ts:211",
-				severity: .medium, state: .inProgress, count: 41, firstSeen: -3 * 86_400, lastSeen: -900, incident: false
+				severity: .medium, state: .inProgress, count: 41, firstSeen: -3 * 86_400, lastSeen: -900,
+				incident: false, regressions: 2
 			),
 			issue(
 				id: "iss_payments_decline", service: "payments", type: "CardDeclined",
@@ -106,7 +114,8 @@ struct FixtureAPI: MapleAPI {
 
 	private func issue(
 		id: String, service: String, type: String, message: String, frame: String, severity: IssueSeverity,
-		state: WorkflowState, count: Double, firstSeen: TimeInterval, lastSeen: TimeInterval, incident: Bool
+		state: WorkflowState, count: Double, firstSeen: TimeInterval, lastSeen: TimeInterval, incident: Bool,
+		regressions: Double = 0
 	) -> ErrorIssue {
 		ErrorIssue(
 			errorLabel: type,
@@ -121,6 +130,12 @@ struct FixtureAPI: MapleAPI {
 			object: .errorIssue,
 			occurrenceCount: count,
 			priority: 1,
+			// Fixed, then seen again — the state the issue list and the widget
+			// both mark. Fixtures carry one so the mark is visible without a
+			// real regression to hand.
+			regressionCount: regressions,
+			// No release tracking in fixtures.
+			resolvedVersions: [],
 			serviceName: service,
 			severity: severity,
 			severitySource: .manual,
@@ -169,6 +184,8 @@ struct FixtureAPI: MapleAPI {
 			object: .errorIssue,
 			occurrenceCount: issue.occurrenceCount,
 			priority: issue.priority,
+			regressionCount: issue.regressionCount,
+			resolvedVersions: issue.resolvedVersions,
 			sampleTraces: [],
 			serviceName: issue.serviceName,
 			severity: issue.severity,
@@ -510,15 +527,123 @@ struct FixtureAPI: MapleAPI {
 		)
 	}
 
+	// MARK: Home Screen widgets
+
+	/// Fixture mode has no server to mint against, and no widget fetches for
+	/// itself here — the credential is a well-formed placeholder so the
+	/// mint-and-store path can be exercised without a session.
+	func mintWidgetCredential(installationId: String) async throws -> WidgetCredential {
+		try await pause()
+		return WidgetCredential(
+			organizationId: FixtureSession.organizationId,
+			secret: "maple_ak_fixture",
+			apiBaseURL: URL(string: "https://fixtures.maple.invalid")!,
+			expiresAt: now.addingTimeInterval(30 * 24 * 60 * 60),
+			mintedAt: now
+		)
+	}
+
+	func revokeWidgetCredential(installationId: String) async throws {
+		try await pause()
+	}
+
+	/// Assembled from the same seeds the rest of the fixtures use, so a Home
+	/// Screen screenshot and the Services tab behind it agree.
+	func widgetSummary() async throws -> WidgetSummaryPayload {
+		try await pause()
+		let bucketSeconds = 300
+		let window = TimeWindow.lastHour.resolve(now: now)
+		return WidgetSummaryPayload(
+			schemaVersion: WidgetSummaryPayload.supportedSchemaVersion,
+			generatedAt: now,
+			organizationId: FixtureSession.organizationId,
+			issues: WidgetSummaryPayload.Issues(
+				windowSeconds: 24 * 60 * 60,
+				hasMore: false,
+				data: issues.map { issue in
+					WidgetSummaryPayload.Issue(
+						id: issue.id,
+						exceptionType: issue.exceptionType,
+						errorLabel: issue.errorLabel,
+						exceptionMessage: issue.exceptionMessage,
+						serviceName: issue.serviceName,
+						severity: issue.severity?.rawValue,
+						occurrenceCount: issue.occurrenceCount,
+						lastSeenAt: ResolvedTimeWindow.parse(issue.lastSeenAt) ?? now,
+						isRegressed: issue.regressionCount > 0,
+						hasOpenIncident: issue.hasOpenIncident
+					)
+				}
+			),
+			throughput: WidgetSummaryPayload.Throughput(
+				windowSeconds: Int(window.end.timeIntervalSince(window.start)),
+				bucketSeconds: bucketSeconds,
+				services: Self.seeds.map { seed in
+					WidgetSummaryPayload.Service(
+						name: seed.name,
+						throughputPerSecond: seed.throughput,
+						errorRate: seed.errorRate,
+						p95LatencyMs: seed.p95,
+						// Counts, not rates — the wire's unit. The mapper divides.
+						points: (0..<12).map { index in
+							seed.throughput * Double(bucketSeconds) * (index.isMultiple(of: 2) ? 0.92 : 1.08)
+						}
+					)
+				},
+				totalPoints: (0..<12).map { index in
+					Self.seeds.reduce(0) { total, seed in
+						total + seed.throughput * Double(bucketSeconds) * (index.isMultiple(of: 2) ? 0.92 : 1.08)
+					}
+				}
+			)
+		)
+	}
+
 	// MARK: Telemetry
 
 	func traceTimeseries(_ request: TraceTimeseriesRequest) async throws -> TraceTimeseriesResult {
 		try await pause()
-		let seed = Self.seeds.first { $0.name == request.serviceName } ?? Self.seeds[3]
 		let bucket = TimeInterval(request.resolvedBucketSeconds)
 		let count = max(2, Int(request.window.end.timeIntervalSince(request.window.start) / bucket))
-		let incident = request.serviceName == "checkout-api" || request.serviceName == "search"
-		let points = (0..<count).map { index -> TimeseriesValuePoint in
+
+		// Grouped: one series per service, which is what the throughput widget
+		// asks for. Ungrouped keeps the single-series shape every screen uses.
+		if request.groupBy == .service {
+			let seeds = Array(Self.seeds.prefix(request.seriesLimit ?? Self.seeds.count))
+			return TraceTimeseriesResult(
+				aggregation: .init(rawValue: request.aggregation.rawValue) ?? .count,
+				bucketSeconds: request.resolvedBucketSeconds,
+				endTime: request.window.endTime,
+				object: .traceTimeseries,
+				series: seeds.map { seed in
+					TimeseriesSeries(
+						group: seed.name,
+						points: series(for: seed, request: request, bucket: bucket, count: count)
+					)
+				},
+				startTime: request.window.startTime
+			)
+		}
+
+		let seed = Self.seeds.first { $0.name == request.serviceName } ?? Self.seeds[3]
+		return TraceTimeseriesResult(
+			aggregation: .init(rawValue: request.aggregation.rawValue) ?? .count,
+			bucketSeconds: request.resolvedBucketSeconds,
+			endTime: request.window.endTime,
+			object: .traceTimeseries,
+			series: [TimeseriesSeries(group: nil, points: series(for: seed, request: request, bucket: bucket, count: count))],
+			startTime: request.window.startTime
+		)
+	}
+
+	private func series(
+		for seed: Seed,
+		request: TraceTimeseriesRequest,
+		bucket: TimeInterval,
+		count: Int
+	) -> [TimeseriesValuePoint] {
+		let incident = seed.name == "checkout-api" || seed.name == "search"
+		return (0..<count).map { index -> TimeseriesValuePoint in
 			let progress = Double(index) / Double(max(1, count - 1))
 			let ramp = incident ? max(0, (progress - 0.55) / 0.3) : 0
 			let wobble = sin(Double(index) * 0.9) * 0.08 + 1
@@ -536,14 +661,6 @@ struct FixtureAPI: MapleAPI {
 				value: value
 			)
 		}
-		return TraceTimeseriesResult(
-			aggregation: .init(rawValue: request.aggregation.rawValue) ?? .count,
-			bucketSeconds: request.resolvedBucketSeconds,
-			endTime: request.window.endTime,
-			object: .traceTimeseries,
-			series: [TimeseriesSeries(group: nil, points: points)],
-			startTime: request.window.startTime
-		)
 	}
 
 	func traceBreakdown(_ request: TraceBreakdownRequest) async throws -> TraceBreakdownResult {
@@ -577,6 +694,56 @@ struct FixtureAPI: MapleAPI {
 		)
 	}
 
+	// MARK: Push
+
+	func registerDevice(_ registration: DeviceRegistration) async throws -> MobileDevice {
+		try await pause()
+		let prefs = registration.preferences ?? .default
+		return MobileDevice(
+			appVersion: registration.appVersion,
+			bundleId: registration.bundleId,
+			createdAt: stamp(-86_400),
+			deviceName: registration.deviceName,
+			enabled: true,
+			environment: registration.environment,
+			id: "mdev_fixture",
+			lastSeenAt: stamp(0),
+			liveActivitiesEnabled: registration.liveActivityStartToken != nil,
+			object: .mobileDevice,
+			platform: .ios,
+			preferences: .init(
+				anomalies: prefs.anomalies,
+				criticalIncidents: prefs.criticalIncidents,
+				newErrorIssues: prefs.newErrorIssues,
+				resolvedIncidents: prefs.resolvedIncidents,
+				warningIncidents: prefs.warningIncidents
+			),
+			token: registration.token
+		)
+	}
+
+	func unregisterDevice(token: String) async throws {
+		try await pause()
+	}
+
+	func myDevices() async throws -> [MobileDevice] {
+		try await pause()
+		return []
+	}
+
+	func registerLiveActivity(
+		deviceToken: String,
+		incidentId: String,
+		activityId: String,
+		pushToken: String
+	) async throws {
+		try await pause()
+	}
+
+	func endLiveActivity(deviceToken: String, incidentId: String) async throws {
+		try await pause()
+	}
+
 	// MARK: Helpers
 
 	private func stamp(_ offset: TimeInterval) -> String {
@@ -585,5 +752,30 @@ struct FixtureAPI: MapleAPI {
 
 	private func pause() async throws {
 		try await Task.sleep(for: latency)
+		try Self.failureInjector.throwIfDue()
+	}
+
+	/// `MAPLE_FIXTURES_FAIL_EVERY=<n>` makes every nth request fail as if the
+	/// device were offline, so the error state, the refresh-failed strip, and
+	/// "Try again" can be exercised without a network to break.
+	private static let failureInjector = FailureInjector(
+		every: ProcessInfo.processInfo.environment["MAPLE_FIXTURES_FAIL_EVERY"].flatMap(Int.init) ?? 0
+	)
+
+	private final class FailureInjector: @unchecked Sendable {
+		private let every: Int
+		private var count = 0
+		private let lock = NSLock()
+
+		init(every: Int) { self.every = every }
+
+		func throwIfDue() throws {
+			guard every > 0 else { return }
+			lock.lock()
+			count += 1
+			let due = count % every == 0
+			lock.unlock()
+			if due { throw MapleAPIError.transport(URLError(.notConnectedToInternet)) }
+		}
 	}
 }

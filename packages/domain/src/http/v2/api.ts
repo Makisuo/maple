@@ -12,12 +12,15 @@ import { V2SlackIntegrationsApiGroup } from "./integrations"
 import { V2PlanetScaleIntegrationsApiGroup } from "./integrations-planetscale"
 import { V2ErrorIssuesApiGroup } from "./error-issues"
 import { V2InvestigationsApiGroup } from "./investigations"
+import { V2MobileDevicesApiGroup } from "./mobile-devices"
 import { V2OrganizationApiGroup } from "./organization"
 import { V2InstrumentationRecommendationsApiGroup } from "./recommendations"
 import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
 import { V2SessionReplaysApiGroup } from "./session-replays"
 import { V2InstrumentationAuditApiGroup } from "./setup-audit"
 import { V2SharePublicApiGroup } from "./share"
+import { V2WidgetCredentialsApiGroup } from "./widget-credentials"
+import { V2WidgetSummaryApiGroup } from "./widget-summary"
 import {
 	V2LogsApiGroup,
 	V2MetricsApiGroup,
@@ -96,6 +99,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2InvestigationsApiGroup)
 	.add(V2AnomaliesApiGroup)
 	.add(V2OrganizationApiGroup)
+	.add(V2MobileDevicesApiGroup)
 	.add(V2SessionReplaysApiGroup)
 	.add(V2TracesApiGroup)
 	.add(V2LogsApiGroup)
@@ -103,6 +107,8 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2ServicesApiGroup)
 	.add(V2ServiceMapApiGroup)
 	.add(V2SharePublicApiGroup)
+	.add(V2WidgetSummaryApiGroup)
+	.add(V2WidgetCredentialsApiGroup)
 	.middleware(V2SchemaErrors)
 	.middleware(V2UnexpectedErrors)
 	.annotateMerge(

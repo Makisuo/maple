@@ -20,6 +20,7 @@
  */
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
+import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "@/mcp/expected-failures"
 import {
 	decodeChatTurnTenant,
 	type ChatMessage,
@@ -30,12 +31,13 @@ import { LLM, Message, type Model } from "@maple/llm"
 import { Cause, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { summarizeCause } from "@/platform/describe-cause"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
-	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS, ...MCP_ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 export interface RunChatSessionTurnInput {
@@ -189,7 +191,7 @@ const compactIfNeeded = (
 								Effect.annotateLogs({
 									sessionId: input.sessionId,
 									messageId: input.messageId,
-									cause: Cause.pretty(cause),
+									cause: summarizeCause(cause),
 								}),
 							),
 						),
@@ -331,7 +333,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 						Effect.annotateLogs({
 							sessionId: input.sessionId,
 							messageId: input.messageId,
-							cause: Cause.pretty(cause),
+							cause: summarizeCause(cause),
 						}),
 					),
 				),

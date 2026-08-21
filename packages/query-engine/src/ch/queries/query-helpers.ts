@@ -9,6 +9,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import type { ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ServiceOverviewSpans, Traces, TracesAggregatesHourly } from "../tables"
 import { MetricsSum, MetricsGauge, MetricsHistogram, MetricsExpHistogram } from "../tables"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition, httpDisplaySpanName } from "../../traces-shared"
 import type { AttributeIndexMode } from "../../capabilities"
 
@@ -254,12 +255,12 @@ export function tracesBaseWhereConditions(
 		if (mm?.deploymentEnv === "contains" && opts.environments.length === 1) {
 			conditions.push(
 				CH.positionCaseInsensitive(
-					$.ResourceAttributes.get("deployment.environment"),
+					deploymentEnvExpr($.ResourceAttributes),
 					CH.lit(opts.environments[0]),
 				).gt(0),
 			)
 		} else {
-			conditions.push(CH.inList($.ResourceAttributes.get("deployment.environment"), opts.environments))
+			conditions.push(CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments))
 		}
 	}
 	if (opts.namespaces?.length) {
@@ -304,9 +305,7 @@ export function tracesBaseWhereConditions(
 		)
 	}
 	if (opts.excludedEnvironments?.length) {
-		conditions.push(
-			CH.notInList($.ResourceAttributes.get("deployment.environment"), opts.excludedEnvironments),
-		)
+		conditions.push(CH.notInList(deploymentEnvExpr($.ResourceAttributes), opts.excludedEnvironments))
 	}
 	if (opts.excludedNamespaces?.length) {
 		conditions.push(CH.notInList($.ResourceAttributes.get("service.namespace"), opts.excludedNamespaces))

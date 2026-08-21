@@ -408,6 +408,40 @@ describe("histogram data shape routing", () => {
 	})
 })
 
+describe("heatmap palette default", () => {
+	const heatmapWidget = (heatmap?: { colorScale?: "amber" | "blues"; scaleType?: "linear" }) => ({
+		...makeWidget(),
+		visualization: "heatmap" as const,
+		display: heatmap === undefined ? {} : { heatmap },
+	})
+
+	it("leaves the palette unset when the widget never stored one", () => {
+		expect(toInitialState(heatmapWidget()).heatmapColorScale).toBeUndefined()
+	})
+
+	it("does not materialise a palette on Apply for an untouched widget", () => {
+		// The bug this guards: the rail seeded "blues" while the chart renders
+		// amber, so opening a pre-`colorScale` heatmap and pressing Apply repainted
+		// it blue without the user touching the palette control.
+		const widget = heatmapWidget()
+		const state = toInitialState(widget)
+		const display = buildWidgetDisplay(widget, state)
+		expect(display.heatmap?.colorScale).toBeUndefined()
+		expect(display.heatmap?.scaleType).toBe("linear")
+	})
+
+	it("writes the palette once the user picks one", () => {
+		const widget = heatmapWidget()
+		const state = { ...toInitialState(widget), heatmapColorScale: "blues" as const }
+		expect(buildWidgetDisplay(widget, state).heatmap?.colorScale).toBe("blues")
+	})
+
+	it("round-trips a stored palette", () => {
+		const widget = heatmapWidget({ colorScale: "amber" })
+		expect(buildWidgetDisplay(widget, toInitialState(widget)).heatmap?.colorScale).toBe("amber")
+	})
+})
+
 describe("display key ownership across type switches", () => {
 	it("replaces a stale chartId when switching a line chart to a pie", () => {
 		// The bug this guards: `...widget.display` carried `query-builder-line` into

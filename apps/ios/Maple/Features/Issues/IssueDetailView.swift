@@ -5,34 +5,20 @@ import SwiftUI
 @MainActor
 @Observable
 final class IssueDetailModel {
-	private(set) var state: LoadState<ErrorIssueDetail> = .loading
+	private(set) var loader: ScreenLoader<ErrorIssueDetail>!
 
 	let issueID: String
+	let generation: Int
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(issueID: String, api: any MapleAPI, session: SessionController) {
 		self.issueID = issueID
 		self.api = api
-		self.session = session
+		self.generation = session.dataGeneration
+		self.loader = ScreenLoader(session: session, screen: Screen.issueDetail) { [unowned self] in try await self.api.issue(id: self.issueID) }
 	}
 
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-
-		do {
-			state = .loaded(try await api.issue(id: issueID))
-		} catch is CancellationError {
-		} catch let error as MapleAPIError {
-			if await session.handle(error) {
-				await load(showPlaceholder: false)
-			} else {
-				state = .failed(error)
-			}
-		} catch {
-			state = .failed(.transport(error))
-		}
-	}
+	var state: LoadState<ErrorIssueDetail> { loader.state }
 }
 
 /// Read-only. Claiming, transitioning, and commenting on issues are
@@ -51,26 +37,23 @@ struct IssueDetailView: View {
 	var body: some View {
 		ZStack {
 			Token.background.ignoresSafeArea()
-			if let model {
-				LoadableView(
-					state: model.state,
-					emptyTitle: "Not found",
-					emptyMessage: "This issue no longer exists.",
-					retry: { Task { await model.load() } }
-				) { issue in
-					IssueDetailContent(issue: issue)
-				}
-				.refreshable { await model.load(showPlaceholder: false) }
-			} else {
-				SkeletonList()
+			LoadableView(
+				loader: model?.loader,
+				emptyTitle: "Not found",
+				emptyMessage: "This issue no longer exists.",
+				skeleton: { DetailSkeleton(leadsWithHeadline: true) }
+			) { issue in
+				IssueDetailContent(issue: issue)
 			}
 		}
 		.navigationTitle("Issue")
 		.navigationBarTitleDisplayMode(.inline)
+		.mapleScreen(Screen.issueDetail)
 		.task(id: session.dataGeneration) {
-			let model = model ?? IssueDetailModel(issueID: issueID, api: session.api, session: session)
+			let model = model?.generation == session.dataGeneration
+				? model! : IssueDetailModel(issueID: issueID, api: session.api, session: session)
 			self.model = model
-			await model.load()
+			await model.loader.loadIfNeeded()
 		}
 	}
 }
@@ -79,17 +62,14 @@ private struct IssueDetailContent: View {
 	let issue: ErrorIssueDetail
 
 	var body: some View {
-		ScrollView {
-			VStack(alignment: .leading, spacing: 24) {
-				IssueHeader(issue: issue)
-				IssueOccurrences(issue: issue)
-				IssueActivity(issue: issue)
-				IssueIncidents(incidents: issue.incidents)
-				IssueSamples(samples: issue.sampleTraces)
-			}
-			.padding(.vertical, 16)
+		VStack(alignment: .leading, spacing: 24) {
+			IssueHeader(issue: issue)
+			IssueOccurrences(issue: issue)
+			IssueActivity(issue: issue)
+			IssueIncidents(incidents: issue.incidents)
+			IssueSamples(samples: issue.sampleTraces)
 		}
-		.scrollContentBackground(.hidden)
+		.padding(.vertical, 16)
 	}
 }
 

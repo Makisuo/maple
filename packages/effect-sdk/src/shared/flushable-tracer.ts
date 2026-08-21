@@ -4,13 +4,40 @@
 // resource, and headers are NOT baked in here — the caller (the Cloudflare,
 // server, or client flushable preset) resolves them and POSTs the drained
 // buffer on `flush`, so the layer itself can be constructed without I/O.
-import { Cause, type Context, Layer, type Option, Predicate, Tracer } from "effect"
+import { Cause, Context, Exit, Layer, Option, Predicate, Tracer } from "effect"
 import * as ErrorReporter from "effect/ErrorReporter"
 import * as OtlpResource from "effect/unstable/observability/OtlpResource"
 import type { ExtractTag } from "effect/Types"
 
+export interface CaptureExceptionOptions {
+	/** Span name. Default `"exception"`. */
+	readonly name?: string | undefined
+	/** Extra span attributes (e.g. the URL the error happened on). */
+	readonly attributes?: Record<string, unknown> | undefined
+}
+
 export interface SpanBuffer {
 	readonly tracerLayer: Layer.Layer<never>
+	/**
+	 * Record a thrown value that never passed through an Effect span.
+	 *
+	 * Everything else in this buffer arrives because an Effect *span* failed —
+	 * which means an error thrown outside Effect had no path here at all. In a
+	 * browser that is most of them: a React render crash caught by an error
+	 * boundary, a throw in an event handler, a rejected promise nobody awaited.
+	 *
+	 * The error is recorded as a one-off span carrying a `Die` cause, so it takes
+	 * the same road as every other failure: `makeOtlpSpan` gives it status
+	 * `Error` and an `exception` event with type/message/stacktrace, which is
+	 * exactly the shape `error_events_mv` fingerprints on. A `Die` (not a `Fail`)
+	 * because an uncaught throw is by definition not an anticipated failure —
+	 * that also keeps it clear of the `anticipatedErrorIdentifiers` filter, which
+	 * would otherwise let a caller silence real crashes by tag.
+	 *
+	 * BOUNDARY: a thrown value is unparsed by definition — JavaScript can throw
+	 * anything. `Cause.prettyErrors` narrows it on the way into the event.
+	 */
+	readonly captureException: (error: unknown, options?: CaptureExceptionOptions) => void
 	readonly drain: () => Array<OtlpSpan>
 	readonly restore: (items: ReadonlyArray<OtlpSpan>) => void
 	readonly setDisabled: (value: boolean) => void
@@ -89,8 +116,26 @@ export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 		},
 	})
 
+	const captureException = (error: unknown, captureOptions: CaptureExceptionOptions = {}): void => {
+		if (disabled) return
+		const now = BigInt(Date.now()) * 1_000_000n
+		const span = makeSpan({
+			name: captureOptions.name ?? "exception",
+			parent: Option.none(),
+			annotations: Context.empty(),
+			status: { _tag: "Started", startTime: now },
+			attributes: new Map(Object.entries(captureOptions.attributes ?? {})),
+			links: [],
+			sampled: true,
+			kind: "internal",
+			export: exportFn,
+		})
+		span.end(now, Exit.failCause(Cause.die(error)))
+	}
+
 	return {
 		tracerLayer: Layer.succeed(Tracer.Tracer, tracer),
+		captureException,
 		drain: () => {
 			const items = buffer
 			buffer = []
@@ -171,6 +216,15 @@ const generateId = (len: number): string => {
 const failureIdentifier = (error: unknown): string | undefined => {
 	if (Predicate.hasProperty(error, "_tag") && typeof error._tag === "string") return error._tag
 	if (Predicate.hasProperty(error, "name") && typeof error.name === "string") return error.name
+	// An error that crossed an HTTP boundary arrives as a decoded *body*, not as
+	// the class that raised it. An API that wraps its bodies in `{ error: … }` —
+	// a common envelope convention — therefore hands the failure channel a plain
+	// object with no identifier of its own, and every identifier a caller
+	// configured goes unmatched: expected 4xx answers record as `Error` spans
+	// whose entire message is the JSON-stringified envelope. Unwrap one level, and
+	// only for the body's own tag.
+	const body = Predicate.hasProperty(error, "error") ? error.error : undefined
+	if (Predicate.hasProperty(body, "_tag") && typeof body._tag === "string") return body._tag
 	return undefined
 }
 

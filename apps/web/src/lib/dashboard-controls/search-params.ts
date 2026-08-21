@@ -1,13 +1,14 @@
 import { Schema } from "effect"
+import { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 
 // Cross-widget dashboard controls live in the URL so a view is shareable and
 // deep-linkable. Two families share that space:
 //
 //   `var-<name>`  dashboard-variable selections (Grafana-style)
-//   `filter`, `collapsed`, `expanded`, `tab`, `widget`
+//   `filter`, `collapsed`, `expanded`, `tab`, `widget`, `refresh`
 //                 per-viewer view state: the free-text filter clause, section
-//                 collapse overrides, the active tab per section, and a tile
-//                 deep link
+//                 collapse overrides, the active tab per section, a tile
+//                 deep link, and the auto-refresh cadence
 //
 // This module is the one owner of both. Every `navigate()` on a dashboard route
 // rebuilds search from `pickDashboardControlParams`, so a param that is not
@@ -32,9 +33,9 @@ export const variableSearchRest = Schema.Record(
  * Per-viewer view state. `Schema.optional` rather than `optionalKey` because
  * these are search params, where `undefined` is a real JS value.
  *
- * All five are flat strings rather than JSON blobs: these end up in URLs people
- * paste to each other, and a hand-editable `?tab=overview:latency` is both
- * readable and impossible to fail parsing.
+ * All of them are flat scalars rather than JSON blobs: these end up in URLs
+ * people paste to each other, and a hand-editable `?tab=overview:latency` is
+ * both readable and impossible to fail parsing.
  */
 export const dashboardViewParamsSchema = {
 	/** Free-text dashboard filter clause, in the `@maple/domain` where-clause grammar. */
@@ -47,6 +48,17 @@ export const dashboardViewParamsSchema = {
 	tab: Schema.optional(Schema.String),
 	/** Widget deep link: expand the owning section, switch to its tab, scroll to it, flash it. */
 	widget: Schema.optional(Schema.String),
+	/**
+	 * Auto-refresh cadence in seconds, overriding the dashboard's saved default
+	 * for this viewer only. `0` is a real value meaning "explicitly off", so a
+	 * viewer can silence a board that auto-refreshes for everyone else.
+	 *
+	 * The only numeric control param: written as a number so the URL reads
+	 * `?refresh=30` rather than the `?refresh="30"` TanStack emits to preserve
+	 * string-ness. The string arm keeps a hand-edited quoted form working, and
+	 * anything unparseable falls back rather than failing the route.
+	 */
+	refresh: Schema.optional(Schema.Union([Schema.Number, Schema.String])),
 }
 
 export interface DashboardViewParams {
@@ -55,6 +67,7 @@ export interface DashboardViewParams {
 	expanded?: string
 	tab?: string
 	widget?: string
+	refresh?: number | string
 }
 
 export type DashboardControlParams = VariableSearchParams & DashboardViewParams
@@ -78,7 +91,43 @@ export function variableValuesFromSearch(search: Record<string, unknown>): Recor
 	return values
 }
 
-const VIEW_PARAM_KEYS = ["filter", "collapsed", "expanded", "tab", "widget"] as const
+const VIEW_PARAM_KEYS = ["filter", "collapsed", "expanded", "tab", "widget", "refresh"] as const
+
+/** Ordered cadence options for the picker, straight off the schema's closed set. */
+export const REFRESH_INTERVAL_OPTIONS: ReadonlyArray<DashboardRefreshIntervalSeconds> =
+	DashboardRefreshIntervalSeconds.literals
+
+const REFRESH_INTERVAL_VALUES = new Set<number>(REFRESH_INTERVAL_OPTIONS)
+
+/** A cadence if the value is a member of the closed set, `undefined` otherwise. */
+export function parseRefreshIntervalSeconds(value: unknown): DashboardRefreshIntervalSeconds | undefined {
+	// TanStack JSON-parses search values, so `?refresh=30` can arrive as either a
+	// number or a string depending on how it was written. An empty `?refresh=` is
+	// treated as absent rather than as `Number("") === 0`, which would silently
+	// read a truncated URL as "auto-refresh off".
+	const seconds =
+		typeof value === "number"
+			? value
+			: typeof value === "string" && value.trim() !== ""
+				? Number(value)
+				: Number.NaN
+	return REFRESH_INTERVAL_VALUES.has(seconds) ? (seconds as DashboardRefreshIntervalSeconds) : undefined
+}
+
+/**
+ * The cadence this viewer should actually poll at: `?refresh=` wins, then the
+ * dashboard's saved default, then off.
+ *
+ * A hand-edited `?refresh=1` or `?refresh=abc` falls back rather than throwing —
+ * same posture as the non-string view params above, and the reason the closed
+ * literal set exists at all (nobody gets to ask for a 100ms re-query).
+ */
+export function resolveRefreshIntervalSeconds(
+	param: unknown,
+	stored: number | undefined,
+): DashboardRefreshIntervalSeconds {
+	return parseRefreshIntervalSeconds(param) ?? parseRefreshIntervalSeconds(stored) ?? 0
+}
 
 /**
  * Pick every cross-widget control param out of an arbitrary search object.
@@ -106,6 +155,12 @@ export function pickDashboardControlParams(search: Record<string, unknown>): Das
 			params[key] = value
 		}
 	}
+
+	// `refresh` is the one numeric control param (`?refresh=30`), so the
+	// string-only loop above would drop it. An out-of-set number survives the
+	// pick and is rejected later by `resolveRefreshIntervalSeconds`, which keeps
+	// this function's job to "carry the control params forward".
+	if (typeof search.refresh === "number") params.refresh = search.refresh
 
 	return params
 }

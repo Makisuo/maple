@@ -4,22 +4,16 @@ import SwiftUI
 @MainActor
 @Observable
 final class AnomaliesListModel {
-	private(set) var state: LoadState<[AnomalyIncident]> = .loading
+	private(set) var loader: ScreenLoader<[AnomalyIncident]>!
 	var openOnly = true {
-		didSet { if openOnly != oldValue { Task { await load() } } }
+		didSet { if openOnly != oldValue { Task { await loader.load(.replace) } } }
 	}
 
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
-		self.session = session
-	}
-
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-		let next = await session.perform {
+		self.loader = ScreenLoader(session: session, screen: Screen.anomalies, isEmpty: { $0.isEmpty }) { [unowned self] in
 			try await self.api.anomalyIncidents(
 				status: self.openOnly ? .open : nil,
 				serviceName: nil,
@@ -28,64 +22,48 @@ final class AnomaliesListModel {
 				cursor: nil
 			).items
 		}
-		guard let next else { return }
-		if case .loaded(let items) = next, items.isEmpty {
-			state = .empty
-		} else {
-			state = next
-		}
 	}
+
+	var state: LoadState<[AnomalyIncident]> { loader.state }
 }
 
 struct AnomaliesListView: View {
-	@Environment(SessionController.self) private var session
-	@State private var model: AnomaliesListModel?
+	/// Owned by the hub so switching segments doesn't refetch; see
+	/// `AlertsHubModels`.
+	let model: AnomaliesListModel
 
 	var body: some View {
-		Group {
-			if let model {
-				LoadableView(
-					state: model.state,
-					emptyTitle: model.openOnly ? "No anomalies" : "Nothing detected",
-					emptyMessage: model.openOnly
-						? "Every monitored signal is inside its baseline."
-						: "No anomalies in the last 7 days.",
-					retry: { Task { await model.load() } }
-				) { anomalies in
-					ScrollView {
-						LazyVStack(spacing: 0) {
-							ForEach(anomalies, id: \.id) { anomaly in
-								NavigationLink(value: Route.anomaly(id: anomaly.id)) {
-									AnomalyRow(anomaly: anomaly)
-								}
-								.buttonStyle(RowButtonStyle())
-								Hairline()
-							}
-						}
+		LoadableView(
+			loader: model.loader,
+			emptyTitle: model.openOnly ? "No anomalies" : "Nothing detected",
+			emptyMessage: model.openOnly
+				? "Every monitored signal is inside its baseline."
+				: "No anomalies in the last 7 days.",
+			skeletonRowHeight: 64
+		) { anomalies in
+			LazyVStack(spacing: 0) {
+				ForEach(anomalies, id: \.id) { anomaly in
+					NavigationLink(value: Route.anomaly(id: anomaly.id)) {
+						AnomalyRow(anomaly: anomaly)
 					}
-					.scrollContentBackground(.hidden)
+					.buttonStyle(RowButtonStyle())
+					Hairline()
 				}
-				.refreshable { await model.load(showPlaceholder: false) }
-				.toolbar {
-					ToolbarItem(placement: .topBarTrailing) {
-						Button {
-							model.openOnly.toggle()
-						} label: {
-							Text(model.openOnly ? "Open" : "7 days")
-								.font(Typo.smallMedium)
-								.foregroundStyle(model.openOnly ? Token.primary : Token.foreground)
-						}
-					}
-				}
-			} else {
-				SkeletonList()
 			}
 		}
-		.task(id: session.dataGeneration) {
-			let model = model ?? AnomaliesListModel(api: session.api, session: session)
-			self.model = model
-			await model.load()
+		.toolbar {
+			ToolbarItem(placement: .topBarTrailing) {
+				Button {
+					model.openOnly.toggle()
+				} label: {
+					Text(model.openOnly ? "Open" : "7 days")
+						.font(Typo.smallMedium)
+						.foregroundStyle(model.openOnly ? Token.primary : Token.foreground)
+				}
+			}
 		}
+		.task { await model.loader.loadIfNeeded() }
+		.mapleScreen(Screen.anomalies)
 	}
 }
 

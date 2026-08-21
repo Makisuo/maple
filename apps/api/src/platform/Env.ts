@@ -1,10 +1,11 @@
 import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
-import { Config, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /** Fatal misconfiguration discovered at startup — surfaces as a tagged defect in the Cause. */
-class EnvValidationError extends Data.TaggedError("@maple/api/lib/EnvValidationError")<{
-	readonly message: string
-}> {}
+class EnvValidationError extends Schema.TaggedError<EnvValidationError>()(
+	"@maple/api/lib/EnvValidationError",
+	{ message: Schema.String },
+) {}
 
 export interface EnvConfig {
 	readonly PORT: number
@@ -75,6 +76,16 @@ export interface EnvConfig {
 	 * The endpoint answers 401 while this is unset.
 	 */
 	readonly SLACK_INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
+	/**
+	 * Apple Push Notification service — token auth for the iOS app. All three
+	 * must be set for push to be live; otherwise the fan-out is a no-op and
+	 * device registration still works (so a later key drop needs no client
+	 * change).
+	 */
+	readonly APNS_TEAM_ID: Option.Option<string>
+	readonly APNS_KEY_ID: Option.Option<string>
+	/** The `.p8` contents, PEM. */
+	readonly APNS_PRIVATE_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_APP_ID: Option.Option<string>
 	readonly GITHUB_APP_SLUG: Option.Option<string>
 	readonly GITHUB_APP_PRIVATE_KEY: Option.Option<Redacted.Redacted<string>>
@@ -167,6 +178,9 @@ const envConfig = Config.all({
 	SLACK_CLIENT_ID: optionalString("SLACK_CLIENT_ID"),
 	SLACK_CLIENT_SECRET: optionalRedacted("SLACK_CLIENT_SECRET"),
 	SLACK_INTERNAL_SERVICE_TOKEN: optionalRedacted("SLACK_INTERNAL_SERVICE_TOKEN"),
+	APNS_TEAM_ID: optionalString("APNS_TEAM_ID"),
+	APNS_KEY_ID: optionalString("APNS_KEY_ID"),
+	APNS_PRIVATE_KEY: optionalRedacted("APNS_PRIVATE_KEY"),
 	GITHUB_APP_ID: optionalString("GITHUB_APP_ID"),
 	GITHUB_APP_SLUG: optionalString("GITHUB_APP_SLUG"),
 	GITHUB_APP_PRIVATE_KEY: optionalRedacted("GITHUB_APP_PRIVATE_KEY"),

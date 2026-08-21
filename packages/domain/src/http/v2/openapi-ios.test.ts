@@ -48,6 +48,14 @@ const IOS_OPERATIONS = [
 	"listAnomalyIncidents",
 	"getAnomalyIncident",
 	"getAnomalyIncidentTimeseries",
+	"listMobileDevices",
+	"registerMobileDevice",
+	"unregisterMobileDevice",
+	"registerLiveActivity",
+	"endLiveActivity",
+	"mintWidgetCredential",
+	"revokeWidgetCredential",
+	"getWidgetSummary",
 ] as const
 
 /**

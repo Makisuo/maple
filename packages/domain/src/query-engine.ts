@@ -108,6 +108,10 @@ export const ErrorsFilters = Schema.Struct({
 	services: Schema.optional(Schema.Array(ServiceName)),
 	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	fingerprintHashes: Schema.optional(Schema.Array(FingerprintHash)),
+	// The sidebar's "Error Type" facet, matched against the stored ErrorLabel.
+	errorLabels: Schema.optional(Schema.Array(Schema.String)),
+	// The sidebar's "Version" facet, matched against ServiceVersion.
+	serviceVersions: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ErrorsFilters = Schema.Schema.Type<typeof ErrorsFilters>
 
@@ -122,8 +126,9 @@ export const MetricsFilters = Schema.Struct({
 	metricType: MetricType,
 	serviceName: Schema.optional(ServiceName),
 	// Metrics tables have no pre-extracted DeploymentEnv column, so this lowers to
-	// a predicate on `ResourceAttributes['deployment.environment']` (see
-	// `metricsTimeseriesQuery`). Same field name as TracesFilters/LogsFilters.
+	// a predicate on `DEPLOYMENT_ENV_SQL` over `ResourceAttributes` — either
+	// semconv spelling of the key (see `metricsTimeseriesQuery`). Same field name
+	// as TracesFilters/LogsFilters.
 	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	groupByAttributeKey: Schema.optional(Schema.String),
 	// Resource-attribute counterpart of `groupByAttributeKey` — groups by a

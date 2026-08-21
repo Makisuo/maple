@@ -45,7 +45,8 @@ const asDeploymentEnv = Schema.decodeUnknownSync(DeploymentEnvironment)
 /**
  * Map the service list's synthetic `"unknown"` environment label back to the raw
  * empty-string `DeploymentEnv` value the warehouse actually stores (see
- * `coerceRow` in `services.ts`, which coerces `"" -> "unknown"` for display).
+ * `coerceServiceOverviewRow` in `@maple/query-engine`, which coerces
+ * `"" -> "unknown"` for display).
  * Without this, scoping a detail page to an `"unknown"` row would emit
  * `DeploymentEnv IN ('unknown')` and match nothing.
  */

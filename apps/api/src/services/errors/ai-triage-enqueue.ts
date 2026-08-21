@@ -12,7 +12,7 @@ import {
 import { InvestigationId, IsoDateTimeString } from "@maple/domain/primitives"
 import { aiTriageSettings, investigations } from "@maple/db"
 import { and, eq, lt } from "drizzle-orm"
-import { Cause, Clock, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
+import { Clock, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
 import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { Database } from "@/platform/DatabaseLive"
 import { isChatSessionNamespace } from "@/chat/session"
@@ -26,6 +26,7 @@ import {
 	staleTimeoutMessage,
 } from "@/services/errors/investigation-stale"
 import { UserId } from "@maple/domain/primitives"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
 const internalServiceUserId = Schema.decodeSync(UserId)("internal-service")
@@ -280,6 +281,10 @@ export const maybeEnqueueTriage: (
 			limits: settings,
 			passCount: reservedPasses,
 			nowMs,
+			// Severity decides which pass ceiling applies, so that a burst of `low`
+			// incidents just after UTC midnight cannot spend the slice a `critical`
+			// opening at noon needs.
+			severity: snapshot.severity,
 		})
 		if (verdict.kind === "exceeded") {
 			yield* Effect.logWarning("Investigation daily budget reached; skipping autonomous start").pipe(
@@ -290,6 +295,16 @@ export const maybeEnqueueTriage: (
 					quotaLimit: verdict.limit,
 				}),
 			)
+			// A refused start has to be visible as a *refusal*. `start_result` used to
+			// be set only on the success path, so a budget-exhausted org looked
+			// identical in traces to one with nothing to investigate — which is how
+			// this went unnoticed for two weeks.
+			yield* Effect.annotateCurrentSpan({
+				orgId: input.orgId,
+				"maple.investigation.start_result": "quota_exceeded",
+				"maple.investigation.quota_dimension": verdict.dimension,
+				"maple.investigation.quota_limit": verdict.limit,
+			})
 			return { enqueued: false, reason: "daily_cap" as const }
 		}
 
@@ -373,7 +388,7 @@ export const maybeEnqueueTriage: (
 				Effect.annotateLogs({
 					orgId: input.orgId,
 					investigationId,
-					error: Cause.pretty(created.cause),
+					error: summarizeCause(created.cause),
 				}),
 			)
 			yield* markFailed("start_failed: the investigation fan-out could not be started; retry")
@@ -394,7 +409,7 @@ export const maybeEnqueueTriage: (
 					orgId: input.orgId,
 					incidentKind: input.incidentKind,
 					incidentId: input.incidentId,
-					error: Cause.pretty(cause),
+					error: summarizeCause(cause),
 				}),
 				Effect.as({ enqueued: false, reason: "error" as const }),
 			),

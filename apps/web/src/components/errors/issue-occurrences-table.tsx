@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import type { ErrorIssueSampleTrace } from "@maple/domain/http"
-import { Empty, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { cn } from "@maple/ui/lib/utils"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
@@ -16,7 +16,11 @@ export function IssueOccurrencesTable({ traces }: IssueOccurrencesTableProps) {
 		return (
 			<Empty>
 				<EmptyHeader>
-					<EmptyTitle>No samples in window</EmptyTitle>
+					<EmptyTitle>No samples in this window</EmptyTitle>
+					<EmptyDescription>
+						This fingerprint was not seen in the selected range. Widen the time range to find
+						traces to open.
+					</EmptyDescription>
 				</EmptyHeader>
 			</Empty>
 		)

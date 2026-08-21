@@ -26,7 +26,7 @@ hand.
 - **Telemetry schemas are the principled version of what we do by hand.** CLAUDE.md documents
   that `WarehouseQueryService.executeSql` spans "coalesce both" legacy `db.statement*`/`db.system`
   and current `db.query.text`/`db.system.name` spellings, and that semconv renamed
-  `deployment.environment` → `deployment.environment.name` (dual-emitted by `apps/ingest`). That
+  `deployment.environment` → `deployment.environment.name` (dual-emitted by `apps/ingest`, coalesced on read by `DEPLOYMENT_ENV_SQL`). That
   is exactly the `rename_attributes` transform a schema file encodes formally. We do not currently
   read `schema_url` off ingested `ResourceSpans`/`ResourceLogs`/`ResourceMetrics` to drive this
   automatically — it's manual per-migration logic. This doc is the reference for what a

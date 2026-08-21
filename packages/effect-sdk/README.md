@@ -79,7 +79,7 @@ When `MAPLE_INGEST_KEY` is unset, the SDK runs in no-op mode: buffers are draine
 
 | Option                        | Description                                                                                                 |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `anticipatedErrorIdentifiers` | Stable `_tag` / `Error.name` identifiers for expected 4xx failures; exported as `Ok` without an exception   |
+| `anticipatedErrorIdentifiers` | Stable `_tag` / `Error.name` identifiers for expected 4xx failures; exported as `Ok` without an exception. A failure wrapped in an `{ error: … }` envelope is matched on the body's `_tag`, so an error decoded from an HTTP response classifies the same as the class that raised it |
 | `dropSpanNames`               | Span names whose prefix matches an entry are dropped before OTLP export (e.g. `"McpServer/Notifications."`) |
 | `excludeLogSpans`             | Skip Effect log spans in OTLP log attributes. Default `false`                                               |
 | `tracesPath`                  | OTLP traces path appended to `endpoint`. Default `/v1/traces`                                               |
@@ -104,6 +104,35 @@ const TracerLive = Maple.layer({
 const program = Effect.log("Hello!").pipe(Effect.withSpan("hello"))
 
 Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
+```
+
+### Uncaught errors (built in)
+
+`MapleFlush.make` from `/client` registers `error` and `unhandledrejection`
+handlers, so a throw that never went through an Effect span still reaches error
+tracking. Each one becomes a span with status `Error` and an `exception` event —
+the same shape a failed Effect span produces, so browser crashes group beside
+server-side errors rather than in a silo.
+
+Turn it off with `captureGlobalErrors: false` when another tracker already owns
+the page's global handlers.
+
+An error your app _catches_ never reaches those handlers — catching it is what
+stops it. Report those explicitly; a React error boundary is the usual caller,
+and without this a boundary-caught crash is invisible in production:
+
+```typescript
+const telemetry = MapleFlush.make({ serviceName: "my-frontend", ... })
+
+class ErrorBoundary extends Component<Props, State> {
+	componentDidCatch(error: unknown, info: ErrorInfo) {
+		telemetry.captureException(error, {
+			name: "browser.react_error_boundary",
+			attributes: { "maple.react.component_stack": info.componentStack ?? "" },
+		})
+	}
+	// …
+}
 ```
 
 ### Session replay & sessions (built in)

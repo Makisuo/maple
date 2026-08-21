@@ -9,6 +9,7 @@ import {
 	SpanDetailResponse,
 	ErrorsByTypeResponse,
 	ErrorsTimeseriesResponse,
+	ErrorsSparkResponse,
 	ErrorsSummaryResponse,
 	ErrorDetailTracesResponse,
 	ErrorRateByServiceResponse,
@@ -399,6 +400,19 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 					const rows = yield* runQuery(Queries.errorsTimeseries, tenant, payload)
 					return new ErrorsTimeseriesResponse({
 						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							count: Number(row.count),
+						})),
+					})
+				}),
+			)
+			.handle("errorsSpark", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.errorsSpark, tenant, payload)
+					return new ErrorsSparkResponse({
+						data: rows.map((row) => ({
+							fingerprintHash: decodeFingerprintHash(row.fingerprintHash),
 							bucket: String(row.bucket),
 							count: Number(row.count),
 						})),

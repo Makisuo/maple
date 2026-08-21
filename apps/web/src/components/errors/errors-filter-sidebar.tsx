@@ -62,7 +62,8 @@ export function ErrorsFilterSidebar() {
 	const hasActiveFilters =
 		(search.services?.length ?? 0) > 0 ||
 		(search.deploymentEnvs?.length ?? 0) > 0 ||
-		(search.errorTypes?.length ?? 0) > 0
+		(search.errorTypes?.length ?? 0) > 0 ||
+		(search.serviceVersions?.length ?? 0) > 0
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
@@ -72,7 +73,8 @@ export function ErrorsFilterSidebar() {
 			const hasFacets =
 				(facets.services?.length ?? 0) > 0 ||
 				(facets.deploymentEnvs?.length ?? 0) > 0 ||
-				(facets.errorTypes?.length ?? 0) > 0
+				(facets.errorTypes?.length ?? 0) > 0 ||
+				(facets.serviceVersions?.length ?? 0) > 0
 
 			return (
 				<FilterSidebarFrame waiting={result.waiting}>
@@ -109,6 +111,15 @@ export function ErrorsFilterSidebar() {
 							options={facets.errorTypes ?? []}
 							selected={search.errorTypes ?? []}
 							onChange={(val) => updateFilter("errorTypes", val)}
+						/>
+
+						{/* Which deploy the error was seen on — the fastest way to tell a
+						    regression from something that was always broken. */}
+						<FilterSection
+							title="Version"
+							options={facets.serviceVersions ?? []}
+							selected={search.serviceVersions ?? []}
+							onChange={(val) => updateFilter("serviceVersions", val)}
 						/>
 
 						{!hasFacets && (

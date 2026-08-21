@@ -41,7 +41,7 @@ func (t *tracesExporter) shutdown(_ context.Context) error { return nil }
 // pushTraces walks the pdata.Traces tree and INSERTs one JSON row per span
 // into Maple's `traces` table. Materialized views inside ClickHouse fan
 // these out into:
-//   - error_events / error_spans          (StatusCode = 'Error')
+//   - error_events / error_events_by_time (StatusCode = 'Error')
 //   - service_overview_spans              (entry-point spans)
 //   - service_map_spans / _children       (parent/child span linkage)
 //   - service_map_edges_hourly            (Client + peer.service)

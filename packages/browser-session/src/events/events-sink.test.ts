@@ -15,6 +15,7 @@ const { resetVisitorCacheForTests, setVisitorTracking } = await import("../ident
 const CONFIG = {
 	endpoint: "https://ingest.test",
 	ingestKey: "k",
+	sdk: "maple-test/0.0.0",
 	maskAllInputs: false,
 	maskAllText: false,
 }

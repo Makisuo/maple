@@ -79,7 +79,7 @@ export const V2AlertDestination = Schema.Struct({
 	}),
 	type: AlertDestinationType.annotate({
 		description:
-			"The delivery channel: `slack-bot`, `pagerduty`, `webhook`, `hazel-oauth`, `discord`, or `email`. Immutable after creation.",
+			"The delivery channel: `slack-bot`, `pagerduty`, `webhook`, `hazel-oauth`, `discord`, `telegram`, or `email`. Immutable after creation.",
 		examples: ["slack-bot"],
 	}),
 	enabled: Schema.Boolean.annotate({
@@ -93,7 +93,8 @@ export const V2AlertDestination = Schema.Struct({
 		examples: ["Slack bot → #incidents"],
 	}),
 	channel_label: Schema.NullOr(Schema.String).annotate({
-		description: "Optional display label for the target channel (Slack destinations), or `null`.",
+		description:
+			"Optional display label for the target channel — the channel name for Slack, the chat ID for Telegram — or `null`.",
 		examples: ["#incidents"],
 	}),
 	member_user_ids: Schema.NullOr(Schema.Array(Schema.String)).annotate({
@@ -113,7 +114,7 @@ export const V2AlertDestination = Schema.Struct({
 	identifier: "AlertDestination",
 	title: "Alert Destination",
 	description:
-		"A notification channel that alert rules deliver to (Slack bot, PagerDuty, generic webhook, Hazel OAuth, Discord, or workspace-member email). Channel secrets are write-only: responses carry a redacted `summary` instead.",
+		"A notification channel that alert rules deliver to (Slack bot, PagerDuty, generic webhook, Hazel OAuth, Discord, Telegram, or workspace-member email). Channel secrets are write-only: responses carry a redacted `summary` instead.",
 	examples: [wireExample(alertDestinationExample)],
 })
 export type V2AlertDestination = Schema.Schema.Type<typeof V2AlertDestination>
@@ -213,6 +214,20 @@ const V2DiscordDestinationCreateParams = Schema.Struct({
 	enabled: enabledField,
 }).annotate({ identifier: "AlertDestinationCreateDiscord", title: "Discord destination" })
 
+const V2TelegramDestinationCreateParams = Schema.Struct({
+	type: Schema.Literal("telegram"),
+	name: nameField,
+	bot_token: NonEmptyString.annotate({
+		description: "The bot token issued by @BotFather. Write-only — never returned.",
+	}),
+	chat_id: NonEmptyString.annotate({
+		description:
+			"The target chat: a numeric id such as `-1001234567890`, or an `@channelusername`. The bot must be a member of the chat.",
+		examples: ["-1001234567890"],
+	}),
+	enabled: enabledField,
+}).annotate({ identifier: "AlertDestinationCreateTelegram", title: "Telegram destination" })
+
 const V2EmailDestinationCreateParams = Schema.Struct({
 	type: Schema.Literal("email"),
 	name: nameField,
@@ -228,6 +243,7 @@ export const V2AlertDestinationCreateParams = Schema.Union([
 	V2WebhookDestinationCreateParams,
 	V2HazelOAuthDestinationCreateParams,
 	V2DiscordDestinationCreateParams,
+	V2TelegramDestinationCreateParams,
 	V2EmailDestinationCreateParams,
 ]).annotate({
 	identifier: "AlertDestinationCreateParams",
@@ -290,6 +306,13 @@ export const V2AlertDestinationUpdateParams = Schema.Union([
 		webhook_url: Schema.optionalKey(Schema.String),
 		enabled: Schema.optionalKey(Schema.Boolean),
 	}).annotate({ identifier: "AlertDestinationUpdateDiscord", title: "Discord destination update" }),
+	Schema.Struct({
+		type: Schema.Literal("telegram"),
+		name: optionalNameField,
+		bot_token: Schema.optionalKey(Schema.String),
+		chat_id: Schema.optionalKey(Schema.String),
+		enabled: Schema.optionalKey(Schema.Boolean),
+	}).annotate({ identifier: "AlertDestinationUpdateTelegram", title: "Telegram destination update" }),
 	Schema.Struct({
 		type: Schema.Literal("email"),
 		name: optionalNameField,
@@ -384,6 +407,61 @@ const emailRecipientErrors = publicErrors(
 	AlertMemberDirectoryNotConfiguredError,
 	AlertMemberDirectoryUnavailableError,
 )
+export const V2TelegramChatsParams = Schema.Struct({
+	bot_token: NonEmptyString.annotate({
+		description:
+			"The bot token to inspect. Write-only, and not stored by this call — it is used for one `getUpdates` read and discarded.",
+	}),
+}).annotate({
+	identifier: "TelegramChatsParams",
+	title: "Telegram chat discovery parameters",
+})
+export type V2TelegramChatsParams = Schema.Schema.Type<typeof V2TelegramChatsParams>
+
+export const V2TelegramChat = Schema.Struct({
+	id: Schema.String.annotate({
+		description:
+			"The chat ID, as a string. Negative for groups and channels — pass it verbatim as `chat_id` when creating the destination.",
+		examples: ["-1001234567890"],
+	}),
+	title: Schema.String.annotate({
+		description: "Display name of the chat: its title, or the username for a one-to-one chat.",
+		examples: ["Acme On-call"],
+	}),
+	type: Schema.Literals(["private", "group", "supergroup", "channel"]).annotate({
+		description: "Telegram's chat type.",
+		examples: ["supergroup"],
+	}),
+}).annotate({
+	identifier: "TelegramChat",
+	title: "Telegram chat",
+	description: "A chat the bot can currently see.",
+	examples: [wireExample({ id: "-1001234567890", title: "Acme On-call", type: "supergroup" })],
+})
+export type V2TelegramChat = Schema.Schema.Type<typeof V2TelegramChat>
+
+export const V2TelegramChatList = Schema.Struct({
+	object: Schema.Literal("alert_destination.telegram_chat_list").annotate({
+		description: 'The object type — always `"alert_destination.telegram_chat_list"`.',
+	}),
+	chats: Schema.Array(V2TelegramChat).annotate({
+		description:
+			'The chats the bot has seen recently, most recent first. Telegram retains updates for about 24 hours, so an empty array means "nothing recent" — add the bot to the chat, or send it a message, and try again.',
+	}),
+}).annotate({
+	identifier: "TelegramChatList",
+	title: "Telegram chat list",
+	description:
+		"Chats discovered from the bot's pending updates. Not the standard list envelope: there is no cursor, because Telegram exposes a short retention window rather than a paginated inventory.",
+	examples: [
+		wireExample({
+			object: "alert_destination.telegram_chat_list",
+			chats: [{ id: "-1001234567890", title: "Acme On-call", type: "supergroup" }],
+		}),
+	],
+})
+export type V2TelegramChatList = Schema.Schema.Type<typeof V2TelegramChatList>
+
 const [destinationEncryption, destinationDecryption, destinationStoredConfigInvalid] = publicErrors(
 	AlertDestinationEncryptionError,
 	AlertDestinationDecryptionError,
@@ -431,6 +509,20 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 				summary: "Create an alert destination",
 				description:
 					"Creates a notification channel that alert rules can deliver to. The request body is discriminated on `type`; channel secrets are write-only. Requires an org-admin role and the `alerts:write` scope.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("telegramChats", "/telegram/chats", {
+			payload: V2TelegramChatsParams,
+			success: V2TelegramChatList,
+			error: [alertForbidden, alertValidation],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "listTelegramChats",
+				summary: "List the chats a Telegram bot can see",
+				description:
+					"Reads a bot's pending updates and returns the chats it can currently post to, so a destination can be created by picking a chat instead of transcribing its numeric ID. The token is used for one read and never stored. Telegram retains updates for about 24 hours; a bot with a webhook registered cannot be inspected this way. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -518,6 +610,6 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		OpenApi.annotations({
 			title: "Alert Destinations",
 			description:
-				"Notification channels for alert rules — Slack bot, PagerDuty, generic webhooks, Hazel OAuth, Discord, and workspace-member email. Create and manage destinations, then reference them from alert rules via `destination_ids`. Mutations are admin-only; channel secrets are write-only.",
+				"Notification channels for alert rules — Slack bot, PagerDuty, generic webhooks, Hazel OAuth, Discord, Telegram, and workspace-member email. Create and manage destinations, then reference them from alert rules via `destination_ids`. Mutations are admin-only; channel secrets are write-only.",
 		}),
 	) {}

@@ -106,7 +106,7 @@ jobs:
                       -v "$PWD/apps/ingest:/app" \
                       -v "$RUNNER_TEMP/ingest-target:/target" \
                       -w /app \
-                      rust:1.88-bookworm \
+                      rust:1.94-bookworm \
                       cargo build --release --target-dir /target
                   cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
 

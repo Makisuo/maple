@@ -11,6 +11,15 @@ struct Sparkline: View {
 	/// `values`. Drawn as a dashed hairline.
 	var reference: Double? = nil
 	var fills: Bool = true
+	/// Whether the vertical range is anchored to zero.
+	///
+	/// True everywhere a sparkline sits beside a rate or a count, so a series
+	/// wobbling between 4.9% and 5.1% does not look like a cliff. False on the
+	/// incident Live Activity, where the baseline that means something is the
+	/// threshold — the reader already knows the value breached it, and the
+	/// question is how far and which way it is moving. Zero-anchored, a 2%→9%
+	/// climb reads as a flat line at 26pt tall, which is the opposite of true.
+	var anchorsToZero: Bool = true
 
 	var body: some View {
 		Canvas { context, size in
@@ -29,9 +38,7 @@ struct Sparkline: View {
 				low = min(low, reference)
 				high = max(high, reference)
 			}
-			// Always include zero for rates and counts: a series that wobbles
-			// between 4.9% and 5.1% should not look like a cliff.
-			low = min(low, 0)
+			if anchorsToZero { low = min(low, 0) }
 			if high == low { high = low + 1 }
 
 			let inset: CGFloat = 1

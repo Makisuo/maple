@@ -76,6 +76,7 @@ extension WorkflowState {
 	var label: String {
 		switch self {
 		case .triage: "Triage"
+		case .regressed: "Regressed"
 		case .todo: "Todo"
 		case .inProgress: "In progress"
 		case .inReview: "In review"
@@ -89,6 +90,9 @@ extension WorkflowState {
 	var tint: Color {
 		switch self {
 		case .triage: Token.amberText
+		// Red, not amber, matching `workflow-badge.tsx`: a regression is a fix
+		// that did not hold, and it reads as more urgent than untriaged.
+		case .regressed: Token.destructive
 		case .inProgress: Token.blueText
 		case .inReview: Token.purpleText
 		case .done: Token.success
@@ -99,6 +103,7 @@ extension WorkflowState {
 	var fill: Color {
 		switch self {
 		case .triage: Token.amberFill
+		case .regressed: Token.destructive
 		case .inProgress: Token.blueFill
 		case .inReview: Token.purpleFill
 		case .done: Token.success
@@ -118,20 +123,104 @@ struct WorkflowBadge: View {
 
 // MARK: - Health
 
+/// The service's own trailing-7d latency, as `listServices` reports it.
+struct LatencyBaseline {
+	let p95LatencyMs: Double
+	let spanCount: Double
+
+	/// `nil` when the service has no history in the baseline window — a new
+	/// service, or one that went quiet — which puts health back on the absolute
+	/// thresholds.
+	init?(service: Service) {
+		guard let p95 = service.baselineP95LatencyMs, let spans = service.baselineSpanCount else {
+			return nil
+		}
+		p95LatencyMs = p95
+		spanCount = spans
+	}
+}
+
 /// Service health, from `apps/web/src/components/dashboard/service-health.ts`.
+/// The thresholds below are that file's, and changing one without the other
+/// puts the phone and the dashboard into disagreement about the same service.
 enum ServiceHealth {
 	case healthy
 	case degraded
 	case unhealthy
 
-	/// Error rate ≥ 5% or p95 ≥ 3s is unhealthy; ≥ 1% or p95 ≥ 1s is degraded.
-	init(errorRate: Double, p95LatencyMs: Double) {
-		if errorRate >= 0.05 || p95LatencyMs >= 3000 {
-			self = .unhealthy
-		} else if errorRate >= 0.01 || p95LatencyMs >= 1000 {
-			self = .degraded
-		} else {
-			self = .healthy
+	// Error rate means the same thing for every service, so its breaks stay
+	// absolute: a fraction of requests that failed.
+	private static let errorRateDegraded = 0.01
+	private static let errorRateUnhealthy = 0.05
+
+	// Absolute p95 breaks, used ONLY as a fallback for a service with no usable
+	// baseline. On their own they permanently flag anything slow by design —
+	// batch workers, queue consumers, report builders — which is what put
+	// healthy services on this app's attention list.
+	private static let p95DegradedMs = 1000.0
+	private static let p95UnhealthyMs = 3000.0
+
+	// With a baseline, latency is judged against the service's own history.
+	private static let baselineDegradedRatio = 2.0
+	private static let baselineUnhealthyRatio = 4.0
+	// Never flag below this floor: 5ms → 15ms is 3× and harmless, and a
+	// sub-floor p95 is mostly noise.
+	private static let latencyFloorMs = 250.0
+	// A baseline built from fewer spans than this is noise — treat it as no
+	// baseline at all.
+	private static let minBaselineSpans = 100.0
+	// And below this many spans in the window being judged, the p95 itself is
+	// too noisy to flag on. Error rate still applies.
+	private static let minCurrentSpans = 50.0
+
+	/// Health for one service as the API returned it, baseline included.
+	init(service: Service) {
+		self.init(
+			errorRate: service.errorRate,
+			p95LatencyMs: service.p95LatencyMs,
+			spanCount: service.spanCount,
+			baseline: LatencyBaseline(service: service)
+		)
+	}
+
+	/// The worse of the error-rate verdict and the latency verdict.
+	init(errorRate: Double, p95LatencyMs: Double, spanCount: Double, baseline: LatencyBaseline?) {
+		let byError: ServiceHealth =
+			if errorRate >= Self.errorRateUnhealthy { .unhealthy }
+			else if errorRate >= Self.errorRateDegraded { .degraded }
+			else { .healthy }
+		let byLatency = Self.latencyHealth(p95LatencyMs, spanCount: spanCount, baseline: baseline)
+		self = byError.rank >= byLatency.rank ? byError : byLatency
+	}
+
+	private static func latencyHealth(
+		_ p95LatencyMs: Double,
+		spanCount: Double,
+		baseline: LatencyBaseline?
+	) -> ServiceHealth {
+		// Sparse window → the p95 is noise, so it says nothing about health.
+		if spanCount < minCurrentSpans { return .healthy }
+
+		if let baseline, baseline.spanCount >= minBaselineSpans, baseline.p95LatencyMs > 0 {
+			let unhealthyAt = max(latencyFloorMs, baseline.p95LatencyMs * baselineUnhealthyRatio)
+			let degradedAt = max(latencyFloorMs, baseline.p95LatencyMs * baselineDegradedRatio)
+			if p95LatencyMs >= unhealthyAt { return .unhealthy }
+			if p95LatencyMs >= degradedAt { return .degraded }
+			return .healthy
+		}
+
+		if p95LatencyMs >= p95UnhealthyMs { return .unhealthy }
+		if p95LatencyMs >= p95DegradedMs { return .degraded }
+		return .healthy
+	}
+
+	/// Higher is worse. Used to take the worst of two verdicts and to sort the
+	/// most-broken services to the top.
+	var rank: Int {
+		switch self {
+		case .healthy: 0
+		case .degraded: 1
+		case .unhealthy: 2
 		}
 	}
 
@@ -162,10 +251,16 @@ struct HealthDot: View {
 // MARK: - Tone rules
 
 enum Tone {
-	/// `errorRateToneClass`: > 5% error, > 0 warn, exactly 0 muted.
+	/// The breaks are `ServiceHealth`'s, not the web's `errorRateToneClass`.
+	///
+	/// The web warns on anything above zero, which on a phone-width list put an
+	/// amber number on six of nine rows — including services with no health dot,
+	/// so the two marks on one row disagreed about whether it was fine. Amber
+	/// costs more here (`DESIGN.md`: at most one per screen), so the tone follows
+	/// the same 1% / 5% breaks the dot does and a row now reads one way.
 	static func errorRate(_ ratio: Double) -> Color {
-		if ratio > 0.05 { return Token.severityError }
-		if ratio > 0 { return Token.severityWarn }
+		if ratio >= 0.05 { return Token.severityError }
+		if ratio >= 0.01 { return Token.severityWarn }
 		return Token.mutedForeground
 	}
 

@@ -284,6 +284,77 @@ describe("dispatchDelivery: discord", () => {
 	)
 })
 
+describe("dispatchDelivery: telegram", () => {
+	const botToken = "123456789:tok3n-in-the-path"
+	const context = contextFor({ type: "telegram", botToken, chatId: "-1001234567890" })
+	const sent = () =>
+		new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }), { status: 200 })
+
+	it.effect("posts an HTML message with both links as inline buttons", () =>
+		Effect.gen(function* () {
+			const { calls, fetchFn } = recorder(sent)
+			const result = yield* dispatch(context, fetchFn)
+
+			assert.lengthOf(calls, 1)
+			const call = calls[0]!
+			assert.strictEqual(call.url, `https://api.telegram.org/bot${botToken}/sendMessage`)
+			assert.strictEqual(call.method, "POST")
+
+			const body = JSON.parse(call.body)
+			assert.strictEqual(body.chat_id, "-1001234567890")
+			assert.strictEqual(body.parse_mode, "HTML")
+			assert.include(body.text, "<b>Checkout error rate</b>")
+			assert.deepStrictEqual(
+				body.reply_markup.inline_keyboard[0].map((b: { url: string }) => b.url),
+				[LINK, CHAT],
+			)
+			// The token authenticates via the path; it must never also ride in the body.
+			assert.notInclude(call.body, botToken)
+
+			assert.deepStrictEqual(result, {
+				providerMessage: "Delivered to Telegram chat -1001234567890",
+				providerReference: "4242",
+				responseCode: 200,
+			})
+		}),
+	)
+
+	/**
+	 * Telegram reports logical failures as HTTP 200 + `{ ok: false }`, so a
+	 * status-only reading of the response would record a silent non-delivery as
+	 * a success.
+	 */
+	it.effect("treats a 200 with ok:false as a failure", () =>
+		Effect.gen(function* () {
+			const { fetchFn } = recorder(
+				() =>
+					new Response(
+						JSON.stringify({
+							ok: false,
+							error_code: 403,
+							description: "Forbidden: bot was kicked",
+						}),
+						{ status: 200 },
+					),
+			)
+			const error = yield* Effect.flip(dispatch(context, fetchFn))
+
+			assert.strictEqual(error.destinationType, "telegram")
+			assert.include(error.message, "bot was kicked")
+			assert.isFalse(error.error.retryable)
+		}),
+	)
+
+	it.effect("does not read the caller's payload json", () =>
+		Effect.gen(function* () {
+			const { calls, fetchFn } = recorder(sent)
+			yield* dispatch(context, fetchFn, '{"totally":"ignored"}')
+
+			assert.notInclude(calls[0]!.body, "totally")
+		}),
+	)
+})
+
 describe("dispatchDelivery: hazel-oauth", () => {
 	const config = {
 		type: "hazel-oauth" as const,

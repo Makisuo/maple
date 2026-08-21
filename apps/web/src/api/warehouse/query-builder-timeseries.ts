@@ -5,10 +5,11 @@ import {
 	LAB_EMPTY_RANGE_STRATEGY,
 	type EmptyRangeFallbackStrategy,
 	type TimeseriesQuerySetDiagnostics,
+	type TimeseriesQuerySetResult,
 	fallbackStrategyFromWire,
 	runTimeseriesQuerySet,
 } from "@maple/query-engine/query-set"
-import { decodeInput, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
+import { decodeInput, invalidWarehouseInput, querySetFailure } from "@/api/warehouse/effect-utils"
 import { makeWarehouseExecutor } from "@/api/warehouse/query-set-executor"
 
 /**
@@ -71,6 +72,38 @@ function resolveStrategy(input: QueryBuilderTimeseriesInput): EmptyRangeFallback
 	return fallbackStrategyFromWire(input.strategy, LAB_EMPTY_RANGE_STRATEGY)
 }
 
+/**
+ * What this endpoint answers with when every query ran and the window simply
+ * held nothing.
+ *
+ * An empty window is a normal answer, not a failure: raising it as
+ * `WarehouseInvalidInputError` marked the span `Error` and billed an exception
+ * event per tile per refresh (24 in 20 minutes from one user paging a quiet
+ * dashboard). Every caller already renders zero rows as its own empty state —
+ * chart tiles via `WidgetEmptyState`, the metric chart and the lab inline — so
+ * the empty shape is all they need.
+ *
+ * The diagnostics describe exactly that: the requested window, the comparison
+ * the caller asked for, and no per-query entries, because no query produced one.
+ */
+function emptyTimeseriesResponse(input: QueryBuilderTimeseriesInput): QueryBuilderTimeseriesResponse {
+	return {
+		data: [],
+		diagnostics: {
+			primaryWindow: { startTime: input.startTime, endTime: input.endTime },
+			comparison: {
+				mode: input.comparison?.mode ?? "none",
+				includePercentChange: input.comparison?.includePercentChange ?? true,
+				shiftedByMs: 0,
+				previousStartTime: null,
+				previousEndTime: null,
+			},
+			queries: [],
+			previousQueries: [],
+		},
+	}
+}
+
 const executor = makeWarehouseExecutor("queryEngine.timeseriesQuery")
 
 export function getQueryBuilderTimeseries({ data }: { data: QueryBuilderTimeseriesInput }) {
@@ -97,13 +130,25 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 		...(!(input.maxDataPoints === undefined) ? { maxDataPoints: input.maxDataPoints } : undefined),
 	}).pipe(
 		// The runner's tagged failures carry the message this app already showed;
-		// re-raising them as `WarehouseInvalidInputError` keeps `displayError` and
-		// `mapBuilderChartFailure` working unchanged.
+		// re-raising them keeps `displayError` and `mapBuilderChartFailure` working
+		// unchanged. `querySetFailure` rather than `invalidWarehouseInput` for the
+		// no-data case: the runner stringifies each per-query failure into
+		// `details`, so a dropped connection arrived here as text and was re-raised
+		// as "Invalid query" — telling the user to fix a request that never left
+		// the browser.
 		Effect.catchTags({
 			"@maple/query-engine/query-set/QuerySetInputError": (error) =>
 				invalidWarehouseInput("getQueryBuilderTimeseries", error.message),
+			// Empty `details` means every query executed and none matched anything:
+			// that is an empty result, so answer with one instead of failing. A
+			// populated `details` carries a real per-query failure and stays an error.
 			"@maple/query-engine/query-set/QuerySetNoDataError": (error) =>
-				invalidWarehouseInput("getQueryBuilderTimeseries", error.message),
+				error.details.length === 0
+					? Effect.succeed({
+							rows: [],
+							diagnostics: emptyTimeseriesResponse(input).diagnostics,
+						} satisfies TimeseriesQuerySetResult)
+					: querySetFailure("getQueryBuilderTimeseries", error.message),
 		}),
 	)
 
@@ -122,4 +167,5 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 
 export const __testables = {
 	resolveStrategy,
+	emptyTimeseriesResponse,
 }

@@ -11,7 +11,7 @@ as a real funnel in the product rather than a hand-written `run_sql`.
    step (the SDK has no populate option — same caveat as 0014). Until populated, page views
    read as zero on managed orgs. Old `web_events`/`web_events_mv` can be removed from the
    workspace afterwards.
-2. **BYO ClickHouse**: migration 0016 bumps `clickHouseSchemaVersion` to 16 (`requiredForIngest`
+2. **BYO ClickHouse**: migration 0021 bumps `clickHouseSchemaVersion` to 21 (`requiredForIngest`
    default), so BYO orgs' ingest routing is un-ready until they apply schema. Deliberate — the
    gateway now writes the new `session_events` columns and `product_events` directly.
 3. **Secrets** (api worker): `CLERK_WEBHOOK_SECRET`, `AUTUMN_WEBHOOK_SECRET` (both routes answer
@@ -230,11 +230,11 @@ windowSeconds, filters })` → per-step `count`, `conversion_from_prev`, `conver
 Order matters because `web_events` has no dedup and `session_events` still holds every browser
 row for 30d — the rename is a rebuild, not a `RENAME TABLE`.
 
-1. Migration `0016_product_events` (BYO CH) + Tinybird datasource `product_events` + MV
+1. Migration `0021_product_events` (BYO CH) + Tinybird datasource `product_events` + MV
    `product_events_mv` (from `session_events`, with the new columns), backfill spec from
    `session_events` for the last 30d (same row-wise projection idea as 0014, `Source='browser'`).
-   Also `0016` adds `VisitorId/UserId/GroupId` to `session_events` (+ Tinybird forward query).
-2. Local CLI: `local-schema-v6.sql`, `local-store-migrations/v5-to-v6-product-events.ts`
+   Also `0021` adds `VisitorId/UserId/GroupId` to `session_events` (+ Tinybird forward query).
+2. Local CLI: `local-schema-v11.sql`, `local-store-migrations/v10-to-v11-product-events.ts`
    (+ test), bump the schema-version gate.
 3. SDKs stamp identity on session events (`browser-session` events-sink; effect-sdk client
    `track.ts`). Backwards compatible — defaults cover old builds.

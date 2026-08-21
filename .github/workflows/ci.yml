@@ -320,6 +320,17 @@ jobs:
                   --filter=@maple-dev/effect-sdk --filter=@maple/landing
                   --filter=@maple/local-ui --concurrency=2
 
+            # Guard what installing @maple-dev/browser costs a page. Splits the
+            # bundled+minified+gzipped graph into what every page load pays and
+            # what only replay-sampled visitors pay, and fails on the budgets in
+            # scripts/size.ts. Without this an eager-graph regression is only
+            # discoverable in a customer's Lighthouse report — which is how a
+            # bundled `effect/Schema` once took the eager side 53% over budget.
+            - name: Browser SDK bundle budget
+              if: ${{ matrix.shard == 'build-other' }}
+              run: bun run size
+              working-directory: packages/browser
+
             # `turbo typecheck` does not cover tsconfig.alchemy.json (alchemy.run.ts and
             # every apps/*/alchemy.run.ts) — only the root `typecheck` script chains it,
             # and CI calls turbo directly. Without this they ship unchecked.
@@ -400,6 +411,13 @@ jobs:
 
             - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
+            # The action always installs the root `maple` workspace, so naming
+            # it as the only filter installs the CI tools (oxlint and the JS
+            # plugins the shared config loads) and no workspace packages.
+            - uses: ./.github/actions/bun-install
+              with:
+                  filters: maple
+
             # apps/slack-agent is deliberately outside the bun workspace (it
             # self-deploys to Railway, not Cloudflare), so the root install and
             # the `bun turbo` job above never reach it — it needs its own.
@@ -415,6 +433,16 @@ jobs:
             # ungated to Slack.
             - run: bun test
               working-directory: apps/slack-agent
+
+            # Lint runs here rather than in the root `effect-lint` job for two
+            # reasons. The `ts` paths filter excludes apps/slack-agent, so a
+            # slack-agent-only PR never runs that job — the exact shape of #518,
+            # which shipped an `as unknown as` cast past the anti-slop rules that
+            # exist to catch it. And `effect-lint` is type-aware, which cannot
+            # resolve this app's `@types/bun` from a root install, so it rejects
+            # the tsconfig outright. The base config is AST-only, which is all
+            # the anti-slop and maple rules need.
+            - run: bun run lint:slack-agent
 
     # The only job where `layerPg` meets a real Postgres. Everything else that
     # touches the Database service runs on PGlite (in-process, single-connection,
@@ -820,7 +848,21 @@ jobs:
             # Deliberately NOT folded into `install --with-deps`: system libs go to
             # apt paths that ~/.cache/ms-playwright does not cover, so on a cache hit
             # the combined form would skip them and webkit would fail to launch.
+            #
+            # Skipped for chromium, where it installed nothing we need and cost more
+            # than the tests. On ubuntu-latest the runner image already carries every
+            # shared library chromium links, so `install-deps chromium` resolved to
+            # exactly nine font packages -- fonts-{wqy-zenhei,ipafont-gothic,unifont,
+            # tlwg-loma-otf,freefont-ttf} and xfonts-* -- i.e. CJK, Cyrillic and Thai
+            # glyph coverage. The bench pages render latin service names only, so those
+            # fonts change no pixel we measure, yet the 21 MB pull off the Azure mirror
+            # ran 12s on a good day and 205s on a bad one, against a 55s test body.
+            # firefox (40 packages) and webkit (100+) do pull real libraries -- keep it.
+            #
+            # If chromium ever fails to launch here, the runner image dropped a library:
+            # re-enable this for chromium rather than debugging the browser.
             - name: Install Playwright system deps
+              if: ${{ matrix.browser != 'chromium' }}
               env:
                   PW_BROWSER: ${{ matrix.browser }}
               run: bunx playwright install-deps "$PW_BROWSER"

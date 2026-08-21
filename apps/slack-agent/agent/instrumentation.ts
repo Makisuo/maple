@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
+import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici"
 import { resourceFromAttributes } from "@opentelemetry/resources"
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs"
 import { NodeSDK } from "@opentelemetry/sdk-node"
@@ -86,6 +87,16 @@ function setupTelemetry(): void {
 
 	const sdk = new NodeSDK({
 		resource,
+		// Every outbound call this agent makes — Slack Web API, the model gateway,
+		// the Maple MCP server — is a global `fetch`, i.e. undici. Without this,
+		// none of those calls produce a span, so a non-2xx response from any of
+		// them (e.g. an MCP connection request) never carries an HTTP status into
+		// Maple's own telemetry. undici is instrumented through
+		// diagnostics_channel, so unlike the module-patching instrumentations this
+		// needs no loader hook and survives eve's bundled build. It cannot
+		// recurse into the exporters below: the Node OTLP exporters use
+		// `node:http`, not fetch.
+		instrumentations: [new UndiciInstrumentation()],
 		traceExporter: new OTLPTraceExporter({
 			url: `${endpoint}/v1/traces`,
 			headers,

@@ -79,6 +79,10 @@
 		".factory/**",
 		".impeccable/**",
 		".superset/**",
+		// apps/slack-agent sits outside the bun workspace, so a root install
+		// never fetches its `@types/bun` and this type-aware run rejects its
+		// tsconfig outright. It is linted with the base (AST-only) config in
+		// the `slack-agent` CI job instead, which installs its dependencies.
 		"apps/slack-agent/**",
 		"apps/web/src/routeTree.gen.ts",
 		"lib/llm/**",

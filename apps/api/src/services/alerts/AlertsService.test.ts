@@ -273,13 +273,16 @@ const createErrorRateRule = (
 	orgId: ReturnType<typeof asOrgId>,
 	userId: ReturnType<typeof asUserId>,
 	destinationId: AlertDestinationId,
+	// Callers that create SEVERAL rules in one org must vary this: alert_rules
+	// carries a unique index on (org_id, name).
+	name = "Checkout error rate",
 ) =>
 	alerts.createRule(
 		orgId,
 		userId,
 		adminRoles,
 		new AlertRuleUpsertRequest({
-			name: "Checkout error rate",
+			name,
 			severity: "critical",
 			enabled: true,
 			serviceNames: ["checkout"],
@@ -781,6 +784,72 @@ describe("AlertsService", () => {
 				ruleThird!.lastScheduledAt!.getTime(),
 				ruleFirst!.lastScheduledAt!.getTime(),
 				"alert_rules catches up once the heartbeat window elapses",
+			)
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
+	// Rules are claimed a chunk at a time in ONE multi-row INSERT, so the whole
+	// batch rides on `setWhere` gating each row independently. If it ever gated the
+	// statement instead, one rule already held by another worker would either drag
+	// its whole chunk down or — worse — hand every rule in the chunk a claim it did
+	// not win, and two workers would evaluate the same rules concurrently.
+	it.effect("claims only the unheld rules when a chunk contains one another worker holds", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_batch_claim")
+			const userId = asUserId("user_batch_claim")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const ruleA = yield* createErrorRateRule(alerts, orgId, userId, destination.id, "rule A")
+			const ruleHeld = yield* createErrorRateRule(alerts, orgId, userId, destination.id, "rule held")
+			const ruleC = yield* createErrorRateRule(alerts, orgId, userId, destination.id, "rule C")
+
+			// Another worker took this one moments ago: inside SCHEDULER_LOCK_TTL_MS,
+			// so this tick must lose it and leave its timestamp untouched.
+			const heldAt = new Date(DEFAULT_CLOCK_EPOCH_MS - 1_000)
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`insert into alert_rule_claims (rule_id, org_id, last_scheduled_at) values ($1, $2, $3)`,
+					[ruleHeld.id, orgId, heldAt],
+				),
+			)
+
+			yield* alerts.runSchedulerTick()
+
+			const claimFor = (ruleId: string) =>
+				Effect.promise(() =>
+					queryFirstRow<{ lastScheduledAt: Date | null }>(
+						testDb,
+						`select last_scheduled_at as "lastScheduledAt" from alert_rule_claims where rule_id = $1`,
+						[ruleId],
+					),
+				)
+
+			const claimA = yield* claimFor(ruleA.id)
+			const claimHeld = yield* claimFor(ruleHeld.id)
+			const claimC = yield* claimFor(ruleC.id)
+
+			// The two free rules are claimed by this tick...
+			assert.strictEqual(
+				claimA?.lastScheduledAt?.getTime(),
+				DEFAULT_CLOCK_EPOCH_MS,
+				"an unheld rule in the batch is claimed",
+			)
+			assert.strictEqual(
+				claimC?.lastScheduledAt?.getTime(),
+				DEFAULT_CLOCK_EPOCH_MS,
+				"every unheld rule in the batch is claimed, not just the first",
+			)
+			// ...while the held one keeps the other worker's timestamp exactly.
+			assert.strictEqual(
+				claimHeld?.lastScheduledAt?.getTime(),
+				heldAt.getTime(),
+				"a rule held inside the lock TTL is not stolen by the batch",
 			)
 		}).pipe(
 			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
@@ -1359,6 +1428,171 @@ describe("AlertsService", () => {
 				}),
 			),
 		)
+	})
+
+	/**
+	 * A `retry: "never"` failure is not retried for its own delivery, but before
+	 * this nothing bounded the DESTINATION: a webhook whose provider answers 400
+	 * forever kept receiving every new incident, failing, and losing the alert
+	 * silently (observed in prod as a flat ~4/hr `AlertDeliveryRejectedError`).
+	 */
+	describe("destination auto-disable on repeated terminal failures", () => {
+		const seedDeliveryFor = (
+			testDb: TestDb,
+			orgId: string,
+			ruleId: string,
+			destinationId: string,
+			scheduledAt: number,
+			n: number,
+		) =>
+			Effect.promise(() =>
+				insertDeliveryEventRow(testDb, {
+					id: `00000000-0000-4000-8000-00000000020${n}`,
+					orgId,
+					incidentId: null,
+					ruleId,
+					destinationId,
+					deliveryKey: `dead-destination-${n}`,
+					eventType: "test",
+					attemptNumber: 1,
+					status: "queued",
+					scheduledAt,
+					payloadJson: JSON.stringify({
+						eventType: "test",
+						incidentId: null,
+						incidentStatus: "resolved",
+						dedupeKey: `dead-destination-${n}`,
+						observed: { value: 0, sampleCount: 0 },
+					}),
+				}),
+			)
+
+		/** Break the rule's stored query so the tick's evaluation half queues nothing of its own. */
+		const breakRuleQuery = (testDb: TestDb, ruleId: string) =>
+			Effect.promise(() =>
+				executeSql(testDb, "update alert_rules set query_spec_json = $1::jsonb where id = $2", [
+					"{}",
+					ruleId,
+				]),
+			)
+
+		const readDestinationHealth = (testDb: TestDb, destinationId: string) =>
+			Effect.promise(() =>
+				queryFirstRow<{
+					enabled: boolean
+					consecutiveFailures: number
+					disabledAt: Date | null
+					disabledReason: string | null
+				}>(
+					testDb,
+					`select enabled,
+					        consecutive_failures as "consecutiveFailures",
+					        disabled_at as "disabledAt",
+					        disabled_reason as "disabledReason"
+					 from alert_destinations where id = $1`,
+					[destinationId],
+				),
+			)
+
+		it.effect("disables the destination after three terminal failures and then skips it", () => {
+			const fixedTime = 1_710_000_200_000
+			const testDb = createTestDb(trackedDbs)
+			let requestCount = 0
+			// An empty-bodied 400 — the exact shape prod sees from Hazel.
+			const rejectingFetch = (async () => {
+				requestCount += 1
+				return new Response("", { status: 400, headers: { "content-type": "application/json" } })
+			}) as typeof fetch
+
+			return Effect.gen(function* () {
+				yield* TestClock.setTime(fixedTime)
+				const alerts = yield* AlertsService
+				const orgId = asOrgId("org_dest_disable")
+				const userId = asUserId("user_dest_disable")
+				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+				const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+				yield* breakRuleQuery(testDb, rule.id)
+
+				for (const n of [1, 2, 3]) {
+					yield* seedDeliveryFor(testDb, orgId, rule.id, destination.id, fixedTime - 1, n)
+				}
+				yield* alerts.runSchedulerTick()
+
+				assert.strictEqual(requestCount, 3)
+				const health = yield* readDestinationHealth(testDb, destination.id)
+				assert.strictEqual(health?.enabled, false)
+				assert.strictEqual(health?.consecutiveFailures, 3)
+				assert.isNotNull(health?.disabledAt ?? null)
+				assert.include(health?.disabledReason ?? "", "delivery failed with 400")
+				// The provider sent no body; the reason says so instead of trailing off.
+				assert.include(health?.disabledReason ?? "", "<empty body>")
+
+				// A delivery queued afterwards never reaches the provider again.
+				yield* seedDeliveryFor(testDb, orgId, rule.id, destination.id, fixedTime - 1, 4)
+				yield* alerts.runSchedulerTick()
+				assert.strictEqual(requestCount, 3)
+
+				const events = yield* alerts.listDeliveryEvents(orgId)
+				const skipped = events.events.find(
+					(event: { deliveryKey: string }) => event.deliveryKey === "dead-destination-4",
+				)
+				assert.strictEqual(skipped?.status, "failed")
+				assert.strictEqual(skipped?.errorMessage, "Destination disabled")
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+						fetch: rejectingFetch,
+					}),
+				),
+			)
+		})
+
+		it.effect("resets the streak on a successful delivery", () => {
+			const fixedTime = 1_710_000_300_000
+			const testDb = createTestDb(trackedDbs)
+			let reject = true
+			const flakyFetch = (async () =>
+				reject
+					? new Response("", { status: 400 })
+					: new Response("ok", { status: 200 })) as typeof fetch
+
+			return Effect.gen(function* () {
+				yield* TestClock.setTime(fixedTime)
+				const alerts = yield* AlertsService
+				const orgId = asOrgId("org_dest_reset")
+				const userId = asUserId("user_dest_reset")
+				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+				const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+				yield* breakRuleQuery(testDb, rule.id)
+
+				// Two terminal failures — one short of the threshold.
+				for (const n of [1, 2]) {
+					yield* seedDeliveryFor(testDb, orgId, rule.id, destination.id, fixedTime - 1, n)
+				}
+				yield* alerts.runSchedulerTick()
+
+				const afterFailures = yield* readDestinationHealth(testDb, destination.id)
+				assert.strictEqual(afterFailures?.enabled, true)
+				assert.strictEqual(afterFailures?.consecutiveFailures, 2)
+
+				// One delivery gets through: the destination is alive, so the streak
+				// is over and the next terminal failure starts counting from zero.
+				reject = false
+				yield* seedDeliveryFor(testDb, orgId, rule.id, destination.id, fixedTime - 1, 3)
+				yield* alerts.runSchedulerTick()
+
+				const afterSuccess = yield* readDestinationHealth(testDb, destination.id)
+				assert.strictEqual(afterSuccess?.enabled, true)
+				assert.strictEqual(afterSuccess?.consecutiveFailures, 0)
+				assert.isNull(afterSuccess?.disabledAt ?? null)
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+						fetch: flakyFetch,
+					}),
+				),
+			)
+		})
 	})
 
 	it.effect("suppresses duplicate delivery sends across concurrent service instances", () => {

@@ -22,6 +22,7 @@ export const AlertDestinationType = Schema.Literals([
 	"webhook",
 	"hazel-oauth",
 	"discord",
+	"telegram",
 	"email",
 ]).annotate({
 	identifier: "@maple/AlertDestinationType",
@@ -207,6 +208,18 @@ export class DiscordAlertDestinationConfig extends Schema.Class<DiscordAlertDest
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class TelegramAlertDestinationConfig extends Schema.Class<TelegramAlertDestinationConfig>(
+	"TelegramAlertDestinationConfig",
+)({
+	type: Schema.Literal("telegram"),
+	name: ChannelLabel,
+	/** Bot token from @BotFather (`<botId>:<secret>`). Write-only — never returned. */
+	botToken: NonEmptyString,
+	/** Target chat: a numeric id (`-1001234567890`) or an `@channelusername`. */
+	chatId: NonEmptyString,
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const MAX_EMAIL_RECIPIENTS = 10
 
 /**
@@ -234,6 +247,7 @@ export const AlertDestinationCreateRequest = Schema.Union([
 	WebhookAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
 	DiscordAlertDestinationConfig,
+	TelegramAlertDestinationConfig,
 	EmailAlertDestinationConfig,
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<typeof AlertDestinationCreateRequest>
@@ -284,6 +298,15 @@ export class UpdateDiscordAlertDestinationConfig extends Schema.Class<UpdateDisc
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class UpdateTelegramAlertDestinationConfig extends Schema.Class<UpdateTelegramAlertDestinationConfig>(
+	"UpdateTelegramAlertDestinationConfig",
+)({
+	name: OptionalNonEmptyString,
+	botToken: Schema.optionalKey(Schema.String),
+	chatId: Schema.optionalKey(Schema.String),
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export class UpdateEmailAlertDestinationConfig extends Schema.Class<UpdateEmailAlertDestinationConfig>(
 	"UpdateEmailAlertDestinationConfig",
 )({
@@ -314,6 +337,10 @@ export const AlertDestinationUpdateRequest = Schema.Union([
 		...UpdateDiscordAlertDestinationConfig.fields,
 	}),
 	Schema.Struct({
+		type: Schema.Literal("telegram"),
+		...UpdateTelegramAlertDestinationConfig.fields,
+	}),
+	Schema.Struct({
 		type: Schema.Literal("email"),
 		...UpdateEmailAlertDestinationConfig.fields,
 	}),
@@ -333,6 +360,17 @@ export class AlertDestinationDocument extends Schema.Class<AlertDestinationDocum
 	memberUserIds: Schema.NullOr(Schema.Array(Schema.String)),
 	lastTestedAt: Schema.NullOr(IsoDateTimeString),
 	lastTestError: Schema.NullOr(Schema.String),
+	/**
+	 * Delivery-health state, so the UI can say "we stopped trying, and why"
+	 * instead of showing a silently dead destination as merely `enabled: false`.
+	 * `optionalKey` because these arrived after the document shipped — an older
+	 * writer that omits them still decodes.
+	 */
+	consecutiveFailures: Schema.optionalKey(Schema.Number),
+	lastFailureAt: Schema.optionalKey(Schema.NullOr(IsoDateTimeString)),
+	/** Non-null only when Maple auto-disabled the destination. */
+	disabledAt: Schema.optionalKey(Schema.NullOr(IsoDateTimeString)),
+	disabledReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
 	// Postgres txid of the write, present only on create/update responses so the
@@ -1056,3 +1094,66 @@ export const ListRuleChecksQuery = Schema.Struct({
 		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 2000 })),
 	),
 })
+
+/**
+ * The opaque, signed id of an alert notification's chart image (see
+ * `alertChartId` in `@maple/db`).
+ *
+ * Carries a rule id and a time window, signed — no credential, and nothing that
+ * can be turned into one. Loosely checked here because its structure is the
+ * signer's business: a malformed id fails verification, which is the same
+ * uniform "no such chart" as a tampered one.
+ */
+export const AlertChartId = Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(1024)).annotate({
+	identifier: "AlertChartId",
+})
+
+export const AlertChartRequest = Schema.Struct({
+	chartId: AlertChartId,
+}).annotate({ identifier: "AlertChartRequest" })
+
+/** `[epochMillis, value]`, oldest first. */
+export const AlertChartPoint = Schema.Tuple([Schema.Number, Schema.Number]).annotate({
+	identifier: "AlertChartPoint",
+})
+
+/** Which side of the threshold the renderer shades; `none` for range comparators. */
+export const AlertChartBreachSide = Schema.Literals(["above", "below", "none"]).annotate({
+	identifier: "AlertChartBreachSide",
+})
+export type AlertChartBreachSide = Schema.Schema.Type<typeof AlertChartBreachSide>
+
+/**
+ * Chart unit, as the static renderer names them.
+ *
+ * The single authority for this list: it types the HTTP response *and* the
+ * signed chart id's payload in `@maple/db`, so the wire and the signature
+ * cannot disagree about what units exist. The renderer in `@maple/widgets`
+ * declares a structurally identical union — it sits below this package and
+ * cannot import it — and the two meet in `apps/web`, where a divergence is a
+ * type error rather than a runtime surprise.
+ */
+export const AlertChartUnit = Schema.Literals([
+	"number",
+	"percent",
+	"duration_ms",
+	"bytes",
+	"requests_per_sec",
+]).annotate({ identifier: "AlertChartUnit" })
+export type AlertChartUnit = Schema.Schema.Type<typeof AlertChartUnit>
+
+/**
+ * Everything the image needs, and nothing else.
+ *
+ * Deliberately not the alert, the incident or the rule: this is fetched by
+ * whatever renders the picture, so it carries one series of numbers and the
+ * words drawn on the card. No org name, no destination, no incident id.
+ */
+export class AlertChartResponse extends Schema.Class<AlertChartResponse>("AlertChartResponse")({
+	title: Schema.String,
+	unit: AlertChartUnit,
+	kind: Schema.Literals(["line", "area", "bar"]),
+	points: Schema.Array(AlertChartPoint),
+	threshold: Schema.NullOr(Schema.Number),
+	breachSide: AlertChartBreachSide,
+}) {}

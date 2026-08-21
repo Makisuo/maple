@@ -44,6 +44,7 @@ struct OrganizationPickerView: View {
 			.navigationTitle(mode == .gate ? "Organization" : "Switch organization")
 			.navigationBarTitleDisplayMode(.inline)
 			.toolbar { toolbar }
+			.mapleScreen(Screen.organizationPicker)
 		}
 		.tint(Token.primary)
 		.task {
@@ -169,13 +170,19 @@ private struct OrganizationRow: View {
 	}
 }
 
-/// The title-slot control that opens the switcher.
+/// The leading-toolbar control that opens the switcher.
 ///
-/// When the account has a single organization there is nothing to switch to, so
-/// it degrades to a plain screen title rather than leaving a dead control.
+/// This used to sit in `.principal` — the centred title slot — on all three
+/// tabs, which is what made the chrome read as not-quite-native: iOS puts the
+/// screen's *name* in the middle, so an organization there is a title that
+/// isn't one, and it cost the app its large titles as a side effect. As a
+/// leading item it reads as what it is (the context everything on screen is
+/// scoped to) and the title slot goes back to the system.
+///
+/// When the account has a single organization there is nothing to switch to,
+/// so the control disappears rather than sitting there dead — the screen's own
+/// large title already names the place.
 struct OrganizationSwitcherButton: View {
-	let fallbackTitle: String
-
 	@Environment(SessionController.self) private var session
 	@State private var isPresented = false
 
@@ -184,25 +191,26 @@ struct OrganizationSwitcherButton: View {
 			Button { isPresented = true } label: {
 				HStack(spacing: 5) {
 					if let id = session.activeOrganizationId {
-						ServiceDot(serviceName: id, size: 8)
+						ServiceDot(serviceName: id, size: 7)
 					}
-					Text(session.activeOrganization?.name ?? "Organization")
-						.font(Typo.monoTitle)
+					Text(session.activeOrganizationName ?? "Organization")
+						.font(Typo.smallMedium)
 						.foregroundStyle(Token.foreground)
 						.lineLimit(1)
-					Image(systemName: "chevron.up.chevron.down")
-						.font(.system(size: 9, weight: .semibold))
+						// A long organization name must not push the trailing
+						// item off the bar; the sheet shows the full name.
+						.truncationMode(.tail)
+					Image(systemName: "chevron.down")
+						.font(.system(size: 8, weight: .semibold))
 						.foregroundStyle(Token.mutedForeground)
 				}
+				.frame(maxWidth: 160, alignment: .leading)
 			}
+			.accessibilityLabel("Switch organization")
 			.sheet(isPresented: $isPresented) {
 				OrganizationPickerView(mode: .switcher)
 					.environment(session)
 			}
-		} else {
-			Text(fallbackTitle)
-				.font(Typo.monoTitle)
-				.foregroundStyle(Token.foreground)
 		}
 	}
 }

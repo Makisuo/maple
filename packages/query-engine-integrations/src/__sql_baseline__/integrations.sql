@@ -1,3 +1,147 @@
+-- builder:ai-sessions:aiSessionFacetsQuery:default
+SELECT
+          SpanAttributes['maple_ai.vendor.id'] AS name,
+          uniqExact(SpanAttributes['maple_ai.session.id']) AS count,
+          'vendor' AS facetType
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
+          AND SpanAttributes['maple_ai.vendor.id'] != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          ServiceName AS name,
+          uniqExact(SpanAttributes['maple_ai.session.id']) AS count,
+          'service' AS facetType
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
+          AND ServiceName != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+FORMAT JSON
+
+-- builder:ai-sessions:aiSessionListQuery:default
+SELECT
+          sessionId AS sessionId,
+          argMin(vendorId, sessionStart) AS vendorId,
+          argMin(vendorVersion, sessionStart) AS vendorVersion,
+          count() AS traceCount,
+          sum(spanCount) AS spanCount,
+          sum(errorSpanCount) AS errorSpanCount,
+          groupUniqArrayArray(serviceNames) AS serviceNames,
+          toString(min(traceStart)) AS startTime,
+          toString(fromUnixTimestamp64Nano(max(traceEndNanos))) AS endTime,
+          intDiv(max(traceEndNanos) - toUnixTimestamp64Nano(min(traceStart)), 1000000) AS durationMs
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SpanAttributes['maple_ai.session.id']) AS sessionId,
+          argMin(SpanAttributes['maple_ai.vendor.id'], if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS vendorId,
+          argMin(SpanAttributes['maple_ai.vendor.version'], if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS vendorVersion,
+          min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
+          count() AS spanCount,
+          countIf(StatusCode = 'Error') AS errorSpanCount,
+          groupUniqArray(ServiceName) AS serviceNames,
+          min(Timestamp) AS traceStart,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND TraceId IN (SELECT
+          TraceId AS TraceId
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''))
+        GROUP BY traceId) AS session_traces
+        WHERE sessionId != ''
+        GROUP BY sessionId
+        ORDER BY startTime DESC
+        LIMIT 50
+        FORMAT JSON
+
+-- builder:ai-sessions:aiSessionListQuery:filtered
+SELECT
+          sessionId AS sessionId,
+          argMin(vendorId, sessionStart) AS vendorId,
+          argMin(vendorVersion, sessionStart) AS vendorVersion,
+          count() AS traceCount,
+          sum(spanCount) AS spanCount,
+          sum(errorSpanCount) AS errorSpanCount,
+          groupUniqArrayArray(serviceNames) AS serviceNames,
+          toString(min(traceStart)) AS startTime,
+          toString(fromUnixTimestamp64Nano(max(traceEndNanos))) AS endTime,
+          intDiv(max(traceEndNanos) - toUnixTimestamp64Nano(min(traceStart)), 1000000) AS durationMs
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SpanAttributes['maple_ai.session.id']) AS sessionId,
+          argMin(SpanAttributes['maple_ai.vendor.id'], if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS vendorId,
+          argMin(SpanAttributes['maple_ai.vendor.version'], if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS vendorVersion,
+          min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
+          count() AS spanCount,
+          countIf(StatusCode = 'Error') AS errorSpanCount,
+          groupUniqArray(ServiceName) AS serviceNames,
+          min(Timestamp) AS traceStart,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND TraceId IN (SELECT
+          TraceId AS TraceId
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
+          AND SpanAttributes['maple_ai.vendor.id'] IN ('eve')
+          AND ServiceName IN ('maple-slack-agent'))
+        GROUP BY traceId) AS session_traces
+        WHERE sessionId != ''
+        GROUP BY sessionId
+        ORDER BY startTime DESC
+        LIMIT 25
+        FORMAT JSON
+
+-- builder:ai-sessions:aiSessionSpansQuery:default
+SELECT
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          SpanName AS spanName,
+          SpanKind AS spanKind,
+          ServiceName AS serviceName,
+          Duration / 1000000 AS durationMs,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          toString(Timestamp) AS timestamp,
+          SpanAttributes AS spanAttributes,
+          ResourceAttributes AS resourceAttributes
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND TraceId IN (SELECT
+          TraceId AS TraceId
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
+          AND SpanAttributes['maple_ai.session.id'] = 'wrun_sql_catalog')
+        ORDER BY timestamp ASC, spanId ASC
+        LIMIT 2000
+        FORMAT JSON
+
 -- builder:cloudflare-infra-breakdowns:cloudflareZoneBreakdownTimeseriesSQL:default
 SELECT
           formatDateTime(toStartOfInterval(TimeUnix, INTERVAL 300 SECOND), '%Y-%m-%dT%H:%i:%S.%fZ') AS bucket,

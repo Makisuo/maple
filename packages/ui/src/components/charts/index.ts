@@ -1,18 +1,42 @@
 export { chartRegistry, getChartById } from "./registry"
+export type { ChartKind, ChartRegistryEntry } from "./registry"
 export { ChartSkeleton, type ChartSkeletonVariant } from "./_shared/chart-skeleton"
-export type { BaseChartProps, ChartCategory, ChartRegistryEntry } from "./_shared/chart-types"
+export {
+	ChartEmpty,
+	ChartError,
+	ChartLoading,
+	ChartPlotArea,
+	useChartPlotHeight,
+} from "./_shared/chart-state"
+export type {
+	CartesianPlotProps,
+	ChartCategory,
+	ChartLegendMode,
+	ChartThreshold,
+	ChartTooltipMode,
+	PlotChromeProps,
+	PlotOverlayProps,
+	PlotProps,
+	QueryBuilderAreaChartProps,
+	QueryBuilderBarChartProps,
+	QueryBuilderFunnelChartProps,
+	QueryBuilderHbarChartProps,
+	QueryBuilderHeatmapChartProps,
+	QueryBuilderHistogramChartProps,
+	QueryBuilderLineChartProps,
+	QueryBuilderPieChartProps,
+	ServiceChartProps,
+	ThroughputAreaChartProps,
+} from "./_shared/chart-types"
 export * from "./_shared/sample-data"
 
 // Bar Charts
-export { DefaultBarChart } from "./bar/default-bar-chart"
 export { QueryBuilderBarChart } from "./bar/query-builder-bar-chart"
 
 // Area Charts
-export { GradientAreaChart } from "./area/gradient-area-chart"
 export { QueryBuilderAreaChart } from "./area/query-builder-area-chart"
 
 // Line Charts
-export { DottedLineChart } from "./line/dotted-line-chart"
 export { QueryBuilderLineChart } from "./line/query-builder-line-chart"
 
 // Service Charts

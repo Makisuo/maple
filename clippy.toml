@@ -1,0 +1,12 @@
+# Clippy CONFIG (thresholds and behavior). Lint LEVELS don't work in this
+# file - they live in apps/ingest/Cargo.toml under [lints.rust]/[lints.clippy].
+
+# unwrap/expect/panic lints target production code; tests assert with them by design.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+
+# Deploy builders (Dockerfile, deploy workflows) and mise pin this toolchain;
+# suggestion lints must not propose APIs newer than it (see the
+# duration_constructors incident: a clippy suggestion broke rust:1.88 builds).
+msrv = "1.94"

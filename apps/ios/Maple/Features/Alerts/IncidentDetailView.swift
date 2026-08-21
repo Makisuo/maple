@@ -26,24 +26,20 @@ struct IncidentDetail {
 @MainActor
 @Observable
 final class IncidentDetailModel {
-	private(set) var state: LoadState<IncidentDetail> = .loading
+	private(set) var loader: ScreenLoader<IncidentDetail>!
 
 	let incidentID: String
+	let generation: Int
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(incidentID: String, api: any MapleAPI, session: SessionController) {
 		self.incidentID = incidentID
 		self.api = api
-		self.session = session
+		self.generation = session.dataGeneration
+		self.loader = ScreenLoader(session: session, screen: Screen.incidentDetail) { [unowned self] in try await self.fetch() }
 	}
 
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-		if let next = await session.perform({ try await self.fetch() }) {
-			state = next
-		}
-	}
+	var state: LoadState<IncidentDetail> { loader.state }
 
 	private func fetch() async throws -> IncidentDetail {
 		let incident = try await api.alertIncident(id: incidentID)
@@ -149,18 +145,13 @@ struct IncidentDetailView: View {
 	var body: some View {
 		ZStack {
 			Token.background.ignoresSafeArea()
-			if let model {
-				LoadableView(
-					state: model.state,
-					emptyTitle: "Not found",
-					emptyMessage: "This incident no longer exists.",
-					retry: { Task { await model.load() } }
-				) { detail in
-					IncidentDetailContent(detail: detail)
-				}
-				.refreshable { await model.load(showPlaceholder: false) }
-			} else {
-				SkeletonList()
+			LoadableView(
+				loader: model?.loader,
+				emptyTitle: "Not found",
+				emptyMessage: "This incident no longer exists.",
+				skeleton: { DetailSkeleton(leadsWithHeadline: true) }
+			) { detail in
+				IncidentDetailContent(detail: detail)
 			}
 		}
 		.navigationTitle("Incident")
@@ -176,11 +167,16 @@ struct IncidentDetailView: View {
 				}
 			}
 		}
+		.mapleScreen(Screen.incidentDetail)
 		.task(id: session.dataGeneration) {
-			let model = model ?? IncidentDetailModel(incidentID: incidentID, api: session.api, session: session)
+			let model = model?.generation == session.dataGeneration
+				? model! : IncidentDetailModel(incidentID: incidentID, api: session.api, session: session)
 			self.model = model
-			await model.load()
+			await model.loader.loadIfNeeded()
 		}
+		// The first incident someone reads is the moment "tell me next time"
+		// makes sense — so this is where the permission prompt lives, once.
+		.task { await PushRegistrar.shared.promptIfNeeded() }
 	}
 
 	private func shareText(_ detail: IncidentDetail) -> String {
@@ -202,20 +198,17 @@ private struct IncidentDetailContent: View {
 	let detail: IncidentDetail
 
 	var body: some View {
-		ScrollView {
-			VStack(alignment: .leading, spacing: 28) {
-				IncidentHeader(detail: detail)
-				WhatTheRuleSaw(detail: detail)
-				if detail.telemetryWindow != nil {
-					WhatChanged(detail: detail)
-				}
-				LikelyCause(detail: detail)
-				IncidentTimeline(detail: detail)
-				RuleFacts(detail: detail)
+		VStack(alignment: .leading, spacing: 28) {
+			IncidentHeader(detail: detail)
+			WhatTheRuleSaw(detail: detail)
+			if detail.telemetryWindow != nil {
+				WhatChanged(detail: detail)
 			}
-			.padding(.vertical, 16)
+			LikelyCause(detail: detail)
+			IncidentTimeline(detail: detail)
+			RuleFacts(detail: detail)
 		}
-		.scrollContentBackground(.hidden)
+		.padding(.vertical, 16)
 	}
 }
 
@@ -394,6 +387,12 @@ private struct WhatTheRuleSaw: View {
 							}
 						}
 					}
+					// The last x-axis label is centred on the final gridline, so
+					// without a trailing inset half of it renders outside the plot
+					// and gets cut ("9:5…" instead of "9:52 AM"). With the inset
+					// Charts drops an overflowing label instead of slicing it, which
+					// is the better of the two failures.
+					.chartPlotStyle { $0.padding(.trailing, 14) }
 					.frame(height: 150)
 					.padding(.horizontal, 16)
 
@@ -736,7 +735,9 @@ private struct RuleFacts: View {
 					}
 				}
 				if let count = detail.incident.lastSampleCount {
-					DetailRow("Last sample", "\(Format.count(count)) samples")
+					// The value is the check's sample size, not a time — "Last
+					// sample" read as a timestamp next to a count.
+					DetailRow("Last check", "\(Format.count(count)) samples")
 					Hairline()
 				}
 			}

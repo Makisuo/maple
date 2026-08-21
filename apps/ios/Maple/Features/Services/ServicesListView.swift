@@ -4,107 +4,69 @@ import SwiftUI
 @MainActor
 @Observable
 final class ServicesListModel {
-	private(set) var state: LoadState<[Service]> = .loading
+	private(set) var loader: ScreenLoader<[Service]>!
 	/// Open-issue counts, keyed by service. Fetched once alongside the list so
 	/// each row can carry a badge without an N+1.
 	private(set) var openIssueCounts: [String: Int] = [:]
 	var window: TimeWindow = .default
+	let generation: Int
 
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(api: any MapleAPI, session: SessionController) {
 		self.api = api
-		self.session = session
+		self.generation = session.dataGeneration
+		self.loader = ScreenLoader(session: session, screen: Screen.services, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetch() }
 	}
 
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
+	var state: LoadState<[Service]> { loader.state }
 
-		do {
-			let resolved = window.resolve()
-			async let servicesTask = api.services(window: resolved, limit: 50)
-			async let countsTask = api.issueCountsByService()
+	private func fetch() async throws -> [Service] {
+		let resolved = window.resolve()
+		async let servicesTask = api.services(window: resolved, limit: 50)
+		async let countsTask = api.issueCountsByService()
 
-			let services = try await servicesTask.items
-			// Counts are decoration: a failure there must not empty the screen.
-			openIssueCounts = Dictionary(
-				uniqueKeysWithValues: ((try? await countsTask) ?? []).map { ($0.serviceName, Int($0.openCount)) }
-			)
-
-			state = services.isEmpty ? .empty : .loaded(sorted(services))
-		} catch is CancellationError {
-			// A window change or org switch superseded this load.
-		} catch let error as MapleAPIError {
-			// A 401 is usually a token that expired mid-flight; re-mint and retry
-			// once before showing the user anything.
-			if await session.handle(error) {
-				await retryOnce()
-			} else {
-				state = .failed(error)
-			}
-		} catch {
-			state = .failed(.transport(error))
-		}
+		let services = try await servicesTask.items
+		// Counts are decoration: a failure there must not empty the screen.
+		openIssueCounts = Dictionary(
+			uniqueKeysWithValues: ((try? await countsTask) ?? []).map { ($0.serviceName, Int($0.openCount)) }
+		)
+		return sorted(services)
 	}
 
 	/// Unhealthy first, then by error rate, then by volume — so the rows that
 	/// need attention are the ones on screen without scrolling.
 	private func sorted(_ services: [Service]) -> [Service] {
 		services.sorted { first, second in
-			let a = ServiceHealth(errorRate: first.errorRate, p95LatencyMs: first.p95LatencyMs)
-			let b = ServiceHealth(errorRate: second.errorRate, p95LatencyMs: second.p95LatencyMs)
-			if a != b { return rank(a) < rank(b) }
+			let a = ServiceHealth(service: first)
+			let b = ServiceHealth(service: second)
+			if a != b { return a.rank > b.rank }
 			if first.errorRate != second.errorRate { return first.errorRate > second.errorRate }
 			return first.throughput > second.throughput
-		}
-	}
-
-	private func rank(_ health: ServiceHealth) -> Int {
-		switch health {
-		case .unhealthy: 0
-		case .degraded: 1
-		case .healthy: 2
-		}
-	}
-
-	private func retryOnce() async {
-		do {
-			let services = try await api.services(window: window.resolve(), limit: 50).items
-			state = services.isEmpty ? .empty : .loaded(sorted(services))
-		} catch let error as MapleAPIError {
-			state = .failed(error)
-			if error.requiresReauthentication { await session.signOutLocally() }
-		} catch {
-			state = .failed(.transport(error))
 		}
 	}
 }
 
 struct ServicesListView: View {
 	@Environment(SessionController.self) private var session
+	@Environment(AppNavigation.self) private var navigation
 	@State private var model: ServicesListModel?
 	@State private var search = ""
 
 	var body: some View {
-		NavigationStack {
+		@Bindable var navigation = navigation
+		// The path lives in `AppNavigation` so the throughput widget can open a
+		// service from outside the view tree — same reason as the Alerts hub.
+		return NavigationStack(path: $navigation.servicesPath) {
 			ZStack {
 				Token.background.ignoresSafeArea()
-				if let model {
-					content(model)
-				} else {
-					SkeletonList()
-				}
+				content
 			}
 			.navigationTitle("Services")
-			.navigationBarTitleDisplayMode(.inline)
+			.navigationBarTitleDisplayMode(.large)
 			.toolbar {
-				// The organization occupies the title slot: it is the context for
-				// everything on screen, the tab bar already names the screen, and
-				// a leading item here gets collapsed into an overflow menu — which
-				// is where a switcher goes to be undiscoverable.
-				ToolbarItem(placement: .principal) {
-					OrganizationSwitcherButton(fallbackTitle: "Services")
+				ToolbarItem(placement: .topBarLeading) {
+					OrganizationSwitcherButton()
 				}
 				if let model {
 					ToolbarItem(placement: .topBarTrailing) {
@@ -113,51 +75,48 @@ struct ServicesListView: View {
 				}
 			}
 			.mapleDestinations()
+			.mapleScreen(Screen.services)
 		}
 		// Re-runs on org switch, which is what clears one org's services before
 		// the next org's arrive.
 		.task(id: session.dataGeneration) {
-			let model = model ?? ServicesListModel(api: session.api, session: session)
+			let model = model?.generation == session.dataGeneration
+				? model! : ServicesListModel(api: session.api, session: session)
 			self.model = model
-			await model.load()
+			await model.loader.loadIfNeeded()
 		}
 	}
 
-	@ViewBuilder
-	private func content(_ model: ServicesListModel) -> some View {
+	private var content: some View {
 		LoadableView(
-			state: model.state,
+			loader: model?.loader,
 			emptyTitle: "No services",
-			emptyMessage: "No services reported telemetry in \(model.window.phrase).",
-			retry: { Task { await model.load() } }
+			emptyMessage: "No services reported telemetry in \(model?.window.phrase ?? TimeWindow.default.phrase).",
+			skeletonRowHeight: 64
 		) { services in
 			let visible = filtered(services)
-			ScrollView {
-				LazyVStack(spacing: 0) {
-					if visible.isEmpty {
-						EmptyStateView(
-							title: "No matches",
-							message: "No service name contains “\(search)”."
-						)
-						.padding(.top, 48)
-					} else {
-						ForEach(visible, id: \.name) { service in
-							NavigationLink(value: Route.service(name: service.name, window: model.window)) {
-								ServiceRow(
-									service: service,
-									openIssues: model.openIssueCounts[service.name] ?? 0
-								)
-							}
-							.buttonStyle(RowButtonStyle())
-							Hairline()
+			LazyVStack(spacing: 0) {
+				if visible.isEmpty {
+					EmptyStateView(
+						title: "No matches",
+						message: "No service name contains “\(search)”."
+					)
+					.padding(.top, 48)
+				} else if let model {
+					ForEach(visible, id: \.name) { service in
+						NavigationLink(value: Route.service(name: service.name, window: model.window)) {
+							ServiceRow(
+								service: service,
+								openIssues: model.openIssueCounts[service.name] ?? 0
+							)
 						}
+						.buttonStyle(RowButtonStyle())
+						Hairline()
 					}
 				}
 			}
-			.scrollContentBackground(.hidden)
 		}
 		.searchable(text: $search, prompt: "Filter services")
-		.refreshable { await model.load(showPlaceholder: false) }
 	}
 
 	private func filtered(_ services: [Service]) -> [Service] {
@@ -170,7 +129,11 @@ struct ServicesListView: View {
 			get: { model.window },
 			set: { newValue in
 				model.window = newValue
-				Task { await model.load() }
+				Telemetry.track(
+					Telemetry.Event.timeWindowChanged,
+					["screen": Screen.services, "window": newValue.rawValue]
+				)
+				Task { await model.loader.load(.replace) }
 			}
 		)
 	}
@@ -184,7 +147,7 @@ private struct ServiceRow: View {
 	let openIssues: Int
 
 	private var health: ServiceHealth {
-		ServiceHealth(errorRate: service.errorRate, p95LatencyMs: service.p95LatencyMs)
+		ServiceHealth(service: service)
 	}
 
 	var body: some View {

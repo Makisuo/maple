@@ -11,21 +11,17 @@ struct AnomalyDetail {
 @MainActor
 @Observable
 final class AnomalyDetailModel {
-	private(set) var state: LoadState<AnomalyDetail> = .loading
+	private(set) var loader: ScreenLoader<AnomalyDetail>!
 
 	let anomalyID: String
+	let generation: Int
 	private let api: any MapleAPI
-	private let session: SessionController
 
 	init(anomalyID: String, api: any MapleAPI, session: SessionController) {
 		self.anomalyID = anomalyID
 		self.api = api
-		self.session = session
-	}
-
-	func load(showPlaceholder: Bool = true) async {
-		if showPlaceholder && !state.hasContent { state = .loading }
-		let next = await session.perform { () -> AnomalyDetail in
+		self.generation = session.dataGeneration
+		self.loader = ScreenLoader(session: session, screen: Screen.anomalyDetail) { [unowned self] in
 			let anomaly = try await self.api.anomalyIncident(id: self.anomalyID)
 			async let series = self.api.anomalyIncidentTimeseries(id: anomaly.id)
 			async let issue: ErrorIssueDetail? = {
@@ -34,8 +30,9 @@ final class AnomalyDetailModel {
 			}()
 			return AnomalyDetail(anomaly: anomaly, timeseries: try? await series, linkedIssue: await issue)
 		}
-		if let next { state = next }
 	}
+
+	var state: LoadState<AnomalyDetail> { loader.state }
 }
 
 struct AnomalyDetailView: View {
@@ -47,26 +44,23 @@ struct AnomalyDetailView: View {
 	var body: some View {
 		ZStack {
 			Token.background.ignoresSafeArea()
-			if let model {
-				LoadableView(
-					state: model.state,
-					emptyTitle: "Not found",
-					emptyMessage: "This anomaly no longer exists.",
-					retry: { Task { await model.load() } }
-				) { detail in
-					AnomalyDetailContent(detail: detail)
-				}
-				.refreshable { await model.load(showPlaceholder: false) }
-			} else {
-				SkeletonList()
+			LoadableView(
+				loader: model?.loader,
+				emptyTitle: "Not found",
+				emptyMessage: "This anomaly no longer exists.",
+				skeleton: { DetailSkeleton(leadsWithHeadline: true) }
+			) { detail in
+				AnomalyDetailContent(detail: detail)
 			}
 		}
 		.navigationTitle("Anomaly")
 		.navigationBarTitleDisplayMode(.inline)
+		.mapleScreen(Screen.anomalyDetail)
 		.task(id: session.dataGeneration) {
-			let model = model ?? AnomalyDetailModel(anomalyID: anomalyID, api: session.api, session: session)
+			let model = model?.generation == session.dataGeneration
+				? model! : AnomalyDetailModel(anomalyID: anomalyID, api: session.api, session: session)
 			self.model = model
-			await model.load()
+			await model.loader.loadIfNeeded()
 		}
 	}
 }
@@ -79,41 +73,38 @@ private struct AnomalyDetailContent: View {
 	private var unit: SignalUnit { anomaly.signalType.unit }
 
 	var body: some View {
-		ScrollView {
-			VStack(alignment: .leading, spacing: 28) {
-				header
-				chart
-				facts
-				if let issue = detail.linkedIssue {
-					VStack(alignment: .leading, spacing: 10) {
-						SectionLabel("Linked issue").padding(.horizontal, 16)
-						NavigationLink(value: Route.issue(id: issue.id)) {
-							HStack(alignment: .top, spacing: 10) {
-								SeverityBadge(severity: issue.severity).frame(width: 56, alignment: .leading)
-								VStack(alignment: .leading, spacing: 4) {
-									Text(issue.exceptionType.isEmpty ? issue.errorLabel : issue.exceptionType)
-										.font(Typo.bodyMedium)
-										.foregroundStyle(Token.foreground)
-										.lineLimit(1)
-									Text(issue.exceptionMessage)
-										.font(Typo.small)
-										.foregroundStyle(Token.mutedForeground)
-										.lineLimit(2)
-								}
-								Spacer(minLength: 0)
+		VStack(alignment: .leading, spacing: 28) {
+			header
+			chart
+			facts
+			if let issue = detail.linkedIssue {
+				VStack(alignment: .leading, spacing: 10) {
+					SectionLabel("Linked issue").padding(.horizontal, 16)
+					NavigationLink(value: Route.issue(id: issue.id)) {
+						HStack(alignment: .top, spacing: 10) {
+							SeverityBadge(severity: issue.severity).frame(width: 56, alignment: .leading)
+							VStack(alignment: .leading, spacing: 4) {
+								Text(issue.exceptionType.isEmpty ? issue.errorLabel : issue.exceptionType)
+									.font(Typo.bodyMedium)
+									.foregroundStyle(Token.foreground)
+									.lineLimit(1)
+								Text(issue.exceptionMessage)
+									.font(Typo.small)
+									.foregroundStyle(Token.mutedForeground)
+									.lineLimit(2)
 							}
-							.padding(.horizontal, 16)
-							.padding(.vertical, 12)
-							.contentShape(.rect)
+							Spacer(minLength: 0)
 						}
-						.buttonStyle(RowButtonStyle())
-						Hairline()
+						.padding(.horizontal, 16)
+						.padding(.vertical, 12)
+						.contentShape(.rect)
 					}
+					.buttonStyle(RowButtonStyle())
+					Hairline()
 				}
 			}
-			.padding(.vertical, 16)
 		}
-		.scrollContentBackground(.hidden)
+		.padding(.vertical, 16)
 	}
 
 	private var header: some View {

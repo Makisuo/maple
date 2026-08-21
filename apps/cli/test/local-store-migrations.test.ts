@@ -1,3 +1,4 @@
+import { v7ToV8AppleCrashFramesModule } from "../src/server/local-store-migrations/v7-to-v8-apple-crash-frames"
 import { describe, expect, it } from "vitest"
 import {
 	CURRENT_LOCAL_SCHEMA,
@@ -15,7 +16,13 @@ import {
 	LOCAL_SCHEMA_V4_MANIFEST,
 	LOCAL_SCHEMA_V5,
 	LOCAL_SCHEMA_V5_MANIFEST,
+	LOCAL_SCHEMA_V7_MANIFEST,
 	LOCAL_SCHEMA_V6,
+	LOCAL_SCHEMA_V7,
+	LOCAL_SCHEMA_V8,
+	LOCAL_SCHEMA_V10,
+	LOCAL_SCHEMA_V10_MANIFEST,
+	LOCAL_SCHEMA_V11,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -52,22 +59,22 @@ import {
 	duplicateCursorContinuation,
 	type CopyProgress,
 } from "../src/server/local-store-migrations/legacy-to-current"
-import { v5ToV6ProductEventsModule } from "../src/server/local-store-migrations/v5-to-v6-product-events"
+import { v10ToV11ProductEventsModule } from "../src/server/local-store-migrations/v10-to-v11-product-events"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v6 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("18015521cc411d12")
-		expect(SCHEMA_DIGEST).toBe("18015521cc411d12bf37d5e0c61bd6db2ec8a498a773ef3c9b28172d957683be")
+	it("matches the generated v11 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("5642766fc2dced4f")
+		expect(SCHEMA_DIGEST).toBe("5642766fc2dced4f7ddf4c0f8c4470d0f20641e23a7c3ad31d3a410c55062a7d")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(6)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V6)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(11)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V11)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -124,15 +131,53 @@ describe("current local schema identity", () => {
 		// migration's backfill double-count into a table that cannot be rebuilt.
 		expect(minutelyView?.definition).toContain("FROM traces")
 		expect(minutelyView?.definition).not.toContain("FROM service_overview_minutely")
-		expect(
-			LOCAL_SCHEMA_V5_MANIFEST.objects
-				.map((object) => object.name)
-				.filter((name) => !v4Names.has(name)),
-		).toEqual(["service_overview_minutely", "service_overview_minutely_mv"])
+		const v5Names = new Set(LOCAL_SCHEMA_V5_MANIFEST.objects.map((object) => object.name))
+		const currentNames = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
+		expect([...v5Names].filter((name) => !v4Names.has(name))).toEqual([
+			"service_overview_minutely",
+			"service_overview_minutely_mv",
+		])
 
-		// v6 replaces web_events with product_events, adds identity_links, and
+		// v6, v7 and v8 add and remove nothing: they only replace materialized-view
+		// bodies, so their object set is identical to v5 and the manifest digest
+		// differs solely through those definitions. v9 removes `error_spans` and
+		// its view; v11 replaces `web_events` with `product_events` and adds
+		// `identity_links`. Asserted as an exact set difference rather than a
+		// relaxed check, so a future edge still cannot add or drop an object
+		// unnoticed.
+		expect([...v5Names].filter((name) => !currentNames.has(name))).toEqual([
+			"error_spans",
+			"error_spans_mv",
+			"web_events",
+			"web_events_mv",
+		])
+		expect([...currentNames].filter((name) => !v5Names.has(name))).toEqual([
+			"identity_links",
+			"identity_links_mv",
+			"product_events",
+			"product_events_mv",
+		])
+		const errorEventsView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "error_events_mv",
+		)
+		const errorEventsByTimeView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "error_events_by_time_mv",
+		)
+		// Exception-less 4xx client spans (Cloudflare marks every non-2xx fetch
+		// span Error) no longer materialize, and ids in the top stack line are
+		// redacted out of the fingerprint frames.
+		for (const view of [errorEventsView, errorEventsByTimeView]) {
+			expect(view?.definition).toContain("_httpStatus >= 400 AND _httpStatus < 500")
+			expect(view?.definition).toContain(":[0-9]+|line [0-9]+|0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|[0-9]{6,}")
+		}
+		const v5ErrorEventsView = LOCAL_SCHEMA_V5_MANIFEST.objects.find(
+			(object) => object.name === "error_events_mv",
+		)
+		expect(v5ErrorEventsView?.definition).not.toContain("_httpStatus")
+
+		// v11 replaces web_events with product_events, adds identity_links, and
 		// widens session_events by the three identity columns. Asserted against
-		// the frozen v5 manifest, same as above.
+		// the frozen v10 manifest, same as above.
 		const productEvents = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "product_events")
 		expect(productEvents?.engine).toBe("MergeTree")
 		expect(productEvents?.orderBy).toBe("(OrgId, Timestamp, VisitorId, SessionId, Seq)")
@@ -175,21 +220,33 @@ describe("current local schema identity", () => {
 			manifest.objects
 				.find((object) => object.name === "session_events")
 				?.columns.map((column) => column.name) ?? []
-		expect(sessionEventColumns(LOCAL_SCHEMA_V5_MANIFEST)).not.toContain("VisitorId")
+		expect(sessionEventColumns(LOCAL_SCHEMA_V10_MANIFEST)).not.toContain("VisitorId")
 		expect(sessionEventColumns(LOCAL_SCHEMA_MANIFEST).slice(-3)).toEqual([
 			"VisitorId",
 			"UserId",
 			"GroupId",
 		])
-		const v5Names = new Set(LOCAL_SCHEMA_V5_MANIFEST.objects.map((object) => object.name))
-		const v6Names = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
-		expect([...v6Names].filter((name) => !v5Names.has(name))).toEqual([
+		const v10Names = new Set(LOCAL_SCHEMA_V10_MANIFEST.objects.map((object) => object.name))
+		const v11Names = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
+		expect([...v11Names].filter((name) => !v10Names.has(name))).toEqual([
 			"identity_links",
 			"identity_links_mv",
 			"product_events",
 			"product_events_mv",
 		])
-		expect([...v5Names].filter((name) => !v6Names.has(name))).toEqual(["web_events", "web_events_mv"])
+		expect([...v10Names].filter((name) => !v11Names.has(name))).toEqual(["web_events", "web_events_mv"])
+	})
+
+	it("recognises Apple crash frames at v8 but not before", () => {
+		const applePattern = "^[0-9]+ +\\\\S.* +0x[0-9a-fA-F]+"
+		for (const name of ["error_events_mv", "error_events_by_time_mv"]) {
+			const view = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === name)
+			expect(view?.definition).toContain(applePattern)
+		}
+		// v7 matched no Apple frame at all, so every iOS crash fell through to the
+		// message hash and collapsed into one issue per exception type.
+		const v7View = LOCAL_SCHEMA_V7_MANIFEST.objects.find((object) => object.name === "error_events_mv")
+		expect(v7View?.definition).not.toContain(applePattern)
 	})
 })
 
@@ -202,7 +259,12 @@ describe("local migration registry", () => {
 			"local-0002-to-0003-service-map-ingest-bridge",
 			"local-0003-to-0004-web-events",
 			"local-0004-to-0005-service-overview-minutely",
-			"local-0005-to-0006-product-events",
+			"local-0005-to-0006-error-events-fingerprint-hygiene",
+			"local-0006-to-0007-error-service-version",
+			"local-0007-to-0008-apple-crash-frames",
+			"local-0008-to-0009-mv-sweep",
+			"local-0009-to-0010-semconv-key-renames",
+			"local-0010-to-0011-product-events",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -249,7 +311,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 7, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 12, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -461,7 +523,9 @@ describe("durable migration recovery", () => {
 				...base,
 				chain: [{ ...base.chain[0]!, progress: { sourceInventory: [], copied: {} } }],
 			})
-			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/sourceInventory must be an object/)
+			// The message is the schema's, so this asserts the failing field rather
+			// than the phrasing: an array where the inventory map belongs.
+			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/sourceInventory/)
 		} finally {
 			await rm(root, { recursive: true, force: true })
 		}
@@ -1042,7 +1106,182 @@ describe("legacy raw replay cursor", () => {
 	})
 })
 
-describe("v5 -> v6 product events module", () => {
+describe("v7 -> v8 journal state decoding", () => {
+	const RAW_TABLES = [
+		"logs",
+		"traces",
+		"metrics_sum",
+		"metrics_gauge",
+		"metrics_histogram",
+		"metrics_exponential_histogram",
+	]
+	const rawRows = Object.fromEntries(RAW_TABLES.map((table) => [table, "12"]))
+	const state = { module: "local-0007-to-0008-apple-crash-frames", version: 1, rawRows }
+
+	it("round-trips a valid state, with and without a retention floor", () => {
+		expect(v7ToV8AppleCrashFramesModule.decodeState(state)).toEqual(state)
+		expect(v7ToV8AppleCrashFramesModule.decodeState({ ...state, retentionDays: 90 })).toEqual({
+			...state,
+			retentionDays: 90,
+		})
+	})
+
+	it("rejects a field this build does not know about", () => {
+		// A journal carrying an unknown field was written by a different build.
+		// Dropping it silently would resume someone else's migration under our
+		// assumptions.
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, somethingElse: 1 })).toThrow()
+	})
+
+	it("rejects another module's state", () => {
+		expect(() =>
+			v7ToV8AppleCrashFramesModule.decodeState({
+				...state,
+				module: "local-0006-to-0007-error-service-version",
+			}),
+		).toThrow()
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, version: 2 })).toThrow()
+	})
+
+	it("rejects row counts that are not unsigned decimal strings", () => {
+		// They are strings precisely because a count can exceed
+		// Number.MAX_SAFE_INTEGER, so anything lossy has to fail loudly.
+		for (const bad of [12, "-1", "1.5", "1e3", ""]) {
+			expect(() =>
+				v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: { ...rawRows, logs: bad } }),
+			).toThrow()
+		}
+	})
+
+	it("rejects a missing or unknown raw table", () => {
+		const { logs: _dropped, ...missing } = rawRows
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: missing })).toThrow()
+		expect(() =>
+			v7ToV8AppleCrashFramesModule.decodeState({ ...state, rawRows: { ...rawRows, not_a_table: "1" } }),
+		).toThrow()
+	})
+
+	it("rejects a non-integer retention floor", () => {
+		expect(() => v7ToV8AppleCrashFramesModule.decodeState({ ...state, retentionDays: 1.5 })).toThrow()
+	})
+
+	it("decodes progress, and treats absent progress as absent", () => {
+		expect(v7ToV8AppleCrashFramesModule.decodeProgress(undefined)).toBeUndefined()
+		expect(v7ToV8AppleCrashFramesModule.decodeProgress({ installed: true })).toEqual({ installed: true })
+		expect(() => v7ToV8AppleCrashFramesModule.decodeProgress({ installed: false })).toThrow()
+		expect(() => v7ToV8AppleCrashFramesModule.decodeProgress({})).toThrow()
+	})
+})
+
+/**
+ * Characterization of the legacy raw-replay journal decoder.
+ *
+ * It guards a resumable copy out of a pre-v1 store: a journal it wrongly
+ * accepts resumes someone else's copy under this build's assumptions, and one
+ * it wrongly rejects strands a user mid-migration. Only one case was pinned
+ * before this, so these lock the accept/reject boundary in place.
+ */
+describe("legacy raw replay progress decoding", () => {
+	const inventory = {
+		table: "logs",
+		rowCount: "10",
+		retentionStartAt: "2026-01-01 00:00:00",
+		minTime: null,
+		maxTime: null,
+		hashSum: "1",
+		hashXor: "2",
+	}
+	const copied = {
+		rows: 1,
+		bytes: 2,
+		lastTimestamp: null,
+		lastHash: "12",
+		lastTieBreak: "13",
+		duplicateCount: 0,
+		duplicateGroupExhausted: false,
+	}
+	const pendingBatch = {
+		table: "logs",
+		rowCount: 1,
+		byteLength: 2,
+		firstTimestamp: null,
+		firstHash: "1",
+		firstTieBreak: "2",
+		lastTimestamp: null,
+		lastHash: "3",
+		lastTieBreak: "4",
+		lastKeyCount: 1,
+		lastKeyExhausted: false,
+		signature: "a".repeat(64),
+	}
+	const progress = { sourceInventory: { logs: inventory }, copied: { logs: copied } }
+	const decode = (value: unknown) => legacyToCurrentModule.decodeProgress(value)
+
+	it("accepts a well-formed progress, with and without a pending batch", () => {
+		expect(decode(progress)).toEqual(progress)
+		expect(decode({ ...progress, pendingBatch })).toEqual({ ...progress, pendingBatch })
+		// Absent progress is "not started", which is not the same as invalid.
+		expect(decode(undefined)).toBeUndefined()
+	})
+
+	it("rejects a non-object, and unknown top-level fields", () => {
+		for (const bad of [null, [], "x", 1]) expect(() => decode(bad)).toThrow()
+		expect(() => decode({ ...progress, somethingElse: 1 })).toThrow()
+	})
+
+	it("rejects tables that are not registered raw tables", () => {
+		expect(() => decode({ ...progress, sourceInventory: { not_a_table: inventory } })).toThrow()
+		expect(() => decode({ ...progress, copied: { not_a_table: copied } })).toThrow()
+		expect(() =>
+			decode({ ...progress, pendingBatch: { ...pendingBatch, table: "not_a_table" } }),
+		).toThrow()
+	})
+
+	it("rejects an inventory whose table disagrees with its key", () => {
+		expect(() =>
+			decode({ ...progress, sourceInventory: { logs: { ...inventory, table: "traces" } } }),
+		).toThrow()
+	})
+
+	it("rejects cursors that are not unsigned decimal strings", () => {
+		// These are interpolated into numeric SQL comparisons, so anything that
+		// could change their meaning has to fail here rather than there.
+		for (const bad of ["-1", "1.5", "0x10", "", 12]) {
+			expect(() => decode({ ...progress, copied: { logs: { ...copied, lastHash: bad } } })).toThrow()
+		}
+		// null is a legitimate "no cursor yet".
+		expect(decode({ ...progress, copied: { logs: { ...copied, lastHash: null } } })).toBeDefined()
+	})
+
+	it("rejects counters that are not non-negative safe integers", () => {
+		for (const bad of [-1, 1.5, Number.MAX_SAFE_INTEGER + 2, "1", null]) {
+			expect(() => decode({ ...progress, copied: { logs: { ...copied, rows: bad } } })).toThrow()
+		}
+	})
+
+	it("rejects a non-boolean exhaustion flag", () => {
+		expect(() =>
+			decode({ ...progress, copied: { logs: { ...copied, duplicateGroupExhausted: "no" } } }),
+		).toThrow()
+	})
+
+	it("rejects a pending batch that is empty or wrongly signed", () => {
+		// An empty batch would commit nothing while advancing the cursor past it.
+		expect(() => decode({ ...progress, pendingBatch: { ...pendingBatch, rowCount: 0 } })).toThrow()
+		for (const bad of ["a".repeat(63), "z".repeat(64), ""]) {
+			expect(() => decode({ ...progress, pendingBatch: { ...pendingBatch, signature: bad } })).toThrow()
+		}
+	})
+
+	it("rejects missing fields anywhere in the tree", () => {
+		const { hashSum: _h, ...shortInventory } = inventory
+		expect(() => decode({ ...progress, sourceInventory: { logs: shortInventory } })).toThrow()
+		const { rows: _r, ...shortCopied } = copied
+		expect(() => decode({ ...progress, copied: { logs: shortCopied } })).toThrow()
+	})
+})
+
+describe("v10 -> v11 product events module", () => {
 	const rawRows = {
 		logs: "1",
 		traces: "2",
@@ -1052,30 +1291,30 @@ describe("v5 -> v6 product events module", () => {
 		metrics_exponential_histogram: "0",
 	}
 	const state = {
-		module: "local-0005-to-0006-product-events",
+		module: "local-0010-to-0011-product-events",
 		version: 1,
 		rawRows,
 		sourceRows: { browserEvents: "3", identityPairs: "2" },
 	}
 
-	it("binds the frozen v5 and v6 identities and never the current constant", () => {
-		expect(v5ToV6ProductEventsModule.from).toEqual(LOCAL_SCHEMA_V5)
-		expect(v5ToV6ProductEventsModule.to).toEqual(LOCAL_SCHEMA_V6)
-		expect(v5ToV6ProductEventsModule.from).not.toBe(CURRENT_LOCAL_SCHEMA)
-		expect(v5ToV6ProductEventsModule.operations.map((operation) => operation.id)).toEqual([
-			"clone-v5-store",
+	it("binds the frozen v10 and v11 identities and never the current constant", () => {
+		expect(v10ToV11ProductEventsModule.from).toEqual(LOCAL_SCHEMA_V10)
+		expect(v10ToV11ProductEventsModule.to).toEqual(LOCAL_SCHEMA_V11)
+		expect(v10ToV11ProductEventsModule.from).not.toBe(CURRENT_LOCAL_SCHEMA)
+		expect(v10ToV11ProductEventsModule.operations.map((operation) => operation.id)).toEqual([
+			"clone-v10-store",
 			"add-session-event-identity",
 			"install-product-events",
-			"verify-v6-schema",
+			"verify-v11-schema",
 		])
-		// The chain must reach v6 through this module and only this module.
-		const chain = resolveMigrationChain(LOCAL_SCHEMA_V5, CURRENT_LOCAL_SCHEMA)
-		expect(chain.map((migration) => migration.id)).toEqual(["local-0005-to-0006-product-events"])
-		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V6)
+		// The chain must reach v11 through this module and only this module.
+		const chain = resolveMigrationChain(LOCAL_SCHEMA_V10, CURRENT_LOCAL_SCHEMA)
+		expect(chain.map((migration) => migration.id)).toEqual(["local-0010-to-0011-product-events"])
+		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V11)
 		// The dropped table is declared, and the backfilled ones say what they
 		// are rebuilt from.
 		const dispositions = new Map(
-			v5ToV6ProductEventsModule.dispositions.map((entry) => [entry.name, entry.disposition]),
+			v10ToV11ProductEventsModule.dispositions.map((entry) => [entry.name, entry.disposition]),
 		)
 		expect(dispositions.get("web_events")).toBe("invalidate")
 		expect(dispositions.get("product_events")).toBe("rebuild-complete")
@@ -1084,49 +1323,49 @@ describe("v5 -> v6 product events module", () => {
 	})
 
 	it("decodes only its own well-formed persisted state", () => {
-		expect(v5ToV6ProductEventsModule.decodeState(state)).toEqual(state)
-		expect(v5ToV6ProductEventsModule.decodeState({ ...state, retentionDays: 120 })).toEqual({
+		expect(v10ToV11ProductEventsModule.decodeState(state)).toEqual(state)
+		expect(v10ToV11ProductEventsModule.decodeState({ ...state, retentionDays: 120 })).toEqual({
 			...state,
 			retentionDays: 120,
 		})
 		expect(() =>
-			v5ToV6ProductEventsModule.decodeState({
+			v10ToV11ProductEventsModule.decodeState({
 				...state,
-				module: "local-0004-to-0005-service-overview-minutely",
+				module: "local-0009-to-0010-semconv-key-renames",
 			}),
 		).toThrow(/unsupported module or version/)
-		expect(() => v5ToV6ProductEventsModule.decodeState({ ...state, version: 2 })).toThrow(
+		expect(() => v10ToV11ProductEventsModule.decodeState({ ...state, version: 2 })).toThrow(
 			/unsupported module or version/,
 		)
-		expect(() => v5ToV6ProductEventsModule.decodeState({ ...state, extra: true })).toThrow(
+		expect(() => v10ToV11ProductEventsModule.decodeState({ ...state, extra: true })).toThrow(
 			/unknown field/,
 		)
-		expect(() => v5ToV6ProductEventsModule.decodeState({ ...state, retentionDays: "120" })).toThrow(
+		expect(() => v10ToV11ProductEventsModule.decodeState({ ...state, retentionDays: "120" })).toThrow(
 			/retentionDays must be an integer/,
 		)
 		expect(() =>
-			v5ToV6ProductEventsModule.decodeState({ ...state, rawRows: { ...rawRows, logs: "-1" } }),
+			v10ToV11ProductEventsModule.decodeState({ ...state, rawRows: { ...rawRows, logs: "-1" } }),
 		).toThrow(/rawRows.logs/)
 		expect(() =>
-			v5ToV6ProductEventsModule.decodeState({ ...state, rawRows: { ...rawRows, web_events: "1" } }),
+			v10ToV11ProductEventsModule.decodeState({ ...state, rawRows: { ...rawRows, web_events: "1" } }),
 		).toThrow(/unknown table/)
 		// The backfill counts are part of the resume key: a state without them
 		// cannot verify, so it must not decode.
 		const { sourceRows: _sourceRows, ...withoutSourceRows } = state
-		expect(() => v5ToV6ProductEventsModule.decodeState(withoutSourceRows)).toThrow(
+		expect(() => v10ToV11ProductEventsModule.decodeState(withoutSourceRows)).toThrow(
 			/sourceRows must be an object/,
 		)
 		expect(() =>
-			v5ToV6ProductEventsModule.decodeState({ ...state, sourceRows: { browserEvents: "3" } }),
+			v10ToV11ProductEventsModule.decodeState({ ...state, sourceRows: { browserEvents: "3" } }),
 		).toThrow(/identityPairs/)
 		expect(() =>
-			v5ToV6ProductEventsModule.decodeState({
+			v10ToV11ProductEventsModule.decodeState({
 				...state,
 				sourceRows: { browserEvents: 3, identityPairs: "2" },
 			}),
 		).toThrow(/browserEvents/)
 		expect(() =>
-			v5ToV6ProductEventsModule.decodeState({
+			v10ToV11ProductEventsModule.decodeState({
 				...state,
 				sourceRows: { browserEvents: "3", identityPairs: "2", webEvents: "0" },
 			}),
@@ -1134,10 +1373,10 @@ describe("v5 -> v6 product events module", () => {
 	})
 
 	it("decodes progress as the single installed marker", () => {
-		expect(v5ToV6ProductEventsModule.decodeProgress(undefined)).toBeUndefined()
-		expect(v5ToV6ProductEventsModule.decodeProgress({ installed: true })).toEqual({ installed: true })
-		expect(() => v5ToV6ProductEventsModule.decodeProgress({ installed: false })).toThrow(/invalid/)
-		expect(() => v5ToV6ProductEventsModule.decodeProgress({ installed: true, rows: 1 })).toThrow(
+		expect(v10ToV11ProductEventsModule.decodeProgress(undefined)).toBeUndefined()
+		expect(v10ToV11ProductEventsModule.decodeProgress({ installed: true })).toEqual({ installed: true })
+		expect(() => v10ToV11ProductEventsModule.decodeProgress({ installed: false })).toThrow(/invalid/)
+		expect(() => v10ToV11ProductEventsModule.decodeProgress({ installed: true, rows: 1 })).toThrow(
 			/invalid/,
 		)
 	})
@@ -1145,7 +1384,7 @@ describe("v5 -> v6 product events module", () => {
 	it("recovers by keeping whatever state and progress were persisted", async () => {
 		const progress = { installed: true } as const
 		await expect(
-			v5ToV6ProductEventsModule.recover({} as MigrationModuleContext, state as never, progress),
+			v10ToV11ProductEventsModule.recover({} as MigrationModuleContext, state as never, progress),
 		).resolves.toEqual({ state, progress })
 	})
 })

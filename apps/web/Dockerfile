@@ -1,5 +1,5 @@
 # Build context: monorepo root (.)
-FROM oven/bun:1.3.11 AS base
+FROM oven/bun:1.4.0 AS base
 WORKDIR /app
 
 FROM base AS pruner

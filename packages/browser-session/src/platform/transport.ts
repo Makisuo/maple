@@ -5,6 +5,8 @@
 export interface IngestConfig {
 	readonly endpoint: string
 	readonly ingestKey: string
+	/** `x-maple-sdk` value — see {@link SDK_HINT_HEADER}. */
+	readonly sdk: string
 	readonly maskAllInputs: boolean
 	readonly maskAllText: boolean
 	/**
@@ -22,6 +24,28 @@ export interface IngestConfig {
 export interface EventIdentity {
 	readonly id?: string | undefined
 	readonly groupId?: string | undefined
+}
+
+/**
+ * Header stamped on every request to ingest: `<sdk-name>/<version>`, e.g.
+ * `maple-browser/0.3.0`. Browsers refuse to let a page set `user-agent`, so
+ * without this a rejected request carried nothing that said which SDK build
+ * produced it. Ingest records it as `maple.sdk` on the request span. Every
+ * gateway that receives browser traffic must allow it in CORS (`apps/ingest`
+ * and the CLI's local listener do) — a header the SDK always sends and
+ * preflight refuses blocks the whole SDK, not just the header.
+ */
+export const SDK_HINT_HEADER = "x-maple-sdk"
+
+/** `<name>/<version>` — the one shape ingest expects in `x-maple-sdk`. */
+export const sdkHint = (name: string, version: string): string => `${name}/${version}`
+
+/** Auth + identity headers shared by every ingest request. */
+export function ingestHeaders(config: Pick<IngestConfig, "ingestKey" | "sdk">): Record<string, string> {
+	return {
+		Authorization: `Bearer ${config.ingestKey}`,
+		[SDK_HINT_HEADER]: config.sdk,
+	}
 }
 
 // Replay POSTs are best-effort and must never throw into the host app, but a
@@ -73,7 +97,7 @@ export async function postSessionMeta(
 	await fetch(`${config.endpoint}/v1/sessionReplays/meta`, {
 		method: "POST",
 		headers: {
-			Authorization: `Bearer ${config.ingestKey}`,
+			...ingestHeaders(config),
 			"content-type": "application/x-ndjson",
 		},
 		body,
@@ -95,7 +119,7 @@ export async function postSessionEvents(
 	await fetch(`${config.endpoint}/v1/sessionEvents`, {
 		method: "POST",
 		headers: {
-			Authorization: `Bearer ${config.ingestKey}`,
+			...ingestHeaders(config),
 			"content-type": "application/x-ndjson",
 		},
 		body,
@@ -113,28 +137,43 @@ export interface ChunkMeta {
 	readonly durationMs: number
 }
 
+/**
+ * How ingest answered a chunk upload. `"exhausted"` is the 413 ingest returns
+ * once a session has hit its recorded-size ceiling; every later chunk of that
+ * session gets the same answer, so the recorder must stop uploading rather than
+ * pay for a rejected POST every flush for the rest of the page's life.
+ */
+export type BlobPostOutcome = "accepted" | "rejected" | "exhausted" | "failed"
+
+const SESSION_EXHAUSTED_STATUS = 413
+
 /** POST a gzipped rrweb event chunk. */
 export async function postSessionBlob(
 	config: IngestConfig,
 	meta: ChunkMeta,
 	gzipped: Uint8Array,
 	keepalive = false,
-): Promise<void> {
-	await fetch(`${config.endpoint}/v1/sessionReplays/blob`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${config.ingestKey}`,
-			"content-type": "application/octet-stream",
-			"x-maple-session-id": meta.sessionId,
-			"x-maple-chunk-seq": String(meta.chunkSeq),
-			"x-maple-is-checkpoint": meta.isCheckpoint ? "1" : "0",
-			"x-maple-event-count": String(meta.eventCount),
-			"x-maple-duration-ms": String(meta.durationMs),
-		},
-		body: gzipped as BodyInit,
-		keepalive: keepaliveFor(keepalive, gzipped.byteLength),
-	}).catch((error) => {
+): Promise<BlobPostOutcome> {
+	try {
+		const response = await fetch(`${config.endpoint}/v1/sessionReplays/blob`, {
+			method: "POST",
+			headers: {
+				...ingestHeaders(config),
+				"content-type": "application/octet-stream",
+				"x-maple-session-id": meta.sessionId,
+				"x-maple-chunk-seq": String(meta.chunkSeq),
+				"x-maple-is-checkpoint": meta.isCheckpoint ? "1" : "0",
+				"x-maple-event-count": String(meta.eventCount),
+				"x-maple-duration-ms": String(meta.durationMs),
+			},
+			body: gzipped as BodyInit,
+			keepalive: keepaliveFor(keepalive, gzipped.byteLength),
+		})
+		if (response.ok) return "accepted"
+		return response.status === SESSION_EXHAUSTED_STATUS ? "exhausted" : "rejected"
+	} catch (error) {
 		// Best-effort.
 		warnDropped("blob PUT", error)
-	})
+		return "failed"
+	}
 }

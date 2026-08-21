@@ -184,7 +184,7 @@ export const V2SessionReplayManifest = Schema.Struct({
 	}),
 	max_bytes_per_request: Schema.Number.annotate({
 		description:
-			"Server cap on the encoded size of one events response. A range whose payload exceeds this is refused with `range_too_large`.",
+			"Budget for one events request, in payload bytes. Sum the range's `byte_size` against this — a range exceeding it is refused with `range_too_large`.",
 	}),
 	truncated: Schema.Boolean.annotate({
 		description:
@@ -368,8 +368,29 @@ export const MAX_REPLAY_CHUNKS_PER_REQUEST = 40
  * over-wide range is refused by us — a `range_too_large` naming the range — and
  * never dies as a platform abort, which the transient-error classifier reads as
  * a flaky warehouse and retries before reporting the service as unavailable.
+ *
+ * This bounds the **encoded** warehouse response, which is not what a caller
+ * can measure — see `MAX_REPLAY_RANGE_PAYLOAD_BYTES` for the budget they get.
  */
 export const MAX_REPLAY_EVENTS_RESPONSE_BYTES = 8_000_000
+
+/**
+ * Payload budget for one events request — the number clients plan ranges
+ * against, and the one the manifest advertises as `max_bytes_per_request`.
+ *
+ * Deliberately below `MAX_REPLAY_EVENTS_RESPONSE_BYTES`, because the two count
+ * different things. A caller can only sum the manifest's `byte_size`, which is
+ * the raw payload; the response guard counts the JSON-encoded row, where the
+ * payload is a string field and every quote in it — and rrweb JSON is dense
+ * with them — costs a second byte. Measured on production chunks the encoded
+ * row runs 1.07–1.14x the payload, so budgeting a range against the encoded
+ * ceiling means a well-packed range fails the response guard by construction:
+ * a 413 on exactly the recordings big enough to need ranging, with
+ * `retry: never`, i.e. permanently unplayable.
+ *
+ * 6 MB leaves ~33% headroom over the worst ratio observed.
+ */
+export const MAX_REPLAY_RANGE_PAYLOAD_BYTES = 6_000_000
 
 /**
  * Hard ceiling on manifest rows. Well beyond reach: ingest caps a session at

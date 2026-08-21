@@ -108,6 +108,33 @@ describe("hydrateDestinationRow", () => {
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
+	it.effect("round-trips a telegram destination without leaking the token into config_json", () => {
+		const testDb = createTestDb(createdDbs)
+		const id = asDestinationId("00000000-0000-4000-8000-000000000009")
+		const secretConfig: DestinationSecretConfig = {
+			type: "telegram",
+			botToken: "123456789:AAHqwertyuiopasdfghjklzxcvbnm123456",
+			chatId: "-1001234567890",
+		}
+		return Effect.gen(function* () {
+			yield* seedDestination({
+				id,
+				type: "telegram",
+				publicConfig: { summary: "Chat -1001234567890", channelLabel: "-1001234567890" },
+				secretConfig,
+			})
+			const row = yield* loadDestination(id)
+
+			// `config_json` is Electric-synced to the browser, so the bot token may
+			// exist only inside the encrypted blob.
+			assert.notInclude(JSON.stringify(row.configJson), "AAHqwerty")
+
+			const hydrated = yield* hydrateDestinationRow(row, ENCRYPTION_KEY, hydrationErrors)
+			assert.deepStrictEqual(hydrated.secretConfig, secretConfig)
+			assert.strictEqual(hydrated.publicConfig.channelLabel, "-1001234567890")
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
 	it.effect("hydrates a chat destination carrying optional public config keys", () => {
 		const testDb = createTestDb(createdDbs)
 		const id = asDestinationId("00000000-0000-4000-8000-000000000002")

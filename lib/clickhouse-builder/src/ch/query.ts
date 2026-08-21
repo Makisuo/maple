@@ -18,7 +18,7 @@
 //
 // Type-safe joins:
 //   CH.from(Traces)
-//     .innerJoin(ErrorSpans, "e", (main, e) => main.TraceId.eq(e.TraceId))
+//     .innerJoin(Events, "e", (main, e) => main.TraceId.eq(e.TraceId))
 //     .select($ => ({
 //       traceId: $.TraceId,
 //       errorType: $.e.ErrorType,

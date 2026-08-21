@@ -1,4 +1,5 @@
 import Foundation
+import MapleWidgetData
 import OpenAPIRuntime
 import OpenAPIURLSession
 
@@ -34,11 +35,15 @@ public typealias AnomalyIncidentStatus = Components.Schemas._MapleAnomalyInciden
 public typealias AnomalyIncidentSeverity = Components.Schemas._MapleAnomalyIncidentSeverity
 public typealias AnomalySignalType = Components.Schemas._MapleAnomalySignalType
 
+public typealias MobileDevice = Components.Schemas.MobileDevice
+public typealias PushEnvironment = Components.Schemas._MapleMobilePushEnvironment
+
 public typealias TraceTimeseriesResult = Components.Schemas.TraceTimeseriesResult
 public typealias TraceBreakdownResult = Components.Schemas.TraceBreakdownResult
 public typealias TraceAggregation = Components.Schemas.TraceTimeseriesParams.AggregationPayload
 public typealias TraceBreakdownAggregation = Components.Schemas.TraceBreakdownParams.AggregationPayload
 public typealias TraceBreakdownGroup = Components.Schemas.TraceBreakdownParams.GroupByPayload
+public typealias TraceTimeseriesGroup = Components.Schemas.TraceTimeseriesParams.GroupByPayload
 public typealias TimeseriesSeries = Components.Schemas.TimeseriesSeries
 public typealias TimeseriesValuePoint = Components.Schemas.TimeseriesValuePoint
 public typealias BreakdownItem = Components.Schemas.BreakdownItem
@@ -104,6 +109,16 @@ public struct IssueQuery: Hashable, Sendable {
 /// A protocol so screens can be driven by a stub in tests and previews without
 /// a network, a token, or a signed-in user.
 public protocol MapleAPI: Sendable {
+	/// A view of this client that names `organizationId` explicitly instead of
+	/// relying on the session token's active-organization claim.
+	///
+	/// A scoped *instance* rather than a per-call argument: the alternative is a
+	/// parameter on all twenty methods below and every stub that implements
+	/// them. A task-local would read better still, but its failure mode —
+	/// "forgot to wrap, request silently went to the active organization" — is
+	/// the exact bug this exists to prevent.
+	func scoped(to organizationId: String) -> any MapleAPI
+
 	func services(window: ResolvedTimeWindow, limit: Int) async throws -> Page<Service>
 	func service(named name: String, window: ResolvedTimeWindow) async throws -> Service
 	func issues(query: IssueQuery, window: ResolvedTimeWindow?, limit: Int, cursor: String?) async throws
@@ -126,15 +141,40 @@ public protocol MapleAPI: Sendable {
 	func anomalyIncident(id: String) async throws -> AnomalyIncident
 	func anomalyIncidentTimeseries(id: String) async throws -> AnomalyIncidentTimeseries
 
+	// Push — see MapleClient+Devices.swift
+	func registerDevice(_ registration: DeviceRegistration) async throws -> MobileDevice
+	func unregisterDevice(token: String) async throws
+	func myDevices() async throws -> [MobileDevice]
+	func registerLiveActivity(deviceToken: String, incidentId: String, activityId: String, pushToken: String)
+		async throws
+	func endLiveActivity(deviceToken: String, incidentId: String) async throws
+
 	// Telemetry — see MapleClient+Telemetry.swift
 	func traceTimeseries(_ request: TraceTimeseriesRequest) async throws -> TraceTimeseriesResult
 	func traceBreakdown(_ request: TraceBreakdownRequest) async throws -> TraceBreakdownResult
+
+	// Home Screen widgets — see MapleClient+WidgetSummary.swift
+	func widgetSummary() async throws -> WidgetSummaryPayload
+	func mintWidgetCredential(installationId: String) async throws -> WidgetCredential
+	func revokeWidgetCredential(installationId: String) async throws
+}
+
+extension MapleAPI {
+	/// Stubs and fixtures serve one organization and ignore the scope.
+	public func scoped(to organizationId: String) -> any MapleAPI { self }
 }
 
 /// The live client: generated operations, wrapped so call sites see plain
 /// values and one error type.
 public struct MapleClient: MapleAPI {
 	let client: Client
+	private let tokens: any MapleTokenProvider
+	let serverURL: URL
+	private let transport: any ClientTransport
+	/// Shared with every client `scoped(to:)` produces, so a widget fetch for
+	/// one organization still dedupes against a foreground fetch for another
+	/// when they happen to be identical.
+	private let coalescer: RequestCoalescer
 
 	/// - Parameters:
 	///   - tokens: supplies the Clerk session JWT.
@@ -142,12 +182,73 @@ public struct MapleClient: MapleAPI {
 	///     (`https://api.maple.dev`), so the production URL is never hardcoded
 	///     in Swift. Override for a locally-run API.
 	public init(tokens: any MapleTokenProvider, baseURL: URL? = nil) throws {
-		self.client = Client(
+		self.init(
+			tokens: tokens,
 			serverURL: try baseURL ?? Servers.Server1.url(),
 			transport: URLSessionTransport(),
-			// Order matters: auth runs outermost so the error mapper sees the
-			// response to a request that actually carried a token.
-			middlewares: [BearerAuthMiddleware(tokens: tokens), ErrorMappingMiddleware()]
+			organizationId: nil,
+			coalescer: RequestCoalescer()
+		)
+	}
+
+	/// Builds a client over a caller-supplied transport. For tests — it is what
+	/// lets the request-count assertions run without a network.
+	init(
+		tokens: any MapleTokenProvider,
+		serverURL: URL,
+		transport: any ClientTransport,
+		coalescer: RequestCoalescer = RequestCoalescer()
+	) {
+		self.init(
+			tokens: tokens,
+			serverURL: serverURL,
+			transport: transport,
+			organizationId: nil,
+			coalescer: coalescer
+		)
+	}
+
+	private init(
+		tokens: any MapleTokenProvider,
+		serverURL: URL,
+		transport: any ClientTransport,
+		organizationId: String?,
+		coalescer: RequestCoalescer
+	) {
+		self.tokens = tokens
+		self.serverURL = serverURL
+		self.transport = transport
+		self.coalescer = coalescer
+
+		// Order matters, outermost first: auth runs outermost so the error
+		// mapper sees the response to a request that actually carried a token,
+		// and coalescing runs innermost so its key is computed over the finished
+		// request — bearer token and organization header included — and so every
+		// waiter still gets its own typed error from the mapper above it.
+		var middlewares: [any ClientMiddleware] = [BearerAuthMiddleware(tokens: tokens)]
+		if let organizationId {
+			middlewares.append(OrganizationMiddleware(organizationId: organizationId))
+		}
+		middlewares.append(ErrorMappingMiddleware())
+		middlewares.append(CoalescingMiddleware(coalescer: coalescer))
+
+		self.client = Client(serverURL: serverURL, transport: transport, middlewares: middlewares)
+	}
+
+	/// The transport is shared rather than rebuilt, so scoping to three
+	/// organizations does not mean three `URLSession`s and three connection
+	/// pools.
+	///
+	/// A scoped call must never invalidate the token: it does not depend on the
+	/// active-organization claim, so a background fetch for one organization
+	/// must not perturb the token the foreground is using for another.
+	public func scoped(to organizationId: String) -> any MapleAPI {
+		MapleClient(
+			tokens: tokens,
+			serverURL: serverURL,
+			transport: transport,
+			organizationId: organizationId,
+			coalescer: coalescer
 		)
 	}
 
@@ -230,15 +331,47 @@ public struct MapleClient: MapleAPI {
 	func mapping<T>(_ work: () async throws -> T) async throws -> T {
 		do {
 			return try await work()
-		} catch let error as MapleAPIError {
-			throw error
-		} catch let error as ClientError {
-			if let underlying = error.underlyingError as? MapleAPIError { throw underlying }
-			throw MapleAPIError.transport(error)
-		} catch is CancellationError {
-			throw CancellationError()
 		} catch {
-			throw MapleAPIError.decoding(error)
+			throw Self.normalize(error)
+		}
+	}
+
+	/// The one place a raw error becomes either `MapleAPIError` or
+	/// `CancellationError`. Static so it is testable without a token provider.
+	///
+	/// OpenAPIRuntime wraps everything the transport throws in a `ClientError`,
+	/// including the `CancellationError` / `URLError(.cancelled)` that a
+	/// cancelled Task produces. Mapping that to `.transport` reported every
+	/// superseded request — a tab switch, an org switch, a pull-to-refresh
+	/// interrupted by navigation — as "Can't reach Maple", so cancellation is
+	/// unwrapped first and rethrown as the plain `CancellationError` that
+	/// callers already look for.
+	static func normalize(_ error: any Error) -> any Error {
+		if isCancellation(error) { return CancellationError() }
+		switch error {
+		case let error as MapleAPIError:
+			return error
+		case let error as ClientError:
+			if let underlying = error.underlyingError as? MapleAPIError { return underlying }
+			return MapleAPIError.transport(error)
+		default:
+			return MapleAPIError.decoding(error)
+		}
+	}
+
+	static func isCancellation(_ error: any Error) -> Bool {
+		switch error {
+		case is CancellationError:
+			return true
+		case let error as URLError:
+			return error.code == .cancelled
+		case let error as ClientError:
+			return isCancellation(error.underlyingError)
+		case let error as MapleAPIError:
+			if case .transport(let underlying) = error { return isCancellation(underlying) }
+			return false
+		default:
+			return false
 		}
 	}
 }

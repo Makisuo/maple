@@ -8,6 +8,7 @@ import { discordTransport } from "./discord"
 import { hazelTransport } from "./hazel"
 import { pagerDutyTransport } from "./pagerduty"
 import { makeSlackTransport } from "./slack"
+import { telegramTransport } from "./telegram"
 import { webhookTransport } from "./webhook"
 
 /**
@@ -123,19 +124,27 @@ describe("transport render: guard flags", () => {
 				}),
 			),
 		],
+		[
+			"telegram",
+			telegramTransport.render(
+				inputFor({ type: "telegram", botToken: "123456789:AA-token", chatId: "-100123" }),
+			),
+		],
 	]
 
 	it("guards exactly the user-configured hosts", () => {
 		const guarded = specs.filter(([, spec]) => spec.guarded).map(([name]) => name)
-		// slack + pagerduty post to compile-time vendor constants: there is no
-		// attacker-controlled URL to validate, so the guard would only cost a
+		// slack + pagerduty + telegram post to compile-time vendor constants: there
+		// is no attacker-controlled URL to validate, so the guard would only cost a
 		// redirect walk.
 		assert.deepStrictEqual(guarded, ["webhook", "discord", "hazel-oauth"])
 	})
 
 	it("marks exactly the providers whose token rides in the URL path", () => {
 		const sensitive = specs.filter(([, spec]) => spec.sensitivePath).map(([name]) => name)
-		assert.deepStrictEqual(sensitive, ["discord", "hazel-oauth"])
+		// telegram is the first provider where this disagrees with `guarded`: a
+		// fixed vendor host, but the bot token rides in the path.
+		assert.deepStrictEqual(sensitive, ["discord", "hazel-oauth", "telegram"])
 	})
 
 	it("always produces a parseable JSON body", () => {
@@ -241,4 +250,102 @@ describe("transport render: event types", () => {
 			})
 		})
 	}
+})
+
+/**
+ * The sparkline is the one part of a renotify that differs from the message
+ * before it, and it is the only trend that survives where an image cannot go —
+ * a lock screen, a push preview, a plain-text client. Both providers carry it,
+ * on both the default and the templated path, and all four of those used to be
+ * separate literals that had already drifted apart once.
+ */
+describe("transport render: sparkline", () => {
+	const SPARK = "▁▂▄▆█"
+	const withSpark = { ...context, sparkline: SPARK }
+
+	const slack = makeSlackTransport({ resolveSlackBotToken: () => Effect.succeed("t") })
+	const slackBody = (ctx: DispatchContext, templated: typeof TEMPLATED | null) =>
+		slack.render(
+			{
+				...inputFor({ type: "slack-bot" as const, channelId: "C1", channelName: "ops" }),
+				context: ctx,
+				templated,
+			},
+			"xoxb-token",
+		).body
+
+	const discordBody = (ctx: DispatchContext, templated: typeof TEMPLATED | null) =>
+		discordTransport.render({
+			...inputFor({ type: "discord" as const, webhookUrl: "https://discord.com/api/w/1/tok" }),
+			context: ctx,
+			templated,
+		}).body
+
+	it("rides in the Slack context block on the default path", () => {
+		assert.include(slackBody(withSpark, null), SPARK)
+	})
+
+	it("rides in the Slack context block on the templated path too", () => {
+		assert.include(slackBody(withSpark, TEMPLATED), SPARK)
+	})
+
+	it("rides in the Discord footer on the default path", () => {
+		assert.include(discordBody(withSpark, null), SPARK)
+	})
+
+	it("rides in the Discord footer on the templated path too", () => {
+		assert.include(discordBody(withSpark, TEMPLATED), SPARK)
+	})
+
+	const CHART_URL = "https://web.localhost/alerts/chart/eyJhIjoxfQ.s1g.png"
+	const withChart = { ...context, sparkline: SPARK, chartUrl: CHART_URL }
+
+	it("puts the chart in a Slack image block on both paths", () => {
+		for (const templated of [null, TEMPLATED]) {
+			const body = slackBody(withChart, templated)
+			assert.include(body, CHART_URL)
+			assert.include(body, '"type":"image"')
+			// alt text repeats the alert, since it is what a screen reader reads
+			// and what shows when the image will not load.
+			assert.include(body, "alt_text")
+		}
+	})
+
+	it("puts the chart in the Discord embed image on both paths", () => {
+		for (const templated of [null, TEMPLATED]) {
+			assert.include(discordBody(withChart, templated), CHART_URL)
+		}
+	})
+
+	it("keeps the sparkline even when the image is present", () => {
+		// The image block does not render on a lock screen or in a push preview;
+		// the sparkline is what travels there.
+		assert.include(slackBody(withChart, null), SPARK)
+		assert.include(discordBody(withChart, null), SPARK)
+	})
+
+	it("emits no image block when there is no chart URL", () => {
+		for (const templated of [null, TEMPLATED]) {
+			assert.notInclude(slackBody(withSpark, templated), '"type":"image"')
+			assert.notInclude(discordBody(withSpark, templated), '"image"')
+		}
+	})
+
+	/**
+	 * The degrade path, and the reason every step of the chart feature returns
+	 * `null` rather than failing: no series must cost the picture and nothing
+	 * else. A message that fails to render because a warehouse read timed out is
+	 * a page that did not arrive.
+	 */
+	it("renders a complete message when there is no sparkline", () => {
+		for (const templated of [null, TEMPLATED]) {
+			const slackJson = slackBody(context, templated)
+			assert.notInclude(slackJson, "undefined")
+			assert.include(slackJson, "Maple Alerts")
+
+			const discordJson = discordBody(context, templated)
+			assert.notInclude(discordJson, "undefined")
+			assert.include(discordJson, "Maple Alerts")
+		}
+	})
 })

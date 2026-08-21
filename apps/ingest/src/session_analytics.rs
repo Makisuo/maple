@@ -23,7 +23,7 @@ fn canonical_host(url: &str) -> String {
         return String::new();
     };
     let host = host.trim_end_matches('.').to_ascii_lowercase();
-    host.strip_prefix("www.").unwrap_or(&host).to_string()
+    host.strip_prefix("www.").unwrap_or(&host).to_owned()
 }
 
 /// A bare host (no scheme) as sent by the SDK.
@@ -69,7 +69,7 @@ const SESSION_EVENT_MAX_ATTRIBUTE_VALUE_BYTES: usize = 1024;
 /// Truncate to a byte budget without splitting a UTF-8 character.
 fn truncate_str(value: &str, max_bytes: usize) -> String {
     if value.len() <= max_bytes {
-        return value.to_string();
+        return value.to_owned();
     }
     let mut end = max_bytes;
     while end > 0 && !value.is_char_boundary(end) {
@@ -137,7 +137,7 @@ fn clamp_string_field(
         Some(text) => {
             if text.len() > max_bytes {
                 let truncated = truncate_str(text, max_bytes);
-                obj.insert(field.to_string(), serde_json::Value::String(truncated));
+                obj.insert(field.to_owned(), serde_json::Value::String(truncated));
             }
         }
         None => {
@@ -222,7 +222,7 @@ pub fn sanitize_session_event(obj: &mut serde_json::Map<String, serde_json::Valu
     if let Some(message) = obj.get("message").and_then(|v| v.as_str()) {
         if message.len() > SESSION_EVENT_MAX_MESSAGE_BYTES {
             let truncated = truncate_str(message, SESSION_EVENT_MAX_MESSAGE_BYTES);
-            obj.insert("message".to_string(), serde_json::Value::String(truncated));
+            obj.insert("message".to_owned(), serde_json::Value::String(truncated));
         }
     }
 
@@ -517,10 +517,13 @@ mod tests {
     #[test]
     fn session_meta_dimensions_are_clamped() {
         let mut obj = serde_json::Map::new();
-        obj.insert("utm_campaign".to_string(), serde_json::json!("c".repeat(512)));
-        obj.insert("host".to_string(), serde_json::json!("app.example.com"));
-        obj.insert("referrer".to_string(), serde_json::json!("r".repeat(4096)));
-        obj.insert("entry_path".to_string(), serde_json::json!("/pricing"));
+        obj.insert(
+            "utm_campaign".to_owned(),
+            serde_json::json!("c".repeat(512)),
+        );
+        obj.insert("host".to_owned(), serde_json::json!("app.example.com"));
+        obj.insert("referrer".to_owned(), serde_json::json!("r".repeat(4096)));
+        obj.insert("entry_path".to_owned(), serde_json::json!("/pricing"));
 
         sanitize_session_meta(&mut obj);
 
@@ -541,8 +544,8 @@ mod tests {
     #[test]
     fn session_meta_off_type_fields_fall_back_to_the_column_default() {
         let mut obj = serde_json::Map::new();
-        obj.insert("utm_source".to_string(), serde_json::json!(42));
-        obj.insert("user_traits".to_string(), serde_json::json!("not-a-map"));
+        obj.insert("utm_source".to_owned(), serde_json::json!(42));
+        obj.insert("user_traits".to_owned(), serde_json::json!("not-a-map"));
 
         sanitize_session_meta(&mut obj);
 
@@ -558,11 +561,11 @@ mod tests {
         for i in 0..100 {
             traits.insert(format!("trait{i}"), serde_json::json!("v"));
         }
-        traits.insert("long".to_string(), serde_json::json!("x".repeat(4096)));
-        traits.insert("numeric".to_string(), serde_json::json!(7));
+        traits.insert("long".to_owned(), serde_json::json!("x".repeat(4096)));
+        traits.insert("numeric".to_owned(), serde_json::json!(7));
 
         let mut obj = serde_json::Map::new();
-        obj.insert("user_traits".to_string(), serde_json::Value::Object(traits));
+        obj.insert("user_traits".to_owned(), serde_json::Value::Object(traits));
         sanitize_session_meta(&mut obj);
 
         let traits = obj["user_traits"].as_object().unwrap();
@@ -578,11 +581,11 @@ mod tests {
     #[test]
     fn session_meta_trait_values_are_stringified_and_truncated() {
         let mut traits = serde_json::Map::new();
-        traits.insert("big".to_string(), serde_json::json!("y".repeat(4096)));
-        traits.insert("flag".to_string(), serde_json::json!(false));
+        traits.insert("big".to_owned(), serde_json::json!("y".repeat(4096)));
+        traits.insert("flag".to_owned(), serde_json::json!(false));
 
         let mut obj = serde_json::Map::new();
-        obj.insert("user_traits".to_string(), serde_json::Value::Object(traits));
+        obj.insert("user_traits".to_owned(), serde_json::Value::Object(traits));
         sanitize_session_meta(&mut obj);
 
         let traits = obj["user_traits"].as_object().unwrap();
@@ -597,12 +600,12 @@ mod tests {
     fn session_event_types_outside_the_allowlist_are_dropped() {
         for accepted in SESSION_EVENT_TYPES {
             let mut obj = serde_json::Map::new();
-            obj.insert("type".to_string(), serde_json::json!(accepted));
+            obj.insert("type".to_owned(), serde_json::json!(accepted));
             assert!(sanitize_session_event(&mut obj), "{accepted} should be kept");
         }
 
         let mut unknown = serde_json::Map::new();
-        unknown.insert("type".to_string(), serde_json::json!("uniqueish-per-event"));
+        unknown.insert("type".to_owned(), serde_json::json!("uniqueish-per-event"));
         assert!(!sanitize_session_event(&mut unknown));
 
         let mut missing = serde_json::Map::new();
@@ -615,13 +618,16 @@ mod tests {
         for i in 0..100 {
             attributes.insert(format!("k{i}"), serde_json::json!("v"));
         }
-        attributes.insert("long".to_string(), serde_json::json!("x".repeat(4096)));
-        attributes.insert("numeric".to_string(), serde_json::json!(42));
+        attributes.insert("long".to_owned(), serde_json::json!("x".repeat(4096)));
+        attributes.insert("numeric".to_owned(), serde_json::json!(42));
 
         let mut obj = serde_json::Map::new();
-        obj.insert("type".to_string(), serde_json::json!("custom"));
-        obj.insert("message".to_string(), serde_json::json!("n".repeat(4096)));
-        obj.insert("attributes".to_string(), serde_json::Value::Object(attributes));
+        obj.insert("type".to_owned(), serde_json::json!("custom"));
+        obj.insert("message".to_owned(), serde_json::json!("n".repeat(4096)));
+        obj.insert(
+            "attributes".to_owned(),
+            serde_json::Value::Object(attributes),
+        );
 
         assert!(sanitize_session_event(&mut obj));
 
@@ -638,12 +644,15 @@ mod tests {
     #[test]
     fn session_event_attribute_values_are_stringified_and_truncated() {
         let mut attributes = serde_json::Map::new();
-        attributes.insert("big".to_string(), serde_json::json!("y".repeat(4096)));
-        attributes.insert("flag".to_string(), serde_json::json!(true));
+        attributes.insert("big".to_owned(), serde_json::json!("y".repeat(4096)));
+        attributes.insert("flag".to_owned(), serde_json::json!(true));
 
         let mut obj = serde_json::Map::new();
-        obj.insert("type".to_string(), serde_json::json!("custom"));
-        obj.insert("attributes".to_string(), serde_json::Value::Object(attributes));
+        obj.insert("type".to_owned(), serde_json::json!("custom"));
+        obj.insert(
+            "attributes".to_owned(),
+            serde_json::Value::Object(attributes),
+        );
 
         assert!(sanitize_session_event(&mut obj));
         let attributes = obj["attributes"].as_object().unwrap();

@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Exit, Schema } from "effect"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { displayError } from "@/lib/error-messages"
 import type { V2Investigation } from "@maple/domain/http/v2"
-import { Button } from "@maple/ui/components/ui/button"
+import { Button, buttonVariants } from "@maple/ui/components/ui/button"
+import { cn } from "@maple/ui/lib/utils"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { ToolbarSearch } from "@maple/ui/components/toolbar"
@@ -29,6 +30,8 @@ import {
 import { InvestigateBar } from "@/components/investigations/investigate-bar"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
+import { retainedInternalQuery } from "@/lib/services/common/internal-atom-client"
+import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
 
 type HubView = "active" | "history"
 
@@ -101,6 +104,19 @@ function InvestigationsHub() {
 	})
 	const result = useAtomValue(listQuery)
 	const refresh = useAtomRefresh(listQuery)
+	// The hub is where someone stands when they ask "why is nothing being
+	// investigated?", so the answer has to be here rather than three clicks away
+	// in settings.
+	// Non-admins cannot change these ceilings, so the action would be a dead end —
+	// the settings section renders nothing for them.
+	const isOrgAdmin = useIsOrgAdmin()
+	const budget = Result.builder(
+		useAtomValue(
+			retainedInternalQuery("aiTriage", "getSettings", { reactivityKeys: ["aiTriageSettings"] }),
+		),
+	)
+		.onSuccess((value) => value)
+		.orElse(() => null)
 	const create = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "create"), {
 		mode: "promiseExit",
 	})
@@ -253,6 +269,14 @@ function InvestigationsHub() {
 					) : (
 						<>
 							<DashboardLayout.Sticky>
+								{budget?.enabled && budget.ordinaryPaused ? (
+									<BudgetExhaustedNotice
+										priorityPaused={budget.priorityPaused}
+										dimension={budget.pausedDimension}
+										resumesAt={budget.resumesAt}
+										canEditSettings={isOrgAdmin}
+									/>
+								) : null}
 								<TriageStrip investigations={page} />
 								<InvestigateBar onSubmit={handleCreate} busy={creating} />
 							</DashboardLayout.Sticky>
@@ -295,6 +319,66 @@ function InvestigationsHub() {
 				</DashboardLayout.Content>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
+	)
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Budget notice
+ * -----------------------------------------------------------------------------------------------*/
+
+/**
+ * Says why nothing new is starting.
+ *
+ * Not dismissible and not a toast: the condition lasts until UTC midnight and is
+ * the direct answer to the question that brings someone to this page.
+ *
+ * The copy distinguishes three states because they are three different outages,
+ * and the reassuring one is only true in the first. Telling an operator that
+ * urgent incidents are still covered while the whole ceiling is spent is worse
+ * than saying nothing — it sends them away from a real outage.
+ */
+function BudgetExhaustedNotice({
+	priorityPaused,
+	dimension,
+	resumesAt,
+	canEditSettings,
+}: {
+	priorityPaused: boolean
+	dimension: "runs" | "passes" | "passes_reserved" | null
+	resumesAt: string | null
+	canEditSettings: boolean
+}) {
+	const resumes = resumesAt === null ? null : new Date(toEpochMs(resumesAt))
+	const resets =
+		resumes === null
+			? "."
+			: `; it resets ${resumes.toLocaleString(undefined, { timeStyle: "short", dateStyle: "medium" })}.`
+	// `runs` is checked before any pass arithmetic and has no reserve, so it stops
+	// every severity — naming the model budget here would point at the wrong number.
+	const spent =
+		dimension === "runs" ? "Today's investigation limit is reached" : "Today's model budget is spent"
+	return (
+		<div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+			<span className="font-medium text-foreground">
+				{priorityPaused ? "Automatic triage paused" : "Automatic triage paused for routine incidents"}
+			</span>
+			<span className="text-muted-foreground">
+				{spent}
+				{resets}{" "}
+				{priorityPaused
+					? "Nothing new will start until then."
+					: "High and critical incidents still start."}
+			</span>
+			{canEditSettings ? (
+				<Link
+					to="/settings"
+					search={{ tab: "automation" }}
+					className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "ml-auto")}
+				>
+					Raise the limit
+				</Link>
+			) : null}
+		</div>
 	)
 }
 

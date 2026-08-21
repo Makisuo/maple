@@ -28,6 +28,7 @@ import {
 	matchOrIn,
 	type FacetOutput,
 } from "./query-helpers"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { httpDisplaySpanName } from "../../traces-shared"
 import { CHNumber } from "../schema"
 
@@ -45,6 +46,33 @@ const fingerprintHashEq = (expr: CH.Expr<number>, hash: string) => expr.eq(finge
 const fingerprintHashIn = (expr: CH.Expr<number>, hashes: readonly string[]) =>
 	CH.inExprList(expr, hashes.map(fingerprintHashLiteral))
 
+/**
+ * Filters every errors surface shares. `errorLabels` and `serviceVersions` are
+ * the sidebar's "Error Type" and "Version" facets; both are plain string
+ * columns on the error-events tables, so they lower to a straight IN list.
+ */
+export interface ErrorsSharedFilters {
+	services?: readonly string[]
+	deploymentEnvs?: readonly string[]
+	errorLabels?: readonly string[]
+	serviceVersions?: readonly string[]
+}
+
+const sharedFilterConditions = (
+	$: {
+		ServiceName: CH.Expr<string>
+		DeploymentEnv: CH.Expr<string>
+		ErrorLabel: CH.Expr<string>
+		ServiceVersion: CH.Expr<string>
+	},
+	opts: ErrorsSharedFilters,
+): Array<CH.Condition | undefined> => [
+	opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+	opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+	opts.errorLabels?.length ? CH.inList($.ErrorLabel, opts.errorLabels) : undefined,
+	opts.serviceVersions?.length ? CH.inList($.ServiceVersion, opts.serviceVersions) : undefined,
+]
+
 // Errors by type
 //
 // Top Errors groups the canonical `error_events` rows by the ingest-computed
@@ -53,10 +81,8 @@ const fingerprintHashIn = (expr: CH.Expr<number>, hashes: readonly string[]) =>
 // hash (string), not a query-time heuristic — see materializations.ts /
 // fingerprint.ts for how the hash + label are derived.
 
-export interface ErrorsByTypeOpts {
+export interface ErrorsByTypeOpts extends ErrorsSharedFilters {
 	rootOnly?: boolean
-	services?: readonly string[]
-	deploymentEnvs?: readonly string[]
 	fingerprintHashes?: readonly string[]
 	limit?: number
 }
@@ -87,8 +113,7 @@ export function errorsByTypeQuery(opts: ErrorsByTypeOpts) {
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
 			CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
-			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-			opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+			...sharedFilterConditions($, opts),
 			opts.fingerprintHashes?.length
 				? fingerprintHashIn($.FingerprintHash, opts.fingerprintHashes)
 				: undefined,
@@ -125,6 +150,49 @@ export function errorsTimeseriesQuery(opts: ErrorsTimeseriesOpts) {
 			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 		])
 		.groupBy("bucket")
+		.orderBy(["bucket", "asc"])
+		.format("JSON")
+}
+
+// Errors spark — bucketed counts for MANY fingerprints in one scan
+//
+// `errorsTimeseriesQuery` answers "how did this one fingerprint behave"; the
+// unified errors list needs the same shape for every row it is about to draw,
+// and one request per row would be 50 round trips. Rows come back tall
+// (fingerprint x bucket) and are pivoted client-side — a wide `groupArray` of
+// pairs would have to be re-sorted there anyway, since aggregate state merge
+// order is not the input order.
+//
+// Fingerprint-filtered, so this rides `error_events`' (OrgId, FingerprintHash,
+// Timestamp) key rather than scanning the window.
+
+export interface ErrorsSparkOpts extends ErrorsSharedFilters {
+	fingerprintHashes: readonly string[]
+}
+
+export const ErrorsSparkOutputSchema = Schema.Struct({
+	fingerprintHash: Schema.String,
+	bucket: Schema.String,
+	count: CHNumber,
+})
+export type ErrorsSparkOutput = Schema.Schema.Type<typeof ErrorsSparkOutputSchema>
+
+export function errorsSparkQuery(opts: ErrorsSparkOpts) {
+	return from(ErrorEvents)
+		.select(($) => ({
+			// Identity UInt64: unwrapped it corrupts above 2^53.
+			fingerprintHash: CH.toString_($.FingerprintHash),
+			bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+			count: CH.count(),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			fingerprintHashIn($.FingerprintHash, opts.fingerprintHashes),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			...sharedFilterConditions($, opts),
+		])
+		.groupBy("fingerprintHash", "bucket")
 		.orderBy(["bucket", "asc"])
 		.format("JSON")
 }
@@ -629,10 +697,8 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 
 // Errors facets (UNION ALL — service + environment + error_type facets)
 
-export interface ErrorsFacetsOpts {
+export interface ErrorsFacetsOpts extends ErrorsSharedFilters {
 	rootOnly?: boolean
-	services?: readonly string[]
-	deploymentEnvs?: readonly string[]
 	fingerprintHashes?: readonly string[]
 }
 
@@ -645,8 +711,7 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 		$.Timestamp.gte(param.dateTime("startTime")),
 		$.Timestamp.lte(param.dateTime("endTime")),
 		CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
-		opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-		opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+		...sharedFilterConditions($, opts),
 		opts.fingerprintHashes?.length
 			? fingerprintHashIn($.FingerprintHash, opts.fingerprintHashes)
 			: undefined,
@@ -686,15 +751,27 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 		.orderBy(["count", "desc"])
 		.limit(50)
 
-	return unionAll(serviceQuery, envQuery, errorTypeQuery).format("JSON")
+	// Deployed version the error was seen on — the fastest way to tell a
+	// regression from something that was always broken. Blank versions are
+	// dropped: a facet you cannot act on is noise.
+	const versionQuery = from(table)
+		.select(($) => ({
+			name: $.ServiceVersion,
+			count: CH.count(),
+			facetType: CH.lit("version"),
+		}))
+		.where(($) => [...baseWhere($), $.ServiceVersion.neq("")])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(50)
+
+	return unionAll(serviceQuery, envQuery, errorTypeQuery, versionQuery).format("JSON")
 }
 
-// Errors summary (CROSS JOIN between error_spans and service_usage)
+// Errors summary (CROSS JOIN between the error-events table and service_usage)
 
-export interface ErrorsSummaryOpts {
+export interface ErrorsSummaryOpts extends ErrorsSharedFilters {
 	rootOnly?: boolean
-	services?: readonly string[]
-	deploymentEnvs?: readonly string[]
 	fingerprintHashes?: readonly string[]
 }
 
@@ -718,8 +795,7 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
 			CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
-			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-			opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+			...sharedFilterConditions($, opts),
 			opts.fingerprintHashes?.length
 				? fingerprintHashIn($.FingerprintHash, opts.fingerprintHashes)
 				: undefined,
@@ -771,7 +847,7 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 					$.Timestamp.gte(param.dateTime("startTime")),
 					$.Timestamp.lte(param.dateTime("endTime")),
 					opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-					CH.inList($.ResourceAttributes.get("deployment.environment"), deploymentEnvs),
+					CH.inList(deploymentEnvExpr($.ResourceAttributes), deploymentEnvs),
 				]),
 		)
 	}
@@ -861,6 +937,9 @@ export function errorTickIssuesQuery() {
 			exceptionMessage: CH.any_($.ExceptionMessage),
 			errorLabel: CH.any_($.ErrorLabel),
 			topFrame: CH.any_($.TopFrame),
+			// Every build seen in the window, not one sampled build — the issue's
+			// build set is what separates a real regression from an old client.
+			serviceVersions: CH.groupUniqArrayArray($.ServiceVersions),
 			count: CH.sum($.OccurrenceCount),
 			firstSeen: CH.min_($.FirstSeen),
 			lastSeen: CH.max_($.LastSeen),
@@ -888,6 +967,9 @@ export function errorTickBootstrapIssuesQuery() {
 			exceptionMessage: CH.any_($.ExceptionMessage),
 			errorLabel: CH.any_($.ErrorLabel),
 			topFrame: CH.any_($.TopFrame),
+			// Per-occurrence rows here, so the distinct set comes straight from the
+			// scalar column rather than from a pre-aggregated one.
+			serviceVersions: CH.groupUniqArray($.ServiceVersion),
 			count: CH.count(),
 			firstSeen: CH.min_($.Timestamp),
 			lastSeen: CH.max_($.Timestamp),

@@ -37,7 +37,7 @@ The `/client` import is required — the bare `@maple-dev/effect-sdk` import res
 
 The client layer reads from `globalThis.navigator` and `Intl.DateTimeFormat` to populate resource attributes automatically:
 
-- `browser.user_agent` — `navigator.userAgent`
+- `user_agent.original` — `navigator.userAgent`
 - `browser.language` — `navigator.language`
 - `browser.timezone` — `Intl.DateTimeFormat().resolvedOptions().timeZone`
 - `maple.sdk.type` — always `"client"`, so server- and browser-emitted spans can be filtered apart

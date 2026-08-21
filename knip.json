@@ -42,9 +42,6 @@
 			],
 			"ignoreBinaries": ["duckdb"]
 		},
-		"packages/domain": {
-			"entry": ["scripts/**/*.ts"]
-		},
 		"packages/db": {
 			"entry": ["scripts/**/*.ts"],
 			"ignoreBinaries": ["pscale"]

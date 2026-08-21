@@ -41,7 +41,6 @@ const dateTimeString = WarehouseDateTimeString
 export {
 	type CommitBreakdown,
 	type ServiceOverview,
-	coerceServiceOverviewRow as coerceRow,
 	coerceServiceOverviewRows as coerceOverviewRows,
 } from "@maple/query-engine"
 
@@ -71,7 +70,8 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 	const endTime = input.endTime ?? fallback.endTime
 
 	// Throughput resolves from the env-scoped sum(SampleRate) estimate (see
-	// `coerceRow`). The SpanMetrics `calls` counter is deliberately NOT consulted
+	// `coerceServiceOverviewRow` in `@maple/query-engine`). The SpanMetrics
+	// `calls` counter is deliberately NOT consulted
 	// here: it's service-level and all-environment (it can't be filtered by
 	// `DeploymentEnv`), so on these per-environment rows it would over-report and
 	// disagree with the env-scoped detail page.

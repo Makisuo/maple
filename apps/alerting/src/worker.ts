@@ -32,6 +32,7 @@ import {
 	ServiceMapRollupService,
 	TinybirdOrgTokenService,
 	WarehouseQueryService,
+	summarizeCause,
 	withPgConnectionScope,
 } from "@maple/api/alerting"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
@@ -230,7 +231,7 @@ export const catchTickFailure = (label: string) =>
 			? Effect.interrupt
 			: Effect.logError("Alerting tick failed").pipe(
 					Effect.annotateLogs({
-						"error.message": Cause.pretty(cause),
+						"error.message": summarizeCause(cause),
 						"maple.alerting.tick": label,
 					}),
 				),

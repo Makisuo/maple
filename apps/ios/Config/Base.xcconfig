@@ -13,3 +13,24 @@ MAPLE_API_BASE_URL =
 // Placeholder so a checkout without Secrets.xcconfig still configures; the app
 // fails at launch with an actionable message rather than a confusing 401.
 CLERK_PUBLISHABLE_KEY = pk_test_replace_me
+
+// Maple's own telemetry. Empty by design: CI builds unsigned without a key,
+// and the SDK treats an empty value as "not configured" — it logs once and
+// records nothing rather than spending a user's battery on a session that can
+// only ever earn a 401. Real values come from Secrets.xcconfig locally and from
+// Xcode Cloud's environment in ci_post_clone.sh.
+//
+// Use the PUBLIC `maple_pk_` key. A `maple_sk_` key authenticates too but has no
+// business in an app binary, where anyone can read it back out.
+MAPLE_INGEST_KEY =
+
+// Overrides the SDK's default of https:/$()/ingest.maple.dev. Only needed to
+// point at staging or a local gateway. Note the $() escape: `//` starts a
+// comment in xcconfig and would truncate a bare URL to its scheme.
+MAPLE_INGEST_ENDPOINT =
+
+// Apple Developer Team ID, for signing a build onto a real device or into
+// TestFlight. Empty builds fine for the simulator, which needs no signing.
+// Find yours at developer.apple.com → Account → Membership details, or from
+// `security find-identity -v -p codesigning` (the parenthesised 10 characters).
+DEVELOPMENT_TEAM =

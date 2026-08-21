@@ -367,9 +367,9 @@ export const isMcpVisualization = (value: unknown): value is WidgetVisualization
  * third spelling for the raw-SQL path — three fields for one decision, which is
  * why agents picked the wrong chart type. A panel type is the whole decision.
  */
-export const MCP_PANEL_TYPES: ReadonlyArray<PanelType> = PANEL_TYPES.filter(
-	(meta) => meta.mcpExposed,
-).map((meta) => meta.panelType)
+export const MCP_PANEL_TYPES: ReadonlyArray<PanelType> = PANEL_TYPES.filter((meta) => meta.mcpExposed).map(
+	(meta) => meta.panelType,
+)
 
 /** Narrows to the MCP-exposed panel types — what `panel_type` accepts. */
 export const isMcpPanelType = (value: unknown): value is PanelType =>
@@ -433,6 +433,14 @@ export const rawSqlDisplayTypeFor = (visualization: string, chartId?: string): R
 export const HEATMAP_COLOR_SCALES = ["amber", "blues", "reds", "viridis", "magma", "cividis"] as const
 
 export type HeatmapColorScale = (typeof HEATMAP_COLOR_SCALES)[number]
+
+/**
+ * The ramp an unconfigured heatmap renders in. The chart falls back to it when
+ * `display.heatmap.colorScale` is absent, and the settings rail shows it as the
+ * ticked option for the same case — one constant, so opening a never-configured
+ * widget in the editor cannot repaint it on Apply.
+ */
+export const DEFAULT_HEATMAP_COLOR_SCALE: HeatmapColorScale = "amber"
 
 export const HEATMAP_SCALE_TYPES = ["linear", "log"] as const
 

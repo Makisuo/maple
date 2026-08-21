@@ -28,65 +28,148 @@ enum LoadState<Value> {
 	}
 }
 
-/// Renders a `LoadState` uniformly.
-struct LoadableView<Value, Content: View>: View {
-	let state: LoadState<Value>
+/// Sendable exactly when its payload is, so a load can be traced across the
+/// span helper's isolation boundary without an unchecked escape hatch.
+/// `ScreenLoader` already constrains `Value: Sendable`, so this costs nothing.
+extension LoadState: Sendable where Value: Sendable {}
+
+/// Renders a screen's `ScreenLoader` uniformly, and owns the scroll view.
+///
+/// One `ScrollView` for all four states, so pull-to-refresh works on the empty
+/// state ("No open alerts" pulls to re-check), on the error state, and is not
+/// torn down mid-gesture when a refresh ends somewhere other than `.loaded`.
+/// `content` therefore supplies the inner stack, not a `ScrollView`.
+///
+/// A `nil` loader is the frame before the screen's model exists; it renders
+/// the same skeleton the loader's `.loading` renders, so nothing flashes.
+struct LoadableView<Value: Sendable, Skeleton: View, Content: View>: View {
+	let loader: ScreenLoader<Value>?
 	let emptyTitle: String
 	let emptyMessage: String
-	var skeletonRowHeight: CGFloat = 64
-	let retry: () -> Void
+	@ViewBuilder let skeleton: () -> Skeleton
 	@ViewBuilder let content: (Value) -> Content
 
-	var body: some View {
+	private var state: LoadState<Value> { loader?.state ?? .loading }
+
+	/// What the animation keys on: the kind of state, not its payload, so a
+	/// refresh that swaps one loaded value for another doesn't crossfade.
+	private var phase: Int {
 		switch state {
-		case .loading:
-			// DESIGN.md: "Don't ship loading spinners by default." A skeleton
-			// keeps the layout still, so arriving data doesn't shove the page.
-			SkeletonList(rowHeight: skeletonRowHeight)
+		case .loading: 0
+		case .empty: 1
+		case .failed: 2
+		case .loaded: 3
+		}
+	}
 
-		case .empty:
-			EmptyStateView(title: emptyTitle, message: emptyMessage)
+	var body: some View {
+		ScrollView {
+			VStack(spacing: 0) {
+				if let loader, let error = loader.refreshError, loader.state.hasContent {
+					RefreshFailedStrip(error: error, retry: loader.retry)
+						.transition(.move(edge: .top).combined(with: .opacity))
+				}
 
-		case .failed(let error):
-			ErrorStateView(error: error, retry: retry)
+				switch state {
+				case .loading:
+					// DESIGN.md: "Don't ship loading spinners by default." A
+					// skeleton keeps the layout still, so arriving data doesn't
+					// shove the page.
+					skeleton()
+						.transition(.opacity)
 
-		case .loaded(let value):
-			content(value)
+				case .empty:
+					EmptyStateView(title: emptyTitle, message: emptyMessage)
+						.containerRelativeFrame(.vertical) { height, _ in height * 0.7 }
+						.transition(.opacity)
+
+				case .failed(let error):
+					ErrorStateView(error: error, retry: { loader?.retry() })
+						.containerRelativeFrame(.vertical) { height, _ in height * 0.7 }
+						.transition(.opacity)
+
+				case .loaded(let value):
+					content(value)
+						// A `.replace` load (window / filter change): the rows on
+						// screen no longer answer the question, so they step
+						// back until the replacement lands.
+						.opacity(loader?.isReplacing == true ? 0.5 : 1)
+						.allowsHitTesting(loader?.isReplacing != true)
+						.transition(.opacity)
+				}
+			}
+			.animation(.easeOut(duration: 0.2), value: phase)
+			.animation(.easeOut(duration: 0.2), value: loader?.isReplacing ?? false)
+			.animation(.easeOut(duration: 0.2), value: loader?.refreshError == nil)
+		}
+		.scrollContentBackground(.hidden)
+		.refreshable {
+			if let loader { Telemetry.track(Telemetry.Event.screenRefreshed, ["screen": loader.screen]) }
+			await loader?.load(.refresh)
 		}
 	}
 }
 
-/// Placeholder rows that match the real row rhythm.
-struct SkeletonList: View {
-	var rowHeight: CGFloat = 64
-	var rows: Int = 7
+extension LoadableView where Skeleton == SkeletonList {
+	/// The list screens: a `SkeletonList` at the screen's real row height.
+	init(
+		loader: ScreenLoader<Value>?,
+		emptyTitle: String,
+		emptyMessage: String,
+		skeletonRowHeight: CGFloat = 64,
+		@ViewBuilder content: @escaping (Value) -> Content
+	) {
+		self.init(
+			loader: loader,
+			emptyTitle: emptyTitle,
+			emptyMessage: emptyMessage,
+			skeleton: { SkeletonList(rowHeight: skeletonRowHeight) },
+			content: content
+		)
+	}
+}
 
-	@State private var shimmer = false
+/// A refresh failed but the content underneath is still good, so it stays.
+/// A hairline strip above it says so — the alternative, replacing a full
+/// list with the error panel because one pull timed out, is what this exists
+/// to prevent.
+struct RefreshFailedStrip: View {
+	let error: MapleAPIError
+	let retry: () -> Void
 
 	var body: some View {
-		VStack(spacing: 0) {
-			ForEach(0..<rows, id: \.self) { index in
-				VStack(alignment: .leading, spacing: 8) {
-					RoundedRectangle(cornerRadius: Token.Radius.sm)
-						.fill(Token.muted)
-						.frame(width: 120 + CGFloat((index * 37) % 90), height: 12)
-					RoundedRectangle(cornerRadius: Token.Radius.sm)
-						.fill(Token.muted.opacity(0.6))
-						.frame(width: 190 + CGFloat((index * 53) % 70), height: 10)
-				}
-				.frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
-				.padding(.horizontal, 16)
-				Hairline()
+		HStack(spacing: 10) {
+			Circle()
+				.fill(Token.destructive)
+				.frame(width: 5, height: 5)
+			VStack(alignment: .leading, spacing: 1) {
+				Text("Couldn't refresh")
+					.font(Typo.smallMedium)
+					.foregroundStyle(Token.foreground)
+				Text(error.title)
+					.font(Typo.tiny)
+					.foregroundStyle(Token.mutedForeground)
+					.lineLimit(1)
 			}
-			Spacer(minLength: 0)
+			Spacer(minLength: 8)
+			if error.isRetryable {
+				Button(action: retry) {
+					Text("Try again")
+						.font(Typo.smallMedium)
+						.foregroundStyle(Token.foreground)
+						.padding(.horizontal, 10)
+						.frame(height: 26)
+						.background(Token.muted, in: .rect(cornerRadius: Token.Radius.md))
+				}
+				.buttonStyle(.plain)
+			}
 		}
-		.opacity(shimmer ? 0.55 : 1)
-		.animation(
-			.easeInOut(duration: 1.1).repeatForever(autoreverses: true),
-			value: shimmer
-		)
-		.onAppear { shimmer = true }
-		.accessibilityLabel("Loading")
+		.padding(.horizontal, 16)
+		.padding(.vertical, 8)
+		.frame(maxWidth: .infinity)
+		.background(Token.card)
+		.overlay(alignment: .bottom) { Hairline() }
+		.accessibilityElement(children: .combine)
 	}
 }
 
@@ -210,19 +293,23 @@ extension SessionController {
 		} catch is CancellationError {
 			return nil
 		} catch let error as MapleAPIError {
+			// A cancelled Task can surface as whatever the transport threw at
+			// the moment; none of it is news the user should see.
+			if error.isCancellation || Task.isCancelled { return nil }
 			guard await handle(error) else { return .failed(error) }
 			do {
 				return .loaded(try await work())
 			} catch is CancellationError {
 				return nil
 			} catch let error as MapleAPIError {
+				if error.isCancellation || Task.isCancelled { return nil }
 				if error.requiresReauthentication { await signOutLocally() }
 				return .failed(error)
 			} catch {
-				return .failed(.transport(error))
+				return Task.isCancelled ? nil : .failed(.transport(error))
 			}
 		} catch {
-			return .failed(.transport(error))
+			return Task.isCancelled ? nil : .failed(.transport(error))
 		}
 	}
 }

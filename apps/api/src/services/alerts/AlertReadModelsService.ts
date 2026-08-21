@@ -22,8 +22,6 @@ import {
 	AlertCheckStatus as AlertCheckStatusSchema,
 	AlertValidationError,
 	OrgId,
-	RoleName,
-	UserId,
 	type AlertIncidentId,
 	type AlertRuleId,
 	type ManagedWarehouseError,
@@ -40,7 +38,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { makeDbExecute } from "@/platform/db-execute"
 import { makePersistenceError } from "./alert-persistence"
-import type { TenantContext } from "@/services/auth/AuthService"
+import { systemTenant } from "./system-tenant"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 export interface AlertChecksSummaryPoint {
@@ -141,8 +139,6 @@ const decodeAlertIncidentStatusSync = Schema.decodeUnknownSync(AlertIncidentStat
 const decodeAlertEventTypeSync = Schema.decodeUnknownSync(AlertEventTypeSchema)
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.errorIssueId)
 const decodeAlertDeliveryStatusSync = Schema.decodeUnknownSync(AlertDeliveryStatus)
-const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 
 type IsoDateTimeValue = Schema.Schema.Type<typeof AlertDestinationDocument.fields.createdAt>
 
@@ -191,13 +187,6 @@ export class AlertReadModelsService extends Context.Service<
 		const warehouse = yield* WarehouseQueryService
 
 		const dbExecute = makeDbExecute(database, "AlertReadModelsService", makePersistenceError)
-
-		const systemTenant = (orgId: OrgId): TenantContext => ({
-			orgId,
-			userId: decodeUserIdSync("system-alerting"),
-			roles: [decodeRoleNameSync("root")],
-			authMode: "self_hosted",
-		})
 
 		const listIncidents = Effect.fn("AlertsService.listIncidents")(function* (
 			orgId: OrgId,

@@ -107,7 +107,10 @@ export const corsHeadersForAllowedOrigin = (
 		? {
 				"access-control-allow-origin": origin,
 				"access-control-allow-methods": "GET, POST, OPTIONS",
-				"access-control-allow-headers": "content-type, content-encoding, authorization",
+				// `x-maple-sdk` is the SDK identity hint every browser SDK sends on
+				// every request; a listener that does not allow it fails preflight
+				// for the whole SDK.
+				"access-control-allow-headers": "content-type, content-encoding, authorization, x-maple-sdk",
 				"access-control-allow-private-network": "true",
 				vary: "Origin",
 			}
@@ -126,6 +129,45 @@ const json = (body: unknown, status = 200): Response =>
 
 const text = (body: string, status = 200, contentType = "text/plain"): Response =>
 	new Response(body, { status, headers: { "content-type": contentType } })
+
+/**
+ * A message for a thrown value of unknown shape that is never `{}` or
+ * `[object Object]`.
+ *
+ * `(error as Error).message` was the idiom here, and a throw that was not an
+ * `Error` — or was an `Error` subclass carrying its detail elsewhere — reduced to
+ * `undefined` or to an empty JSON object. Production carried 94 spans reading
+ * exactly `Error: {}` at `POST /v1/traces`: the throw survived all the way to the
+ * tracer, which fingerprinted it into one issue with no message, no type, and no
+ * stack beyond the span name. Nothing about it could be diagnosed.
+ *
+ * So every branch here must yield something a human can act on, and the last
+ * resort names the shape rather than pretending to describe it.
+ */
+export const describeThrown = (error: unknown): string => {
+	if (error instanceof Error && error.message !== "") return error.message
+	if (typeof error === "string" && error !== "") return error
+	if (error !== null && typeof error === "object") {
+		// Both reads are inside the try: `message` may be a getter that throws, and
+		// reading it outside would defeat the whole point of this function.
+		try {
+			// `in` narrows without invoking the getter; the read below is what can
+			// throw, and it is inside the try for exactly that reason.
+			if ("message" in error) {
+				const message = error.message
+				if (typeof message === "string" && message !== "") return message
+			}
+			const json = JSON.stringify(error)
+			// `{}` here means every own property was non-enumerable or unserializable
+			// (a `Response`, a class instance) — the empty object is the bug, so say so.
+			if (json !== undefined && json !== "{}") return json
+		} catch {
+			// Circular, or a getter that throws. Fall through to the constructor name.
+		}
+		return `non-serializable ${error.constructor?.name ?? "object"} thrown`
+	}
+	return `${typeof error} thrown: ${String(error)}`
+}
 
 type Signal = "traces" | "logs" | "metrics"
 
@@ -186,7 +228,7 @@ async function ingest(
 		// Effect *defect* — no `error.type`, no 4xx suppression, and a span reading
 		// only "The connection was closed." It is a caller outcome, so 400 it.
 		return {
-			response: text(`read ${signal} body: ${(error as Error).message}`, 400),
+			response: text(`read ${signal} body: ${describeThrown(error)}`, 400),
 			accepted: 0,
 			requestBytes: 0,
 		}
@@ -199,7 +241,7 @@ async function ingest(
 		decoded = decodeOtlp(signal, raw, contentType, contentEncoding)
 	} catch (error) {
 		return {
-			response: text(`decode ${signal}: ${(error as Error).message}`, 400),
+			response: text(`decode ${signal}: ${describeThrown(error)}`, 400),
 			accepted: 0,
 			requestBytes,
 		}
@@ -213,7 +255,7 @@ async function ingest(
 		const status = error instanceof OtlpFieldError ? 400 : 500
 		const stage = status === 400 ? "decode" : "encode"
 		return {
-			response: text(`${stage} ${signal}: ${(error as Error).message}`, status),
+			response: text(`${stage} ${signal}: ${describeThrown(error)}`, status),
 			accepted: 0,
 			requestBytes,
 		}
@@ -232,7 +274,7 @@ async function ingest(
 				db.exec(statement.sql)
 			} catch (error) {
 				return {
-					response: text(`chDB insert (${batch.datasource}): ${(error as Error).message}`, 500),
+					response: text(`chDB insert (${batch.datasource}): ${describeThrown(error)}`, 500),
 					accepted,
 					requestBytes,
 				}
@@ -321,7 +363,7 @@ async function handleQuery(db: Chdb, authority: RetiredDayAuthority, req: Reques
 		// and a 5xx would make the shared warehouse executor classify it as a
 		// transient upstream error and retry the identical query.
 		return {
-			response: text(`query failed: ${(error as Error).message}`, 400),
+			response: text(`query failed: ${describeThrown(error)}`, 400),
 			rowCount: 0,
 			durationMs: Math.round(performance.now() - started),
 			sql,
@@ -366,6 +408,12 @@ type SpanRunner = <A>(effect: Effect.Effect<A>) => Promise<A>
 // hand back to the client in `recoverResponse`. (Failing with a bare `Response`
 // recorded an empty `{}` — a `Response` has no enumerable own fields — which lost
 // the cause entirely and bucketed every failure under one "Error" fingerprint.)
+/** A rejection out of `ingest`, carried as a typed failure so it becomes a 500
+ *  with a real message rather than an untyped defect. */
+class IngestFailed extends Schema.TaggedError<IngestFailed>()("@maple/cli/IngestFailed", {
+	message: Schema.String,
+}) {}
+
 class IngestRejected extends Schema.TaggedError<IngestRejected>()("@maple/cli/IngestRejected", {
 	response: Schema.instanceOf(Response),
 	status: Schema.Number,
@@ -405,8 +453,22 @@ const ingestSpan = (
 	runSpan(
 		recoverResponse(
 			Effect.gen(function* () {
-				const { response, accepted, requestBytes } = yield* Effect.promise(() =>
-					ingest(db, authority, signal, req),
+				// `Effect.promise` is for promises that cannot reject, and `ingest`
+				// can: it awaits the request body and drives chDB. A rejection there
+				// became a DEFECT, which `recoverResponse`'s `Effect.match` does not
+				// catch — so it escaped as an untyped, unlabelled span error instead of
+				// the 500 the caller should have received.
+				const { response, accepted, requestBytes } = yield* Effect.tryPromise({
+					try: () => ingest(db, authority, signal, req),
+					catch: (error): IngestFailed => new IngestFailed({ message: describeThrown(error) }),
+				}).pipe(
+					Effect.catchTag("@maple/cli/IngestFailed", (error) =>
+						Effect.succeed({
+							response: text(`ingest ${signal}: ${error.message}`, 500),
+							accepted: 0,
+							requestBytes: 0,
+						}),
+					),
 				)
 				yield* Effect.annotateCurrentSpan({
 					"http.request.body.size": requestBytes,

@@ -1,8 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Exit, Layer, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpIngest } from "./OtlpIngest"
 import { ScraperEnv, type ScraperEnvConfig } from "./Env"
+import { endedSpansNamed, makeCapturingTracer } from "./testing/capturing-tracer"
 import type { OtlpExportRequest } from "./prometheus/otlp"
 
 const testEnv: ScraperEnvConfig = {
@@ -122,6 +123,49 @@ describe("OtlpIngest", () => {
 				Effect.flip,
 			)
 			assert.strictEqual(error.status, 401)
+		}).pipe(Effect.provide(TestLayer)),
+	)
+
+	// A 4xx is the gateway telling us about the *caller*, not a fault of this
+	// send — only 5xx is `Error` (CLAUDE.md). The typed error still reaches the
+	// caller; it just must not be blamed on the span.
+	it.effect("annotates rather than errors its span on a billing rejection (402)", () =>
+		Effect.gen(function* () {
+			const tracer = makeCapturingTracer()
+			const otlp = yield* OtlpIngest
+			yield* otlp.send("maple_pk_test_key", SAMPLE_REQUEST).pipe(
+				Effect.provideService(
+					FetchHttpClient.Fetch,
+					stubFetch([], () => new Response("metrics limit reached", { status: 402 })),
+				),
+				Effect.provide(tracer.layer),
+				Effect.flip,
+			)
+
+			const spans = endedSpansNamed(tracer.ended, "OtlpIngest.send")
+			assert.lengthOf(spans, 1)
+			assert.isTrue(Exit.isSuccess(spans[0]!.exit))
+			assert.strictEqual(spans[0]!.attributes.get("error.type"), "delivery_blocked")
+			assert.strictEqual(spans[0]!.attributes.get("http.response.status_code"), 402)
+		}).pipe(Effect.provide(TestLayer)),
+	)
+
+	it.effect("still errors its span when the gateway itself fails (5xx)", () =>
+		Effect.gen(function* () {
+			const tracer = makeCapturingTracer()
+			const otlp = yield* OtlpIngest
+			yield* otlp.send("maple_pk_test_key", SAMPLE_REQUEST).pipe(
+				Effect.provideService(
+					FetchHttpClient.Fetch,
+					stubFetch([], () => new Response("boom", { status: 500 })),
+				),
+				Effect.provide(tracer.layer),
+				Effect.flip,
+			)
+
+			const spans = endedSpansNamed(tracer.ended, "OtlpIngest.send")
+			assert.lengthOf(spans, 1)
+			assert.isTrue(Exit.isFailure(spans[0]!.exit))
 		}).pipe(Effect.provide(TestLayer)),
 	)
 })

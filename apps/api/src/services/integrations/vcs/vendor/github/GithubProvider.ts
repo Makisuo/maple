@@ -10,6 +10,7 @@ import {
 	type VcsProviderId,
 	VcsRateLimitedError,
 	type VcsRepositoryRef,
+	VcsRepositoryBlockedError,
 	VcsRepoUnavailableError,
 	type VcsSyncJob,
 	VcsWebhookParseError,
@@ -113,13 +114,32 @@ const parsePayload = <A, E>(event: string, decoded: Effect.Effect<A, E>) =>
 // everything else (incl. 401/403/5xx) is transient and retryable.
 const isGone = (status?: number) => status === 404 || status === 410
 
+// GitHub answers 451 for a repository taken down for legal reasons, and carries
+// the same `{"block":{"reason":"dmca"}}` body on the 403 variant. Neither clears
+// on retry, so both are terminal — matched on the body rather than on 403 alone,
+// which is otherwise an ordinary (retryable) permission failure.
+const BLOCK_BODY = /"block"\s*:|Repository access blocked/
+const isBlocked = (error: GithubAppError) =>
+	error.status === 451 || (error.status === 403 && BLOCK_BODY.test(error.message))
+
 const toVcsError = (
 	error: GithubAppError,
-): VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRateLimitedError => {
+):
+	| VcsProviderError
+	| VcsInstallationGoneError
+	| VcsRepoUnavailableError
+	| VcsRepositoryBlockedError
+	| VcsRateLimitedError => {
 	if (error.retryAfterSeconds !== undefined) {
 		return new VcsRateLimitedError({
 			message: error.message,
 			retryAfterSeconds: error.retryAfterSeconds,
+		})
+	}
+	if (isBlocked(error)) {
+		return new VcsRepositoryBlockedError({
+			message: error.message,
+			...(!(error.status === undefined) ? { status: error.status } : undefined),
 		})
 	}
 	if (isGone(error.status)) {
@@ -138,7 +158,7 @@ const toVcsError = (
 // `fetchCommits` keeps the port's 3-way error channel (no VcsRateLimitedError).
 const toVcsCommitError = (
 	error: GithubAppError,
-): VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError => {
+): VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRepositoryBlockedError => {
 	const mapped = toVcsError(error)
 	return mapped._tag === "@maple/http/errors/VcsRateLimitedError"
 		? new VcsProviderError({ message: mapped.message })

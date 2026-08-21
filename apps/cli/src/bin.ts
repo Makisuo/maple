@@ -92,6 +92,10 @@ if (checkpointProbeDataDir !== undefined) {
 		// the span `Error` and are reported by `runMain`.
 		Effect.catchTags({
 			"@maple/cli/ServerStateError": recoverExpected,
+			// `maple checkpoint` against a server whose chDB config has no
+			// `<backups>` stanza: a refused precondition with an actionable fix, not
+			// a failure. Same category as the already-running guard above.
+			"@maple/cli/CheckpointPreconditionError": recoverExpected,
 			// Mode resolution ("No Maple backend found", "Cannot use --remote and
 			// --local together") reaches here as a `WarehouseConfigError`, remapped by
 			// `WarehouseExecutorFromMode` in core/warehouse.ts. `pipeName` is the

@@ -220,7 +220,13 @@ export function AttributesTable({ attributes, title, searchQuery, groupByNamespa
 	)
 }
 
-function partitionResourceAttributes(attrs: Record<string, string>) {
+/**
+ * Splits Maple's own attributes (the `maple_` namespace the gateway stamps —
+ * `maple_org_id`, `maple_ai.*`, …) out of whatever the instrumentation sent.
+ * They're useful when you go looking, and noise when you don't, so they get
+ * their own collapsed section instead of a row among the customer's own keys.
+ */
+function partitionInternalAttributes(attrs: Record<string, string>) {
 	const standard: Record<string, string> = {}
 	const internal: Record<string, string> = {}
 	for (const [key, value] of Object.entries(attrs)) {
@@ -233,23 +239,26 @@ function partitionResourceAttributes(attrs: Record<string, string>) {
 	return { standard, internal }
 }
 
-export function ResourceAttributesSection({
+/**
+ * An `AttributesTable` with the `maple_` keys folded into a collapsed
+ * "Maple Internal" table beneath it. Use this anywhere a raw attribute map from
+ * the pipeline is shown — span, resource, or log — since any of them can carry
+ * gateway-stamped keys.
+ */
+export function AttributesSection({
 	attributes,
+	title,
 	searchQuery,
 	groupByNamespace,
-}: {
-	attributes: Record<string, string>
-	searchQuery?: string
-	groupByNamespace?: boolean
-}) {
-	const { standard, internal } = partitionResourceAttributes(attributes)
+}: AttributesTableProps) {
+	const { standard, internal } = partitionInternalAttributes(attributes)
 	const internalCount = Object.keys(internal).length
 
 	return (
 		<div className="space-y-2">
 			<AttributesTable
 				attributes={standard}
-				title="Resource Attributes"
+				title={title}
 				searchQuery={searchQuery}
 				groupByNamespace={groupByNamespace}
 			/>
@@ -274,5 +283,20 @@ export function ResourceAttributesSection({
 				</Collapsible>
 			)}
 		</div>
+	)
+}
+
+export function ResourceAttributesSection({
+	attributes,
+	searchQuery,
+	groupByNamespace,
+}: Omit<AttributesTableProps, "title">) {
+	return (
+		<AttributesSection
+			attributes={attributes}
+			title="Resource Attributes"
+			searchQuery={searchQuery}
+			groupByNamespace={groupByNamespace}
+		/>
 	)
 }

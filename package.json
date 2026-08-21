@@ -24,7 +24,8 @@
 		"dev:alerting": "bun --filter=@maple/alerting dev",
 		"format": "oxfmt",
 		"format:check": "oxfmt --check",
-		"lint": "oxlint -c .oxlintrc.effect.json --quiet alchemy.run.ts scripts apps packages lib examples",
+		"lint": "oxlint -c .oxlintrc.effect.json --quiet alchemy.run.ts scripts apps packages lib examples && bun run lint:slack-agent",
+		"lint:slack-agent": "oxlint -c .oxlintrc.json --quiet apps/slack-agent",
 		"lint:audit": "oxlint -c .oxlintrc.effect.json alchemy.run.ts scripts apps packages lib examples",
 		"lint:fix": "oxlint -c .oxlintrc.effect.json --fix alchemy.run.ts scripts apps packages lib examples",
 		"alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk --filter=@maple-dev/browser --filter=@maple-dev/clickhouse-builder",
@@ -73,7 +74,7 @@
 	"overrides": {
 		"@effect/sql-d1": "4.0.0-rc.108"
 	},
-	"packageManager": "bun@1.3.11",
+	"packageManager": "bun@1.4.0",
 	"catalog": {
 		"vite": "^8.0.16",
 		"vitest": "^4.1.9"
@@ -111,8 +112,7 @@
 			"@base-ui/react": "^1.6.0",
 			"@xyflow/react": "^12.11.0",
 			"class-variance-authority": "^0.7.1",
-			"clsx": "^2.1.1",
-			"recharts": "^3.9.0"
+			"clsx": "^2.1.1"
 		}
 	},
 	"patchedDependencies": {

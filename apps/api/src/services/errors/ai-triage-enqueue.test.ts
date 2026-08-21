@@ -88,6 +88,26 @@ const enableAutomation = Effect.gen(function* () {
 	)
 })
 
+/**
+ * Both ceilings, explicitly. The reserve is a fraction of the pass ceiling, so a
+ * test about it has to pin that number rather than inherit a default whose whole
+ * point is to be large.
+ */
+const enableWithLimits = (maxRunsPerDay: number, maxPassesPerDay: number) =>
+	Effect.gen(function* () {
+		const database = yield* Database
+		const nowMs = yield* Clock.currentTimeMillis
+		yield* database.execute((db) =>
+			db.insert(aiTriageSettings).values({
+				orgId: ORG,
+				enabled: true,
+				maxRunsPerDay,
+				maxPassesPerDay,
+				updatedAt: new Date(nowMs),
+			}),
+		)
+	})
+
 const fakeFanoutWorkflow = () => {
 	const created: Array<{ id: string; params: Record<string, unknown> }> = []
 	return {
@@ -205,7 +225,7 @@ describe("maybeEnqueueTriage", () => {
 			const start = (id: string) => maybeEnqueueTriage(baseInput(id, workflow.binding))
 
 			// `maxRunsPerDay` is 2 here, and a planned run reserves 6 passes against a
-			// 90-pass default — so the runs ceiling is what bites first.
+			// 1000-pass default — so the runs ceiling is what bites first.
 			assert.isTrue((yield* start("incident-1")).enqueued)
 			assert.isTrue((yield* start("incident-2")).enqueued)
 			assert.deepStrictEqual(yield* start("incident-3"), {
@@ -310,6 +330,49 @@ describe("maybeEnqueueTriage", () => {
 			})
 			assert.isTrue(result.enqueued)
 			assert.lengthOf(workflow.created, 1)
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	/**
+	 * The regression this reserve was built for: for two weeks the whole daily
+	 * budget was spent by ordinary incidents within three hours of UTC midnight,
+	 * so every incident during working hours was refused — including the ones
+	 * worth investigating. Arrival order must not outrank severity.
+	 *
+	 * A start contributes `fanoutSize + 1` to usage and reserves `width + 2`. At
+	 * width 4 (unclassified) that is 5 spent per start and 6 reserved; a critical
+	 * is width 5, so 7 reserved. With a 20-pass ceiling the ordinary slice is 14.
+	 */
+	it.effect("keeps the reserve for high and critical once ordinary starts fill the slice", () =>
+		Effect.gen(function* () {
+			yield* enableWithLimits(50, 20)
+			const workflow = fakeFanoutWorkflow()
+			const ordinary = (id: string) => maybeEnqueueTriage(baseInput(id, workflow.binding))
+
+			assert.isTrue((yield* ordinary("incident-1")).enqueued) // 0 + 6 <= 14
+			assert.isTrue((yield* ordinary("incident-2")).enqueued) // 5 + 6 <= 14
+			assert.deepStrictEqual(yield* ordinary("incident-3"), {
+				enqueued: false,
+				reason: "daily_cap",
+			}) // 10 + 6 > 14
+
+			// Same instant, same usage, higher severity: the reserved slice is still there.
+			const critical = yield* maybeEnqueueTriage(criticalInput(workflow.binding, "incident-4"))
+			assert.isTrue(critical.enqueued) // 10 + 7 <= 20
+			assert.lengthOf(workflow.created, 3)
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("refuses a critical start too once the full ceiling is spent", () =>
+		Effect.gen(function* () {
+			yield* enableWithLimits(50, 8)
+			const workflow = fakeFanoutWorkflow()
+			// One critical spends 6 of 8; a second needs 6 + 7 and cannot have it.
+			assert.isTrue((yield* maybeEnqueueTriage(criticalInput(workflow.binding, "incident-1"))).enqueued)
+			assert.deepStrictEqual(yield* maybeEnqueueTriage(criticalInput(workflow.binding, "incident-2")), {
+				enqueued: false,
+				reason: "daily_cap",
+			})
 		}).pipe(Effect.provide(makeLayer())),
 	)
 })

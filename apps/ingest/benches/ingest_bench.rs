@@ -1,3 +1,10 @@
+//! Throughput benchmarks for the ingest pipeline.
+#![expect(
+    clippy::expect_used,
+    reason = "a benchmark that cannot build its fixtures has nothing to measure, so failing \
+              loudly at setup is the intended behaviour"
+)]
+
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
@@ -76,7 +83,7 @@ fn bench_ingest_accept(c: &mut Criterion) {
     });
 
     group.finish();
-    let _ = std::fs::remove_dir_all(&fixture.queue_dir);
+    drop(std::fs::remove_dir_all(&fixture.queue_dir));
 }
 
 impl BenchFixture {
@@ -90,14 +97,14 @@ impl BenchFixture {
             .route("/v0/events", post(fake_tinybird_import))
             .with_state(fake_state);
         tokio::spawn(async move {
-            let _ = axum::serve(listener, app).await;
+            drop(axum::serve(listener, app).await);
         });
 
         let queue_dir = unique_temp_dir("maple-ingest-bench-wal");
         let pipeline = TelemetryPipeline::new(
             TinybirdConfig {
                 endpoint: format!("http://{addr}"),
-                token: "bench-token".to_string(),
+                token: "bench-token".to_owned(),
                 queue_dir: queue_dir.clone(),
                 // Effectively uncapped: this benchmark measures accept latency
                 // (encode + WAL append + ack), not back-pressure. A single org
@@ -118,10 +125,10 @@ impl BenchFixture {
                 clickhouse_export_timeout: Duration::from_secs(5),
                 clickhouse_breaker: ClickHouseBreakerConfig::default(),
                 datasources: DatasourceNames::defaults(),
-                datasource_session_replays: "session_replays".to_string(),
-                datasource_session_replay_events: "session_replay_events".to_string(),
-                datasource_session_events: "session_events".to_string(),
-                datasource_product_events: "product_events".to_string(),
+                datasource_session_replays: "session_replays".to_owned(),
+                datasource_session_replay_events: "session_replay_events".to_owned(),
+                datasource_session_events: "session_events".to_owned(),
+                datasource_product_events: "product_events".to_owned(),
             },
             Client::builder()
                 .timeout(Duration::from_secs(5))
@@ -168,7 +175,7 @@ fn build_logs(count: usize) -> ExportLogsServiceRequest {
             time_unix_nano: 1_700_000_000_000_000_000 + index as u64,
             observed_time_unix_nano: 1_700_000_000_000_000_000 + index as u64,
             severity_number: 9,
-            severity_text: "INFO".to_string(),
+            severity_text: "INFO".to_owned(),
             body: Some(AnyValue {
                 value: Some(any_value::Value::StringValue(format!(
                     "benchmark log {index}"
@@ -188,8 +195,8 @@ fn build_logs(count: usize) -> ExportLogsServiceRequest {
             }),
             scope_logs: vec![ScopeLogs {
                 scope: Some(InstrumentationScope {
-                    name: "criterion".to_string(),
-                    version: "1".to_string(),
+                    name: "criterion".to_owned(),
+                    version: "1".to_owned(),
                     attributes: Vec::new(),
                     dropped_attributes_count: 0,
                 }),
@@ -201,11 +208,17 @@ fn build_logs(count: usize) -> ExportLogsServiceRequest {
     }
 }
 
+/// A non-zero id byte for fixture span/trace ids. Wraps rather than truncating
+/// so a bench that builds more than 255 spans keeps producing valid ids.
+fn fixture_id_byte(index: usize) -> u8 {
+    u8::try_from(index % 255).unwrap_or(0) + 1
+}
+
 fn build_traces(count: usize) -> ExportTraceServiceRequest {
     let spans = (0..count)
         .map(|index| Span {
-            trace_id: vec![index as u8 + 1; 16],
-            span_id: vec![index as u8 + 1; 8],
+            trace_id: vec![fixture_id_byte(index); 16],
+            span_id: vec![fixture_id_byte(index); 8],
             name: format!("benchmark span {index}"),
             kind: span::SpanKind::Server as i32,
             start_time_unix_nano: 1_700_000_000_000_000_000 + index as u64,
@@ -224,8 +237,8 @@ fn build_traces(count: usize) -> ExportTraceServiceRequest {
             }),
             scope_spans: vec![ScopeSpans {
                 scope: Some(InstrumentationScope {
-                    name: "criterion".to_string(),
-                    version: "1".to_string(),
+                    name: "criterion".to_owned(),
+                    version: "1".to_owned(),
                     attributes: Vec::new(),
                     dropped_attributes_count: 0,
                 }),
@@ -239,9 +252,9 @@ fn build_traces(count: usize) -> ExportTraceServiceRequest {
 
 fn string_kv(key: &str, value: &str) -> KeyValue {
     KeyValue {
-        key: key.to_string(),
+        key: key.to_owned(),
         value: Some(AnyValue {
-            value: Some(any_value::Value::StringValue(value.to_string())),
+            value: Some(any_value::Value::StringValue(value.to_owned())),
         }),
     }
 }
@@ -249,8 +262,7 @@ fn string_kv(key: &str, value: &str) -> KeyValue {
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |duration| duration.as_nanos());
     std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
 }
 

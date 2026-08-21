@@ -192,6 +192,3 @@ export const ROUTE_ENDPOINT_PLANS: RouteEndpointPlanRegistry = {
 			}),
 	},
 }
-
-/** Endpoints a shared dashboard can render. Used by the dialog's warning list. */
-export const SUPPORTED_ROUTE_ENDPOINTS: ReadonlySet<string> = new Set(Object.keys(ROUTE_ENDPOINT_PLANS))

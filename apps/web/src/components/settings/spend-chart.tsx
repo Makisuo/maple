@@ -1,20 +1,48 @@
 import { useMemo } from "react"
-import { Area, ComposedChart, Line, ReferenceDot, ReferenceLine } from "recharts"
+import { areaY, d3Curve, defineChart, dot, lineY, ruleX, stack, text } from "@tanstack/charts"
+import { decorative } from "@tanstack/charts/mark/decorative"
+import { scaleLinear } from "@tanstack/charts-scales/linear"
+import { scalePoint } from "@tanstack/charts-scales/point"
+import { curveMonotoneX } from "d3-shape"
 
 import {
-	ChartContainer,
-	ChartTooltip,
-	ChartTooltipContent,
-	type ChartConfig,
-	ChartGrid,
-	ChartXAxis,
-	ChartYAxis,
-} from "@maple/ui/components/ui/chart"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+	PlotFrame,
+	PlotTooltipBody,
+	createTooltipFocusStore,
+	cursorTooltip,
+	dashedGridY,
+	focusCrosshair,
+	resolvePlotColor,
+	usePlotChromeColors,
+	type PlotTooltipSeries,
+} from "@maple/ui/components/plot"
+import { useTheme } from "@maple/ui/hooks/use-theme"
+
+/** One stacked band segment: a day, the band it belongs to, and its dollars. */
+interface SpendCell {
+	point: CumulativePoint
+	band: (typeof BANDS)[number]
+	value: number | null
+}
+
+/**
+ * What reaches the tooltip: a band segment when the stack is hovered, or a bare
+ * day from the projection line.
+ */
+type SpendDatum = CumulativePoint | SpendCell
+
+/** The day behind a datum — every band's cumulative total at that point. */
+function dayOf(datum: SpendDatum): CumulativePoint {
+	return typeof (datum as SpendCell).point === "object"
+		? (datum as SpendCell).point
+		: (datum as CumulativePoint)
+}
+import { ChartEmpty, ChartLoading } from "@maple/ui/components/charts"
 
 import { formatCurrency } from "@/lib/billing/currency"
 import {
 	buildCumulativeSeries,
+	type CumulativePoint,
 	FEATURE_COLORS,
 	FEATURE_SHORT_LABELS,
 	SPEND_FEATURES,
@@ -33,9 +61,16 @@ import type { DailySpendResponse } from "@maple/domain/http"
  * dashed projection carries today's actual total to the end of the cycle.
  */
 
+/** The plot itself. The states around it reserve {@link SPEND_CHART_HEIGHT}. */
 const CHART_HEIGHT = 260
 
-const chartConfig: ChartConfig = {
+/**
+ * The box the chart occupies including its legend strip, so the skeleton and the
+ * empty state don't collapse the card while the cycle's spend loads.
+ */
+const SPEND_CHART_HEIGHT = 300
+
+const chartConfig = {
 	base: { label: "Base plan", color: "#57534a" },
 	logs: { label: FEATURE_SHORT_LABELS.logs, color: FEATURE_COLORS.logs },
 	traces: { label: FEATURE_SHORT_LABELS.traces, color: FEATURE_COLORS.traces },
@@ -48,12 +83,12 @@ const chartConfig: ChartConfig = {
 		label: FEATURE_SHORT_LABELS.product_events,
 		color: FEATURE_COLORS.product_events,
 	},
-}
+} satisfies Record<string, { label: string; color: string }>
 
 const BANDS = ["base", ...SPEND_FEATURES] as const
 
 export function SpendChartSkeleton() {
-	return <Skeleton className="h-[300px] w-full rounded-none" />
+	return <ChartLoading variant="area" height={SPEND_CHART_HEIGHT} />
 }
 
 export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySpendResponse | undefined }) {
@@ -88,12 +123,163 @@ export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySp
 	const hasFuture = lastPoint !== undefined && lastPoint.future
 
 	if (data.length === 0) {
-		return (
-			<div className="flex h-[300px] items-center justify-center border border-dashed border-border/60 font-mono text-[11px] text-muted-foreground">
-				No ingest recorded this cycle yet
-			</div>
-		)
+		return <ChartEmpty height={SPEND_CHART_HEIGHT}>No ingest recorded this cycle yet</ChartEmpty>
 	}
+
+	const chromeColors = usePlotChromeColors()
+	const focusStore = useMemo(() => createTooltipFocusStore(), [])
+	const { theme } = useTheme()
+	// oxlint-disable-next-line react-hooks/exhaustive-deps
+	const primary = useMemo(() => resolvePlotColor("--primary", "#6366f1"), [theme])
+
+	const dateLabel = useMemo(
+		() => (value: string) =>
+			new Date(`${value}T00:00:00Z`).toLocaleDateString("en-US", {
+				month: "short",
+				day: "numeric",
+				timeZone: "UTC",
+			}),
+		[],
+	)
+
+	const tooltipSeries = useMemo<PlotTooltipSeries<SpendDatum>[]>(
+		() =>
+			BANDS.map((band) => ({
+				label: chartConfig[band]?.label ?? band,
+				color: chartConfig[band]?.color ?? chromeColors.border,
+				// Read off the DAY, so a hovered band still prints every other band's
+				// running total at that point rather than only its own.
+				value: (datum: SpendDatum) => {
+					const value = dayOf(datum)[band]
+					return typeof value === "number" ? value : null
+				},
+				format: (value: number) => formatCurrency(value, model.currency),
+			})),
+		[chromeColors.border, model.currency],
+	)
+
+	const definition = useMemo(() => {
+		const at = (point: CumulativePoint) => point.date
+
+		/**
+		 * Stacking groups on `z`, so the bands are built as CELLS — one datum per
+		 * band per day. Recharts stacked by matching `stackId` across five sibling
+		 * `<Area>` elements instead.
+		 */
+		const cells: SpendCell[] = data.flatMap((point) =>
+			BANDS.map((band) => ({
+				point,
+				band,
+				value: typeof point[band] === "number" ? (point[band] as number) : null,
+			})),
+		)
+
+		return defineChart({
+			marks: [
+				dashedGridY(),
+				areaY(cells, {
+					x: (cell: SpendCell) => cell.point.date,
+					y: (cell: SpendCell) => cell.value,
+					z: (cell: SpendCell) => cell.band,
+					fill: (cell: SpendCell) => chartConfig[cell.band]?.color ?? chromeColors.border,
+					fillOpacity: 0.35,
+					stroke: (cell: SpendCell) => chartConfig[cell.band]?.color ?? chromeColors.border,
+					strokeWidth: 1,
+					curve: d3Curve(curveMonotoneX),
+					layout: stack({ order: [...BANDS] }),
+				}),
+				// The projection: today's actual total joined to where the cycle
+				// lands, dashed because it has not happened.
+				...(hasFuture
+					? [
+							lineY(data, {
+								id: "projected",
+								x: at,
+								y: (point: CumulativePoint) =>
+									typeof point.projected === "number" ? point.projected : null,
+								stroke: primary,
+								strokeWidth: 1.5,
+								strokeDasharray: "4 4",
+							}),
+						]
+					: []),
+				// The endpoint and its amount. `decorative` so neither takes focus
+				// away from the bands, and neither widens the chart's point type.
+				...(hasFuture && lastPoint
+					? [
+							decorative(
+								dot([lastPoint], {
+									x: at,
+									y: () => projected,
+									r: 3,
+									fill: primary,
+								}),
+							),
+							decorative(
+								text([lastPoint], {
+									x: at,
+									y: () => projected,
+									text: () => `${formatCurrency(projected, model.currency)} projected`,
+									fill: primary,
+									anchor: "end",
+									dy: -8,
+									fontSize: 10,
+								}),
+							),
+						]
+					: []),
+				// "Today" — a vertical rule, which is what `ReferenceLine x=` was.
+				...(todayPoint
+					? [
+							decorative(
+								ruleX([todayPoint], {
+									x: at,
+									stroke: chromeColors.border,
+									strokeOpacity: 1,
+									strokeWidth: 1,
+								}),
+							),
+						]
+					: []),
+				focusCrosshair(chromeColors),
+			],
+			x: {
+				scale: scalePoint,
+				axis: {
+					line: false,
+					ticks: { size: 0, padding: 8, format: dateLabel },
+					tickLabels: { thin: { minGap: 12 } },
+				},
+			},
+			y: {
+				scale: scaleLinear().domain([0, yMax]),
+				axis: {
+					line: false,
+					ticks: {
+						size: 0,
+						padding: 8,
+						format: (value: number) => `$${Math.round(value)}`,
+					},
+				},
+			},
+			margin: { top: 8, right: 56, bottom: 0, left: 52 },
+			focus: "group-x",
+			focusRing: false,
+			tooltip: cursorTooltip(focusStore.anchor),
+		})
+	}, [
+		data,
+		hasFuture,
+		lastPoint,
+		todayPoint,
+		projected,
+		yMax,
+		primary,
+		chromeColors,
+		dateLabel,
+		model.currency,
+		focusStore,
+	])
 
 	return (
 		<div className="border border-border/60 bg-card/40">
@@ -129,97 +315,21 @@ export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySp
 			</div>
 
 			<div className="px-2 pb-2 pt-4">
-				<ChartContainer config={chartConfig} className="w-full" style={{ height: CHART_HEIGHT }}>
-					<ComposedChart data={[...data]} margin={{ top: 8, right: 56, left: 0, bottom: 0 }}>
-						<ChartGrid />
-						<ChartXAxis
-							dataKey="date"
-							minTickGap={40}
-							tickFormatter={(value: string) =>
-								new Date(`${value}T00:00:00Z`).toLocaleDateString("en-US", {
-									month: "short",
-									day: "numeric",
-									timeZone: "UTC",
-								})
-							}
-							className="font-mono text-[10px]"
-						/>
-						<ChartYAxis
-							domain={[0, yMax]}
-							width={52}
-							tickFormatter={(value: number) => `$${Math.round(value)}`}
-							className="font-mono text-[10px]"
-						/>
-						<ChartTooltip
-							content={
-								<ChartTooltipContent
-									labelFormatter={(label) =>
-										new Date(`${String(label)}T00:00:00Z`).toLocaleDateString("en-US", {
-											month: "short",
-											day: "numeric",
-											timeZone: "UTC",
-										})
-									}
-									formatter={(value) => formatCurrency(Number(value), model.currency)}
-								/>
-							}
-						/>
-						{BANDS.map((band) => (
-							<Area
-								key={band}
-								dataKey={band}
-								type="monotone"
-								stackId="spend"
-								stroke={chartConfig[band]?.color}
-								fill={chartConfig[band]?.color}
-								fillOpacity={0.35}
-								strokeWidth={1}
-								isAnimationActive={false}
-							/>
-						))}
-						{/* The projection: today's actual total joined to where the cycle
-						    lands, dashed because it hasn't happened. */}
-						{hasFuture && (
-							<Line
-								dataKey="projected"
-								type="linear"
-								stroke="var(--color-primary)"
-								strokeDasharray="4 4"
-								strokeWidth={1.5}
-								dot={false}
-								connectNulls
-								isAnimationActive={false}
+				<div className="w-full" style={{ height: CHART_HEIGHT }}>
+					<PlotFrame
+						definition={definition}
+						ariaLabel="Cumulative spend this cycle"
+						className="h-full w-full"
+						renderTooltipBody={({ points }) => (
+							<PlotTooltipBody
+								points={points}
+								series={tooltipSeries}
+								focusStore={focusStore}
+								heading={(datum: SpendDatum) => dateLabel(dayOf(datum).date)}
 							/>
 						)}
-						{hasFuture && lastPoint && (
-							<ReferenceDot
-								x={lastPoint.date}
-								y={projected}
-								r={3}
-								fill="var(--color-primary)"
-								stroke="none"
-								label={{
-									value: `${formatCurrency(projected, model.currency)} projected`,
-									position: "top",
-									fill: "var(--color-primary)",
-									fontSize: 10,
-								}}
-							/>
-						)}
-						{todayPoint && (
-							<ReferenceLine
-								x={todayPoint.date}
-								stroke="var(--color-border)"
-								label={{
-									value: "Today",
-									position: "insideTopLeft",
-									fill: "var(--color-muted-foreground)",
-									fontSize: 10,
-								}}
-							/>
-						)}
-					</ComposedChart>
-				</ChartContainer>
+					/>
+				</div>
 			</div>
 
 			<div className="flex flex-wrap items-baseline justify-between gap-2 border-t border-border/60 px-4 py-2.5 text-[11px] text-muted-foreground">

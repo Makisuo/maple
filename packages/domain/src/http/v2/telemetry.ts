@@ -969,6 +969,15 @@ export const V2Service = Schema.Struct({
 	p99_latency_ms: Schema.Number,
 	has_sampling: Schema.Boolean,
 	sampling_weight: Schema.Number,
+	// The service's own trailing-7d p95, ending where the requested window
+	// starts, so an ongoing regression can't inflate its own baseline. Absent
+	// when the service has no history in that window. Clients judge latency
+	// against this rather than an absolute threshold — a batch worker whose p95
+	// is always seconds is healthy, not degraded.
+	baseline_p95_latency_ms: Schema.optionalKey(Schema.Number),
+	// Spans behind `baseline_p95_latency_ms`. A baseline built from a handful of
+	// spans is noise; clients should ignore it below their own minimum.
+	baseline_span_count: Schema.optionalKey(Schema.Number),
 }).annotate({
 	identifier: "Service",
 	title: "Service",

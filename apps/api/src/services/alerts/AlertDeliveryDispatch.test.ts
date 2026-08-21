@@ -506,6 +506,29 @@ describe("dispatchDelivery", () => {
 		}),
 	)
 
+	it.effect("slack-bot: calls fetch detached from the runtime object", () =>
+		Effect.gen(function* () {
+			// Regression: the unguarded transports used to call `runtime.fetchFn(...)`,
+			// a method call that hands workerd's global `fetch` a `this` of the
+			// runtime object — "Illegal invocation", every Slack delivery dead.
+			// A `function` (not an arrow) is what makes `this` observable here.
+			let called = false
+			let receiver: typeof globalThis | undefined
+			const fetchFn: typeof fetch = function (this: typeof globalThis | undefined) {
+				called = true
+				receiver = this
+				return Promise.resolve(
+					new Response(JSON.stringify({ ok: true, ts: "1700000000.000100" }), { status: 200 }),
+				)
+			}
+
+			yield* dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps())
+
+			assert.isTrue(called)
+			assert.isUndefined(receiver)
+		}),
+	)
+
 	it.effect("slack-bot: surfaces a not_in_channel logical error with an actionable message", () =>
 		Effect.gen(function* () {
 			const fetchFn: typeof fetch = async () =>

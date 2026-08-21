@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
+	MAX_REPLAY_CHUNKS_PER_REQUEST,
+	MAX_REPLAY_EVENTS_RESPONSE_BYTES,
+	MAX_REPLAY_RANGE_PAYLOAD_BYTES,
+} from "@maple/domain/http/v2"
+import {
 	INITIAL_WINDOW_BYTES,
 	MAX_BYTES_PER_RANGE,
 	MAX_CHUNKS_PER_RANGE,
@@ -43,6 +48,17 @@ describe("range planning", () => {
 				.reduce((sum, c) => sum + c.byte_size, 0)
 			expect(bytes).toBeLessThanOrEqual(MAX_BYTES_PER_RANGE)
 		}
+	})
+
+	it("plans against a payload budget that leaves headroom under the server's response ceiling", () => {
+		// The bug this pins: the client budgeted ranges to exactly the server's
+		// 8 MB ceiling, but that ceiling counts the JSON-*encoded* row, which runs
+		// 1.07–1.14x the payload the manifest reports. A full range therefore blew
+		// the guard by construction — 413 `range_too_large`, `retry: never` — and
+		// the recording was permanently unplayable from that chunk on.
+		expect(MAX_BYTES_PER_RANGE).toBeLessThanOrEqual(MAX_REPLAY_RANGE_PAYLOAD_BYTES)
+		expect(MAX_REPLAY_RANGE_PAYLOAD_BYTES * 1.25).toBeLessThanOrEqual(MAX_REPLAY_EVENTS_RESPONSE_BYTES)
+		expect(MAX_CHUNKS_PER_RANGE).toBeLessThanOrEqual(MAX_REPLAY_CHUNKS_PER_REQUEST)
 	})
 
 	it("still caps chunk count when chunks are small", () => {

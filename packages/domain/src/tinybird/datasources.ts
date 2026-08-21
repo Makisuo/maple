@@ -580,7 +580,7 @@ export type ServiceMapDbQuerySignaturesHourlyRow = InferRow<typeof serviceMapDbQ
  * (those are in `service_map_db_edges_hourly`), keyed by what they're talking to:
  *
  *   - http       — `server.address` / `http.host` / `url.authority`
- *   - messaging  — `messaging.system` + `messaging.destination`
+ *   - messaging  — `messaging.system` + `messaging.destination.name` (legacy `messaging.destination`)
  *   - rpc        — `rpc.system` + `rpc.service`
  *
  * `TargetType` is LowCardinality(String) — not Enum8 — to match the
@@ -846,37 +846,6 @@ export const serviceOverviewMinutely = defineDatasource("service_overview_minute
 export type ServiceOverviewMinutelyRow = InferRow<typeof serviceOverviewMinutely>
 
 /**
- * Pre-materialized error spans for the errors page.
- * Pre-filters to StatusCode='Error' and pre-extracts deployment.environment
- * so error queries avoid scanning the full traces table and Map columns.
- * Sorted by (OrgId, ServiceName, Timestamp) for efficient filtering and aggregation.
- * Populated by materialized view, not direct ingestion.
- */
-export const errorSpans = defineDatasource("error_spans", {
-	description:
-		"Pre-materialized error spans for the errors page. Pre-filters to StatusCode='Error' and pre-extracts deployment.environment. Populated by materialized view.",
-	jsonPaths: false,
-	schema: {
-		OrgId: t.string().lowCardinality(),
-		Timestamp: t.dateTime(),
-		TraceId: t.string(),
-		SpanId: t.string(),
-		ParentSpanId: t.string().default("__unset__"),
-		ServiceName: t.string().lowCardinality(),
-		StatusMessage: t.string(),
-		Duration: t.uint64(),
-		DeploymentEnv: t.string().lowCardinality(),
-	},
-	engine: engine.mergeTree({
-		partitionKey: "toDate(Timestamp)",
-		sortingKey: ["OrgId", "ServiceName", "Timestamp"],
-		ttl: "Timestamp + INTERVAL 90 DAY",
-	}),
-})
-
-export type ErrorSpansRow = InferRow<typeof errorSpans>
-
-/**
  * Pre-materialized error events for the errors-as-issues triage system.
  * Populated from traces where StatusCode='Error'. Unwraps the first OTel
  * `exception` event (if any) to surface exception.type / message / stacktrace,
@@ -905,6 +874,11 @@ export const errorEvents = defineDatasource("error_events", {
 		StatusMessage: t.string(),
 		Duration: t.uint64(),
 		ErrorLabel: t.string(),
+		// Emitting build, for the issue evaluator's regression rule: an occurrence
+		// from a build that was already running when the issue was resolved is an
+		// old client still in the wild, not a regression. Appended last so the
+		// materialized projection stays aligned with this column order.
+		ServiceVersion: t.string().lowCardinality(),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
@@ -948,6 +922,11 @@ export const errorEventsByTime = defineDatasource("error_events_by_time", {
 		StatusMessage: t.string(),
 		Duration: t.uint64(),
 		ErrorLabel: t.string(),
+		// Emitting build, for the issue evaluator's regression rule: an occurrence
+		// from a build that was already running when the issue was resolved is an
+		// old client still in the wild, not a regression. Appended last so the
+		// materialized projection stays aligned with this column order.
+		ServiceVersion: t.string().lowCardinality(),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
@@ -986,6 +965,15 @@ export const errorFingerprintsMinutely = defineDatasource("error_fingerprints_mi
 		OccurrenceCount: t.simpleAggregateFunction("sum", t.uint64()),
 		FirstSeen: t.simpleAggregateFunction("min", t.dateTime()),
 		LastSeen: t.simpleAggregateFunction("max", t.dateTime()),
+		// EVERY build seen in the minute, not one sampled build. The evaluator
+		// unions these into the issue's build set, and that set is what decides
+		// whether an occurrence on a resolved issue is a real regression or an old
+		// client still in the wild. Sampling one build per minute made the set a
+		// lottery for exactly the case the rule exists for: `maple-cli` runs on
+		// other people's machines with many versions live at once, so the builds
+		// that happened not to be sampled before the fix shipped would each look
+		// like a regression and reopen the issue.
+		ServiceVersions: t.simpleAggregateFunction("groupUniqArrayArray", t.array(t.string())),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toYYYYMM(Minute)",
@@ -1065,9 +1053,6 @@ export const traceDetailSpans = defineDatasource("trace_detail_spans", {
 		StatusMessage: t.string(),
 		SpanAttributes: t.map(t.string().lowCardinality(), t.string()),
 		ResourceAttributes: t.map(t.string().lowCardinality(), t.string()),
-		EventsTimestamp: t.array(t.dateTime64(9)),
-		EventsName: t.array(t.string().lowCardinality()),
-		EventsAttributes: t.array(t.map(t.string().lowCardinality(), t.string())),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",

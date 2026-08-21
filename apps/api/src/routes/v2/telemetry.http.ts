@@ -75,7 +75,7 @@ const metricCatalogRowSchema = Schema.Struct({
 	isMonotonic: CH.CHNumber,
 })
 
-const serviceCatalogRowSchema = Schema.Struct({
+export const serviceCatalogRowSchema = Schema.Struct({
 	serviceName: Schema.String,
 	serviceNamespaces: Schema.Array(Schema.String),
 	deploymentEnvironments: Schema.Array(Schema.String),
@@ -88,6 +88,15 @@ const serviceCatalogRowSchema = Schema.Struct({
 	p99LatencyMs: CH.CHNumber,
 })
 
+const serviceHealthBaselineRowSchema = Schema.Struct({
+	serviceName: Schema.String,
+	serviceNamespace: Schema.String,
+	environment: Schema.String,
+	baselineP95LatencyMs: CH.CHNumber,
+	baselineSpanCount: CH.CHNumber,
+})
+
+const HOUR_MS = 60 * 60 * 1000
 const PARTITION_HINT_RADIUS_MS = 60 * 60 * 1000
 const PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT = 50
 const PUBLIC_BREAKDOWN_DEFAULT_LIMIT = 20
@@ -1006,7 +1015,40 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 	}),
 )
 
-const toService = (
+// The latency baseline covers the seven days BEFORE the window being judged,
+// so a regression that is still running can't raise the bar it is measured
+// against.
+const BASELINE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+// Matches the `serviceHealthBaseline` registry definition the dashboard reads
+// through, so both surfaces re-read a week-wide aggregate at the same rate.
+const BASELINE_CACHE_SECONDS = 3600
+
+/**
+ * The trailing p95 a service is judged against, keyed by service name. The
+ * catalog rows aggregate every namespace and environment under one name, so
+ * the baseline rows collapse the same way: the busiest row wins rather than
+ * the numbers being averaged across populations that don't compare.
+ */
+export type ServiceBaselines = ReadonlyMap<string, { p95LatencyMs: number; spanCount: number }>
+
+const collapseBaselines = (
+	rows: readonly {
+		serviceName: string
+		baselineP95LatencyMs: number
+		baselineSpanCount: number
+	}[],
+): ServiceBaselines => {
+	const map = new Map<string, { p95LatencyMs: number; spanCount: number }>()
+	for (const row of rows) {
+		const spanCount = Number(row.baselineSpanCount)
+		const current = map.get(row.serviceName)
+		if (current !== undefined && current.spanCount >= spanCount) continue
+		map.set(row.serviceName, { p95LatencyMs: Number(row.baselineP95LatencyMs), spanCount })
+	}
+	return map
+}
+
+export const toService = (
 	row: {
 		serviceName: string
 		serviceNamespaces: readonly string[]
@@ -1020,11 +1062,13 @@ const toService = (
 		p99LatencyMs: number
 	},
 	rangeSeconds: number,
+	baselines: ServiceBaselines,
 ): V2Service => {
 	const spanCount = Number(row.spanCount)
 	const estimatedSpanCount = Number(row.estimatedSpanCount)
 	const estimatedErrorCount = Number(row.estimatedErrorCount)
-	return {
+	const baseline = baselines.get(row.serviceName)
+	const service: V2Service = {
 		object: "service",
 		name: decodeServiceName(row.serviceName),
 		service_namespaces: [...row.serviceNamespaces],
@@ -1040,14 +1084,76 @@ const toService = (
 		has_sampling: estimatedSpanCount > spanCount + 0.001,
 		sampling_weight: spanCount > 0 ? estimatedSpanCount / spanCount : 1,
 	}
+	// Omitted rather than zeroed when the service has no history: a zero
+	// baseline would read as "instant, therefore everything is a regression".
+	if (baseline === undefined) return service
+	return {
+		...service,
+		baseline_p95_latency_ms: baseline.p95LatencyMs,
+		baseline_span_count: baseline.spanCount,
+	}
 }
 
 export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (handlers) =>
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
+		const queryEngine = yield* QueryEngineService
+
+		/**
+		 * Trailing p95 per service for the seven days before `windowStartMs`.
+		 *
+		 * Hour-floored so a polling client's drifting window keeps hitting the
+		 * same cache entry, and cached for an hour — a week-wide aggregate that
+		 * moves slowly should not be re-read on every list request.
+		 */
+		const loadBaselines = (
+			tenant: CurrentTenant.TenantSchema,
+			windowStartMs: number,
+			filters: { deploymentEnvironment?: string; serviceNamespace?: string },
+		) =>
+			Effect.gen(function* () {
+				const endMs = Math.floor(windowStartMs / HOUR_MS) * HOUR_MS
+				const window = {
+					startTime: formatWarehouseDateTime(endMs - BASELINE_WINDOW_MS),
+					endTime: formatWarehouseDateTime(endMs),
+				}
+				const compiled = CH.compile(
+					CH.serviceHealthBaselineQuery({
+						environments: filters.deploymentEnvironment
+							? [filters.deploymentEnvironment]
+							: undefined,
+						namespaces: filters.serviceNamespace ? [filters.serviceNamespace] : undefined,
+					}),
+					{ orgId: tenant.orgId, ...window },
+					{ rowSchema: serviceHealthBaselineRowSchema },
+				)
+				const rows = yield* queryEngine.cachedDirect(
+					tenant,
+					"v2ServiceHealthBaseline",
+					{ ...window, ...filters },
+					warehouse.compiledQuery(tenant, compiled, {
+						profile: "aggregation",
+						context: "v2ServiceHealthBaseline",
+					}),
+					BASELINE_CACHE_SECONDS,
+				)
+				return collapseBaselines(rows)
+			}).pipe(
+				// A missing baseline is a supported state — clients fall back to
+				// absolute thresholds — so a failed baseline read degrades the health
+				// signal instead of failing the whole listing.
+				Effect.catchCause((cause) =>
+					Effect.as(
+						Effect.logWarning("v2 service baseline read failed", cause),
+						collapseBaselines([]),
+					),
+				),
+			)
+
 		const execute = (
 			tenant: CurrentTenant.TenantSchema,
 			window: { startTime: string; endTime: string; rangeSeconds: number },
+			baselines: ServiceBaselines,
 			opts: Parameters<typeof CH.serviceCatalogQuery>[0],
 		) => {
 			const compiled = CH.compile(
@@ -1060,7 +1166,7 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 					profile: "aggregation",
 					context: "v2ServiceCatalog",
 				})
-				.pipe(Effect.map((rows) => rows.map((row) => toService(row, window.rangeSeconds))))
+				.pipe(Effect.map((rows) => rows.map((row) => toService(row, window.rangeSeconds, baselines))))
 		}
 		return handlers
 			.handle("list", ({ query }) =>
@@ -1072,8 +1178,12 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 						precision: "second",
 						rangeLabel: "Service queries",
 					})
+					const baselines = yield* loadBaselines(tenant, Date.parse(query.start_time), {
+						deploymentEnvironment: query.deployment_environment,
+						serviceNamespace: query.service_namespace,
+					})
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
-						execute(tenant, window, {
+						execute(tenant, window, baselines, {
 							deploymentEnvironment: query.deployment_environment,
 							serviceNamespace: query.service_namespace,
 							limit,
@@ -1092,7 +1202,8 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 						precision: "second",
 						rangeLabel: "Service queries",
 					})
-					const rows = yield* execute(tenant, window, {
+					const baselines = yield* loadBaselines(tenant, Date.parse(query.start_time), {})
+					const rows = yield* execute(tenant, window, baselines, {
 						serviceName: params.name,
 						limit: 1,
 					})

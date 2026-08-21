@@ -203,6 +203,10 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				lastSeenAt: isoFromDate(row.lastSeenAt),
 				occurrenceCount: row.occurrenceCount,
 				resolvedAt: row.resolvedAt == null ? null : isoFromDate(row.resolvedAt),
+				lastResolvedAt: row.lastResolvedAt == null ? null : isoFromDate(row.lastResolvedAt),
+				lastRegressedAt: row.lastRegressedAt == null ? null : isoFromDate(row.lastRegressedAt),
+				regressionCount: row.regressionCount,
+				resolvedVersions: row.resolvedVersionsJson,
 				snoozeUntil: row.snoozeUntil == null ? null : isoFromDate(row.snoozeUntil),
 				archivedAt: row.archivedAt == null ? null : isoFromDate(row.archivedAt),
 				hasOpenIncident,
@@ -359,6 +363,16 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			if (toState === "done") {
 				update.resolvedAt = msToDate(timestamp)
 				update.resolvedByActorId = actorId ?? null
+				// Survives the next reopen, so a regressed issue can still show when it
+				// was last fixed instead of looking untouched.
+				update.lastResolvedAt = msToDate(timestamp)
+				// Snapshot the builds this issue has been seen from. Occurrences from
+				// any of them afterwards are old clients still running the broken
+				// build, not a regression — see `isRegression` in
+				// error-tick-persistence.ts. Without this, `maple-cli` issues could
+				// never stay fixed: every binary already installed keeps reporting the
+				// bug for as long as it is in use.
+				update.resolvedVersionsJson = row.seenVersionsJson
 			} else if (fromState === "done") {
 				update.resolvedAt = null
 				update.resolvedByActorId = null

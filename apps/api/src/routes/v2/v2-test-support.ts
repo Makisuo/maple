@@ -10,6 +10,8 @@ import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadMod
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { OrganizationService } from "@/services/org/OrganizationService"
+import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
+import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
@@ -36,6 +38,7 @@ import { HttpV2PlanetScaleIntegrationsLive, HttpV2SlackIntegrationsLive } from "
 import { HttpV2ErrorIssuesLive } from "./error-issues.http"
 import { HttpV2AnomaliesLive } from "./anomalies.http"
 import { HttpV2InvestigationsLive } from "./investigations.http"
+import { HttpV2MobileDevicesLive } from "./mobile-devices.http"
 import { HttpV2OrganizationLive } from "./organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
@@ -50,6 +53,8 @@ import {
 	HttpV2ServicesLive,
 	HttpV2TracesLive,
 } from "./telemetry.http"
+import { HttpV2WidgetSummaryLive } from "./widget-summary.http"
+import { HttpV2WidgetCredentialsLive } from "./widget-credentials.http"
 
 /**
  * Test-only support for the v2 HTTP harnesses. `HttpApiBuilder.layer(MapleApiV2)`
@@ -76,12 +81,19 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2InvestigationsLive,
 	HttpV2AnomaliesLive,
 	HttpV2OrganizationLive,
+	// Real services, no stubs: they need only the Database every harness already
+	// provides, and their own route tests are the only places that call them.
+	HttpV2MobileDevicesLive.pipe(
+		Layer.provide(Layer.mergeAll(MobileDevicesService.layer, LiveActivitiesService.layer)),
+	),
 	HttpV2SessionReplaysLive,
 	HttpV2TracesLive,
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
+	HttpV2WidgetSummaryLive,
+	HttpV2WidgetCredentialsLive,
 	// The share group's own dependencies are satisfied here rather than by every
 	// harness: most v2 route tests never touch the share endpoints, and threading
 	// inert services through two dozen call sites to register a group they never
@@ -316,6 +328,7 @@ const alertDestinationStubs = {
 	createDestination: die,
 	updateDestination: die,
 	deleteDestination: die,
+	listTelegramChats: die,
 	testDestination: die,
 }
 

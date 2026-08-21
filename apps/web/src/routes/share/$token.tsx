@@ -30,7 +30,15 @@ import {
 	type ShareWidgetOptionsReporter,
 } from "@/components/share/shared-widget-renderer"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
-import { variableSearchRest, variableValuesFromSearch } from "@/lib/dashboard-controls/search-params"
+import {
+	parseRefreshIntervalSeconds,
+	resolveRefreshIntervalSeconds,
+	variableSearchRest,
+	variableValuesFromSearch,
+} from "@/lib/dashboard-controls/search-params"
+import { RefreshControls } from "@/components/time-range-picker/refresh-controls"
+import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
+import type { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 import { formatTimeRangeDisplay, presetLabel } from "@/lib/time-utils"
 import {
 	shareTimeRange,
@@ -55,6 +63,12 @@ const ShareSearch = Schema.StructWithRest(
 		embed: Schema.optional(Schema.Boolean),
 		from: Schema.optional(Schema.String),
 		to: Schema.optional(Schema.String),
+		/**
+		 * Auto-refresh cadence in seconds for this URL, overriding the board's
+		 * stored default. A share has nowhere to persist a viewer's choice, so
+		 * this is the only place the picker's selection lives.
+		 */
+		refresh: Schema.optional(Schema.Union([Schema.Number, Schema.String])),
 	}),
 	// `?var-<name>=` selections, exactly as on the dashboard route, so a deep
 	// link into a board and into its share pick the same values. The server
@@ -87,6 +101,7 @@ const DEFAULT_SHARE_TIME_RANGE = { type: "relative", value: "1h" } as const
 const resolveShareWindow = (
 	search: { readonly from?: string; readonly to?: string },
 	stored: unknown,
+	{ snap }: { snap: boolean } = { snap: true },
 ): ShareWindow | null => {
 	if (search.from !== undefined && search.to !== undefined) {
 		return {
@@ -95,7 +110,7 @@ const resolveShareWindow = (
 		}
 	}
 	const timeRange = shareTimeRange(stored) ?? DEFAULT_SHARE_TIME_RANGE
-	const resolved = resolveTimeRange(timeRange)
+	const resolved = resolveTimeRange(timeRange, { snap })
 	if (resolved === null) return null
 	return {
 		timeRange: resolved,
@@ -165,6 +180,7 @@ function SharePageContent({ isSignedIn }: { isSignedIn: boolean }) {
 				from={search.from}
 				to={search.to}
 				search={search}
+				refreshParam={search.refresh}
 				signedIn={isSignedIn}
 				embed={search.embed === true}
 			/>
@@ -355,6 +371,7 @@ function ShareBody({
 	from,
 	to,
 	search,
+	refreshParam,
 	signedIn,
 	embed,
 }: {
@@ -363,14 +380,23 @@ function ShareBody({
 	from: string | undefined
 	to: string | undefined
 	search: Record<string, unknown>
+	refreshParam: number | string | undefined
 	signedIn: boolean
 	embed: boolean
 }) {
-	// Recomputed only when the URL or the resolved board changes: re-resolving
-	// a relative preset on every render would re-key the fetch effect forever.
+	const navigate = Route.useNavigate()
+	// Bumped by a manual reload or an auto-refresh tick. It re-resolves the
+	// window *unsnapped* so a relative share actually advances to "now" — the
+	// signed-in board does the same at dashboard-time-range-atoms.ts:77 — and it
+	// re-requests every tile even when the window is absolute and unchanged.
+	const [refreshTick, setRefreshTick] = useState(0)
+
+	// Recomputed only when the URL, the resolved board, or a refresh changes:
+	// re-resolving a relative preset on every render would re-key the fetch
+	// effect forever.
 	const window = useMemo(
-		() => resolveShareWindow({ from, to }, share.dashboard.timeRange),
-		[from, to, share.dashboard.timeRange],
+		() => resolveShareWindow({ from, to }, share.dashboard.timeRange, { snap: refreshTick === 0 }),
+		[from, to, share.dashboard.timeRange, refreshTick],
 	)
 	// Only what the URL selects; the server runs the board's own ladder
 	// (default → All → first option) for everything else, so an unset variable
@@ -393,7 +419,7 @@ function ShareBody({
 		() => share.dashboard.widgets.filter((widget) => options[widget.id] !== undefined),
 		[share.dashboard.widgets, options],
 	)
-	const { states, variables } = useShareWidgetData(
+	const { states, variables, refresh } = useShareWidgetData(
 		token,
 		reportedWidgets,
 		window?.timeRange ?? EMPTY_WINDOW,
@@ -402,6 +428,24 @@ function ShareBody({
 		signedIn,
 		options,
 	)
+
+	const handleRefresh = useCallback(() => {
+		setRefreshTick((tick) => tick + 1)
+		refresh()
+	}, [refresh])
+
+	// `?refresh=` is the only source here: a share has no signed-in viewer to
+	// save a default for, so the picker overrides the board's stored cadence for
+	// this URL and nothing more.
+	const storedRefreshInterval = parseRefreshIntervalSeconds(share.dashboard.refreshIntervalSeconds)
+	const refreshIntervalSeconds = resolveRefreshIntervalSeconds(refreshParam, storedRefreshInterval)
+	const handleRefreshIntervalChange = (next: DashboardRefreshIntervalSeconds) => {
+		navigate({ replace: true, search: (prev) => ({ ...prev, refresh: next }) })
+	}
+	useIntervalRefresh(handleRefresh, {
+		intervalMs: refreshIntervalSeconds * 1000,
+		enabled: refreshIntervalSeconds > 0 && window !== null,
+	})
 
 	if (window === null) {
 		return (
@@ -428,9 +472,20 @@ function ShareBody({
 		<div className="flex flex-col gap-3">
 			{/* The one thing a viewer needs to compare this page with the board it
 			    shares: which window they are looking at. */}
+			{/* An embed keeps auto-refreshing on whatever the URL or the board asked
+			    for, but draws no control for it: it lives inside someone else's
+			    document, where our chrome would be furniture. */}
 			{embed ? null : (
-				<div className="text-muted-foreground text-xs" data-testid="share-time-range">
-					{window.label}
+				<div className="flex items-center justify-between gap-2">
+					<div className="text-muted-foreground text-xs" data-testid="share-time-range">
+						{window.label}
+					</div>
+					<RefreshControls
+						onReload={handleRefresh}
+						value={refreshIntervalSeconds}
+						onChange={handleRefreshIntervalChange}
+						savedDefault={storedRefreshInterval}
+					/>
 				</div>
 			)}
 			{/* Titles interpolate `$service` and friends with the values the server

@@ -21,7 +21,7 @@ import { ServiceDot } from "@maple/ui/components/service-dot"
 import type { SpanNode, SpanDetailResult } from "@/api/warehouse/traces"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { getSpanDetailResultAtom, listLogsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@/components/attributes"
+import { CopyableValue, AttributesSection, ResourceAttributesSection } from "@/components/attributes"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
@@ -437,7 +437,7 @@ export function SpanDetailPanel({
 							{/* Span + Resource Attributes — loaded lazily for the
 							    selected span (see detailResult above) */}
 							{span.isMissing ? (
-								<AttributesTable
+								<AttributesSection
 									attributes={span.spanAttributes ?? {}}
 									title="Span Attributes"
 								/>
@@ -453,7 +453,7 @@ export function SpanDetailPanel({
 									))
 									.onError(() => (
 										<>
-											<AttributesTable
+											<AttributesSection
 												attributes={span.spanAttributes ?? {}}
 												title="Span Attributes"
 											/>
@@ -464,7 +464,7 @@ export function SpanDetailPanel({
 									))
 									.onSuccess((detail) => (
 										<>
-											<AttributesTable
+											<AttributesSection
 												attributes={detail.spanAttributes}
 												title="Span Attributes"
 											/>

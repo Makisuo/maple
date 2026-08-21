@@ -165,6 +165,7 @@ extension AlertDestinationType {
 		case .webhook: "Webhook"
 		case .hazelOauth: "Hazel"
 		case .discord: "Discord"
+		case .telegram: "Telegram"
 		case .email: "Email"
 		}
 	}

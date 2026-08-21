@@ -22,6 +22,8 @@
 		"./warehouse-queries": "./src/warehouse-queries.ts",
 		"./tinybird": "./src/tinybird/index.ts",
 		"./tinybird/db-query-shape-sql": "./src/tinybird/db-query-shape-sql.ts",
+		"./tinybird/fingerprint": "./src/tinybird/fingerprint.ts",
+		"./tinybird/semconv-renames": "./src/tinybird/semconv-renames.ts",
 		"./tinybird/span-display-name": "./src/tinybird/span-display-name.ts",
 		"./clickhouse": "./src/clickhouse/index.ts",
 		"./generated/clickhouse-schema": "./src/generated/clickhouse-schema.ts",

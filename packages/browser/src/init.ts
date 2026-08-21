@@ -12,6 +12,7 @@ import {
 	onConsentChange,
 	publishSessionSink,
 	rotateSession,
+	sdkHint,
 	setActiveTraceIdProvider,
 	setVisitorTracking,
 	startEventSink,
@@ -24,7 +25,12 @@ import {
 import type { ReplaySessionHandle } from "@maple/browser-session/replay"
 import { trace } from "@opentelemetry/api"
 import { type MapleBrowserConfig, type ResolvedConfig, resolveConfig } from "./config"
+import { setupErrorCapture } from "./errors"
 import { setupTracing } from "./tracing"
+import { SDK_NAME, SDK_VERSION } from "./version"
+
+/** `x-maple-sdk` value for every request this build makes to ingest. */
+const SDK_HINT = sdkHint(SDK_NAME, SDK_VERSION)
 
 export interface MapleBrowserHandle {
 	/** Empty until consent is granted when `requireConsent` is enabled. */
@@ -69,6 +75,7 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 	let stopped = false
 	let rotateOnNextStart = false
 	let shutdownTracing: (() => Promise<void>) | undefined
+	let stopErrorCapture: (() => void) | undefined
 	// Bumped by every start and stop, so a replay chunk that lands after a
 	// consent revoke (or a rotation) never attaches a recorder to a dead runtime.
 	let generation = 0
@@ -83,6 +90,7 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 			{
 				endpoint: config.endpoint,
 				ingestKey: config.ingestKey,
+				sdk: SDK_HINT,
 				maskAllInputs: config.maskAllInputs,
 				maskAllText: config.maskAllText,
 				getIdentity: () => activeConfig?.identity,
@@ -90,9 +98,16 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 			session.id,
 		)
 		if (config.tracingEnabled && !shutdownTracing) shutdownTracing = setupTracing(config)
+		// After `setupTracing`: the handlers span through the global provider it
+		// registers, so registering them first would drop the errors of the very
+		// first moments into a no-op tracer.
+		if (config.tracingEnabled && config.tracingCaptureErrors && !stopErrorCapture) {
+			stopErrorCapture = setupErrorCapture()
+		}
 		const shared = {
 			endpoint: config.endpoint,
 			ingestKey: config.ingestKey,
+			sdk: SDK_HINT,
 			serviceName: config.serviceName,
 			environment: config.environment,
 			serviceVersion: config.serviceVersion,
@@ -185,6 +200,8 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 			stopped = true
 			stopConsentListener()
 			await stopRuntime(true)
+			stopErrorCapture?.()
+			stopErrorCapture = undefined
 			await shutdownTracing?.()
 			shutdownTracing = undefined
 			setActiveTraceIdProvider(() => undefined)

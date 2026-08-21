@@ -1,6 +1,6 @@
 {
 	"name": "@maple-dev/browser",
-	"version": "0.3.0",
+	"version": "0.8.0",
 	"description": "Maple browser SDK — OpenTelemetry tracing and rrweb session replay in one package. Every span and replay event shares a session id for trace↔replay correlation.",
 	"keywords": [
 		"maple",
@@ -10,17 +10,30 @@
 		"rum",
 		"session-replay"
 	],
+	"homepage": "https://github.com/MapleTechLabs/maple/tree/main/packages/browser#readme",
+	"bugs": {
+		"url": "https://github.com/MapleTechLabs/maple/issues"
+	},
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/MapleTechLabs/maple.git",
+		"directory": "packages/browser"
+	},
 	"files": [
 		"dist",
 		"README.md"
 	],
 	"type": "module",
+	"sideEffects": false,
 	"exports": {
 		".": {
 			"types": "./dist/index.d.mts",
 			"import": "./dist/index.mjs"
 		}
+	},
+	"publishConfig": {
+		"access": "public"
 	},
 	"scripts": {
 		"build": "tsdown",

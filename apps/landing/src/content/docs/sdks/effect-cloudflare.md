@@ -66,6 +66,8 @@ In addition to the [common options](/docs/sdks/effect#configuration-reference), 
 
 `anticipatedErrorIdentifiers` keeps expected rejections (a 404, a 401) visible as traces without counting them as errors — matching how Maple's ingest gateway treats 4xx. A span still exports as `Error` if its cause contains any defect.
 
+An error that crossed an HTTP boundary is a decoded body rather than the class that raised it, so a failure shaped `{ error: { _tag } }` — the envelope convention many APIs use — is matched on the body's `_tag`. Client-side spans classify the same as the server-side ones they mirror, with no separate identifiers to configure.
+
 `dropSpanNames` is useful for suppressing protocol-level chatter — e.g. `["McpServer/Notifications."]` to drop MCP notification spam without dropping legitimate handler spans.
 
 ## Endpoint Resolution

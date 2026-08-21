@@ -1,6 +1,6 @@
 import { browserLocation, browserNavigator } from "../platform/browser-globals"
 import type { ResolvedIdentity } from "../identity/identity"
-import { keepaliveFor } from "../platform/transport"
+import { type IngestConfig, ingestHeaders, keepaliveFor } from "../platform/transport"
 import type { EntryContext } from "../session/session"
 import { parseUserAgent } from "../platform/user-agent"
 
@@ -182,16 +182,15 @@ function pathOf(url: string): string {
 
 /** POST one session metadata row (NDJSON). Best-effort — never throws. */
 export async function postSessionMetaRow(
-	endpoint: string,
-	ingestKey: string,
+	target: Pick<IngestConfig, "endpoint" | "ingestKey" | "sdk">,
 	row: Record<string, unknown>,
 	keepalive = false,
 ): Promise<void> {
 	const body = `${JSON.stringify(row)}\n`
-	await fetch(`${endpoint.replace(/\/$/, "")}/v1/sessionReplays/meta`, {
+	await fetch(`${target.endpoint.replace(/\/$/, "")}/v1/sessionReplays/meta`, {
 		method: "POST",
 		headers: {
-			Authorization: `Bearer ${ingestKey}`,
+			...ingestHeaders(target),
 			"content-type": "application/x-ndjson",
 		},
 		body,

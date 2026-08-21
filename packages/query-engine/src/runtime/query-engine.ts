@@ -1845,6 +1845,8 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						services: filters?.services as string[] | undefined,
 						deploymentEnvs: filters?.deploymentEnvs as string[] | undefined,
 						fingerprintHashes: filters?.fingerprintHashes as string[] | undefined,
+						errorLabels: filters?.errorLabels as string[] | undefined,
+						serviceVersions: filters?.serviceVersions as string[] | undefined,
 					}),
 					baseParams,
 					"errorsFacets",

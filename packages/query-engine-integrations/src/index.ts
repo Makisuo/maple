@@ -12,6 +12,7 @@
 // layer in `@maple/query-engine/observability` builds on those queries, so
 // moving them would make the two packages circular.
 
+export * from "./ai/index"
 export * from "./cloudflare/index"
 export * from "./planetscale/index"
 export * from "./product/index"

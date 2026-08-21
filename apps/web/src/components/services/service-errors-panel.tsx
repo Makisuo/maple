@@ -27,7 +27,9 @@ function PanelFrame({ children, detailLimited }: { children: React.ReactNode; de
 					{detailLimited && (
 						<span className="text-[11px] text-muted-foreground">Latest 90 days</span>
 					)}
-					<Link to="/errors/issues" className="text-xs text-primary hover:underline">
+					{/* `/errors/issues` now 302s to `/errors` and rewrites the time range
+					    to 7d on the way through. Link to the hub directly. */}
+					<Link to="/errors" className="text-xs text-primary hover:underline">
 						View all →
 					</Link>
 				</div>

@@ -1,6 +1,6 @@
 import * as React from "react"
 import { EventType, IncrementalSource, MouseInteractions } from "@rrweb/types"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { getReplayManifestResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { ReplayEngine, ReplayEngineFactory, ReplayFormat } from "./engine/replay-engine"
 import { rrwebEngineFactory } from "./engine/rrweb-engine"
@@ -24,6 +24,12 @@ import { buildTimeline, type InactiveInterval, type Timeline } from "./replay-ti
 // below this provider knows or cares which one is mounted.
 
 const EMPTY_CHUNKS: ReadonlyArray<ReplayChunkMeta> = []
+
+/** Stable identity so the loader's budgets don't change on every manifest refetch. */
+const EMPTY_LIMITS = {
+	maxBytesPerRequest: undefined,
+	maxChunksPerRequest: undefined,
+} as const
 
 /** A user interaction worth flagging on the scrubber. */
 export type ActionKind = "click" | "input" | "scroll" | "nav"
@@ -218,6 +224,8 @@ export function classifyUnplayable(input: {
 export interface ReplayPlayerContextValue {
 	status: ReplayLoadStatus
 	error: unknown
+	/** Refetch the manifest and the range that failed. */
+	retry(): void
 	/** Session still open — an `empty` status then means "chunks still arriving". */
 	sessionActive: boolean
 	/** Fullscreen target (the surface figure). */
@@ -271,14 +279,6 @@ const ENGINE_FACTORIES: Record<ReplayFormat, ReplayEngineFactory> = {
 	video: videoEngineFactory,
 } satisfies Record<ReplayFormat, ReplayEngineFactory>
 
-export function errorMessage(error: unknown): string {
-	if (typeof error === "object" && error !== null && "message" in error) {
-		const message = (error as { message: unknown }).message
-		if (typeof message === "string") return message
-	}
-	return String(error)
-}
-
 export function ReplayPlayerProvider({
 	sessionId,
 	children,
@@ -311,7 +311,9 @@ export function ReplayPlayerProvider({
 }) {
 	// The manifest — every chunk's position and size, no payloads. Cheap on any
 	// session, and the prerequisite for deciding which payload ranges to fetch.
-	const manifestResult = useAtomValue(getReplayManifestResultAtom({ data: { sessionId, ...window } }))
+	const manifestAtom = getReplayManifestResultAtom({ data: { sessionId, ...window } })
+	const manifestResult = useAtomValue(manifestAtom)
+	const refreshManifest = useAtomRefresh(manifestAtom)
 
 	const manifestChunks = React.useMemo<ReadonlyArray<ReplayChunkMeta>>(
 		() =>
@@ -321,10 +323,26 @@ export function ReplayPlayerProvider({
 		[manifestResult],
 	)
 
+	// The server's advertised per-request budgets, taken from the same manifest
+	// the ranges are planned from, so the plan and the endpoint agree on what
+	// fits. Undefined until it lands.
+	const manifestLimits = React.useMemo(
+		() =>
+			Result.builder(manifestResult)
+				.onSuccess((result) => ({
+					maxBytesPerRequest: result.max_bytes_per_request,
+					maxChunksPerRequest: result.max_chunks_per_request,
+				}))
+				.orElse(() => EMPTY_LIMITS),
+		[manifestResult],
+	)
+
 	const loader = useReplayChunkLoader({
 		sessionId,
 		window,
 		chunks: manifestChunks,
+		maxBytesPerRequest: manifestLimits.maxBytesPerRequest,
+		maxChunksPerRequest: manifestLimits.maxChunksPerRequest,
 		// Tests can supply events directly without hitting the network.
 		enabled: eventsOverride === undefined,
 	})
@@ -707,10 +725,19 @@ export function ReplayPlayerProvider({
 		setSkipInactive((prev) => !prev)
 	}, [])
 
+	// Refetch both reads the player depends on: the failure can be in either,
+	// and from here there is no way to tell which without inspecting the error.
+	const retryRange = loader.retryRange
+	const retry = React.useCallback(() => {
+		refreshManifest()
+		retryRange()
+	}, [refreshManifest, retryRange])
+
 	const value = React.useMemo<ReplayPlayerContextValue>(
 		() => ({
 			status,
 			error,
+			retry,
 			sessionActive,
 			figureRef,
 			surfaceRef,
@@ -737,6 +764,7 @@ export function ReplayPlayerProvider({
 		[
 			status,
 			error,
+			retry,
 			sessionActive,
 			isPlaying,
 			finished,

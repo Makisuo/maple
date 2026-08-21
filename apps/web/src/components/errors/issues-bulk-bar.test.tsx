@@ -41,7 +41,7 @@ describe("IssuesBulkBar menus open without throwing", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Severity" }))
 
 		expect(screen.getByText("Set severity")).toBeDefined()
-		expect(screen.getByRole("menuitem", { name: "critical" })).toBeDefined()
+		expect(screen.getByRole("menuitem", { name: "Critical" })).toBeDefined()
 		expect(screen.getByRole("menuitem", { name: "Clear severity" })).toBeDefined()
 	})
 
@@ -56,7 +56,7 @@ describe("IssuesBulkBar menus open without throwing", () => {
 	it("applies a severity to every selected issue", () => {
 		const props = renderBar({ selected: [issue("a", "triage"), issue("b", "todo")] })
 		fireEvent.click(screen.getByRole("button", { name: "Severity" }))
-		fireEvent.click(screen.getByRole("menuitem", { name: "critical" }))
+		fireEvent.click(screen.getByRole("menuitem", { name: "Critical" }))
 
 		expect(props.mutations.setSeverityMany).toHaveBeenCalledWith(["a", "b"], "critical")
 		expect(props.onClear).toHaveBeenCalled()
@@ -87,6 +87,8 @@ describe("IssuesBulkBar move-to menu follows the transition matrix", () => {
 		renderBar({ selected: [issue("a", "done")] })
 		openMoveTo()
 
+		// `Regressed` is absent even though `done -> regressed` is a legal edge: the
+		// errors tick sets it from which build fired, so it is not a human choice.
 		expect(moveItems()).toEqual(["Triage", "In progress", "Cancelled", "Won't fix"])
 	})
 

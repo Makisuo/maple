@@ -16,9 +16,12 @@ import {
 } from "@maple/domain/http"
 import {
 	CUSTOMER_CACHE_BUCKET,
+	classifyAutumn,
 	decodeUpstream,
 	ensureOk,
 	readCustomerCached,
+	resolveAttachConflict,
+	summariseSubscriptions,
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
 import { forkRequestScoped } from "@/platform/fork-request-scoped"
@@ -95,7 +98,14 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 							// them.
 							autumn.getOrCreateCustomer(tenant.orgId, { expand: ["subscriptions.plan"] }),
 						)
-						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, "cache.hit": hit })
+						yield* Effect.annotateCurrentSpan({
+							orgId: tenant.orgId,
+							"cache.hit": hit,
+							// The plan gate is derived from these rows; without them a
+							// wrongly-gated org can only be diagnosed by asking the customer
+							// to open devtools.
+							...summariseSubscriptions(result.response),
+						})
 						const response = yield* ensureOk(result)
 						return yield* decodeUpstream(BillingCustomer, response)
 					}),
@@ -160,7 +170,9 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 						)
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 						const result = yield* autumn.updateCustomerBillingControls(tenant.orgId, payload)
-						yield* ensureOk(result)
+						// Caller input: a rejected control is about what THEY asked for, so
+						// the classified 4xx survives to the client instead of a blanket 502.
+						yield* classifyAutumn(result)
 						yield* invalidateCustomer(tenant.orgId, result)
 						const refreshed = yield* autumn.getOrCreateCustomer(tenant.orgId, {
 							expand: ["subscriptions.plan"],
@@ -179,8 +191,34 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 						// the Stripe checkout with the Clerk email would need a separate
 						// `customers.get_or_create` on this path — a behaviour change, not
 						// part of this port.
+						yield* Effect.annotateCurrentSpan({
+							orgId: tenant.orgId,
+							"billing.plan_id": payload.planId,
+						})
 						const result = yield* autumn.attach(tenant.orgId, { planId: payload.planId })
-						const response = yield* ensureOk(result)
+						const response = yield* classifyAutumn(result).pipe(
+							Effect.catchTag(
+								"@maple/http/errors/BillingConflictError",
+								// A conflict is what a double-click produces: the first attach
+								// succeeded, the page sat on the old DOM while the browser
+								// navigated to Stripe, and the customer clicked again. Autumn
+								// answers 409, which we used to launder into a 502 and show as
+								// "Something went wrong. Please try again." — telling someone
+								// who had just paid that their purchase had failed.
+								//
+								// Re-read rather than assume: 409 is not exclusively
+								// already-attached. Only when the customer genuinely holds the
+								// plan is this a success; any other conflict still surfaces.
+								(conflict) =>
+									resolveAttachConflict(
+										autumn.getOrCreateCustomer(tenant.orgId, {
+											expand: ["subscriptions.plan"],
+										}),
+										payload.planId,
+										conflict,
+									),
+							),
+						)
 						yield* invalidateCustomer(tenant.orgId, result)
 						const attached = yield* decodeUpstream(AttachResult, response)
 						// Inline (no-redirect) plan start; the Autumn webhook covers the
@@ -213,7 +251,8 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 						const result = yield* autumn.previewAttach(tenant.orgId, {
 							planId: payload.planId,
 						})
-						const response = yield* ensureOk(result)
+						// Caller input (a plan id): keep the classified rejection.
+						const response = yield* classifyAutumn(result)
 						return yield* decodeUpstream(PreviewAttachResult, response)
 					}),
 				)

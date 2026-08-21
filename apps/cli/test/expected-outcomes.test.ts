@@ -5,7 +5,8 @@ import { ok, strictEqual } from "node:assert"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { chdbConfigPath, resolveChdbConfigFile } from "../src/commands/server"
+import { chdbConfigPath, dirtyStoreRecoveryAdvice, resolveChdbConfigFile } from "../src/commands/server"
+import { CheckpointPreconditionError, parseCheckpointId } from "../src/server/checkpoints"
 import { recoverExpected } from "../src/core/outcomes"
 
 /** Run an effect, capturing anything written to stderr and restoring the real
@@ -43,6 +44,25 @@ describe("expected CLI outcomes", () => {
 		strictEqual(output, "maple is already running (PID 4242) — stop it with `maple stop`\n")
 	})
 
+	// The "no `<backups>` stanza" refusal used to bill two error events: an Error
+	// span on `CheckpointService.create` plus the `ServerError` the command
+	// re-wrapped it into. It is now an expected outcome carrying the same text.
+	it("recovers the checkpoint precondition refusal with its message intact", async () => {
+		const refusal = new CheckpointPreconditionError({
+			dataDir: "/home/u/.maple/data",
+			message:
+				"the running server's chDB config has no `<backups>` stanza, so it " +
+				"cannot take checkpoints. Restart `maple start` without " +
+				"`--chdb-config-file` to use the generated default, or add " +
+				"`<backups><allowed_disk>default</allowed_disk>" +
+				"<allowed_path>backups</allowed_path></backups>` to your config.",
+		})
+
+		strictEqual(refusal._tag, "@maple/cli/CheckpointPreconditionError")
+		strictEqual(refusal.expected, true)
+		strictEqual(await captureStderr(recoverExpected(refusal)), `${refusal.message}\n`)
+	})
+
 	it("still exits non-zero, so scripts and CI keep their old behaviour", async () => {
 		const original = process.exitCode
 		const restoreStderr = process.stderr.write.bind(process.stderr)
@@ -57,6 +77,38 @@ describe("expected CLI outcomes", () => {
 			process.stderr.write = restoreStderr
 			process.exitCode = original ?? 0
 		}
+	})
+})
+
+describe("dirty-store recovery advice", () => {
+	// The dead end this guards: `maple start` refused to open an unclean store and
+	// told the user to run `maple restore --yes`, which aborted with "checkpoint
+	// state not found" because no checkpoint had ever been taken. Both messages
+	// were accurate and neither named a command that would get them running.
+	it("never sends the user to restore when there is no checkpoint to restore", () => {
+		const none = dirtyStoreRecoveryAdvice({ available: false, reason: "none" })
+		ok(!none.includes("maple restore"))
+		ok(none.includes("maple start --reset"))
+		ok(none.includes("maple checkpoint"))
+
+		const unusable = dirtyStoreRecoveryAdvice({
+			available: false,
+			reason: "unusable",
+			detail: "checkpoint backup size mismatch",
+		})
+		ok(!unusable.includes("maple restore"))
+		ok(unusable.includes("checkpoint backup size mismatch"))
+		ok(unusable.includes("maple start --reset"))
+	})
+
+	it("offers restore, naming the checkpoint, once one exists", () => {
+		const advice = dirtyStoreRecoveryAdvice({
+			available: true,
+			checkpointId: parseCheckpointId("00000000-0000-4000-8000-000000000000"),
+		})
+		ok(advice.includes("maple restore --yes"))
+		ok(advice.includes("00000000-0000-4000-8000-000000000000"))
+		ok(advice.includes("maple start --reset"))
 	})
 })
 

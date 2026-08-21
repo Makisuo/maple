@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState, type ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { useMountEffect } from "@/hooks/use-mount-effect"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 
 import {
@@ -134,5 +135,86 @@ describe("page refresh controller", () => {
 		expect(screen.getByTestId("a").textContent).toBe("2")
 
 		expect(onRelativeRangeRefresh).not.toHaveBeenCalled()
+	})
+})
+
+/**
+ * Stands in for a widget: every tile subscribes through
+ * `useRefreshableAtomValue`, so counting listener calls counts canvas refreshes.
+ */
+function Subscriber({ onReload }: { onReload: () => void }) {
+	const { subscribeReload } = usePageRefreshContext()
+	// Mount-scoped rather than render-time: subscribing during render would
+	// double-add under StrictMode with no matching cleanup.
+	useMountEffect(() => subscribeReload(onReload))
+	return null
+}
+
+function AutoRefreshHarness({
+	onReload,
+	autoRefreshMs,
+	autoRefreshPaused,
+}: {
+	onReload: () => void
+	autoRefreshMs?: number
+	autoRefreshPaused?: boolean
+}) {
+	return (
+		<PageRefreshProvider autoRefreshMs={autoRefreshMs} autoRefreshPaused={autoRefreshPaused}>
+			<Subscriber onReload={onReload} />
+		</PageRefreshProvider>
+	)
+}
+
+describe("page refresh auto-refresh", () => {
+	beforeEach(() => vi.useFakeTimers())
+
+	afterEach(() => {
+		cleanup()
+		vi.useRealTimers()
+		vi.restoreAllMocks()
+	})
+
+	it("fans a tick out to every subscriber on the configured cadence", () => {
+		const onReload = vi.fn()
+		render(<AutoRefreshHarness onReload={onReload} autoRefreshMs={5_000} />)
+
+		act(() => vi.advanceTimersByTime(5_000))
+		expect(onReload).toHaveBeenCalledTimes(1)
+
+		act(() => vi.advanceTimersByTime(10_000))
+		expect(onReload).toHaveBeenCalledTimes(3)
+	})
+
+	// `0`/absent is the off sentinel every non-dashboard page relies on; it must
+	// register no interval at all rather than a `setInterval(…, 0)` hot loop.
+	it("registers no timer when the cadence is absent or zero", () => {
+		const onReload = vi.fn()
+		render(<AutoRefreshHarness onReload={onReload} />)
+		act(() => vi.advanceTimersByTime(60_000))
+		expect(onReload).not.toHaveBeenCalled()
+
+		cleanup()
+		render(<AutoRefreshHarness onReload={onReload} autoRefreshMs={0} />)
+		act(() => vi.advanceTimersByTime(60_000))
+		expect(onReload).not.toHaveBeenCalled()
+	})
+
+	// Editing a dashboard or previewing a version suspends the timer without
+	// forgetting the cadence, so leaving that state resumes at the same interval.
+	it("suspends while paused and resumes on the same cadence", () => {
+		const onReload = vi.fn()
+		const view = render(
+			<AutoRefreshHarness onReload={onReload} autoRefreshMs={5_000} autoRefreshPaused />,
+		)
+
+		act(() => vi.advanceTimersByTime(20_000))
+		expect(onReload).not.toHaveBeenCalled()
+
+		view.rerender(
+			<AutoRefreshHarness onReload={onReload} autoRefreshMs={5_000} autoRefreshPaused={false} />,
+		)
+		act(() => vi.advanceTimersByTime(5_000))
+		expect(onReload).toHaveBeenCalledTimes(1)
 	})
 })

@@ -67,13 +67,55 @@ export class AiTriageResult extends Schema.Class<AiTriageResult>("AiTriageResult
 	unchecked: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
+/**
+ * What today's budget has actually been spent on, in both units.
+ *
+ * Ships with the settings rather than as its own endpoint because a ceiling and
+ * its consumption are unreadable apart: "1000 passes/day" answers nothing on its
+ * own, and the question an operator arrives with is always whether triage is
+ * running right now.
+ */
+export class AiTriageUsage extends Schema.Class<AiTriageUsage>("AiTriageUsage")({
+	runs: Schema.Number,
+	passes: Schema.Number,
+}) {}
+
 export class AiTriageSettingsDocument extends Schema.Class<AiTriageSettingsDocument>(
 	"AiTriageSettingsDocument",
 )({
 	enabled: Schema.Boolean,
 	maxRunsPerDay: Schema.Number,
-	/** Model passes per day — one investigation spends about six. */
+	/** Model passes per day — one investigation spends `fanoutSize + 1`, so 4–7. */
 	maxPassesPerDay: Schema.Number,
+	/** Spent so far in the current UTC day. */
+	usage: AiTriageUsage,
+	/**
+	 * Whether an ordinary-severity incident would be refused right now.
+	 *
+	 * Derived server-side from the same verdict the enqueue path uses, at the same
+	 * cost a real start reserves, so the banner cannot drift from the rule that
+	 * actually refuses starts.
+	 */
+	ordinaryPaused: Schema.Boolean,
+	/**
+	 * Whether a `critical` would be refused too.
+	 *
+	 * Separate from {@link ordinaryPaused} because the two are different outages
+	 * and the honest sentence differs: with only the ordinary slice gone, urgent
+	 * incidents are still being investigated from the reserve; with this set,
+	 * nothing is starting at all. Collapsing them tells an operator that criticals
+	 * are covered at exactly the moment they are not.
+	 */
+	priorityPaused: Schema.Boolean,
+	/**
+	 * Which ceiling refused the start, so the copy can name the right number.
+	 *
+	 * `runs` has no reserve, so it pauses ordinary and priority together — which is
+	 * why this cannot be inferred from the two booleans alone.
+	 */
+	pausedDimension: Schema.NullOr(Schema.Literals(["runs", "passes", "passes_reserved"])),
+	/** When the budget resets — the next UTC midnight. Null when nothing is paused. */
+	resumesAt: Schema.NullOr(IsoDateTimeString),
 	updatedAt: Schema.NullOr(IsoDateTimeString),
 	updatedBy: Schema.NullOr(UserId),
 }) {}

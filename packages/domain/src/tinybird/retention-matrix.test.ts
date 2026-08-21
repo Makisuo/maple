@@ -8,7 +8,6 @@ const RETENTION_DAYS = {
 	error_events: 90,
 	error_events_by_time: 90,
 	error_fingerprints_minutely: 90,
-	error_spans: 90,
 	logs: 30,
 	logs_aggregates_hourly: 365,
 	metric_catalog: 90,

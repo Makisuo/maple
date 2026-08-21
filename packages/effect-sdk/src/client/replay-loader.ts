@@ -19,6 +19,7 @@ import {
 } from "@maple/browser-session"
 import { setupStandaloneSession } from "./standalone-session.js"
 import { getCurrentIdentity } from "./user.js"
+import { CLIENT_SDK_HINT } from "../version.js"
 
 export interface ClientReplayConfig {
 	/** Record rrweb session replays. Default `true`. */
@@ -74,6 +75,7 @@ export const startClientSession = (config: ClientSessionConfig): ClientSessionHa
 	const engineConfig = {
 		endpoint: config.endpoint.replace(/\/$/, ""),
 		ingestKey: config.ingestKey,
+		sdk: CLIENT_SDK_HINT,
 		maskAllInputs: config.replay?.maskAllInputs ?? true,
 		maskAllText: config.replay?.maskAllText ?? false,
 		getIdentity: getCurrentIdentity,
@@ -123,6 +125,7 @@ export const startClientSession = (config: ClientSessionConfig): ClientSessionHa
 					next.replay = startReplaySession({
 						endpoint: config.endpoint,
 						ingestKey: config.ingestKey!,
+						sdk: CLIENT_SDK_HINT,
 						serviceName: config.serviceName,
 						environment: config.environment,
 						serviceVersion: config.serviceVersion,

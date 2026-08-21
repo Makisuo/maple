@@ -211,6 +211,12 @@ export function redactForShare(
 		if (document.variables !== undefined) {
 			redacted = { ...redacted, variables: variablesForWidget(document.variables, widget) }
 		}
+		// A single-tile share auto-refreshes on the same cadence as the board it came
+		// from. The value is a literal out of a closed set, so it leaks nothing the
+		// viewer could not infer from watching the tile update on its own.
+		if (document.refreshIntervalSeconds !== undefined) {
+			redacted = { ...redacted, refreshIntervalSeconds: document.refreshIntervalSeconds }
+		}
 		return redacted
 	}
 

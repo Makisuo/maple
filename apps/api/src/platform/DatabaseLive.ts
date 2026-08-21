@@ -6,9 +6,20 @@ import { updateCurrentSpanName } from "./span-name"
 
 export type DatabaseClient = MaplePgClient
 
+/**
+ * `cause` is the driver's own error, kept for `postgres-errors.ts` to read the
+ * `code`/SQLSTATE off. It is `Schema.Defect()` rather than `Schema.Unknown` for
+ * the reason the convention gives: `Unknown` has no encoded form, so anything
+ * that serialized a `DatabaseError` serialized the raw postgres.js object —
+ * host, port, driver options and all. `Defect()` encodes an `Error` to its
+ * `name` and `message`, and `excludeCause: true` stops at the driver error
+ * instead of walking into the socket error underneath it. `toDatabaseError`
+ * already lifts the root cause's message into `message`, so the diagnostic half
+ * survives the narrowing.
+ */
 export class DatabaseError extends Schema.TaggedError<DatabaseError>()("@maple/api/lib/DatabaseError", {
 	message: Schema.String,
-	cause: Schema.Unknown,
+	cause: Schema.Defect({ excludeCause: true }),
 }) {}
 
 export interface DatabaseApi {

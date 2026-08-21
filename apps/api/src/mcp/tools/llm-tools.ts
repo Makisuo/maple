@@ -48,15 +48,20 @@ const cap = (message: string): string =>
 		? message
 		: `${message.slice(0, MAX_FAILURE_MESSAGE_CHARS)}…[truncated]`
 
+/**
+ * Typed failures only. A defect is an internal breakage the model can do
+ * nothing with, and its message is the kind of thing this function exists to
+ * keep out of the transcript — so `Die` reasons are filtered out before
+ * rendering rather than summarized.
+ *
+ * `Cause.prettyErrors` does the narrowing: it resolves `message` through the
+ * same `toString`/JSON fallbacks Effect uses everywhere, so a failure that is
+ * not an `Error` still reads as something rather than "the tool failed".
+ */
 export const summarizeToolFailure = (cause: Cause.Cause<unknown>): string => {
-	const failure = cause.reasons.find(Cause.isFailReason)
-	const error: unknown = failure?.error
-	if (error instanceof Error) return cap(error.message)
-	if (error && typeof error === "object" && "message" in error) {
-		const message = (error as { message?: unknown }).message
-		if (typeof message === "string") return cap(message)
-	}
-	return "the tool failed"
+	const failures = Cause.prettyErrors(Cause.fromReasons(cause.reasons.filter(Cause.isFailReason)))
+	const first = failures[0]
+	return first === undefined ? "the tool failed" : cap(first.message)
 }
 
 /**
@@ -109,27 +114,29 @@ export const buildMapleTools = (
 											message: `${definition.name} requires user approval and was not executed.`,
 										}),
 									)
-								: executor.execute(tenant, definition.name, params, options.surface ?? "chat").pipe(
-										Effect.flatMap((result) =>
-											result.isError
-												? Effect.fail(
-														new ToolFailure({
-															message: toolResultText(result),
-														}),
-													)
-												: Effect.succeed(toolResultText(result)),
-										),
-										// A tool that fails outright (unknown tool, tenant error) must
-										// not kill the turn — hand the model the message and let it
-										// route around.
-										Effect.catchCause((cause) =>
-											Effect.fail(
-												new ToolFailure({
-													message: `Tool failed: ${summarizeToolFailure(cause)}`,
-												}),
+								: executor
+										.execute(tenant, definition.name, params, options.surface ?? "chat")
+										.pipe(
+											Effect.flatMap((result) =>
+												result.isError
+													? Effect.fail(
+															new ToolFailure({
+																message: toolResultText(result),
+															}),
+														)
+													: Effect.succeed(toolResultText(result)),
+											),
+											// A tool that fails outright (unknown tool, tenant error) must
+											// not kill the turn — hand the model the message and let it
+											// route around.
+											Effect.catchCause((cause) =>
+												Effect.fail(
+													new ToolFailure({
+														message: `Tool failed: ${summarizeToolFailure(cause)}`,
+													}),
+												),
 											),
 										),
-									),
 					}),
 				]
 			}),

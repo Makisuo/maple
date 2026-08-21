@@ -197,6 +197,34 @@ export class CheckpointCreateError extends Schema.TaggedError<CheckpointCreateEr
 	{ ...checkpointErrorFields, checkpointId: CheckpointId },
 ) {}
 
+/**
+ * A checkpoint the CLI *correctly refuses to take*: the running server's chDB
+ * config carries no `<backups>` stanza, so `BACKUP DATABASE` cannot work.
+ *
+ * Its own tag, and never a `CheckpointCreateError`, because nothing failed —
+ * this is the CLI reporting an unmet precondition with an actionable fix, the
+ * same category as "maple is already running". It used to bill two error events
+ * per occurrence (an `Error` span on `CheckpointService.create`, plus the
+ * `ServerError` the command re-wrapped it into). `bin.ts` now recovers it via
+ * `recoverExpected`, which annotates `maple.cli.outcome`, prints the message and
+ * exits 1 with the root span `Ok`. The `expected` marker states that intent on
+ * the error itself rather than only in the recovery list.
+ */
+/** Kept verbatim — it is the whole remedy the user gets. */
+const MISSING_BACKUPS_CONFIG_MESSAGE =
+	"the running server's chDB config has no `<backups>` stanza, so it " +
+	"cannot take checkpoints. Restart `maple start` without " +
+	"`--chdb-config-file` to use the generated default, or add " +
+	"`<backups><allowed_disk>default</allowed_disk>" +
+	"<allowed_path>backups</allowed_path></backups>` to your config."
+
+export class CheckpointPreconditionError extends Schema.TaggedError<CheckpointPreconditionError>()(
+	"@maple/cli/CheckpointPreconditionError",
+	{ dataDir: Schema.String, message: Schema.String },
+) {
+	readonly expected = true
+}
+
 export class CheckpointRecoveryError extends Schema.TaggedError<CheckpointRecoveryError>()(
 	"@maple/cli/CheckpointRecoveryError",
 	checkpointErrorFields,
@@ -736,6 +764,42 @@ export const readCheckpointState = async (dataDir: string): Promise<CheckpointSt
 	await resolveCheckpoint(dataDir, state.current, state)
 	if (state.previous) await resolveCheckpoint(dataDir, state.previous, state)
 	return state
+}
+
+/**
+ * Whether `maple restore` has anything to restore, and if not, why.
+ *
+ * Checkpoints are only ever created by the explicit `maple checkpoint` command,
+ * so "none" is the ordinary state for a store nobody has checkpointed — not a
+ * fault. Recovery advice has to branch on it: telling someone to run
+ * `maple restore --yes` when no checkpoint exists sends them into a dead end
+ * where every suggested command fails.
+ */
+export type CheckpointAvailability =
+	| { readonly available: true; readonly checkpointId: CheckpointId }
+	| { readonly available: false; readonly reason: "none" }
+	| { readonly available: false; readonly reason: "unusable"; readonly detail: string }
+
+export const checkpointAvailability = async (dataDir: string): Promise<CheckpointAvailability> => {
+	try {
+		const state = await readCheckpointState(dataDir)
+		return { available: true, checkpointId: state.current }
+	} catch (error) {
+		const detail = errorMessage(error)
+		try {
+			// A present-but-unreadable state file, or stray checkpoint data beside a
+			// missing one, is a fault to surface rather than an empty registry.
+			if (
+				!existsSync(checkpointStatePath(dataDir)) &&
+				(await checkpointLikePaths(dataDir)).length === 0
+			) {
+				return { available: false, reason: "none" }
+			}
+		} catch {
+			// Fall through: an unreadable registry is itself "unusable".
+		}
+		return { available: false, reason: "unusable", detail }
+	}
 }
 
 const resolveCheckpointById = async (
@@ -1303,6 +1367,48 @@ export const withMaintenanceLock = async <A>(
 	}
 }
 
+/**
+ * The Effect boundary for promise-land work that takes the maintenance lock
+ * INTERNALLY — archive create/gc/reconcile/catalog, retention, and local-store
+ * migrations. Use it instead of a bare `Effect.tryPromise` at every such call.
+ *
+ * `Effect.tryPromise` is interruptible, and interruption ABANDONS the promise:
+ * the runtime marks the async resumed, aborts its signal and unwinds the fiber
+ * without waiting (see `callbackOptions` in effect's internal/effect.ts). Under
+ * `BunRuntime.runMain` a Ctrl-C therefore tore the process down while
+ * `withMaintenanceLock` was still mid-operation, so its `finally` never ran and
+ * `<dataDir>.maintenance.lock` survived with a plausible owner record. The next
+ * run only recovered because {@link acquireMaintenance} quarantines a provably
+ * dead PID — recovery by luck, one PID reuse away from a hard failure.
+ *
+ * `Effect.uninterruptible` fixes it without touching those modules: an interrupt
+ * arriving here is recorded on the fiber and NOT delivered, the fiber stays
+ * parked until the promise settles, the lock's `finally` releases, and the
+ * recorded interrupt fires as soon as interruptibility is restored. The work was
+ * never abortable — the promise ran to completion either way. All this changes
+ * is that Effect now waits for it instead of walking away mid-write.
+ *
+ * The cost is deliberate: Ctrl-C during a long operation is honoured when that
+ * operation finishes, not immediately. That is the correct trade for the only
+ * writer of a lock the next process must trust. A caller who truly cannot wait
+ * still has SIGKILL, which is the crash case the on-disk journals already
+ * reconcile. To make Ctrl-C prompt again, the promise bodies below would have to
+ * observe the `AbortSignal` that `try` already receives — until they do, an
+ * interruptible boundary would only delete the lock out from under work that
+ * keeps running.
+ */
+export const maintenanceOperation = <A, E>(options: {
+	readonly operation: string
+	readonly try: () => Promise<A>
+	readonly catch: (error: unknown) => E
+}): Effect.Effect<A, E> =>
+	Effect.tryPromise({ try: options.try, catch: options.catch }).pipe(
+		Effect.uninterruptible,
+		Effect.withSpan("CheckpointService.maintenanceOperation", {
+			attributes: { "maple.checkpoint.maintenance_operation": options.operation },
+		}),
+	)
+
 export const retireCheckpointIfEligible = async (
 	dataDir: string,
 	checkpointId: CheckpointId | null,
@@ -1425,7 +1531,7 @@ const removeCompletedRetirement = async (
 	await faults.afterRetirementCleanupRemoval?.(cleanup)
 }
 
-export const createCheckpoint = Effect.fn("CheckpointService.create")(function* (options: CheckpointOptions) {
+const createCheckpointTraced = Effect.fn("CheckpointService.create")(function* (options: CheckpointOptions) {
 	const operationId = newCheckpointOperationId()
 	const checkpointId = newCheckpointId()
 	const createError = (error: unknown): CheckpointCreateError =>
@@ -1440,6 +1546,10 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 		"maple.checkpoint.operation_id": operationId,
 		"maple.checkpoint.id": checkpointId,
 	})
+	// Settled into a value rather than left in the failure channel: `Effect.fn`
+	// derives this span's status from that channel, and a refused precondition
+	// must not close `CheckpointService.create` as `Error`. `createCheckpoint`
+	// below re-raises it once the span has closed, so callers still see a failure.
 	return yield* withMaintenance(options.dataDir, operationId, createError, () =>
 		Effect.gen(function* () {
 			const prepared = yield* Effect.tryPromise({
@@ -1491,22 +1601,18 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 			})
 			yield* postCheckpointBackup(options.host, options.port, options.dataDir, checkpointId).pipe(
 				Effect.mapError((error) =>
-					createError(
-						isMissingBackupConfigurationError(error)
-							? new Error(
-									// `maple start` generates a backups-enabled config when
-									// `--chdb-config-file` is absent, so reaching this means the
-									// server was started with a custom config carrying no
-									// `<backups>` stanza — or with a build predating that default.
-									"the running server's chDB config has no `<backups>` stanza, so it " +
-										"cannot take checkpoints. Restart `maple start` without " +
-										"`--chdb-config-file` to use the generated default, or add " +
-										"`<backups><allowed_disk>default</allowed_disk>" +
-										"<allowed_path>backups</allowed_path></backups>` to your config.",
-									{ cause: error },
-								)
-							: error,
-					),
+					isMissingBackupConfigurationError(error)
+						? // `maple start` generates a backups-enabled config when
+							// `--chdb-config-file` is absent, so reaching this means the
+							// server was started with a custom config carrying no
+							// `<backups>` stanza — or with a build predating that default.
+							// An unmet precondition, not a failure: see
+							// `CheckpointPreconditionError`.
+							new CheckpointPreconditionError({
+								dataDir: resolve(options.dataDir),
+								message: MISSING_BACKUPS_CONFIG_MESSAGE,
+							})
+						: createError(error),
 				),
 			)
 			return yield* Effect.tryPromise({
@@ -1590,8 +1696,26 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 				catch: createError,
 			})
 		}),
+	).pipe(
+		Effect.catchTag("@maple/cli/CheckpointPreconditionError", (refusal) =>
+			Effect.as(Effect.annotateCurrentSpan({ "maple.checkpoint.refused": refusal._tag }), refusal),
+		),
 	)
 })
+
+/**
+ * Create a checkpoint, or refuse with an expected outcome.
+ *
+ * The refusal travels back through the span as a value (see the note inside
+ * `createCheckpointTraced`) and is turned back into a failure here, outside it —
+ * so the caller's control flow is unchanged while the span stays `Ok`.
+ */
+export const createCheckpoint = (options: CheckpointOptions) =>
+	createCheckpointTraced(options).pipe(
+		Effect.flatMap((outcome) =>
+			outcome instanceof CheckpointPreconditionError ? Effect.fail(outcome) : Effect.succeed(outcome),
+		),
+	)
 
 const parseResetTransaction = (value: unknown, expectedDataDir: string): ResetTransaction => {
 	const transaction = Schema.decodeUnknownSync(ResetTransactionSchema)(value)

@@ -142,7 +142,7 @@ grep -q "local store migrated" "$ROOT/migrate.out" || fail "native migration did
 # must be bumped in lockstep with LOCAL_SCHEMA_VERSION and the matching
 # LOCAL_SCHEMA_V<n>.fingerprint in apps/cli/src/server/schema-identity.ts;
 # leaving it on the previous version is what makes this step fail after a bump.
-jq -e '.formatVersion == 2 and .activation == "active" and .schemaVersion == 6 and .schema == "18015521cc411d12"' \
+jq -e '.formatVersion == 2 and .activation == "active" and .schemaVersion == 11 and .schema == "5642766fc2dced4f"' \
 	"$ROOT/maple-store-version.json" >/dev/null || fail "native migration wrote the wrong active identity"
 
 step "reopening promoted store in a fresh server"

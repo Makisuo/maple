@@ -856,7 +856,7 @@
 	"feat_alerts_cap_4_title": "Every check on the record",
 	"feat_alerts_cap_4_body": "Each evaluation writes its observed value, sample count and verdict — including failed queries, so a gap is visible instead of silent. When a rule stays quiet, a diagnosis panel walks the pipeline stage by stage.",
 	"feat_alerts_cap_5_title": "Delivery that survives",
-	"feat_alerts_cap_5_body": "Queued dispatch with five attempts and backoff, every provider response stored, custom templates per destination, and a renotify interval while the incident stays open. Slack, PagerDuty, Discord, email, webhooks, Hazel.",
+	"feat_alerts_cap_5_body": "Queued dispatch with five attempts and backoff, every provider response stored, custom templates per destination, and a renotify interval while the incident stays open. Slack, PagerDuty, Discord, Telegram, email, webhooks, Hazel.",
 	"feat_alerts_artifact_title": "From breach to page in a minute",
 	"feat_alerts_artifact_lede": "Rules evaluate every 60 seconds. Two consecutive breaches open the incident and send the notification with the observed value attached; two healthy windows resolve it without anyone clicking close.",
 

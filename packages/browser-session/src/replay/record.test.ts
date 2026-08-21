@@ -29,12 +29,15 @@ interface PostedChunk {
 	body: string
 }
 const posted: PostedChunk[] = []
+// What the mocked ingest answers the next uploads with; defaults to accepted.
+const outcomes: Array<"accepted" | "rejected" | "exhausted" | "failed"> = []
 
 vi.mock("../platform/transport", () => ({
 	// Identity "gzip" so tests can read the serialized payload directly.
 	gzip: vi.fn(async (bytes: Uint8Array) => bytes),
 	postSessionBlob: vi.fn(async (_config: unknown, meta: PostedChunk["meta"], bytes: Uint8Array) => {
 		posted.push({ meta, body: new TextDecoder().decode(bytes) })
+		return outcomes.shift() ?? "accepted"
 	}),
 }))
 
@@ -43,6 +46,7 @@ const { startRecording } = await import("./record")
 const CONFIG = {
 	endpoint: "https://ingest.example",
 	ingestKey: "key",
+	sdk: "maple-test/0.0.0",
 	maskAllInputs: true,
 	maskAllText: false,
 }
@@ -60,6 +64,8 @@ const incremental = (timestamp: number, payload = "x") => ({
 describe("startRecording", () => {
 	beforeEach(() => {
 		posted.length = 0
+		outcomes.length = 0
+		stopFn.mockClear()
 		emitRef = undefined
 		takeFullSnapshot.mockClear()
 		vi.useFakeTimers()
@@ -84,6 +90,30 @@ describe("startRecording", () => {
 		const events = JSON.parse(chunk.body) as Array<{ type: number; timestamp: number }>
 		expect(events.map((e) => e.type)).toEqual([FULL_SNAPSHOT, INCREMENTAL])
 		recorder.stop()
+	})
+
+	it("stops recording and uploading once ingest answers 413 for the session", async () => {
+		// Ingest returns 413 for every chunk after a session's byte ceiling; a
+		// recorder that kept flushing posted a rejected chunk every 5s for the
+		// rest of the page's life.
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const recorder = startRecording(CONFIG, "session-1")
+		emitRef!(fullSnapshot(1_000), true)
+		outcomes.push("exhausted")
+		await recorder.flush()
+		expect(posted).toHaveLength(1)
+		expect(stopFn).toHaveBeenCalledTimes(1)
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining("maximum recorded size"))
+
+		// Anything still emitted (rrweb is stopped, but be defensive) and every
+		// later flush — periodic or explicit — uploads nothing.
+		emitRef!(incremental(2_000))
+		await recorder.flush()
+		await vi.advanceTimersByTimeAsync(10_000)
+		expect(posted).toHaveLength(1)
+		// A later revoke must not tear rrweb down a second time.
+		recorder.stop()
+		expect(stopFn).toHaveBeenCalledTimes(1)
 	})
 
 	it("skips unserializable events without breaking the stream", async () => {
