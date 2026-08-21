@@ -706,8 +706,11 @@ export const ProductEvents = table("product_events", {
 })
 
 // (VisitorId, UserId) pairs observed together on a session_replays row.
-// ReplacingMergeTree keyed on the pair — always aggregate (`min(FirstSeen)`) or
-// semi-join; never assume one row per pair on read.
+// AggregatingMergeTree keyed on the pair, `FirstSeen` collapsing under `min` —
+// so a merge keeps the pair's EARLIEST sighting rather than an arbitrary one,
+// which is what makes ranking a visitor's users by it stable. Unmerged parts
+// still hold several rows per pair, so always aggregate (`min(FirstSeen)` per
+// pair) or semi-join; never assume one row per pair on read.
 export const IdentityLinks = table("identity_links", {
 	OrgId: T.string,
 	VisitorId: T.string,

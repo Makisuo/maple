@@ -24,8 +24,10 @@ as a real funnel in the product rather than a hand-written `run_sql`.
    identity; older builds keep writing (all new columns default).
 6. **Billing**: `bun run --cwd apps/api atmn push` (no package script exists; `atmn` is an
    `apps/api` dependency) so the `product_events` feature and its `startup` plan item exist in
-   Autumn before the gateway starts reserving against it. Until pushed, `balances.check` for an
-   unknown feature fails open and usage is still tracked, so nothing is rejected — just unbilled.
+   Autumn before the gateway starts reserving against it. Until pushed, Autumn answers
+   `allowed: false` for the unknown feature — a real denial, not an error, so `is_allowed`'s
+   fail-open does NOT rescue it. Neither event path rejects on `product_events` for exactly that
+   reason: usage is recorded fail-open and nothing is dropped — just unbilled.
 
 ### Billing
 
@@ -33,11 +35,11 @@ Product events are their own metered Autumn feature, `product_events` (unit = on
 separate from `browser_sessions`. The ingest gateway meters it on two paths, both with the same
 reserve → WAL enqueue → confirm/release shape as session starts (`metered_enqueue` in
 `apps/ingest/src/main.rs`): (1) `POST /v1/events` reserves the number of rows that survived
-`sanitize_product_event`, and its entitlement gate is `product_events`; (2) `POST /v1/sessionEvents`
-reserves the number of `type == "custom"` rows in the batch (a browser `track()` call is the same
-unit as a server-side event) but keeps its entitlement REJECTION on `browser_sessions`, so an
-exhausted product-events allowance bills usage-based overage instead of 402-ing a whole session
-transcript. Automatic session events (clicks, navigations, ...) stay unmetered. **Beta pricing
+`sanitize_product_event`; (2) `POST /v1/sessionEvents` reserves the number of `type == "custom"`
+rows in the batch (a browser `track()` call is the same unit as a server-side event) and keeps its
+entitlement REJECTION on `browser_sessions`. **Neither path rejects on `product_events`**: an
+exhausted (or un-provisioned) product-events allowance bills usage-based overage instead of 402-ing
+a whole session transcript or a backend's buffered batch. Automatic session events (clicks, navigations, ...) stay unmetered. **Beta pricing
 (2026-08-17): the `startup` item is `unlimited: true` with no price** — usage is tracked in Autumn
 (and shown on the billing page as "Unlimited · free during beta") so real volumes are known before
 a price is set. To start charging, swap `unlimited` for an `included` allowance + `price` in

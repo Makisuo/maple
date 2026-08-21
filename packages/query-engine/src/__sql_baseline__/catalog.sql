@@ -649,7 +649,7 @@ SELECT
         ORDER BY group ASC, step ASC
         FORMAT JSON
 
--- builder:product-events:productEventsFunnelBreakdownQuery:session-dimension  [5df587f2]
+-- builder:product-events:productEventsFunnelBreakdownQuery:session-dimension  [f52bc5e1]
 SELECT
           group AS group,
           arrayJoin([1, 2, 3]) AS step,
@@ -673,8 +673,13 @@ SELECT
         LEFT JOIN (SELECT
           VisitorId AS VisitorId,
           argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
         FROM identity_links
         WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
         GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
         LEFT JOIN (SELECT
           SessionId AS SessionId,
@@ -696,7 +701,7 @@ SELECT
         ORDER BY group ASC, step ASC
         FORMAT JSON
 
--- builder:product-events:productEventsFunnelQuery:person  [5c76c8ff]
+-- builder:product-events:productEventsFunnelQuery:person  [41bb75cc]
 SELECT
           arrayJoin([1, 2, 3]) AS step,
           arrayElement(counts, step) AS count
@@ -715,8 +720,13 @@ SELECT
         LEFT JOIN (SELECT
           VisitorId AS VisitorId,
           argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
         FROM identity_links
         WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
         GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
         WHERE e.OrgId = 'org_sql_catalog'
           AND e.Timestamp >= '2026-01-01 10:30:00'
@@ -752,7 +762,7 @@ SELECT
         ORDER BY step ASC
         FORMAT JSON
 
--- builder:product-events:productEventsFunnelQuery:session-step-filtered  [2502c451]
+-- builder:product-events:productEventsFunnelQuery:session-step-filtered  [bbc7eaed]
 SELECT
           arrayJoin([1, 2, 3, 4]) AS step,
           arrayElement(counts, step) AS count
@@ -773,8 +783,13 @@ SELECT
         LEFT JOIN (SELECT
           VisitorId AS VisitorId,
           argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
         FROM identity_links
         WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
         GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
         WHERE s.OrgId = 'org_sql_catalog'
           AND s.StartTime >= '2026-01-01 10:30:00'
@@ -787,8 +802,13 @@ SELECT
         LEFT JOIN (SELECT
           VisitorId AS VisitorId,
           argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
         FROM identity_links
         WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
         GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
         WHERE s.OrgId = 'org_sql_catalog'
           AND s.StartTime >= '2026-01-01 10:30:00'
@@ -826,8 +846,13 @@ SELECT
         LEFT JOIN (SELECT
           VisitorId AS VisitorId,
           argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
         FROM identity_links
         WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
         GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
         WHERE e.OrgId = 'org_sql_catalog'
           AND e.Timestamp >= '2026-01-01 10:30:00'
@@ -840,8 +865,13 @@ SELECT
         LEFT JOIN (SELECT
           VisitorId AS VisitorId,
           argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
         FROM identity_links
         WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
         GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
         WHERE s.OrgId = 'org_sql_catalog'
           AND s.StartTime >= '2026-01-01 10:30:00'

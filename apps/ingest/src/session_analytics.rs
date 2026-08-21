@@ -280,6 +280,21 @@ const PRODUCT_EVENT_ID_FIELDS: [(&str, usize); 5] = [
 /// which client produced it.
 const PRODUCT_EVENT_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.9f";
 
+/// How far a client-supplied `timestamp` may sit from the moment the gateway
+/// received it before the row is dropped.
+///
+/// The timestamp is otherwise the one unbounded field on the row, and it is the
+/// one that decides physical layout: `product_events` is
+/// `PARTITION BY toDate(Timestamp)`, so a backfill stamped across five years of
+/// history mints ~2,000 single-row partitions for that org, and a far-FUTURE
+/// stamp is worse still — `TTL toDate(Timestamp) + INTERVAL 365 DAY` never
+/// fires, so the row is resident forever while sitting outside every funnel
+/// window that could show it. The window is asymmetric because the two
+/// directions mean different things: trailing a little is a buffered backend
+/// flush or a clock behind, leading is always a bug.
+const PRODUCT_EVENT_MAX_BACKDATE_DAYS: i64 = 30;
+const PRODUCT_EVENT_MAX_FUTURE_DAYS: i64 = 1;
+
 /// Parse a client-supplied product-event timestamp.
 ///
 /// Accepts RFC 3339 (`2026-08-17T10:15:30.123Z`, offsets allowed) or the
@@ -295,6 +310,20 @@ fn parse_product_event_timestamp(value: &str) -> Option<chrono::DateTime<chrono:
     chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S%.f")
         .ok()
         .map(|naive| naive.and_utc())
+}
+
+/// Whether a parsed timestamp is close enough to receipt time to store.
+fn product_event_timestamp_in_range(
+    at: chrono::DateTime<chrono::Utc>,
+    received_at: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    let behind = chrono::TimeDelta::try_days(PRODUCT_EVENT_MAX_BACKDATE_DAYS);
+    let ahead = chrono::TimeDelta::try_days(PRODUCT_EVENT_MAX_FUTURE_DAYS);
+    match (behind, ahead) {
+        (Some(behind), Some(ahead)) => at >= received_at - behind && at <= received_at + ahead,
+        // Unreachable for these constants; keep the row rather than invent a bound.
+        _ => true,
+    }
 }
 
 fn format_product_event_timestamp(at: chrono::DateTime<chrono::Utc>) -> String {
@@ -378,6 +407,10 @@ pub fn sanitize_product_event(
     let timestamp = match obj.get("timestamp") {
         None | Some(serde_json::Value::Null) => received_at,
         Some(serde_json::Value::String(raw)) => match parse_product_event_timestamp(raw) {
+            // Parseable but implausible is dropped like unparseable: clamping to
+            // the window edge would pile the whole replay onto one partition and
+            // report every event at a time it did not happen.
+            Some(parsed) if !product_event_timestamp_in_range(parsed, received_at) => return false,
             Some(parsed) => parsed,
             None => return false,
         },
@@ -733,6 +766,38 @@ mod tests {
             serde_json::json!("yesterday"),
             serde_json::json!("1755432000000"),
             serde_json::json!(1755432000000u64),
+        ] {
+            let mut obj = product_event(serde_json::json!({ "name": "e", "timestamp": bad }));
+            assert!(
+                !sanitize_product_event(&mut obj, received_at()),
+                "timestamp {bad} should be dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn product_event_timestamp_outside_the_window_is_dropped() {
+        // Inside: a buffered backend flush from last week, the far edge of the
+        // backdate window, and a clock a few hours ahead.
+        for ok in [
+            serde_json::json!("2026-08-10T12:00:00Z"),
+            serde_json::json!("2026-07-19T12:00:00Z"),
+            serde_json::json!("2026-08-18T06:00:00Z"),
+        ] {
+            let mut obj = product_event(serde_json::json!({ "name": "e", "timestamp": ok }));
+            assert!(
+                sanitize_product_event(&mut obj, received_at()),
+                "timestamp {ok} should be kept"
+            );
+        }
+
+        // Outside: a five-year historical replay (one partition per day) and a
+        // far-future stamp the 365-day TTL would never reach.
+        for bad in [
+            serde_json::json!("2019-01-01T00:00:00Z"),
+            serde_json::json!("2026-07-17T11:59:59Z"),
+            serde_json::json!("2026-08-19T00:00:00Z"),
+            serde_json::json!("2999-01-01T00:00:00Z"),
         ] {
             let mut obj = product_event(serde_json::json!({ "name": "e", "timestamp": bad }));
             assert!(

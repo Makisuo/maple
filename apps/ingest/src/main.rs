@@ -2739,16 +2739,16 @@ async fn handle_product_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
-    // Product events are their own metered feature. The gate here catches
-    // "no active subscription" / hard-capped orgs before the body is parsed;
-    // the exact quantity is reserved per accepted row below.
-    if org_id != SENTINEL_ORG_ID {
-        if let Some(error) = entitlement_rejection(state, &org_id, PRODUCT_EVENTS_FEATURE_ID).await
-        {
-            return Err(error);
-        }
-    }
-
+    // Product events are their own metered feature, but they are NOT gated on
+    // it — same reasoning as the `type == "custom"` rows on `/v1/sessionEvents`.
+    // Autumn answers `allowed: false` for a customer that simply has no balance
+    // for the feature yet (a plan item not pushed, or not granted to a live
+    // subscription), which is every org until the `atmn push` in the rollout
+    // checklist lands. A gate here would turn that window into a 402 on every
+    // backend and mobile event — including the API's own signup/plan emits —
+    // and `decide_allowed` reads a well-formed `allowed: false` as a real
+    // denial, so the fail-open in `is_allowed` never rescues it. The quantity is
+    // still reserved and recorded per accepted row below.
     let pipeline = native_rows_pipeline_for(
         state,
         destination,
@@ -2806,7 +2806,11 @@ async fn handle_product_events_inner(
         &org_id,
         PRODUCT_EVENTS_FEATURE_ID,
         count as f64,
-        OnDenied::Reject,
+        // Fail-open, matching the entitlement decision above: a denial here is
+        // far more likely to mean "the feature is not provisioned yet" than
+        // "this org is over its allowance", and dropping a backend's buffered
+        // batch is not a recoverable outcome for the caller.
+        OnDenied::MeterAnyway,
         || async {
             pipeline
                 .accept_rows_to(
@@ -6928,12 +6932,24 @@ mod tests {
             .iter()
             .filter(|c| c.path == "balances.check")
             .collect();
-        // Every check on this endpoint — the gate and the reservation — is
-        // against `product_events`, never `browser_sessions`.
+        // Every check on this endpoint is against `product_events`, never
+        // `browser_sessions`.
         assert!(!checks.is_empty(), "expected Autumn checks, saw {calls:?}");
         for check in &checks {
             assert_eq!(check.feature_id(), "product_events", "{check:?}");
         }
+        // ...and there is NO entitlement gate (a check with no
+        // `required_balance`), only the reservation. A gate would 402 every org
+        // whose Autumn customer has no `product_events` balance yet, which is
+        // every org until the plan item is pushed and granted — Autumn answers
+        // that with a real `allowed: false`, not an error, so the fail-open in
+        // `is_allowed` does not cover it.
+        let gates: Vec<&str> = checks
+            .iter()
+            .filter(|c| c.reserved_value().is_none())
+            .map(|c| c.feature_id())
+            .collect();
+        assert!(gates.is_empty(), "expected no entitlement gate, saw {gates:?}");
         let reservations: Vec<f64> = checks.iter().filter_map(|c| c.reserved_value()).collect();
         assert_eq!(
             reservations,

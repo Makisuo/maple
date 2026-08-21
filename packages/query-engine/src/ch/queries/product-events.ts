@@ -221,16 +221,36 @@ type LinkAccessor = { readonly UserId: CH.Expr<string | null> } | ColumnAccessor
 const LINK_ALIAS = "link"
 
 /**
- * `identity_links` collapsed to one linked user per visitor. ReplacingMergeTree
- * may still hold several rows per (visitor, user) and a visitor may have been
- * linked to more than one user; `argMin(UserId, FirstSeen)` picks the user the
+ * `identity_links` collapsed to one linked user per visitor: the user the
  * visitor became *first*, which is the identity that anonymous rows
  * chronologically precede — the one a conversion funnel wants.
+ *
+ * TWO aggregations, and the inner one is load-bearing. `identity_links` holds
+ * one row per (visitor, user) SIGHTING until a merge collapses them, so a pair
+ * seen across several sessions has several rows with different `FirstSeen`.
+ * `min(FirstSeen)` per pair reduces that to the pair's first sighting, and only
+ * then does the outer `argMin` pick which user the visitor became first.
+ *
+ * The engine is the other half of this: `identity_links` is an
+ * AggregatingMergeTree whose `FirstSeen` collapses under `min`, so the merge
+ * keeps that same earliest value. A plain ReplacingMergeTree (no version
+ * column) keeps an arbitrary duplicate instead — usually the newest — and no
+ * amount of read-time aggregation recovers the row it dropped, so a visitor
+ * linked to A in January and again in March, and to B in February, would answer
+ * "A" until the merge landed and "B" after. Neither half works alone.
  */
 function identityLinksByVisitor() {
-	return from(IdentityLinks)
-		.select(($) => ({ VisitorId: $.VisitorId, UserId: CH.argMin($.UserId, $.FirstSeen) }))
+	const firstSeenPerPair = from(IdentityLinks)
+		.select(($) => ({
+			VisitorId: $.VisitorId,
+			UserId: $.UserId,
+			FirstSeen: CH.min_($.FirstSeen),
+		}))
 		.where(($) => [$.OrgId.eq(param.string("orgId"))])
+		.groupBy("VisitorId", "UserId")
+
+	return fromQuery(firstSeenPerPair, "pair_links")
+		.select(($) => ({ VisitorId: $.VisitorId, UserId: CH.argMin($.UserId, $.FirstSeen) }))
 		.groupBy("VisitorId")
 }
 

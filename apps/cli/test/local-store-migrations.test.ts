@@ -59,8 +59,8 @@ import { join } from "node:path"
 
 describe("current local schema identity", () => {
 	it("matches the generated v6 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("4fb7062f1e068837")
-		expect(SCHEMA_DIGEST).toBe("4fb7062f1e068837ff72848af8e862a47155b7543a1de8401b7b67c9ce176792")
+		expect(SCHEMA_FINGERPRINT).toBe("18015521cc411d12")
+		expect(SCHEMA_DIGEST).toBe("18015521cc411d12bf37d5e0c61bd6db2ec8a498a773ef3c9b28172d957683be")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
@@ -161,7 +161,11 @@ describe("current local schema identity", () => {
 		expect(productEventsView?.definition).toContain("FROM session_events")
 		expect(productEventsView?.definition).toContain("'browser' AS Source")
 		const identityLinks = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "identity_links")
-		expect(identityLinks?.engine).toBe("ReplacingMergeTree")
+		// Aggregating, not Replacing: the funnel ranks a visitor's linked users by
+		// `FirstSeen`, so the merge has to keep the pair's EARLIEST sighting. A
+		// Replacing merge with no version column keeps an arbitrary duplicate and
+		// the ranking flips as merges land.
+		expect(identityLinks?.engine).toBe("AggregatingMergeTree")
 		expect(identityLinks?.orderBy).toBe("(OrgId, VisitorId, UserId)")
 		const identityLinksView = LOCAL_SCHEMA_MANIFEST.objects.find(
 			(object) => object.name === "identity_links_mv",

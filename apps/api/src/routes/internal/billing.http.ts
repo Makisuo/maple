@@ -21,6 +21,7 @@ import {
 	readCustomerCached,
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
+import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { emitPlanStartedFromAttach } from "@/services/billing/plan-events"
 import { ProductEventsService } from "@/services/product-events/ProductEventsService"
 import { requireAdmin } from "@/services/auth/auth"
@@ -184,12 +185,25 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 						const attached = yield* decodeUpstream(AttachResult, response)
 						// Inline (no-redirect) plan start; the Autumn webhook covers the
 						// Stripe-checkout path. Never fails the request.
-						yield* emitPlanStartedFromAttach(productEvents, {
-							orgId: tenant.orgId,
-							userId: tenant.userId,
-							planId: payload.planId,
-							result: attached,
-						})
+						//
+						// FORKED, unlike the webhook receivers: this is the Subscribe
+						// click, the one request where a stall reads as a failed payment,
+						// and `track` is a bounded-but-not-free POST to the ingest
+						// gateway. `forkRequestScoped` means a gateway that answers
+						// normally still gets the event (the fiber finishes long before
+						// the response is written) while a stalled one is interrupted at
+						// the response instead of holding the user. Losing it there costs
+						// nothing durable — `plan_events.ts` is explicit that this emit is
+						// the low-latency COMPLEMENT and the `billing.updated` webhook is
+						// the authoritative `plan_started`.
+						yield* forkRequestScoped(
+							emitPlanStartedFromAttach(productEvents, {
+								orgId: tenant.orgId,
+								userId: tenant.userId,
+								planId: payload.planId,
+								result: attached,
+							}),
+						)
 						return attached
 					}),
 				)

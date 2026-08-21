@@ -102,9 +102,15 @@ export type WindowFunnelMode = "strict_order" | "strict_deduplication" | "strict
  * `cond1..condN` that occurred in that order within `window` of the `cond1`
  * event.
  *
- * `window` is in the unit of `timestamp` — for `DateTime`/`DateTime64` columns
- * that is seconds, so callers pass `windowSeconds`. Ordering within a group
- * happens inside the aggregate; no `ORDER BY` is needed on the input.
+ * `window` is in the unit of `timestamp`, whatever that unit happens to be —
+ * seconds for a `Date`/`DateTime` column, but ClickHouse rejects `DateTime64`
+ * outright, so a sub-second-precision column has to be projected to an integer
+ * first and `window` then follows THAT unit. Projecting with
+ * `toUInt64(toUnixTimestamp64Milli(ts))` means passing `windowSeconds * 1000`;
+ * passing bare seconds against a millisecond timestamp silently yields a window
+ * 1000x too short and a funnel that converts almost nobody past step 1.
+ * Ordering within a group happens inside the aggregate; no `ORDER BY` is needed
+ * on the input.
  *
  * Curried like {@link quantile}: the window and mode are *parameters* of the
  * aggregate, the timestamp and conditions are its arguments.

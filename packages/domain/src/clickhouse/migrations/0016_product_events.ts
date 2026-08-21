@@ -84,7 +84,8 @@ export const productEventsBrowserBackfill: BackfillSpec = {
  *
  * Re-runnable by construction: views are dropped first, `product_events`
  * clears only `Source = 'browser'` (never a directly ingested row), and
- * `identity_links` is a ReplacingMergeTree so a re-insert of a pair is a no-op.
+ * `identity_links` is an AggregatingMergeTree over `min(FirstSeen)`, so a
+ * re-insert of a pair collapses back to the same earliest-sighting row.
  *
  * **BYO ClickHouse only.** Managed orgs get `product_events_mv` /
  * `identity_links_mv` via `tinybird deploy` from `materializations.ts`, and the
@@ -128,13 +129,17 @@ ENGINE = MergeTree
 PARTITION BY toDate(Timestamp)
 ORDER BY (OrgId, Timestamp, VisitorId, SessionId, Seq)
 TTL toDate(Timestamp) + INTERVAL 365 DAY`,
+		// AggregatingMergeTree, not Replacing: the reader ranks a visitor's linked
+		// users by `FirstSeen`, and a Replacing merge with no version column keeps
+		// an arbitrary duplicate, so that ranking would flip as merges land. `min`
+		// makes the collapse keep the earliest sighting instead.
 		`CREATE TABLE IF NOT EXISTS identity_links (
   OrgId LowCardinality(String),
   VisitorId String,
   UserId String,
-  FirstSeen DateTime64(9)
+  FirstSeen SimpleAggregateFunction(min, DateTime64(9))
 )
-ENGINE = ReplacingMergeTree
+ENGINE = AggregatingMergeTree
 PARTITION BY tuple()
 ORDER BY (OrgId, VisitorId, UserId)
 TTL toDate(FirstSeen) + INTERVAL 365 DAY`,

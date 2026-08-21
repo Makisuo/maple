@@ -2194,8 +2194,20 @@ export type ProductEventsRow = InferRow<typeof productEvents>
  * only) into one row: a `product_events` row resolves its person as
  * `if(UserId != '', UserId, coalesce(link.UserId, VisitorId))`.
  *
- * ReplacingMergeTree keyed on the pair, so re-observing it is a no-op; the
- * lowest `FirstSeen` wins on merge because the reader takes `min()`.
+ * AggregatingMergeTree keyed on the pair, with `FirstSeen` as
+ * `SimpleAggregateFunction(min, …)`, so re-observing a pair collapses to the
+ * EARLIEST sighting. That engine choice is load-bearing, not tidiness: the
+ * reader ranks a visitor's users by `FirstSeen` to pick the one they became
+ * first, and under a plain ReplacingMergeTree (no version column) a merge keeps
+ * an arbitrary duplicate — commonly the newest. A visitor linked to A in
+ * January and again in March, and to B in February, then answers "A" until the
+ * merge lands and "B" afterwards, moving funnel counts with merge timing rather
+ * than with the data. Read-time `min()` cannot repair that: by then the January
+ * row is gone. The merge itself has to keep the minimum.
+ *
+ * Readers still aggregate `min(FirstSeen)` per pair — unmerged parts hold
+ * several rows — and only then rank; see `identityLinksByVisitor` in
+ * `@maple/query-engine`'s `ch/queries/product-events.ts`.
  */
 export const identityLinks = defineDatasource("identity_links", {
 	description:
@@ -2205,13 +2217,14 @@ export const identityLinks = defineDatasource("identity_links", {
 		OrgId: t.string().lowCardinality(),
 		VisitorId: t.string(),
 		UserId: t.string(),
-		FirstSeen: t.dateTime64(9),
+		FirstSeen: t.simpleAggregateFunction("min", t.dateTime64(9)),
 	},
-	engine: engine.replacingMergeTree({
+	engine: engine.aggregatingMergeTree({
 		partitionKey: "tuple()",
 		sortingKey: ["OrgId", "VisitorId", "UserId"],
-		// A pair not re-observed for a year is dead weight; the reader takes the
-		// most recent link anyway.
+		// A pair not re-observed for a year is dead weight. Keyed off the pair's
+		// first sighting, which `min` now makes stable, so the TTL of a link does
+		// not move every time the visitor signs in again.
 		ttl: "toDate(FirstSeen) + INTERVAL 365 DAY",
 	}),
 })

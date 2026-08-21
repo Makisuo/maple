@@ -99,8 +99,12 @@ describe("productEventsFunnelQuery", () => {
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "person", windowSeconds: 60 }),
 			params,
 		)
+		// `min(FirstSeen)` per pair BEFORE the argMin: identity_links holds one
+		// row per sighting until the AggregatingMergeTree merge collapses them,
+		// so ranking a visitor's users on a raw FirstSeen would count arbitrary
+		// duplicates until parts merge.
 		expect(oneLine(sql)).toContain(
-			"LEFT JOIN (SELECT VisitorId AS VisitorId, argMin(UserId, FirstSeen) AS UserId FROM identity_links WHERE OrgId = 'org_1' GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId",
+			"LEFT JOIN (SELECT VisitorId AS VisitorId, argMin(UserId, FirstSeen) AS UserId FROM (SELECT VisitorId AS VisitorId, UserId AS UserId, min(FirstSeen) AS FirstSeen FROM identity_links WHERE OrgId = 'org_1' GROUP BY VisitorId, UserId) AS pair_links GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId",
 		)
 		expect(sql).toContain(
 			"multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) AS key",

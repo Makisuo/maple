@@ -165,6 +165,16 @@ export const makeProductEvents = (options: {
 		const line = toProductEventLine(event, now)
 		yield* post(line).pipe(
 			Effect.retry({ times: RETRIES, while: isRetryable }),
+			// TOTAL budget, on top of the per-attempt timeout inside `post`.
+			// A timeout carries no `status`, so `isRetryable` treats it as
+			// retryable and an unreachable gateway would otherwise cost a caller
+			// two full timeouts back to back. `track` runs inline for the webhook
+			// receivers, so the ceiling has to be the one an inline caller can
+			// actually afford, not twice it.
+			Effect.timeoutOrElse({
+				duration: REQUEST_TIMEOUT,
+				orElse: () => new ProductEventsError({ message: `Product event gave up (${event.name})` }),
+			}),
 			Effect.catchCause((cause) =>
 				Effect.logDebug("Product event dropped").pipe(
 					Effect.annotateLogs({ event: event.name, cause: String(cause) }),
