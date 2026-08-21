@@ -95,7 +95,7 @@ receivers / processors plus this exporter.
 
 | OTLP signal | Maple base table                                                                        | Materialized views fan-out into                                                                                                                                                |
 | ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Traces      | `traces`                                                                                | `error_events`, `error_spans`, `service_overview_spans`, `service_map_*`, `trace_list_mv`, `trace_detail_spans`, `traces_aggregates_hourly`, `service_usage`, attribute facets |
+| Traces      | `traces`                                                                                | `error_events`, `service_overview_spans`, `service_map_*`, `trace_list_mv`, `trace_detail_spans`, `traces_aggregates_hourly`, `service_usage`, attribute facets |
 | Logs        | `logs`                                                                                  | `logs_aggregates_hourly`, `service_usage`, log attribute facets                                                                                                                |
 | Metrics     | `metrics_sum` / `metrics_gauge` / `metrics_histogram` / `metrics_exponential_histogram` | `service_usage`, metric attribute facets                                                                                                                                       |
 

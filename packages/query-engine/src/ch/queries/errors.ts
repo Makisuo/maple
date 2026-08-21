@@ -767,7 +767,7 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 	return unionAll(serviceQuery, envQuery, errorTypeQuery, versionQuery).format("JSON")
 }
 
-// Errors summary (CROSS JOIN between error_spans and service_usage)
+// Errors summary (CROSS JOIN between the error-events table and service_usage)
 
 export interface ErrorsSummaryOpts extends ErrorsSharedFilters {
 	rootOnly?: boolean

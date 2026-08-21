@@ -58,14 +58,6 @@ Per-service hosting-platform attributes for the service map's runtime-icon resol
 
 Additionally extracts (see file): `faas.name`, `sdk.type`, `process.runtime.name`.
 
-## `error_spans_mv`
-
-Materializes spans with `StatusCode = 'Error'`.
-
-| Column | Extracted from | Line |
-|---|---|---|
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:454` |
-
 ## `error_events_mv`
 
 Unwraps the first OTel `exception` event from `EventsName` / `EventsAttributes` Maps.
