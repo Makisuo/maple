@@ -286,7 +286,8 @@ async function ingest(
 	let stagedEventIds: readonly string[] = []
 	try {
 		eventing.persistFailures(evaluation.failures)
-		if (evaluation.events.length > 0) stagedEventIds = eventing.stage(evaluation.events).eventIds
+		if (evaluation.events.length > 0)
+			stagedEventIds = eventing.stage(evaluation.events, evaluation.eventSourceFingerprints).eventIds
 	} catch (error) {
 		const status = error instanceof OtlpFieldError ? 400 : 503
 		return {

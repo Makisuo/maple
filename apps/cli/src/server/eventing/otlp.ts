@@ -253,7 +253,7 @@ const sourceOccurrenceId = (record: NormalizedAttributes): string | null => {
 const derivedOccurrenceId = (input: JsonValue): string =>
 	`derived:sha256:${createHash("sha256").update(canonicalJson(input)).digest("hex")}`
 
-export const normalizeOtlpLogs = (
+const normalizeOtlpLogsStrict = (
 	request: unknown,
 	_acceptedAt = new Date().toISOString(),
 	tenantId = "local",
@@ -406,6 +406,60 @@ export const normalizeOtlpLogs = (
 	}
 	return signals
 }
+
+export interface OtlpLogNormalizationResult {
+	readonly signals: readonly NormalizedSignal[]
+	readonly ineligible: number
+	readonly failures: number
+}
+
+/**
+ * Event projection is an optional branch beside the established warehouse
+ * encoder. Projection-only bounds make one occurrence ineligible; they must
+ * not narrow the OTLP request contract or suppress unrelated warehouse rows.
+ * The warehouse encoder independently rejects fields that are invalid for
+ * both paths.
+ */
+export const normalizeOtlpLogsWithDiagnostics = (
+	request: unknown,
+	acceptedAt = new Date().toISOString(),
+	tenantId = "local",
+): OtlpLogNormalizationResult => {
+	const input = (request ?? {}) as OtlpLogsRequest
+	const signals: NormalizedSignal[] = []
+	let ineligible = 0
+	let failures = 0
+	for (const resourceLogs of input.resourceLogs ?? [])
+		for (const scopeLogs of resourceLogs.scopeLogs ?? [])
+			for (const log of scopeLogs.logRecords ?? []) {
+				try {
+					const normalized = normalizeOtlpLogsStrict(
+						{
+							resourceLogs: [
+								{
+									...resourceLogs,
+									scopeLogs: [{ ...scopeLogs, logRecords: [log] }],
+								},
+							],
+						},
+						acceptedAt,
+						tenantId,
+					)
+					if (normalized.length === 0) ineligible += 1
+					else signals.push(...normalized)
+				} catch (error) {
+					if (!(error instanceof OtlpFieldError)) throw error
+					failures += 1
+				}
+			}
+	return { signals, ineligible, failures }
+}
+
+export const normalizeOtlpLogs = (
+	request: unknown,
+	acceptedAt = new Date().toISOString(),
+	tenantId = "local",
+): readonly NormalizedSignal[] => normalizeOtlpLogsWithDiagnostics(request, acceptedAt, tenantId).signals
 
 export const OTLP_LOG_ADAPTER: SignalSourceAdapter<
 	unknown,

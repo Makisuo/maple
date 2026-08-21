@@ -515,6 +515,11 @@ projection requires `timeUnixNano` or `observedTimeUnixNano`; server receipt
 time is never incorporated into durable identity or event content.
 OTLP permits both timestamp fields to be absent or zero; those records remain
 accepted by the warehouse path but are skipped by durable event projection.
+The same isolation applies to eventing-specific normalization bounds: an
+oversized attribute map or nested value makes only that source occurrence
+ineligible for projection and records a bounded normalization failure. The
+existing warehouse encoder still decides independently whether the OTLP record
+is valid for storage, so enabling a projection does not narrow ingest.
 
 Staging and chDB insertion are not one transaction. A process crash after the
 chDB insert but before the OTLP acknowledgement can still cause a duplicate raw
@@ -522,8 +527,11 @@ telemetry row on retry; that is already possible with at-least-once OTLP
 delivery. The staged/ready outbox protocol prevents an event from becoming
 dispatchable before the ingest attempt reaches its warehouse commit point.
 Staged rows retain the source occurrence identity and original projection
-revision. On redelivery, Maple recovers those exact event IDs and does not
-reevaluate that occurrence against a newer or disabled projection snapshot.
+revision plus a bounded hash of the normalized source content. On redelivery,
+Maple recovers those exact event IDs and does not reevaluate that occurrence
+against a newer or disabled projection snapshot. Recovery requires the source
+hash to match; reuse of the same source identity with changed content fails as a
+collision and leaves the staged event non-ready.
 
 If atomic exactly-once storage across both systems later becomes a requirement,
 the correct addition is a durable ingress journal before both writes. chDB
@@ -548,7 +556,10 @@ acknowledged as poison messages. Health-event issue mutations use a durable
 `(org_id, event_id)` receipt inserted in the same PostgreSQL transaction as the
 issue mutation; timeline insertion remains independently idempotent. A retry
 after a failure between those phases therefore completes the issue once without
-duplicating its occurrence count or history.
+duplicating its occurrence count or history. Transactions also take a scoped
+lock for `(org_id, issue fingerprint)` before claiming the receipt. Concurrent,
+distinct events for the same issue are therefore all counted, while only one
+transition reopens a resolved issue.
 
 The provider source adapter supplies the strongest available delivery or event
 identity. It then uses the same selector, projector, event ID, and outbox

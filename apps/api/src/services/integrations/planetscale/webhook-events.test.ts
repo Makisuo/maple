@@ -306,6 +306,95 @@ describe("upsertPlanetScaleIssue", () => {
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
+	it.effect("counts concurrent distinct events against an initially absent issue", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const payload = yield* decodePlanetScaleWebhookPayload(OOM_PAYLOAD)
+			const base = {
+				orgId: asOrgId("org_1"),
+				payload,
+				severity: "high" as const,
+				title: "PlanetScale branch out of memory",
+				description: "Branch main of main-db was restarted after running out of memory.",
+			}
+			const results = yield* Effect.all(
+				[
+					upsertPlanetScaleIssue({ ...base, eventId: "event-a", timestamp: 1_000 }),
+					upsertPlanetScaleIssue({ ...base, eventId: "event-b", timestamp: 2_000 }),
+				],
+				{ concurrency: "unbounded" },
+			)
+			assert.deepStrictEqual(results.map(({ action }) => action).sort(), ["created", "refreshed"])
+			assert.strictEqual(results[0].issueId, results[1].issueId)
+
+			const aggregate = yield* Effect.promise(() =>
+				queryFirstRow<{ occurrence_count: number; receipts: number; created_events: number }>(
+					testDb,
+					`SELECT i.occurrence_count,
+					        (SELECT count(*)::int FROM planetscale_issue_receipts) AS receipts,
+					        (SELECT count(*)::int FROM error_issue_events WHERE issue_id = i.id AND type = 'created') AS created_events
+					 FROM error_issues i`,
+				),
+			)
+			assert.strictEqual(aggregate?.occurrence_count, 2)
+			assert.strictEqual(aggregate?.receipts, 2)
+			assert.strictEqual(aggregate?.created_events, 1)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("serializes concurrent distinct events when reopening a resolved issue", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const payload = yield* decodePlanetScaleWebhookPayload(OOM_PAYLOAD)
+			const base = {
+				orgId: asOrgId("org_1"),
+				payload,
+				severity: "high" as const,
+				title: "PlanetScale branch out of memory",
+				description: "Branch main of main-db was restarted after running out of memory.",
+			}
+			const initial = yield* upsertPlanetScaleIssue({
+				...base,
+				eventId: "event-initial",
+				timestamp: 1_000,
+			})
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE error_issues SET workflow_state = 'done' WHERE id = $1", [
+					initial.issueId,
+				]),
+			)
+
+			const results = yield* Effect.all(
+				[
+					upsertPlanetScaleIssue({ ...base, eventId: "event-a", timestamp: 2_000 }),
+					upsertPlanetScaleIssue({ ...base, eventId: "event-b", timestamp: 3_000 }),
+				],
+				{ concurrency: "unbounded" },
+			)
+			assert.deepStrictEqual(results.map(({ action }) => action).sort(), ["refreshed", "reopened"])
+
+			const aggregate = yield* Effect.promise(() =>
+				queryFirstRow<{
+					workflow_state: string
+					occurrence_count: number
+					state_changes: number
+					regressions: number
+				}>(
+					testDb,
+					`SELECT i.workflow_state, i.occurrence_count,
+					        (SELECT count(*)::int FROM error_issue_events WHERE issue_id = i.id AND type = 'state_change') AS state_changes,
+					        (SELECT count(*)::int FROM error_issue_events WHERE issue_id = i.id AND type = 'regression') AS regressions
+					 FROM error_issues i WHERE i.id = $1`,
+					[initial.issueId],
+				),
+			)
+			assert.strictEqual(aggregate?.workflow_state, "triage")
+			assert.strictEqual(aggregate?.occurrence_count, 3)
+			assert.strictEqual(aggregate?.state_changes, 1)
+			assert.strictEqual(aggregate?.regressions, 1)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
 	it.effect("leaves a wontfix issue with an active snooze entirely alone", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {

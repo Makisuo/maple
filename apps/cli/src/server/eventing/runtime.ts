@@ -1,23 +1,29 @@
+import { createHash } from "node:crypto"
 import {
+	canonicalJson,
 	CompiledProjectionRegistry,
+	isJsonValue,
 	ProjectorRegistry,
 	SignalSourceRegistry,
 	assertSignalProjectionInputBudget,
 	SignalProjectionSpecSchema,
 	type MapleCloudEvent,
+	type JsonValue,
+	type NormalizedSignal,
 	type ProjectionFailure,
 	type SignalProjectionSpec,
 } from "@maple/eventing-core"
 import { Schema } from "effect"
 import { LocalEventingControlStore } from "./control-store"
 import type { EventConsumerStart } from "./control-store"
-import { OTLP_LOG_ADAPTER } from "./otlp"
+import { normalizeOtlpLogsWithDiagnostics, OTLP_LOG_ADAPTER } from "./otlp"
 import { NOOP_EVENTING_TELEMETRY, type EventingTelemetry } from "./telemetry"
 
 const TENANT_ID = "local"
 
 export interface LocalProjectionEvaluation {
 	readonly events: readonly MapleCloudEvent[]
+	readonly eventSourceFingerprints: ReadonlyMap<string, string>
 	readonly recoveredEventIds: readonly string[]
 	readonly failures: readonly ProjectionFailure[]
 	readonly typeMismatchFields: readonly string[]
@@ -32,10 +38,30 @@ export interface LocalProjectionActivation {
 
 const emptyEvaluation = (): LocalProjectionEvaluation => ({
 	events: [],
+	eventSourceFingerprints: new Map(),
 	recoveredEventIds: [],
 	failures: [],
 	typeMismatchFields: [],
 })
+
+const sourceOccurrenceFingerprint = (signal: NormalizedSignal): string => {
+	if (!isJsonValue(signal.data)) throw new Error("normalized source occurrence must contain finite JSON")
+	const content: JsonValue = {
+		sourceKind: signal.sourceKind,
+		source: signal.source,
+		tenantId: signal.tenantId,
+		occurrenceId: signal.occurrenceId,
+		identityQuality: signal.identityQuality,
+		occurredAt: signal.occurredAt,
+		observedAt: signal.observedAt,
+		subject: signal.subject,
+		fields: [...signal.fields.entries()]
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, value]) => ({ key, value })),
+		data: signal.data,
+	}
+	return `sha256:${createHash("sha256").update(canonicalJson(content)).digest("hex")}`
+}
 
 export class LocalEventingRuntime {
 	readonly #store: LocalEventingControlStore
@@ -106,10 +132,11 @@ export class LocalEventingRuntime {
 		const acceptedAt = new Date().toISOString()
 		let normalized
 		try {
-			normalized =
+			const result =
 				signal === "logs"
-					? OTLP_LOG_ADAPTER.normalize(decoded, { acceptedAt, tenantId: TENANT_ID })
-					: []
+					? normalizeOtlpLogsWithDiagnostics(decoded, acceptedAt, TENANT_ID)
+					: { signals: [], ineligible: 0, failures: 0 }
+			normalized = result.signals
 			this.#telemetry.record({
 				operation: "normalization",
 				outcome: "success",
@@ -117,6 +144,13 @@ export class LocalEventingRuntime {
 				durationMs: performance.now() - startedAt,
 				sourceKind,
 			})
+			if (result.failures > 0)
+				this.#telemetry.record({
+					operation: "normalization",
+					outcome: "failure",
+					count: result.failures,
+					sourceKind,
+				})
 		} catch (error) {
 			this.#telemetry.record({
 				operation: "normalization",
@@ -128,16 +162,19 @@ export class LocalEventingRuntime {
 		}
 		const snapshot = this.#compiled
 		const events: MapleCloudEvent[] = []
+		const eventSourceFingerprints = new Map<string, string>()
 		const recoveredEventIds: string[] = []
 		const failures: ProjectionFailure[] = []
 		const typeMismatchFields = new Set<string>()
 		for (const occurrence of normalized) {
+			const sourceFingerprint = sourceOccurrenceFingerprint(occurrence)
 			if (occurrence.occurrenceId !== null) {
 				const staged = this.#store.stagedEventIdsForOccurrence(
 					occurrence.tenantId,
 					occurrence.sourceKind,
 					occurrence.source,
 					occurrence.occurrenceId,
+					sourceFingerprint,
 				)
 				if (staged.length > 0) {
 					recoveredEventIds.push(...staged)
@@ -159,6 +196,7 @@ export class LocalEventingRuntime {
 				sourceKind,
 			})
 			events.push(...result.events)
+			for (const event of result.events) eventSourceFingerprints.set(event.id, sourceFingerprint)
 			failures.push(...result.failures)
 			for (const mismatch of result.typeMismatchFields) typeMismatchFields.add(mismatch)
 		}
@@ -169,15 +207,21 @@ export class LocalEventingRuntime {
 				count: typeMismatchFields.size,
 				sourceKind,
 			})
-		return { events, recoveredEventIds, failures, typeMismatchFields: [...typeMismatchFields] }
+		return {
+			events,
+			eventSourceFingerprints,
+			recoveredEventIds,
+			failures,
+			typeMismatchFields: [...typeMismatchFields],
+		}
 	}
 
 	persistFailures(failures: readonly ProjectionFailure[]): void {
 		if (failures.length > 0) this.#store.recordProjectionFailures(TENANT_ID, failures)
 	}
 
-	stage(events: readonly MapleCloudEvent[]) {
-		return this.#store.stageEvents(events)
+	stage(events: readonly MapleCloudEvent[], sourceFingerprints: ReadonlyMap<string, string> = new Map()) {
+		return this.#store.stageEvents(events, sourceFingerprints)
 	}
 
 	markReady(eventIds: readonly string[]): void {

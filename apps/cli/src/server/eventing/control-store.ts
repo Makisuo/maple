@@ -17,7 +17,7 @@ import { Schema } from "effect"
 import { durableWrite, ensurePrivateDirectory } from "../durable-files"
 import { NOOP_EVENTING_TELEMETRY, type EventingTelemetry } from "./telemetry"
 
-const CONTROL_SCHEMA_VERSION = 3
+const CONTROL_SCHEMA_VERSION = 4
 const CONTROL_DIRECTORY = "control"
 const CONTROL_DATABASE = "eventing.sqlite"
 const MAX_FAILURES_PER_TENANT = 10_000
@@ -61,6 +61,7 @@ CREATE TABLE outbox_events (
     source_kind TEXT,
     source TEXT,
     source_occurrence_id TEXT,
+    source_fingerprint TEXT,
     state TEXT NOT NULL CHECK (state IN ('staged', 'ready')),
     event_json TEXT NOT NULL,
     staged_at TEXT NOT NULL,
@@ -120,7 +121,7 @@ CREATE TABLE event_consumers (
 CREATE INDEX event_consumers_tenant_active_ack
     ON event_consumers (tenant_id, active, last_acked_sequence);
 
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;
 `
 
 const MIGRATE_SCHEMA_1_TO_2 = `
@@ -173,6 +174,12 @@ CREATE INDEX outbox_events_staged_occurrence
 PRAGMA user_version = 3;
 `
 
+const MIGRATE_SCHEMA_3_TO_4 = `
+ALTER TABLE outbox_events ADD COLUMN source_fingerprint TEXT;
+
+PRAGMA user_version = 4;
+`
+
 interface UserVersionRow {
 	readonly user_version: number | bigint
 }
@@ -189,6 +196,7 @@ interface EventRow {
 	readonly event_id: string
 	readonly event_json: string
 	readonly state: "staged" | "ready"
+	readonly source_fingerprint: string | null
 }
 
 interface EventJsonRow {
@@ -235,6 +243,10 @@ interface ConsumerRow {
 
 interface EventIdRow {
 	readonly event_id: string
+}
+
+interface StagedOccurrenceRow extends EventIdRow {
+	readonly source_fingerprint: string | null
 }
 
 interface ActiveRevisionRow {
@@ -516,6 +528,10 @@ export class LocalEventingControlStore {
 				db.transaction(() => db.exec(MIGRATE_SCHEMA_2_TO_3)).exclusive()
 				schemaVersion = 3
 			}
+			if (schemaVersion === 3) {
+				db.transaction(() => db.exec(MIGRATE_SCHEMA_3_TO_4)).exclusive()
+				schemaVersion = 4
+			}
 			if (schemaVersion !== CONTROL_SCHEMA_VERSION)
 				throw new Error(
 					`unsupported eventing control schema ${schemaVersion}; expected ${CONTROL_SCHEMA_VERSION}`,
@@ -621,7 +637,11 @@ export class LocalEventingControlStore {
 			.map(({ spec_json }) => decodeProjection(spec_json))
 	}
 
-	stageEvents(events: readonly MapleCloudEvent[], stagedAt = new Date().toISOString()): StageEventsResult {
+	stageEvents(
+		events: readonly MapleCloudEvent[],
+		sourceFingerprints: ReadonlyMap<string, string> = new Map(),
+		stagedAt = new Date().toISOString(),
+	): StageEventsResult {
 		let inserted = 0
 		let deduplicated = 0
 		const eventIds: string[] = []
@@ -639,6 +659,13 @@ export class LocalEventingControlStore {
 					for (const candidate of events) {
 						const validated = validateMapleCloudEvent(candidate)
 						const { event, canonicalJson: eventJson, byteLength: eventBytes } = validated
+						const sourceFingerprint = sourceFingerprints.get(event.id) ?? null
+						if (sourceFingerprint !== null && !/^sha256:[0-9a-f]{64}$/.test(sourceFingerprint))
+							throw new Error(`event has invalid source fingerprint: ${event.id}`)
+						if (event.sourceoccurrenceid !== undefined && sourceFingerprint === null)
+							throw new Error(
+								`event with source occurrence ID requires a source fingerprint: ${event.id}`,
+							)
 						let sourceKind: string | null = null
 						if (event.sourceoccurrenceid !== undefined) {
 							const projection = this.#db
@@ -654,12 +681,26 @@ export class LocalEventingControlStore {
 						}
 						const existing = this.#db
 							.query<EventRow, [string]>(
-								"SELECT event_id, event_json, state FROM outbox_events WHERE event_id = ?",
+								"SELECT event_id, event_json, state, source_fingerprint FROM outbox_events WHERE event_id = ?",
 							)
 							.get(event.id)
 						if (existing) {
 							if (existing.event_json !== eventJson)
 								throw new Error(`event ID collision with different payload: ${event.id}`)
+							if (
+								sourceFingerprint !== null &&
+								existing.source_fingerprint !== null &&
+								existing.source_fingerprint !== sourceFingerprint
+							)
+								throw new Error(
+									`event ID collision with different source occurrence: ${event.id}`,
+								)
+							if (
+								existing.state === "staged" &&
+								sourceFingerprint !== null &&
+								existing.source_fingerprint === null
+							)
+								throw new Error(`staged event has no recovery fingerprint: ${event.id}`)
 							deduplicated += 1
 						} else {
 							if (
@@ -670,7 +711,7 @@ export class LocalEventingControlStore {
 									`event outbox capacity exceeded (${outboxEvents}/${this.#limits.maxOutboxEvents} events, ${outboxBytes}/${this.#limits.maxOutboxBytes} bytes)`,
 								)
 							this.#db.run(
-								"INSERT INTO outbox_events (event_id, tenant_id, projection_id, projection_revision, source_kind, source, source_occurrence_id, state, event_json, staged_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'staged', ?, ?)",
+								"INSERT INTO outbox_events (event_id, tenant_id, projection_id, projection_revision, source_kind, source, source_occurrence_id, source_fingerprint, state, event_json, staged_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'staged', ?, ?)",
 								[
 									event.id,
 									event.tenantid,
@@ -679,6 +720,7 @@ export class LocalEventingControlStore {
 									sourceKind,
 									event.sourceoccurrenceid === undefined ? null : event.source,
 									event.sourceoccurrenceid ?? null,
+									sourceFingerprint,
 									eventJson,
 									stagedAt,
 								],
@@ -715,13 +757,20 @@ export class LocalEventingControlStore {
 		sourceKind: string,
 		source: string,
 		sourceOccurrenceId: string,
+		sourceFingerprint: string,
 	): readonly string[] {
-		return this.#db
-			.query<EventIdRow, [string, string, string, string]>(
-				"SELECT event_id FROM outbox_events WHERE tenant_id = ? AND source_kind = ? AND source = ? AND source_occurrence_id = ? AND state = 'staged' ORDER BY sequence",
+		const rows = this.#db
+			.query<StagedOccurrenceRow, [string, string, string, string]>(
+				"SELECT event_id, source_fingerprint FROM outbox_events WHERE tenant_id = ? AND source_kind = ? AND source = ? AND source_occurrence_id = ? AND state = 'staged' ORDER BY sequence",
 			)
 			.all(tenantId, sourceKind, source, sourceOccurrenceId)
-			.map(({ event_id }) => event_id)
+		for (const row of rows) {
+			if (row.source_fingerprint === null)
+				throw new Error(`staged source occurrence has no recovery fingerprint: ${row.event_id}`)
+			if (row.source_fingerprint !== sourceFingerprint)
+				throw new Error(`staged source occurrence collision: ${sourceOccurrenceId}`)
+		}
+		return rows.map(({ event_id }) => event_id)
 	}
 
 	markReady(eventIds: readonly string[], readyAt = new Date().toISOString()): void {
@@ -1164,7 +1213,7 @@ export class LocalEventingControlStore {
 		const db = new Database(uri, sqliteConstants.SQLITE_OPEN_READONLY | sqliteConstants.SQLITE_OPEN_URI)
 		try {
 			configure(db)
-			return validateOpenDatabase(db, [1, 2, CONTROL_SCHEMA_VERSION])
+			return validateOpenDatabase(db, [1, 2, 3, CONTROL_SCHEMA_VERSION])
 		} finally {
 			db.close(true)
 		}

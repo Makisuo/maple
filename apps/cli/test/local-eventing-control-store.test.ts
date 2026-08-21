@@ -53,6 +53,8 @@ const event = (overrides: Partial<MapleCloudEvent> = {}): MapleCloudEvent => ({
 	...overrides,
 })
 
+const SOURCE_FINGERPRINT = `sha256:${"a".repeat(64)}`
+
 describe("LocalEventingControlStore", () => {
 	it("records bounded outbox and consumer telemetry without identifiers or payloads", async () =>
 		withDataDir(async (dataDir) => {
@@ -150,7 +152,7 @@ describe("LocalEventingControlStore", () => {
 				store.saveProjection(projection({ revision: 3 }))
 				deepStrictEqual(store.loadEnabledProjections("tenant-a"), [projection({ revision: 3 })])
 				deepStrictEqual(store.validate(), {
-					schemaVersion: 3,
+					schemaVersion: 4,
 					projectionRevisions: 3,
 					projectionFailures: 0,
 					stagedEvents: 0,
@@ -184,6 +186,41 @@ describe("LocalEventingControlStore", () => {
 			}
 		}))
 
+	it("binds staged source recovery to the normalized occurrence fingerprint", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				store.saveProjection(projection())
+				const sourced = event({ sourceoccurrenceid: "record-42" })
+				throws(() => store.stageEvents([sourced]), /requires a source fingerprint/)
+				store.stageEvents([sourced], new Map([[sourced.id, SOURCE_FINGERPRINT]]))
+				deepStrictEqual(
+					store.stagedEventIdsForOccurrence(
+						sourced.tenantid,
+						"otel.log",
+						sourced.source,
+						sourced.sourceoccurrenceid!,
+						SOURCE_FINGERPRINT,
+					),
+					[sourced.id],
+				)
+				throws(
+					() =>
+						store.stagedEventIdsForOccurrence(
+							sourced.tenantid,
+							"otel.log",
+							sourced.source,
+							sourced.sourceoccurrenceid!,
+							`sha256:${"b".repeat(64)}`,
+						),
+					/staged source occurrence collision/,
+				)
+				strictEqual(store.listStaged().events.length, 1)
+			} finally {
+				store.close()
+			}
+		}))
+
 	it("survives restart and round-trips through a validated standalone snapshot", async () =>
 		withDataDir(async (dataDir) => {
 			let store = await LocalEventingControlStore.open(dataDir)
@@ -209,7 +246,7 @@ describe("LocalEventingControlStore", () => {
 			const snapshot = join(dataDir, "backups", "snapshot", "control.sqlite")
 			const validation = await store.backupTo(snapshot)
 			deepStrictEqual(validation, {
-				schemaVersion: 3,
+				schemaVersion: 4,
 				projectionRevisions: 1,
 				projectionFailures: 1,
 				stagedEvents: 0,
@@ -327,8 +364,10 @@ describe("LocalEventingControlStore", () => {
 	it("migrates schema 1 in place and keeps schema-1 snapshots restorable", async () =>
 		withDataDir(async (dataDir) => {
 			let store = await LocalEventingControlStore.open(dataDir)
-			store.stageEvents([event()])
-			store.markReady([event().id])
+			store.saveProjection(projection())
+			const migratedEvent = event({ sourceoccurrenceid: "record-42" })
+			store.stageEvents([migratedEvent], new Map([[migratedEvent.id, SOURCE_FINGERPRINT]]))
+			store.markReady([migratedEvent.id])
 			store.close()
 
 			const database = new Database(eventingControlPath(dataDir), {
@@ -337,6 +376,7 @@ describe("LocalEventingControlStore", () => {
 				safeIntegers: true,
 			})
 			database.exec("DROP INDEX outbox_events_staged_occurrence")
+			database.exec("ALTER TABLE outbox_events DROP COLUMN source_fingerprint")
 			database.exec("ALTER TABLE outbox_events DROP COLUMN source_kind")
 			database.exec("ALTER TABLE outbox_events DROP COLUMN source")
 			database.exec("ALTER TABLE outbox_events DROP COLUMN source_occurrence_id")
@@ -350,10 +390,15 @@ describe("LocalEventingControlStore", () => {
 			)
 			store = await LocalEventingControlStore.open(dataDir)
 			try {
-				strictEqual(store.validate().schemaVersion, 3)
+				strictEqual(store.validate().schemaVersion, 4)
 				deepStrictEqual(
 					store.listReady().events.map(({ event }) => event.id),
-					[event().id],
+					[migratedEvent.id],
+				)
+				strictEqual(
+					store.stageEvents([migratedEvent], new Map([[migratedEvent.id, SOURCE_FINGERPRINT]]))
+						.deduplicated,
+					1,
 				)
 				deepStrictEqual(store.listConsumers("tenant-a"), [])
 			} finally {

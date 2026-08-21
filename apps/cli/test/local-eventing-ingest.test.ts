@@ -446,11 +446,54 @@ describe("Local eventing ingest seam", () => {
 									eventName: "project.me",
 									body: { stringValue: "projectable" },
 								},
-								{ eventName: "ignore.me", body: { stringValue: "timestamp-less" } },
+								{
+									eventName: "ignore.me",
+									body: { stringValue: "timestamp-less" },
+									attributes: Array.from({ length: 257 }, (_, index) => ({
+										key: `projection-only-${index}`,
+										value: { stringValue: "warehouse-valid" },
+									})),
+								},
 								{
 									timeUnixNano: "1786131721123456789",
 									eventName: "ignore.me",
 									body: { stringValue: "ordinary" },
+								},
+							],
+						},
+					],
+				},
+				{
+					resource: {
+						attributes: Array.from({ length: 257 }, (_, index) => ({
+							key: `resource-projection-only-${index}`,
+							value: { stringValue: "warehouse-valid" },
+						})),
+					},
+					scopeLogs: [
+						{
+							logRecords: [
+								{
+									timeUnixNano: "1786131722123456789",
+									eventName: "ignore.me",
+								},
+							],
+						},
+					],
+				},
+				{
+					scopeLogs: [
+						{
+							scope: {
+								attributes: Array.from({ length: 257 }, (_, index) => ({
+									key: `scope-projection-only-${index}`,
+									value: { stringValue: "warehouse-valid" },
+								})),
+							},
+							logRecords: [
+								{
+									timeUnixNano: "1786131723123456789",
+									eventName: "ignore.me",
 								},
 							],
 						},
@@ -495,7 +538,7 @@ describe("Local eventing ingest seam", () => {
 			}),
 		)
 		strictEqual(result.response.status, 200)
-		strictEqual(result.accepted, 3)
+		strictEqual(result.accepted, 5)
 		strictEqual(inserted, true)
 		deepStrictEqual(stagedIds, ["event-1"])
 	})

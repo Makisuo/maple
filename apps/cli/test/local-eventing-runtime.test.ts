@@ -202,10 +202,19 @@ describe("LocalEventingRuntime", () => {
 					"attribute:example.record.sequence",
 				])
 
+				const projectionBoundFailure = structuredClone(exampleRecordObserved)
+				firstLogRecord(projectionBoundFailure).attributes.push(
+					...Array.from({ length: 257 }, (_, index) =>
+						attr(`projection-only-${index}`, { stringValue: "warehouse-valid" }),
+					),
+				)
+				strictEqual(runtime.evaluateOtlp("logs", projectionBoundFailure).events.length, 0)
+
 				const operationOutcomes = observations.map(
 					({ operation, outcome }) => `${operation}:${outcome}`,
 				)
 				ok(operationOutcomes.includes("normalization:success"))
+				ok(operationOutcomes.includes("normalization:failure"))
 				ok(operationOutcomes.includes("projection:success"))
 				ok(operationOutcomes.includes("projection:failure"))
 				ok(operationOutcomes.includes("selector_type_mismatch:observed"))
@@ -367,7 +376,7 @@ describe("LocalEventingRuntime", () => {
 						serviceName: "example-service",
 					},
 				})
-				const staged = runtime.stage(first.events)
+				const staged = runtime.stage(first.events, first.eventSourceFingerprints)
 				strictEqual(staged.inserted, 1)
 				strictEqual(runtime.listReady().events.length, 0)
 				deepStrictEqual(
@@ -375,6 +384,14 @@ describe("LocalEventingRuntime", () => {
 					first.events,
 				)
 				runtime.activate(projection({ revision: 2, enabled: false }))
+				const changedRetry = structuredClone(exampleRecordObserved)
+				firstLogRecord(changedRetry).body = { stringValue: "changed retry content" }
+				throws(
+					() => runtime.evaluateOtlp("logs", changedRetry, () => true),
+					/staged source occurrence collision/,
+				)
+				strictEqual(runtime.listStaged().events.length, 1)
+				strictEqual(runtime.listReady().events.length, 0)
 				const retry = runtime.evaluateOtlp("logs", exampleRecordObserved, () => true)
 				deepStrictEqual(retry.events, [])
 				deepStrictEqual(retry.recoveredEventIds, staged.eventIds)
@@ -425,6 +442,7 @@ describe("LocalEventingRuntime", () => {
 				const runtime = new LocalEventingRuntime(store)
 				deepStrictEqual(runtime.evaluateOtlp("logs", { malformed: Symbol("not decoded") }), {
 					events: [],
+					eventSourceFingerprints: new Map(),
 					recoveredEventIds: [],
 					failures: [],
 					typeMismatchFields: [],

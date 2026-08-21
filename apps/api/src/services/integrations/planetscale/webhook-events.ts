@@ -566,6 +566,12 @@ export const upsertPlanetScaleIssue: (
 
 	return yield* database.execute((db) =>
 		db.transaction(async (tx) => {
+			// Distinct source events can share one issue fingerprint and queue batches
+			// process concurrently. Serialize that aggregate before claiming a receipt
+			// so every committed receipt corresponds to exactly one applied occurrence.
+			await tx.execute(
+				sql`select pg_advisory_xact_lock(hashtext(${input.orgId}), hashtext(${fingerprintHash}))`,
+			)
 			const receipt = await tx
 				.insert(planetscaleIssueReceipts)
 				.values({
@@ -661,13 +667,13 @@ export const upsertPlanetScaleIssue: (
 						),
 					)
 					.limit(1)
+					.for("update")
 			)[0]
 
 			if (prior === undefined) {
 				const candidateId = decodeIssueId(randomUUID())
-				// READ COMMITTED does not hold the gap between the select above and
-				// this insert, so a concurrent webhook for the same event can slip in
-				// and raise `error_issues_org_fp_idx`.
+				// The transaction-scoped fingerprint lock protects the absent-row gap.
+				// Keep the conflict handling defensive for writers that predate the lock.
 				const claimed = await tx
 					.insert(errorIssues)
 					.values({
@@ -714,11 +720,11 @@ export const upsertPlanetScaleIssue: (
 					})
 					return { issueId: insertedId, action: "created" as const }
 				}
-				// The concurrent writer won and already emitted `created`; report the
-				// sighting against their issue rather than duplicating the history.
+				// A writer outside this lock won. Re-read it under a row lock and apply
+				// this distinct occurrence instead of committing a receipt-only skip.
 				const winner = (
 					await tx
-						.select({ id: errorIssues.id })
+						.select()
 						.from(errorIssues)
 						.where(
 							and(
@@ -727,54 +733,61 @@ export const upsertPlanetScaleIssue: (
 							),
 						)
 						.limit(1)
+						.for("update")
 				)[0]
-				return { issueId: winner?.id ?? candidateId, action: "skipped" as const }
+				if (winner === undefined)
+					throw new Error("PlanetScale issue conflict winner was not visible in the transaction")
+				return await applyExistingIssue(winner)
 			}
 
-			const issueId = prior.id
-			// A wontfix issue with an active or indefinite snooze stays untouched.
-			const snoozeActive =
-				prior.workflowState === "wontfix" &&
-				(prior.snoozeUntil == null || prior.snoozeUntil.getTime() > input.timestamp)
-			if (snoozeActive) return { issueId, action: "skipped" as const }
+			return await applyExistingIssue(prior)
 
-			await tx
-				.update(errorIssues)
-				.set({
-					lastSeenAt: new Date(input.timestamp),
-					occurrenceCount: sql`${errorIssues.occurrenceCount} + 1`,
-					exceptionMessage: input.description,
-					sourceRefJson,
-					updatedAt: new Date(input.timestamp),
+			async function applyExistingIssue(prior: ErrorIssueRow): Promise<UpsertPlanetScaleIssueResult> {
+				const issueId = prior.id
+				// A wontfix issue with an active or indefinite snooze stays untouched.
+				const snoozeActive =
+					prior.workflowState === "wontfix" &&
+					(prior.snoozeUntil == null || prior.snoozeUntil.getTime() > input.timestamp)
+				if (snoozeActive) return { issueId, action: "skipped" as const }
+
+				await tx
+					.update(errorIssues)
+					.set({
+						lastSeenAt: new Date(input.timestamp),
+						occurrenceCount: sql`${errorIssues.occurrenceCount} + 1`,
+						exceptionMessage: input.description,
+						sourceRefJson,
+						updatedAt: new Date(input.timestamp),
+					})
+					.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
+
+				const reopenFrom: WorkflowState | null =
+					prior.workflowState === "done" || prior.workflowState === "wontfix"
+						? prior.workflowState
+						: null
+				if (reopenFrom === null) return { issueId, action: "refreshed" as const }
+
+				await tx
+					.update(errorIssues)
+					.set({
+						workflowState: "triage",
+						resolvedAt: null,
+						resolvedByActorId: null,
+						snoozeUntil: null,
+						updatedAt: new Date(input.timestamp),
+					})
+					.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
+				const actorId = await ensureActor()
+				await recordEvent(issueId, actorId, "state_change", {
+					fromState: reopenFrom,
+					toState: "triage",
+					payload: { viaRegression: true, event: input.payload.event },
 				})
-				.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
-
-			const reopenFrom: WorkflowState | null =
-				prior.workflowState === "done" || prior.workflowState === "wontfix"
-					? prior.workflowState
-					: null
-			if (reopenFrom === null) return { issueId, action: "refreshed" as const }
-
-			await tx
-				.update(errorIssues)
-				.set({
-					workflowState: "triage",
-					resolvedAt: null,
-					resolvedByActorId: null,
-					snoozeUntil: null,
-					updatedAt: new Date(input.timestamp),
+				await recordEvent(issueId, actorId, "regression", {
+					payload: { event: input.payload.event, database: databaseName },
 				})
-				.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
-			const actorId = await ensureActor()
-			await recordEvent(issueId, actorId, "state_change", {
-				fromState: reopenFrom,
-				toState: "triage",
-				payload: { viaRegression: true, event: input.payload.event },
-			})
-			await recordEvent(issueId, actorId, "regression", {
-				payload: { event: input.payload.event, database: databaseName },
-			})
-			return { issueId, action: "reopened" as const }
+				return { issueId, action: "reopened" as const }
+			}
 		}),
 	)
 })
