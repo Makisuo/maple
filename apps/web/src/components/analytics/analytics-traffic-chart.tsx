@@ -22,7 +22,7 @@ import { useMediaQuery } from "@maple/ui/hooks/use-media-query"
 import { useTheme } from "@maple/ui/hooks/use-theme"
 import { linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 
-import { CHART_EMPTY_MESSAGE, makeBucketLabeler } from "../infra/chart-utils"
+import { CHART_EMPTY_MESSAGE, isoToLabel, makeBucketLabeler } from "../infra/chart-utils"
 import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../infra/primitives/chart-card"
 import type { AnalyticsMetricDescriptor, AnalyticsMetricSource } from "./metrics"
 
@@ -55,6 +55,9 @@ interface AnalyticsTrafficChartProps {
 
 /** One bucket, carrying whichever of the two series reported there. */
 interface TrafficPoint {
+	/** The bucket's ISO timestamp — the x value, so ticks can be chosen by calendar day. */
+	bucket: string
+	/** The tooltip heading: time of day, dated once the window crosses 24h. */
 	label: string
 	primary?: number
 	companion?: number
@@ -93,7 +96,7 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 		[theme],
 	)
 
-	const { data, totals } = useMemo(() => {
+	const { data, dayTicks, totals } = useMemo(() => {
 		const primaryPoints = metric.series(source)
 		const companionPoints = companion?.series(source) ?? []
 
@@ -107,8 +110,29 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 
 		const buckets = [...byBucket.keys()].sort()
 		const label = makeBucketLabeler(buckets)
+		// The first bucket of each local calendar day. Over a multi-day window the
+		// axis ticks there and nowhere else — one dated label per day reads; a
+		// thinned run of "Aug 14, 9:30pm" labels does not. Within a single day the
+		// list has one entry and the axis keeps its time-of-day ticks instead.
+		const dayTicks: string[] = []
+		let lastDay = ""
+		for (const bucket of buckets) {
+			const day = new Date(bucket).toDateString()
+			if (day !== lastDay) {
+				dayTicks.push(bucket)
+				lastDay = day
+			}
+		}
+		// A "last 7 days" window opens mid-evening, so its first day is a sliver a
+		// few pixels wide — its label collides with the next day's and thinning
+		// drops the FULL day. Below half a day of coverage the sliver goes untitled.
+		if (dayTicks.length > 1) {
+			const leadSpan = new Date(dayTicks[1]!).getTime() - new Date(dayTicks[0]!).getTime()
+			if (leadSpan < 12 * 60 * 60 * 1000) dayTicks.shift()
+		}
 		return {
-			data: buckets.map((bucket) => ({ label: label(bucket), ...byBucket.get(bucket)! })),
+			data: buckets.map((bucket) => ({ bucket, label: label(bucket), ...byBucket.get(bucket)! })),
+			dayTicks,
 			totals: {
 				primary: primaryPoints.reduce((sum, point) => sum + point.value, 0),
 				companion: companionPoints.reduce((sum, point) => sum + point.value, 0),
@@ -160,7 +184,8 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 	const narrow = useMediaQuery("max-sm")
 
 	const definition = useMemo(() => {
-		const at = (point: TrafficPoint) => point.label
+		const at = (point: TrafficPoint) => point.bucket
+		const perDay = dayTicks.length > 1
 		// A bucket one table has and the other doesn't is a gap, not a zero —
 		// joining across it would draw a dip that never happened, which is what
 		// `connectNulls={false}` said.
@@ -205,7 +230,15 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 				scale: scalePoint,
 				axis: {
 					line: false,
-					ticks: { size: 0, padding: 8 },
+					ticks: perDay
+						? {
+								size: 0,
+								padding: 8,
+								values: dayTicks,
+								format: (bucket: string) =>
+									new Date(bucket).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+							}
+						: { size: 0, padding: 8, format: isoToLabel },
 					tickLabels: { thin: { minGap: 12 } },
 				},
 			},
@@ -223,12 +256,16 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 					},
 				},
 			},
-			margin: { left: narrow ? 36 : 52, right: 8, top: 4, bottom: 0 },
+			// No `bottom`: an authored side is a hard lock, and `bottom: 0` (the
+			// Recharts value, where the axis was sized separately) left the x tick
+			// labels nowhere to draw and cut the y axis's "0" in half. Unset, the
+			// frame measures the labels and reserves exactly their height.
+			margin: { left: narrow ? 36 : 52, right: 8, top: 4 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [data, painted, gradientPrefix, chromeColors, metric, focusStore, narrow])
+	}, [data, dayTicks, painted, gradientPrefix, chromeColors, metric, focusStore, narrow])
 
 	// Only when there are two series to tell apart — a lone series is already
 	// named by the card title, and a legend restating it is one accessory too many.
