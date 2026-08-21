@@ -64,6 +64,19 @@ const DROPPED_VIEWS = [
 
 const DROPPED_TABLES = ["error_spans"] as const
 
+/**
+ * Columns removed from `trace_detail_spans`, dropped explicitly for the same
+ * reason the views above are: the bundled v9 DDL is `CREATE TABLE IF NOT EXISTS`,
+ * so on a store where the table already exists it is a no-op and the wide v8
+ * table survives. Installing the narrowed schema is NOT enough — `assertPhysicalSchema`
+ * then fails with `unexpected column EventsTimestamp`.
+ */
+const DROPPED_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> = [
+	["trace_detail_spans", "EventsTimestamp"],
+	["trace_detail_spans", "EventsName"],
+	["trace_detail_spans", "EventsAttributes"],
+]
+
 const preflight = async (context: MigrationModuleContext): Promise<V8ToV9State> => {
 	await context.ensureCapacity()
 	const retentionDays = readRawTelemetryRetentionDays(context.dataDir)
@@ -98,10 +111,11 @@ const prepareTarget = async (context: MigrationModuleContext, state: V8ToV9State
  * The local mirror of ClickHouse migration 0019. Four changes, one edge:
  *
  *  - `error_spans` and its view are dropped outright. Nothing read them.
- *  - `trace_detail_spans` loses its three `Events*` columns. The column drop is
- *    NOT issued here: the v9 DDL declares the narrowed table and chDB installs
- *    it, so the columns disappear with the view rebuild rather than through a
- *    mutation on the store.
+ *  - `trace_detail_spans` loses its three `Events*` columns, via an explicit
+ *    `ALTER ... DROP COLUMN`. Declaring the narrowed table in the v9 DDL is not
+ *    enough — that DDL is `CREATE TABLE IF NOT EXISTS`, so on an existing store
+ *    it is a no-op and the wide v8 table survives verification as
+ *    `unexpected column EventsTimestamp`. Same `IF NOT EXISTS` trap as the views.
  *  - The four attribute-value views gain a cardinality bound.
  *  - The span-metrics calls view starts matching the metric name the collector
  *    actually emits.
@@ -118,6 +132,9 @@ const apply = async (context: MigrationModuleContext): Promise<V8ToV9Progress> =
 		(db) => {
 			for (const view of DROPPED_VIEWS) db.exec(`DROP TABLE IF EXISTS ${view}`)
 			for (const table of DROPPED_TABLES) db.exec(`DROP TABLE IF EXISTS ${table}`)
+			for (const [table, column] of DROPPED_COLUMNS) {
+				db.exec(`ALTER TABLE ${table} DROP COLUMN IF EXISTS ${column}`)
+			}
 		},
 		{ schemaSql: LOCAL_SCHEMA_V8_SQL, bootstrapSchema: false },
 	)
