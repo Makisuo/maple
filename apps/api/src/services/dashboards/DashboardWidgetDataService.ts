@@ -290,7 +290,10 @@ export class DashboardWidgetDataService extends Context.Service<
 			if (plan.kind === "disabled") {
 				return yield* Effect.fail(
 					new ShareWidgetExecutionError({
-						message: "This widget's own time range couldn't be resolved.",
+						message:
+							plan.reason === "metric_not_selected"
+								? "This widget has no metric selected."
+								: "This widget's own time range couldn't be resolved.",
 						widgetId: request.widgetId,
 					}),
 				)

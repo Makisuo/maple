@@ -68,7 +68,13 @@ export interface PlannedWidgetRequest {
 
 export interface DisabledWidgetRequest {
 	readonly kind: "disabled"
-	readonly reason: "invalid_widget_time_range"
+	/**
+	 * - `invalid_widget_time_range`: the tile pins a range that cannot be resolved.
+	 * - `metric_not_selected`: a metrics-source query with no metric name. The
+	 *   server would reject it (`"Metric source requires a metric name"`), so the
+	 *   request is never sent — a half-configured tile is a state, not an error.
+	 */
+	readonly reason: "invalid_widget_time_range" | "metric_not_selected"
 }
 
 export type WidgetRequestPlan = PlannedWidgetRequest | DisabledWidgetRequest
@@ -78,6 +84,45 @@ export const WIDGET_FETCH_STRATEGY = { enableEmptyRangeFallback: false } as cons
 
 /** Endpoint whose params carry `maxDataPoints`. Mirrors `QUERY_RESULT_ENDPOINTS.timeseries`. */
 const TIMESERIES_ENDPOINT = "custom_query_builder_timeseries"
+
+/** Query-set endpoints: `params.queries` is an array of query-builder drafts. */
+const QUERY_SET_ENDPOINTS = new Set([
+	"custom_query_builder_timeseries",
+	"custom_query_builder_breakdown",
+	"custom_query_builder_list",
+])
+/** Legacy flat custom-chart endpoints: `params.source` + `params.filters.metricName`. */
+const CUSTOM_CHART_ENDPOINTS = new Set(["custom_timeseries", "custom_breakdown"])
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isBlank = (value: unknown): boolean => typeof value !== "string" || value.trim() === ""
+
+/**
+ * A metrics-source request that names no metric. Checked on the interpolated
+ * params so a `$metric` variable that resolved to a real name passes, and one
+ * that resolved to nothing is caught the same as a blank draft.
+ */
+function isMetricNotSelected(endpoint: string, params: Record<string, unknown>): boolean {
+	if (QUERY_SET_ENDPOINTS.has(endpoint)) {
+		const queries = params.queries
+		if (!Array.isArray(queries)) return false
+		return queries.some(
+			(query) =>
+				isRecord(query) &&
+				query.dataSource === "metrics" &&
+				query.enabled !== false &&
+				isBlank(query.metricName),
+		)
+	}
+	if (CUSTOM_CHART_ENDPOINTS.has(endpoint)) {
+		if (params.source !== "metrics") return false
+		const filters = params.filters
+		return !isRecord(filters) || isBlank(filters.metricName)
+	}
+	return false
+}
 
 export const windowSeconds = (window: WidgetWindow): number =>
 	Math.max(0, (parseWarehouseDateTime(window.endTime) - parseWarehouseDateTime(window.startTime)) / 1000)
@@ -112,6 +157,10 @@ export function planWidgetRequest(input: PlanWidgetRequestInput): WidgetRequestP
 		input.variableValues === undefined
 			? withMacros
 			: interpolateWidgetParams(withMacros, input.variableValues)
+
+	if (isMetricNotSelected(endpoint, interpolated)) {
+		return { kind: "disabled", reason: "metric_not_selected" }
+	}
 
 	return {
 		kind: "request",

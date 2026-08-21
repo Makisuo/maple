@@ -43,6 +43,16 @@ describe("startEventSink baseline counters", () => {
 		sink.stop()
 	})
 
+	it("survives history.pushState being invoked detached from history", () => {
+		const sink = startEventSink(CONFIG, "sess-nav")
+		// A router that captured the method reference calls it with no receiver;
+		// the native method would throw "Illegal invocation" through our wrapper.
+		const push = history.pushState
+		expect(() => push.call(undefined, null, "", "/detached")).not.toThrow()
+		expect(location.pathname).toBe("/detached")
+		sink.stop()
+	})
+
 	it("counts clicks without any replay capture installed", () => {
 		const sink = startEventSink(CONFIG, "sess-3")
 		const button = document.createElement("button")
