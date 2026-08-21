@@ -18,6 +18,7 @@ import {
 	verticalGradient,
 	type PlotTooltipSeries,
 } from "@maple/ui/components/plot"
+import { useMediaQuery } from "@maple/ui/hooks/use-media-query"
 import { useTheme } from "@maple/ui/hooks/use-theme"
 import { linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 
@@ -153,6 +154,11 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 		[metric, companion, colors, totals],
 	)
 
+	// On a phone the 52px axis gutter is ~15% of the plot; the compact tick labels
+	// ("1.2k", "45s") fit in 36. Viewport rather than container is honest here —
+	// on phones the sidebars are sheets, so the two agree.
+	const narrow = useMediaQuery("max-sm")
+
 	const definition = useMemo(() => {
 		const at = (point: TrafficPoint) => point.label
 		// A bucket one table has and the other doesn't is a gap, not a zero —
@@ -217,12 +223,12 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 					},
 				},
 			},
-			margin: { left: 52, right: 8, top: 4, bottom: 0 },
+			margin: { left: narrow ? 36 : 52, right: 8, top: 4, bottom: 0 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [data, painted, gradientPrefix, chromeColors, metric, focusStore])
+	}, [data, painted, gradientPrefix, chromeColors, metric, focusStore, narrow])
 
 	// Only when there are two series to tell apart — a lone series is already
 	// named by the card title, and a legend restating it is one accessory too many.

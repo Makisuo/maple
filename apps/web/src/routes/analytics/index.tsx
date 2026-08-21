@@ -367,7 +367,7 @@ function AnalyticsContent({
 
 			{Result.builder(breakdownsResult)
 				.onInitial(() => (
-					<div className="grid gap-4 lg:grid-cols-2">
+					<div className="grid gap-4 @min-[880px]/page:grid-cols-2">
 						<Skeleton className="h-72 w-full" />
 						<Skeleton className="h-72 w-full" />
 					</div>
@@ -522,7 +522,7 @@ function AnalyticsContent({
 					]
 
 					return (
-						<div className="grid items-start gap-4 lg:grid-cols-2">
+						<div className="grid items-start gap-4 @min-[880px]/page:grid-cols-2">
 							{cards.map((card) => (
 								<AnalyticsBreakdownPanel
 									key={card.id}
