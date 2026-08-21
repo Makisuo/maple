@@ -7,6 +7,11 @@ Related work: [issue #222](https://github.com/MapleTechLabs/maple/issues/222),
 
 Audience: Maple maintainers and implementers of hosted or Maple Local runtimes
 
+Implementers adding a source adapter or semantic projector should also read
+[`eventing-extension-guide.md`](./eventing-extension-guide.md), which provides a
+complete compile-time extension example, host wiring patterns, and review and
+test checklists.
+
 ## Decision summary
 
 Maple will treat immediate, per-occurrence event generation as an ingest concern,

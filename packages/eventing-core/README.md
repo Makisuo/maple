@@ -11,6 +11,11 @@ outbox adapters, and decides when compiled registries become active.
 See [`docs/signal-to-event-projection.md`](../../docs/signal-to-event-projection.md)
 for the architecture and acceptance contract.
 
+See [`docs/eventing-extension-guide.md`](../../docs/eventing-extension-guide.md)
+for a complete source adapter and projector example, registration and host
+wiring patterns, versioning rules, and the required test checklist. Eventing
+extensions are compile-time registered modules, not dynamically loaded plugins.
+
 The versioned interoperability artifacts are generated under `schemas/`, with
 valid comparison and identity vectors in `fixtures/v1.json`. Run `bun test` to
 verify generated-schema drift, hostile selector bounds, typed comparison
