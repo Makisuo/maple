@@ -3578,6 +3578,60 @@ mod tests {
     }
 
     #[test]
+    fn trace_encoder_applies_resource_to_span_mapping() {
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource {
+                    attributes: vec![
+                        string_kv("service.name", "checkout"),
+                        string_kv("deployment.environment", "prod"),
+                    ],
+                    dropped_attributes_count: 0,
+                    entity_refs: Vec::new(),
+                }),
+                scope_spans: vec![ScopeSpans {
+                    scope: None,
+                    spans: vec![Span {
+                        trace_id: vec![0x11; 16],
+                        span_id: vec![0x22; 8],
+                        name: "POST /checkout".to_owned(),
+                        kind: span::SpanKind::Server as i32,
+                        start_time_unix_nano: 1_700_000_000_000_000_000,
+                        end_time_unix_nano: 1_700_000_000_250_000_000,
+                        attributes: vec![string_kv("http.route", "/checkout")],
+                        ..Default::default()
+                    }],
+                    schema_url: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+        };
+
+        let rules = vec![AttributeMappingRule {
+            source_context: MappingSourceContext::Resource,
+            source_key: "deployment.environment".to_owned(),
+            target_key: "deployment.environment.name".to_owned(),
+            operation: MappingOperation::Move,
+        }];
+
+        let (frames, _) = encode_traces(
+            &test_cfg().datasources,
+            "org_1",
+            &request,
+            &SamplingPolicy::default(),
+            &rules,
+        )
+        .unwrap();
+
+        let row = frame_row(&frames[0]);
+        assert_eq!(
+            row["span_attributes"]["deployment.environment.name"],
+            "prod"
+        );
+        assert_eq!(row["resource_attributes"]["deployment.environment"], "prod");
+    }
+
+    #[test]
     fn apply_attribute_mappings_rewrites_span_attributes() {
         let rule =
             |source_context, source_key: &str, target_key: &str, operation| AttributeMappingRule {
