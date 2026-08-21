@@ -1,21 +1,30 @@
-# Writing a signal-to-event extension
+# Extending Maple's signal-to-event system
 
-This guide shows how to add a reusable signal source or semantic event projector
-to Maple's eventing architecture.
+This guide walks through adding either of the two main eventing extensions:
 
-An eventing extension is a **compile-time registered module**. It is not a
-dynamically loaded plugin and it cannot add executable code through projection
-configuration. A host chooses which adapters and projectors to install, while an
-operator chooses which installed projector to activate with a bounded, durable
-projection revision.
+- a **source adapter**, which turns an authenticated source payload into typed,
+  normalized signals; or
+- a **semantic projector**, which turns matching signals into versioned factual
+  events.
+
+You can add one or both, depending on what the source already provides.
+
+First, one important naming point: an eventing extension is a compile-time
+registered module. It is not a runtime-loaded plugin, and projection
+configuration cannot introduce executable code.
+
+The host decides which adapters and projectors are installed. An operator can
+then activate installed projectors through bounded, durable projection
+revisions.
 
 The contracts in `@maple/eventing-core` are host-neutral. Hosted Maple and Maple
-Local can install the same source and projector definitions while supplying
-different authentication, persistence, transaction, and consumer adapters.
+Local can install the same source and projector definitions while using
+different authentication, persistence, transaction, and consumer
+implementations.
 
-## The extension boundary
+## Where the extension fits
 
-One factual occurrence follows this path:
+A factual occurrence moves through the system like this:
 
 ```text
 authenticated input
@@ -28,63 +37,77 @@ authenticated input
     -> named consumer or hosted delivery path
 ```
 
-The extension owns:
+The extension is responsible for:
 
-- normalization of one authenticated source payload into bounded signals;
-- stable source and occurrence identity;
-- the selectable field catalog and sensitivity policy;
-- projector configuration and output codecs;
-- pure translation from a matching signal to factual event data; and
-- versioned event type and data-schema names.
+- normalizing an authenticated source payload into bounded signals;
+- defining stable source and occurrence identity;
+- declaring the selectable field catalog and sensitivity policy;
+- decoding projector configuration and output;
+- translating a matching signal into factual event data; and
+- owning the versioned event type and data-schema names.
 
-The host owns:
+The host is responsible for:
 
-- authentication and signature verification before normalization;
-- request decoding and input-size limits;
-- projection revision storage and atomic registry activation;
-- the warehouse commit boundary;
-- durable event staging, recovery, and collision detection;
-- checkpoints or hosted transactional persistence; and
-- consumer authorization, delivery, retries, and side effects.
+- authenticating the source or verifying its signature before normalization;
+- decoding requests and enforcing input-size limits;
+- storing projection revisions and activating compiled registries atomically;
+- defining the warehouse or source-of-record commit boundary;
+- staging events durably and detecting recovery collisions;
+- checkpointing or providing equivalent hosted transactional persistence; and
+- authorizing consumers, delivering events, retrying work, and performing side
+  effects.
 
-Projectors never perform I/O. Sending a message, calling a provider, mutating
-source state, or deciding an action belongs to a consumer after the durable
-event boundary.
+That last boundary matters: projectors never perform I/O. Sending a message,
+calling a provider, mutating source state, or deciding what action to take
+belongs to a consumer after the event has crossed the durable boundary.
 
-## Decide whether a new source is needed
+## Do you need a new source adapter?
 
-Use an installed source kind when it already preserves the fact you need. For
-example, a semantic fact carried by an OTLP log usually needs only a new
-projector and projection configuration; it does not need another OTLP decoder.
+A useful rule of thumb is to reuse an installed source kind whenever it already
+preserves the fact you need.
 
-Add a source adapter when the source has a distinct authenticated payload,
-identity contract, or field vocabulary, such as a provider webhook. A new
-adapter must not decode the same request a second time merely for eventing.
+For example, when a semantic fact already arrives in an OTLP log, you will
+usually need only:
 
-Before writing code, record:
+1. a new projector; and
+2. projection configuration that selects the relevant logs.
 
-| Decision       | Requirement                                                                                          |
-| -------------- | ---------------------------------------------------------------------------------------------------- |
-| `sourceKind`   | Stable name for the normalized input contract.                                                       |
-| `source`       | Stable URI for the logical producer or integration; never include credentials.                       |
-| `occurrenceId` | Prefer a source-issued retry-stable ID. Document any derived identity and its collision limitations. |
-| event time     | Use source time. Do not use a changing receipt time in durable event bytes.                          |
-| fields         | Expose only bounded scalar values needed for selection.                                              |
-| `data`         | Preserve only bounded, schema-validated projector input. Do not retain an unchecked raw request.     |
-| sensitivity    | Mark fields sensitive when generic projection must not expose them by default.                       |
-| replay         | Declare whether each field can be reconstructed exactly, only after coercion, or not at all.         |
+You do not need another OTLP decoder.
 
-If no stable source timestamp or occurrence identity exists, the adapter must
-state the weaker identity quality. A host may decline durable projection rather
-than pretend a retry-safe identity exists.
+Add a source adapter when the source has its own authenticated payload, identity
+contract, or field vocabulary. A provider webhook is the usual example.
+
+A new adapter should not decode the same request a second time just for
+eventing. The host should decode once, authenticate once, and pass the
+already-decoded value to the adapter.
+
+Before writing the implementation, settle the following contracts:
+
+| Decision       | What to decide                                                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sourceKind`   | A stable name for the normalized input contract.                                                                                            |
+| `source`       | A stable URI identifying the logical producer or integration. Never include credentials.                                                    |
+| `occurrenceId` | Prefer an ID issued by the source that remains stable across retries and rebatching. Document the collision limits of any derived identity. |
+| Event time     | Use source time. Do not put a changing server receipt time into durable event bytes.                                                        |
+| Fields         | Expose only the bounded scalar values needed for selection.                                                                                 |
+| `data`         | Preserve only bounded, schema-validated projector input. Do not retain an unchecked raw request.                                            |
+| Sensitivity    | Mark fields as sensitive when generic projection must not expose them by default.                                                           |
+| Replay         | State whether each field can be reconstructed exactly, only through an explicit coercion, or not at all.                                    |
+
+When the source provides no stable occurrence identity, say so through the
+weaker identity quality. When it provides no stable source timestamp, do not
+substitute a changing host receipt time. A host may decline durable projection
+rather than pretend the source offers retry-safe identity or time.
 
 ## Complete example
 
-The following module adapts a verified build-system message and projects
-successful builds into a versioned factual event. The example is intentionally
-provider-neutral.
+The following example takes a build-system message that the host has already
+authenticated and runtime-decoded, normalizes it, and projects successful builds
+into a versioned factual event.
 
-### 1. Define and normalize the source
+The example is deliberately provider-neutral.
+
+### 1. Define the source and normalize its messages
 
 ```ts
 import { defineSignalFields, type SignalSourceAdapter } from "@maple/eventing-core"
@@ -127,13 +150,14 @@ export const BUILD_SOURCE: SignalSourceAdapter<BuildMessage, BuildContext> = {
 			occurrenceId: message.id,
 			identityQuality: "source",
 			occurredAt: message.occurredAt,
-			// This source has no separate stable observation timestamp.
+			// This provider has no separate, stable observation timestamp.
+			// Use source time rather than a changing host receipt time.
 			observedAt: message.occurredAt,
 			subject: `projects/${message.projectId}/builds/${message.id}`,
 			fields: defineSignalFields([
 				{
 					field: { namespace: "signal", key: "event.name", type: "string" },
-					value: { type: "string", value: "build.completed" },
+					value: { type: "string", value: "build.status.changed" },
 				},
 				{
 					field: { namespace: "attribute", key: "build.status", type: "string" },
@@ -150,16 +174,21 @@ export const BUILD_SOURCE: SignalSourceAdapter<BuildMessage, BuildContext> = {
 }
 ```
 
-Authentication is deliberately absent from `normalize`. The host must verify
-the message before calling the adapter. Normalization must be deterministic for
-the same source occurrence and must not call `Date.now()`, generate UUIDs, or
-perform network or database I/O.
+Authentication is intentionally absent from `normalize`. The host must verify
+the message before calling the adapter.
 
-### 2. Define projector codecs and implementation
+Normalization must also be deterministic. Given the same source occurrence, it
+should produce the same normalized signal. It must not call `Date.now()`,
+generate a UUID, query a database, make a network request, or depend on mutable
+host state.
 
-Both projector configuration and projector output cross trust boundaries. Give
-each one a runtime decoder. The output decoder is what makes `dataschema` an
-enforced contract rather than an annotation.
+### 2. Define the projector's runtime codecs
+
+Projector configuration and projector output both cross trust boundaries, so
+each needs a runtime decoder.
+
+The output decoder is especially important: it makes `dataschema` an enforced
+contract rather than a hopeful annotation.
 
 ```ts
 import { type JsonValue, type SignalProjector } from "@maple/eventing-core"
@@ -195,8 +224,9 @@ export const BUILD_COMPLETED_PROJECTOR: SignalProjector<Schema.Schema.Type<typeo
 	decodeOutput,
 	project: (signal, config) => {
 		const build = decodeBuildData(signal.data)
-		if (build.status !== "success")
+		if (build.status !== "success") {
 			throw new Error("build-completed projector requires a successful build")
+		}
 		return {
 			subject: signal.subject,
 			time: signal.occurredAt,
@@ -210,14 +240,18 @@ export const BUILD_COMPLETED_PROJECTOR: SignalProjector<Schema.Schema.Type<typeo
 }
 ```
 
-The selector should normally prevent incompatible statuses from reaching this
-projector. The explicit check still makes the semantic precondition fail closed
-if configuration and implementation drift apart.
+The selector should normally stop incompatible statuses from reaching this
+projector. The explicit check is still useful: if the projection configuration
+and implementation ever drift apart, the projector fails closed instead of
+emitting a misleading event.
 
-### 3. Register code and compile configuration
+### 3. Register the code and compile a projection
 
-Registration installs code. A projection revision selects installed code and
-supplies bounded data configuration.
+Registration installs trusted code. A projection revision selects that
+installed code and supplies bounded data configuration.
+
+That distinction is the core safety model: configuration chooses among
+registered behavior, but it cannot introduce new executable behavior.
 
 ```ts
 import {
@@ -252,12 +286,18 @@ const projection: SignalProjectionSpec = {
 const compiled = CompiledProjectionRegistry.compile([projection], sources, projectors)
 ```
 
-Compilation rejects unknown sources or projectors, unsupported fields or
-operators, invalid projector configuration, and contradictory source kinds.
-Hosts atomically replace an entire compiled registry snapshot only after this
-step succeeds.
+Compilation rejects:
 
-### 4. Evaluate at the host commit boundary
+- unknown source kinds;
+- unknown projector IDs or versions;
+- unsupported fields or operators;
+- malformed projector configuration; and
+- projectors that do not accept the selected source kind.
+
+A host should replace its complete compiled registry snapshot atomically, and
+only after compilation succeeds.
+
+### 4. Evaluate at the host's commit boundary
 
 ```ts
 const acceptedAt = "2026-08-21T12:00:01Z"
@@ -268,125 +308,202 @@ const [signal] = BUILD_SOURCE.normalize(
 		status: "success",
 		occurredAt: "2026-08-21T12:00:00Z",
 	},
-	{ tenantId: "tenant-a", integrationId: "integration-3" },
+	{
+		tenantId: "tenant-a",
+		integrationId: "integration-3",
+	},
 )
 
 if (!signal) throw new Error("build adapter produced no signal")
 const result = compiled.evaluate(signal, acceptedAt)
 ```
 
-`acceptedAt` is host control metadata used for `activeFrom` gating. Do not put a
-changing acceptance timestamp into source identity or projector output.
+`acceptedAt` is host control metadata used for `activeFrom` gating. It is not
+part of the source fact.
 
-`evaluate` is pure and does not persist its result. The host must:
+Do not put a changing acceptance timestamp into source identity, normalized
+event content, or projector output. Otherwise, a retry could produce different
+durable bytes for the same source occurrence.
 
-1. stage every successful event durably;
-2. commit the original source occurrence to its warehouse or source-of-record;
-3. mark the staged event ready only after that commit succeeds; and
-4. recover the original staged identity on retry rather than evaluating the
-   occurrence against a newer projection revision.
+`evaluate` is pure: it returns results but does not persist them.
 
-Maple Local implements this with its SQLite eventing control store and chDB
-commit seam. A hosted adapter may provide the same guarantee with a database
-transaction or another durable outbox implementation.
+The host must then:
 
-## Host registration patterns
+1. stage every successfully projected event durably;
+2. commit the original source occurrence to the warehouse or other source of
+   record;
+3. mark the staged events ready only after that commit succeeds; and
+4. on retry, recover the original staged events rather than reevaluating the
+   occurrence under a newer projection revision.
+
+That last step is important. A projection may be edited or disabled between the
+first attempt and a retry. Recovery must complete the original durable
+obligation, not quietly replace it with whatever the current registry would
+produce.
+
+Maple Local implements this with its SQLite eventing control store and the chDB
+commit seam. A hosted implementation may use a database transaction or another
+durable outbox, as long as it provides the same ordering and recovery guarantees.
+
+## Registering an extension in a host
 
 ### Maple Local
 
-Maple Local already normalizes OTLP logs in `apps/cli/src/server/eventing`. If a
-new fact is carried by those logs, register only the projector in the
-`ProjectorRegistry` supplied to `LocalEventingRuntime`, then activate a durable
-projection revision through the authenticated configuration boundary.
+Maple Local already normalizes OTLP logs in `apps/cli/src/server/eventing`.
 
-A genuinely new Local source also requires wiring its authenticated ingest path
-to a `SignalSourceAdapter`, registering the adapter definition in the Local
-composition root, and preserving the existing stage → warehouse commit → ready
-ordering. Do not bypass `LocalEventingRuntime` by writing directly to the outbox.
+When the new fact is already carried by those logs, the usual path is:
+
+1. register the projector in the `ProjectorRegistry` supplied to
+   `LocalEventingRuntime`; and
+2. activate a durable projection revision through the authenticated
+   configuration boundary.
+
+A genuinely new Local source requires a little more wiring:
+
+1. authenticate and decode its ingest request;
+2. pass the decoded value to a `SignalSourceAdapter`;
+3. register the adapter definition in the Local composition root; and
+4. preserve the existing stage → warehouse commit → ready ordering.
+
+Do not bypass `LocalEventingRuntime` by writing directly to the outbox. That
+would skip the shared identity, collision, activation, and recovery rules.
 
 ### Hosted Maple
 
-A hosted source verifies and decodes its request at the route boundary, invokes
-its adapter once, and registers source and projector definitions in its service
-composition. The PlanetScale webhook composition in
-`apps/api/src/services/integrations/planetscale/webhook-events.ts` is the current
-reference: provider verification remains outside the projector, while the
-normalized fact uses the shared registry and CloudEvent contract.
+A hosted source should:
 
-Hosted persistence does not need to use the Local SQLite store. It must still
-provide equivalent tenant isolation, idempotent event staging, collision
-detection, and retry behavior.
+1. verify and decode the request at the route boundary;
+2. invoke its adapter once;
+3. register the source and projector definitions in the service composition;
+   and
+4. persist the resulting events through the hosted durable boundary.
 
-## Versioning rules
+The PlanetScale webhook composition in
+[`apps/api/src/services/integrations/planetscale/webhook-events.ts`](../apps/api/src/services/integrations/planetscale/webhook-events.ts)
+is the current reference implementation. Provider verification stays outside
+the projector, while the normalized fact uses the shared registry and
+CloudEvent contracts.
 
-Four versions have different meanings:
+A hosted implementation does not need to use Maple Local's SQLite store. It
+does, however, need equivalent guarantees for:
 
-- **Source kind** identifies the normalized field and identity contract. Keep
-  changes backward compatible or introduce a new source kind.
-- **Projector version** changes when projector semantics or configuration
-  compatibility changes.
-- **Event type and data-schema version** change when consumers would observe an
-  incompatible payload contract.
-- **Projection revision** changes for every selector, activation, enabled state,
-  projector reference, or projector configuration edit. Revisions are immutable
-  and monotonic; rollback is a new revision.
+- tenant isolation;
+- idempotent staging;
+- event and source-identity collision detection;
+- durable recovery; and
+- retries.
 
-Do not rewrite an old projector implementation under the same ID and version.
-Do not reuse an event type or schema URI for an incompatible payload.
+## Versioning without surprises
 
-## Schema and fixture checklist
+There are four separate kinds of versioning here. They solve different
+problems, so do not collapse them into one number.
 
-For each public or cross-runtime event contract:
+### Source kind
 
-1. Define a closed runtime output decoder.
-2. Publish or generate the matching versioned JSON Schema in the owning package.
-3. Add valid and invalid output fixtures.
-4. Add a deterministic event fixture with the expected canonical event ID.
-5. Keep schema generation and drift checks in the package test suite.
+`sourceKind` identifies the normalized fields, identity rules, and source
+contract.
 
-The shared schemas and fixtures under `packages/eventing-core` define the common
-selector, envelope, and identity behavior. Source-specific payload schemas stay
-with the module that owns their semantics.
+Keep changes backward compatible. When you need an incompatible normalized
+contract, introduce a new source kind.
+
+### Projector version
+
+Increment the projector version when its semantics or configuration
+compatibility changes.
+
+Never replace an old implementation under the same projector ID and version.
+Existing durable projection revisions must continue to refer to the behavior
+they originally selected.
+
+### Event type and data-schema version
+
+Change the event type or data-schema version when a consumer would observe an
+incompatible payload contract.
+
+Do not reuse an event type or schema URI for a differently shaped or differently
+interpreted event.
+
+### Projection revision
+
+Create a new projection revision whenever you change:
+
+- the selector;
+- `activeFrom`;
+- enabled or disabled state;
+- the projector ID or version; or
+- projector configuration.
+
+Projection revisions are immutable and monotonic. A rollback is not an edit to
+an older revision; it is a new revision that restores the earlier behavior.
+
+## Schemas and fixtures
+
+Every public or cross-runtime event contract should include the following:
+
+1. A closed runtime decoder for projector output.
+2. A matching, versioned JSON Schema in the package that owns the event.
+3. Valid and invalid output fixtures.
+4. A deterministic complete-event fixture with its expected canonical event ID.
+5. Schema-generation and drift checks in the package test suite.
+
+The shared schemas and fixtures in `packages/eventing-core` define the common
+selector, envelope, and event-identity behavior.
+
+Source-specific payload schemas should stay with the module that owns their
+meaning.
 
 ## Required tests
 
-An extension is not complete until its tests prove:
+An extension is not complete until its tests demonstrate all of the following:
 
-- authentication happens before normalization;
-- normalization is bounded and rejects or redacts sensitive raw values;
-- the same source occurrence normalizes deterministically;
-- source retries produce byte-identical CloudEvents;
-- a reused source ID with changed content is detected by the host as a collision;
-- catalog types and operators accept valid selectors and reject invalid ones;
-- projector configuration and output codecs reject malformed values;
-- one failing projector does not suppress successful sibling projections;
-- tenant and source-kind mismatches do not project;
-- event and string-size limits are enforced;
-- a warehouse failure leaves events staged, and a retry promotes the original
-  staged event exactly once; and
-- checkpoint or hosted restore paths preserve event and consumer state.
+- Authentication or signature verification happens before normalization.
+- Normalization is bounded.
+- Sensitive raw values are rejected or redacted according to the source policy.
+- The same source occurrence normalizes deterministically.
+- A retry under the same projection revision produces a byte-identical
+  CloudEvent for the same source occurrence.
+- Reusing a source ID with changed content is detected as a collision by the
+  host.
+- The field catalog accepts valid selector fields and operators.
+- The field catalog rejects unknown or incompatible fields and operators.
+- The projector configuration decoder rejects malformed configuration.
+- The projector output decoder rejects malformed event data.
+- One failing projector does not suppress successful sibling projections.
+- Tenant mismatches and source-kind mismatches do not project.
+- Event-size and string-size limits are enforced.
+- A warehouse failure leaves the event staged.
+- A retry promotes the original staged event exactly once.
+- Checkpoint restore, or the hosted equivalent, preserves event and consumer
+  state.
 
-Use the registry tests in `packages/eventing-core/src/registry.test.ts` for pure
-contract examples and the Local runtime/control-store tests in `apps/cli/test`
-for durability examples.
+For pure contract examples, start with
+[`packages/eventing-core/src/registry.test.ts`](../packages/eventing-core/src/registry.test.ts).
+
+For durability examples, see the Local runtime and control-store tests under
+[`apps/cli/test`](../apps/cli/test).
 
 ## Review checklist
 
-Before registering an extension, reviewers should be able to answer yes to all
-of the following:
+Before registering an extension, reviewers should be able to answer yes to each
+of these:
 
 - Is the source authenticated before adapter code runs?
 - Is occurrence identity stable across retries and rebatching?
-- Are source time and acceptance time kept distinct?
+- Are source time and host acceptance time kept separate?
 - Are selectable fields typed, bounded, and classified for sensitivity?
 - Is projector input bounded and schema validated?
 - Are projector configuration and output decoded at runtime?
 - Is the projector deterministic, pure, and free of I/O?
-- Are event type, schema, and version ownership explicit?
+- Is ownership of the event type, data schema, and their versions explicit?
 - Does the host preserve stage → source commit → ready ordering?
-- Can a consumer retry without duplicating a factual event or side effect?
+- Does retry recover the original staged event instead of reevaluating it under
+  new configuration?
+- Does the consumer use the immutable event ID as an idempotency key where the
+  destination supports one?
+- Are external side effects kept behind the durable event and consumer boundary?
 
 For the underlying contracts and processing guarantees, see
-[`signal-to-event-projection.md`](./signal-to-event-projection.md). For Maple
-Local consumer administration and lease semantics, see
+[`signal-to-event-projection.md`](./signal-to-event-projection.md).
+
+For Maple Local's consumer administration and lease semantics, see
 [`local-event-consumers.md`](./local-event-consumers.md).
