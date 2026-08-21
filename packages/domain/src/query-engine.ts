@@ -126,8 +126,9 @@ export const MetricsFilters = Schema.Struct({
 	metricType: MetricType,
 	serviceName: Schema.optional(ServiceName),
 	// Metrics tables have no pre-extracted DeploymentEnv column, so this lowers to
-	// a predicate on `ResourceAttributes['deployment.environment']` (see
-	// `metricsTimeseriesQuery`). Same field name as TracesFilters/LogsFilters.
+	// a predicate on `DEPLOYMENT_ENV_SQL` over `ResourceAttributes` — either
+	// semconv spelling of the key (see `metricsTimeseriesQuery`). Same field name
+	// as TracesFilters/LogsFilters.
 	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	groupByAttributeKey: Schema.optional(Schema.String),
 	// Resource-attribute counterpart of `groupByAttributeKey` — groups by a

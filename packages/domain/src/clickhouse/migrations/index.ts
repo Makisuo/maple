@@ -18,6 +18,7 @@ import { migration_0016_error_events_4xx_and_frame_redaction } from "./0016_erro
 import { migration_0017_error_service_version_columns } from "./0017_error_service_version_columns"
 import { migration_0018_apple_crash_frames } from "./0018_apple_crash_frames"
 import { migration_0019_mv_sweep } from "./0019_mv_sweep"
+import { migration_0020_deployment_environment_name } from "./0020_deployment_environment_name"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -68,6 +69,7 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0017_error_service_version_columns,
 	migration_0018_apple_crash_frames,
 	migration_0019_mv_sweep,
+	migration_0020_deployment_environment_name,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied

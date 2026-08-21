@@ -19,6 +19,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
 import { ServiceAddressResolutionsHourly, ServiceMapEdgesHourly, Traces } from "../tables"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
 import { serviceMapEdgeJoinQuery } from "./service-map"
 import { CHNumber } from "../schema"
 
@@ -216,7 +217,7 @@ export function serviceMapResolutionsRollupSQL(
 			SpanId: $.SpanId,
 			ServiceName: $.ServiceName,
 			ServerAddress: $.SpanAttributes.get("server.address"),
-			DeploymentEnv: $.ResourceAttributes.get("deployment.environment"),
+			DeploymentEnv: deploymentEnvExpr($.ResourceAttributes),
 		}))
 		.where(($) => [
 			CH.inList($.SpanKind, ["Client", "Producer"]),

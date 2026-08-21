@@ -509,7 +509,7 @@ describe("tracesTimeseriesQuery", () => {
 		})
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM traces")
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
+		expect(sql).toContain("coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production', 'staging')")
 	})
 
 	it("filters by environments with rootOnly (MV path uses pre-extracted DeploymentEnv)", () => {
@@ -607,6 +607,23 @@ describe("tracesTimeseriesQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("ResourceAttributes['host.name'] = 'server-1'")
 	})
+
+	// Either spelling of the renamed deployment-environment resource attribute
+	// has to match either stored key: our SDKs dual-emit, a current OTel SDK
+	// sends only `deployment.environment.name`, an older one only the legacy key.
+	for (const key of ["deployment.environment", "deployment.environment.name"]) {
+		it(`matches both deployment-environment spellings when filtering on ${key}`, () => {
+			const q = tracesTimeseriesQuery({
+				metric: "count",
+				needsSampling: false,
+				resourceAttributeFilters: [{ key, value: "production", mode: "equals" }],
+			})
+			const { sql } = compileCH(q, baseParams)
+			expect(sql).toContain(
+				"if(ResourceAttributes['deployment.environment.name'] != '', ResourceAttributes['deployment.environment.name'], ResourceAttributes['deployment.environment']) = 'production'",
+			)
+		})
+	}
 
 	it("filters attribute with rootOnly on raw table", () => {
 		const q = tracesTimeseriesQuery({

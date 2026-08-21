@@ -14,6 +14,7 @@ import {
 	OPAQUE_DB_NAMESPACE_RE,
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
 import { Schema } from "effect"
 import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { defineCondFn, defineFn } from "@maple-dev/clickhouse-builder"
@@ -508,9 +509,7 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 			$.Timestamp.lte(param.dateTime("endTime")),
 			$.SpanKind.in_("Client", "Producer"),
 			dbSystemExpr($).neq(""),
-			opts.deploymentEnv
-				? $.ResourceAttributes.get("deployment.environment").eq(opts.deploymentEnv)
-				: undefined,
+			opts.deploymentEnv ? deploymentEnvExpr($.ResourceAttributes).eq(opts.deploymentEnv) : undefined,
 		])
 		.groupBy("sourceService", "dbSystem", "dbNamespace")
 
@@ -736,9 +735,7 @@ const serviceDbRawFilters = (
 	// Same undefined-vs-'' semantics as `shapesHourlyFilters`.
 	params.dbNamespace !== undefined ? dbNamespaceExpr($).eq(params.dbNamespace) : undefined,
 	params.sourceService ? $.ServiceName.eq(params.sourceService) : undefined,
-	params.deploymentEnv
-		? $.ResourceAttributes.get("deployment.environment").eq(params.deploymentEnv)
-		: undefined,
+	params.deploymentEnv ? deploymentEnvExpr($.ResourceAttributes).eq(params.deploymentEnv) : undefined,
 ]
 
 // Aggregate-state expressions shared by the summary/timeseries/top-queries
@@ -1119,7 +1116,7 @@ export function serviceExternalEdgesSQL(
 					.or(attr("rpc.service").neq(""))
 					.or(attr("rpc.system").neq("")),
 				opts.deploymentEnv
-					? $.ResourceAttributes.get("deployment.environment").eq(opts.deploymentEnv)
+					? deploymentEnvExpr($.ResourceAttributes).eq(opts.deploymentEnv)
 					: undefined,
 			]
 		})

@@ -20,7 +20,7 @@ import {
 	LOCAL_SCHEMA_V6,
 	LOCAL_SCHEMA_V7,
 	LOCAL_SCHEMA_V8,
-	LOCAL_SCHEMA_V9,
+	LOCAL_SCHEMA_V10,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -62,16 +62,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v9 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("2516215f22b41a63")
-		expect(SCHEMA_DIGEST).toBe("2516215f22b41a636b3186d0b293a0a6276e4bb85004efd3994b80867696a469")
+	it("matches the generated v10 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("c10dd07518c57e5d")
+		expect(SCHEMA_DIGEST).toBe("c10dd07518c57e5d2f7d3e973b4222e83a4818110c828b632fbb04a5995ba8cc")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(9)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V9)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(10)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V10)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -188,6 +188,7 @@ describe("local migration registry", () => {
 			"local-0006-to-0007-error-service-version",
 			"local-0007-to-0008-apple-crash-frames",
 			"local-0008-to-0009-mv-sweep",
+			"local-0009-to-0010-deployment-environment-name",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -234,7 +235,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 10, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 11, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)

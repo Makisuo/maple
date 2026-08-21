@@ -12,6 +12,7 @@ import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { Logs, LogsAggregatesHourly } from "../tables"
 import { finalizeTimeseries } from "./series-cap"
 import type { AttributeFilter } from "@maple/domain/query-engine"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
 import { buildAttrFilterCondition } from "../../traces-shared"
 import type { AttributeIndexMode, LogBodySearchMode } from "../../capabilities"
 import { edgeCondition, interiorConditions } from "./rollup-splice"
@@ -113,7 +114,7 @@ function environmentCondition(
 	opts: LogsQueryOpts,
 ): CH.Condition | undefined {
 	if (!opts.environments?.length) return undefined
-	const envAttr = $.ResourceAttributes.get("deployment.environment")
+	const envAttr = deploymentEnvExpr($.ResourceAttributes)
 	if (opts.matchModes?.deploymentEnv === "contains" && opts.environments.length === 1) {
 		return CH.positionCaseInsensitive(envAttr, CH.lit(opts.environments[0]!)).gt(0)
 	}
@@ -846,12 +847,12 @@ function logsFacetsQueryFromRaw(
 		.select(($) => ({
 			severityText: CH.lit(""),
 			serviceName: CH.lit(""),
-			deploymentEnv: $.ResourceAttributes.get("deployment.environment"),
+			deploymentEnv: deploymentEnvExpr($.ResourceAttributes),
 			namespace: CH.lit(""),
 			count: CH.count(),
 			facetType: CH.lit("deploymentEnv"),
 		}))
-		.where(($) => [...baseWhere($), $.ResourceAttributes.get("deployment.environment").neq("")])
+		.where(($) => [...baseWhere($), deploymentEnvExpr($.ResourceAttributes).neq("")])
 		.groupBy("deploymentEnv")
 
 	const namespaceQuery = from(Logs)

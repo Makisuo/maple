@@ -74,7 +74,7 @@ describe("metric alert evaluation", () => {
 			)
 
 			assert.include(sql, "OrgId = 'org_metrics_alert_test'")
-			assert.include(sql, "ResourceAttributes['deployment.environment'] IN ('production')")
+			assert.include(sql, "coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')")
 			assert.strictEqual(context, "metricsAlertEval")
 			assert.deepStrictEqual(result, [
 				{

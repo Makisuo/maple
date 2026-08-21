@@ -162,8 +162,10 @@ to per-request hot paths like token validation. OTLP export bypasses the API, so
 
 `apps/ingest` (Rust) self-instruments over OTLP/HTTP to its own `INGEST_FORWARD_OTLP_ENDPOINT`
 (startup guard refuses a loopback endpoint), as `service.name="ingest"`, `maple_org_id="internal"`,
-and `deployment.environment.name` **dual-emitted** as the legacy `deployment.environment` because
-the Tinybird MVs still pre-extract the old key. Custom fields use the `maple.*` namespace. Span
+and `deployment.environment.name` **dual-emitted** as the deprecated `deployment.environment`
+(the MVs coalesce both since migration 0020 — see `DEPLOYMENT_ENV_SQL` in
+`packages/domain/src/tinybird/deployment-env-sql.ts`; the dual-emit remains for rows already
+materialized under the old key and for pre-0020 BYO-ClickHouse schemas). Custom fields use the `maple.*` namespace. Span
 status follows OTEL HTTP semconv for SERVER spans: **only 5xx is `Error`, 4xx rejections are `Ok`**
 (`otel_status_for_rejection` in `apps/ingest/src/main.rs`) so error dashboards aren't flooded by
 expected 401/402/429s. Operational metrics (`apps/ingest/src/metrics.rs`) push via OTLP every 30s —

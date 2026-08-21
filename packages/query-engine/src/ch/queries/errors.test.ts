@@ -147,7 +147,9 @@ describe("errorsSummaryQuery", () => {
 	it("applies deploymentEnvs filter", () => {
 		const q = errorsSummaryQuery({ deploymentEnvs: ["production"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')",
+		)
 		expect(sql).toContain("FROM traces")
 	})
 })

@@ -18,6 +18,7 @@ import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-buil
 import { unionAll, type CHUnionQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
 import { CHNumber } from "../schema"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
 import type { FacetOutput } from "./query-helpers"
 
 const HOSTMETRIC_NAMES = [
@@ -405,7 +406,7 @@ const podFilterConditions = (
 		: undefined,
 	opts.jobs?.length ? CH.inList($.ResourceAttributes.get("k8s.job.name"), opts.jobs) : undefined,
 	opts.environments?.length
-		? CH.inList($.ResourceAttributes.get("deployment.environment.name"), opts.environments)
+		? CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments)
 		: undefined,
 	opts.computeTypes?.length
 		? CH.inList($.ResourceAttributes.get("eks.amazonaws.com/compute-type"), opts.computeTypes)
@@ -432,7 +433,7 @@ export function listPodsQuery(opts: ListPodsOpts = {}) {
 			namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
 			nodeName: CH.any_($.ResourceAttributes.get("k8s.node.name")),
 			clusterName: CH.any_($.ResourceAttributes.get("k8s.cluster.name")),
-			environment: CH.any_($.ResourceAttributes.get("deployment.environment.name")),
+			environment: CH.any_(deploymentEnvExpr($.ResourceAttributes)),
 			deploymentName: CH.any_($.ResourceAttributes.get("k8s.deployment.name")),
 			statefulsetName: CH.any_($.ResourceAttributes.get("k8s.statefulset.name")),
 			daemonsetName: CH.any_($.ResourceAttributes.get("k8s.daemonset.name")),
@@ -728,7 +729,7 @@ const nodeFilterConditions = (
 		? CH.inList($.ResourceAttributes.get("k8s.cluster.name"), opts.clusters)
 		: undefined,
 	opts.environments?.length
-		? CH.inList($.ResourceAttributes.get("deployment.environment.name"), opts.environments)
+		? CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments)
 		: undefined,
 ]
 
@@ -738,7 +739,7 @@ export function listNodesQuery(opts: ListNodesOpts = {}) {
 			nodeName: $.ResourceAttributes.get("k8s.node.name"),
 			nodeUid: CH.any_($.ResourceAttributes.get("k8s.node.uid")),
 			clusterName: CH.any_($.ResourceAttributes.get("k8s.cluster.name")),
-			environment: CH.any_($.ResourceAttributes.get("deployment.environment.name")),
+			environment: CH.any_(deploymentEnvExpr($.ResourceAttributes)),
 			kubeletVersion: CH.any_($.ResourceAttributes.get("k8s.kubelet.version")),
 			lastSeen: CH.max_($.TimeUnix),
 			cpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.node.cpu.usage")),
@@ -861,7 +862,7 @@ const workloadFilterConditions = (
 		? CH.inList($.ResourceAttributes.get("k8s.cluster.name"), opts.clusters)
 		: undefined,
 	opts.environments?.length
-		? CH.inList($.ResourceAttributes.get("deployment.environment.name"), opts.environments)
+		? CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments)
 		: undefined,
 	opts.computeTypes?.length
 		? CH.inList($.ResourceAttributes.get("eks.amazonaws.com/compute-type"), opts.computeTypes)
@@ -875,7 +876,7 @@ export function listWorkloadsQuery(opts: ListWorkloadsOpts) {
 			workloadName: $.ResourceAttributes.get(attrKey),
 			namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
 			clusterName: CH.any_($.ResourceAttributes.get("k8s.cluster.name")),
-			environment: CH.any_($.ResourceAttributes.get("deployment.environment.name")),
+			environment: CH.any_(deploymentEnvExpr($.ResourceAttributes)),
 			podCount: CH.uniq($.ResourceAttributes.get("k8s.pod.uid")),
 			lastSeen: CH.max_($.TimeUnix),
 			avgCpuLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
@@ -976,19 +977,35 @@ export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) 
 // list query (pods, nodes, or workloads), filtered by the same opts so the
 // facet counts reflect the *current* filtered set.
 
+/**
+ * Facet dimensions are plain `ResourceAttributes` keys, with one exception: the
+ * deployment environment has two spellings in the wild (OTel renamed
+ * `deployment.environment` to `deployment.environment.name`), so it resolves to
+ * the coalescing expression instead of a single map lookup. Without this a
+ * cluster whose collector still emits the legacy key produced an empty
+ * environment facet.
+ */
+const facetAttrExpr = (
+	resourceAttributes: { get(key: string): CH.Expr<string> },
+	attrKey: string,
+): CH.Expr<string> =>
+	attrKey === "deployment.environment.name"
+		? deploymentEnvExpr(resourceAttributes)
+		: resourceAttributes.get(attrKey)
+
 export type PodFacetsOutput = FacetOutput
 
 const makePodFacet = (opts: ListPodsOpts, attrKey: string, facetType: string, perFacetLimit: number) =>
 	from(MetricsGauge)
 		.select(($) => ({
-			name: $.ResourceAttributes.get(attrKey),
+			name: facetAttrExpr($.ResourceAttributes, attrKey),
 			count: CH.uniq($.ResourceAttributes.get("k8s.pod.uid")),
 			facetType: CH.lit(facetType),
 		}))
 		.where(($) => [
 			...podBaseConditions($, [POD_FACET_PROBE_METRIC]),
 			...podFilterConditions($, opts),
-			$.ResourceAttributes.get(attrKey).neq(""),
+			facetAttrExpr($.ResourceAttributes, attrKey).neq(""),
 		])
 		.groupBy("name")
 		.orderBy(["count", "desc"])
@@ -1014,14 +1031,14 @@ export type NodeFacetsOutput = FacetOutput
 const makeNodeFacet = (opts: ListNodesOpts, attrKey: string, facetType: string, perFacetLimit: number) =>
 	from(MetricsGauge)
 		.select(($) => ({
-			name: $.ResourceAttributes.get(attrKey),
+			name: facetAttrExpr($.ResourceAttributes, attrKey),
 			count: CH.uniq($.ResourceAttributes.get("k8s.node.name")),
 			facetType: CH.lit(facetType),
 		}))
 		.where(($) => [
 			...nodeBaseConditions($, [NODE_FACET_PROBE_METRIC]),
 			...nodeFilterConditions($, opts),
-			$.ResourceAttributes.get(attrKey).neq(""),
+			facetAttrExpr($.ResourceAttributes, attrKey).neq(""),
 		])
 		.groupBy("name")
 		.orderBy(["count", "desc"])
@@ -1046,7 +1063,7 @@ const makeWorkloadFacet = (
 	const ownerKey = workloadAttrKey(opts.kind)
 	return from(MetricsGauge)
 		.select(($) => ({
-			name: $.ResourceAttributes.get(attrKey),
+			name: facetAttrExpr($.ResourceAttributes, attrKey),
 			count: CH.uniq($.ResourceAttributes.get(ownerKey)),
 			facetType: CH.lit(facetType),
 		}))
@@ -1057,7 +1074,7 @@ const makeWorkloadFacet = (
 			$.ResourceAttributes.get(ownerKey).neq(""),
 			$.MetricName.in_(POD_FACET_PROBE_METRIC),
 			...workloadFilterConditions($, opts, ownerKey),
-			$.ResourceAttributes.get(attrKey).neq(""),
+			facetAttrExpr($.ResourceAttributes, attrKey).neq(""),
 		])
 		.groupBy("name")
 		.orderBy(["count", "desc"])
