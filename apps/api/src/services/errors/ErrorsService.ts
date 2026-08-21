@@ -39,6 +39,7 @@ import { Cause, Clock, Context, Effect, Layer, Option, Ref, Schema } from "effec
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
+import { toPgText } from "@/platform/pg-text"
 import { SYSTEM_ERRORS_AGENT_NAME } from "@/services/auth/system-actors"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database } from "@/platform/DatabaseLive"
@@ -1073,13 +1074,15 @@ const make: Effect.Effect<
 			scanFingerprints: issuesRaw.length,
 		})
 
+		// Every display string crosses from ClickHouse bytes into Postgres text
+		// here — the one place to strip what Postgres refuses (`PgText` in `pg-text.ts`).
 		const rows = issuesRaw.map((raw) => ({
 			fingerprintHash: String(raw.fingerprintHash ?? ""),
-			serviceName: String(raw.serviceName ?? ""),
-			exceptionType: String(raw.exceptionType ?? ""),
-			exceptionMessage: String(raw.exceptionMessage ?? ""),
-			errorLabel: String(raw.errorLabel ?? ""),
-			topFrame: String(raw.topFrame ?? ""),
+			serviceName: toPgText(String(raw.serviceName ?? "")),
+			exceptionType: toPgText(String(raw.exceptionType ?? "")),
+			exceptionMessage: toPgText(String(raw.exceptionMessage ?? "")),
+			errorLabel: toPgText(String(raw.errorLabel ?? "")),
+			topFrame: toPgText(String(raw.topFrame ?? "")),
 			// The warehouse returns every distinct build seen for the fingerprint in
 			// the window; an older cluster that predates the column returns nothing.
 			serviceVersions: Array.isArray(raw.serviceVersions)
