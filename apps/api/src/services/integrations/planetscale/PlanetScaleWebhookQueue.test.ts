@@ -6,6 +6,7 @@ import { projectPlanetScaleWebhookEvent } from "./webhook-events"
 import {
 	MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES,
 	PlanetScaleWebhookQueue,
+	PlanetScaleWebhookQueueMessage,
 	planetScaleWebhookQueueJobBytes,
 	type PlanetScaleWebhookJob,
 } from "./PlanetScaleWebhookQueue"
@@ -37,6 +38,32 @@ const provideQueue = (environment: Record<string, unknown>) =>
 	)
 
 describe("PlanetScaleWebhookQueue", () => {
+	it("decodes tenant, source, connection, type, schema, and time as one relational boundary", () => {
+		const contradictions: readonly PlanetScaleWebhookJob[] = [
+			{ ...job, event: { ...job.event, tenantid: Schema.decodeUnknownSync(OrgId)("org_2") } },
+			{ ...job, event: { ...job.event, source: "urn:maple:planetscale:connection_2" } },
+			{
+				...job,
+				event: {
+					...job.event,
+					data: {
+						connectionId: "connection_2",
+						event: payload.event,
+						organization: payload.organization,
+						database: payload.database,
+						resource: payload.resource,
+					},
+				},
+			},
+			{ ...job, event: { ...job.event, type: "dev.maple.unsupported.v1" } },
+			{ ...job, event: { ...job.event, dataschema: "urn:maple:event-schema:unsupported:v1" } },
+			{ ...job, event: { ...job.event, time: "2026-99-99T00:00:00Z" } },
+		]
+		for (const contradiction of contradictions)
+			assert.throws(() => Schema.decodeUnknownSync(PlanetScaleWebhookQueueMessage)(contradiction))
+		assert.deepStrictEqual(Schema.decodeUnknownSync(PlanetScaleWebhookQueueMessage)(job), job)
+	})
+
 	it.effect("schema-encodes the internal job onto the dedicated binding", () => {
 		const sent: unknown[] = []
 		assert.isBelow(planetScaleWebhookQueueJobBytes(job), MAX_PLANETSCALE_WEBHOOK_QUEUE_BYTES)

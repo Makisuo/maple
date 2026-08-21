@@ -236,7 +236,10 @@ interface NormalizedSignal {
   retries and rebatching. `"derived"` identifies a canonical content fingerprint
   with documented collision/collapse limitations. `"none"` cannot support a
   durable once-only automation guarantee.
-- `occurredAt` is source time; `observedAt` is Maple acceptance time.
+- `occurredAt` is source event time; `observedAt` is the stable source-observation
+  time when the source provides one. Maple acceptance time is host control
+  metadata passed separately to activation gating, so retries cannot leak a new
+  receipt timestamp into projector output.
 - `fields` contains canonical built-ins and namespaced source attributes. It must
   not contain secrets merely because they were present in the incoming payload.
 - `data` is a bounded, schema-validated, source-specific representation available
@@ -360,6 +363,11 @@ Every semantic edit creates a new immutable revision. Activation is not
 retroactive: the new revision sees signals accepted after the runtime atomically
 installs its compiled registry snapshot. Historical processing requires an
 explicit replay operation.
+
+Replaying the exact latest revision is a no-op only while its enabled/disabled
+state still matches the active pointer. Replaying an older revision is a stale
+revision conflict; an intentional rollback is a new monotonic revision that
+copies the earlier configuration.
 
 The configuration record is data. Source adapters and projector implementations
 are registered code. This is how matching remains configurable without making
@@ -505,12 +513,17 @@ failure rather than silently losing automation. A source retry reuses the same
 event ID and canonical event bytes, so staging is idempotent. Durable OTLP log
 projection requires `timeUnixNano` or `observedTimeUnixNano`; server receipt
 time is never incorporated into durable identity or event content.
+OTLP permits both timestamp fields to be absent or zero; those records remain
+accepted by the warehouse path but are skipped by durable event projection.
 
 Staging and chDB insertion are not one transaction. A process crash after the
 chDB insert but before the OTLP acknowledgement can still cause a duplicate raw
 telemetry row on retry; that is already possible with at-least-once OTLP
 delivery. The staged/ready outbox protocol prevents an event from becoming
 dispatchable before the ingest attempt reaches its warehouse commit point.
+Staged rows retain the source occurrence identity and original projection
+revision. On redelivery, Maple recovers those exact event IDs and does not
+reevaluate that occurrence against a newer or disabled projection snapshot.
 
 If atomic exactly-once storage across both systems later becomes a requirement,
 the correct addition is a durable ingress journal before both writes. chDB
@@ -527,6 +540,15 @@ boundary. The complete serialized job is measured against a 120 KiB cap before
 send; oversized factual payloads receive a deterministic `413` rather than a
 retryable queue failure. Consumers continue to read legacy payload-only and
 transitional jobs.
+
+Current queue jobs are decoded as one relational contract: the event tenant,
+source, embedded connection, type, schema, and timestamp must agree with the
+bounded routing fields. Unsupported or contradictory jobs are terminally
+acknowledged as poison messages. Health-event issue mutations use a durable
+`(org_id, event_id)` receipt inserted in the same PostgreSQL transaction as the
+issue mutation; timeline insertion remains independently idempotent. A retry
+after a failure between those phases therefore completes the issue once without
+duplicating its occurrence count or history.
 
 The provider source adapter supplies the strongest available delivery or event
 identity. It then uses the same selector, projector, event ID, and outbox
@@ -919,8 +941,9 @@ leased, at-least-once claims and exact whole-batch acknowledgement. Ready-event 
 through the slowest active consumer and retains a bounded acknowledged tail; staged events are never
 pruned by delivery acknowledgement.
 
-Re-delivery is the safe recovery operation: it deduplicates the same staged event
-ID and promotes it only after the warehouse write succeeds. Maple never blindly
+Re-delivery is the safe recovery operation: it locates staged rows by stable
+source occurrence, preserves their original projection snapshot, and promotes
+those exact event IDs only after the warehouse write succeeds. Maple never blindly
 promotes an old staged record because, after a crash, the control store alone
 cannot prove whether the corresponding chDB write committed. Activation requires
 authentication, a bounded request body, structural budget validation, and full

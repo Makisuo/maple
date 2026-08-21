@@ -263,7 +263,7 @@ describe("upsertPlanetScaleIssue", () => {
 				description: "Branch main of main-db was restarted after running out of memory.",
 			}
 
-			const first = yield* upsertPlanetScaleIssue({ ...base, timestamp: 1_000 })
+			const first = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-1", timestamp: 1_000 })
 			assert.strictEqual(first.action, "created")
 			assert.isNotNull(first.issueId)
 
@@ -281,7 +281,7 @@ describe("upsertPlanetScaleIssue", () => {
 			)
 
 			// Repeat firing dedupes into the same issue and bumps the count.
-			const second = yield* upsertPlanetScaleIssue({ ...base, timestamp: 2_000 })
+			const second = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-2", timestamp: 2_000 })
 			assert.strictEqual(second.action, "refreshed")
 			assert.strictEqual(second.issueId, first.issueId)
 
@@ -291,7 +291,7 @@ describe("upsertPlanetScaleIssue", () => {
 					first.issueId,
 				]),
 			)
-			const third = yield* upsertPlanetScaleIssue({ ...base, timestamp: 3_000 })
+			const third = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-3", timestamp: 3_000 })
 			assert.strictEqual(third.action, "reopened")
 
 			const reopened = yield* Effect.promise(() =>
@@ -319,7 +319,7 @@ describe("upsertPlanetScaleIssue", () => {
 				description: "Branch main of main-db was restarted after running out of memory.",
 			}
 
-			const first = yield* upsertPlanetScaleIssue({ ...base, timestamp: 1_000 })
+			const first = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-1", timestamp: 1_000 })
 			assert.strictEqual(first.action, "created")
 
 			// Operator marks it wontfix with a snooze that has not yet expired.
@@ -331,7 +331,7 @@ describe("upsertPlanetScaleIssue", () => {
 				),
 			)
 
-			const second = yield* upsertPlanetScaleIssue({ ...base, timestamp: 5_000 })
+			const second = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-2", timestamp: 5_000 })
 			assert.strictEqual(second.action, "skipped")
 			assert.strictEqual(second.issueId, first.issueId)
 
@@ -379,7 +379,7 @@ describe("upsertPlanetScaleIssue", () => {
 				description: "Branch main of main-db was restarted after running out of memory.",
 			}
 
-			const first = yield* upsertPlanetScaleIssue({ ...base, timestamp: 1_000 })
+			const first = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-1", timestamp: 1_000 })
 			assert.strictEqual(first.action, "created")
 
 			// "Won't fix" with snooze_until NULL means "stop resurfacing this" —
@@ -393,7 +393,11 @@ describe("upsertPlanetScaleIssue", () => {
 			)
 
 			const farFuture = Date.UTC(2099, 0, 1)
-			const second = yield* upsertPlanetScaleIssue({ ...base, timestamp: farFuture })
+			const second = yield* upsertPlanetScaleIssue({
+				...base,
+				eventId: "event-2",
+				timestamp: farFuture,
+			})
 			assert.strictEqual(second.action, "skipped")
 			assert.strictEqual(second.issueId, first.issueId)
 
@@ -422,7 +426,7 @@ describe("upsertPlanetScaleIssue", () => {
 				description: "Branch main of main-db was restarted after running out of memory.",
 			}
 
-			const first = yield* upsertPlanetScaleIssue({ ...base, timestamp: 1_000 })
+			const first = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-1", timestamp: 1_000 })
 			assert.strictEqual(first.action, "created")
 
 			// Snooze deadline is before the next firing's timestamp → expired.
@@ -434,7 +438,7 @@ describe("upsertPlanetScaleIssue", () => {
 				),
 			)
 
-			const second = yield* upsertPlanetScaleIssue({ ...base, timestamp: 10_000 })
+			const second = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-2", timestamp: 10_000 })
 			assert.strictEqual(second.action, "reopened")
 			assert.strictEqual(second.issueId, first.issueId)
 
@@ -481,6 +485,7 @@ describe("upsertPlanetScaleIssue", () => {
 			const payload = yield* decodePlanetScaleWebhookPayload(OOM_PAYLOAD)
 			const input = {
 				orgId: asOrgId("org_1"),
+				eventId: "event-1",
 				payload,
 				severity: "high" as const,
 				title: "PlanetScale branch out of memory",

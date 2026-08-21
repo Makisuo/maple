@@ -3,7 +3,7 @@ import { OrgId } from "@maple/domain/http"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { MapleCloudEventSchema } from "@maple/eventing-core"
 import { Context, Effect, Layer, Schema } from "effect"
-import { PlanetScaleWebhookPayload } from "./webhook-events"
+import { PlanetScaleWebhookPayload, planetScaleWebhookPayloadFromEvent } from "./webhook-events"
 
 const QUEUE_BINDING = "PLANETSCALE_WEBHOOK_QUEUE"
 
@@ -28,7 +28,7 @@ export const PlanetScaleWebhookJob = Schema.Struct({
 export type PlanetScaleWebhookJob = Schema.Schema.Type<typeof PlanetScaleWebhookJob>
 
 /** Consumer contract kept backward-compatible during rolling deployments. */
-export const PlanetScaleWebhookQueueMessage = Schema.Union([
+const PlanetScaleWebhookQueueMessageBase = Schema.Union([
 	PlanetScaleWebhookJob,
 	Schema.Struct({
 		...PlanetScaleWebhookJobBase,
@@ -37,6 +37,22 @@ export const PlanetScaleWebhookQueueMessage = Schema.Union([
 	}),
 	LegacyPlanetScaleWebhookJob,
 ])
+export const PlanetScaleWebhookQueueMessage = PlanetScaleWebhookQueueMessageBase.pipe(
+	Schema.check(
+		Schema.makeFilter(
+			(job) => {
+				if (!("event" in job)) return true
+				try {
+					planetScaleWebhookPayloadFromEvent(job.event, job.orgId, job.connectionId)
+					return true
+				} catch {
+					return false
+				}
+			},
+			{ expected: "a supported, tenant-bound PlanetScale webhook event" },
+		),
+	),
+)
 export type PlanetScaleWebhookQueueMessage = Schema.Schema.Type<typeof PlanetScaleWebhookQueueMessage>
 
 /** Cloudflare's 128 KB body limit includes the complete serialized queue job. */

@@ -17,6 +17,7 @@ import {
 	actors,
 	errorIssues,
 	errorIssueEvents,
+	planetscaleIssueReceipts,
 	planetscaleDatabases,
 	planetscaleEvents,
 	type ErrorIssueRow,
@@ -221,14 +222,17 @@ export const projectPlanetScaleWebhookEvent = (input: PlanetScaleWebhookEventInp
 		PLANETSCALE_SOURCES,
 		PLANETSCALE_PROJECTORS,
 	)
-	const result = registry.evaluate(signal)
+	const result = registry.evaluate(signal, observedAt)
 	if (result.failures.length > 0) throw new Error(result.failures[0]!.message)
 	if (result.events.length !== 1) throw new Error("PlanetScale webhook projection produced no event")
 	return result.events[0]!
 }
 
 export const planetScaleWebhookPayloadFromEvent = (
-	event: Pick<MapleCloudEvent, "type" | "dataschema" | "time"> & { readonly data: unknown },
+	event: Pick<MapleCloudEvent, "type" | "dataschema" | "time" | "tenantid" | "source"> & {
+		readonly data: unknown
+	},
+	orgId: string,
 	connectionId: string,
 ): PlanetScaleWebhookPayload => {
 	if (
@@ -236,6 +240,9 @@ export const planetScaleWebhookPayloadFromEvent = (
 		event.dataschema !== "urn:maple:event-schema:planetscale-webhook:v1"
 	)
 		throw new Error("queued PlanetScale event contract is invalid")
+	if (event.tenantid !== orgId) throw new Error("queued PlanetScale event tenant identity is contradictory")
+	if (event.source !== `urn:maple:planetscale:${connectionId}`)
+		throw new Error("queued PlanetScale event source identity is contradictory")
 	const data = decodePlanetScaleWebhookEventData(event.data)
 	if (data.connectionId !== connectionId)
 		throw new Error("queued PlanetScale event connection identity is contradictory")
@@ -520,6 +527,7 @@ export const planetScaleIssueFingerprint = (database: string, event: string) =>
 
 export interface UpsertPlanetScaleIssueInput {
 	readonly orgId: OrgId
+	readonly eventId: string
 	readonly payload: PlanetScaleWebhookPayload
 	readonly severity: IssueSeverity
 	readonly title: string
@@ -535,7 +543,8 @@ export interface UpsertPlanetScaleIssueResult {
 /**
  * Create-or-refresh the triage issue backing a PlanetScale health event.
  * Database failures stay typed so the durable queue consumer can retry the
- * delivery. The fingerprint makes successful redelivery idempotent.
+ * delivery. The event receipt makes redelivery idempotent; the fingerprint
+ * groups distinct source occurrences into the same issue.
  */
 export const upsertPlanetScaleIssue: (
 	input: UpsertPlanetScaleIssueInput,
@@ -557,6 +566,33 @@ export const upsertPlanetScaleIssue: (
 
 	return yield* database.execute((db) =>
 		db.transaction(async (tx) => {
+			const receipt = await tx
+				.insert(planetscaleIssueReceipts)
+				.values({
+					orgId: input.orgId,
+					eventId: input.eventId,
+					processedAt: new Date(actorTimestamp),
+				})
+				.onConflictDoNothing()
+				.returning({ eventId: planetscaleIssueReceipts.eventId })
+			if (receipt.length === 0) {
+				const existing = (
+					await tx
+						.select({ id: errorIssues.id })
+						.from(errorIssues)
+						.where(
+							and(
+								eq(errorIssues.orgId, input.orgId),
+								eq(errorIssues.fingerprintHash, fingerprintHash),
+							),
+						)
+						.limit(1)
+				)[0]
+				if (existing === undefined)
+					throw new Error("PlanetScale issue receipt exists without its atomic issue mutation")
+				return { issueId: existing.id, action: "skipped" as const }
+			}
+
 			const ensureActor = async (): Promise<ActorId> => {
 				const selectActor = () =>
 					tx

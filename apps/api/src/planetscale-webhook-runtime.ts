@@ -86,7 +86,7 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 									})
 						const payload =
 							"event" in job
-								? planetScaleWebhookPayloadFromEvent(event, job.connectionId)
+								? planetScaleWebhookPayloadFromEvent(event, job.orgId, job.connectionId)
 								: job.payload
 						const eventData =
 							typeof event.data === "object" &&
@@ -163,6 +163,7 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 										Effect.flatMap(() =>
 											upsertPlanetScaleIssue({
 												orgId: job.orgId,
+												eventId: event.id,
 												payload,
 												severity: classified.severity,
 												title: classified.title,

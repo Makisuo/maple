@@ -87,6 +87,74 @@ describe("PlanetScale webhook queue consumer", () => {
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
+	it.effect("applies an issue event exactly once across duplicate queue deliveries", () => {
+		const testDb = createTestDb(trackedDbs)
+		const first = makeBatch(job)
+		const duplicate = makeBatch(job)
+		return Effect.gen(function* () {
+			yield* processPlanetScaleWebhookBatch(first.batch)
+			yield* Effect.promise(() =>
+				testDb.pglite.exec(
+					"UPDATE error_issues SET workflow_state = 'done', resolved_at = '2026-08-20T00:00:00Z'",
+				),
+			)
+			yield* processPlanetScaleWebhookBatch(duplicate.batch)
+			assert.isTrue(first.acknowledged())
+			assert.isTrue(duplicate.acknowledged())
+			const issue = yield* Effect.promise(() =>
+				queryFirstRow<{ occurrence_count: number; workflow_state: string }>(
+					testDb,
+					"SELECT occurrence_count, workflow_state FROM error_issues WHERE org_id = $1",
+					["org_1"],
+				),
+			)
+			assert.strictEqual(issue?.occurrence_count, 1)
+			assert.strictEqual(issue?.workflow_state, "done")
+			const history = yield* Effect.promise(() =>
+				queryFirstRow<{ count: number }>(
+					testDb,
+					"SELECT count(*)::int AS count FROM error_issue_events WHERE org_id = $1",
+					["org_1"],
+				),
+			)
+			assert.strictEqual(history?.count, 1)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("recovers exactly once after the timeline commits but the issue transaction fails", () => {
+		const testDb = createTestDb(trackedDbs)
+		const failed = makeBatch(job)
+		const retry = makeBatch(job)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				testDb.pglite.exec(`CREATE FUNCTION reject_planetscale_issue_event() RETURNS trigger AS $$
+					BEGIN RAISE EXCEPTION 'forced issue event failure'; END;
+					$$ LANGUAGE plpgsql;
+					CREATE TRIGGER reject_planetscale_issue_event
+					BEFORE INSERT ON error_issue_events
+					FOR EACH ROW EXECUTE FUNCTION reject_planetscale_issue_event();`),
+			)
+			yield* processPlanetScaleWebhookBatch(failed.batch)
+			assert.isTrue(failed.retried())
+			yield* Effect.promise(() =>
+				testDb.pglite.exec(`DROP TRIGGER reject_planetscale_issue_event ON error_issue_events;
+					DROP FUNCTION reject_planetscale_issue_event();`),
+			)
+			yield* processPlanetScaleWebhookBatch(retry.batch)
+			assert.isTrue(retry.acknowledged())
+			const counts = yield* Effect.promise(() =>
+				queryFirstRow<{ timeline: number; issues: number; receipts: number }>(
+					testDb,
+					`SELECT
+						(SELECT count(*)::int FROM planetscale_events) AS timeline,
+						(SELECT count(*)::int FROM error_issues) AS issues,
+						(SELECT count(*)::int FROM planetscale_issue_receipts) AS receipts`,
+				),
+			)
+			assert.deepStrictEqual(counts, { timeline: 1, issues: 1, receipts: 1 })
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
 	it.effect("processes the exact pre-event-envelope queue body during rolling upgrades", () => {
 		const testDb = createTestDb(trackedDbs)
 		const legacyJob = {
@@ -136,6 +204,23 @@ describe("PlanetScale webhook queue consumer", () => {
 	it.effect("acknowledges terminal malformed jobs", () => {
 		const testDb = createTestDb(trackedDbs)
 		const delivery = makeBatch({ kind: "not-a-planetscale-job" })
+		return processPlanetScaleWebhookBatch(delivery.batch).pipe(
+			Effect.tap(() =>
+				Effect.sync(() => {
+					assert.isTrue(delivery.acknowledged())
+					assert.isFalse(delivery.retried())
+				}),
+			),
+			Effect.provide(testDb.layer),
+		)
+	})
+
+	it.effect("terminally acknowledges schema-valid jobs with contradictory event identity", () => {
+		const testDb = createTestDb(trackedDbs)
+		const delivery = makeBatch({
+			...job,
+			event: { ...job.event, tenantid: Schema.decodeUnknownSync(OrgId)("org_2") },
+		})
 		return processPlanetScaleWebhookBatch(delivery.batch).pipe(
 			Effect.tap(() =>
 				Effect.sync(() => {
