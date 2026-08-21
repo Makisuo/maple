@@ -352,9 +352,14 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				return yield* withTimeout(
 					Effect.gen(function* () {
 						// Alert evaluations are small and use a short whole-result cache.
+						// The TTL must outlive one scheduler tick: rules are claimed in
+						// chunks at concurrency 5 and interleaved across orgs, so two rules
+						// over the same signal can be minutes apart within a single tick.
+						// At the old 30s — shorter than the 60s tick — an entry expired
+						// before any sibling rule could reach it.
 						const key = buildEvaluateCacheKey(tenant.orgId, request)
 						const { value, hit } = yield* edgeCache.getOrCompute(
-							{ bucket: "qe-evaluate", key, ttlSeconds: 30 },
+							{ bucket: "qe-evaluate", key, ttlSeconds: 90 },
 							evaluateImpl(tenant, request),
 						)
 						yield* recordCacheOutcome(hit)

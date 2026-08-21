@@ -4,9 +4,12 @@ import WidgetKit
 
 /// Ongoing issues, on the Home Screen and the Lock Screen.
 ///
-/// The extension holds no session and makes no requests: it renders the
-/// snapshot the app publishes into the shared App Group. See `IssuesSnapshot`
-/// for why, and `WidgetPublisher` for who writes it.
+/// The extension holds no Clerk session. It fetches with a device credential
+/// the app mints for it — read-only, expiring, and fenced by the server to
+/// `/v2/widget_summary` alone — and falls back to whatever the app last
+/// published into the shared App Group. See `WidgetSummaryFetcher` for the
+/// fetch, `WidgetCredentialStore` for the credential, and `WidgetPublisher` for
+/// the app's half.
 struct IssuesWidget: Widget {
 	var body: some WidgetConfiguration {
 		// Configurable since the organization picker shipped. Widgets placed
@@ -135,21 +138,37 @@ struct IssuesProvider: AppIntentTimelineProvider {
 		WidgetSnapshotStore<IssuesSnapshot>.legacyIssues.load()
 	}
 
-	/// One read, rendered at every point on `WidgetTimelineSchedule`'s ladder.
+	/// Fetch if it is worth it, then render the result at every point on
+	/// `WidgetTimelineSchedule`'s ladder.
 	///
-	/// The data does not change between them — only its age does, and the row
-	/// times ("2m", "3h") and the footer are relative, so without these the
-	/// widget would still claim "2m" an hour later. WidgetKit is told to come
-	/// back after the last one; the app's own `reloadTimelines` is what actually
-	/// keeps it current when something happens.
+	/// **The fetch enriches this timeline; it never gates it.** `makeEntry` runs
+	/// first and would answer on its own, so a fetch that fails, times out, or
+	/// never happens costs nothing but freshness — the widget renders the last
+	/// snapshot with an honest age, which is what it did before it could fetch
+	/// at all. Only a *successful* fetch sends us back to disk.
+	///
+	/// The ladder is still one read rendered many times: the data does not change
+	/// between entries, only its age, and the row times ("2m", "3h") and the
+	/// footer are relative — without them the widget would still claim "2m" an
+	/// hour later.
 	func timeline(for configuration: SelectOrganizationIntent, in context: Context) async -> Timeline<IssuesEntry> {
 		let now = Date()
-		let base = makeEntry(for: configuration, at: now)
+		var base = makeEntry(for: configuration, at: now)
+		let outcome = await WidgetTimelineRefresh.run(
+			organizationId: base.organizationId,
+			organizationName: base.organizationName,
+			storedGeneratedAt: base.snapshot?.generatedAt,
+			now: now
+		)
+		// Re-read rather than take the payload back: the fetcher writes both
+		// widgets' snapshots into the App Group, and going through the store
+		// keeps this provider's one way of resolving an organization.
+		if outcome.didFetch { base = makeEntry(for: configuration, at: now) }
 		let entries = WidgetTimelineSchedule.entryDates(from: now).map { date -> IssuesEntry in
 			var entry = base
 			entry.date = date
 			return entry
 		}
-		return Timeline(entries: entries, policy: .after(WidgetTimelineSchedule.refreshDate(from: now)))
+		return Timeline(entries: entries, policy: .after(outcome.refreshDate))
 	}
 }

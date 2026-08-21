@@ -122,6 +122,14 @@ export interface IncidentDigestPushEvent {
 export interface MobilePushServiceApi {
 	readonly notifyIncident: (event: IncidentPushEvent) => Effect.Effect<MobilePushSummary>
 	readonly notifyIncidentDigest: (event: IncidentDigestPushEvent) => Effect.Effect<MobilePushSummary>
+	/**
+	 * Wake the organization's phones so their Home Screen widgets can refresh.
+	 *
+	 * Silent — `content-available` and nothing else. It is not a notification
+	 * and must never look like one: the user did not ask to be told anything,
+	 * they asked for a widget that is not hours out of date.
+	 */
+	readonly refreshWidgets: (orgId: OrgId, reason: string) => Effect.Effect<MobilePushSummary>
 }
 
 const SEND_CONCURRENCY = 8
@@ -569,12 +577,151 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 						incidentId: event.incidentId,
 					}),
 				)
+				// Last, and silent. A `test` is somebody trying a rule out — it must
+				// not make real Home Screens re-fetch — and a `renotify` that did
+				// not escalate is the same numbers again, which the widget's own
+				// refresh already covers.
+				if (event.eventType !== "test" && escalates) {
+					yield* refreshWidgets(event.orgId, `incident_${event.eventType}`).pipe(
+						ignoreLogged("Mobile push: widget refresh failed", {
+							orgId: event.orgId,
+							incidentId: event.incidentId,
+						}),
+					)
+				}
 				yield* Effect.annotateCurrentSpan({
 					"maple.push.sent": sent,
 					"maple.push.failed": failed,
 					"maple.push.unregistered": unregistered,
 				})
 				return { sent, failed, unregistered, skipped }
+			})
+
+			/**
+			 * The widgets' half of an incident.
+			 *
+			 * A Home Screen widget refreshes itself when WidgetKit wakes it, which
+			 * is on a budget derived from how often it is looked at — somewhere
+			 * between twenty and sixty times a day for a widget in use. That is
+			 * good enough for "how is the fleet doing" and much too slow for "an
+			 * incident just opened", which is the one moment the numbers on a Lock
+			 * Screen are most wrong.
+			 *
+			 * So an incident sends one background wake-up per phone. The app is
+			 * given a few seconds, reloads the timelines, and the widget fetches.
+			 *
+			 * Three limits worth stating plainly, because this looks more powerful
+			 * than it is:
+			 *
+			 * - **It is a hint.** iOS throttles background pushes on an
+			 *   unpublished schedule and drops them freely. Nothing may depend on
+			 *   one arriving; the widget's own refresh is the mechanism, and this
+			 *   only makes it timely.
+			 * - **It reaches only phones that accepted notifications.** A device
+			 *   row exists because push registration created it, so a user who
+			 *   declined alerts and pinned a widget gets the ordinary refresh and
+			 *   no wake-up. That is inherent to APNs, not a gap to close here.
+			 * - **It rides the alert budget.** This is called from the incident
+			 *   fan-out, which is already bounded per tick and per rule, so a
+			 *   forty-service breakage cannot turn into forty wake-ups.
+			 *
+			 * Every device the organization has, not just the ones that wanted the
+			 * banner: notification preferences say which events are worth
+			 * interrupting someone for, and a widget refresh interrupts nobody.
+			 */
+			const refreshWidgets = Effect.fn("MobilePushService.refreshWidgets")(function* (
+				orgId: OrgId,
+				reason: string,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.push.reason": reason })
+				const empty: MobilePushSummary = { sent: 0, failed: 0, unregistered: 0, skipped: 0 }
+				if (!apns.isConfigured) return empty
+
+				const registered = yield* devices
+					.listForOrg(orgId)
+					.pipe(
+						Effect.catch((error) =>
+							Effect.logWarning(
+								"Mobile push: could not list devices for a widget refresh",
+							).pipe(
+								Effect.annotateLogs({ orgId, error: error.message }),
+								Effect.as([] as ReadonlyArray<MobileDevice>),
+							),
+						),
+					)
+				if (registered.length === 0) return empty
+
+				const results = yield* Effect.forEach(
+					registered,
+					(device) =>
+						apns
+							.sendBackground({
+								deviceToken: device.token,
+								environment: device.environment,
+								bundleId: device.bundleId,
+								// One pending wake-up per organization is all anyone
+								// needs: they all mean the same thing, and the widget
+								// re-reads everything when it refreshes.
+								collapseId: `widget-refresh:${orgId}`,
+								// A wake-up that arrives after the numbers have moved on
+								// again is a wasted radio.
+								expiresInSeconds: 600,
+								data: {
+									maple_kind: "widget_refresh",
+									maple_org_id: orgId,
+									maple_reason: reason,
+								},
+							})
+							.pipe(
+								Effect.timeout(SEND_TIMEOUT),
+								Effect.map((result) => ({ device, result })),
+								Effect.catch((error) =>
+									Effect.succeed({
+										device,
+										result: {
+											outcome: "failed" as const,
+											status: 0,
+											reason: error._tag === "TimeoutError" ? "timeout" : error.message,
+											retryable: true,
+										},
+									}),
+								),
+							),
+					{ concurrency: SEND_CONCURRENCY },
+				)
+
+				let sent = 0
+				let failed = 0
+				let unregistered = 0
+				for (const { device, result } of results) {
+					switch (result.outcome) {
+						case "sent":
+							sent += 1
+							break
+						case "unregistered":
+							unregistered += 1
+							yield* devices.disable(device.id, result.reason).pipe(
+								ignoreLogged("Mobile push: could not disable a dead device", {
+									orgId,
+									deviceId: device.id,
+								}),
+							)
+							break
+						case "failed":
+							// Quieter than the alert path on purpose: nobody is waiting
+							// on this, and a failed wake-up costs a widget some
+							// freshness, not a missed page.
+							failed += 1
+							break
+					}
+				}
+				yield* Effect.annotateCurrentSpan({
+					"maple.push.sent": sent,
+					"maple.push.failed": failed,
+					"maple.push.unregistered": unregistered,
+				})
+				// Nothing is `skipped` here — preferences do not apply to a refresh.
+				return { sent, failed, unregistered, skipped: 0 }
 			})
 
 			/**
@@ -811,7 +958,7 @@ export class MobilePushService extends Context.Service<MobilePushService, Mobile
 				return { sent, failed: results.length - sent - unregistered, unregistered, skipped }
 			})
 
-			return { notifyIncident, notifyIncidentDigest } satisfies MobilePushServiceApi
+			return { notifyIncident, notifyIncidentDigest, refreshWidgets } satisfies MobilePushServiceApi
 		}),
 	},
 ) {

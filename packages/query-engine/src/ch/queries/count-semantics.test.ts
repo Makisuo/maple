@@ -35,6 +35,13 @@ function countExpr(sql: string): string {
 	return line.slice(0, line.indexOf(" AS count")).trim()
 }
 
+/** The SELECT expression aliased as `spanCount`, e.g. `count()`. */
+function spanCountExpr(sql: string): string {
+	const line = sql.split("\n").find((l) => / AS spanCount\b/.test(l))
+	if (!line) throw new Error(`no spanCount column in:\n${sql}`)
+	return line.slice(0, line.indexOf(" AS spanCount")).trim()
+}
+
 function sourceTable(sql: string): string {
 	const tables = [...sql.matchAll(/FROM (\w+)/g)].map((m) => m[1])
 	// Union/CTE shapes read several tables; the invariant cares about the set.
@@ -64,8 +71,26 @@ const TIMESERIES_ROUTES: ReadonlyArray<{
 		opts: { metric: "count", needsSampling: false, groupBy: ["http_method"], bucketSeconds: 3600 },
 	},
 	{
+		// `status_code` is what keeps this on the flat per-span scan: the overview
+		// rollup tiers pre-aggregate it away into `ErrorCount`, so they cannot group
+		// by it. Without a groupBy outside `OVERVIEW_ROLLUP_GROUP_KEYS` these opts
+		// now route to the tiers below.
 		name: "service_overview_spans MV",
 		table: "service_overview_spans",
+		opts: {
+			metric: "count",
+			needsSampling: false,
+			rootOnly: true,
+			groupBy: ["status_code"],
+			bucketSeconds: 300,
+		},
+	},
+	{
+		// The alert-evaluation shape: one metric, sub-hour bucket, root spans only.
+		// `computeAlertBuckets` never sets `allMetrics`, which used to force this
+		// onto the per-span scan above; it now reads the minutely rollup instead.
+		name: "annual service overview union (single metric, no allMetrics)",
+		table: "service_overview_minutely+service_overview_spans",
 		opts: { metric: "count", needsSampling: false, rootOnly: true, bucketSeconds: 300 },
 	},
 	{
@@ -115,13 +140,28 @@ describe("traces count is sample-weighted on every route", () => {
 	// `spanCount` (rows observed), never the extrapolated `count`. Row-level
 	// tables must therefore keep both columns distinct.
 	it("keeps an unweighted spanCount alongside the weighted count", () => {
+		// Asserted as an invariant rather than a literal, because the routes differ
+		// in how they spell it: row-level tables emit `count()`, while the overview
+		// tiers sum a stored raw `SpanCount` through `bCount`. Both are unweighted,
+		// which is the property `minimumSampleCount` depends on.
 		for (const opts of [
 			{ metric: "count", needsSampling: false, groupBy: ["http_method"], bucketSeconds: 300 },
 			{ metric: "count", needsSampling: false, rootOnly: true, bucketSeconds: 300 },
+			{
+				metric: "count",
+				needsSampling: false,
+				rootOnly: true,
+				groupBy: ["status_code"],
+				bucketSeconds: 300,
+			},
 		] as const) {
 			const { sql } = compileCH(tracesTimeseriesQuery(opts), { ...baseParams, bucketSeconds: 300 })
-			expect(sql).toContain("count() AS spanCount")
-			expect(countExpr(sql)).toBe("sum(SampleRate)")
+			const spanCount = spanCountExpr(sql)
+			expect(
+				/SampleRate|Estimated|Weighted/.test(spanCount),
+				`spanCount expression "${spanCount}" is sample-weighted; it is the confidence guard and must count observed rows`,
+			).toBe(false)
+			expectWeighted(sql)
 		}
 	})
 

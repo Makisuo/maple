@@ -4,6 +4,7 @@ import MapleAPI
 import MapleWidgetData
 import Observation
 import UIKit
+import WidgetKit
 import UserNotifications
 
 /// Owns everything push: the permission, the APNs token, keeping the server's
@@ -247,13 +248,27 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 	/// Runs for a silent (`content-available`) push and for a visible one
 	/// delivered while the app has background time; iOS ignores the completion
 	/// result beyond deciding how generous to be next time.
+	///
+	/// Two shapes, and the cheap one is the common one. A push whose only job is
+	/// to refresh the Home Screen just reloads the timelines: the widget holds
+	/// its own credential now and fetches for itself, so a `reloadAllTimelines`
+	/// buys the same freshness as a full publish for a fraction of the few
+	/// seconds iOS grants — and background time spent here is background time
+	/// iOS is deciding whether to keep granting.
 	func application(
 		_ application: UIApplication,
 		didReceiveRemoteNotification userInfo: [AnyHashable: Any],
 		fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
 	) {
+		let isWidgetRefresh = userInfo["maple_kind"] as? String == "widget_refresh"
 		Task { @MainActor in
-			await WidgetPublisher.shared.refresh(trigger: .push, force: true)
+			if isWidgetRefresh {
+				WidgetCenter.shared.reloadAllTimelines()
+			} else {
+				// An alert push also renews credentials and warms the snapshots,
+				// which the widget cannot do for itself.
+				await WidgetPublisher.shared.refresh(trigger: .push, force: true)
+			}
 			completionHandler(.newData)
 		}
 	}

@@ -44,6 +44,7 @@ import { v4ToV5ServiceOverviewMinutelyModule } from "./local-store-migrations/v4
 import { v5ToV6ErrorEventsFingerprintHygieneModule } from "./local-store-migrations/v5-to-v6-error-events-fingerprint-hygiene"
 import { v6ToV7ErrorServiceVersionModule } from "./local-store-migrations/v6-to-v7-error-service-version"
 import { v7ToV8AppleCrashFramesModule } from "./local-store-migrations/v7-to-v8-apple-crash-frames"
+import { v8ToV9MvSweepModule } from "./local-store-migrations/v8-to-v9-mv-sweep"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -109,6 +110,7 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v5ToV6ErrorEventsFingerprintHygieneModule,
 	v6ToV7ErrorServiceVersionModule,
 	v7ToV8AppleCrashFramesModule,
+	v8ToV9MvSweepModule,
 ]
 
 export const validateMigrationRegistry = (

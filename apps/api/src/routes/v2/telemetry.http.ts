@@ -75,7 +75,7 @@ const metricCatalogRowSchema = Schema.Struct({
 	isMonotonic: CH.CHNumber,
 })
 
-const serviceCatalogRowSchema = Schema.Struct({
+export const serviceCatalogRowSchema = Schema.Struct({
 	serviceName: Schema.String,
 	serviceNamespaces: Schema.Array(Schema.String),
 	deploymentEnvironments: Schema.Array(Schema.String),
@@ -1029,7 +1029,7 @@ const BASELINE_CACHE_SECONDS = 3600
  * the baseline rows collapse the same way: the busiest row wins rather than
  * the numbers being averaged across populations that don't compare.
  */
-type ServiceBaselines = ReadonlyMap<string, { p95LatencyMs: number; spanCount: number }>
+export type ServiceBaselines = ReadonlyMap<string, { p95LatencyMs: number; spanCount: number }>
 
 const collapseBaselines = (
 	rows: readonly {
@@ -1048,7 +1048,7 @@ const collapseBaselines = (
 	return map
 }
 
-const toService = (
+export const toService = (
 	row: {
 		serviceName: string
 		serviceNamespaces: readonly string[]

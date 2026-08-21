@@ -7,7 +7,7 @@ import {
 	planAlertLifecycle,
 	type AlertLifecycleInput,
 } from "@maple/alerting-core"
-import { formatWarehouseDateTime } from "@maple/query-engine"
+import { formatWarehouseDateTime, snapAlertWindowEndMs } from "@maple/query-engine"
 import { MapleCloudEventSchema } from "@maple/eventing-core"
 import {
 	AlertComparator as AlertComparatorSchema,
@@ -474,7 +474,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				| WarehouseQueryPathError
 			> {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": rule.id })
-				const endMs = yield* now
+				// Snapped, not raw `now`: excludes the still-filling current minute and
+				// lets rules over the same signal share one `qe-evaluate` entry within
+				// a tick. See `snapAlertWindowEndMs`.
+				const endMs = snapAlertWindowEndMs(yield* now)
 				const startMs = endMs - rule.windowMinutes * 60_000
 				const plan = rule.compiledPlan
 				const source = yield* planEvaluateSource(plan, rule.windowMinutes)

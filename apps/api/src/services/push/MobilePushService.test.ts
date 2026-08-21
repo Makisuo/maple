@@ -2,7 +2,13 @@ import { assert, describe, expect, it } from "@effect/vitest"
 import { encodePublicId } from "@maple/domain/http/v2"
 import { MobileDeviceId, OrgId, UserId } from "@maple/domain/primitives"
 import { Effect, Layer, Schema } from "effect"
-import { ApnsClient, type ApnsLiveActivityPush, type ApnsPush, type ApnsSendResult } from "@/platform/Apns"
+import {
+	ApnsClient,
+	type ApnsBackgroundPush,
+	type ApnsLiveActivityPush,
+	type ApnsPush,
+	type ApnsSendResult,
+} from "@/platform/Apns"
 import { LiveActivitiesService, type LiveActivity } from "./LiveActivitiesService"
 import { MobileDevicesService, type MobileDevice } from "./MobileDevicesService"
 import {
@@ -83,6 +89,9 @@ interface LiveActivityRecorder {
 	readonly ended: Array<string>
 }
 
+/** Every silent widget wake-up a run produced. */
+const background: Array<ApnsBackgroundPush> = []
+
 const makeLayer = (
 	devices: ReadonlyArray<MobileDevice>,
 	sendImpl: (push: ApnsPush) => ApnsSendResult,
@@ -108,6 +117,10 @@ const makeLayer = (
 					sendLiveActivity: (push) => {
 						live.pushes.push(push)
 						return Effect.succeed(liveSendImpl(push))
+					},
+					sendBackground: (push) => {
+						background.push(push)
+						return Effect.succeed({ outcome: "sent" as const, apnsId: null })
 					},
 				}),
 				Layer.succeed(MobileDevicesService, {
@@ -538,5 +551,70 @@ describe("MobilePushService live activities", () => {
 				]),
 			),
 		)
+	})
+})
+
+describe("MobilePushService widget refresh", () => {
+	it.effect("wakes every registered phone, silently, collapsed per organization", () => {
+		background.length = 0
+		const sent: Array<ApnsPush> = []
+		const devices = [
+			device(1),
+			// Preferences say which events are worth *interrupting* someone for. A
+			// widget refresh interrupts nobody, so it goes to this phone too.
+			device(2, { preferences: { ...device(2).preferences, criticalIncidents: false } }),
+			device(3, { environment: "sandbox" }),
+		]
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			const summary = yield* push.refreshWidgets(ORG, "manual")
+			assert.deepStrictEqual(summary, { sent: 3, failed: 0, unregistered: 0, skipped: 0 })
+			assert.deepStrictEqual(
+				background.map((p) => [p.deviceToken, p.environment, p.collapseId]),
+				[
+					["token-1", "production", `widget-refresh:${ORG}`],
+					["token-2", "production", `widget-refresh:${ORG}`],
+					["token-3", "sandbox", `widget-refresh:${ORG}`],
+				],
+			)
+			assert.deepStrictEqual(background[0]!.data, {
+				maple_kind: "widget_refresh",
+				maple_org_id: ORG,
+				maple_reason: "manual",
+			})
+		}).pipe(Effect.provide(makeLayer(devices, () => ({ outcome: "sent", apnsId: null }), sent, [])))
+	})
+
+	it.effect("sends nothing when APNs is not configured", () => {
+		background.length = 0
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			const summary = yield* push.refreshWidgets(ORG, "manual")
+			assert.deepStrictEqual(summary, { sent: 0, failed: 0, unregistered: 0, skipped: 0 })
+			assert.strictEqual(background.length, 0)
+		}).pipe(
+			Effect.provide(makeLayer([device(1)], () => ({ outcome: "sent", apnsId: null }), [], [], false)),
+		)
+	})
+
+	it.effect("rides along with an incident that actually pushed", () => {
+		background.length = 0
+		const sent: Array<ApnsPush> = []
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			yield* push.notifyIncident(event())
+			assert.strictEqual(background.length, 1)
+			assert.strictEqual(background[0]!.data.maple_reason, "incident_trigger")
+		}).pipe(Effect.provide(makeLayer([device(1)], () => ({ outcome: "sent", apnsId: null }), sent, [])))
+	})
+
+	it.effect("never lets somebody trying a rule out refresh real Home Screens", () => {
+		background.length = 0
+		const sent: Array<ApnsPush> = []
+		return Effect.gen(function* () {
+			const push = yield* MobilePushService
+			yield* push.notifyIncident(event({ eventType: "test" }))
+			assert.strictEqual(background.length, 0)
+		}).pipe(Effect.provide(makeLayer([device(1)], () => ({ outcome: "sent", apnsId: null }), sent, [])))
 	})
 })

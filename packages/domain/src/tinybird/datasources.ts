@@ -846,37 +846,6 @@ export const serviceOverviewMinutely = defineDatasource("service_overview_minute
 export type ServiceOverviewMinutelyRow = InferRow<typeof serviceOverviewMinutely>
 
 /**
- * Pre-materialized error spans for the errors page.
- * Pre-filters to StatusCode='Error' and pre-extracts deployment.environment
- * so error queries avoid scanning the full traces table and Map columns.
- * Sorted by (OrgId, ServiceName, Timestamp) for efficient filtering and aggregation.
- * Populated by materialized view, not direct ingestion.
- */
-export const errorSpans = defineDatasource("error_spans", {
-	description:
-		"Pre-materialized error spans for the errors page. Pre-filters to StatusCode='Error' and pre-extracts deployment.environment. Populated by materialized view.",
-	jsonPaths: false,
-	schema: {
-		OrgId: t.string().lowCardinality(),
-		Timestamp: t.dateTime(),
-		TraceId: t.string(),
-		SpanId: t.string(),
-		ParentSpanId: t.string().default("__unset__"),
-		ServiceName: t.string().lowCardinality(),
-		StatusMessage: t.string(),
-		Duration: t.uint64(),
-		DeploymentEnv: t.string().lowCardinality(),
-	},
-	engine: engine.mergeTree({
-		partitionKey: "toDate(Timestamp)",
-		sortingKey: ["OrgId", "ServiceName", "Timestamp"],
-		ttl: "Timestamp + INTERVAL 90 DAY",
-	}),
-})
-
-export type ErrorSpansRow = InferRow<typeof errorSpans>
-
-/**
  * Pre-materialized error events for the errors-as-issues triage system.
  * Populated from traces where StatusCode='Error'. Unwraps the first OTel
  * `exception` event (if any) to surface exception.type / message / stacktrace,
@@ -1084,9 +1053,6 @@ export const traceDetailSpans = defineDatasource("trace_detail_spans", {
 		StatusMessage: t.string(),
 		SpanAttributes: t.map(t.string().lowCardinality(), t.string()),
 		ResourceAttributes: t.map(t.string().lowCardinality(), t.string()),
-		EventsTimestamp: t.array(t.dateTime64(9)),
-		EventsName: t.array(t.string().lowCardinality()),
-		EventsAttributes: t.array(t.map(t.string().lowCardinality(), t.string())),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",

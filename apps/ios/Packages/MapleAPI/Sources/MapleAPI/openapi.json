@@ -2645,6 +2645,312 @@
         "title": "Trace timeseries result",
         "type": "object"
       },
+      "WidgetCredential": {
+        "additionalProperties": false,
+        "description": "A read-only, expiring credential for one app installation's Home Screen widgets. Minting is idempotent per installation: the previous credential is revoked in the same transaction.",
+        "examples": [
+          {
+            "created_at": "2026-08-21T09:10:00.000Z",
+            "expires_at": "2026-09-20T09:10:00.000Z",
+            "object": "widget_credential",
+            "organization_id": "org_2abcDEF",
+            "scopes": [
+              "widget_summary:read"
+            ],
+            "secret": "maple_ak_1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081"
+          }
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "object": {
+            "description": "The object type — always `\"widget_credential\"`.",
+            "enum": [
+              "widget_credential"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "minLength": 1,
+            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+            "title": "Org ID",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "Fixed by the server. Today, exactly `widget_summary:read`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secret": {
+            "description": "The bearer token, shown once. Store it where only this installation can read it, and send it nowhere but Maple.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "secret",
+          "organization_id",
+          "scopes",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "Widget credential",
+        "type": "object"
+      },
+      "WidgetCredentialDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deleted": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "object": {
+            "enum": [
+              "widget_credential"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "deleted"
+        ],
+        "title": "Widget credential delete response",
+        "type": "object"
+      },
+      "WidgetSummary": {
+        "additionalProperties": false,
+        "description": "Everything the Maple iOS Home Screen widgets draw, in one response: ongoing error issues over the last day, and per-service traffic over the last hour.",
+        "examples": [
+          {
+            "generated_at": "2026-08-21T09:10:00.000Z",
+            "issues": {
+              "data": [
+                {
+                  "error_label": "checkout",
+                  "exception_message": "Cannot read properties of undefined",
+                  "exception_type": "TypeError",
+                  "has_open_incident": true,
+                  "id": "iss_YofPTrK9782DWwcnXhpcCw",
+                  "is_regressed": false,
+                  "last_seen_at": "2026-08-21T09:08:12.000Z",
+                  "occurrence_count": 412,
+                  "service_name": "api",
+                  "severity": "critical"
+                }
+              ],
+              "has_more": false,
+              "window_seconds": 86400
+            },
+            "object": "widget_summary",
+            "organization_id": "org_2abcDEF",
+            "schema_version": 1,
+            "throughput": {
+              "bucket_seconds": 300,
+              "services": [
+                {
+                  "error_rate": 0.012,
+                  "name": "api",
+                  "p95_latency_ms": 184,
+                  "points": [
+                    3600,
+                    3720,
+                    3540
+                  ],
+                  "throughput_per_second": 12.5
+                }
+              ],
+              "total_points": [
+                5200,
+                5310,
+                5180
+              ],
+              "window_seconds": 3600
+            }
+          }
+        ],
+        "properties": {
+          "generated_at": {
+            "type": "string"
+          },
+          "issues": {
+            "$ref": "#/components/schemas/WidgetSummaryIssues"
+          },
+          "object": {
+            "description": "The object type — always `\"widget_summary\"`.",
+            "enum": [
+              "widget_summary"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "minLength": 1,
+            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+            "title": "Org ID",
+            "type": "string"
+          },
+          "schema_version": {
+            "type": "number"
+          },
+          "throughput": {
+            "$ref": "#/components/schemas/WidgetSummaryThroughput"
+          }
+        },
+        "required": [
+          "object",
+          "schema_version",
+          "generated_at",
+          "organization_id",
+          "issues",
+          "throughput"
+        ],
+        "title": "Widget summary",
+        "type": "object"
+      },
+      "WidgetSummaryIssue": {
+        "additionalProperties": false,
+        "description": "One ongoing error issue, reduced to what a Home Screen row can render.",
+        "properties": {
+          "error_label": {
+            "type": "string"
+          },
+          "exception_message": {
+            "type": "string"
+          },
+          "exception_type": {
+            "type": "string"
+          },
+          "has_open_incident": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/_maple_ErrorIssueId"
+          },
+          "is_regressed": {
+            "type": "boolean"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "occurrence_count": {
+            "type": "number"
+          },
+          "service_name": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/_maple_IssueSeverity"
+          }
+        },
+        "required": [
+          "id",
+          "exception_type",
+          "error_label",
+          "exception_message",
+          "service_name",
+          "occurrence_count",
+          "last_seen_at",
+          "is_regressed",
+          "has_open_incident"
+        ],
+        "title": "Widget summary issue",
+        "type": "object"
+      },
+      "WidgetSummaryIssues": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WidgetSummaryIssue"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "window_seconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "window_seconds",
+          "has_more",
+          "data"
+        ],
+        "title": "Widget summary issues",
+        "type": "object"
+      },
+      "WidgetSummaryService": {
+        "additionalProperties": false,
+        "description": "One service's traffic over the throughput window.",
+        "properties": {
+          "error_rate": {
+            "type": "number"
+          },
+          "name": {
+            "$ref": "#/components/schemas/_maple_ServiceName"
+          },
+          "p95_latency_ms": {
+            "type": "number"
+          },
+          "points": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "throughput_per_second": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "throughput_per_second",
+          "error_rate",
+          "p95_latency_ms",
+          "points"
+        ],
+        "title": "Widget summary service",
+        "type": "object"
+      },
+      "WidgetSummaryThroughput": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket_seconds": {
+            "type": "number"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/WidgetSummaryService"
+            },
+            "type": "array"
+          },
+          "total_points": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "window_seconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "window_seconds",
+          "services",
+          "total_points"
+        ],
+        "title": "Widget summary throughput",
+        "type": "object"
+      },
       "_maple_ActorId": {
         "description": "Opaque, prefixed public object ID (e.g. `actor_YofPTrK9782DWwcnXhpcCw`). A reversible base58 encoding of the internal ID — treat it as an opaque string.",
         "examples": [
@@ -6324,6 +6630,393 @@
           "Traces"
         ]
       }
+    },
+    "/v2/widget_credentials/{installation_id}": {
+      "delete": {
+        "description": "Retires the installation's credential for this organization; the app calls this on sign-out and when the user leaves the organization. Idempotent — an installation with nothing to revoke is already in the requested state. Requires the `widget_credentials:write` scope.",
+        "operationId": "revokeWidgetCredential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "description": "A stable, client-generated identifier for one app installation — on iOS, `identifierForVendor`. Opaque to Maple, and only ever compared against itself: it decides which credential a re-mint replaces.",
+              "examples": [
+                "F9E1B4C0-8F2A-4C6D-9E1B-4C08F2A4C6D9"
+              ],
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Installation ID",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetCredentialDeleteResponse"
+                }
+              }
+            },
+            "description": "WidgetCredentialDeleteResponse"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403. | The @maple/http/v2/OrganizationAccessDeniedError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/ApiKeyPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503. | The @maple/http/errors/AuthorizationUnavailableError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revoke this installation's widget credential",
+        "tags": [
+          "Widget Credentials"
+        ]
+      },
+      "put": {
+        "description": "Issues a read-only, expiring credential for this installation's Home Screen widgets, revoking whatever it had. Idempotent, so the app calls it again to roll. Requires the `widget_credentials:write` scope — which a widget credential does not have, so renewal always goes through a signed-in session.",
+        "operationId": "mintWidgetCredential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "description": "A stable, client-generated identifier for one app installation — on iOS, `identifierForVendor`. Opaque to Maple, and only ever compared against itself: it decides which credential a re-mint replaces.",
+              "examples": [
+                "F9E1B4C0-8F2A-4C6D-9E1B-4C08F2A4C6D9"
+              ],
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Installation ID",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetCredential"
+                }
+              }
+            },
+            "description": "A read-only, expiring credential for one app installation's Home Screen widgets. Minting is idempotent per installation: the previous credential is revoked in the same transaction."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403. | The @maple/http/v2/OrganizationAccessDeniedError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/ApiKeyPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503. | The @maple/http/errors/AuthorizationUnavailableError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mint this installation's widget credential",
+        "tags": [
+          "Widget Credentials"
+        ]
+      }
+    },
+    "/v2/widget_summary": {
+      "get": {
+        "description": "Returns ongoing error issues and per-service traffic in a single small payload sized for a Home Screen widget. The windows are fixed by the server. Requires the `widget_summary:read` scope.",
+        "operationId": "getWidgetSummary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetSummary"
+                }
+              }
+            },
+            "description": "Everything the Maple iOS Home Screen widgets draw, in one response: ongoing error issues over the last day, and per-service traffic over the last hour."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/QueryEngineValidationError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403. | The @maple/http/v2/OrganizationAccessDeniedError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQuotaExceededError failure. HTTP 429. | The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseMalformedQueryError failure. HTTP 500. | The @maple/http/errors/WarehouseScopeError failure. HTTP 500. | The @maple/http/errors/OrgClickHouseSettingsEncryptionError failure. HTTP 500. | The @maple/http/errors/QueryEngineResultMismatchError failure. HTTP 500. | The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQueryError failure. HTTP 502. | The @maple/http/errors/WarehouseAuthError failure. HTTP 502. | The @maple/http/errors/WarehouseConfigError failure. HTTP 502. | The @maple/http/errors/WarehouseClientError failure. HTTP 502. | The @maple/http/errors/WarehouseSchemaDriftError failure. HTTP 502. | The @maple/http/errors/WarehouseResultDecodeError failure. HTTP 502. | The @maple/http/errors/OrgClickHouseSettingsStoredConfigInvalidError failure. HTTP 502."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/ErrorPersistenceError failure. HTTP 503. | The @maple/http/errors/WarehouseUpstreamError failure. HTTP 503. | The @maple/http/errors/OrgClickHouseSettingsPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503. | The @maple/http/errors/AuthorizationUnavailableError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/QueryEngineTimeoutError failure. HTTP 504. | The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retrieve the mobile widget summary",
+        "tags": [
+          "Widget Summary"
+        ]
+      }
     }
   },
   "security": [],
@@ -6433,6 +7126,14 @@
     {
       "description": "Read a dashboard through a share link. The only unauthenticated group in this API: the token in the request body is the credential, so these operations resolve for a viewer with no Maple account.",
       "name": "Shares"
+    },
+    {
+      "description": "The single read behind the Maple mobile Home Screen widgets. Deliberately its own scope family so a device credential can be fenced to it alone.",
+      "name": "Widget Summary"
+    },
+    {
+      "description": "Device-scoped, read-only credentials for the Maple mobile Home Screen widgets. Minted by a signed-in app for one installation at a time.",
+      "name": "Widget Credentials"
     }
   ]
 }
