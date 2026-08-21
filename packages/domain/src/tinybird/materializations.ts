@@ -44,7 +44,7 @@ import {
 	DB_STATEMENT_SQL,
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
-import { DEPLOYMENT_ENV_SQL } from "./deployment-env-sql"
+import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
 import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
 
 /**
@@ -596,18 +596,18 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', 'messaging',
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '', 'messaging',
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', 'rpc',
             'http'
           ) AS TargetType,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', SpanAttributes['rpc.system'],
             ''
           ) AS TargetSystem,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '',
-              if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']),
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '',
+              if(${MESSAGING_DESTINATION_SQL} != '', ${MESSAGING_DESTINATION_SQL}, SpanAttributes['messaging.system']),
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '',
               if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']),
             if(SpanAttributes['server.address'] != '',
@@ -630,7 +630,7 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
                SpanAttributes['server.address'] != ''
             OR SpanAttributes['http.host'] != ''
             OR SpanAttributes['url.authority'] != ''
-            OR SpanAttributes['messaging.destination'] != ''
+            OR ${MESSAGING_DESTINATION_SQL} != ''
             OR SpanAttributes['messaging.system'] != ''
             OR SpanAttributes['rpc.service'] != ''
             OR SpanAttributes['rpc.system'] != ''

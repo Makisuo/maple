@@ -164,7 +164,8 @@ to per-request hot paths like token validation. OTLP export bypasses the API, so
 (startup guard refuses a loopback endpoint), as `service.name="ingest"`, `maple_org_id="internal"`,
 and `deployment.environment.name` **dual-emitted** as the deprecated `deployment.environment`
 (the MVs coalesce both since migration 0020 — see `DEPLOYMENT_ENV_SQL` in
-`packages/domain/src/tinybird/deployment-env-sql.ts`; the dual-emit remains for rows already
+`packages/domain/src/tinybird/semconv-renames.ts`, which is where every
+renamed-key coalesce belongs; the dual-emit remains for rows already
 materialized under the old key and for pre-0020 BYO-ClickHouse schemas). Custom fields use the `maple.*` namespace. Span
 status follows OTEL HTTP semconv for SERVER spans: **only 5xx is `Error`, 4xx rejections are `Ok`**
 (`otel_status_for_rejection` in `apps/ingest/src/main.rs`) so error dashboards aren't flooded by

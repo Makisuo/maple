@@ -14,7 +14,7 @@ import {
 	OPAQUE_DB_NAMESPACE_RE,
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
-import { deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
+import { deploymentEnvExpr, messagingDestinationExpr } from "@maple/domain/tinybird/semconv-renames"
 import { Schema } from "effect"
 import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { defineCondFn, defineFn } from "@maple-dev/clickhouse-builder"
@@ -1055,7 +1055,8 @@ export function serviceExternalEdgesSQL(
 	const recentEdges = from(Traces)
 		.select(($) => {
 			const attr = (key: string) => $.SpanAttributes.get(key)
-			const isMessaging = attr("messaging.destination").neq("").or(attr("messaging.system").neq(""))
+			const destination = messagingDestinationExpr($.SpanAttributes)
+			const isMessaging = destination.neq("").or(attr("messaging.system").neq(""))
 			const isRpc = attr("rpc.service").neq("").or(attr("rpc.system").neq(""))
 			return {
 				sourceService: $.ServiceName,
@@ -1075,14 +1076,7 @@ export function serviceExternalEdgesSQL(
 				),
 				targetName: CH.multiIf(
 					[
-						[
-							isMessaging,
-							CH.if_(
-								attr("messaging.destination").neq(""),
-								attr("messaging.destination"),
-								attr("messaging.system"),
-							),
-						],
+						[isMessaging, CH.if_(destination.neq(""), destination, attr("messaging.system"))],
 						[isRpc, CH.if_(attr("rpc.service").neq(""), attr("rpc.service"), attr("rpc.system"))],
 					],
 					CH.if_(
@@ -1111,7 +1105,7 @@ export function serviceExternalEdgesSQL(
 					.neq("")
 					.or(attr("http.host").neq(""))
 					.or(attr("url.authority").neq(""))
-					.or(attr("messaging.destination").neq(""))
+					.or(messagingDestinationExpr($.SpanAttributes).neq(""))
 					.or(attr("messaging.system").neq(""))
 					.or(attr("rpc.service").neq(""))
 					.or(attr("rpc.system").neq("")),

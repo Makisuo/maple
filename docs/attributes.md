@@ -27,7 +27,7 @@ Tag every span with these and you get per-environment and per-version slices for
 | `deployment.environment`      | `production` | The deprecated spelling of the same attribute. Read everywhere the `.name` key is, so older instrumentation keeps working. |
 | `deployment.commit_sha`       | `c0b92f68`   | Per-version metrics in service overview; exposed as the `commit_sha` discovery facet so you can pivot by deploy. |
 
-OpenTelemetry renamed this attribute (`deployment.environment` → `deployment.environment.name`); Maple reads whichever one your spans carry, preferring `.name` when both are present, so emitting either is fine. Maple's own SDKs dual-emit both. In the search bar, `env`, `environment`, and `commit_sha` are short aliases — see [Filter aliases](#filter-aliases) below.
+OpenTelemetry renamed this attribute (`deployment.environment` → `deployment.environment.name`); Maple reads whichever one your spans carry, preferring `.name` when both are present, so emitting either is fine. Maple's own SDKs dual-emit both. The same holds for `messaging.destination` → `messaging.destination.name` on messaging spans. In the search bar, `env`, `environment`, and `commit_sha` are short aliases — see [Filter aliases](#filter-aliases) below.
 
 ## Span status & kind
 

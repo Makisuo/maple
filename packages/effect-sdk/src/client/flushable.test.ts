@@ -228,7 +228,7 @@ describe("MapleFlush.make (client)", () => {
 			}
 		).resourceSpans[0].resource.attributes
 		const attrMap = Object.fromEntries(attrs.map((a) => [a.key, a.value.stringValue]))
-		expect(attrMap["browser.user_agent"]).toBe("TestAgent/1.0")
+		expect(attrMap["user_agent.original"]).toBe("TestAgent/1.0")
 		expect(attrMap["browser.language"]).toBe("en-GB")
 		// Intl is always present in node/browsers; just assert it's a non-empty string.
 		expect(typeof attrMap["browser.timezone"]).toBe("string")

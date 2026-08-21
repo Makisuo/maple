@@ -27,7 +27,7 @@ import {
 import { assertPhysicalSchema } from "../schema-physical"
 
 /** Stamped into the journal and matched on the way back out. */
-const MODULE_ID = "local-0009-to-0010-deployment-environment-name" as const
+const MODULE_ID = "local-0009-to-0010-semconv-key-renames" as const
 
 const V9ToV10StateCodec = makeRawRowsState(MODULE_ID)
 
@@ -38,7 +38,7 @@ const decodeState = V9ToV10StateCodec.decode
 const decodeProgress = decodeInstalledProgress
 
 /**
- * Every view whose body pre-extracts `DeploymentEnv`.
+ * Every view whose body reads one of the renamed keys.
  *
  * The bundled v10 DDL is `CREATE ... IF NOT EXISTS` throughout, so a view whose
  * body changed has to be dropped first or the v9 version simply survives — the
@@ -98,13 +98,16 @@ const prepareTarget = async (context: MigrationModuleContext, state: V9ToV10Stat
 /**
  * The local mirror of ClickHouse migration 0020: every view that pre-extracts
  * `DeploymentEnv` now reads `deployment.environment.name` with the deprecated
- * `deployment.environment` as fallback, instead of the legacy key alone.
+ * `deployment.environment` as fallback, and the external-edge rollup reads
+ * `messaging.destination.name` with `messaging.destination` as fallback —
+ * instead of the deprecated spelling alone in both cases.
  *
- * Forward-only. Rows already materialized keep the environment the v9 bodies
- * wrote — empty, for a service that only ever sent the canonical key — and the
- * targets converge as their TTL rolls. That is the same position a deployed
- * cluster is in right after migration 0020, and rebuilding them would mean
- * rewriting a store this edge has just promised to clone byte-for-byte.
+ * Forward-only. Rows already materialized keep what the v9 bodies wrote — an
+ * empty environment for a service that only ever sent the canonical key, a
+ * system-labelled edge for a current producer span — and the targets converge as
+ * their TTL rolls. That is the same position a deployed cluster is in right
+ * after migration 0020, and rebuilding them would mean rewriting a store this
+ * edge has just promised to clone byte-for-byte.
  */
 const apply = async (context: MigrationModuleContext): Promise<V9ToV10Progress> => {
 	await context.openTarget(
@@ -145,8 +148,8 @@ const operations: ReadonlyArray<MigrationOperation> = [
 		phase: "target-created",
 	},
 	{
-		id: "rebuild-deployment-env-views",
-		description: "Rebuild every view that pre-extracts DeploymentEnv from both semconv keys",
+		id: "rebuild-semconv-rename-views",
+		description: "Rebuild every view that reads a renamed OTel key so it accepts both spellings",
 		requiresQuiescence: true,
 		phase: "copying",
 	},
@@ -177,20 +180,17 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 		classification: "derived",
 		disposition: "rebuild-within-retention-horizon",
 		guarantee:
-			"Existing rows are preserved untouched; buckets materialized after the migration carry the environment under either semconv key, and rows written with an empty DeploymentEnv age out with the rollup TTL.",
+			"Existing rows are preserved untouched; buckets materialized after the migration resolve both the environment and the messaging destination under either semconv spelling, and rows written with an empty DeploymentEnv or a system-labelled target age out with the rollup TTL.",
 		preservationInterval: "rollup retention horizon",
 		sourceRetentionDays: 365,
 		targetRetentionDays: 365,
 	},
 ]
 
-export const v9ToV10DeploymentEnvironmentNameModule: LocalStoreMigrationModule<
-	V9ToV10State,
-	V9ToV10Progress
-> = {
+export const v9ToV10SemconvKeyRenamesModule: LocalStoreMigrationModule<V9ToV10State, V9ToV10Progress> = {
 	id: MODULE_ID,
 	moduleVersion: 1,
-	description: "Rebuild every DeploymentEnv view to read either deployment-environment semconv key",
+	description: "Rebuild every view that reads a renamed OTel attribute to accept both spellings",
 	from: LOCAL_SCHEMA_V9,
 	to: LOCAL_SCHEMA_V10,
 	operations,

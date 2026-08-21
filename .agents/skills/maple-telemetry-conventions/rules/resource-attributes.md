@@ -23,7 +23,7 @@ OTel renamed this attribute; the registry lists `deployment.environment.name` as
 **Reading is the rule that matters.** Anything that pulls the environment out of `ResourceAttributes` — an MV body, a query-engine filter, a facet — uses the shared coalesce, never a bare map lookup:
 
 ```ts
-import { DEPLOYMENT_ENV_SQL, deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
+import { DEPLOYMENT_ENV_SQL, deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 ```
 
 ```sql
@@ -31,7 +31,7 @@ coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''),
          ResourceAttributes['deployment.environment'])
 ```
 
-A bare lookup on either key alone drops the environment for half the fleet: our own SDKs dual-emit, a current OTel SDK sends only `.name`, an older one only the legacy key. `packages/domain/src/tinybird/deployment-env-sql.test.ts` fails if any MV extracts `DeploymentEnv` some other way.
+A bare lookup on either key alone drops the environment for half the fleet: our own SDKs dual-emit, a current OTel SDK sends only `.name`, an older one only the legacy key. `packages/domain/src/tinybird/semconv-renames.test.ts` fails if any MV extracts `DeploymentEnv` some other way. The same module carries `MESSAGING_DESTINATION_SQL` for the `messaging.destination` -> `messaging.destination.name` rename; any future rename Maple *keys on* belongs there too.
 
 Source: `apps/ingest/src/main.rs:526-538`
 

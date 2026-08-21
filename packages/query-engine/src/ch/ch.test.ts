@@ -509,7 +509,9 @@ describe("tracesTimeseriesQuery", () => {
 		})
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM traces")
-		expect(sql).toContain("coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production', 'staging')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production', 'staging')",
+		)
 	})
 
 	it("filters by environments with rootOnly (MV path uses pre-extracted DeploymentEnv)", () => {

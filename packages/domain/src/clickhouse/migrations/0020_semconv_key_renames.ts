@@ -1,45 +1,56 @@
 import type { ClickHouseMigration } from "./index"
 
 /**
- * Migration 0020 — read the deployment environment from either semconv spelling.
+ * Migration 0020 — read renamed OTel attributes under either spelling.
  *
- * OpenTelemetry renamed the resource attribute: the registry lists
- * `deployment.environment.name` as stable and plain `deployment.environment` as
- * deprecated ("Replaced by `deployment.environment.name`"). Every materialized
- * view that pre-extracts `DeploymentEnv` pinned the legacy key, so a service
- * instrumented with an OTel SDK new enough to have adopted the rename
- * materialized an EMPTY environment into every rollup — no environment facet, no
- * environment filter, on exactly the dashboards the rollups back. Maple's own SDKs
- * and the ingest gateway dual-emit both keys, which is why this never showed up
- * on our own telemetry.
+ * Semantic conventions rename keys; instrumentation in the wild does not update
+ * in lockstep. Two renames were being read on the deprecated spelling alone, so
+ * telemetry from a current OTel SDK lost the attribute at write time — inside a
+ * materialized view, where the loss is invisible and permanent for those rows.
  *
- * Each body now extracts `DEPLOYMENT_ENV_SQL`
- * (`packages/domain/src/tinybird/deployment-env-sql.ts`):
+ * 1. **`deployment.environment` -> `deployment.environment.name`.** The registry
+ *    lists the `.name` key as stable and the bare one as deprecated ("Replaced
+ *    by `deployment.environment.name`"). Every MV that pre-extracts
+ *    `DeploymentEnv` pinned the deprecated key, so a service instrumented with an
+ *    SDK new enough to have adopted the rename materialized an EMPTY environment
+ *    into every rollup — no environment facet, no environment filter, on exactly
+ *    the dashboards the rollups back. Maple's own SDKs and the ingest gateway
+ *    dual-emit, which is why this never showed up on our own telemetry.
+ *
+ * 2. **`messaging.destination` -> `messaging.destination.name`.** The messaging
+ *    semconv namespaced the destination. `service_external_edges_hourly_mv` reads
+ *    it for `TargetName`, so a current producer span fell through to the
+ *    *system* value and every topic or queue collapsed into one `kafka` / `sqs`
+ *    node instead of a per-destination edge. Maple's own `VcsSyncQueue` spans emit
+ *    the `.name` key, so this one was visible on our own service map.
+ *
+ * Both now read through the shared fragments in
+ * `packages/domain/src/tinybird/semconv-renames.ts`, e.g.
  *
  *     coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''),
  *              ResourceAttributes['deployment.environment'])
  *
- * canonical key first, legacy fallback — byte-identical to the read side's
- * `deploymentEnvExpr`, so a raw-table branch and an MV branch of the same union
- * still produce the same grouping key.
+ * canonical key first, deprecated fallback — byte-identical to the read side's
+ * `deploymentEnvExpr` / `messagingDestinationExpr`, so a raw-table branch and an
+ * MV branch of the same union still produce the same grouping key.
  *
  * An MV body can only be changed by dropping and recreating the view, so each
  * pair here is `DROP VIEW` + `CREATE MATERIALIZED VIEW`. The `TO` targets are
  * untouched: no data is dropped, and inserts arriving inside the drop/create gap
  * simply do not materialize for that view (the same exposure migration 0019 had).
  *
- * Forward-only. Rows already materialized keep the empty `DeploymentEnv` the old
- * bodies wrote; they age out with the target's TTL. Backfilling would mean
- * rewriting every rollup from `traces`, which costs far more than waiting out a
- * 90d/365d TTL for a column that was empty for those rows anyway.
+ * Forward-only. Rows already materialized keep what the old bodies wrote; they
+ * age out with the target's TTL. Backfilling would mean rewriting every rollup
+ * from `traces`, which costs far more than waiting out a 90d/365d TTL for a
+ * column that was empty or mislabeled on those rows anyway.
  *
  * `requiredForIngest: false` — every table here is MV-populated and the raw
  * insert path is unchanged, so a server mid-migration keeps ingesting.
  */
-export const migration_0020_deployment_environment_name: ClickHouseMigration = {
+export const migration_0020_semconv_key_renames: ClickHouseMigration = {
 	version: 20,
 	description:
-		"Extract DeploymentEnv from deployment.environment.name with the legacy deployment.environment as fallback",
+		"Read deployment.environment(.name) and messaging.destination(.name) under either semconv spelling",
 	requiredForIngest: false,
 	statements: [
 		"DROP VIEW IF EXISTS error_events_by_time_mv",
@@ -49,7 +60,7 @@ export const migration_0020_deployment_environment_name: ClickHouseMigration = {
 		"DROP VIEW IF EXISTS logs_aggregates_hourly_mv",
 		"CREATE MATERIALIZED VIEW IF NOT EXISTS logs_aggregates_hourly_mv TO logs_aggregates_hourly AS\nSELECT\n          OrgId,\n          toStartOfHour(TimestampTime) AS Hour,\n          ServiceName,\n          SeverityText,\n          coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS DeploymentEnv,\n          count() AS Count,\n          sum(length(Body) + 200) AS SizeBytes,\n          ResourceAttributes['service.namespace'] AS ServiceNamespace\n        FROM logs\n        GROUP BY OrgId, Hour, ServiceName, SeverityText, DeploymentEnv, ServiceNamespace",
 		"DROP VIEW IF EXISTS service_external_edges_hourly_mv",
-		"CREATE MATERIALIZED VIEW IF NOT EXISTS service_external_edges_hourly_mv TO service_external_edges_hourly AS\nSELECT\n          OrgId,\n          toStartOfHour(toDateTime(Timestamp)) AS Hour,\n          ServiceName,\n          multiIf(\n            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', 'messaging',\n            SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', 'rpc',\n            'http'\n          ) AS TargetType,\n          multiIf(\n            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],\n            SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', SpanAttributes['rpc.system'],\n            ''\n          ) AS TargetSystem,\n          multiIf(\n            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '',\n              if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']),\n            SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '',\n              if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']),\n            if(SpanAttributes['server.address'] != '',\n              SpanAttributes['server.address'],\n              if(SpanAttributes['http.host'] != '',\n                SpanAttributes['http.host'],\n                SpanAttributes['url.authority']))\n          ) AS TargetName,\n          coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS DeploymentEnv,\n          count() AS CallCount,\n          countIf(StatusCode = 'Error') AS ErrorCount,\n          sum(Duration / 1000000) AS DurationSumMs,\n          max(Duration / 1000000) AS MaxDurationMs,\n          sum(SampleRate) AS SampleRateSum\n        FROM traces\n        WHERE SpanKind IN ('Client', 'Producer')\n          AND SpanAttributes['db.system.name'] = ''\n          AND ServiceName != ''\n          AND (\n               SpanAttributes['server.address'] != ''\n            OR SpanAttributes['http.host'] != ''\n            OR SpanAttributes['url.authority'] != ''\n            OR SpanAttributes['messaging.destination'] != ''\n            OR SpanAttributes['messaging.system'] != ''\n            OR SpanAttributes['rpc.service'] != ''\n            OR SpanAttributes['rpc.system'] != ''\n          )\n        GROUP BY OrgId, Hour, ServiceName, TargetType, TargetSystem, TargetName, DeploymentEnv\n        HAVING TargetName != ''",
+		"CREATE MATERIALIZED VIEW IF NOT EXISTS service_external_edges_hourly_mv TO service_external_edges_hourly AS\nSELECT\n          OrgId,\n          toStartOfHour(toDateTime(Timestamp)) AS Hour,\n          ServiceName,\n          multiIf(\n            coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != '', 'messaging',\n            SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', 'rpc',\n            'http'\n          ) AS TargetType,\n          multiIf(\n            coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],\n            SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', SpanAttributes['rpc.system'],\n            ''\n          ) AS TargetSystem,\n          multiIf(\n            coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '' OR SpanAttributes['messaging.system'] != '',\n              if(coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '', coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']), SpanAttributes['messaging.system']),\n            SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '',\n              if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']),\n            if(SpanAttributes['server.address'] != '',\n              SpanAttributes['server.address'],\n              if(SpanAttributes['http.host'] != '',\n                SpanAttributes['http.host'],\n                SpanAttributes['url.authority']))\n          ) AS TargetName,\n          coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS DeploymentEnv,\n          count() AS CallCount,\n          countIf(StatusCode = 'Error') AS ErrorCount,\n          sum(Duration / 1000000) AS DurationSumMs,\n          max(Duration / 1000000) AS MaxDurationMs,\n          sum(SampleRate) AS SampleRateSum\n        FROM traces\n        WHERE SpanKind IN ('Client', 'Producer')\n          AND SpanAttributes['db.system.name'] = ''\n          AND ServiceName != ''\n          AND (\n               SpanAttributes['server.address'] != ''\n            OR SpanAttributes['http.host'] != ''\n            OR SpanAttributes['url.authority'] != ''\n            OR coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != ''\n            OR SpanAttributes['messaging.system'] != ''\n            OR SpanAttributes['rpc.service'] != ''\n            OR SpanAttributes['rpc.system'] != ''\n          )\n        GROUP BY OrgId, Hour, ServiceName, TargetType, TargetSystem, TargetName, DeploymentEnv\n        HAVING TargetName != ''",
 		"DROP VIEW IF EXISTS service_map_children_mv",
 		"CREATE MATERIALIZED VIEW IF NOT EXISTS service_map_children_mv TO service_map_children AS\nSELECT\n          OrgId,\n          toDateTime(Timestamp) AS Timestamp,\n          TraceId,\n          ParentSpanId,\n          ServiceName,\n          SpanKind,\n          Duration,\n          StatusCode,\n          TraceState,\n          coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS DeploymentEnv\n        FROM traces\n        WHERE SpanKind IN ('Server', 'Consumer')\n          AND ParentSpanId != ''",
 		"DROP VIEW IF EXISTS service_map_db_edges_hourly_mv",

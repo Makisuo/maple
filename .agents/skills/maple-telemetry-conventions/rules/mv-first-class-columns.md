@@ -104,7 +104,7 @@ Same pattern — extracts `DeploymentEnv` through `DEPLOYMENT_ENV_SQL`. See `mat
 
 Example: if you add a new MV column `HttpUserAgent` that extracts `SpanAttributes['http.user_agent']`, every service emitting spans **must** use `http.user_agent` as the attribute key. Don't have one service emit `http.user_agent` and another `userAgent` — only one will populate the column.
 
-Corollary: every MV here extracts `DeploymentEnv` through the shared `DEPLOYMENT_ENV_SQL` fragment (`packages/domain/src/tinybird/deployment-env-sql.ts`), which coalesces `deployment.environment.name` over the deprecated `deployment.environment`. A bare lookup on either key alone silently materializes an empty environment for half the instrumentation in the wild. See `rules/resource-attributes.md`.
+Corollary: every MV here extracts `DeploymentEnv` through the shared `DEPLOYMENT_ENV_SQL` fragment (`packages/domain/src/tinybird/semconv-renames.ts`), which coalesces `deployment.environment.name` over the deprecated `deployment.environment` — as `MESSAGING_DESTINATION_SQL` does for `messaging.destination(.name)` in the external-edge rollup. A bare lookup on either key alone silently materializes an empty environment for half the instrumentation in the wild. See `rules/resource-attributes.md`.
 
 ## When NOT to extract into a column
 

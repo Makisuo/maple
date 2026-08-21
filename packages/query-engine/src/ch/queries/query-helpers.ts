@@ -9,7 +9,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import type { ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ServiceOverviewSpans, Traces, TracesAggregatesHourly } from "../tables"
 import { MetricsSum, MetricsGauge, MetricsHistogram, MetricsExpHistogram } from "../tables"
-import { deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition, httpDisplaySpanName } from "../../traces-shared"
 import type { AttributeIndexMode } from "../../capabilities"
 

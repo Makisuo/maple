@@ -28,7 +28,7 @@ import {
 	matchOrIn,
 	type FacetOutput,
 } from "./query-helpers"
-import { deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { httpDisplaySpanName } from "../../traces-shared"
 import { CHNumber } from "../schema"
 

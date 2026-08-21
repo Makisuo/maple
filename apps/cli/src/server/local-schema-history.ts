@@ -88,9 +88,9 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 	}),
 	Object.freeze({
 		version: 10,
-		fingerprint: "c10dd07518c57e5d",
-		digest: "c10dd07518c57e5d2f7d3e973b4222e83a4818110c828b632fbb04a5995ba8cc",
-		manifestDigest: "3e98a402799a554c5424bbea4ba6a0e047bcc75bd5008a773a649e442cefda6a",
-		projectRevision: "45c9658ce6659cbf0607940b688d091c9477df786d31a9325a748db9c5b232e6",
+		fingerprint: "b10c1137fb63a6f3",
+		digest: "b10c1137fb63a6f3ebd4d44c37ed82d469d1e52ea483c03b3c5cc25399410bd1",
+		manifestDigest: "7c975d2547ccdedb55f5b5fe2360fa72a4e6b9b7fd1935611e257e207c5694fd",
+		projectRevision: "5b4c3a0d3aa0962b062689605ad5cf075f47403df04e851ce58133f16fc692e3",
 	}),
 ] as const)

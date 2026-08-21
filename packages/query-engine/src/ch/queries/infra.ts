@@ -18,7 +18,7 @@ import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-buil
 import { unionAll, type CHUnionQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
 import { CHNumber } from "../schema"
-import { deploymentEnvExpr } from "@maple/domain/tinybird/deployment-env-sql"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import type { FacetOutput } from "./query-helpers"
 
 const HOSTMETRIC_NAMES = [

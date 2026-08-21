@@ -63,8 +63,8 @@ import { join } from "node:path"
 
 describe("current local schema identity", () => {
 	it("matches the generated v10 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("c10dd07518c57e5d")
-		expect(SCHEMA_DIGEST).toBe("c10dd07518c57e5d2f7d3e973b4222e83a4818110c828b632fbb04a5995ba8cc")
+		expect(SCHEMA_FINGERPRINT).toBe("b10c1137fb63a6f3")
+		expect(SCHEMA_DIGEST).toBe("b10c1137fb63a6f3ebd4d44c37ed82d469d1e52ea483c03b3c5cc25399410bd1")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
@@ -188,7 +188,7 @@ describe("local migration registry", () => {
 			"local-0006-to-0007-error-service-version",
 			"local-0007-to-0008-apple-crash-frames",
 			"local-0008-to-0009-mv-sweep",
-			"local-0009-to-0010-deployment-environment-name",
+			"local-0009-to-0010-semconv-key-renames",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
