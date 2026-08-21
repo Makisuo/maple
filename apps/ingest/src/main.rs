@@ -3335,7 +3335,6 @@ async fn handle_signal(
         .instrument(span)
         .await;
     let duration = start.elapsed();
-    let duration_ms = duration_millis(duration);
 
     match result {
         Ok((response, item_count, org_id, decoded_bytes, metered_atomically)) => {
@@ -3357,10 +3356,6 @@ async fn handle_signal(
                     }
                 }
             }
-            info!(
-                status = status_code,
-                duration_ms, item_count, "Request processed"
-            );
             response
         }
         Err((error, error_kind)) => {
