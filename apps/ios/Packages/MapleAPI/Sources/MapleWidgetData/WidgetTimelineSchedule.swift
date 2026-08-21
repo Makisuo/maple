@@ -26,16 +26,45 @@ public enum WidgetTimelineSchedule {
 	/// hour old.
 	public static let offsetMinutes: [Int] = [0, 1, 2, 5, 10, 15, 20, 30, 45, 60, 90, 120]
 
-	/// One timeline request an hour. iOS meters those against the same budget as
-	/// the app's `reloadTimelines` calls, so this is the half of the budget the
-	/// widget spends on its own; see `WidgetPublisher` for the other half.
-	public static let refreshAfter: TimeInterval = 60 * 60
+	/// One timeline request roughly every three quarters of an hour.
+	///
+	/// **Deliberately not shortened now that the widget fetches for itself.**
+	/// The date in a `TimelineReloadPolicy` is a floor, not a promise: iOS grants
+	/// rebuilds from a budget derived from how often the widget is actually
+	/// looked at, and asking four times as often does not produce four times as
+	/// many. What it does produce is a widget that spends its whole allotment by
+	/// mid-afternoon and goes cold in the evening — which is exactly when an
+	/// on-call user needs it. Every granted rebuild now returns fresh data
+	/// instead of re-rendering what is already on screen; that is where the win
+	/// is, not in asking more often.
+	public static let refreshAfter: TimeInterval = 45 * 60
 
 	public static func entryDates(from date: Date) -> [Date] {
 		offsetMinutes.map { date.addingTimeInterval(Double($0) * 60) }
 	}
 
-	public static func refreshDate(from date: Date) -> Date {
-		date.addingTimeInterval(refreshAfter)
+	/// When to come back, given how the last fetches went.
+	///
+	/// A flat interval spends the same budget whether the widget is healthy or
+	/// permanently broken. A credential the app has to re-mint answers 401 on
+	/// every attempt, and without a backoff those attempts are the entire day's
+	/// rebuilds — so a widget that cannot fix itself must stop asking so often
+	/// and let the app's own reload wake it when there is something to say.
+	///
+	/// The short retry sits at *one* failure, not at repeated ones: a single
+	/// miss is usually a tunnel or a dropped connection, and being back inside a
+	/// quarter of an hour is worth one rebuild.
+	public static func refreshDate(from date: Date, consecutiveFailures: Int = 0) -> Date {
+		date.addingTimeInterval(refreshInterval(consecutiveFailures: consecutiveFailures))
+	}
+
+	public static func refreshInterval(consecutiveFailures: Int) -> TimeInterval {
+		switch consecutiveFailures {
+		case ..<1: refreshAfter
+		case 1: 15 * 60
+		case 2: 30 * 60
+		case 3: 60 * 60
+		default: 4 * 60 * 60
+		}
 	}
 }

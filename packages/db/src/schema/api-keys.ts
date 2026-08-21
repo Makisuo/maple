@@ -17,7 +17,10 @@ export const apiKeys = pgTable(
 		metadataJson: jsonb("metadata_json").$type<unknown>(),
 		// v2 scope strings ("<family>:read"/"<family>:write"/"*"); null = legacy full access.
 		scopes: jsonb("scopes").$type<string[]>(),
-		kind: text("kind", { enum: ["standard", "mcp"] })
+		// `standard` is a human-minted org key; `mcp` is only valid for the MCP
+		// server; `device` is minted *for* a device by a signed-in app, with the
+		// server choosing its scopes, TTL, and roles — see ApiKeysService.
+		kind: text("kind", { enum: ["standard", "mcp", "device"] })
 			.notNull()
 			.default("standard"),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),

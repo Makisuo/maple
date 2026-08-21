@@ -99,6 +99,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"DELETE /v2/mobile_devices/{token}",
 			"DELETE /v2/mobile_devices/{token}/live_activities/{incident_id}",
 			"DELETE /v2/scrape_targets/{id}",
+			"DELETE /v2/widget_credentials/{installation_id}",
 			"GET /v2/alerts/deliveries",
 			"GET /v2/alerts/destinations",
 			"GET /v2/alerts/destinations/{id}",
@@ -155,6 +156,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/session_replays/{id}/transcript",
 			"GET /v2/traces/{trace_id}",
 			"GET /v2/traces/{trace_id}/spans/{span_id}",
+			"GET /v2/widget_summary",
 			"PATCH /v2/alerts/destinations/{id}",
 			"PATCH /v2/alerts/rules/{id}",
 			"PATCH /v2/anomalies/settings",
@@ -213,6 +215,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"PUT /v2/dashboards/{id}/widgets/{widget_id}/share",
 			"PUT /v2/mobile_devices/{token}",
 			"PUT /v2/mobile_devices/{token}/live_activities/{incident_id}",
+			"PUT /v2/widget_credentials/{installation_id}",
 		])
 	})
 

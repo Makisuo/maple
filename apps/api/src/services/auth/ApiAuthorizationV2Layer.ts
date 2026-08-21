@@ -82,9 +82,26 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 
 					if (Option.isSome(apiKeyResolved)) {
 						const resolved = apiKeyResolved.value
-						if (resolved.kind !== "standard") {
+						// Deny-list, not an allow-list: `mcp` keys are minted through a
+						// path that does not gate on organization admin, so they must
+						// never reach the public API. `device` keys are admitted
+						// because every ceiling they have — scopes, TTL, and the
+						// pinned roles below — is chosen by the server that minted
+						// them, not by whatever is holding them.
+						if (resolved.kind === "mcp") {
 							return yield* Effect.fail(
 								V2InvalidCredentials.make("This API key is only valid for the MCP server."),
+							)
+						}
+
+						// A device credential's authority is entirely its pinned
+						// roles, and `apiKeyDefaultRoles` below is `root`. A device
+						// row that reaches here without them is not a key with a
+						// permissive default — it is a key whose defining property
+						// is missing, so it is rejected rather than promoted.
+						if (resolved.kind === "device" && resolved.roles === null) {
+							return yield* Effect.fail(
+								V2InvalidCredentials.make("This device credential is not valid."),
 							)
 						}
 

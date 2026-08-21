@@ -1,4 +1,5 @@
 import Foundation
+import MapleWidgetData
 import OpenAPIRuntime
 import OpenAPIURLSession
 
@@ -151,6 +152,11 @@ public protocol MapleAPI: Sendable {
 	// Telemetry — see MapleClient+Telemetry.swift
 	func traceTimeseries(_ request: TraceTimeseriesRequest) async throws -> TraceTimeseriesResult
 	func traceBreakdown(_ request: TraceBreakdownRequest) async throws -> TraceBreakdownResult
+
+	// Home Screen widgets — see MapleClient+WidgetSummary.swift
+	func widgetSummary() async throws -> WidgetSummaryPayload
+	func mintWidgetCredential(installationId: String) async throws -> WidgetCredential
+	func revokeWidgetCredential(installationId: String) async throws
 }
 
 extension MapleAPI {
@@ -163,7 +169,7 @@ extension MapleAPI {
 public struct MapleClient: MapleAPI {
 	let client: Client
 	private let tokens: any MapleTokenProvider
-	private let serverURL: URL
+	let serverURL: URL
 	private let transport: any ClientTransport
 	/// Shared with every client `scoped(to:)` produces, so a widget fetch for
 	/// one organization still dedupes against a foreground fetch for another
