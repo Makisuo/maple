@@ -19,6 +19,7 @@ import {
 import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Badge } from "@maple/ui/components/ui/badge"
+import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
@@ -102,6 +103,54 @@ function groupByEnvironment(services: ServiceOverview[]): [string, ServiceOvervi
 		if (pa !== pb) return pa - pb
 		return a.localeCompare(b)
 	})
+}
+
+type ServicesGroupBy = "namespace" | "environment"
+
+/** Sentinel group key for rows without a `service.namespace`; sorted last. */
+const NO_NAMESPACE = ""
+
+/**
+ * Namespace mode is double-grouped: namespace headers at the top level, the
+ * familiar environment groups nested inside each — so a namespace's services
+ * still read production-first.
+ */
+function groupByNamespace(services: ServiceOverview[]): [string, [string, ServiceOverview[]][]][] {
+	const groups = new Map<string, ServiceOverview[]>()
+	for (const service of services) {
+		const ns = service.serviceNamespace || NO_NAMESPACE
+		if (!groups.has(ns)) groups.set(ns, [])
+		groups.get(ns)!.push(service)
+	}
+	return Array.from(groups.entries())
+		.toSorted(([a], [b]) => {
+			if (a === NO_NAMESPACE) return 1
+			if (b === NO_NAMESPACE) return -1
+			return a.localeCompare(b)
+		})
+		.map(([ns, nsServices]) => [ns, groupByEnvironment(nsServices)])
+}
+
+/**
+ * Unset `groupBy` in the URL means auto: group by namespace as soon as the
+ * displayed rows carry any `service.namespace` (the semconv grouping
+ * dimension), else fall back to the environment grouping every org has.
+ */
+function resolveGroupBy(explicit: ServicesGroupBy | undefined, services: ServiceOverview[]): ServicesGroupBy {
+	if (explicit !== undefined) return explicit
+	return services.some((service) => service.serviceNamespace !== "") ? "namespace" : "environment"
+}
+
+const serviceCountLabel = (count: number) => `${count} ${count === 1 ? "service" : "services"}`
+
+function NamespaceHeaderLabel({ namespace }: { namespace: string }) {
+	return namespace === NO_NAMESPACE ? (
+		<Badge variant="secondary" className="text-muted-foreground">
+			No namespace
+		</Badge>
+	) : (
+		<Badge variant="secondary">{namespace}</Badge>
+	)
 }
 
 function truncateCommitSha(sha: string, length = 7): string {
@@ -379,6 +428,8 @@ interface ServiceRowProps {
 	filters: ServicesSearchParams | undefined
 	health: ServiceHealth | undefined
 	baseline: LatencyBaselineSignal | undefined
+	/** Line under the service name — the dimension the table is NOT grouped by. */
+	subtitle: string
 	navigate: ReturnType<typeof useNavigate>
 }
 
@@ -388,6 +439,7 @@ const ServiceRow = React.memo(function ServiceRow({
 	filters,
 	health,
 	baseline,
+	subtitle,
 	navigate,
 }: ServiceRowProps) {
 	const throughputData = React.useMemo(
@@ -434,9 +486,7 @@ const ServiceRow = React.memo(function ServiceRow({
 					<span className="min-w-0 truncate">{service.serviceName}</span>
 					<HealthDot health={health} />
 				</Link>
-				{service.serviceNamespace ? (
-					<div className="truncate text-xs text-muted-foreground">{service.serviceNamespace}</div>
-				) : null}
+				{subtitle !== "" && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
 			</TableCell>
 			<TableCell className="hidden lg:table-cell text-xs">
 				<LatencyValue ms={service.p50LatencyMs} scale="p50" />
@@ -565,6 +615,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 				startTime: effectiveStartTime,
 				endTime: effectiveEndTime,
 				environments: filters?.environments,
+				namespaces: filters?.namespaces,
 				commitShas: filters?.commitShas,
 			},
 		}),
@@ -576,6 +627,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 				startTime: effectiveStartTime,
 				endTime: effectiveEndTime,
 				environments: filters?.environments,
+				namespaces: filters?.namespaces,
 				commitShas: filters?.commitShas,
 			},
 		}),
@@ -591,6 +643,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 		startTime: effectiveStartTime,
 		endTime: effectiveEndTime,
 		environments: filters?.environments,
+		namespaces: filters?.namespaces,
 		commitShas: filters?.commitShas,
 	})
 
@@ -622,7 +675,19 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 				? overviewResponse.data.filter((service) => healthFor(service) === healthFilter)
 				: overviewResponse.data
 
-			const groups = groupByEnvironment(services)
+			const hasNamespaces = services.some((service) => service.serviceNamespace !== "")
+			const groupBy = resolveGroupBy(filters?.groupBy, services)
+			// One shape for both modes: namespace mode nests environment groups
+			// under each namespace; environment mode is a single anonymous outer
+			// group whose header is skipped.
+			const groups: [string, [string, ServiceOverview[]][]][] =
+				groupBy === "namespace"
+					? groupByNamespace(services)
+					: [[NO_NAMESPACE, groupByEnvironment(services)]]
+			// In namespace mode both dimensions live in the group headers; in
+			// environment mode the namespace still needs a line under the name.
+			const subtitleFor = (service: ServiceOverview) =>
+				groupBy === "namespace" ? "" : service.serviceNamespace
 
 			// Tally over the DISPLAYED rows so the footer agrees with the table
 			// under active filters.
@@ -648,6 +713,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 						baseline={baselineMap?.get(
 							baselineKey(service.serviceName, service.serviceNamespace, service.environment),
 						)}
+						subtitle={subtitleFor(service)}
 						navigate={navigate}
 					/>
 				)
@@ -658,6 +724,32 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 					<div
 						className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}
 					>
+						{/* Offered only when the org actually emits `service.namespace` —
+						    without namespaces the environment grouping is the only one
+						    that says anything. */}
+						{hasNamespaces && (
+							<div className="flex items-center justify-end">
+								<ToggleGroup
+									value={[groupBy]}
+									onValueChange={(values) => {
+										const next = values.find((value) => value !== groupBy)
+										if (next === "namespace" || next === "environment") {
+											navigate({
+												to: "/services",
+												search: (prev) => ({ ...prev, groupBy: next }),
+											})
+										}
+									}}
+									variant="outline"
+									size="sm"
+									aria-label="Group services by"
+									className="shrink-0"
+								>
+									<ToggleGroupItem value="namespace">Namespace</ToggleGroupItem>
+									<ToggleGroupItem value="environment">Environment</ToggleGroupItem>
+								</ToggleGroup>
+							</div>
+						)}
 						{/* Desktop: full metrics table. Below md the fixed-width columns and
 				    in-cell sparklines force horizontal scroll, so we swap to a list. */}
 						<div className="hidden md:block rounded-md border overflow-auto">
@@ -692,24 +784,55 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 											</TableCell>
 										</TableRow>
 									) : (
-										groups.map(([environment, envServices]) => (
-											<React.Fragment key={environment}>
-												<TableRow className="bg-muted/30 hover:bg-muted/30">
-													<TableCell colSpan={7} className="py-2">
-														<div className="flex items-center gap-2">
-															<EnvironmentBadge environment={environment} />
-															<span className="text-xs text-muted-foreground">
-																{envServices.length}{" "}
-																{envServices.length === 1
-																	? "service"
-																	: "services"}
-															</span>
-														</div>
-													</TableCell>
-												</TableRow>
-												{envServices.map(rowFor)}
-											</React.Fragment>
-										))
+										groups.map(([namespace, envGroups]) => {
+											const namespaceCount = envGroups.reduce(
+												(sum, [, envServices]) => sum + envServices.length,
+												0,
+											)
+											return (
+												<React.Fragment key={namespace}>
+													{groupBy === "namespace" && (
+														<TableRow className="bg-muted/50 hover:bg-muted/50">
+															<TableCell colSpan={7} className="py-2">
+																<div className="flex items-center gap-2">
+																	<NamespaceHeaderLabel
+																		namespace={namespace}
+																	/>
+																	<span className="text-xs text-muted-foreground">
+																		{serviceCountLabel(namespaceCount)}
+																	</span>
+																</div>
+															</TableCell>
+														</TableRow>
+													)}
+													{envGroups.map(([environment, envServices]) => (
+														<React.Fragment key={environment}>
+															<TableRow className="bg-muted/30 hover:bg-muted/30">
+																<TableCell colSpan={7} className="py-2">
+																	<div
+																		className={cn(
+																			"flex items-center gap-2",
+																			groupBy === "namespace" && "pl-4",
+																		)}
+																	>
+																		<EnvironmentBadge
+																			environment={environment}
+																		/>
+																		<span className="text-xs text-muted-foreground">
+																			{envServices.length}{" "}
+																			{envServices.length === 1
+																				? "service"
+																				: "services"}
+																		</span>
+																	</div>
+																</TableCell>
+															</TableRow>
+															{envServices.map(rowFor)}
+														</React.Fragment>
+													))}
+												</React.Fragment>
+											)
+										})
 									)}
 								</TableBody>
 							</Table>
@@ -723,75 +846,105 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 									No services found
 								</div>
 							) : (
-								groups.map(([environment, envServices]) => (
-									<div key={environment}>
-										<div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2">
-											<EnvironmentBadge environment={environment} />
-											<span className="text-xs text-muted-foreground">
-												{envServices.length}{" "}
-												{envServices.length === 1 ? "service" : "services"}
-											</span>
-										</div>
-										{envServices.map((service: ServiceOverview) => {
-											const health = healthFor(service)
-											return (
-												<Link
-													key={`${service.serviceName}-${service.serviceNamespace}-${service.environment}`}
-													to="/services/$serviceName"
-													params={{ serviceName: service.serviceName }}
-													search={serviceDetailSearch(filters, service.environment)}
-													className="flex min-h-11 items-center justify-between gap-3 border-b px-3 py-2.5 last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+								groups.map(([namespace, envGroups]) => (
+									<div key={namespace}>
+										{groupBy === "namespace" && (
+											<div className="flex items-center gap-2 border-b bg-muted/50 px-3 py-2">
+												<NamespaceHeaderLabel namespace={namespace} />
+												<span className="text-xs text-muted-foreground">
+													{serviceCountLabel(
+														envGroups.reduce(
+															(sum, [, envServices]) =>
+																sum + envServices.length,
+															0,
+														),
+													)}
+												</span>
+											</div>
+										)}
+										{envGroups.map(([environment, envServices]) => (
+											<div key={environment}>
+												<div
+													className={cn(
+														"flex items-center gap-2 border-b bg-muted/30 px-3 py-2",
+														groupBy === "namespace" && "pl-6",
+													)}
 												>
-													<div className="min-w-0 flex-1">
-														<div className="flex items-center gap-1.5 text-sm font-medium text-primary">
-															<ServiceDot serviceName={service.serviceName} />
-															<span className="truncate">
-																{service.serviceName}
-															</span>
-															<HealthDot health={health} />
-														</div>
-														{service.serviceNamespace ? (
-															<div className="truncate text-xs text-muted-foreground">
-																{service.serviceNamespace}
-															</div>
-														) : null}
-														<div className="mt-1 flex items-center gap-3 font-mono text-xs tabular-nums">
-															<span>
-																<span className="text-muted-foreground/60">
-																	P99{" "}
-																</span>
-																<LatencyValue
-																	ms={service.p99LatencyMs}
-																	scale="p99"
-																/>
-															</span>
-															<span>
-																<span className="text-muted-foreground/60">
-																	Thru{" "}
-																</span>
-																<span className="text-foreground">
-																	{service.hasSampling ? "~" : ""}
-																	{formatThroughput(service.throughput)}
-																</span>
-															</span>
-														</div>
-													</div>
-													<div className="shrink-0 text-right">
-														<div
-															className={cn(
-																"font-mono text-sm font-semibold tabular-nums",
-																errorRateToneClass(service.errorRate),
+													<EnvironmentBadge environment={environment} />
+													<span className="text-xs text-muted-foreground">
+														{envServices.length}{" "}
+														{envServices.length === 1 ? "service" : "services"}
+													</span>
+												</div>
+												{envServices.map((service: ServiceOverview) => {
+													const health = healthFor(service)
+													return (
+														<Link
+															key={`${service.serviceName}-${service.serviceNamespace}-${service.environment}`}
+															to="/services/$serviceName"
+															params={{ serviceName: service.serviceName }}
+															search={serviceDetailSearch(
+																filters,
+																service.environment,
 															)}
+															className="flex min-h-11 items-center justify-between gap-3 border-b px-3 py-2.5 last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
 														>
-															{formatErrorRate(service.errorRate)}
-														</div>
-														<div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
-															err
-														</div>
-													</div>
-												</Link>
-											)
-										})}
+															<div className="min-w-0 flex-1">
+																<div className="flex items-center gap-1.5 text-sm font-medium text-primary">
+																	<ServiceDot
+																		serviceName={service.serviceName}
+																	/>
+																	<span className="truncate">
+																		{service.serviceName}
+																	</span>
+																	<HealthDot health={health} />
+																</div>
+																{subtitleFor(service) !== "" && (
+																	<div className="truncate text-xs text-muted-foreground">
+																		{subtitleFor(service)}
+																	</div>
+																)}
+																<div className="mt-1 flex items-center gap-3 font-mono text-xs tabular-nums">
+																	<span>
+																		<span className="text-muted-foreground/60">
+																			P99{" "}
+																		</span>
+																		<LatencyValue
+																			ms={service.p99LatencyMs}
+																			scale="p99"
+																		/>
+																	</span>
+																	<span>
+																		<span className="text-muted-foreground/60">
+																			Thru{" "}
+																		</span>
+																		<span className="text-foreground">
+																			{service.hasSampling ? "~" : ""}
+																			{formatThroughput(
+																				service.throughput,
+																			)}
+																		</span>
+																	</span>
+																</div>
+															</div>
+															<div className="shrink-0 text-right">
+																<div
+																	className={cn(
+																		"font-mono text-sm font-semibold tabular-nums",
+																		errorRateToneClass(service.errorRate),
+																	)}
+																>
+																	{formatErrorRate(service.errorRate)}
+																</div>
+																<div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+																	err
+																</div>
+															</div>
+														</Link>
+													)
+												})}
+											</div>
+										))}
 									</div>
 								))
 							)}

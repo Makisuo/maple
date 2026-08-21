@@ -44,6 +44,7 @@ import {
 	DB_STATEMENT_SQL,
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
+import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
 import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
 
 /**
@@ -272,7 +273,7 @@ export const serviceMapSpansMv = defineMaterializedView("service_map_spans_mv", 
           Duration,
           StatusCode,
           TraceState,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer', 'Server', 'Consumer')
       `,
@@ -302,7 +303,7 @@ export const serviceOverviewSpansMv = defineMaterializedView("service_overview_s
           Duration,
           StatusCode,
           TraceState,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ResourceAttributes['deployment.commit_sha'] AS CommitSha,
           SampleRate,
           ResourceAttributes['service.namespace'] AS ServiceNamespace
@@ -329,7 +330,7 @@ export const serviceOverviewHourlyMv = defineMaterializedView("service_overview_
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ResourceAttributes['service.namespace'] AS ServiceNamespace,
           ResourceAttributes['deployment.commit_sha'] AS CommitSha,
           count() AS SpanCount,
@@ -375,7 +376,7 @@ export const serviceOverviewMinutelyMv = defineMaterializedView("service_overvie
           OrgId,
           toStartOfMinute(toDateTime(Timestamp)) AS Minute,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ResourceAttributes['service.namespace'] AS ServiceNamespace,
           ResourceAttributes['deployment.commit_sha'] AS CommitSha,
           count() AS SpanCount,
@@ -423,7 +424,7 @@ export const serviceMapChildrenMv = defineMaterializedView("service_map_children
           Duration,
           StatusCode,
           TraceState,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv
         FROM traces
         WHERE SpanKind IN ('Server', 'Consumer')
           AND ParentSpanId != ''
@@ -501,7 +502,7 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
           ServiceName,
           ${DB_SYSTEM_ATTR_SQL} AS DbSystem,
           ${DB_NAMESPACE_ATTR_SQL} AS DbNamespace,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           count() AS CallCount,
           countIf(StatusCode = 'Error') AS ErrorCount,
           sum(Duration / 1000000) AS DurationSumMs,
@@ -546,7 +547,7 @@ export const serviceMapDbQuerySignaturesHourlyMv = defineMaterializedView(
           ServiceName,
           ${DB_SYSTEM_ATTR_SQL} AS DbSystem,
           ${DB_NAMESPACE_ATTR_SQL} AS DbNamespace,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ${DB_QUERY_KEY_SQL} AS QueryKey,
           any(substring(${DB_QUERY_LABEL_SQL}, 1, 220)) AS QueryLabel,
           any(substring(${DB_STATEMENT_SQL}, 1, 1000)) AS SampleStatement,
@@ -595,18 +596,18 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', 'messaging',
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '', 'messaging',
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', 'rpc',
             'http'
           ) AS TargetType,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', SpanAttributes['rpc.system'],
             ''
           ) AS TargetSystem,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '',
-              if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']),
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '',
+              if(${MESSAGING_DESTINATION_SQL} != '', ${MESSAGING_DESTINATION_SQL}, SpanAttributes['messaging.system']),
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '',
               if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']),
             if(SpanAttributes['server.address'] != '',
@@ -615,7 +616,7 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
                 SpanAttributes['http.host'],
                 SpanAttributes['url.authority']))
           ) AS TargetName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           count() AS CallCount,
           countIf(StatusCode = 'Error') AS ErrorCount,
           sum(Duration / 1000000) AS DurationSumMs,
@@ -629,7 +630,7 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
                SpanAttributes['server.address'] != ''
             OR SpanAttributes['http.host'] != ''
             OR SpanAttributes['url.authority'] != ''
-            OR SpanAttributes['messaging.destination'] != ''
+            OR ${MESSAGING_DESTINATION_SQL} != ''
             OR SpanAttributes['messaging.system'] != ''
             OR SpanAttributes['rpc.service'] != ''
             OR SpanAttributes['rpc.system'] != ''
@@ -659,7 +660,7 @@ export const servicePlatformsHourlyMv = defineMaterializedView("service_platform
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           max(ResourceAttributes['k8s.cluster.name']) AS K8sCluster,
           max(ResourceAttributes['k8s.pod.name']) AS K8sPodName,
           max(ResourceAttributes['k8s.deployment.name']) AS K8sDeploymentName,
@@ -841,7 +842,7 @@ const errorEventsSelectSql = `
           SpanId,
           ParentSpanId,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           _exType AS ExceptionType,
           _exMsg AS ExceptionMessage,
           _exStack AS ExceptionStacktrace,
@@ -988,7 +989,7 @@ export const traceListMvMv = defineMaterializedView("trace_list_mv_mv", {
           if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) AS HttpMethod,
           if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], if(SpanAttributes['url.path'] != '', SpanAttributes['url.path'], SpanAttributes['http.target'])) AS HttpRoute,
           if(SpanAttributes['http.status_code'] != '', SpanAttributes['http.status_code'], SpanAttributes['http.response.status_code']) AS HttpStatusCode,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           toUInt8(
             StatusCode = 'Error'
             OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500)
@@ -1403,7 +1404,7 @@ export const tracesAggregatesHourlyMv = defineMaterializedView("traces_aggregate
           SpanKind,
           StatusCode,
           IsEntryPoint,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           sum(SampleRate) AS WeightedCount,
           sum(toFloat64(Duration) * SampleRate) AS WeightedDurationSum,
           sumIf(SampleRate, StatusCode = 'Error') AS WeightedErrorCount,
@@ -1434,7 +1435,7 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
           OrgId,
           toStartOfMinute(toDateTime(Timestamp)) AS Minute,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ${NORMALIZED_SPAN_NAME_SQL} AS SpanName,
           count() AS SpanCount,
           sum(SampleRate) AS EstimatedSpanCount,
@@ -1497,7 +1498,7 @@ export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_ho
           toStartOfHour(TimestampTime) AS Hour,
           ServiceName,
           SeverityText,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           count() AS Count,
           sum(length(Body) + 200) AS SizeBytes,
           ResourceAttributes['service.namespace'] AS ServiceNamespace

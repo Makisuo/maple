@@ -191,7 +191,11 @@ export function AnomalyTimeseriesChart({
 				scale: scaleLinear().domain(yDomain),
 				axis: { line: false, ticks: { size: 0, padding: 8, format: valueFormatter } },
 			},
-			margin: { top: 8, right: 8, bottom: 0, left: 70 },
+			// `bottom` is left unset: an authored side is a hard lock, and `bottom: 0`
+			// (carried over from Recharts, which sized the axis separately) clipped
+			// the x tick labels out and halved the y axis's "0". Unset, the frame
+			// measures the labels and reserves their height.
+			margin: { top: 8, right: 8, left: 70 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),

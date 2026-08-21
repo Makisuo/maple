@@ -18,12 +18,17 @@ import {
  * this grid needs the rule between its two rows at every width. The classes are
  * otherwise `StatRail`'s exactly.
  *
- * The 4-up break is held to `lg` rather than `md`: eight tiles carrying a value,
- * a delta and a sparkline truncate their labels at tablet width where four do
- * not.
+ * The 4-up break is a *container* query, not a viewport one: with both sidebars
+ * open the content column can be ~512px narrower than the viewport, and a
+ * viewport `lg:` flipped to four columns inside a space that fits two. 880px is
+ * the honest budget — each tile carries `px-5`, a no-wrap value ("12m 45s" at
+ * 26px mono is ~110px), a `w-24` spark slot and the gaps, ~220px apiece.
  */
 const GRID =
-	"grid grid-cols-2 divide-x divide-y divide-border overflow-hidden rounded-md border bg-card lg:grid-cols-4"
+	"grid grid-cols-2 divide-x divide-y divide-border overflow-hidden rounded-md border bg-card @min-[880px]/page:grid-cols-4"
+
+/** Tighter tile chrome once the 2-col grid leaves each tile under ~260px. */
+const TILE_NARROW = "@max-[560px]/page:px-4 @max-[560px]/page:py-3"
 
 interface AnalyticsMetricStripProps {
 	source: AnalyticsMetricSource
@@ -104,6 +109,8 @@ function MetricTile({
 			disabled={!available}
 			onSelect={() => onSelect(metric.key)}
 			delay={delay}
+			className={TILE_NARROW}
+			valueClassName="@max-[560px]/page:text-[22px]"
 		/>
 	)
 }
@@ -146,7 +153,7 @@ export function AnalyticsMetricStripLoading() {
 	return (
 		<div className={GRID}>
 			{ANALYTICS_METRICS.map((metric) => (
-				<div key={metric.key} className="px-5 py-4">
+				<div key={metric.key} className={cn("px-5 py-4", TILE_NARROW)}>
 					<Skeleton className="h-3 w-20" />
 					<div className="mt-3 flex items-end justify-between gap-3">
 						<Skeleton className="h-7 w-20" />

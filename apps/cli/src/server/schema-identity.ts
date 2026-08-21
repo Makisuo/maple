@@ -8,6 +8,7 @@ import schemaV6Sql from "./schema/local-schema-v6.sql" with { type: "text" }
 import schemaV7Sql from "./schema/local-schema-v7.sql" with { type: "text" }
 import schemaV8Sql from "./schema/local-schema-v8.sql" with { type: "text" }
 import schemaV9Sql from "./schema/local-schema-v9.sql" with { type: "text" }
+import schemaV10Sql from "./schema/local-schema-v10.sql" with { type: "text" }
 import { schemaDigest as digestSchema, schemaFingerprint as fingerprintSchema } from "./store-version"
 import { buildLocalSchemaManifest, type LocalSchemaManifest } from "./schema-manifest"
 import { LOCAL_SCHEMA_VERSION } from "./local-schema-version"
@@ -31,7 +32,7 @@ export const LEGACY_SCHEMA_PROJECT_REVISION =
 export const LEGACY_SCHEMA_FINGERPRINT = "428701854f9fd30e"
 
 export const CURRENT_SCHEMA_PROJECT_REVISION =
-	"3773cd0bfa79483773ada07c70c9fa5571688ceecfb1fd5839c33c4251b7f979"
+	"5b4c3a0d3aa0962b062689605ad5cf075f47403df04e851ce58133f16fc692e3"
 /** Revision recorded by the issue-297 recovery report. The refreshed upstream
  * generator currently emits CURRENT_SCHEMA_PROJECT_REVISION; the structural
  * fingerprint is the compatibility identity used by the migration. */
@@ -46,7 +47,7 @@ export const LOCAL_SCHEMA_MANIFEST_DIGEST = LOCAL_SCHEMA_MANIFEST.digest
  * Immutable per-version DDL and manifest snapshots.
  *
  * A historical edge must keep constructing and verifying the schema it was
- * written for: when v9 ships, v7 -> v8 must still produce v8 rather than
+ * written for: when v10 ships, v8 -> v9 must still produce v9 rather than
  * silently retargeting whatever the generator currently emits. The SQL is
  * imported literally because Bun resolves text imports statically; everything
  * derived from it is built once, here.
@@ -61,6 +62,7 @@ const SNAPSHOT_SQL: ReadonlyArray<string> = [
 	schemaV7Sql,
 	schemaV8Sql,
 	schemaV9Sql,
+	schemaV10Sql,
 ]
 
 export interface LocalSchemaSnapshot {
@@ -112,6 +114,9 @@ export const LOCAL_SCHEMA_V8_MANIFEST_DIGEST = snapshotAt(8).manifestDigest
 export const LOCAL_SCHEMA_V9_SQL = snapshotAt(9).sql
 export const LOCAL_SCHEMA_V9_MANIFEST = snapshotAt(9).manifest
 export const LOCAL_SCHEMA_V9_MANIFEST_DIGEST = snapshotAt(9).manifestDigest
+export const LOCAL_SCHEMA_V10_SQL = snapshotAt(10).sql
+export const LOCAL_SCHEMA_V10_MANIFEST = snapshotAt(10).manifest
+export const LOCAL_SCHEMA_V10_MANIFEST_DIGEST = snapshotAt(10).manifestDigest
 
 export interface LocalSchemaIdentity {
 	readonly version: number
@@ -125,7 +130,7 @@ export interface LocalSchemaIdentity {
 /**
  * Per-version identities, frozen and read straight from the append-only
  * history. Historical migration edges must never point at
- * CURRENT_LOCAL_SCHEMA: when v9 ships, v0 -> v1 must still construct and verify
+ * CURRENT_LOCAL_SCHEMA: when v10 ships, v0 -> v1 must still construct and verify
  * v1 rather than silently changing its destination.
  */
 const identityAt = (version: number): LocalSchemaIdentity => {
@@ -151,6 +156,7 @@ export const LOCAL_SCHEMA_V6 = identityAt(6)
 export const LOCAL_SCHEMA_V7 = identityAt(7)
 export const LOCAL_SCHEMA_V8 = identityAt(8)
 export const LOCAL_SCHEMA_V9 = identityAt(9)
+export const LOCAL_SCHEMA_V10 = identityAt(10)
 
 export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = Object.freeze({
 	version: LOCAL_SCHEMA_VERSION,

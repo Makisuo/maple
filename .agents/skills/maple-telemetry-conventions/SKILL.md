@@ -21,7 +21,7 @@ Reference for the **language-agnostic** OpenTelemetry conventions Maple uses acr
 
 - `rules/span-attributes.md` — Master reference of every custom attribute key Maple emits, grouped by namespace, with file:line citations.
 - `rules/status-and-kind.md` — Title Case status code rule (`Ok`/`Error`/`Unset`) and span kind conventions (`Server` / `Client` / `Internal`).
-- `rules/resource-attributes.md` — `service.*` identity, `deployment.environment.name` resolution order, the legacy `deployment.environment` dual-emit, and `maple_org_id`.
+- `rules/resource-attributes.md` — `service.*` identity, `deployment.environment.name` resolution order, the deprecated `deployment.environment` dual-emit and read-side coalesce, and `maple_org_id`.
 - `rules/language-bindings.md` — Parallel TypeScript / Rust / Python snippets that emit the same attribute keys.
 - `rules/mv-first-class-columns.md` — Which span and resource attributes Tinybird MVs pre-extract into columns (and the rule for adding new ones).
 - `rules/service-map-attribution.md` — Required span and resource attributes for the service map to render edges, runtime icons, and platform badges. Includes the canonical `peer.service` registry.
@@ -35,7 +35,7 @@ Reference for the **language-agnostic** OpenTelemetry conventions Maple uses acr
 | Vendor namespace | Custom attributes go under `maple.*`. Sub-namespaces: `maple.ingest.*`, `maple.cloudflare.*`. |
 | Standard semconv | Use OTel semconv keys verbatim: `service.name`, `http.request.method`, `db.system.name`, `error.type`. |
 | Org identity | `orgId` (camelCase) in TypeScript spans, `maple.org_id` (dotted) in Rust spans. Don't unify until MVs migrate. |
-| Deployment env | Dual-emit `deployment.environment` + `deployment.environment.name`. Keep both until MV `coalesce()` migration lands. |
+| Deployment env | Emit `deployment.environment.name` (we dual-emit the deprecated `deployment.environment` too). **Read** both via `DEPLOYMENT_ENV_SQL` / `deploymentEnvExpr` — never a bare map lookup. |
 | Warehouse SQL spans | Every span from `WarehouseQueryService.executeSql` carries `db.system.name`, `peer.service`, `db.query.text`, `db.query.fingerprint`, `db.duration_ms`, `result.rowCount`, `orgId`, `query.context`, `query.profile`. Legacy spans (pre 2026-06) use `db.statement*`/`db.system`; warehouse readers coalesce both. |
 | Service map | Outbound spans need `peer.service` (HTTP/RPC) or `db.system.name` (DB) on a `Client`/`Producer` span. Resource attrs need `process.runtime.name`, `cloud.platform`, `maple.sdk.type` for runtime icon + platform badge. See `rules/service-map-attribution.md`. |
 | Loop prevention | Never remove `HttpMiddleware.TracerDisabledWhen` (apps/api/src/app.ts:169-175) or the ingest loopback guard (apps/ingest/src/main.rs:499-514). |

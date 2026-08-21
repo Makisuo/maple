@@ -193,8 +193,10 @@ private struct ScreenSpanModifier: ViewModifier {
 				// win — it is what the session transcript is built from.
 				span?.end()
 				span = Maple.trackScreen(name)
+				Telemetry.Visit.began(name, span: span)
 			}
 			.onDisappear {
+				Telemetry.Visit.ended(name, span: span)
 				span?.end()
 				span = nil
 			}
@@ -211,7 +213,9 @@ private struct ScreenSpanModifier: ViewModifier {
 				// never reach `didEnterBackground`, so the span is still running and
 				// must not be replaced.
 				guard phase == .active, let current = span, current.hasEnded else { return }
+				Telemetry.Visit.ended(name, span: current)
 				span = Maple.trackScreen(name)
+				Telemetry.Visit.began(name, span: span)
 			}
 	}
 }
@@ -360,6 +364,42 @@ extension Telemetry {
 			pending?.span.setAttribute(Key.pushOrganizationSwitched, true)
 		}
 	}
+
+	/// The open `ui.screen` span for a screen, so a load can hang under the visit
+	/// that caused it.
+	///
+	/// `trackScreen` hands the span back but nothing carries it: the SDK starts it
+	/// without making it ambient, and rightly so — a span that lives for the whole
+	/// visit is not a scope anything can nest inside. The result was that every
+	/// `ui.screen` arrived as a childless root while the load it caused sat in a
+	/// trace of its own. Registering by name is the same shape `PushOpen` already
+	/// uses to parent a load to the tap that asked for it.
+	@MainActor
+	enum Visit {
+		private static var spans: [String: Span] = [:]
+
+		static func began(_ screen: String, span: Span?) {
+			guard let span else { return }
+			spans[screen] = span
+		}
+
+		static func ended(_ screen: String, span: Span?) {
+			guard let span, spans[screen] === span else { return }
+			spans.removeValue(forKey: screen)
+		}
+
+		/// A span the SDK closed behind our back — backgrounding closes every open
+		/// screen span — is not a parent: a child that starts after its parent ended
+		/// draws as a bar hanging outside the one above it.
+		static func parent(for screen: String) -> Span? {
+			guard let span = spans[screen] else { return nil }
+			guard !span.hasEnded else {
+				spans.removeValue(forKey: screen)
+				return nil
+			}
+			return span
+		}
+	}
 }
 
 // MARK: - Screen loads
@@ -387,7 +427,10 @@ extension Telemetry {
 		]
 		if let organizationId { attributes[Key.organizationId] = .string(organizationId) }
 
-		let state = await withParent(PushOpen.parent(for: screen)) {
+		// A tapped notification owns the story when there is one — tap → load →
+		// requests. Otherwise the visit does.
+		let parent = PushOpen.parent(for: screen) ?? Visit.parent(for: screen)
+		let state = await withParent(parent) {
 			await Telemetry.span(Name.screenLoad, attributes: attributes) { span in
 				let state = await body()
 				record(state, on: span)

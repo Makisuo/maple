@@ -596,6 +596,7 @@ function makeAllMetricsTimeseriesRequest(opts: {
 	serviceName?: ServiceName
 	rootSpansOnly?: boolean
 	environments?: ReadonlyArray<DeploymentEnvironment>
+	namespaces?: ReadonlyArray<ServiceNamespace>
 	commitShas?: ReadonlyArray<CommitSha>
 	groupBy?: string[]
 }) {
@@ -612,6 +613,7 @@ function makeAllMetricsTimeseriesRequest(opts: {
 				serviceName: opts.serviceName,
 				rootSpansOnly: opts.rootSpansOnly ?? true,
 				environments: opts.environments,
+				namespaces: opts.namespaces,
 				commitShas: opts.commitShas,
 			},
 			bucketSeconds: opts.bucketSeconds,
@@ -953,6 +955,7 @@ const GetCustomChartServiceSparklinesInputSchema = Schema.Struct({
 	startTime: Schema.optional(dateTimeString),
 	endTime: Schema.optional(dateTimeString),
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 	commitShas: Schema.optional(Schema.mutable(Schema.Array(CommitSha))),
 })
 
@@ -987,6 +990,7 @@ const getCustomChartServiceSparklinesEffect = Effect.fn("QueryEngine.getCustomCh
 			bucketSeconds,
 			rootSpansOnly: true,
 			environments: input.environments,
+			namespaces: input.namespaces,
 			commitShas: input.commitShas,
 			groupBy: ["service"] as string[],
 		}

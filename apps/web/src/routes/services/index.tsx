@@ -22,8 +22,13 @@ const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
 const servicesSearchSchema = Schema.Struct({
 	environments: OptionalStringArrayParam,
+	namespaces: OptionalStringArrayParam,
 	commitShas: OptionalStringArrayParam,
 	health: Schema.optional(Schema.Literals(["healthy", "degraded", "unhealthy"])),
+	// Table grouping mode. Unset = auto: group by namespace when the displayed
+	// rows carry any `service.namespace`, else by environment. Render-only —
+	// must never be part of an atom input.
+	groupBy: Schema.optional(Schema.Literals(["namespace", "environment"])),
 	...TimeRangeSearchFields,
 })
 
@@ -51,6 +56,7 @@ export function servicesRouteAtoms(search: ServicesSearchParams) {
 		startTime,
 		endTime,
 		environments: search.environments,
+		namespaces: search.namespaces,
 		commitShas: search.commitShas,
 	}
 

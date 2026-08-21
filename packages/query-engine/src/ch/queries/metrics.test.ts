@@ -40,7 +40,9 @@ describe("metricsTimeseriesQuery", () => {
 		// scope reads the resource-attribute map directly.
 		const q = metricsTimeseriesQuery({ metricType: "sum", environments: ["production"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')",
+		)
 	})
 
 	it("omits the environment predicate when no environments are selected", () => {
@@ -253,7 +255,9 @@ describe("metricsTimeseriesRateQuery", () => {
 	it("applies an environment filter in the CTE", () => {
 		const q = metricsTimeseriesRateQuery({ environments: ["production", "staging"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production', 'staging')",
+		)
 	})
 
 	it("falls back to raw metrics_sum when an environment filter is set", () => {
