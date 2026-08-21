@@ -26,8 +26,8 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
 use axum::extract::Query;
 use axum::extract::State;
-use axum::http::header::{HeaderName, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::header::{HeaderName, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, RETRY_AFTER};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -1021,23 +1021,248 @@ impl Drop for OrgInFlightPermit {
     }
 }
 
+/// Public error envelope, matching the shape every other Maple HTTP surface
+/// emits (`docs/api-v2.md#errors`).
+///
+/// The gateway used to answer with a bare `{"error": "<sentence>"}`, so a client
+/// had nothing to branch on and no way to tell a retryable queue stall from a
+/// permanent server bug. `_tag` is the stable semantic identity (the wire
+/// counterpart of an Effect `Schema.TaggedError` tag), `type`/`code` are
+/// presentation categories, `title`/`message` are safe copy, and
+/// `retryable`/`recovery`/`retry_after_seconds` say what to do next without
+/// parsing prose.
 #[derive(Serialize)]
 struct ErrorBody {
-    error: String,
+    error: PublicError,
 }
+
+#[derive(Serialize)]
+struct PublicError {
+    #[serde(rename = "_tag")]
+    tag: &'static str,
+    r#type: &'static str,
+    code: &'static str,
+    title: &'static str,
+    message: String,
+    retryable: bool,
+    recovery: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_after_seconds: Option<u64>,
+}
+
+/// The identity half of an `ApiError`: everything about a failure that is fixed
+/// at compile time, so a tag can never drift from its code, copy, or retry
+/// semantics. Internal cause strings (WAL paths, upstream bodies, driver
+/// messages) are deliberately *not* here — they stay on the span and in the
+/// handler's log line, per `docs/api-v2.md#errors`.
+#[derive(Clone, Copy, Debug)]
+struct FailureKind {
+    tag: &'static str,
+    code: &'static str,
+    title: &'static str,
+    recovery: &'static str,
+    retryable: bool,
+    /// Stable `error.type` span/metric label. The status-derived kinds keep the
+    /// existing vocabulary; explicitly named failures narrow it.
+    error_kind: &'static str,
+    retry_after_seconds: Option<u64>,
+}
+
+impl FailureKind {
+    /// Generic fallback for the many call sites that only have a status and a
+    /// sentence. Named failures below are preferred for anything a client or a
+    /// dashboard needs to tell apart.
+    fn for_status(status: StatusCode) -> &'static Self {
+        match status {
+            StatusCode::UNAUTHORIZED => &INGEST_UNAUTHORIZED,
+            StatusCode::BAD_REQUEST => &INGEST_BAD_REQUEST,
+            StatusCode::PAYMENT_REQUIRED => &INGEST_PLAN_LIMIT_REACHED,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE => &INGEST_UNSUPPORTED_MEDIA_TYPE,
+            StatusCode::PAYLOAD_TOO_LARGE => &INGEST_PAYLOAD_TOO_LARGE,
+            StatusCode::TOO_MANY_REQUESTS => &INGEST_RATE_LIMITED,
+            StatusCode::SERVICE_UNAVAILABLE => &INGEST_SERVICE_UNAVAILABLE,
+            _ => &INGEST_INTERNAL_ERROR,
+        }
+    }
+}
+
+static INGEST_UNAUTHORIZED: FailureKind = FailureKind {
+    tag: "@maple/ingest/Unauthorized",
+    code: "ingest_unauthorized",
+    title: "Ingest key rejected",
+    recovery: "reauthenticate",
+    retryable: false,
+    error_kind: "auth",
+    retry_after_seconds: None,
+};
+
+static INGEST_BAD_REQUEST: FailureKind = FailureKind {
+    tag: "@maple/ingest/BadRequest",
+    code: "ingest_bad_request",
+    title: "Malformed ingest request",
+    recovery: "fix_request",
+    retryable: false,
+    error_kind: "bad_request",
+    retry_after_seconds: None,
+};
+
+static INGEST_PLAN_LIMIT_REACHED: FailureKind = FailureKind {
+    tag: "@maple/ingest/PlanLimitReached",
+    code: "ingest_plan_limit_reached",
+    title: "Ingestion blocked by plan limits",
+    recovery: "contact_support",
+    retryable: false,
+    error_kind: "billing",
+    retry_after_seconds: None,
+};
+
+static INGEST_UNSUPPORTED_MEDIA_TYPE: FailureKind = FailureKind {
+    tag: "@maple/ingest/UnsupportedMediaType",
+    code: "ingest_unsupported_media_type",
+    title: "Unsupported content type",
+    recovery: "fix_request",
+    retryable: false,
+    error_kind: "unsupported_media",
+    retry_after_seconds: None,
+};
+
+static INGEST_PAYLOAD_TOO_LARGE: FailureKind = FailureKind {
+    tag: "@maple/ingest/PayloadTooLarge",
+    code: "ingest_payload_too_large",
+    title: "Payload too large",
+    recovery: "fix_request",
+    retryable: false,
+    error_kind: "payload_too_large",
+    retry_after_seconds: None,
+};
+
+static INGEST_RATE_LIMITED: FailureKind = FailureKind {
+    tag: "@maple/ingest/RateLimited",
+    code: "ingest_rate_limited",
+    title: "Ingest rate limit reached",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "throttle",
+    retry_after_seconds: Some(1),
+};
+
+static INGEST_SERVICE_UNAVAILABLE: FailureKind = FailureKind {
+    tag: "@maple/ingest/ServiceUnavailable",
+    code: "ingest_unavailable",
+    title: "Ingest gateway unavailable",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "unavailable",
+    retry_after_seconds: Some(5),
+};
+
+static INGEST_INTERNAL_ERROR: FailureKind = FailureKind {
+    tag: "@maple/ingest/InternalError",
+    code: "ingest_internal_error",
+    title: "Ingest gateway error",
+    recovery: "contact_support",
+    retryable: false,
+    error_kind: "error",
+    retry_after_seconds: None,
+};
+
+/// The per-org byte budget is full: the caller's batch was refused, nothing was
+/// written, and the same batch will be accepted once the lane drains.
+static INGEST_THROTTLED: FailureKind = FailureKind {
+    tag: "@maple/ingest/OrgQueueThrottled",
+    code: "ingest_queue_throttled",
+    title: "Ingest queue full for this org",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "throttle",
+    retry_after_seconds: Some(1),
+};
+
+/// An export lane's channel is full — usually a slow downstream target (a
+/// customer's own ClickHouse) backing the lane up. Retryable, caller's data
+/// untouched, and deliberately *not* an error span (`otel_status_for_rejection`).
+static INGEST_BACKPRESSURE: FailureKind = FailureKind {
+    tag: "@maple/ingest/ExportLaneBackpressure",
+    code: "ingest_export_lane_full",
+    title: "Ingest export lane saturated",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "backpressure",
+    retry_after_seconds: Some(2),
+};
+
+/// The durable queue (WAL) could not take the batch — disk I/O, a full lane
+/// file, or a closed writer. Server fault, but the batch is safe to resend.
+static INGEST_QUEUE_UNAVAILABLE: FailureKind = FailureKind {
+    tag: "@maple/ingest/QueueUnavailable",
+    code: "ingest_queue_unavailable",
+    title: "Ingest queue unavailable",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "queue_unavailable",
+    retry_after_seconds: Some(5),
+};
+
+/// The decoded payload could not be encoded for the warehouse. This is a
+/// gateway bug or an unrepresentable record, not a transient condition —
+/// resending the identical batch fails the same way.
+static INGEST_ENCODE_FAILED: FailureKind = FailureKind {
+    tag: "@maple/ingest/PayloadEncodeFailed",
+    code: "ingest_encode_failed",
+    title: "Telemetry could not be encoded for storage",
+    recovery: "contact_support",
+    retryable: false,
+    error_kind: "encode",
+    retry_after_seconds: None,
+};
+
+/// The upstream collector answered with a 5xx, or its response could not be
+/// read. Distinct from a queue failure: nothing about the caller's batch is
+/// wrong and the forward is safe to repeat.
+static INGEST_COLLECTOR_UNAVAILABLE: FailureKind = FailureKind {
+    tag: "@maple/ingest/CollectorUnavailable",
+    code: "ingest_collector_unavailable",
+    title: "Upstream collector unavailable",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "collector_unavailable",
+    retry_after_seconds: Some(5),
+};
 
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
+    kind: &'static FailureKind,
     message: String,
+    /// Internal cause, kept off the wire. Recorded as the span's reject reason
+    /// so a 503 in the dashboard names the underlying I/O failure.
+    detail: Option<String>,
 }
 
 impl ApiError {
     fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,
+            kind: FailureKind::for_status(status),
             message: message.into(),
+            detail: None,
         }
+    }
+
+    /// Attach an explicit failure identity, replacing the status-derived one.
+    fn tagged(status: StatusCode, kind: &'static FailureKind, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            kind,
+            message: message.into(),
+            detail: None,
+        }
+    }
+
+    /// Internal cause for telemetry only — never serialized.
+    fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
     }
 
     fn unauthorized(message: impl Into<String>) -> Self {
@@ -1064,31 +1289,60 @@ impl ApiError {
         Self::new(StatusCode::SERVICE_UNAVAILABLE, message)
     }
 
-    /// Stable `error.type` label for this error, by HTTP status. Reuses the same
-    /// vocabulary as `handle_signal_inner` so the native replay/session handlers
-    /// produce categorizable spans instead of "Unknown Error".
+    /// Stable `error.type` label for this error. Reuses the same vocabulary as
+    /// `handle_signal_inner` so the native replay/session handlers produce
+    /// categorizable spans instead of "Unknown Error".
     fn error_kind(&self) -> &'static str {
+        self.kind.error_kind
+    }
+
+    /// What `maple.ingest.reject_reason` records: the safe message plus the
+    /// internal cause when there is one.
+    fn reason(&self) -> String {
+        match &self.detail {
+            Some(detail) => format!("{}: {detail}", self.message),
+            None => self.message.clone(),
+        }
+    }
+
+    /// v2 error `type`, the closed status-family vocabulary from
+    /// `docs/api-v2.md#errors`.
+    fn error_type(&self) -> &'static str {
         match self.status {
-            StatusCode::UNAUTHORIZED => "auth",
-            StatusCode::BAD_REQUEST => "bad_request",
-            StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported_media",
-            StatusCode::PAYLOAD_TOO_LARGE => "payload_too_large",
-            StatusCode::TOO_MANY_REQUESTS => "throttle",
-            StatusCode::SERVICE_UNAVAILABLE => "unavailable",
-            _ => "error",
+            StatusCode::UNAUTHORIZED => "authentication_error",
+            StatusCode::PAYMENT_REQUIRED => "payment_error",
+            StatusCode::FORBIDDEN => "permission_error",
+            StatusCode::NOT_FOUND => "not_found_error",
+            StatusCode::CONFLICT => "conflict_error",
+            StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
+            status if status.is_server_error() => "api_error",
+            _ => "invalid_request_error",
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            self.status,
-            axum::Json(ErrorBody {
-                error: self.message,
-            }),
-        )
-            .into_response()
+        let retry_after = self.kind.retry_after_seconds;
+        let body = ErrorBody {
+            error: PublicError {
+                tag: self.kind.tag,
+                r#type: self.error_type(),
+                code: self.kind.code,
+                title: self.kind.title,
+                message: self.message,
+                retryable: self.kind.retryable,
+                recovery: self.kind.recovery,
+                retry_after_seconds: retry_after,
+            },
+        };
+        let mut response = (self.status, axum::Json(body)).into_response();
+        if let Some(seconds) = retry_after {
+            if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            }
+        }
+        response
     }
 }
 
@@ -1194,16 +1448,43 @@ fn record_grpc_outcome<T>(span: &Span, result: &Result<tonic::Response<T>, tonic
 /// variant to 503).
 fn api_error_from_pipeline(error: &PipelineError) -> ApiError {
     match error {
-        PipelineError::Throttled(_) => {
-            ApiError::too_many_requests("Ingest queue full for org, retry shortly")
-        }
-        PipelineError::Backpressure(_) => {
-            ApiError::too_many_requests("Ingest export lane full, retry shortly")
-        }
-        PipelineError::QueueUnavailable(_) | PipelineError::Encode(_) => {
-            ApiError::service_unavailable("Telemetry backend unavailable")
-        }
+        PipelineError::Throttled(detail) => ApiError::tagged(
+            StatusCode::TOO_MANY_REQUESTS,
+            &INGEST_THROTTLED,
+            "This org's ingest queue is at capacity. No data was written; resend this batch after the suggested delay.",
+        )
+        .with_detail(*detail),
+        PipelineError::Backpressure(detail) => ApiError::tagged(
+            StatusCode::TOO_MANY_REQUESTS,
+            &INGEST_BACKPRESSURE,
+            "The export lane for this org is saturated. No data was written; resend this batch after the suggested delay.",
+        )
+        .with_detail(*detail),
+        PipelineError::QueueUnavailable(detail) => ApiError::tagged(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &INGEST_QUEUE_UNAVAILABLE,
+            "Maple could not durably queue this batch. No data was written; resend it after the suggested delay.",
+        )
+        .with_detail(detail.clone()),
+        PipelineError::Encode(detail) => ApiError::tagged(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &INGEST_ENCODE_FAILED,
+            "Maple could not encode this batch for storage. Resending the same payload will fail again — contact support with this request's trace id.",
+        )
+        .with_detail(detail.clone()),
     }
+}
+
+/// A forward to the upstream collector could not be completed. `message` is the
+/// safe, caller-facing sentence; `detail` is the internal cause, which stays on
+/// the span and out of the response body.
+fn collector_unavailable(message: &'static str, detail: impl Into<String>) -> ApiError {
+    ApiError::tagged(
+        StatusCode::SERVICE_UNAVAILABLE,
+        &INGEST_COLLECTOR_UNAVAILABLE,
+        message,
+    )
+    .with_detail(detail)
 }
 
 /// Resolve the deployment environment in maple's canonical priority order.
@@ -2411,7 +2692,7 @@ async fn handle_replay_meta(
                 &span_handle,
                 status,
                 error.error_kind(),
-                error.message.as_str(),
+                error.reason().as_str(),
             );
             error.into_response()
         }
@@ -2612,7 +2893,7 @@ async fn handle_session_events(
                 &span_handle,
                 status,
                 error.error_kind(),
-                error.message.as_str(),
+                error.reason().as_str(),
             );
             error.into_response()
         }
@@ -2779,7 +3060,7 @@ async fn handle_replay_blob(
                 &span_handle,
                 status,
                 error.error_kind(),
-                error.message.as_str(),
+                error.reason().as_str(),
             );
             error.into_response()
         }
@@ -3086,7 +3367,7 @@ async fn handle_signal(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            record_rejection_reason(&span_handle, status, error_kind, error.message.as_str());
+            record_rejection_reason(&span_handle, status, error_kind, error.reason().as_str());
             metrics::request_completed(signal.path(), "error", error_kind, duration.as_secs_f64());
             error.into_response()
         }
@@ -3160,7 +3441,7 @@ async fn handle_cloudflare_logpush(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            record_rejection_reason(&span_handle, status, error_kind, error.message.as_str());
+            record_rejection_reason(&span_handle, status, error_kind, error.reason().as_str());
             metrics::request_completed("logs", "error", error_kind, duration.as_secs_f64());
             if error_kind == "auth" {
                 metrics::cloudflare_auth_failure("http_requests");
@@ -4260,7 +4541,10 @@ async fn forward_to_collector(
             url = %url,
             "Collector forwarding failed"
         );
-        ApiError::service_unavailable("Collector forwarding failed: transport error")
+        collector_unavailable(
+            "Maple could not reach the upstream collector. No data was stored; resend this batch after the suggested delay.",
+            error.to_string(),
+        )
     })?;
 
     let forward_duration = forward_start.elapsed();
@@ -4297,11 +4581,23 @@ async fn forward_to_collector(
             org_id = %resolved_key.org_id,
             "Collector returned error"
         );
-        return Err(ApiError::service_unavailable(
-            "Collector returned server error",
+        return Err(collector_unavailable(
+            "The upstream collector rejected this batch with a server error. No data was stored; resend it after the suggested delay.",
+            format!("collector responded {upstream_status_code}"),
         ));
     }
 
+    relay_collector_response(response, upstream_status_code, signal, resolved_key).await
+}
+
+/// Copy the collector's own (non-5xx) answer back to the caller verbatim, so an
+/// OTLP partial-success body reaches the SDK unchanged.
+async fn relay_collector_response(
+    response: reqwest::Response,
+    upstream_status_code: u16,
+    signal: Signal,
+    resolved_key: &ResolvedIngestKey,
+) -> Result<Response, ApiError> {
     let status = StatusCode::from_u16(upstream_status_code).unwrap_or(StatusCode::BAD_GATEWAY);
 
     let upstream_content_type = response.headers().get(CONTENT_TYPE).cloned();
@@ -4313,7 +4609,10 @@ async fn forward_to_collector(
             key_id = %resolved_key.key_id,
             "Failed reading collector response"
         );
-        ApiError::service_unavailable("Telemetry backend unavailable")
+        collector_unavailable(
+            "Maple could not read the upstream collector's response. The batch may or may not have been stored; resend it after the suggested delay.",
+            error.to_string(),
+        )
     })?;
 
     let mut response = Response::builder().status(status);
@@ -4323,7 +4622,13 @@ async fn forward_to_collector(
 
     response
         .body(axum::body::Body::from(upstream_body))
-        .map_err(|_| ApiError::service_unavailable("Telemetry backend unavailable"))
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Maple could not relay the upstream collector's response.",
+            )
+            .with_detail(error.to_string())
+        })
 }
 
 #[hotpath::measure]
@@ -5669,6 +5974,63 @@ mod tests {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "x").error_kind(),
             "error"
         );
+    }
+
+    #[tokio::test]
+    async fn api_error_body_uses_the_tagged_error_envelope() {
+        let response = api_error_from_pipeline(&PipelineError::QueueUnavailable(
+            "wal lane 46 is full".into(),
+        ))
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(RETRY_AFTER).unwrap(),
+            HeaderValue::from_static("5")
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: JsonValue = serde_json::from_slice(&body).unwrap();
+        let error = &body["error"];
+        assert_eq!(error["_tag"], "@maple/ingest/QueueUnavailable");
+        assert_eq!(error["type"], "api_error");
+        assert_eq!(error["code"], "ingest_queue_unavailable");
+        assert_eq!(error["retryable"], true);
+        assert_eq!(error["recovery"], "retry");
+        assert_eq!(error["retry_after_seconds"], 5);
+        // The internal cause is telemetry-only: it never reaches the wire.
+        assert!(!body.to_string().contains("wal lane 46"));
+    }
+
+    #[test]
+    fn pipeline_failures_carry_distinct_tags_and_retry_semantics() {
+        let queue = api_error_from_pipeline(&PipelineError::QueueUnavailable("wal closed".into()));
+        let encode = api_error_from_pipeline(&PipelineError::Encode("bad row".into()));
+
+        // Both are 503, but one is worth retrying and the other never is — the
+        // single "Telemetry backend unavailable" string said neither.
+        assert_eq!(queue.status, encode.status);
+        assert_ne!(queue.kind.tag, encode.kind.tag);
+        assert!(queue.kind.retryable);
+        assert!(!encode.kind.retryable);
+        assert_eq!(encode.kind.recovery, "contact_support");
+
+        // The cause survives on the span even though it is off the wire.
+        assert!(queue.reason().contains("wal closed"));
+    }
+
+    #[test]
+    fn pipeline_error_kinds_match_the_pipeline_vocabulary() {
+        for error in [
+            PipelineError::Throttled("x"),
+            PipelineError::Backpressure("x"),
+            PipelineError::QueueUnavailable("x".into()),
+            PipelineError::Encode("x".into()),
+        ] {
+            assert_eq!(api_error_from_pipeline(&error).error_kind(), error.kind());
+        }
     }
 
     #[test]
