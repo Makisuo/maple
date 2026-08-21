@@ -412,7 +412,7 @@ function BreakdownTable({
 				) : null}
 				<ColumnHead<SortKey>
 					label={columnLabel(dimension.noun)}
-					width="flex-1 min-w-0"
+					width="w-0 flex-1 min-w-0"
 					sortKey="name"
 					currentKey={sortKey}
 					dir={sortDir}
@@ -494,7 +494,7 @@ function BreakdownTable({
 									{index + 1}
 								</span>
 							) : null}
-							<span className="flex min-w-0 flex-1 items-center gap-2">
+							<span className="flex w-0 min-w-0 flex-1 items-center gap-2">
 								{icon ?? (hasIcons ? <span className="size-4 shrink-0" aria-hidden /> : null)}
 								<span
 									className={cn(

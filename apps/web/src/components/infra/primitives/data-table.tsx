@@ -157,6 +157,11 @@ function DataTableRoot({
 					className={cn("overflow-x-auto", scrolls && "overflow-y-auto overscroll-contain")}
 					style={scrolls ? { maxHeight } : undefined}
 				>
+					{/* `min-w-fit` is what lets fixed-width columns scroll sideways instead of
+					    squishing on a phone. It measures every row's intrinsic width, so the
+					    flexible label column must be `w-0 flex-1 min-w-…` — without `w-0` one
+					    long untruncated name sets the width of the whole table and pushes the
+					    numeric columns off the edge on a desktop card. */}
 					<div className="min-w-fit">{children}</div>
 				</div>
 			</div>

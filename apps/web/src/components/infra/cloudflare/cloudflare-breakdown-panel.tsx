@@ -346,7 +346,7 @@ function BreakdownTable({
 			stickySurfaceClass="bg-card"
 		>
 			<DataTable.Head>
-				{head(dimension.column, "key", "flex-1 min-w-[220px]")}
+				{head(dimension.column, "key", "w-0 flex-1 min-w-[220px]")}
 				{head("Requests", "requests", "w-[110px]")}
 				{head("Error rate", "errorRate", "w-[90px]")}
 				{head("Bandwidth", "bytes", "w-[90px]", "hidden md:flex")}
@@ -357,7 +357,7 @@ function BreakdownTable({
 				const selected = selectedValues.includes(row.key)
 				return (
 					<div key={row.key} className={ROW_CLASS} style={shareBar(row.share)}>
-						<div className="min-w-[220px] flex-1 truncate">
+						<div className="w-0 min-w-[220px] flex-1 truncate">
 							{interactive && onToggleFilter ? (
 								<button
 									type="button"

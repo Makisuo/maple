@@ -35,7 +35,7 @@ interface HostTableProps {
 function HostColumns({ sort }: { sort?: SortControls<SortKey> }) {
 	return (
 		<>
-			<ColumnHead<SortKey> label="Host" sortKey="hostName" {...sort} width="flex-1 min-w-[260px]" />
+			<ColumnHead<SortKey> label="Host" sortKey="hostName" {...sort} width="w-0 flex-1 min-w-[260px]" />
 			<ColumnHead label="Status" width="w-[88px]" />
 			<ColumnHead label="Usage" width="w-[200px]" />
 			<ColumnHead<SortKey>
@@ -64,7 +64,7 @@ export function HostTableLoading() {
 				<HostColumns />
 			</DataTable.Head>
 			<DataTable.SkeletonRows count={6}>
-				<div className="min-w-[260px] flex-1">
+				<div className="w-0 min-w-[260px] flex-1">
 					<Skeleton className="h-4 w-40" />
 					<Skeleton className="mt-1.5 h-3 w-32" />
 				</div>
@@ -96,7 +96,7 @@ export function HostTable({ hosts, waiting }: HostTableProps) {
 					params={{ hostName: host.hostName }}
 					className={ROW_LINK_CLASS}
 				>
-					<div className="min-w-[260px] flex-1">
+					<div className="w-0 min-w-[260px] flex-1">
 						<div className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 							{host.hostName}
 						</div>
