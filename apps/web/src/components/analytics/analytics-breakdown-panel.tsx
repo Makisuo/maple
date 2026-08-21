@@ -65,6 +65,11 @@ export interface BreakdownDimension {
 	 * icon follows from the name keep using `analyticsRowIcon`.
 	 */
 	readonly renderIcon?: (row: BreakdownRow) => ReactNode
+	/**
+	 * Column head for `views`, when the dimension carries it. Defaults to "Views";
+	 * the Events dimension ranks by firings and says so.
+	 */
+	readonly viewsLabel?: string
 }
 
 type SortKey = "name" | "count" | "views"
@@ -152,6 +157,7 @@ export function AnalyticsBreakdownPanel({
 	// have them, sessions otherwise — so the bar always tracks the number the
 	// rows are actually ordered by.
 	const hasViews = dimension.rows.some((row) => row.views !== undefined)
+	const viewsLabel = dimension.viewsLabel ?? "Views"
 
 	const rows = useMemo(() => {
 		const total = dimension.rows.reduce((sum, row) => sum + (hasViews ? (row.views ?? 0) : row.count), 0)
@@ -188,6 +194,7 @@ export function AnalyticsBreakdownPanel({
 		rows: sorted,
 		label,
 		hasViews,
+		viewsLabel,
 		hasIcons,
 		selected,
 		waiting,
@@ -257,8 +264,11 @@ export function AnalyticsBreakdownPanel({
 						<div className="flex flex-col gap-1 pe-8">
 							<DialogTitle className="text-base">{dimension.tab}</DialogTitle>
 							<DialogDescription>
-								Ranked by {hasViews ? "page views" : "sessions"} over the selected window.
-								Pick a row to filter the page.
+								Ranked by{" "}
+								{hasViews
+									? (dimension.viewsLabel?.toLowerCase() ?? "page views")
+									: "sessions"}{" "}
+								over the selected window. Pick a row to filter the page.
 							</DialogDescription>
 						</div>
 						<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
@@ -357,6 +367,7 @@ interface BreakdownTableProps {
 	rows: ReadonlyArray<BreakdownRow & { share: number }>
 	label: (name: string) => string
 	hasViews: boolean
+	viewsLabel: string
 	hasIcons: boolean
 	selected: string | undefined
 	waiting?: boolean
@@ -380,6 +391,7 @@ function BreakdownTable({
 	rows,
 	label,
 	hasViews,
+	viewsLabel,
 	hasIcons,
 	selected,
 	waiting,
@@ -420,7 +432,7 @@ function BreakdownTable({
 				/>
 				{hasViews ? (
 					<ColumnHead<SortKey>
-						label="Views"
+						label={viewsLabel}
 						width={ranked ? "w-16 sm:w-24" : "w-16"}
 						align="right"
 						sortKey="views"

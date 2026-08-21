@@ -285,6 +285,9 @@ const FILTER_CASES: ReadonlyArray<{ readonly label: string; readonly filters: CH
 	// narrow the page-view source through a subquery.
 	{ label: "replays-dimension", filters: { country: "DE" } },
 	{ label: "replays-dimension+path", filters: { country: "DE", pagePath: "/pricing" } },
+	// The event semi-join, alone and composed with a page filter.
+	{ label: "event", filters: { eventName: "signup_started" } },
+	{ label: "event+path", filters: { eventName: "signup_started", pagePath: "/pricing" } },
 	{
 		label: "all-dimensions",
 		filters: {
@@ -298,6 +301,7 @@ const FILTER_CASES: ReadonlyArray<{ readonly label: string; readonly filters: CH
 			language: "en-US",
 			utmSource: "twitter",
 			visitorType: "new",
+			eventName: "signup_started",
 		},
 	},
 ]
@@ -324,6 +328,10 @@ const QUERIES: ReadonlyArray<{
 	{
 		name: "webAnalyticsPages",
 		compile: (filters) => CH.compile(CH.webAnalyticsPagesQuery({ ...filters, limit: 100 }), window).sql,
+	},
+	{
+		name: "webAnalyticsEvents",
+		compile: (filters) => CH.compile(CH.webAnalyticsEventsQuery({ ...filters, limit: 100 }), window).sql,
 	},
 	{
 		name: "webAnalyticsBreakdowns",
