@@ -3,7 +3,7 @@ import { Result } from "@/lib/effect-atom"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { cn } from "@maple/ui/lib/utils"
 
-import type { WebAnalyticsBreakdowns } from "@/api/warehouse/web-analytics"
+import type { WebAnalyticsBreakdowns, WebAnalyticsEvent } from "@/api/warehouse/web-analytics"
 import type { QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	FilterSection,
@@ -32,6 +32,7 @@ import { browserIconFor, deviceIconFor } from "@/components/replays/session-icon
 
 interface AnalyticsFilterSidebarProps {
 	breakdownsResult: Result.Result<WebAnalyticsBreakdowns, QueryAtomFailure>
+	eventsResult: Result.Result<{ data: ReadonlyArray<WebAnalyticsEvent> }, QueryAtomFailure>
 	filters: AnalyticsFilters
 	onFilterChange: (key: AnalyticsFilterKey, value: string | undefined) => void
 	onClearFilters: () => void
@@ -60,6 +61,7 @@ const utmSourceIcon = (name: string) => (isHostLike(name) ? hostIcon(name) : nul
 
 export function AnalyticsFilterSidebar({
 	breakdownsResult,
+	eventsResult,
 	filters,
 	onFilterChange,
 	onClearFilters,
@@ -70,6 +72,11 @@ export function AnalyticsFilterSidebar({
 		.onSuccess((breakdowns, result) => (
 			<AnalyticsFilterSidebarView
 				breakdowns={breakdowns}
+				// Decorative beside the breakdowns: a slow or failed events query
+				// drops the Event section rather than blanking the whole sidebar.
+				events={Result.builder(eventsResult)
+					.onSuccess((rows) => rows.data)
+					.orElse(() => [])}
 				waiting={result.waiting}
 				filters={filters}
 				onFilterChange={onFilterChange}
@@ -81,12 +88,14 @@ export function AnalyticsFilterSidebar({
 
 function AnalyticsFilterSidebarView({
 	breakdowns,
+	events,
 	waiting,
 	filters,
 	onFilterChange,
 	onClearFilters,
 }: {
 	breakdowns: WebAnalyticsBreakdowns
+	events: ReadonlyArray<WebAnalyticsEvent>
 	waiting: boolean
 	filters: AnalyticsFilters
 	onFilterChange: (key: AnalyticsFilterKey, value: string | undefined) => void
@@ -146,6 +155,16 @@ function AnalyticsFilterSidebarView({
 					options={toOptions(breakdowns.entryPaths)}
 					{...single("pagePath")}
 				/>
+				{/* Counts are sessions that fired the event, matching every other count
+				    in this rail; firings live on the card. Hidden outright when nothing
+				    is tracked — an empty "Event" section would read as a broken filter. */}
+				{events.length > 0 || filters.eventName ? (
+					<SearchableFilterSection
+						title={FILTER_SECTION_LABEL_TEXT.eventName}
+						options={events.map((event) => ({ name: event.name, count: event.sessions }))}
+						{...single("eventName")}
+					/>
+				) : null}
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.referrerHost}
 					options={toOptions(breakdowns.referrerHosts)}

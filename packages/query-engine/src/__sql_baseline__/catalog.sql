@@ -1979,7 +1979,7 @@ SELECT
         LIMIT 2
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered  [81a04a1d]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered  [dd21e64d]
 SELECT
           if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
@@ -2007,6 +2007,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2038,6 +2047,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
           AND Country != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2070,6 +2088,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
           AND DeviceType != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2102,6 +2129,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
           AND BrowserName != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2134,6 +2170,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
           AND OsName != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2166,6 +2211,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
           AND Language != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2198,6 +2252,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2229,6 +2292,15 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2260,6 +2332,15 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmMedium = 'social'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2291,6 +2372,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
           AND EntryPath != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2323,6 +2413,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
           AND ExitPath != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2355,13 +2454,22 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
           AND Host != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered-rollup  [fd0344cd]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered-rollup  [99fac2d3]
 SELECT
           if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
@@ -2389,6 +2497,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2420,6 +2537,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
           AND Country != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2452,6 +2578,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
           AND DeviceType != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2484,6 +2619,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
           AND BrowserName != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2516,6 +2660,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
           AND OsName != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2548,6 +2701,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
           AND Language != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2580,6 +2742,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2611,6 +2782,15 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2642,6 +2822,15 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmMedium = 'social'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2673,6 +2862,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
           AND EntryPath != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2705,6 +2903,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
           AND ExitPath != ''
         GROUP BY name
         ORDER BY count DESC
@@ -2737,6 +2944,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
           AND Host != ''
         GROUP BY name
         ORDER BY count DESC
@@ -3051,6 +3267,120 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
+-- builder:web-analytics:webAnalyticsEventsQuery:default  [7a2203c7]
+SELECT
+          Message AS name,
+          count() AS events,
+          uniq(SessionId) AS sessions
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message != ''
+        GROUP BY name
+        ORDER BY events DESC
+        LIMIT 100
+        FORMAT JSON
+
+-- builder:web-analytics:webAnalyticsEventsQuery:default-rollup  [d3ea0b13]
+SELECT
+          EventName AS name,
+          count() AS events,
+          uniq(SessionId) AS sessions
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName != ''
+        GROUP BY name
+        ORDER BY events DESC
+        LIMIT 100
+        FORMAT JSON
+
+-- builder:web-analytics:webAnalyticsEventsQuery:semi-joined  [9f5b9302]
+SELECT
+          Message AS name,
+          count() AS events,
+          uniq(SessionId) AS sessions
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_replays
+        WHERE OrgId = 'org_sql_catalog'
+          AND StartTime >= '2026-01-01 10:30:00'
+          AND StartTime <= '2026-01-03 14:15:00'
+          AND Country = 'DE'
+        GROUP BY sessionId)
+          AND Message != ''
+        GROUP BY name
+        ORDER BY events DESC
+        LIMIT 100
+        FORMAT JSON
+
+-- builder:web-analytics:webAnalyticsEventsQuery:semi-joined-rollup  [ebdeba2a]
+SELECT
+          EventName AS name,
+          count() AS events,
+          uniq(SessionId) AS sessions
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_replays
+        WHERE OrgId = 'org_sql_catalog'
+          AND StartTime >= '2026-01-01 10:30:00'
+          AND StartTime <= '2026-01-03 14:15:00'
+          AND Country = 'DE'
+        GROUP BY sessionId)
+          AND EventName != ''
+        GROUP BY name
+        ORDER BY events DESC
+        LIMIT 100
+        FORMAT JSON
+
+-- builder:web-analytics:webAnalyticsEventsQuery:url-filtered  [8b46502c]
+SELECT
+          Message AS name,
+          count() AS events,
+          uniq(SessionId) AS sessions
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND domain(Url) = 'maple.dev'
+          AND Message != ''
+        GROUP BY name
+        ORDER BY events DESC
+        LIMIT 100
+        FORMAT JSON
+
+-- builder:web-analytics:webAnalyticsEventsQuery:url-filtered-rollup  [18968e6e]
+SELECT
+          EventName AS name,
+          count() AS events,
+          uniq(SessionId) AS sessions
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND Host = 'maple.dev'
+          AND EventName != ''
+        GROUP BY name
+        ORDER BY events DESC
+        LIMIT 100
+        FORMAT JSON
+
 -- builder:web-analytics:webAnalyticsPagesQuery:default  [ee65a1f8]
 SELECT
           domain(Url) AS host,
@@ -3273,7 +3603,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsSummaryQuery:filtered  [5b45919d]
+-- builder:web-analytics:webAnalyticsSummaryQuery:filtered  [5a9fc283]
 SELECT
           uniqIf(VisitorId, VisitorId != '') AS visitors,
           uniq(SessionId) AS sessions,
@@ -3305,9 +3635,18 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Type = 'custom'
+          AND Message = 'signup_started'
+        GROUP BY sessionId)
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsSummaryQuery:filtered-rollup  [3746231e]
+-- builder:web-analytics:webAnalyticsSummaryQuery:filtered-rollup  [b2b3770a]
 SELECT
           uniqIf(VisitorId, VisitorId != '') AS visitors,
           uniq(SessionId) AS sessions,
@@ -3339,6 +3678,15 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM web_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
         FORMAT JSON
 
 -- builder:web-analytics:webAnalyticsTimeseriesQuery:default  [bdbaa144]

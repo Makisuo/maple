@@ -79,6 +79,7 @@ const WEB_ANALYTICS_ALL_FILTERS = {
 	utmMedium: "social",
 	utmCampaign: "launch",
 	visitorType: "new",
+	eventName: "signup_started",
 } as const
 
 const webAnalyticsVariants = (
@@ -126,6 +127,25 @@ const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
 	),
 	...webAnalyticsVariants("webAnalyticsPagesQuery", "semi-joined", (useWebEvents) =>
 		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, country: "DE", useWebEvents }), window),
+	),
+	...webAnalyticsVariants("webAnalyticsEventsQuery", "default", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsEventsQuery({ limit: 100, useWebEvents }), window),
+	),
+	...webAnalyticsVariants("webAnalyticsEventsQuery", "url-filtered", (useWebEvents) =>
+		CH.compile(CH.webAnalyticsEventsQuery({ limit: 100, host: "maple.dev", useWebEvents }), window),
+	),
+	// `eventName` alongside a replays dimension: the replays semi-join must appear
+	// and the event's own filter must NOT — this is the breakdown it is picked from.
+	...webAnalyticsVariants("webAnalyticsEventsQuery", "semi-joined", (useWebEvents) =>
+		CH.compile(
+			CH.webAnalyticsEventsQuery({
+				limit: 100,
+				country: "DE",
+				eventName: "signup_started",
+				useWebEvents,
+			}),
+			window,
+		),
 	),
 	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "default", (useWebEvents) =>
 		CH.compileUnion(CH.webAnalyticsBreakdownsQuery({ useWebEvents }), window),

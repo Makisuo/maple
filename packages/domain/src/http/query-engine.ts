@@ -1181,6 +1181,8 @@ const WebAnalyticsFilterFields = {
 	utmMedium: Schema.optional(Schema.String),
 	utmCampaign: Schema.optional(Schema.String),
 	visitorType: Schema.optional(Schema.Literals(["new", "returning"])),
+	// Sessions in which a `track(eventName)` call fired.
+	eventName: Schema.optional(Schema.String),
 } as const
 
 export class WebAnalyticsSummaryRequest extends Schema.Class<WebAnalyticsSummaryRequest>(
@@ -1273,6 +1275,27 @@ export class WebAnalyticsPagesResponse extends Schema.Class<WebAnalyticsPagesRes
 			host: Schema.String,
 			pagePath: Schema.String,
 			pageViews: Schema.Number,
+			sessions: Schema.Number,
+		}),
+	),
+}) {}
+
+export class WebAnalyticsEventsRequest extends Schema.Class<WebAnalyticsEventsRequest>(
+	"WebAnalyticsEventsRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	limit: Schema.optional(Schema.Number),
+	...WebAnalyticsFilterFields,
+}) {}
+
+export class WebAnalyticsEventsResponse extends Schema.Class<WebAnalyticsEventsResponse>(
+	"WebAnalyticsEventsResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			name: Schema.String,
+			events: Schema.Number,
 			sessions: Schema.Number,
 		}),
 	),
@@ -2152,6 +2175,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("webAnalyticsPages", "/web-analytics-pages", {
 			payload: WebAnalyticsPagesRequest,
 			success: WebAnalyticsPagesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("webAnalyticsEvents", "/web-analytics-events", {
+			payload: WebAnalyticsEventsRequest,
+			success: WebAnalyticsEventsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)
