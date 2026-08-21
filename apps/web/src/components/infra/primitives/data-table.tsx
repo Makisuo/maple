@@ -154,10 +154,10 @@ function DataTableRoot({
 				aria-label={ariaLabel}
 			>
 				<div
-					className={cn(scrolls && "overflow-y-auto overscroll-contain")}
+					className={cn("overflow-x-auto", scrolls && "overflow-y-auto overscroll-contain")}
 					style={scrolls ? { maxHeight } : undefined}
 				>
-					{children}
+					<div className="min-w-fit">{children}</div>
 				</div>
 			</div>
 		</DataTableContext>
