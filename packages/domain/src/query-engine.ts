@@ -630,3 +630,17 @@ export class CompiledAlertQueryPlan extends Schema.Class<CompiledAlertQueryPlan>
 	sampleCountStrategy: Schema.NullOr(QueryEngineSampleCountStrategy),
 	noDataBehavior: QueryEngineNoDataBehavior,
 }) {}
+
+/**
+ * The value the web-analytics acquisition breakdowns (`referrerHost`, `utm*`)
+ * emit for a session whose column is empty — direct traffic for the referrer,
+ * an untagged visit for UTM — and the value a filter sends back to select that
+ * group.
+ *
+ * A sentinel rather than the raw `''` because the value has to survive a round
+ * trip as a filter through a URL search param, the HTTP payload and an MCP tool
+ * argument, and an empty string is dropped or defaulted at every one of those
+ * boundaries. Parenthesised so it cannot collide with a real hostname and reads
+ * as a marker wherever it shows up unlabelled.
+ */
+export const WEB_ANALYTICS_UNSET = "(none)"

@@ -1979,9 +1979,9 @@ SELECT
         LIMIT 2
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered  [1cbe5313]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered  [81a04a1d]
 SELECT
-          ReferrerHost AS name,
+          if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
           'referrerHost' AS facetType
         FROM session_replays
@@ -2007,7 +2007,6 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND ReferrerHost != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2173,7 +2172,7 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          UtmSource AS name,
+          if(UtmSource = '', '(none)', UtmSource) AS name,
           uniq(SessionId) AS count,
           'utmSource' AS facetType
         FROM session_replays
@@ -2199,13 +2198,12 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND UtmSource != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmMedium AS name,
+          if(UtmMedium = '', '(none)', UtmMedium) AS name,
           uniq(SessionId) AS count,
           'utmMedium' AS facetType
         FROM session_replays
@@ -2231,13 +2229,12 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND UtmMedium != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmCampaign AS name,
+          if(UtmCampaign = '', '(none)', UtmCampaign) AS name,
           uniq(SessionId) AS count,
           'utmCampaign' AS facetType
         FROM session_replays
@@ -2263,7 +2260,6 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmMedium = 'social'
           AND VisitorIsNew = 1
-          AND UtmCampaign != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2365,9 +2361,9 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered-rollup  [4fc9ae27]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered-rollup  [fd0344cd]
 SELECT
-          ReferrerHost AS name,
+          if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
           'referrerHost' AS facetType
         FROM session_replays
@@ -2393,7 +2389,6 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND ReferrerHost != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2559,7 +2554,7 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          UtmSource AS name,
+          if(UtmSource = '', '(none)', UtmSource) AS name,
           uniq(SessionId) AS count,
           'utmSource' AS facetType
         FROM session_replays
@@ -2585,13 +2580,12 @@ SELECT
           AND UtmMedium = 'social'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND UtmSource != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmMedium AS name,
+          if(UtmMedium = '', '(none)', UtmMedium) AS name,
           uniq(SessionId) AS count,
           'utmMedium' AS facetType
         FROM session_replays
@@ -2617,13 +2611,12 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmCampaign = 'launch'
           AND VisitorIsNew = 1
-          AND UtmMedium != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmCampaign AS name,
+          if(UtmCampaign = '', '(none)', UtmCampaign) AS name,
           uniq(SessionId) AS count,
           'utmCampaign' AS facetType
         FROM session_replays
@@ -2649,7 +2642,6 @@ SELECT
           AND UtmSource = 'twitter'
           AND UtmMedium = 'social'
           AND VisitorIsNew = 1
-          AND UtmCampaign != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2751,16 +2743,15 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:default  [7db200be]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:default  [49a69b46]
 SELECT
-          ReferrerHost AS name,
+          if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
           'referrerHost' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND ReferrerHost != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2831,40 +2822,37 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          UtmSource AS name,
+          if(UtmSource = '', '(none)', UtmSource) AS name,
           uniq(SessionId) AS count,
           'utmSource' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmSource != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmMedium AS name,
+          if(UtmMedium = '', '(none)', UtmMedium) AS name,
           uniq(SessionId) AS count,
           'utmMedium' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmMedium != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmCampaign AS name,
+          if(UtmCampaign = '', '(none)', UtmCampaign) AS name,
           uniq(SessionId) AS count,
           'utmCampaign' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmCampaign != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2909,16 +2897,15 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:default-rollup  [7db200be]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:default-rollup  [49a69b46]
 SELECT
-          ReferrerHost AS name,
+          if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
           'referrerHost' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND ReferrerHost != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
@@ -2989,40 +2976,37 @@ SELECT
         LIMIT 50
 UNION ALL
 SELECT
-          UtmSource AS name,
+          if(UtmSource = '', '(none)', UtmSource) AS name,
           uniq(SessionId) AS count,
           'utmSource' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmSource != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmMedium AS name,
+          if(UtmMedium = '', '(none)', UtmMedium) AS name,
           uniq(SessionId) AS count,
           'utmMedium' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmMedium != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
-          UtmCampaign AS name,
+          if(UtmCampaign = '', '(none)', UtmCampaign) AS name,
           uniq(SessionId) AS count,
           'utmCampaign' AS facetType
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND StartTime >= '2026-01-01 10:30:00'
           AND StartTime <= '2026-01-03 14:15:00'
-          AND UtmCampaign != ''
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50

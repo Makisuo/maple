@@ -33,7 +33,7 @@ import {
 	type AnalyticsMetricKey,
 	type AnalyticsMetricSource,
 } from "@/components/analytics/metrics"
-import { countryLabel, languageLabel } from "@/components/analytics/labels"
+import { countryLabel, languageLabel, referrerLabel, utmLabel } from "@/components/analytics/labels"
 import {
 	activeFilterChips,
 	analyticsFilterSearchFields,
@@ -389,8 +389,7 @@ function AnalyticsContent({
 							filterKey: "referrerHost",
 							noun: "referrer",
 							nounPlural: "referrers",
-							emptyMessage:
-								"No referrers recorded. Sessions with an empty referrer are excluded rather than bucketed as direct — an empty value also covers internal navigation and Referrer-Policy suppression.",
+							formatValue: referrerLabel,
 						},
 						{
 							tab: "UTM source",
@@ -398,6 +397,7 @@ function AnalyticsContent({
 							filterKey: "utmSource",
 							noun: "source",
 							nounPlural: "sources",
+							formatValue: utmLabel,
 						},
 						{
 							tab: "Medium",
@@ -405,6 +405,7 @@ function AnalyticsContent({
 							filterKey: "utmMedium",
 							noun: "medium",
 							nounPlural: "mediums",
+							formatValue: utmLabel,
 						},
 						{
 							tab: "Campaign",
@@ -412,6 +413,7 @@ function AnalyticsContent({
 							filterKey: "utmCampaign",
 							noun: "campaign",
 							nounPlural: "campaigns",
+							formatValue: utmLabel,
 						},
 					]
 
