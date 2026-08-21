@@ -6,6 +6,7 @@ import { formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-en
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
@@ -50,6 +51,14 @@ import {
 	webAnalyticsSummaryResultAtom,
 	webAnalyticsTimeseriesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
+import { AnalyticsFunnelsView } from "@/components/funnels/analytics-funnels-view"
+import {
+	funnelFromSearch,
+	funnelSearchFields,
+	funnelToSearch,
+	type AnalyticsView,
+	type FunnelDefinition,
+} from "@/components/funnels/definition"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -59,6 +68,9 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 const analyticsSearchSchema = Schema.Struct({
 	...analyticsFilterSearchFields,
 	...TimeRangeSearchFields,
+	// `view` picks Overview or Funnels; the funnel definition rides in the URL
+	// too so a funnel is a shareable link.
+	...funnelSearchFields,
 })
 
 const DEFAULT_PRESET = "7d"
@@ -101,14 +113,33 @@ function WebAnalyticsPage() {
 		onFilterChange(key, toggleFilterValue(filters[key], value))
 	}
 
+	// Clearing filters keeps the view and the funnel: those are what you are
+	// looking at, the filters are how narrowly.
 	const onClearFilters = () => {
 		navigate({
 			search: {
 				startTime: search.startTime,
 				endTime: search.endTime,
 				timePreset: search.timePreset,
+				view: search.view,
+				steps: search.steps,
+				keyBy: search.keyBy,
+				window: search.window,
+				breakdown: search.breakdown,
 			},
 		})
+	}
+
+	const view: AnalyticsView = search.view ?? "overview"
+	const onViewChange = (next: AnalyticsView) => {
+		navigate({ search: (prev) => ({ ...prev, view: next === "overview" ? undefined : next }) })
+	}
+
+	const funnel = funnelFromSearch(search)
+	// An edit per history entry would make Back useless while
+	// typing an event name, so definition edits replace the current entry.
+	const onFunnelChange = (definition: FunnelDefinition) => {
+		navigate({ replace: true, search: (prev) => ({ ...prev, ...funnelToSearch(definition) }) })
 	}
 
 	// Retained, not bare: the filters are part of every atom key, so each row click
@@ -148,7 +179,23 @@ function WebAnalyticsPage() {
 					</DashboardLayout.Filters>
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
-							<DashboardLayout.Header>
+							<DashboardLayout.Header
+								titleContent={
+									<ToggleGroup
+										value={[view]}
+										onValueChange={(values) => {
+											const next = values[0]
+											if (next === "overview" || next === "funnels") onViewChange(next)
+										}}
+										variant="outline"
+										size="sm"
+										aria-label="Analytics view"
+									>
+										<ToggleGroupItem value="overview">Overview</ToggleGroupItem>
+										<ToggleGroupItem value="funnels">Funnels</ToggleGroupItem>
+									</ToggleGroup>
+								}
+							>
 								<div className="flex flex-wrap items-center gap-2">
 									{/* The reciprocal of the Analytics button on Session Replays: this
 									    page aggregates the sessions that page plays back one at a time,
@@ -187,8 +234,12 @@ function WebAnalyticsPage() {
 						<DashboardLayout.Scroll>
 							<div className="space-y-6">
 								<PageHero
-									title="Web Analytics"
-									description="Who visited your sites, what they read, and where they came from — from the same browser SDK that records sessions."
+									title={view === "funnels" ? "Funnels" : "Web Analytics"}
+									description={
+										view === "funnels"
+											? "How many people made it from one step to the next — page views, track() events and server-side events, stitched per person."
+											: "Who visited your sites, what they read, and where they came from — from the same browser SDK that records sessions."
+									}
 									meta={
 										chips.length > 0 ? (
 											<div className="flex flex-wrap items-center gap-1.5">
@@ -213,14 +264,24 @@ function WebAnalyticsPage() {
 										) : undefined
 									}
 								/>
-								<AnalyticsContent
-									startTime={startTime}
-									endTime={endTime}
-									filters={filters}
-									breakdownsResult={breakdownsResult}
-									eventsResult={eventsResult}
-									onToggleFilter={onToggleFilter}
-								/>
+								{view === "funnels" ? (
+									<AnalyticsFunnelsView
+										startTime={startTime}
+										endTime={endTime}
+										filters={filters}
+										definition={funnel}
+										onDefinitionChange={onFunnelChange}
+									/>
+								) : (
+									<AnalyticsContent
+										startTime={startTime}
+										endTime={endTime}
+										filters={filters}
+										breakdownsResult={breakdownsResult}
+										eventsResult={eventsResult}
+										onToggleFilter={onToggleFilter}
+									/>
+								)}
 							</div>
 						</DashboardLayout.Scroll>
 					</DashboardLayout.Content>

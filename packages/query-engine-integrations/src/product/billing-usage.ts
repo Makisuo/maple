@@ -21,7 +21,7 @@
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { ServiceUsage, SessionReplays } from "@maple/query-engine/ch/tables"
+import { ProductEvents, ServiceUsage, SessionReplays } from "@maple/query-engine/ch/tables"
 import { CHNumber } from "@maple/query-engine/ch/schema"
 import { hourFloor } from "@maple/query-engine/ch/query-helpers"
 
@@ -102,6 +102,44 @@ export function dailySessionCountQuery() {
 			$.OrgId.eq(param.string("orgId")),
 			$.StartTime.gte(CH.toDateTime(param.dateTime("startTime"))),
 			$.StartTime.lte(CH.toDateTime(param.dateTime("endTime"))),
+		])
+		.groupBy("day")
+		.orderBy(["day", "asc"])
+		.format("JSON")
+}
+
+export interface DailyProductEventCountOutput {
+	readonly day: string
+	readonly events: number
+}
+
+export const dailyProductEventCountRowSchema: CompiledQueryRowSchema<DailyProductEventCountOutput> =
+	Schema.Struct({
+		day: Schema.String,
+		events: CHNumber,
+	})
+
+/**
+ * Per-UTC-day billable product events for one org.
+ *
+ * Mirrors what the ingest gateway meters as `product_events`: every directly
+ * posted row (`POST /v1/events`, `Kind` custom/screen) plus browser `track()`
+ * calls (`Kind = 'custom'` via `product_events_mv`). Page views are part of the
+ * session, billed under `browser_sessions`, so `Kind = 'navigation'` is
+ * excluded. `product_events` is PARTITION BY toDate(Timestamp) with Timestamp
+ * second in the sorting key, so the window predicate is a primary-index range.
+ */
+export function dailyProductEventCountQuery() {
+	return from(ProductEvents)
+		.select(($) => ({
+			day: CH.toStartOfInterval($.Timestamp, DAY_SECONDS),
+			events: CH.count(),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(CH.toDateTime(param.dateTime("startTime"))),
+			$.Timestamp.lte(CH.toDateTime(param.dateTime("endTime"))),
+			$.Kind.neq("navigation"),
 		])
 		.groupBy("day")
 		.orderBy(["day", "asc"])

@@ -17,7 +17,7 @@ import type {
 } from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
 import { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
-import type { QueryComparisonMode } from "@maple/query-model"
+import type { FunnelBreakdownBy, FunnelKeyBy, FunnelStep, QueryComparisonMode } from "@maple/query-model"
 import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } from "@maple/domain/where-clause"
 
@@ -89,7 +89,26 @@ export interface QueryBuilderWidgetState {
 	heatmapScaleType: HeatmapScaleType
 	// Markdown-specific: the note body. Static — never hits the warehouse.
 	markdownContent: string
+	/**
+	 * Funnel-specific: the product-event funnel definition. With one or more
+	 * steps the widget is fetched through the funnel endpoint and the query
+	 * builder is bypassed; with none it stays a group-by breakdown drawn as a
+	 * funnel, exactly as before.
+	 */
+	funnel: FunnelWidgetDraft
 }
+
+/** The funnel widget's editor state for its `display.funnel` definition block. */
+export interface FunnelWidgetDraft {
+	steps: FunnelStep[]
+	keyBy: FunnelKeyBy
+	windowSeconds: number
+	breakdownBy?: FunnelBreakdownBy
+}
+
+/** Whether the funnel state carries a definition the funnel endpoint can run. */
+export const hasFunnelSteps = (state: Pick<QueryBuilderWidgetState, "visualization" | "funnel">): boolean =>
+	state.visualization === "funnel" && state.funnel.steps.length > 0
 
 /**
  * What a panel type's `buildDataSource` is handed. `base` is the timeseries

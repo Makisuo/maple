@@ -37,7 +37,7 @@ const includedRun = (plan: CatalogPlan): string =>
 		.map((item) => {
 			const unit = featureUnit(item.featureId as string)
 			const amount = Number(item.included).toLocaleString()
-			return unit === "GB" ? `${amount} GB ${item.featureId}` : `${amount} sessions`
+			return unit === "GB" ? `${amount} GB ${item.featureId}` : `${amount} ${unit}`
 		})
 		.join(" · ")
 

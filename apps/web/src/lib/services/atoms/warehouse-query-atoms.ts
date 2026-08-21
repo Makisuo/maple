@@ -113,6 +113,11 @@ import {
 	getWebAnalyticsSummary,
 	getWebAnalyticsTimeseries,
 } from "@/api/warehouse/web-analytics"
+import {
+	getProductEventNames,
+	getProductEventsFunnel,
+	getProductEventsFunnelBreakdown,
+} from "@/api/warehouse/product-events"
 
 /**
  * The error union every warehouse server function fails with: the structured
@@ -279,6 +284,21 @@ export const webAnalyticsEventsResultAtom = makeQueryAtomFamily(getWebAnalyticsE
 
 export const webAnalyticsBreakdownsResultAtom = makeQueryAtomFamily(getWebAnalyticsBreakdowns, {
 	staleTime: 30_000,
+})
+
+// Product-event funnels share the analytics page and its 30s. The event-name
+// list backs the step builder's autocomplete and changes only when someone
+// ships a new `track()` call, so it can sit for a minute.
+export const productEventsFunnelResultAtom = makeQueryAtomFamily(getProductEventsFunnel, {
+	staleTime: 30_000,
+})
+
+export const productEventsFunnelBreakdownResultAtom = makeQueryAtomFamily(getProductEventsFunnelBreakdown, {
+	staleTime: 30_000,
+})
+
+export const productEventNamesResultAtom = makeQueryAtomFamily(getProductEventNames, {
+	staleTime: 60_000,
 })
 
 export const getReplayResultAtom = makeQueryAtomFamily(getReplay, {

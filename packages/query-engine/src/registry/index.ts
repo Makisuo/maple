@@ -10,4 +10,5 @@ export {
 	type TimeBucketQueryCachePolicy,
 } from "./query-definition"
 export * from "./logs"
+export { productEventsFunnelOpts } from "./product-events"
 export * as Queries from "./queries"

@@ -46,6 +46,7 @@ import {
 	CodeIcon,
 	ShieldIcon,
 	PlayRotateClockwiseIcon,
+	CursorPointerIcon,
 } from "@/components/icons"
 import type { IconComponent } from "@/components/icons"
 
@@ -54,6 +55,7 @@ const FEATURE_ICONS: Record<string, IconComponent> = {
 	traces: PulseIcon,
 	metrics: ChartLineIcon,
 	browser_sessions: PlayRotateClockwiseIcon,
+	product_events: CursorPointerIcon,
 } satisfies Record<string, IconComponent>
 
 // Display labels for the metered data rows, keyed by Autumn featureId (Autumn
@@ -64,6 +66,13 @@ const DATA_FEATURE_LABELS: Record<string, string> = {
 	traces: "Traces",
 	metrics: "Metrics",
 	browser_sessions: "Browser Sessions",
+	product_events: "Product Events",
+} satisfies Record<string, string>
+
+// Count-metered features and their plural unit — everything else is GB.
+const COUNT_UNITS: Record<string, string> = {
+	browser_sessions: "sessions",
+	product_events: "events",
 } satisfies Record<string, string>
 
 // Per-feature icons for the platform-feature rows, keyed by the `icon` strings
@@ -104,8 +113,7 @@ function getPlanPrice(plan: Plan): {
 function formatIncludedUsage(item: PlanItem): string {
 	if (item.unlimited) return "Unlimited"
 	if (item.included != null) {
-		// browser_sessions is metered by count, not bytes — everything else is GB.
-		const unit = item.featureId === "browser_sessions" ? "sessions" : "GB"
+		const unit = (item.featureId ? COUNT_UNITS[item.featureId] : undefined) ?? "GB"
 		return `${Number(item.included).toLocaleString()} ${unit}`
 	}
 	return ""
@@ -134,6 +142,7 @@ const ENTERPRISE_DATA_FEATURES = [
 	{ featureId: "traces", label: "Traces", value: "Custom" },
 	{ featureId: "metrics", label: "Metrics", value: "Custom" },
 	{ featureId: "browser_sessions", label: "Browser Sessions", value: "Custom" },
+	{ featureId: "product_events", label: "Product Events", value: "Custom" },
 ]
 
 function getScenario(plan: Plan): string {

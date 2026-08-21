@@ -26,6 +26,7 @@ import { migration_0017_error_service_version_columns } from "./0017_error_servi
 import { migration_0018_apple_crash_frames } from "./0018_apple_crash_frames"
 import { migration_0019_mv_sweep } from "./0019_mv_sweep"
 import { migration_0020_semconv_key_renames } from "./0020_semconv_key_renames"
+import { migration_0021_product_events } from "./0021_product_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -41,15 +42,15 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
 		])
-		expect(migrations.at(-1)).toBe(migration_0020_semconv_key_renames)
-		expect(latestMigrationVersion).toBe(20)
-		// 0010 and 0014-0020 are read-path only, so the ingest-gating version skips
-		// all eight and stays at 13 — nothing writes `web_events`,
-		// `service_overview_minutely` or `error_events` directly, and bumping it
-		// would un-ready every BYO-CH org's ingest routing for a read-path change.
-		expect(clickHouseSchemaVersion).toBe("13")
+		expect(migrations.at(-1)).toBe(migration_0021_product_events)
+		expect(latestMigrationVersion).toBe(21)
+		// 0010 and 0014-0020 are read-path only and skipped by the ingest-gating
+		// version; 0021 is not — the gateway writes `session_events`' new identity
+		// columns and `product_events` directly, so a BYO-CH org must apply it
+		// before ingest routes there again.
+		expect(clickHouseSchemaVersion).toBe("21")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
 		expect(migration_0015_service_overview_minutely.requiredForIngest).toBe(false)

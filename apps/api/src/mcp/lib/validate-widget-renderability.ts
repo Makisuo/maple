@@ -7,6 +7,7 @@ import {
 	type PanelType,
 } from "@maple/domain/http"
 import { dataSourceQuerySet, dataSourceRawSql, dataSourceTransform } from "@maple/widgets/dashboard"
+import { FUNNEL_MAX_STEPS } from "@maple/query-model"
 import { isGroupByRequested } from "./inspect-widget"
 
 type DashboardWidget = typeof DashboardWidgetSchema.Type
@@ -118,6 +119,33 @@ export const validateWidgetRenderability = (input: ValidateWidgetRenderabilityIn
 		fatal.push(
 			`\`panel_type: "${panelType}"\` renders a single number and needs a reduction. Add \`transform: { "reduceToValue": { "field": "value", "aggregate": "sum" } }\` to the data source. Valid aggregates: sum, first, count, avg, max, min — there is no \`last\`.`,
 		)
+	}
+
+	// A product-event funnel definition the query builder cannot compile. These
+	// are the same three rules `validate()` in `@maple/query-engine`'s
+	// `product-events.ts` enforces, and they have to run HERE, on the write, or
+	// the widget persists and then 400s on every render — signed-in and shared
+	// alike — with no way to repair it from the tool that created it. The
+	// /analytics view and the web widget builder both block on them already.
+	const funnelSteps = widget.display.funnel?.steps
+	if (funnelSteps !== undefined && funnelSteps.length > 0) {
+		if (funnelSteps.length > FUNNEL_MAX_STEPS) {
+			fatal.push(
+				`A product-event funnel has at most ${FUNNEL_MAX_STEPS} steps, but \`display_json.funnel.steps\` has ${funnelSteps.length}.`,
+			)
+		}
+		const lateSession = funnelSteps.findIndex((step, index) => index > 0 && step.kind === "session")
+		if (lateSession !== -1) {
+			fatal.push(
+				`A \`{ "kind": "session" }\` funnel step describes how the session was acquired, so it is only valid as step 1 — \`display_json.funnel.steps\` has one at step ${lateSession + 1}.`,
+			)
+		}
+		const windowSeconds = widget.display.funnel?.windowSeconds
+		if (windowSeconds !== undefined && (!Number.isFinite(windowSeconds) || windowSeconds <= 0)) {
+			fatal.push(
+				`\`display_json.funnel.windowSeconds\` is the conversion window and must be a positive number of seconds (got ${JSON.stringify(windowSeconds)}). Omit it to use the default 86400 (24h).`,
+			)
+		}
 	}
 
 	// --- warnings ----------------------------------------------------------

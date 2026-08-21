@@ -50,7 +50,7 @@ use maple_ingest::otel::{
 use maple_ingest::otlp_json;
 use maple_ingest::r2::{replay_object_key, ReplayBlobStore};
 use maple_ingest::session_analytics::{
-    derive_referrer_host, sanitize_session_event, sanitize_session_meta,
+    derive_referrer_host, sanitize_product_event, sanitize_session_event, sanitize_session_meta,
 };
 use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
@@ -331,6 +331,8 @@ impl AppConfig {
             .unwrap_or_else(|_| "session_replay_events".to_owned()),
             datasource_session_events: std::env::var("INGEST_TINYBIRD_DATASOURCE_SESSION_EVENTS")
                 .unwrap_or_else(|_| "session_events".to_owned()),
+            datasource_product_events: std::env::var("INGEST_TINYBIRD_DATASOURCE_PRODUCT_EVENTS")
+                .unwrap_or_else(|_| "product_events".to_owned()),
         };
         if write_mode.uses_tinybird() {
             tinybird.validate()?;
@@ -757,6 +759,87 @@ impl OrgRouting {
 /// spend-cap key, and the usage metric's `signal` dimension, and those three must
 /// never drift apart.
 const BROWSER_SESSIONS_FEATURE_ID: &str = "browser_sessions";
+
+/// The Autumn feature ID product events meter as — one unit per event, whether
+/// it arrived on `/v1/events` or as a `type == "custom"` row on
+/// `/v1/sessionEvents` (a browser `track()` call is the same product event as a
+/// server-side one; only the transport differs).
+const PRODUCT_EVENTS_FEATURE_ID: &str = "product_events";
+
+/// What a DENIED Autumn reservation means for the batch in flight.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OnDenied {
+    /// 402 the request: the metered feature IS the payload, so an exhausted
+    /// allowance is a reason not to accept it (session starts, `/v1/events`).
+    Reject,
+    /// Keep the batch and record the usage fail-open. For a feature that is only
+    /// PART of the payload — the `type == "custom"` rows of a session-events
+    /// batch — a rejection would also drop the clicks, navigations and errors
+    /// beside them, which is the incoherent outcome the `browser_sessions` gate
+    /// exists to avoid. Autumn also answers `allowed: false` for a customer that
+    /// simply has no balance for the feature yet (a plan item not pushed, or not
+    /// granted to a live subscription), so denial here must never break ingest.
+    MeterAnyway,
+}
+
+/// Meter `value` units of `feature_id` around a WAL enqueue: reserve through
+/// Autumn's atomic check+event lock, run `enqueue`, then confirm or release the
+/// lock. When Autumn could not reserve (disabled, unavailable, or denied under
+/// `OnDenied::MeterAnyway`) the quantity is recorded fail-open through the
+/// retrying tracker after the enqueue succeeds, so provider outages never drop
+/// data or usage. `value <= 0` meters nothing.
+///
+/// This is the one shape every count-metered handler uses (session starts on
+/// the metadata endpoint, product events on both event endpoints); keeping it in
+/// one place is what stops the reserve → enqueue → finalize ordering drifting
+/// between them.
+async fn metered_enqueue<T, F, Fut>(
+    state: &AppState,
+    org_id: &str,
+    feature_id: &'static str,
+    value: f64,
+    on_denied: OnDenied,
+    enqueue: F,
+) -> Result<T, ApiError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T, ApiError>>,
+{
+    // `reserve_autumn_usage` fails only on a denial (every other outcome is an
+    // `Ok(None)` fail-open), so swallowing the error here is exactly "denied".
+    let reservation = match reserve_autumn_usage(state, org_id, feature_id, value).await {
+        Ok(reservation) => reservation,
+        Err(error) => {
+            if on_denied == OnDenied::Reject {
+                return Err(error);
+            }
+            warn!(
+                org_id,
+                feature_id, value, "Autumn denied the reservation; metering fail-open"
+            );
+            None
+        }
+    };
+    let enqueue_result = enqueue().await;
+
+    if let (Some(entitlements), Some(reservation)) =
+        (&state.autumn_entitlements, reservation.as_ref())
+    {
+        let _ = entitlements
+            .finalize(reservation, enqueue_result.is_ok())
+            .await;
+    }
+    let accepted = enqueue_result?;
+
+    // Fail-open fallback: if Autumn could not reserve, record after the WAL
+    // commit through the retrying tracker.
+    if reservation.is_none() && org_id != SENTINEL_ORG_ID && value > 0.0 {
+        if let Some(tracker) = &state.autumn_tracker {
+            tracker.track(org_id, feature_id, value);
+        }
+    }
+    Ok(accepted)
+}
 
 /// The 402 Autumn's entitlement check produces for `feature_id`, or `None` when
 /// the org may ingest it.
@@ -2000,6 +2083,7 @@ async fn main() {
         .route("/v1/sessionReplays/meta", post(handle_replay_meta))
         .route("/v1/sessionReplays/blob", post(handle_replay_blob))
         .route("/v1/sessionEvents", post(handle_session_events))
+        .route("/v1/events", post(handle_product_events))
         .route(
             "/v1/logpush/cloudflare/http_requests/{connector_id}",
             post(handle_cloudflare_logpush_http_requests),
@@ -2800,49 +2884,29 @@ async fn handle_replay_meta_inner(
         reason = "a single request carries far fewer than 2^53 session starts"
     )]
     let billable_sessions = session_starts as f64;
-    let reservation = reserve_autumn_usage(
+    metered_enqueue(
         state,
         &org_id,
         BROWSER_SESSIONS_FEATURE_ID,
         billable_sessions,
+        OnDenied::Reject,
+        || async {
+            pipeline
+                .accept_rows_to(
+                    &org_id,
+                    state.config.tinybird.datasource_session_replays.clone(),
+                    rows,
+                    TelemetrySignal::SessionReplays,
+                    destination,
+                )
+                .await
+                .map_err(|e| {
+                    warn!(org_id = %org_id, error = %e, "session metadata enqueue rejected");
+                    api_error_from_pipeline(&e)
+                })
+        },
     )
     .await?;
-    let enqueue_result = pipeline
-        .accept_rows_to(
-            &org_id,
-            state.config.tinybird.datasource_session_replays.clone(),
-            rows,
-            TelemetrySignal::SessionReplays,
-            destination,
-        )
-        .await
-        .map_err(|e| {
-            warn!(org_id = %org_id, error = %e, "session metadata enqueue rejected");
-            api_error_from_pipeline(&e)
-        });
-
-    if let Err(error) = enqueue_result {
-        if let (Some(entitlements), Some(reservation)) =
-            (&state.autumn_entitlements, reservation.as_ref())
-        {
-            let _ = entitlements.finalize(reservation, false).await;
-        }
-        return Err(error);
-    }
-
-    if let (Some(entitlements), Some(reservation)) =
-        (&state.autumn_entitlements, reservation.as_ref())
-    {
-        let _ = entitlements.finalize(reservation, true).await;
-    }
-
-    // Fail-open fallback: if Autumn could not reserve, record after the WAL
-    // commit through the retrying tracker.
-    if reservation.is_none() && org_id != SENTINEL_ORG_ID && session_starts > 0 {
-        if let Some(tracker) = &state.autumn_tracker {
-            tracker.track(&org_id, "browser_sessions", billable_sessions);
-        }
-    }
 
     Ok(count)
 }
@@ -2871,6 +2935,7 @@ async fn handle_session_events(
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
         "maple.session_events.dropped" = tracing::field::Empty,
+        "maple.product_events.metered" = tracing::field::Empty,
         "maple.sdk" = tracing::field::Empty,
         "user_agent.original" = tracing::field::Empty,
     );
@@ -2917,13 +2982,16 @@ async fn handle_session_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
-    // Same Autumn gate as the metadata endpoint. Session events
-    // are not separately metered — `browser_sessions` remains the billed unit,
-    // and introducing a `browser_events` meter is a pricing decision, not a
-    // schema one — but they must still be entitlement-gated: an out-of-quota org
-    // whose metadata rows are rejected while its event stream keeps writing is
-    // the incoherent half of the old design, and it only widens now that custom
-    // events are a promoted feature.
+    // Same Autumn gate as the metadata endpoint. Automatic session events
+    // (clicks, navigations, errors, ...) are not separately metered —
+    // `browser_sessions` remains their billed unit — but they must still be
+    // entitlement-gated: an out-of-quota org whose metadata rows are rejected
+    // while its event stream keeps writing is the incoherent half of the old
+    // design. `type == "custom"` rows are different: a browser `track()` call is
+    // a product event, and it is metered as `product_events` below (same unit as
+    // `/v1/events`). The REJECTION here deliberately stays on `browser_sessions`:
+    // an exhausted product-events allowance is billed as usage_based overage and
+    // must not 402 a whole session transcript.
     if org_id != SENTINEL_ORG_ID {
         if let Some(error) =
             entitlement_rejection(state, &org_id, BROWSER_SESSIONS_FEATURE_ID).await
@@ -2942,6 +3010,7 @@ async fn handle_session_events_inner(
     // metadata, org_id is taken from the authenticated key, never the body.
     let mut rows: Vec<Vec<u8>> = Vec::new();
     let mut dropped: u64 = 0;
+    let mut custom_events: u64 = 0;
     for line in body.split(|&b| b == b'\n') {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
@@ -2958,6 +3027,9 @@ async fn handle_session_events_inner(
         if !sanitize_session_event(obj) {
             dropped += 1;
             continue;
+        }
+        if obj.get("type").and_then(|v| v.as_str()) == Some("custom") {
+            custom_events += 1;
         }
         obj.insert(
             "org_id".to_owned(),
@@ -2982,19 +3054,200 @@ async fn handle_session_events_inner(
         return Ok(0);
     }
     let count = rows.len();
-    pipeline
-        .accept_rows_to(
-            &org_id,
-            state.config.tinybird.datasource_session_events.clone(),
-            rows,
-            TelemetrySignal::SessionEvents,
-            destination,
-        )
+    Span::current().record("maple.product_events.metered", custom_events);
+    // Only the custom rows are metered; the automatic ones ride on the
+    // session's `browser_sessions` unit. A batch with no custom rows reserves
+    // nothing (`metered_enqueue` skips zero) and just enqueues.
+    metered_enqueue(
+        state,
+        &org_id,
+        PRODUCT_EVENTS_FEATURE_ID,
+        custom_events as f64,
+        OnDenied::MeterAnyway,
+        || async {
+            pipeline
+                .accept_rows_to(
+                    &org_id,
+                    state.config.tinybird.datasource_session_events.clone(),
+                    rows,
+                    TelemetrySignal::SessionEvents,
+                    destination,
+                )
+                .await
+                .map_err(|e| {
+                    warn!(org_id = %org_id, error = %e, "session events enqueue rejected");
+                    api_error_from_pipeline(&e)
+                })
+        },
+    )
+    .await?;
+    Ok(count)
+}
+
+async fn handle_product_events(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    metrics::request_started();
+    let _guard = InFlightGuard;
+    let span = tracing::info_span!(
+        "ingest_product_events",
+        otel.name = "POST /v1/events",
+        otel.kind = "server",
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
+        "http.request.method" = "POST",
+        "http.route" = "/v1/events",
+        "http.request.body.size" = body.len(),
+        "http.response.status_code" = tracing::field::Empty,
+        "error.type" = tracing::field::Empty,
+        "maple.signal" = "product_events",
+        "maple.org_id" = tracing::field::Empty,
+        "maple.ingest.clickhouse_ready" = tracing::field::Empty,
+        "maple.ingest.destination" = tracing::field::Empty,
+        "maple.product_events.dropped" = tracing::field::Empty,
+        "maple.product_events.metered" = tracing::field::Empty,
+    );
+    let span_handle = span.clone();
+    match handle_product_events_inner(&state, &headers, body)
+        .instrument(span)
         .await
-        .map_err(|e| {
-            warn!(org_id = %org_id, error = %e, "session events enqueue rejected");
-            api_error_from_pipeline(&e)
-        })?;
+    {
+        Ok(count) => {
+            span_handle.record("http.response.status_code", 200u16);
+            span_handle.record("otel.status_code", "Ok");
+            (StatusCode::OK, axum::Json(AcceptedBody { accepted: count })).into_response()
+        }
+        Err(error) => {
+            let status = error.status.as_u16();
+            span_handle.record("http.response.status_code", status);
+            span_handle.record("error.type", error.error_kind());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
+            error.into_response()
+        }
+    }
+}
+
+/// `POST /v1/events` — product events posted directly by backends and mobile
+/// apps (browser rows reach `product_events` through the `session_events`
+/// materialized view instead). Same auth, NDJSON framing and per-row drop
+/// policy as `/v1/sessionEvents`; the row shape is fixed by
+/// `sanitize_product_event`. Entitlement-gated and metered as `product_events`,
+/// one unit per row that reaches the WAL.
+async fn handle_product_events_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<usize, ApiError> {
+    let resolved_key = match resolve_replay_key(state, headers).await? {
+        Some(resolved_key) => resolved_key,
+        None => return Ok(0),
+    };
+    let org_id = resolved_key.org_id.clone();
+    Span::current().record("maple.org_id", org_id.as_str());
+    Span::current().record(
+        "maple.ingest.clickhouse_ready",
+        resolved_key.clickhouse_ready,
+    );
+    let destination = native_destination_for(&resolved_key);
+    Span::current().record("maple.ingest.destination", destination.as_str());
+
+    // Product events are their own metered feature, but they are NOT gated on
+    // it — same reasoning as the `type == "custom"` rows on `/v1/sessionEvents`.
+    // Autumn answers `allowed: false` for a customer that simply has no balance
+    // for the feature yet (a plan item not pushed, or not granted to a live
+    // subscription), which is every org until the `atmn push` in the rollout
+    // checklist lands. A gate here would turn that window into a 402 on every
+    // backend and mobile event — including the API's own signup/plan emits —
+    // and `decide_allowed` reads a well-formed `allowed: false` as a real
+    // denial, so the fail-open in `is_allowed` never rescues it. The quantity is
+    // still reserved and recorded per accepted row below.
+    let pipeline = native_rows_pipeline_for(
+        state,
+        destination,
+        "Product event storage is not configured",
+    )?;
+
+    // One receipt time for the whole batch: rows without a `timestamp` all
+    // land at the moment the request arrived, not spread across the parse.
+    let received_at = chrono::Utc::now();
+    let mut rows: Vec<Vec<u8>> = Vec::new();
+    let mut dropped: u64 = 0;
+    for line in body.split(|&b| b == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let mut value: serde_json::Value = serde_json::from_slice(line)
+            .map_err(|e| ApiError::bad_request(format!("invalid product event JSON: {e}")))?;
+        let obj = value
+            .as_object_mut()
+            .ok_or_else(|| ApiError::bad_request("product event must be a JSON object"))?;
+        if !sanitize_product_event(obj, received_at) {
+            dropped += 1;
+            continue;
+        }
+        // org_id comes from the authenticated key, never the body — the
+        // sanitizer already discarded whatever the client sent under that name.
+        obj.insert(
+            "org_id".to_string(),
+            serde_json::Value::String(org_id.clone()),
+        );
+        rows.push(
+            serde_json::to_vec(&value)
+                .map_err(|e| ApiError::bad_request(format!("failed to re-serialize event: {e}")))?,
+        );
+    }
+
+    if dropped > 0 {
+        Span::current().record("maple.product_events.dropped", dropped);
+        warn!(
+            org_id = %org_id,
+            dropped,
+            "dropped malformed product events (name, source or timestamp)"
+        );
+    }
+
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    // Metered quantity = rows actually enqueued, i.e. after the sanitiser's
+    // drops — a malformed line is neither stored nor billed.
+    let count = rows.len();
+    Span::current().record("maple.product_events.metered", count as u64);
+    metered_enqueue(
+        state,
+        &org_id,
+        PRODUCT_EVENTS_FEATURE_ID,
+        count as f64,
+        // Fail-open, matching the entitlement decision above: a denial here is
+        // far more likely to mean "the feature is not provisioned yet" than
+        // "this org is over its allowance", and dropping a backend's buffered
+        // batch is not a recoverable outcome for the caller.
+        OnDenied::MeterAnyway,
+        || async {
+            pipeline
+                .accept_rows_to(
+                    &org_id,
+                    state.config.tinybird.datasource_product_events.clone(),
+                    rows,
+                    TelemetrySignal::ProductEvents,
+                    destination,
+                )
+                .await
+                .map_err(|e| {
+                    warn!(org_id = %org_id, error = %e, "product events enqueue rejected");
+                    api_error_from_pipeline(&e)
+                })
+        },
+    )
+    .await?;
     Ok(count)
 }
 
@@ -6743,6 +6996,7 @@ mod tests {
             datasource_session_replays: "session_replays".to_owned(),
             datasource_session_replay_events: "session_replay_events".to_owned(),
             datasource_session_events: "session_events".to_owned(),
+            datasource_product_events: "product_events".to_owned(),
         }
     }
 
@@ -7158,6 +7412,249 @@ mod tests {
         drop(std::fs::remove_dir_all(&queue_dir));
     }
 
+    /// One request a fake Autumn saw: which endpoint, and the JSON body.
+    #[derive(Debug)]
+    struct AutumnCall {
+        path: String,
+        body: serde_json::Value,
+    }
+
+    impl AutumnCall {
+        fn feature_id(&self) -> &str {
+            self.body["feature_id"].as_str().unwrap_or_default()
+        }
+        /// `required_balance` is only sent by `reserve`; a plain `is_allowed`
+        /// gate omits it. That is how the tests tell the two apart.
+        fn reserved_value(&self) -> Option<f64> {
+            self.body.get("required_balance").and_then(|v| v.as_f64())
+        }
+    }
+
+    async fn fake_autumn(
+        axum::extract::State(tx): axum::extract::State<
+            tokio::sync::mpsc::UnboundedSender<AutumnCall>,
+        >,
+        Path(path): Path<String>,
+        body: Bytes,
+    ) -> axum::Json<serde_json::Value> {
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        let _ = tx.send(AutumnCall { path, body });
+        axum::Json(serde_json::json!({ "allowed": true }))
+    }
+
+    /// Spawn a fake Autumn that allows everything and records every call, and
+    /// point `state` at it with billing enforcement enabled.
+    async fn with_fake_autumn(
+        mut state: AppState,
+    ) -> (AppState, tokio::sync::mpsc::UnboundedReceiver<AutumnCall>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/v1/{*path}", post(fake_autumn))
+            .with_state(tx);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        state.autumn_entitlements = Some(AutumnEntitlements::new(
+            state.http_client.clone(),
+            "am_sk_test".to_string(),
+            &format!("http://{addr}"),
+        ));
+        (state, rx)
+    }
+
+    /// Drain everything the fake Autumn has seen so far. Reserve → enqueue →
+    /// finalize all complete before the handler returns, so no waiting is
+    /// needed once the handler future has resolved.
+    fn drain_autumn_calls(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<AutumnCall>,
+    ) -> Vec<AutumnCall> {
+        let mut calls = Vec::new();
+        while let Ok(call) = rx.try_recv() {
+            calls.push(call);
+        }
+        calls
+    }
+
+    fn bearer_headers(raw_key: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {raw_key}").parse().unwrap(),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn product_events_endpoint_meters_each_enqueued_row_as_product_events() {
+        let queue_dir = unique_main_test_dir("product-events-meter");
+        let state =
+            replay_blob_test_state("maple_sk_test_pe_meter", "org_pe_meter", queue_dir.clone())
+                .await;
+        let (state, mut rx) = with_fake_autumn(state).await;
+
+        // Three valid rows and one the sanitiser drops (reserved `$`-prefixed
+        // name). The dropped row is neither stored nor billed.
+        let body = concat!(
+            r#"{"name":"plan_started"}"#,
+            "\n",
+            r#"{"name":"$not_allowed"}"#,
+            "\n",
+            r#"{"name":"checkout_viewed","source":"mobile"}"#,
+            "\n",
+            r#"{"name":"$screen","source":"mobile","page_path":"Home"}"#,
+            "\n",
+        );
+        let accepted = handle_product_events_inner(
+            &state,
+            &bearer_headers("maple_sk_test_pe_meter"),
+            Bytes::from_static(body.as_bytes()),
+        )
+        .await
+        .expect("product events should be accepted");
+        assert_eq!(accepted, 3);
+
+        let calls = drain_autumn_calls(&mut rx);
+        let checks: Vec<&AutumnCall> = calls
+            .iter()
+            .filter(|c| c.path == "balances.check")
+            .collect();
+        // Every check on this endpoint is against `product_events`, never
+        // `browser_sessions`.
+        assert!(!checks.is_empty(), "expected Autumn checks, saw {calls:?}");
+        for check in &checks {
+            assert_eq!(check.feature_id(), "product_events", "{check:?}");
+        }
+        // ...and there is NO entitlement gate (a check with no
+        // `required_balance`), only the reservation. A gate would 402 every org
+        // whose Autumn customer has no `product_events` balance yet, which is
+        // every org until the plan item is pushed and granted — Autumn answers
+        // that with a real `allowed: false`, not an error, so the fail-open in
+        // `is_allowed` does not cover it.
+        let gates: Vec<&str> = checks
+            .iter()
+            .filter(|c| c.reserved_value().is_none())
+            .map(|c| c.feature_id())
+            .collect();
+        assert!(gates.is_empty(), "expected no entitlement gate, saw {gates:?}");
+        let reservations: Vec<f64> = checks.iter().filter_map(|c| c.reserved_value()).collect();
+        assert_eq!(
+            reservations,
+            vec![3.0],
+            "exactly one reservation for the enqueued row count"
+        );
+        let finalizes: Vec<&AutumnCall> = calls
+            .iter()
+            .filter(|c| c.path == "balances.finalize")
+            .collect();
+        assert_eq!(finalizes.len(), 1, "{calls:?}");
+        assert_eq!(finalizes[0].body["action"], "confirm");
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[tokio::test]
+    async fn custom_session_events_are_metered_as_product_events_but_gated_on_browser_sessions() {
+        let queue_dir = unique_main_test_dir("session-events-custom-meter");
+        let state =
+            replay_blob_test_state("maple_sk_test_se_meter", "org_se_meter", queue_dir.clone())
+                .await;
+        let (state, mut rx) = with_fake_autumn(state).await;
+
+        // Two `track()` calls, one automatic click, one unknown type (dropped).
+        let body = concat!(
+            r#"{"type":"custom","message":"signup_completed"}"#,
+            "\n",
+            r#"{"type":"click","message":"button#buy"}"#,
+            "\n",
+            r#"{"type":"custom","message":"plan_selected","attributes":{"plan":"pro"}}"#,
+            "\n",
+            r#"{"type":"not-a-real-type"}"#,
+            "\n",
+        );
+        let accepted = handle_session_events_inner(
+            &state,
+            &bearer_headers("maple_sk_test_se_meter"),
+            Bytes::from_static(body.as_bytes()),
+        )
+        .await
+        .expect("session events should be accepted");
+        assert_eq!(
+            accepted, 3,
+            "custom + click rows are stored, unknown is dropped"
+        );
+
+        let calls = drain_autumn_calls(&mut rx);
+        let checks: Vec<&AutumnCall> = calls
+            .iter()
+            .filter(|c| c.path == "balances.check")
+            .collect();
+
+        // The entitlement gate (no `required_balance`) stays on browser_sessions:
+        // an exhausted product-events allowance must not 402 a whole transcript.
+        let gates: Vec<&str> = checks
+            .iter()
+            .filter(|c| c.reserved_value().is_none())
+            .map(|c| c.feature_id())
+            .collect();
+        assert_eq!(gates, vec!["browser_sessions"], "{calls:?}");
+
+        // The reservation is for the two custom rows only, as product_events.
+        let reservations: Vec<(&str, f64)> = checks
+            .iter()
+            .filter_map(|c| c.reserved_value().map(|v| (c.feature_id(), v)))
+            .collect();
+        assert_eq!(reservations, vec![("product_events", 2.0)], "{calls:?}");
+
+        let finalizes: Vec<&AutumnCall> = calls
+            .iter()
+            .filter(|c| c.path == "balances.finalize")
+            .collect();
+        assert_eq!(finalizes.len(), 1, "{calls:?}");
+        assert_eq!(finalizes[0].body["action"], "confirm");
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[tokio::test]
+    async fn session_events_without_custom_rows_reserve_nothing() {
+        let queue_dir = unique_main_test_dir("session-events-no-custom");
+        let state =
+            replay_blob_test_state("maple_sk_test_se_auto", "org_se_auto", queue_dir.clone()).await;
+        let (state, mut rx) = with_fake_autumn(state).await;
+
+        let body = concat!(
+            r#"{"type":"click","message":"a"}"#,
+            "\n",
+            r#"{"type":"navigation","message":"/pricing"}"#,
+            "\n",
+        );
+        let accepted = handle_session_events_inner(
+            &state,
+            &bearer_headers("maple_sk_test_se_auto"),
+            Bytes::from_static(body.as_bytes()),
+        )
+        .await
+        .expect("session events should be accepted");
+        assert_eq!(accepted, 2);
+
+        let calls = drain_autumn_calls(&mut rx);
+        // Automatic events ride on the session's browser_sessions unit: only
+        // the gate fires, no reservation and no finalize.
+        assert!(
+            calls
+                .iter()
+                .all(|c| c.path == "balances.check" && c.reserved_value().is_none()),
+            "{calls:?}"
+        );
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(calls[0].feature_id(), "browser_sessions");
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
     #[tokio::test]
     async fn replay_chunks_stay_inline_when_no_blob_store_is_configured() {
         // The self-hosted / BYO-ClickHouse path, and the pre-cutover managed

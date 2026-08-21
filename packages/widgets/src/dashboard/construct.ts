@@ -1,4 +1,4 @@
-import type { QueryResultContract, QuerySet } from "@maple/query-model"
+import type { FunnelKeyBy, FunnelStep, QueryResultContract, QuerySet } from "@maple/query-model"
 import type { RawSqlDataSource } from "./access"
 import type { WidgetDataSourceTransformV2 } from "./shared/transform"
 import type {
@@ -128,3 +128,36 @@ export const makeStaticDataSource = (
 	kind: "static",
 	...(!(transform === undefined) ? { transform } : undefined),
 })
+
+/** The route a product-event funnel widget fetches through. */
+export const PRODUCT_EVENTS_FUNNEL_ENDPOINT = "product_events_funnel"
+
+/**
+ * The stored `display.funnel` definition of a product-event funnel widget —
+ * what `makeProductEventsFunnelDataSource` reads.
+ */
+export interface ProductEventsFunnelDefinition {
+	readonly steps: ReadonlyArray<FunnelStep>
+	readonly keyBy?: FunnelKeyBy
+	readonly windowSeconds?: number
+}
+
+/**
+ * A funnel widget over `product_events`: the definition mirrored into the route
+ * params, so the fetch path (`toWidgetRequest`) never has to read the display.
+ * `keyBy` and `windowSeconds` are forwarded only when set; the route applies
+ * the same defaults the /analytics Funnels view does.
+ */
+export const makeProductEventsFunnelDataSource = (
+	funnel: ProductEventsFunnelDefinition,
+	transform?: WidgetDataSourceTransform,
+) =>
+	makeRouteDataSource(
+		PRODUCT_EVENTS_FUNNEL_ENDPOINT,
+		{
+			steps: funnel.steps,
+			...(!(funnel.keyBy === undefined) ? { keyBy: funnel.keyBy } : undefined),
+			...(!(funnel.windowSeconds === undefined) ? { windowSeconds: funnel.windowSeconds } : undefined),
+		},
+		transform,
+	)

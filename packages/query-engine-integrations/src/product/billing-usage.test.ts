@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { compileCH, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
+	dailyProductEventCountQuery,
+	dailyProductEventCountRowSchema,
 	dailySessionCountQuery,
 	dailySessionCountRowSchema,
 	dailySignalVolumeQuery,
@@ -97,5 +99,29 @@ describe("dailySessionCountQuery", () => {
 		const [row] = decodeRows(compiled, [{ day: "2026-07-01 00:00:00", sessions: "1284" }])
 
 		expect(row).toEqual({ day: "2026-07-01 00:00:00", sessions: 1284 })
+	})
+})
+
+describe("dailyProductEventCountQuery", () => {
+	it("counts billable product events per UTC day, excluding page views", () => {
+		const { sql } = compileCH(dailyProductEventCountQuery(), params)
+
+		expect(sql).toContain("FROM product_events")
+		expect(sql).toContain("OrgId = 'org_123'")
+		expect(sql).toContain("toStartOfInterval(Timestamp, INTERVAL 86400 SECOND) AS day")
+		expect(sql).toContain("count() AS events")
+		expect(sql).toContain("Kind != 'navigation'")
+		expect(sql).toContain("Timestamp >= toDateTime('2026-07-01 00:00:00')")
+		expect(sql).toContain("GROUP BY day")
+	})
+
+	it("decodes a string event count", () => {
+		const compiled = compileCH(dailyProductEventCountQuery(), params, {
+			rowSchema: dailyProductEventCountRowSchema,
+		})
+
+		const [row] = decodeRows(compiled, [{ day: "2026-07-01 00:00:00", events: "40120" }])
+
+		expect(row).toEqual({ day: "2026-07-01 00:00:00", events: 40120 })
 	})
 })

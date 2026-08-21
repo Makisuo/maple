@@ -60,7 +60,7 @@ const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 // forces the `SessionId IN (SELECT …)` semi-join branch, which is a whole
 // second SQL shape that no unfiltered fixture reaches.
 //
-// Every one is emitted TWICE, once per page-view source. `useWebEvents` is a
+// Every one is emitted TWICE, once per page-view source. `useProductEvents` is a
 // routing predicate, and `routeCoverage()` in sql-catalog.ts requires a
 // predicate to be exercised both ways — but the stronger reason is that the two
 // paths are required to return identical numbers, so both SQL shapes belong in
@@ -85,84 +85,204 @@ const WEB_ANALYTICS_ALL_FILTERS = {
 const webAnalyticsVariants = (
 	name: string,
 	label: string,
-	compile: (useWebEvents: boolean) => CompiledQuery<unknown>,
+	compile: (useProductEvents: boolean) => CompiledQuery<unknown>,
 ): ReadonlyArray<BuilderFixture> => [
 	{ module: "web-analytics", name, label, compile: () => compile(false) },
 	{ module: "web-analytics", name, label: `${label}-rollup`, compile: () => compile(true) },
 ]
 
 const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
-	...webAnalyticsVariants("webAnalyticsSummaryQuery", "default", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsSummaryQuery({ useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsSummaryQuery", "default", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsSummaryQuery({ useProductEvents }), window),
 	),
-	...webAnalyticsVariants("webAnalyticsSummaryQuery", "filtered", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsSummaryQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsSummaryQuery", "filtered", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsSummaryQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }), window),
 	),
-	...webAnalyticsVariants("webAnalyticsTimeseriesQuery", "default", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600, useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsTimeseriesQuery", "default", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }), window),
 	),
-	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "default", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsPageviewsTimeseriesQuery({ bucketSeconds: 3600, useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "default", (useProductEvents) =>
+		CH.compile(
+			CH.webAnalyticsPageviewsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }),
+			window,
+		),
 	),
 	// Forces the semi-join: `referrerHost` is a session_replays-only dimension,
 	// so the page-view source has to narrow through a subquery to honour it.
-	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "semi-joined", (useWebEvents) =>
+	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "semi-joined", (useProductEvents) =>
 		CH.compile(
 			CH.webAnalyticsPageviewsTimeseriesQuery({
 				bucketSeconds: 3600,
 				referrerHost: "t.co",
 				visitorType: "returning",
-				useWebEvents,
+				useProductEvents,
 			}),
 			window,
 		),
 	),
-	...webAnalyticsVariants("webAnalyticsPagesQuery", "default", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsPagesQuery", "default", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, useProductEvents }), window),
 	),
 	// host/pagePath filter directly off the page-view source — deliberately NOT
 	// through the semi-join, so the 82% of sessions with no analytics block still count.
-	...webAnalyticsVariants("webAnalyticsPagesQuery", "url-filtered", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, host: "maple.dev", useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsPagesQuery", "url-filtered", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, host: "maple.dev", useProductEvents }), window),
 	),
-	...webAnalyticsVariants("webAnalyticsPagesQuery", "semi-joined", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, country: "DE", useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsPagesQuery", "semi-joined", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, country: "DE", useProductEvents }), window),
 	),
-	...webAnalyticsVariants("webAnalyticsEventsQuery", "default", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsEventsQuery({ limit: 100, useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsEventsQuery", "default", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsEventsQuery({ limit: 100, useProductEvents }), window),
 	),
-	...webAnalyticsVariants("webAnalyticsEventsQuery", "url-filtered", (useWebEvents) =>
-		CH.compile(CH.webAnalyticsEventsQuery({ limit: 100, host: "maple.dev", useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsEventsQuery", "url-filtered", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsEventsQuery({ limit: 100, host: "maple.dev", useProductEvents }), window),
 	),
 	// `eventName` alongside a replays dimension: the replays semi-join must appear
 	// and the event's own filter must NOT — this is the breakdown it is picked from.
-	...webAnalyticsVariants("webAnalyticsEventsQuery", "semi-joined", (useWebEvents) =>
+	...webAnalyticsVariants("webAnalyticsEventsQuery", "semi-joined", (useProductEvents) =>
 		CH.compile(
 			CH.webAnalyticsEventsQuery({
 				limit: 100,
 				country: "DE",
 				eventName: "signup_started",
-				useWebEvents,
+				useProductEvents,
 			}),
 			window,
 		),
 	),
-	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "default", (useWebEvents) =>
-		CH.compileUnion(CH.webAnalyticsBreakdownsQuery({ useWebEvents }), window),
+	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "default", (useProductEvents) =>
+		CH.compileUnion(CH.webAnalyticsBreakdownsQuery({ useProductEvents }), window),
 	),
 	// Every dimension selected at once: each branch must exclude its own filter,
 	// so this is the fixture that would catch a branch that forgot to. On the
 	// rollup variant it is also the one that shows the navigation semi-join being
 	// inlined into all twelve branches — the shape the rollup exists to make cheap.
-	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "all-dimensions-filtered", (useWebEvents) =>
+	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "all-dimensions-filtered", (useProductEvents) =>
 		CH.compileUnion(
-			CH.webAnalyticsBreakdownsQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useWebEvents }),
+			CH.webAnalyticsBreakdownsQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }),
 			window,
 		),
 	),
 ]
 
+// Product-event funnel fixtures. The funnel SQL has four independent axes —
+// person-key resolution (with or without the identity_links join), a session
+// step 1 (UNION ALL of a session_replays branch), the population filter
+// semi-join, and a breakdown dimension (event column vs session_replays join) —
+// and each is a distinct SQL shape the analyzer has to see.
+const FUNNEL_STEPS: ReadonlyArray<CH.FunnelStep> = [
+	{ kind: "page", pagePath: "/pricing", host: "maple.dev" },
+	{ kind: "event", eventName: "signup_completed" },
+	{ kind: "event", eventName: "plan_started", attributeEquals: { plan: "startup" } },
+]
+const REFERRAL_STEPS: ReadonlyArray<CH.FunnelStep> = [
+	{ kind: "session", dimension: "referrerHost", value: "news.ycombinator.com" },
+	...FUNNEL_STEPS,
+]
+
+const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
+	{
+		module: "product-events",
+		name: "productEventsFunnelQuery",
+		label: "person",
+		compile: () =>
+			CH.compile(
+				CH.productEventsFunnelQuery({
+					steps: FUNNEL_STEPS,
+					keyBy: "person",
+					windowSeconds: 7 * 86_400,
+				}),
+				window,
+			),
+	},
+	{
+		module: "product-events",
+		name: "productEventsFunnelQuery",
+		label: "session-step-filtered",
+		compile: () =>
+			CH.compile(
+				CH.productEventsFunnelQuery({
+					steps: REFERRAL_STEPS,
+					keyBy: "person",
+					windowSeconds: 7 * 86_400,
+					filters: WEB_ANALYTICS_ALL_FILTERS,
+				}),
+				window,
+			),
+	},
+	{
+		module: "product-events",
+		name: "productEventsFunnelQuery",
+		label: "visitor-session-step",
+		compile: () =>
+			CH.compile(
+				CH.productEventsFunnelQuery({
+					steps: REFERRAL_STEPS,
+					keyBy: "visitor",
+					windowSeconds: 3_600,
+				}),
+				window,
+			),
+	},
+	{
+		module: "product-events",
+		name: "productEventsFunnelQuery",
+		label: "session-key",
+		compile: () =>
+			CH.compile(
+				CH.productEventsFunnelQuery({ steps: FUNNEL_STEPS, keyBy: "session", windowSeconds: 1_800 }),
+				window,
+			),
+	},
+	{
+		module: "product-events",
+		name: "productEventsFunnelBreakdownQuery",
+		label: "session-dimension",
+		compile: () =>
+			CH.compile(
+				CH.productEventsFunnelBreakdownQuery({
+					steps: FUNNEL_STEPS,
+					keyBy: "person",
+					windowSeconds: 7 * 86_400,
+					breakdownBy: "utmSource",
+					limit: 10,
+				}),
+				window,
+			),
+	},
+	{
+		module: "product-events",
+		name: "productEventsFunnelBreakdownQuery",
+		label: "attribute-session-step",
+		compile: () =>
+			CH.compile(
+				CH.productEventsFunnelBreakdownQuery({
+					steps: REFERRAL_STEPS,
+					keyBy: "user",
+					windowSeconds: 7 * 86_400,
+					breakdownBy: "attribute:plan",
+					limit: 5,
+				}),
+				window,
+			),
+	},
+	{
+		module: "product-events",
+		name: "productEventNamesQuery",
+		label: "default",
+		compile: () => CH.compile(CH.productEventNamesQuery({ limit: 100 }), window),
+	},
+	{
+		module: "product-events",
+		name: "productEventNamesQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compile(CH.productEventNamesQuery({ filters: WEB_ANALYTICS_ALL_FILTERS, limit: 100 }), window),
+	},
+]
+
 export const builderFixtures: ReadonlyArray<BuilderFixture> = [
+	...productEventsFixtures,
 	// Session replay fixtures used by the replay routes.
 	{
 		module: "session-replays",

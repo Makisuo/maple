@@ -555,6 +555,438 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
+-- builder:product-events:productEventNamesQuery:default  [7c7336c7]
+SELECT
+          EventName AS eventName,
+          Kind AS kind,
+          count() AS count,
+          uniqIf(SessionId, SessionId != '') AS sessions,
+          uniq(if(UserId != '', UserId, VisitorId)) AS persons
+        FROM product_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY eventName, kind
+        ORDER BY count DESC, eventName ASC
+        LIMIT 100
+        FORMAT JSON
+
+-- builder:product-events:productEventNamesQuery:filtered  [a47865a2]
+SELECT
+          EventName AS eventName,
+          Kind AS kind,
+          count() AS count,
+          uniqIf(SessionId, SessionId != '') AS sessions,
+          uniq(if(UserId != '', UserId, VisitorId)) AS persons
+        FROM product_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Host = 'maple.dev'
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM session_replays
+        WHERE OrgId = 'org_sql_catalog'
+          AND StartTime >= '2026-01-01 10:30:00'
+          AND StartTime <= '2026-01-03 14:15:00'
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM product_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'navigation'
+          AND PagePath = '/pricing'
+        GROUP BY sessionId)
+          AND ReferrerHost = 't.co'
+          AND Country = 'DE'
+          AND DeviceType = 'desktop'
+          AND BrowserName = 'Chrome'
+          AND OsName = 'macOS'
+          AND Language = 'en-US'
+          AND UtmSource = 'twitter'
+          AND UtmMedium = 'social'
+          AND UtmCampaign = 'launch'
+          AND VisitorIsNew = 1
+          AND SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM product_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
+        GROUP BY sessionId)
+        GROUP BY eventName, kind
+        ORDER BY count DESC, eventName ASC
+        LIMIT 100
+        FORMAT JSON
+
+-- builder:product-events:productEventsFunnelBreakdownQuery:attribute-session-step  [ac39fa69]
+SELECT
+          group AS group,
+          arrayJoin([1, 2, 3, 4]) AS step,
+          arrayElement(counts, step) AS count
+        FROM (SELECT
+          group AS group,
+          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3), countIf(level >= 4)] AS counts,
+          countIf(level >= 1) AS entered
+        FROM (SELECT
+          key AS key,
+          windowFunnel(604800000)(ts, s1 = 1, s2 = 1, s3 = 1, s4 = 1) AS level,
+          argMinIf(dim, ts, dim != '') AS group
+        FROM (
+SELECT
+          UserId AS key,
+          toUInt64(toUnixTimestamp64Milli(StartTime)) AS ts,
+          1 AS s1,
+          0 AS s2,
+          0 AS s3,
+          0 AS s4,
+          '' AS dim
+        FROM session_replays AS s
+        WHERE OrgId = 'org_sql_catalog'
+          AND StartTime >= '2026-01-01 10:30:00'
+          AND StartTime <= '2026-01-03 14:15:00'
+          AND ReferrerHost = 'news.ycombinator.com'
+          AND UserId != ''
+UNION ALL
+SELECT
+          UserId AS key,
+          toUInt64(toUnixTimestamp64Milli(Timestamp)) AS ts,
+          0 AS s1,
+          toUInt8(((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev')) AS s2,
+          toUInt8(EventName = 'signup_completed') AS s3,
+          toUInt8((EventName = 'plan_started' AND Attributes['plan'] = 'startup')) AS s4,
+          Attributes['plan'] AS dim
+        FROM product_events AS e
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ((((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev') OR EventName = 'signup_completed') OR (EventName = 'plan_started' AND Attributes['plan'] = 'startup'))
+          AND UserId != ''
+) AS funnel_events
+        GROUP BY key) AS levels
+        GROUP BY group
+        ORDER BY entered DESC, group ASC
+        LIMIT 5) AS groups
+        ORDER BY group ASC, step ASC
+        FORMAT JSON
+
+-- builder:product-events:productEventsFunnelBreakdownQuery:session-dimension  [f52bc5e1]
+SELECT
+          group AS group,
+          arrayJoin([1, 2, 3]) AS step,
+          arrayElement(counts, step) AS count
+        FROM (SELECT
+          group AS group,
+          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3)] AS counts,
+          countIf(level >= 1) AS entered
+        FROM (SELECT
+          key AS key,
+          windowFunnel(604800000)(ts, s1 = 1, s2 = 1, s3 = 1) AS level,
+          argMinIf(dim, ts, dim != '') AS group
+        FROM (SELECT
+          multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) AS key,
+          toUInt64(toUnixTimestamp64Milli(e.Timestamp)) AS ts,
+          toUInt8(((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev')) AS s1,
+          toUInt8(e.EventName = 'signup_completed') AS s2,
+          toUInt8((e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup')) AS s3,
+          coalesce(sd.Value, '') AS dim
+        FROM product_events AS e
+        LEFT JOIN (SELECT
+          VisitorId AS VisitorId,
+          argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
+        FROM identity_links
+        WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
+        GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
+        LEFT JOIN (SELECT
+          SessionId AS SessionId,
+          max(UtmSource) AS Value
+        FROM session_replays
+        WHERE OrgId = 'org_sql_catalog'
+          AND StartTime >= '2026-01-01 10:30:00'
+          AND StartTime <= '2026-01-03 14:15:00'
+        GROUP BY SessionId) AS sd ON e.SessionId = sd.SessionId
+        WHERE e.OrgId = 'org_sql_catalog'
+          AND e.Timestamp >= '2026-01-01 10:30:00'
+          AND e.Timestamp <= '2026-01-03 14:15:00'
+          AND ((((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev') OR e.EventName = 'signup_completed') OR (e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup'))
+          AND multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) != '') AS funnel_events
+        GROUP BY key) AS levels
+        GROUP BY group
+        ORDER BY entered DESC, group ASC
+        LIMIT 10) AS groups
+        ORDER BY group ASC, step ASC
+        FORMAT JSON
+
+-- builder:product-events:productEventsFunnelQuery:person  [41bb75cc]
+SELECT
+          arrayJoin([1, 2, 3]) AS step,
+          arrayElement(counts, step) AS count
+        FROM (SELECT
+          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3)] AS counts
+        FROM (SELECT
+          key AS key,
+          windowFunnel(604800000)(ts, s1 = 1, s2 = 1, s3 = 1) AS level
+        FROM (SELECT
+          multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) AS key,
+          toUInt64(toUnixTimestamp64Milli(e.Timestamp)) AS ts,
+          toUInt8(((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev')) AS s1,
+          toUInt8(e.EventName = 'signup_completed') AS s2,
+          toUInt8((e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup')) AS s3
+        FROM product_events AS e
+        LEFT JOIN (SELECT
+          VisitorId AS VisitorId,
+          argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
+        FROM identity_links
+        WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
+        GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
+        WHERE e.OrgId = 'org_sql_catalog'
+          AND e.Timestamp >= '2026-01-01 10:30:00'
+          AND e.Timestamp <= '2026-01-03 14:15:00'
+          AND ((((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev') OR e.EventName = 'signup_completed') OR (e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup'))
+          AND multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) != '') AS funnel_events
+        GROUP BY key) AS levels) AS totals
+        ORDER BY step ASC
+        FORMAT JSON
+
+-- builder:product-events:productEventsFunnelQuery:session-key  [619f95db]
+SELECT
+          arrayJoin([1, 2, 3]) AS step,
+          arrayElement(counts, step) AS count
+        FROM (SELECT
+          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3)] AS counts
+        FROM (SELECT
+          key AS key,
+          windowFunnel(1800000)(ts, s1 = 1, s2 = 1, s3 = 1) AS level
+        FROM (SELECT
+          SessionId AS key,
+          toUInt64(toUnixTimestamp64Milli(Timestamp)) AS ts,
+          toUInt8(((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev')) AS s1,
+          toUInt8(EventName = 'signup_completed') AS s2,
+          toUInt8((EventName = 'plan_started' AND Attributes['plan'] = 'startup')) AS s3
+        FROM product_events AS e
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ((((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev') OR EventName = 'signup_completed') OR (EventName = 'plan_started' AND Attributes['plan'] = 'startup'))
+          AND SessionId != '') AS funnel_events
+        GROUP BY key) AS levels) AS totals
+        ORDER BY step ASC
+        FORMAT JSON
+
+-- builder:product-events:productEventsFunnelQuery:session-step-filtered  [98d45a39]
+SELECT
+          arrayJoin([1, 2, 3, 4]) AS step,
+          arrayElement(counts, step) AS count
+        FROM (SELECT
+          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3), countIf(level >= 4)] AS counts
+        FROM (SELECT
+          key AS key,
+          windowFunnel(604800000)(ts, s1 = 1, s2 = 1, s3 = 1, s4 = 1) AS level
+        FROM (
+SELECT
+          multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) AS key,
+          toUInt64(toUnixTimestamp64Milli(s.StartTime)) AS ts,
+          1 AS s1,
+          0 AS s2,
+          0 AS s3,
+          0 AS s4
+        FROM session_replays AS s
+        LEFT JOIN (SELECT
+          VisitorId AS VisitorId,
+          argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
+        FROM identity_links
+        WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
+        GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
+        WHERE s.OrgId = 'org_sql_catalog'
+          AND s.StartTime >= '2026-01-01 10:30:00'
+          AND s.StartTime <= '2026-01-03 14:15:00'
+          AND s.ReferrerHost = 'news.ycombinator.com'
+          AND multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) != ''
+          AND multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) IN (SELECT
+          multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) AS key
+        FROM session_replays AS s
+        LEFT JOIN (SELECT
+          VisitorId AS VisitorId,
+          argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
+        FROM identity_links
+        WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
+        GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
+        WHERE s.OrgId = 'org_sql_catalog'
+          AND s.StartTime >= '2026-01-01 10:30:00'
+          AND s.StartTime <= '2026-01-03 14:15:00'
+          AND s.SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM product_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'navigation'
+          AND Host = 'maple.dev'
+          AND PagePath = '/pricing'
+        GROUP BY sessionId)
+          AND s.ReferrerHost = 't.co'
+          AND s.Country = 'DE'
+          AND s.DeviceType = 'desktop'
+          AND s.BrowserName = 'Chrome'
+          AND s.OsName = 'macOS'
+          AND s.Language = 'en-US'
+          AND s.UtmSource = 'twitter'
+          AND s.UtmMedium = 'social'
+          AND s.UtmCampaign = 'launch'
+          AND s.VisitorIsNew = 1
+          AND s.SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM product_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
+        GROUP BY key)
+UNION ALL
+SELECT
+          multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) AS key,
+          toUInt64(toUnixTimestamp64Milli(e.Timestamp)) AS ts,
+          0 AS s1,
+          toUInt8(((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev')) AS s2,
+          toUInt8(e.EventName = 'signup_completed') AS s3,
+          toUInt8((e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup')) AS s4
+        FROM product_events AS e
+        LEFT JOIN (SELECT
+          VisitorId AS VisitorId,
+          argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
+        FROM identity_links
+        WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
+        GROUP BY VisitorId) AS link ON e.VisitorId = link.VisitorId
+        WHERE e.OrgId = 'org_sql_catalog'
+          AND e.Timestamp >= '2026-01-01 10:30:00'
+          AND e.Timestamp <= '2026-01-03 14:15:00'
+          AND ((((e.Kind = 'navigation' AND e.PagePath = '/pricing') AND e.Host = 'maple.dev') OR e.EventName = 'signup_completed') OR (e.EventName = 'plan_started' AND e.Attributes['plan'] = 'startup'))
+          AND multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) != ''
+          AND multiIf(e.UserId != '', e.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), e.VisitorId) IN (SELECT
+          multiIf(s.UserId != '', s.UserId, coalesce(link.UserId, '') != '', coalesce(link.UserId, ''), s.VisitorId) AS key
+        FROM session_replays AS s
+        LEFT JOIN (SELECT
+          VisitorId AS VisitorId,
+          argMin(UserId, FirstSeen) AS UserId
+        FROM (SELECT
+          VisitorId AS VisitorId,
+          UserId AS UserId,
+          min(FirstSeen) AS FirstSeen
+        FROM identity_links
+        WHERE OrgId = 'org_sql_catalog'
+        GROUP BY VisitorId, UserId) AS pair_links
+        GROUP BY VisitorId) AS link ON s.VisitorId = link.VisitorId
+        WHERE s.OrgId = 'org_sql_catalog'
+          AND s.StartTime >= '2026-01-01 10:30:00'
+          AND s.StartTime <= '2026-01-03 14:15:00'
+          AND s.SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM product_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'navigation'
+          AND Host = 'maple.dev'
+          AND PagePath = '/pricing'
+        GROUP BY sessionId)
+          AND s.ReferrerHost = 't.co'
+          AND s.Country = 'DE'
+          AND s.DeviceType = 'desktop'
+          AND s.BrowserName = 'Chrome'
+          AND s.OsName = 'macOS'
+          AND s.Language = 'en-US'
+          AND s.UtmSource = 'twitter'
+          AND s.UtmMedium = 'social'
+          AND s.UtmCampaign = 'launch'
+          AND s.VisitorIsNew = 1
+          AND s.SessionId IN (SELECT
+          SessionId AS sessionId
+        FROM product_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Kind = 'custom'
+          AND EventName = 'signup_started'
+        GROUP BY sessionId)
+        GROUP BY key)
+) AS funnel_events
+        GROUP BY key) AS levels) AS totals
+        ORDER BY step ASC
+        FORMAT JSON
+
+-- builder:product-events:productEventsFunnelQuery:visitor-session-step  [1eb9e5d6]
+SELECT
+          arrayJoin([1, 2, 3, 4]) AS step,
+          arrayElement(counts, step) AS count
+        FROM (SELECT
+          [countIf(level >= 1), countIf(level >= 2), countIf(level >= 3), countIf(level >= 4)] AS counts
+        FROM (SELECT
+          key AS key,
+          windowFunnel(3600000)(ts, s1 = 1, s2 = 1, s3 = 1, s4 = 1) AS level
+        FROM (
+SELECT
+          VisitorId AS key,
+          toUInt64(toUnixTimestamp64Milli(StartTime)) AS ts,
+          1 AS s1,
+          0 AS s2,
+          0 AS s3,
+          0 AS s4
+        FROM session_replays AS s
+        WHERE OrgId = 'org_sql_catalog'
+          AND StartTime >= '2026-01-01 10:30:00'
+          AND StartTime <= '2026-01-03 14:15:00'
+          AND ReferrerHost = 'news.ycombinator.com'
+          AND VisitorId != ''
+UNION ALL
+SELECT
+          VisitorId AS key,
+          toUInt64(toUnixTimestamp64Milli(Timestamp)) AS ts,
+          0 AS s1,
+          toUInt8(((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev')) AS s2,
+          toUInt8(EventName = 'signup_completed') AS s3,
+          toUInt8((EventName = 'plan_started' AND Attributes['plan'] = 'startup')) AS s4
+        FROM product_events AS e
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ((((Kind = 'navigation' AND PagePath = '/pricing') AND Host = 'maple.dev') OR EventName = 'signup_completed') OR (EventName = 'plan_started' AND Attributes['plan'] = 'startup'))
+          AND VisitorId != ''
+) AS funnel_events
+        GROUP BY key) AS levels) AS totals
+        ORDER BY step ASC
+        FORMAT JSON
+
 -- builder:service-map-rollup:serviceMapEdgesExistingHoursSQL:default  [6a2a284a]
 SELECT
           toUnixTimestamp(Hour) AS hourTs
@@ -2469,7 +2901,7 @@ SELECT
         LIMIT 50
 FORMAT JSON
 
--- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered-rollup  [99fac2d3]
+-- builder:web-analytics:webAnalyticsBreakdownsQuery:all-dimensions-filtered-rollup  [858177f5]
 SELECT
           if(ReferrerHost = '', '(none)', ReferrerHost) AS name,
           uniq(SessionId) AS count,
@@ -2480,7 +2912,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2499,7 +2931,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2520,7 +2952,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2539,7 +2971,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2561,7 +2993,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2580,7 +3012,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2602,7 +3034,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2621,7 +3053,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2643,7 +3075,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2662,7 +3094,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2684,7 +3116,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2703,7 +3135,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2725,7 +3157,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2744,7 +3176,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2765,7 +3197,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2784,7 +3216,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2805,7 +3237,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2824,7 +3256,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2845,7 +3277,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2864,7 +3296,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2886,7 +3318,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2905,7 +3337,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2927,7 +3359,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -2946,7 +3378,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3283,12 +3715,12 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsEventsQuery:default-rollup  [d3ea0b13]
+-- builder:web-analytics:webAnalyticsEventsQuery:default-rollup  [fcb15a4e]
 SELECT
           EventName AS name,
           count() AS events,
           uniq(SessionId) AS sessions
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3323,12 +3755,12 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsEventsQuery:semi-joined-rollup  [ebdeba2a]
+-- builder:web-analytics:webAnalyticsEventsQuery:semi-joined-rollup  [69728711]
 SELECT
           EventName AS name,
           count() AS events,
           uniq(SessionId) AS sessions
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3364,12 +3796,12 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsEventsQuery:url-filtered-rollup  [18968e6e]
+-- builder:web-analytics:webAnalyticsEventsQuery:url-filtered-rollup  [031766f1]
 SELECT
           EventName AS name,
           count() AS events,
           uniq(SessionId) AS sessions
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3398,13 +3830,13 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPagesQuery:default-rollup  [89af71c3]
+-- builder:web-analytics:webAnalyticsPagesQuery:default-rollup  [db25069a]
 SELECT
           Host AS host,
           PagePath AS pagePath,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3440,13 +3872,13 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPagesQuery:semi-joined-rollup  [12fc3e6e]
+-- builder:web-analytics:webAnalyticsPagesQuery:semi-joined-rollup  [95c72121]
 SELECT
           Host AS host,
           PagePath AS pagePath,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3483,13 +3915,13 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPagesQuery:url-filtered-rollup  [90a8dfda]
+-- builder:web-analytics:webAnalyticsPagesQuery:url-filtered-rollup  [d0bf84d1]
 SELECT
           Host AS host,
           PagePath AS pagePath,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3515,12 +3947,12 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPageviewsTimeseriesQuery:default-rollup  [0e7c3b62]
+-- builder:web-analytics:webAnalyticsPageviewsTimeseriesQuery:default-rollup  [f5af91eb]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3552,12 +3984,12 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsPageviewsTimeseriesQuery:semi-joined-rollup  [f3673589]
+-- builder:web-analytics:webAnalyticsPageviewsTimeseriesQuery:semi-joined-rollup  [6d125446]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket,
           count() AS pageViews,
           uniq(SessionId) AS sessions
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3646,7 +4078,7 @@ SELECT
         GROUP BY sessionId)
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsSummaryQuery:filtered-rollup  [b2b3770a]
+-- builder:web-analytics:webAnalyticsSummaryQuery:filtered-rollup  [83fa614e]
 SELECT
           uniqIf(VisitorId, VisitorId != '') AS visitors,
           uniq(SessionId) AS sessions,
@@ -3660,7 +4092,7 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
@@ -3680,7 +4112,7 @@ SELECT
           AND VisitorIsNew = 1
           AND SessionId IN (SELECT
           SessionId AS sessionId
-        FROM web_events
+        FROM product_events
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'

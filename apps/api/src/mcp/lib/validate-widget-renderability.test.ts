@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { makeQueryDataSource, makeRawSqlDataSource, makeStaticDataSource } from "@maple/widgets/dashboard"
+import {
+	makeProductEventsFunnelDataSource,
+	makeQueryDataSource,
+	makeRawSqlDataSource,
+	makeStaticDataSource,
+} from "@maple/widgets/dashboard"
 import { makeQueryDraft } from "@/dashboard-templates/helpers"
 import type { PanelType } from "@maple/domain/http"
 import { collectDocumentRenderWarnings, validateWidgetRenderability } from "./validate-widget-renderability"
@@ -65,6 +70,49 @@ describe("fatal — combinations that always render wrong", () => {
 		const issues = validateWidgetRenderability(widget("line", querySource()))
 		expect(issues.fatal).toEqual([])
 		expect(issues.warnings).toEqual([])
+	})
+
+	// A funnel definition the query builder rejects would persist and then 400 on
+	// every render, signed-in and shared alike, with nothing in the authoring
+	// tool able to repair it. These are the builder's own three rules.
+	describe("a product-event funnel definition the builder cannot compile", () => {
+		const funnelWidget = (funnel: Record<string, unknown>) =>
+			widget("funnel", makeProductEventsFunnelDataSource({ steps: [] as never }), { funnel })
+		const step = (eventName: string) => ({ kind: "event", eventName })
+
+		it("more than ten steps", () => {
+			const steps = Array.from({ length: 11 }, (_, i) => step(`e${i}`))
+			expect(validateWidgetRenderability(funnelWidget({ steps })).fatal.join(" ")).toContain(
+				"at most 10 steps",
+			)
+		})
+
+		it("a session step past step 1", () => {
+			const steps = [
+				step("signup_completed"),
+				{ kind: "session", dimension: "utmSource", value: "twitter" },
+			]
+			expect(validateWidgetRenderability(funnelWidget({ steps })).fatal.join(" ")).toContain(
+				"only valid as step 1",
+			)
+		})
+
+		it("a non-positive conversion window", () => {
+			const steps = [step("a"), step("b")]
+			expect(
+				validateWidgetRenderability(funnelWidget({ steps, windowSeconds: 0 })).fatal.join(" "),
+			).toContain("windowSeconds")
+		})
+
+		it("a valid definition, and a funnel with no steps at all, are clean", () => {
+			const steps = [{ kind: "session", dimension: "utmSource", value: "x" }, step("signup")]
+			expect(validateWidgetRenderability(funnelWidget({ steps, windowSeconds: 3600 })).fatal).toEqual(
+				[],
+			)
+			// No steps: the widget is the original group-by breakdown drawn as a
+			// funnel, and none of these rules apply to it.
+			expect(validateWidgetRenderability(funnelWidget({ showStepPercent: true })).fatal).toEqual([])
+		})
 	})
 })
 

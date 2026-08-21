@@ -1,3 +1,4 @@
+import { FunnelBreakdownBy, FunnelKeyBy, FunnelStep } from "@maple/query-model"
 import { Schema } from "effect"
 import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "../../widget-types"
 import { StringRecord } from "./transform"
@@ -110,10 +111,21 @@ export const makeWidgetDisplayConfigSchema = <DataSource extends Schema.Top>(dat
 			}),
 		),
 
-		// Funnel-specific
+		// Funnel-specific.
+		//
+		// `steps`/`keyBy`/`windowSeconds`/`breakdownBy` turn the funnel from a
+		// rendering of group-by rows into a product-event funnel: when `steps` is
+		// present the widget is fetched through the funnel endpoint instead of the
+		// query set. Additive — a funnel without them renders exactly as before,
+		// which is what keeps older readers of the document (the mobile app reads
+		// this wire) safe.
 		funnel: Schema.optional(
 			Schema.Struct({
 				showStepPercent: Schema.optional(Schema.Boolean),
+				steps: Schema.optional(Schema.Array(FunnelStep)),
+				keyBy: Schema.optional(FunnelKeyBy),
+				windowSeconds: Schema.optional(Schema.Number),
+				breakdownBy: Schema.optional(FunnelBreakdownBy),
 			}),
 		),
 

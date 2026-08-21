@@ -30,6 +30,8 @@ import { ScraperInternalRouter } from "@/routes/v1/scraper-internal.http"
 import { HttpSessionReplaysLive } from "@/routes/v1/session-replay.http"
 import { SlackCallbackRouter, SlackInternalRouter } from "@/routes/v1/slack-integration.http"
 import { VcsWebhookRouter } from "@/routes/v1/vcs-webhook.http"
+import { AutumnWebhookRouter } from "@/routes/webhooks/autumn.http"
+import { ClerkWebhookRouter } from "@/routes/webhooks/clerk.http"
 import { HttpV2AlertDeliveriesLive } from "@/routes/v2/alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "@/routes/v2/alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "@/routes/v2/alert-incidents.http"
@@ -160,6 +162,8 @@ export const AllRoutes = Layer.mergeAll(
 	PrometheusScrapeProxyRouter,
 	ScraperInternalRouter,
 	VcsWebhookRouter,
+	ClerkWebhookRouter,
+	AutumnWebhookRouter,
 	McpLive,
 	HealthRouter,
 	DocsRoute,
@@ -223,5 +227,7 @@ export const ApiObservabilityLive = Layer.mergeAll(
 		"x-api-key",
 		"x-hub-signature",
 		"x-hub-signature-256",
+		// Svix (Clerk / Autumn webhooks): replayable alongside its body within the tolerance window.
+		"svix-signature",
 	]),
 )

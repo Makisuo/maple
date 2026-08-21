@@ -1,6 +1,7 @@
 import { useCallback } from "react"
 import { Cause, Exit } from "effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
+import { trackProduct } from "@/lib/analytics"
 import { useAtomSet } from "@/lib/effect-atom"
 import {
 	AttachRequest,
@@ -41,13 +42,19 @@ export function useBillingActions() {
 	const portalSet = useAtomSet(openCustomerPortalMutation, { mode: "promiseExit" })
 
 	const attach = useCallback(
-		async ({ planId }: { planId: string }): Promise<AttachResult> =>
-			unwrap(
+		async ({ planId }: { planId: string }): Promise<AttachResult> => {
+			const result = unwrap(
 				await attachSet({
 					payload: new AttachRequest({ planId }),
 					reactivityKeys: MUTATION_KEYS,
 				}),
-			),
+			)
+			// Every caller redirects to `paymentUrl` when present, so this is the last
+			// moment the session is still ours: record checkout intent before the tab
+			// leaves for Stripe. `plan_started` itself is emitted server-side.
+			if (result.paymentUrl) trackProduct("plan_checkout_started", { plan_id: planId })
+			return result
+		},
 		[attachSet],
 	)
 

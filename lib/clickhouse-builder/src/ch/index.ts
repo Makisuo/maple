@@ -80,6 +80,9 @@ export {
 	argMin,
 	argMax,
 	argMaxMerge,
+	windowFunnel,
+	sequenceMatch,
+	type WindowFunnelMode,
 	// String
 	toString_ as toString,
 	positionCaseInsensitive,

@@ -11,13 +11,13 @@
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param, from, inSubquery, unionAll, compileFnCall } from "@maple-dev/clickhouse-builder"
 import type { ColumnAccessor, CHQuery, CHUnionQuery } from "@maple-dev/clickhouse-builder"
-import { SessionReplays, SessionEvents, WebEvents } from "../tables"
+import { SessionReplays, SessionEvents, ProductEvents } from "../tables"
 import type { FacetOutput } from "./query-helpers"
 import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
 
 /**
  * The page-view discriminator: `session_events.Type` on the raw path,
- * `web_events.Kind` on the rollup. Deliberately not `EventName = '$pageview'` —
+ * `product_events.Kind` on the rollup. Deliberately not `EventName = '$pageview'` —
  * `track()` takes a caller-supplied name with no reserved-prefix check, so a
  * customer calling `track('$pageview')` would inflate the count. `Kind` carries
  * the source `Type` through untouched, which is what makes the two paths
@@ -26,7 +26,7 @@ import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
 const NAVIGATION = "navigation"
 
 /**
- * The custom-event discriminator, the other value `web_events.Kind` takes. A
+ * The custom-event discriminator, the other value `product_events.Kind` takes. A
  * `track(name)` call lands as `Type = 'custom'` with the name in `Message` on the
  * raw table and as `Kind = 'custom'` / `EventName = name` on the rollup.
  */
@@ -80,7 +80,7 @@ export interface WebAnalyticsFilters {
 	 */
 	readonly eventName?: string
 	/**
-	 * Read page views from the `web_events` rollup instead of `session_events`.
+	 * Read page views from the `product_events` rollup instead of `session_events`.
 	 *
 	 * Purely a source swap — every predicate below has a one-to-one counterpart on
 	 * the rollup (`Type`→`Kind`, `domain(Url)`→`Host`, `path(Url)`→`PagePath`),
@@ -89,8 +89,16 @@ export interface WebAnalyticsFilters {
 	 * property stays checkable: there is one definition of the filter semantics,
 	 * and only the table it resolves against changes.
 	 */
-	readonly useWebEvents?: boolean
+	readonly useProductEvents?: boolean
 }
+
+/**
+ * The same filter surface under the name the funnel queries use — the
+ * `/analytics` sidebar narrows page views and funnels identically, and
+ * `product-events.ts` narrows through {@link replaysWhere} exactly as
+ * the page-view queries do.
+ */
+export type ProductEventsFilters = WebAnalyticsFilters
 
 /** Which `session_replays` dimensions a facet branch can exclude from its own WHERE. */
 export type WebAnalyticsFacetKey =
@@ -110,7 +118,7 @@ export type WebAnalyticsFacetKey =
 
 type ReplaysAccessor = ColumnAccessor<typeof SessionReplays.columns>
 type EventsAccessor = ColumnAccessor<typeof SessionEvents.columns>
-type WebEventsAccessor = ColumnAccessor<typeof WebEvents.columns>
+type ProductEventsAccessor = ColumnAccessor<typeof ProductEvents.columns>
 
 /**
  * The page-view predicate over raw `session_events`.
@@ -151,7 +159,7 @@ function eventConditionsRaw(
 }
 
 /**
- * The same predicate over the `web_events` rollup — the one-to-one counterpart
+ * The same predicate over the `product_events` rollup — the one-to-one counterpart
  * of {@link navigationConditionsRaw}, and the reason the two paths can be held
  * to byte-identical results.
  *
@@ -161,7 +169,7 @@ function eventConditionsRaw(
  * `PagePath` were parsed once at write time instead of once per scanned row.
  */
 function navigationConditionsRollup(
-	$: WebEventsAccessor,
+	$: ProductEventsAccessor,
 	filters: WebAnalyticsFilters,
 	only?: "host" | "pagePath",
 ): Array<CH.Condition | undefined> {
@@ -170,7 +178,7 @@ function navigationConditionsRollup(
 
 /** The rollup counterpart of {@link eventConditionsRaw}. */
 function eventConditionsRollup(
-	$: WebEventsAccessor,
+	$: ProductEventsAccessor,
 	filters: WebAnalyticsFilters,
 	kind: EventKind,
 	only?: "host" | "pagePath",
@@ -204,15 +212,15 @@ function eventConditionsRollup(
  *
  * This subquery is inlined into **every one of the twelve breakdown branches**
  * whenever a page filter is active, which is what made a single top-pages click
- * the most expensive interaction on the page. Pointing it at `web_events` is the
- * main reason that table exists.
+ * the most expensive interaction on the page. Pointing it at `product_events` is
+ * the main reason that table exists.
  */
 function navigationSessionsSubquery(
 	filters: WebAnalyticsFilters,
 	only?: "host" | "pagePath",
 ): CHQuery<any, { readonly sessionId: string }, any> {
-	return filters.useWebEvents
-		? from(WebEvents)
+	return filters.useProductEvents
+		? from(ProductEvents)
 				.select(($) => ({ sessionId: $.SessionId }))
 				.where(($) => navigationConditionsRollup($, filters, only))
 				.groupBy("sessionId")
@@ -236,8 +244,8 @@ function eventSessionsSubquery(
 	filters: WebAnalyticsFilters,
 	eventName: string,
 ): CHQuery<any, { readonly sessionId: string }, any> {
-	return filters.useWebEvents
-		? from(WebEvents)
+	return filters.useProductEvents
+		? from(ProductEvents)
 				.select(($) => ({ sessionId: $.SessionId }))
 				.where(($) => [...eventConditionsRollup($, {}, CUSTOM), $.EventName.eq(eventName)])
 				.groupBy("sessionId")
@@ -277,7 +285,7 @@ const acquisitionEq = (column: CH.Expr<string>, value: string) =>
  * doesn't collapse to the single selected value — the sidebar has to keep
  * offering the alternatives.
  */
-function replaysWhere(
+export function replaysWhere(
 	$: ReplaysAccessor,
 	filters: WebAnalyticsFilters,
 	exclude?: WebAnalyticsFacetKey,
@@ -332,7 +340,7 @@ function replaysWhere(
 }
 
 /** True when any filter can only be evaluated against `session_replays`. */
-function needsSessionSemiJoin(filters: WebAnalyticsFilters): boolean {
+export function needsSessionSemiJoin(filters: WebAnalyticsFilters): boolean {
 	return Boolean(
 		filters.referrerHost ||
 		filters.country ||
@@ -394,9 +402,9 @@ function navigationWhereRaw(
 	]
 }
 
-/** WHERE conditions for the page-view queries over the `web_events` rollup. */
+/** WHERE conditions for the page-view queries over the `product_events` rollup. */
 function navigationWhereRollup(
-	$: WebEventsAccessor,
+	$: ProductEventsAccessor,
 	filters: WebAnalyticsFilters,
 ): Array<CH.Condition | undefined> {
 	return [
@@ -553,8 +561,8 @@ export function webAnalyticsPageviewsTimeseriesQuery(
 	opts: WebAnalyticsPageviewsTimeseriesOpts = {},
 ): CHQuery<any, WebAnalyticsPageviewsTimeseriesOutput, any> {
 	const bucketSeconds = opts.bucketSeconds ?? 3600
-	return opts.useWebEvents
-		? from(WebEvents)
+	return opts.useProductEvents
+		? from(ProductEvents)
 				.select(($) => ({
 					bucket: CH.toStartOfInterval($.Timestamp, bucketSeconds),
 					pageViews: CH.count(),
@@ -605,8 +613,8 @@ export function webAnalyticsPagesQuery(
 	opts: WebAnalyticsPagesOpts = {},
 ): CHQuery<any, WebAnalyticsPagesOutput, any> {
 	const limit = opts.limit ?? 100
-	return opts.useWebEvents
-		? from(WebEvents)
+	return opts.useProductEvents
+		? from(ProductEvents)
 				.select(($) => ({
 					host: $.Host,
 					pagePath: $.PagePath,
@@ -662,8 +670,8 @@ export function webAnalyticsEventsQuery(
 	opts: WebAnalyticsEventsOpts = {},
 ): CHQuery<any, WebAnalyticsEventsOutput, any> {
 	const limit = opts.limit ?? 100
-	return opts.useWebEvents
-		? from(WebEvents)
+	return opts.useProductEvents
+		? from(ProductEvents)
 				.select(($) => ({
 					name: $.EventName,
 					events: CH.count(),

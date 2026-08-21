@@ -185,6 +185,14 @@ Names are capped at 128 chars; props at 32 keys / 64-char keys / 1024-char value
 Values are coerced to strings (`Date` → ISO, objects → JSON; `null`/`undefined`/functions are
 dropped). Calls before `init()` finishes are queued, and `track()` never throws.
 
+Every session event — page views and `track()` calls alike — is stamped with the person it belongs
+to: the visitor id, plus the `id` and `groupId` from `identify()`. That is what lets a funnel follow
+one person from an anonymous marketing visit through sign-in, and lets browser events line up with
+the same user's [server-side events](/docs/sdks/effect-server#server-side-track). Identity is
+resolved when the batch is sent, so an `identify()` shortly after `init()` still lands on the first
+page view. The visitor id is empty when the visitor cookie is off (consent not granted, Global
+Privacy Control, `persistVisitorId: false`); events from older SDK builds arrive with no identity.
+
 ## Linking a marketing site to your app
 
 The visitor id is stored in **both** localStorage and a cookie scoped to your registered domain, so

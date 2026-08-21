@@ -640,10 +640,16 @@ export const SessionEvents = table("session_events", {
 	ErrorStack: T.string,
 	// Overflow / extensibility.
 	Attributes: T.map(T.string, T.string),
+	// Identity stamped by the SDK per event ('' on builds that predate it).
+	VisitorId: T.string,
+	UserId: T.string,
+	GroupId: T.string,
 })
 
-// Web analytics fact table — the navigation and custom rows of session_events,
-// re-sorted by time with the URL pre-parsed. Populated by `web_events_mv`.
+// Product events fact table — every event a funnel or product-analytics query
+// can step on. Dual-fed: the navigation and custom rows of session_events arrive
+// via `product_events_mv` (Source='browser'), backend and mobile events are
+// posted directly through `POST /v1/events` (Source='server' | 'mobile').
 //
 // Exists because session_events is sorted (OrgId, SessionId, Timestamp, Seq), so
 // a time-range filter there cannot use the primary index at all, and its idx_type
@@ -651,29 +657,54 @@ export const SessionEvents = table("session_events", {
 // session's transcript). Reads that only want page views were scanning ~13x the
 // rows they used and parsing domain(Url)/path(Url) per row on top.
 //
-// Also the funnel substrate: windowFunnel over (Timestamp, EventName, PagePath)
-// grouped by SessionId.
-export const WebEvents = table("web_events", {
+// The funnel substrate: windowFunnel over (Timestamp, EventName, PagePath)
+// grouped by the person key `if(UserId != '', UserId, VisitorId)`, stitched
+// through `identity_links`. VisitorId is third in the sorting key so one
+// person's rows are contiguous inside a time range.
+export const ProductEvents = table("product_events", {
 	OrgId: T.string,
 	Timestamp: T.dateTime64,
+	// "browser" | "server" | "mobile".
+	Source: T.string,
+	// '' on server rows.
 	SessionId: T.string,
-	// Tiebreaker within a millisecond, so a funnel's step order is stable.
+	// Tiebreaker within a millisecond, so a funnel's step order is stable. 0 on
+	// direct rows.
 	Seq: T.uint32,
-	// "navigation" | "custom" — the source Type, carried through unchanged. This
-	// is the page-view predicate, NOT `EventName = '$pageview'`: track() takes a
-	// caller-supplied name with no reserved-prefix check, so a customer calling
-	// track('$pageview') would otherwise inflate the count.
+	VisitorId: T.string,
+	UserId: T.string,
+	GroupId: T.string,
+	// "navigation" | "custom" | "screen" — the source type, carried through
+	// unchanged. This is the page-view predicate, NOT `EventName = '$pageview'`:
+	// track() takes a caller-supplied name with no reserved-prefix check on the
+	// browser path, so a customer calling track('$pageview') would otherwise
+	// inflate the count.
 	Kind: T.string,
-	// "$pageview" for navigation, else the track() name. The funnel step key.
+	// "$pageview" for navigation, "$screen" for mobile screens, else the track()
+	// name. The funnel step key.
 	EventName: T.string,
 	// domain(Url) / path(Url), materialized at write time.
 	Host: T.string,
 	PagePath: T.string,
 	Url: T.string,
+	// The emitting service on direct rows; '' on browser rows.
+	ServiceName: T.string,
 	// track() props.
 	Attributes: T.map(T.string, T.string),
 })
 
+// (VisitorId, UserId) pairs observed together on a session_replays row.
+// AggregatingMergeTree keyed on the pair, `FirstSeen` collapsing under `min` —
+// so a merge keeps the pair's EARLIEST sighting rather than an arbitrary one,
+// which is what makes ranking a visitor's users by it stable. Unmerged parts
+// still hold several rows per pair, so always aggregate (`min(FirstSeen)` per
+// pair) or semi-join; never assume one row per pair on read.
+export const IdentityLinks = table("identity_links", {
+	OrgId: T.string,
+	VisitorId: T.string,
+	UserId: T.string,
+	FirstSeen: T.dateTime64,
+})
 export const MetricsExpHistogram = table("metrics_exponential_histogram", {
 	OrgId: T.string,
 	ResourceAttributes: T.map(T.string, T.string),
