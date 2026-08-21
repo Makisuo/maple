@@ -157,6 +157,7 @@ export {
 	webAnalyticsTimeseriesQuery,
 	webAnalyticsPageviewsTimeseriesQuery,
 	webAnalyticsPagesQuery,
+	webAnalyticsEventsQuery,
 	webAnalyticsBreakdownsQuery,
 	type WebAnalyticsFilters,
 	type WebAnalyticsFacetKey,

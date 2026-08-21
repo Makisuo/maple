@@ -107,6 +107,7 @@ import {
 import { getAiSessionsFacets, listAiSessions } from "@/api/warehouse/ai-sessions"
 import {
 	getWebAnalyticsBreakdowns,
+	getWebAnalyticsEvents,
 	getWebAnalyticsPages,
 	getWebAnalyticsPageviews,
 	getWebAnalyticsSummary,
@@ -258,7 +259,7 @@ export const replaysFacetsResultAtom = makeQueryAtomFamily(getReplaysFacets, {
 	staleTime: 30_000,
 })
 
-// Web analytics — one page, five atoms, all 30s. Traffic numbers are watched
+// Web analytics — one page, six atoms, all 30s. Traffic numbers are watched
 // during a launch, so a longer TTL reads as a stalled page; a shorter one just
 // re-runs the same 30-day-TTL scans.
 export const webAnalyticsSummaryResultAtom = makeQueryAtomFamily(getWebAnalyticsSummary, {
@@ -274,6 +275,10 @@ export const webAnalyticsPageviewsResultAtom = makeQueryAtomFamily(getWebAnalyti
 })
 
 export const webAnalyticsPagesResultAtom = makeQueryAtomFamily(getWebAnalyticsPages, {
+	staleTime: 30_000,
+})
+
+export const webAnalyticsEventsResultAtom = makeQueryAtomFamily(getWebAnalyticsEvents, {
 	staleTime: 30_000,
 })
 

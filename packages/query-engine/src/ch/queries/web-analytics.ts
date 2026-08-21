@@ -25,6 +25,15 @@ import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
  */
 const NAVIGATION = "navigation"
 
+/**
+ * The custom-event discriminator, the other value `product_events.Kind` takes. A
+ * `track(name)` call lands as `Type = 'custom'` with the name in `Message` on the
+ * raw table and as `Kind = 'custom'` / `EventName = name` on the rollup.
+ */
+const CUSTOM = "custom"
+
+type EventKind = typeof NAVIGATION | typeof CUSTOM
+
 // assumeNotNull(x) — drops the Nullable wrapper for a caller whose WHERE (or, as
 // below, whose `-If` condition) already excludes the NULLs. Generic per call
 // site, so declared here rather than via defineFn — same as session-replays.ts.
@@ -65,6 +74,12 @@ export interface WebAnalyticsFilters {
 	/** `new` keeps first-ever sessions for a visitor, `returning` the rest. */
 	readonly visitorType?: "new" | "returning"
 	/**
+	 * Sessions in which a `track(eventName)` call fired — a semi-join on
+	 * `SessionId` against the custom rows of the page-view source, independent of
+	 * `host` / `pagePath` (see {@link eventSessionsSubquery}).
+	 */
+	readonly eventName?: string
+	/**
 	 * Read page views from the `product_events` rollup instead of `session_events`.
 	 *
 	 * Purely a source swap — every predicate below has a one-to-one counterpart on
@@ -99,6 +114,7 @@ export type WebAnalyticsFacetKey =
 	| "entryPath"
 	| "exitPath"
 	| "host"
+	| "eventName"
 
 type ReplaysAccessor = ColumnAccessor<typeof SessionReplays.columns>
 type EventsAccessor = ColumnAccessor<typeof SessionEvents.columns>
@@ -117,11 +133,26 @@ function navigationConditionsRaw(
 	filters: WebAnalyticsFilters,
 	only?: "host" | "pagePath",
 ): Array<CH.Condition | undefined> {
+	return eventConditionsRaw($, filters, NAVIGATION, only)
+}
+
+/**
+ * The predicate {@link navigationConditionsRaw} is the page-view case of: the
+ * same org / time / URL bounds over raw `session_events`, for either of the two
+ * event types product analytics reads. Custom events carry the `Url` of the page
+ * they fired on, so `host` / `pagePath` mean the same thing for both kinds.
+ */
+function eventConditionsRaw(
+	$: EventsAccessor,
+	filters: WebAnalyticsFilters,
+	kind: EventKind,
+	only?: "host" | "pagePath",
+): Array<CH.Condition | undefined> {
 	return [
 		$.OrgId.eq(param.string("orgId")),
 		$.Timestamp.gte(param.dateTime("startTime")),
 		$.Timestamp.lte(param.dateTime("endTime")),
-		$.Type.eq(NAVIGATION),
+		$.Type.eq(kind),
 		only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => CH.domain_($.Url).eq(v)),
 		only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => CH.path_($.Url).eq(v)),
 	]
@@ -142,11 +173,21 @@ function navigationConditionsRollup(
 	filters: WebAnalyticsFilters,
 	only?: "host" | "pagePath",
 ): Array<CH.Condition | undefined> {
+	return eventConditionsRollup($, filters, NAVIGATION, only)
+}
+
+/** The rollup counterpart of {@link eventConditionsRaw}. */
+function eventConditionsRollup(
+	$: ProductEventsAccessor,
+	filters: WebAnalyticsFilters,
+	kind: EventKind,
+	only?: "host" | "pagePath",
+): Array<CH.Condition | undefined> {
 	return [
 		$.OrgId.eq(param.string("orgId")),
 		$.Timestamp.gte(param.dateTime("startTime")),
 		$.Timestamp.lte(param.dateTime("endTime")),
-		$.Kind.eq(NAVIGATION),
+		$.Kind.eq(kind),
 		only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => $.Host.eq(v)),
 		only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => $.PagePath.eq(v)),
 	]
@@ -187,6 +228,46 @@ function navigationSessionsSubquery(
 				.select(($) => ({ sessionId: $.SessionId }))
 				.where(($) => navigationConditionsRaw($, filters, only))
 				.groupBy("sessionId")
+}
+
+/**
+ * `SELECT SessionId FROM <page-view source> WHERE <custom event named eventName>` —
+ * which sessions fired the selected `track()` event.
+ *
+ * Deliberately independent of `host` / `pagePath`: "sessions that fired
+ * `signup_started`" and "sessions that viewed `/pricing`" compose as two
+ * semi-joins, so an event filter never silently narrows to events fired *on*
+ * the filtered page. The `EventName` skip index on the rollup is what makes the
+ * equality cheap for a rare event.
+ */
+function eventSessionsSubquery(
+	filters: WebAnalyticsFilters,
+	eventName: string,
+): CHQuery<any, { readonly sessionId: string }, any> {
+	return filters.useProductEvents
+		? from(ProductEvents)
+				.select(($) => ({ sessionId: $.SessionId }))
+				.where(($) => [...eventConditionsRollup($, {}, CUSTOM), $.EventName.eq(eventName)])
+				.groupBy("sessionId")
+		: from(SessionEvents)
+				.select(($) => ({ sessionId: $.SessionId }))
+				.where(($) => [...eventConditionsRaw($, {}, CUSTOM), $.Message.eq(eventName)])
+				.groupBy("sessionId")
+}
+
+/**
+ * The `eventName` semi-join clause, appended to every query on the page —
+ * source-independent, like {@link replaysSemiJoin}. `exclude` lets the events
+ * breakdown drop its own filter so the alternatives stay listed.
+ */
+function eventSemiJoin(
+	sessionId: CH.Expr<string>,
+	filters: WebAnalyticsFilters,
+	exclude?: WebAnalyticsFacetKey,
+): CH.Condition | undefined {
+	return exclude !== "eventName" && filters.eventName !== undefined
+		? inSubquery(sessionId, eventSessionsSubquery(filters, filters.eventName))
+		: undefined
 }
 
 /**
@@ -254,6 +335,7 @@ export function replaysWhere(
 		CH.when(filters.visitorType, (v: "new" | "returning") =>
 			v === "new" ? $.VisitorIsNew.eq(1) : $.VisitorIsNew.eq(0),
 		),
+		eventSemiJoin($.SessionId, filters, exclude),
 	]
 }
 
@@ -283,11 +365,16 @@ export function needsSessionSemiJoin(filters: WebAnalyticsFilters): boolean {
  * recursing into `navigationSessionsSubquery`: `session_events` filters both
  * directly off `Url`, and routing them through `session_replays` would silently
  * drop the sessions with no analytics block from the page-view numbers.
+ * `eventName` is left out for the same reason — the event source applies it
+ * directly via {@link eventSemiJoin}, so threading it through here would only
+ * nest the same semi-join twice.
  */
 function matchingSessionsSubquery(filters: WebAnalyticsFilters) {
 	return from(SessionReplays)
 		.select(($) => ({ sessionId: $.SessionId }))
-		.where(($) => replaysWhere($, { ...filters, host: undefined, pagePath: undefined }))
+		.where(($) =>
+			replaysWhere($, { ...filters, host: undefined, pagePath: undefined, eventName: undefined }),
+		)
 		.groupBy("sessionId")
 }
 
@@ -308,7 +395,11 @@ function navigationWhereRaw(
 	$: EventsAccessor,
 	filters: WebAnalyticsFilters,
 ): Array<CH.Condition | undefined> {
-	return [...navigationConditionsRaw($, filters), replaysSemiJoin($.SessionId, filters)]
+	return [
+		...navigationConditionsRaw($, filters),
+		replaysSemiJoin($.SessionId, filters),
+		eventSemiJoin($.SessionId, filters),
+	]
 }
 
 /** WHERE conditions for the page-view queries over the `product_events` rollup. */
@@ -316,7 +407,11 @@ function navigationWhereRollup(
 	$: ProductEventsAccessor,
 	filters: WebAnalyticsFilters,
 ): Array<CH.Condition | undefined> {
-	return [...navigationConditionsRollup($, filters), replaysSemiJoin($.SessionId, filters)]
+	return [
+		...navigationConditionsRollup($, filters),
+		replaysSemiJoin($.SessionId, filters),
+		eventSemiJoin($.SessionId, filters),
+	]
 }
 
 // Summary KPIs
@@ -541,6 +636,69 @@ export function webAnalyticsPagesQuery(
 				.where(($) => [...navigationWhereRaw($, opts), CH.domain_($.Url).neq("")])
 				.groupBy("host", "pagePath")
 				.orderBy(["pageViews", "desc"])
+				.limit(limit)
+				.format("JSON")
+}
+
+// Top custom events
+
+export interface WebAnalyticsEventsOpts extends WebAnalyticsFilters {
+	readonly limit?: number
+}
+
+export interface WebAnalyticsEventsOutput {
+	readonly name: string
+	readonly events: number
+	readonly sessions: number
+}
+
+/**
+ * Most-fired `track()` events by name — `count()` of firings and the distinct
+ * sessions that fired each, over the custom rows of the page-view source.
+ *
+ * `host` / `pagePath` narrow to events fired *on* that page, the same reading as
+ * the Pages query; the `session_replays` dimensions reach it through the semi-join.
+ * Its own `eventName` filter is excluded — this is the breakdown that filter is
+ * picked from, and the alternatives have to stay listed beside the selection.
+ *
+ * A customer's `track('$pageview')` shows up here as an event called `$pageview`
+ * on purpose: `Kind` / `Type` is the discriminator, never the name. Empty names
+ * cannot reach the table (the SDK trims and drops them) but are guarded anyway so
+ * a malformed row can never render as a blank first line.
+ */
+export function webAnalyticsEventsQuery(
+	opts: WebAnalyticsEventsOpts = {},
+): CHQuery<any, WebAnalyticsEventsOutput, any> {
+	const limit = opts.limit ?? 100
+	return opts.useProductEvents
+		? from(ProductEvents)
+				.select(($) => ({
+					name: $.EventName,
+					events: CH.count(),
+					sessions: CH.uniq($.SessionId),
+				}))
+				.where(($) => [
+					...eventConditionsRollup($, opts, CUSTOM),
+					replaysSemiJoin($.SessionId, opts),
+					$.EventName.neq(""),
+				])
+				.groupBy("name")
+				.orderBy(["events", "desc"])
+				.limit(limit)
+				.format("JSON")
+		: from(SessionEvents)
+				.select(($) => ({
+					name: $.Message,
+					events: CH.count(),
+					sessions: CH.uniq($.SessionId),
+				}))
+				.where(($) => [
+					...eventConditionsRaw($, opts, CUSTOM),
+					replaysSemiJoin($.SessionId, opts),
+					$.Message.neq(""),
+				])
+				.groupBy("name")
+				.orderBy(["events", "desc"])
 				.limit(limit)
 				.format("JSON")
 }

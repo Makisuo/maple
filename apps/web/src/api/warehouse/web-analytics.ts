@@ -1,4 +1,4 @@
-// One filter schema shared by all five queries, so the /analytics route builds a
+// One filter schema shared by all six queries, so the /analytics route builds a
 // single filter object and every panel narrows identically. See
 // packages/query-engine/src/ch/queries/web-analytics.ts for why the page reads
 // two tables and what each half covers.
@@ -6,6 +6,7 @@
 import { Effect, Schema } from "effect"
 import {
 	WebAnalyticsBreakdownsRequest,
+	WebAnalyticsEventsRequest,
 	WebAnalyticsPagesRequest,
 	WebAnalyticsPageviewsRequest,
 	WebAnalyticsSummaryRequest,
@@ -27,6 +28,7 @@ export const WebAnalyticsFilterFields = {
 	utmMedium: Schema.optional(Schema.String),
 	utmCampaign: Schema.optional(Schema.String),
 	visitorType: Schema.optional(Schema.Literals(["new", "returning"])),
+	eventName: Schema.optional(Schema.String),
 } as const
 
 export const TimeWindowFields = {
@@ -53,6 +55,12 @@ const WebAnalyticsPagesInputSchema = Schema.Struct({
 	limit: Schema.optional(PositiveInt),
 })
 
+const WebAnalyticsEventsInputSchema = Schema.Struct({
+	...TimeWindowFields,
+	...WebAnalyticsFilterFields,
+	limit: Schema.optional(PositiveInt),
+})
+
 const WebAnalyticsBreakdownsInputSchema = Schema.Struct({
 	...TimeWindowFields,
 	...WebAnalyticsFilterFields,
@@ -62,6 +70,7 @@ const WebAnalyticsBreakdownsInputSchema = Schema.Struct({
 export type GetWebAnalyticsSummaryInput = (typeof WebAnalyticsSummaryInputSchema)["Encoded"]
 export type GetWebAnalyticsTimeseriesInput = (typeof WebAnalyticsTimeseriesInputSchema)["Encoded"]
 export type GetWebAnalyticsPagesInput = (typeof WebAnalyticsPagesInputSchema)["Encoded"]
+export type GetWebAnalyticsEventsInput = (typeof WebAnalyticsEventsInputSchema)["Encoded"]
 export type GetWebAnalyticsBreakdownsInput = (typeof WebAnalyticsBreakdownsInputSchema)["Encoded"]
 
 export interface WebAnalyticsSummary {
@@ -112,6 +121,13 @@ export interface WebAnalyticsPage {
 	host: string
 	pagePath: string
 	pageViews: number
+	sessions: number
+}
+
+/** One `track()` event name, with firings and the distinct sessions that fired it. */
+export interface WebAnalyticsEvent {
+	name: string
+	events: number
 	sessions: number
 }
 
@@ -233,6 +249,29 @@ const getWebAnalyticsPagesEffect = Effect.fn("QueryEngine.getWebAnalyticsPages")
 	)
 
 	return { data: result.data satisfies ReadonlyArray<WebAnalyticsPage> }
+})
+
+export function getWebAnalyticsEvents({ data }: { data: GetWebAnalyticsEventsInput }) {
+	return getWebAnalyticsEventsEffect({ data })
+}
+
+const getWebAnalyticsEventsEffect = Effect.fn("QueryEngine.getWebAnalyticsEvents")(function* ({
+	data,
+}: {
+	data: GetWebAnalyticsEventsInput
+}) {
+	const input = yield* decodeInput(WebAnalyticsEventsInputSchema, data, "getWebAnalyticsEvents")
+
+	const result = yield* runWarehouseQuery("webAnalyticsEvents", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			return yield* client.queryEngine.webAnalyticsEvents({
+				payload: new WebAnalyticsEventsRequest(input),
+			})
+		}),
+	)
+
+	return { data: result.data satisfies ReadonlyArray<WebAnalyticsEvent> }
 })
 
 export function getWebAnalyticsBreakdowns({ data }: { data: GetWebAnalyticsBreakdownsInput }) {

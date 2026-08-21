@@ -37,6 +37,7 @@ import type {
 	WebAnalyticsTimeseriesRequest,
 	WebAnalyticsPageviewsRequest,
 	WebAnalyticsPagesRequest,
+	WebAnalyticsEventsRequest,
 	WebAnalyticsBreakdownsRequest,
 } from "@maple/domain/http"
 import { Match } from "effect"
@@ -641,6 +642,7 @@ const webAnalyticsFilters = (
 		readonly utmMedium?: string
 		readonly utmCampaign?: string
 		readonly visitorType?: "new" | "returning"
+		readonly eventName?: string
 	},
 	useProductEvents: boolean,
 ): CH.WebAnalyticsFilters => ({
@@ -656,6 +658,7 @@ const webAnalyticsFilters = (
 	utmMedium: payload.utmMedium,
 	utmCampaign: payload.utmCampaign,
 	visitorType: payload.visitorType,
+	eventName: payload.eventName,
 	useProductEvents,
 })
 
@@ -726,6 +729,23 @@ const webAnalyticsPagesDef = (useProductEvents: boolean) => ({
 
 export const webAnalyticsPages = defineQuery(webAnalyticsPagesDef(true))
 export const webAnalyticsPagesRaw = defineQuery(webAnalyticsPagesDef(false))
+
+const webAnalyticsEventsDef = (useProductEvents: boolean) => ({
+	id: "webAnalyticsEvents" as const,
+	profile: "aggregation" as const,
+	cache: timeRangeCache,
+	compile: (payload: WebAnalyticsEventsRequest, orgId: string) =>
+		CH.compile(
+			CH.webAnalyticsEventsQuery({
+				...webAnalyticsFilters(payload, useProductEvents),
+				limit: payload.limit,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const webAnalyticsEvents = defineQuery(webAnalyticsEventsDef(true))
+export const webAnalyticsEventsRaw = defineQuery(webAnalyticsEventsDef(false))
 
 const webAnalyticsBreakdownsDef = (useProductEvents: boolean) => ({
 	id: "webAnalyticsBreakdowns" as const,

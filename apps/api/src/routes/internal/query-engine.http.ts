@@ -61,6 +61,7 @@ import {
 	WebAnalyticsTimeseriesResponse,
 	WebAnalyticsPageviewsResponse,
 	WebAnalyticsPagesResponse,
+	WebAnalyticsEventsResponse,
 	WebAnalyticsBreakdownsResponse,
 	ProductEventsFunnelResponse,
 	ProductEventsFunnelBreakdownResponse,
@@ -1700,6 +1701,24 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 							host: String(row.host),
 							pagePath: String(row.pagePath),
 							pageViews: Number(row.pageViews) || 0,
+							sessions: Number(row.sessions) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("webAnalyticsEvents", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* withProductEventsFallback(
+						(t, pl) => runQuery(Queries.webAnalyticsEvents, t, pl),
+						(t, pl) => runQuery(Queries.webAnalyticsEventsRaw, t, pl),
+						tenant,
+						payload,
+					)
+					return new WebAnalyticsEventsResponse({
+						data: rows.map((row) => ({
+							name: String(row.name),
+							events: Number(row.events) || 0,
 							sessions: Number(row.sessions) || 0,
 						})),
 					})
