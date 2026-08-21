@@ -389,7 +389,19 @@ describe("tracesTimeseriesQuery", () => {
 		expect(sql).not.toContain("FROM service_overview_spans")
 	})
 
-	it("keeps fine-grained trace timeseries on the existing MV path", () => {
+	// This is the shape `computeAlertBuckets` produces: one metric, sub-hour
+	// bucket, root spans only, and no `allMetrics`. It used to fall all the way
+	// through to a flat scan of the per-span `service_overview_spans` because
+	// `canUseAnnualServiceOverview` demanded `allMetrics === true` — 165k scans
+	// per 3 days against a 325M-row table while the 2.2M-row minutely rollup
+	// built for it sat unreachable.
+	//
+	// Asserting the minutely tier specifically, NOT just the presence of a table
+	// name: the tiered union reads `service_overview_spans` too (as its partial-
+	// bucket edge), so `toContain("FROM service_overview_spans")` passes on both
+	// routes and cannot tell them apart. That weak assertion is what let the
+	// regression sit here unnoticed.
+	it("routes fine-grained single-metric trace timeseries to the minutely rollup", () => {
 		const q = tracesTimeseriesQuery({
 			metric: "p95_duration",
 			needsSampling: false,
@@ -397,8 +409,28 @@ describe("tracesTimeseriesQuery", () => {
 			bucketSeconds: 300,
 		})
 		const { sql } = compileCH(q, { ...baseParams, bucketSeconds: 300 })
+		expect(sql).toContain("FROM service_overview_minutely")
+		// The raw edge covers only the partial minutes at the window's ends.
 		expect(sql).toContain("FROM service_overview_spans")
+		// Sub-hour buckets have no position inside an hour-floored row.
+		expect(sql).not.toContain("FROM service_overview_hourly")
 		expect(sql).not.toContain("FROM traces_aggregates_hourly")
+	})
+
+	// The other side of that route: a groupBy the rollup tiers cannot serve
+	// (`status_code` is pre-aggregated into `ErrorCount`) must still fall through
+	// to the flat per-span scan.
+	it("keeps status_code breakdowns on the flat service_overview_spans scan", () => {
+		const q = tracesTimeseriesQuery({
+			metric: "count",
+			needsSampling: false,
+			rootOnly: true,
+			groupBy: ["status_code"],
+			bucketSeconds: 300,
+		})
+		const { sql } = compileCH(q, { ...baseParams, bucketSeconds: 300 })
+		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).not.toContain("FROM service_overview_minutely")
 	})
 
 	it("keeps all-metrics and Apdex timeseries off traces_aggregates_hourly", () => {

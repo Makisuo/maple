@@ -20,6 +20,7 @@ import {
 	LOCAL_SCHEMA_V6,
 	LOCAL_SCHEMA_V7,
 	LOCAL_SCHEMA_V8,
+	LOCAL_SCHEMA_V9,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -61,16 +62,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v8 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("51081e951066442a")
-		expect(SCHEMA_DIGEST).toBe("51081e951066442a8e5b53df2c4bdda933edd20fc89132a54ed9b4dbb7e55a05")
+	it("matches the generated v9 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("2516215f22b41a63")
+		expect(SCHEMA_DIGEST).toBe("2516215f22b41a636b3186d0b293a0a6276e4bb85004efd3994b80867696a469")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(8)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V8)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(9)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V9)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -125,15 +126,23 @@ describe("current local schema identity", () => {
 		expect(minutelyView?.definition).toContain("FROM traces")
 		expect(minutelyView?.definition).not.toContain("FROM service_overview_minutely")
 		const v5Names = new Set(LOCAL_SCHEMA_V5_MANIFEST.objects.map((object) => object.name))
+		const currentNames = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
 		expect([...v5Names].filter((name) => !v4Names.has(name))).toEqual([
 			"service_overview_minutely",
 			"service_overview_minutely_mv",
 		])
 
-		// v6 adds and removes nothing: it only replaces two materialized-view
-		// bodies, so the object set is identical to v5 and the manifest digest
-		// differs solely through those two definitions.
-		expect(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name)).toEqual([...v5Names])
+		// v6, v7 and v8 add and remove nothing: they only replace materialized-view
+		// bodies, so their object set is identical to v5 and the manifest digest
+		// differs solely through those definitions. v9 is the first edge to remove
+		// objects — `error_spans` and its view, which no query ever read. Asserted
+		// as an exact set difference rather than a relaxed check, so a future edge
+		// still cannot add or drop an object unnoticed.
+		expect([...v5Names].filter((name) => !currentNames.has(name))).toEqual([
+			"error_spans",
+			"error_spans_mv",
+		])
+		expect([...currentNames].filter((name) => !v5Names.has(name))).toEqual([])
 		const errorEventsView = LOCAL_SCHEMA_MANIFEST.objects.find(
 			(object) => object.name === "error_events_mv",
 		)
@@ -178,6 +187,7 @@ describe("local migration registry", () => {
 			"local-0005-to-0006-error-events-fingerprint-hygiene",
 			"local-0006-to-0007-error-service-version",
 			"local-0007-to-0008-apple-crash-frames",
+			"local-0008-to-0009-mv-sweep",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -224,7 +234,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 9, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 10, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)

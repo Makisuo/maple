@@ -601,6 +601,29 @@ export function formatBucketSecondsShort(seconds: number): string {
  */
 export const alertWindowBucketSeconds = (windowMinutes: number): number => Math.max(windowMinutes * 60, 60)
 
+/** The scheduler tick period. Alert windows are snapped to it — see below. */
+export const ALERT_TICK_SECONDS = 60
+
+/**
+ * Snap an alert evaluation window's end to the tick boundary.
+ *
+ * Two reasons, one of which is a correctness improvement rather than a cache
+ * trick:
+ *
+ *  1. FRESHNESS — a window ending at `now` always includes the current,
+ *     still-filling minute, so the final bucket reads low for reasons that have
+ *     nothing to do with the signal. The error tick already excludes it
+ *     (`ErrorsService`'s cutoff floors to the minute and subtracts one more).
+ *  2. SHARING — every rule in a tick computed its own `now`, so rules over the
+ *     identical query still produced distinct windows and distinct cache keys.
+ *     Snapping makes a tick's rules agree, which is what lets the `qe-evaluate`
+ *     entry be reused by, say, warn-at-100 and page-at-500 on one signal.
+ *
+ * Costs up to one tick of extra lag, which is bounded by the tick period the
+ * scheduler already imposes.
+ */
+export const snapAlertWindowEndMs = (epochMs: number): number => floorToBucketMs(epochMs, ALERT_TICK_SECONDS)
+
 const floorToBucketMs = (epochMs: number, bucketSeconds: number): number => {
 	const bucketMs = bucketSeconds * 1000
 	return Math.floor(epochMs / bucketMs) * bucketMs

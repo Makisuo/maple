@@ -382,6 +382,19 @@ const OVERVIEW_ROLLUP_GROUP_KEYS: ReadonlySet<string> = new Set(["service", "non
  * Reading the hourly tier for a sub-hour bucket would pile every interior hour
  * onto the bucket containing `:00` and leave the rest of the hour reading zero.
  *
+ * No longer gated on `allMetrics === true`. That flag only picks which aggregates
+ * the *raw* paths bother computing (`metricSelectExprs`); the tiers here read
+ * pre-aggregated columns and produce all five `MetricNeed`s unconditionally, so
+ * every `TracesMetric` is serveable. Requiring it kept alert evaluation
+ * (`computeAlertBuckets`, which never sets it) off this route entirely and on a
+ * flat scan of the per-span `service_overview_spans` — 165k scans / 3 days.
+ * The apdex threshold check below is the real capability limit: `rawEdges`
+ * hardcodes the 500ms buckets the rollups store.
+ *
+ * Unlike the `traces_aggregates_hourly` route, all three tiers here carry a true
+ * raw `SpanCount` alongside the weighted one, so a rule routed here evaluates
+ * `minimumSampleCount` against a real sample count rather than an estimate.
+ *
  * Exported because it names a distinct SQL *route*: the SQL it selects is
  * structurally unlike every other branch of `tracesTimeseriesQuery`, so the
  * catalog sweep in `sql-catalog.ts` asserts a fixture exercises it both ways.
@@ -393,8 +406,16 @@ export function canUseAnnualServiceOverview(opts: TracesTimeseriesOpts): boolean
 	const tierIsAvailable =
 		opts.overviewTiers === "hour" ? bucketSeconds % 3600 === 0 : bucketSeconds % 60 === 0
 
+	// A single-metric caller on an hour-multiple bucket is better served by
+	// `traces_aggregates_hourly` (the next branch): it stores sample-WEIGHTED
+	// quantile states, where these tiers store unweighted ones. Yield those to it
+	// and claim only the sub-hour case, where the alternative is a per-span scan
+	// of `service_overview_spans`. `allMetrics` callers stay here at every bucket
+	// because that route cannot serve them at all.
+	const prefersAggregatesHourly = opts.allMetrics !== true && bucketSeconds % 3600 === 0
+
 	return (
-		opts.allMetrics === true &&
+		!prefersAggregatesHourly &&
 		(opts.apdexThresholdMs ?? 500) === 500 &&
 		opts.rootOnly === true &&
 		bucketSeconds >= 60 &&

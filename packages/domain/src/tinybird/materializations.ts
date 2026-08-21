@@ -22,7 +22,6 @@ import {
 	serviceOverviewSpans,
 	serviceOverviewHourly,
 	serviceOverviewMinutely,
-	errorSpans,
 	errorEvents,
 	errorEventsByTime,
 	errorFingerprintsMinutely,
@@ -682,36 +681,6 @@ export const servicePlatformsHourlyMv = defineMaterializedView("service_platform
 })
 
 /**
- * Materialized view populating error_spans from error spans.
- * Pre-filters to StatusCode='Error' and pre-extracts deployment.environment
- * so error queries avoid scanning the full traces table and Map columns.
- */
-export const errorSpansMv = defineMaterializedView("error_spans_mv", {
-	description:
-		"Materializes error spans from traces. Pre-filters to StatusCode='Error' and pre-extracts deployment.environment.",
-	datasource: errorSpans,
-	nodes: [
-		node({
-			name: "error_spans_mv_node",
-			sql: `
-        SELECT
-          OrgId,
-          toDateTime(Timestamp) AS Timestamp,
-          TraceId,
-          SpanId,
-          ParentSpanId,
-          ServiceName,
-          StatusMessage,
-          Duration,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv
-        FROM traces
-        WHERE StatusCode = 'Error'
-      `,
-		}),
-	],
-})
-
-/**
  * Materialized view populating error_events from traces where StatusCode='Error'.
  * Unwraps the first OTel `exception` event and computes a cityHash64
  * FingerprintHash used to group occurrences into Issues.
@@ -983,10 +952,7 @@ export const traceDetailSpansMv = defineMaterializedView("trace_detail_spans_mv"
           StatusCode,
           StatusMessage,
           SpanAttributes,
-          ResourceAttributes,
-          EventsTimestamp,
-          EventsName,
-          EventsAttributes
+          ResourceAttributes
         FROM traces
       `,
 		}),
@@ -1178,7 +1144,14 @@ export const spanMetricsCallsHourlyMv = defineMaterializedView("span_metrics_cal
           StartTimeUnix,
           argMaxState(Value, TimeUnix) AS LastValue
         FROM metrics_sum
-        WHERE MetricName IN ('span.metrics.calls', 'calls') AND IsMonotonic
+        -- 'traces.span.metrics.calls' is the name the collector actually emits:
+        -- spanmetricsconnector output is namespaced by the pipeline it is attached
+        -- to. Without it this MV matched nothing and the target sat at 0 rows since
+        -- it was created, while ~880k rows / 2 days of the real counter flowed past
+        -- into metrics_sum and every read fell back to the raw window-function scan
+        -- (~7s p95 -- see queries/metrics.ts). Keep this list in sync with
+        -- SPAN_METRICS_CALLS_NAMES on the read side.
+        WHERE MetricName IN ('span.metrics.calls', 'calls', 'traces.span.metrics.calls') AND IsMonotonic
         GROUP BY OrgId, Hour, ServiceName, MetricName, SpanKind, AttrFingerprint, ResourceFingerprint, StartTimeUnix
       `,
 		}),
@@ -1263,6 +1236,46 @@ export const metricCatalogExpHistogramMv = defineMaterializedView("metric_catalo
 	],
 })
 
+/**
+ * Cardinality bound shared by all four `attribute_values_hourly` materializations.
+ *
+ * That table is an AUTOCOMPLETE INDEX — it exists so the filter builder can
+ * suggest values for a key. It is read a couple of hundred times a week. With
+ * `AttributeValue != ''` as its only filter it had grown to 1.59 billion rows /
+ * 12.3 GB, because `ARRAY JOIN` over an attribute map turns every distinct value
+ * into its own row per (org, key, hour).
+ *
+ * The three rules below were chosen against what was actually in the table, not
+ * from intuition — measured over a 6h slice:
+ *
+ *   - NUMERIC MEASUREMENTS dominated: `idle_ns` (4.9M rows) and `busy_ns` (1.7M)
+ *     alone were ~70% of it, with `http.request.body.size` and the
+ *     `maple.ingest.*_bytes` counters behind them. Nobody picks
+ *     `idle_ns = 486123904` from a dropdown. Digits-only values longer than four
+ *     characters are dropped; the threshold deliberately spares HTTP status
+ *     codes and ports, which are low-cardinality and genuinely pickable.
+ *   - LONG VALUES: `db.query.text` averaged 864 characters, `body` 334,
+ *     `http.response.header.report-to` 241, `url.full` 146. Useless as
+ *     suggestions and the bulk of the bytes.
+ *   - UNBOUNDED IDENTIFIERS: ids and captured HTTP headers (`cf-ray`,
+ *     `x-request-id`, `traceparent`, `date`) are unique per request by
+ *     definition. Matched by shape rather than by an exact key list so this
+ *     generalizes past whichever keys one customer happens to emit.
+ *
+ * This narrows VALUE suggestions only. `attribute_keys_hourly` is untouched, so
+ * every key stays discoverable and filterable — you just do not get a dropdown
+ * of values for a nanosecond counter.
+ *
+ * Regexes use `[.]` rather than an escaped dot to keep the emitted SQL free of
+ * backslash escaping across the TS template → DDL → chDB path.
+ */
+const attributeValueCardinalityBound = `WHERE AttributeValue != ''
+          AND length(AttributeValue) <= 128
+          AND NOT (length(AttributeValue) > 4 AND match(AttributeValue, '^[0-9]+([.][0-9]+)?$'))
+          AND NOT match(AttributeKey, '(_id|[.]id|Id|_ns)$')
+          AND AttributeKey NOT LIKE 'http.request.header.%'
+          AND AttributeKey NOT LIKE 'http.response.header.%'`
+
 export const logAttributeValuesMv = defineMaterializedView("log_attribute_values_mv", {
 	description: "Aggregates log attribute values from logs hourly.",
 	datasource: attributeValuesHourly,
@@ -1281,7 +1294,7 @@ export const logAttributeValuesMv = defineMaterializedView("log_attribute_values
         ARRAY JOIN
           mapKeys(LogAttributes) AS AttributeKey,
           mapValues(LogAttributes) AS AttributeValue
-        WHERE AttributeValue != ''
+        ${attributeValueCardinalityBound}
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
 		}),
@@ -1306,7 +1319,7 @@ export const metricAttributeValuesMv = defineMaterializedView("metric_attribute_
         ARRAY JOIN
           mapKeys(Attributes) AS AttributeKey,
           mapValues(Attributes) AS AttributeValue
-        WHERE AttributeValue != ''
+        ${attributeValueCardinalityBound}
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
 		}),
@@ -1331,7 +1344,7 @@ export const traceSpanAttributeValuesMv = defineMaterializedView("trace_span_att
         ARRAY JOIN
           mapKeys(SpanAttributes) AS AttributeKey,
           mapValues(SpanAttributes) AS AttributeValue
-        WHERE AttributeValue != ''
+        ${attributeValueCardinalityBound}
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
 		}),
@@ -1356,7 +1369,7 @@ export const traceResourceAttributeValuesMv = defineMaterializedView("trace_reso
         ARRAY JOIN
           mapKeys(ResourceAttributes) AS AttributeKey,
           mapValues(ResourceAttributes) AS AttributeValue
-        WHERE AttributeValue != ''
+        ${attributeValueCardinalityBound}
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
 		}),

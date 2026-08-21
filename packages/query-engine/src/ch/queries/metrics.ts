@@ -167,7 +167,11 @@ const metricsRateTimeseriesColumns = {
 	dataPointCount: T.uint64,
 }
 
-const SPAN_METRICS_CALLS_NAMES = new Set(["span.metrics.calls", "calls"])
+// Must stay in sync with the WHERE clause of `span_metrics_calls_hourly_mv`.
+// `traces.span.metrics.calls` is what the collector emits in practice
+// (spanmetricsconnector output is namespaced by its pipeline); it was missing
+// from both sides, so the rollup held 0 rows and every read took the raw path.
+const SPAN_METRICS_CALLS_NAMES = new Set(["span.metrics.calls", "calls", "traces.span.metrics.calls"])
 
 function canUseSpanMetricsCallsHourly(opts: MetricsRateTimeseriesOpts): boolean {
 	return (

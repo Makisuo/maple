@@ -54,9 +54,6 @@ export const TraceDetailSpans = table("trace_detail_spans", {
 	StatusMessage: T.string,
 	SpanAttributes: T.map(T.string, T.string),
 	ResourceAttributes: T.map(T.string, T.string),
-	EventsTimestamp: T.array(T.dateTime64),
-	EventsName: T.array(T.string),
-	EventsAttributes: T.array(T.map(T.string, T.string)),
 })
 
 export const TraceListMv = table("trace_list_mv", {
@@ -152,18 +149,6 @@ export const ServiceOverviewMinutely = table("service_overview_minutely", {
 	FirstSeen: T.dateTime,
 	ApdexSatisfiedCount: T.uint64,
 	ApdexToleratingCount: T.uint64,
-})
-
-export const ErrorSpans = table("error_spans", {
-	OrgId: T.string,
-	Timestamp: T.dateTime,
-	TraceId: T.string,
-	SpanId: T.string,
-	ParentSpanId: T.string,
-	ServiceName: T.string,
-	StatusMessage: T.string,
-	Duration: T.uint64,
-	DeploymentEnv: T.string,
 })
 
 export const ErrorEvents = table("error_events", {

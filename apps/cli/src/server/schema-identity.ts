@@ -7,6 +7,7 @@ import schemaV5Sql from "./schema/local-schema-v5.sql" with { type: "text" }
 import schemaV6Sql from "./schema/local-schema-v6.sql" with { type: "text" }
 import schemaV7Sql from "./schema/local-schema-v7.sql" with { type: "text" }
 import schemaV8Sql from "./schema/local-schema-v8.sql" with { type: "text" }
+import schemaV9Sql from "./schema/local-schema-v9.sql" with { type: "text" }
 import { schemaDigest as digestSchema, schemaFingerprint as fingerprintSchema } from "./store-version"
 import { buildLocalSchemaManifest, type LocalSchemaManifest } from "./schema-manifest"
 import { LOCAL_SCHEMA_VERSION } from "./local-schema-version"
@@ -30,7 +31,7 @@ export const LEGACY_SCHEMA_PROJECT_REVISION =
 export const LEGACY_SCHEMA_FINGERPRINT = "428701854f9fd30e"
 
 export const CURRENT_SCHEMA_PROJECT_REVISION =
-	"bb7da950a3a65af75fcf627bf4ed0436308c98fee86906048b05b6d40d9f7534"
+	"3773cd0bfa79483773ada07c70c9fa5571688ceecfb1fd5839c33c4251b7f979"
 /** Revision recorded by the issue-297 recovery report. The refreshed upstream
  * generator currently emits CURRENT_SCHEMA_PROJECT_REVISION; the structural
  * fingerprint is the compatibility identity used by the migration. */
@@ -59,6 +60,7 @@ const SNAPSHOT_SQL: ReadonlyArray<string> = [
 	schemaV6Sql,
 	schemaV7Sql,
 	schemaV8Sql,
+	schemaV9Sql,
 ]
 
 export interface LocalSchemaSnapshot {
@@ -107,6 +109,9 @@ export const LOCAL_SCHEMA_V7_MANIFEST_DIGEST = snapshotAt(7).manifestDigest
 export const LOCAL_SCHEMA_V8_SQL = snapshotAt(8).sql
 export const LOCAL_SCHEMA_V8_MANIFEST = snapshotAt(8).manifest
 export const LOCAL_SCHEMA_V8_MANIFEST_DIGEST = snapshotAt(8).manifestDigest
+export const LOCAL_SCHEMA_V9_SQL = snapshotAt(9).sql
+export const LOCAL_SCHEMA_V9_MANIFEST = snapshotAt(9).manifest
+export const LOCAL_SCHEMA_V9_MANIFEST_DIGEST = snapshotAt(9).manifestDigest
 
 export interface LocalSchemaIdentity {
 	readonly version: number
@@ -145,6 +150,7 @@ export const LOCAL_SCHEMA_V5 = identityAt(5)
 export const LOCAL_SCHEMA_V6 = identityAt(6)
 export const LOCAL_SCHEMA_V7 = identityAt(7)
 export const LOCAL_SCHEMA_V8 = identityAt(8)
+export const LOCAL_SCHEMA_V9 = identityAt(9)
 
 export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = Object.freeze({
 	version: LOCAL_SCHEMA_VERSION,
