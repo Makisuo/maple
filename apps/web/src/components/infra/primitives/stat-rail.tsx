@@ -51,6 +51,10 @@ interface StatRailItemProps {
 	selected?: boolean
 	/** A tile with nothing to show: still rendered, but not selectable. */
 	disabled?: boolean
+	/** Extra classes on the tile shell, e.g. container-query padding overrides. */
+	className?: string
+	/** Extra classes on the value, e.g. a container-query size step-down. */
+	valueClassName?: string
 }
 
 /**
@@ -78,6 +82,8 @@ export function StatRailItem({
 	onSelect,
 	selected,
 	disabled,
+	className,
+	valueClassName,
 }: StatRailItemProps) {
 	const body = (
 		<>
@@ -105,6 +111,7 @@ export function StatRailItem({
 					className={cn(
 						"shrink-0 whitespace-nowrap font-mono text-[26px] font-semibold tabular-nums leading-none tracking-[-0.01em]",
 						VALUE_TONE[tone],
+						valueClassName,
 					)}
 				>
 					{value}
@@ -125,7 +132,7 @@ export function StatRailItem({
 		</>
 	)
 
-	const shell = cn("relative px-5 py-4 animate-in fade-in slide-in-from-bottom-1 duration-500")
+	const shell = cn("relative px-5 py-4 animate-in fade-in slide-in-from-bottom-1 duration-500", className)
 	const style = delay ? { animationDelay: `${delay}ms`, animationFillMode: "backwards" } : undefined
 
 	if (!onSelect) {
