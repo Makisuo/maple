@@ -28,6 +28,7 @@ import {
 	matchOrIn,
 	type FacetOutput,
 } from "./query-helpers"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { httpDisplaySpanName } from "../../traces-shared"
 import { CHNumber } from "../schema"
 
@@ -846,7 +847,7 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 					$.Timestamp.gte(param.dateTime("startTime")),
 					$.Timestamp.lte(param.dateTime("endTime")),
 					opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-					CH.inList($.ResourceAttributes.get("deployment.environment"), deploymentEnvs),
+					CH.inList(deploymentEnvExpr($.ResourceAttributes), deploymentEnvs),
 				]),
 		)
 	}

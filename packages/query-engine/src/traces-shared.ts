@@ -31,6 +31,7 @@ export const TRACE_LIST_MV_ATTR_MAP: Record<string, string> = {
 
 export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
 	"deployment.environment": "DeploymentEnv",
+	"deployment.environment.name": "DeploymentEnv",
 } satisfies Record<string, string>
 
 // Attribute filter → typed Condition
@@ -38,7 +39,7 @@ export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { normalizedSpanNameExpr } from "@maple/domain/tinybird/span-display-name"
 
-// HTTP semconv coalescing
+// Semconv rename coalescing
 //
 // OpenTelemetry renamed several HTTP span attributes in the stable semconv:
 //   http.method      → http.request.method
@@ -54,6 +55,19 @@ const HTTP_SEMCONV_ALIASES: Record<string, readonly string[]> = {
 	"http.request.method": ["http.method", "http.request.method"],
 	"http.status_code": ["http.status_code", "http.response.status_code"],
 	"http.response.status_code": ["http.status_code", "http.response.status_code"],
+} satisfies Record<string, readonly string[]>
+
+/**
+ * The same treatment for the one renamed *resource* attribute: the registry
+ * marks `deployment.environment` deprecated, "Replaced by
+ * `deployment.environment.name`". Both spellings are in the wild — our own SDKs
+ * dual-emit, a current OTel SDK sends only `.name`, an older one only the legacy
+ * key — so either filter spelling has to match either stored key. Canonical
+ * first, matching `DEPLOYMENT_ENV_SQL`'s coalesce order.
+ */
+const RESOURCE_SEMCONV_ALIASES: Record<string, readonly string[]> = {
+	"deployment.environment": ["deployment.environment.name", "deployment.environment"],
+	"deployment.environment.name": ["deployment.environment.name", "deployment.environment"],
 } satisfies Record<string, readonly string[]>
 
 /** `if(map[k0] != '', map[k0], if(map[k1] != '', …))` — first non-empty alias. */
@@ -95,9 +109,16 @@ export function buildAttrFilterCondition(
 	indexMode: AttributeIndexMode = "none",
 ): CH.Condition {
 	const mapExpr = CH.dynamicColumn<Record<string, string>>(mapName)
-	// Span attributes renamed across OTel semconv versions match either spelling,
-	// mirroring trace_list_mv. Resource attributes have no such aliases.
-	const keys = mapName === "SpanAttributes" ? (HTTP_SEMCONV_ALIASES[af.key] ?? [af.key]) : [af.key]
+	// Attributes renamed across OTel semconv versions match either spelling,
+	// mirroring trace_list_mv (span attributes) and the MVs' pre-extracted
+	// `DeploymentEnv` (resource attributes).
+	const aliasTable =
+		mapName === "SpanAttributes"
+			? HTTP_SEMCONV_ALIASES
+			: mapName === "ResourceAttributes"
+				? RESOURCE_SEMCONV_ALIASES
+				: undefined
+	const keys = aliasTable?.[af.key] ?? [af.key]
 	const colExpr: CH.Expr<string> = coalescedMapGet(mapExpr, keys)
 	const value = af.value ?? ""
 

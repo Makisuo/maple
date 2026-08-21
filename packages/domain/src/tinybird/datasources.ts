@@ -580,7 +580,7 @@ export type ServiceMapDbQuerySignaturesHourlyRow = InferRow<typeof serviceMapDbQ
  * (those are in `service_map_db_edges_hourly`), keyed by what they're talking to:
  *
  *   - http       — `server.address` / `http.host` / `url.authority`
- *   - messaging  — `messaging.system` + `messaging.destination`
+ *   - messaging  — `messaging.system` + `messaging.destination.name` (legacy `messaging.destination`)
  *   - rpc        — `rpc.system` + `rpc.service`
  *
  * `TargetType` is LowCardinality(String) — not Enum8 — to match the

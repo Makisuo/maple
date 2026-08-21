@@ -77,7 +77,9 @@ describe("serviceOperationsSummaryQuery", () => {
 	it("applies environment filter via ResourceAttributes", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api", environments: ["production"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')",
+		)
 		expect(sql).toContain("DeploymentEnv IN ('production')")
 	})
 
