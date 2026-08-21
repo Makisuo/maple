@@ -353,6 +353,19 @@ const configure = (db: Database): void => {
 	db.exec("PRAGMA busy_timeout = 5000")
 }
 
+const assertSchema3MigrationSafe = (db: Database): void => {
+	const row = db
+		.query<CountRow, []>(
+			"SELECT count(*) AS count FROM outbox_events WHERE state = 'staged' AND source_occurrence_id IS NOT NULL",
+		)
+		.get()
+	if (row === null) throw new Error("schema-3 staged-source preflight returned no row")
+	if (asNumber(row.count) > 0)
+		throw new Error(
+			"cannot migrate eventing control schema 3 with staged source occurrences: the legacy rows have no source fingerprint; complete or explicitly abandon them with the schema-3 build before upgrading",
+		)
+}
+
 const checkpointWal = (db: Database): void => {
 	const result = db.query<WalCheckpointRow, []>("PRAGMA wal_checkpoint(TRUNCATE)").get()
 	if (!result) throw new Error("eventing control WAL checkpoint returned no result")
@@ -529,6 +542,7 @@ export class LocalEventingControlStore {
 				schemaVersion = 3
 			}
 			if (schemaVersion === 3) {
+				assertSchema3MigrationSafe(db)
 				db.transaction(() => db.exec(MIGRATE_SCHEMA_3_TO_4)).exclusive()
 				schemaVersion = 4
 			}
@@ -749,6 +763,21 @@ export class LocalEventingControlStore {
 			)
 			.get(tenantId, sourceKind)
 		if (row === null) throw new Error("staged source-kind query returned no row")
+		return asNumber(row.count) > 0
+	}
+
+	hasStagedSourceOccurrence(
+		tenantId: string,
+		sourceKind: string,
+		source: string,
+		sourceOccurrenceId: string,
+	): boolean {
+		const row = this.#db
+			.query<CountRow, [string, string, string, string]>(
+				"SELECT count(*) AS count FROM outbox_events WHERE tenant_id = ? AND source_kind = ? AND source = ? AND source_occurrence_id = ? AND state = 'staged'",
+			)
+			.get(tenantId, sourceKind, source, sourceOccurrenceId)
+		if (row === null) throw new Error("staged source-occurrence query returned no row")
 		return asNumber(row.count) > 0
 	}
 

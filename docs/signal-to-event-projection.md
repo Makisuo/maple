@@ -519,7 +519,11 @@ The same isolation applies to eventing-specific normalization bounds: an
 oversized attribute map or nested value makes only that source occurrence
 ineligible for projection and records a bounded normalization failure. The
 existing warehouse encoder still decides independently whether the OTLP record
-is valid for storage, so enabling a projection does not narrow ingest.
+is valid for storage, so enabling a projection does not narrow ingest. Before
+full event normalization, Maple performs a tolerant, bounded extraction of the
+stable source URI and source-issued occurrence ID. An ineligible occurrence
+that matches an existing staged obligation fails ingest rather than silently
+acknowledging a changed retry and stranding the earlier event.
 
 Staging and chDB insertion are not one transaction. A process crash after the
 chDB insert but before the OTLP acknowledgement can still cause a duplicate raw
@@ -531,7 +535,16 @@ revision plus a bounded hash of the normalized source content. On redelivery,
 Maple recovers those exact event IDs and does not reevaluate that occurrence
 against a newer or disabled projection snapshot. Recovery requires the source
 hash to match; reuse of the same source identity with changed content fails as a
-collision and leaves the staged event non-ready.
+collision and leaves the staged event non-ready. Within one ingest batch, two
+occurrences that generate the same CloudEvent ID but have different normalized
+source hashes are rejected before any event is staged. The fingerprint contract
+orders field keys by explicit JavaScript code-unit order, not locale collation,
+so checkpoint recovery is independent of host locale.
+
+Schema 4 introduced this source fingerprint. Opening a schema-3 control store
+therefore fails before migration if it contains staged source-backed rows whose
+fingerprints cannot be reconstructed. Ready rows and stores without unresolved
+source-backed staging remain eligible for migration.
 
 If atomic exactly-once storage across both systems later becomes a requirement,
 the correct addition is a durable ingress journal before both writes. chDB

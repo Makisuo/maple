@@ -122,8 +122,11 @@ consumers for the tenant. Maple retains the newest 1,000 otherwise-prunable read
 Disabled consumers do not block pruning; staged events are never pruned by consumer acknowledgement.
 If no consumer is active, acknowledgement retention performs no deletion.
 
-The eventing control database migrates transactionally from schema 1 to schema 2 on open. Existing
-schema-1 control snapshots remain valid and are migrated after restore. Consumer cursors and leases
-are part of the same SQLite backup as projection and outbox state. Consumer mutations enter the
-server admission gate, so checkpoint exclusivity cannot capture a half-applied claim or
-acknowledgement.
+The eventing control database uses schema 4. Schemas 1 through 3 are accepted and each migration step
+is applied transactionally on open. A schema-3 database containing a staged source-backed event is
+rejected before the schema-4 migration: schema 3 did not persist the normalized-source fingerprint
+needed to distinguish an exact retry from source-ID reuse. Complete or explicitly abandon those
+staged events with the schema-3 build before upgrading. Ready schema-3 events and older snapshots
+without that unresolved state remain migratable. Consumer cursors and leases are part of the same
+SQLite backup as projection and outbox state. Consumer mutations enter the server admission gate, so
+checkpoint exclusivity cannot capture a half-applied claim or acknowledgement.

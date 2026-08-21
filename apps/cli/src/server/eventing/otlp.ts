@@ -26,6 +26,18 @@ interface KeyValue {
 	readonly value?: AnyValue
 }
 
+interface OtlpLogRecord {
+	readonly timeUnixNano?: string | number
+	readonly observedTimeUnixNano?: string | number
+	readonly severityNumber?: number
+	readonly severityText?: string
+	readonly eventName?: string
+	readonly body?: AnyValue
+	readonly attributes?: readonly KeyValue[]
+	readonly traceId?: string
+	readonly spanId?: string
+}
+
 interface OtlpLogsRequest {
 	readonly resourceLogs?: readonly {
 		readonly resource?: { readonly attributes?: readonly KeyValue[] }
@@ -35,17 +47,7 @@ interface OtlpLogsRequest {
 				readonly version?: string
 				readonly attributes?: readonly KeyValue[]
 			}
-			readonly logRecords?: readonly {
-				readonly timeUnixNano?: string | number
-				readonly observedTimeUnixNano?: string | number
-				readonly severityNumber?: number
-				readonly severityText?: string
-				readonly eventName?: string
-				readonly body?: AnyValue
-				readonly attributes?: readonly KeyValue[]
-				readonly traceId?: string
-				readonly spanId?: string
-			}[]
+			readonly logRecords?: readonly OtlpLogRecord[]
 		}[]
 	}[]
 }
@@ -250,6 +252,66 @@ const sourceOccurrenceId = (record: NormalizedAttributes): string | null => {
 	return null
 }
 
+export interface OtlpRecoveryIdentity {
+	readonly sourceKind: "otel.log"
+	readonly source: string
+	readonly tenantId: string
+	readonly occurrenceId: string
+	readonly occurredAt: string | null
+}
+
+const recoveryStringAttribute = (values: readonly KeyValue[] | undefined, key: string): string | null => {
+	let value: string | null = null
+	for (const entry of values ?? []) {
+		if (entry.key !== key) continue
+		if (typeof entry.value?.stringValue === "string") value = entry.value.stringValue
+	}
+	return value
+}
+
+const recoveryBoundedIdentity = (value: string, prefix: string): string | null =>
+	Buffer.byteLength(value, "utf8") > MAX_STRING_BYTES ? null : boundedIdentity(value, prefix)
+
+const recoveryIdentity = (
+	resourceAttributes: readonly KeyValue[] | undefined,
+	log: OtlpLogRecord,
+	tenantId: string,
+): OtlpRecoveryIdentity | null => {
+	let occurrenceId: string | null = null
+	for (const key of ["event.id", "cloudevents.id"]) {
+		const value = recoveryStringAttribute(log.attributes, key)?.trim()
+		if (!value) continue
+		occurrenceId = recoveryBoundedIdentity(value, "source")
+		break
+	}
+	if (occurrenceId === null) return null
+
+	const explicit = (
+		recoveryStringAttribute(log.attributes, "event.source") ??
+		recoveryStringAttribute(log.attributes, "cloudevents.source")
+	)?.trim()
+	let source: string | null
+	if (explicit) source = recoveryBoundedIdentity(explicit, "urn:maple:source")
+	else {
+		const service = recoveryStringAttribute(resourceAttributes, "service.name")?.trim()
+		source = recoveryBoundedIdentity(
+			service ? `urn:maple:source:otel:${encodeURIComponent(service)}` : "urn:maple:source:otel:local",
+			"urn:maple:source",
+		)
+	}
+	if (source === null) return null
+
+	const occurredNanos = epochNanos(log.timeUnixNano) ?? epochNanos(log.observedTimeUnixNano)
+	let occurredAt: string | null = null
+	if (occurredNanos !== null)
+		try {
+			occurredAt = nanosToTimestamp(occurredNanos)
+		} catch (error) {
+			if (!(error instanceof OtlpFieldError)) throw error
+		}
+	return { sourceKind: "otel.log", source, tenantId, occurrenceId, occurredAt }
+}
+
 const derivedOccurrenceId = (input: JsonValue): string =>
 	`derived:sha256:${createHash("sha256").update(canonicalJson(input)).digest("hex")}`
 
@@ -409,6 +471,7 @@ const normalizeOtlpLogsStrict = (
 
 export interface OtlpLogNormalizationResult {
 	readonly signals: readonly NormalizedSignal[]
+	readonly unprojectedIdentities: readonly OtlpRecoveryIdentity[]
 	readonly ineligible: number
 	readonly failures: number
 }
@@ -427,11 +490,13 @@ export const normalizeOtlpLogsWithDiagnostics = (
 ): OtlpLogNormalizationResult => {
 	const input = (request ?? {}) as OtlpLogsRequest
 	const signals: NormalizedSignal[] = []
+	const unprojectedIdentities: OtlpRecoveryIdentity[] = []
 	let ineligible = 0
 	let failures = 0
 	for (const resourceLogs of input.resourceLogs ?? [])
 		for (const scopeLogs of resourceLogs.scopeLogs ?? [])
 			for (const log of scopeLogs.logRecords ?? []) {
+				const identity = recoveryIdentity(resourceLogs.resource?.attributes, log, tenantId)
 				try {
 					const normalized = normalizeOtlpLogsStrict(
 						{
@@ -445,14 +510,17 @@ export const normalizeOtlpLogsWithDiagnostics = (
 						acceptedAt,
 						tenantId,
 					)
-					if (normalized.length === 0) ineligible += 1
-					else signals.push(...normalized)
+					if (normalized.length === 0) {
+						ineligible += 1
+						if (identity !== null) unprojectedIdentities.push(identity)
+					} else signals.push(...normalized)
 				} catch (error) {
 					if (!(error instanceof OtlpFieldError)) throw error
 					failures += 1
+					if (identity !== null) unprojectedIdentities.push(identity)
 				}
 			}
-	return { signals, ineligible, failures }
+	return { signals, unprojectedIdentities, ineligible, failures }
 }
 
 export const normalizeOtlpLogs = (

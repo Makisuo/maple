@@ -44,7 +44,7 @@ const emptyEvaluation = (): LocalProjectionEvaluation => ({
 	typeMismatchFields: [],
 })
 
-const sourceOccurrenceFingerprint = (signal: NormalizedSignal): string => {
+export const sourceOccurrenceFingerprint = (signal: NormalizedSignal): string => {
 	if (!isJsonValue(signal.data)) throw new Error("normalized source occurrence must contain finite JSON")
 	const content: JsonValue = {
 		sourceKind: signal.sourceKind,
@@ -56,7 +56,7 @@ const sourceOccurrenceFingerprint = (signal: NormalizedSignal): string => {
 		observedAt: signal.observedAt,
 		subject: signal.subject,
 		fields: [...signal.fields.entries()]
-			.sort(([left], [right]) => left.localeCompare(right))
+			.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
 			.map(([key, value]) => ({ key, value })),
 		data: signal.data,
 	}
@@ -135,7 +135,7 @@ export class LocalEventingRuntime {
 			const result =
 				signal === "logs"
 					? normalizeOtlpLogsWithDiagnostics(decoded, acceptedAt, TENANT_ID)
-					: { signals: [], ineligible: 0, failures: 0 }
+					: { signals: [], unprojectedIdentities: [], ineligible: 0, failures: 0 }
 			normalized = result.signals
 			this.#telemetry.record({
 				operation: "normalization",
@@ -151,6 +151,18 @@ export class LocalEventingRuntime {
 					count: result.failures,
 					sourceKind,
 				})
+			for (const identity of result.unprojectedIdentities)
+				if (
+					this.#store.hasStagedSourceOccurrence(
+						identity.tenantId,
+						identity.sourceKind,
+						identity.source,
+						identity.occurrenceId,
+					)
+				)
+					throw new Error(
+						`cannot safely recover staged source occurrence after projection normalization failed: ${identity.occurrenceId}`,
+					)
 		} catch (error) {
 			this.#telemetry.record({
 				operation: "normalization",
@@ -196,7 +208,12 @@ export class LocalEventingRuntime {
 				sourceKind,
 			})
 			events.push(...result.events)
-			for (const event of result.events) eventSourceFingerprints.set(event.id, sourceFingerprint)
+			for (const event of result.events) {
+				const priorFingerprint = eventSourceFingerprints.get(event.id)
+				if (priorFingerprint !== undefined && priorFingerprint !== sourceFingerprint)
+					throw new Error(`source occurrence collision within one ingest batch: ${event.id}`)
+				eventSourceFingerprints.set(event.id, sourceFingerprint)
+			}
 			failures.push(...result.failures)
 			for (const mismatch of result.typeMismatchFields) typeMismatchFields.add(mismatch)
 		}

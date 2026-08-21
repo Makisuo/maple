@@ -406,6 +406,46 @@ describe("LocalEventingControlStore", () => {
 			}
 		}))
 
+	it("refuses schema-3 migration when staged source rows lack recovery fingerprints", async () =>
+		withDataDir(async (dataDir) => {
+			let store = await LocalEventingControlStore.open(dataDir)
+			store.saveProjection(projection())
+			const staged = event({ sourceoccurrenceid: "record-42" })
+			store.stageEvents([staged], new Map([[staged.id, SOURCE_FINGERPRINT]]))
+			store.close()
+
+			const database = new Database(eventingControlPath(dataDir), {
+				readwrite: true,
+				strict: true,
+				safeIntegers: true,
+			})
+			database.exec("ALTER TABLE outbox_events DROP COLUMN source_fingerprint")
+			database.exec("PRAGMA user_version = 3")
+			database.close(true)
+
+			strictEqual(
+				LocalEventingControlStore.validateSnapshot(eventingControlPath(dataDir)).schemaVersion,
+				3,
+			)
+			await rejects(
+				() => LocalEventingControlStore.open(dataDir),
+				/schema 3 with staged source occurrences/,
+			)
+			const unchanged = new Database(eventingControlPath(dataDir), {
+				readwrite: true,
+				strict: true,
+				safeIntegers: true,
+			})
+			try {
+				const version = unchanged
+					.query<{ readonly user_version: number | bigint }, []>("PRAGMA user_version")
+					.get()
+				strictEqual(Number(version!.user_version), 3)
+			} finally {
+				unchanged.close(true)
+			}
+		}))
+
 	it("leases whole batches, redelivers after expiry, and rejects stale acknowledgements", async () =>
 		withDataDir(async (dataDir) => {
 			const store = await LocalEventingControlStore.open(dataDir, {

@@ -13,8 +13,8 @@ import {
 	type SignalScalar,
 } from "@maple/eventing-core"
 import { LocalEventingControlStore } from "../src/server/eventing/control-store"
-import { normalizeOtlpLogs } from "../src/server/eventing/otlp"
-import { LocalEventingRuntime } from "../src/server/eventing/runtime"
+import { normalizeOtlpLogs, normalizeOtlpLogsWithDiagnostics } from "../src/server/eventing/otlp"
+import { LocalEventingRuntime, sourceOccurrenceFingerprint } from "../src/server/eventing/runtime"
 import type { EventingTelemetryObservation } from "../src/server/eventing/telemetry"
 import { encodeLogs } from "../src/server/otlp/encode"
 
@@ -285,6 +285,32 @@ describe("LocalEventingRuntime", () => {
 		delete timestampLessRecord.timeUnixNano
 		delete timestampLessRecord.observedTimeUnixNano
 		deepStrictEqual(normalizeOtlpLogs(timestampLess, "2026-08-07T20:00:00Z"), [])
+		deepStrictEqual(
+			normalizeOtlpLogsWithDiagnostics(timestampLess, "2026-08-07T20:00:00Z").unprojectedIdentities,
+			[
+				{
+					sourceKind: "otel.log",
+					source: "https://events.example.test",
+					tenantId: "local",
+					occurrenceId: "01K20EXAMPLERECORD42",
+					occurredAt: null,
+				},
+			],
+		)
+	})
+
+	it("uses a locale-independent source-fingerprint field order", () => {
+		const [signal] = normalizeOtlpLogs(exampleRecordObserved, "2026-08-07T20:00:00Z")
+		const fields = new Map(signal!.fields)
+		fields.set("attribute:ä", { type: "string", value: "umlaut" })
+		fields.set("attribute:z", { type: "string", value: "ascii" })
+		const forward = { ...signal!, fields }
+		const reverse = { ...signal!, fields: new Map([...fields].reverse()) }
+		strictEqual(sourceOccurrenceFingerprint(forward), sourceOccurrenceFingerprint(reverse))
+		strictEqual(
+			sourceOccurrenceFingerprint(forward),
+			"sha256:4ed4d210645f2df1959e5c56acb5b22140a01aa267fdf1fab8b62e56ea63e31e",
+		)
 	})
 
 	it("preserves __proto__ as ordinary OTLP data without prototype mutation", () => {
@@ -384,6 +410,18 @@ describe("LocalEventingRuntime", () => {
 					first.events,
 				)
 				runtime.activate(projection({ revision: 2, enabled: false }))
+				const projectionIneligibleRetry = structuredClone(exampleRecordObserved)
+				firstLogRecord(projectionIneligibleRetry).attributes.push(
+					...Array.from({ length: 257 }, (_, index) =>
+						attr(`retry-projection-only-${index}`, { stringValue: "warehouse-valid" }),
+					),
+				)
+				throws(
+					() => runtime.evaluateOtlp("logs", projectionIneligibleRetry, () => true),
+					/cannot safely recover staged source occurrence/,
+				)
+				strictEqual(runtime.listStaged().events.length, 1)
+				strictEqual(runtime.listReady().events.length, 0)
 				const changedRetry = structuredClone(exampleRecordObserved)
 				firstLogRecord(changedRetry).body = { stringValue: "changed retry content" }
 				throws(
@@ -401,6 +439,33 @@ describe("LocalEventingRuntime", () => {
 					first.events,
 				)
 				deepStrictEqual(runtime.listStaged().events, [])
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("rejects same event bytes with conflicting source content within one batch", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				const runtime = new LocalEventingRuntime(store, undefined, exampleProjectors())
+				runtime.activate(projection())
+				const request = structuredClone(exampleRecordObserved)
+				const first = firstLogRecord(request)
+				first.attributes.push(attr("example.projector.ignored", { stringValue: "first" }))
+				const second = structuredClone(first)
+				second.attributes = second.attributes.map((entry) =>
+					entry.key === "example.projector.ignored"
+						? attr(entry.key, { stringValue: "second" })
+						: entry,
+				)
+				request.resourceLogs[0]!.scopeLogs[0]!.logRecords.push(second)
+				throws(
+					() => runtime.evaluateOtlp("logs", request),
+					/source occurrence collision within one ingest batch/,
+				)
+				strictEqual(runtime.listStaged().events.length, 0)
+				strictEqual(runtime.listReady().events.length, 0)
 			} finally {
 				store.close()
 			}
