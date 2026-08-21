@@ -28,6 +28,7 @@ import {
 	buildProjectedMapExpr,
 	canUseServiceOverviewMv,
 	canUseTracesAggregatesMv,
+	errorsOnlyCondition,
 	inclusionValues,
 	serviceOverviewWhereConditions,
 	tracesAggregatesWhereConditions,
@@ -1463,6 +1464,117 @@ const addHours = (d: CH.Expr<string>, hours: CH.Expr<number>): CH.Expr<string> =
 	compileFnCall<string>("addHours", d, hours)
 
 /**
+ * Attribute-filter keys the trace-list MV pre-extracts into columns. The MV
+ * coalesces both semconv spellings at write time, so either key lands on the
+ * same column.
+ */
+const TRACE_LIST_MV_ATTR_COLUMNS = new Map<string, "HttpMethod" | "HttpStatusCode">([
+	["http.method", "HttpMethod"],
+	["http.request.method", "HttpMethod"],
+	["http.status_code", "HttpStatusCode"],
+	["http.response.status_code", "HttpStatusCode"],
+])
+
+/**
+ * Whether `traceListQuery`'s paging stage can run over `trace_list_mv` instead
+ * of raw `traces`. The MV's sort key is `(OrgId, Timestamp, TraceId)`, so
+ * "newest N roots" is a read-in-order index walk instead of a full window scan
+ * — the raw table's `(OrgId, ServiceName, SpanName, Timestamp)` key cannot
+ * serve a time-ordered scan without reading the whole window.
+ *
+ * The MV stores roots only (exactly this query's population) but has no
+ * attribute maps: only HTTP method/status filters that map onto its
+ * pre-extracted columns are expressible; anything else falls back to raw.
+ */
+export function canUseTraceListMvStage1(opts: TraceListOpts): boolean {
+	if (opts.resourceAttributeFilters?.length) return false
+	if (opts.commitShas?.length) return false
+	for (const af of opts.attributeFilters ?? []) {
+		if (!TRACE_LIST_MV_ATTR_COLUMNS.has(af.key)) return false
+		const expressible =
+			(af.mode === "equals" && af.value !== undefined) || (af.mode === "in" && !!af.values?.length)
+		if (!expressible) return false
+	}
+	return true
+}
+
+/**
+ * `tracesBaseWhereConditions` re-expressed over the MV's pre-extracted columns.
+ * `SpanName` here is already the display spelling the facet sidebar shows
+ * (the MV normalizes `http.server GET` → `GET /route` at write time), so a
+ * facet click matches without the raw-or-display OR the base builder needs.
+ */
+function traceListMvWhereConditions(
+	$: ColumnAccessor<typeof TraceListMv.columns>,
+	opts: TraceListOpts,
+): Array<CH.Condition | undefined> {
+	const mm = opts.matchModes
+	const services = inclusionValues(opts.serviceName, opts.serviceNames)
+	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
+	const conditions: Array<CH.Condition | undefined> = [
+		$.OrgId.eq(param.string("orgId")),
+		$.Timestamp.gte(param.dateTime("startTime")),
+		$.Timestamp.lte(param.dateTime("endTime")),
+		CH.when(services, (v: readonly string[]) =>
+			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
+		),
+		CH.when(spanNames, (v: readonly string[]) => matchOrIn($.SpanName, v, mm?.spanName === "contains")),
+		CH.when(opts.statusCode, (v: string) => $.StatusCode.eq(v)),
+		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
+	]
+
+	if (opts.minDurationMs != null) {
+		conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
+	}
+	if (opts.maxDurationMs != null) {
+		conditions.push($.Duration.lte(opts.maxDurationMs * 1000000))
+	}
+	if (opts.environments?.length) {
+		conditions.push(
+			matchOrIn(
+				$.DeploymentEnv,
+				opts.environments,
+				mm?.deploymentEnv === "contains" && opts.environments.length === 1,
+			),
+		)
+	}
+	if (opts.namespaces?.length) {
+		conditions.push(
+			matchOrIn(
+				$.ServiceNamespace,
+				opts.namespaces,
+				mm?.serviceNamespace === "contains" && opts.namespaces.length === 1,
+			),
+		)
+	}
+	for (const af of opts.attributeFilters ?? []) {
+		const column = TRACE_LIST_MV_ATTR_COLUMNS.get(af.key)
+		if (!column) continue // unreachable behind canUseTraceListMvStage1
+		const col = $[column]
+		if (af.mode === "equals" && af.value !== undefined) {
+			conditions.push(af.negated ? col.neq(af.value) : col.eq(af.value))
+		} else if (af.mode === "in" && af.values?.length) {
+			const inCond = CH.inList(col, af.values)
+			conditions.push(af.negated ? CH.not(inCond) : inCond)
+		}
+	}
+	if (opts.excludedServiceNames?.length) {
+		conditions.push(CH.notInList($.ServiceName, opts.excludedServiceNames))
+	}
+	if (opts.excludedSpanNames?.length) {
+		conditions.push(CH.notInList($.SpanName, opts.excludedSpanNames))
+	}
+	if (opts.excludedEnvironments?.length) {
+		conditions.push(CH.notInList($.DeploymentEnv, opts.excludedEnvironments))
+	}
+	if (opts.excludedNamespaces?.length) {
+		conditions.push(CH.notInList($.ServiceNamespace, opts.excludedNamespaces))
+	}
+
+	return conditions
+}
+
+/**
  * Two-stage **trace**-level list: exactly one row per TraceId, carrying the real
  * span count, every participating service, and the trace's wall-clock duration.
  *
@@ -1492,26 +1604,57 @@ export function traceListQuery(opts: TraceListOpts) {
 	const sortBy = opts.sortBy ?? "timestamp"
 	const sortDir = opts.sortDir ?? "desc"
 
-	const pageBase = from(Traces)
-		.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
-		.where(($) => [
-			...buildWhereConditions($, opts),
-			$.ParentSpanId.eq(""),
-			cursor
-				? $.Timestamp.lt(cursor.timestamp).or(
-						$.Timestamp.eq(cursor.timestamp).and($.TraceId.lt(cursor.traceId)),
-					)
-				: undefined,
-		])
-	let page = (
-		sortBy === "durationMs"
-			? pageBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
-			: pageBase.orderBy(["ts", sortDir], ["traceId", "desc"])
-	).limit(limit)
-	if (offset > 0) {
-		page = page.offset(offset)
+	let pageSql: string
+	if (canUseTraceListMvStage1(opts)) {
+		// `trace_list_mv` is sorted `(OrgId, Timestamp, TraceId)`, so this pages
+		// read-in-order instead of scanning the window. Its Timestamp is
+		// second-granularity (`toDateTime`): the ns cursor from stage-2
+		// `startTime` must be truncated to match, and the `(ts, traceId)` tuple
+		// ordering is what keeps pages disjoint despite the truncation ties.
+		const secCursor = cursor
+			? { timestamp: cursor.timestamp.slice(0, 19), traceId: cursor.traceId }
+			: undefined
+		const mvBase = from(TraceListMv)
+			.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
+			.where(($) => [
+				...traceListMvWhereConditions($, opts),
+				secCursor
+					? $.Timestamp.lt(secCursor.timestamp).or(
+							$.Timestamp.eq(secCursor.timestamp).and($.TraceId.lt(secCursor.traceId)),
+						)
+					: undefined,
+			])
+		let page = (
+			sortBy === "durationMs"
+				? mvBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
+				: mvBase.orderBy(["ts", sortDir], ["traceId", "desc"])
+		).limit(limit)
+		if (offset > 0) {
+			page = page.offset(offset)
+		}
+		pageSql = compileCH(page, {}, { skipFormat: true }).sql
+	} else {
+		const pageBase = from(Traces)
+			.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
+			.where(($) => [
+				...buildWhereConditions($, opts),
+				$.ParentSpanId.eq(""),
+				cursor
+					? $.Timestamp.lt(cursor.timestamp).or(
+							$.Timestamp.eq(cursor.timestamp).and($.TraceId.lt(cursor.traceId)),
+						)
+					: undefined,
+			])
+		let page = (
+			sortBy === "durationMs"
+				? pageBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
+				: pageBase.orderBy(["ts", sortDir], ["traceId", "desc"])
+		).limit(limit)
+		if (offset > 0) {
+			page = page.offset(offset)
+		}
+		pageSql = compileCH(page, {}, { skipFormat: true }).sql
 	}
-	const pageSql = compileCH(page, {}, { skipFormat: true }).sql
 
 	// Lexicographic tuple ordering: true root first, earliest span as the
 	// tiebreaker for the (malformed) traces that ship no root at all.

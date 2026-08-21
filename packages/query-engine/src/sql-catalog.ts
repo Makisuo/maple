@@ -692,6 +692,22 @@ export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
 		allCapabilities: true,
 	},
 	{
+		// An attribute filter the MV cannot express — covers the raw-`traces`
+		// stage-1 fallback of traceListQuery.
+		label: "traces-list-grouped-attr-fallback",
+		query: {
+			kind: "list",
+			source: "traces",
+			groupByTrace: true,
+			limit: 50,
+			filters: {
+				...TRACES_FILTERS,
+				attributeFilters: [{ key: "user.id", value: "u1", mode: "equals" }],
+			},
+		},
+		allCapabilities: true,
+	},
+	{
 		label: "traces-list-grouped-duration-sort",
 		query: {
 			kind: "list",
