@@ -127,6 +127,9 @@ is applied transactionally on open. A schema-3 database containing a staged sour
 rejected before the schema-4 migration: schema 3 did not persist the normalized-source fingerprint
 needed to distinguish an exact retry from source-ID reuse. Complete or explicitly abandon those
 staged events with the schema-3 build before upgrading. Ready schema-3 events and older snapshots
-without that unresolved state remain migratable. Consumer cursors and leases are part of the same
-SQLite backup as projection and outbox state. Consumer mutations enter the server admission gate, so
-checkpoint exclusivity cannot capture a half-applied claim or acknowledgement.
+without that unresolved state remain migratable. Restore opens and migrates a private scratch copy
+before publishing restored state, so an unrecoverable legacy snapshot cannot replace the live store.
+Schema-4 validation also rejects staged source-backed rows with missing or malformed fingerprints.
+Consumer cursors and leases are part of the same SQLite backup as projection and outbox state.
+Consumer mutations enter the server admission gate, so checkpoint exclusivity cannot capture a
+half-applied claim or acknowledgement.

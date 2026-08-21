@@ -16,7 +16,7 @@ import {
 import { Schema } from "effect"
 import { LocalEventingControlStore } from "./control-store"
 import type { EventConsumerStart } from "./control-store"
-import { normalizeOtlpLogsWithDiagnostics, OTLP_LOG_ADAPTER } from "./otlp"
+import { normalizeOtlpLogsWithDiagnostics, OTLP_LOG_ADAPTER, type OtlpRecoveryIdentity } from "./otlp"
 import { NOOP_EVENTING_TELEMETRY, type EventingTelemetry } from "./telemetry"
 
 const TENANT_ID = "local"
@@ -62,6 +62,21 @@ export const sourceOccurrenceFingerprint = (signal: NormalizedSignal): string =>
 	}
 	return `sha256:${createHash("sha256").update(canonicalJson(content)).digest("hex")}`
 }
+
+const sourceOccurrenceKey = (
+	occurrence: Pick<NormalizedSignal, "tenantId" | "sourceKind" | "source" | "occurrenceId">,
+): string | null =>
+	occurrence.occurrenceId === null
+		? null
+		: canonicalJson([
+				occurrence.tenantId,
+				occurrence.sourceKind,
+				occurrence.source,
+				occurrence.occurrenceId,
+			])
+
+const recoveryIdentityKey = (identity: OtlpRecoveryIdentity): string =>
+	canonicalJson([identity.tenantId, identity.sourceKind, identity.source, identity.occurrenceId])
 
 export class LocalEventingRuntime {
 	readonly #store: LocalEventingControlStore
@@ -131,12 +146,14 @@ export class LocalEventingRuntime {
 		const startedAt = performance.now()
 		const acceptedAt = new Date().toISOString()
 		let normalized
+		let unprojectedIdentities: readonly OtlpRecoveryIdentity[]
 		try {
 			const result =
 				signal === "logs"
 					? normalizeOtlpLogsWithDiagnostics(decoded, acceptedAt, TENANT_ID)
 					: { signals: [], unprojectedIdentities: [], ineligible: 0, failures: 0 }
 			normalized = result.signals
+			unprojectedIdentities = result.unprojectedIdentities
 			this.#telemetry.record({
 				operation: "normalization",
 				outcome: "success",
@@ -151,18 +168,6 @@ export class LocalEventingRuntime {
 					count: result.failures,
 					sourceKind,
 				})
-			for (const identity of result.unprojectedIdentities)
-				if (
-					this.#store.hasStagedSourceOccurrence(
-						identity.tenantId,
-						identity.sourceKind,
-						identity.source,
-						identity.occurrenceId,
-					)
-				)
-					throw new Error(
-						`cannot safely recover staged source occurrence after projection normalization failed: ${identity.occurrenceId}`,
-					)
 		} catch (error) {
 			this.#telemetry.record({
 				operation: "normalization",
@@ -171,6 +176,35 @@ export class LocalEventingRuntime {
 				sourceKind,
 			})
 			throw error
+		}
+		const sourceFingerprints = new Map<string, string>()
+		for (const occurrence of normalized) {
+			const key = sourceOccurrenceKey(occurrence)
+			if (key === null) continue
+			const fingerprint = sourceOccurrenceFingerprint(occurrence)
+			const prior = sourceFingerprints.get(key)
+			if (prior !== undefined && prior !== fingerprint)
+				throw new Error(
+					`source occurrence collision within one ingest batch: ${occurrence.occurrenceId}`,
+				)
+			sourceFingerprints.set(key, fingerprint)
+		}
+		for (const identity of unprojectedIdentities) {
+			if (sourceFingerprints.has(recoveryIdentityKey(identity)))
+				throw new Error(
+					`source occurrence collision with an unprojectable record within one ingest batch: ${identity.occurrenceId}`,
+				)
+			if (
+				this.#store.hasStagedSourceOccurrence(
+					identity.tenantId,
+					identity.sourceKind,
+					identity.source,
+					identity.occurrenceId,
+				)
+			)
+				throw new Error(
+					`cannot safely recover staged source occurrence after projection normalization failed: ${identity.occurrenceId}`,
+				)
 		}
 		const snapshot = this.#compiled
 		const events: MapleCloudEvent[] = []

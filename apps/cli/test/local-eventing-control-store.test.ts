@@ -1,6 +1,15 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert"
 import { Database } from "bun:sqlite"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, it } from "vitest"
@@ -443,6 +452,92 @@ describe("LocalEventingControlStore", () => {
 				strictEqual(Number(version!.user_version), 3)
 			} finally {
 				unchanged.close(true)
+			}
+		}))
+
+	it("rejects invalid schema-4 staged fingerprints during snapshot validation", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			store.saveProjection(projection())
+			const missing = event({ id: "event-missing-fingerprint", sourceoccurrenceid: "record-1" })
+			const malformed = event({ id: "event-malformed-fingerprint", sourceoccurrenceid: "record-2" })
+			store.stageEvents(
+				[missing, malformed],
+				new Map([
+					[missing.id, SOURCE_FINGERPRINT],
+					[malformed.id, SOURCE_FINGERPRINT],
+				]),
+			)
+			store.close()
+
+			const database = new Database(eventingControlPath(dataDir), {
+				readwrite: true,
+				strict: true,
+				safeIntegers: true,
+			})
+			database.run("UPDATE outbox_events SET source_fingerprint = NULL WHERE event_id = ?", [
+				missing.id,
+			])
+			database.run("UPDATE outbox_events SET source_fingerprint = ? WHERE event_id = ?", [
+				"sha256:not-a-digest",
+				malformed.id,
+			])
+			database.close(true)
+
+			throws(
+				() => LocalEventingControlStore.validateSnapshot(eventingControlPath(dataDir)),
+				/invalid staged source fingerprint/,
+			)
+			await rejects(() => LocalEventingControlStore.open(dataDir), /invalid staged source fingerprint/)
+		}))
+
+	it("rejects an unsafe schema-3 restore before replacing an openable target", async () =>
+		withDataDir(async (dataDir) => {
+			const unsafeDataDir = join(dataDir, "unsafe")
+			let store = await LocalEventingControlStore.open(unsafeDataDir)
+			store.saveProjection(projection())
+			const unsafeEvent = event({ sourceoccurrenceid: "unsafe-record" })
+			store.stageEvents([unsafeEvent], new Map([[unsafeEvent.id, SOURCE_FINGERPRINT]]))
+			store.close()
+			const unsafeDatabase = new Database(eventingControlPath(unsafeDataDir), {
+				readwrite: true,
+				strict: true,
+				safeIntegers: true,
+			})
+			unsafeDatabase.exec("ALTER TABLE outbox_events DROP COLUMN source_fingerprint")
+			unsafeDatabase.exec("PRAGMA user_version = 3")
+			unsafeDatabase.close(true)
+
+			const liveDataDir = join(dataDir, "live")
+			store = await LocalEventingControlStore.open(liveDataDir)
+			store.saveProjection(projection())
+			const liveEvent = event({ id: "live-event" })
+			store.stageEvents([liveEvent])
+			store.markReady([liveEvent.id])
+			store.close()
+			const liveBefore = readFileSync(eventingControlPath(liveDataDir))
+
+			await rejects(
+				() =>
+					LocalEventingControlStore.restoreSnapshot(
+						eventingControlPath(unsafeDataDir),
+						liveDataDir,
+					),
+				/schema 3 with staged source occurrences/,
+			)
+			deepStrictEqual(readFileSync(eventingControlPath(liveDataDir)), liveBefore)
+			deepStrictEqual(
+				readdirSync(dataDir).filter((name) => name.startsWith(".maple-eventing-control-restore-")),
+				[],
+			)
+			store = await LocalEventingControlStore.open(liveDataDir)
+			try {
+				deepStrictEqual(
+					store.listReady().events.map(({ event }) => event.id),
+					[liveEvent.id],
+				)
+			} finally {
+				store.close()
 			}
 		}))
 

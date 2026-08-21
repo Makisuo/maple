@@ -1,7 +1,7 @@
 import { constants as sqliteConstants, Database } from "bun:sqlite"
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
-import { chmodSync, existsSync, lstatSync, readFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import {
 	canonicalJson,
@@ -441,6 +441,30 @@ const validateOpenDatabase = (
 				canonicalInstant(consumer.disabled_at, "event consumer disabledAt")
 		}
 	}
+	if (schemaVersion >= 4) {
+		const statement = db.prepare<CountRow, []>(
+			`SELECT count(*) AS count
+				 FROM outbox_events
+				 WHERE state = 'staged'
+				   AND source_occurrence_id IS NOT NULL
+				   AND (
+				       source_fingerprint IS NULL
+				       OR length(source_fingerprint) <> 71
+				       OR substr(source_fingerprint, 1, 7) <> 'sha256:'
+				       OR substr(source_fingerprint, 8) GLOB '*[^0-9a-f]*'
+				   )`,
+		)
+		let invalidFingerprints: CountRow | null
+		try {
+			invalidFingerprints = statement.get()
+		} finally {
+			statement.finalize()
+		}
+		if (invalidFingerprints === null)
+			throw new Error("eventing staged source-fingerprint validation returned no row")
+		if (asNumber(invalidFingerprints.count) > 0)
+			throw new Error("eventing control database has an invalid staged source fingerprint")
+	}
 	return {
 		schemaVersion,
 		projectionRevisions: asNumber(revisions.count),
@@ -542,8 +566,10 @@ export class LocalEventingControlStore {
 				schemaVersion = 3
 			}
 			if (schemaVersion === 3) {
-				assertSchema3MigrationSafe(db)
-				db.transaction(() => db.exec(MIGRATE_SCHEMA_3_TO_4)).exclusive()
+				db.transaction(() => {
+					assertSchema3MigrationSafe(db)
+					db.exec(MIGRATE_SCHEMA_3_TO_4)
+				}).exclusive()
 				schemaVersion = 4
 			}
 			if (schemaVersion !== CONTROL_SCHEMA_VERSION)
@@ -1250,6 +1276,17 @@ export class LocalEventingControlStore {
 
 	static async restoreSnapshot(snapshotPath: string, dataDir: string): Promise<void> {
 		LocalEventingControlStore.validateSnapshot(snapshotPath)
-		await durableWrite(eventingControlPath(dataDir), readFileSync(snapshotPath))
+		const stagingDataDir = mkdtempSync(
+			join(dirname(resolve(dataDir)), ".maple-eventing-control-restore-"),
+		)
+		let restored: LocalEventingControlStore | undefined
+		try {
+			await durableWrite(eventingControlPath(stagingDataDir), readFileSync(snapshotPath))
+			restored = await LocalEventingControlStore.open(stagingDataDir)
+			await restored.backupTo(eventingControlPath(dataDir))
+		} finally {
+			restored?.close()
+			rmSync(stagingDataDir, { recursive: true, force: true })
+		}
 	}
 }

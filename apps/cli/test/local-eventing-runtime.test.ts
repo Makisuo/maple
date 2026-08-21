@@ -102,6 +102,16 @@ const projection = (overrides: Partial<SignalProjectionSpec> = {}): SignalProjec
 	...overrides,
 })
 
+const eventNameProjection = (id: string, eventName: string): SignalProjectionSpec =>
+	projection({
+		id,
+		selector: {
+			op: "eq",
+			field: { namespace: "signal", key: "event.name", type: "string" },
+			value: { type: "string", value: eventName },
+		},
+	})
+
 const signalField = (
 	signal: NormalizedSignal,
 	namespace: "resource" | "attribute",
@@ -460,6 +470,74 @@ describe("LocalEventingRuntime", () => {
 						: entry,
 				)
 				request.resourceLogs[0]!.scopeLogs[0]!.logRecords.push(second)
+				throws(
+					() => runtime.evaluateOtlp("logs", request),
+					/source occurrence collision within one ingest batch/,
+				)
+				strictEqual(runtime.listStaged().events.length, 0)
+				strictEqual(runtime.listReady().events.length, 0)
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("rejects matching and nonmatching records that reuse one source occurrence", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				const runtime = new LocalEventingRuntime(store, undefined, exampleProjectors())
+				runtime.activate(eventNameProjection("observed-only", "example.record.observed"))
+				const request = structuredClone(exampleRecordObserved)
+				const sibling = structuredClone(firstLogRecord(request))
+				sibling.eventName = "example.record.ignored"
+				request.resourceLogs[0]!.scopeLogs[0]!.logRecords.push(sibling)
+				throws(
+					() => runtime.evaluateOtlp("logs", request),
+					/source occurrence collision within one ingest batch/,
+				)
+				strictEqual(runtime.listStaged().events.length, 0)
+				strictEqual(runtime.listReady().events.length, 0)
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("rejects projectable and projection-ineligible records with one source occurrence", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				const runtime = new LocalEventingRuntime(store, undefined, exampleProjectors())
+				runtime.activate(projection())
+				const request = structuredClone(exampleRecordObserved)
+				const sibling = structuredClone(firstLogRecord(request))
+				sibling.attributes.push(
+					...Array.from({ length: 257 }, (_, index) =>
+						attr(`projection-only-sibling-${index}`, { stringValue: "warehouse-valid" }),
+					),
+				)
+				request.resourceLogs[0]!.scopeLogs[0]!.logRecords.push(sibling)
+				throws(
+					() => runtime.evaluateOtlp("logs", request),
+					/source occurrence collision with an unprojectable record within one ingest batch/,
+				)
+				strictEqual(runtime.listStaged().events.length, 0)
+				strictEqual(runtime.listReady().events.length, 0)
+			} finally {
+				store.close()
+			}
+		}))
+
+	it("rejects disjoint projections over conflicting records with one source occurrence", async () =>
+		withDataDir(async (dataDir) => {
+			const store = await LocalEventingControlStore.open(dataDir)
+			try {
+				const runtime = new LocalEventingRuntime(store, undefined, exampleProjectors())
+				runtime.activate(eventNameProjection("observed-events", "example.record.observed"))
+				runtime.activate(eventNameProjection("alternate-events", "example.record.alternate"))
+				const request = structuredClone(exampleRecordObserved)
+				const sibling = structuredClone(firstLogRecord(request))
+				sibling.eventName = "example.record.alternate"
+				request.resourceLogs[0]!.scopeLogs[0]!.logRecords.push(sibling)
 				throws(
 					() => runtime.evaluateOtlp("logs", request),
 					/source occurrence collision within one ingest batch/,

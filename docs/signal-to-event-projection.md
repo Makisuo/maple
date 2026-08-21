@@ -536,15 +536,23 @@ Maple recovers those exact event IDs and does not reevaluate that occurrence
 against a newer or disabled projection snapshot. Recovery requires the source
 hash to match; reuse of the same source identity with changed content fails as a
 collision and leaves the staged event non-ready. Within one ingest batch, two
-occurrences that generate the same CloudEvent ID but have different normalized
-source hashes are rejected before any event is staged. The fingerprint contract
-orders field keys by explicit JavaScript code-unit order, not locale collation,
-so checkpoint recovery is independent of host locale.
+records that reuse the same tenant, source kind, source URI, and source-issued
+occurrence ID must also have the same normalized source hash. Maple checks that
+source tuple for every normalized occurrence before selectors divide it into
+zero, one, or several projected event IDs. A projection-ineligible record that
+reuses a normalized tuple makes the batch ambiguous and is rejected before any
+event is staged. The fingerprint contract orders field keys by explicit
+JavaScript code-unit order, not locale collation, so checkpoint recovery is
+independent of host locale.
 
 Schema 4 introduced this source fingerprint. Opening a schema-3 control store
 therefore fails before migration if it contains staged source-backed rows whose
 fingerprints cannot be reconstructed. Ready rows and stores without unresolved
-source-backed staging remain eligible for migration.
+source-backed staging remain eligible for migration. Restore copies a signed
+control snapshot into a private scratch store, opens and migrates that copy, and
+serializes the validated current-schema database into the restored data
+directory. An unsafe legacy snapshot therefore fails before restore readiness
+or the live-directory swap; the signed checkpoint artifact itself is unchanged.
 
 If atomic exactly-once storage across both systems later becomes a requirement,
 the correct addition is a durable ingress journal before both writes. chDB
