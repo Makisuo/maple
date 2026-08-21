@@ -48,6 +48,8 @@ enum Telemetry {
 		static let widgetRefresh = "widget.refresh"
 		/// One of the two Home Screen surfaces, inside a refresh.
 		static let widgetSnapshot = "widget.snapshot"
+		/// Minting or rolling the credential the widget extension fetches with.
+		static let widgetCredential = "widget.credential"
 		static let liveActivitySubmit = "live_activity.submit"
 		static let liveActivityEnd = "live_activity.end"
 	}
@@ -92,6 +94,20 @@ enum Telemetry {
 		/// The round reloaded because the widgets would resolve a *different*
 		/// organization or name, not because any snapshot's numbers moved.
 		static let widgetResolutionChanged = "maple.app.widget.resolution_changed"
+
+		// What the widget extension recorded about its *own* fetches. The
+		// extension links no telemetry — it carries MapleWidgetData and nothing
+		// else — so without these the path that actually keeps the Home Screen
+		// current is completely unobservable, which is the failure this whole
+		// change exists to fix. Drained by WidgetPublisher on the next round.
+		/// How the extension's last fetch ended: success, unauthorized, …
+		static let widgetFetchOutcome = "maple.app.widget.fetch.outcome"
+		/// Seconds since the extension last fetched successfully. Absent when it
+		/// never has, which is a different statement from "a long time ago".
+		static let widgetFetchAgeSeconds = "maple.app.widget.fetch.age_seconds"
+		static let widgetFetchFailures = "maple.app.widget.fetch.consecutive_failures"
+		/// The extension has stopped fetching until the app mints again.
+		static let widgetFetchCredentialRejected = "maple.app.widget.fetch.credential_rejected"
 		/// How the publisher got its session: the view tree, or a headless
 		/// bootstrap in a background launch.
 		static let widgetContextSource = "maple.app.widget.context_source"

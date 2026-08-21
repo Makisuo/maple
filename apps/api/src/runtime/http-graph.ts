@@ -56,6 +56,8 @@ import {
 	HttpV2ServicesLive,
 	HttpV2TracesLive,
 } from "@/routes/v2/telemetry.http"
+import { HttpV2WidgetSummaryLive } from "@/routes/v2/widget-summary.http"
+import { HttpV2WidgetCredentialsLive } from "@/routes/v2/widget-credentials.http"
 import { ApiAuthorizationLayer } from "@/services/auth/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { SessionAuthorizationLayer } from "@/services/auth/SessionAuthorizationLayer"
@@ -138,6 +140,8 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2MetricsLive,
 			HttpV2ServicesLive,
 			HttpV2ServiceMapLive,
+			HttpV2WidgetSummaryLive,
+			HttpV2WidgetCredentialsLive,
 		),
 	),
 	Layer.provide(V2TransportErrorBoundaryLive),

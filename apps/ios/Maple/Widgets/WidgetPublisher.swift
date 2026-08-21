@@ -14,6 +14,14 @@ import WidgetKit
 /// process that holds a session — fetches and writes; the widgets only render.
 /// See `IssuesSnapshot` and `ThroughputSnapshot`.
 ///
+/// One organization costs **one request**, `GET /v2/widget_summary`. It used to
+/// cost four, composed here, and the composition was the problem: a
+/// `BGAppRefreshTask` gets tens of seconds, and four round-trips per
+/// organization is how a background round runs out of them having written
+/// nothing. The shape that comes back — `WidgetSummaryPayload` — is the same
+/// one the widgets will decode for themselves, so the app and the Home Screen
+/// cannot drift apart about what a row says.
+///
 /// Refreshes are driven from four places, which between them cover every way a
 /// phone is used:
 ///
@@ -36,20 +44,12 @@ import WidgetKit
 final class WidgetPublisher {
 	static let shared = WidgetPublisher()
 
-	/// Ongoing means what the app's "Needs attention" filter means, over the
-	/// same day Home considers recent: an issue nobody has actioned that is
-	/// still happening. Without the window a months-dead issue in `triage`
-	/// would sit on someone's Home Screen forever.
-	private static let issuesWindow = TimeWindow.last24Hours
-	/// Throughput is a "right now" number, so it uses Home's rate window —
-	/// same hour, same figures as the Services tab.
-	private static let throughputWindow = TimeWindow.lastHour
-	/// Enough to make `openCount` meaningful and to be sure the six rows shown
-	/// are the six worst; beyond that the widget renders "20+".
-	private static let issueFetchLimit = 20
-	/// The picker shows at most `ThroughputSnapshot.maximumServices`, but the
-	/// org total is summed from every service, so this is deliberately wider.
-	private static let serviceFetchLimit = 50
+	/// The windows, the page sizes, and the ranking all belong to
+	/// `/v2/widget_summary` now. They used to live here as five constants that
+	/// had to agree with what the widgets rendered — "ongoing" and "right now"
+	/// are product definitions, and two App Store builds holding different
+	/// opinions about them is exactly the drift the endpoint removes.
+	///
 	/// Foreground, push, and background refresh can all fire within a second
 	/// of each other. One round per minute is plenty for a surface iOS redraws
 	/// every fifteen.
@@ -57,18 +57,22 @@ final class WidgetPublisher {
 
 	/// How many organizations one round may publish.
 	///
-	/// One organization costs four requests. Publishing every membership would
-	/// be 48 for an account in twelve — most of them for organizations nobody
-	/// put on a Home Screen — and iOS answers that kind of appetite with less
-	/// background time, so the widgets would end up *less* current. The set is
+	/// Publishing every membership would fetch for a dozen organizations nobody
+	/// put on a Home Screen, and iOS answers that kind of appetite with less
+	/// background time — so the widgets would end up *less* current. The set is
 	/// driven by what is actually placed instead; see `organizationsToPublish`.
+	/// It also bounds the credentials a round mints, which is the more important
+	/// ceiling now: each one is a bearer token that then has to be revoked.
 	private static let maximumOrganizations = 3
-	/// Organizations in flight at once: three organizations means six sockets
-	/// open, not twelve. Pairwise, so changing this means changing the loop in
-	/// `refresh` too.
-	private static let maximumConcurrentOrganizations = 2
 
 	private let index: WidgetOrganizationIndex
+	/// Where the widgets' own credential lives — a file in the shared App Group
+	/// container, written here and read by the extension.
+	private let credentials = WidgetCredentialStore()
+	/// What the extension records about its own fetches — the only way to see a
+	/// path that has no telemetry of its own. Read on the way past; written by
+	/// the widget.
+	private let fetchStates = WidgetFetchStateStore()
 	private var lastRefreshedAt: Date?
 	/// Something other than a snapshot's contents changed what the widgets
 	/// would render — a corrected name, or a newly known organization. Set
@@ -212,9 +216,21 @@ final class WidgetPublisher {
 		// organization switch, and `reloadAllTimelines` spends the widget refresh
 		// budget iOS is metering.
 		guard !evicted.isEmpty else { return }
+		let api = context?.api
+		let installationId = AppInstallation.identifier
 		for organizationId in evicted {
 			WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organizationId).clear()
 			WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organizationId).clear()
+			credentials.clear(organizationId: organizationId)
+			fetchStates.clear(organizationId: organizationId)
+			// Server-side too, and not only locally: deleting the file stops this
+			// phone using the credential, but the credential itself would stay live
+			// until it expired. Best effort — it is bound to an organization the
+			// user has just left, so a failure here is a token that outlives its
+			// usefulness by up to a month, not one that outlives the membership.
+			if let api {
+				Task { try? await api.scoped(to: organizationId).revokeWidgetCredential(installationId: installationId) }
+			}
 		}
 		WidgetCenter.shared.reloadAllTimelines()
 	}
@@ -276,29 +292,17 @@ final class WidgetPublisher {
 				)
 			}
 
-			// Two organizations in flight, in pairs. Everything here is already
-			// on the main actor and the concurrency that matters is the awaits
-			// inside `publish`, so this is `async let` rather than a task group —
-			// which also keeps the whole round on one actor rather than making
-			// `Context` `Sendable` for no gain.
+			// Sequential, which it did not used to be.
+			//
+			// A round was two organizations in flight at a time, in pairs, because
+			// one organization cost four requests and three of them cost twelve.
+			// One organization is now one request, so the whole round is at most
+			// three — and a plain loop is worth more than the overlap: it keeps
+			// everything on the main actor, which is where `Context` and the
+			// organization index already live.
 			var outcome = RoundOutcome()
-			// `cursor`, not `index`: `self.index` is the organization index and
-			// is read again below, and a shadow here would resolve to an `Int`.
-			var cursor = rounds.startIndex
-			while cursor < rounds.endIndex {
-				let first = rounds[cursor]
-				let second = rounds.indices.contains(cursor + 1) ? rounds[cursor + 1] : nil
-				cursor += Self.maximumConcurrentOrganizations
-
-				async let firstDone = self.publish(first)
-				if let second {
-					async let secondDone = self.publish(second)
-					let (left, right) = await (firstDone, secondDone)
-					outcome.merge(left)
-					outcome.merge(right)
-				} else {
-					outcome.merge(await firstDone)
-				}
+			for round in rounds {
+				outcome.merge(await self.publish(round))
 			}
 
 			// **One reload per kind, per round, and only when something a reader
@@ -322,6 +326,9 @@ final class WidgetPublisher {
 			self.resolutionChanged = false
 			outcome.issuesChanged = outcome.issuesChanged || resolutionMoved
 			outcome.throughputChanged = outcome.throughputChanged || resolutionMoved
+
+			await self.ensureCredentials(for: organizations, context: context)
+			self.drainFetchState(for: context.active.id, onto: span)
 
 			var reloads = 0
 			if outcome.issuesChanged {
@@ -366,12 +373,10 @@ final class WidgetPublisher {
 		let isActive: Bool
 	}
 
-	/// One organization's round: both surfaces, then record it in the index the
-	/// widget extension reads.
+	/// One organization's round: one request covering both surfaces, then record
+	/// it in the index the widget extension reads.
 	private func publish(_ round: PublishRound) async -> (issues: PublishOutcome, throughput: PublishOutcome) {
-		async let issues = refreshIssues(round.organization, api: round.api)
-		async let throughput = refreshThroughput(round.organization, api: round.api)
-		let outcome = await (issues: issues, throughput: throughput)
+		let outcome = await publishSummary(round.organization, api: round.api)
 
 		// Only a round that actually published stamps the time. It used to
 		// stamp unconditionally, which made a repeatedly failing organization
@@ -390,6 +395,93 @@ final class WidgetPublisher {
 		return outcome
 	}
 
+	/// Put the widget extension's own last fetch on this round's span.
+	///
+	/// The extension is otherwise invisible: it links `MapleWidgetData` and
+	/// nothing else, so it has no tracer, and a fetch that fails there fails in
+	/// complete silence — which is precisely the shape of the bug that left the
+	/// Home Screen frozen before any of this. The app is the only process here
+	/// that can reach a collector, so it reads what the widget wrote and says it
+	/// out loud.
+	///
+	/// The active organization only: a round already carries one organization id,
+	/// and fanning these attributes across three would make them unreadable.
+	private func drainFetchState(for organizationId: String, onto span: Span?) {
+		let state = fetchStates.load(organizationId: organizationId)
+		guard let outcome = state.lastOutcome else { return }
+		span?.setAttribute(Telemetry.Key.widgetFetchOutcome, outcome.rawValue)
+		span?.setAttribute(Telemetry.Key.widgetFetchFailures, state.consecutiveFailures)
+		span?.setAttribute(Telemetry.Key.widgetFetchCredentialRejected, state.isCredentialRejected)
+		// Absent rather than zero when the extension has never succeeded: "it has
+		// not managed one yet" and "the last one was just now" must not read the
+		// same.
+		if let lastSuccessAt = state.lastSuccessAt {
+			span?.setAttribute(
+				Telemetry.Key.widgetFetchAgeSeconds,
+				Int(Date().timeIntervalSince(lastSuccessAt))
+			)
+		}
+	}
+
+	/// Make sure every organization this round covered has a live credential for
+	/// its widgets to fetch with.
+	///
+	/// Lazy, and only for organizations a round actually covered — which is to
+	/// say the active one plus what is pinned. Minting for every membership
+	/// would scatter bearer tokens across organizations nobody put on a Home
+	/// Screen, each of which then has to be revoked.
+	///
+	/// Renewal is the app's job and only the app's: a widget credential does not
+	/// carry the scope to mint, so it cannot extend its own life. That is why the
+	/// renewal window is a week — a phone opened at weekends must not be one bad
+	/// Monday from a Home Screen that has gone quiet with no way back.
+	private func ensureCredentials(for organizations: [WidgetOrganization], context: Context) async {
+		let now = Date()
+		let installationId = AppInstallation.identifier
+		for organization in organizations {
+			let stored = credentials.load(organizationId: organization.id)
+			guard stored == nil || stored?.needsRenewal(at: now) == true else { continue }
+			await Telemetry.span(
+				Telemetry.Name.widgetCredential,
+				attributes: [Telemetry.Key.organizationId: .string(organization.id)]
+			) { span in
+				do {
+					let credential = try await context.api
+						.scoped(to: organization.id)
+						.mintWidgetCredential(installationId: installationId)
+					// The server binds a credential to the organization it was minted
+					// in and cannot be asked for another. A disagreement here would
+					// file one organization's key under another's name, which stays
+					// invisible until a widget renders the wrong numbers.
+					guard credential.organizationId == organization.id else {
+						span?.setStatus(.error("credential organization mismatch"))
+						return
+					}
+					guard self.credentials.save(credential) else {
+						span?.setStatus(.error("credential not stored"))
+						return
+					}
+					// A widget that met a 401 stopped fetching on purpose — a
+					// rolled credential answers 401 forever, and retrying would
+					// spend the whole refresh budget on failures. This is the only
+					// thing that can lift that, so it has to happen here and be
+					// followed by a reload: otherwise the widget sits on its
+					// backoff for hours with a perfectly good credential beside it.
+					self.fetchStates.clearCredentialRejection(organizationId: organization.id)
+					span?.setAttribute(Telemetry.Key.widgetChanged, true)
+					WidgetCenter.shared.reloadAllTimelines()
+				} catch is CancellationError {
+				} catch {
+					// Silent, like everything else here. A failed mint leaves the
+					// previous credential in place until it expires, and the widgets
+					// keep rendering what the app published — which is what they did
+					// before they could fetch at all.
+					span?.setStatus(.error("credential not minted"))
+				}
+			}
+		}
+	}
+
 	/// Which organizations this round covers.
 	///
 	/// Driven by what is actually on a Home Screen, not by the membership list:
@@ -403,27 +495,23 @@ final class WidgetPublisher {
 		trigger: Trigger
 	) async -> (organizations: [WidgetOrganization], pinnedCount: Int) {
 		let pinned = await pinnedOrganizationIds()
-		// Read once. Inside the comparator this decoded the whole index from
-		// UserDefaults on every comparison.
-		// Never-published organizations are simply absent, so they fall to
-		// `.distantPast` below and sort first — which is what a newly pinned
-		// organization with an empty widget needs.
-		let publishedAt = Dictionary(
-			index.load().compactMap { organization in
-				organization.lastPublishedAt.map { (organization.id, $0) }
-			},
-			uniquingKeysWith: { first, _ in first }
-		)
-		let others = context.memberships
-			.filter { $0.id != context.active.id && pinned.contains($0.id) }
-			// Oldest first, so a background round that can only afford one
-			// extra organization round-robins rather than starving one.
-			.sorted {
-				publishedAt[$0.id] ?? .distantPast < publishedAt[$1.id] ?? .distantPast
-			}
+		let others = context.memberships.filter {
+			$0.id != context.active.id && pinned.contains($0.id)
+		}
 
-		// A `BGAppRefreshTask` gets tens of seconds; twelve requests inside one
-		// is how the whole chain gets deprioritized.
+		// There used to be an oldest-first ordering here, so a background round
+		// that could only afford one extra organization round-robined rather than
+		// starving one. It has been removed rather than kept: `lastPublishedAt` is
+		// stamped by this file alone, and the widget extension now refreshes an
+		// organization without touching it — so the ordering would rank an
+		// organization the widget has been keeping perfectly current as the most
+		// starved one in the list. A stale sort key is worse than none.
+		//
+		// The budget survives for a different reason than it was written for. One
+		// organization is one request now, not four, so this is no longer about a
+		// `BGAppRefreshTask` running out of time; it is that a warm publish for an
+		// organization nobody pinned is battery spent to make iOS trust the app
+		// less.
 		let budget = trigger == .background ? 1 : Self.maximumOrganizations - 1
 		return ([context.active] + others.prefix(budget), pinned.count)
 	}
@@ -455,18 +543,22 @@ final class WidgetPublisher {
 	/// what the UI deliberately swallows.
 	private func snapshot(
 		_ surface: String,
-		_ body: @MainActor @Sendable @escaping () async -> PublishOutcome
-	) async -> PublishOutcome {
+		_ body: @MainActor @Sendable @escaping () async -> (issues: PublishOutcome, throughput: PublishOutcome)
+	) async -> (issues: PublishOutcome, throughput: PublishOutcome) {
 		await Telemetry.span(
 			Telemetry.Name.widgetSnapshot,
 			attributes: [Telemetry.Key.widgetSurface: .string(surface)]
 		) { span in
 			let outcome = await body()
-			span?.setStatus(outcome == .failed ? .error("snapshot not published") : .ok)
+			let failed = outcome.issues == .failed && outcome.throughput == .failed
+			span?.setStatus(failed ? .error("snapshot not published") : .ok)
 			// The other half of the reload-budget story: a round of all-`false`
 			// here is the widget correctly staying put, not the publisher
 			// failing, and the two are indistinguishable without this.
-			span?.setAttribute(Telemetry.Key.widgetChanged, outcome == .changed)
+			span?.setAttribute(
+				Telemetry.Key.widgetChanged,
+				outcome.issues == .changed || outcome.throughput == .changed
+			)
 			return outcome
 		}
 	}
@@ -474,11 +566,23 @@ final class WidgetPublisher {
 	/// Sign-out. The widgets outlive the session, so the previous account's
 	/// failures and traffic must not stay legible on the lock screen.
 	func clear() {
+		// Captured before the context goes: revoking needs the session that is
+		// about to end, and a credential is the one thing here that stays usable
+		// after sign-out if nobody tells the server.
+		let api = context?.api
+		let installationId = AppInstallation.identifier
 		context = nil
 		lastRefreshedAt = nil
+		// The local copies go first and unconditionally. Whatever the network
+		// does, this phone must stop being able to fetch as the previous account.
+		credentials.clearAll()
 		// Every organization, not just the active one: anything left behind
 		// stays readable on the Home Screen of a phone that has been signed out.
 		for organizationId in index.clear() {
+			fetchStates.clear(organizationId: organizationId)
+			if let api {
+				Task { try? await api.scoped(to: organizationId).revokeWidgetCredential(installationId: installationId) }
+			}
 			WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organizationId).clear()
 			WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organizationId).clear()
 		}
@@ -490,143 +594,80 @@ final class WidgetPublisher {
 		WidgetCenter.shared.reloadAllTimelines()
 	}
 
-	// MARK: Issues
+	// MARK: Publishing
 
-	private func refreshIssues(_ organization: WidgetOrganization, api: any MapleAPI) async -> PublishOutcome {
-		await snapshot("issues") { await self.publishIssues(organization, api: api) }
-	}
-
-	private func publishIssues(_ organization: WidgetOrganization, api: any MapleAPI) async -> PublishOutcome {
-		guard
-			let page = try? await api.issues(
-				query: IssueQuery(actionableOnly: true, sort: .severity),
-				window: Self.issuesWindow.resolve(),
-				limit: Self.issueFetchLimit,
-				cursor: nil
-			)
-		else { return .failed }
-
-		let now = Date()
-		let snapshot = IssuesSnapshot.make(
-			organizationId: organization.id,
-			organizationName: organization.name,
-			generatedAt: now,
-			issues: page.items.map(WidgetIssue.init(issue:)),
-			hasMore: page.hasMore
-		)
-		let store = WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organization.id)
-		// Read before writing: the reload decision is "does this differ from
-		// what is on screen", and after the save there is nothing to compare to.
-		let stored = store.load()
-		// Saved unconditionally even when nothing changed, so `generatedAt`
-		// advances and the widget's footer is honest the next time it is built
-		// for any reason.
-		guard store.save(snapshot) else { return .failed }
-		return WidgetReloadDecision.shouldReload(
-			stored: stored,
-			incoming: snapshot,
-			storedIsStale: stored?.isStale(at: now) ?? false
-		) ? .changed : .unchanged
-	}
-
-	// MARK: Throughput
-
-	private func refreshThroughput(_ organization: WidgetOrganization, api: any MapleAPI) async -> PublishOutcome {
-		await snapshot("throughput") { await self.publishThroughput(organization, api: api) }
-	}
-
-	private func publishThroughput(_ organization: WidgetOrganization, api: any MapleAPI) async -> PublishOutcome {
-		let window = Self.throughputWindow.resolve()
-
-		// Three requests, not one per service: `group_by: service` returns
-		// every service's shape at once, and the ungrouped total covers the
-		// traffic of services past the series limit — summing only the grouped
-		// series would quietly under-report a big org's throughput.
-		async let servicesTask = api.services(window: window, limit: Self.serviceFetchLimit)
-		async let groupedTask = api.traceTimeseries(
-			TraceTimeseriesRequest(
-				aggregation: .count,
-				window: window,
-				groupBy: .service,
-				seriesLimit: ThroughputSnapshot.maximumServices
-			)
-		)
-		async let totalTask = api.traceTimeseries(
-			TraceTimeseriesRequest(aggregation: .count, window: window)
-		)
-
-		guard let services = try? await servicesTask.items else { return .failed }
-		let grouped = try? await groupedTask
-		let total = try? await totalTask
-
-		let rows = services.map { service in
-			ServiceThroughput(
-				name: service.name,
-				throughputPerSecond: service.throughput,
-				errorRate: service.errorRate,
-				p95LatencyMs: service.p95LatencyMs,
-				points: Self.perSecond(grouped?.valuesByGroup[service.name] ?? [], bucketSeconds: grouped?.bucketSeconds)
-			)
-		}
-
-		// The total's *numbers* come from the service list (every service, not
-		// just the charted ones); only its shape comes from the ungrouped
-		// series, which is the one thing the list cannot provide.
-		var overall = ServiceThroughput.total(of: rows)
-		if let total {
-			overall.points = Self.perSecond(total.values, bucketSeconds: total.bucketSeconds)
-		}
-
-		let now = Date()
-		let snapshot = ThroughputSnapshot.make(
-			organizationId: organization.id,
-			generatedAt: now,
-			windowMinutes: Int(Self.throughputWindow.duration / 60),
-			services: rows,
-			overall: overall
-		)
-		let store = WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organization.id)
-		let stored = store.load()
-		guard store.save(snapshot) else { return .failed }
-		// Throughput is the surface where suppression earns the most: its floats
-		// differ on every fetch, but `contentFingerprint` compares the rendered
-		// strings, so a rate that still reads "12.5/s" costs nothing.
-		return WidgetReloadDecision.shouldReload(
-			stored: stored,
-			incoming: snapshot,
-			storedIsStale: stored?.isStale(at: now) ?? false
-		) ? .changed : .unchanged
-	}
-
-	/// Spans per bucket → spans per second, so the sparkline carries the same
-	/// unit as the headline. A missing or nonsensical bucket length leaves the
-	/// series out rather than drawing counts as if they were rates.
-	private static func perSecond(_ values: [Double], bucketSeconds: Int?) -> [Double] {
-		guard let bucketSeconds, bucketSeconds > 0 else { return [] }
-		return values.map { $0 / Double(bucketSeconds) }
-	}
-}
-
-extension WidgetIssue {
-	/// The wire model, reduced to what a widget row can hold.
+	/// One organization's round: one request, then both snapshots.
 	///
-	/// `last_seen_at` is the one field that can fail to parse. Falling back to
-	/// `.distantPast` rather than dropping the row keeps the issue visible and
-	/// sorts it last, which is the failure mode that loses the least.
-	init(issue: ErrorIssue) {
-		self.init(
-			id: issue.id,
-			title: issue.displayTitle,
-			subtitle: issue.displaySubtitle,
-			serviceName: issue.serviceName,
-			// Unknown-to-this-build severities decode to nil and rank below
-			// `low` rather than crashing a widget that cannot be updated
-			// without an App Store release.
-			severity: issue.severity.flatMap { WidgetIssueSeverity(rawValue: $0.rawValue) },
-			occurrenceCount: issue.occurrenceCount,
-			lastSeenAt: ResolvedTimeWindow.parse(issue.lastSeenAt) ?? .distantPast,
-			isRegressed: issue.regressionCount > 0,
-			hasOpenIncident: issue.hasOpenIncident
+	/// The two surfaces are no longer independent — one response means an issues
+	/// failure costs throughput too. That is the trade the single request buys,
+	/// and it is a small one: a failed round leaves both stored snapshots in
+	/// place and the widgets age them honestly, which is what they did for
+	/// whichever half failed before.
+	private func publishSummary(
+		_ organization: WidgetOrganization,
+		api: any MapleAPI
+	) async -> (issues: PublishOutcome, throughput: PublishOutcome) {
+		await snapshot("summary") {
+			let failed = (issues: PublishOutcome.failed, throughput: PublishOutcome.failed)
+			guard let payload = try? await api.widgetSummary() else { return failed }
+			// A payload from a newer server may have changed what an existing
+			// field *means*, which is the one thing a tolerant decoder cannot
+			// absorb. Keep the last good snapshots rather than render it.
+			guard payload.isSupported else { return failed }
+			// The scoped client names the organization in a header and the server
+			// echoes back the one it resolved. A disagreement means this payload
+			// would be written under the wrong organization's key — the same
+			// class of error as opening the wrong organization from a
+			// notification, and just as invisible once it has happened.
+			guard payload.organizationId == organization.id else { return failed }
+			return await self.store(payload, for: organization)
+		}
+	}
+
+	/// Both snapshots from one payload. Returns per-surface outcomes so the
+	/// reload budget is still spent per widget kind.
+	private func store(
+		_ payload: WidgetSummaryPayload,
+		for organization: WidgetOrganization
+	) async -> (issues: PublishOutcome, throughput: PublishOutcome) {
+		// The name comes from the caller (resolved against the membership index),
+		// never from the payload — see the endpoint's own note on why it carries
+		// no name.
+		let issues = payload.issuesSnapshot(organizationName: organization.name)
+		let throughput = payload.throughputSnapshot()
+
+		let issuesStore = WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organization.id)
+		let throughputStore = WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organization.id)
+		// Read before writing: the reload decision is "does this differ from what
+		// is on screen", and after the save there is nothing to compare to.
+		let storedIssues = issuesStore.load()
+		let storedThroughput = throughputStore.load()
+
+		// Saved unconditionally even when nothing changed, so `generatedAt`
+		// advances and the footers are honest the next time a widget is built
+		// for any reason.
+		let issuesSaved = issuesStore.save(issues)
+		let throughputSaved = throughputStore.save(throughput)
+
+		let now = payload.generatedAt
+		return (
+			issues: issuesSaved
+				? (WidgetReloadDecision.shouldReload(
+					stored: storedIssues,
+					incoming: issues,
+					storedIsStale: storedIssues?.isStale(at: now) ?? false
+				) ? .changed : .unchanged)
+				: .failed,
+			// Throughput is the surface where suppression earns the most: its
+			// floats differ on every fetch, but `contentFingerprint` compares the
+			// rendered strings, so a rate that still reads "12.5/s" costs nothing.
+			throughput: throughputSaved
+				? (WidgetReloadDecision.shouldReload(
+					stored: storedThroughput,
+					incoming: throughput,
+					storedIsStale: storedThroughput?.isStale(at: now) ?? false
+				) ? .changed : .unchanged)
+				: .failed
 		)
 	}
 }

@@ -6,8 +6,9 @@ import WidgetKit
 /// Throughput — the organization's, or one service's, picked in the widget's
 /// own configuration rather than by adding a different widget per service.
 ///
-/// Like the issues widget, this renders a snapshot the app published into the
-/// shared App Group and makes no requests of its own. See `ThroughputSnapshot`.
+/// Like the issues widget, this fetches with the device credential the app
+/// minted for it and falls back to the snapshot the app published into the
+/// shared App Group. One fetch covers both widgets. See `ThroughputSnapshot`.
 struct ThroughputWidget: Widget {
 	var body: some WidgetConfiguration {
 		AppIntentConfiguration(
@@ -109,18 +110,29 @@ struct ThroughputProvider: AppIntentTimelineProvider {
 		WidgetSnapshotStore<ThroughputSnapshot>.legacyThroughput.load()
 	}
 
-	/// One read, several entries — the numbers do not change between them,
-	/// only how old they are. Same ladder as the issues widget, so the two
-	/// widgets' footers never disagree about the time; see
-	/// `WidgetTimelineSchedule`.
+	/// Fetch if it is worth it, then render the result at every point on the
+	/// ladder — the same shape as the issues widget, and for the same reasons.
+	/// See `IssuesProvider.timeline` for why the fetch enriches this timeline
+	/// rather than gating it.
+	///
+	/// One fetch covers both widgets: `WidgetSummaryFetcher` writes both
+	/// snapshots, and coalesces, so three pinned instances woken together make
+	/// one request between them.
 	func timeline(for configuration: SelectServiceIntent, in context: Context) async -> Timeline<ThroughputEntry> {
 		let now = Date()
-		let base = makeEntry(for: configuration, at: now)
+		var base = makeEntry(for: configuration, at: now)
+		let outcome = await WidgetTimelineRefresh.run(
+			organizationId: base.organizationId,
+			organizationName: base.organizationName,
+			storedGeneratedAt: base.snapshot?.generatedAt,
+			now: now
+		)
+		if outcome.didFetch { base = makeEntry(for: configuration, at: now) }
 		let entries = WidgetTimelineSchedule.entryDates(from: now).map { date -> ThroughputEntry in
 			var entry = base
 			entry.date = date
 			return entry
 		}
-		return Timeline(entries: entries, policy: .after(WidgetTimelineSchedule.refreshDate(from: now)))
+		return Timeline(entries: entries, policy: .after(outcome.refreshDate))
 	}
 }
