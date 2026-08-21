@@ -147,15 +147,7 @@ public struct WidgetFetchStateStore: Sendable {
 		save(state, organizationId: organizationId)
 	}
 
-	private static var encoder: JSONEncoder {
-		let encoder = JSONEncoder()
-		encoder.dateEncodingStrategy = .iso8601
-		return encoder
-	}
-
-	private static var decoder: JSONDecoder {
-		let decoder = JSONDecoder()
-		decoder.dateDecodingStrategy = .iso8601
-		return decoder
-	}
+	private static var encoder: JSONEncoder { WidgetJSON.encoder }
+	/// Tolerant of fractional seconds — see `WidgetJSON`.
+	private static var decoder: JSONDecoder { WidgetJSON.decoder }
 }

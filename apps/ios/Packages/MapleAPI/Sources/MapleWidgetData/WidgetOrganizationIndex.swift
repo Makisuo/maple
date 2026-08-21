@@ -188,16 +188,8 @@ public struct WidgetOrganizationIndex: Sendable {
 	}
 
 	// ISO-8601, matching `WidgetSnapshotStore`: read by another process, from
-	// possibly another build.
-	private static var encoder: JSONEncoder {
-		let encoder = JSONEncoder()
-		encoder.dateEncodingStrategy = .iso8601
-		return encoder
-	}
-
-	private static var decoder: JSONDecoder {
-		let decoder = JSONDecoder()
-		decoder.dateDecodingStrategy = .iso8601
-		return decoder
-	}
+	// possibly another build — which is also why the decoder is the tolerant
+	// one. See `WidgetJSON`.
+	private static var encoder: JSONEncoder { WidgetJSON.encoder }
+	private static var decoder: JSONDecoder { WidgetJSON.decoder }
 }

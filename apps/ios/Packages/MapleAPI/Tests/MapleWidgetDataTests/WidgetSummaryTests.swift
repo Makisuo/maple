@@ -108,9 +108,7 @@ struct WidgetSummaryWireTests {
 		  }
 		}
 		"""
-		let decoder = JSONDecoder()
-		decoder.dateDecodingStrategy = .iso8601
-		let decoded = try decoder.decode(WidgetSummaryPayload.self, from: Data(json.utf8))
+		let decoded = try WidgetJSON.decoder.decode(WidgetSummaryPayload.self, from: Data(json.utf8))
 
 		#expect(decoded.isSupported)
 		#expect(decoded.organizationId == "org_1")
@@ -127,10 +125,41 @@ struct WidgetSummaryWireTests {
 		 "issues":{"window_seconds":86400,"has_more":false,"data":[]},
 		 "throughput":{"window_seconds":3600,"bucket_seconds":null,"services":[],"total_points":[]}}
 		"""
-		let decoder = JSONDecoder()
-		decoder.dateDecodingStrategy = .iso8601
-		let decoded = try decoder.decode(WidgetSummaryPayload.self, from: Data(json.utf8))
+		let decoded = try WidgetJSON.decoder.decode(WidgetSummaryPayload.self, from: Data(json.utf8))
 		#expect(decoded.throughput.bucketSeconds == nil)
+	}
+
+	@Test("reads the timestamps the API actually sends, milliseconds and all")
+	func decodesFractionalSeconds() throws {
+		// `JSONDecoder`'s own `.iso8601` rejects fractional seconds on the
+		// deployment target, and the API sends nothing else — so this is the
+		// difference between the widgets refreshing and never refreshing. It
+		// passed on a newer macOS, whose Foundation is lenient, and failed on CI.
+		// See WidgetJSON.
+		let withMillis = "2027-01-15T08:00:00.000Z"
+		let withoutMillis = "2027-01-15T08:00:00Z"
+		#expect(WidgetJSON.parse(withMillis) == WidgetJSON.parse(withoutMillis))
+		#expect(WidgetJSON.parse(withMillis) != nil)
+		#expect(WidgetJSON.parse("not a timestamp") == nil)
+
+		// And through a real decode, which is where it actually bit.
+		for stamp in [withMillis, withoutMillis] {
+			let json = """
+			{"schema_version":1,"generated_at":"\(stamp)","organization_id":"org_1",
+			 "issues":{"window_seconds":86400,"has_more":false,"data":[]},
+			 "throughput":{"window_seconds":3600,"bucket_seconds":60,"services":[],"total_points":[]}}
+			"""
+			let decoded = try WidgetJSON.decoder.decode(WidgetSummaryPayload.self, from: Data(json.utf8))
+			#expect(decoded.generatedAt == Date(timeIntervalSince1970: 1_800_000_000))
+		}
+	}
+
+	@Test("a snapshot survives a round trip through the App Group's coders")
+	func roundTripsThroughStoreCoders() throws {
+		let snapshot = payload().issuesSnapshot(organizationName: "Acme")
+		let data = try WidgetJSON.encoder.encode(snapshot)
+		let decoded = try WidgetJSON.decoder.decode(IssuesSnapshot.self, from: data)
+		#expect(decoded == snapshot)
 	}
 
 	@Test("a payload from a newer server is not supported")

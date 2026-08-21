@@ -192,9 +192,11 @@ public actor WidgetSummaryFetcher {
 			guard let http = response as? HTTPURLResponse else { return .failure(.server) }
 			switch http.statusCode {
 			case 200:
-				let decoder = JSONDecoder()
-				decoder.dateDecodingStrategy = .iso8601
-				guard let payload = try? decoder.decode(WidgetSummaryPayload.self, from: data) else {
+				// `WidgetJSON.decoder`, never a plain `.iso8601` one: the API sends
+				// timestamps with milliseconds and `.iso8601` rejects those on the
+				// deployment target. See WidgetJSON.
+				guard let payload = try? WidgetJSON.decoder.decode(WidgetSummaryPayload.self, from: data)
+				else {
 					return .failure(.undecodable)
 				}
 				return .success(payload)
