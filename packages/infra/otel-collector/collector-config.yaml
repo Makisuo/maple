@@ -1,0 +1,88 @@
+# OpenTelemetry Collector configuration for the ECS Fargate collector that
+# runs beside the ingest gateway (`apps/ingest/alchemy.run.ts`). It receives
+# the gateway's own traces/metrics/usage metrics (and customer OTLP when
+# INGEST_WRITE_MODE is forward/dual) and exports them to Tinybird.
+#
+# Derived from `otel/collector-config.yaml` (the Railway collector), with two
+# deliberate differences:
+#
+#   - No `file_storage/queue`. On Fargate a container exit ends the task AND
+#     its ephemeral disk, so a file-backed queue survives nothing it is meant
+#     to survive; the stock contrib image is nonroot on scratch, so the queue
+#     directory cannot even be created without running as root or adding EFS.
+#     The exporter also gives up after `max_elapsed_time` regardless, so a long
+#     Tinybird outage drops data with or without the file. In-memory queue only.
+#   - `memory_limiter` is sized for the 1 GiB task in `resolveCollectorTaskSize`
+#     (~75% hard limit, ~25% spike) — a limit above task memory never fires.
+#
+# The Railway file goes away with the Railway decommission; this one stays.
+
+receivers:
+    otlp:
+        protocols:
+            grpc:
+                endpoint: 0.0.0.0:4317
+            http:
+                endpoint: 0.0.0.0:4318
+
+processors:
+    batch:
+        timeout: 1s
+        send_batch_size: 5000
+        send_batch_max_size: 10000
+
+    memory_limiter:
+        check_interval: 1s
+        limit_mib: 768
+        spike_limit_mib: 192
+
+exporters:
+    tinybird:
+        endpoint: ${env:TINYBIRD_HOST}
+        token: ${env:TINYBIRD_TOKEN}
+        timeout: 30s
+        metrics:
+            sum:
+                datasource: metrics_sum
+            gauge:
+                datasource: metrics_gauge
+            histogram:
+                datasource: metrics_histogram
+            exponential_histogram:
+                datasource: metrics_exponential_histogram
+        retry_on_failure:
+            enabled: true
+            initial_interval: 1s
+            max_interval: 30s
+            max_elapsed_time: 300s
+        sending_queue:
+            enabled: true
+            num_consumers: 8
+            queue_size: 10000
+
+extensions:
+    health_check:
+        endpoint: 0.0.0.0:13133
+
+service:
+    extensions: [health_check]
+
+    pipelines:
+        logs:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [tinybird]
+
+        traces:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [tinybird]
+
+        metrics:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [tinybird]
+
+    telemetry:
+        logs:
+            level: info

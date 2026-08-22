@@ -16,7 +16,9 @@
  * requested and alchemy's ECS service falls back to an HTTP listener. Point an
  * OTLP exporter straight at `http://<alb>/v1/traces` with a staging ingest key;
  * the task reads its key store and Tinybird target from the staging secrets
- * the workflow loads.
+ * the workflow loads. The in-VPC OTel collector comes with it, so the
+ * preview's own traces/metrics land in the STAGING Tinybird workspace under
+ * `ServiceName = 'ingest'` — that is how to check the collector before prod.
  *
  * Guarded to `pr-<n>` stages only: the stack name differs from the main
  * stack, so running it as `prd` or `stg` would create a second, unmanaged
@@ -73,6 +75,9 @@ export default Alchemy.Stack(
 			// http://<alb-hostname> — no ingest domain, so no certificate and an
 			// HTTP listener on 80.
 			ingestServiceUrl: ingest.serviceUrl,
+			// Resolvable only inside the preview VPC — where the gateway sends its
+			// own telemetry.
+			ingestCollectorEndpoint: ingest.collectorEndpoint,
 		}
 	}),
 )
