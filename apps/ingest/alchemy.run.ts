@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs"
+import { resolve } from "node:path"
 import * as AWS from "alchemy/AWS"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -19,6 +20,15 @@ import { resolveDeploymentEnvironment } from "@maple/infra/cloudflare"
  * Present in CI, absent on a dev machine — see `Dockerfile.prebuilt`.
  */
 const PREBUILT_BINARY = "apps/ingest/dist/maple-ingest"
+/**
+ * Absolute on purpose. alchemy has flipped how a relative `dockerfile` is
+ * resolved between releases — `ECR.Image` joins it onto `context`, while the
+ * ECS image source (beta.73+) resolves it against the cwd, "NOT the context"
+ * — and each flip broke the deploy. An absolute path passes through both
+ * rules untouched. The stack already assumes cwd = repo root (see
+ * PREBUILT_BINARY).
+ */
+const PREBUILT_DOCKERFILE = resolve("apps/ingest/Dockerfile.prebuilt")
 
 const requireEnv = (key: string): string => {
 	const value = process.env[key]?.trim()
@@ -216,14 +226,10 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			// back to the self-contained source build. Keyed on the file rather than
 			// on `process.env.CI` so a local run that happens to have built the binary
 			// gets the fast path too, and so CI can never silently ship a stale one.
-			// `dockerfile` is resolved relative to `context`, NOT to the cwd — despite
-			// one doc comment upstream saying otherwise, `ImageProps` and
-			// `AWS/ECR/Image.ts:225` both join it onto the context. A repo-root path
-			// here produced `apps/ingest/apps/ingest/Dockerfile.prebuilt` and failed
-			// the deploy outright; caught by deploying the real thing through
-			// scripts/aws-probe.run.ts.
+			// `dockerfile` is absolute — see PREBUILT_DOCKERFILE for why a relative
+			// path here has broken the deploy in both directions.
 			context: "apps/ingest",
-			...(existsSync(PREBUILT_BINARY) ? { dockerfile: "Dockerfile.prebuilt" } : undefined),
+			...(existsSync(PREBUILT_BINARY) ? { dockerfile: PREBUILT_DOCKERFILE } : undefined),
 			// The docker build platform is derived from this (`taskImagePlatform` in
 			// alchemy's ECS/Task). Explicit so a build from an Apple Silicon machine
 			// produces the same artifact CI does — an arm64 image on an X86_64 task
