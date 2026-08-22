@@ -20,7 +20,12 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { errorIssueFromV2 } from "@/lib/services/error-issues"
-import { buildErrorSignals, indexInvestigationsByIssue, type ErrorSignal } from "@/lib/models/error-signal"
+import {
+	buildErrorSignals,
+	indexInvestigationsByIssue,
+	sparkFingerprintHashes,
+	type ErrorSignal,
+} from "@/lib/models/error-signal"
 import {
 	clearedSelection,
 	type IssueSelectionMsg,
@@ -277,7 +282,7 @@ export function ErrorsHub(props: ErrorsHubProps) {
 
 	// The sparkline set follows the rows actually on screen, so a filtered view
 	// never pays for fingerprints it will not draw.
-	const fingerprintHashes = useMemo(() => issues.map((issue) => issue.fingerprintHash), [issues])
+	const fingerprintHashes = useMemo(() => sparkFingerprintHashes(issues), [issues])
 
 	const bucketSeconds = useMemo(() => {
 		const startMs = Date.parse(props.range.startTime.replace(" ", "T") + "Z")
