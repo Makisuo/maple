@@ -85,6 +85,7 @@ use tracing::Instrument;
 use tracing::{debug, error, info, warn, Span};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer as _;
 
 const INGEST_SOURCE: &str = "maple-ingest-gateway";
 const CLOUDFLARE_LOGPUSH_SOURCE: &str = "cloudflare-logpush";
@@ -1586,6 +1587,13 @@ struct TelemetryProviders {
     logger: SdkLoggerProvider,
 }
 
+/// Registry-wide filter: what reaches the OTel span layer. Spans are always
+/// `info`, so this must stay at `info` regardless of log verbosity.
+const SPAN_FILTER_DIRECTIVES: &str = "maple_ingest=info,tower_http=info";
+/// Default per-layer filter for the stdout and OTLP-log layers (`RUST_LOG`
+/// overrides). Hot-path `info!` logs are dropped in production by default.
+const LOG_FILTER_DIRECTIVES: &str = "maple_ingest=warn,tower_http=warn";
+
 #[expect(
     clippy::too_many_lines,
     reason = "linear construction of one OTel pipeline; every step feeds the next"
@@ -1595,12 +1603,22 @@ fn init_tracing(
     bind_port: u16,
     service_instance_id: &str,
 ) -> Option<TelemetryProviders> {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "maple_ingest=warn,tower_http=warn".into());
+    // Two filters on purpose. The registry-wide filter is pinned at `info`
+    // because every gateway span (`ingest`, `ingest.authenticate`, the Postgres
+    // client spans, …) is an `info_span!`; a global `warn` filter discards them
+    // before `tracing_opentelemetry` ever sees them and the gateway goes silent
+    // in its own traces. Log verbosity is a per-layer filter on the stdout and
+    // OTLP-log layers only: `RUST_LOG` still overrides it, default `warn`.
+    let env_filter = tracing_subscriber::EnvFilter::new(SPAN_FILTER_DIRECTIVES);
+    let log_filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| LOG_FILTER_DIRECTIVES.into())
+    };
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
-        .compact();
+        .compact()
+        .with_filter(log_filter());
 
     let deployment_env = resolve_deployment_env();
     let internal_org_id =
@@ -1710,7 +1728,7 @@ fn init_tracing(
 
     let tracer = provider.tracer("maple-ingest");
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider).with_filter(log_filter());
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -7974,6 +7992,60 @@ mod tests {
             "connector identity should stay cached while routing refreshes"
         );
         assert_eq!(store.routing_fetches.load(Ordering::Relaxed), 1);
+    }
+
+    /// Regression for the gateway going silent in its own traces: a global
+    /// `warn` filter (the #581 default) discards every `info_span!` before the
+    /// OTel layer sees it. The span filter must admit info spans; the log
+    /// filter is the one allowed to drop info events — and only as a
+    /// per-layer filter, never registry-wide.
+    #[test]
+    fn span_filter_admits_info_spans_that_the_log_filter_would_drop() {
+        use tracing::callsite::{DefaultCallsite, Identifier};
+        use tracing::field::FieldSet;
+        use tracing::metadata::Kind;
+        use tracing::{Level, Metadata, Subscriber};
+
+        static SPAN_CALLSITE: DefaultCallsite = DefaultCallsite::new(&SPAN_META);
+        static SPAN_META: Metadata<'static> = Metadata::new(
+            "filter_probe_span",
+            "maple_ingest::probe",
+            Level::INFO,
+            None,
+            None,
+            None,
+            FieldSet::new(&[], Identifier(&SPAN_CALLSITE)),
+            Kind::SPAN,
+        );
+        static EVENT_CALLSITE: DefaultCallsite = DefaultCallsite::new(&EVENT_META);
+        static EVENT_META: Metadata<'static> = Metadata::new(
+            "filter_probe_event",
+            "maple_ingest::probe",
+            Level::INFO,
+            None,
+            None,
+            None,
+            FieldSet::new(&[], Identifier(&EVENT_CALLSITE)),
+            Kind::EVENT,
+        );
+
+        let span_filter = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new(SPAN_FILTER_DIRECTIVES));
+        assert!(
+            span_filter.enabled(&SPAN_META),
+            "the registry-wide filter must let info spans reach the OTel layer"
+        );
+
+        let log_filter = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new(LOG_FILTER_DIRECTIVES));
+        assert!(
+            !log_filter.enabled(&EVENT_META),
+            "hot-path info logs stay off by default"
+        );
+        assert!(
+            !log_filter.enabled(&SPAN_META),
+            "the log filter drops info spans too, which is why it must stay per-layer"
+        );
     }
 
     /// Records `(thread, span name, parent span name)` for every span opened
