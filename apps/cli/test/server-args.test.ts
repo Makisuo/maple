@@ -31,7 +31,10 @@ describe("local server bind host", () => {
 
 	it("separates the bind address from the client-facing address", () => {
 		strictEqual(resolveAdvertiseHost(undefined, undefined, "0.0.0.0"), "127.0.0.1")
-		strictEqual(resolveAdvertiseHost(undefined, " srvmini2.lan ", "0.0.0.0"), "srvmini2.lan")
+		strictEqual(
+			resolveAdvertiseHost(undefined, " node-a.example.test ", "0.0.0.0"),
+			"node-a.example.test",
+		)
 		strictEqual(resolveAdvertiseHost(" 192.0.2.10 ", "ignored", "0.0.0.0"), "192.0.2.10")
 		strictEqual(resolveAdvertiseHost("  ", " [::1] ", "0.0.0.0"), "::1")
 	})
@@ -71,7 +74,7 @@ describe("buildDetachedChildArgs", () => {
 			const args = buildDetachedChildArgs({
 				entry: "/repo/apps/cli/src/bin.ts",
 				host: "0.0.0.0",
-				advertiseHost: "srvmini2.lan",
+				advertiseHost: "node-a.example.test",
 				port: 4318,
 				dataDir: "/tmp/maple data",
 				offline: true,
@@ -85,7 +88,7 @@ describe("buildDetachedChildArgs", () => {
 				"--host",
 				"0.0.0.0",
 				"--advertise-host",
-				"srvmini2.lan",
+				"node-a.example.test",
 				"--port",
 				"4318",
 				"--data-dir",

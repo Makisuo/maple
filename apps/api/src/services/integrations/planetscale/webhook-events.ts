@@ -1,10 +1,23 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto"
+import {
+	canonicalJson,
+	CompiledProjectionRegistry,
+	defineSignalFields,
+	isJsonValue,
+	ProjectorRegistry,
+	SignalSourceRegistry,
+	type JsonValue,
+	type MapleCloudEvent,
+	type SignalProjector,
+	type SignalSourceAdapter,
+} from "@maple/eventing-core"
 import type { IssueSeverity, OrgId, WorkflowState } from "@maple/domain/http"
 import { ActorId, ErrorIssueEventId, ErrorIssueId } from "@maple/domain/primitives"
 import {
 	actors,
 	errorIssues,
 	errorIssueEvents,
+	planetscaleIssueReceipts,
 	planetscaleDatabases,
 	planetscaleEvents,
 	type ErrorIssueRow,
@@ -49,6 +62,205 @@ export const decodePlanetScaleWebhookPayload = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(PlanetScaleWebhookPayload),
 )
 
+export interface PlanetScaleWebhookEventInput {
+	readonly orgId: string
+	readonly connectionId: string
+	readonly payload: PlanetScaleWebhookPayload
+	readonly receivedAt: number
+}
+
+interface PlanetScaleWebhookAdapterInput {
+	readonly connectionId: string
+	readonly payload: PlanetScaleWebhookPayload
+}
+
+interface PlanetScaleWebhookAdapterContext {
+	readonly tenantId: string
+	readonly acceptedAt: string
+}
+
+const validDate = (epochMs: number, label: string): Date => {
+	if (!Number.isSafeInteger(epochMs) || epochMs < 0)
+		throw new Error(`${label} must be a non-negative epoch millisecond`)
+	const date = new Date(epochMs)
+	if (Number.isNaN(date.getTime())) throw new Error(`${label} is outside the supported date range`)
+	return date
+}
+
+export const planetScaleWebhookTimestampMillis = (payload: PlanetScaleWebhookPayload): number | null => {
+	if (payload.timestamp == null || !Number.isFinite(payload.timestamp) || payload.timestamp <= 0)
+		return null
+	const epochMs = Math.trunc(payload.timestamp * 1_000)
+	return Number.isSafeInteger(epochMs) ? epochMs : null
+}
+
+export const PLANETSCALE_WEBHOOK_ADAPTER: SignalSourceAdapter<
+	PlanetScaleWebhookAdapterInput,
+	PlanetScaleWebhookAdapterContext
+> = {
+	definition: {
+		sourceKind: "planetscale.webhook",
+		fields: [
+			{
+				field: { namespace: "signal", key: "event.name", type: "string" },
+				operators: ["exists", "eq", "neq", "contains", "in"],
+				sensitivity: "public",
+				replay: "unavailable",
+			},
+		],
+	},
+	normalize: ({ connectionId, payload }, context) => {
+		const observedAtDate = new Date(context.acceptedAt)
+		if (Number.isNaN(observedAtDate.getTime()))
+			throw new Error("PlanetScale receipt time is outside the supported date range")
+		if (!isJsonValue(payload)) throw new Error("PlanetScale webhook payload must be finite JSON")
+		const payloadJson = payload
+		const occurredAtMs = planetScaleWebhookTimestampMillis(payload)
+		if (occurredAtMs === null) throw new Error("PlanetScale webhook requires a positive source timestamp")
+		const occurredAt = validDate(occurredAtMs, "PlanetScale event timestamp").toISOString()
+		const occurrenceId = `derived:sha256:${createHash("sha256")
+			.update(connectionId)
+			.update("\0")
+			.update(canonicalJson(payloadJson))
+			.update("\0")
+			.update(occurredAt)
+			.digest("hex")}`
+		return [
+			{
+				sourceKind: "planetscale.webhook",
+				source: `urn:maple:planetscale:${connectionId}`,
+				tenantId: context.tenantId,
+				occurrenceId,
+				identityQuality: "derived",
+				occurredAt,
+				observedAt: observedAtDate.toISOString(),
+				subject:
+					payload.database == null
+						? `planetscale-connections/${connectionId}`
+						: `planetscale-databases/${payload.database}`,
+				fields: defineSignalFields([
+					{
+						field: { namespace: "signal", key: "event.name", type: "string" },
+						value: { type: "string", value: payload.event },
+					},
+				]),
+				data: {
+					connectionId,
+					event: payload.event,
+					organization: payload.organization ?? null,
+					database: payload.database ?? null,
+					resource: (payload.resource ?? null) as JsonValue,
+				},
+			},
+		]
+	},
+}
+
+const PlanetScaleWebhookEventDataSchema = Schema.Struct({
+	connectionId: Schema.String,
+	event: Schema.String,
+	organization: Schema.NullOr(Schema.String),
+	database: Schema.NullOr(Schema.String),
+	resource: Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
+})
+
+const decodePlanetScaleWebhookEventData = Schema.decodeUnknownSync(PlanetScaleWebhookEventDataSchema)
+
+const decodePlanetScaleWebhookProjectorOutput = (value: unknown): JsonValue => {
+	const decoded = decodePlanetScaleWebhookEventData(value)
+	if (!isJsonValue(decoded)) throw new Error("PlanetScale projector output must be finite JSON")
+	return decoded
+}
+
+const PLANETSCALE_WEBHOOK_PROJECTOR: SignalProjector<Record<string, never>> = {
+	id: "planetscale.webhook",
+	version: 1,
+	sourceKinds: ["planetscale.webhook"],
+	outputType: "dev.maple.planetscale.webhook.received.v1",
+	dataSchema: "urn:maple:event-schema:planetscale-webhook:v1",
+	decodeOutput: decodePlanetScaleWebhookProjectorOutput,
+	decodeConfig: (value) => {
+		if (
+			typeof value !== "object" ||
+			value === null ||
+			Array.isArray(value) ||
+			Object.keys(value).length > 0
+		)
+			throw new Error("PlanetScale webhook projector config must be empty")
+		return {}
+	},
+	project: (signal) => ({ data: signal.data as JsonValue }),
+}
+
+const PLANETSCALE_SOURCES = new SignalSourceRegistry().register(PLANETSCALE_WEBHOOK_ADAPTER.definition)
+const PLANETSCALE_PROJECTORS = new ProjectorRegistry().register(PLANETSCALE_WEBHOOK_PROJECTOR)
+
+/** Normalize and project one verified, durably queued PlanetScale webhook through the common layer. */
+export const projectPlanetScaleWebhookEvent = (input: PlanetScaleWebhookEventInput): MapleCloudEvent => {
+	const observedAt = validDate(input.receivedAt, "PlanetScale receipt time").toISOString()
+	const [signal] = PLANETSCALE_WEBHOOK_ADAPTER.normalize(
+		{ connectionId: input.connectionId, payload: input.payload },
+		{ tenantId: input.orgId, acceptedAt: observedAt },
+	)
+	if (!signal) throw new Error("PlanetScale webhook adapter produced no signal")
+	const registry = CompiledProjectionRegistry.compile(
+		[
+			{
+				id: "planetscale-webhook",
+				revision: 1,
+				enabled: true,
+				tenantId: input.orgId,
+				sourceKind: "planetscale.webhook",
+				selector: {
+					op: "exists",
+					field: { namespace: "signal", key: "event.name", type: "string" },
+				},
+				projector: { id: "planetscale.webhook", version: 1, config: {} },
+				activeFrom: observedAt,
+			},
+		],
+		PLANETSCALE_SOURCES,
+		PLANETSCALE_PROJECTORS,
+	)
+	const result = registry.evaluate(signal, observedAt)
+	if (result.failures.length > 0) throw new Error(result.failures[0]!.message)
+	if (result.events.length !== 1) throw new Error("PlanetScale webhook projection produced no event")
+	return result.events[0]!
+}
+
+export const planetScaleWebhookPayloadFromEvent = (
+	event: Pick<MapleCloudEvent, "type" | "dataschema" | "time" | "tenantid" | "source"> & {
+		readonly data: unknown
+	},
+	orgId: string,
+	connectionId: string,
+): PlanetScaleWebhookPayload => {
+	if (
+		event.type !== "dev.maple.planetscale.webhook.received.v1" ||
+		event.dataschema !== "urn:maple:event-schema:planetscale-webhook:v1"
+	)
+		throw new Error("queued PlanetScale event contract is invalid")
+	if (event.tenantid !== orgId) throw new Error("queued PlanetScale event tenant identity is contradictory")
+	if (event.source !== `urn:maple:planetscale:${connectionId}`)
+		throw new Error("queued PlanetScale event source identity is contradictory")
+	const data = decodePlanetScaleWebhookEventData(event.data)
+	if (data.connectionId !== connectionId)
+		throw new Error("queued PlanetScale event connection identity is contradictory")
+	const timestamp = Date.parse(event.time)
+	if (!Number.isSafeInteger(timestamp) || timestamp <= 0)
+		throw new Error("queued PlanetScale event timestamp is invalid")
+	return {
+		timestamp: timestamp / 1_000,
+		event: data.event,
+		organization: data.organization,
+		database: data.database,
+		resource: data.resource,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Classification
+// ---------------------------------------------------------------------------
 /** Where an event belongs on the timeline. Mirrored by the web vocabulary table. */
 export type PlanetScaleEventCategory = "deploy_request" | "branch" | "database" | "cluster" | "keyspace"
 
@@ -315,6 +527,7 @@ export const planetScaleIssueFingerprint = (database: string, event: string) =>
 
 export interface UpsertPlanetScaleIssueInput {
 	readonly orgId: OrgId
+	readonly eventId: string
 	readonly payload: PlanetScaleWebhookPayload
 	readonly severity: IssueSeverity
 	readonly title: string
@@ -330,7 +543,8 @@ export interface UpsertPlanetScaleIssueResult {
 /**
  * Create-or-refresh the triage issue backing a PlanetScale health event.
  * Database failures stay typed so the durable queue consumer can retry the
- * delivery. The fingerprint makes successful redelivery idempotent.
+ * delivery. The event receipt makes redelivery idempotent; the fingerprint
+ * groups distinct source occurrences into the same issue.
  */
 export const upsertPlanetScaleIssue: (
 	input: UpsertPlanetScaleIssueInput,
@@ -352,6 +566,39 @@ export const upsertPlanetScaleIssue: (
 
 	return yield* database.execute((db) =>
 		db.transaction(async (tx) => {
+			// Distinct source events can share one issue fingerprint and queue batches
+			// process concurrently. Serialize that aggregate before claiming a receipt
+			// so every committed receipt corresponds to exactly one applied occurrence.
+			await tx.execute(
+				sql`select pg_advisory_xact_lock(hashtext(${input.orgId}), hashtext(${fingerprintHash}))`,
+			)
+			const receipt = await tx
+				.insert(planetscaleIssueReceipts)
+				.values({
+					orgId: input.orgId,
+					eventId: input.eventId,
+					processedAt: new Date(actorTimestamp),
+				})
+				.onConflictDoNothing()
+				.returning({ eventId: planetscaleIssueReceipts.eventId })
+			if (receipt.length === 0) {
+				const existing = (
+					await tx
+						.select({ id: errorIssues.id })
+						.from(errorIssues)
+						.where(
+							and(
+								eq(errorIssues.orgId, input.orgId),
+								eq(errorIssues.fingerprintHash, fingerprintHash),
+							),
+						)
+						.limit(1)
+				)[0]
+				if (existing === undefined)
+					throw new Error("PlanetScale issue receipt exists without its atomic issue mutation")
+				return { issueId: existing.id, action: "skipped" as const }
+			}
+
 			const ensureActor = async (): Promise<ActorId> => {
 				const selectActor = () =>
 					tx
@@ -420,13 +667,13 @@ export const upsertPlanetScaleIssue: (
 						),
 					)
 					.limit(1)
+					.for("update")
 			)[0]
 
 			if (prior === undefined) {
 				const candidateId = decodeIssueId(randomUUID())
-				// READ COMMITTED does not hold the gap between the select above and
-				// this insert, so a concurrent webhook for the same event can slip in
-				// and raise `error_issues_org_fp_idx`.
+				// The transaction-scoped fingerprint lock protects the absent-row gap.
+				// Keep the conflict handling defensive for writers that predate the lock.
 				const claimed = await tx
 					.insert(errorIssues)
 					.values({
@@ -473,11 +720,11 @@ export const upsertPlanetScaleIssue: (
 					})
 					return { issueId: insertedId, action: "created" as const }
 				}
-				// The concurrent writer won and already emitted `created`; report the
-				// sighting against their issue rather than duplicating the history.
+				// A writer outside this lock won. Re-read it under a row lock and apply
+				// this distinct occurrence instead of committing a receipt-only skip.
 				const winner = (
 					await tx
-						.select({ id: errorIssues.id })
+						.select()
 						.from(errorIssues)
 						.where(
 							and(
@@ -486,54 +733,61 @@ export const upsertPlanetScaleIssue: (
 							),
 						)
 						.limit(1)
+						.for("update")
 				)[0]
-				return { issueId: winner?.id ?? candidateId, action: "skipped" as const }
+				if (winner === undefined)
+					throw new Error("PlanetScale issue conflict winner was not visible in the transaction")
+				return await applyExistingIssue(winner)
 			}
 
-			const issueId = prior.id
-			// A wontfix issue with an active or indefinite snooze stays untouched.
-			const snoozeActive =
-				prior.workflowState === "wontfix" &&
-				(prior.snoozeUntil == null || prior.snoozeUntil.getTime() > input.timestamp)
-			if (snoozeActive) return { issueId, action: "skipped" as const }
+			return await applyExistingIssue(prior)
 
-			await tx
-				.update(errorIssues)
-				.set({
-					lastSeenAt: new Date(input.timestamp),
-					occurrenceCount: sql`${errorIssues.occurrenceCount} + 1`,
-					exceptionMessage: input.description,
-					sourceRefJson,
-					updatedAt: new Date(input.timestamp),
+			async function applyExistingIssue(prior: ErrorIssueRow): Promise<UpsertPlanetScaleIssueResult> {
+				const issueId = prior.id
+				// A wontfix issue with an active or indefinite snooze stays untouched.
+				const snoozeActive =
+					prior.workflowState === "wontfix" &&
+					(prior.snoozeUntil == null || prior.snoozeUntil.getTime() > input.timestamp)
+				if (snoozeActive) return { issueId, action: "skipped" as const }
+
+				await tx
+					.update(errorIssues)
+					.set({
+						lastSeenAt: new Date(input.timestamp),
+						occurrenceCount: sql`${errorIssues.occurrenceCount} + 1`,
+						exceptionMessage: input.description,
+						sourceRefJson,
+						updatedAt: new Date(input.timestamp),
+					})
+					.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
+
+				const reopenFrom: WorkflowState | null =
+					prior.workflowState === "done" || prior.workflowState === "wontfix"
+						? prior.workflowState
+						: null
+				if (reopenFrom === null) return { issueId, action: "refreshed" as const }
+
+				await tx
+					.update(errorIssues)
+					.set({
+						workflowState: "triage",
+						resolvedAt: null,
+						resolvedByActorId: null,
+						snoozeUntil: null,
+						updatedAt: new Date(input.timestamp),
+					})
+					.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
+				const actorId = await ensureActor()
+				await recordEvent(issueId, actorId, "state_change", {
+					fromState: reopenFrom,
+					toState: "triage",
+					payload: { viaRegression: true, event: input.payload.event },
 				})
-				.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
-
-			const reopenFrom: WorkflowState | null =
-				prior.workflowState === "done" || prior.workflowState === "wontfix"
-					? prior.workflowState
-					: null
-			if (reopenFrom === null) return { issueId, action: "refreshed" as const }
-
-			await tx
-				.update(errorIssues)
-				.set({
-					workflowState: "triage",
-					resolvedAt: null,
-					resolvedByActorId: null,
-					snoozeUntil: null,
-					updatedAt: new Date(input.timestamp),
+				await recordEvent(issueId, actorId, "regression", {
+					payload: { event: input.payload.event, database: databaseName },
 				})
-				.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
-			const actorId = await ensureActor()
-			await recordEvent(issueId, actorId, "state_change", {
-				fromState: reopenFrom,
-				toState: "triage",
-				payload: { viaRegression: true, event: input.payload.event },
-			})
-			await recordEvent(issueId, actorId, "regression", {
-				payload: { event: input.payload.event, database: databaseName },
-			})
-			return { issueId, action: "reopened" as const }
+				return { issueId, action: "reopened" as const }
+			}
 		}),
 	)
 })

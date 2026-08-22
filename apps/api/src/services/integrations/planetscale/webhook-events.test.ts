@@ -10,6 +10,7 @@ import {
 	deployRequestNumber,
 	insertPlanetScaleEvent,
 	planetScaleIssueFingerprint,
+	projectPlanetScaleWebhookEvent,
 	truncateToSecond,
 	upsertPlanetScaleIssue,
 	verifyPlanetScaleSignature,
@@ -47,6 +48,58 @@ describe("verifyPlanetScaleSignature", () => {
 })
 
 describe("classifyPlanetScaleEvent", () => {
+	it("normalizes queued webhooks into deterministic common CloudEvents", () => {
+		const payload = Schema.decodeUnknownSync(PlanetScaleWebhookPayload)(JSON.parse(OOM_PAYLOAD))
+		const input = {
+			orgId: "org_events",
+			connectionId: "connection-1",
+			payload,
+			receivedAt: 1_698_252_880_000,
+		}
+		const event = projectPlanetScaleWebhookEvent(input)
+		assert.deepStrictEqual(event, projectPlanetScaleWebhookEvent(input))
+		assert.strictEqual(event.type, "dev.maple.planetscale.webhook.received.v1")
+		assert.strictEqual(event.tenantid, "org_events")
+		assert.strictEqual(event.subject, "planetscale-databases/main-db")
+		assert.strictEqual((event.data as { readonly event: string }).event, "branch.out_of_memory")
+		assert.throws(
+			() => projectPlanetScaleWebhookEvent({ ...input, receivedAt: Number.MAX_SAFE_INTEGER }),
+			/outside the supported date range/,
+		)
+	})
+
+	it("keeps source-timestamp retries byte-identical and rejects missing timestamps", () => {
+		const timestamped = Schema.decodeUnknownSync(PlanetScaleWebhookPayload)(JSON.parse(OOM_PAYLOAD))
+		const first = projectPlanetScaleWebhookEvent({
+			orgId: "org_events",
+			connectionId: "connection-1",
+			payload: timestamped,
+			receivedAt: 1_698_252_880_000,
+		})
+		const redelivery = projectPlanetScaleWebhookEvent({
+			orgId: "org_events",
+			connectionId: "connection-1",
+			payload: timestamped,
+			receivedAt: 1_698_252_990_000,
+		})
+		assert.deepStrictEqual(first, redelivery)
+
+		const withoutTimestamp = Schema.decodeUnknownSync(PlanetScaleWebhookPayload)({
+			event: "branch.ready",
+			database: "main-db",
+		})
+		assert.throws(
+			() =>
+				projectPlanetScaleWebhookEvent({
+					orgId: "org_events",
+					connectionId: "connection-1",
+					payload: withoutTimestamp,
+					receivedAt: 1_698_252_880_000,
+				}),
+			/requires a positive source timestamp/,
+		)
+	})
+
 	it("maps health events to issues and lifecycle events to timeline rows", () => {
 		assert.strictEqual(classifyPlanetScaleEvent("branch.out_of_memory").action, "issue")
 		assert.strictEqual(classifyPlanetScaleEvent("branch.anomaly").action, "issue")
@@ -210,7 +263,7 @@ describe("upsertPlanetScaleIssue", () => {
 				description: "Branch main of main-db was restarted after running out of memory.",
 			}
 
-			const first = yield* upsertPlanetScaleIssue({ ...base, timestamp: 1_000 })
+			const first = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-1", timestamp: 1_000 })
 			assert.strictEqual(first.action, "created")
 			assert.isNotNull(first.issueId)
 
@@ -228,7 +281,7 @@ describe("upsertPlanetScaleIssue", () => {
 			)
 
 			// Repeat firing dedupes into the same issue and bumps the count.
-			const second = yield* upsertPlanetScaleIssue({ ...base, timestamp: 2_000 })
+			const second = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-2", timestamp: 2_000 })
 			assert.strictEqual(second.action, "refreshed")
 			assert.strictEqual(second.issueId, first.issueId)
 
@@ -238,7 +291,7 @@ describe("upsertPlanetScaleIssue", () => {
 					first.issueId,
 				]),
 			)
-			const third = yield* upsertPlanetScaleIssue({ ...base, timestamp: 3_000 })
+			const third = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-3", timestamp: 3_000 })
 			assert.strictEqual(third.action, "reopened")
 
 			const reopened = yield* Effect.promise(() =>
@@ -250,6 +303,95 @@ describe("upsertPlanetScaleIssue", () => {
 			)
 			assert.strictEqual(reopened?.workflow_state, "triage")
 			assert.strictEqual(reopened?.occurrence_count, 3)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("counts concurrent distinct events against an initially absent issue", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const payload = yield* decodePlanetScaleWebhookPayload(OOM_PAYLOAD)
+			const base = {
+				orgId: asOrgId("org_1"),
+				payload,
+				severity: "high" as const,
+				title: "PlanetScale branch out of memory",
+				description: "Branch main of main-db was restarted after running out of memory.",
+			}
+			const results = yield* Effect.all(
+				[
+					upsertPlanetScaleIssue({ ...base, eventId: "event-a", timestamp: 1_000 }),
+					upsertPlanetScaleIssue({ ...base, eventId: "event-b", timestamp: 2_000 }),
+				],
+				{ concurrency: "unbounded" },
+			)
+			assert.deepStrictEqual(results.map(({ action }) => action).sort(), ["created", "refreshed"])
+			assert.strictEqual(results[0].issueId, results[1].issueId)
+
+			const aggregate = yield* Effect.promise(() =>
+				queryFirstRow<{ occurrence_count: number; receipts: number; created_events: number }>(
+					testDb,
+					`SELECT i.occurrence_count,
+					        (SELECT count(*)::int FROM planetscale_issue_receipts) AS receipts,
+					        (SELECT count(*)::int FROM error_issue_events WHERE issue_id = i.id AND type = 'created') AS created_events
+					 FROM error_issues i`,
+				),
+			)
+			assert.strictEqual(aggregate?.occurrence_count, 2)
+			assert.strictEqual(aggregate?.receipts, 2)
+			assert.strictEqual(aggregate?.created_events, 1)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("serializes concurrent distinct events when reopening a resolved issue", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const payload = yield* decodePlanetScaleWebhookPayload(OOM_PAYLOAD)
+			const base = {
+				orgId: asOrgId("org_1"),
+				payload,
+				severity: "high" as const,
+				title: "PlanetScale branch out of memory",
+				description: "Branch main of main-db was restarted after running out of memory.",
+			}
+			const initial = yield* upsertPlanetScaleIssue({
+				...base,
+				eventId: "event-initial",
+				timestamp: 1_000,
+			})
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE error_issues SET workflow_state = 'done' WHERE id = $1", [
+					initial.issueId,
+				]),
+			)
+
+			const results = yield* Effect.all(
+				[
+					upsertPlanetScaleIssue({ ...base, eventId: "event-a", timestamp: 2_000 }),
+					upsertPlanetScaleIssue({ ...base, eventId: "event-b", timestamp: 3_000 }),
+				],
+				{ concurrency: "unbounded" },
+			)
+			assert.deepStrictEqual(results.map(({ action }) => action).sort(), ["refreshed", "reopened"])
+
+			const aggregate = yield* Effect.promise(() =>
+				queryFirstRow<{
+					workflow_state: string
+					occurrence_count: number
+					state_changes: number
+					regressions: number
+				}>(
+					testDb,
+					`SELECT i.workflow_state, i.occurrence_count,
+					        (SELECT count(*)::int FROM error_issue_events WHERE issue_id = i.id AND type = 'state_change') AS state_changes,
+					        (SELECT count(*)::int FROM error_issue_events WHERE issue_id = i.id AND type = 'regression') AS regressions
+					 FROM error_issues i WHERE i.id = $1`,
+					[initial.issueId],
+				),
+			)
+			assert.strictEqual(aggregate?.workflow_state, "triage")
+			assert.strictEqual(aggregate?.occurrence_count, 3)
+			assert.strictEqual(aggregate?.state_changes, 1)
+			assert.strictEqual(aggregate?.regressions, 1)
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
@@ -266,7 +408,7 @@ describe("upsertPlanetScaleIssue", () => {
 				description: "Branch main of main-db was restarted after running out of memory.",
 			}
 
-			const first = yield* upsertPlanetScaleIssue({ ...base, timestamp: 1_000 })
+			const first = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-1", timestamp: 1_000 })
 			assert.strictEqual(first.action, "created")
 
 			// Operator marks it wontfix with a snooze that has not yet expired.
@@ -278,7 +420,7 @@ describe("upsertPlanetScaleIssue", () => {
 				),
 			)
 
-			const second = yield* upsertPlanetScaleIssue({ ...base, timestamp: 5_000 })
+			const second = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-2", timestamp: 5_000 })
 			assert.strictEqual(second.action, "skipped")
 			assert.strictEqual(second.issueId, first.issueId)
 
@@ -326,7 +468,7 @@ describe("upsertPlanetScaleIssue", () => {
 				description: "Branch main of main-db was restarted after running out of memory.",
 			}
 
-			const first = yield* upsertPlanetScaleIssue({ ...base, timestamp: 1_000 })
+			const first = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-1", timestamp: 1_000 })
 			assert.strictEqual(first.action, "created")
 
 			// "Won't fix" with snooze_until NULL means "stop resurfacing this" —
@@ -340,7 +482,11 @@ describe("upsertPlanetScaleIssue", () => {
 			)
 
 			const farFuture = Date.UTC(2099, 0, 1)
-			const second = yield* upsertPlanetScaleIssue({ ...base, timestamp: farFuture })
+			const second = yield* upsertPlanetScaleIssue({
+				...base,
+				eventId: "event-2",
+				timestamp: farFuture,
+			})
 			assert.strictEqual(second.action, "skipped")
 			assert.strictEqual(second.issueId, first.issueId)
 
@@ -369,7 +515,7 @@ describe("upsertPlanetScaleIssue", () => {
 				description: "Branch main of main-db was restarted after running out of memory.",
 			}
 
-			const first = yield* upsertPlanetScaleIssue({ ...base, timestamp: 1_000 })
+			const first = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-1", timestamp: 1_000 })
 			assert.strictEqual(first.action, "created")
 
 			// Snooze deadline is before the next firing's timestamp → expired.
@@ -381,7 +527,7 @@ describe("upsertPlanetScaleIssue", () => {
 				),
 			)
 
-			const second = yield* upsertPlanetScaleIssue({ ...base, timestamp: 10_000 })
+			const second = yield* upsertPlanetScaleIssue({ ...base, eventId: "event-2", timestamp: 10_000 })
 			assert.strictEqual(second.action, "reopened")
 			assert.strictEqual(second.issueId, first.issueId)
 
@@ -428,6 +574,7 @@ describe("upsertPlanetScaleIssue", () => {
 			const payload = yield* decodePlanetScaleWebhookPayload(OOM_PAYLOAD)
 			const input = {
 				orgId: asOrgId("org_1"),
+				eventId: "event-1",
 				payload,
 				severity: "high" as const,
 				title: "PlanetScale branch out of memory",

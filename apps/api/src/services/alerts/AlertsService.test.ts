@@ -3,6 +3,7 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Cause, Clock, ConfigProvider, Duration, Effect, Exit, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
+import { projectAlertLifecycleEvent } from "@maple/alerting-core"
 import {
 	AlertDestinationInUseError,
 	AlertForbiddenError,
@@ -1909,6 +1910,24 @@ describe("AlertsService", () => {
 			const userId = asUserId("user_timeout")
 			const destination = yield* createWebhookDestination(alerts, orgId, userId)
 			const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+			const lifecycleEvent = projectAlertLifecycleEvent({
+				tenantId: orgId,
+				ruleId: rule.id,
+				ruleName: rule.name,
+				incidentId: null,
+				eventType: "test",
+				incidentStatus: "resolved",
+				groupKey: null,
+				signalType: rule.signalType,
+				severity: rule.severity,
+				comparator: rule.comparator,
+				threshold: rule.threshold,
+				thresholdUpper: rule.thresholdUpper,
+				windowMinutes: rule.windowMinutes,
+				value: 0,
+				sampleCount: 0,
+				occurredAtMs: fixedTime,
+			})
 
 			yield* Effect.promise(() =>
 				insertDeliveryEventRow(testDb, {
@@ -1923,6 +1942,7 @@ describe("AlertsService", () => {
 					status: "queued",
 					scheduledAt: fixedTime - 1,
 					payloadJson: JSON.stringify({
+						event: lifecycleEvent,
 						eventType: "test",
 						incidentId: null,
 						incidentStatus: "resolved",
@@ -1943,6 +1963,7 @@ describe("AlertsService", () => {
 						},
 						linkUrl: "http://127.0.0.1:3471/alerts",
 						sentAt: new Date(fixedTime).toISOString(),
+						futureAdditiveField: { preserve: true },
 					}),
 				}),
 			)
@@ -1951,6 +1972,18 @@ describe("AlertsService", () => {
 			// live runtime clock, so the timeout fires on its own in real time.
 			const tick = yield* alerts.runSchedulerTick()
 			const events = yield* alerts.listDeliveryEvents(orgId)
+			const retryPayload = yield* Effect.promise(() =>
+				queryFirstRow<{
+					payload_json: {
+						event?: unknown
+						futureAdditiveField?: unknown
+					}
+				}>(
+					testDb,
+					"select payload_json from alert_delivery_events where delivery_key = $1 and attempt_number = 2",
+					["timeout-delivery-key"],
+				),
+			)
 
 			assert.strictEqual(tick.processedCount, 1)
 			assert.strictEqual(tick.deliveryFailureCount, 1)
@@ -1963,6 +1996,8 @@ describe("AlertsService", () => {
 			assert.strictEqual(timeoutEvent?.status, "failed")
 			assert.include(timeoutEvent?.errorMessage ?? "", "timed out")
 			assert.strictEqual(retryEvent?.status, "queued")
+			assert.deepStrictEqual(retryPayload?.payload_json.event, lifecycleEvent)
+			assert.deepStrictEqual(retryPayload?.payload_json.futureAdditiveField, { preserve: true })
 		}).pipe(
 			Effect.provide(
 				makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {

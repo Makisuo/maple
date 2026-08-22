@@ -1,0 +1,180 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:maple:eventing:schema:cloud-event:v1",
+	"$ref": "#/$defs/MapleCloudEvent",
+	"$defs": {
+		"MapleCloudEvent": {
+			"type": "object",
+			"properties": {
+				"specversion": {
+					"type": "string",
+					"enum": ["1.0"]
+				},
+				"id": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"source": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"type": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"subject": {
+					"type": "string"
+				},
+				"time": {
+					"type": "string",
+					"allOf": [
+						{
+							"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$"
+						}
+					]
+				},
+				"datacontenttype": {
+					"type": "string",
+					"enum": ["application/json"]
+				},
+				"dataschema": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"tenantid": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"projectionid": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"projectionrevision": {
+					"type": "integer",
+					"allOf": [
+						{
+							"exclusiveMinimum": 0
+						}
+					]
+				},
+				"projectorid": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"projectorversion": {
+					"type": "integer",
+					"allOf": [
+						{
+							"exclusiveMinimum": 0
+						}
+					]
+				},
+				"sourceoccurrenceid": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"sourceidentityquality": {
+					"type": "string",
+					"enum": ["source", "derived", "none"]
+				},
+				"data": {}
+			},
+			"required": [
+				"specversion",
+				"id",
+				"source",
+				"type",
+				"time",
+				"datacontenttype",
+				"dataschema",
+				"tenantid",
+				"projectionid",
+				"projectionrevision",
+				"projectorid",
+				"projectorversion",
+				"data"
+			],
+			"additionalProperties": false
+		}
+	}
+}

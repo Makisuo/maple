@@ -1,0 +1,380 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:maple:eventing:schema:signal-projection:v1",
+	"$ref": "#/$defs/SignalProjectionSpec",
+	"$defs": {
+		"SignalFieldRef": {
+			"type": "object",
+			"properties": {
+				"namespace": {
+					"type": "string",
+					"enum": ["signal", "resource", "scope", "attribute", "body"]
+				},
+				"key": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 512
+						}
+					]
+				},
+				"type": {
+					"type": "string",
+					"enum": ["string", "boolean", "int64", "float64", "timestamp", "duration"]
+				}
+			},
+			"required": ["namespace", "key", "type"],
+			"additionalProperties": false
+		},
+		"SignalLiteral": {
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"type": "string",
+							"enum": ["string"]
+						},
+						"value": {
+							"type": "string",
+							"description": "Predicate string literal limited to 4096 UTF-8 bytes; JSON Schema cannot express this byte-count constraint"
+						}
+					},
+					"required": ["type", "value"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"type": "string",
+							"enum": ["boolean"]
+						},
+						"value": {
+							"type": "boolean"
+						}
+					},
+					"required": ["type", "value"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"type": "string",
+							"enum": ["int64"]
+						},
+						"value": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^-?(?:0|[1-9][0-9]*)$"
+								}
+							]
+						}
+					},
+					"required": ["type", "value"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"type": "string",
+							"enum": ["float64"]
+						},
+						"value": {
+							"type": "number"
+						}
+					},
+					"required": ["type", "value"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"type": "string",
+							"enum": ["timestamp"]
+						},
+						"value": {
+							"type": "string",
+							"allOf": [
+								{
+									"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$"
+								}
+							]
+						}
+					},
+					"required": ["type", "value"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"type": "string",
+							"enum": ["duration"]
+						},
+						"value": {
+							"type": "string",
+							"allOf": [
+								{
+									"maxLength": 20
+								},
+								{
+									"pattern": "^-?(?:0|[1-9][0-9]*)$"
+								}
+							]
+						}
+					},
+					"required": ["type", "value"],
+					"additionalProperties": false
+				}
+			]
+		},
+		"SignalPredicate": {
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"op": {
+							"type": "string",
+							"enum": ["all"]
+						},
+						"clauses": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/SignalPredicate"
+							},
+							"allOf": [
+								{
+									"minItems": 1
+								},
+								{
+									"maxItems": 64
+								}
+							]
+						}
+					},
+					"required": ["op", "clauses"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"op": {
+							"type": "string",
+							"enum": ["any"]
+						},
+						"clauses": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/SignalPredicate"
+							},
+							"allOf": [
+								{
+									"minItems": 1
+								},
+								{
+									"maxItems": 64
+								}
+							]
+						}
+					},
+					"required": ["op", "clauses"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"op": {
+							"type": "string",
+							"enum": ["not"]
+						},
+						"clause": {
+							"$ref": "#/$defs/SignalPredicate"
+						}
+					},
+					"required": ["op", "clause"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"op": {
+							"type": "string",
+							"enum": ["exists"]
+						},
+						"field": {
+							"$ref": "#/$defs/SignalFieldRef"
+						}
+					},
+					"required": ["op", "field"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"op": {
+							"type": "string",
+							"enum": ["eq", "neq", "gt", "gte", "lt", "lte", "contains"]
+						},
+						"field": {
+							"$ref": "#/$defs/SignalFieldRef"
+						},
+						"value": {
+							"$ref": "#/$defs/SignalLiteral"
+						}
+					},
+					"required": ["op", "field", "value"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"op": {
+							"type": "string",
+							"enum": ["in"]
+						},
+						"field": {
+							"$ref": "#/$defs/SignalFieldRef"
+						},
+						"values": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/SignalLiteral"
+							},
+							"allOf": [
+								{
+									"minItems": 1
+								},
+								{
+									"maxItems": 100
+								}
+							]
+						}
+					},
+					"required": ["op", "field", "values"],
+					"additionalProperties": false
+				}
+			]
+		},
+		"SignalProjectionSpec": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"revision": {
+					"type": "integer",
+					"allOf": [
+						{
+							"exclusiveMinimum": 0
+						}
+					]
+				},
+				"enabled": {
+					"type": "boolean"
+				},
+				"tenantId": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"sourceKind": {
+					"type": "string",
+					"allOf": [
+						{
+							"minLength": 1
+						},
+						{
+							"maxLength": 256
+						},
+						{
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+						}
+					]
+				},
+				"selector": {
+					"$ref": "#/$defs/SignalPredicate"
+				},
+				"projector": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"allOf": [
+								{
+									"minLength": 1
+								},
+								{
+									"maxLength": 256
+								},
+								{
+									"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$"
+								}
+							]
+						},
+						"version": {
+							"type": "integer",
+							"allOf": [
+								{
+									"exclusiveMinimum": 0
+								}
+							]
+						},
+						"config": {}
+					},
+					"required": ["id", "version", "config"],
+					"additionalProperties": false
+				},
+				"activeFrom": {
+					"type": "string",
+					"allOf": [
+						{
+							"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$"
+						}
+					]
+				}
+			},
+			"required": [
+				"id",
+				"revision",
+				"enabled",
+				"tenantId",
+				"sourceKind",
+				"selector",
+				"projector",
+				"activeFrom"
+			],
+			"additionalProperties": false
+		}
+	}
+}

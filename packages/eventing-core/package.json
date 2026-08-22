@@ -1,0 +1,24 @@
+{
+	"name": "@maple/eventing-core",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"schemas": "bun run scripts/generate-schemas.ts",
+		"schemas:check": "bun run scripts/generate-schemas.ts --check",
+		"test": "bun run schemas:check && vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	}
+}

@@ -1,5 +1,5 @@
 import type { OrgId } from "@maple/domain"
-import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import { boolean, index, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 /**
  * Poll-state for the PlanetScale management-API poller, mirroring
@@ -161,3 +161,20 @@ export const planetscaleEvents = pgTable(
 
 export type PlanetScaleEventRow = typeof planetscaleEvents.$inferSelect
 export type PlanetScaleEventInsert = typeof planetscaleEvents.$inferInsert
+
+/**
+ * Exactly-once guard for issue mutations driven by an at-least-once queue.
+ * The receipt is inserted in the same transaction as the issue update, so a
+ * crash before commit leaves both absent and a retry can safely finish them.
+ */
+export const planetscaleIssueReceipts = pgTable(
+	"planetscale_issue_receipts",
+	{
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		eventId: text("event_id").notNull(),
+		processedAt: timestamp("processed_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [primaryKey({ columns: [table.orgId, table.eventId] })],
+)
+
+export type PlanetScaleIssueReceiptRow = typeof planetscaleIssueReceipts.$inferSelect

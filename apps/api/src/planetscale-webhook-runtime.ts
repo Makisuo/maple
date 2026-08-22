@@ -10,9 +10,12 @@ import {
 	deployRequestNumber,
 	insertPlanetScaleEvent,
 	planetScaleBranchName,
+	planetScaleWebhookPayloadFromEvent,
+	planetScaleWebhookTimestampMillis,
+	projectPlanetScaleWebhookEvent,
 	upsertPlanetScaleIssue,
 } from "./services/integrations/planetscale/webhook-events"
-import { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
+import { PlanetScaleWebhookQueueMessage } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
@@ -32,7 +35,7 @@ export const buildPlanetScaleWebhookLayer = (_env: Record<string, unknown>) => {
 
 export const flushPlanetScaleWebhookTelemetry = (env: Record<string, unknown>) => telemetry.flush(env)
 
-const decodeJob = Schema.decodeUnknownEffect(PlanetScaleWebhookJob)
+const decodeJob = Schema.decodeUnknownEffect(PlanetScaleWebhookQueueMessage)
 
 export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 	Effect.forEach(
@@ -54,11 +57,52 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 							),
 						),
 					onSuccess: (job) => {
-						const classified = classifyPlanetScaleEvent(job.payload.event)
+						if (!("event" in job) && planetScaleWebhookTimestampMillis(job.payload) === null)
+							return Effect.logWarning(
+								"Discarding timestamp-less legacy PlanetScale webhook queue message",
+							).pipe(
+								Effect.annotateLogs({
+									orgId: job.orgId,
+									connectionId: job.connectionId,
+									event: job.payload.event,
+								}),
+								Effect.flatMap(() => Effect.sync(() => message.ack())),
+								Effect.tap(() =>
+									Effect.annotateCurrentSpan({
+										"maple.planetscale.webhook.queue.outcome": "timestamp_missing_ack",
+									}),
+								),
+							)
+						// Old jobs can remain in Cloudflare Queue across a deploy. Rebuild the
+						// event from the durable legacy fields instead of malformed-acking them.
+						const event =
+							"event" in job
+								? job.event
+								: projectPlanetScaleWebhookEvent({
+										orgId: job.orgId,
+										connectionId: job.connectionId,
+										payload: job.payload,
+										receivedAt: job.receivedAt,
+									})
+						const payload =
+							"event" in job
+								? planetScaleWebhookPayloadFromEvent(event, job.orgId, job.connectionId)
+								: job.payload
+						const eventData =
+							typeof event.data === "object" &&
+							event.data !== null &&
+							!Array.isArray(event.data)
+								? (event.data as { readonly [key: string]: unknown })
+								: null
+						const eventName =
+							typeof eventData?.event === "string" ? eventData.event : payload.event
+						const classified = classifyPlanetScaleEvent(eventName)
 						const annotateJob = Effect.annotateCurrentSpan({
 							orgId: job.orgId,
+							"maple.event.id": event.id,
+							"maple.event.type": event.type,
 							"maple.planetscale.connection_id": job.connectionId,
-							"maple.planetscale.webhook.event": job.payload.event,
+							"maple.planetscale.webhook.event": payload.event,
 						})
 						if (classified.action !== "issue" && classified.action !== "timeline") {
 							return annotateJob.pipe(
@@ -70,38 +114,38 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 								Effect.annotateLogs({
 									orgId: job.orgId,
 									connectionId: job.connectionId,
-									event: job.payload.event,
+									event: payload.event,
 								}),
 								Effect.flatMap(() => Effect.sync(() => message.ack())),
 							)
 						}
 
 						const timestamp =
-							job.payload.timestamp != null && job.payload.timestamp > 0
-								? job.payload.timestamp * 1000
+							payload.timestamp != null && payload.timestamp > 0
+								? payload.timestamp * 1000
 								: job.receivedAt
 
 						const spec = classified.timeline
 						const timeline = insertPlanetScaleEvent({
 							orgId: job.orgId,
-							databaseName: job.payload.database ?? "unknown",
+							databaseName: payload.database ?? "unknown",
 							branchName:
-								spec.category === "deploy_request" ? "" : planetScaleBranchName(job.payload),
+								spec.category === "deploy_request" ? "" : planetScaleBranchName(payload),
 							category: spec.category,
-							eventType: job.payload.event,
+							eventType: payload.event,
 							state: spec.state,
 							externalId:
-								spec.category === "deploy_request" ? deployRequestNumber(job.payload) : "",
-							title: spec.title(job.payload),
+								spec.category === "deploy_request" ? deployRequestNumber(payload) : "",
+							title: spec.title(payload),
 							source: "webhook",
-							payload: job.payload.resource ?? null,
+							payload: payload.resource ?? null,
 							occurredAtMs: timestamp,
 							createdAtMs: job.receivedAt,
 						}).pipe(
 							Effect.withSpan("PlanetScaleWebhookQueue.persistTimelineEvent", {
 								attributes: {
 									orgId: job.orgId,
-									"maple.planetscale.webhook.event": job.payload.event,
+									"maple.planetscale.webhook.event": payload.event,
 								},
 							}),
 						)
@@ -119,10 +163,11 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 										Effect.flatMap(() =>
 											upsertPlanetScaleIssue({
 												orgId: job.orgId,
-												payload: job.payload,
+												eventId: event.id,
+												payload,
 												severity: classified.severity,
 												title: classified.title,
-												description: classified.describe(job.payload),
+												description: classified.describe(payload),
 												timestamp,
 											}),
 										),
@@ -130,7 +175,7 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 											attributes: {
 												orgId: job.orgId,
 												"maple.planetscale.connection_id": job.connectionId,
-												"maple.planetscale.webhook.event": job.payload.event,
+												"maple.planetscale.webhook.event": payload.event,
 											},
 										}),
 									)
@@ -142,7 +187,7 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 										Effect.annotateLogs({
 											orgId: job.orgId,
 											connectionId: job.connectionId,
-											event: job.payload.event,
+											event: payload.event,
 											attempt: message.attempts,
 											error: error.message,
 										}),
@@ -158,7 +203,7 @@ export const processPlanetScaleWebhookBatch = (batch: MessageBatch<unknown>) =>
 										Effect.annotateLogs({
 											orgId: job.orgId,
 											connectionId: job.connectionId,
-											event: job.payload.event,
+											event: payload.event,
 											issueId: result.issueId,
 											issueAction: result.action,
 										}),
