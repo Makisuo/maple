@@ -139,3 +139,19 @@ jobs:
               run: bun run alchemy:deploy:prd
               env:
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+
+            # The ACM certificate for the ingest domain validates over DNS, and the
+            # stack does not manage the Cloudflare zone: print the validation CNAME
+            # (and status) after every deploy so the first pass of a stage — which
+            # fails at the 443 listener until the record exists — tells you exactly
+            # what to add. alchemy's own output snapshots the options before ACM has
+            # populated them, so this asks ACM directly.
+            - name: Ingest certificate validation records
+              if: ${{ always() && env.MAPLE_DEPLOY_AWS_INGEST == '1' }}
+              run: |
+                  for arn in $(aws acm list-certificates --region us-east-1 \
+                      --query "CertificateSummaryList[?starts_with(DomainName, 'ingest')].CertificateArn" --output text); do
+                      aws acm describe-certificate --region us-east-1 --certificate-arn "$arn" \
+                          --query 'Certificate.{Domain:DomainName,Status:Status,Validation:DomainValidationOptions[].{Status:ValidationStatus,Record:ResourceRecord}}' \
+                          --output json
+                  done
