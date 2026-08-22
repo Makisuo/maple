@@ -3,8 +3,9 @@ name: Deploy PR ingest gateway (AWS via Alchemy)
 # On-demand ECS deployment of `apps/ingest` for ONE pull request — the way to
 # test the gateway on Fargate before it reaches staging. Deploys only
 # `scripts/ingest-preview.run.ts` (VPC, security groups, cluster, secrets, ALB,
-# gateway service, the in-VPC OTel collector service + its Cloud Map namespace
-# — no workers, no certificate: the ALB answers plain HTTP on 80),
+# gateway service, and with `collector: true` the in-VPC OTel collector + its
+# Cloud Map namespace — no workers, no certificate: the ALB answers plain HTTP
+# on 80),
 # tagged `maple-ingest-pr-<n>` in the prod AWS account. It is torn down when
 # the PR closes (the `pull_request: closed` trigger below — the stack outlives
 # nothing but the PR), or earlier by re-running with `action: destroy`. A
@@ -32,6 +33,10 @@ on:
                 type: choice
                 options: [deploy, destroy]
                 default: deploy
+            collector:
+                description: "Also deploy the in-VPC OTel collector (MAPLE_DEPLOY_AWS_COLLECTOR=1) — prd-only by default, see stageDeploysCollector"
+                type: boolean
+                default: false
 
 concurrency:
     group: pr-ingest-${{ inputs.pr_number || github.event.pull_request.number }}
@@ -54,6 +59,9 @@ jobs:
             # A closed PR always destroys.
             ACTION: ${{ github.event_name == 'pull_request' && 'destroy' || inputs.action }}
             COMMIT_SHA: ${{ github.sha }}
+            # Opt the preview into the collector for this run (it is prd-only
+            # otherwise — a cash-flow call, see `stageDeploysCollector`).
+            MAPLE_DEPLOY_AWS_COLLECTOR: ${{ inputs.collector && '1' || '' }}
         steps:
             - name: Checkout
               uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -137,7 +145,7 @@ jobs:
             # the stage's warehouse? Fails the job if the collector is missing or
             # logs export errors.
             - name: Verify the collector beside the gateway
-              if: env.ACTION == 'deploy'
+              if: env.ACTION == 'deploy' && env.MAPLE_DEPLOY_AWS_COLLECTOR == '1'
               env:
                   AWS_REGION: us-east-1
               run: bash scripts/ingest-preview-verify.sh

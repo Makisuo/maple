@@ -167,6 +167,21 @@ export function resolveCollectorEndpoint(
 }
 
 /**
+ * Whether a stage gets the OTel collector beside its gateway.
+ *
+ * prd only for now — a cash-flow call, not a design one. The intent is every
+ * stage that deploys the gateway (`stageDeploysIngest`), so stg and previews
+ * carry their own self-telemetry too; flip this to `stageDeploysIngest(stage)`
+ * when the budget allows (~$13.5/mo per stage at the non-prd size). Until
+ * then a preview can opt in for one run with MAPLE_DEPLOY_AWS_COLLECTOR=1
+ * (the `collector` input of deploy-pr-ingest.yml), which is how the collector
+ * was verified on Fargate before it reached prod.
+ */
+export function stageDeploysCollector(stage: MapleStage): boolean {
+	return stage.kind === "prd"
+}
+
+/**
  * Fargate task size for the collector per stage.
  *
  * In `tinybird` write mode (prod) the collector only carries the gateway's own

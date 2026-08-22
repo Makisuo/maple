@@ -8,6 +8,8 @@ import {
 	resolveCollectorTaskSize,
 	resolveIngestCidrBlock,
 	resolveIngestNamespaceName,
+	stageDeploysCollector,
+	stageDeploysIngest,
 } from "./stage.ts"
 
 describe("parseMapleRegion", () => {
@@ -66,6 +68,17 @@ describe("collector service discovery", () => {
 		expect(resolveCollectorEndpoint(parseMapleStage("pr-12"), "eu")).toBe(
 			"http://otel-collector.maple-ingest-eu-pr-12.internal:4318",
 		)
+	})
+
+	it("deploys the collector to prd only for now, a subset of the gateway stages", () => {
+		expect(stageDeploysCollector(parseMapleStage("prd"))).toBe(true)
+		expect(stageDeploysCollector(parseMapleStage("stg"))).toBe(false)
+		expect(stageDeploysCollector(parseMapleStage("pr-12"))).toBe(false)
+		for (const stage of ["prd", "stg", "pr-12", "dev-alice"]) {
+			if (stageDeploysCollector(parseMapleStage(stage))) {
+				expect(stageDeploysIngest(parseMapleStage(stage))).toBe(true)
+			}
+		}
 	})
 
 	it("sizes the collector task with 1 GiB everywhere so the memory limiter can fire", () => {
