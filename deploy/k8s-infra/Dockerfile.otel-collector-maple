@@ -48,7 +48,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 # OCI labels — `org.opencontainers.image.source` is what GHCR uses to link
 # the package back to the source repo for visibility / permissions.
-LABEL org.opencontainers.image.source="https://github.com/Makisuo/maple"
+LABEL org.opencontainers.image.source="https://github.com/MapleTechLabs/maple"
 LABEL org.opencontainers.image.description="OpenTelemetry Collector with Maple ClickHouse exporter"
 LABEL org.opencontainers.image.licenses="MIT"
 

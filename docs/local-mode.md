@@ -30,7 +30,7 @@ curl -fsSL https://maple.dev/cli/install | sh
 
 (`maple.dev/cli/install` is [scripts/install.sh](../scripts/install.sh) served by
 `apps/landing` — the build copies it to `public/cli/install`. The raw GitHub URL
-`https://raw.githubusercontent.com/Makisuo/maple/main/scripts/install.sh` works too.)
+`https://raw.githubusercontent.com/MapleTechLabs/maple/main/scripts/install.sh` works too.)
 
 The manual installer detects your OS/arch, downloads the matching bundle from
 the latest GitHub release, verifies its checksum, installs the two files into

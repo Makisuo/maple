@@ -40,7 +40,7 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
     attrs.push(KeyValue::new(
         "vcs.repository.url.full",
         env::var("VCS_REPOSITORY_URL")
-            .unwrap_or_else(|_| "https://github.com/Makisuo/maple".to_owned()),
+            .unwrap_or_else(|_| "https://github.com/MapleTechLabs/maple".to_owned()),
     ));
     if let Some(revision) = detect_head_revision() {
         attrs.push(KeyValue::new("vcs.ref.head.revision", revision));

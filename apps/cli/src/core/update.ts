@@ -31,7 +31,7 @@ export class UpdateError extends Schema.TaggedError<UpdateError>()("@maple/cli/U
 	message: Schema.String,
 }) {}
 
-const REPO = "Makisuo/maple"
+const REPO = "MapleTechLabs/maple"
 const LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`
 /** Throttle window for the startup check — hit GitHub at most once per day. */
 export const CHECK_TTL_MS = 24 * 60 * 60 * 1000

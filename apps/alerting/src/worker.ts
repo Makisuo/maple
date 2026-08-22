@@ -45,7 +45,7 @@ import { Cause, Effect, Layer, Match } from "effect"
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "alerting",
 	serviceNamespace: "backend",
-	repositoryUrl: "https://github.com/Makisuo/maple",
+	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 

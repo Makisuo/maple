@@ -9,7 +9,7 @@ keywords:
     - observability
     - opentelemetry
     - kubernetes
-home: https://github.com/makisuo/maple
+home: https://github.com/MapleTechLabs/maple
 sources:
     - https://github.com/open-telemetry/opentelemetry-collector-contrib
     - https://github.com/open-telemetry/opentelemetry-operator
