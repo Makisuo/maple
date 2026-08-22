@@ -132,6 +132,16 @@ jobs:
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: bunx alchemy deploy scripts/ingest-preview.run.ts --yes --adopt --stage "pr-$PR_NUMBER"
 
+            # Is the collector running, discoverable by the name the gateway was
+            # given, and exporting — and did the gateway's own telemetry land in
+            # the stage's warehouse? Fails the job if the collector is missing or
+            # logs export errors.
+            - name: Verify the collector beside the gateway
+              if: env.ACTION == 'deploy'
+              env:
+                  AWS_REGION: us-east-1
+              run: bash scripts/ingest-preview-verify.sh
+
             - name: Destroy ingest preview stack with Alchemy
               if: env.ACTION == 'destroy' && steps.exists.outputs.stack == 'true'
               env:
