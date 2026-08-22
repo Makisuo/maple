@@ -2,6 +2,7 @@ import { DailySpendResponse, DailyVolume, WarehouseQueryError } from "@maple/dom
 import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/query-engine"
 import { Context, Effect, Layer } from "effect"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { isMissingProductEvents } from "@/services/warehouse/missing-table"
 import type { TenantContext } from "@/services/auth/AuthService"
 import * as Integrations from "@maple/query-engine-integrations"
 
@@ -99,9 +100,8 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 					})
 				}
 
-				// `product_events` is a newer table than the other two: a cluster that
-				// predates it has ingested no product events, so the honest series is
-				// all zeros — not a 502 that takes the whole spend chart down with it.
+				// A cluster without `product_events` has ingested no product events, so
+				// the honest series is all zeros — not a 502 for the whole chart.
 				const eventRows = yield* warehouse
 					.compiledQuery(
 						tenant,
@@ -111,14 +111,7 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 						{ profile: "list", context: "billingDailyProductEventCount" },
 					)
 					.pipe(
-						Effect.catchTag("@maple/http/errors/WarehouseConfigError", (error) =>
-							/product_events/i.test(error.message)
-								? Effect.as(
-										Effect.annotateCurrentSpan("query.rollup.fallback", true),
-										noEventRows,
-									)
-								: Effect.fail(error),
-						),
+						Effect.catchIf(isMissingProductEvents, () => Effect.succeed(noEventRows)),
 						Effect.mapError(toQueryError),
 					)
 
