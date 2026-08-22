@@ -207,6 +207,36 @@ export const planEvaluateSource = (
 	return Effect.succeed({ kind: "spec", query: plan.query })
 }
 
+/**
+ * A multi-service rule is N independent single-service rules that happen to
+ * share a threshold and a destination list: the scheduler evaluates each
+ * service on its own and keys the results by service name.
+ *
+ * That explosion was open-coded three times — the scheduler tick, `testRule`
+ * and `previewRule` — each re-deriving the per-service plan the same way and
+ * each free to drift. The preview's whole promise is that it shows what the
+ * scheduler will do, so it must not be *mirroring* the scheduler's rule shape;
+ * it must be building the same one.
+ *
+ * Returns one entry per service in `serviceNames`, each already carrying its
+ * own compiled plan and the group key its outcomes are stored under. Callers
+ * keep their own concurrency for the evaluation itself — compiling is pure.
+ */
+export const perServiceRules = (
+	rule: NormalizedRule,
+): Effect.Effect<
+	ReadonlyArray<{ readonly groupKey: string; readonly rule: NormalizedRule }>,
+	AlertValidationError
+> =>
+	Effect.forEach(rule.serviceNames, (serviceName) =>
+		compileRulePlan({ ...rule, serviceName }).pipe(
+			Effect.map((compiledPlan) => ({
+				groupKey: serviceName,
+				rule: { ...rule, serviceName, compiledPlan },
+			})),
+		),
+	)
+
 export const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (rule: {
 	readonly signalType: AlertSignalType
 	readonly serviceName: string | null

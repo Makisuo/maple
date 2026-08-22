@@ -79,6 +79,7 @@ import * as AlertingMetrics from "@/observability/AlertingMetrics"
 import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueue"
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
+import { advanceAlertCounters, simulateFiringSpans, type AlertCounters } from "./alert-counters"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { formatComparator } from "./alert-formatting"
@@ -106,11 +107,11 @@ import { makeAlertDestinationDelivery, parseAlertDestinationEncryptionKey } from
 import { AlertReadModelsService, type AlertReadModelsServiceApi } from "./AlertReadModelsService"
 import { AlertRulesService, makeAlertRulePersistence, type AlertRulesServiceApi } from "./AlertRulesService"
 import {
-	compileRulePlan,
 	decodeStoredAlertRuleMetadata,
 	isGroupedPlan,
 	toStorageGroupKey,
 	makeAlertValidationError as makeValidationError,
+	perServiceRules,
 	planEvaluateSource,
 	type NormalizedRule,
 } from "./AlertRuleModel"
@@ -244,8 +245,19 @@ const resolveServiceLinkName = (
 	}
 	return null
 }
-// Cap on how many evaluation windows a structured rule preview replays.
-const MAX_PREVIEW_BUCKETS = 200
+/**
+ * Cap on how many evaluation windows a rule preview replays.
+ *
+ * One bucket is one evaluation window, so the cap is what decides whether the
+ * preview covers the range the user picked. At 200 it did not: the create
+ * form's default (5-minute window, last 24h) needs 288 and the 1-minute window
+ * needs 1440, so the common case silently charted only the newest slice of a
+ * full-width axis. 1500 covers every window/range pair the pickers can produce
+ * up to 24h, plus the coarser windows over 7d and 30d, and still bounds the
+ * response for the pathological combinations (1-minute windows over 30 days),
+ * which clamp and say so via `truncatedToStart`.
+ */
+const MAX_PREVIEW_BUCKETS = 1500
 
 /** Preserve each org's oldest-first order while preventing one org from monopolizing a tick. */
 export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
@@ -966,18 +978,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				let evaluation: EvaluatedRule
 				if (normalized.serviceNames.length > 1) {
 					const results = yield* Effect.forEach(
-						normalized.serviceNames,
-						(svcName) =>
+						yield* perServiceRules(normalized),
+						({ rule }) =>
 							Effect.gen(function* () {
-								const perServicePlan = yield* compileRulePlan({
-									...normalized,
-									serviceName: svcName,
-								})
-								const observations = yield* evaluateRule(orgId, {
-									...normalized,
-									serviceName: svcName,
-									compiledPlan: perServicePlan,
-								})
+								const observations = yield* evaluateRule(orgId, rule)
 								return (
 									observations[0]?.evaluation ?? {
 										status: "skipped" as const,
@@ -1186,26 +1190,18 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					// Mirror the scheduler's multi-service mode: independent per-service
 					// plans, groupKey = service name.
 					yield* Effect.forEach(
-						normalized.serviceNames,
-						(svcName) =>
+						yield* perServiceRules(normalized),
+						({ groupKey, rule }) =>
 							Effect.gen(function* () {
-								const perServicePlan = yield* compileRulePlan({
-									...normalized,
-									serviceName: svcName,
-								})
-								const perServiceSource = yield* planEvaluateSource(
-									perServicePlan,
-									normalized.windowMinutes,
-								)
 								const observations = yield* queryEngine.evaluateSeries(systemTenant(orgId), {
 									startTime: formatWarehouseDateTime(startMs),
 									endTime: formatWarehouseDateTime(queryEndMs),
-									source: perServiceSource,
-									reducer: perServicePlan.reducer,
-									sampleCountStrategy: perServicePlan.sampleCountStrategy,
+									source: yield* planEvaluateSource(rule.compiledPlan, rule.windowMinutes),
+									reducer: rule.compiledPlan.reducer,
+									sampleCountStrategy: rule.compiledPlan.sampleCountStrategy,
 								})
 								for (const obs of observations) {
-									record(svcName, Date.parse(obs.bucket), {
+									record(groupKey, Date.parse(obs.bucket), {
 										value: obs.value,
 										sampleCount: obs.sampleCount,
 										hasData: obs.sampleCount > 0,
@@ -1257,59 +1253,48 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				const series: AlertRulePreviewSeries[] = []
 				const wouldFire: AlertRulePreviewFiringSpan[] = []
 				for (const [groupKey, buckets] of obsByGroup) {
-					const points: AlertRulePreviewPoint[] = []
-					// Simulate the scheduler's saturating counters (skipped freezes both —
-					// same as processEvaluation).
-					let breaches = 0
-					let healthy = 0
-					let openStart: number | null = null
-					for (const bucketMs of pointBuckets) {
+					// Every window in the grid, judged by the same `applyEvaluationLogic`
+					// the scheduler runs per tick — no-data windows included, filled from
+					// `NO_DATA` so a gap is an evaluated skip rather than a missing point.
+					const evaluations = pointBuckets.map((bucketMs) => {
 						const obs = buckets.get(bucketMs) ?? NO_DATA
 						const evaluation = applyEvaluationLogic(normalized, obs)
-						const provisional = hasPartialBucket && bucketMs === endMs
-						points.push(
-							new AlertRulePreviewPoint({
-								bucket: iso(bucketMs),
-								value: evaluation.value,
-								sampleCount: obs.sampleCount,
-								status: evaluation.status,
-								...(provisional ? { provisional } : undefined),
-							}),
-						)
-						// The in-progress window charts but doesn't feed the incident
-						// simulation — the scheduler hasn't evaluated it yet.
-						if (provisional) continue
-						if (evaluation.status === "breached") {
-							breaches = Math.min(breaches + 1, normalized.consecutiveBreachesRequired)
-							healthy = 0
-						} else if (evaluation.status === "healthy") {
-							healthy = Math.min(healthy + 1, normalized.consecutiveHealthyRequired)
-							breaches = 0
+						return {
+							bucketMs,
+							status: evaluation.status,
+							value: evaluation.value,
+							sampleCount: obs.sampleCount,
+							provisional: hasPartialBucket && bucketMs === endMs,
 						}
-						if (openStart == null && breaches >= normalized.consecutiveBreachesRequired) {
-							// Shade from the start of the run's first breached window.
-							openStart = bucketMs - (normalized.consecutiveBreachesRequired - 1) * windowMs
-						} else if (openStart != null && healthy >= normalized.consecutiveHealthyRequired) {
-							wouldFire.push(
-								new AlertRulePreviewFiringSpan({
-									groupKey,
-									start: iso(openStart),
-									end: iso(bucketMs + windowMs),
-								}),
-							)
-							openStart = null
-						}
-					}
-					if (openStart != null) {
+					})
+
+					series.push(
+						new AlertRulePreviewSeries({
+							groupKey,
+							points: evaluations.map(
+								({ bucketMs, status, value, sampleCount, provisional }) =>
+									new AlertRulePreviewPoint({
+										bucket: iso(bucketMs),
+										value,
+										sampleCount,
+										status,
+										...(provisional ? { provisional } : undefined),
+									}),
+							),
+						}),
+					)
+
+					// The would-fire shading is the scheduler's own state machine replayed
+					// over the series — not a second implementation of it.
+					for (const span of simulateFiringSpans(evaluations, normalized, windowMs)) {
 						wouldFire.push(
 							new AlertRulePreviewFiringSpan({
 								groupKey,
-								start: iso(openStart),
-								end: iso(endMs),
+								start: iso(span.startMs),
+								end: iso(span.endMs),
 							}),
 						)
 					}
-					series.push(new AlertRulePreviewSeries({ groupKey, points }))
 				}
 
 				yield* Effect.annotateCurrentSpan({
@@ -1864,9 +1849,18 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						)
 					}
 
+					const priorCounters: AlertCounters = {
+						consecutiveBreaches: state?.consecutiveBreaches ?? 0,
+						consecutiveHealthy: state?.consecutiveHealthy ?? 0,
+					}
+
 					if (evaluation.status === "skipped") {
-						const consecutiveBreaches = state?.consecutiveBreaches ?? 0
-						const consecutiveHealthy = state?.consecutiveHealthy ?? 0
+						// Freezing both counters is the machine's rule, not a local one.
+						const { consecutiveBreaches, consecutiveHealthy } = advanceAlertCounters(
+							priorCounters,
+							"skipped",
+							normalized,
+						)
 						yield* upsertState({
 							consecutiveBreaches,
 							consecutiveHealthy,
@@ -1883,23 +1877,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						}
 					}
 
-					// Capped at the rule's thresholds: the counters are only ever compared
-					// with >= against *Required, so saturating keeps open/resolve behavior
-					// identical while letting steady-state ticks skip the state upsert above.
-					const consecutiveBreaches =
-						evaluation.status === "breached"
-							? Math.min(
-									(state?.consecutiveBreaches ?? 0) + 1,
-									normalized.consecutiveBreachesRequired,
-								)
-							: 0
-					const consecutiveHealthy =
-						evaluation.status === "healthy"
-							? Math.min(
-									(state?.consecutiveHealthy ?? 0) + 1,
-									normalized.consecutiveHealthyRequired,
-								)
-							: 0
+					const { consecutiveBreaches, consecutiveHealthy } = advanceAlertCounters(
+						priorCounters,
+						evaluation.status,
+						normalized,
+					)
 
 					yield* upsertState({
 						consecutiveBreaches,
@@ -3125,36 +3107,29 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 										const normalized = yield* normalizeRuleRow(row)
 
 										if (normalized.serviceNames.length > 1) {
-											yield* Effect.forEach(normalized.serviceNames, (svcName) =>
-												Effect.gen(function* () {
-													const perServicePlan = yield* compileRulePlan({
-														...normalized,
-														serviceName: svcName,
-													})
-													const perService = {
-														...normalized,
-														serviceName: svcName,
-														compiledPlan: perServicePlan,
-													}
-													const observations = yield* evaluateRule(
-														row.orgId,
-														perService,
-													)
-													const evaluation = observations[0]?.evaluation
-													if (evaluation == null) return
-													yield* recordEvaluationStatus(evaluation)
-													yield* processEvaluation(
-														row,
-														normalized,
-														evaluation,
-														svcName,
-														timestamp,
-														pendingChecks,
-														issueBudget,
-														pushBudget,
-														prefetch,
-													)
-												}),
+											yield* Effect.forEach(
+												yield* perServiceRules(normalized),
+												({ groupKey, rule }) =>
+													Effect.gen(function* () {
+														const observations = yield* evaluateRule(
+															row.orgId,
+															rule,
+														)
+														const evaluation = observations[0]?.evaluation
+														if (evaluation == null) return
+														yield* recordEvaluationStatus(evaluation)
+														yield* processEvaluation(
+															row,
+															normalized,
+															evaluation,
+															groupKey,
+															timestamp,
+															pendingChecks,
+															issueBudget,
+															pushBudget,
+															prefetch,
+														)
+													}),
 											)
 
 											yield* resolveOrphanedGroupIncidents(
