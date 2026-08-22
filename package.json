@@ -61,7 +61,7 @@
 		"@oxlint/plugins": "1.77.0",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"@types/node": "catalog:tooling",
-		"alchemy": "2.0.0-beta.72",
+		"alchemy": "2.0.0-beta.74",
 		"effect": "catalog:effect",
 		"knip": "^6.17.1",
 		"oxfmt": "^0.55.0",

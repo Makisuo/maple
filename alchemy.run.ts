@@ -82,10 +82,11 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
  *
  * Set `MAPLE_DEPLOY_AWS_INGEST=1` to include it. Unset, both the AWS providers
  * and the ingest resources drop out and the stack is exactly what shipped
- * before the AWS work landed — which is the point: the ingest deploy currently
- * hangs, and it hangs in the same `alchemy deploy` run that ships every
- * Cloudflare worker, so an unconditional AWS half means no production deploys
- * at all.
+ * before the AWS work landed. It was made opt-in when the AWS half wedged
+ * every production deploy (#378); that hang turned out to be alchemy's
+ * env-credential account lookup deadlocking without `AWS_ACCOUNT_ID` (the
+ * workflows now set it — see deploy-prd.yml), so the flag is only the
+ * migration switch now, not a workaround.
  */
 const DEPLOY_AWS_INGEST = process.env.MAPLE_DEPLOY_AWS_INGEST === "1"
 
@@ -105,13 +106,12 @@ export default Alchemy.Stack(
 		// Infisical exactly like the Cloudflare ones — `AWS.providers()` reads
 		// AWS_REGION / AWS_ACCOUNT_ID / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
 		//
-		// OPT-IN, because the AWS half currently wedges the deploy. Four prd runs
-		// have burned their whole timeout inside `alchemy deploy` with no output
-		// at any log level, no AWS API call in CloudTrail, and no resource
-		// created — while blocking every Cloudflare worker behind them, since
-		// they deploy in the same run. Unset, this stack is byte-identical to the
-		// last one that shipped (2m05s), so production keeps deploying while the
-		// hang is investigated with the flag on.
+		// OPT-IN (MAPLE_DEPLOY_AWS_INGEST=1): unset, this stack is byte-identical
+		// to the pure-Cloudflare one that ships today, so the ECS cut-over is a
+		// repo-variable flip rather than a code change. `AWS.providers()` also
+		// needs AWS_ACCOUNT_ID in CI — without it the env-credential path looks
+		// the account up over STS from inside its own environment construction
+		// and deadlocks silently (the #378 hang).
 		providers,
 		// Shared account-wide state store (Worker + DO SQLite) — bootstrapped once
 		// per Cloudflare account (`alchemy bootstrap cloudflare` or the first

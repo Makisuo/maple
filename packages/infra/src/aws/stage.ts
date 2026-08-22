@@ -124,7 +124,10 @@ export function resolveIngestTaskSize(stage: MapleStage): IngestTaskSize {
  *
  * PR previews are excluded deliberately: `resolveMapleDomains` gives them no
  * `ingest` domain, and a VPC + ALB per PR is real money for a stack nothing
- * points at. Dev stages run the gateway through docker-compose instead.
+ * points at. Testing the gateway on Fargate for one PR is the separate,
+ * on-demand `scripts/ingest-preview.run.ts` stack (deploy-pr-ingest.yml),
+ * which calls `createMapleIngest` directly and is torn down by hand. Dev
+ * stages run the gateway through docker-compose instead.
  */
 export function stageDeploysIngest(stage: MapleStage): boolean {
 	return stage.kind === "prd" || stage.kind === "stg"
