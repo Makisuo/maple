@@ -352,10 +352,17 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 			const points = response.data
 			if (points.length === 0) return null
 
+			// Severity is grouped by the RAW `SeverityText`, and SDKs disagree on
+			// its case — one org ships `INFO`, `Info` and `info` side by side. They
+			// are one severity to the reader, so fold them into one series here.
+			// Leaving them apart produced three tooltip rows all labelled "INFO",
+			// and three identical React keys: on every hover re-render React then
+			// leaked the stale rows instead of replacing them, and the tooltip grew
+			// a row per bucket crossed.
 			const seriesKeysSet = new Set<string>()
 			for (const point of points) {
 				for (const key of Object.keys(point.series)) {
-					seriesKeysSet.add(key)
+					seriesKeysSet.add(key.toUpperCase())
 				}
 			}
 
@@ -368,10 +375,15 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 				}
 			}
 
-			const chartData = points.map((point) => ({
-				bucket: point.bucket,
-				...point.series,
-			}))
+			const chartData = points.map((point) => {
+				const bySeverity = new Map<string, number>()
+				for (const [key, value] of Object.entries(point.series)) {
+					if (typeof value !== "number") continue
+					const canonical = key.toUpperCase()
+					bySeverity.set(canonical, (bySeverity.get(canonical) ?? 0) + value)
+				}
+				return { bucket: point.bucket, ...Object.fromEntries(bySeverity) }
+			})
 
 			const totalCount = points.reduce((sum, point) => {
 				return (
