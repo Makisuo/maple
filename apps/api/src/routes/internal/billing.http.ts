@@ -24,6 +24,9 @@ import {
 	summariseSubscriptions,
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
+import { forkRequestScoped } from "@/platform/fork-request-scoped"
+import { emitPlanStartedFromAttach } from "@/services/billing/plan-events"
+import { ProductEventsService } from "@/services/product-events/ProductEventsService"
 import { requireAdmin } from "@/services/auth/auth"
 import { DailySpendService } from "@/services/billing/DailySpendService"
 
@@ -71,6 +74,7 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 		const edgeCache = yield* EdgeCacheService
 		const dailySpend = yield* DailySpendService
 		const autumn = yield* AutumnClient
+		const productEvents = yield* ProductEventsService
 
 		// Invalidate on any 2xx, matching `ensureOk` — otherwise a 201/204 from
 		// attach/openCustomerPortal would decode as success yet leave the stale
@@ -216,7 +220,29 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 							),
 						)
 						yield* invalidateCustomer(tenant.orgId, result)
-						return yield* decodeUpstream(AttachResult, response)
+						const attached = yield* decodeUpstream(AttachResult, response)
+						// Inline (no-redirect) plan start; the Autumn webhook covers the
+						// Stripe-checkout path. Never fails the request.
+						//
+						// FORKED, unlike the webhook receivers: this is the Subscribe
+						// click, the one request where a stall reads as a failed payment,
+						// and `track` is a bounded-but-not-free POST to the ingest
+						// gateway. `forkRequestScoped` means a gateway that answers
+						// normally still gets the event (the fiber finishes long before
+						// the response is written) while a stalled one is interrupted at
+						// the response instead of holding the user. Losing it there costs
+						// nothing durable — `plan_events.ts` is explicit that this emit is
+						// the low-latency COMPLEMENT and the `billing.updated` webhook is
+						// the authoritative `plan_started`.
+						yield* forkRequestScoped(
+							emitPlanStartedFromAttach(productEvents, {
+								orgId: tenant.orgId,
+								userId: tenant.userId,
+								planId: payload.planId,
+								result: attached,
+							}),
+						)
+						return attached
 					}),
 				)
 				.handle("previewAttach", ({ payload }) =>

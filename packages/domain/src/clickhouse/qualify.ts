@@ -15,6 +15,7 @@ export const CLICKHOUSE_MV_SOURCE_TABLES: ReadonlyArray<string> = [
 	"service_overview_spans",
 	"service_operations_minutely",
 	"session_events",
+	"session_replays",
 ]
 
 /**

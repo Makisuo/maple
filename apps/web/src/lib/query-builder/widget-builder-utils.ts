@@ -22,6 +22,7 @@ import {
 	type QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-shared"
 import { WIDGET_TYPES } from "@maple/domain/http"
+import { DEFAULT_FUNNEL_KEY_BY, DEFAULT_FUNNEL_WINDOW_SECONDS } from "@/components/funnels/definition"
 import { dataSourceQuerySet, dataSourceRouteParams, makeQueryDataSource } from "@maple/widgets/dashboard"
 
 // Lowering the widget editor's state to a persisted widget, and back.
@@ -124,6 +125,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		heatmapColorScale: undefined,
 		heatmapScaleType: "linear",
 		markdownContent: "",
+		funnel: { steps: [], keyBy: DEFAULT_FUNNEL_KEY_BY, windowSeconds: DEFAULT_FUNNEL_WINDOW_SECONDS },
 		...definition.initialState?.(widget),
 	}
 
@@ -259,6 +261,13 @@ export function validateQueries(state: QueryBuilderWidgetState): string | null {
 	// a note doesn't query at all, so validating their placeholder draft would
 	// block Apply on an error the user has no panel to fix.
 	if (definition.queryEditor !== "builder") return null
+
+	// A type that has swapped its query set for a source of its own (a funnel
+	// with product-event steps) validates that source instead: its query drafts
+	// are the placeholder the state shape requires, not what reaches the warehouse.
+	if (definition.ownsDataSource?.(state)) {
+		return definition.validate?.({ state, activeQueries: [], visibleQueries: [] }) ?? null
+	}
 
 	const activeQueries = state.queries.filter((query) => query.enabled !== false)
 	if (activeQueries.length === 0) return "Add at least one query"

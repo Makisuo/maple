@@ -78,7 +78,7 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 				)}
 			</span>
 
-			<span className="relative z-10 flex w-[130px] shrink-0 items-center gap-1.5 font-medium text-foreground">
+			<span className="relative z-10 flex min-w-0 flex-1 items-center gap-1.5 font-medium text-foreground sm:w-[130px] sm:flex-none">
 				<SignalIcon size={14} className="shrink-0 text-muted-foreground" />
 				<span className="truncate">{SIGNAL_LABEL[incident.signalType]}</span>
 			</span>
@@ -113,7 +113,7 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 				{incident.deploymentEnv || "—"}
 			</span>
 
-			<span className="relative z-0 min-w-0 flex-1" />
+			<span className="relative z-0 hidden min-w-0 flex-1 sm:block" />
 
 			{activeFingerprints > 1 ? (
 				<span

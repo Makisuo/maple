@@ -5,6 +5,18 @@
 // data that goes stale. Both are constructed lazily and memoized, because
 // constructing one per row is the expensive part, not the lookup.
 
+import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
+
+/**
+ * The empty-referrer group. "Direct" is what every analytics product calls it,
+ * even though the bucket also covers internal navigation and Referrer-Policy
+ * suppression — a longer, truer label would not fit a 12px row.
+ */
+export const referrerLabel = (host: string): string => (host === WEB_ANALYTICS_UNSET ? "Direct" : host)
+
+/** The untagged group of a `utm_*` dimension. */
+export const utmLabel = (value: string): string => (value === WEB_ANALYTICS_UNSET ? "Not set" : value)
+
 const displayNames = (type: "region" | "language"): Intl.DisplayNames | undefined => {
 	try {
 		return new Intl.DisplayNames(undefined, { type, fallback: "none" })

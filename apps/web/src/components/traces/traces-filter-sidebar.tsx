@@ -75,6 +75,18 @@ function TracesFilterSidebarView({
 							onChange={(checked) => onFilterChange("rootOnly", checked ? undefined : false)}
 						/>
 
+						{/* Only meaningful on the grouped trace list — the span-level
+						    list (rootOnly off) has no trace structure to judge. */}
+						{(filters.rootOnly ?? true) && (
+							<SingleCheckboxFilter
+								title="Hide Single-Span Noise"
+								checked={filters.hideNoise ?? true}
+								onChange={(checked) =>
+									onFilterChange("hideNoise", checked ? undefined : false)
+								}
+							/>
+						)}
+
 						<FilterSection
 							title="Environment"
 							options={facets.deploymentEnvs ?? []}

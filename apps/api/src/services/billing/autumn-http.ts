@@ -87,7 +87,8 @@ const ROUTE_PATHS: Record<AutumnRoute, string> = {
  * so one deep transform reproduces all of them.
  *
  * Some fields carry keys that are DATA, not schema — feature ids like
- * `browser_sessions` / `ai_input_tokens`, group labels, free-form metadata.
+ * `browser_sessions` / `product_events` / `ai_input_tokens`, group labels,
+ * free-form metadata.
  * Camelizing those would silently break every feature lookup, so they are held
  * back. The SDK's inbound Zod schemas draw the line in two distinct places, and
  * so do we (the field's OWN key is always renamed either way — the SDK remapped

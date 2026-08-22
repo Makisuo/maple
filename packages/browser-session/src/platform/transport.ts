@@ -9,6 +9,21 @@ export interface IngestConfig {
 	readonly sdk: string
 	readonly maskAllInputs: boolean
 	readonly maskAllText: boolean
+	/**
+	 * Identity from `identify()`, consulted when session-event rows are built so
+	 * a late `identify()` still stamps `user_id`/`group_id` on the rows that
+	 * follow it — the same source the session metadata row reads.
+	 */
+	readonly getIdentity?: (() => EventIdentity | undefined) | undefined
+}
+
+/**
+ * The slice of `ResolvedIdentity` that rides on session-event rows. Declared
+ * structurally so this transport layer stays free of the identity module.
+ */
+export interface EventIdentity {
+	readonly id?: string | undefined
+	readonly groupId?: string | undefined
 }
 
 /**

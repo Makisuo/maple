@@ -7,6 +7,7 @@
 		"sync:i18n": "astro sync",
 		"sync:cli": "mkdir -p public/cli && cp ../../scripts/install.sh public/cli/install && cp ../../scripts/uninstall.sh public/cli/uninstall",
 		"dev:app": "bun run sync:cli && astro dev --port ${PORT:-3391} --host ${HOST:-127.0.0.1}",
+		"test": "vitest run",
 		"build": "bun run sync:cli && astro build",
 		"preview": "astro preview",
 		"astro": "astro"
@@ -21,6 +22,7 @@
 		"@fontsource-variable/geist-mono": "^5.2.8",
 		"@inlang/paraglide-astro": "^0.4.1",
 		"@maple-dev/browser": "workspace:*",
+		"@maple/domain": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@maple/ui": "workspace:*",
 		"@tailwindcss/vite": "catalog:tailwind",
@@ -30,6 +32,7 @@
 		"astro": "^5.17.1",
 		"autumn-js": "^1.2.51",
 		"d3-scale": "^4.0.2",
+		"effect": "catalog:effect",
 		"fuse.js": "^7.4.2",
 		"motion": "^12.40.0",
 		"react": "catalog:react",
@@ -39,7 +42,8 @@
 	},
 	"devDependencies": {
 		"@types/d3-scale": "^4.0.9",
-		"typescript": "^6.0.3"
+		"typescript": "^6.0.3",
+		"vitest": "catalog:"
 	},
 	"portless": {
 		"name": "landing",

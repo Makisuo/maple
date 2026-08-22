@@ -120,11 +120,11 @@ function FirstTraceCelebration({ serviceName, onDismiss }: { serviceName?: strin
 
 	return (
 		<Card className="mb-4 shrink-0 border-primary/40 bg-primary/[0.04] overflow-hidden">
-			<CardContent className="flex items-center gap-4 p-5">
+			<CardContent className="flex flex-wrap items-center gap-4 p-5">
 				<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
 					<CircleCheckIcon size={20} />
 				</div>
-				<div className="flex-1 min-w-0">
+				<div className="min-w-0 flex-1 basis-40">
 					<p className="text-sm font-semibold tracking-tight">First trace received — you're live</p>
 					<p className="text-xs text-muted-foreground mt-0.5">
 						{serviceName
@@ -132,7 +132,7 @@ function FirstTraceCelebration({ serviceName, onDismiss }: { serviceName?: strin
 							: "We're seeing your telemetry. Jump in to explore."}
 					</p>
 				</div>
-				<Button size="sm" onClick={handleExplore} className="gap-2 shrink-0">
+				<Button size="sm" onClick={handleExplore} className="gap-2 shrink-0 max-sm:order-last max-sm:w-full">
 					Explore your traces
 					<RocketIcon size={14} />
 				</Button>

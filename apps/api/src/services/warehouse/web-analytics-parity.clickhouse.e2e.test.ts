@@ -1,7 +1,7 @@
 // SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 // Raw-vs-rollup parity for web analytics.
 //
-// `web_events` is a performance change, not a semantics change: every one of the
+// `product_events` is a performance change, not a semantics change: every one of the
 // five web-analytics queries must return byte-identical numbers whether it reads
 // raw `session_events` or the rollup. The analyzer sweep next door proves the
 // rollup SQL *parses*; only running both against the same rows proves they
@@ -19,7 +19,7 @@
 //   - The navigation semi-join changing which sessions it selects, which is the
 //     path the breakdown fan-out inlines twelve times.
 //   - The MV's WHERE dropping or admitting the wrong event types: clicks and
-//     network rows must never reach `web_events`, and custom rows must.
+//     network rows must never reach `product_events`, and custom rows must.
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import * as CH from "@maple/query-engine/ch"
@@ -37,7 +37,7 @@ const ORG_ID = "org_web_analytics_parity"
 /**
  * The seed window is anchored to *now*, not to a fixed calendar date.
  *
- * `session_events` and `web_events` both carry a 30-day TTL, and ClickHouse
+ * `session_events` carries a 30-day TTL (`product_events` a longer one), and ClickHouse
  * enforces it at insert time — a hardcoded date silently drops every seeded row
  * the moment it ages past the horizon, both tables end up empty, and every
  * comparison below passes by comparing nothing to nothing. This test was written
@@ -266,7 +266,7 @@ const assertSourcesSwapped = (rawSql: string, rollupSql: string): void => {
 		return
 	}
 	assert.notInclude(rollupSql, "FROM session_events", "the rollup variant still reads the raw table")
-	assert.include(rollupSql, "FROM web_events", "the rollup variant does not read web_events")
+	assert.include(rollupSql, "FROM product_events", "the rollup variant does not read product_events")
 }
 
 /** Order-insensitive comparison keyed on the row's dimension columns — the
@@ -285,6 +285,9 @@ const FILTER_CASES: ReadonlyArray<{ readonly label: string; readonly filters: CH
 	// narrow the page-view source through a subquery.
 	{ label: "replays-dimension", filters: { country: "DE" } },
 	{ label: "replays-dimension+path", filters: { country: "DE", pagePath: "/pricing" } },
+	// The event semi-join, alone and composed with a page filter.
+	{ label: "event", filters: { eventName: "signup_started" } },
+	{ label: "event+path", filters: { eventName: "signup_started", pagePath: "/pricing" } },
 	{
 		label: "all-dimensions",
 		filters: {
@@ -298,6 +301,7 @@ const FILTER_CASES: ReadonlyArray<{ readonly label: string; readonly filters: CH
 			language: "en-US",
 			utmSource: "twitter",
 			visitorType: "new",
+			eventName: "signup_started",
 		},
 	},
 ]
@@ -326,6 +330,10 @@ const QUERIES: ReadonlyArray<{
 		compile: (filters) => CH.compile(CH.webAnalyticsPagesQuery({ ...filters, limit: 100 }), window).sql,
 	},
 	{
+		name: "webAnalyticsEvents",
+		compile: (filters) => CH.compile(CH.webAnalyticsEventsQuery({ ...filters, limit: 100 }), window).sql,
+	},
+	{
 		name: "webAnalyticsBreakdowns",
 		compile: (filters) =>
 			CH.compileUnion(CH.webAnalyticsBreakdownsQuery({ ...filters, limitPerDimension: 50 }), window)
@@ -333,7 +341,11 @@ const QUERIES: ReadonlyArray<{
 	},
 ]
 
-describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () => {
+// One database for both suites in this file — migrations are the slow part.
+// File-level so the parity suite's teardown cannot run before the funnel suite
+// below has started; guarded because file-level hooks run even when every
+// `describe` is skipped.
+if (clickhouseE2eEnabled) {
 	beforeAll(async () => {
 		await clickhouseExec(`CREATE DATABASE ${database}`)
 		await applyRealMigrations(database)
@@ -343,7 +355,9 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 	afterAll(async () => {
 		await clickhouseExec(`DROP DATABASE IF EXISTS ${database}`)
 	}, 30_000)
+}
 
+describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () => {
 	it("seeds land in both tables", async () => {
 		// The guard against a vacuous suite. Every comparison below is an equality
 		// between two result sets, so two empty result sets pass every one of them —
@@ -369,8 +383,10 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 		)
 	})
 
-	it("populates web_events from the materialized view with only navigation and custom rows", async () => {
-		const rows = await runJson("SELECT Kind, count() AS n FROM web_events GROUP BY Kind ORDER BY Kind")
+	it("populates product_events from the materialized view with only navigation and custom rows", async () => {
+		const rows = await runJson(
+			"SELECT Kind, count() AS n FROM product_events GROUP BY Kind ORDER BY Kind",
+		)
 		const byKind = Object.fromEntries(rows.map((row) => [String(row.Kind), Number(row.n)]))
 		const expectedNavigation = SEED_EVENTS.filter((row) => row.type === "navigation").length
 		const expectedCustom = SEED_EVENTS.filter((row) => row.type === "custom").length
@@ -378,7 +394,7 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 
 		// The reserved-name collision lands as a custom row, not a page view.
 		const collision = await runJson(
-			"SELECT Kind FROM web_events WHERE EventName = '$pageview' AND Kind = 'custom'",
+			"SELECT Kind FROM product_events WHERE EventName = '$pageview' AND Kind = 'custom'",
 		)
 		assert.lengthOf(collision, 1, "track('$pageview') must stay a custom event")
 	})
@@ -386,7 +402,7 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 	it("pre-extracts Host and PagePath exactly as the read-time functions would", async () => {
 		const drift = await runJson(
 			`SELECT count() AS n
-			 FROM web_events
+			 FROM product_events
 			 WHERE Host != domain(Url) OR PagePath != path(Url)`,
 		)
 		assert.strictEqual(Number(drift[0]?.n), 0, "write-time URL parsing diverged from read-time")
@@ -396,8 +412,8 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 	for (const query of QUERIES) {
 		for (const filterCase of FILTER_CASES) {
 			it(`${query.name} agrees across sources — ${filterCase.label}`, async () => {
-				const rawSql = query.compile({ ...filterCase.filters, useWebEvents: false })
-				const rollupSql = query.compile({ ...filterCase.filters, useWebEvents: true })
+				const rawSql = query.compile({ ...filterCase.filters, useProductEvents: false })
+				const rollupSql = query.compile({ ...filterCase.filters, useProductEvents: true })
 				assertSourcesSwapped(rawSql, rollupSql)
 
 				const [rawRows, rollupRows] = await Promise.all([runJson(rawSql), runJson(rollupSql)])
@@ -418,4 +434,243 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 			})
 		}
 	}
+})
+
+// Funnels over product_events.
+//
+// Not a raw-vs-rollup parity — funnels have no raw counterpart, since server
+// rows exist only in `product_events`. What is under test is the arithmetic:
+// per-step counts computed by hand from a small seed versus what the compiled
+// SQL returns, across every person-key resolution, the session-step branch, the
+// window bound, and both breakdown sources.
+//
+// The seed is its own org so the web-analytics counts above are untouched:
+//   f1  v1 (anonymous)   referred by t.co / twitter   /  → /pricing → signup_started
+//   f2  v2               referred by t.co             /  → /pricing
+//   f3  v3               referred by google.com       /pricing
+//   f5  v1 + u1          direct (identified later)    /dashboard      ← links v1 → u1
+//   server rows: plan_started for u1 (plan=startup) and for u9 (unlinked)
+
+const FUNNEL_ORG_ID = "org_funnel_parity"
+const funnelWindow = { orgId: FUNNEL_ORG_ID, startTime: START_TIME, endTime: END_TIME }
+
+interface FunnelSeedEvent extends SeedEvent {
+	readonly visitorId: string
+	readonly userId: string
+}
+
+const fev = (
+	sessionId: string,
+	visitorId: string,
+	userId: string,
+	ts: string,
+	seq: number,
+	type: string,
+	url: string,
+	message = "",
+): FunnelSeedEvent => ({ sessionId, visitorId, userId, ts, seq, type, url, message })
+
+const FUNNEL_EVENTS: ReadonlyArray<FunnelSeedEvent> = [
+	fev("f1", "v1", "", at(HOUR_MS), 0, "navigation", "https://maple.dev/"),
+	fev("f1", "v1", "", at(HOUR_MS + MINUTE_MS), 1, "navigation", "https://maple.dev/pricing"),
+	fev(
+		"f1",
+		"v1",
+		"",
+		at(HOUR_MS + 2 * MINUTE_MS),
+		2,
+		"custom",
+		"https://maple.dev/pricing",
+		"signup_started",
+	),
+	fev("f2", "v2", "", at(2 * HOUR_MS), 0, "navigation", "https://maple.dev/"),
+	fev("f2", "v2", "", at(2 * HOUR_MS + MINUTE_MS), 1, "navigation", "https://maple.dev/pricing"),
+	fev("f3", "v3", "", at(3 * HOUR_MS), 0, "navigation", "https://maple.dev/pricing"),
+	fev("f5", "v1", "u1", at(5 * HOUR_MS), 0, "navigation", "https://app.maple.dev/dashboard"),
+]
+
+const FUNNEL_SESSIONS: ReadonlyArray<SeedSession> = [
+	sess("f1", 1, {
+		visitorId: "v1",
+		referrerHost: "t.co",
+		utmSource: "twitter",
+		country: "DE",
+		startTime: at(HOUR_MS),
+	}),
+	sess("f2", 1, { visitorId: "v2", referrerHost: "t.co", country: "US", startTime: at(2 * HOUR_MS) }),
+	sess("f3", 1, { visitorId: "v3", referrerHost: "google.com", country: "DE", startTime: at(3 * HOUR_MS) }),
+	sess("f5", 1, { visitorId: "v1", startTime: at(5 * HOUR_MS) }),
+]
+
+const seedFunnel = async (): Promise<void> => {
+	const eventRows = FUNNEL_EVENTS.map(
+		(row) =>
+			`(${quote(FUNNEL_ORG_ID)}, ${quote(row.sessionId)}, ${quote(row.ts)}, ${row.seq}, ${quote(row.type)}, ${quote(row.url)}, ${quote(row.message ?? "")}, map(), ${quote(row.visitorId)}, ${quote(row.userId)})`,
+	).join(",\n")
+	await clickhouseExec(
+		`INSERT INTO session_events (OrgId, SessionId, Timestamp, Seq, Type, Url, Message, Attributes, VisitorId, UserId) VALUES\n${eventRows}`,
+		database,
+	)
+	// f5 carries UserId so identity_links_mv links v1 → u1.
+	const sessionRows = FUNNEL_SESSIONS.map(
+		(row) =>
+			`(${quote(FUNNEL_ORG_ID)}, ${quote(row.sessionId)}, ${quote(row.startTime)}, ${row.version}, ${quote(row.visitorId)}, ${quote(row.sessionId === "f5" ? "u1" : "")}, ${quote(row.referrerHost)}, ${quote(row.country)}, ${quote(row.utmSource)})`,
+	).join(",\n")
+	await clickhouseExec(
+		`INSERT INTO session_replays (OrgId, SessionId, StartTime, Version, VisitorId, UserId, ReferrerHost, Country, UtmSource) VALUES\n${sessionRows}`,
+		database,
+	)
+	await clickhouseExec(
+		`INSERT INTO product_events (OrgId, Timestamp, Source, UserId, Kind, EventName, ServiceName, Attributes) VALUES
+		 (${quote(FUNNEL_ORG_ID)}, ${quote(at(6 * HOUR_MS))}, 'server', 'u1', 'custom', 'plan_started', 'maple-api', map('plan', 'startup')),
+		 (${quote(FUNNEL_ORG_ID)}, ${quote(at(6 * HOUR_MS + MINUTE_MS))}, 'server', 'u9', 'custom', 'plan_started', 'maple-api', map('plan', 'free'))`,
+		database,
+	)
+}
+
+const REFERRAL_STEPS: ReadonlyArray<CH.FunnelStep> = [
+	{ kind: "session", dimension: "referrerHost", value: "t.co" },
+	{ kind: "page", pagePath: "/pricing" },
+	{ kind: "event", eventName: "plan_started" },
+]
+const PRODUCT_STEPS: ReadonlyArray<CH.FunnelStep> = [
+	{ kind: "page", pagePath: "/pricing", host: "maple.dev" },
+	{ kind: "event", eventName: "signup_started" },
+	{ kind: "event", eventName: "plan_started", attributeEquals: { plan: "startup" } },
+]
+
+const funnelCounts = async (opts: CH.ProductEventsFunnelOpts): Promise<ReadonlyArray<number>> => {
+	const rows = await runJson(CH.compile(CH.productEventsFunnelQuery(opts), funnelWindow).sql)
+	return rows.map((row) => Number(row.count))
+}
+
+const breakdownRows = async (
+	opts: CH.ProductEventsFunnelBreakdownOpts,
+): Promise<ReadonlyArray<[unknown, number, number]>> => {
+	const rows = await runJson(CH.compile(CH.productEventsFunnelBreakdownQuery(opts), funnelWindow).sql)
+	return rows.map((row) => [row.group, Number(row.step), Number(row.count)])
+}
+
+describe.skipIf(!clickhouseE2eEnabled)("product events funnels", () => {
+	beforeAll(async () => {
+		// Shares the database (and its migrations) with the parity suite above; the
+		// seed is a different org so neither suite can see the other's rows.
+		await seedFunnel()
+	}, 60_000)
+
+	it("seeds land in product_events and identity_links", async () => {
+		const [events, links] = await Promise.all([
+			runJson(`SELECT count() AS n FROM product_events WHERE OrgId = ${quote(FUNNEL_ORG_ID)}`),
+			runJson(
+				`SELECT VisitorId, UserId FROM identity_links WHERE OrgId = ${quote(FUNNEL_ORG_ID)} GROUP BY VisitorId, UserId`,
+			),
+		])
+		assert.strictEqual(
+			Number(events[0]?.n),
+			FUNNEL_EVENTS.length + 2,
+			"browser rows via the MV plus two server rows",
+		)
+		assert.deepStrictEqual(links, [{ VisitorId: "v1", UserId: "u1" }])
+	})
+
+	it("stitches a referred anonymous visit to the same person's server-side event", async () => {
+		// u1 (via v1): entry H1 → /pricing H1+1m → plan_started H6. v2: entry → /pricing.
+		assert.deepStrictEqual(
+			await funnelCounts({ steps: REFERRAL_STEPS, keyBy: "person", windowSeconds: 86_400 }),
+			[2, 2, 1],
+		)
+	})
+
+	it("cannot reach the server-side step on a visitor or session key", async () => {
+		assert.deepStrictEqual(
+			await funnelCounts({ steps: REFERRAL_STEPS, keyBy: "visitor", windowSeconds: 86_400 }),
+			[2, 2, 0],
+		)
+		assert.deepStrictEqual(
+			await funnelCounts({ steps: REFERRAL_STEPS, keyBy: "session", windowSeconds: 86_400 }),
+			[2, 2, 0],
+		)
+	})
+
+	it("enforces the window from the step-1 event", async () => {
+		// plan_started is 5h after the referred entry: inside a day, outside an hour.
+		assert.deepStrictEqual(
+			await funnelCounts({ steps: REFERRAL_STEPS, keyBy: "person", windowSeconds: 3_600 }),
+			[2, 2, 0],
+		)
+	})
+
+	it("counts persons in step order and ignores later steps without a step-1 event", async () => {
+		// u1: /pricing → signup_started → plan_started(startup) = 3. v2, v3: /pricing = 1.
+		// u9: plan_started only, no step 1 → 0.
+		assert.deepStrictEqual(
+			await funnelCounts({ steps: PRODUCT_STEPS, keyBy: "person", windowSeconds: 86_400 }),
+			[3, 1, 1],
+		)
+	})
+
+	it("narrows the population by person when a filter is set", async () => {
+		// country=DE keeps f1 (→ u1) and f3 (v3); v2 (US) drops out entirely.
+		assert.deepStrictEqual(
+			await funnelCounts({
+				steps: PRODUCT_STEPS,
+				keyBy: "person",
+				windowSeconds: 86_400,
+				filters: { country: "DE" },
+			}),
+			[2, 1, 1],
+		)
+	})
+
+	it("breaks a funnel down by a session dimension read through the person's sessions", async () => {
+		assert.deepStrictEqual(
+			await breakdownRows({
+				steps: PRODUCT_STEPS,
+				keyBy: "person",
+				windowSeconds: 86_400,
+				breakdownBy: "referrerHost",
+			}),
+			[
+				["google.com", 1, 1],
+				["google.com", 2, 0],
+				["google.com", 3, 0],
+				["t.co", 1, 2],
+				["t.co", 2, 1],
+				["t.co", 3, 1],
+			],
+		)
+	})
+
+	it("breaks a funnel down by an event attribute", async () => {
+		assert.deepStrictEqual(
+			await breakdownRows({
+				steps: [{ kind: "event", eventName: "plan_started" }],
+				keyBy: "user",
+				windowSeconds: 60,
+				breakdownBy: "attribute:plan",
+			}),
+			[
+				["free", 1, 1],
+				["startup", 1, 1],
+			],
+		)
+	})
+
+	it("lists event names with counts, sessions and persons", async () => {
+		const rows = await runJson(CH.compile(CH.productEventNamesQuery({ limit: 10 }), funnelWindow).sql)
+		assert.deepStrictEqual(
+			rows.map((row) => [
+				row.eventName,
+				row.kind,
+				Number(row.count),
+				Number(row.sessions),
+				Number(row.persons),
+			]),
+			[
+				["$pageview", "navigation", 6, 4, 4],
+				["plan_started", "custom", 2, 0, 2],
+				["signup_started", "custom", 1, 1, 1],
+			],
+		)
+	})
 })

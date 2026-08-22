@@ -34,7 +34,7 @@ export function ConnectButton() {
 					</Button>
 				}
 			/>
-			<PopoverPopup align="end" className="w-[26rem]">
+			<PopoverPopup align="end" className="w-[26rem] max-w-[calc(100vw-1rem)]">
 				{open && <ConnectPanel />}
 			</PopoverPopup>
 		</Popover>

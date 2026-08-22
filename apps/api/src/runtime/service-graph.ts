@@ -60,6 +60,7 @@ import { OrganizationService } from "@/services/org/OrganizationService"
 import { LiveActivitiesService } from "@/services/push/LiveActivitiesService"
 import { MobileDevicesService } from "@/services/push/MobileDevicesService"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
+import { ProductEventsService } from "@/services/product-events/ProductEventsService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
@@ -253,9 +254,15 @@ const DailySpendServiceLive = DailySpendService.layer.pipe(Layer.provideMerge(Wa
 // configured"), so an unconfigured local worker still boots.
 const AutumnClientLive = AutumnClient.layer.pipe(Layer.provide(InfraLive))
 
+// Server-side product events (signup/plan funnel) — the Clerk/Autumn webhook
+// receivers and the billing `attach` route emit through it. Builds without an
+// ingest key (every `track` is then a logged no-op).
+const ProductEventsServiceLive = ProductEventsService.layer.pipe(Layer.provide(InfraLive))
+
 const MainServicesLive = Layer.mergeAll(
 	CoreServicesLive,
 	AutumnClientLive,
+	ProductEventsServiceLive,
 	DailySpendServiceLive,
 	CloudflareAnalyticsServiceLive,
 	WarehouseQueryServiceLive,

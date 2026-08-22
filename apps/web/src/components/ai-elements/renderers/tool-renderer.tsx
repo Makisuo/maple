@@ -493,6 +493,79 @@ export function ToolRenderer({ data: output }: { data: StructuredToolOutput }) {
 					/>
 				</Stack>
 			)
+
+		case "query_funnel": {
+			const first = output.data.steps[0]?.count ?? 0
+			const last = output.data.steps[output.data.steps.length - 1]?.count ?? 0
+			return (
+				<Stack>
+					<StatCards
+						props={{
+							cards: [
+								{
+									label: "Conversion",
+									value: output.data.conversion === null ? "—" : output.data.conversion,
+									format: "percent",
+								},
+								{ label: "Entered", value: first, format: "number" },
+								{ label: "Completed", value: last, format: "number" },
+								{ label: "Counting", value: output.data.keyBy, format: "text" },
+							],
+						}}
+					/>
+					<DataTable
+						props={{
+							headers: ["#", "Step", "Count", "Of first", "Of previous", "Drop-off"],
+							rows: output.data.steps.map((step) => [
+								String(step.step),
+								step.label,
+								String(step.count),
+								`${(step.ofFirst * 100).toFixed(1)}%`,
+								step.ofPrevious === null ? "—" : `${(step.ofPrevious * 100).toFixed(1)}%`,
+								step.step === 1 ? "—" : `-${step.dropOff}`,
+							]),
+							title: `Funnel · ${output.data.steps.length} steps · within ${output.data.windowSeconds}s`,
+						}}
+					/>
+					{output.data.breakdown ? (
+						<DataTable
+							props={{
+								headers: [
+									output.data.breakdown.by,
+									...output.data.steps.map((step) => `Step ${step.step}`),
+									"Conv.",
+								],
+								rows: output.data.breakdown.groups.map((group) => [
+									group.group === "" ? "(none)" : group.group,
+									...group.counts.map((count) => String(count)),
+									group.conversion === null
+										? "—"
+										: `${(group.conversion * 100).toFixed(1)}%`,
+								]),
+								title: `By ${output.data.breakdown.by}`,
+							}}
+						/>
+					) : null}
+				</Stack>
+			)
+		}
+
+		case "list_product_events":
+			return (
+				<DataTable
+					props={{
+						headers: ["Event", "Kind", "Count", "Sessions", "Persons"],
+						rows: output.data.events.map((event) => [
+							event.eventName,
+							event.kind,
+							String(event.count),
+							String(event.sessions),
+							String(event.persons),
+						]),
+						title: `Product events · ${output.data.events.length}`,
+					}}
+				/>
+			)
 	}
 
 	return (

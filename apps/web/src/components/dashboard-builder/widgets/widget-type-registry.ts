@@ -97,6 +97,13 @@ export interface WidgetTypeDefinition {
 	buildDisplay: (ctx: BuildDisplayContext) => WidgetDisplayConfig
 	/** Returns a message that blocks Apply, or `null`. Shared rules run first. */
 	validate?: (ctx: ValidateContext) => string | null
+	/**
+	 * True when, for this state, the type fetches through a source of its own
+	 * rather than the query set — a funnel with product-event steps. The shared
+	 * query validation (at least one query, group-by required, …) is skipped and
+	 * only `validate` runs.
+	 */
+	ownsDataSource?: (state: QueryBuilderWidgetState) => boolean
 }
 
 /**

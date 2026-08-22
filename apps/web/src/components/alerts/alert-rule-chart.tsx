@@ -751,7 +751,11 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 					},
 				},
 			},
-			margin: { top: 8, right: PLOT_RIGHT, bottom: 0, left: Y_AXIS_WIDTH },
+			// `bottom` is left unset: an authored side is a hard lock, and `bottom: 0`
+			// (carried over from Recharts, which sized the axis separately) clipped
+			// the x tick labels out and halved the y axis's "0". Unset, the frame
+			// measures the labels and reserves their height.
+			margin: { top: 8, right: PLOT_RIGHT, left: Y_AXIS_WIDTH },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),

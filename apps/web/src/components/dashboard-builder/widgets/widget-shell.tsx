@@ -300,20 +300,21 @@ export function WidgetFrame({
 			) : dataState.status === "error" ? (
 				dataState.message === "No query data found in selected time range" ? (
 					<WidgetEmptyState />
-				) : dataState.kind === "range" ? (
+				) : dataState.kind === "range" || dataState.kind === "config" ? (
 					// A constraint, not a failure — muted like the empty state rather
-					// than destructive, since nothing is broken and the neighbouring
-					// charts on this dashboard are showing the full window fine.
+					// than destructive, since nothing is broken: the window is too wide
+					// for a list, or the tile simply isn't configured yet.
 					<div className="flex items-center justify-center h-full flex-col gap-1.5 px-3">
 						<span className="text-xs font-medium text-muted-foreground">
-							{dataState.title ?? "Range too wide"}
+							{dataState.title ??
+								(dataState.kind === "range" ? "Range too wide" : "Not configured")}
 						</span>
 						{dataState.message && (
 							<span className="text-[10px] text-muted-foreground/70 max-w-full text-center line-clamp-3">
 								{dataState.message}
 							</span>
 						)}
-						{narrowRange && (
+						{dataState.kind === "range" && narrowRange && (
 							<Button
 								variant="outline"
 								size="xs"

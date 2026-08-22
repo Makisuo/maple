@@ -279,14 +279,14 @@ export function ChatConversation({
 							propose a corrected widget JSON for you to approve.
 						</EmptyNotice>
 					) : (
-						<div className="flex flex-col items-center gap-3">
+						<div className="flex w-full min-w-0 max-w-full flex-col items-center gap-3 px-4">
 							<div className="space-y-1 text-center">
 								<h3 className="font-medium text-sm">Maple AI</h3>
 								<p className="text-muted-foreground text-sm">
 									Ask me about your traces, logs, errors, and services.
 								</p>
 							</div>
-							<Suggestions className="mt-2 justify-center">
+							<Suggestions className="mt-2 w-full justify-center">
 								{suggestions.map((s) => (
 									<Suggestion key={s} suggestion={s} onClick={() => handleSend(s)} />
 								))}

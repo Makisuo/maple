@@ -280,7 +280,11 @@ export function InfraMetricChart({
 				axis: { line: false, ticks: { size: 0, padding: 8, format: tickFormatter } },
 			},
 			// A pinned left margin so sibling charts on the page share a plot edge.
-			margin: { top: 12, right: 12, bottom: 0, left: 56 },
+			// `bottom` is left unset: an authored side is a hard lock, and `bottom: 0`
+			// (carried over from Recharts, which sized the axis separately) clipped
+			// the x tick labels out and halved the y axis's "0". Unset, the frame
+			// measures the labels and reserves their height.
+			margin: { top: 12, right: 12, left: 56 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),

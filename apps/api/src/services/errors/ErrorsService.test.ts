@@ -1137,6 +1137,32 @@ describe("ErrorsService.runTick", () => {
 		},
 	)
 
+	it.effect("a scan row carrying NUL bytes is stored stripped instead of failing the tick", () => {
+		// ClickHouse String is bytes; a CLI crash once shipped raw chDB metadata in
+		// its message and Postgres refused the row with 22021. The tick then
+		// re-reported its own DatabaseError — params and NULs included — and failed
+		// on that, once a minute, until the row was sanitized at this boundary.
+		const rows = [
+			scanRow({
+				exceptionMessage: "failed at position 1 (\u0000\u0000): \u0000garbage",
+				topFrame: "cli/store.ts:1\u0000",
+			}),
+		]
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedIssue(asIssueId(randomUUID()))
+
+			const result = yield* errors.runTick()
+			assert.strictEqual(result.issuesTouched, 1)
+
+			const issues = yield* loadIssuesByFingerprint(SCAN_FINGERPRINT)
+			assert.lengthOf(issues, 1)
+			assert.strictEqual(issues[0]!.exceptionMessage, "failed at position 1 (): garbage")
+			assert.strictEqual(issues[0]!.topFrame, "cli/store.ts:1")
+		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+	})
+
 	it.effect("re-running the same completed window is a no-op", () => {
 		const rows = [scanRow()]
 		return Effect.gen(function* () {

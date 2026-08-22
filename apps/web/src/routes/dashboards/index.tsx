@@ -188,7 +188,7 @@ function DashboardListPage() {
 	}
 
 	const actions = (
-		<div className="flex items-center gap-1">
+		<div className="flex flex-wrap items-center gap-1">
 			<Button variant="outline" size="sm" onClick={() => navigate({ to: "/dashboards/templates" })}>
 				<GridIcon size={14} data-icon="inline-start" />
 				Browse templates

@@ -453,7 +453,7 @@ export function TraceTimeline() {
 				inputRef={searchInputRef}
 			/>
 
-			<div className="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-1.5 shrink-0">
+			<div className="flex flex-wrap items-center justify-between gap-y-1 border-b border-border bg-muted/30 px-3 py-1.5 shrink-0">
 				<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
 					<span className="font-medium">Timeline</span>
 					<span className="tabular-nums">{bars.length} spans</span>
@@ -480,7 +480,7 @@ export function TraceTimeline() {
 						</Tooltip>
 					)}
 				</div>
-				<div className="flex items-center gap-1">
+				<div className="flex flex-wrap items-center gap-1">
 					<Button
 						variant="ghost"
 						size="sm"
@@ -638,7 +638,7 @@ export function TraceTimeline() {
 			</div>
 
 			<div className="flex items-center justify-between border-t border-border bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground shrink-0">
-				<div className="flex items-center gap-3 text-foreground/30">
+				<div className="flex items-center gap-3 text-foreground/30 max-sm:hidden">
 					<span>
 						<kbd className="border border-foreground/10 bg-muted px-1 py-0.5 font-mono text-[9px]">
 							Drag
@@ -668,7 +668,7 @@ export function TraceTimeline() {
 						all shortcuts
 					</button>
 				</div>
-				<div className="flex items-center gap-2.5">
+				<div className="flex min-w-0 flex-wrap items-center justify-end gap-2.5">
 					{services.map((service) => (
 						<div key={service} className="flex items-center gap-1">
 							<div

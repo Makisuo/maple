@@ -35,7 +35,8 @@ import {
 	spanMetricsCallsHourly,
 	serviceOperationsMinutely,
 	serviceOperationsHourly,
-	webEvents,
+	productEvents,
+	identityLinks,
 } from "./datasources"
 import {
 	DB_NAMESPACE_ATTR_SQL,
@@ -1510,7 +1511,7 @@ export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_ho
 })
 
 /**
- * Populates `web_events` — the web analytics fact table.
+ * Populates the browser half of `product_events` — the product events fact table.
  *
  * A pure row-wise projection: filter to the two product-analytics event types,
  * pre-extract `domain(Url)`/`path(Url)`, re-sort by time in the target. No
@@ -1531,30 +1532,69 @@ export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_ho
  * the page-view predicate stays provably identical to the pre-rollup
  * `Type = 'navigation'` even if a customer calls `track('$pageview')`.
  *
- * Column order must match the `web_events` SCHEMA order — enforced by
+ * `Source` is the literal `'browser'`: this view is the only writer of browser
+ * rows, and the backfill deletes by it. Identity columns are copied through from
+ * the SDK-stamped `session_events` row — never joined from `session_replays`,
+ * whose v1/v2 rows may land after the event.
+ *
+ * Column order must match the `product_events` SCHEMA order — enforced by
  * `materialized-projection-order.test.ts`.
  */
-export const webEventsMv = defineMaterializedView("web_events_mv", {
+export const productEventsMv = defineMaterializedView("product_events_mv", {
 	description:
-		"Populates web_events from session_events navigation and custom rows, with domain(Url)/path(Url) pre-extracted and the event name normalized.",
-	datasource: webEvents,
+		"Populates product_events from session_events navigation and custom rows, with domain(Url)/path(Url) pre-extracted, the event name normalized and the SDK-stamped identity copied through.",
+	datasource: productEvents,
 	nodes: [
 		node({
-			name: "web_events_mv_node",
+			name: "product_events_mv_node",
 			sql: `
         SELECT
           OrgId,
           Timestamp,
+          'browser' AS Source,
           SessionId,
           Seq,
+          VisitorId,
+          UserId,
+          GroupId,
           Type AS Kind,
           if(Type = 'navigation', '$pageview', Message) AS EventName,
           domain(Url) AS Host,
           path(Url) AS PagePath,
           Url,
+          '' AS ServiceName,
           Attributes
         FROM session_events
         WHERE Type IN ('navigation', 'custom')
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `identity_links` from `session_replays` rows that carry both a
+ * visitor and a user id.
+ *
+ * Per-block firing is harmless here for the same reason it is fatal for
+ * per-session aggregates: this is a pure filter+project of one row, and the
+ * target is a ReplacingMergeTree keyed on the pair, so seeing the v1 and v2 rows
+ * of one session just re-inserts the same link.
+ */
+export const identityLinksMv = defineMaterializedView("identity_links_mv", {
+	description:
+		"Populates identity_links with every (VisitorId, UserId) pair observed on a session_replays row.",
+	datasource: identityLinks,
+	nodes: [
+		node({
+			name: "identity_links_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          VisitorId,
+          UserId,
+          StartTime AS FirstSeen
+        FROM session_replays
+        WHERE VisitorId != '' AND UserId != ''
       `,
 		}),
 	],

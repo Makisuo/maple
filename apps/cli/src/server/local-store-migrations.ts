@@ -46,6 +46,7 @@ import { v6ToV7ErrorServiceVersionModule } from "./local-store-migrations/v6-to-
 import { v7ToV8AppleCrashFramesModule } from "./local-store-migrations/v7-to-v8-apple-crash-frames"
 import { v8ToV9MvSweepModule } from "./local-store-migrations/v8-to-v9-mv-sweep"
 import { v9ToV10SemconvKeyRenamesModule } from "./local-store-migrations/v9-to-v10-semconv-key-renames"
+import { v10ToV11ProductEventsModule } from "./local-store-migrations/v10-to-v11-product-events"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -113,6 +114,7 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v7ToV8AppleCrashFramesModule,
 	v8ToV9MvSweepModule,
 	v9ToV10SemconvKeyRenamesModule,
+	v10ToV11ProductEventsModule,
 ]
 
 export const validateMigrationRegistry = (

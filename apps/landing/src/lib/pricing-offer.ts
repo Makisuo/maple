@@ -18,16 +18,29 @@ import * as m from "../paraglide/messages.js"
 
 const AUTUMN_API_VERSION = "2.3.0"
 
-/** browser_sessions is metered per session; every other signal is per GB. */
-type Unit = "gb" | "count"
+/**
+ * browser_sessions is metered per session, product_events per event; every
+ * other signal is per GB.
+ */
+export type Unit = "gb" | "sessions" | "events"
 
 export interface Allotment {
 	featureId: string
 	label: string
 	unit: Unit
 	included: number
-	/** Price per unit once `included` is used up. */
+	/**
+	 * Autumn `unlimited`: no cap and no overage — the row reads "Unlimited · free
+	 * during beta" instead of a number and a rate. `included`/`rate` are ignored.
+	 */
+	unlimited?: boolean
+	/** Price per `rateUnits` units once `included` is used up. */
 	rate?: number
+	/**
+	 * Units the rate is quoted per — 1 for GB and sessions, 1,000 for events.
+	 * Autumn's `billingUnits`; the rate is the price of one such block.
+	 */
+	rateUnits: number
 }
 
 export interface Offer {
@@ -43,14 +56,15 @@ export interface Offer {
 const HIDDEN_FEATURE_IDS = new Set<string>(["ai_input_tokens", "ai_output_tokens"])
 
 /** Canonical row order — Autumn can return items in any order. */
-const DATA_FEATURE_ORDER = ["logs", "traces", "metrics", "browser_sessions"]
+const DATA_FEATURE_ORDER = ["logs", "traces", "metrics", "browser_sessions", "product_events"]
 
 const dataFeatureRank = (id: string | undefined) => {
 	const i = id ? DATA_FEATURE_ORDER.indexOf(id) : -1
 	return i === -1 ? DATA_FEATURE_ORDER.length : i
 }
 
-const unitFor = (featureId: string): Unit => (featureId === "browser_sessions" ? "count" : "gb")
+const unitFor = (featureId: string): Unit =>
+	featureId === "browser_sessions" ? "sessions" : featureId === "product_events" ? "events" : "gb"
 
 /**
  * Capitalized, localized labels for the metered rows, keyed by Autumn featureId
@@ -61,6 +75,7 @@ const dataFeatureLabels = (): Record<string, string> => ({
 	traces: m.pricing_traces(),
 	metrics: m.pricing_metrics(),
 	browser_sessions: m.nav_browser_sessions(),
+	product_events: m.pricing_product_events(),
 })
 
 /**
@@ -81,8 +96,8 @@ export const platformFeatures = (): string[] => [
 
 /**
  * The live offer, or the `autumn.config.ts` mirror if Autumn is unreachable at
- * build time. The fallback carries browser sessions too — a short fallback
- * would render a meter that disagrees with the live one.
+ * build time. The fallback carries browser sessions and product events too — a
+ * short fallback would render a meter that disagrees with the live one.
  */
 export async function getOffer(): Promise<Offer> {
 	const labels = dataFeatureLabels()
@@ -123,7 +138,9 @@ export async function getOffer(): Promise<Offer> {
 							label: labels[featureId] ?? item.feature?.name ?? featureId,
 							unit: unitFor(featureId),
 							included: Number(item.included ?? 0),
+							unlimited: item.unlimited === true,
 							rate: item.price?.amount ?? undefined,
+							rateUnits: Math.max(1, item.price?.billingUnits ?? 1),
 						}
 					})
 					.sort((a, b) => dataFeatureRank(a.featureId) - dataFeatureRank(b.featureId)),
@@ -143,15 +160,39 @@ export async function getOffer(): Promise<Offer> {
 		hasTrial: true,
 		trialDuration: 14,
 		allotments: [
-			{ featureId: "logs", label: labels.logs!, unit: "gb", included: 100, rate: 0.3 },
-			{ featureId: "traces", label: labels.traces!, unit: "gb", included: 100, rate: 0.3 },
-			{ featureId: "metrics", label: labels.metrics!, unit: "gb", included: 100, rate: 0.3 },
+			{ featureId: "logs", label: labels.logs!, unit: "gb", included: 100, rate: 0.3, rateUnits: 1 },
+			{
+				featureId: "traces",
+				label: labels.traces!,
+				unit: "gb",
+				included: 100,
+				rate: 0.3,
+				rateUnits: 1,
+			},
+			{
+				featureId: "metrics",
+				label: labels.metrics!,
+				unit: "gb",
+				included: 100,
+				rate: 0.3,
+				rateUnits: 1,
+			},
 			{
 				featureId: "browser_sessions",
 				label: labels.browser_sessions!,
-				unit: "count",
+				unit: "sessions",
 				included: 5000,
 				rate: 0.002,
+				rateUnits: 1,
+			},
+			{
+				featureId: "product_events",
+				label: labels.product_events!,
+				unit: "events",
+				// Free and unlimited during beta — mirrors `apps/api/autumn.config.ts`.
+				included: 0,
+				unlimited: true,
+				rateUnits: 1,
 			},
 		],
 		ctaLabel: m.pricing_start_trial({ duration: "14" }),
@@ -172,4 +213,12 @@ export const money = (n: number) => {
 /** Sub-cent rates (per session) need three places; per-GB rates need two. */
 export const rateLabel = (n: number) => `$${n < 0.01 ? n.toFixed(3) : n.toFixed(2)}`
 
-export const volume = (a: Allotment, n: number) => (a.unit === "gb" ? `${n} GB` : n.toLocaleString("en-US"))
+/**
+ * The block a rate is quoted per, for the "then {rate} / …" sentence: 1 for
+ * GB and sessions, "1,000" for events. Localized unit words come from the
+ * message catalog; this only supplies the number.
+ */
+export const rateBlock = (a: Allotment) => a.rateUnits.toLocaleString("en-US")
+
+export const volume = (a: Allotment, n: number) =>
+	a.unlimited ? m.pricing_unlimited() : a.unit === "gb" ? `${n} GB` : n.toLocaleString("en-US")

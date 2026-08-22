@@ -28,6 +28,7 @@ import {
 	buildProjectedMapExpr,
 	canUseServiceOverviewMv,
 	canUseTracesAggregatesMv,
+	errorsOnlyCondition,
 	inclusionValues,
 	serviceOverviewWhereConditions,
 	tracesAggregatesWhereConditions,
@@ -1328,6 +1329,9 @@ const ROOT_SPAN_ATTR_KEYS = [
 	"url.path",
 	"server.address",
 	"net.peer.name",
+	// Mobile screen spans (`ui.screen` / `screen.load`) carry their only useful
+	// identity here — without it every screen trace renders as the bare span name.
+	"screen.name",
 ] as const
 
 /**
@@ -1403,8 +1407,17 @@ export interface TraceListOpts extends TracesQueryOpts {
 	 * `traceId`). Composite because root timestamps are not unique: a bare
 	 * `Timestamp < cursor` silently drops every trace sharing the boundary
 	 * timestamp. Strictly preferred over `offset` for deep pagination.
+	 * Only valid with the default `timestamp` sort.
 	 */
 	cursor?: { timestamp: string; traceId: string }
+	/**
+	 * `durationMs` sorts by the ROOT span's own duration, not the trace's
+	 * wall-clock extent — the wall clock only exists after stage 2 aggregates,
+	 * while pagination must be decided in stage 1 over `traces`. For a root the
+	 * two agree except when a child outlives its parent.
+	 */
+	sortBy?: TracesListSortKey
+	sortDir?: TracesListSortDir
 }
 
 export interface TraceListOutput {
@@ -1415,6 +1428,8 @@ export interface TraceListOutput {
 	readonly endTime: string
 	/** Wall-clock extent of the whole trace, not the root span's own duration. */
 	readonly durationMicros: number
+	/** The root span's own duration — the `durationMs` sort key (see `TraceListOpts.sortBy`). */
+	readonly rootDurationMicros: number
 	/** Every span in the trace, not just the ones matching the filters. */
 	readonly spanCount: number
 	/** Root service first, remaining participants sorted. */
@@ -1442,6 +1457,123 @@ const arrayDistinct = <T>(arr: CH.Expr<ReadonlyArray<T>>): CH.Expr<ReadonlyArray
 const fromUnixTimestamp64Nano = (nanos: CH.Expr<number>): CH.Expr<string> =>
 	compileFnCall<string>("fromUnixTimestamp64Nano", nanos)
 
+const subtractHours = (d: CH.Expr<string>, hours: CH.Expr<number>): CH.Expr<string> =>
+	compileFnCall<string>("subtractHours", d, hours)
+
+const addHours = (d: CH.Expr<string>, hours: CH.Expr<number>): CH.Expr<string> =>
+	compileFnCall<string>("addHours", d, hours)
+
+/**
+ * Attribute-filter keys the trace-list MV pre-extracts into columns. The MV
+ * coalesces both semconv spellings at write time, so either key lands on the
+ * same column.
+ */
+const TRACE_LIST_MV_ATTR_COLUMNS = new Map<string, "HttpMethod" | "HttpStatusCode">([
+	["http.method", "HttpMethod"],
+	["http.request.method", "HttpMethod"],
+	["http.status_code", "HttpStatusCode"],
+	["http.response.status_code", "HttpStatusCode"],
+])
+
+/**
+ * Whether `traceListQuery`'s paging stage can run over `trace_list_mv` instead
+ * of raw `traces`. The MV's sort key is `(OrgId, Timestamp, TraceId)`, so
+ * "newest N roots" is a read-in-order index walk instead of a full window scan
+ * — the raw table's `(OrgId, ServiceName, SpanName, Timestamp)` key cannot
+ * serve a time-ordered scan without reading the whole window.
+ *
+ * The MV stores roots only (exactly this query's population) but has no
+ * attribute maps: only HTTP method/status filters that map onto its
+ * pre-extracted columns are expressible; anything else falls back to raw.
+ */
+export function canUseTraceListMvStage1(opts: TraceListOpts): boolean {
+	if (opts.resourceAttributeFilters?.length) return false
+	if (opts.commitShas?.length) return false
+	for (const af of opts.attributeFilters ?? []) {
+		if (!TRACE_LIST_MV_ATTR_COLUMNS.has(af.key)) return false
+		const expressible =
+			(af.mode === "equals" && af.value !== undefined) || (af.mode === "in" && !!af.values?.length)
+		if (!expressible) return false
+	}
+	return true
+}
+
+/**
+ * `tracesBaseWhereConditions` re-expressed over the MV's pre-extracted columns.
+ * `SpanName` here is already the display spelling the facet sidebar shows
+ * (the MV normalizes `http.server GET` → `GET /route` at write time), so a
+ * facet click matches without the raw-or-display OR the base builder needs.
+ */
+function traceListMvWhereConditions(
+	$: ColumnAccessor<typeof TraceListMv.columns>,
+	opts: TraceListOpts,
+): Array<CH.Condition | undefined> {
+	const mm = opts.matchModes
+	const services = inclusionValues(opts.serviceName, opts.serviceNames)
+	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
+	const conditions: Array<CH.Condition | undefined> = [
+		$.OrgId.eq(param.string("orgId")),
+		$.Timestamp.gte(param.dateTime("startTime")),
+		$.Timestamp.lte(param.dateTime("endTime")),
+		CH.when(services, (v: readonly string[]) =>
+			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
+		),
+		CH.when(spanNames, (v: readonly string[]) => matchOrIn($.SpanName, v, mm?.spanName === "contains")),
+		CH.when(opts.statusCode, (v: string) => $.StatusCode.eq(v)),
+		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
+	]
+
+	if (opts.minDurationMs != null) {
+		conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
+	}
+	if (opts.maxDurationMs != null) {
+		conditions.push($.Duration.lte(opts.maxDurationMs * 1000000))
+	}
+	if (opts.environments?.length) {
+		conditions.push(
+			matchOrIn(
+				$.DeploymentEnv,
+				opts.environments,
+				mm?.deploymentEnv === "contains" && opts.environments.length === 1,
+			),
+		)
+	}
+	if (opts.namespaces?.length) {
+		conditions.push(
+			matchOrIn(
+				$.ServiceNamespace,
+				opts.namespaces,
+				mm?.serviceNamespace === "contains" && opts.namespaces.length === 1,
+			),
+		)
+	}
+	for (const af of opts.attributeFilters ?? []) {
+		const column = TRACE_LIST_MV_ATTR_COLUMNS.get(af.key)
+		if (!column) continue // unreachable behind canUseTraceListMvStage1
+		const col = $[column]
+		if (af.mode === "equals" && af.value !== undefined) {
+			conditions.push(af.negated ? col.neq(af.value) : col.eq(af.value))
+		} else if (af.mode === "in" && af.values?.length) {
+			const inCond = CH.inList(col, af.values)
+			conditions.push(af.negated ? CH.not(inCond) : inCond)
+		}
+	}
+	if (opts.excludedServiceNames?.length) {
+		conditions.push(CH.notInList($.ServiceName, opts.excludedServiceNames))
+	}
+	if (opts.excludedSpanNames?.length) {
+		conditions.push(CH.notInList($.SpanName, opts.excludedSpanNames))
+	}
+	if (opts.excludedEnvironments?.length) {
+		conditions.push(CH.notInList($.DeploymentEnv, opts.excludedEnvironments))
+	}
+	if (opts.excludedNamespaces?.length) {
+		conditions.push(CH.notInList($.ServiceNamespace, opts.excludedNamespaces))
+	}
+
+	return conditions
+}
+
 /**
  * Two-stage **trace**-level list: exactly one row per TraceId, carrying the real
  * span count, every participating service, and the trace's wall-clock duration.
@@ -1459,38 +1591,76 @@ const fromUnixTimestamp64Nano = (nanos: CH.Expr<number>): CH.Expr<string> =>
  * `limit` trace ids into primary-key seeks; the heavy SpanAttributes lookups are
  * materialized only there, for at most one page of traces.
  *
- * Stage 2 is deliberately not time-bounded: a trace's children can outlive the
- * requested window, and clipping them would undercount `spanCount` at the window
- * edge. The TraceId seek is what keeps it cheap, not partition pruning.
+ * Stage 2 is bounded by the requested window padded by ±1h, not the exact
+ * window: a trace's children can outlive it, and clipping them exactly would
+ * undercount `spanCount` at the window edge. The pad has to exist at all
+ * because an unbounded stage 2 defeats partition pruning — the PK analysis
+ * touches every retained partition and times out on prod-sized retention.
  */
 export function traceListQuery(opts: TraceListOpts) {
 	const limit = opts.limit ?? 25
 	const offset = opts.offset ?? 0
 	const cursor = opts.cursor
+	const sortBy = opts.sortBy ?? "timestamp"
+	const sortDir = opts.sortDir ?? "desc"
 
-	let page = from(Traces)
-		.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp }))
-		.where(($) => [
-			...buildWhereConditions($, opts),
-			$.ParentSpanId.eq(""),
-			cursor
-				? $.Timestamp.lt(cursor.timestamp).or(
-						$.Timestamp.eq(cursor.timestamp).and($.TraceId.lt(cursor.traceId)),
-					)
-				: undefined,
-		])
-		.orderBy(["ts", "desc"], ["traceId", "desc"])
-		.limit(limit)
-	if (offset > 0) {
-		page = page.offset(offset)
+	let pageSql: string
+	if (canUseTraceListMvStage1(opts)) {
+		// `trace_list_mv` is sorted `(OrgId, Timestamp, TraceId)`, so this pages
+		// read-in-order instead of scanning the window. Its Timestamp is
+		// second-granularity (`toDateTime`): the ns cursor from stage-2
+		// `startTime` must be truncated to match, and the `(ts, traceId)` tuple
+		// ordering is what keeps pages disjoint despite the truncation ties.
+		const secCursor = cursor
+			? { timestamp: cursor.timestamp.slice(0, 19), traceId: cursor.traceId }
+			: undefined
+		const mvBase = from(TraceListMv)
+			.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
+			.where(($) => [
+				...traceListMvWhereConditions($, opts),
+				secCursor
+					? $.Timestamp.lt(secCursor.timestamp).or(
+							$.Timestamp.eq(secCursor.timestamp).and($.TraceId.lt(secCursor.traceId)),
+						)
+					: undefined,
+			])
+		let page = (
+			sortBy === "durationMs"
+				? mvBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
+				: mvBase.orderBy(["ts", sortDir], ["traceId", "desc"])
+		).limit(limit)
+		if (offset > 0) {
+			page = page.offset(offset)
+		}
+		pageSql = compileCH(page, {}, { skipFormat: true }).sql
+	} else {
+		const pageBase = from(Traces)
+			.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
+			.where(($) => [
+				...buildWhereConditions($, opts),
+				$.ParentSpanId.eq(""),
+				cursor
+					? $.Timestamp.lt(cursor.timestamp).or(
+							$.Timestamp.eq(cursor.timestamp).and($.TraceId.lt(cursor.traceId)),
+						)
+					: undefined,
+			])
+		let page = (
+			sortBy === "durationMs"
+				? pageBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
+				: pageBase.orderBy(["ts", sortDir], ["traceId", "desc"])
+		).limit(limit)
+		if (offset > 0) {
+			page = page.offset(offset)
+		}
+		pageSql = compileCH(page, {}, { skipFormat: true }).sql
 	}
-	const pageSql = compileCH(page, {}, { skipFormat: true }).sql
 
 	// Lexicographic tuple ordering: true root first, earliest span as the
 	// tiebreaker for the (malformed) traces that ship no root at all.
 	const rootOrder = CH.rawExpr<unknown>("(if(ParentSpanId = '', 0, 1), Timestamp)")
 
-	return from(TraceDetailSpans)
+	const aggregated = from(TraceDetailSpans)
 		.select(($) => {
 			const rootServiceName = argMin($.ServiceName, rootOrder)
 			const startNanos = CH.toUnixTimestamp64Nano($.Timestamp)
@@ -1500,6 +1670,10 @@ export function traceListQuery(opts: TraceListOpts) {
 				startTime: argMin($.Timestamp, rootOrder),
 				endTime: fromUnixTimestamp64Nano(endNanos),
 				durationMicros: CH.intDiv(endNanos.sub(CH.min_(startNanos)), 1000),
+				// Stage 1's duration sort key, re-derived so stage 2 can return the
+				// page in the same order (the wall-clock extent above only exists
+				// after this aggregation, so it cannot drive pagination).
+				rootDurationMicros: CH.intDiv(argMin($.Duration, rootOrder), 1000),
 				spanCount: CH.count(),
 				services: arrayDistinct(
 					arrayPushFront(arraySort(CH.groupUniqArray($.ServiceName)), rootServiceName),
@@ -1521,10 +1695,23 @@ export function traceListQuery(opts: TraceListOpts) {
 		})
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
+			// Padded, not exact: children can start slightly before their root
+			// (clock skew) or outlive the window, but they cannot drift a full
+			// hour — the same ±1h convention as the trace-detail partition hint
+			// (`computeTraceTimeWindow`). Without any bound this scans every
+			// retained partition for the PK analysis and times out on prod
+			// (measured: 12h window, unbounded >10s; bounded <10s).
+			$.Timestamp.gte(subtractHours(CH.toDateTime(param.dateTime("startTime")), CH.lit(1))),
+			$.Timestamp.lte(addHours(CH.toDateTime(param.dateTime("endTime")), CH.lit(1))),
 			CH.rawCond(`TraceId IN (SELECT traceId FROM (${pageSql}))`),
 		])
 		.groupBy("traceId")
-		.orderBy(["startTime", "desc"], ["traceId", "desc"])
+
+	return (
+		sortBy === "durationMs"
+			? aggregated.orderBy(["rootDurationMicros", sortDir], ["startTime", sortDir], ["traceId", "desc"])
+			: aggregated.orderBy(["startTime", sortDir], ["traceId", "desc"])
+	)
 		.limit(limit)
 		.format("JSON")
 }
