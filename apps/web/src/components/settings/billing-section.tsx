@@ -25,6 +25,7 @@ import { BillingControlsCard, BillingControlsCardSkeleton } from "./billing-cont
 import { PlanOffer } from "./plan-offer"
 import { CostBreakdown, CostBreakdownSkeleton } from "./cost-breakdown"
 import { InvoicesSection } from "./invoices-section"
+import { BillingDetailsSection } from "./billing-details-section"
 
 /**
  * Billing, spend-first.
@@ -254,6 +255,13 @@ export function BillingSection({ isAdmin = true }: { isAdmin?: boolean }) {
 					) : (
 						<BillingControlsCard customer={customer} model={model} canEdit={isAdmin} />
 					)}
+				</div>
+			</section>
+
+			<section className="mt-12">
+				<SectionHeader title="Billing details" subtitle="Printed on every invoice" />
+				<div className="mt-4">
+					<BillingDetailsSection canEdit={isAdmin} />
 				</div>
 			</section>
 

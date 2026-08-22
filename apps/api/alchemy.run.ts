@@ -307,6 +307,9 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				// only if the funnel should land in a different org than the API's traces.
 				...optionalSecret("MAPLE_PRODUCT_EVENTS_INGEST_KEY"),
 				...optionalSecret("AUTUMN_SECRET_KEY"),
+				// Billing details (company name, address, tax IDs) are written to the
+				// Stripe customer Autumn links; Autumn itself has no API for them.
+				...optionalSecret("STRIPE_SECRET_KEY"),
 				...optionalSecret("SD_INTERNAL_TOKEN"),
 				...optionalSecret("INTERNAL_SERVICE_TOKEN"),
 				...optionalPlain("HAZEL_API_BASE_URL"),

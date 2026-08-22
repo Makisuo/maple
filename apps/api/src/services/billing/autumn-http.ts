@@ -242,6 +242,12 @@ export interface AutumnClientApi {
 		options: {
 			readonly expand: ReadonlyArray<CustomerExpand>
 			readonly customerData?: AutumnCustomerData | undefined
+			/**
+			 * Force the linked Stripe customer into existence now. Autumn otherwise
+			 * creates it lazily on the first billing operation, and the billing
+			 * details (name, address, tax IDs) have nowhere to live until it exists.
+			 */
+			readonly createInStripe?: boolean | undefined
 		},
 	) => AutumnCall
 	readonly aggregateEvents: (
@@ -367,10 +373,13 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientApi>
 				callAutumn(httpClient, secretKey, apiUrl, route, body)
 
 			return {
-				getOrCreateCustomer: (customerId, { expand, customerData }) =>
+				getOrCreateCustomer: (customerId, { expand, customerData, createInStripe }) =>
 					call("getOrCreateCustomer", {
 						customer_id: customerId,
 						...customerDataFields(customerData),
+						// Only when asked: the default read path must stay byte-for-byte
+						// what production has always sent.
+						...(createInStripe !== undefined ? { create_in_stripe: createInStripe } : undefined),
 						// The SDK's custom handler appended this unconditionally, and the
 						// billing UI reads `balances` — keep appending it.
 						expand: [...expand, "balances.feature"],

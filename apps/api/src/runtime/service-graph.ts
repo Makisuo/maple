@@ -20,6 +20,7 @@ import { McpOAuthService } from "@/services/auth/McpOAuthService"
 import { OAuthStateRepository } from "@/services/auth/OAuthStateRepository"
 import { DailySpendService } from "@/services/billing/DailySpendService"
 import { AutumnClient } from "@/services/billing/autumn-http"
+import { StripeClient } from "@/services/billing/stripe-http"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
@@ -254,6 +255,11 @@ const DailySpendServiceLive = DailySpendService.layer.pipe(Layer.provideMerge(Wa
 // configured"), so an unconfigured local worker still boots.
 const AutumnClientLive = AutumnClient.layer.pipe(Layer.provide(InfraLive))
 
+// Stripe's customer + tax-ID routes for the billing-details card. Same shape
+// and the same boot posture as AutumnClient: no `STRIPE_SECRET_KEY` means each
+// call fails as "not configured", never the layer.
+const StripeClientLive = StripeClient.layer.pipe(Layer.provide(InfraLive))
+
 // Server-side product events (signup/plan funnel) — the Clerk/Autumn webhook
 // receivers and the billing `attach` route emit through it. Builds without an
 // ingest key (every `track` is then a logged no-op).
@@ -262,6 +268,7 @@ const ProductEventsServiceLive = ProductEventsService.layer.pipe(Layer.provide(I
 const MainServicesLive = Layer.mergeAll(
 	CoreServicesLive,
 	AutumnClientLive,
+	StripeClientLive,
 	ProductEventsServiceLive,
 	DailySpendServiceLive,
 	CloudflareAnalyticsServiceLive,
