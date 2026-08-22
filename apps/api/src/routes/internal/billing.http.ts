@@ -135,9 +135,24 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 				.handle("getUsage", ({ query }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
+						// The window is the subscription's own period, same as the spend
+						// chart. Autumn's named `1bc` range looks BACKWARD one cycle-length
+						// from now rather than forward from the reset, so mid-cycle it
+						// folded most of the previous cycle into "this cycle's usage".
+						const { result: customerResult } = yield* readCustomerCached(
+							edgeCache,
+							tenant.orgId,
+							autumn.getOrCreateCustomer(tenant.orgId, { expand: ["subscriptions.plan"] }),
+						)
+						const customer = yield* decodeUpstream(
+							BillingCustomer,
+							yield* ensureOk(customerResult),
+						)
+						const cycle = resolveCycleWindow(customer, yield* Clock.currentTimeMillis)
+						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 						const result = yield* autumn.aggregateEvents(tenant.orgId, {
 							featureId: query.featureId,
-							range: query.range,
+							customRange: { start: cycle.startMs, end: cycle.endMs },
 						})
 						const response = yield* ensureOk(result)
 						return yield* decodeUpstream(BillingUsage, response)

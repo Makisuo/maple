@@ -145,15 +145,18 @@ describe("AutumnClient request construction", () => {
 		})
 	})
 
-	it("aggregateEvents sends the SDK's bin_size default", async () => {
+	it("aggregateEvents sends an explicit custom_range (never a named range) plus the SDK's bin_size default", async () => {
 		const { captured } = await withFetch({ body: JSON.stringify({ total: {} }) }, (autumn) =>
-			autumn.aggregateEvents(ORG, { featureId: ["logs", "traces"], range: "30d" }),
+			autumn.aggregateEvents(ORG, {
+				featureId: ["logs", "traces"],
+				customRange: { start: 1_755_129_600_000, end: 1_757_808_000_000 },
+			}),
 		)
 		assert.strictEqual(captured?.url, "https://api.useautumn.com/v1/events.aggregate")
 		assert.deepStrictEqual(captured?.body, {
 			customer_id: ORG,
 			feature_id: ["logs", "traces"],
-			range: "30d",
+			custom_range: { start: 1_755_129_600_000, end: 1_757_808_000_000 },
 			bin_size: "day",
 		})
 	})
@@ -398,7 +401,11 @@ describe("AutumnClient response handling", () => {
 					total: { ai_input_tokens: { count: 120, sum: 4.2 } },
 				}),
 			},
-			(autumn) => autumn.aggregateEvents(ORG, { featureId: ["ai_input_tokens"], range: "30d" }),
+			(autumn) =>
+				autumn.aggregateEvents(ORG, {
+					featureId: ["ai_input_tokens"],
+					customRange: { start: 1_755_129_600_000, end: 1_757_808_000_000 },
+				}),
 		)
 		assert.deepStrictEqual(result.response, {
 			list: [{ period: 1_750_000_000_000, values: { ai_input_tokens: 12 } }],

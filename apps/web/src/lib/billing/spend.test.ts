@@ -90,6 +90,35 @@ describe("buildSpendModel", () => {
 		expect(result.topDriver?.overageCents).toBe(8_700)
 	})
 
+	it("reads usage from the balance meter, not the event aggregate, when the feature has a balance", () => {
+		// Autumn's aggregate window is a rolling cycle-length ending now, so on day 9
+		// of a cycle it folds three weeks of the PREVIOUS cycle in. The balance's
+		// `usage` is what the invoice is built from.
+		const result = buildSpendModel({
+			customer: buildCustomer({
+				balances: {
+					metrics: { granted: 100, usage: 379.75 },
+					browser_sessions: { granted: 5_000, usage: 101_928 },
+				},
+			}),
+			plans: [startupPlan],
+			usage: {
+				metrics: { sum: 433.98 },
+				browser_sessions: { sum: 401_015 },
+				// No balance for this one: the aggregate is all we have.
+				product_events: { sum: 1_576 },
+			} as BillingUsage["total"],
+			nowMs: NOW,
+		})
+		if (result === null) throw new Error("expected a model")
+		const byId = Object.fromEntries(result.features.map((feature) => [feature.featureId, feature]))
+		expect(byId.metrics?.used).toBe(379.75)
+		expect(byId.metrics?.overageUnits).toBeCloseTo(279.75)
+		expect(byId.browser_sessions?.used).toBe(101_928)
+		expect(byId.browser_sessions?.overageUnits).toBe(96_928)
+		expect(byId.product_events?.used).toBe(1_576)
+	})
+
 	it("has no top driver while everything is within its allotment", () => {
 		const result = buildSpendModel({
 			customer: buildCustomer(),

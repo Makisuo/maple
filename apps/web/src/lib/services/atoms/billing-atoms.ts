@@ -26,12 +26,12 @@ export const billingPlansAtom = retainedQuery("billingPublic", "listPlans", {
 	reactivityKeys: [BILLING_PLANS_KEY],
 })
 
-// The billing page always meters the same five features over one billing cycle,
-// so a single static atom (not a family) is enough.
+// The billing page always meters the same five features over the current
+// billing cycle (the API resolves the window), so a single static atom (not a
+// family) is enough.
 export const billingUsageAtom = retainedInternalQuery("billing", "getUsage", {
 	query: {
 		featureId: ["logs", "traces", "metrics", "browser_sessions", "product_events"],
-		range: "1bc",
 	},
 	reactivityKeys: [BILLING_USAGE_KEY],
 })

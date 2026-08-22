@@ -250,9 +250,19 @@ export interface AutumnClientApi {
 			readonly createInStripe?: boolean | undefined
 		},
 	) => AutumnCall
+	/**
+	 * Always an explicit window. Autumn's named `1bc` range is NOT "the current
+	 * cycle since the last reset": it looks backward one cycle-length from now
+	 * (`calculateBillingCycleResult` in its analytics utils), so mid-cycle it
+	 * sums most of the PREVIOUS cycle too and overstated every usage card 3-4x.
+	 */
 	readonly aggregateEvents: (
 		customerId: string,
-		options: { readonly featureId: ReadonlyArray<string> | string; readonly range: string },
+		options: {
+			readonly featureId: ReadonlyArray<string> | string
+			/** Epoch ms, `start < end`. */
+			readonly customRange: { readonly start: number; readonly end: number }
+		},
 	) => AutumnCall
 	readonly attach: (
 		customerId: string,
@@ -385,11 +395,11 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientApi>
 						expand: [...expand, "balances.feature"],
 					}),
 
-				aggregateEvents: (customerId, { featureId, range }) =>
+				aggregateEvents: (customerId, { featureId, customRange }) =>
 					call("aggregateEvents", {
 						customer_id: customerId,
 						feature_id: featureId,
-						range,
+						custom_range: { start: customRange.start, end: customRange.end },
 						// Zod default on the SDK's outbound params — genuinely on the wire.
 						bin_size: "day",
 					}),

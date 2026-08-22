@@ -198,9 +198,10 @@ export class BillingUsage extends Schema.Class<BillingUsage>("BillingUsage")({
 	total: Schema.optionalKey(Schema.Record(Schema.String, BillingUsageFeature)),
 }) {}
 
+// The window is the subscription's current period, resolved server-side: Autumn's
+// own "1bc" range is a rolling cycle-length ending now, not "since the reset".
 const BillingUsageQuery = Schema.Struct({
 	featureId: Schema.Array(Schema.String),
-	range: Schema.String,
 })
 
 /**
