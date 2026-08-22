@@ -45,8 +45,9 @@ describe("forkRequestScoped", () => {
 	// Scope OUTSIDE the middleware stack, so it outlives `pgConnectionMiddleware`.
 	// A handler that forks and then finishes with no further async work must
 	// still get its background DB call onto the socket before the middleware's
-	// `ensuring` releases it — this is the `ApiKeysService.touchLastUsed` shape
-	// on `POST /mcp`, which used to land every call as `SCOPE_CLOSED`.
+	// `ensuring` releases it — this is the shape `ApiKeysService.touchLastUsed` had
+	// on `POST /mcp` (it is awaited inline now), which used to land every call
+	// as `SCOPE_CLOSED`.
 	it.effect("runs the forked DB call before the connection scope closes", () =>
 		Effect.scoped(
 			Effect.gen(function* () {

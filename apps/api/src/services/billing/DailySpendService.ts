@@ -29,6 +29,8 @@ export const toUtcDateKey = (epochMs: number) => new Date(epochMs).toISOString()
 
 const startOfUtcDay = (epochMs: number) => Math.floor(epochMs / DAY_MS) * DAY_MS
 
+const noEventRows: ReadonlyArray<typeof Integrations.dailyProductEventCountRowSchema.Type> = []
+
 export interface DailySpendServiceApi {
 	readonly get: (
 		tenant: TenantContext,
@@ -97,6 +99,9 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 					})
 				}
 
+				// `product_events` is a newer table than the other two: a cluster that
+				// predates it has ingested no product events, so the honest series is
+				// all zeros — not a 502 that takes the whole spend chart down with it.
 				const eventRows = yield* warehouse
 					.compiledQuery(
 						tenant,
@@ -105,7 +110,17 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 						}),
 						{ profile: "list", context: "billingDailyProductEventCount" },
 					)
-					.pipe(Effect.mapError(toQueryError))
+					.pipe(
+						Effect.catchTag("@maple/http/errors/WarehouseConfigError", (error) =>
+							/product_events/i.test(error.message)
+								? Effect.as(
+										Effect.annotateCurrentSpan("query.rollup.fallback", true),
+										noEventRows,
+									)
+								: Effect.fail(error),
+						),
+						Effect.mapError(toQueryError),
+					)
 
 				const sessionsByDay = new Map<string, number>()
 				for (const row of sessionRows) {
