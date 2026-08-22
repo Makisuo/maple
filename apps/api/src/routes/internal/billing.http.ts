@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect, Option, Schema } from "effect"
 import { EdgeCacheService } from "@maple/cache"
 import {
 	AttachResult,
@@ -24,6 +24,14 @@ import {
 	summariseSubscriptions,
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
+import { StripeClient } from "@/services/billing/stripe-http"
+import {
+	ensureStripeCustomerId,
+	isAlreadyRemoved,
+	readBillingProfile,
+	readStripeCustomerId,
+	unlinkedProfile,
+} from "@/services/billing/billing-profile"
 import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { emitPlanStartedFromAttach } from "@/services/billing/plan-events"
 import { ProductEventsService } from "@/services/product-events/ProductEventsService"
@@ -74,6 +82,7 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 		const edgeCache = yield* EdgeCacheService
 		const dailySpend = yield* DailySpendService
 		const autumn = yield* AutumnClient
+		const stripe = yield* StripeClient
 		const productEvents = yield* ProductEventsService
 
 		// Invalidate on any 2xx, matching `ensureOk` — otherwise a 201/204 from
@@ -83,6 +92,19 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 			result.statusCode >= 200 && result.statusCode < 300
 				? edgeCache.invalidate({ bucket: CUSTOMER_CACHE_BUCKET, key: orgId })
 				: Effect.void
+
+		// The billing-details writes share one preamble: admins only, and a Stripe
+		// customer to write to (created through Autumn on first use).
+		const stripeCustomerForWrite = (tenant: CurrentTenant.TenantSchema) =>
+			Effect.gen(function* () {
+				yield* requireAdmin(
+					tenant.roles,
+					() =>
+						new BillingForbiddenError({ message: "Only org admins can manage billing details" }),
+				)
+				yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+				return yield* ensureStripeCustomerId(edgeCache, autumn, tenant.orgId)
+			})
 
 		return (
 			handlers
@@ -268,6 +290,58 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 						const response = yield* ensureOk(result)
 						yield* invalidateCustomer(tenant.orgId, result)
 						return yield* decodeUpstream(CustomerPortalResult, response)
+					}),
+				)
+				.handle("getBillingProfile", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+						const stripeCustomerId = yield* readStripeCustomerId(edgeCache, autumn, tenant.orgId)
+						yield* Effect.annotateCurrentSpan({
+							"billing.stripe_linked": Option.isSome(stripeCustomerId),
+						})
+						if (Option.isNone(stripeCustomerId)) return unlinkedProfile()
+						return yield* readBillingProfile(stripe, stripeCustomerId.value)
+					}),
+				)
+				.handle("updateBillingProfile", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const stripeCustomerId = yield* stripeCustomerForWrite(tenant)
+						const result = yield* stripe.updateCustomer(stripeCustomerId, {
+							name: payload.name,
+							address: payload.address,
+						})
+						// Caller input: Stripe's rejection (a bad country code, say) is about
+						// what THEY sent, so the classified 4xx survives to the client.
+						yield* classifyAutumn(result)
+						return yield* readBillingProfile(stripe, stripeCustomerId)
+					}),
+				)
+				.handle("addBillingTaxId", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const stripeCustomerId = yield* stripeCustomerForWrite(tenant)
+						// The type is a catalog identifier; the value is customer data and
+						// stays off the span.
+						yield* Effect.annotateCurrentSpan({ "billing.tax_id_type": payload.type })
+						const result = yield* stripe.createTaxId(stripeCustomerId, {
+							type: payload.type,
+							value: payload.value,
+						})
+						// `tax_id_invalid` lands here with Stripe's own wording, which is the
+						// only place the format expectation is spelled out.
+						yield* classifyAutumn(result)
+						return yield* readBillingProfile(stripe, stripeCustomerId)
+					}),
+				)
+				.handle("removeBillingTaxId", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const stripeCustomerId = yield* stripeCustomerForWrite(tenant)
+						const result = yield* stripe.deleteTaxId(stripeCustomerId, params.taxIdId)
+						if (!isAlreadyRemoved(result)) yield* classifyAutumn(result)
+						return yield* readBillingProfile(stripe, stripeCustomerId)
 					}),
 				)
 		)
