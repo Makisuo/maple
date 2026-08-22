@@ -19,10 +19,10 @@ const REASON_LABEL: Record<ErrorIncidentDocument["reason"], string> = {
 // Nothing in the product asks you to close an incident, so `resolved` needs
 // saying out loud: the error tick flips it after the silence window, and
 // moving the issue to Done resolves whatever is still open.
-const STATUS_EXPLANATION: Record<ErrorIncidentDocument["status"], string> = {
+const STATUS_EXPLANATION = {
 	open: "Open until the error goes quiet, or you mark the issue Done.",
 	resolved: `Incidents resolve on their own when the error goes quiet — no new occurrences for ${ERROR_INCIDENT_AUTO_RESOLVE_MINUTES} minutes after the last one. Marking the issue Done resolves its open incidents too.`,
-}
+} satisfies Record<ErrorIncidentDocument["status"], string>
 
 export function IssueIncidentsTable({ incidents }: IssueIncidentsTableProps) {
 	if (incidents.length === 0) {
