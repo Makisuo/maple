@@ -2032,12 +2032,17 @@ export const sessionEvents = defineDatasource("session_events", {
 	// cluster, whereas Tinybird rebuilds the table and replays live rows
 	// through this SELECT. Every other column is carried forward untouched;
 	// only the map is re-typed, and the cast preserves values because
-	// `LowCardinality(String)` keys are already strings.
+	// `LowCardinality(String)` keys are already strings. The identity columns
+	// (migration 0021) are new, so existing rows carry them forward as their
+	// default `''` — Tinybird requires every schema column to appear here.
 	forwardQuery: `SELECT
 		OrgId, SessionId, Timestamp, Seq, Type, Url, TraceId, Level, Message,
 		TargetSelector, TargetText, NetMethod, NetUrl, NetStatus, NetDurationMs,
 		ErrorStack,
-		CAST(Attributes, 'Map(String, String)') AS Attributes`,
+		CAST(Attributes, 'Map(String, String)') AS Attributes,
+		defaultValueOfTypeName('String') AS VisitorId,
+		defaultValueOfTypeName('String') AS UserId,
+		defaultValueOfTypeName('String') AS GroupId`,
 	indexes: [
 		{
 			// `Type` is not in the sorting key, so the "top custom events" query
