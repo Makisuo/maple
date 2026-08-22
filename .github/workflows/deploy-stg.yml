@@ -25,7 +25,7 @@ jobs:
         env:
             # Opt-in for the AWS/ECS ingest half (see alchemy.run.ts). Unset or not
             # "1", the deploy is the pure-Cloudflare stack that shipped in 2m05s.
-            # Set the repo variable to "1" to reproduce the hang under investigation.
+            # Set the repo variable to "1" to ship the ingest gateway to ECS as well.
             MAPLE_DEPLOY_AWS_INGEST: ${{ vars.MAPLE_DEPLOY_AWS_INGEST }}
             INFISICAL_ENV_SLUG: staging
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
@@ -53,6 +53,7 @@ jobs:
 
             # AFTER Infisical — see the note in deploy-prd.yml.
             - name: Configure AWS credentials (OIDC)
+              id: aws
               uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -110,5 +111,8 @@ jobs:
             - name: Run database migrations
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
 
+            # AWS_ACCOUNT_ID: see the note in deploy-prd.yml.
             - name: Deploy STG stack with Alchemy
               run: bun run alchemy:deploy:stg
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
