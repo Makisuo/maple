@@ -1,0 +1,125 @@
+name: Deploy PR ingest gateway (AWS via Alchemy)
+
+# On-demand ECS deployment of `apps/ingest` for ONE pull request — the way to
+# test the gateway on Fargate before it reaches staging. Deploys only
+# `scripts/ingest-preview.run.ts` (VPC, security groups, cluster, secrets, ALB,
+# service — no workers, no certificate: the ALB answers plain HTTP on 80),
+# tagged `maple-ingest-pr-<n>` in the prod AWS account, and nothing tears it
+# down automatically: re-run with `action: destroy` when you are done. A
+# VPC + ALB per PR is real money for a stack nothing points at, which is why
+# the main stack's `pr` stage never carries the AWS half.
+#
+# Manual only. Credentials come from the `staging` environment (the AWS deploy
+# role's trust policy and the Infisical identity only accept the production
+# and staging subjects), so the task runs against staging's ingest-key store,
+# Tinybird target and keys.
+on:
+    workflow_dispatch:
+        inputs:
+            pr_number:
+                description: "Pull request number — the stack deploys as stage pr-<n>"
+                type: number
+                required: true
+            action:
+                description: "deploy (create/update) or destroy"
+                type: choice
+                options: [deploy, destroy]
+                default: deploy
+
+concurrency:
+    group: pr-ingest-${{ inputs.pr_number }}
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+    id-token: write # Infisical + AWS OIDC
+
+jobs:
+    ingest:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        environment: staging
+        env:
+            INFISICAL_ENV_SLUG: staging
+            PR_NUMBER: ${{ inputs.pr_number }}
+            COMMIT_SHA: ${{ github.sha }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - name: Setup mise (toolchain)
+              uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            - name: Load deployment secrets from Infisical
+              uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+              with:
+                  method: "oidc"
+                  identity-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+                  project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+                  env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+                  export-type: "env"
+                  secret-path: "/"
+
+            # AFTER Infisical — see the note in deploy-prd.yml.
+            - name: Configure AWS credentials (OIDC)
+              id: aws
+              uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: us-east-1
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            # Same prebuilt-binary path as deploy-prd.yml (and the same cache key,
+            # so this rides its warm cache): the image build is a COPY, not a
+            # from-scratch cargo build inside docker.
+            - name: Cache ingest cargo build
+              if: inputs.action == 'deploy'
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: |
+                      ~/.cargo-ingest
+                      ${{ runner.temp }}/ingest-target
+                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
+                  restore-keys: |
+                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
+                      ingest-cargo-${{ runner.os }}-
+
+            - name: Build ingest binary
+              if: inputs.action == 'deploy'
+              run: |
+                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
+                  docker run --rm \
+                      --user "$(id -u):$(id -g)" \
+                      -e CARGO_HOME=/cargo \
+                      -v "$HOME/.cargo-ingest:/cargo" \
+                      -v "$PWD/apps/ingest:/app" \
+                      -v "$RUNNER_TEMP/ingest-target:/target" \
+                      -w /app \
+                      rust:1.94-bookworm \
+                      cargo build --release --target-dir /target
+                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
+
+            # AWS_ACCOUNT_ID: see the note in deploy-prd.yml — without it alchemy's
+            # env-credential path deadlocks silently.
+            - name: Deploy ingest preview stack with Alchemy
+              if: inputs.action == 'deploy'
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+              run: bunx alchemy deploy scripts/ingest-preview.run.ts --yes --adopt --stage "pr-$PR_NUMBER"
+
+            - name: Destroy ingest preview stack with Alchemy
+              if: inputs.action == 'destroy'
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+              run: bunx alchemy destroy scripts/ingest-preview.run.ts --yes --stage "pr-$PR_NUMBER"
+
+            # alchemy writes its stdout to .alchemy/log/out — surface it either way.
+            - name: Dump alchemy log
+              if: always()
+              run: |
+                  echo "===== .alchemy/log/out ====="
+                  cat .alchemy/log/out 2>/dev/null || echo "(missing)"
+                  echo "===== .alchemy/log/err ====="
+                  cat .alchemy/log/err 2>/dev/null || echo "(missing)"
