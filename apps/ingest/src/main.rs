@@ -1596,7 +1596,7 @@ fn init_tracing(
     service_instance_id: &str,
 ) -> Option<TelemetryProviders> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "maple_ingest=info,tower_http=info".into());
+        .unwrap_or_else(|_| "maple_ingest=warn,tower_http=warn".into());
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
@@ -3676,7 +3676,7 @@ async fn handle_cloudflare_logpush(
             span_handle.record("maple.cloudflare.is_validation", is_validation);
             metrics::request_completed("logs", "ok", "none", duration.as_secs_f64());
             metrics::cloudflare_batch("http_requests", is_validation);
-            info!(
+            debug!(
                 status = status_code,
                 duration_ms = duration_millis(duration),
                 item_count,
