@@ -11,7 +11,8 @@ import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
 import { CheckIcon, EyeIcon, FireIcon, LoaderIcon } from "@/components/icons"
 import { breachStatsFromPreview, formatBreachDuration, type BreachStats } from "@/lib/alerts/breach-stats"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
+import type { TimeRange } from "@/components/time-range-picker/types"
 import {
 	formThresholdToDomain,
 	formatSignalValue,
@@ -31,15 +32,20 @@ interface RuleLiveChartHeroProps {
 		status: "breached" | "healthy" | "skipped"
 		value: number | null
 	} | null
+	/** Resolved absolute window the preview was evaluated over. */
+	range: { startTime: string; endTime: string }
+	/** The picker's own (unresolved) selection — preset or custom bounds. */
+	timeRange: TimeRange
+	onTimeRangeChange: (range: TimeRange) => void
 }
 
 /**
  * Hero block sitting above the form: the SAME chart the rule detail page
- * renders, fed by the evaluator's own preview over the last 24h — threshold
- * line, per-window observations, and shaded "would have fired" spans. The
- * would-have-fired count is folded into the header strip as a compact pill so
- * the entire hero stays inside one short card. Raw-SQL rules get a real
- * preview too (the endpoint replays the SQL per evaluation window).
+ * renders, fed by the evaluator's own preview over a user-picked lookback —
+ * threshold line, per-window observations, and shaded "would have fired"
+ * spans. The would-have-fired count is folded into the header strip as a
+ * compact pill so the entire hero stays inside one short card. Raw-SQL rules
+ * get a real preview too (the endpoint replays the SQL per evaluation window).
  */
 export function RuleLiveChartHero({
 	form,
@@ -49,6 +55,9 @@ export function RuleLiveChartHero({
 	onTestRule,
 	testing,
 	previewResult,
+	range,
+	timeRange,
+	onTimeRangeChange,
 }: RuleLiveChartHeroProps) {
 	// The preview plots observed signal data in domain units (error_rate as a
 	// 0–1 ratio), so the threshold line must be converted from the form's percent
@@ -59,14 +68,14 @@ export function RuleLiveChartHero({
 			? formThresholdToDomain(form.signalType, form.thresholdUpper)
 			: null
 
-	// Same canned 24h window `useAlertRulePreview` uses when no range is passed.
-	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "24h")
+	// The chart's domain is the exact window the preview query ran over, so the
+	// axis, threshold line, and would-fire bands stay in step with the picker.
 	const window = useMemo(
 		() => ({
-			min: new Date(normalizeTimestampInput(startTime)).getTime(),
-			max: new Date(normalizeTimestampInput(endTime)).getTime(),
+			min: new Date(normalizeTimestampInput(range.startTime)).getTime(),
+			max: new Date(normalizeTimestampInput(range.endTime)).getTime(),
 		}),
-		[startTime, endTime],
+		[range.startTime, range.endTime],
 	)
 
 	const stats = useMemo(() => breachStatsFromPreview(preview), [preview])
@@ -81,7 +90,6 @@ export function RuleLiveChartHero({
 					<Badge variant="outline" className="font-mono text-xs">
 						{signalLabels[form.signalType]}
 					</Badge>
-					<span className="text-muted-foreground text-xs">Live · last 24h</span>
 					{groupBySummary && (
 						<span className="hidden max-w-[360px] truncate text-muted-foreground text-xs md:inline">
 							Grouped by {groupBySummary}
@@ -89,7 +97,9 @@ export function RuleLiveChartHero({
 					)}
 					<BreachPill stats={stats} />
 				</div>
-				<div className="flex items-center gap-2">
+				{/* shrink-0: a custom range's long label must squeeze the left-hand
+				    summary, not the controls. */}
+				<div className="flex shrink-0 items-center gap-2">
 					{previewResult && (
 						<PreviewBadge
 							status={previewResult.status}
@@ -97,6 +107,14 @@ export function RuleLiveChartHero({
 							signalType={form.signalType}
 						/>
 					)}
+					{/* Preview-only lookback: it re-runs the preview query, never the
+					    rule being saved. */}
+					<TimeRangePicker
+						startTime={timeRange.startTime}
+						endTime={timeRange.endTime}
+						presetValue={timeRange.presetValue}
+						onChange={onTimeRangeChange}
+					/>
 					<Button variant="outline" size="sm" onClick={onTestRule} disabled={testing}>
 						{testing ? <LoaderIcon size={14} className="animate-spin" /> : <EyeIcon size={14} />}
 						Test rule
@@ -137,7 +155,7 @@ function BreachPill({ stats }: { stats: BreachStats }) {
 		return (
 			<span className="hidden items-center gap-1 text-xs text-success-foreground sm:inline-flex">
 				<CheckIcon size={12} />
-				No breaches in 24h
+				No breaches in this window
 			</span>
 		)
 	}

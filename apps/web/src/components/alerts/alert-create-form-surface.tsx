@@ -17,8 +17,10 @@ import { ScopeSection } from "@/components/alerts/scope-section"
 import { SignalAndThresholdSection } from "@/components/alerts/signal-and-threshold-section"
 import { WidgetPrefillNoticeBanner } from "@/components/alerts/widget-prefill-notice-banner"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import type { TimeRange } from "@/components/time-range-picker/types"
 import { trackProduct } from "@/lib/analytics"
 import { useAlertRulePreview } from "@/hooks/use-alert-rule-preview"
+import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 import {
 	buildRuleCreateParamsV2,
@@ -35,6 +37,9 @@ import type { WidgetAlertPrefillNotice } from "@/lib/alerts/widget-prefill"
 import { Result, useAtomSet } from "@/lib/effect-atom"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { useAlertRulesList } from "@/hooks/use-alerts-list"
+
+/** Preview lookback the form opens on — the rule detail page's default too. */
+const DEFAULT_PREVIEW_PRESET = "24h"
 
 export function AlertCreateFormSurface({
 	initialForm,
@@ -86,7 +91,19 @@ export function AlertCreateFormSurface({
 	// entry with no pre-fills.
 	const [templatesOpen, setTemplatesOpen] = useState(() => showTemplatesInitially)
 
-	const { preview, previewLoading, previewError } = useAlertRulePreview(ruleForm)
+	// Preview-only lookback. Deliberately component-local: it tunes what the
+	// chart shows while authoring and is never part of the rule that gets saved,
+	// so it stays out of the URL and out of `ruleForm`.
+	const [previewTimeRange, setPreviewTimeRange] = useState<TimeRange>({
+		presetValue: DEFAULT_PREVIEW_PRESET,
+	})
+	const previewRange = useEffectiveTimeRange(
+		previewTimeRange.startTime,
+		previewTimeRange.endTime,
+		previewTimeRange.presetValue ?? DEFAULT_PREVIEW_PRESET,
+	)
+
+	const { preview, previewLoading, previewError } = useAlertRulePreview(ruleForm, previewRange)
 
 	const validationIssues = useMemo(
 		() => deriveValidationIssues(ruleForm, destinations),
@@ -190,6 +207,9 @@ export function AlertCreateFormSurface({
 								onTestRule={() => runTest(false)}
 								testing={previewingRule}
 								previewResult={freshPreviewResult}
+								range={previewRange}
+								timeRange={previewTimeRange}
+								onTimeRangeChange={setPreviewTimeRange}
 							/>
 							<div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
 								<SignalAndThresholdSection
