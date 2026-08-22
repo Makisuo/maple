@@ -18,11 +18,12 @@ export type WidgetAlertPrefillResult = {
 type AlertableDashboardWidget = {
 	id: string
 	visualization?: string
-	dataSource?: {
-		endpoint?: string
-		params?: unknown
-		transform?: unknown
-	}
+	/**
+	 * Read only through the version-agnostic accessors below, which narrow
+	 * `unknown` themselves — so this stays opaque rather than restating one
+	 * schema version's field list and quietly excluding the others.
+	 */
+	dataSource?: unknown
 	display?: { title?: string }
 }
 
