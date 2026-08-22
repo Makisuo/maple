@@ -143,7 +143,7 @@ export function ApiKeysSection() {
 					)}
 					<div className="flex-1" />
 					<a
-						href="https://maple.dev/docs"
+						href="https://maple.dev/docs/api"
 						target="_blank"
 						rel="noopener noreferrer"
 						className="text-muted-foreground hover:text-foreground text-xs transition-colors"
