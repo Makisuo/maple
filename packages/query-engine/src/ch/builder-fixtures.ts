@@ -503,6 +503,16 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				fingerprintHash: FINGERPRINT,
 			}),
 	},
+	{
+		module: "errors",
+		name: "errorIssueEnvironmentsQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(CH.errorIssueEnvironmentsQuery(), {
+				...window,
+				fingerprintHash: FINGERPRINT,
+			}),
+	},
 
 	// Batch ④ — the modules the query-engine refactor touches. These exist so a
 	// refactor that claims "no SQL changed" is actually checkable: without a

@@ -171,6 +171,7 @@ struct FixtureAPI: MapleAPI {
 			return ErrorIssueTimeseriesPoint(bucket: stamp(-hoursAgo), count: count)
 		}
 		return ErrorIssueDetail(
+			environments: [ErrorIssueEnvironment(count: issue.occurrenceCount, name: "production")],
 			errorLabel: issue.errorLabel,
 			exceptionMessage: issue.exceptionMessage,
 			exceptionType: issue.exceptionType,

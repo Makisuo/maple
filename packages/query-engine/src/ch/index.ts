@@ -255,6 +255,8 @@ export {
 	errorIssueTimeseriesQuery,
 	errorIssueSampleTracesQuery,
 	ErrorIssueSampleTracesOutputSchema,
+	errorIssueEnvironmentsQuery,
+	ErrorIssueEnvironmentsOutputSchema,
 	type ErrorsByTypeOpts,
 	type ErrorsByTypeOutput,
 	type ErrorsTimeseriesOpts,

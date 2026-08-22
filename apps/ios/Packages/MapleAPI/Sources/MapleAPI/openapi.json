@@ -1457,7 +1457,7 @@
       },
       "ErrorIssueDetail": {
         "additionalProperties": false,
-        "description": "The issue resource with its requested timeseries window, sample traces, and incidents.",
+        "description": "The issue resource with its requested timeseries window, sample traces, incidents, and the environments it was seen in.",
         "properties": {
           "archived_at": {
             "type": "string"
@@ -1467,6 +1467,12 @@
           },
           "claimed_at": {
             "type": "string"
+          },
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorIssueEnvironment"
+            },
+            "type": "array"
           },
           "error_label": {
             "type": "string"
@@ -1591,9 +1597,27 @@
           "has_open_incident",
           "timeseries",
           "sample_traces",
-          "incidents"
+          "incidents",
+          "environments"
         ],
         "title": "Error issue detail",
+        "type": "object"
+      },
+      "ErrorIssueEnvironment": {
+        "additionalProperties": false,
+        "description": "A deployment environment the issue was observed in over the requested window, with its occurrence count.",
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ],
         "type": "object"
       },
       "ErrorIssueList": {
@@ -5200,7 +5224,7 @@
                 }
               }
             },
-            "description": "The issue resource with its requested timeseries window, sample traces, and incidents."
+            "description": "The issue resource with its requested timeseries window, sample traces, incidents, and the environments it was seen in."
           },
           "400": {
             "content": {

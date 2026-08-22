@@ -32,6 +32,7 @@ import {
 } from "./queries/attribute-keys"
 import {
 	errorDetailTracesQuery,
+	errorIssueEnvironmentsQuery,
 	errorIssueSampleTracesQuery,
 	errorIssueTimeseriesQuery,
 	errorIssuesQuery,
@@ -522,6 +523,16 @@ export function compilePipeQuery(
 			Match.when("error_issue_sample_traces", () =>
 				eraseType(
 					compile(errorIssueSampleTracesQuery({ limit: int("limit", 25) }), {
+						orgId,
+						startTime,
+						endTime,
+						fingerprintHash: String(params.fingerprint_hash),
+					}),
+				),
+			),
+			Match.when("error_issue_environments", () =>
+				eraseType(
+					compile(errorIssueEnvironmentsQuery({ limit: int("limit", 20) }), {
 						orgId,
 						startTime,
 						endTime,

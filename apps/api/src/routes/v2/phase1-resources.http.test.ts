@@ -21,6 +21,7 @@ import {
 	ErrorIssueNotFoundError,
 	ErrorPersistenceError,
 	ErrorIssueSampleTrace,
+	ErrorIssueEnvironment,
 	ErrorIssuesListResponse,
 	ErrorIssueTimeseriesPoint,
 	InvestigationDocument,
@@ -321,6 +322,7 @@ const errorIssueDetailFixture = new ErrorIssueDetailResponse({
 		}),
 	],
 	incidents: [errorIncidentFixture],
+	environments: [new ErrorIssueEnvironment({ name: "production", count: 12 })],
 })
 
 const die = () => Effect.die(new Error("not exercised in this test harness"))

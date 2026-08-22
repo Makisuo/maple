@@ -33,10 +33,12 @@ export function StateSelect({
 	current,
 	disabled,
 	onChange,
+	className = "w-full",
 }: {
 	current: WorkflowState
 	disabled?: boolean
 	onChange: (next: WorkflowState) => void
+	className?: string
 }) {
 	const allowed = new Set<WorkflowState>(allowedTransitionsForAll([current]))
 	const change = (value: unknown) => {
@@ -45,7 +47,7 @@ export function StateSelect({
 	}
 	return (
 		<Select value={current} onValueChange={change} disabled={disabled}>
-			<SelectTrigger className="w-full">
+			<SelectTrigger className={className}>
 				{/* Base UI prints the raw value ("in_progress") unless given a
 				    renderer. Third place this bit — see the errors hub and
 				    `severity-select.tsx`. */}
