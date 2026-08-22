@@ -231,6 +231,7 @@ export default Alchemy.Stack(
 			// `maple.dev` zone, surfaced here so they come out of the deploy rather
 			// than the AWS console.
 			ingestServiceUrl: ingest?.serviceUrl,
+			ingestCollectorEndpoint: ingest?.collectorEndpoint,
 			ingestCertificateValidation: ingest?.certificateValidation,
 			electricSyncWorker: electricSync.workerName,
 			webWorker: web.workerName,

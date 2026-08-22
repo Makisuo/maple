@@ -3,7 +3,8 @@ name: Deploy PR ingest gateway (AWS via Alchemy)
 # On-demand ECS deployment of `apps/ingest` for ONE pull request — the way to
 # test the gateway on Fargate before it reaches staging. Deploys only
 # `scripts/ingest-preview.run.ts` (VPC, security groups, cluster, secrets, ALB,
-# service — no workers, no certificate: the ALB answers plain HTTP on 80),
+# gateway service, the in-VPC OTel collector service + its Cloud Map namespace
+# — no workers, no certificate: the ALB answers plain HTTP on 80),
 # tagged `maple-ingest-pr-<n>` in the prod AWS account. It is torn down when
 # the PR closes (the `pull_request: closed` trigger below — the stack outlives
 # nothing but the PR), or earlier by re-running with `action: destroy`. A
