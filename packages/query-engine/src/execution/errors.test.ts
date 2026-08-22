@@ -171,6 +171,12 @@ describe("mapWarehouseError", () => {
 				WarehouseConfigError,
 			)
 		})
+
+		it("classifies the Tinybird gateway's missing-datasource message", () => {
+			expect(mapWarehouseError("p", "Resource 'product_events' not found")).toBeInstanceOf(
+				WarehouseConfigError,
+			)
+		})
 	})
 
 	describe("client", () => {

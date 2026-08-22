@@ -139,8 +139,11 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 	{
 		status: (s) => s === 404,
 		types: new Set(["UNKNOWN_DATABASE", "UNKNOWN_TABLE", "TABLE_IS_DROPPED", "UNKNOWN_SETTING"]),
+		// "Resource '<name>' not found" is the Tinybird gateway's phrasing of
+		// UNKNOWN_TABLE; without it a missing datasource fell through to the
+		// generic query error and the per-org missing-table fallbacks never fired.
 		pattern:
-			/Invalid URL|unknown database|unknown table|table .* does not exist|database .* does not exist/i,
+			/Invalid URL|unknown database|unknown table|table .* does not exist|database .* does not exist|Resource '[^']*' not found/i,
 		make: (base) => new WarehouseConfigError(base),
 	},
 	{

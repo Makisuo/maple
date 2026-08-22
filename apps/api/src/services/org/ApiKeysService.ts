@@ -18,7 +18,6 @@ import { and, desc, eq, getTableColumns, isNull, lt, ne, or, sql } from "drizzle
 import { Clock, Effect, Layer, Option, Redacted, Schema, Context } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
-import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 
@@ -658,9 +657,16 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 					"tenant.userId": resolved.value.userId,
 					"maple.api_key.id": resolved.value.keyId,
 				})
-				// Scoped, not detached: this write shares the request's single Postgres
-				// connection, and a detached fiber can outlive its release.
-				yield* forkRequestScoped(touchLastUsed(resolved.value.keyId).pipe(Effect.ignore))
+				// Awaited, not forked. A fork — even one started immediately and bound
+				// to the request scope — still lost the race on requests whose handler
+				// had no further async work (`GET /mcp`): the response went out, the
+				// Postgres scope closed, and the UPDATE died with CONNECTION_ENDED
+				// before it reached the socket, recorded as an error span on every
+				// such request. The memo and the SQL predicate already make this at
+				// most one cheap UPDATE per key per heartbeat on an already-dialed
+				// connection, so there is nothing worth racing for. Failure is
+				// still best-effort: a missed heartbeat must never fail auth.
+				yield* touchLastUsed(resolved.value.keyId).pipe(Effect.ignore)
 			}
 			return resolved
 		})

@@ -29,6 +29,7 @@ import {
 	type DirtyStorePolicy,
 	hostedDashboardUrl,
 	hostedUiOrigin,
+	isProcessAlive,
 	resolveAdvertiseHost,
 	resolveBindHost,
 	serverProbeUrl,
@@ -153,17 +154,6 @@ const readPid = (fs: FileSystem, pidPath: string): Effect.Effect<Option.Option<n
 		}),
 		Effect.orElseSucceed(() => Option.none<number>()),
 	)
-
-/** Liveness probe via signal 0 — a process primitive with no FileSystem
- *  equivalent. Never throws (errors mean "not alive"). */
-const isProcessAlive = (pid: number): boolean => {
-	try {
-		process.kill(pid, 0)
-		return true
-	} catch {
-		return false
-	}
-}
 
 const port = Flag.integer("port").pipe(
 	Flag.withDescription("Port for OTLP/HTTP ingest, the query API, and the bundled UI"),
