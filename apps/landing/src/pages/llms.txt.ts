@@ -148,7 +148,7 @@ export const GET: APIRoute = ({ site }) => {
 		"## Community",
 		"",
 		"- [Discord](https://discord.gg/BnXjKuwJqP)",
-		"- [X](https://x.com/maple_dev)",
+		"- [X](https://x.com/Mapledotdev)",
 	].join("\n")
 
 	return plainText(body)
