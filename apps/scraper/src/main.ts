@@ -21,7 +21,7 @@ import { ScrapeScheduler } from "./ScrapeScheduler"
 const TelemetryLayer = Maple.layer({
 	serviceName: "scraper",
 	serviceNamespace: "backend",
-	repositoryUrl: "https://github.com/Makisuo/maple",
+	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	shutdownTimeout: "3 seconds",
 })
 

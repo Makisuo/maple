@@ -8,7 +8,7 @@
  */
 
 export const API_ORIGIN = "https://api.maple.dev"
-export const GITHUB_URL = "https://github.com/Makisuo/maple"
+export const GITHUB_URL = "https://github.com/MapleTechLabs/maple"
 export const DISCORD_URL = "https://discord.gg/BnXjKuwJqP"
 export const X_URL = "https://x.com/maple_dev"
 

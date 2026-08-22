@@ -47,7 +47,7 @@ export const mapleMcpServerManifest = ({
 		version: MAPLE_MCP_SERVER_VERSION,
 		websiteUrl: `${site}/features/ai-mcp-integration`,
 		repository: {
-			url: "https://github.com/Makisuo/maple",
+			url: "https://github.com/MapleTechLabs/maple",
 			source: "github",
 			subfolder: "apps/api",
 		},

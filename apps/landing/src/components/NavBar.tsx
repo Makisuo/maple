@@ -365,7 +365,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 
 						<div className="pt-6 flex flex-col gap-4">
 							<a
-								href="https://github.com/Makisuo/maple"
+								href="https://github.com/MapleTechLabs/maple"
 								target="_blank"
 								rel="noopener noreferrer"
 								className="flex items-center justify-between text-xs text-fg-muted hover:text-fg transition-colors"

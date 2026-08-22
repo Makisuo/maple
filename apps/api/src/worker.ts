@@ -59,7 +59,7 @@ const WorkerPlatformLive = Layer.mergeAll(
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
 	serviceNamespace: "backend",
-	repositoryUrl: "https://github.com/Makisuo/maple",
+	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	dropSpanNames: ["McpServer/Notifications."],
 	// Expected 4xx outcomes (validation, not-found, unauthorized, …) record as
 	// Ok spans instead of errors — see @maple/domain/anticipated-errors.

@@ -25,7 +25,7 @@ All signals are exported over OTLP HTTP to Maple's ingest gateway. The collector
 The fastest path is the install script, which creates the namespace + ingest-key Secret and runs Helm for you. It prints your active `kubectl` context and asks for confirmation first (set `MAPLE_INSTALL_YES=1` to skip):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Makisuo/maple/main/deploy/k8s-infra/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/MapleTechLabs/maple/main/deploy/k8s-infra/install.sh | \
   MAPLE_INGEST_KEY=YOUR_MAPLE_INGEST_KEY \
   MAPLE_CLUSTER_NAME=production \
   bash

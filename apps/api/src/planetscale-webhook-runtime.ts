@@ -17,7 +17,7 @@ import { PlanetScaleWebhookJob } from "./services/integrations/planetscale/Plane
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
 	serviceNamespace: "backend",
-	repositoryUrl: "https://github.com/Makisuo/maple",
+	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 

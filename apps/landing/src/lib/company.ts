@@ -56,7 +56,7 @@ export const aboutPage: CompanyPage = {
 		{
 			heading: "Open source",
 			paragraphs: [
-				`The source code is public at [github.com/Makisuo/maple](${GITHUB_URL}) under the Functional Source License (FSL-1.1); each release converts to Apache 2.0 two years after publication. You can read every line, self-host the whole platform, or use the hosted service at maple.dev. Maple Local packages the same platform — ingest, query engine, and UI — as a single binary with an embedded ClickHouse for laptops and CI.`,
+				`The source code is public at [github.com/MapleTechLabs/maple](${GITHUB_URL}) under the Functional Source License (FSL-1.1); each release converts to Apache 2.0 two years after publication. You can read every line, self-host the whole platform, or use the hosted service at maple.dev. Maple Local packages the same platform — ingest, query engine, and UI — as a single binary with an embedded ClickHouse for laptops and CI.`,
 			],
 		},
 		{
