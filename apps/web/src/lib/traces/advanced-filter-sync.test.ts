@@ -493,3 +493,100 @@ describe("applyWhereClause", () => {
 		expect(result.excludedServices).toBeUndefined()
 	})
 })
+
+describe("applyWhereClause removals", () => {
+	it("clears named-field params the previous clause set but the new one drops", () => {
+		const result = applyWhereClause(
+			{
+				whereClause: 'service.name = "checkout" AND span.name = "GET /orders"',
+				services: ["checkout"],
+				spanNames: ["GET /orders"],
+				startTime: "2026-02-01 00:00:00",
+			},
+			'span.name = "GET /orders"',
+		)
+
+		expect(result.services).toBeUndefined()
+		expect(result.spanNames).toEqual(["GET /orders"])
+		expect(result.startTime).toBe("2026-02-01 00:00:00")
+	})
+
+	it("clears boolean and duration params the previous clause set", () => {
+		const result = applyWhereClause(
+			{
+				whereClause:
+					'service.name = "checkout" AND has_error = true AND min_duration_ms = 100 AND max_duration_ms = 900 AND root_only = false',
+				services: ["checkout"],
+				hasError: true,
+				minDurationMs: 100,
+				maxDurationMs: 900,
+				rootOnly: false,
+			},
+			'service.name = "checkout"',
+		)
+
+		expect(result.hasError).toBeUndefined()
+		expect(result.minDurationMs).toBeUndefined()
+		expect(result.maxDurationMs).toBeUndefined()
+		expect(result.rootOnly).toBeUndefined()
+		expect(result.services).toEqual(["checkout"])
+	})
+
+	it("clears attribute filters the previous clause set", () => {
+		const result = applyWhereClause(
+			{
+				whereClause: 'attr.http.route = "/api" AND resource.service.version = "1.2.3"',
+				attributeFilters: [{ key: "http.route", value: "/api" }],
+				resourceAttributeFilters: [{ key: "service.version", value: "1.2.3" }],
+			},
+			'attr.http.route = "/api"',
+		)
+
+		expect(result.attributeFilters).toEqual([{ key: "http.route", value: "/api", matchMode: undefined }])
+		expect(result.resourceAttributeFilters).toBeUndefined()
+	})
+
+	it("clears excluded* params the previous clause set", () => {
+		const result = applyWhereClause(
+			{
+				whereClause: 'service.name != "checkout" AND span.name != "GET /health"',
+				excludedServices: ["checkout"],
+				excludedSpanNames: ["GET /health"],
+			},
+			'span.name != "GET /health"',
+		)
+
+		expect(result.excludedServices).toBeUndefined()
+		expect(result.excludedSpanNames).toEqual(["GET /health"])
+	})
+
+	it("clears a match mode the previous clause set", () => {
+		const result = applyWhereClause(
+			{
+				whereClause: 'service.name contains "check"',
+				services: ["check"],
+				serviceMatchMode: "contains",
+			},
+			'service.name = "checkout"',
+		)
+
+		expect(result.services).toEqual(["checkout"])
+		expect(result.serviceMatchMode).toBeUndefined()
+	})
+
+	it("keeps params the previous clause never set", () => {
+		const result = applyWhereClause(
+			{
+				whereClause: 'span.name = "GET /orders"',
+				spanNames: ["GET /orders"],
+				services: ["billing"],
+				hasError: true,
+			},
+			'span.name = "POST /pay"',
+		)
+
+		expect(result.spanNames).toEqual(["POST /pay"])
+		expect(result.services).toEqual(["billing"])
+		expect(result.hasError).toBe(true)
+	})
+})
