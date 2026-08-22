@@ -105,7 +105,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 		const albSecurityGroup = yield* AWS.EC2.SecurityGroup("ingest-alb-sg", {
 			vpcId: network.vpcId,
 			groupName: name("ingest-alb"),
-			description: "Maple OTLP ingest — public HTTPS to the load balancer",
+			description: "Maple OTLP ingest - public HTTPS to the load balancer",
 			ingress: [
 				{
 					ipProtocol: "tcp",
