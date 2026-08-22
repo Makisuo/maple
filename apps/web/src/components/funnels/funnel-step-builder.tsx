@@ -13,20 +13,25 @@ import { cn } from "@maple/ui/lib/utils"
 import { formatNumber } from "@maple/ui/lib/format"
 
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XmarkIcon } from "@/components/icons"
+import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
+import { parseFunnelStepFilter, type FunnelStepDraft } from "@/lib/query-builder/funnel-filters"
 import {
 	FUNNEL_MAX_STEPS,
 	FUNNEL_SESSION_DIMENSIONS,
 	FUNNEL_SESSION_DIMENSION_LABEL,
 	emptyEventStep,
 	type FunnelSessionDimension,
-	type FunnelStep,
 } from "./definition"
 
 // The step builder: an ordered list of up to ten steps, each an event name, a
 // page path, or — first step only — a session's acquisition dimension. Shared
-// by the /analytics Funnels view and the dashboard funnel widget's config rail,
+// by the /analytics Funnels view and the dashboard funnel widget's query panel,
 // so it owns no fetching: the event-name and page-path suggestions come in as
 // props and every edit goes straight back out through `onChange`.
+//
+// It holds `FunnelStepDraft`s — wire steps plus the raw filter text an event
+// step is typed with. A plain `FunnelStep` is a draft too, so the /analytics
+// view passes its URL steps through unchanged.
 
 export interface FunnelStepSuggestion {
 	readonly name: string
@@ -35,18 +40,25 @@ export interface FunnelStepSuggestion {
 }
 
 interface FunnelStepBuilderProps {
-	steps: ReadonlyArray<FunnelStep>
-	onChange: (steps: ReadonlyArray<FunnelStep>) => void
+	steps: ReadonlyArray<FunnelStepDraft>
+	onChange: (steps: ReadonlyArray<FunnelStepDraft>) => void
 	/** `track()` event names for the event-step autocomplete. */
 	eventNames?: ReadonlyArray<FunnelStepSuggestion>
 	/** Page paths for the page-step autocomplete. */
 	pagePaths?: ReadonlyArray<FunnelStepSuggestion>
+	/**
+	 * Offer a per-step attribute filter under each event step
+	 * (`plan = "pro" AND source = "cli"` → `attributeEquals`).
+	 */
+	eventStepFilter?: boolean
+	/** Offer an optional host beside each page step's path. */
+	pageStepHost?: boolean
 	/** Tighter spacing for a settings rail. */
 	compact?: boolean
 	className?: string
 }
 
-type StepKind = FunnelStep["kind"]
+type StepKind = FunnelStepDraft["kind"]
 
 const KIND_LABEL = {
 	event: "Event",
@@ -55,7 +67,7 @@ const KIND_LABEL = {
 } satisfies Record<StepKind, string>
 
 /** Change a step's kind, carrying nothing over: the value fields do not mean the same thing. */
-function withKind(step: FunnelStep, kind: StepKind): FunnelStep {
+function withKind(step: FunnelStepDraft, kind: StepKind): FunnelStepDraft {
 	if (step.kind === kind) return step
 	switch (kind) {
 		case "event":
@@ -80,10 +92,12 @@ export function FunnelStepBuilder({
 	onChange,
 	eventNames = [],
 	pagePaths = [],
+	eventStepFilter = false,
+	pageStepHost = false,
 	compact = false,
 	className,
 }: FunnelStepBuilderProps) {
-	const update = (index: number, step: FunnelStep) =>
+	const update = (index: number, step: FunnelStepDraft) =>
 		onChange(steps.map((current, i) => (i === index ? step : current)))
 	const remove = (index: number) => onChange(steps.filter((_, i) => i !== index))
 	const add = () => onChange([...steps, emptyEventStep()])
@@ -107,6 +121,8 @@ export function FunnelStepBuilder({
 					compact={compact}
 					eventNames={eventNames}
 					pagePaths={pagePaths}
+					eventStepFilter={eventStepFilter}
+					pageStepHost={pageStepHost}
 					onChange={(next) => update(index, next)}
 					onRemove={() => remove(index)}
 					onMoveUp={() => reorder(index, index - 1)}
@@ -138,18 +154,22 @@ function StepRow({
 	compact,
 	eventNames,
 	pagePaths,
+	eventStepFilter,
+	pageStepHost,
 	onChange,
 	onRemove,
 	onMoveUp,
 	onMoveDown,
 }: {
 	index: number
-	step: FunnelStep
+	step: FunnelStepDraft
 	total: number
 	compact: boolean
 	eventNames: ReadonlyArray<FunnelStepSuggestion>
 	pagePaths: ReadonlyArray<FunnelStepSuggestion>
-	onChange: (step: FunnelStep) => void
+	eventStepFilter: boolean
+	pageStepHost: boolean
+	onChange: (step: FunnelStepDraft) => void
 	onRemove: () => void
 	onMoveUp: () => void
 	onMoveDown: () => void
@@ -157,13 +177,20 @@ function StepRow({
 	const kinds: ReadonlyArray<StepKind> = index === 0 ? ["event", "page", "session"] : ["event", "page"]
 	const kindItems = Object.fromEntries(kinds.map((kind) => [kind, KIND_LABEL[kind]]))
 
+	// The filter line only exists for event steps and only when offered; its
+	// error is shown under the line as it is typed.
+	const filterClause = step.kind === "event" ? (step.filterClause ?? "") : ""
+	const filterParse = eventStepFilter && step.kind === "event" ? parseFunnelStepFilter(filterClause) : null
+	const filterError = filterParse !== null && !filterParse.ok ? filterParse.error : null
+
 	return (
 		<div
 			className={cn(
-				"flex items-center gap-1.5 rounded-md border bg-card",
+				"flex flex-col gap-1 rounded-md border bg-card",
 				compact ? "px-1.5 py-1" : "px-2 py-1.5",
 			)}
 		>
+			<div className="flex items-center gap-1.5">
 			<span
 				className={cn(
 					"grid shrink-0 place-items-center rounded-sm bg-muted font-mono text-[10px] tabular-nums text-muted-foreground",
@@ -198,28 +225,38 @@ function StepRow({
 				{step.kind === "event" ? (
 					<SuggestingInput
 						value={step.eventName}
-						onChange={(eventName) => onChange({ kind: "event", eventName })}
+						onChange={(eventName) => onChange({ ...step, eventName })}
 						suggestions={eventNames}
 						placeholder="Event name, e.g. signup_completed"
 						ariaLabel={`Step ${index + 1} event name`}
 						empty="No events recorded in this window — type a name."
 					/>
 				) : step.kind === "page" ? (
-					<SuggestingInput
-						value={step.pagePath}
-						onChange={(pagePath) =>
-							onChange(
-								step.host
-									? { kind: "page", pagePath, host: step.host }
-									: { kind: "page", pagePath },
-							)
-						}
-						suggestions={pagePaths}
-						placeholder="Page path, e.g. /pricing"
-						ariaLabel={`Step ${index + 1} page path`}
-						empty="No page paths in this window — type a path."
-						mono
-					/>
+					<>
+						<SuggestingInput
+							value={step.pagePath}
+							onChange={(pagePath) => onChange({ ...step, pagePath })}
+							suggestions={pagePaths}
+							placeholder="Page path, e.g. /pricing"
+							ariaLabel={`Step ${index + 1} page path`}
+							empty="No page paths in this window — type a path."
+							mono
+						/>
+						{pageStepHost ? (
+							<Input
+								size="sm"
+								value={step.host ?? ""}
+								onChange={(event) => {
+									const host = event.target.value
+									const { host: _host, ...rest } = step
+									onChange(host === "" ? rest : { ...rest, host })
+								}}
+								placeholder="host (optional)"
+								aria-label={`Step ${index + 1} page host`}
+								className="w-40 min-w-0 shrink-0 font-mono text-xs"
+							/>
+						) : null}
+					</>
 				) : (
 					<>
 						<Select
@@ -292,6 +329,35 @@ function StepRow({
 					<XmarkIcon size={12} />
 				</Button>
 			</div>
+			</div>
+			{eventStepFilter && step.kind === "event" ? (
+				<div className={cn("flex flex-col gap-0.5", compact ? "pl-6" : "pl-7")}>
+					<div className="flex items-center gap-1.5">
+						<span className="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+							where
+						</span>
+						{/* Attribute keys are the customer's own vocabulary, so the scope
+						    offers no keys and only `=`; the data source is the editor's
+						    required prop and is not consulted under this scope. */}
+						<WhereClauseEditor
+							className="min-w-0 flex-1"
+							rows={1}
+							value={filterClause}
+							dataSource="traces"
+							autocompleteScope="product_event_attributes"
+							values={{}}
+							onChange={(next) => {
+								const { filterClause: _clause, ...rest } = step
+								onChange(next === "" ? rest : { ...rest, filterClause: next })
+							}}
+							placeholder='plan = "pro" AND source = "cli"'
+							textareaClassName="min-h-[28px] resize-none text-xs"
+							ariaLabel={`Step ${index + 1} attribute filter`}
+						/>
+					</div>
+					{filterError ? <p className="text-[11px] text-destructive">{filterError}</p> : null}
+				</div>
+			) : null}
 		</div>
 	)
 }

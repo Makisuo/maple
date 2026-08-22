@@ -262,3 +262,18 @@ row for 30d — the rename is a rebuild, not a `RENAME TABLE`.
 Referral → identified in app → `onboarding_step_completed` as a `raw_sql_chart` widget over
 `session_replays` + `web_events` (the join used for the numbers above). ~15 min, no schema change,
 missing only the plan-start step.
+
+## Status: the dashboard funnel widget (2026-08)
+
+The funnel widget's definition is edited as its **query panel** (`FunnelQueryPanel`,
+`apps/web/src/components/dashboard-builder/config/funnel-query-panel.tsx`): the panel's source
+select offers **Product events** beside Traces / Logs / Metrics (a query-builder source is the
+original group-by breakdown drawn as a funnel). The product-events body is the ordered steps —
+event steps take a per-step attribute filter (`plan = "pro" AND source = "cli"` →
+`attributeEquals`), page steps an optional host — a population where-clause over the session
+dimensions (`country = "DE" AND utm.source = "twitter"` → `display.funnel.filters`), and Count by /
+Window / Breakdown as add-ons. The definition persists on `display.funnel` and is mirrored flat into
+the `product_events_funnel` route params (`ProductEventsFunnelWidgetParams` in `@maple/query-model`),
+which the browser server function and the share API's route plan both decode. With a breakdown the
+route answers `{ name, value, group }` rows (top 6 groups by step-1 count) and the funnel chart draws
+one bar per group per step with a legend.

@@ -94,3 +94,38 @@ describe("QueryPanel metric combobox", () => {
 		expect(screen.getByText("No metrics found.")).toBeDefined()
 	})
 })
+
+describe("QueryPanel source select", () => {
+	it("offers an extra source only when asked", () => {
+		render(
+			<QueryPanel
+				query={prefilled}
+				index={0}
+				canRemove={false}
+				metricSelectionOptions={[]}
+				autocompleteValues={{
+					traces: emptyAutocomplete,
+					logs: emptyAutocomplete,
+					metrics: emptyAutocomplete,
+				}}
+				onUpdate={vi.fn()}
+				onAggregationChange={vi.fn()}
+				onMetricSelectionChange={vi.fn()}
+				onClone={vi.fn()}
+				onRemove={vi.fn()}
+				onDataSourceChange={vi.fn()}
+				extraSourceOptions={["product_events"]}
+				onExtraSourceChange={vi.fn()}
+			/>,
+		)
+		fireEvent.click(screen.getByRole("combobox", { name: "Query source" }))
+		expect(screen.getByRole("option", { name: "Product events" })).toBeTruthy()
+		expect(screen.getByRole("option", { name: "Traces" })).toBeTruthy()
+	})
+
+	it("does not offer Product events to an ordinary query", () => {
+		renderPanel([])
+		fireEvent.click(screen.getByRole("combobox", { name: "Query source" }))
+		expect(screen.queryByRole("option", { name: "Product events" })).toBeNull()
+	})
+})
