@@ -95,6 +95,27 @@ const emptyPreview = {
 
 const checks = [check(0, "healthy", 0.02), check(30, "breached", 0.09), check(60, "healthy", 0.03)]
 
+/** The server capped the replay, so the series covers only the last 6h of 24h. */
+// SAFETY: this focused fixture supplies every preview field rendered by AlertRuleChart.
+const truncatedPreview = {
+	...preview,
+	series: [
+		{
+			groupKey: "all",
+			points: [
+				{
+					bucket: iso(WINDOW_END - 6 * 3_600_000),
+					value: 0.02,
+					sampleCount: 100,
+					status: "healthy",
+					provisional: false,
+				},
+			],
+		},
+	],
+	truncatedToStart: iso(WINDOW_END - 6 * 3_600_000),
+} as unknown as AlertRulePreviewResponse
+
 const baseProps = {
 	threshold: 0.05,
 	comparator: "gt" as const,
@@ -124,6 +145,32 @@ describe("alert rule chart source toggle", () => {
 		expect(screen.queryByText(/has no points in this window/i)).toBeNull()
 		// The unselected source is offered as a comparison ghost instead.
 		expect(screen.getByText("Query")).toBeTruthy()
+	})
+})
+
+// The framing rule itself is `resolveChartDomain`, unit-tested in
+// lib/alerts/chart-series.test.ts. What is component-level here is the caption:
+// it must describe what the reader is actually looking at in each case.
+describe("alert rule chart truncated preview caption", () => {
+	it("says the axis moved when the preview owns it", () => {
+		render(
+			<AlertRuleChart
+				{...baseProps}
+				checks={[]}
+				preview={truncatedPreview}
+				source="preview"
+				onSelectBucket={vi.fn()}
+			/>,
+		)
+		expect(screen.getByText(/Axis starts at/)).toBeTruthy()
+	})
+
+	it("says only the series is short when the rail shares the axis", () => {
+		render(<AlertRuleChart {...baseProps} preview={truncatedPreview} source="preview" />)
+		expect(screen.getByText(/Query series starts at/)).toBeTruthy()
+		// 60 cells still span the full 24h window: the +30min check lands in cell 1.
+		const cells = screen.getAllByRole("button")
+		expect(cells.length).toBe(60)
 	})
 })
 
