@@ -112,17 +112,23 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 		// dialable. Opening INGEST_PORT to 0.0.0.0/0 would let anyone who finds it
 		// post OTLP straight to a task over plaintext HTTP, skipping the ALB and,
 		// since the domain is proxied, Cloudflare's TLS and rate limiting with it.
+		// The public listener port follows the certificate: with an ingest domain
+		// the ALB terminates TLS on 443; a stage without one (PR previews) gets
+		// alchemy's default HTTP listener on 80, and the group has to admit THAT
+		// port or the load balancer is unreachable (the first preview deploy came
+		// up healthy and timed out on every request for exactly this reason).
+		const listenerPort = domains.ingest ? 443 : 80
 		const albSecurityGroup = yield* AWS.EC2.SecurityGroup("ingest-alb-sg", {
 			vpcId: network.vpcId,
 			groupName: name("ingest-alb"),
-			description: "Maple OTLP ingest - public HTTPS to the load balancer",
+			description: `Maple OTLP ingest - public ${listenerPort === 443 ? "HTTPS" : "HTTP"} to the load balancer`,
 			ingress: [
 				{
 					ipProtocol: "tcp",
-					fromPort: 443,
-					toPort: 443,
+					fromPort: listenerPort,
+					toPort: listenerPort,
 					cidrIpv4: "0.0.0.0/0",
-					description: "OTLP over HTTPS",
+					description: listenerPort === 443 ? "OTLP over HTTPS" : "OTLP over HTTP (no ingest domain, no certificate)",
 				},
 			],
 		})
