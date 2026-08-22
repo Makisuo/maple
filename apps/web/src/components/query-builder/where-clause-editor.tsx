@@ -28,9 +28,9 @@ interface WhereClauseEditorProps {
 	textareaClassName?: string
 	ariaLabel?: string
 	/**
-	 * Render syntax highlighting over the textarea. The overlay mirrors the
-	 * Textarea's default padding, so combine only with font/size classes in
-	 * `textareaClassName` — custom padding there would misalign the overlay.
+	 * Render syntax highlighting over the textarea (on by default). The overlay
+	 * mirrors the Textarea's wrapper (including `textareaClassName`) and its
+	 * inner padding, so wrapper-level font/size/padding classes stay aligned.
 	 */
 	highlight?: boolean
 }
@@ -49,7 +49,7 @@ export function WhereClauseEditor({
 	className,
 	textareaClassName,
 	ariaLabel,
-	highlight = false,
+	highlight = true,
 }: WhereClauseEditorProps) {
 	const textAreaRef = React.useRef<HTMLTextAreaElement | null>(null)
 	const highlightRef = React.useRef<HTMLDivElement | null>(null)
@@ -253,22 +253,26 @@ export function WhereClauseEditor({
 				<div
 					ref={highlightRef}
 					aria-hidden
-					// Mirrors the Textarea's inner metrics: 1px border + the default
-					// px/py, plus the same wrapper font classes so wrapping matches.
+					// Mirrors the Textarea's two-layer box: the outer div takes the
+					// wrapper's 1px border, font classes and `textareaClassName` (which
+					// lands on the wrapper span, not the <textarea>), the inner div the
+					// <textarea>'s default padding — so wrapping and offsets match.
 					className={cn(
-						"pointer-events-none absolute inset-0 overflow-hidden rounded-lg border border-transparent px-[calc(--spacing(3)-1px)] py-[calc(--spacing(1.5)-1px)] text-base break-words whitespace-pre-wrap sm:text-sm",
+						"pointer-events-none absolute inset-0 overflow-hidden rounded-lg border border-transparent text-base sm:text-sm",
 						textareaClassName,
 					)}
 				>
-					{highlightTokens.map((token, index) => (
-						<span
-							// biome-ignore lint/suspicious/noArrayIndexKey: tokens are positional
-							key={index}
-							style={{ color: WHERE_CLAUSE_TOKEN_COLOR[token.type] }}
-						>
-							{token.text}
-						</span>
-					))}
+					<div className="px-[calc(--spacing(3)-1px)] py-[calc(--spacing(1.5)-1px)] break-words whitespace-pre-wrap">
+						{highlightTokens.map((token, index) => (
+							<span
+								// biome-ignore lint/suspicious/noArrayIndexKey: tokens are positional
+								key={index}
+								style={{ color: WHERE_CLAUSE_TOKEN_COLOR[token.type] }}
+							>
+								{token.text}
+							</span>
+						))}
+					</div>
 				</div>
 			)}
 
