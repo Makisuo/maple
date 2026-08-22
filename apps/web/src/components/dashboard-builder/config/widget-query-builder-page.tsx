@@ -96,6 +96,9 @@ function readRawSqlDraftFromWidget(widget: DashboardWidget): RawSqlDraft {
 	return { sql: RAW_SQL_TEMPLATES[displayType], granularitySeconds: null }
 }
 
+const sameRawSqlDraft = (a: RawSqlDraft, b: RawSqlDraft): boolean =>
+	a.sql === b.sql && a.granularitySeconds === b.granularitySeconds
+
 /**
  * Build the `raw_sql_chart` data source for the type currently selected in the
  * editor — NOT the saved widget's type. Reading `widget.*` here meant the Type
@@ -197,6 +200,36 @@ export function WidgetQueryBuilderPage({
 	// only updates when the user clicks Run Preview — typing in the textarea
 	// shouldn't refire the SQL on every keystroke.
 	const [rawSqlPreviewDraft, setRawSqlPreviewDraft] = React.useState<RawSqlDraft>(initialRawSqlDraft)
+
+	// The widget prop is not fixed for the life of the editor: the dashboard row
+	// can reach it after the first render, or be replaced by a later sync. Seeding
+	// the SQL draft and the Source toggle only from the first render left a
+	// re-opened raw-SQL widget on the Query Builder tab with a template in the
+	// editor, while the preview and the canvas tile drew the stored SQL — the
+	// widget prop had the query all along.
+	//
+	// Re-seeded during render (React's "adjust state when a prop changes"), and
+	// only while the draft is still the one seeded: whatever the user typed wins.
+	const seededRawSqlRef = React.useRef<RawSqlDraft>(initialRawSqlDraft)
+	if (
+		!sameRawSqlDraft(initialRawSqlDraft, seededRawSqlRef.current) &&
+		sameRawSqlDraft(rawSqlDraft, seededRawSqlRef.current)
+	) {
+		seededRawSqlRef.current = initialRawSqlDraft
+		// The dirty baseline follows too, or the unsaved-changes blocker fires on
+		// an edit the user never made.
+		initialRawSqlSnapshotRef.current = initialRawSqlDraft
+		setRawSqlDraft(initialRawSqlDraft)
+		setRawSqlPreviewDraft(initialRawSqlDraft)
+	}
+	// Same for the Source toggle — a widget that arrives as raw SQL after the
+	// first render leaves the editor on Query Builder otherwise. `initialModeRef`
+	// is also the dirty baseline, so it follows either way; the toggle itself only
+	// moves while the user has not chosen a tab of their own.
+	if (initialMode !== initialModeRef.current) {
+		if (mode === initialModeRef.current) setMode(initialMode)
+		initialModeRef.current = initialMode
+	}
 
 	const previewWidget = React.useMemo(() => {
 		// The override applies live from the editing state — it costs nothing to
