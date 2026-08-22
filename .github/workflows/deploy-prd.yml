@@ -135,8 +135,11 @@ jobs:
             # log line. That was the "AWS ingest deploy hang" (#378). With the id
             # supplied, the lookup is skipped. Reproduced locally with CI=true and
             # the id unset on alchemy 2.0.0-beta.64 through beta.74.
+            # continue-on-error so the certificate step below can finish the job;
+            # the last step turns an unrecovered failure back into a red run.
             - name: Deploy PRD stack with Alchemy
               id: deploy
+              continue-on-error: true
               run: bun run alchemy:deploy:prd
               env:
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
@@ -148,10 +151,17 @@ jobs:
             # deploy that failed for any other reason reaches this too: the script
             # is a no-op on an ISSUED certificate and the retry fails the same way.
             - name: Validate the ingest certificate and retry the deploy
-              if: ${{ failure() && steps.deploy.outcome == 'failure' && env.MAPLE_DEPLOY_AWS_INGEST == '1' }}
+              id: retry
+              if: ${{ steps.deploy.outcome == 'failure' && env.MAPLE_DEPLOY_AWS_INGEST == '1' }}
               env:
                   INGEST_DOMAIN: ingest.maple.dev
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: |
                   bash scripts/ingest-cert-validate.sh
                   bun run alchemy:deploy:prd
+
+            - name: Fail the run if the deploy did not succeed
+              if: ${{ steps.deploy.outcome == 'failure' && steps.retry.outcome != 'success' }}
+              run: |
+                  echo "::error::alchemy deploy failed and the certificate-validation retry did not recover it (retry outcome: ${{ steps.retry.outcome }})"
+                  exit 1
