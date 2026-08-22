@@ -54,9 +54,19 @@ record_name="${record_name%.}"
 record_value="${record_value%.}"
 
 cf() { curl -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" "$@"; }
-zone_id=$(cf "https://api.cloudflare.com/client/v4/zones?name=${zone_name}&status=active" | jq -r '.result[0].id // empty')
+# Fail loudly with Cloudflare's own error list (the token's DNS permission on the
+# zone is the usual culprit) instead of a bare non-zero from `jq -e`.
+cf_ok() {
+    local response; response=$(cat)
+    if ! jq -e '.success' >/dev/null <<<"$response"; then
+        echo "::error::Cloudflare API call failed: $(jq -c '.errors' <<<"$response")"
+        return 1
+    fi
+}
+zones_response=$(cf "https://api.cloudflare.com/client/v4/zones?name=${zone_name}&status=active")
+zone_id=$(jq -r '.result[0].id // empty' <<<"$zones_response")
 if [ -z "$zone_id" ]; then
-    echo "::error::Cloudflare zone ${zone_name} not visible to CLOUDFLARE_API_TOKEN"
+    echo "::error::Cloudflare zone ${zone_name} not visible to CLOUDFLARE_API_TOKEN: $(jq -c '{success, errors}' <<<"$zones_response")"
     exit 1
 fi
 
@@ -64,11 +74,11 @@ existing=$(cf "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records
 if [ -n "$existing" ]; then
     echo "validation CNAME already present (record ${existing}); updating content in case it rotated"
     cf -X PATCH "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${existing}" \
-        --data "$(jq -nc --arg c "$record_value" '{content:$c, ttl:1, proxied:false}')" | jq -e '.success' >/dev/null
+        --data "$(jq -nc --arg c "$record_value" '{content:$c, ttl:1, proxied:false}')" | cf_ok
 else
     echo "creating validation CNAME for ${INGEST_DOMAIN} in zone ${zone_name}"
     cf -X POST "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
-        --data "$(jq -nc --arg n "$record_name" --arg c "$record_value" '{type:"CNAME", name:$n, content:$c, ttl:1, proxied:false, comment:"ACM validation for the ingest gateway (managed by deploy workflow)"}')" | jq -e '.success' >/dev/null
+        --data "$(jq -nc --arg n "$record_name" --arg c "$record_value" '{type:"CNAME", name:$n, content:$c, ttl:1, proxied:false, comment:"ACM validation for the ingest gateway (managed by deploy workflow)"}')" | cf_ok
 fi
 
 # ACM usually picks up a Cloudflare-hosted record within a few minutes. The
