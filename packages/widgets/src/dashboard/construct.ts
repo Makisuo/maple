@@ -1,4 +1,11 @@
-import type { FunnelKeyBy, FunnelStep, QueryResultContract, QuerySet } from "@maple/query-model"
+import type {
+	FunnelBreakdownBy,
+	FunnelKeyBy,
+	FunnelPopulationFilters,
+	FunnelStep,
+	QueryResultContract,
+	QuerySet,
+} from "@maple/query-model"
 import type { RawSqlDataSource } from "./access"
 import type { WidgetDataSourceTransformV2 } from "./shared/transform"
 import type {
@@ -140,24 +147,37 @@ export interface ProductEventsFunnelDefinition {
 	readonly steps: ReadonlyArray<FunnelStep>
 	readonly keyBy?: FunnelKeyBy
 	readonly windowSeconds?: number
+	/** Split the funnel by a dimension: the widget draws one bar per group per step. */
+	readonly breakdownBy?: FunnelBreakdownBy
+	/** Narrow the population to persons with a session matching these dimensions. */
+	readonly filters?: FunnelPopulationFilters
 }
 
 /**
  * A funnel widget over `product_events`: the definition mirrored into the route
  * params, so the fetch path (`toWidgetRequest`) never has to read the display.
  * `keyBy` and `windowSeconds` are forwarded only when set; the route applies
- * the same defaults the /analytics Funnels view does.
+ * the same defaults the /analytics Funnels view does. The population filters
+ * are spread FLAT into the params — they are the same keys the funnel request
+ * takes, so both routes decode the bag as `ProductEventsFunnelWidgetParams`
+ * without re-nesting.
  */
 export const makeProductEventsFunnelDataSource = (
 	funnel: ProductEventsFunnelDefinition,
 	transform?: WidgetDataSourceTransform,
-) =>
-	makeRouteDataSource(
+) => {
+	const filters = Object.fromEntries(
+		Object.entries(funnel.filters ?? {}).filter(([, value]) => value !== undefined && value !== ""),
+	)
+	return makeRouteDataSource(
 		PRODUCT_EVENTS_FUNNEL_ENDPOINT,
 		{
 			steps: funnel.steps,
 			...(!(funnel.keyBy === undefined) ? { keyBy: funnel.keyBy } : undefined),
 			...(!(funnel.windowSeconds === undefined) ? { windowSeconds: funnel.windowSeconds } : undefined),
+			...(!(funnel.breakdownBy === undefined) ? { breakdownBy: funnel.breakdownBy } : undefined),
+			...filters,
 		},
 		transform,
 	)
+}

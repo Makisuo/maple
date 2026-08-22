@@ -9,6 +9,7 @@ import type { LegendPosition } from "@/components/dashboard-builder/config/setti
 import { widgetTypes } from "@/components/dashboard-builder/widgets/types"
 import { fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
 import {
+	defaultFunnelDraft,
 	deriveDefaultWidgetTitle,
 	hasActiveGroupBy,
 	inferDefaultUnitForQueries,
@@ -22,7 +23,6 @@ import {
 	type QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-shared"
 import { WIDGET_TYPES } from "@maple/domain/http"
-import { DEFAULT_FUNNEL_KEY_BY, DEFAULT_FUNNEL_WINDOW_SECONDS } from "@/components/funnels/definition"
 import { dataSourceQuerySet, dataSourceRouteParams, makeQueryDataSource } from "@maple/widgets/dashboard"
 
 // Lowering the widget editor's state to a persisted widget, and back.
@@ -125,7 +125,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		heatmapColorScale: undefined,
 		heatmapScaleType: "linear",
 		markdownContent: "",
-		funnel: { steps: [], keyBy: DEFAULT_FUNNEL_KEY_BY, windowSeconds: DEFAULT_FUNNEL_WINDOW_SECONDS },
+		funnel: defaultFunnelDraft(),
 		...definition.initialState?.(widget),
 	}
 

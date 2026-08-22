@@ -13,7 +13,13 @@ import {
 	ProductEventsFunnelBreakdownRequest,
 	ProductEventsFunnelRequest,
 } from "@maple/domain/http"
-import { funnelStepLabel } from "@maple/query-model"
+import {
+	FUNNEL_WIDGET_BREAKDOWN_LIMIT,
+	ProductEventsFunnelWidgetParams,
+	funnelWidgetBreakdownRows,
+	funnelWidgetRows,
+	type FunnelWidgetRow,
+} from "@maple/query-model"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 import { TimeWindowFields, WebAnalyticsFilterFields } from "@/api/warehouse/web-analytics"
@@ -139,16 +145,16 @@ const getProductEventNamesEffect = Effect.fn("QueryEngine.getProductEventNames")
 
 // Dashboard funnel widget (route data source `product_events_funnel`).
 //
-// The widget's stored `display.funnel` definition — steps, key, window — is the
-// route's params bag; the dashboard planner adds `startTime`/`endTime`. The rows
-// come back as `{ name, value }` so the same funnel chart the group-by breakdown
-// feeds draws them unchanged: one bar per step, labelled by the step.
+// The widget's stored `display.funnel` definition — steps, key, window, an
+// optional breakdown and the flat population filters — is the route's params
+// bag (`ProductEventsFunnelWidgetParams`); the dashboard planner adds
+// `startTime`/`endTime`. The rows come back as `{ name, value }` (plus `group`
+// on a breakdown) so the same funnel chart the group-by breakdown feeds draws
+// them unchanged: one bar per step, or one per group per step.
 
 const ProductEventsFunnelWidgetInputSchema = Schema.Struct({
 	...TimeWindowFields,
-	steps: Schema.Array(FunnelStep),
-	keyBy: Schema.optional(FunnelKeyBy),
-	windowSeconds: Schema.optional(PositiveInt),
+	...ProductEventsFunnelWidgetParams.fields,
 })
 
 export type GetProductEventsFunnelWidgetInput = (typeof ProductEventsFunnelWidgetInputSchema)["Encoded"]
@@ -172,26 +178,40 @@ const getProductEventsFunnelWidgetEffect = Effect.fn("QueryEngine.getProductEven
 		"getProductEventsFunnelWidget",
 	)
 
+	// A funnel with no steps yet (the preset tile, a widget mid-edit) draws the
+	// empty state rather than asking the warehouse for a definition it rejects.
+	if (input.steps.length === 0) return { data: [] satisfies ReadonlyArray<FunnelWidgetRow> }
+
+	const { breakdownBy, ...rest } = input
+	const request = {
+		...rest,
+		keyBy: input.keyBy ?? WIDGET_DEFAULT_KEY_BY,
+		windowSeconds: input.windowSeconds ?? WIDGET_DEFAULT_WINDOW_SECONDS,
+	}
+
+	if (breakdownBy !== undefined) {
+		const result = yield* runWarehouseQuery("productEventsFunnelWidgetBreakdown", () =>
+			Effect.gen(function* () {
+				const client = yield* MapleInternalAtomClient
+				return yield* client.queryEngine.productEventsFunnelBreakdown({
+					payload: new ProductEventsFunnelBreakdownRequest({
+						...request,
+						breakdownBy,
+						limit: FUNNEL_WIDGET_BREAKDOWN_LIMIT,
+					}),
+				})
+			}),
+		)
+		return { data: funnelWidgetBreakdownRows(input.steps, result.data) }
+	}
+
 	const result = yield* runWarehouseQuery("productEventsFunnelWidget", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.productEventsFunnel({
-				payload: new ProductEventsFunnelRequest({
-					startTime: input.startTime,
-					endTime: input.endTime,
-					steps: input.steps,
-					keyBy: input.keyBy ?? WIDGET_DEFAULT_KEY_BY,
-					windowSeconds: input.windowSeconds ?? WIDGET_DEFAULT_WINDOW_SECONDS,
-				}),
+				payload: new ProductEventsFunnelRequest(request),
 			})
 		}),
 	)
-
-	const countByStep = new Map(result.data.map((row) => [row.step, row.count]))
-	return {
-		data: input.steps.map((step, index) => ({
-			name: funnelStepLabel(step),
-			value: countByStep.get(index + 1) ?? 0,
-		})),
-	}
+	return { data: funnelWidgetRows(input.steps, result.data) }
 })

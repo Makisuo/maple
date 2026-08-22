@@ -14,6 +14,7 @@ import {
 	type QueryBuilderQueryDraft,
 } from "@maple/query-engine/query-builder"
 import { toSeriesFieldOptions, validateQueries } from "@/lib/query-builder/widget-builder-utils"
+import type { FunnelWidgetDraft } from "@/lib/query-builder/widget-builder-shared"
 
 export function useWidgetBuilder() {
 	const formAtom = WidgetBuilderForm.use()
@@ -101,6 +102,10 @@ export function useWidgetBuilder() {
 		}))
 	}
 
+	const updateFunnel = (updater: (funnel: FunnelWidgetDraft) => FunnelWidgetDraft) => {
+		setState((current) => ({ ...current, funnel: updater(current.funnel) }))
+	}
+
 	const runPreview = () => {
 		if (validationError) return
 		setStagedState({
@@ -108,6 +113,11 @@ export function useWidgetBuilder() {
 			queries: state.queries.map((q) => ({ ...q, addOns: { ...q.addOns } })),
 			formulas: state.formulas.map((f) => ({ ...f })),
 			listColumns: state.listColumns.map((c) => ({ ...c })),
+			funnel: {
+				...state.funnel,
+				steps: state.funnel.steps.map((step) => ({ ...step })),
+				addOns: { ...state.funnel.addOns },
+			},
 		})
 	}
 
@@ -124,6 +134,7 @@ export function useWidgetBuilder() {
 			addFormula,
 			removeFormula,
 			updateFormula,
+			updateFunnel,
 			runPreview,
 		},
 		meta: {

@@ -12,6 +12,7 @@ import {
 	type QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-utils"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
+import { defaultFunnelDraft } from "@/lib/query-builder/widget-builder-shared"
 
 /**
  * What a widget routed to, as one comparable value.
@@ -76,7 +77,7 @@ function makeState(): QueryBuilderWidgetState {
 		gaugeMax: "",
 		sparklineEnabled: false,
 		markdownContent: "",
-		funnel: { steps: [], keyBy: "person", windowSeconds: 86400 },
+		funnel: defaultFunnelDraft(),
 	}
 }
 
@@ -290,6 +291,8 @@ describe("product-event funnel widget", () => {
 			},
 		],
 		funnel: {
+			...defaultFunnelDraft(),
+			source: "product_events",
 			steps: [
 				{ kind: "page", pagePath: "/pricing" },
 				{ kind: "event", eventName: "signup_completed" },
@@ -314,27 +317,72 @@ describe("product-event funnel widget", () => {
 		})
 	})
 
-	it("stays a group-by breakdown without steps", () => {
-		const state = {
+	it("compiles step filters, the population filter and the breakdown into the params", () => {
+		const state: QueryBuilderWidgetState = {
 			...funnelState(),
-			funnel: { steps: [], keyBy: "person" as const, windowSeconds: 86400 },
+			funnel: {
+				...funnelState().funnel,
+				steps: [
+					{ kind: "page", pagePath: "/pricing", host: "example.com" },
+					{ kind: "event", eventName: "signup_completed", filterClause: 'plan = "pro" AND source = cli' },
+				],
+				filterClause: 'country = "DE" AND utm.source = "twitter"',
+				breakdownBy: "referrerHost",
+			},
+		}
+		const dataSource = buildWidgetDataSource(makeWidget(), state, ["A"])
+		if (dataSource.kind !== "route") throw new Error("expected a route")
+		expect(dataSource.params).toEqual({
+			steps: [
+				{ kind: "page", pagePath: "/pricing", host: "example.com" },
+				{ kind: "event", eventName: "signup_completed", attributeEquals: { plan: "pro", source: "cli" } },
+			],
+			keyBy: "visitor",
+			windowSeconds: 3600,
+			breakdownBy: "referrerHost",
+			country: "DE",
+			utmSource: "twitter",
+		})
+	})
+
+	it("stays a group-by breakdown on the query-set source, whatever the steps say", () => {
+		const state: QueryBuilderWidgetState = {
+			...funnelState(),
+			funnel: { ...funnelState().funnel, source: "query_set" },
 		}
 		expect(routedTo(buildWidgetDataSource(makeWidget(), state, ["A"]))).toBe("breakdown")
 	})
 
 	it("persists the definition on display.funnel and reads it back", () => {
-		const state = funnelState()
+		const state: QueryBuilderWidgetState = {
+			...funnelState(),
+			funnel: {
+				...funnelState().funnel,
+				steps: [
+					{ kind: "page", pagePath: "/pricing" },
+					{ kind: "event", eventName: "signup_completed", filterClause: 'plan = "pro"' },
+				],
+				filterClause: 'country = "DE"',
+				breakdownBy: "attribute:plan",
+				showStepPercent: false,
+			},
+		}
 		const widget = {
 			...makeWidget(),
 			visualization: "funnel" as const,
-			display: { funnel: { showStepPercent: false } },
+			display: { funnel: { showStepPercent: true } },
 		}
 		const display = buildWidgetDisplay(widget, state)
 		expect(display.funnel).toEqual({
 			showStepPercent: false,
-			steps: state.funnel.steps,
+			steps: [
+				{ kind: "page", pagePath: "/pricing" },
+				{ kind: "event", eventName: "signup_completed", attributeEquals: { plan: "pro" } },
+			],
 			keyBy: "visitor",
 			windowSeconds: 3600,
+			breakdownBy: "attribute:plan",
+			filters: { country: "DE" },
 		})
 
 		const reopened = toInitialState({
@@ -342,13 +390,62 @@ describe("product-event funnel widget", () => {
 			display,
 			dataSource: buildWidgetDataSource(widget, state, ["A"]),
 		})
-		expect(reopened.funnel).toEqual({ steps: state.funnel.steps, keyBy: "visitor", windowSeconds: 3600 })
+		expect(reopened.funnel).toEqual({
+			source: "product_events",
+			steps: [
+				{ kind: "page", pagePath: "/pricing" },
+				{
+					kind: "event",
+					eventName: "signup_completed",
+					attributeEquals: { plan: "pro" },
+					filterClause: 'plan = "pro"',
+				},
+			],
+			keyBy: "visitor",
+			windowSeconds: 3600,
+			breakdownBy: "attribute:plan",
+			filterClause: 'country = "DE"',
+			showStepPercent: false,
+			addOns: { keyBy: true, window: true, breakdown: true },
+		})
 	})
 
-	it("drops the definition but keeps the rendering flag when the steps are removed", () => {
-		const state = {
+	it("opens a widget stored with steps but no source field on the product-events source", () => {
+		const widget = {
+			...makeWidget(),
+			visualization: "funnel" as const,
+			display: { funnel: { steps: [{ kind: "event" as const, eventName: "x" }] } },
+		}
+		expect(toInitialState(widget).funnel).toMatchObject({
+			source: "product_events",
+			steps: [{ kind: "event", eventName: "x" }],
+			addOns: { keyBy: false, window: false, breakdown: false },
+		})
+	})
+
+	it("opens a product-events route widget without a display definition on its own params", () => {
+		const widget = {
+			...makeWidget(),
+			visualization: "funnel" as const,
+			display: {},
+			dataSource: {
+				kind: "route" as const,
+				endpoint: "product_events_funnel",
+				params: { steps: [{ kind: "page", pagePath: "/" }], keyBy: "session", country: "DE" },
+			},
+		}
+		expect(toInitialState(widget).funnel).toMatchObject({
+			source: "product_events",
+			steps: [{ kind: "page", pagePath: "/" }],
+			keyBy: "session",
+			filterClause: 'country = "DE"',
+		})
+	})
+
+	it("keeps only the rendering flag on the query-set source", () => {
+		const state: QueryBuilderWidgetState = {
 			...funnelState(),
-			funnel: { steps: [], keyBy: "person" as const, windowSeconds: 86400 },
+			funnel: { ...defaultFunnelDraft(), showStepPercent: true },
 		}
 		const widget = {
 			...makeWidget(),
@@ -360,19 +457,27 @@ describe("product-event funnel widget", () => {
 		expect(buildWidgetDisplay(widget, state).funnel).toEqual({ showStepPercent: true })
 	})
 
-	it("skips the group-by requirement and validates the steps instead", () => {
+	it("skips the group-by requirement and validates the definition instead", () => {
 		expect(validateQueries(funnelState())).toBeNull()
 		const blank = {
 			...funnelState(),
-			funnel: {
-				steps: [{ kind: "event" as const, eventName: "" }],
-				keyBy: "person" as const,
-				windowSeconds: 1,
-			},
+			funnel: { ...funnelState().funnel, steps: [{ kind: "event" as const, eventName: "" }] },
 		}
 		expect(validateQueries(blank)).toContain("Step 1 needs")
-		// Without steps the ordinary rule is back: a funnel needs a group-by.
-		const plain = { ...funnelState(), funnel: { steps: [], keyBy: "person" as const, windowSeconds: 1 } }
+		const none = { ...funnelState(), funnel: { ...funnelState().funnel, steps: [] } }
+		expect(validateQueries(none)).toBe("Add at least one step")
+		const badStepFilter = {
+			...funnelState(),
+			funnel: {
+				...funnelState().funnel,
+				steps: [{ kind: "event" as const, eventName: "x", filterClause: "plan != pro" }],
+			},
+		}
+		expect(validateQueries(badStepFilter)).toMatch(/^Step 1: /)
+		const badFilter = { ...funnelState(), funnel: { ...funnelState().funnel, filterClause: 'plan = "pro"' } }
+		expect(validateQueries(badFilter)).toMatch(/^Filters: /)
+		// On the query-set source the ordinary rule is back: a funnel needs a group-by.
+		const plain = { ...funnelState(), funnel: defaultFunnelDraft() }
 		expect(validateQueries(plain)).toContain("group-by")
 	})
 })

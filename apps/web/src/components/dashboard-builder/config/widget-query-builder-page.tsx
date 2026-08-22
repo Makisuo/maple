@@ -6,6 +6,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { QueryPanel } from "@/components/dashboard-builder/config/query-panel"
+import { FunnelQueryPanel } from "@/components/dashboard-builder/config/funnel-query-panel"
 import { MarkdownEditorPanel } from "@/components/dashboard-builder/config/markdown-editor-panel"
 import { FormulaPanel } from "@/components/dashboard-builder/config/formula-panel"
 import { WidgetSettingsBar } from "@/components/dashboard-builder/config/widget-settings-bar"
@@ -43,6 +44,8 @@ import {
 	buildWidgetDisplay,
 	inferDefaultUnitForQueries,
 } from "@/lib/query-builder/widget-builder-utils"
+import { isProductEventsFunnel } from "@/lib/query-builder/widget-builder-shared"
+import { emptyEventStep } from "@/components/funnels/definition"
 import { RAW_SQL_TEMPLATES, visualizationToDisplayType } from "@/lib/raw-sql/templates"
 
 export interface WidgetQueryBuilderPageHandle {
@@ -150,6 +153,7 @@ export function WidgetQueryBuilderPage({
 			addFormula,
 			removeFormula,
 			updateFormula,
+			updateFunnel,
 			runPreview,
 		},
 		meta: { validationError, seriesFieldOptions },
@@ -370,6 +374,35 @@ export function WidgetQueryBuilderPage({
 		[setState],
 	)
 
+	// A funnel's one panel offers "Product events" beside the three query
+	// sources. Choosing it swaps the query panels for the funnel panel; choosing
+	// a query source from the funnel panel brings the query set back, retargeted
+	// to that source.
+	const isFunnel = state.visualization === "funnel"
+	const showFunnelPanel = isProductEventsFunnel(state)
+	const handleFunnelSourceChange = React.useCallback(
+		(source: QueryBuilderDataSource | "product_events") => {
+			if (source === "product_events") {
+				updateFunnel((current) => ({
+					...current,
+					source: "product_events",
+					// Open on a step to fill in rather than an empty list.
+					steps: current.steps.length > 0 ? current.steps : [emptyEventStep()],
+				}))
+				return
+			}
+			updateFunnel((current) => ({ ...current, source: "query_set" }))
+			const first = state.queries[0]
+			if (first) handleDataSourceChange(first.id, source)
+		},
+		[handleDataSourceChange, state.queries, updateFunnel],
+	)
+	// Suggestions (event names, page paths, facets) follow the preview's window.
+	const suggestionWindow = React.useMemo(() => {
+		const range = state.timeRange ? resolveTimeRange(state.timeRange) : resolvedTime
+		return range ? { startTime: range.startTime, endTime: range.endTime } : undefined
+	}, [state.timeRange, resolvedTime])
+
 	// Gate on the EDITING state, not the saved widget — otherwise switching type
 	// in-editor leaves the toggle in the state the previous type wanted.
 	//
@@ -469,6 +502,21 @@ export function WidgetQueryBuilderPage({
 										</Button>
 									</div>
 								</>
+							) : showFunnelPanel ? (
+								<>
+									<FunnelQueryPanel
+										funnel={state.funnel}
+										onUpdate={updateFunnel}
+										onSourceChange={handleFunnelSourceChange}
+										suggestionWindow={suggestionWindow}
+									/>
+									<div className="flex items-center gap-3">
+										<Button size="sm" onClick={runPreview} disabled={!!validationError}>
+											Run Preview
+										</Button>
+										<span className="text-[11px] text-muted-foreground ml-auto">A</span>
+									</div>
+								</>
 							) : (
 								<>
 									{/* Query panels */}
@@ -494,6 +542,10 @@ export function WidgetQueryBuilderPage({
 												onDataSourceChange={(ds) =>
 													handleDataSourceChange(query.id, ds)
 												}
+												extraSourceOptions={
+													isFunnel && index === 0 ? ["product_events"] : undefined
+												}
+												onExtraSourceChange={handleFunnelSourceChange}
 												autoIntervalLabel={autoIntervalLabel}
 											/>
 										))}

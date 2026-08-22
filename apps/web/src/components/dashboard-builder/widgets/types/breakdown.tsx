@@ -1,5 +1,14 @@
+import { Option, Schema } from "effect"
 import { WIDGET_TYPES } from "@maple/domain/http"
-import { makeProductEventsFunnelDataSource, makeQueryDataSource } from "@maple/widgets/dashboard"
+import { ProductEventsFunnelWidgetParams } from "@maple/query-model"
+import {
+	PRODUCT_EVENTS_FUNNEL_ENDPOINT,
+	dataSourceEndpoint,
+	dataSourceRouteParams,
+	makeProductEventsFunnelDataSource,
+	makeQueryDataSource,
+	type ProductEventsFunnelDefinition,
+} from "@maple/widgets/dashboard"
 
 import {
 	ArrowTrendDownIcon,
@@ -28,13 +37,21 @@ import {
 	type WidgetTypeDefinition,
 } from "@/components/dashboard-builder/widgets/widget-type-registry"
 import { BREAKDOWN_TAIL_LIMIT } from "@maple/query-engine/query-builder"
-import type { BuildDataSourceContext } from "@/lib/query-builder/widget-builder-shared"
+import type { BuildDataSourceContext, FunnelWidgetDraft } from "@/lib/query-builder/widget-builder-shared"
 import {
 	hasActiveGroupBy,
-	hasFunnelSteps,
 	histogramValueColumn,
+	isProductEventsFunnel,
 	parsePositiveNumber,
 } from "@/lib/query-builder/widget-builder-shared"
+import {
+	compileFunnelStep,
+	compileFunnelSteps,
+	draftFromFunnelStep,
+	formatProductEventsFilterClause,
+	hasProductEventsFilters,
+	parseProductEventsFilterClause,
+} from "@/lib/query-builder/funnel-filters"
 import {
 	DEFAULT_FUNNEL_KEY_BY,
 	DEFAULT_FUNNEL_WINDOW_SECONDS,
@@ -92,13 +109,14 @@ export const pieWidgetType: WidgetTypeDefinition = {
 }
 
 /**
- * Two funnels share one visualization. Without product-event steps it is the
- * original: a group-by breakdown drawn as descending stages. With them
- * (`display.funnel.steps`) it is a conversion funnel over `product_events`,
- * fetched through the `product_events_funnel` route instead of the query set —
- * same renderer, same `{ name, value }` rows, one bar per step. The definition
- * is persisted on the display block (additive: older readers of the document
- * see a funnel with extra keys they ignore) and mirrored into the route params
+ * The funnel widget has one visualization and two sources, chosen in its query
+ * panel. "Product events" is a conversion funnel over `product_events`
+ * (`display.funnel.steps` + key, window, filters, breakdown), fetched through
+ * the `product_events_funnel` route; a query-builder source is the original
+ * group-by breakdown drawn as descending stages. Same renderer, same
+ * `{ name, value }` rows (plus `group` on a breakdown). The definition is
+ * persisted on the display block — additive, so older readers of the document
+ * see a funnel with extra keys they ignore — and mirrored into the route params
  * so the fetch path never has to read the display.
  */
 export const funnelWidgetType: WidgetTypeDefinition = {
@@ -110,7 +128,7 @@ export const funnelWidgetType: WidgetTypeDefinition = {
 	ConfigPanel: () => (
 		<>
 			<WidgetSettings.Divider />
-			<WidgetSettings.FunnelSteps />
+			<WidgetSettings.FunnelStepPercent />
 			<WidgetSettings.QueryOptions />
 		</>
 	),
@@ -119,50 +137,103 @@ export const funnelWidgetType: WidgetTypeDefinition = {
 
 	initialState: (widget) => {
 		const stored = widget.display.funnel
-		return {
-			funnel: {
-				steps: [...(stored?.steps ?? [])],
-				keyBy: stored?.keyBy ?? DEFAULT_FUNNEL_KEY_BY,
-				windowSeconds: stored?.windowSeconds ?? DEFAULT_FUNNEL_WINDOW_SECONDS,
-				...(stored?.breakdownBy !== undefined ? { breakdownBy: stored.breakdownBy } : undefined),
+		// The display is the definition's home; a widget whose route was written
+		// without one (an older MCP call) still opens on its own steps.
+		const routeParams =
+			dataSourceEndpoint(widget.dataSource) === PRODUCT_EVENTS_FUNNEL_ENDPOINT
+				? Option.getOrUndefined(
+						Schema.decodeUnknownOption(ProductEventsFunnelWidgetParams)(
+							dataSourceRouteParams(widget.dataSource) ?? {},
+						),
+					)
+				: undefined
+		const steps = stored?.steps ?? routeParams?.steps ?? []
+		const keyBy = stored?.keyBy ?? routeParams?.keyBy ?? DEFAULT_FUNNEL_KEY_BY
+		const windowSeconds = stored?.windowSeconds ?? routeParams?.windowSeconds ?? DEFAULT_FUNNEL_WINDOW_SECONDS
+		const breakdownBy = stored?.breakdownBy ?? routeParams?.breakdownBy
+		const filterClause = formatProductEventsFilterClause(stored?.filters ?? routeParams)
+		const funnel: FunnelWidgetDraft = {
+			source: routeParams !== undefined || steps.length > 0 ? "product_events" : "query_set",
+			steps: steps.map(draftFromFunnelStep),
+			keyBy,
+			windowSeconds,
+			...(breakdownBy !== undefined ? { breakdownBy } : undefined),
+			filterClause,
+			showStepPercent: stored?.showStepPercent,
+			// An add-on is open when its value is not the default, so the bar shows
+			// what is set without hiding a stored choice.
+			addOns: {
+				keyBy: keyBy !== DEFAULT_FUNNEL_KEY_BY,
+				window: windowSeconds !== DEFAULT_FUNNEL_WINDOW_SECONDS,
+				breakdown: breakdownBy !== undefined,
 			},
 		}
+		return { funnel }
 	},
 
-	ownsDataSource: hasFunnelSteps,
+	ownsDataSource: isProductEventsFunnel,
 
 	buildDataSource: (ctx) =>
-		hasFunnelSteps(ctx.state)
-			? makeProductEventsFunnelDataSource(ctx.state.funnel, ctx.sharedTransform)
+		isProductEventsFunnel(ctx.state)
+			? makeProductEventsFunnelDataSource(funnelDefinition(ctx.state.funnel), ctx.sharedTransform)
 			: breakdownDataSource(ctx),
 
-	buildDisplay: ({ base, state, widget }) =>
+	buildDisplay: ({ base, state }) =>
 		extendDisplay(base, {
-			funnel: hasFunnelSteps(state)
+			funnel: isProductEventsFunnel(state)
 				? {
-						...widget.display.funnel,
-						steps: state.funnel.steps,
-						keyBy: state.funnel.keyBy,
-						windowSeconds: state.funnel.windowSeconds,
-						...(state.funnel.breakdownBy !== undefined
-							? { breakdownBy: state.funnel.breakdownBy }
+						...(state.funnel.showStepPercent !== undefined
+							? { showStepPercent: state.funnel.showStepPercent }
 							: undefined),
+						...funnelDefinition(state.funnel),
+						steps: [...funnelDefinition(state.funnel).steps],
 					}
-				: // Steps removed: drop the definition, keep the rendering flags.
-					widget.display.funnel && widget.display.funnel.showStepPercent !== undefined
-					? { showStepPercent: widget.display.funnel.showStepPercent }
+				: // A query-set funnel keeps only the rendering flag.
+					state.funnel.showStepPercent !== undefined
+					? { showStepPercent: state.funnel.showStepPercent }
 					: undefined,
 		}),
 
 	validate: ({ state }) => {
-		if (!hasFunnelSteps(state)) return null
-		const incomplete = state.funnel.steps.findIndex((step) => completedSteps([step]).length === 0)
+		if (!isProductEventsFunnel(state)) return null
+		const { steps, filterClause, windowSeconds } = state.funnel
+		if (steps.length === 0) return "Add at least one step"
+		const incomplete = steps.findIndex((step) => completedSteps([step]).length === 0)
 		if (incomplete !== -1) return `Step ${incomplete + 1} needs an event name, page path or session value`
-		if (state.funnel.steps.some((step, index) => index > 0 && step.kind === "session")) {
+		if (steps.some((step, index) => index > 0 && step.kind === "session")) {
 			return "A session step is only valid as step 1"
 		}
+		const compiled = compileFunnelSteps(steps)
+		if (!compiled.ok) return compiled.error
+		const filters = parseProductEventsFilterClause(filterClause)
+		if (!filters.ok) return `Filters: ${filters.error}`
+		if (!Number.isFinite(windowSeconds) || windowSeconds <= 0) return "The conversion window must be positive"
 		return null
 	},
+}
+
+/**
+ * The draft lowered to the stored / routed definition. A step whose filter
+ * does not compile falls back to the bare step, and an unparsable population
+ * filter to none — `validate` blocks Apply and Run Preview on both, so this is
+ * only reached for a definition that passed.
+ */
+function funnelDefinition(funnel: FunnelWidgetDraft): ProductEventsFunnelDefinition {
+	const steps = funnel.steps.map((draft) => {
+		const compiled = compileFunnelStep(draft)
+		if (compiled.ok) return compiled.value
+		const { filterClause: _clause, ...step } = draft
+		return step
+	})
+	const parsedFilters = parseProductEventsFilterClause(funnel.filterClause)
+	const filters = parsedFilters.ok && hasProductEventsFilters(parsedFilters.value) ? parsedFilters.value : undefined
+	return {
+		steps,
+		keyBy: funnel.keyBy,
+		windowSeconds: funnel.windowSeconds,
+		...(funnel.breakdownBy !== undefined ? { breakdownBy: funnel.breakdownBy } : undefined),
+		...(filters !== undefined ? { filters } : undefined),
+	}
 }
 
 /**

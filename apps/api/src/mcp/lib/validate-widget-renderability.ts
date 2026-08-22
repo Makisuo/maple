@@ -128,6 +128,14 @@ export const validateWidgetRenderability = (input: ValidateWidgetRenderabilityIn
 	// alike — with no way to repair it from the tool that created it. The
 	// /analytics view and the web widget builder both block on them already.
 	const funnelSteps = widget.display.funnel?.steps
+	if (
+		(funnelSteps === undefined || funnelSteps.length === 0) &&
+		(widget.display.funnel?.filters !== undefined || widget.display.funnel?.breakdownBy !== undefined)
+	) {
+		warnings.push(
+			"`display_json.funnel.filters` / `breakdownBy` only apply to a product-event funnel, which needs `display_json.funnel.steps`; without steps the widget draws the query set's group-by rows and ignores them.",
+		)
+	}
 	if (funnelSteps !== undefined && funnelSteps.length > 0) {
 		if (funnelSteps.length > FUNNEL_MAX_STEPS) {
 			fatal.push(

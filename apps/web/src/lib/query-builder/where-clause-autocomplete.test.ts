@@ -339,3 +339,51 @@ describe("where clause autocomplete", () => {
 		expect(result.suggestions.every((item) => item.description !== "Dashboard variable")).toBe(true)
 	})
 })
+
+describe("where clause autocomplete: funnel scopes", () => {
+	it("offers the population-filter vocabulary under product_events, whatever the data source", () => {
+		const result = getWhereClauseAutocomplete({
+			expression: "",
+			cursor: 0,
+			dataSource: "traces",
+			scope: "product_events",
+			maxSuggestions: 20,
+		})
+		const keys = result.suggestions.map((item) => item.insertText)
+		expect(keys).toContain("country")
+		expect(keys).toContain("utm.source")
+		expect(keys).toContain("visitor_type")
+		expect(keys).not.toContain("service.name")
+	})
+
+	it("completes values from the facets and only offers =", () => {
+		const values = getWhereClauseAutocomplete({
+			expression: "country = ",
+			cursor: "country = ".length,
+			dataSource: "traces",
+			scope: "product_events",
+			values: { productEventFacets: { country: ["DE", "US"] } },
+		})
+		expect(values.suggestions.map((item) => item.label)).toEqual(["DE", "US"])
+
+		const operators = getWhereClauseAutocomplete({
+			expression: "country ",
+			cursor: "country ".length,
+			dataSource: "traces",
+			scope: "product_events",
+		})
+		expect(operators.context).toBe("operator")
+		expect(operators.suggestions.map((item) => item.insertText)).toEqual(["="])
+	})
+
+	it("suggests no keys for a step's attribute filter — they are the customer's own", () => {
+		const result = getWhereClauseAutocomplete({
+			expression: "",
+			cursor: 0,
+			dataSource: "traces",
+			scope: "product_event_attributes",
+			values: { attributeKeys: ["http.route"] },
+		})
+		expect(result.suggestions).toEqual([])
+	})
+})

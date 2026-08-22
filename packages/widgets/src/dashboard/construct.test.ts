@@ -127,4 +127,18 @@ describe("makeProductEventsFunnelDataSource", () => {
 	it("forwards only the definition fields that are set", () => {
 		expect(dataSourceRouteParams(makeProductEventsFunnelDataSource({ steps }))).toEqual({ steps })
 	})
+
+	it("spreads the population filters flat and forwards the breakdown", () => {
+		const source = makeProductEventsFunnelDataSource({
+			steps,
+			breakdownBy: "referrerHost",
+			filters: { country: "DE", utmSource: "twitter", host: undefined, pagePath: "" },
+		})
+		expect(dataSourceRouteParams(source)).toEqual({
+			steps,
+			breakdownBy: "referrerHost",
+			country: "DE",
+			utmSource: "twitter",
+		})
+	})
 })
