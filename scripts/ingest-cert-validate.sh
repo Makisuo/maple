@@ -60,6 +60,12 @@ cf_ok() {
     local response; response=$(cat)
     if ! jq -e '.success' >/dev/null <<<"$response"; then
         echo "::error::Cloudflare API call failed: $(jq -c '.errors' <<<"$response")"
+        # Name the token so the right one gets the permission (id + status only;
+        # GitHub masks digits, so also print the id with separators between
+        # characters, which survives the masker).
+        local verify; verify=$(cf "https://api.cloudflare.com/client/v4/user/tokens/verify")
+        local token_id; token_id=$(jq -r '.result.id // "unknown"' <<<"$verify")
+        echo "token in use: id=${token_id} status=$(jq -r '.result.status // "unknown"' <<<"$verify") (id spaced: $(sed 's/./& /g' <<<"$token_id"))"
         return 1
     fi
 }
