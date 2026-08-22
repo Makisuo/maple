@@ -195,7 +195,10 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 							orgId: tenant.orgId,
 							"billing.plan_id": payload.planId,
 						})
-						const result = yield* autumn.attach(tenant.orgId, { planId: payload.planId })
+						const result = yield* autumn.attach(tenant.orgId, {
+							planId: payload.planId,
+							successUrl: payload.successUrl,
+						})
 						const response = yield* classifyAutumn(result).pipe(
 							Effect.catchTag(
 								"@maple/http/errors/BillingConflictError",

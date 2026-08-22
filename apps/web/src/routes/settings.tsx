@@ -29,6 +29,8 @@ const legacyTabValues = ["connectors", "integrations", "escalations", "ai"] as c
 
 const SettingsSearch = Schema.Struct({
 	tab: Schema.optional(Schema.Literals([...settingsTabValues, ...legacyTabValues])),
+	// Stripe Checkout return marker — see `lib/billing/checkout-return.ts`.
+	checkout: Schema.optional(Schema.Literal("complete")),
 })
 
 export const Route = createFileRoute("/settings")({

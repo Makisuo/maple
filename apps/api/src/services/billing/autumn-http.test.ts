@@ -168,6 +168,29 @@ describe("AutumnClient request construction", () => {
 		})
 	})
 
+	it("attach forwards success_url only when the caller supplies one", async () => {
+		const { captured } = await withFetch({}, (autumn) =>
+			autumn.attach(ORG, {
+				planId: "startup",
+				successUrl: "https://app.maple.dev/quick-start?checkout=complete",
+			}),
+		)
+		assert.deepStrictEqual(captured?.body, {
+			customer_id: ORG,
+			plan_id: "startup",
+			redirect_mode: "if_required",
+			success_url: "https://app.maple.dev/quick-start?checkout=complete",
+		})
+		const { captured: absent } = await withFetch({}, (autumn) =>
+			autumn.attach(ORG, { planId: "startup", successUrl: undefined }),
+		)
+		assert.deepStrictEqual(absent?.body, {
+			customer_id: ORG,
+			plan_id: "startup",
+			redirect_mode: "if_required",
+		})
+	})
+
 	it("previewAttach hits preview_attach with the same defaults", async () => {
 		const { captured } = await withFetch({}, (autumn) => autumn.previewAttach(ORG, { planId: "startup" }))
 		assert.strictEqual(captured?.url, "https://api.useautumn.com/v1/billing.preview_attach")

@@ -263,6 +263,10 @@ export class UpdateBillingControlsRequest extends Schema.Class<UpdateBillingCont
 
 export class AttachRequest extends Schema.Class<AttachRequest>("AttachRequest")({
 	planId: Schema.String,
+	// Where Stripe sends the buyer after checkout. The web passes its own page
+	// URL with a `checkout=complete` marker so the return can wait for the
+	// Stripe→Autumn sync instead of re-showing the "Start trial" button.
+	successUrl: Schema.optionalKey(Schema.String),
 }) {}
 
 export class AttachResult extends Schema.Class<AttachResult>("AttachResult")({

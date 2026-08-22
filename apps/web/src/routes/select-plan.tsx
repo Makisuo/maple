@@ -12,6 +12,8 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
 const SelectPlanSearch = Schema.Struct({
 	redirect_url: Schema.optional(Schema.String),
+	// Stripe Checkout return marker — see `lib/billing/checkout-return.ts`.
+	checkout: Schema.optional(Schema.Literal("complete")),
 })
 
 export const Route = createFileRoute("/select-plan")({

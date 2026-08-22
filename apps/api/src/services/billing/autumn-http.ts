@@ -248,7 +248,10 @@ export interface AutumnClientApi {
 		customerId: string,
 		options: { readonly featureId: ReadonlyArray<string> | string; readonly range: string },
 	) => AutumnCall
-	readonly attach: (customerId: string, options: { readonly planId: string }) => AutumnCall
+	readonly attach: (
+		customerId: string,
+		options: { readonly planId: string; readonly successUrl?: string | undefined },
+	) => AutumnCall
 	readonly previewAttach: (customerId: string, options: { readonly planId: string }) => AutumnCall
 	readonly openCustomerPortal: (
 		customerId: string,
@@ -387,11 +390,15 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientApi>
 				// `customerData` we handed it here. Pre-identifying the buyer would need a
 				// separate `customers.get_or_create` call on the checkout path — a real
 				// change, not a port.
-				attach: (customerId, { planId }) =>
+				attach: (customerId, { planId, successUrl }) =>
 					call("attach", {
 						customer_id: customerId,
 						plan_id: planId,
 						redirect_mode: "if_required", // Zod default on the SDK's outbound params.
+						// Only when the caller has one: Autumn falls back to its configured
+						// default otherwise, and an explicit `undefined` is not "absent" on
+						// the wire for every JSON encoder.
+						...(successUrl !== undefined ? { success_url: successUrl } : undefined),
 					}),
 
 				previewAttach: (customerId, { planId }) =>
