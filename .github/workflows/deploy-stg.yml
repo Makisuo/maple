@@ -7,6 +7,11 @@ on:
         types: [completed]
         branches: [main]
     workflow_dispatch:
+        inputs:
+            aws_ingest:
+                description: "Also deploy the ingest gateway to ECS (MAPLE_DEPLOY_AWS_INGEST=1) for this run only"
+                type: boolean
+                default: false
 
 concurrency:
     group: deploy-stg
@@ -25,8 +30,11 @@ jobs:
         env:
             # Opt-in for the AWS/ECS ingest half (see alchemy.run.ts). Unset or not
             # "1", the deploy is the pure-Cloudflare stack that shipped in 2m05s.
-            # Set the repo variable to "1" to ship the ingest gateway to ECS as well.
-            MAPLE_DEPLOY_AWS_INGEST: ${{ vars.MAPLE_DEPLOY_AWS_INGEST }}
+            # Standing opt-in is the MAPLE_DEPLOY_AWS_INGEST variable (set it on the
+            # `staging` environment to scope it to this stage); a manual run can
+            # force it on for one deploy via the `aws_ingest` input, which is how a
+            # branch gets the gateway onto ECS for testing without touching the var.
+            MAPLE_DEPLOY_AWS_INGEST: ${{ (github.event_name == 'workflow_dispatch' && inputs.aws_ingest) && '1' || vars.MAPLE_DEPLOY_AWS_INGEST }}
             INFISICAL_ENV_SLUG: staging
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
