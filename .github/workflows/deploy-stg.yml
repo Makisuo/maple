@@ -120,8 +120,11 @@ jobs:
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
 
             # AWS_ACCOUNT_ID: see the note in deploy-prd.yml.
+            # continue-on-error so the certificate step below can finish the job;
+            # the last step turns an unrecovered failure back into a red run.
             - name: Deploy STG stack with Alchemy
               id: deploy
+              continue-on-error: true
               run: bun run alchemy:deploy:stg
               env:
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
@@ -133,10 +136,17 @@ jobs:
             # deploy that failed for any other reason reaches this too: the script
             # is a no-op on an ISSUED certificate and the retry fails the same way.
             - name: Validate the ingest certificate and retry the deploy
-              if: ${{ failure() && steps.deploy.outcome == 'failure' && env.MAPLE_DEPLOY_AWS_INGEST == '1' }}
+              id: retry
+              if: ${{ steps.deploy.outcome == 'failure' && env.MAPLE_DEPLOY_AWS_INGEST == '1' }}
               env:
                   INGEST_DOMAIN: ingest-staging.maple.dev
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: |
                   bash scripts/ingest-cert-validate.sh
                   bun run alchemy:deploy:stg
+
+            - name: Fail the run if the deploy did not succeed
+              if: ${{ steps.deploy.outcome == 'failure' && steps.retry.outcome != 'success' }}
+              run: |
+                  echo "::error::alchemy deploy failed and the certificate-validation retry did not recover it (retry outcome: ${{ steps.retry.outcome }})"
+                  exit 1
