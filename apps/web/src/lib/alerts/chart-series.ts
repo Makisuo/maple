@@ -1,4 +1,9 @@
-import type { AlertCheckDocument, AlertRulePreviewResponse, AlertRulePreviewPoint } from "@maple/domain/http"
+import type {
+	AlertCheckDocument,
+	AlertEvaluationStatus,
+	AlertRulePreviewResponse,
+	AlertRulePreviewPoint,
+} from "@maple/domain/http"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 /**
@@ -49,7 +54,7 @@ export interface Band {
  */
 export interface BucketMeta {
 	readonly sampleCount: number
-	readonly status: string
+	readonly status: AlertEvaluationStatus
 	readonly provisional: boolean
 }
 
@@ -133,7 +138,7 @@ const EMPTY_PREVIEW: PreviewProjection = {
 }
 
 /** Worst-first, so a bucket where any group breached reads as breached. */
-const STATUS_RANK: Record<string, number> = { healthy: 0, skipped: 1, breached: 2 }
+const STATUS_RANK = { healthy: 0, skipped: 1, breached: 2 } satisfies Record<AlertEvaluationStatus, number>
 
 /**
  * Project the preview wire response onto the plot's row shape.
@@ -182,8 +187,7 @@ export const projectPreview = (
 			meta.set(t, {
 				sampleCount: (previous?.sampleCount ?? 0) + point.sampleCount,
 				status:
-					previous != null &&
-					(STATUS_RANK[previous.status] ?? 0) >= (STATUS_RANK[point.status] ?? 0)
+					previous != null && STATUS_RANK[previous.status] >= STATUS_RANK[point.status]
 						? previous.status
 						: point.status,
 				provisional: (previous?.provisional ?? false) || point.provisional === true,
