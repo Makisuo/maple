@@ -4,8 +4,9 @@ name: Deploy PR ingest gateway (AWS via Alchemy)
 # test the gateway on Fargate before it reaches staging. Deploys only
 # `scripts/ingest-preview.run.ts` (VPC, security groups, cluster, secrets, ALB,
 # service — no workers, no certificate: the ALB answers plain HTTP on 80),
-# tagged `maple-ingest-pr-<n>` in the prod AWS account, and nothing tears it
-# down automatically: re-run with `action: destroy` when you are done. A
+# tagged `maple-ingest-pr-<n>` in the prod AWS account. It is torn down when
+# the PR closes (the `pull_request: closed` trigger below — the stack outlives
+# nothing but the PR), or earlier by re-running with `action: destroy`. A
 # VPC + ALB per PR is real money for a stack nothing points at, which is why
 # the main stack's `pr` stage never carries the AWS half.
 #
@@ -14,6 +15,11 @@ name: Deploy PR ingest gateway (AWS via Alchemy)
 # and staging subjects), so the task runs against staging's ingest-key store,
 # Tinybird target and keys.
 on:
+    # Automatic teardown. Runs for EVERY closed PR; the destroy itself is
+    # skipped when no `maple-ingest-pr-<n>` cluster exists, so a PR that never
+    # had a preview costs one short job and no AWS calls beyond the lookup.
+    pull_request:
+        types: [closed]
     workflow_dispatch:
         inputs:
             pr_number:
@@ -27,7 +33,7 @@ on:
                 default: deploy
 
 concurrency:
-    group: pr-ingest-${{ inputs.pr_number }}
+    group: pr-ingest-${{ inputs.pr_number || github.event.pull_request.number }}
     cancel-in-progress: false
 
 permissions:
@@ -36,12 +42,16 @@ permissions:
 
 jobs:
     ingest:
+        # Fork PRs get no staging credentials.
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
         runs-on: ubuntu-latest
         timeout-minutes: 30
         environment: staging
         env:
             INFISICAL_ENV_SLUG: staging
-            PR_NUMBER: ${{ inputs.pr_number }}
+            PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
+            # A closed PR always destroys.
+            ACTION: ${{ github.event_name == 'pull_request' && 'destroy' || inputs.action }}
             COMMIT_SHA: ${{ github.sha }}
         steps:
             - name: Checkout
@@ -74,8 +84,20 @@ jobs:
             # Same prebuilt-binary path as deploy-prd.yml (and the same cache key,
             # so this rides its warm cache): the image build is a COPY, not a
             # from-scratch cargo build inside docker.
+            # Only a stack that exists gets destroyed: the ECS cluster is created
+            # with the stack and named deterministically, so its absence means
+            # "nothing to tear down" (every closed PR reaches this step).
+            - name: Check whether the preview stack exists
+              id: exists
+              if: env.ACTION == 'destroy'
+              run: |
+                  status=$(aws ecs describe-clusters --clusters "maple-ingest-pr-$PR_NUMBER" \
+                      --query 'clusters[0].status' --output text 2>/dev/null || echo "NONE")
+                  echo "cluster status: $status"
+                  if [ "$status" = "ACTIVE" ]; then echo "stack=true" >> "$GITHUB_OUTPUT"; else echo "stack=false" >> "$GITHUB_OUTPUT"; fi
+
             - name: Cache ingest cargo build
-              if: inputs.action == 'deploy'
+              if: env.ACTION == 'deploy'
               uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   path: |
@@ -87,7 +109,7 @@ jobs:
                       ingest-cargo-${{ runner.os }}-
 
             - name: Build ingest binary
-              if: inputs.action == 'deploy'
+              if: env.ACTION == 'deploy'
               run: |
                   mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
                   docker run --rm \
@@ -104,13 +126,13 @@ jobs:
             # AWS_ACCOUNT_ID: see the note in deploy-prd.yml — without it alchemy's
             # env-credential path deadlocks silently.
             - name: Deploy ingest preview stack with Alchemy
-              if: inputs.action == 'deploy'
+              if: env.ACTION == 'deploy'
               env:
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: bunx alchemy deploy scripts/ingest-preview.run.ts --yes --adopt --stage "pr-$PR_NUMBER"
 
             - name: Destroy ingest preview stack with Alchemy
-              if: inputs.action == 'destroy'
+              if: env.ACTION == 'destroy' && steps.exists.outputs.stack == 'true'
               env:
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: bunx alchemy destroy scripts/ingest-preview.run.ts --yes --stage "pr-$PR_NUMBER"
