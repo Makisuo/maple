@@ -100,6 +100,34 @@ export function resolveIngestDesiredCount(stage: MapleStage): number {
 	return stage.kind === "prd" ? 2 : 1
 }
 
+/**
+ * Target-tracking autoscaling for the ingest service, or `undefined` for a
+ * fixed desired count.
+ *
+ * prd: 2–6 tasks on 60% average CPU. The floor is today's fixed count (AZ
+ * redundancy); the ceiling is ~6x current traffic at ~1,300 req/s per vCPU.
+ * Scale-out is eager (1 min) because a burst that outruns the gateway turns
+ * into 5xx at the edge; scale-in is lazy (5 min) so a lull does not thrash.
+ * Note the per-org replay byte budget is process-local, so the effective
+ * ceiling scales with the task count (see `resolveIngestDesiredCount`).
+ * Other stages stay fixed: nothing bursts at staging or a preview.
+ */
+export interface IngestScaling {
+	min: number
+	max: number
+	/** Target average CPU utilization, percent. */
+	cpuUtilization: number
+	/** Shaped like effect's `Duration.Input` so it can flow straight into alchemy. */
+	scaleInCooldown: `${number} ${"seconds" | "minutes"}`
+	scaleOutCooldown: `${number} ${"seconds" | "minutes"}`
+}
+
+export function resolveIngestScaling(stage: MapleStage): IngestScaling | undefined {
+	return stage.kind === "prd"
+		? { min: 2, max: 6, cpuUtilization: 60, scaleInCooldown: "5 minutes", scaleOutCooldown: "60 seconds" }
+		: undefined
+}
+
 export interface IngestTaskSize {
 	/** Fargate CPU units. 1024 = 1 vCPU. */
 	cpu: number
