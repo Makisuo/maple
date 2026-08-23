@@ -1076,6 +1076,39 @@ export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
 		.format("JSON")
 }
 
+// Error Issue environments — where one fingerprint was seen in the window.
+//
+// The Postgres `error_issues` row carries no environment: a fingerprint spans
+// environments, so "which environment is this in?" is a warehouse question
+// scoped to the window the detail page is looking at. Blank environments are
+// dropped for the same reason the facet drops them — a value you cannot act
+// on is noise.
+
+export const ErrorIssueEnvironmentsOutputSchema = Schema.Struct({
+	name: Schema.String,
+	count: CHNumber,
+})
+export type ErrorIssueEnvironmentsOutput = Schema.Schema.Type<typeof ErrorIssueEnvironmentsOutputSchema>
+
+export function errorIssueEnvironmentsQuery(opts: { limit?: number } = {}) {
+	return from(ErrorEvents)
+		.select(($) => ({
+			name: $.DeploymentEnv,
+			count: CH.count(),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			$.DeploymentEnv.neq(""),
+		])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(opts.limit ?? 20)
+		.format("JSON")
+}
+
 // Error detail traces (INNER JOIN with error subquery)
 
 export interface ErrorDetailTracesOpts {

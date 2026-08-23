@@ -1,6 +1,11 @@
 import type { BillingCustomer, BillingUsage, CatalogPlan } from "@maple/domain/http"
 
-import { isActivePlanSubscription, resolveSubscriptionPlan, type PlanLike } from "@maple/domain/billing"
+import {
+	isActivePlanSubscription,
+	meteredUsage,
+	resolveSubscriptionPlan,
+	type PlanLike,
+} from "@maple/domain/billing"
 import { formatCurrency } from "./currency"
 import { formatCount, formatUsage } from "./usage"
 
@@ -124,7 +129,7 @@ export function estimateCycleCost({
 
 		const item = basePlan?.items?.find((i) => i.featureId === featureId)
 		const included = balance?.granted ?? item?.included ?? null
-		const used = usage?.[featureId]?.sum ?? 0
+		const used = meteredUsage(balance, usage?.[featureId]?.sum)
 		if (included == null) continue
 		const over = Math.max(0, used - included)
 		if (over <= 0) continue

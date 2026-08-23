@@ -35,6 +35,21 @@ SELECT
         LIMIT 1000
         FORMAT JSON
 
+-- builder:errors:errorIssueEnvironmentsQuery:default  [16b2e68d]
+SELECT
+          DeploymentEnv AS name,
+          count() AS count
+        FROM error_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND FingerprintHash = toUInt64('11640393269246331608')
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND DeploymentEnv != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 20
+        FORMAT JSON
+
 -- builder:errors:errorIssueSampleTracesQuery:default  [165204e4]
 SELECT
           TraceId AS traceId,
@@ -4479,6 +4494,21 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00'
         GROUP BY traceId
         ORDER BY startTime DESC
+        FORMAT JSON
+
+-- pipe:error_issue_environments:default:baseline  [16b2e68d]
+SELECT
+          DeploymentEnv AS name,
+          count() AS count
+        FROM error_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND FingerprintHash = toUInt64('11640393269246331608')
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND DeploymentEnv != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 20
         FORMAT JSON
 
 -- pipe:error_issue_sample_traces:default:baseline  [165204e4]

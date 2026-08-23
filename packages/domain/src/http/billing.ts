@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Effect, Schema } from "effect"
+import { TAX_ID_TYPE_VALUES } from "../billing-tax-ids"
 import { SessionAuthorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 import { WarehouseQueryError } from "./warehouse-errors"
@@ -197,9 +198,10 @@ export class BillingUsage extends Schema.Class<BillingUsage>("BillingUsage")({
 	total: Schema.optionalKey(Schema.Record(Schema.String, BillingUsageFeature)),
 }) {}
 
+// The window is the subscription's current period, resolved server-side: Autumn's
+// own "1bc" range is a rolling cycle-length ending now, not "since the reset".
 const BillingUsageQuery = Schema.Struct({
 	featureId: Schema.Array(Schema.String),
-	range: Schema.String,
 })
 
 /**
@@ -263,6 +265,10 @@ export class UpdateBillingControlsRequest extends Schema.Class<UpdateBillingCont
 
 export class AttachRequest extends Schema.Class<AttachRequest>("AttachRequest")({
 	planId: Schema.String,
+	// Where Stripe sends the buyer after checkout. The web passes its own page
+	// URL with a `checkout=complete` marker so the return can wait for the
+	// Stripe→Autumn sync instead of re-showing the "Start trial" button.
+	successUrl: Schema.optionalKey(Schema.String),
 }) {}
 
 export class AttachResult extends Schema.Class<AttachResult>("AttachResult")({
@@ -297,6 +303,73 @@ export class CustomerPortalRequest extends Schema.Class<CustomerPortalRequest>("
 
 export class CustomerPortalResult extends Schema.Class<CustomerPortalResult>("CustomerPortalResult")({
 	url: Schema.String,
+}) {}
+
+// ---------------------------------------------------------------------------
+// Billing details (company name, address, tax IDs).
+//
+// Autumn has no tax-ID or address concept; these live on the Stripe customer
+// Autumn links (`stripe_id`), and the API reads/writes them through Stripe
+// directly. Nothing here is persisted by Maple — Stripe is the source of truth
+// and is what prints them on the invoice PDF.
+// ---------------------------------------------------------------------------
+
+/** Stripe tax-ID `type` values (see `@maple/domain/billing-tax-ids`). */
+export const BillingTaxIdType = Schema.Literals(TAX_ID_TYPE_VALUES)
+export type BillingTaxIdType = typeof BillingTaxIdType.Type
+
+/** Postal address as Stripe stores it; every line is optional on the wire. */
+export class BillingAddress extends Schema.Class<BillingAddress>("BillingAddress")({
+	line1: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	line2: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	city: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	state: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	postalCode: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	/** ISO-3166 alpha-2. */
+	country: Schema.optionalKey(Schema.NullOr(Schema.String)),
+}) {}
+
+/**
+ * One tax ID on the Stripe customer. `type` and `verificationStatus` stay plain
+ * strings (not the literal unions) so a value Stripe adds later can't fail the
+ * decode — same posture as `BillingInvoice.status`. Known statuses:
+ * `pending` | `verified` | `unverified` | `unavailable`.
+ */
+export class BillingTaxId extends Schema.Class<BillingTaxId>("BillingTaxId")({
+	id: Schema.String,
+	type: Schema.String,
+	value: Schema.String,
+	country: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	verificationStatus: Schema.optionalKey(Schema.NullOr(Schema.String)),
+}) {}
+
+/**
+ * What the billing-details card renders. `linked: false` means the org has no
+ * Stripe customer yet (Autumn creates it lazily on the first billing operation)
+ * — a read never forces one into existence, so the rest is empty; the first
+ * write creates it.
+ */
+export class BillingProfile extends Schema.Class<BillingProfile>("BillingProfile")({
+	linked: Schema.Boolean,
+	name: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	address: Schema.optionalKey(Schema.NullOr(BillingAddress)),
+	taxIds: Schema.Array(BillingTaxId),
+}) {}
+
+const TrimmedName = Schema.String.pipe(Schema.check(Schema.isMaxLength(150)))
+
+export class UpdateBillingProfileRequest extends Schema.Class<UpdateBillingProfileRequest>(
+	"UpdateBillingProfileRequest",
+)({
+	/** Legal / company name as it should print on invoices. `null` clears it. */
+	name: Schema.optionalKey(Schema.NullOr(TrimmedName)),
+	/** `null` clears the address. Omitted fields are left as they are. */
+	address: Schema.optionalKey(Schema.NullOr(BillingAddress)),
+}) {}
+
+export class AddBillingTaxIdRequest extends Schema.Class<AddBillingTaxIdRequest>("AddBillingTaxIdRequest")({
+	type: BillingTaxIdType,
+	value: Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isMaxLength(64))),
 }) {}
 
 /**
@@ -455,6 +528,27 @@ export class BillingForbiddenError extends HttpTaggedError<BillingForbiddenError
 ) {}
 
 /**
+ * The org has no Stripe customer yet and one could not be created on demand,
+ * so there is nowhere to put billing details. Autumn creates the Stripe
+ * customer lazily — normally on the first checkout — and `create_in_stripe` on
+ * the write path covers the rest; reaching here means even that came back
+ * unlinked. Nothing about the request is wrong, hence `recovery: "none"`.
+ */
+export class BillingProfileUnavailableError extends HttpTaggedError<BillingProfileUnavailableError>()(
+	"@maple/http/errors/BillingProfileUnavailableError",
+	{ message: Schema.String },
+	{
+		status: 409,
+		code: "billing_profile_unavailable",
+		title: "Billing details unavailable",
+		message: "Billing details become available once your organization has a plan or payment method.",
+		retry: "never",
+		recovery: "none",
+		exposure: "redacted",
+	},
+) {}
+
+/**
  * Every failure `classifyAutumn` can produce. Endpoints that take caller input
  * declare the whole union; pure reads collapse the 4xx members back into
  * `BillingUpstreamError` at the handler, because on those endpoints an upstream
@@ -545,6 +639,36 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 			payload: CustomerPortalRequest,
 			success: CustomerPortalResult,
 			error: [...billingTransportErrors],
+		}),
+	)
+	// Billing details live on the Stripe customer, read through Stripe directly.
+	// The read is not admin-gated (members may see what the invoice will say)
+	// and never creates the Stripe customer; the writes do both.
+	.add(
+		HttpApiEndpoint.get("getBillingProfile", "/profile", {
+			success: BillingProfile,
+			error: [...billingTransportErrors],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.put("updateBillingProfile", "/profile", {
+			payload: UpdateBillingProfileRequest,
+			success: BillingProfile,
+			error: [BillingForbiddenError, BillingProfileUnavailableError, ...billingRequestErrors],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("addBillingTaxId", "/profile/tax-ids", {
+			payload: AddBillingTaxIdRequest,
+			success: BillingProfile,
+			error: [BillingForbiddenError, BillingProfileUnavailableError, ...billingRequestErrors],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.delete("removeBillingTaxId", "/profile/tax-ids/:taxIdId", {
+			params: { taxIdId: Schema.String },
+			success: BillingProfile,
+			error: [BillingForbiddenError, BillingProfileUnavailableError, ...billingRequestErrors],
 		}),
 	)
 	.prefix("/internal/billing")

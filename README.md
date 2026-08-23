@@ -184,6 +184,7 @@ For ingest + key auth, set these at minimum in your root `.env` when running the
 - `MAPLE_INGEST_KEY_ENCRYPTION_KEY` (required when ingest reads encrypted credentials from Postgres)
 - `INGEST_PORT`
 - `INGEST_FORWARD_OTLP_ENDPOINT`
+- `MAPLE_INTERNAL_ORG_ID` (the org the gateway's own telemetry is filed under; no default)
 - `INGEST_FORWARD_TIMEOUT_MS`
 - `INGEST_MAX_REQUEST_BODY_BYTES`
 - `INGEST_REQUIRE_TLS`

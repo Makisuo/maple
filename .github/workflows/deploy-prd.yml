@@ -30,7 +30,7 @@ jobs:
         env:
             # Opt-in for the AWS/ECS ingest half (see alchemy.run.ts). Unset or not
             # "1", the deploy is the pure-Cloudflare stack that shipped in 2m05s.
-            # Set the repo variable to "1" to reproduce the hang under investigation.
+            # Set the repo variable to "1" to ship the ingest gateway to ECS as well.
             MAPLE_DEPLOY_AWS_INGEST: ${{ vars.MAPLE_DEPLOY_AWS_INGEST }}
             INFISICAL_ENV_SLUG: prod
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
@@ -62,6 +62,7 @@ jobs:
             # method whenever CI=true). Running it last means these always win over
             # anything stale carrying the same names out of Infisical.
             - name: Configure AWS credentials (OIDC)
+              id: aws
               uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -126,5 +127,41 @@ jobs:
             # migrates, so new and rebuilt tables are readable by every consumer —
             # including the ingest gateway, which reaches Postgres through PSBouncer as
             # a role that does NOT inherit `postgres`.
+
+            # alchemy's env-credential path (CI=true) otherwise discovers the account
+            # with an STS GetCallerIdentity issued while its own AWSEnvironment is
+            # still being built, and that call waits on the half-built environment
+            # for its endpoint resolver — a self-deadlock with no network I/O and no
+            # log line. That was the "AWS ingest deploy hang" (#378). With the id
+            # supplied, the lookup is skipped. Reproduced locally with CI=true and
+            # the id unset on alchemy 2.0.0-beta.64 through beta.74.
+            # continue-on-error so the certificate step below can finish the job;
+            # the last step turns an unrecovered failure back into a red run.
             - name: Deploy PRD stack with Alchemy
+              id: deploy
+              continue-on-error: true
               run: bun run alchemy:deploy:prd
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+
+            # First pass of a stage with the AWS half on: the ingest ACM certificate
+            # is created PENDING_VALIDATION and the 443 listener fails. Finish the
+            # job here — create the validation CNAME in the Cloudflare zone with the
+            # token Infisical already provides, wait for ISSUED, deploy again. A
+            # deploy that failed for any other reason reaches this too: the script
+            # is a no-op on an ISSUED certificate and the retry fails the same way.
+            - name: Validate the ingest certificate and retry the deploy
+              id: retry
+              if: ${{ steps.deploy.outcome == 'failure' && env.MAPLE_DEPLOY_AWS_INGEST == '1' }}
+              env:
+                  INGEST_DOMAIN: ingest.maple.dev
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+              run: |
+                  bash scripts/ingest-cert-validate.sh
+                  bun run alchemy:deploy:prd
+
+            - name: Fail the run if the deploy did not succeed
+              if: ${{ steps.deploy.outcome == 'failure' && steps.retry.outcome != 'success' }}
+              run: |
+                  echo "::error::alchemy deploy failed and the certificate-validation retry did not recover it (retry outcome: ${{ steps.retry.outcome }})"
+                  exit 1

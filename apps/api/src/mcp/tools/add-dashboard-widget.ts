@@ -122,6 +122,8 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 							steps: funnelSteps,
 							keyBy: decodedDisplay.funnel?.keyBy,
 							windowSeconds: decodedDisplay.funnel?.windowSeconds,
+							breakdownBy: decodedDisplay.funnel?.breakdownBy,
+							filters: decodedDisplay.funnel?.filters,
 						}
 					: undefined
 

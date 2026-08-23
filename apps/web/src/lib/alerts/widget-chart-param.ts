@@ -15,13 +15,19 @@ import { fromBase64Url, toBase64Url } from "@/lib/base64url"
 const AlertChartWidgetSchema = Schema.Struct({
 	id: Schema.String,
 	visualization: Schema.optional(Schema.String),
-	dataSource: Schema.optional(
-		Schema.Struct({
-			endpoint: Schema.optional(Schema.String),
-			params: Schema.optional(Schema.Unknown),
-			transform: Schema.optional(Schema.Unknown),
-		}),
-	),
+	/**
+	 * Deliberately opaque.
+	 *
+	 * This used to be `Struct({ endpoint, params, transform })` — the v2 shape —
+	 * and Effect Schema drops excess properties on decode, so once the builder
+	 * started writing v3 data sources (`{ kind: "query" | "raw_sql", ... }`) every
+	 * snapshot decoded to `{}` and the alert page fell back to a blank form. The
+	 * prefill reads this through the version-agnostic accessors in
+	 * `@maple/widgets/dashboard`, which take `unknown` and narrow themselves, so
+	 * restating the data-source shape here buys nothing and silently truncates
+	 * whatever arm it does not know about.
+	 */
+	dataSource: Schema.optional(Schema.Unknown),
 	display: Schema.optional(Schema.Struct({ title: Schema.optional(Schema.String) })),
 })
 

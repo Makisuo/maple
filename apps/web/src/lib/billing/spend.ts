@@ -3,6 +3,7 @@ import {
 	cycleSpend,
 	isActivePlanSubscription,
 	isPricedPlan,
+	meteredUsage,
 	projectCycleSpend,
 	resolveSubscriptionPlan,
 	type FeatureUsagePricing,
@@ -202,7 +203,7 @@ export function buildSpendModel({
 		billingUnitsByFeature[featureId] = billingUnits
 		const amount = item?.price?.amount
 		pricing[featureId] = {
-			used: usage?.[featureId]?.sum ?? 0,
+			used: meteredUsage(balance, usage?.[featureId]?.sum),
 			included: balance?.granted ?? item?.included ?? null,
 			ratePerUnit: amount == null ? null : amount / billingUnits,
 			unlimited: balance?.unlimited === true,

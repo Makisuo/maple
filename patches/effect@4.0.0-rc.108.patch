@@ -153,3 +153,104 @@ index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a2
    const methodNotAllowedResponse = HttpServerResponse.empty({
      status: 405,
      headers: {
+diff --git a/dist/unstable/httpapi/HttpApiBuilder.js b/dist/unstable/httpapi/HttpApiBuilder.js
+--- a/dist/unstable/httpapi/HttpApiBuilder.js
++++ b/dist/unstable/httpapi/HttpApiBuilder.js
+@@ -52,8 +52,13 @@
+   }
+   yield* router.addAll(routes);
+   if (options?.openapiPath) {
+-    const spec = OpenApi.fromApi(api);
+-    yield* router.add("GET", options.openapiPath, Effect.succeed(Response.jsonUnsafe(spec)));
++    let response;
++    yield* router.add("GET", options.openapiPath, Effect.sync(() => {
++      if (response !== undefined) return response;
++      const spec = OpenApi.fromApi(api);
++      response = Response.jsonUnsafe(spec);
++      return response;
++    }));
+   }
+ }));
+ /**
+@@ -347,7 +352,8 @@
+ /** @internal */
+ export function handlerToRoute(group, handler, context) {
+   const endpoint = handler.endpoint;
+-  return HttpRouter.route(endpoint.method, endpoint.path, handlerToHttpEffect(group, endpoint, context, handler.handler, handler.isRaw), {
++  let httpEffect;
++  return HttpRouter.route(endpoint.method, endpoint.path, Effect.suspend(() => httpEffect ??= handlerToHttpEffect(group, endpoint, context, handler.handler, handler.isRaw)), {
+     uninterruptible: handler.uninterruptible
+   });
+ }
+diff --git a/dist/unstable/httpapi/HttpApiScalar.js b/dist/unstable/httpapi/HttpApiScalar.js
+--- a/dist/unstable/httpapi/HttpApiScalar.js
++++ b/dist/unstable/httpapi/HttpApiScalar.js
+@@ -15,17 +15,20 @@
+ import * as internal from "./internal/httpApiScalar.js";
+ import * as OpenApi from "./OpenApi.js";
+ const makeHandler = options => {
+-  const spec = OpenApi.fromApi(options.api);
+-  const {
+-    customFetch,
+-    ...scalar
+-  } = options.scalar ?? {};
+-  const scalarConfig = {
+-    _integration: "html",
+-    ...scalar
+-  };
+-  const scalarScript = options.source._tag === "Cdn" ? `<script src="${Html.escapeAttribute(`https://cdn.jsdelivr.net/npm/@scalar/api-reference@${encodeURIComponent(options.source.version ?? "latest")}/dist/browser/standalone.min.js`)}" crossorigin></script>` : `<script>${options.source.source}</script>`;
+-  const response = HttpServerResponse.html(`<!doctype html>
++  let response;
++  return Effect.sync(() => {
++    if (response !== undefined) return response;
++    const spec = OpenApi.fromApi(options.api);
++    const {
++      customFetch,
++      ...scalar
++    } = options.scalar ?? {};
++    const scalarConfig = {
++      _integration: "html",
++      ...scalar
++    };
++    const scalarScript = options.source._tag === "Cdn" ? `<script src="${Html.escapeAttribute(`https://cdn.jsdelivr.net/npm/@scalar/api-reference@${encodeURIComponent(options.source.version ?? "latest")}/dist/browser/standalone.min.js`)}" crossorigin></script>` : `<script>${options.source.source}</script>`;
++    response = HttpServerResponse.html(`<!doctype html>
+ <html>
+   <head>
+     <meta charset="utf-8" />
+@@ -48,7 +51,8 @@
+     </script>
+   </body>
+ </html>`);
+-  return Effect.succeed(response);
++    return response;
++  });
+ };
+ /**
+  * Mounts a Scalar API reference page for an `HttpApi` using the bundled Scalar script.
+diff --git a/dist/unstable/httpapi/HttpApiSwagger.js b/dist/unstable/httpapi/HttpApiSwagger.js
+--- a/dist/unstable/httpapi/HttpApiSwagger.js
++++ b/dist/unstable/httpapi/HttpApiSwagger.js
+@@ -15,8 +15,11 @@
+ import * as internal from "./internal/httpApiSwagger.js";
+ import * as OpenApi from "./OpenApi.js";
+ const makeHandler = options => {
+-  const spec = OpenApi.fromApi(options.api);
+-  const response = HttpServerResponse.html(`<!DOCTYPE html>
++  let response;
++  return Effect.sync(() => {
++    if (response !== undefined) return response;
++    const spec = OpenApi.fromApi(options.api);
++    response = HttpServerResponse.html(`<!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="utf-8" />
+@@ -40,7 +43,8 @@
+   </script>
+ </body>
+ </html>`);
+-  return Effect.succeed(response);
++    return response;
++  });
+ };
+ /**
+  * Mounts Swagger UI for an `HttpApi` at the configured path, defaulting to

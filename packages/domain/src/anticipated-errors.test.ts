@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { ANTICIPATED_ERROR_IDENTIFIERS, isAnticipatedErrorIdentifier } from "./anticipated-errors"
+import { deriveAnticipatedIdentifiers } from "./anticipated-errors-derive"
 
 describe("ANTICIPATED_ERROR_IDENTIFIERS", () => {
+	it("matches the reflection-derived set", () => {
+		expect([...ANTICIPATED_ERROR_IDENTIFIERS].sort()).toEqual([...deriveAnticipatedIdentifiers()].sort())
+	})
+
 	it("includes exact tagged-error identifiers for 4xx business errors", () => {
 		for (const identifier of [
 			"@maple/http/errors/UnauthorizedError",
@@ -26,7 +31,7 @@ describe("ANTICIPATED_ERROR_IDENTIFIERS", () => {
 		}
 	})
 
-	it("derives a non-trivial set (reflection still works)", () => {
+	it("contains a non-trivial generated set", () => {
 		expect(ANTICIPATED_ERROR_IDENTIFIERS.size).toBeGreaterThan(25)
 	})
 })

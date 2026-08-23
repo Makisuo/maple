@@ -1,4 +1,4 @@
-import { FunnelBreakdownBy, FunnelKeyBy, FunnelStep } from "@maple/query-model"
+import { FunnelBreakdownBy, FunnelKeyBy, FunnelPopulationFilters, FunnelStep } from "@maple/query-model"
 import { Schema } from "effect"
 import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "../../widget-types"
 import { StringRecord } from "./transform"
@@ -126,6 +126,9 @@ export const makeWidgetDisplayConfigSchema = <DataSource extends Schema.Top>(dat
 				keyBy: Schema.optional(FunnelKeyBy),
 				windowSeconds: Schema.optional(Schema.Number),
 				breakdownBy: Schema.optional(FunnelBreakdownBy),
+				// The population filter: persons with a session matching these
+				// dimensions. Additive like the rest of the block.
+				filters: Schema.optional(FunnelPopulationFilters),
 			}),
 		),
 

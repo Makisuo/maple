@@ -42,10 +42,12 @@ export function useBillingActions() {
 	const portalSet = useAtomSet(openCustomerPortalMutation, { mode: "promiseExit" })
 
 	const attach = useCallback(
-		async ({ planId }: { planId: string }): Promise<AttachResult> => {
+		async ({ planId, successUrl }: { planId: string; successUrl?: string }): Promise<AttachResult> => {
 			const result = unwrap(
 				await attachSet({
-					payload: new AttachRequest({ planId }),
+					payload: new AttachRequest(
+						successUrl === undefined ? { planId } : { planId, successUrl },
+					),
 					reactivityKeys: MUTATION_KEYS,
 				}),
 			)

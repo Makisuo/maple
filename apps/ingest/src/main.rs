@@ -85,6 +85,7 @@ use tracing::Instrument;
 use tracing::{debug, error, info, warn, Span};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer as _;
 
 const INGEST_SOURCE: &str = "maple-ingest-gateway";
 const CLOUDFLARE_LOGPUSH_SOURCE: &str = "cloudflare-logpush";
@@ -149,6 +150,13 @@ struct AppConfig {
     /// rrweb JSON inline in the `session_replay_events` row. `Some` diverts the
     /// payload to R2 and writes a thin index row with an empty `events`.
     replay_blob_store: Option<ReplayBlobStoreConfig>,
+    /// The org Maple's own telemetry is filed under (`maple_org_id` on every
+    /// self-telemetry resource, which the downstream collector writes into
+    /// `OrgId`). Required, with no default: the old `"internal"` fallback was a
+    /// string no org has, so an unset value did not disable self-telemetry — it
+    /// wrote a full stream of traces, logs and metrics into the warehouse under
+    /// an id nothing can read. Failing at boot is the only honest option.
+    internal_org_id: String,
     /// Whether `Cf-IPCountry` on an inbound request can be believed.
     ///
     /// Off by default, and that default is the safe one: container deployments
@@ -237,6 +245,15 @@ impl AppConfig {
 
         if forward_endpoint.is_empty() {
             return Err("INGEST_FORWARD_OTLP_ENDPOINT is required".to_owned());
+        }
+
+        let internal_org_id = std::env::var("MAPLE_INTERNAL_ORG_ID")
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+
+        if internal_org_id.is_empty() {
+            return Err("MAPLE_INTERNAL_ORG_ID is required".to_owned());
         }
 
         let forward_timeout_ms = parse_u64(
@@ -505,6 +522,7 @@ impl AppConfig {
             org_routing_cache_ttl_secs,
             replay_max_session_bytes,
             replay_blob_store,
+            internal_org_id,
             trust_proxy_geo,
         })
     }
@@ -1586,6 +1604,13 @@ struct TelemetryProviders {
     logger: SdkLoggerProvider,
 }
 
+/// Registry-wide filter: what reaches the OTel span layer. Spans are always
+/// `info`, so this must stay at `info` regardless of log verbosity.
+const SPAN_FILTER_DIRECTIVES: &str = "maple_ingest=info,tower_http=info";
+/// Default per-layer filter for the stdout and OTLP-log layers (`RUST_LOG`
+/// overrides). Hot-path `info!` logs are dropped in production by default.
+const LOG_FILTER_DIRECTIVES: &str = "maple_ingest=warn,tower_http=warn";
+
 #[expect(
     clippy::too_many_lines,
     reason = "linear construction of one OTel pipeline; every step feeds the next"
@@ -1594,18 +1619,26 @@ fn init_tracing(
     forward_endpoint: &str,
     bind_port: u16,
     service_instance_id: &str,
+    internal_org_id: &str,
 ) -> Option<TelemetryProviders> {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "maple_ingest=info,tower_http=info".into());
+    // Two filters on purpose. The registry-wide filter is pinned at `info`
+    // because every gateway span (`ingest`, `ingest.authenticate`, the Postgres
+    // client spans, …) is an `info_span!`; a global `warn` filter discards them
+    // before `tracing_opentelemetry` ever sees them and the gateway goes silent
+    // in its own traces. Log verbosity is a per-layer filter on the stdout and
+    // OTLP-log layers only: `RUST_LOG` still overrides it, default `warn`.
+    let env_filter = tracing_subscriber::EnvFilter::new(SPAN_FILTER_DIRECTIVES);
+    let log_filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| LOG_FILTER_DIRECTIVES.into())
+    };
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
-        .compact();
+        .compact()
+        .with_filter(log_filter());
 
     let deployment_env = resolve_deployment_env();
-    let internal_org_id =
-        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_owned());
-
     let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
     let skip_dev = deployment_env == "development" && !forward_explicit;
     let loopback = endpoint_loopback_to_self(forward_endpoint, bind_port);
@@ -1629,7 +1662,7 @@ fn init_tracing(
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
-        internal_org_id,
+        internal_org_id: internal_org_id.to_owned(),
     });
 
     let exporter = match SpanExporter::builder()
@@ -1710,7 +1743,7 @@ fn init_tracing(
 
     let tracer = provider.tracer("maple-ingest");
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider).with_filter(log_filter());
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -1736,11 +1769,9 @@ fn init_metrics(
     forward_endpoint: &str,
     bind_port: u16,
     service_instance_id: &str,
+    internal_org_id: &str,
 ) -> Option<SdkMeterProvider> {
     let deployment_env = resolve_deployment_env();
-    let internal_org_id =
-        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_owned());
-
     let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
     let skip_dev = deployment_env == "development" && !forward_explicit;
     if skip_dev || endpoint_loopback_to_self(forward_endpoint, bind_port) {
@@ -1753,7 +1784,7 @@ fn init_metrics(
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
-        internal_org_id,
+        internal_org_id: internal_org_id.to_owned(),
     });
 
     let exporter = match MetricExporter::builder()
@@ -1800,11 +1831,9 @@ fn init_usage_metrics(
     forward_endpoint: &str,
     bind_port: u16,
     service_instance_id: &str,
+    internal_org_id: &str,
 ) -> Option<UsageMetrics> {
     let deployment_env = resolve_deployment_env();
-    let internal_org_id =
-        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_owned());
-
     let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
     let skip_dev = deployment_env == "development" && !forward_explicit;
     if skip_dev || endpoint_loopback_to_self(forward_endpoint, bind_port) {
@@ -1817,7 +1846,7 @@ fn init_usage_metrics(
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
-        internal_org_id,
+        internal_org_id: internal_org_id.to_owned(),
     });
 
     let exporter = match MetricExporter::builder()
@@ -1882,12 +1911,25 @@ async fn main() {
     // One UUID per process, shared by the trace and metric resources so both
     // signals attribute to the same `service.instance.id`.
     let service_instance_id = uuid::Uuid::new_v4().to_string();
-    let telemetry_providers =
-        init_tracing(&config.forward_endpoint, config.port, &service_instance_id);
-    let meter_provider = init_metrics(&config.forward_endpoint, config.port, &service_instance_id);
-    let usage_metrics =
-        init_usage_metrics(&config.forward_endpoint, config.port, &service_instance_id)
-            .map(Arc::new);
+    let telemetry_providers = init_tracing(
+        &config.forward_endpoint,
+        config.port,
+        &service_instance_id,
+        &config.internal_org_id,
+    );
+    let meter_provider = init_metrics(
+        &config.forward_endpoint,
+        config.port,
+        &service_instance_id,
+        &config.internal_org_id,
+    );
+    let usage_metrics = init_usage_metrics(
+        &config.forward_endpoint,
+        config.port,
+        &service_instance_id,
+        &config.internal_org_id,
+    )
+    .map(Arc::new);
 
     let http_client = match Client::builder()
         .timeout(config.forward_timeout)
@@ -3676,7 +3718,7 @@ async fn handle_cloudflare_logpush(
             span_handle.record("maple.cloudflare.is_validation", is_validation);
             metrics::request_completed("logs", "ok", "none", duration.as_secs_f64());
             metrics::cloudflare_batch("http_requests", is_validation);
-            info!(
+            debug!(
                 status = status_code,
                 duration_ms = duration_millis(duration),
                 item_count,
@@ -7084,6 +7126,7 @@ mod tests {
             config: AppConfig {
                 port: 0,
                 otlp_grpc_port: None,
+                internal_org_id: "org_test_internal".to_owned(),
                 forward_endpoint,
                 forward_timeout: Duration::from_secs(5),
                 write_mode: WriteMode::Forward,
@@ -7974,6 +8017,60 @@ mod tests {
             "connector identity should stay cached while routing refreshes"
         );
         assert_eq!(store.routing_fetches.load(Ordering::Relaxed), 1);
+    }
+
+    /// Regression for the gateway going silent in its own traces: a global
+    /// `warn` filter (the #581 default) discards every `info_span!` before the
+    /// OTel layer sees it. The span filter must admit info spans; the log
+    /// filter is the one allowed to drop info events — and only as a
+    /// per-layer filter, never registry-wide.
+    #[test]
+    fn span_filter_admits_info_spans_that_the_log_filter_would_drop() {
+        use tracing::callsite::{DefaultCallsite, Identifier};
+        use tracing::field::FieldSet;
+        use tracing::metadata::Kind;
+        use tracing::{Level, Metadata, Subscriber};
+
+        static SPAN_CALLSITE: DefaultCallsite = DefaultCallsite::new(&SPAN_META);
+        static SPAN_META: Metadata<'static> = Metadata::new(
+            "filter_probe_span",
+            "maple_ingest::probe",
+            Level::INFO,
+            None,
+            None,
+            None,
+            FieldSet::new(&[], Identifier(&SPAN_CALLSITE)),
+            Kind::SPAN,
+        );
+        static EVENT_CALLSITE: DefaultCallsite = DefaultCallsite::new(&EVENT_META);
+        static EVENT_META: Metadata<'static> = Metadata::new(
+            "filter_probe_event",
+            "maple_ingest::probe",
+            Level::INFO,
+            None,
+            None,
+            None,
+            FieldSet::new(&[], Identifier(&EVENT_CALLSITE)),
+            Kind::EVENT,
+        );
+
+        let span_filter = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new(SPAN_FILTER_DIRECTIVES));
+        assert!(
+            span_filter.enabled(&SPAN_META),
+            "the registry-wide filter must let info spans reach the OTel layer"
+        );
+
+        let log_filter = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new(LOG_FILTER_DIRECTIVES));
+        assert!(
+            !log_filter.enabled(&EVENT_META),
+            "hot-path info logs stay off by default"
+        );
+        assert!(
+            !log_filter.enabled(&SPAN_META),
+            "the log filter drops info spans too, which is why it must stay per-layer"
+        );
     }
 
     /// Records `(thread, span name, parent span name)` for every span opened

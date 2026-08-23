@@ -7,6 +7,11 @@ on:
         types: [completed]
         branches: [main]
     workflow_dispatch:
+        inputs:
+            aws_ingest:
+                description: "Also deploy the ingest gateway to ECS (MAPLE_DEPLOY_AWS_INGEST=1) for this run only"
+                type: boolean
+                default: false
 
 concurrency:
     group: deploy-stg
@@ -25,8 +30,11 @@ jobs:
         env:
             # Opt-in for the AWS/ECS ingest half (see alchemy.run.ts). Unset or not
             # "1", the deploy is the pure-Cloudflare stack that shipped in 2m05s.
-            # Set the repo variable to "1" to reproduce the hang under investigation.
-            MAPLE_DEPLOY_AWS_INGEST: ${{ vars.MAPLE_DEPLOY_AWS_INGEST }}
+            # Standing opt-in is the MAPLE_DEPLOY_AWS_INGEST variable (set it on the
+            # `staging` environment to scope it to this stage); a manual run can
+            # force it on for one deploy via the `aws_ingest` input, which is how a
+            # branch gets the gateway onto ECS for testing without touching the var.
+            MAPLE_DEPLOY_AWS_INGEST: ${{ (github.event_name == 'workflow_dispatch' && inputs.aws_ingest) && '1' || vars.MAPLE_DEPLOY_AWS_INGEST }}
             INFISICAL_ENV_SLUG: staging
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
@@ -53,6 +61,7 @@ jobs:
 
             # AFTER Infisical — see the note in deploy-prd.yml.
             - name: Configure AWS credentials (OIDC)
+              id: aws
               uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -110,5 +119,34 @@ jobs:
             - name: Run database migrations
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
 
+            # AWS_ACCOUNT_ID: see the note in deploy-prd.yml.
+            # continue-on-error so the certificate step below can finish the job;
+            # the last step turns an unrecovered failure back into a red run.
             - name: Deploy STG stack with Alchemy
+              id: deploy
+              continue-on-error: true
               run: bun run alchemy:deploy:stg
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+
+            # First pass of a stage with the AWS half on: the ingest ACM certificate
+            # is created PENDING_VALIDATION and the 443 listener fails. Finish the
+            # job here — create the validation CNAME in the Cloudflare zone with the
+            # token Infisical already provides, wait for ISSUED, deploy again. A
+            # deploy that failed for any other reason reaches this too: the script
+            # is a no-op on an ISSUED certificate and the retry fails the same way.
+            - name: Validate the ingest certificate and retry the deploy
+              id: retry
+              if: ${{ steps.deploy.outcome == 'failure' && env.MAPLE_DEPLOY_AWS_INGEST == '1' }}
+              env:
+                  INGEST_DOMAIN: ingest-staging.maple.dev
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+              run: |
+                  bash scripts/ingest-cert-validate.sh
+                  bun run alchemy:deploy:stg
+
+            - name: Fail the run if the deploy did not succeed
+              if: ${{ steps.deploy.outcome == 'failure' && steps.retry.outcome != 'success' }}
+              run: |
+                  echo "::error::alchemy deploy failed and the certificate-validation retry did not recover it (retry outcome: ${{ steps.retry.outcome }})"
+                  exit 1

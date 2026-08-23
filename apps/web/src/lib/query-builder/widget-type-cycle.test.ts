@@ -11,6 +11,7 @@ import {
 	type QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-utils"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
+import { defaultFunnelDraft } from "@/lib/query-builder/widget-builder-shared"
 
 /**
  * What a widget routed to, as one comparable value.
@@ -88,7 +89,7 @@ function makeState(overrides: Partial<QueryBuilderWidgetState> = {}): QueryBuild
 		gaugeMax: "",
 		sparklineEnabled: false,
 		markdownContent: "",
-		funnel: { steps: [], keyBy: "person", windowSeconds: 86400 },
+		funnel: defaultFunnelDraft(),
 		...overrides,
 	}
 }

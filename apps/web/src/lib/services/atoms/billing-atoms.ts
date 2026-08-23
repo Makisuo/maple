@@ -9,6 +9,10 @@ export const BILLING_CUSTOMER_KEY = "billingCustomer"
 export const BILLING_PLANS_KEY = "billingPlans"
 export const BILLING_USAGE_KEY = "billingUsage"
 export const BILLING_INVOICES_KEY = "billingInvoices"
+// Billing details (company name, address, tax IDs) live on the Stripe customer,
+// not the Autumn one, so they get their own key: no customer-level mutation
+// changes them and none of theirs changes the customer.
+export const BILLING_PROFILE_KEY = "billingProfile"
 
 // Read atoms. Transient token-settle 401s are retried by the shared client
 // (api-client-transform.ts scopes a 401 retry to the billing paths), and effect-atom
@@ -22,12 +26,12 @@ export const billingPlansAtom = retainedQuery("billingPublic", "listPlans", {
 	reactivityKeys: [BILLING_PLANS_KEY],
 })
 
-// The billing page always meters the same five features over one billing cycle,
-// so a single static atom (not a family) is enough.
+// The billing page always meters the same five features over the current
+// billing cycle (the API resolves the window), so a single static atom (not a
+// family) is enough.
 export const billingUsageAtom = retainedInternalQuery("billing", "getUsage", {
 	query: {
 		featureId: ["logs", "traces", "metrics", "browser_sessions", "product_events"],
-		range: "1bc",
 	},
 	reactivityKeys: [BILLING_USAGE_KEY],
 })
@@ -43,6 +47,12 @@ export const billingDailySpendAtom = retainedInternalQuery("billing", "getDailyS
 	reactivityKeys: [BILLING_CUSTOMER_KEY],
 })
 
+// Settings-only read of the Stripe-side billing details. Not fetched on
+// every page like the customer, so no edge cache behind it either.
+export const billingProfileAtom = retainedInternalQuery("billing", "getBillingProfile", {
+	reactivityKeys: [BILLING_PROFILE_KEY],
+})
+
 export const attachMutation = MapleInternalAtomClient.mutation("billing", "attach")
 export const previewAttachMutation = MapleInternalAtomClient.mutation("billing", "previewAttach")
 export const openCustomerPortalMutation = MapleInternalAtomClient.mutation("billing", "openCustomerPortal")
@@ -50,3 +60,9 @@ export const updateBillingControlsMutation = MapleInternalAtomClient.mutation(
 	"billing",
 	"updateBillingControls",
 )
+export const updateBillingProfileMutation = MapleInternalAtomClient.mutation(
+	"billing",
+	"updateBillingProfile",
+)
+export const addBillingTaxIdMutation = MapleInternalAtomClient.mutation("billing", "addBillingTaxId")
+export const removeBillingTaxIdMutation = MapleInternalAtomClient.mutation("billing", "removeBillingTaxId")

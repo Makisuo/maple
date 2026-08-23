@@ -242,13 +242,32 @@ export interface AutumnClientApi {
 		options: {
 			readonly expand: ReadonlyArray<CustomerExpand>
 			readonly customerData?: AutumnCustomerData | undefined
+			/**
+			 * Force the linked Stripe customer into existence now. Autumn otherwise
+			 * creates it lazily on the first billing operation, and the billing
+			 * details (name, address, tax IDs) have nowhere to live until it exists.
+			 */
+			readonly createInStripe?: boolean | undefined
 		},
 	) => AutumnCall
+	/**
+	 * Always an explicit window. Autumn's named `1bc` range is NOT "the current
+	 * cycle since the last reset": it looks backward one cycle-length from now
+	 * (`calculateBillingCycleResult` in its analytics utils), so mid-cycle it
+	 * sums most of the PREVIOUS cycle too and overstated every usage card 3-4x.
+	 */
 	readonly aggregateEvents: (
 		customerId: string,
-		options: { readonly featureId: ReadonlyArray<string> | string; readonly range: string },
+		options: {
+			readonly featureId: ReadonlyArray<string> | string
+			/** Epoch ms, `start < end`. */
+			readonly customRange: { readonly start: number; readonly end: number }
+		},
 	) => AutumnCall
-	readonly attach: (customerId: string, options: { readonly planId: string }) => AutumnCall
+	readonly attach: (
+		customerId: string,
+		options: { readonly planId: string; readonly successUrl?: string | undefined },
+	) => AutumnCall
 	readonly previewAttach: (customerId: string, options: { readonly planId: string }) => AutumnCall
 	readonly openCustomerPortal: (
 		customerId: string,
@@ -364,20 +383,23 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientApi>
 				callAutumn(httpClient, secretKey, apiUrl, route, body)
 
 			return {
-				getOrCreateCustomer: (customerId, { expand, customerData }) =>
+				getOrCreateCustomer: (customerId, { expand, customerData, createInStripe }) =>
 					call("getOrCreateCustomer", {
 						customer_id: customerId,
 						...customerDataFields(customerData),
+						// Only when asked: the default read path must stay byte-for-byte
+						// what production has always sent.
+						...(createInStripe !== undefined ? { create_in_stripe: createInStripe } : undefined),
 						// The SDK's custom handler appended this unconditionally, and the
 						// billing UI reads `balances` — keep appending it.
 						expand: [...expand, "balances.feature"],
 					}),
 
-				aggregateEvents: (customerId, { featureId, range }) =>
+				aggregateEvents: (customerId, { featureId, customRange }) =>
 					call("aggregateEvents", {
 						customer_id: customerId,
 						feature_id: featureId,
-						range,
+						custom_range: { start: customRange.start, end: customRange.end },
 						// Zod default on the SDK's outbound params — genuinely on the wire.
 						bin_size: "day",
 					}),
@@ -387,11 +409,15 @@ export class AutumnClient extends Context.Service<AutumnClient, AutumnClientApi>
 				// `customerData` we handed it here. Pre-identifying the buyer would need a
 				// separate `customers.get_or_create` call on the checkout path — a real
 				// change, not a port.
-				attach: (customerId, { planId }) =>
+				attach: (customerId, { planId, successUrl }) =>
 					call("attach", {
 						customer_id: customerId,
 						plan_id: planId,
 						redirect_mode: "if_required", // Zod default on the SDK's outbound params.
+						// Only when the caller has one: Autumn falls back to its configured
+						// default otherwise, and an explicit `undefined` is not "absent" on
+						// the wire for every JSON encoder.
+						...(successUrl !== undefined ? { success_url: successUrl } : undefined),
 					}),
 
 				previewAttach: (customerId, { planId }) =>

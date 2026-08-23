@@ -7,6 +7,7 @@ import {
 	overageUnits,
 	projectCycleSpend,
 	resolveSubscriptionPlan,
+	meteredUsage,
 } from "./billing"
 
 // The Startup plan as it ships in apps/api/autumn.config.ts: $39/mo, 100 GB of
@@ -17,6 +18,21 @@ const startupFeatures = {
 	metrics: { used: 160, included: 100, ratePerUnit: 0.3 },
 	browser_sessions: { used: 26_700, included: 5_000, ratePerUnit: 0.002 },
 }
+
+describe("meteredUsage", () => {
+	it("prefers the balance meter Autumn invoices from over the event aggregate", () => {
+		// The aggregate is a rolling cycle-length window, so mid-cycle it overstates.
+		expect(meteredUsage({ usage: 379.75 }, 433.98)).toBe(379.75)
+		expect(meteredUsage({ usage: 0 }, 12)).toBe(0)
+	})
+
+	it("falls back to the aggregate for a feature with no balance (not on the plan)", () => {
+		expect(meteredUsage(undefined, 1_576)).toBe(1_576)
+		expect(meteredUsage({ usage: null }, 1_576)).toBe(1_576)
+		expect(meteredUsage({}, undefined)).toBe(0)
+		expect(meteredUsage(undefined, undefined)).toBe(0)
+	})
+})
 
 describe("overageUnits", () => {
 	it("is the excess over included, floored at zero", () => {

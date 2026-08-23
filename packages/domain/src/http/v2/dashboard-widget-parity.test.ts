@@ -110,6 +110,7 @@ const fullDisplay = {
 		keyBy: "person",
 		windowSeconds: 86400,
 		breakdownBy: "attribute:plan",
+		filters: { country: "DE", utmSource: "twitter", visitorType: "new" },
 	},
 	histogram: { bucketCount: 10, bucketWidth: 2, logScaleY: false },
 	heatmap: { colorScale: "amber", scaleType: "linear" },
@@ -154,6 +155,7 @@ describe("the v2 widget display mirrors the stored one", () => {
 				key_by: "person",
 				window_seconds: 86400,
 				breakdown_by: "attribute:plan",
+				filters: { country: "DE", utm_source: "twitter", visitor_type: "new" },
 				// Steps are the query-engine contract and stay camelCase inside.
 				steps: [
 					{ kind: "session", dimension: "utmSource", value: "twitter" },

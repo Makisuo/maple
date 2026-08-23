@@ -9,6 +9,7 @@ public typealias ErrorIssueDetail = Components.Schemas.ErrorIssueDetail
 public typealias ErrorIssueActor = Components.Schemas.ErrorIssueActor
 public typealias ErrorIncident = Components.Schemas.ErrorIncident
 public typealias ErrorIssueSampleTrace = Components.Schemas.ErrorIssueSampleTrace
+public typealias ErrorIssueEnvironment = Components.Schemas.ErrorIssueEnvironment
 public typealias ErrorIssueServiceCount = Components.Schemas.ErrorIssueServiceCount
 public typealias ErrorIssueTimeseriesPoint = Components.Schemas.ErrorIssueTimeseriesPoint
 public typealias IssueSeverity = Components.Schemas._MapleIssueSeverity

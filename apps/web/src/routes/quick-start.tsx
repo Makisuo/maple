@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react"
 import { createFileRoute, Navigate } from "@tanstack/react-router"
+import { Schema } from "effect"
 import { useAuth } from "@clerk/clerk-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
@@ -14,8 +15,16 @@ import { useQuickStart, type StepId } from "@/hooks/use-quick-start"
 import { hasSelectedPlan, resolvePlanAccess } from "@/lib/billing/plan-gating"
 import { STEP_IDS, type RoleOption } from "@/atoms/quick-start-atoms"
 
+const QuickStartSearch = Schema.Struct({
+	// Where __root sends the user once onboarding completes.
+	redirect_url: Schema.optional(Schema.String),
+	// Stripe Checkout return marker — see `lib/billing/checkout-return.ts`.
+	checkout: Schema.optional(Schema.Literal("complete")),
+})
+
 export const Route = createFileRoute("/quick-start")({
 	component: QuickStartPage,
+	validateSearch: Schema.toStandardSchemaV1(QuickStartSearch),
 })
 
 export const STEP_MOTION = {

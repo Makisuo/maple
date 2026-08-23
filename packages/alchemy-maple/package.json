@@ -45,7 +45,7 @@
 		"@effect/vitest": "4.0.0-rc.108",
 		"@maple/domain": "workspace:*",
 		"@types/node": "catalog:tooling",
-		"alchemy": "2.0.0-beta.72",
+		"alchemy": "2.0.0-beta.74",
 		"effect": "catalog:effect",
 		"tsdown": "^0.22.14",
 		"typescript": "catalog:tooling",

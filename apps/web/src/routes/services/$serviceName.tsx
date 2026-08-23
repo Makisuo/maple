@@ -4,6 +4,7 @@ import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { Option, Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { UnnamedServiceHint, isUnnamedService } from "@/components/services/unnamed-service-hint"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
@@ -194,6 +195,7 @@ function ServiceDetailContent() {
 								<PageLayout.Title className="flex items-center gap-2.5" title={serviceName}>
 									<ServiceDot serviceName={serviceName} className="size-3" />
 									<span className="truncate">{serviceName}</span>
+									{isUnnamedService(serviceName) && <UnnamedServiceHint />}
 								</PageLayout.Title>
 							}
 						>

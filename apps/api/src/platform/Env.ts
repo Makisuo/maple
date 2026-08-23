@@ -51,6 +51,14 @@ export interface EnvConfig {
 	/** Svix signing secret (`whsec_…`) for `POST /webhooks/autumn`; the route answers 503 while unset. */
 	readonly AUTUMN_WEBHOOK_SECRET: Option.Option<Redacted.Redacted<string>>
 	/**
+	 * Stripe secret (or restricted, Customers read/write) key for the billing
+	 * details the Autumn API has no surface for — company name, address and tax
+	 * IDs on the Stripe customer Autumn links. Unset → those routes answer
+	 * `BillingNotConfiguredError`; nothing else depends on it.
+	 */
+	readonly STRIPE_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
+	readonly STRIPE_API_URL: string
+	/**
 	 * Self-observability ingest key (`@maple-dev/effect-sdk` reads the same variable
 	 * for OTLP export). Also the default credential for server-side product events.
 	 */
@@ -158,6 +166,8 @@ const envConfig = Config.all({
 	AUTUMN_SECRET_KEY: optionalRedacted("AUTUMN_SECRET_KEY"),
 	AUTUMN_API_URL: stringWithDefault("AUTUMN_API_URL", "https://api.useautumn.com"),
 	AUTUMN_WEBHOOK_SECRET: optionalRedacted("AUTUMN_WEBHOOK_SECRET"),
+	STRIPE_SECRET_KEY: optionalRedacted("STRIPE_SECRET_KEY"),
+	STRIPE_API_URL: stringWithDefault("STRIPE_API_URL", "https://api.stripe.com"),
 	MAPLE_INGEST_KEY: optionalRedacted("MAPLE_INGEST_KEY"),
 	MAPLE_ENDPOINT: optionalString("MAPLE_ENDPOINT"),
 	MAPLE_PRODUCT_EVENTS_INGEST_KEY: optionalRedacted("MAPLE_PRODUCT_EVENTS_INGEST_KEY"),

@@ -75,9 +75,11 @@ ClickHouse migration 0020 moved every MV onto the coalesce, so our own rollups n
 
 | Key | Type | Source | Default | Notes |
 |---|---|---|---|---|
-| `maple_org_id` | string | env `MAPLE_INTERNAL_ORG_ID` | `"internal"` | Tags Maple's own services (so their self-traces don't pollute customer trace lists). Set per process. |
+| `maple_org_id` | string | env `MAPLE_INTERNAL_ORG_ID` | **none — required** | Tags Maple's own services (so their self-traces don't pollute customer trace lists). Set per process. |
 
-Source: `apps/ingest/src/main.rs:496-497, 539`.
+There used to be a `"internal"` fallback here. It was removed (2026-08-23) because it never disabled anything: an unset value shipped a full stream of traces, logs and metrics into the warehouse under an `OrgId` no org owns and no UI can read — which is how the AWS ingest fleet looked like it had lost its self-telemetry for a day. The gateway now refuses to boot without it (`AppConfig::from_env`).
+
+Source: `apps/ingest/src/main.rs` — `AppConfig::from_env` (parse) and `build_resource` call sites in `init_tracing` / `init_metrics` / `init_usage_metrics`.
 
 This is intentionally **not** `maple.org_id` (the vendor-namespaced span attribute used for the *customer's* org). Resource-level `maple_org_id` is the org running this Maple service; span-level `maple.org_id` is the org sending data through it. The two underscore-vs-dot spellings prevent confusion in trace search.
 

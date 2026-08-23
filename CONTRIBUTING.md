@@ -231,6 +231,7 @@ port and keep `VITE_*` / `MAPLE_INGEST_PUBLIC_URL` consistent.
 | ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
 | `INGEST_FORWARD_OTLP_ENDPOINT`     | yes            | `http://127.0.0.1:4318` for local collector                             |
 | `INGEST_WRITE_MODE`                | recommended    | `forward` for ClickHouse stack (default `tinybird`)                     |
+| `MAPLE_INTERNAL_ORG_ID`            | yes            | Org the gateway files its OWN telemetry under; no default               |
 | `MAPLE_INGEST_KEY_ENCRYPTION_KEY`  | yes\*          | \*Required for postgres key store / ClickHouse direct path              |
 | `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` | yes            | Same value as API                                                       |
 | `MAPLE_SELF_HOSTED_MODE`           | recommended    | `single_tenant` → static key store (no DB)                              |

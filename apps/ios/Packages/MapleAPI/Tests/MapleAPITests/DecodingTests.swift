@@ -95,7 +95,7 @@ struct DecodingTests {
 		#expect(ResolvedTimeWindow.format(parsed) == "2026-08-17T09:30:00.000Z")
 	}
 
-	@Test("Decodes issue detail with its timeseries, samples, and incidents")
+	@Test("Decodes issue detail with its timeseries, samples, incidents, and environments")
 	func issueDetail() throws {
 		let json = Data(
 			"""
@@ -112,7 +112,8 @@ struct DecodingTests {
 			   "timestamp":"2026-08-17T00:00:00.000Z","exception_message":"boom","duration_micros":15400}],
 			 "incidents":[{"id":"einc_1","object":"error_incident","issue_id":"iss_2xK9","status":"open",
 			   "reason":"regression","first_triggered_at":"2026-08-16T00:00:00.000Z",
-			   "last_triggered_at":"2026-08-17T00:00:00.000Z","resolved_at":null,"occurrence_count":12}]}
+			   "last_triggered_at":"2026-08-17T00:00:00.000Z","resolved_at":null,"occurrence_count":12}],
+			 "environments":[{"name":"production","count":405},{"name":"staging","count":12}]}
 			""".utf8
 		)
 
@@ -124,6 +125,7 @@ struct DecodingTests {
 		#expect(detail.incidents.first?.status == .open)
 		#expect(detail.incidents.first?.reason == .regression)
 		#expect(detail.incidents.first?.resolvedAt == nil)
+		#expect(detail.environments.map(\.name) == ["production", "staging"])
 	}
 
 	@Test("Decodes per-service issue counts")

@@ -1,8 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 import { Result } from "@/lib/effect-atom"
 
 import { useDebouncedValue } from "@maple/ui/hooks/use-debounced-value"
-import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -20,17 +19,15 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 
 import {
 	FUNNEL_KEY_BY_OPTIONS,
-	FUNNEL_SESSION_DIMENSIONS,
-	FUNNEL_SESSION_DIMENSION_LABEL,
 	FUNNEL_WINDOW_OPTIONS,
 	completedSteps,
 	stepLabel,
 	type FunnelBreakdownBy,
 	type FunnelDefinition,
 	type FunnelKeyBy,
-	type FunnelSessionDimension,
 	type FunnelStep,
 } from "./definition"
+import { BreakdownPicker } from "./breakdown-picker"
 import { FunnelStepBuilder } from "./funnel-step-builder"
 import { FunnelBreakdownTable, FunnelResults } from "./funnel-results"
 
@@ -41,10 +38,6 @@ import { FunnelBreakdownTable, FunnelResults } from "./funnel-results"
 
 const PAGE_SUGGESTION_LIMIT = 100
 const BREAKDOWN_LIMIT = 10
-
-const ATTRIBUTE_PREFIX = "attribute:"
-const NONE = "__none__"
-const ATTRIBUTE = "__attribute__"
 
 /** How long the definition may keep changing before it reaches the warehouse. */
 const DEFINITION_DEBOUNCE_MS = 400
@@ -191,20 +184,22 @@ export function AnalyticsFunnelsView({
 								</SelectContent>
 							</Select>
 						</LabelledSelect>
-						<BreakdownPicker
-							value={definition.breakdownBy}
-							onChange={(breakdownBy) =>
-								onDefinitionChange(
-									breakdownBy === undefined
-										? {
-												steps: definition.steps,
-												keyBy: definition.keyBy,
-												windowSeconds: definition.windowSeconds,
-											}
-										: { ...definition, breakdownBy },
-								)
-							}
-						/>
+						<LabelledSelect label="Break down by">
+							<BreakdownPicker
+								value={definition.breakdownBy}
+								onChange={(breakdownBy) =>
+									onDefinitionChange(
+										breakdownBy === undefined
+											? {
+													steps: definition.steps,
+													keyBy: definition.keyBy,
+													windowSeconds: definition.windowSeconds,
+												}
+											: { ...definition, breakdownBy },
+									)
+								}
+							/>
+						</LabelledSelect>
 					</div>
 				</div>
 				<div className="px-4 pb-4">
@@ -322,88 +317,6 @@ function LabelledSelect({ label, children }: { label: string; children: ReactNod
 			<span className="text-[11px] text-muted-foreground">{label}</span>
 			{children}
 		</div>
-	)
-}
-
-/**
- * Breakdown: none, one of the session dimensions, or `attribute:<key>` typed
- * by hand — the attribute keys on `track()` events are the customer's own
- * vocabulary and there is no cheap way to list them.
- *
- * "Attribute…" and the key it needs are two interactions, so the mode is held
- * here and only a NON-EMPTY key becomes a `breakdownBy`. Emitting the bare
- * `attribute:` prefix would break the funnel down by `Attributes['']`, which no
- * event carries: every person lands in the `(none)` group, and the aggregation
- * that produced it was pure waste.
- */
-function BreakdownPicker({
-	value,
-	onChange,
-}: {
-	value: FunnelBreakdownBy | undefined
-	onChange: (value: FunnelBreakdownBy | undefined) => void
-}) {
-	const fromValue = value !== undefined && value.startsWith(ATTRIBUTE_PREFIX)
-	const [attributeMode, setAttributeMode] = useState(fromValue)
-	const [attributeKey, setAttributeKey] = useState(fromValue ? value.slice(ATTRIBUTE_PREFIX.length) : "")
-	// The local mode only survives while nothing else is selected, so a URL that
-	// changes under us (Back, a shared link) wins over a stale "Attribute…".
-	const isAttribute = fromValue || (attributeMode && value === undefined)
-	const selected = isAttribute ? ATTRIBUTE : value === undefined ? NONE : value
-	const items = {
-		[NONE]: "None",
-		...FUNNEL_SESSION_DIMENSION_LABEL,
-		[ATTRIBUTE]: "Attribute…",
-	}
-	const emitAttribute = (key: string) => {
-		const trimmed = key.trim()
-		onChange(trimmed.length > 0 ? `${ATTRIBUTE_PREFIX}${trimmed}` : undefined)
-	}
-	return (
-		<LabelledSelect label="Break down by">
-			<Select
-				items={items}
-				value={selected}
-				onValueChange={(next) => {
-					if (next === NONE) {
-						setAttributeMode(false)
-						onChange(undefined)
-					} else if (next === ATTRIBUTE) {
-						setAttributeMode(true)
-						emitAttribute(attributeKey)
-					} else if (FUNNEL_SESSION_DIMENSIONS.includes(next as FunnelSessionDimension)) {
-						setAttributeMode(false)
-						onChange(next as FunnelSessionDimension)
-					}
-				}}
-			>
-				<SelectTrigger size="sm" className="w-32 min-w-0" aria-label="Break down by">
-					<SelectValue />
-				</SelectTrigger>
-				<SelectContent>
-					<SelectItem value={NONE}>None</SelectItem>
-					{FUNNEL_SESSION_DIMENSIONS.map((dimension) => (
-						<SelectItem key={dimension} value={dimension}>
-							{FUNNEL_SESSION_DIMENSION_LABEL[dimension]}
-						</SelectItem>
-					))}
-					<SelectItem value={ATTRIBUTE}>Attribute…</SelectItem>
-				</SelectContent>
-			</Select>
-			{isAttribute ? (
-				<Input
-					size="sm"
-					value={attributeKey}
-					onChange={(event) => {
-						setAttributeKey(event.target.value)
-						emitAttribute(event.target.value)
-					}}
-					placeholder="attribute key, e.g. plan"
-					aria-label="Breakdown attribute key"
-					className="w-40 font-mono text-xs"
-				/>
-			) : null}
-		</LabelledSelect>
 	)
 }
 

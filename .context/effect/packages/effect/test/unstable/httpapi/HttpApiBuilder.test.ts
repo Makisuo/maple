@@ -11,7 +11,7 @@ import {
   SchemaTransformation,
   Stream
 } from "effect"
-import { Etag, HttpPlatform } from "effect/unstable/http"
+import { Etag, HttpPlatform, HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import {
   HttpApi,
   HttpApiBuilder,
@@ -59,15 +59,22 @@ it.layer(TestServices)("HttpApiBuilder query parameters", (it) => {
     }))
 })
 
-it.effect("reuses response schema transformations by source AST", () => {
+it.effect("builds endpoint handlers lazily and memoizes them per route", () => {
+  class CountedMiddleware extends HttpApiMiddleware.Service<CountedMiddleware>()("CountedMiddleware") {}
+
+  let middlewareApplications = 0
   const SharedSuccess = Schema.String.pipe(HttpApiSchema.asText())
   const DistinctSuccess = Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/custom" }))
   const Api = HttpApi.make("Api").add(
     HttpApiGroup.make("test")
-      .add(HttpApiEndpoint.get("first", "/first", { success: SharedSuccess }))
-      .add(HttpApiEndpoint.get("second", "/second", { success: SharedSuccess }))
-      .add(HttpApiEndpoint.get("distinct", "/distinct", { success: DistinctSuccess }))
+      .add(HttpApiEndpoint.get("first", "/first", { success: SharedSuccess }).middleware(CountedMiddleware))
+      .add(HttpApiEndpoint.get("second", "/second", { success: SharedSuccess }).middleware(CountedMiddleware))
+      .add(HttpApiEndpoint.get("distinct", "/distinct", { success: DistinctSuccess }).middleware(CountedMiddleware))
   )
+  const CountedMiddlewareLive = Layer.succeed(CountedMiddleware)((httpEffect) => {
+    middlewareApplications++
+    return httpEffect
+  })
   const GroupLive = HttpApiBuilder.group(
     Api,
     "test",
@@ -76,20 +83,103 @@ it.effect("reuses response schema transformations by source AST", () => {
         .handle("first", () => Effect.succeed("first"))
         .handle("second", () => Effect.succeed("second"))
         .handle("distinct", () => Effect.succeed("distinct"))
-  )
+  ).pipe(Layer.provide(CountedMiddlewareLive))
+  const Health = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
+  const Routes = Layer.merge(
+    HttpApiBuilder.layer(Api).pipe(Layer.provide(GroupLive)),
+    Health
+  ).pipe(Layer.provide(TestServices))
 
   return Effect.acquireUseRelease(
     Effect.sync(() => vi.spyOn(Schema, "decodeTo")),
     (decodeTo) =>
-      Effect.gen(function*() {
-        yield* Effect.scoped(Layer.build(GroupLive))
-        const responseSchemaCalls = decodeTo.mock.calls.filter(
-          ([schema]) => schema === SharedSuccess || schema === DistinctSuccess
-        )
-        assert.strictEqual(responseSchemaCalls.length, 2)
-      }),
+      withHandler(Routes, (handler) =>
+        Effect.gen(function*() {
+          const responseSchemaCalls = () =>
+            decodeTo.mock.calls.filter(
+              ([schema]) => schema === SharedSuccess || schema === DistinctSuccess
+            )
+
+          const health = yield* Effect.promise(() => handler(new Request("http://test/health")))
+          assert.strictEqual(health.status, 200)
+          assert.strictEqual(responseSchemaCalls().length, 0)
+          assert.strictEqual(middlewareApplications, 0)
+
+          const first = yield* Effect.promise(() => handler(new Request("http://test/first")))
+          assert.strictEqual(first.status, 200)
+          assert.strictEqual(responseSchemaCalls().length, 1)
+          assert.strictEqual(middlewareApplications, 1)
+
+          const firstAgain = yield* Effect.promise(() => handler(new Request("http://test/first")))
+          assert.strictEqual(firstAgain.status, 200)
+          assert.strictEqual(responseSchemaCalls().length, 1)
+          assert.strictEqual(middlewareApplications, 1)
+
+          const second = yield* Effect.promise(() =>
+            Promise.all(
+              Array.from({ length: 20 }, () => handler(new Request("http://test/second")))
+            )
+          )
+          assert.ok(second.every((response) => response.status === 200))
+          assert.strictEqual(responseSchemaCalls().length, 1)
+          assert.strictEqual(middlewareApplications, 2)
+
+          const distinct = yield* Effect.promise(() => handler(new Request("http://test/distinct")))
+          assert.strictEqual(distinct.status, 200)
+          assert.strictEqual(responseSchemaCalls().length, 2)
+          assert.strictEqual(middlewareApplications, 3)
+        })),
     (decodeTo) => Effect.sync(() => decodeTo.mockRestore())
   )
+})
+
+it.effect("retries lazy endpoint initialization after a middleware construction defect", () => {
+  class FlakyMiddleware extends HttpApiMiddleware.Service<FlakyMiddleware>()("FlakyMiddleware") {}
+
+  let middlewareApplications = 0
+  const Api = HttpApi.make("Api").add(
+    HttpApiGroup.make("test").add(
+      HttpApiEndpoint.get("flaky", "/flaky", {
+        success: Schema.String.pipe(HttpApiSchema.asText())
+      }).middleware(FlakyMiddleware)
+    )
+  )
+  const FlakyMiddlewareLive = Layer.succeed(FlakyMiddleware)((httpEffect) => {
+    middlewareApplications++
+    if (middlewareApplications === 1) {
+      throw new Error("middleware construction defect")
+    }
+    return httpEffect
+  })
+  const GroupLive = HttpApiBuilder.group(
+    Api,
+    "test",
+    (handlers) => handlers.handle("flaky", () => Effect.succeed("ok"))
+  ).pipe(Layer.provide(FlakyMiddlewareLive))
+  const Health = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
+  const Routes = Layer.merge(
+    HttpApiBuilder.layer(Api).pipe(Layer.provide(GroupLive)),
+    Health
+  ).pipe(Layer.provide(TestServices))
+
+  return withHandler(Routes, (handler) =>
+    Effect.gen(function*() {
+      const health = yield* Effect.promise(() => handler(new Request("http://test/health")))
+      assert.strictEqual(health.status, 200)
+      assert.strictEqual(middlewareApplications, 0)
+
+      const first = yield* Effect.promise(() => handler(new Request("http://test/flaky")))
+      assert.strictEqual(first.status, 500)
+      assert.strictEqual(middlewareApplications, 1)
+
+      const second = yield* Effect.promise(() => handler(new Request("http://test/flaky")))
+      assert.strictEqual(second.status, 200)
+      assert.strictEqual(middlewareApplications, 2)
+
+      const third = yield* Effect.promise(() => handler(new Request("http://test/flaky")))
+      assert.strictEqual(third.status, 200)
+      assert.strictEqual(middlewareApplications, 2)
+    }))
 })
 
 it.layer(TestServices)("HttpApiBuilder payload content types", (it) => {
@@ -1371,3 +1461,13 @@ it.layer(TestServices)("HttpApiBuilder streaming success responses", (it) => {
       assert.deepStrictEqual(error, new HandlerFailure({ message: "handler failed" }))
     }))
 })
+
+const withHandler = <A, E, R>(
+  layer: Layer.Layer<never, never, HttpRouter.HttpRouter>,
+  use: (handler: (request: Request) => Promise<Response>) => Effect.Effect<A, E, R>
+) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => HttpRouter.toWebHandler(layer, { disableLogger: true })),
+    ({ handler }) => use(handler),
+    ({ dispose }) => Effect.promise(dispose)
+  )

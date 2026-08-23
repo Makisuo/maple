@@ -28,6 +28,12 @@ export type ProductEvent =
 	 * "started a plan"; this only exists to size checkout drop-off.
 	 */
 	| "plan_checkout_started"
+	/**
+	 * The buyer came back from Stripe. `confirmed` says whether the plan was
+	 * visible by the time we stopped waiting — a `false` is a Stripe→Autumn sync
+	 * slower than `CHECKOUT_CONFIRM_TIMEOUT_MS`, or an abandoned checkout.
+	 */
+	| "plan_checkout_returned"
 
 /**
  * Record a product event. Never throws and never awaits — the SDK buffers and

@@ -33,6 +33,7 @@ import {
 	isResolvableSha,
 } from "@/components/vcs/commit-sha-hover-card"
 import { QueryErrorState } from "@/components/common/query-error-state"
+import { UnnamedServiceHint, isUnnamedService } from "@/components/services/unnamed-service-hint"
 import {
 	type CommitBreakdown,
 	type ServiceOverview,
@@ -484,6 +485,7 @@ const ServiceRow = React.memo(function ServiceRow({
 				>
 					<ServiceDot serviceName={service.serviceName} />
 					<span className="min-w-0 truncate">{service.serviceName}</span>
+					{isUnnamedService(service.serviceName) && <UnnamedServiceHint />}
 					<HealthDot health={health} />
 				</Link>
 				{subtitle !== "" && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
@@ -897,6 +899,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 																	<span className="truncate">
 																		{service.serviceName}
 																	</span>
+																	{isUnnamedService(
+																		service.serviceName,
+																	) && <UnnamedServiceHint />}
 																	<HealthDot health={health} />
 																</div>
 																{subtitleFor(service) !== "" && (

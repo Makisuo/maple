@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
 import {
+	AddBillingTaxIdRequest,
 	BillingConflictError,
 	BillingControls,
 	BillingNotConfiguredError,
+	BillingProfile,
+	BillingProfileUnavailableError,
 	BillingPaymentRequiredError,
 	BillingRateLimitedError,
 	BillingRequestError,
@@ -128,5 +131,46 @@ describe("billing error presentation", () => {
 			new BillingRequestError({ ...context, upstreamStatus: 400, message: "Unknown plan id" }),
 		)
 		expect(body).toMatchObject({ type: "invalid_request_error", message: "Unknown plan id" })
+	})
+})
+
+describe("billing profile contract", () => {
+	const decodeProfile = Schema.decodeUnknownSync(BillingProfile)
+	const decodeAddRequest = Schema.decodeUnknownSync(AddBillingTaxIdRequest)
+
+	it("decodes an unlinked profile with nothing but the flag and an empty list", () => {
+		const profile = decodeProfile({ linked: false, taxIds: [] })
+		expect(profile.linked).toBe(false)
+		expect(profile.name).toBeUndefined()
+		expect(profile.taxIds).toEqual([])
+	})
+
+	it("keeps an unknown verification status and tax-id type as plain strings", () => {
+		// Stripe owns both vocabularies; a new value must not fail the decode.
+		const profile = decodeProfile({
+			linked: true,
+			name: "Acme",
+			address: { country: "DE" },
+			taxIds: [{ id: "txi", type: "xx_new", value: "1", verificationStatus: "brand_new" }],
+		})
+		expect(profile.taxIds[0]?.type).toBe("xx_new")
+		expect(profile.taxIds[0]?.verificationStatus).toBe("brand_new")
+	})
+
+	it("only accepts a Stripe tax-id type on the add request", () => {
+		expect(decodeAddRequest({ type: "eu_vat", value: "DE123456789" }).type).toBe("eu_vat")
+		expect(() => decodeAddRequest({ type: "not_a_type", value: "x" })).toThrow()
+		expect(() => decodeAddRequest({ type: "eu_vat", value: "" })).toThrow()
+	})
+
+	it("presents 'no Stripe customer yet' as a conflict with nothing for the caller to fix", () => {
+		const body = publicHttpErrorBody(
+			new BillingProfileUnavailableError({ message: "no stripe_id after create_in_stripe" }),
+		)
+		expect(body.type).toBe("conflict_error")
+		expect(body.code).toBe("billing_profile_unavailable")
+		expect(body.message).not.toContain("stripe_id")
+		expect(body.retryable).toBe(false)
+		expect(body.recovery).toBe("none")
 	})
 })

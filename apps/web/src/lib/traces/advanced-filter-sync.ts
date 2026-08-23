@@ -289,10 +289,60 @@ export function toWhereClause(filters: ParsedWhereClauseFilters): string | undef
 	return clauses.join(" AND ")
 }
 
+type ClauseFields = Omit<TracesSearchLike, "startTime" | "endTime" | "whereClause">
+
+/**
+ * The search params a clause owns, containing only the keys it actually sets.
+ * The key set is what tells `applyWhereClause` which params to drop when a
+ * later edit of the clause no longer produces them.
+ */
+function clauseFields(filters: ParsedWhereClauseFilters): ClauseFields {
+	const modes = filters.matchModes ?? {}
+	const fields: ClauseFields = {}
+
+	if (filters.service) {
+		fields.services = [filters.service]
+		fields.serviceMatchMode = modes.service
+	}
+	if (filters.spanName) {
+		fields.spanNames = [filters.spanName]
+		fields.spanNameMatchMode = modes.spanName
+	}
+	if (filters.deploymentEnv) {
+		fields.deploymentEnvs = [filters.deploymentEnv]
+		fields.deploymentEnvMatchMode = modes.deploymentEnv
+	}
+	if (filters.httpMethod) fields.httpMethods = [filters.httpMethod]
+	if (filters.httpStatusCode) fields.httpStatusCodes = [filters.httpStatusCode]
+	if (filters.hasError !== undefined) fields.hasError = filters.hasError
+	if (filters.rootOnly !== undefined) fields.rootOnly = filters.rootOnly
+	if (filters.minDurationMs !== undefined) fields.minDurationMs = filters.minDurationMs
+	if (filters.maxDurationMs !== undefined) fields.maxDurationMs = filters.maxDurationMs
+	if (filters.attributeFilters.length > 0) fields.attributeFilters = filters.attributeFilters
+	if (filters.resourceAttributeFilters.length > 0) {
+		fields.resourceAttributeFilters = filters.resourceAttributeFilters
+	}
+	if (filters.excludedServices?.length) fields.excludedServices = filters.excludedServices
+	if (filters.excludedSpanNames?.length) fields.excludedSpanNames = filters.excludedSpanNames
+	if (filters.excludedDeploymentEnvs?.length) {
+		fields.excludedDeploymentEnvs = filters.excludedDeploymentEnvs
+	}
+	if (filters.excludedHttpMethods?.length) fields.excludedHttpMethods = filters.excludedHttpMethods
+	if (filters.excludedHttpStatusCodes?.length) {
+		fields.excludedHttpStatusCodes = filters.excludedHttpStatusCodes
+	}
+
+	return fields
+}
+
 /**
  * One-way transform: parses a where clause string and merges the parsed
  * filter values into the search params. Does NOT reverse-sync checkboxes
  * back into whereClause text.
+ *
+ * Params the previous clause contributed are dropped first, so removing a
+ * clause removes its filter from the URL instead of leaving it stuck there.
+ * Params the previous clause never set (sidebar selections) are kept.
  */
 export function applyWhereClause(search: TracesSearchLike, whereClause: string): TracesSearchLike {
 	const trimmed = whereClause.trim()
@@ -323,44 +373,16 @@ export function applyWhereClause(search: TracesSearchLike, whereClause: string):
 		}
 	}
 
-	const { filters } = parseWhereClause(trimmed)
-	const modes = filters.matchModes ?? {}
+	const carried: TracesSearchLike = { ...search }
+	if (search.whereClause) {
+		for (const key of Object.keys(clauseFields(parseWhereClause(search.whereClause).filters))) {
+			delete carried[key as keyof ClauseFields]
+		}
+	}
 
 	return {
-		...search,
+		...carried,
+		...clauseFields(parseWhereClause(trimmed).filters),
 		whereClause: trimmed,
-		services: filters.service ? [filters.service] : search.services,
-		spanNames: filters.spanName ? [filters.spanName] : search.spanNames,
-		hasError: filters.hasError ?? search.hasError,
-		minDurationMs: filters.minDurationMs ?? search.minDurationMs,
-		maxDurationMs: filters.maxDurationMs ?? search.maxDurationMs,
-		httpMethods: filters.httpMethod ? [filters.httpMethod] : search.httpMethods,
-		httpStatusCodes: filters.httpStatusCode ? [filters.httpStatusCode] : search.httpStatusCodes,
-		deploymentEnvs: filters.deploymentEnv ? [filters.deploymentEnv] : search.deploymentEnvs,
-		rootOnly: filters.rootOnly ?? search.rootOnly,
-		attributeFilters:
-			filters.attributeFilters.length > 0 ? filters.attributeFilters : search.attributeFilters,
-		resourceAttributeFilters:
-			filters.resourceAttributeFilters.length > 0
-				? filters.resourceAttributeFilters
-				: search.resourceAttributeFilters,
-		serviceMatchMode: filters.service ? modes.service : search.serviceMatchMode,
-		spanNameMatchMode: filters.spanName ? modes.spanName : search.spanNameMatchMode,
-		deploymentEnvMatchMode: filters.deploymentEnv ? modes.deploymentEnv : search.deploymentEnvMatchMode,
-		excludedServices: filters.excludedServices?.length
-			? filters.excludedServices
-			: search.excludedServices,
-		excludedSpanNames: filters.excludedSpanNames?.length
-			? filters.excludedSpanNames
-			: search.excludedSpanNames,
-		excludedDeploymentEnvs: filters.excludedDeploymentEnvs?.length
-			? filters.excludedDeploymentEnvs
-			: search.excludedDeploymentEnvs,
-		excludedHttpMethods: filters.excludedHttpMethods?.length
-			? filters.excludedHttpMethods
-			: search.excludedHttpMethods,
-		excludedHttpStatusCodes: filters.excludedHttpStatusCodes?.length
-			? filters.excludedHttpStatusCodes
-			: search.excludedHttpStatusCodes,
 	}
 }

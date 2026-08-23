@@ -17,7 +17,9 @@ import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { serverErrorSpanMiddleware } from "./http/server-error-span"
 import { v2WorkerUnavailableResponse } from "./http/v2-worker-unavailable"
+import { API_CORS_RESPONSE_HEADERS, apiCorsPreflightResponse } from "./http/api-cors"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
+import { makeRecoverablePromiseMemo } from "./platform/recoverable-promise-memo"
 import { classifyWorkerQueue } from "./queue-dispatch"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
@@ -52,6 +54,11 @@ const WorkerPlatformLive = Layer.mergeAll(
 	WorkerHttpPlatformLive,
 )
 
+// HttpRouter accepts an immutable request-local context. The worker does not
+// inject per-request services here, so reuse the same empty value rather than
+// rebuilding it on every invocation.
+const HandlerContext = Context.empty() as never
+
 // Construct telemetry once at module scope — `layer` is stable, `flush(env)`
 // resolves env lazily on first call. Including `telemetry.layer` in the
 // handler's layer composition is the critical bit: the Tracer reference must
@@ -65,23 +72,6 @@ const telemetry = MapleCloudflareSDK.make({
 	// Ok spans instead of errors — see @maple/domain/anticipated-errors.
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS, ...MCP_ANTICIPATED_ERROR_IDENTIFIERS],
 })
-
-// `HttpMiddleware.tracer` ends the root server span on a deferred macrotask
-// (`scheduleTask(span.end, 0)`), but `telemetry.flush` drains synchronously.
-// Flushing immediately after the response loses the server span — its macrotask
-// hasn't fired yet. Isolated requests (e.g. a GitHub webhook) freeze the isolate
-// before a subsequent request rescues it, so the trace is silently dropped.
-// Yield one macrotask first so `span.end` runs before we drain.
-//
-// The SDK now owns this drain — `telemetry.flush` yields a macrotask inside its
-// own serialized body. This local yield is kept deliberately redundant (an extra
-// macrotask is harmless) so a version skew between the worker and the published
-// SDK can't drop spans; remove it once the SDK version carrying that change is
-// pinned here.
-const flushTelemetry = async (env: Record<string, unknown>): Promise<void> => {
-	await new Promise<void>((resolve) => setTimeout(resolve, 0))
-	await telemetry.flush(env)
-}
 
 /**
  * Install one Postgres connection for the whole of `program`.
@@ -104,10 +94,17 @@ const scoped = async <A, E, R>(program: Effect.Effect<A, E, R>) => {
 // the top level near-empty; the cost moves to the first request, which runs
 // under the far larger per-request CPU budget.
 const buildHandler = async () => {
-	const { HttpServicesLive } = await import("./runtime/service-graph")
-	const { AllRoutes, ApiAuthLive, ApiObservabilityLive } = await import("./runtime/http-graph")
-	const { layerPg } = await import("@/platform/DatabasePgLive")
-	const { pgConnectionMiddleware } = await import("@/platform/pg-connection-scope")
+	const [
+		{ HttpServicesLive },
+		{ AllRoutes, ApiAuthLive, ApiObservabilityLive },
+		{ layerPg },
+		{ pgConnectionMiddleware },
+	] = await Promise.all([
+		import("./runtime/service-graph"),
+		import("./runtime/http-graph"),
+		import("@/platform/DatabasePgLive"),
+		import("@/platform/pg-connection-scope"),
+	])
 	// The worker's one per-request middleware stack. Ordering is load-bearing:
 	// `serverErrorSpanMiddleware` must stay OUTERMOST (directly under
 	// `HttpMiddleware.tracer`) so it converts a 5xx success into the failure the
@@ -138,19 +135,20 @@ const buildHandler = async () => {
 
 // Single isolate-wide handler — `toWebHandler` builds its own ManagedRuntime
 // lazily on first invocation and keeps it for the lifetime of the isolate.
-// Memoized via the build promise so concurrent first requests share one build;
-// a construction failure surfaces as a 504 in `handle` rather than bricking the
-// isolate.
-let handlerPromise: ReturnType<typeof buildHandler> | undefined
-const getHandler = () => (handlerPromise ??= buildHandler())
+// Memoized via the build promise so concurrent first requests share one build.
+// A rejected build is cleared after those callers observe it, allowing a later
+// request to recover instead of pinning the isolate to a rejected promise.
+const handlerMemo = makeRecoverablePromiseMemo(buildHandler)
 
 // RPC has no HttpApi request to construct the application services for it, so
 // it gets a sibling isolate-wide ManagedRuntime. Its headless service graph
 // stays behind a dynamic import, preserving the worker's startup-CPU budget.
 const buildRpcRuntime = async (env: Record<string, unknown>) => {
-	const { InvestigationServicesLive } = await import("./runtime/mcp-service-graph")
-	const { layerPg } = await import("@/platform/DatabasePgLive")
-	return ManagedRuntime.make(
+	const [{ InvestigationServicesLive }, { layerPg }] = await Promise.all([
+		import("./runtime/mcp-service-graph"),
+		import("@/platform/DatabasePgLive"),
+	])
+	const runtime = ManagedRuntime.make(
 		InvestigationServicesLive.pipe(
 			Layer.provideMerge(WorkerPlatformLive),
 			Layer.provideMerge(layerPg),
@@ -159,10 +157,19 @@ const buildRpcRuntime = async (env: Record<string, unknown>) => {
 			Layer.provideMerge(WorkerConfigProviderLayer),
 		),
 	)
+	try {
+		// ManagedRuntime also acquires lazily and retains a failed build fiber.
+		// Acquire before resolving the recoverable outer promise so a later RPC
+		// can construct a fresh runtime after an initialization failure.
+		await runtime.context()
+		return runtime
+	} catch (error) {
+		await runtime.dispose()
+		throw error
+	}
 }
 
-let rpcRuntimePromise: ReturnType<typeof buildRpcRuntime> | undefined
-const getRpcRuntime = (env: Record<string, unknown>) => (rpcRuntimePromise ??= buildRpcRuntime(env))
+const rpcRuntimeMemo = makeRecoverablePromiseMemo(buildRpcRuntime)
 
 type InternalRpcMethod = "listMcpTools" | "callMcpTool" | "submitDiagnosis"
 
@@ -193,7 +200,7 @@ const runInternalRpc = async (
 	ctx: ExecutionContext,
 ) => {
 	const [runtime, { callMcpToolRpc, listMcpToolsRpc, submitDiagnosisRpc }] = await Promise.all([
-		getRpcRuntime(env),
+		rpcRuntimeMemo.get(env),
 		import("./internal-rpc"),
 	])
 	let exit: Exit.Exit<unknown, unknown>
@@ -210,7 +217,7 @@ const runInternalRpc = async (
 			exit = await runtime.runPromiseExit(await scoped(submitDiagnosisRpc(input)))
 			break
 	}
-	ctx.waitUntil(flushTelemetry(env))
+	ctx.waitUntil(telemetry.flush(env))
 	if (exit._tag === "Success") return exit.value
 	const defect = exit.cause.reasons.find(Cause.isDieReason)
 	if (defect) throw defect.defect
@@ -241,6 +248,26 @@ const isV2Request = (request: Request): boolean => {
 		return false
 	}
 }
+
+/**
+ * Liveness does not need the domain graph, service graph, authentication,
+ * database scope, route codecs, or telemetry runtime. Keeping it
+ * bootstrap-safe also lets a cold isolate report health when an unrelated
+ * application binding is unavailable.
+ */
+const isHealthRequest = (request: Request): boolean => {
+	if (request.method !== "GET") return false
+	try {
+		return new URL(request.url).pathname === "/health"
+	} catch {
+		return false
+	}
+}
+
+const healthResponse = (): Response =>
+	new Response("OK", {
+		headers: { ...API_CORS_RESPONSE_HEADERS, "content-type": "text/plain; charset=utf-8" },
+	})
 
 const readMcpSessionsBinding = (env: Record<string, unknown>): SessionsBinding | undefined => {
 	const candidate = env.MCP_SESSIONS
@@ -283,16 +310,24 @@ const handle = async (
 	env: Record<string, unknown>,
 	ctx: ExecutionContext,
 ): Promise<Response> => {
-	const kv = readMcpSessionsBinding(env)
+	if (isHealthRequest(request)) return healthResponse()
+	if (request.method === "OPTIONS") return apiCorsPreflightResponse()
+
 	const isMcp = isMcpPost(request)
+	const kv = isMcp ? readMcpSessionsBinding(env) : undefined
 	const reqSid = isMcp ? request.headers.get("mcp-session-id") : null
+	// Start the expensive cold handler build and the independent KV read before
+	// buffering an MCP body. Warm requests resolve both promises immediately;
+	// cold MCP requests hide module evaluation and KV latency behind body I/O.
+	const pendingHandler = handlerMemo.get()
+	const pendingSession = kv && reqSid ? preloadSession(kv, reqSid) : undefined
 
 	// MCP diagnostics: buffer the body so we can peek the JSON-RPC method/id
 	// before handing it off to Effect, then re-emit the request with the
 	// buffered body so the inner handler still sees a readable stream.
 	let forwardRequest = request
 	let mcpFrame: McpFrame | null = null
-	const startedAt = Date.now()
+	const startedAt = isMcp ? Date.now() : undefined
 	if (isMcp) {
 		const bodyText = await request.text()
 		mcpFrame = peekMcpFrame(bodyText)
@@ -307,11 +342,20 @@ const handle = async (
 		)
 	}
 
-	if (kv && reqSid) await preloadSession(kv, reqSid)
-
 	try {
-		const { handler } = await getHandler()
-		const response = await handler(forwardRequest, Context.empty() as never)
+		const built = pendingSession
+			? (await Promise.all([pendingHandler, pendingSession]))[0]
+			: await pendingHandler
+		let response: Response
+		try {
+			response = await built.handler(forwardRequest, HandlerContext)
+		} catch (error) {
+			// `toWebHandler` acquires lazily and pins a rejected inner build.
+			// Evict only the exact wrapper used by this request so the next real
+			// request can rebuild it; overlapping failures cannot clear a retry.
+			if (handlerMemo.evict(pendingHandler)) await built.dispose()
+			throw error
+		}
 		if (kv && isMcp) {
 			const resSid = response.headers.get("mcp-session-id")
 			// Only persist when the server issued a new session — i.e. on
@@ -323,7 +367,7 @@ const handle = async (
 				if (put) ctx.waitUntil(put)
 			}
 		}
-		if (isMcp && mcpFrame) {
+		if (isMcp && mcpFrame && startedAt !== undefined) {
 			console.log(
 				`[mcp-out] method=${mcpFrame.method} id=${mcpFrame.id}` +
 					` status=${response.status} dur=${Date.now() - startedAt}ms` +
@@ -331,7 +375,7 @@ const handle = async (
 					` resp_sid=${response.headers.get("mcp-session-id") ?? "-"}`,
 			)
 		}
-		ctx.waitUntil(flushTelemetry(env))
+		ctx.waitUntil(telemetry.flush(env))
 		return response
 	} catch (err) {
 		console.error("[worker] handler failed:", err)
@@ -348,12 +392,12 @@ const handle = async (
 				Effect.provide(telemetry.layer),
 			),
 		)
-		if (isMcp && mcpFrame) {
+		if (isMcp && mcpFrame && startedAt !== undefined) {
 			console.error(
 				`[mcp-err] method=${mcpFrame.method} id=${mcpFrame.id}` + ` dur=${Date.now() - startedAt}ms`,
 			)
 		}
-		ctx.waitUntil(flushTelemetry(env))
+		ctx.waitUntil(telemetry.flush(env))
 		return isV2Request(request)
 			? v2WorkerUnavailableResponse()
 			: new Response("The API worker is temporarily unavailable.", { status: 504 })

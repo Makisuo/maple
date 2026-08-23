@@ -259,6 +259,7 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "error_issues", label: "default", params: {} },
 	{ pipe: "error_issue_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "error_issue_sample_traces", label: "default", params: { fingerprint_hash: FINGERPRINT } },
+	{ pipe: "error_issue_environments", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 
 	{ pipe: "list_metrics", label: "default", params: {} },
 	{ pipe: "metrics_summary", label: "default", params: {} },

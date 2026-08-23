@@ -75,6 +75,17 @@ export interface CycleSpend {
 
 const toCents = (dollars: number) => dollars * 100
 
+/**
+ * Units consumed this cycle. The balance's `usage` is the meter Autumn invoices
+ * from — it resets with the cycle — so it is the authority whenever the feature
+ * has a balance. The event aggregate is only the fallback for a feature the
+ * customer has no balance for (metered but not on their plan).
+ */
+export const meteredUsage = (
+	balance: { readonly usage?: number | null | undefined } | undefined,
+	aggregate: number | null | undefined,
+): number => balance?.usage ?? aggregate ?? 0
+
 /** Units of `feature` beyond its included allotment. Never negative. */
 export function overageUnits(feature: FeatureUsagePricing): number {
 	if (feature.unlimited) return 0
