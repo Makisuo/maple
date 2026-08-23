@@ -30,8 +30,8 @@ import {
 // straight back out through `onChange`.
 //
 // It holds `FunnelStepDraft`s — wire steps plus the raw filter text an event
-// step is typed with. A plain `FunnelStep` is a draft too, so the /analytics
-// view passes its URL steps through unchanged.
+// step is typed with. A plain `FunnelStep` is a draft too, so a widget's
+// stored steps pass through unchanged.
 
 export interface FunnelStepSuggestion {
 	readonly name: string
