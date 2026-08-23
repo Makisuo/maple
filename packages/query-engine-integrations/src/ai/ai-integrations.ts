@@ -1,28 +1,19 @@
-// AI span mapping: the default GenAI integration, the vendor registry lookup,
-// and the mapper that turns one warehouse row into an `AiAgentSpan`.
+// BOUNDARY: this module decodes raw warehouse attribute strings; a parsed
+// value stays unknown until the catalog's field type names it.
+
+// AI span mapping: the default GenAI integration, the vendor lookup, and the
+// mapper that turns one warehouse row into an `AiAgentSpan`.
 //
-// The mechanism is deliberately small: an integration is a table of
-// `field -> source attribute keys` plus an optional `refine` hook, and a vendor
-// integration is the same table applied ON TOP of the default one, per field.
-// That covers the two shapes real instrumentation takes — "same meaning,
-// different key" (the table) and "same key, different value" (the hook) —
-// without a plugin system.
-//
-// Why keyed on `maple_ai.vendor.id` rather than re-detected here: the ingest
-// gateway already ran the detection at decode time over evidence the read path
-// no longer has (instrumentation scope, resource SDK name, span events — see
-// `SCREEN_KEYS` and the vendor table in `apps/ingest/src/ai_session.rs`) and
-// stamped its verdict on the span. Re-deriving a dialect from what survives
-// into ClickHouse would be a weaker second copy of that decision, free to
-// disagree with the stamp.
-//
-// Everything here is tolerant by construction. Attributes arrive as
-// `Map(String, String)`, so a missing key reads back as `''` and every value is
-// a string that may or may not be the shape its field expects. A value that
-// fails to decode yields no field — never a throw — because one badly
-// serialised attribute must not cost the user the rest of the span.
+// An integration is a table of `field -> source attribute keys` plus an
+// optional `refine` hook: same meaning under a different key, and same key with
+// a different value. Vendor entries are keyed on the `maple_ai.vendor.id` the
+// ingest gateway stamped at decode time, from evidence the read path no longer
+// has (instrumentation scope, resource SDK name, span events — see
+// `apps/ingest/src/ai_session.rs`). Attributes arrive as `Map(String, String)`,
+// so a missing key reads back as `''` and an undecodable value yields no field.
 
 import {
+	AI_CORE_FIELDS,
 	AI_GENAI_FIELDS,
 	AI_PROMPT_VARIABLE_PREFIX,
 	MAPLE_AI_SESSION_ID_ATTR,
@@ -31,30 +22,27 @@ import {
 	type AiAgentSpan,
 	type AiFieldDef,
 	type AiGenAiField,
-	type AiSessionSpanRow,
 	type MutableAiGenAiValues,
-} from "./ai-span-model"
+} from "@maple/domain/gen-ai"
+import type { AiSessionSpansOutput } from "./ai-sessions"
 import { AI_VENDOR_INTEGRATIONS } from "./ai-vendors"
 
 export interface AiRefineContext {
-	readonly row: AiSessionSpanRow
-	/**
-	 * Span attributes merged OVER resource attributes — a span-level key wins,
-	 * because resource attributes describe the process, not the operation. Both
-	 * are readable here; the source key lists read from the same merged view.
-	 */
+	readonly row: AiSessionSpansOutput
+	/** The span's own attributes — the map the source key lists read. */
 	readonly attributes: Record<string, string>
 }
+
+/** Field → source attribute keys, tried in order; the first value that decodes wins. */
+type AiSources = Partial<Record<AiGenAiField, readonly string[]>>
 
 export interface AiIntegration {
 	readonly id: string
 	/**
-	 * Field → source attribute keys, tried in order; the first key with a value
-	 * that decodes wins. A vendor entry REPLACES the default entry for that
-	 * field, so a vendor that wants the canonical key to keep priority lists it
-	 * first itself.
+	 * The vendor's own dialect keys. They are appended to the default's list for
+	 * that field, so an entry lists only what the default does not already read.
 	 */
-	readonly sources: Partial<Record<AiGenAiField, readonly string[]>>
+	readonly sources?: AiSources
 	/**
 	 * For what a key list cannot express: normalising a value, or deriving a
 	 * field from something other than a single attribute.
@@ -62,33 +50,21 @@ export interface AiIntegration {
 	readonly refine?: (values: MutableAiGenAiValues, ctx: AiRefineContext) => void
 }
 
-/** ClickHouse returns `''` for a missing Map key, so empty means absent. */
-const readAttribute = (attributes: Record<string, string>, key: string): string | undefined => {
-	const value: string | undefined = attributes[key]
-	return value === undefined || value === "" ? undefined : value
+/** An integration carrying a source list for every catalog field. */
+interface ResolvedAiIntegration extends AiIntegration {
+	readonly sources: Record<AiGenAiField, readonly string[]>
 }
 
 /**
- * What a JSON-typed attribute can decode to. Spelling it out rather than
- * returning `unknown` keeps the decoder's contract honest: the value came off a
- * `JSON.parse`, so it is JSON, not anything at all.
+ * ClickHouse returns `''` for a missing Map key, so empty means absent — and so
+ * does whitespace, which emitters send for a value they never filled in.
  */
-export type AiJsonValue =
-	| string
-	| number
-	| boolean
-	| null
-	| readonly AiJsonValue[]
-	| { readonly [key: string]: AiJsonValue }
+const readAttribute = (attributes: Record<string, string>, key: string): string | undefined => {
+	const value: string | undefined = attributes[key]
+	return value === undefined || value.trim() === "" ? undefined : value
+}
 
-/**
- * Every shape `decodeAttribute` can produce. It is exactly `AiJsonValue`: the
- * four scalar field types are JSON scalars and `stringArray` is a JSON array,
- * so naming them again would only restate the union.
- */
-export type AiDecodedValue = AiJsonValue
-
-const parseJson = (raw: string): AiJsonValue | undefined => {
+const parseJson = (raw: string): unknown => {
 	try {
 		return JSON.parse(raw)
 	} catch {
@@ -99,8 +75,7 @@ const parseJson = (raw: string): AiJsonValue | undefined => {
 const decodeStringArray = (raw: string): readonly string[] | undefined => {
 	// Real data carries both shapes for the same attribute: `'["stop"]'` from
 	// instrumentation that serialises the array, and a bare `"stop"` from
-	// instrumentation that emits the single value. Anything that is not a JSON
-	// array of strings is treated as the bare form rather than discarded.
+	// instrumentation that emits the single value.
 	const parsed = parseJson(raw)
 	// Unparseable is the bare form: `stop` and `"stop"`-without-quotes both land
 	// here, and that is the only case where the raw text IS the value.
@@ -108,14 +83,13 @@ const decodeStringArray = (raw: string): readonly string[] | undefined => {
 	if (typeof parsed === "string") return [parsed]
 	if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")) return parsed
 	// Parsed cleanly but into some other shape — an object, a number, an array of
-	// non-strings. That is structured data in the wrong shape, not a bare value.
-	// Wrapping the raw JSON text into a one-element array would type-check and
+	// non-strings. Wrapping the raw JSON text into a one-element array would
 	// silently consume the field with a value that never existed, so decode to
 	// nothing and let the next alias have its turn.
 	return undefined
 }
 
-const decodeAttribute = (type: AiFieldDef["type"], raw: string): AiDecodedValue | undefined => {
+const decodeAttribute = (type: AiFieldDef["type"], raw: string): unknown => {
 	switch (type) {
 		case "string":
 			return raw
@@ -133,26 +107,21 @@ const decodeAttribute = (type: AiFieldDef["type"], raw: string): AiDecodedValue 
 		}
 		case "stringArray":
 			return decodeStringArray(raw)
-		case "json":
-			return parseJson(raw)
+		case "json": {
+			// Objects and arrays only: `"null"`, `"0"` and `"false"` parse cleanly
+			// into values that would reach the UI where a message list belongs.
+			const parsed = parseJson(raw)
+			return parsed !== null && typeof parsed === "object" ? parsed : undefined
+		}
 		default: {
-			// A sixth field type added to the catalog without a case here would
-			// otherwise compile clean and make every field of that type silently
-			// absent from every span — the one failure mode this module is least
-			// able to surface. `tsconfig` has no `noImplicitReturns`, so the
-			// never-assignment is what actually enforces it.
+			// A field type added to the catalog without a case here would otherwise
+			// compile clean and make every field of that type silently absent from
+			// every span. `tsconfig` has no `noImplicitReturns`, so the
+			// never-assignment is what enforces it.
 			const unhandled: never = type
 			return unhandled
 		}
 	}
-}
-
-// The catalog correlates each field with its value type, but a loop over the
-// union of fields cannot carry that correlation without re-stating the whole
-// table. The single unchecked write lives here; `decodeAttribute` is driven by
-// the same catalog entry, so the value is right by construction.
-const assign = (values: MutableAiGenAiValues, field: AiGenAiField, value: AiDecodedValue): void => {
-	;(values as Record<string, AiDecodedValue>)[field] = value
 }
 
 /**
@@ -179,16 +148,17 @@ const GENAI_LEGACY_ALIASES = {
 	outputMessages: ["gen_ai.completion"],
 	providerName: ["gen_ai.system"],
 	requestSeed: ["gen_ai.openai.request.seed"],
-	outputType: ["gen_ai.openai.request.response_format"],
 	responseFinishReasons: ["gen_ai.response.finish_reason"],
-} satisfies Partial<Record<AiGenAiField, readonly string[]>>
+} satisfies AiSources
 
-const genAiSources: Partial<Record<AiGenAiField, readonly string[]>> = {}
+// SAFETY: `Object.entries` erases the key/value correlation, so the accumulator
+// is asserted; the first loop writes an entry for every catalog field.
+const genAiSources = {} as Record<AiGenAiField, readonly string[]>
 for (const [field, def] of Object.entries(AI_GENAI_FIELDS)) {
 	genAiSources[field as AiGenAiField] = [def.key]
 }
 for (const [field, aliases] of Object.entries(GENAI_LEGACY_ALIASES)) {
-	genAiSources[field as AiGenAiField] = [...(genAiSources[field as AiGenAiField] ?? []), ...aliases]
+	genAiSources[field as AiGenAiField] = [...genAiSources[field as AiGenAiField], ...aliases]
 }
 
 /**
@@ -205,10 +175,9 @@ const LEGACY_SYSTEM_VALUES = new Map([
 ])
 
 const genAiRefine = (values: MutableAiGenAiValues, ctx: AiRefineContext): void => {
-	// Only a value that actually came from the legacy key gets rewritten. A span
-	// that emits `gen_ai.provider.name` is already speaking the new vocabulary,
-	// and its values must be passed through even when they collide with an old
-	// enum member.
+	// Gated on the canonical key being absent: a span that emits
+	// `gen_ai.provider.name` is already speaking the new vocabulary, and its
+	// values pass through even when they collide with an old enum member.
 	if (
 		values.providerName !== undefined &&
 		readAttribute(ctx.attributes, AI_GENAI_FIELDS.providerName.key) === undefined
@@ -229,43 +198,46 @@ const genAiRefine = (values: MutableAiGenAiValues, ctx: AiRefineContext): void =
 /**
  * The default integration: canonical GenAI keys plus their legacy aliases. It
  * is what an unrecognised vendor — and the `unknown:*` buckets the gateway
- * stamps — falls back to, and it is the base every vendor override merges onto.
+ * stamps — falls back to, and it is the base every vendor override extends.
  */
-export const genAiIntegration: AiIntegration = {
+export const genAiIntegration: ResolvedAiIntegration = {
 	id: "gen_ai",
 	sources: genAiSources,
 	refine: genAiRefine,
 }
 
-const resolvedIntegrations = new Map<string, AiIntegration>()
-
 /**
- * The integration for a vendor stamp: the default one, with the vendor's key
- * lists replacing the default's per field and both `refine` hooks running —
- * default first, so the vendor can correct its work.
+ * The default's keys for every field with the vendor's dialect keys appended,
+ * deduplicated. The canonical and legacy `gen_ai.*` spellings keep priority, so
+ * recognising a vendor can only add keys, never remove one.
  */
-export const resolveAiIntegration = (vendorId: string | undefined): AiIntegration => {
-	if (vendorId === undefined) return genAiIntegration
-	// `Object.hasOwn`, not a plain index: the vendor stamp is customer-reachable
-	// (the gateway strips `maple_ai.*` from span attributes but not from RESOURCE
-	// attributes), and a plain index reads through the prototype chain — a stamp
-	// of `constructor` or `toString` would resolve truthy, skip the guard below,
-	// and mint an integration with `id: undefined` into the module-level cache.
-	if (!Object.hasOwn(AI_VENDOR_INTEGRATIONS, vendorId)) return genAiIntegration
-	const vendor = AI_VENDOR_INTEGRATIONS[vendorId]
-	if (vendor === undefined) return genAiIntegration
-	const cached = resolvedIntegrations.get(vendorId)
-	if (cached !== undefined) return cached
-	const merged: AiIntegration = {
-		id: vendor.id,
-		sources: { ...genAiIntegration.sources, ...vendor.sources },
-		refine: (values, ctx) => {
-			genAiIntegration.refine?.(values, ctx)
-			vendor.refine?.(values, ctx)
-		},
+const mergeSources = (vendor: AiSources = {}): Record<AiGenAiField, readonly string[]> => {
+	const merged = {} as Record<AiGenAiField, readonly string[]>
+	for (const [field, keys] of Object.entries(genAiSources)) {
+		merged[field as AiGenAiField] = [...new Set([...keys, ...(vendor[field as AiGenAiField] ?? [])])]
 	}
-	resolvedIntegrations.set(vendorId, merged)
 	return merged
+}
+
+const resolvedIntegrations = new Map<string, ResolvedAiIntegration>(
+	Object.entries(AI_VENDOR_INTEGRATIONS).map(([vendorId, vendor]): [string, ResolvedAiIntegration] => [
+		vendorId,
+		{
+			id: vendor.id,
+			sources: mergeSources(vendor.sources),
+			// Both hooks run, default first, so the vendor can correct its work.
+			refine: (values, ctx) => {
+				genAiRefine(values, ctx)
+				vendor.refine?.(values, ctx)
+			},
+		},
+	]),
+)
+
+/** The integration for a vendor stamp, or the default for a stamp with no entry. */
+export const resolveAiIntegration = (vendorId: string | undefined): ResolvedAiIntegration => {
+	const resolved = vendorId === undefined ? undefined : resolvedIntegrations.get(vendorId)
+	return resolved ?? genAiIntegration
 }
 
 const collectPromptVariables = (attributes: Record<string, string>): Record<string, string> | undefined => {
@@ -274,8 +246,8 @@ const collectPromptVariables = (attributes: Record<string, string>): Record<stri
 	let collected: Record<string, string> | undefined
 	for (const [key, value] of Object.entries(attributes)) {
 		if (!key.startsWith(AI_PROMPT_VARIABLE_PREFIX) || value === "") continue
-		// Null-prototype again: a `gen_ai.prompt.variable.__proto__` key would hit
-		// the prototype setter on a `{}` literal and be dropped without a trace.
+		// Null-prototype: a `gen_ai.prompt.variable.__proto__` key would hit the
+		// prototype setter on a `{}` literal and be dropped without a trace.
 		collected ??= Object.create(null) as Record<string, string>
 		collected[key.slice(AI_PROMPT_VARIABLE_PREFIX.length)] = value
 	}
@@ -283,66 +255,45 @@ const collectPromptVariables = (attributes: Record<string, string>): Record<stri
 }
 
 /**
- * A `core` field is plain OTel semconv that every HTTP client span carries, so
+ * A core field is plain OTel semconv that every HTTP client span carries, so
  * mapping one is not evidence that this span is an AI span.
  */
 const hasAiSignal = (values: MutableAiGenAiValues): boolean =>
-	Object.keys(values).some((field) => AI_GENAI_FIELDS[field as AiGenAiField].group !== "core")
+	Object.keys(values).some((field) => !AI_CORE_FIELDS.has(field as AiGenAiField))
 
-interface AiSpanOptionalFields {
-	sessionId?: string
-	vendorId?: string
-	vendorVersion?: string
-	promptVariables?: Record<string, string>
-}
-
-export const mapAiSpan = (row: AiSessionSpanRow): AiAgentSpan => {
-	// Null-prototype: attribute keys are customer-controlled, and a `Record`
-	// index would otherwise resolve `toString` or `valueOf` to an inherited
-	// function that the `=== ""` check below would wave through as a value.
-	const attributes: Record<string, string> = Object.assign(
-		Object.create(null) as Record<string, string>,
-		row.resourceAttributes,
-		row.spanAttributes,
-	)
-	// The `maple_ai.*` envelope is read from SPAN attributes only, never the
-	// merged view. The gateway strips this namespace from span attributes before
-	// stamping its own verdict, so a span-level value is authoritative — but it
-	// does not touch resource attributes, and `aiSessionSpansQuery` selects
-	// sessions on `SpanAttributes` alone. Reading the merged view would let one
-	// forged resource attribute mark every span in a service as an AI span and
-	// label it with a session id the query never matched on.
-	const envelope = row.spanAttributes
-	const vendorId = readAttribute(envelope, MAPLE_AI_VENDOR_ID_ATTR)
+export const mapAiSpan = (row: AiSessionSpansOutput): AiAgentSpan => {
+	// Span attributes only, envelope and source keys alike. The gateway strips
+	// `maple_ai.*` from span attributes before stamping its own verdict, so a
+	// span-level value is authoritative — and it does not touch resource
+	// attributes, where one forged `gen_ai.*` or `maple_ai.*` key would mark
+	// every span in the service as an AI span.
+	const attributes = row.spanAttributes
+	const vendorId = readAttribute(attributes, MAPLE_AI_VENDOR_ID_ATTR)
 	const integration = resolveAiIntegration(vendorId)
 
-	const genAi: MutableAiGenAiValues = {}
+	// SAFETY: the catalog correlates each field with its value type, but a loop
+	// over the field union cannot carry that correlation. `decodeAttribute` is
+	// driven by the same catalog entry as the field it is written under, so the
+	// value matches the field by construction.
+	const genAi = {} as MutableAiGenAiValues & Record<string, unknown>
 	for (const [field, keys] of Object.entries(integration.sources)) {
-		if (keys === undefined) continue
+		const def = AI_GENAI_FIELDS[field as AiGenAiField]
 		for (const key of keys) {
 			const raw = readAttribute(attributes, key)
 			if (raw === undefined) continue
-			const value = decodeAttribute(AI_GENAI_FIELDS[field as AiGenAiField].type, raw)
+			const value = decodeAttribute(def.type, raw)
 			// A key that carries an undecodable value does not consume the
 			// field: the next alias still gets its turn.
 			if (value === undefined) continue
-			assign(genAi, field as AiGenAiField, value)
+			genAi[field] = value
 			break
 		}
 	}
 	integration.refine?.(genAi, { row, attributes })
 
 	const promptVariables = collectPromptVariables(attributes)
-	const sessionId = readAttribute(envelope, MAPLE_AI_SESSION_ID_ATTR)
-	const vendorVersion = readAttribute(envelope, MAPLE_AI_VENDOR_VERSION_ATTR)
-
-	// Collected separately so an absent stamp leaves the key off the span
-	// entirely rather than present-and-undefined.
-	const optional: AiSpanOptionalFields = {}
-	if (sessionId !== undefined) optional.sessionId = sessionId
-	if (vendorId !== undefined) optional.vendorId = vendorId
-	if (vendorVersion !== undefined) optional.vendorVersion = vendorVersion
-	if (promptVariables !== undefined) optional.promptVariables = promptVariables
+	const sessionId = readAttribute(attributes, MAPLE_AI_SESSION_ID_ATTR)
+	const vendorVersion = readAttribute(attributes, MAPLE_AI_VENDOR_VERSION_ATTR)
 
 	return {
 		traceId: row.traceId,
@@ -355,11 +306,15 @@ export const mapAiSpan = (row: AiSessionSpanRow): AiAgentSpan => {
 		durationMs: row.durationMs,
 		statusCode: row.statusCode,
 		statusMessage: row.statusMessage,
-		...optional,
-		integrationId: integration.id,
+		// Spread rather than assigned, so an absent stamp leaves the key off the
+		// span entirely rather than present-and-undefined.
+		...(sessionId !== undefined && { sessionId }),
+		...(vendorId !== undefined && { vendorId }),
+		...(vendorVersion !== undefined && { vendorVersion }),
 		isAiSpan: vendorId !== undefined || promptVariables !== undefined || hasAiSignal(genAi),
 		genAi,
 	}
 }
 
-export const mapAiSpans = (rows: readonly AiSessionSpanRow[]): readonly AiAgentSpan[] => rows.map(mapAiSpan)
+export const mapAiSpans = (rows: readonly AiSessionSpansOutput[]): readonly AiAgentSpan[] =>
+	rows.map(mapAiSpan)

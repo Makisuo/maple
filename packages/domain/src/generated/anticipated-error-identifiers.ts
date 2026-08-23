@@ -5,6 +5,7 @@
 // contracts outside production so worker startup imports only this literal.
 
 export const ANTICIPATED_ERROR_IDENTIFIER_LIST: ReadonlyArray<string> = [
+	"@maple/http/ai-sessions/AiSessionTooLargeError",
 	"@maple/http/ai-triage/AiTriageForbiddenError",
 	"@maple/http/ai-triage/AiTriageValidationError",
 	"@maple/http/anomalies/AnomalyForbiddenError",

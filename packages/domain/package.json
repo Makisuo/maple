@@ -8,6 +8,7 @@
 		"./anticipated-errors": "./src/anticipated-errors.ts",
 		"./billing": "./src/billing.ts",
 		"./billing-tax-ids": "./src/billing-tax-ids.ts",
+		"./gen-ai": "./src/gen-ai.ts",
 		"./glob": "./src/glob.ts",
 		"./http": "./src/http/index.ts",
 		"./http/v2": "./src/http/v2/index.ts",

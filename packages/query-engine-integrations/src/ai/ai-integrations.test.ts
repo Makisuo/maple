@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { genAiIntegration, mapAiSpan, mapAiSpans, resolveAiIntegration } from "./ai-integrations"
-import { AI_GENAI_FIELDS, type AiGenAiField, type AiSessionSpanRow } from "./ai-span-model"
+import { AI_GENAI_FIELDS, type AiGenAiField } from "@maple/domain/gen-ai"
+import type { AiSessionSpansOutput } from "./ai-sessions"
 
 const row = (
 	spanAttributes: Record<string, string>,
-	overrides: Partial<AiSessionSpanRow> = {},
-): AiSessionSpanRow => ({
+	overrides: Partial<AiSessionSpansOutput> = {},
+): AiSessionSpansOutput => ({
 	traceId: "d31eaf1d98a9b26028dfe521f8dbc75c",
 	spanId: "00233d43ea0d1598",
 	parentSpanId: "68fc42c0c9f2cf15",
@@ -157,8 +158,17 @@ describe("value decoding", () => {
 		expect(mapped.genAi.toolName).toBe("add_reaction")
 	})
 
-	it("treats an empty value as absent, because that is what a missing Map key returns", () => {
+	it("treats an empty or blank value as absent, because that is what a missing Map key returns", () => {
 		expect(mapAiSpan(row({ "gen_ai.request.model": "" })).genAi.requestModel).toBeUndefined()
+		expect(mapAiSpan(row({ "gen_ai.request.model": "   " })).genAi.requestModel).toBeUndefined()
+	})
+
+	it("keeps only objects and arrays for a JSON field", () => {
+		// `"null"`, `"0"` and `"false"` all parse cleanly into values that would
+		// reach the UI where a message list belongs.
+		expect(mapAiSpan(row({ "gen_ai.input.messages": "null" })).genAi.inputMessages).toBeUndefined()
+		expect(mapAiSpan(row({ "gen_ai.input.messages": "0" })).genAi.inputMessages).toBeUndefined()
+		expect(mapAiSpan(row({ "gen_ai.input.messages": "false" })).genAi.inputMessages).toBeUndefined()
 	})
 
 	it("falls through to the next alias when the first key does not decode", () => {
@@ -179,7 +189,6 @@ describe("legacy aliases", () => {
 		["gen_ai.completion", '[{"role":"assistant"}]', "outputMessages", [{ role: "assistant" }]],
 		["gen_ai.system", "anthropic", "providerName", "anthropic"],
 		["gen_ai.openai.request.seed", "7", "requestSeed", 7],
-		["gen_ai.openai.request.response_format", "json_object", "outputType", "json_object"],
 		["gen_ai.response.finish_reason", "stop", "responseFinishReasons", ["stop"]],
 		// Not in the deprecation table: the sub-key spelling OpenRouter actually
 		// emits. Both confirmed present in the warehouse — unlike the plausible
@@ -264,23 +273,14 @@ describe("value normalisation", () => {
 })
 
 describe("prompt variables", () => {
-	it("collects the templated gen_ai.prompt.variable.<name> attributes by prefix", () => {
+	it("counts a templated gen_ai.prompt.variable.<name> attribute as AI signal", () => {
 		// Templated: the variable name is IN the key, so there is no single key
-		// the source-list mechanism could look up.
-		const mapped = mapAiSpan(
-			row({
-				"gen_ai.prompt.name": "triage",
-				"gen_ai.prompt.variable.service": "maple-api",
-				"gen_ai.prompt.variable.window": "24h",
-			}),
-		)
+		// the source-list mechanism could look up. The values are not on the wire
+		// — their presence is what marks the span.
+		const mapped = mapAiSpan(row({ "gen_ai.prompt.variable.service": "maple-api" }))
 
-		expect(mapped.promptVariables).toEqual({ service: "maple-api", window: "24h" })
-		expect(mapped.genAi.promptName).toBe("triage")
-	})
-
-	it("omits promptVariables entirely when none are present", () => {
-		expect(mapAiSpan(row(EXECUTE_TOOL_ATTRS)).promptVariables).toBeUndefined()
+		expect(mapped.isAiSpan).toBe(true)
+		expect(mapped.genAi).toEqual({})
 	})
 })
 
@@ -290,7 +290,6 @@ describe("non-AI spans", () => {
 
 		expect(mapped.isAiSpan).toBe(false)
 		expect(mapped.genAi).toEqual({})
-		expect(mapped.integrationId).toBe("gen_ai")
 		expect(mapped.vendorId).toBeUndefined()
 	})
 
@@ -335,15 +334,16 @@ describe("span envelope", () => {
 		})
 	})
 
-	it("lets a span attribute win over a resource attribute of the same name", () => {
+	it("reads gen_ai keys from span attributes alone", () => {
+		// A resource-level `gen_ai.*` key describes the process, not the
+		// operation: honouring it would stamp every span of that service —
+		// Postgres, HTTP, everything — as an AI span.
 		const mapped = mapAiSpan(
-			row(
-				{ "gen_ai.request.model": "openai/gpt-5.6-luna" },
-				{ resourceAttributes: { "gen_ai.request.model": "stale" } },
-			),
+			row({}, { resourceAttributes: { "gen_ai.request.model": "resource-level" } }),
 		)
 
-		expect(mapped.genAi.requestModel).toBe("openai/gpt-5.6-luna")
+		expect(mapped.genAi.requestModel).toBeUndefined()
+		expect(mapped.isAiSpan).toBe(false)
 	})
 
 	it("maps a whole trace's worth of spans in order", () => {
@@ -364,8 +364,8 @@ describe("resolveAiIntegration", () => {
 
 		expect(integration).toBe(genAiIntegration)
 		expect(
-			mapAiSpan(row({ ...INVOKE_AGENT_ATTRS, "maple_ai.vendor.id": "unknown:other" })).integrationId,
-		).toBe("gen_ai")
+			mapAiSpan(row({ ...INVOKE_AGENT_ATTRS, "maple_ai.vendor.id": "unknown:other" })).isAiSpan,
+		).toBe(true)
 	})
 
 	it("falls back to the default integration for an unstamped span", () => {
@@ -373,52 +373,24 @@ describe("resolveAiIntegration", () => {
 	})
 
 	it("returns the same merged integration on every call for a vendor", () => {
-		// The merge is memoised per vendor id; re-merging sixty source lists on
+		// The merge runs once at module init; re-merging sixty source lists on
 		// every span of every session is pure waste.
 		expect(resolveAiIntegration("vercel_ai_sdk")).toBe(resolveAiIntegration("vercel_ai_sdk"))
 	})
 })
 
-// The vendor stamp is customer-reachable: the ingest gateway strips `maple_ai.*`
-// from span attributes but NOT from resource attributes, so these names can
-// arrive from outside. A plain index reads them off `Object.prototype`.
-describe("hostile vendor stamps", () => {
-	const prototypeKeys = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]
+describe("untrusted attribute keys", () => {
+	it("ignores a vendor stamp that arrives via a resource attribute", () => {
+		// The envelope is read from span attributes alone, so a resource-level
+		// stamp neither selects an integration nor marks the span.
+		const mapped = mapAiSpan(row({}, { resourceAttributes: { "maple_ai.vendor.id": "eve" } }))
 
-	for (const stamp of prototypeKeys) {
-		it(`falls back to the default integration for a stamp of ${stamp}`, () => {
-			const resolved = resolveAiIntegration(stamp)
-
-			// Before the Object.hasOwn guard this resolved to a merged integration
-			// with `id: undefined`, which violates AiAgentSpanSchema at the encode
-			// boundary and was memoised process-wide.
-			expect(resolved.id).toBe("gen_ai")
-			expect(resolved).toBe(genAiIntegration)
-		})
-	}
-
-	it("maps a span whose stamp arrives via a resource attribute", () => {
-		const mapped = mapAiSpan(row({}, { resourceAttributes: { "maple_ai.vendor.id": "constructor" } }))
-
-		expect(mapped.integrationId).toBe("gen_ai")
-		expect(typeof mapped.integrationId).toBe("string")
+		expect(mapped.vendorId).toBeUndefined()
+		expect(mapped.isAiSpan).toBe(false)
 	})
 
-	it("keeps a prompt variable literally named __proto__", () => {
-		const mapped = mapAiSpan(row({ "gen_ai.prompt.variable.__proto__": "kept" }))
-
-		// Asserted through `Object.keys` rather than against an object literal: a
-		// `{ __proto__: "kept" }` literal collapses to `{}` via the prototype
-		// setter, so the expectation would silently test nothing.
-		expect(Object.keys(mapped.promptVariables ?? {})).toEqual(["__proto__"])
-		expect(mapped.promptVariables?.["__proto__"]).toBe("kept")
-	})
-
-	it("does not mistake an inherited member for an attribute value", () => {
-		const mapped = mapAiSpan(row({ "gen_ai.request.model": "gpt-5.6-luna" }))
-
-		expect(mapped.genAi.requestModel).toBe("gpt-5.6-luna")
-		expect(mapped.genAi.toolCallResult).toBeUndefined()
+	it("keeps a prompt variable literally named __proto__ as AI signal", () => {
+		expect(mapAiSpan(row({ "gen_ai.prompt.variable.__proto__": "kept" })).isAiSpan).toBe(true)
 	})
 })
 

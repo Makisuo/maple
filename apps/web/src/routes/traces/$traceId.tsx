@@ -127,7 +127,7 @@ function TraceDetailPage() {
 			</DashboardLayout.Root>
 		))
 		.onSuccess((data) => {
-			if (data.spans.length === 0) {
+			if (data.spans.length === 0 || data.traceStartTime === undefined) {
 				return (
 					<DashboardLayout.Root>
 						<DashboardLayout.Breadcrumbs
@@ -202,17 +202,26 @@ function TraceDetailPage() {
 				)
 			}
 
-			return <TraceDetailContent data={data} traceId={traceId} backToTracesHref={backToTracesHref} />
+			return (
+				<TraceDetailContent
+					data={data}
+					traceStartTime={data.traceStartTime}
+					traceId={traceId}
+					backToTracesHref={backToTracesHref}
+				/>
+			)
 		})
 		.render()
 }
 
 function TraceDetailContent({
 	data,
+	traceStartTime,
 	traceId,
 	backToTracesHref,
 }: {
 	data: SpanHierarchyResponse
+	traceStartTime: string
 	traceId: string
 	backToTracesHref: string
 }) {
@@ -248,16 +257,6 @@ function TraceDetailContent({
 
 	const services = React.useMemo(
 		() => [...new Set(data.spans.map((s: Span) => s.serviceName))],
-		[data.spans],
-	)
-
-	const traceStartTime = React.useMemo(
-		() =>
-			data.spans.length > 0
-				? data.spans.reduce((earliest, span) =>
-						new Date(span.startTime) < new Date(earliest.startTime) ? span : earliest,
-					).startTime
-				: new Date().toISOString(),
 		[data.spans],
 	)
 
