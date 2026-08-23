@@ -1,5 +1,6 @@
 import Foundation
 import MapleAPI
+import MapleWidgetData
 
 /// A deterministic in-memory `MapleAPI` for previews, screenshots, and running
 /// the app without a Clerk session (`MAPLE_FIXTURES=1` in the scheme's
@@ -170,6 +171,7 @@ struct FixtureAPI: MapleAPI {
 			return ErrorIssueTimeseriesPoint(bucket: stamp(-hoursAgo), count: count)
 		}
 		return ErrorIssueDetail(
+			environments: [ErrorIssueEnvironment(count: issue.occurrenceCount, name: "production")],
 			errorLabel: issue.errorLabel,
 			exceptionMessage: issue.exceptionMessage,
 			exceptionType: issue.exceptionType,
@@ -523,6 +525,78 @@ struct FixtureAPI: MapleAPI {
 			signalType: anomaly.signalType,
 			thresholdValue: anomaly.thresholdValue,
 			unit: .perMinute
+		)
+	}
+
+	// MARK: Home Screen widgets
+
+	/// Fixture mode has no server to mint against, and no widget fetches for
+	/// itself here — the credential is a well-formed placeholder so the
+	/// mint-and-store path can be exercised without a session.
+	func mintWidgetCredential(installationId: String) async throws -> WidgetCredential {
+		try await pause()
+		return WidgetCredential(
+			organizationId: FixtureSession.organizationId,
+			secret: "maple_ak_fixture",
+			apiBaseURL: URL(string: "https://fixtures.maple.invalid")!,
+			expiresAt: now.addingTimeInterval(30 * 24 * 60 * 60),
+			mintedAt: now
+		)
+	}
+
+	func revokeWidgetCredential(installationId: String) async throws {
+		try await pause()
+	}
+
+	/// Assembled from the same seeds the rest of the fixtures use, so a Home
+	/// Screen screenshot and the Services tab behind it agree.
+	func widgetSummary() async throws -> WidgetSummaryPayload {
+		try await pause()
+		let bucketSeconds = 300
+		let window = TimeWindow.lastHour.resolve(now: now)
+		return WidgetSummaryPayload(
+			schemaVersion: WidgetSummaryPayload.supportedSchemaVersion,
+			generatedAt: now,
+			organizationId: FixtureSession.organizationId,
+			issues: WidgetSummaryPayload.Issues(
+				windowSeconds: 24 * 60 * 60,
+				hasMore: false,
+				data: issues.map { issue in
+					WidgetSummaryPayload.Issue(
+						id: issue.id,
+						exceptionType: issue.exceptionType,
+						errorLabel: issue.errorLabel,
+						exceptionMessage: issue.exceptionMessage,
+						serviceName: issue.serviceName,
+						severity: issue.severity?.rawValue,
+						occurrenceCount: issue.occurrenceCount,
+						lastSeenAt: ResolvedTimeWindow.parse(issue.lastSeenAt) ?? now,
+						isRegressed: issue.regressionCount > 0,
+						hasOpenIncident: issue.hasOpenIncident
+					)
+				}
+			),
+			throughput: WidgetSummaryPayload.Throughput(
+				windowSeconds: Int(window.end.timeIntervalSince(window.start)),
+				bucketSeconds: bucketSeconds,
+				services: Self.seeds.map { seed in
+					WidgetSummaryPayload.Service(
+						name: seed.name,
+						throughputPerSecond: seed.throughput,
+						errorRate: seed.errorRate,
+						p95LatencyMs: seed.p95,
+						// Counts, not rates — the wire's unit. The mapper divides.
+						points: (0..<12).map { index in
+							seed.throughput * Double(bucketSeconds) * (index.isMultiple(of: 2) ? 0.92 : 1.08)
+						}
+					)
+				},
+				totalPoints: (0..<12).map { index in
+					Self.seeds.reduce(0) { total, seed in
+						total + seed.throughput * Double(bucketSeconds) * (index.isMultiple(of: 2) ? 0.92 : 1.08)
+					}
+				}
+			)
 		)
 	}
 

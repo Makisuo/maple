@@ -1,10 +1,10 @@
 import * as React from "react"
 
-import { ChevronDownIcon, ChevronRightIcon } from "../icons"
+import { ChevronDownIcon, ChevronRightIcon, LayersIcon } from "../icons"
 import { cn } from "../../lib/utils"
 import { getServiceColor } from "../../lib/colors"
 import { formatDuration } from "../../lib/format"
-import { getCacheInfo } from "../../lib/cache"
+import { describeSpan } from "../../lib/span-category"
 import type { TimelineBar } from "./trace-timeline-types"
 import { DEPTH_INDENT, ROW_HEIGHT } from "./trace-timeline-types"
 
@@ -19,6 +19,8 @@ interface TraceTimelineRowProps {
 	dimmed: boolean
 	/** Search active and this row matches → ring it. */
 	matched: boolean
+	/** A single-service trace repeats one name down every row — the header already said it. */
+	showService: boolean
 	onSelect: (spanId: string) => void
 	/** `wholeSubtree` comes from an Alt/Option-click. */
 	onToggleCollapse: (spanId: string, wholeSubtree: boolean) => void
@@ -49,13 +51,15 @@ function TraceTimelineRowImpl({
 	hovered,
 	dimmed,
 	matched,
+	showService,
 	onSelect,
 	onToggleCollapse,
 	onZoomSpan,
 	onHover,
 }: TraceTimelineRowProps) {
 	const spanId = bar.span.spanId
-	const cacheInfo = getCacheInfo(bar.span.spanAttributes)
+	const { category, cacheInfo } = describeSpan(bar.span)
+	const CategoryIcon = category.Icon
 	const durationLabel = formatDuration(bar.span.durationMs)
 
 	return (
@@ -79,7 +83,9 @@ function TraceTimelineRowImpl({
 			{/* Label cell. Sticky so it survives any horizontal scroll of the timeline column,
 			    and sized from `--sidebar-w` so a resize drag doesn't re-render a single row. */}
 			<div
-				className="sticky left-0 z-10 relative flex items-center gap-1 shrink-0 border-r border-border bg-inherit pr-2 text-[11px]"
+				// A container, so the trailing chips can drop out at narrow column widths without a
+				// re-render: a resize drag only rewrites `--sidebar-w`.
+				className="@container/label sticky left-0 z-10 relative flex items-center gap-1 shrink-0 border-r border-border bg-inherit pr-2 text-[11px]"
 				style={{ width: "var(--sidebar-w)", paddingLeft: bar.depth * DEPTH_INDENT + 4 }}
 			>
 				{/* Ancestor indent guides */}
@@ -113,6 +119,14 @@ function TraceTimelineRowImpl({
 				) : (
 					<span className="inline-block size-4 shrink-0" />
 				)}
+				{/* Category glyph. The timeline row has no room to spell the category out, so the
+				    title carries it; `describeSpan` already ran here for `cacheInfo`. */}
+				<span className="flex shrink-0 items-center" title={category.label}>
+					<CategoryIcon
+						size={11}
+						className={bar.isError ? "text-destructive" : category.accent.text}
+					/>
+				</span>
 				<span
 					className={cn(
 						"truncate font-mono font-medium text-foreground/90",
@@ -122,12 +136,17 @@ function TraceTimelineRowImpl({
 				>
 					{bar.span.spanName}
 				</span>
-				<span
-					className="truncate text-[10px] shrink-0"
-					style={{ color: getServiceColor(bar.span.serviceName) }}
-				>
-					{bar.span.serviceName}
-				</span>
+				{showService && (
+					// Shrinkable, unlike the rest of the trailing run, and gone entirely once the
+					// column is narrow: the span name must not be crushed to three characters for a
+					// service the row's colour stripe and the legend already name.
+					<span
+						className="min-w-0 max-w-[40%] truncate text-[10px] @max-[240px]/label:hidden"
+						style={{ color: getServiceColor(bar.span.serviceName) }}
+					>
+						{bar.span.serviceName}
+					</span>
+				)}
 				{cacheInfo?.result && (
 					<span
 						className={cn(
@@ -139,7 +158,13 @@ function TraceTimelineRowImpl({
 					</span>
 				)}
 				{bar.isCollapsed && bar.childCount > 0 && (
-					<span className="text-[9px] text-muted-foreground/70 shrink-0">+{bar.childCount}</span>
+					<span
+						className="flex items-center gap-0.5 shrink-0 text-[9px] text-muted-foreground/70"
+						title={`${bar.childCount} hidden ${bar.childCount === 1 ? "span" : "spans"}`}
+					>
+						<LayersIcon size={9} />
+						{bar.childCount}
+					</span>
 				)}
 				<span className="ml-auto shrink-0 pl-1 font-mono text-[10px] tabular-nums text-muted-foreground">
 					{durationLabel}

@@ -13,10 +13,13 @@
 // rename swaps the directory entry, so the running process keeps its old inode
 // while new invocations pick up the new binary. Keep the triple/URL logic here
 // in sync with install.sh.
-import { Clock, Duration, Effect, Option, Schema } from "effect"
+import { Clock, Duration, Effect, Option, Schema, Stream } from "effect"
+import { FileSystem } from "effect/FileSystem"
+import { PlatformError } from "effect/PlatformError"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { realpathSync } from "node:fs"
-import { chmod, mkdir, rename, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { amber, bold, dim, green } from "../lib/style"
 import { MAPLE_VERSION } from "../version"
@@ -28,7 +31,7 @@ export class UpdateError extends Schema.TaggedError<UpdateError>()("@maple/cli/U
 	message: Schema.String,
 }) {}
 
-const REPO = "Makisuo/maple"
+const REPO = "MapleTechLabs/maple"
 const LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`
 /** Throttle window for the startup check — hit GitHub at most once per day. */
 export const CHECK_TTL_MS = 24 * 60 * 60 * 1000
@@ -152,9 +155,23 @@ export const fetchLatestTag = (timeoutMs = 5000): Effect.Effect<string, UpdateEr
  *  (the symlink on PATH resolves here). */
 const resolveInstallDir = (): string => dirname(realpathSync(process.execPath))
 
+const errnoCode = (e: unknown): string | undefined =>
+	typeof e === "object" && e !== null && "code" in e ? String((e as { code?: unknown }).code) : undefined
+
+/**
+ * A permission failure on the install dir is the one fs error with actionable
+ * advice, so it must survive the mapping. `FileSystem` reports it as a
+ * `PlatformError` whose `reason._tag` is "PermissionDenied" and whose `cause`
+ * carries the original errno error — check both, not just a bare `.code`.
+ */
+const isPermissionDenied = (e: unknown): boolean => {
+	if (e instanceof PlatformError && e.reason._tag === "PermissionDenied") return true
+	const code = errnoCode(e) ?? errnoCode((e as { cause?: unknown } | null)?.cause)
+	return code === "EACCES" || code === "EPERM"
+}
+
 const mapFsError = (e: unknown, installDir: string): UpdateError => {
-	const code = (e as { code?: string } | null)?.code
-	if (code === "EACCES" || code === "EPERM") {
+	if (isPermissionDenied(e)) {
 		return new UpdateError({
 			message: `cannot write to ${installDir} — re-run the installer (curl -fsSL https://maple.dev/cli/install | sh) or fix permissions`,
 		})
@@ -217,8 +234,6 @@ const fetchText = (
 		}),
 	)
 
-export const __testables = { downloadTo, fetchText }
-
 const sha256File = (path: string): Effect.Effect<string, UpdateError> =>
 	Effect.tryPromise({
 		try: async () => {
@@ -232,37 +247,56 @@ const sha256File = (path: string): Effect.Effect<string, UpdateError> =>
 			}),
 	})
 
-const extractTar = (tarball: string, destDir: string): Effect.Effect<void, UpdateError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const proc = Bun.spawn(["tar", "-xzf", tarball, "-C", destDir], {
+const extractTar = (
+	tarball: string,
+	destDir: string,
+): Effect.Effect<void, UpdateError, ChildProcessSpawner> =>
+	Effect.gen(function* () {
+		const spawner = yield* ChildProcessSpawner
+		const handle = yield* spawner.spawn(
+			ChildProcess.make("tar", ["-xzf", tarball, "-C", destDir], {
+				stdin: "ignore",
 				stdout: "ignore",
 				stderr: "pipe",
-			})
-			const code = await proc.exited
-			if (code !== 0) {
-				const err = await new Response(proc.stderr).text()
-				throw new Error(`tar exited ${code}: ${err.trim()}`)
-			}
-		},
-		catch: (e) =>
-			new UpdateError({
-				message: `could not extract bundle: ${e instanceof Error ? e.message : String(e)}`,
 			}),
-	})
+		)
+		// Drain stderr alongside the exit status: `tar` cannot exit while its
+		// diagnostics are still buffered in an unread pipe.
+		const [code, stderr] = yield* Effect.all(
+			[handle.exitCode, Stream.mkString(Stream.decodeText(handle.stderr))],
+			{ concurrency: "unbounded" },
+		)
+		if (code !== 0) {
+			return yield* new UpdateError({
+				message: `could not extract bundle: tar exited ${code}: ${stderr.trim()}`,
+			})
+		}
+	}).pipe(
+		Effect.scoped,
+		Effect.catchTag("PlatformError", (e) =>
+			Effect.fail(new UpdateError({ message: `could not extract bundle: ${e.message}` })),
+		),
+	)
 
 /** Best-effort: strip the Gatekeeper quarantine flag macOS sets on downloads. */
-const clearQuarantine = (paths: ReadonlyArray<string>): Effect.Effect<void> =>
-	Effect.promise(async () => {
-		try {
-			await Bun.spawn(["xattr", "-dr", "com.apple.quarantine", ...paths], {
+const clearQuarantine = (paths: ReadonlyArray<string>): Effect.Effect<void, never, ChildProcessSpawner> =>
+	Effect.gen(function* () {
+		const spawner = yield* ChildProcessSpawner
+		yield* spawner.exitCode(
+			ChildProcess.make("xattr", ["-dr", "com.apple.quarantine", ...paths], {
+				stdin: "ignore",
 				stdout: "ignore",
 				stderr: "ignore",
-			}).exited
-		} catch {
-			// best effort — quarantine clearing failing shouldn't fail the update
-		}
-	})
+			}),
+		)
+	}).pipe(
+		// Quarantine clearing failing must never fail the update. Unlike the
+		// previous bare `catch`, the cause is logged rather than discarded.
+		Effect.tapCause((cause) => Effect.logDebug("could not clear macOS quarantine flag", cause)),
+		Effect.ignore,
+	)
+
+export const __testables = { downloadTo, extractTar, fetchText, mapFsError }
 
 export interface UpdateResult {
 	readonly tag: string
@@ -272,8 +306,9 @@ export interface UpdateResult {
 /** Download, verify, and atomically install a release bundle in place. */
 export const performUpdate = (
 	opts: { tag?: string } = {},
-): Effect.Effect<UpdateResult, UpdateError, HttpClient.HttpClient> =>
+): Effect.Effect<UpdateResult, UpdateError, HttpClient.HttpClient | ChildProcessSpawner | FileSystem> =>
 	Effect.gen(function* () {
+		const fs = yield* FileSystem
 		const target = yield* resolveTarget
 		const tagRaw = opts.tag ?? (yield* fetchLatestTag(10_000))
 		const tag = tagRaw.startsWith("v") ? tagRaw : `v${tagRaw}`
@@ -291,17 +326,14 @@ export const performUpdate = (
 		yield* Effect.scoped(
 			Effect.gen(function* () {
 				yield* Effect.addFinalizer(() =>
-					Effect.promise(() => rm(tmpDir, { recursive: true, force: true }).catch(() => {})),
+					fs.remove(tmpDir, { recursive: true, force: true }).pipe(Effect.ignore),
 				)
 
 				// Fresh temp dir.
-				yield* Effect.tryPromise({
-					try: async () => {
-						await rm(tmpDir, { recursive: true, force: true })
-						await mkdir(tmpDir, { recursive: true })
-					},
-					catch: (e) => mapFsError(e, installDir),
-				})
+				yield* fs.remove(tmpDir, { recursive: true, force: true }).pipe(
+					Effect.andThen(fs.makeDirectory(tmpDir, { recursive: true })),
+					Effect.mapError((e) => mapFsError(e, installDir)),
+				)
 
 				const tarball = join(tmpDir, "bundle.tar.gz")
 				yield* downloadTo(url, tarball)
@@ -320,14 +352,11 @@ export const performUpdate = (
 				const srcDir = join(tmpDir, name)
 
 				// Atomic in-place swap of both bundle files.
-				yield* Effect.tryPromise({
-					try: async () => {
-						await rename(join(srcDir, "maple"), join(installDir, "maple"))
-						await rename(join(srcDir, "libchdb.so"), join(installDir, "libchdb.so"))
-						await chmod(join(installDir, "maple"), 0o755)
-					},
-					catch: (e) => mapFsError(e, installDir),
-				})
+				yield* fs.rename(join(srcDir, "maple"), join(installDir, "maple")).pipe(
+					Effect.andThen(fs.rename(join(srcDir, "libchdb.so"), join(installDir, "libchdb.so"))),
+					Effect.andThen(fs.chmod(join(installDir, "maple"), 0o755)),
+					Effect.mapError((e) => mapFsError(e, installDir)),
+				)
 
 				if (process.platform === "darwin") {
 					yield* clearQuarantine([join(installDir, "maple"), join(installDir, "libchdb.so")])

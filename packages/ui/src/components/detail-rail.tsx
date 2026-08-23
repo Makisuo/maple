@@ -1,6 +1,7 @@
 import type * as React from "react"
 
 import { cn } from "../lib/utils"
+import type { IconComponent } from "./icons"
 
 /* -------------------------------------------------------------------------------------------------
  * DetailRail — the label/value rail every detail page hangs off its trailing edge.
@@ -27,7 +28,10 @@ function Group({
 	return (
 		<section
 			data-slot="detail-rail-group"
-			className={cn("flex flex-col gap-2 border-b border-border/40 p-4 last:border-b-0", className)}
+			className={cn(
+				"flex flex-col gap-1.5 border-b border-border/40 px-4 py-3.5 last:border-b-0",
+				className,
+			)}
 		>
 			<h3 className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
 				{label}
@@ -38,26 +42,80 @@ function Group({
 }
 
 function Row({
+	/**
+	 * Optional glyph in front of the label. A rail that gives every row one
+	 * reads as a scannable list rather than a wall of words; a rail that gives
+	 * none keeps the original two-column shape, so this is opt-in per rail —
+	 * never per row, or the labels stop aligning with each other.
+	 */
+	icon: Icon,
 	label,
+	/**
+	 * Provenance or scope for the value, set under the label in the label's own
+	 * column ("Severity / AI triage") — the label column is where "what is this
+	 * row" lives, so that is where "and where did it come from" belongs too,
+	 * rather than a stray line under the value.
+	 */
+	hint,
 	title,
 	children,
 	/** Width of the label column. Narrow rails (recommendations) run tighter. */
 	labelWidth = "88px",
+	className,
 }: {
+	icon?: IconComponent
 	label: string
+	hint?: string
 	title?: string
 	children: React.ReactNode
 	labelWidth?: string
+	className?: string
 }) {
 	return (
 		<div
 			data-slot="detail-rail-row"
 			title={title}
-			className="grid min-h-8 items-center gap-x-3 py-0.5"
+			className={cn("grid min-h-8 items-center gap-x-3 py-0.5", className)}
 			style={{ gridTemplateColumns: `${labelWidth} 1fr` }}
 		>
-			<span className="text-xs text-muted-foreground">{label}</span>
+			<span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+				{Icon ? <Icon className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden /> : null}
+				<span className="flex min-w-0 flex-col">
+					<span className="truncate">{label}</span>
+					{hint ? (
+						<span className="truncate text-[10px] text-muted-foreground/70">{hint}</span>
+					) : null}
+				</span>
+			</span>
 			<div className="flex min-w-0 items-center justify-end">{children}</div>
+		</div>
+	)
+}
+
+/**
+ * Label above a full-width value, for values too long for `Row`'s 88px label
+ * column to leave room for — service names, environment lists, anything that
+ * truncated at "kafka-consumers-…" when squeezed beside a label. Same label
+ * type as `Row`, so a rail can mix the two without a visible seam.
+ */
+function Field({
+	label,
+	hint,
+	title,
+	children,
+}: {
+	label: string
+	hint?: string
+	title?: string
+	children: React.ReactNode
+}) {
+	return (
+		<div data-slot="detail-rail-field" title={title} className="flex flex-col gap-1 py-1">
+			<span className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
+				<span>{label}</span>
+				{hint ? <span className="text-[10px] text-muted-foreground/70">{hint}</span> : null}
+			</span>
+			<div className="min-w-0">{children}</div>
 		</div>
 	)
 }
@@ -82,4 +140,4 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
 	)
 }
 
-export const DetailRail = { Group, Row, MetaRow }
+export const DetailRail = { Group, Row, Field, MetaRow }

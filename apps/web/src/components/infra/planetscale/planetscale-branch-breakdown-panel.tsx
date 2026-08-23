@@ -201,7 +201,7 @@ export function PlanetScaleBranchBreakdownPanel({
 						currentKey={sortKey}
 						dir={sortDir}
 						onSort={handleSort}
-						width="flex-1 min-w-[200px]"
+						width="w-0 flex-1 min-w-[200px]"
 					/>
 					<ColumnHead<SortKey>
 						label={spec.label}
@@ -219,7 +219,7 @@ export function PlanetScaleBranchBreakdownPanel({
 					const selected = !row.isOther && selectedBranches.includes(row.branch)
 					const Cell = (
 						<>
-							<div className="flex min-w-[200px] flex-1 items-center gap-2 overflow-hidden">
+							<div className="flex w-0 min-w-[200px] flex-1 items-center gap-2 overflow-hidden">
 								<span
 									className={cn(
 										"truncate text-[13px]",

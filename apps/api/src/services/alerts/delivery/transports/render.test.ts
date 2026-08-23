@@ -8,6 +8,7 @@ import { discordTransport } from "./discord"
 import { hazelTransport } from "./hazel"
 import { pagerDutyTransport } from "./pagerduty"
 import { makeSlackTransport } from "./slack"
+import { telegramTransport } from "./telegram"
 import { webhookTransport } from "./webhook"
 
 /**
@@ -123,19 +124,27 @@ describe("transport render: guard flags", () => {
 				}),
 			),
 		],
+		[
+			"telegram",
+			telegramTransport.render(
+				inputFor({ type: "telegram", botToken: "123456789:AA-token", chatId: "-100123" }),
+			),
+		],
 	]
 
 	it("guards exactly the user-configured hosts", () => {
 		const guarded = specs.filter(([, spec]) => spec.guarded).map(([name]) => name)
-		// slack + pagerduty post to compile-time vendor constants: there is no
-		// attacker-controlled URL to validate, so the guard would only cost a
+		// slack + pagerduty + telegram post to compile-time vendor constants: there
+		// is no attacker-controlled URL to validate, so the guard would only cost a
 		// redirect walk.
 		assert.deepStrictEqual(guarded, ["webhook", "discord", "hazel-oauth"])
 	})
 
 	it("marks exactly the providers whose token rides in the URL path", () => {
 		const sensitive = specs.filter(([, spec]) => spec.sensitivePath).map(([name]) => name)
-		assert.deepStrictEqual(sensitive, ["discord", "hazel-oauth"])
+		// telegram is the first provider where this disagrees with `guarded`: a
+		// fixed vendor host, but the bot token rides in the path.
+		assert.deepStrictEqual(sensitive, ["discord", "hazel-oauth", "telegram"])
 	})
 
 	it("always produces a parseable JSON body", () => {

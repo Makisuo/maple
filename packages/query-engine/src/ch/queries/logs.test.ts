@@ -234,7 +234,9 @@ describe("logsTimeseriesQuery MV routing", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM logs")
 		expect(sql).not.toContain("logs_aggregates_hourly")
-		expect(sql).toContain("positionCaseInsensitive(ResourceAttributes['deployment.environment'], 'prod')")
+		expect(sql).toContain(
+			"positionCaseInsensitive(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']), 'prod')",
+		)
 	})
 })
 
@@ -279,7 +281,9 @@ describe("logsBreakdownQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM logs")
 		expect(sql).not.toContain("logs_aggregates_hourly")
-		expect(sql).toContain("positionCaseInsensitive(ResourceAttributes['deployment.environment'], 'prod')")
+		expect(sql).toContain(
+			"positionCaseInsensitive(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']), 'prod')",
+		)
 	})
 
 	it("applies custom limit", () => {
@@ -581,7 +585,9 @@ describe("logsFacetsQuery", () => {
 		const { sql } = compileUnion(q, baseParams)
 		expect(sql).toContain("FROM logs")
 		expect(sql).not.toContain("logs_aggregates_hourly")
-		expect(sql).toContain("positionCaseInsensitive(ResourceAttributes['deployment.environment'], 'prod')")
+		expect(sql).toContain(
+			"positionCaseInsensitive(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']), 'prod')",
+		)
 	})
 
 	it("compiles only the requested branch when facet is set", () => {
@@ -615,31 +621,41 @@ describe("environments filter", () => {
 	it("logsListQuery filters by a single environment", () => {
 		const q = logsListQuery({ environments: ["production"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')",
+		)
 	})
 
 	it("logsListQuery filters by multiple environments", () => {
 		const q = logsListQuery({ environments: ["production", "staging"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production', 'staging')",
+		)
 	})
 
 	it("logsListQuery uses positionCaseInsensitive for single-value contains mode", () => {
 		const q = logsListQuery({ environments: ["prod"], matchModes: { deploymentEnv: "contains" } })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("positionCaseInsensitive(ResourceAttributes['deployment.environment'], 'prod')")
+		expect(sql).toContain(
+			"positionCaseInsensitive(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']), 'prod')",
+		)
 	})
 
 	it("logsCountQuery applies environments filter", () => {
 		const q = logsCountQuery({ environments: ["production"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')",
+		)
 	})
 
 	it("logsTimeseriesQuery applies environments filter", () => {
 		const q = logsTimeseriesQuery({ environments: ["production"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')",
+		)
 	})
 
 	it("logsFacetsQuery applies environments filter to all branches via the MV column", () => {

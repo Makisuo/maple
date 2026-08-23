@@ -13,6 +13,19 @@ import type {
 	AlertSignalType,
 } from "@maple/domain/http"
 import { formatSignalValue } from "@/lib/alerts/form-utils"
+import {
+	clipToDomain,
+	GHOST_KEY,
+	mergeGhost,
+	projectChecks,
+	projectPreview,
+	resolveChartDomain,
+	resolveSource,
+	SIGNAL_SOURCE_LABEL,
+	SINGLE_KEY,
+	type Band,
+	type SignalSource,
+} from "@/lib/alerts/chart-series"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import {
 	PlotFrame,
@@ -84,19 +97,7 @@ interface AlertRuleChartProps {
 	className?: string
 }
 
-const SINGLE_KEY = "value"
-/** The unselected source, drawn dashed behind the selected one for comparison. */
-const GHOST_KEY = "__ghost"
 const CHART_HEIGHT = 300
-
-type ChartPoint = { t: number } & Record<string, number | null>
-export type SignalSource = "preview" | "checks"
-type ResolvedSource = SignalSource | "none"
-
-export const SIGNAL_SOURCE_LABEL: Record<SignalSource, string> = {
-	preview: "Query",
-	checks: "Evaluated",
-} satisfies Record<SignalSource, string>
 
 const Y_AXIS_WIDTH = 72
 const PLOT_RIGHT = 12
@@ -123,22 +124,7 @@ function clamp01(value: number): number {
 
 const NO_CHECKS: ReadonlyArray<AlertCheckDocument> = []
 const NO_INCIDENTS: ReadonlyArray<AlertIncidentDocument> = []
-const EMPTY_BANDS: Array<{ x1: number; x2: number }> = []
-
-// Recharts reconciliation cost is linear in plotted points, and beyond ~1
-// point per 2 horizontal pixels extra points are invisible at our widths.
-// Tooltip/rail/band data stays computed from the full series.
-const MAX_PLOTTED_POINTS = 720
-
-function downsample(rows: ChartPoint[]): ChartPoint[] {
-	if (rows.length <= MAX_PLOTTED_POINTS) return rows
-	const stride = Math.ceil(rows.length / MAX_PLOTTED_POINTS)
-	const out: ChartPoint[] = []
-	for (let i = 0; i < rows.length; i += stride) out.push(rows[i]!)
-	const last = rows[rows.length - 1]!
-	if (out[out.length - 1] !== last) out.push(last)
-	return out
-}
+const EMPTY_BANDS: Band[] = []
 
 export const AlertRuleChart = React.memo(function AlertRuleChart({
 	preview,
@@ -149,7 +135,7 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 	thresholdUpper,
 	comparator,
 	signalType,
-	window: domain,
+	window: requestedDomain,
 	source: requestedSource,
 	railCoverage,
 	selectedBucket = null,
@@ -158,181 +144,50 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 	error,
 	className,
 }: AlertRuleChartProps) {
-	// The two sources are built independently so the toggle can switch between
-	// them, and so the unselected one can be drawn as a comparison ghost.
-	const previewChart = React.useMemo((): {
-		rows: ChartPoint[]
-		seriesKeys: string[]
-		isMultiSeries: boolean
-		hasPoints: boolean
-		/** t → total samples across groups (tooltip). */
-		sampleCounts: Map<number, number>
-		/** t → worst per-bucket status across groups (tooltip). */
-		statuses: Map<number, string>
-		/** Merged spans where NO group observed data — hatched on the chart. */
-		noDataBands: Array<{ x1: number; x2: number }>
-		/** x-coords of the trailing in-progress window (tooltip). */
-		provisionalTs: Set<number>
-	} => {
-		const sampleCounts = new Map<number, number>()
-		const statuses = new Map<number, string>()
-		const provisionalTs = new Set<number>()
-		const previewSeries = preview?.series ?? []
-		// An entirely-valueless preview (every window no-data) charts nothing
-		// useful — fall through to checks/placeholder instead of an empty grid.
-		const hasPreviewPoints = previewSeries.some((s) => s.points.some((p) => p.value != null))
+	const { domain, clampedToPreview } = React.useMemo(
+		() =>
+			resolveChartDomain(requestedDomain, preview?.truncatedToStart, {
+				// The rail and the incident lane share this domain and are not capped
+				// by the preview's window budget.
+				hasOverlays: checks.length > 0 || incidents.length > 0,
+			}),
+		[requestedDomain, preview?.truncatedToStart, checks.length, incidents.length],
+	)
 
-		if (!hasPreviewPoints) {
-			return {
-				rows: [],
-				seriesKeys: [SINGLE_KEY],
-				isMultiSeries: false,
-				hasPoints: false,
-				sampleCounts,
-				statuses,
-				noDataBands: [],
-				provisionalTs,
-			}
-		}
+	// The two sources are projected independently so the toggle can switch
+	// between them, and so the unselected one can be drawn as a comparison ghost.
+	const previewChart = React.useMemo(() => projectPreview(preview, domain.max), [preview, domain.max])
+	const checksChart = React.useMemo(() => projectChecks(checks), [checks])
 
-		{
-			const keys = previewSeries.map((s) => s.groupKey)
-			const single = keys.length === 1
-			const byT = new Map<number, ChartPoint>()
-			const statusRank: Record<string, number> = {
-				healthy: 0,
-				skipped: 1,
-				breached: 2,
-			} satisfies Record<string, number>
-			// Points plot at the window CLOSE — the moment the evaluator observes
-			// the window — matching check timestamps and reaching the axis edge.
-			const stepMs = (preview?.bucketSeconds ?? 60) * 1000
-			// t → window bounds + how many of the bucket's points carried data.
-			const buckets = new Map<number, { x1: number; x2: number; points: number; withData: number }>()
-			for (const series of previewSeries) {
-				const key = single ? SINGLE_KEY : series.groupKey
-				for (const point of series.points) {
-					const open = Date.parse(point.bucket)
-					if (!Number.isFinite(open)) continue
-					// The provisional window is shorter than a full step — close it at
-					// the domain edge instead of overshooting it.
-					const t = point.provisional ? Math.min(open + stepMs, domain.max) : open + stepMs
-					let row = byT.get(t)
-					if (!row) {
-						row = { t }
-						byT.set(t, row)
-					}
-					row[key] = point.value
-					sampleCounts.set(t, (sampleCounts.get(t) ?? 0) + point.sampleCount)
-					const prev = statuses.get(t)
-					if (prev == null || (statusRank[point.status] ?? 0) > (statusRank[prev] ?? 0)) {
-						statuses.set(t, point.status)
-					}
-					if (point.provisional) provisionalTs.add(t)
-					let bucket = buckets.get(t)
-					if (!bucket) {
-						bucket = { x1: open, x2: t, points: 0, withData: 0 }
-						buckets.set(t, bucket)
-					}
-					bucket.points += 1
-					if (point.value != null) bucket.withData += 1
-				}
-			}
-			// Runs of windows where every group came back empty → merged hatched bands.
-			const noDataBands: Array<{ x1: number; x2: number }> = []
-			const emptyBuckets = Array.from(buckets.values())
-				.filter((b) => b.points > 0 && b.withData === 0)
-				.sort((a, b) => a.x1 - b.x1)
-			for (const bucket of emptyBuckets) {
-				const last = noDataBands[noDataBands.length - 1]
-				if (last && bucket.x1 <= last.x2 + 1) last.x2 = bucket.x2
-				else noDataBands.push({ x1: bucket.x1, x2: bucket.x2 })
-			}
-			const rows = downsample(Array.from(byT.values()).sort((a, b) => a.t - b.t))
-			return {
-				rows,
-				seriesKeys: single ? [SINGLE_KEY] : keys,
-				isMultiSeries: !single,
-				hasPoints: true,
-				sampleCounts,
-				statuses,
-				noDataBands,
-				provisionalTs,
-			}
-		}
-	}, [preview, domain.max])
+	const { source, fellBack, bothAvailable } = resolveSource(requestedSource, {
+		preview: previewChart.hasPoints,
+		checks: checksChart.hasPoints,
+	})
 
-	/** The values the evaluator actually recorded, one point per check. */
-	const checksChart = React.useMemo((): { rows: ChartPoint[]; hasPoints: boolean } => {
-		const rows: ChartPoint[] = checks
-			.map((check) => ({
-				t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
-				[SINGLE_KEY]: check.observedValue,
-			}))
-			.filter((row) => Number.isFinite(row.t))
-			.sort((a, b) => a.t - b.t)
-		return { rows: downsample(rows), hasPoints: rows.some((r) => r[SINGLE_KEY] != null) }
-	}, [checks])
-
-	// The requested source wins when it has points; otherwise we fall back to the
-	// other one. `fellBack` drives the caption, so the swap is never silent.
-	const resolvedSource: ResolvedSource = previewChart.hasPoints
-		? requestedSource === "checks" && checksChart.hasPoints
-			? "checks"
-			: "preview"
-		: checksChart.hasPoints
-			? "checks"
-			: "none"
-	const fellBack =
-		requestedSource != null && resolvedSource !== "none" && resolvedSource !== requestedSource
-	const bothSourcesAvailable = previewChart.hasPoints && checksChart.hasPoints
-
-	const source = resolvedSource
-	const { sampleCounts, statuses, provisionalTs } = previewChart
-	const seriesKeys = source === "preview" ? previewChart.seriesKeys : [SINGLE_KEY]
+	const bucketMeta = previewChart.meta
+	// Memoised because `[SINGLE_KEY]` is a fresh array otherwise, and this feeds
+	// the chart *definition* — an unstable identity here rebuilt the entire plot
+	// spec on every render.
+	const seriesKeys = React.useMemo(
+		() => (source === "preview" ? previewChart.seriesKeys : [SINGLE_KEY]),
+		[source, previewChart.seriesKeys],
+	)
 	const isMultiSeries = source === "preview" && previewChart.isMultiSeries
-	const noDataBands = source === "preview" ? previewChart.noDataBands : EMPTY_BANDS
+	const noDataBands = React.useMemo(
+		() => (source === "preview" ? clipToDomain(previewChart.noDataBands, domain) : EMPTY_BANDS),
+		[source, previewChart.noDataBands, domain],
+	)
 
-	// The unselected source, aligned onto the selected series' own timestamps so
-	// it can share the dataset without shredding the primary line with nulls.
 	// Grouped rules skip the ghost — N series plus N ghosts is unreadable.
 	const { chartData, divergence } = React.useMemo(() => {
 		const primary = source === "preview" ? previewChart.rows : checksChart.rows
-		if (source === "none" || isMultiSeries || !bothSourcesAvailable) {
+		if (source === "none" || isMultiSeries || !bothAvailable) {
 			return { chartData: primary, divergence: null as number | null }
 		}
 		const ghostRows = source === "preview" ? checksChart.rows : previewChart.rows
-		const ghostPoints = ghostRows
-			.map((row) => ({ t: row.t, v: row[SINGLE_KEY] }))
-			.filter((p): p is { t: number; v: number } => typeof p.v === "number")
-		if (ghostPoints.length === 0) return { chartData: primary, divergence: null }
-		// Half the primary spacing: close enough to be the same window, far enough
-		// that a coarser summary bucket still lands on its neighbour.
-		const spacing =
-			primary.length >= 2
-				? Math.abs(primary[1]!.t - primary[0]!.t)
-				: (domain.max - domain.min) / RAIL_CELLS
-		const tolerance = Math.max(spacing, 1)
-		let cursor = 0
-		let maxGap: number | null = null
-		const merged = primary.map((row) => {
-			while (
-				cursor + 1 < ghostPoints.length &&
-				Math.abs(ghostPoints[cursor + 1]!.t - row.t) <= Math.abs(ghostPoints[cursor]!.t - row.t)
-			) {
-				cursor += 1
-			}
-			const candidate = ghostPoints[cursor]!
-			if (Math.abs(candidate.t - row.t) > tolerance) return row
-			const own = row[SINGLE_KEY]
-			if (typeof own === "number") {
-				const gap = Math.abs(own - candidate.v)
-				if (maxGap == null || gap > maxGap) maxGap = gap
-			}
-			return { ...row, [GHOST_KEY]: candidate.v }
-		})
-		return { chartData: merged, divergence: maxGap }
-	}, [source, isMultiSeries, bothSourcesAvailable, previewChart, checksChart, domain])
+		const merged = mergeGhost(primary, ghostRows, (domain.max - domain.min) / RAIL_CELLS)
+		return { chartData: merged.rows, divergence: merged.divergence }
+	}, [source, isMultiSeries, bothAvailable, previewChart, checksChart, domain])
 
 	const hasSignal = chartData.length > 0
 
@@ -360,7 +215,7 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 	const seriesColors = React.useMemo(() => resolveSeriesColors(seriesKeys), [seriesKeys])
 
 	const otherSource: SignalSource = source === "preview" ? "checks" : "preview"
-	const hasGhost = source !== "none" && !isMultiSeries && bothSourcesAvailable
+	const hasGhost = source !== "none" && !isMultiSeries && bothAvailable
 
 	const chartConfig: ChartConfig = React.useMemo(() => {
 		const config: ChartConfig = {}
@@ -400,41 +255,27 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 
 	const incidentBands = React.useMemo(
 		() =>
-			incidents
-				.map((incident) => {
-					const x1 = new Date(incident.firstTriggeredAt).getTime()
-					const x2 = incident.resolvedAt ? new Date(incident.resolvedAt).getTime() : domain.max
-					return { x1, x2, open: incident.status === "open" }
-				})
-				.filter((band) => band.x2 >= domain.min && band.x1 <= domain.max)
-				.map((band) => ({
-					...band,
-					x1: Math.max(band.x1, domain.min),
-					x2: Math.min(band.x2, domain.max),
+			clipToDomain(
+				incidents.map((incident) => ({
+					x1: new Date(incident.firstTriggeredAt).getTime(),
+					x2: incident.resolvedAt ? new Date(incident.resolvedAt).getTime() : domain.max,
+					open: incident.status === "open",
 				})),
+				domain,
+			),
 		[incidents, domain],
 	)
 
 	const wouldFireBands = React.useMemo(() => {
-		if (!showWouldFire || preview == null) return []
-		return preview.wouldFire
-			.map((span) => ({
+		if (!showWouldFire || preview == null) return EMPTY_BANDS
+		return clipToDomain(
+			preview.wouldFire.map((span) => ({
 				x1: Date.parse(span.start),
 				x2: Date.parse(span.end),
 				groupKey: span.groupKey,
-			}))
-			.filter(
-				(band) =>
-					Number.isFinite(band.x1) &&
-					Number.isFinite(band.x2) &&
-					band.x2 >= domain.min &&
-					band.x1 <= domain.max,
-			)
-			.map((band) => ({
-				...band,
-				x1: Math.max(band.x1, domain.min),
-				x2: Math.min(band.x2, domain.max),
-			}))
+			})),
+			domain,
+		)
 	}, [showWouldFire, preview, domain])
 
 	const railCells = React.useMemo(() => {
@@ -619,20 +460,16 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 		}
 
 		/** A band spanning the full y domain — `rect` has no "fill the plot" mode. */
-		const band = (
-			bands: ReadonlyArray<{ x1: number; x2: number }>,
-			fill: string,
-			fillOpacity: number,
-			id: string,
-		) =>
+		const band = (bands: ReadonlyArray<Band>, fill: string, fillOpacity: number, id: string) =>
 			bands.length === 0
 				? []
 				: [
 						decorative(
 							rect(bands, {
 								id,
-								x1: (b: { x1: number }) => new Date(Math.max(b.x1, domain.min)),
-								x2: (b: { x2: number }) => new Date(Math.min(b.x2, domain.max)),
+								// Already clipped to the domain by `clipToDomain`.
+								x1: (b: Band) => new Date(b.x1),
+								x2: (b: Band) => new Date(b.x2),
 								y1: () => yDomain[0],
 								y2: () => yDomain[1],
 								fill,
@@ -751,7 +588,11 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 					},
 				},
 			},
-			margin: { top: 8, right: PLOT_RIGHT, bottom: 0, left: Y_AXIS_WIDTH },
+			// `bottom` is left unset: an authored side is a hard lock, and `bottom: 0`
+			// (carried over from Recharts, which sized the axis separately) clipped
+			// the x tick labels out and halved the y axis's "0". Unset, the frame
+			// measures the labels and reserves their height.
+			margin: { top: 8, right: PLOT_RIGHT, left: Y_AXIS_WIDTH },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
@@ -817,12 +658,11 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 							heading={(point: SignalPoint) => {
 								const t = num(point.t)
 								const label = formatTime(t, "tooltip")
-								const samples = sampleCounts.get(t)
-								const status = statuses.get(t)
+								const meta = bucketMeta.get(t)
 								const extras = [
-									samples != null ? `${samples} samples` : null,
-									status === "skipped" ? "skipped" : null,
-									provisionalTs.has(t) ? "in progress" : null,
+									meta != null ? `${meta.sampleCount} samples` : null,
+									meta?.status === "skipped" ? "skipped" : null,
+									meta?.provisional === true ? "in progress" : null,
 								].filter(Boolean)
 								return extras.length > 0 ? `${label} · ${extras.join(" · ")}` : label
 							}}
@@ -917,8 +757,10 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 			)}
 			{preview?.truncatedToStart != null && (
 				<p className="text-[11px] text-muted-foreground">
-					Preview truncated to {formatTime(Date.parse(preview.truncatedToStart), "tooltip")} —
-					shorten the window or the range for full coverage.
+					{clampedToPreview ? "Axis starts at " : "Query series starts at "}
+					{formatTime(Date.parse(preview.truncatedToStart), "tooltip")} — the selected range needs
+					more evaluation windows than one preview replays. Widen the rule's window or shorten the
+					range for full coverage.
 				</p>
 			)}
 

@@ -1,3 +1,4 @@
+import { MAPLE_MCP_SERVER_VERSION } from "@maple/domain/mcp-manifest"
 import { McpProtocol, McpServer } from "effect/unstable/ai"
 import { Cause, Effect, Layer } from "effect"
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -126,7 +127,8 @@ const McpAuthorizationMiddleware = HttpRouter.middleware<{ provides: CurrentMcpT
 
 const McpHttpLive = McpServer.layerHttp({
 	name: "maple-observability",
-	version: "1.0.0",
+	// Kept equal to the public `server.json` manifest (`@maple/domain/mcp-manifest`).
+	version: MAPLE_MCP_SERVER_VERSION,
 	path: "/mcp",
 	protocols: MCP_PROTOCOLS,
 	clientSessions: sessionStore,

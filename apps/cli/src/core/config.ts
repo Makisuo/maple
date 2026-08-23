@@ -1,5 +1,6 @@
 import { Clock, Context, Effect, Layer, Option, Redacted, type PlatformError, Schema } from "effect"
 import { FileSystem } from "effect/FileSystem"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as os from "node:os"
 import * as path from "node:path"
 import { defaultLocalUrl } from "../lib/local-address"
@@ -108,13 +109,19 @@ export interface MapleConfigValues {
 export class MapleConfig extends Context.Service<MapleConfig, MapleConfigValues>()("@maple/cli/MapleConfig", {
 	make: Effect.gen(function* () {
 		const fs = yield* FileSystem
+		// The native credential helpers spawn `security`/`secret-tool`. Capturing
+		// the spawner here keeps it out of MapleConfigValues' signatures, the same
+		// way `fs` is captured for the write helpers.
+		const spawner = yield* ChildProcessSpawner
+		const keychain = <A>(effect: Effect.Effect<A, never, ChildProcessSpawner>): Effect.Effect<A> =>
+			Effect.provideService(effect, ChildProcessSpawner, spawner)
 		const stored = yield* readStored(fs)
 		const env = process.env
 		const resolvedApiUrl = env.MAPLE_API_URL ?? stored.apiUrl
 		const envToken = env.MAPLE_API_TOKEN
 		const nativeToken =
 			!envToken && !stored.token && stored.credentialStore === "keychain" && resolvedApiUrl
-				? yield* Effect.promise(() => readNativeCredential(resolvedApiUrl))
+				? yield* keychain(readNativeCredential(resolvedApiUrl))
 				: undefined
 		const resolvedToken = envToken ?? stored.token ?? nativeToken
 		const tokenSource = envToken
@@ -141,11 +148,9 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigValues>
 			write: (next) => writeMerged(fs, (cur) => ({ ...cur, ...next })),
 			saveRemoteCredential: (next) =>
 				Effect.gen(function* () {
-					const storedInKeychain = yield* Effect.promise(() =>
-						writeNativeCredential(next.apiUrl, next.token),
-					)
+					const storedInKeychain = yield* keychain(writeNativeCredential(next.apiUrl, next.token))
 					if (!storedInKeychain) {
-						yield* Effect.promise(() => deleteNativeCredential(next.apiUrl))
+						yield* keychain(deleteNativeCredential(next.apiUrl))
 					}
 					yield* writeMerged(fs, (cur) => {
 						const { token: _token, ...withoutToken } = cur
@@ -165,7 +170,7 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigValues>
 				Effect.gen(function* () {
 					const storedApiUrl = stored.apiUrl
 					if (storedApiUrl && stored.credentialStore === "keychain") {
-						yield* Effect.promise(() => deleteNativeCredential(storedApiUrl))
+						yield* keychain(deleteNativeCredential(storedApiUrl))
 					}
 					yield* writeMerged(fs, (cur) => {
 						const {

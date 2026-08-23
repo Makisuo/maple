@@ -20,6 +20,7 @@ import { openGlobalChat } from "@/components/chat/global-chat-sheet"
 import { ConnectButton } from "@/components/header/connect-button"
 import { QuotaBanner } from "@/components/billing/quota-banner"
 import { PaymentFailedBanner } from "@/components/billing/payment-failed-banner"
+import { SubscriptionEndedBanner } from "@/components/billing/subscription-ended-banner"
 import { AppUpdateBanner } from "@/components/layout/app-update-banner"
 import { Link, defaultParseSearch } from "@tanstack/react-router"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
@@ -164,6 +165,7 @@ function Body({ children }: { children: React.ReactNode }) {
 			    whether or not the deployment uses Clerk, and self-hosted installs
 			    have the same long-lived-tab problem. */}
 			<AppUpdateBanner />
+			{isClerkAuthEnabled && <SubscriptionEndedBanner />}
 			{isClerkAuthEnabled && <PaymentFailedBanner />}
 			{isClerkAuthEnabled && <QuotaBanner />}
 			<PageLayout.Body>{children}</PageLayout.Body>

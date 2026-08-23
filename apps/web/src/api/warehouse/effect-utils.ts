@@ -8,6 +8,7 @@ import {
 	type AttributeValueItem,
 } from "@maple/query-engine"
 import { Effect, Layer, Schema } from "effect"
+import { HttpClientError } from "effect/unstable/http"
 import { PublicHttpErrorBodySchema, type AnyPublicHttpErrorBody } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
@@ -18,7 +19,9 @@ import {
 	mapleInternalClientLayer,
 	mapleRuntime,
 } from "@/lib/registry"
-import { makeClientErrorBody } from "@/lib/error-messages"
+import { makeClientErrorBody, NetworkErrorBody } from "@/lib/error-messages"
+import { apiBaseUrl } from "@/lib/services/common/api-base-url"
+import { isBlipping, originOf } from "@/lib/services/common/peer-reachability"
 import { makeExecuteBatcher } from "./execute-batcher"
 
 export const WarehouseDateTimeString = TinybirdDateTime
@@ -94,11 +97,39 @@ export class WarehouseInvalidInputError extends Schema.TaggedError<WarehouseInva
 	})
 }
 
+/**
+ * The browser could not reach the API at all, and has not been able to for less
+ * than `PEER_OUTAGE_GRACE_MS`.
+ *
+ * Its own tag rather than a flavour of `WarehouseQueryError` because it is not a
+ * fault of Maple's: `otel-layer.ts` anticipates this tag, so the spans it fails
+ * record `Ok` and no exception event is fingerprinted for a wifi blip. A failure
+ * still arriving after the grace window is a real outage and stays a
+ * `WarehouseQueryError`, which reports as before.
+ *
+ * It carries the same public body a bare transport failure already resolved to
+ * through `displayError`, so the UI copy is unchanged — "Cannot reach Maple
+ * API", retryable. That copy is the point: the path this replaces re-raised a
+ * dropped connection as `WarehouseInvalidInputError`, telling the user their
+ * query was invalid and to fix the request.
+ */
+export class WarehouseUnreachableError extends Schema.TaggedError<WarehouseUnreachableError>()(
+	"@maple/web/errors/WarehouseUnreachableError",
+	{
+		operation: Schema.String,
+		message: Schema.String,
+		cause: Schema.optional(Schema.Unknown),
+	},
+) {
+	readonly error = NetworkErrorBody
+}
+
 export type WarehouseApiError =
 	| WarehouseDecodeError
 	| WarehouseQueryError
 	| WarehouseTransformError
 	| WarehouseInvalidInputError
+	| WarehouseUnreachableError
 
 /** Backend failures are either a public body or an error carrying that same body. */
 export type BackendError = AnyPublicHttpErrorBody | { readonly error: AnyPublicHttpErrorBody }
@@ -124,17 +155,43 @@ export const isWarehouseApiError = (cause: unknown): cause is WarehouseApiError 
 	typeof cause._tag === "string" &&
 	cause._tag.startsWith("@maple/web/errors/Warehouse")
 
+/**
+ * True when `cause` is a request that never got a response — the browser could
+ * not reach the API — as opposed to one the API answered with a failure.
+ *
+ * Walks the cause chain because the transport failure is usually nested: the
+ * batcher rejects its promise with an `HttpClientError`, which `Effect.tryPromise`
+ * then wraps. Bounded at the same depth `displayError` uses.
+ */
+export const isTransportFailure = (cause: unknown, depth = 0): boolean => {
+	if (HttpClientError.isHttpClientError(cause)) return cause.reason._tag === "TransportError"
+	if (depth >= 4) return false
+	const nested =
+		typeof cause === "object" && cause !== null && "cause" in cause
+			? (cause as { readonly cause: unknown }).cause
+			: undefined
+	return nested === undefined || nested === cause ? false : isTransportFailure(nested, depth + 1)
+}
+
+/**
+ * A transport failure while the API is inside its grace window is the network
+ * dropping, not the warehouse failing — see `peer-reachability.ts`. Once the run
+ * outlasts the window it is a real outage and stays a `WarehouseQueryError`, so
+ * an API that is genuinely down still reports.
+ */
+export const isNetworkBlip = (cause: unknown): boolean =>
+	isTransportFailure(cause) && isBlipping(originOf(apiBaseUrl), Date.now())
+
 /** Preserve known errors; introduce a local query error only for an unstructured failure. */
 export const normalizeWarehouseError = (
 	operation: string,
 	cause: unknown,
 ): WarehouseApiError | BackendError => {
 	if (isBackendError(cause) || isWarehouseApiError(cause)) return cause
-	return new WarehouseQueryError({
-		operation,
-		message: toMessage(cause, `Warehouse query failed for ${operation}`),
-		cause,
-	})
+	const message = toMessage(cause, `Warehouse query failed for ${operation}`)
+	return isNetworkBlip(cause)
+		? new WarehouseUnreachableError({ operation, message, cause })
+		: new WarehouseQueryError({ operation, message, cause })
 }
 
 export function decodeInput<S extends Schema.Top & { readonly DecodingServices: never }>(
@@ -195,6 +252,25 @@ export function runWarehouseQueryV2<A, E>(
 	)
 }
 
+/**
+ * Raise a query-set failure whose per-query causes the runner has already
+ * flattened to strings.
+ *
+ * `runQuerySetWindow` catches each executor failure into `result.error` text and
+ * re-raises the batch as `QuerySetNoDataError`, so the type is gone by the time
+ * an adapter sees it and only the live reachability clock still knows whether
+ * the API answered. While it says the API is unreachable this is that, not a bad
+ * query — which is what the user was previously told to fix.
+ */
+export function querySetFailure(
+	operation: string,
+	message: string,
+): Effect.Effect<never, WarehouseInvalidInputError | WarehouseUnreachableError> {
+	return isBlipping(originOf(apiBaseUrl), Date.now())
+		? Effect.fail(new WarehouseUnreachableError({ operation, message }))
+		: invalidWarehouseInput(operation, message)
+}
+
 export function invalidWarehouseInput(
 	operation: string,
 	message: string,
@@ -229,12 +305,7 @@ const executeQueryEngineEffect = Effect.fn("QueryEngine.execute")(function* (
 ) {
 	return yield* Effect.tryPromise({
 		try: () => executeBatcher.enqueue(payload),
-		catch: (cause) =>
-			new WarehouseQueryError({
-				operation: "QueryEngine.executeBatch",
-				message: toMessage(cause, "Warehouse batch request failed"),
-				cause,
-			}),
+		catch: (cause) => normalizeWarehouseError("QueryEngine.executeBatch", cause),
 	})
 })
 

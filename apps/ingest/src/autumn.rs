@@ -18,7 +18,8 @@ pub(crate) struct UsageEvent {
     pub org_id: String,
     pub feature_id: &'static str,
     /// Quantity to bill for this event. Unit depends on `feature_id`: GB for
-    /// `logs`/`traces`/`metrics`, a raw count for `browser_sessions`.
+    /// `logs`/`traces`/`metrics`, a raw count for `browser_sessions` (session
+    /// starts) and `product_events` (events).
     pub value: f64,
 }
 
@@ -217,7 +218,8 @@ async fn flush_loop(
                 }
 
                 // Update pending gauge. Note: this now sums mixed units across
-                // features (GB for logs/traces/metrics, counts for browser_sessions);
+                // features (GB for logs/traces/metrics, counts for browser_sessions
+                // and product_events);
                 // the metric name is kept as-is to avoid breaking existing dashboards.
                 let total_pending: f64 = accumulator.values().map(PendingUsage::total).sum();
                 metrics::autumn_pending_gb(total_pending);

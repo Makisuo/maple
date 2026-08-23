@@ -32,6 +32,7 @@ import {
 	ServiceMapRollupService,
 	TinybirdOrgTokenService,
 	WarehouseQueryService,
+	summarizeCause,
 	withPgConnectionScope,
 } from "@maple/api/alerting"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
@@ -44,7 +45,7 @@ import { Cause, Effect, Layer, Match } from "effect"
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "alerting",
 	serviceNamespace: "backend",
-	repositoryUrl: "https://github.com/Makisuo/maple",
+	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
@@ -230,7 +231,7 @@ export const catchTickFailure = (label: string) =>
 			? Effect.interrupt
 			: Effect.logError("Alerting tick failed").pipe(
 					Effect.annotateLogs({
-						"error.message": Cause.pretty(cause),
+						"error.message": summarizeCause(cause),
 						"maple.alerting.tick": label,
 					}),
 				),

@@ -5,16 +5,16 @@
 // Account API) and keep the runtime half. `R2Bucket("MY_BUCKET")` is a
 // lightweight token; `R2Bucket.bind(token)` yields the client.
 import type * as runtime from "@cloudflare/workers-types"
-import * as Data from "effect/Data"
+import * as Schema from "effect/Schema"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import { WorkerEnvironment } from "./worker-environment.ts"
 
-export class R2Error extends Data.TaggedError("@maple/effect-cloudflare/R2Error")<{
-	message: string
-	cause: unknown
-}> {}
+export class R2Error extends Schema.TaggedError<R2Error>()("@maple/effect-cloudflare/R2Error", {
+	message: Schema.String,
+	cause: Schema.Defect(),
+}) {}
 
 export interface R2BucketToken {
 	readonly Type: "Cloudflare.R2Bucket"

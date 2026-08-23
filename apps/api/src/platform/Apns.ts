@@ -46,7 +46,14 @@ export interface ApnsPush {
 	/** Deep-link and grouping data delivered to the app alongside the alert. */
 	readonly data: Record<string, string>
 	readonly threadId?: string | undefined
-	readonly sound?: string | undefined
+	/**
+	 * `undefined` plays the default sound, an explicit `null` plays none.
+	 *
+	 * The distinction matters: an all-clear that buzzes the phone is the same
+	 * interruption as the alert it cancels, and a stream of them is why people
+	 * turn the app's notifications off entirely.
+	 */
+	readonly sound?: string | null | undefined
 }
 
 /**
@@ -78,6 +85,38 @@ export interface ApnsLiveActivityPush {
 	readonly priority?: 5 | 10 | undefined
 }
 
+/**
+ * A background push: no alert, no sound, no badge — just `content-available`,
+ * which wakes the app for a few seconds so it can refresh something.
+ *
+ * Maple sends exactly one of these, and only for the Home Screen widgets: an
+ * incident opening or resolving is the moment the numbers on a Lock Screen are
+ * most wrong, and it is the one moment worth spending a wake-up on.
+ *
+ * Three things about this channel that are easy to get wrong:
+ *
+ * - **iOS decides.** Background pushes are throttled on a schedule Apple does
+ *   not publish and does not honour any particular rate. This is a hint, never
+ *   a delivery guarantee, and nothing may depend on one arriving.
+ * - **Priority 5, always.** Apple explicitly rejects `content-available` at
+ *   priority 10 on newer iOS, and a background push that jumps the queue is
+ *   also the one users notice as battery drain.
+ * - **It expires.** A wake-up that arrives after the numbers have moved on
+ *   again is a wasted radio, so these carry a short expiry and a collapse id —
+ *   an organization only ever needs the most recent one.
+ */
+export interface ApnsBackgroundPush {
+	readonly deviceToken: string
+	readonly environment: MobilePushEnvironment
+	readonly bundleId: string
+	/** Delivered to the app alongside the wake-up; `aps` stays alert-free. */
+	readonly data: Record<string, string>
+	/** Newer wake-ups replace older ones — one per organization is plenty. */
+	readonly collapseId?: string | undefined
+	/** Seconds. Past this Apple stops trying, which is the wanted behaviour. */
+	readonly expiresInSeconds?: number | undefined
+}
+
 export type ApnsSendResult =
 	| { readonly outcome: "sent"; readonly apnsId: string | null }
 	/** Apple says this token is dead: stop sending to it. */
@@ -93,6 +132,7 @@ export interface ApnsClientApi {
 	readonly isConfigured: boolean
 	readonly send: (push: ApnsPush) => Effect.Effect<ApnsSendResult, ApnsError>
 	readonly sendLiveActivity: (push: ApnsLiveActivityPush) => Effect.Effect<ApnsSendResult, ApnsError>
+	readonly sendBackground: (push: ApnsBackgroundPush) => Effect.Effect<ApnsSendResult, ApnsError>
 }
 
 const APNS_HOSTS = {
@@ -177,6 +217,7 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 					isConfigured: false,
 					send: unconfigured,
 					sendLiveActivity: unconfigured,
+					sendBackground: unconfigured,
 				} satisfies ApnsClientApi
 			}
 
@@ -254,7 +295,7 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 								: undefined),
 							body: push.alert.body,
 						},
-						sound: push.sound ?? "default",
+						...(push.sound === null ? undefined : { sound: push.sound ?? "default" }),
 						...(push.threadId !== undefined ? { "thread-id": push.threadId } : undefined),
 						...(push.interruptionLevel !== undefined
 							? { "interruption-level": push.interruptionLevel }
@@ -276,10 +317,43 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 				return yield* dispatch(push.environment, push.deviceToken, headers, body)
 			})
 
+			const sendBackground = Effect.fn("ApnsClient.sendBackground")(function* (
+				push: ApnsBackgroundPush,
+			) {
+				if (!ALLOWED_TOPICS.has(push.bundleId)) {
+					return yield* new ApnsError({
+						message: `Refusing to send for an unknown APNs topic: ${push.bundleId}`,
+					})
+				}
+				const token = yield* currentToken
+				const body = {
+					// `content-available` and nothing else. Any of `alert`, `sound`
+					// or `badge` alongside it turns this into a visible
+					// notification, which is not what a widget refresh should cost
+					// the user.
+					aps: { "content-available": 1 },
+					...push.data,
+				}
+				const nowSeconds = Math.floor((yield* Clock.currentTimeMillis) / 1000)
+				const headers = {
+					authorization: `bearer ${token}`,
+					"apns-topic": push.bundleId,
+					"apns-push-type": "background",
+					// Apple rejects `content-available` at priority 10.
+					"apns-priority": "5",
+					"apns-expiration": String(nowSeconds + (push.expiresInSeconds ?? 900)),
+					...(push.collapseId !== undefined
+						? { "apns-collapse-id": push.collapseId.slice(0, 64) }
+						: undefined),
+				}
+				return yield* dispatch(push.environment, push.deviceToken, headers, body)
+			})
+
 			/**
 			 * One POST to Apple and one reading of its answer, shared by both push
-			 * types: the difference between an alert and a Live Activity is entirely
-			 * in the headers and the body, never in how a 410 is interpreted.
+			 * kinds: the difference between an alert, a Live Activity and a
+			 * background wake-up is entirely in the headers and the body, never in
+			 * how a 410 is interpreted.
 			 */
 			const dispatch = Effect.fn("ApnsClient.dispatch")(function* (
 				environment: MobilePushEnvironment,
@@ -392,7 +466,7 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 				return yield* dispatch(push.environment, push.pushToken, headers, body)
 			})
 
-			return { isConfigured: true, send, sendLiveActivity } satisfies ApnsClientApi
+			return { isConfigured: true, send, sendLiveActivity, sendBackground } satisfies ApnsClientApi
 		}),
 	},
 ) {

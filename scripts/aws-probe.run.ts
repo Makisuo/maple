@@ -1,6 +1,13 @@
 /**
  * Manual bisect harness for the ingest deploy hang (`.github/workflows/aws-probe.yml`).
  *
+ * RESOLVED: the hang was alchemy's env-credential account lookup (an STS
+ * GetCallerIdentity issued while AWSEnvironment is still being built) waiting
+ * on its own half-built environment for the endpoint resolver — silent, no
+ * network I/O. Setting AWS_ACCOUNT_ID skips the lookup; the workflows do.
+ * Reproduced locally with `CI=true` and the id unset on beta.64 → beta.74.
+ * The rest of this header is the original investigation, kept for the method.
+ *
  * Four prd deploys wedged inside `alchemy deploy` with no output at any log
  * level, no AWS API call in CloudTrail, and no resource created. Every
  * candidate inside the process has been measured and cleared — module import
@@ -88,7 +95,11 @@ export default Alchemy.Stack(
 			repositoryUri: repository.repositoryUri,
 			context: "apps/ingest",
 			dockerfile: "Dockerfile.prebuilt",
-			platform: "linux/amd64",
+			// Matches the ECS tasks' `runtimePlatform` (ARM64, see
+			// apps/ingest/alchemy.run.ts) and the aarch64 binary the build job
+			// produces. `ECR.Image` takes an explicit platform; the ECS image
+			// source derives one instead.
+			platform: "linux/arm64",
 		})
 		return { level, imageUri: image.imageUri }
 	}),

@@ -14,6 +14,7 @@ export { ErrorIssueWorkflowService } from "./services/errors/ErrorIssueWorkflowS
 export { ErrorPolicyService } from "./services/errors/ErrorPolicyService"
 export { ErrorsService } from "./services/errors/ErrorsService"
 export { NotificationDispatcher } from "./services/alerts/NotificationDispatcher"
+export { summarizeCause } from "@/platform/describe-cause"
 export { Database } from "@/platform/DatabaseLive"
 export { layerPg } from "@/platform/DatabasePgLive"
 export { withPgConnectionScope } from "@/platform/pg-connection-scope"

@@ -1367,6 +1367,48 @@ export const withMaintenanceLock = async <A>(
 	}
 }
 
+/**
+ * The Effect boundary for promise-land work that takes the maintenance lock
+ * INTERNALLY — archive create/gc/reconcile/catalog, retention, and local-store
+ * migrations. Use it instead of a bare `Effect.tryPromise` at every such call.
+ *
+ * `Effect.tryPromise` is interruptible, and interruption ABANDONS the promise:
+ * the runtime marks the async resumed, aborts its signal and unwinds the fiber
+ * without waiting (see `callbackOptions` in effect's internal/effect.ts). Under
+ * `BunRuntime.runMain` a Ctrl-C therefore tore the process down while
+ * `withMaintenanceLock` was still mid-operation, so its `finally` never ran and
+ * `<dataDir>.maintenance.lock` survived with a plausible owner record. The next
+ * run only recovered because {@link acquireMaintenance} quarantines a provably
+ * dead PID — recovery by luck, one PID reuse away from a hard failure.
+ *
+ * `Effect.uninterruptible` fixes it without touching those modules: an interrupt
+ * arriving here is recorded on the fiber and NOT delivered, the fiber stays
+ * parked until the promise settles, the lock's `finally` releases, and the
+ * recorded interrupt fires as soon as interruptibility is restored. The work was
+ * never abortable — the promise ran to completion either way. All this changes
+ * is that Effect now waits for it instead of walking away mid-write.
+ *
+ * The cost is deliberate: Ctrl-C during a long operation is honoured when that
+ * operation finishes, not immediately. That is the correct trade for the only
+ * writer of a lock the next process must trust. A caller who truly cannot wait
+ * still has SIGKILL, which is the crash case the on-disk journals already
+ * reconcile. To make Ctrl-C prompt again, the promise bodies below would have to
+ * observe the `AbortSignal` that `try` already receives — until they do, an
+ * interruptible boundary would only delete the lock out from under work that
+ * keeps running.
+ */
+export const maintenanceOperation = <A, E>(options: {
+	readonly operation: string
+	readonly try: () => Promise<A>
+	readonly catch: (error: unknown) => E
+}): Effect.Effect<A, E> =>
+	Effect.tryPromise({ try: options.try, catch: options.catch }).pipe(
+		Effect.uninterruptible,
+		Effect.withSpan("CheckpointService.maintenanceOperation", {
+			attributes: { "maple.checkpoint.maintenance_operation": options.operation },
+		}),
+	)
+
 export const retireCheckpointIfEligible = async (
 	dataDir: string,
 	checkpointId: CheckpointId | null,

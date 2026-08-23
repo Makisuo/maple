@@ -686,10 +686,43 @@ function WidgetTimeRange() {
 }
 
 /**
+ * The funnel chart's percentage labels: Auto (share of step 1), Conversion
+ * (adds the step-to-step rate), Off. Three states because
+ * `display.funnel.showStepPercent` is a tri-state — unset keeps the
+ * long-standing default, and a widget saved before the control existed must
+ * keep rendering as it did.
+ */
+function FunnelStepPercent() {
+	const { state, set } = useSettings()
+	const value = state.funnel.showStepPercent
+	return (
+		<Field label="Step labels">
+			<Segments
+				value={value === undefined ? "auto" : value ? "conversion" : "off"}
+				onSelect={(next) =>
+					set({
+						funnel: {
+							...state.funnel,
+							showStepPercent: next === "auto" ? undefined : next === "conversion",
+						},
+					})
+				}
+				options={[
+					{ value: "auto", label: "Auto" },
+					{ value: "conversion", label: "Conversion" },
+					{ value: "off", label: "Off" },
+				]}
+			/>
+		</Field>
+	)
+}
+
+/**
  * The rail's field vocabulary. A panel type's `ConfigPanel` composes these; none
  * of them takes the widget state as a prop.
  */
 export const WidgetSettings = {
+	FunnelStepPercent,
 	Divider,
 	Name,
 	Description,

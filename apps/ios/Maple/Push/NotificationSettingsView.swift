@@ -26,8 +26,12 @@ struct NotificationSettingsView: View {
 						permissionSection
 						if push.authorization == .authorized {
 							prefsSection("Alerts") {
-								toggle("Critical incidents", "Breaks through Focus.", \.criticalIncidents)
-								toggle("Warnings", nil, \.warningIncidents)
+								toggle(
+									"Critical incidents",
+									"Breaks through Focus. Reminders space out the longer one stays open.",
+									\.criticalIncidents
+								)
+								toggle("Warnings", "One notification each — warnings never repeat.", \.warningIncidents)
 								toggle("Resolved", "Quiet — no sound, no Focus.", \.resolvedIncidents)
 							}
 							liveActivitySection
@@ -89,7 +93,7 @@ struct NotificationSettingsView: View {
 					statusRow(
 						dot: Token.mutedForeground,
 						title: "Not asked yet",
-						detail: "Get a push when an alert opens or resolves in \(orgName)."
+						detail: "Get a push when a critical alert opens in \(orgName). Warnings and resolutions stay off until you turn them on."
 					)
 					actionButton("Turn on notifications") {
 						Task { await push.requestAuthorization() }
@@ -117,7 +121,7 @@ struct NotificationSettingsView: View {
 	}
 
 	private var orgName: String {
-		session.activeOrganization?.name ?? "this organization"
+		session.activeOrganizationName ?? "this organization"
 	}
 
 	private func statusRow(dot: Color, title: String, detail: String) -> some View {

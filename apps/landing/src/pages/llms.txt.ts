@@ -13,6 +13,7 @@ import type { APIRoute } from "astro"
 import { features } from "../lib/features"
 import { useCases } from "../lib/use-cases"
 import { absolute, plainText } from "../lib/page-markdown"
+import { API_ORIGIN, API_PATHS, GITHUB_URL, SITE_PATHS } from "../lib/agent-resources"
 
 const CONVENTION = (family: string) =>
 	`Append \`.md\` to any ${family} URL, or send \`Accept: text/markdown\`, to receive the raw markdown source.`
@@ -88,11 +89,32 @@ export const GET: APIRoute = ({ site }) => {
 		`- [Best open-source observability tools](${url("/best-open-source-observability-tools")})`,
 		"",
 
+		"## Maple API",
+		"",
+		`REST API for the Maple observability platform, base URL \`${API_ORIGIN}/v2\`. Bearer auth with a Maple API key (\`maple_ak_…\`); JSON in and out; every error is a \`{ "error": { "_tag", "type", "code", "message" } }\` envelope; 600 requests/minute per key with \`Retry-After\` on 429.`,
+		"",
+		`- [Maple API guide](${url(`${SITE_PATHS.apiDocs}.md`)}) — authentication, conventions, errors, rate limits`,
+		`- [OpenAPI 3.1 specification (JSON)](${url(SITE_PATHS.openapi)}) — every operation has an operationId, description, typed parameters and response schemas`,
+		`- [Interactive API reference](${API_ORIGIN}${API_PATHS.reference})`,
+		`- [Same spec served by the API](${API_ORIGIN}${API_PATHS.openapi})`,
+		"",
+
+		"## MCP server",
+		"",
+		`Maple exposes its API to AI agents as a hosted Model Context Protocol server over Streamable HTTP at \`${API_ORIGIN}${API_PATHS.mcp}\`. Authenticate with a Maple API key as a Bearer token, or let the client complete the OAuth flow advertised at \`${API_ORIGIN}${API_PATHS.oauthResource}\`.`,
+		"",
+		`- [MCP server guide](${url(`${SITE_PATHS.mcpDocs}.md`)}) — connecting Claude, Cursor, and other clients; available tools`,
+		`- [MCP server manifest (server.json)](${url(SITE_PATHS.mcpManifest)}) — also at ${url(SITE_PATHS.mcpServerJson)} and ${API_ORIGIN}${API_PATHS.mcpManifest}`,
+		`- [AI & MCP feature page](${url("/features/ai-mcp-integration.md")})`,
+		"",
+
 		"## Command line tool",
 		"",
-		"Run Maple locally against a single embedded ClickHouse binary — no account required.",
+		"The official `maple` CLI runs the whole platform locally against a single embedded ClickHouse binary — no account required — and talks to the hosted service for the rest.",
 		"",
-		`- [Install script](${url("/cli/install")})`,
+		`- Homebrew: \`brew install Makisuo/tap/maple\``,
+		`- Install script: \`curl -fsSL ${url("/cli/install")} | sh\` ([source](${url("/cli/install")}))`,
+		`- [Releases on GitHub](${GITHUB_URL}/releases)`,
 		`- [CLI reference](${url("/docs/local-mode/cli-reference.md")})`,
 		"",
 
@@ -102,7 +124,7 @@ export const GET: APIRoute = ({ site }) => {
 		"",
 		`- [SDK overview](${url("/docs/sdks/overview.md")})`,
 		`- [Effect SDK](${url("/docs/sdks/effect.md")})`,
-		`- [Repository](https://github.com/Makisuo/maple)`,
+		`- [Repository](${GITHUB_URL})`,
 		"",
 
 		"## Brand",
@@ -113,8 +135,12 @@ export const GET: APIRoute = ({ site }) => {
 		`- [Brand kit archive](${url("/brand/maple-brand-kit.zip")})`,
 		"",
 
-		"## Legal",
+		"## Company",
 		"",
+		"Maple is built and operated by Makisuo, Inc.",
+		"",
+		...both("About Maple", SITE_PATHS.about),
+		...both("Contact", SITE_PATHS.contact),
 		`- [Privacy policy](${url("/privacy")})`,
 		`- [Terms of service](${url("/terms")})`,
 		"",
@@ -122,7 +148,7 @@ export const GET: APIRoute = ({ site }) => {
 		"## Community",
 		"",
 		"- [Discord](https://discord.gg/BnXjKuwJqP)",
-		"- [X](https://x.com/maple_dev)",
+		"- [X](https://x.com/Mapledotdev)",
 	].join("\n")
 
 	return plainText(body)

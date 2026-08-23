@@ -28,6 +28,7 @@ import {
 	matchOrIn,
 	type FacetOutput,
 } from "./query-helpers"
+import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { httpDisplaySpanName } from "../../traces-shared"
 import { CHNumber } from "../schema"
 
@@ -767,7 +768,7 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 	return unionAll(serviceQuery, envQuery, errorTypeQuery, versionQuery).format("JSON")
 }
 
-// Errors summary (CROSS JOIN between error_spans and service_usage)
+// Errors summary (CROSS JOIN between the error-events table and service_usage)
 
 export interface ErrorsSummaryOpts extends ErrorsSharedFilters {
 	rootOnly?: boolean
@@ -846,7 +847,7 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 					$.Timestamp.gte(param.dateTime("startTime")),
 					$.Timestamp.lte(param.dateTime("endTime")),
 					opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-					CH.inList($.ResourceAttributes.get("deployment.environment"), deploymentEnvs),
+					CH.inList(deploymentEnvExpr($.ResourceAttributes), deploymentEnvs),
 				]),
 		)
 	}
@@ -1072,6 +1073,39 @@ export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
 		])
 		.orderBy(["timestamp", "desc"])
 		.limit(opts.limit ?? 25)
+		.format("JSON")
+}
+
+// Error Issue environments — where one fingerprint was seen in the window.
+//
+// The Postgres `error_issues` row carries no environment: a fingerprint spans
+// environments, so "which environment is this in?" is a warehouse question
+// scoped to the window the detail page is looking at. Blank environments are
+// dropped for the same reason the facet drops them — a value you cannot act
+// on is noise.
+
+export const ErrorIssueEnvironmentsOutputSchema = Schema.Struct({
+	name: Schema.String,
+	count: CHNumber,
+})
+export type ErrorIssueEnvironmentsOutput = Schema.Schema.Type<typeof ErrorIssueEnvironmentsOutputSchema>
+
+export function errorIssueEnvironmentsQuery(opts: { limit?: number } = {}) {
+	return from(ErrorEvents)
+		.select(($) => ({
+			name: $.DeploymentEnv,
+			count: CH.count(),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			$.DeploymentEnv.neq(""),
+		])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(opts.limit ?? 20)
 		.format("JSON")
 }
 

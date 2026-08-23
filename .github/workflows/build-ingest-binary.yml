@@ -1,0 +1,101 @@
+name: Build ingest binary
+
+# Compiles `apps/ingest` for the deploy image and hands it to the caller as an
+# artifact. Called by deploy-prd / deploy-stg / deploy-pr-preview / aws-probe,
+# which all COPY the result via `apps/ingest/Dockerfile.prebuilt`.
+#
+# It is a separate job purely because of the RUNNER. The ECS tasks run on
+# Graviton (`cpuArchitecture: "ARM64"` in apps/ingest/alchemy.run.ts), so the
+# binary has to be aarch64, and `ubuntu-24.04-arm` builds it NATIVELY — free on
+# public repos. The two alternatives were both worse:
+#
+#   - QEMU (`--platform linux/arm64` on an x86 runner): a from-scratch build of
+#     385 crates under emulation, against a 2m54s native baseline.
+#   - A cross toolchain on the x86 runner: jemalloc (the global allocator, see
+#     main.rs), ring and the rest of the C deps in the graph all have to
+#     cross-build, each with its own way of finding a compiler. Nothing to go
+#     wrong natively.
+#
+# The rest of a deploy stays on x86 — only this step cares about the task
+# architecture, and moving a whole deploy job (bun, alchemy, wrangler, drizzle)
+# to arm64 would risk far more than it buys.
+
+on:
+    workflow_call:
+        inputs:
+            artifact-name:
+                description: "Name to upload the binary under; the caller downloads it into apps/ingest/dist"
+                type: string
+                default: maple-ingest
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        name: Compile (aarch64)
+        runs-on: ubuntu-24.04-arm
+        timeout-minutes: 30
+        steps:
+            - name: Checkout
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            # `runner.arch` is in the key because `runner.os` is "Linux" on both
+            # x86 and arm runners: without it this job would restore the x86
+            # caches the deploy workflows left behind before the Graviton move.
+            - name: Cache ingest cargo build
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: |
+                      ~/.cargo-ingest
+                      ${{ runner.temp }}/ingest-target
+                  key: ingest-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
+                  restore-keys: |
+                      ingest-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
+                      ingest-cargo-${{ runner.os }}-${{ runner.arch }}-
+
+            # Inside rust:1.94-bookworm rather than on the runner: the runtime
+            # base is debian:bookworm-slim (glibc 2.36) and ubuntu-24.04 ships
+            # 2.39, so a host-built binary starts and immediately dies with
+            # `version 'GLIBC_2.39' not found`. No `--platform`: the host is
+            # arm64, so the multi-arch tag already resolves to arm64.
+            #
+            # --target-dir points OUTSIDE apps/ingest deliberately. Alchemy
+            # hashes the image context with `hashDirectory`, which has no
+            # .dockerignore support and derives its exclusions from gitignore
+            # rules WITHOUT rebasing root-anchored ones onto the context dir —
+            # `/apps/ingest/target` becomes the glob `apps/ingest/target/**`
+            # evaluated with cwd=apps/ingest, which matches nothing. A target
+            # dir inside the context would therefore be walked and hashed in
+            # full on every deploy.
+            - name: Build ingest binary
+              run: |
+                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
+                  docker run --rm \
+                      --user "$(id -u):$(id -g)" \
+                      -e CARGO_HOME=/cargo \
+                      -v "$HOME/.cargo-ingest:/cargo" \
+                      -v "$PWD/apps/ingest:/app" \
+                      -v "$RUNNER_TEMP/ingest-target:/target" \
+                      -w /app \
+                      rust:1.94-bookworm \
+                      cargo build --release --target-dir /target
+                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
+                  file apps/ingest/dist/maple-ingest
+
+            # Fails the build here rather than in ECS, where the symptom is a
+            # task that pulls, starts and exits with `exec format error`.
+            - name: Assert the binary is aarch64
+              run: |
+                  if ! file -b apps/ingest/dist/maple-ingest | grep -q 'ARM aarch64'; then
+                      echo "::error::expected an aarch64 binary, got: $(file -b apps/ingest/dist/maple-ingest)"
+                      exit 1
+                  fi
+
+            - name: Upload binary
+              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+              with:
+                  name: ${{ inputs.artifact-name }}
+                  path: apps/ingest/dist/maple-ingest
+                  retention-days: 1
+                  if-no-files-found: error

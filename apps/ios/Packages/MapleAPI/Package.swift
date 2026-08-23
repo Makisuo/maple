@@ -29,6 +29,12 @@ let package = Package(
 		.target(
 			name: "MapleAPI",
 			dependencies: [
+				// One direction only. `MapleWidgetData` owns the shapes the Home
+				// Screen renders and the mapping into them, so the app and the
+				// widget extension cannot disagree about what a row says. The
+				// reverse — the widget reaching for the generated client — is the
+				// dependency this whole split exists to prevent.
+				"MapleWidgetData",
 				.product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
 				.product(name: "OpenAPIURLSession", package: "swift-openapi-urlsession"),
 			],

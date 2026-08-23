@@ -230,8 +230,10 @@ describe("V2ErrorIssue wire format", () => {
 				},
 			],
 			incidents: [],
+			environments: [{ name: "production", count: 4 }],
 		})
 		expect(detail.timeseries[0]?.count).toBe(4)
+		expect(detail.environments[0]?.name).toBe("production")
 		expect(detail.sample_traces[0]?.trace_id).toBe("0123456789abcdef0123456789abcdef")
 	})
 })

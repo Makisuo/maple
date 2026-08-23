@@ -135,7 +135,7 @@ export function ServiceMapMiniMap({ colorMode }: { colorMode: ServiceMapColorMod
 	return (
 		<div
 			ref={rootRef}
-			className="react-flow__panel bottom right react-flow__minimap pointer-events-none !bg-muted/50 !border-border"
+			className="react-flow__panel bottom right react-flow__minimap pointer-events-none !bg-muted/50 !border-border max-sm:hidden"
 		>
 			<svg
 				ref={svgRef}

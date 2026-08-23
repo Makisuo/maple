@@ -106,18 +106,37 @@ SELECT version, applied_at, description FROM _maple_schema_migrations ORDER BY v
 
 ## What gets created
 
-On a clean install, migration 0001 creates **20 tables** (datasources) and **22 materialized views**:
+On a clean install, migration 0001 creates **37 tables** (datasources) and **39 materialized views**.
+Migration 0001 re-exports the *generated* snapshot, so these counts track
+`datasources.ts` / `materializations.ts` — regenerate with `bun run clickhouse:schema`
+and `bun run tinybird:manifest` after editing either, or CI's drift gate fails.
 
-- **Direct-ingest tables**: `traces`, `logs`, `metrics_sum`, `metrics_gauge`, `metrics_histogram`, `metrics_exponential_histogram`, `alert_checks`
-- **MV-populated tables**: `service_usage`, `service_map_spans`, `service_map_children`, `service_map_edges_hourly`, `service_overview_spans`, `error_spans`, `error_events`, `trace_list_mv`, `trace_detail_spans`, `attribute_keys_hourly`, `attribute_values_hourly`, `traces_aggregates_hourly`, `logs_aggregates_hourly`
-- **Materialized views**: 22 MVs that fan out from the direct-ingest tables to populate the MV-populated tables
+- **Direct-ingest tables** (12): `alert_checks`, `logs`, `metrics_exponential_histogram`,
+  `metrics_gauge`, `metrics_histogram`, `metrics_sum`, `service_address_resolutions_hourly`,
+  `service_map_edges_hourly_ingest`, `session_events`, `session_replay_events`,
+  `session_replays`, `traces`
+- **MV-populated tables** (25): `attribute_keys_hourly`, `attribute_values_hourly`,
+  `error_events`, `error_events_by_time`, `error_fingerprints_minutely`,
+  `logs_aggregates_hourly`, `metric_catalog`, `service_external_edges_hourly`,
+  `service_map_children`, `service_map_db_edges_hourly`,
+  `service_map_db_query_shapes_hourly`, `service_map_edges_hourly`, `service_map_spans`,
+  `service_operations_hourly`, `service_operations_minutely`, `service_overview_hourly`,
+  `service_overview_minutely`, `service_overview_spans`, `service_platforms_hourly`,
+  `service_usage`, `span_metrics_calls_hourly`, `trace_detail_spans`, `trace_list_mv`,
+  `traces_aggregates_hourly`, `web_events`
+- **Materialized views** (39): fan out from the direct-ingest tables to populate the
+  MV-populated tables. Several targets are fed by more than one MV — `service_usage` by
+  six, `attribute_values_hourly` / `attribute_keys_hourly` / `metric_catalog` by four each.
+
+See [`warehouse-rollups.md`](warehouse-rollups.md) for when a materialized view is the
+right answer and which tier a query should read.
 
 Every table is partitioned by date and carries a TTL, tiered by how raw the data is:
 
 | Retention    | Tables                                                                                                                         |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
 | **30 days**  | `traces`, `trace_detail_spans`, `logs`, `service_map_spans`, `service_map_children`, `service_overview_spans`, `trace_list_mv` |
-| **90 days**  | `error_spans`, `error_events`, `error_events_by_time`, `metrics_*`, `attribute_*_hourly`, `metric_catalog`                     |
+| **90 days**  | `error_events`, `error_events_by_time`, `metrics_*`, `attribute_*_hourly`, `metric_catalog`                     |
 | **365 days** | hourly rollups (`*_hourly`), `service_usage`, `alert_checks`                                                                   |
 
 Adjust by writing a follow-up migration if your retention requirements differ.

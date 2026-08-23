@@ -24,6 +24,7 @@ const INGEST_DATASOURCES = [
 	"session_replays",
 	"session_replay_events",
 	"session_events",
+	"product_events",
 ] as const
 
 // Replaced by the Rust binary with the pinned, escaped org-id string literal.

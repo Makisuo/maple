@@ -9,6 +9,8 @@ vi.mock("../session/session", () => ({
 vi.mock("../platform/transport", () => ({ postSessionEvents: vi.fn(async () => {}) }))
 
 const { resetSinkForTests, startEventSink } = await import("./events-sink")
+const { postSessionEvents } = await import("../platform/transport")
+const { resetVisitorCacheForTests, setVisitorTracking } = await import("../identity/visitor")
 
 const CONFIG = {
 	endpoint: "https://ingest.test",
@@ -40,6 +42,16 @@ describe("startEventSink baseline counters", () => {
 		window.dispatchEvent(new Event("unhandledrejection") as PromiseRejectionEvent)
 
 		expect(sink.getErrorCount()).toBe(1)
+		sink.stop()
+	})
+
+	it("survives history.pushState being invoked detached from history", () => {
+		const sink = startEventSink(CONFIG, "sess-nav")
+		// A router that captured the method reference calls it with no receiver;
+		// the native method would throw "Illegal invocation" through our wrapper.
+		const push = history.pushState
+		expect(() => push.call(undefined, null, "", "/detached")).not.toThrow()
+		expect(location.pathname).toBe("/detached")
 		sink.stop()
 	})
 
@@ -78,5 +90,65 @@ describe("startEventSink baseline counters", () => {
 
 		expect(sink.getErrorCount()).toBe(0)
 		expect(sink.getClickCount()).toBe(0)
+	})
+})
+
+// Every row carries the person key funnels group on. Resolved when the row is
+// built, so a late `identify()` still lands on the buffered page view.
+describe("startEventSink identity stamping", () => {
+	const postedRows = () => vi.mocked(postSessionEvents).mock.calls.flatMap(([, rows]) => rows)
+
+	beforeEach(() => {
+		resetSinkForTests()
+		resetVisitorCacheForTests()
+		window.localStorage.clear()
+		vi.mocked(postSessionEvents).mockClear()
+	})
+
+	it("stamps visitor_id, user_id and group_id on every row", async () => {
+		const sink = startEventSink(
+			{ ...CONFIG, getIdentity: () => ({ id: "user_1", groupId: "org_1", traits: {} }) },
+			"sess-id-1",
+		)
+		sink.emit({ type: "custom", message: "signup_completed" })
+		await sink.flush()
+
+		const rows = postedRows()
+		expect(rows.length).toBeGreaterThan(0)
+		for (const row of rows) {
+			expect(row.session_id).toBe("sess-id-1")
+			expect(row.user_id).toBe("user_1")
+			expect(row.group_id).toBe("org_1")
+			expect(typeof row.visitor_id).toBe("string")
+			expect(row.visitor_id).not.toBe("")
+		}
+		sink.stop()
+	})
+
+	it("reads identity when the row is built, so identify() after emit still applies", async () => {
+		let identity: { id: string; traits: Record<string, string> } | undefined
+		const sink = startEventSink({ ...CONFIG, getIdentity: () => identity }, "sess-id-2")
+		sink.emit({ type: "custom", message: "before_identify" })
+		identity = { id: "user_late", traits: {} }
+		await sink.flush()
+
+		expect(postedRows().every((row) => row.user_id === "user_late")).toBe(true)
+		sink.stop()
+	})
+
+	it("sends empty strings when there is no identity and visitor tracking is off", async () => {
+		setVisitorTracking(false)
+		const sink = startEventSink(CONFIG, "sess-id-3")
+		sink.emit({ type: "custom", message: "anon" })
+		await sink.flush()
+
+		const rows = postedRows()
+		expect(rows.length).toBeGreaterThan(0)
+		for (const row of rows) {
+			expect(row.visitor_id).toBe("")
+			expect(row.user_id).toBe("")
+			expect(row.group_id).toBe("")
+		}
+		sink.stop()
 	})
 })

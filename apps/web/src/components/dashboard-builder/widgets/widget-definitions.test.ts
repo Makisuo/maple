@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { QueryResultContract } from "@maple/query-model"
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 import { buildBreakdownQuerySpec, buildListQuerySpec } from "@maple/query-engine/query-builder"
+import { toInitialState } from "@/lib/query-builder/widget-builder-utils"
 import {
 	funnelPresets,
 	hbarPresets,
@@ -96,5 +97,27 @@ describe("widget preset query specs", () => {
 		expect(source.resultShape).toBe("list")
 		expect(source.columns).toEqual(["durationMs"])
 		expect(histogram!.display.unit).toBe("duration_ms")
+	})
+})
+
+describe("product-event funnel preset", () => {
+	it("opens the editor on the Product events source with no steps yet", () => {
+		const preset = funnelPresets.find((candidate) => candidate.id === "funnel-product-events")
+		expect(preset).toBeDefined()
+		if (!preset) return
+		expect(preset.dataSource).toEqual({
+			kind: "route",
+			endpoint: "product_events_funnel",
+			params: { steps: [] },
+		})
+		const state = toInitialState({
+			id: "w",
+			visualization: preset.visualization,
+			dataSource: preset.dataSource,
+			display: preset.display,
+			layout: { x: 0, y: 0, w: 6, h: 4 },
+		})
+		expect(state.funnel.source).toBe("product_events")
+		expect(state.funnel.steps).toEqual([])
 	})
 })

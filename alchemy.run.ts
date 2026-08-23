@@ -1,3 +1,10 @@
+// The Maple stack: one `create*` factory per app, composed here.
+//
+// Comments in these files explain what a reader needs in order not to break the
+// code. The history behind those decisions — the #378 deploy hang, the
+// CONNECT_TIMEOUT cold-start regression, the Hyperdrive split measurements, the
+// v1→v2 equivalences, the cost calls, and the local-dev/`alchemy dev` state of
+// play — lives in `docs/infra.md`.
 import { appendFileSync } from "node:fs"
 import * as Alchemy from "alchemy"
 import * as AWS from "alchemy/AWS"
@@ -7,6 +14,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { parseMapleRegion, resolveAwsRegion, stageDeploysIngest } from "@maple/infra/aws"
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
+import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi } from "./apps/api/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
@@ -31,14 +39,6 @@ if (!process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_DEFAULT_ACCOUNT
 const resolveUrl = (domain: string | undefined, envKey: string, fallback = ""): string =>
 	domain ? `https://${domain}` : process.env[envKey]?.trim() || fallback
 
-const requireEnv = (key: string): string => {
-	const value = process.env[key]?.trim()
-	if (!value) {
-		throw new Error(`Missing required deployment env: ${key}`)
-	}
-	return value
-}
-
 const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStage>) =>
 	Effect.gen(function* () {
 		// Bootstrap these account/zone-wide resources in production first. Other
@@ -52,7 +52,7 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
 			/\/+$/,
 			"",
 		)
-		const headers = { authorization: `Bearer ${requireEnv("MAPLE_OTEL_INGEST_KEY")}` }
+		const headers = { authorization: `Bearer ${yield* requiredPlain("MAPLE_OTEL_INGEST_KEY")}` }
 		const tracesDestination = yield* Cloudflare.Workers.ObservabilityDestination(
 			"workers-observability-traces",
 			{
@@ -77,25 +77,21 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
 		return { logsDestination, tracesDestination }
 	})
 
-/**
- * Opt-in switch for the AWS half of the stack (`apps/ingest` on ECS).
- *
- * Set `MAPLE_DEPLOY_AWS_INGEST=1` to include it. Unset, both the AWS providers
- * and the ingest resources drop out and the stack is exactly what shipped
- * before the AWS work landed — which is the point: the ingest deploy currently
- * hangs, and it hangs in the same `alchemy deploy` run that ships every
- * Cloudflare worker, so an unconditional AWS half means no production deploys
- * at all.
- */
-const DEPLOY_AWS_INGEST = process.env.MAPLE_DEPLOY_AWS_INGEST === "1"
-
 type StackProviderServices =
 	| Layer.Services<ReturnType<typeof Cloudflare.providers>>
 	| Layer.Services<ReturnType<typeof AWS.providers>>
 
-const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> = DEPLOY_AWS_INGEST
-	? Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()))
-	: Cloudflare.providers()
+/**
+ * Both clouds, unconditionally.
+ *
+ * `providers` is part of the `Alchemy.Stack` options, which are evaluated
+ * before `Alchemy.Stage` is readable inside the stack effect, so this cannot be
+ * stage-derived — every stage registers the AWS provider surface even when it
+ * creates no AWS resource. Whether a stage actually gets an ingest fleet is
+ * `stageDeploysIngest`, below.
+ */
+const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> =
+	Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()))
 
 export default Alchemy.Stack(
 	"maple",
@@ -105,13 +101,10 @@ export default Alchemy.Stack(
 		// Infisical exactly like the Cloudflare ones — `AWS.providers()` reads
 		// AWS_REGION / AWS_ACCOUNT_ID / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
 		//
-		// OPT-IN, because the AWS half currently wedges the deploy. Four prd runs
-		// have burned their whole timeout inside `alchemy deploy` with no output
-		// at any log level, no AWS API call in CloudTrail, and no resource
-		// created — while blocking every Cloudflare worker behind them, since
-		// they deploy in the same run. Unset, this stack is byte-identical to the
-		// last one that shipped (2m05s), so production keeps deploying while the
-		// hang is investigated with the flag on.
+		// AWS_ACCOUNT_ID is REQUIRED in CI. Without it alchemy's env-credential
+		// path looks the account up over STS from inside its own environment
+		// construction and deadlocks silently, with no log line and no network
+		// I/O — the #378 hang. Every deploy workflow sets it; see deploy-prd.yml.
 		providers,
 		// Shared account-wide state store (Worker + DO SQLite) — bootstrapped once
 		// per Cloudflare account (`alchemy bootstrap cloudflare` or the first
@@ -142,17 +135,14 @@ export default Alchemy.Stack(
 			)
 		}
 
-		// The Rust OTLP gateway on ECS Fargate (prd/stg only — PR previews get no
-		// ingest domain, and a VPC + ALB per PR is real money for a stack nothing
-		// points at; dev stages run it through docker-compose). `domains.ingest`
-		// reaches it via a Cloudflare CNAME at the ALB, so the URL below stays a
-		// plain string and does not depend on the service resource.
-		// Gated on the same flag as `AWS.providers()` above — creating the resource
-		// without its provider registered is not a runnable combination.
-		const ingest =
-			DEPLOY_AWS_INGEST && stageDeploysIngest(stage)
-				? yield* createMapleIngest({ stage, domains, region })
-				: undefined
+		// The Rust OTLP gateway on ECS Fargate (prd/stg/pr — dev stages run it
+		// through docker-compose instead). On prd/stg `domains.ingest` reaches it
+		// via a Cloudflare CNAME at the ALB, so the URL below stays a plain string
+		// and does not depend on the service resource; a PR preview gets no ingest
+		// domain, so its ALB answers plain HTTP on 80 at `ingest.serviceUrl`.
+		const ingest = stageDeploysIngest(stage)
+			? yield* createMapleIngest({ stage, domains, region })
+			: undefined
 
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
 
@@ -217,6 +207,10 @@ export default Alchemy.Stack(
 						`api_url=${summary.apiUrl}`,
 						`sync_url=${summary.electricSyncUrl}`,
 						`landing_url=${summary.landingUrl}`,
+						// Empty on a stage with no ingest fleet. On a PR preview this is
+						// the ALB's plain-HTTP hostname — the preview has no ingest
+						// domain, so there is no certificate and no CNAME.
+						`ingest_url=${ingest?.serviceUrl ?? ""}`,
 					].join("\n")}\n`,
 				)
 			}
@@ -231,6 +225,7 @@ export default Alchemy.Stack(
 			// `maple.dev` zone, surfaced here so they come out of the deploy rather
 			// than the AWS console.
 			ingestServiceUrl: ingest?.serviceUrl,
+			ingestCollectorEndpoint: ingest?.collectorEndpoint,
 			ingestCertificateValidation: ingest?.certificateValidation,
 			electricSyncWorker: electricSync.workerName,
 			webWorker: web.workerName,

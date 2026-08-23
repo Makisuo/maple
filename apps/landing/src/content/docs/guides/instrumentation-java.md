@@ -8,7 +8,7 @@ sdk: "java"
 
 This guide covers instrumenting a Java application to send traces and logs to Maple. The fastest path on the JVM is the OpenTelemetry Java agent, which auto-instruments most popular libraries with zero code changes.
 
-> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/Makisuo/maple/tree/main/skills/maple-onboard). Already instrumented? `maple-audit` reviews the existing setup against Maple's conventions and fixes gaps — see the [maple-audit skill](https://github.com/Makisuo/maple/tree/main/skills/maple-audit).
+> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/MapleTechLabs/maple/tree/main/skills/maple-onboard). Already instrumented? `maple-audit` reviews the existing setup against Maple's conventions and fixes gaps — see the [maple-audit skill](https://github.com/MapleTechLabs/maple/tree/main/skills/maple-audit).
 
 ## Prerequisites
 

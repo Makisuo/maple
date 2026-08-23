@@ -88,6 +88,7 @@ export const toV2IssueDetail = (detail: ErrorIssueDetailResponse): V2ErrorIssueD
 		duration_micros: trace.durationMicros,
 	})),
 	incidents: detail.incidents.map(toV2Incident),
+	environments: detail.environments.map((env) => ({ name: env.name, count: env.count })),
 })
 
 const decodeCursor = (

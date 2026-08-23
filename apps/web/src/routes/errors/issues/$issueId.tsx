@@ -433,7 +433,7 @@ function IssueDetailContent() {
 		))
 		.onSuccess((v2Detail) => {
 			const detail = errorIssueDetailFromV2(v2Detail)
-			const { issue, timeseries, sampleTraces, incidents } = detail
+			const { issue, timeseries, sampleTraces, incidents, environments } = detail
 			const totalInWindow = timeseries.reduce((sum, b) => sum + b.count, 0)
 			const linkedInvestigation = Result.builder(investigationsResult)
 				.onSuccess((response) => response.data[0] ?? null)
@@ -614,6 +614,7 @@ function IssueDetailContent() {
 						<DashboardLayout.RightPanel>
 							<IssueSidebar
 								issue={issue}
+								environments={environments}
 								busy={busy}
 								onTransition={transitionTo}
 								onClaim={claim}

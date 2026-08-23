@@ -39,7 +39,7 @@ packages:
     # target called Maple.
     MapleSwift:
         url: https://github.com/MapleTechLabs/maple-swift
-        exactVersion: 0.2.0
+        exactVersion: 0.3.3
 
 settings:
     base:
@@ -182,10 +182,14 @@ targets:
                     Environment: $(MAPLE_ENVIRONMENT)
                     ServiceName: maple-ios
 
-    # The Home Screen / Lock Screen widget. Renders the snapshot the app writes
-    # into the shared App Group and nothing else — it holds no Clerk session and
-    # makes no requests, which is why it links MapleWidgetData rather than
-    # MapleAPI. See Widgets/IssuesWidget.swift.
+    # The Home Screen / Lock Screen widget.
+    #
+    # It fetches `GET /v2/widget_summary` for itself, with a device credential
+    # the app mints into the shared App Group, and falls back to the snapshot
+    # the app last published. It still links MapleWidgetData rather than
+    # MapleAPI: an extension gets ~30MB and a few seconds, and the generated
+    # client is 30k lines plus OpenAPIRuntime. The hand-written client for that
+    # one endpoint is WidgetSummaryFetcher. See Widgets/IssuesWidget.swift.
     MapleWidgets:
         type: app-extension
         platform: iOS

@@ -138,11 +138,11 @@ describe("v2 mobile devices", () => {
 			expect(created.body.id).toMatch(/^mdev_/)
 			expect(created.body.token).toBe(TOKEN)
 			expect(created.body.enabled).toBe(true)
-			// Defaults: incidents on, issue/anomaly pushes opt-in.
+			// Defaults: critical incidents only — everything else is opt-in.
 			expect(created.body.preferences).toEqual({
 				critical_incidents: true,
-				warning_incidents: true,
-				resolved_incidents: true,
+				warning_incidents: false,
+				resolved_incidents: false,
 				new_error_issues: false,
 				anomalies: false,
 			})
@@ -153,7 +153,7 @@ describe("v2 mobile devices", () => {
 				platform: "ios",
 				environment: "production",
 				bundle_id: "com.maple.mobile",
-				preferences: { resolved_incidents: false, anomalies: true },
+				preferences: { resolved_incidents: true, anomalies: true },
 			})
 			expect(refreshed.status).toBe(200)
 			expect(refreshed.body.id).toBe(created.body.id)
@@ -161,8 +161,8 @@ describe("v2 mobile devices", () => {
 			expect(refreshed.body.app_version).toBe("0.2.0")
 			expect(refreshed.body.preferences).toEqual({
 				critical_incidents: true,
-				warning_incidents: true,
-				resolved_incidents: false,
+				warning_incidents: false,
+				resolved_incidents: true,
 				new_error_issues: false,
 				anomalies: true,
 			})

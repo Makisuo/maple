@@ -105,3 +105,62 @@ export function groupUniqArrayIf(maxSize: number) {
 			),
 		)
 }
+
+/** The optional `windowFunnel` matching modes — see the ClickHouse docs. */
+export type WindowFunnelMode = "strict_order" | "strict_deduplication" | "strict_increase"
+
+/**
+ * `windowFunnel(window[, mode])(timestamp, cond1, cond2, …)` — the ClickHouse
+ * funnel aggregate: per group, the length of the longest prefix of
+ * `cond1..condN` that occurred in that order within `window` of the `cond1`
+ * event.
+ *
+ * `window` is in the unit of `timestamp`, whatever that unit happens to be —
+ * seconds for a `Date`/`DateTime` column, but ClickHouse rejects `DateTime64`
+ * outright, so a sub-second-precision column has to be projected to an integer
+ * first and `window` then follows THAT unit. Projecting with
+ * `toUInt64(toUnixTimestamp64Milli(ts))` means passing `windowSeconds * 1000`;
+ * passing bare seconds against a millisecond timestamp silently yields a window
+ * 1000x too short and a funnel that converts almost nobody past step 1.
+ * Ordering within a group happens inside the aggregate; no `ORDER BY` is needed
+ * on the input.
+ *
+ * Curried like {@link quantile}: the window and mode are *parameters* of the
+ * aggregate, the timestamp and conditions are its arguments.
+ */
+export function windowFunnel(window: number, mode?: WindowFunnelMode) {
+	const params = mode === undefined ? `${Math.round(window)}` : `${Math.round(window)}, '${mode}'`
+	return (timestamp: Expr<any>, ...conditions: ReadonlyArray<Condition>): Expr<number> => {
+		if (conditions.length === 0) {
+			throw new Error("windowFunnel requires at least one condition")
+		}
+		const args = [timestamp.toFragment(), ...conditions.map((c) => c.toFragment())]
+			.map(compile)
+			.join(", ")
+		return makeExpr<number>(raw(`windowFunnel(${params})(${args})`))
+	}
+}
+
+/**
+ * `sequenceMatch(pattern)(timestamp, cond1, cond2, …)` — 1 when the events
+ * matching `cond1..condN` occur in the order the pattern describes
+ * (`'(?1)(?2)'`, `'(?1)(?t<3600)(?2)'`, …), else 0. ClickHouse returns a
+ * `UInt8`, exposed as an `Expr<number>` for `sumIf`/`countIf`-style use.
+ *
+ * The pattern is embedded verbatim — it is ClickHouse's pattern grammar, not
+ * user input, so only quote-free literals are accepted.
+ */
+export function sequenceMatch(pattern: string) {
+	if (pattern.includes("'") || pattern.includes("\\")) {
+		throw new Error("sequenceMatch pattern must not contain quotes or backslashes")
+	}
+	return (timestamp: Expr<any>, ...conditions: ReadonlyArray<Condition>): Expr<number> => {
+		if (conditions.length === 0) {
+			throw new Error("sequenceMatch requires at least one condition")
+		}
+		const args = [timestamp.toFragment(), ...conditions.map((c) => c.toFragment())]
+			.map(compile)
+			.join(", ")
+		return makeExpr<number>(raw(`sequenceMatch('${pattern}')(${args})`))
+	}
+}

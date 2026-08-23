@@ -31,7 +31,7 @@ function buildCustomer(
 }
 
 // Mirrors apps/api/autumn.config.ts: $39/mo base, 100 GB included per signal at
-// $0.30/GB overage, 5000 sessions at $0.002/session.
+// $0.30/GB overage, 5000 sessions at $0.002/session, 1M events at $0.05/1,000.
 const startupPlan = {
 	id: "startup",
 	name: "Startup",
@@ -42,6 +42,7 @@ const startupPlan = {
 		{ featureId: "traces", included: 100, price: { amount: 0.3, billingUnits: 1 } },
 		{ featureId: "metrics", included: 100, price: { amount: 0.3, billingUnits: 1 } },
 		{ featureId: "browser_sessions", included: 5000, price: { amount: 0.002, billingUnits: 1 } },
+		{ featureId: "product_events", included: 1_000_000, price: { amount: 0.05, billingUnits: 1000 } },
 	],
 } as Plan
 
@@ -91,6 +92,34 @@ describe("estimateCycleCost", () => {
 		expect(sessions!.amount).toBeCloseTo(4)
 		expect(estimate!.total).toBeCloseTo(39 + 3.9 + 4)
 		expect(estimate!.partial).toBe(false)
+	})
+
+	it("prices overage from the balance meter when the feature has one, not the aggregate", () => {
+		const estimate = estimateCycleCost({
+			customer: buildCustomer([buildSubscription()], { metrics: { granted: 100, usage: 379.75 } }),
+			plans: [startupPlan],
+			// The rolling-window aggregate is larger; it must not drive the bill.
+			usage: usage({ metrics: 433.98 }),
+		})
+		const metrics = estimate!.lines.find((l) => l.key === "overage:metrics")
+		// 279.75 GB over → ceil = 280 × $0.30
+		expect(metrics!.amount).toBeCloseTo(84)
+		expect(metrics!.detail).toContain("279.75 GB over included")
+	})
+
+	it("bills product events per 1,000-event block and says so in the detail", () => {
+		const estimate = estimateCycleCost({
+			customer: buildCustomer([buildSubscription()], { product_events: { granted: 1_000_000 } }),
+			plans: [startupPlan],
+			usage: usage({ product_events: 1_250_500 }),
+		})
+		const events = estimate!.lines.find((l) => l.key === "overage:product_events")
+		// 250,500 over → ceil(250.5) = 251 blocks × $0.05
+		expect(events).toMatchObject({
+			label: "Product Events overage",
+			detail: "250,500 events over included × $0.05 / 1,000 events",
+		})
+		expect(events!.amount).toBeCloseTo(12.55)
 	})
 
 	it("rounds overage up per billingUnits block", () => {

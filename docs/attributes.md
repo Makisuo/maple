@@ -23,11 +23,11 @@ Tag every span with these and you get per-environment and per-version slices for
 
 | Attribute                     | Example      | What Maple does with it                                                                                          |
 | ----------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `deployment.environment`      | `production` | Filterable everywhere; per-env throughput / latency / error rate; environment chips in span detail.              |
-| `deployment.environment.name` | `production` | Accepted as an alias for `deployment.environment` in infrastructure queries.                                     |
+| `deployment.environment.name` | `production` | The current OTel key. Filterable everywhere; per-env throughput / latency / error rate; environment chips in span detail. |
+| `deployment.environment`      | `production` | The deprecated spelling of the same attribute. Read everywhere the `.name` key is, so older instrumentation keeps working. |
 | `deployment.commit_sha`       | `c0b92f68`   | Per-version metrics in service overview; exposed as the `commit_sha` discovery facet so you can pivot by deploy. |
 
-Maple's SDKs currently dual-emit both `deployment.environment` and `deployment.environment.name` — they're treated as the same value. Emitting either is fine. In the search bar, `env`, `environment`, and `commit_sha` are short aliases — see [Filter aliases](#filter-aliases) below.
+OpenTelemetry renamed this attribute (`deployment.environment` → `deployment.environment.name`); Maple reads whichever one your spans carry, preferring `.name` when both are present, so emitting either is fine. Maple's own SDKs dual-emit both. The same holds for `messaging.destination` → `messaging.destination.name` on messaging spans. In the search bar, `env`, `environment`, and `commit_sha` are short aliases — see [Filter aliases](#filter-aliases) below.
 
 ## Span status & kind
 

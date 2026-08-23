@@ -2,6 +2,7 @@ import { DailySpendResponse, DailyVolume, WarehouseQueryError } from "@maple/dom
 import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/query-engine"
 import { Context, Effect, Layer } from "effect"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { isMissingProductEvents } from "@/services/warehouse/missing-table"
 import type { TenantContext } from "@/services/auth/AuthService"
 import * as Integrations from "@maple/query-engine-integrations"
 
@@ -28,6 +29,8 @@ const BYTES_PER_BILLED_GB = 1_000_000_000
 export const toUtcDateKey = (epochMs: number) => new Date(epochMs).toISOString().slice(0, 10)
 
 const startOfUtcDay = (epochMs: number) => Math.floor(epochMs / DAY_MS) * DAY_MS
+
+const noEventRows: ReadonlyArray<typeof Integrations.dailyProductEventCountRowSchema.Type> = []
 
 export interface DailySpendServiceApi {
 	readonly get: (
@@ -97,9 +100,29 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 					})
 				}
 
+				// A cluster without `product_events` has ingested no product events, so
+				// the honest series is all zeros — not a 502 for the whole chart.
+				const eventRows = yield* warehouse
+					.compiledQuery(
+						tenant,
+						CH.compile(Integrations.dailyProductEventCountQuery(), params, {
+							rowSchema: Integrations.dailyProductEventCountRowSchema,
+						}),
+						{ profile: "list", context: "billingDailyProductEventCount" },
+					)
+					.pipe(
+						Effect.catchIf(isMissingProductEvents, () => Effect.succeed(noEventRows)),
+						Effect.mapError(toQueryError),
+					)
+
 				const sessionsByDay = new Map<string, number>()
 				for (const row of sessionRows) {
 					sessionsByDay.set(toUtcDateKey(parseWarehouseDateTime(row.day)), row.sessions)
+				}
+
+				const eventsByDay = new Map<string, number>()
+				for (const row of eventRows) {
+					eventsByDay.set(toUtcDateKey(parseWarehouseDateTime(row.day)), row.events)
 				}
 
 				const days: DailyVolume[] = []
@@ -115,6 +138,7 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 							tracesGB: signals?.tracesGB ?? 0,
 							metricsGB: signals?.metricsGB ?? 0,
 							browserSessions: sessionsByDay.get(key) ?? 0,
+							productEvents: eventsByDay.get(key) ?? 0,
 						}),
 					)
 				}

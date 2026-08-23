@@ -18,7 +18,7 @@ import { useIngestConnection } from "@/components/ingest/use-ingest-connection"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { mcpUrl } from "@/lib/services/common/mcp-url"
 
-const ONBOARD_SKILL_COMMAND = "bunx skills add Makisuo/maple/skills/maple-onboard"
+const ONBOARD_SKILL_COMMAND = "bunx skills add MapleTechLabs/maple/skills/maple-onboard"
 const MCP_ENDPOINT = `${mcpUrl}/mcp`
 
 export function ConnectButton() {
@@ -34,7 +34,7 @@ export function ConnectButton() {
 					</Button>
 				}
 			/>
-			<PopoverPopup align="end" className="w-[26rem]">
+			<PopoverPopup align="end" className="w-[26rem] max-w-[calc(100vw-1rem)]">
 				{open && <ConnectPanel />}
 			</PopoverPopup>
 		</Popover>

@@ -126,6 +126,13 @@ static WAL_SHARD_FULL_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static WAL_COMPACTED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_compacted_bytes_total")
+        .with_description("Exported WAL bytes reclaimed by rewriting a lane file from its cursor")
+        .build()
+});
+
 static FORWARD_RESPONSES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_forward_responses_total")
@@ -522,6 +529,17 @@ pub fn wal_commit_bytes(shard: usize, destination: &str, bytes: u64) {
 pub fn wal_shard_bytes(shard: usize, destination: &str, bytes: u64) {
     WAL_SHARD_BYTES.record(
         bytes,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+        ],
+    );
+}
+
+/// Exported bytes reclaimed by compacting a WAL lane file.
+pub fn wal_lane_compacted(shard: usize, destination: &str, reclaimed_bytes: u64) {
+    WAL_COMPACTED_BYTES_TOTAL.add(
+        reclaimed_bytes,
         &[
             KeyValue::new("shard", shard.to_string()),
             KeyValue::new("destination", destination.to_owned()),

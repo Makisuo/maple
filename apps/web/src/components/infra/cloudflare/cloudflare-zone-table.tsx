@@ -40,7 +40,7 @@ export function CloudflareZoneTableLoading() {
 	return (
 		<DataTable.Root ariaLabel="Zones">
 			<DataTable.Head>
-				<ColumnHead label="Zone" width="flex-1 min-w-[220px]" />
+				<ColumnHead label="Zone" width="w-0 flex-1 min-w-[220px]" />
 				<ColumnHead label="Requests" align="right" width="w-[90px]" />
 				<ColumnHead label="Error rate" align="right" width="w-[90px]" />
 				<ColumnHead label="Cache hit" align="right" width="w-[90px]" hidden="hidden md:flex" />
@@ -48,7 +48,7 @@ export function CloudflareZoneTableLoading() {
 				<ColumnHead label="TTFB p99" align="right" width="w-[90px]" />
 			</DataTable.Head>
 			<DataTable.SkeletonRows count={3}>
-				<div className="min-w-[220px] flex-1">
+				<div className="w-0 min-w-[220px] flex-1">
 					<Skeleton className="h-4 w-44" />
 				</div>
 				<Skeleton className="h-3 w-[90px]" />
@@ -86,7 +86,7 @@ export function CloudflareZoneTable({ zones, waiting, emptyMessage }: Cloudflare
 					currentKey={sortKey}
 					dir={sortDir}
 					onSort={handleSort}
-					width="flex-1 min-w-[220px]"
+					width="w-0 flex-1 min-w-[220px]"
 				/>
 				<ColumnHead<SortKey>
 					label="Requests"
@@ -177,7 +177,7 @@ export function CloudflareZoneTable({ zones, waiting, emptyMessage }: Cloudflare
 					params={{ zoneName: zone.zoneName }}
 					className={ROW_LINK_CLASS}
 				>
-					<div className="min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
+					<div className="w-0 min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 						{zone.zoneName}
 					</div>
 					{numCell(formatNumber(zone.requests))}

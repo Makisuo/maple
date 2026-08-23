@@ -1,10 +1,11 @@
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Context, Data, Duration, Effect, Layer } from "effect"
+import { Context, Duration, Effect, Layer, Schema } from "effect"
 import { Env } from "./Env"
 
-class EmailDeliveryError extends Data.TaggedError("@maple/api/platform/EmailDeliveryError")<{
-	readonly message: string
-}> {}
+class EmailDeliveryError extends Schema.TaggedError<EmailDeliveryError>()(
+	"@maple/api/platform/EmailDeliveryError",
+	{ message: Schema.String },
+) {}
 
 export interface EmailServiceApi {
 	readonly isConfigured: boolean

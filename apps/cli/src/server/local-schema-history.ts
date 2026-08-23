@@ -72,4 +72,32 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "2814f51596f9eabcdb32fb992249b9c8378d15f0c2a60dcbc2ccb49f3ad9dae6",
 		projectRevision: "73f8f3249a508cd05598289b67b3773a049e38db0302efa6aa9e45e3501d2182",
 	}),
+	Object.freeze({
+		version: 8,
+		fingerprint: "51081e951066442a",
+		digest: "51081e951066442a8e5b53df2c4bdda933edd20fc89132a54ed9b4dbb7e55a05",
+		manifestDigest: "60908c2e8307e24885227d4553916eef64df7f9b23abec23b5697cfea0d84d94",
+		projectRevision: "bb7da950a3a65af75fcf627bf4ed0436308c98fee86906048b05b6d40d9f7534",
+	}),
+	Object.freeze({
+		version: 9,
+		fingerprint: "2516215f22b41a63",
+		digest: "2516215f22b41a636b3186d0b293a0a6276e4bb85004efd3994b80867696a469",
+		manifestDigest: "f1bdef1ca3dcb073fc3cda998c145f64fd9a4a4f174543e7bc0405867bedf356",
+		projectRevision: "3773cd0bfa79483773ada07c70c9fa5571688ceecfb1fd5839c33c4251b7f979",
+	}),
+	Object.freeze({
+		version: 10,
+		fingerprint: "b10c1137fb63a6f3",
+		digest: "b10c1137fb63a6f3ebd4d44c37ed82d469d1e52ea483c03b3c5cc25399410bd1",
+		manifestDigest: "7c975d2547ccdedb55f5b5fe2360fa72a4e6b9b7fd1935611e257e207c5694fd",
+		projectRevision: "5b4c3a0d3aa0962b062689605ad5cf075f47403df04e851ce58133f16fc692e3",
+	}),
+	Object.freeze({
+		version: 11,
+		fingerprint: "5642766fc2dced4f",
+		digest: "5642766fc2dced4f7ddf4c0f8c4470d0f20641e23a7c3ad31d3a410c55062a7d",
+		manifestDigest: "221f2e37bf61b08b87b9cac21acde9c18f1c0bb04625eea6ca2450e280581a1e",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)

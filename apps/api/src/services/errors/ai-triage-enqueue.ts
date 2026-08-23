@@ -12,7 +12,7 @@ import {
 import { InvestigationId, IsoDateTimeString } from "@maple/domain/primitives"
 import { aiTriageSettings, investigations } from "@maple/db"
 import { and, eq, lt } from "drizzle-orm"
-import { Cause, Clock, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
+import { Clock, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
 import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { Database } from "@/platform/DatabaseLive"
 import { isChatSessionNamespace } from "@/chat/session"
@@ -26,6 +26,7 @@ import {
 	staleTimeoutMessage,
 } from "@/services/errors/investigation-stale"
 import { UserId } from "@maple/domain/primitives"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
 const internalServiceUserId = Schema.decodeSync(UserId)("internal-service")
@@ -387,7 +388,7 @@ export const maybeEnqueueTriage: (
 				Effect.annotateLogs({
 					orgId: input.orgId,
 					investigationId,
-					error: Cause.pretty(created.cause),
+					error: summarizeCause(created.cause),
 				}),
 			)
 			yield* markFailed("start_failed: the investigation fan-out could not be started; retry")
@@ -408,7 +409,7 @@ export const maybeEnqueueTriage: (
 					orgId: input.orgId,
 					incidentKind: input.incidentKind,
 					incidentId: input.incidentId,
-					error: Cause.pretty(cause),
+					error: summarizeCause(cause),
 				}),
 				Effect.as({ enqueued: false, reason: "error" as const }),
 			),

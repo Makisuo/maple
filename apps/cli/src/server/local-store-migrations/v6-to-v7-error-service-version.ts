@@ -1,14 +1,21 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 import { cp, mkdir, rm } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { RAW_TELEMETRY_TTL_COLUMNS, readRawTelemetryRetentionDays, type Chdb } from "../chdb"
+import {
+	decodeInstalledProgress,
+	makeRawRowsState,
+	type InstalledProgress,
+	RAW_TABLES,
+	rawRowCounts,
+	expectedManifest,
+} from "./journal-codecs"
+import { readRawTelemetryRetentionDays } from "../chdb"
 import type {
 	LocalStoreMigrationModule,
 	MigrationModuleContext,
 	MigrationOperation,
 	StateDispositionEntry,
 } from "../local-store-migration-module"
-import { withRawTelemetryRetentionFloor } from "../schema-manifest"
 import {
 	LOCAL_SCHEMA_V6,
 	LOCAL_SCHEMA_V6_MANIFEST,
@@ -18,8 +25,6 @@ import {
 	LOCAL_SCHEMA_V7_SQL,
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
-
-const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
 /** Error-family views replaced by this edge, dropped before the v7 DDL runs. */
 const ERROR_VIEWS = ["error_events_mv", "error_events_by_time_mv", "error_fingerprints_minutely_mv"] as const
@@ -40,83 +45,16 @@ const SERVICE_VERSION_COLUMNS = [
 	],
 ] as const
 
-interface V6ToV7State {
-	readonly module: "local-0006-to-0007-error-service-version"
-	readonly version: 1
-	readonly rawRows: Readonly<Record<string, string>>
-	readonly retentionDays?: number
-}
+/** Stamped into the journal and matched on the way back out. */
+const MODULE_ID = "local-0006-to-0007-error-service-version" as const
 
-interface V6ToV7Progress {
-	readonly installed: true
-}
+const V6ToV7StateCodec = makeRawRowsState(MODULE_ID)
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
+type V6ToV7State = typeof V6ToV7StateCodec.schema.Type
+type V6ToV7Progress = InstalledProgress
 
-const decodeCounts = (value: unknown): Readonly<Record<string, string>> => {
-	if (!isRecord(value)) throw new Error("v6 -> v7 rawRows must be an object")
-	const counts: Record<string, string> = {}
-	for (const table of RAW_TABLES) {
-		const count = value[table]
-		if (typeof count !== "string" || !/^\d+$/.test(count))
-			throw new Error(`v6 -> v7 rawRows.${table} must be an unsigned decimal string`)
-		counts[table] = count
-	}
-	if (Object.keys(value).some((table) => !RAW_TABLES.includes(table as (typeof RAW_TABLES)[number])))
-		throw new Error("v6 -> v7 rawRows contains an unknown table")
-	return counts
-}
-
-const decodeState = (value: unknown): V6ToV7State => {
-	if (!isRecord(value)) throw new Error("v6 -> v7 state must be an object")
-	const allowed = new Set(["module", "version", "rawRows", "retentionDays"])
-	if (Object.keys(value).some((key) => !allowed.has(key)))
-		throw new Error("v6 -> v7 state contains an unknown field")
-	if (value.module !== "local-0006-to-0007-error-service-version" || value.version !== 1)
-		throw new Error("v6 -> v7 state has an unsupported module or version")
-	if (
-		value.retentionDays !== undefined &&
-		(typeof value.retentionDays !== "number" || !Number.isSafeInteger(value.retentionDays))
-	)
-		throw new Error("v6 -> v7 retentionDays must be an integer")
-	return {
-		module: "local-0006-to-0007-error-service-version",
-		version: 1,
-		rawRows: decodeCounts(value.rawRows),
-		...(!(value.retentionDays === undefined) ? { retentionDays: value.retentionDays } : undefined),
-	}
-}
-
-const decodeProgress = (value: unknown): V6ToV7Progress | undefined => {
-	if (value === undefined) return undefined
-	if (!isRecord(value) || Object.keys(value).some((key) => key !== "installed") || value.installed !== true)
-		throw new Error("v6 -> v7 progress is invalid")
-	return { installed: true }
-}
-
-const parseJsonEachRow = <A>(value: string): A[] =>
-	value
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.map((line) => JSON.parse(line) as A)
-
-const rawRowCounts = (db: Chdb): Readonly<Record<string, string>> => {
-	const quotedTables = RAW_TABLES.map((table) => `'${table}'`).join(", ")
-	const rows = parseJsonEachRow<{ table: string; rowCount: string }>(
-		db.query(
-			`SELECT table, toString(sum(rows)) AS rowCount FROM system.parts WHERE database = 'default' AND active = 1 AND table IN (${quotedTables}) GROUP BY table`,
-		),
-	)
-	const byTable = new Map(rows.map((row) => [row.table, row.rowCount]))
-	return Object.fromEntries(RAW_TABLES.map((table) => [table, byTable.get(table) ?? "0"]))
-}
-
-const expectedManifest = (manifest: typeof LOCAL_SCHEMA_V6_MANIFEST, retentionDays: number | undefined) =>
-	retentionDays === undefined
-		? manifest
-		: withRawTelemetryRetentionFloor(manifest, RAW_TABLES, retentionDays)
+const decodeState = V6ToV7StateCodec.decode
+const decodeProgress = decodeInstalledProgress
 
 const preflight = async (context: MigrationModuleContext): Promise<V6ToV7State> => {
 	await context.ensureCapacity()
@@ -128,12 +66,12 @@ const preflight = async (context: MigrationModuleContext): Promise<V6ToV7State> 
 		},
 		{ schemaSql: LOCAL_SCHEMA_V6_SQL, bootstrapSchema: false },
 	)
-	return {
-		module: "local-0006-to-0007-error-service-version",
-		version: 1,
-		rawRows,
-		...(!(retentionDays === undefined) ? { retentionDays } : undefined),
-	}
+	// Two literals rather than a conditional spread: `retentionDays` is an
+	// `optionalKey`, so an absent floor has to be an absent key, not a present
+	// `undefined`.
+	return retentionDays === undefined
+		? { module: MODULE_ID, version: 1, rawRows }
+		: { module: MODULE_ID, version: 1, rawRows, retentionDays }
 }
 
 const prepareTarget = async (context: MigrationModuleContext, state: V6ToV7State): Promise<V6ToV7State> => {
@@ -280,7 +218,7 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 ]
 
 export const v6ToV7ErrorServiceVersionModule: LocalStoreMigrationModule<V6ToV7State, V6ToV7Progress> = {
-	id: "local-0006-to-0007-error-service-version",
+	id: MODULE_ID,
 	moduleVersion: 1,
 	description:
 		"Add ServiceVersion to the error-events tables and rebuild the error-events views on fingerprint v2",

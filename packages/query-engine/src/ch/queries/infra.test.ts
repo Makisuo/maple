@@ -119,7 +119,9 @@ describe("listPodsQuery", () => {
 		expect(sql).toContain("ResourceAttributes['k8s.node.name'] IN")
 		expect(sql).toContain("ResourceAttributes['k8s.cluster.name'] IN")
 		expect(sql).toContain("ResourceAttributes['k8s.deployment.name'] IN")
-		expect(sql).toContain("ResourceAttributes['deployment.environment.name'] IN")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN",
+		)
 		expect(sql).toContain("'production'")
 	})
 
@@ -224,7 +226,9 @@ describe("podFacetsQuery", () => {
 		expect(sql).toContain("ResourceAttributes['k8s.statefulset.name']")
 		expect(sql).toContain("ResourceAttributes['k8s.daemonset.name']")
 		expect(sql).toContain("ResourceAttributes['k8s.job.name']")
-		expect(sql).toContain("ResourceAttributes['deployment.environment.name']")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])",
+		)
 		expect(sql).toContain("FORMAT JSON")
 	})
 
@@ -290,7 +294,9 @@ describe("listNodesQuery", () => {
 			baseParams,
 		)
 		expect(sql).toContain("ResourceAttributes['k8s.cluster.name'] IN")
-		expect(sql).toContain("ResourceAttributes['deployment.environment.name'] IN")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN",
+		)
 	})
 })
 
@@ -300,7 +306,9 @@ describe("nodeFacetsQuery", () => {
 		expect(sql.toUpperCase().split("UNION ALL").length).toBeGreaterThan(2)
 		expect(sql).toContain("ResourceAttributes['k8s.node.name']")
 		expect(sql).toContain("ResourceAttributes['k8s.cluster.name']")
-		expect(sql).toContain("ResourceAttributes['deployment.environment.name']")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])",
+		)
 	})
 
 	it("scans only k8s.node.cpu.usage, not k8s.node.uptime", () => {
@@ -363,7 +371,9 @@ describe("listWorkloadsQuery", () => {
 		expect(sql).toContain("ResourceAttributes['k8s.deployment.name'] IN")
 		expect(sql).toContain("ResourceAttributes['k8s.namespace.name'] IN")
 		expect(sql).toContain("ResourceAttributes['k8s.cluster.name'] IN")
-		expect(sql).toContain("ResourceAttributes['deployment.environment.name'] IN")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN",
+		)
 	})
 })
 
@@ -373,7 +383,9 @@ describe("workloadFacetsQuery", () => {
 		expect(sql).toContain("ResourceAttributes['k8s.deployment.name']")
 		expect(sql).toContain("ResourceAttributes['k8s.namespace.name']")
 		expect(sql).toContain("ResourceAttributes['k8s.cluster.name']")
-		expect(sql).toContain("ResourceAttributes['deployment.environment.name']")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])",
+		)
 	})
 
 	it("scans only the single probe metric, not the full pod metric set", () => {

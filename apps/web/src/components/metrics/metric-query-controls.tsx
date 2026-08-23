@@ -119,7 +119,6 @@ export function MetricQueryControls({
 					className="flex-1"
 					textareaClassName="min-h-8 resize-y text-xs"
 					ariaLabel={`Where clause for ${metricName}`}
-					highlight
 				/>
 			</div>
 

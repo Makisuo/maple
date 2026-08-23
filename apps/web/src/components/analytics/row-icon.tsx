@@ -17,6 +17,8 @@ import { useState, type ReactNode } from "react"
 import { cn } from "@maple/ui/lib/utils"
 
 import { browserIconFor, deviceIconFor } from "@/components/replays/session-icons"
+import { ArrowThroughLineRightIcon } from "@/components/icons"
+import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
 import type { AnalyticsFilterKey } from "./filters"
 
 /** Shared box size, so a favicon, an SVG mark and the empty fallback all agree. */
@@ -85,6 +87,14 @@ export const dimensionHasIcons = (key: AnalyticsFilterKey): boolean => ICON_KEYS
 export function analyticsRowIcon(key: AnalyticsFilterKey, name: string): ReactNode | undefined {
 	switch (key) {
 		case "referrerHost":
+			// The direct-traffic group is not a host (a favicon lookup for the
+			// literal "(none)" would come back as a monogram of it): an arrow
+			// straight through the line — arrived with nothing behind it.
+			return name === WEB_ANALYTICS_UNSET ? (
+				<ArrowThroughLineRightIcon className={cn(ICON_BOX, "text-foreground")} />
+			) : (
+				<Favicon host={name} />
+			)
 		case "host":
 			return <Favicon host={name} />
 		case "utmSource":

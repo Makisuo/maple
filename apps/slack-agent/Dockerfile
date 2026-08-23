@@ -11,7 +11,7 @@
 FROM node:24-slim
 
 # Bun, for `bun install` only.
-COPY --from=oven/bun:1.3-slim /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=oven/bun:1.4-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 

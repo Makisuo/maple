@@ -19,6 +19,7 @@
 
 export * from "./comparison"
 export * from "./formula"
+export * from "./funnel"
 export * from "./query-draft"
 export * from "./query-set"
 export * from "./result-shape"

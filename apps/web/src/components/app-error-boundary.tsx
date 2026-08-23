@@ -2,11 +2,12 @@
  * Last-resort boundary for errors outside router boundaries. It has no router
  * context; crash artwork geometry is coupled to `.boot-*`/`.crash-*` in styles.css.
  */
-import { Component, type ReactNode } from "react"
+import { Component, type ErrorInfo, type ReactNode } from "react"
 
 import { buttonVariants } from "@maple/ui/components/ui/button"
 import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
 import { displayError } from "@/lib/error-messages"
+import { captureException } from "@/lib/services/common/otel-layer"
 
 interface AppErrorBoundaryProps {
 	children: ReactNode
@@ -23,10 +24,25 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 		return { error }
 	}
 
-	componentDidCatch(error: unknown) {
-		if (isChunkLoadError(error) && shouldAttemptChunkReload()) {
-			window.location.reload()
+	componentDidCatch(error: unknown, errorInfo: ErrorInfo) {
+		if (isChunkLoadError(error)) {
+			// A stale chunk after a deploy is a cache miss, not a bug — the reload
+			// fixes it and reporting it would bury real crashes under one issue per
+			// deploy.
+			if (shouldAttemptChunkReload()) window.location.reload()
+			return
 		}
+		// React swallows a boundary-caught error in production, so without this the
+		// crash screen below is the only trace this ever happened.
+		captureException(error, {
+			name: "browser.react_error_boundary",
+			attributes: {
+				"maple.exception.source": "app_error_boundary",
+				...(errorInfo.componentStack
+					? { "maple.react.component_stack": errorInfo.componentStack }
+					: undefined),
+			},
+		})
 	}
 
 	render() {

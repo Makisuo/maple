@@ -107,11 +107,13 @@ import {
 import { getAiSessionSpans, getAiSessionsFacets, listAiSessions } from "@/api/warehouse/ai-sessions"
 import {
 	getWebAnalyticsBreakdowns,
+	getWebAnalyticsEvents,
 	getWebAnalyticsPages,
 	getWebAnalyticsPageviews,
 	getWebAnalyticsSummary,
 	getWebAnalyticsTimeseries,
 } from "@/api/warehouse/web-analytics"
+import { getProductEventNames } from "@/api/warehouse/product-events"
 
 /**
  * The error union every warehouse server function fails with: the structured
@@ -257,7 +259,7 @@ export const replaysFacetsResultAtom = makeQueryAtomFamily(getReplaysFacets, {
 	staleTime: 30_000,
 })
 
-// Web analytics — one page, five atoms, all 30s. Traffic numbers are watched
+// Web analytics — one page, six atoms, all 30s. Traffic numbers are watched
 // during a launch, so a longer TTL reads as a stalled page; a shorter one just
 // re-runs the same 30-day-TTL scans.
 export const webAnalyticsSummaryResultAtom = makeQueryAtomFamily(getWebAnalyticsSummary, {
@@ -276,8 +278,18 @@ export const webAnalyticsPagesResultAtom = makeQueryAtomFamily(getWebAnalyticsPa
 	staleTime: 30_000,
 })
 
+export const webAnalyticsEventsResultAtom = makeQueryAtomFamily(getWebAnalyticsEvents, {
+	staleTime: 30_000,
+})
+
 export const webAnalyticsBreakdownsResultAtom = makeQueryAtomFamily(getWebAnalyticsBreakdowns, {
 	staleTime: 30_000,
+})
+
+// The event-name list backs the step builder's autocomplete and changes only
+// when someone ships a new `track()` call, so it can sit for a minute.
+export const productEventNamesResultAtom = makeQueryAtomFamily(getProductEventNames, {
+	staleTime: 60_000,
 })
 
 export const getReplayResultAtom = makeQueryAtomFamily(getReplay, {

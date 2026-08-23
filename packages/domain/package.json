@@ -7,6 +7,7 @@
 		".": "./src/index.ts",
 		"./anticipated-errors": "./src/anticipated-errors.ts",
 		"./billing": "./src/billing.ts",
+		"./billing-tax-ids": "./src/billing-tax-ids.ts",
 		"./gen-ai": "./src/gen-ai.ts",
 		"./glob": "./src/glob.ts",
 		"./http": "./src/http/index.ts",
@@ -14,6 +15,7 @@
 		"./http/v2-worker-unavailable": "./src/http/v2/worker-unavailable.ts",
 		"./internal-rpc": "./src/internal-rpc.ts",
 		"./llm": "./src/llm.ts",
+		"./mcp-manifest": "./src/mcp-manifest.ts",
 		"./permission": "./src/permission.ts",
 		"./primitives": "./src/primitives.ts",
 		"./query-engine": "./src/query-engine.ts",
@@ -24,6 +26,7 @@
 		"./tinybird": "./src/tinybird/index.ts",
 		"./tinybird/db-query-shape-sql": "./src/tinybird/db-query-shape-sql.ts",
 		"./tinybird/fingerprint": "./src/tinybird/fingerprint.ts",
+		"./tinybird/semconv-renames": "./src/tinybird/semconv-renames.ts",
 		"./tinybird/span-display-name": "./src/tinybird/span-display-name.ts",
 		"./clickhouse": "./src/clickhouse/index.ts",
 		"./generated/clickhouse-schema": "./src/generated/clickhouse-schema.ts",
@@ -33,6 +36,8 @@
 		"./chat-session": "./src/chat-session.ts"
 	},
 	"scripts": {
+		"gen:anticipated-errors": "bun scripts/gen-anticipated-errors.ts",
+		"gen:anticipated-errors:check": "bun scripts/gen-anticipated-errors.ts --check",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
 	},

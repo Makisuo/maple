@@ -200,6 +200,13 @@ export const ErrorIncidentReason = Schema.Literals(["first_seen", "regression", 
 })
 export type ErrorIncidentReason = Schema.Schema.Type<typeof ErrorIncidentReason>
 
+/**
+ * Silence, in minutes, after which the error tick auto-resolves an open
+ * incident. Shared so the dashboard can explain the `resolved` status with the
+ * same number the evaluator applies.
+ */
+export const ERROR_INCIDENT_AUTO_RESOLVE_MINUTES = 30
+
 // Actor documents
 
 export class ActorDocument extends Schema.Class<ActorDocument>("ActorDocument")({
@@ -285,6 +292,12 @@ export class ErrorIssueSampleTrace extends Schema.Class<ErrorIssueSampleTrace>("
 	durationMicros: Schema.Number,
 }) {}
 
+/** One deployment environment a fingerprint was observed in over the detail window. */
+export class ErrorIssueEnvironment extends Schema.Class<ErrorIssueEnvironment>("ErrorIssueEnvironment")({
+	name: Schema.String,
+	count: Schema.Number,
+}) {}
+
 export class ErrorIncidentDocument extends Schema.Class<ErrorIncidentDocument>("ErrorIncidentDocument")({
 	id: ErrorIncidentId,
 	issueId: ErrorIssueId,
@@ -303,6 +316,9 @@ export class ErrorIssueDetailResponse extends Schema.Class<ErrorIssueDetailRespo
 	timeseries: Schema.Array(ErrorIssueTimeseriesPoint),
 	sampleTraces: Schema.Array(ErrorIssueSampleTrace),
 	incidents: Schema.Array(ErrorIncidentDocument),
+	// Environments the fingerprint was seen in over the requested window. The
+	// issue row itself has none: one fingerprint spans environments.
+	environments: Schema.Array(ErrorIssueEnvironment),
 }) {}
 
 export class ErrorIncidentsListResponse extends Schema.Class<ErrorIncidentsListResponse>(

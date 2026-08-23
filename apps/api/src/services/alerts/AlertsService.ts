@@ -1,4 +1,4 @@
-import { formatWarehouseDateTime } from "@maple/query-engine"
+import { formatWarehouseDateTime, snapAlertWindowEndMs } from "@maple/query-engine"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -59,7 +59,6 @@ import {
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import {
 	Array as Arr,
-	Cause,
 	Chunk,
 	Effect,
 	HashSet,
@@ -80,9 +79,11 @@ import * as AlertingMetrics from "@/observability/AlertingMetrics"
 import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueue"
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
+import { advanceAlertCounters, simulateFiringSpans, type AlertCounters } from "./alert-counters"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { formatComparator } from "./alert-formatting"
+import { makeIncidentPushBudget, type IncidentPushBudget } from "./alert-push-budget"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
@@ -106,15 +107,16 @@ import { makeAlertDestinationDelivery, parseAlertDestinationEncryptionKey } from
 import { AlertReadModelsService, type AlertReadModelsServiceApi } from "./AlertReadModelsService"
 import { AlertRulesService, makeAlertRulePersistence, type AlertRulesServiceApi } from "./AlertRulesService"
 import {
-	compileRulePlan,
 	decodeStoredAlertRuleMetadata,
 	isGroupedPlan,
 	toStorageGroupKey,
 	makeAlertValidationError as makeValidationError,
+	perServiceRules,
 	planEvaluateSource,
 	type NormalizedRule,
 } from "./AlertRuleModel"
 import { mapSignalUnit, resolveSignalDisplay } from "./alert-signal-display"
+import { summarizeCause } from "@/platform/describe-cause"
 
 export { AlertRuntime, type AlertRuntimeApi } from "./AlertRuntime"
 
@@ -163,15 +165,11 @@ const ALERT_CHECK_INGEST_CONCURRENCY = 4
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
 // group-by rule opening hundreds of incidents can't stall the per-minute tick.
 const ISSUE_UPSERTS_PER_TICK = 50
-// The same fuse for phones, and it bounds two things at once. A grouped rule
-// opening many incidents at once would otherwise send one notification per
-// group to every registered device in the org — and because the send is awaited
-// inside the tick, the evaluation of every other rule that minute queues behind
-// it. Capping the events caps both the notification storm and the wall time the
-// tick can spend in APNs. Deliberately not solved by forking the send instead:
-// on Workers a fiber that outlives the invocation is simply cancelled, which
-// would trade a slow notification for a silently dropped one.
-const INCIDENT_PUSHES_PER_TICK = 25
+// The same fuse for phones lives in `alert-push-budget.ts`, which bounds both
+// the tick's total sends and any one rule's share of them. Deliberately not
+// solved by forking the sends instead: on Workers a fiber that outlives the
+// invocation is simply cancelled, which would trade a slow notification for a
+// silently dropped one.
 /**
  * Checks read for the Lock Screen sparkline. Rules evaluate about once a
  * minute, so this is the last ~half hour — enough to show the climb that opened
@@ -247,8 +245,19 @@ const resolveServiceLinkName = (
 	}
 	return null
 }
-// Cap on how many evaluation windows a structured rule preview replays.
-const MAX_PREVIEW_BUCKETS = 200
+/**
+ * Cap on how many evaluation windows a rule preview replays.
+ *
+ * One bucket is one evaluation window, so the cap is what decides whether the
+ * preview covers the range the user picked. At 200 it did not: the create
+ * form's default (5-minute window, last 24h) needs 288 and the 1-minute window
+ * needs 1440, so the common case silently charted only the newest slice of a
+ * full-width axis. 1500 covers every window/range pair the pickers can produce
+ * up to 24h, plus the coarser windows over 7d and 30d, and still bounds the
+ * response for the pathological combinations (1-minute windows over 30 days),
+ * which clamp and say so via `truncatedToStart`.
+ */
+const MAX_PREVIEW_BUCKETS = 1500
 
 /** Preserve each org's oldest-first order while preventing one org from monopolizing a tick. */
 export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
@@ -505,7 +514,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				| WarehouseQueryPathError
 			> {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": rule.id })
-				const endMs = yield* now
+				// Snapped, not raw `now`: excludes the still-filling current minute and
+				// lets rules over the same signal share one `qe-evaluate` entry within
+				// a tick. See `snapAlertWindowEndMs`.
+				const endMs = snapAlertWindowEndMs(yield* now)
 				const startMs = endMs - rule.windowMinutes * 60_000
 				const plan = rule.compiledPlan
 				const source = yield* planEvaluateSource(plan, rule.windowMinutes)
@@ -703,17 +715,23 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					scheduledAt: number,
 					// Null on the ad-hoc paths (a rule edit resolving its own
 					// incidents): those are one user action, not a storm.
-					pushBudget: Ref.Ref<number> | null,
+					pushBudget: IncidentPushBudget | null,
 				) {
 					// Phones first, and regardless of destinations: push is per person,
 					// not per rule, and a rule with no Slack channel still has people
 					// who installed the app. Best-effort by contract — it never fails
 					// the tick.
+					const linkUrl = resolveNotificationLinkUrl(rule, incident.groupKey)
 					const pushAllowed =
 						pushBudget === null ||
-						(yield* Ref.modify(pushBudget, (remaining): [boolean, number] =>
-							remaining > 0 ? [true, remaining - 1] : [false, remaining],
-						))
+						(yield* pushBudget.claim({
+							orgId,
+							ruleId: rule.id,
+							ruleName: rule.name,
+							severity: rule.severity,
+							linkUrl,
+							kind: eventType === "resolve" ? "resolve" : "firing",
+						}))
 					if (pushAllowed) {
 						yield* mobilePush
 							.notifyIncident({
@@ -737,11 +755,22 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 								serviceNames: rule.serviceNames,
 								windowMinutes: rule.windowMinutes,
 								dedupeKey: incident.dedupeKey,
-								openForMs:
-									eventType === "resolve"
-										? Math.max(0, scheduledAt - dateToMs(incident.firstTriggeredAt))
-										: null,
-								linkUrl: resolveNotificationLinkUrl(rule, incident.groupKey),
+								// Always, not just on resolve: how long an incident has been
+								// open is what the renotify escalation ladder is a function
+								// of, and it is the subtitle of every repeat banner.
+								openForMs: Math.max(0, scheduledAt - dateToMs(incident.firstTriggeredAt)),
+								// Read from the incident BEFORE the tick advanced
+								// `lastNotifiedAt` — this is the previous notification, which
+								// is the other end of the interval the ladder measures.
+								previousNotifiedOpenForMs:
+									incident.lastNotifiedAt === null
+										? null
+										: Math.max(
+												0,
+												dateToMs(incident.lastNotifiedAt) -
+													dateToMs(incident.firstTriggeredAt),
+											),
+								linkUrl,
 								// Unevaluated: the Lock Screen sparkline is the only
 								// consumer, so this warehouse read happens for a critical
 								// incident on a phone that can show one, and nowhere else.
@@ -765,8 +794,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							})
 							.pipe(Effect.timeout("20 seconds"), Effect.ignoreCause)
 					} else {
-						yield* Effect.logWarning(
-							"Mobile push: per-tick budget exhausted, skipping incident notification",
+						yield* Effect.logInfo(
+							"Mobile push: over this rule's per-tick share, folding the incident into the digest",
 						).pipe(Effect.annotateLogs({ orgId, ruleId: rule.id, incidentId: incident.id }))
 					}
 
@@ -949,18 +978,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				let evaluation: EvaluatedRule
 				if (normalized.serviceNames.length > 1) {
 					const results = yield* Effect.forEach(
-						normalized.serviceNames,
-						(svcName) =>
+						yield* perServiceRules(normalized),
+						({ rule }) =>
 							Effect.gen(function* () {
-								const perServicePlan = yield* compileRulePlan({
-									...normalized,
-									serviceName: svcName,
-								})
-								const observations = yield* evaluateRule(orgId, {
-									...normalized,
-									serviceName: svcName,
-									compiledPlan: perServicePlan,
-								})
+								const observations = yield* evaluateRule(orgId, rule)
 								return (
 									observations[0]?.evaluation ?? {
 										status: "skipped" as const,
@@ -1169,26 +1190,18 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					// Mirror the scheduler's multi-service mode: independent per-service
 					// plans, groupKey = service name.
 					yield* Effect.forEach(
-						normalized.serviceNames,
-						(svcName) =>
+						yield* perServiceRules(normalized),
+						({ groupKey, rule }) =>
 							Effect.gen(function* () {
-								const perServicePlan = yield* compileRulePlan({
-									...normalized,
-									serviceName: svcName,
-								})
-								const perServiceSource = yield* planEvaluateSource(
-									perServicePlan,
-									normalized.windowMinutes,
-								)
 								const observations = yield* queryEngine.evaluateSeries(systemTenant(orgId), {
 									startTime: formatWarehouseDateTime(startMs),
 									endTime: formatWarehouseDateTime(queryEndMs),
-									source: perServiceSource,
-									reducer: perServicePlan.reducer,
-									sampleCountStrategy: perServicePlan.sampleCountStrategy,
+									source: yield* planEvaluateSource(rule.compiledPlan, rule.windowMinutes),
+									reducer: rule.compiledPlan.reducer,
+									sampleCountStrategy: rule.compiledPlan.sampleCountStrategy,
 								})
 								for (const obs of observations) {
-									record(svcName, Date.parse(obs.bucket), {
+									record(groupKey, Date.parse(obs.bucket), {
 										value: obs.value,
 										sampleCount: obs.sampleCount,
 										hasData: obs.sampleCount > 0,
@@ -1240,59 +1253,48 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				const series: AlertRulePreviewSeries[] = []
 				const wouldFire: AlertRulePreviewFiringSpan[] = []
 				for (const [groupKey, buckets] of obsByGroup) {
-					const points: AlertRulePreviewPoint[] = []
-					// Simulate the scheduler's saturating counters (skipped freezes both —
-					// same as processEvaluation).
-					let breaches = 0
-					let healthy = 0
-					let openStart: number | null = null
-					for (const bucketMs of pointBuckets) {
+					// Every window in the grid, judged by the same `applyEvaluationLogic`
+					// the scheduler runs per tick — no-data windows included, filled from
+					// `NO_DATA` so a gap is an evaluated skip rather than a missing point.
+					const evaluations = pointBuckets.map((bucketMs) => {
 						const obs = buckets.get(bucketMs) ?? NO_DATA
 						const evaluation = applyEvaluationLogic(normalized, obs)
-						const provisional = hasPartialBucket && bucketMs === endMs
-						points.push(
-							new AlertRulePreviewPoint({
-								bucket: iso(bucketMs),
-								value: evaluation.value,
-								sampleCount: obs.sampleCount,
-								status: evaluation.status,
-								...(provisional ? { provisional } : undefined),
-							}),
-						)
-						// The in-progress window charts but doesn't feed the incident
-						// simulation — the scheduler hasn't evaluated it yet.
-						if (provisional) continue
-						if (evaluation.status === "breached") {
-							breaches = Math.min(breaches + 1, normalized.consecutiveBreachesRequired)
-							healthy = 0
-						} else if (evaluation.status === "healthy") {
-							healthy = Math.min(healthy + 1, normalized.consecutiveHealthyRequired)
-							breaches = 0
+						return {
+							bucketMs,
+							status: evaluation.status,
+							value: evaluation.value,
+							sampleCount: obs.sampleCount,
+							provisional: hasPartialBucket && bucketMs === endMs,
 						}
-						if (openStart == null && breaches >= normalized.consecutiveBreachesRequired) {
-							// Shade from the start of the run's first breached window.
-							openStart = bucketMs - (normalized.consecutiveBreachesRequired - 1) * windowMs
-						} else if (openStart != null && healthy >= normalized.consecutiveHealthyRequired) {
-							wouldFire.push(
-								new AlertRulePreviewFiringSpan({
-									groupKey,
-									start: iso(openStart),
-									end: iso(bucketMs + windowMs),
-								}),
-							)
-							openStart = null
-						}
-					}
-					if (openStart != null) {
+					})
+
+					series.push(
+						new AlertRulePreviewSeries({
+							groupKey,
+							points: evaluations.map(
+								({ bucketMs, status, value, sampleCount, provisional }) =>
+									new AlertRulePreviewPoint({
+										bucket: iso(bucketMs),
+										value,
+										sampleCount,
+										status,
+										...(provisional ? { provisional } : undefined),
+									}),
+							),
+						}),
+					)
+
+					// The would-fire shading is the scheduler's own state machine replayed
+					// over the series — not a second implementation of it.
+					for (const span of simulateFiringSpans(evaluations, normalized, windowMs)) {
 						wouldFire.push(
 							new AlertRulePreviewFiringSpan({
 								groupKey,
-								start: iso(openStart),
-								end: iso(endMs),
+								start: iso(span.startMs),
+								end: iso(span.endMs),
 							}),
 						)
 					}
-					series.push(new AlertRulePreviewSeries({ groupKey, points }))
 				}
 
 				yield* Effect.annotateCurrentSpan({
@@ -1770,7 +1772,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				timestamp: number,
 				pendingChecks: Ref.Ref<Chunk.Chunk<AlertChecksRow>>,
 				issueBudget: Ref.Ref<number>,
-				pushBudget: Ref.Ref<number>,
+				pushBudget: IncidentPushBudget,
 				prefetch: TickPrefetch,
 			) {
 				const stateConflictTarget: [
@@ -1847,9 +1849,18 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						)
 					}
 
+					const priorCounters: AlertCounters = {
+						consecutiveBreaches: state?.consecutiveBreaches ?? 0,
+						consecutiveHealthy: state?.consecutiveHealthy ?? 0,
+					}
+
 					if (evaluation.status === "skipped") {
-						const consecutiveBreaches = state?.consecutiveBreaches ?? 0
-						const consecutiveHealthy = state?.consecutiveHealthy ?? 0
+						// Freezing both counters is the machine's rule, not a local one.
+						const { consecutiveBreaches, consecutiveHealthy } = advanceAlertCounters(
+							priorCounters,
+							"skipped",
+							normalized,
+						)
 						yield* upsertState({
 							consecutiveBreaches,
 							consecutiveHealthy,
@@ -1866,23 +1877,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						}
 					}
 
-					// Capped at the rule's thresholds: the counters are only ever compared
-					// with >= against *Required, so saturating keeps open/resolve behavior
-					// identical while letting steady-state ticks skip the state upsert above.
-					const consecutiveBreaches =
-						evaluation.status === "breached"
-							? Math.min(
-									(state?.consecutiveBreaches ?? 0) + 1,
-									normalized.consecutiveBreachesRequired,
-								)
-							: 0
-					const consecutiveHealthy =
-						evaluation.status === "healthy"
-							? Math.min(
-									(state?.consecutiveHealthy ?? 0) + 1,
-									normalized.consecutiveHealthyRequired,
-								)
-							: 0
+					const { consecutiveBreaches, consecutiveHealthy } = advanceAlertCounters(
+						priorCounters,
+						evaluation.status,
+						normalized,
+					)
 
 					yield* upsertState({
 						consecutiveBreaches,
@@ -2316,7 +2315,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					readonly staleGroupKeys?: HashSet.HashSet<string>
 					readonly resolveAll?: boolean
 					/** Absent on the rule-edit paths, which are one user action. */
-					readonly pushBudget?: Ref.Ref<number>
+					readonly pushBudget?: IncidentPushBudget
 				},
 			) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.alert.rule_id": ruleId })
@@ -2417,7 +2416,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					evaluatedGroups: HashSet.HashSet<string>,
 					timestamp: number,
 					openIncidents: ReadonlyArray<AlertIncidentRow>,
-					pushBudget: Ref.Ref<number>,
+					pushBudget: IncidentPushBudget,
 				) {
 					// Supplied from the tick-head prefetch instead of re-read here — this
 					// was the single heaviest query shape in the service, because it read
@@ -2924,7 +2923,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				// Chunk makes concurrent appends immutable without copying the full buffer.
 				const pendingChecks = yield* Ref.make(Chunk.empty<AlertChecksRow>())
 				const issueBudget = yield* Ref.make(ISSUE_UPSERTS_PER_TICK)
-				const pushBudget = yield* Ref.make(INCIDENT_PUSHES_PER_TICK)
+				const pushBudget = yield* makeIncidentPushBudget
 
 				// Two housekeeping statements used to run per rule, inside the loop.
 				// Both are gated to touch zero rows in steady state (to keep the
@@ -3108,36 +3107,29 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 										const normalized = yield* normalizeRuleRow(row)
 
 										if (normalized.serviceNames.length > 1) {
-											yield* Effect.forEach(normalized.serviceNames, (svcName) =>
-												Effect.gen(function* () {
-													const perServicePlan = yield* compileRulePlan({
-														...normalized,
-														serviceName: svcName,
-													})
-													const perService = {
-														...normalized,
-														serviceName: svcName,
-														compiledPlan: perServicePlan,
-													}
-													const observations = yield* evaluateRule(
-														row.orgId,
-														perService,
-													)
-													const evaluation = observations[0]?.evaluation
-													if (evaluation == null) return
-													yield* recordEvaluationStatus(evaluation)
-													yield* processEvaluation(
-														row,
-														normalized,
-														evaluation,
-														svcName,
-														timestamp,
-														pendingChecks,
-														issueBudget,
-														pushBudget,
-														prefetch,
-													)
-												}),
+											yield* Effect.forEach(
+												yield* perServiceRules(normalized),
+												({ groupKey, rule }) =>
+													Effect.gen(function* () {
+														const observations = yield* evaluateRule(
+															row.orgId,
+															rule,
+														)
+														const evaluation = observations[0]?.evaluation
+														if (evaluation == null) return
+														yield* recordEvaluationStatus(evaluation)
+														yield* processEvaluation(
+															row,
+															normalized,
+															evaluation,
+															groupKey,
+															timestamp,
+															pendingChecks,
+															issueBudget,
+															pushBudget,
+															prefetch,
+														)
+													}),
 											)
 
 											yield* resolveOrphanedGroupIncidents(
@@ -3275,6 +3267,20 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					tickStart,
 				)
 
+				// One card per rule for everything its share held back, in place of
+				// the banners themselves. After the whole rule loop, so a rule that
+				// broke across forty groups is one digest rather than one per chunk.
+				// Best-effort like every other push: a digest is a courtesy, and it
+				// must never fail the tick that produced it.
+				yield* Effect.forEach(
+					yield* pushBudget.suppressed,
+					(rule) =>
+						mobilePush
+							.notifyIncidentDigest(rule)
+							.pipe(Effect.timeout("20 seconds"), Effect.ignoreCause),
+					{ concurrency: 4, discard: true },
+				)
+
 				// Resolve stale incidents for disabled rules
 				const disabledRulesWithOpenIncidents = yield* dbExecute((db) =>
 					db
@@ -3327,7 +3333,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 											Effect.annotateLogs({
 												orgId,
 												rowCount: checks.length,
-												cause: Cause.pretty(cause),
+												cause: summarizeCause(cause),
 											}),
 										),
 									),
@@ -3355,6 +3361,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				createDestination: destinations.createDestination,
 				updateDestination: destinations.updateDestination,
 				deleteDestination: destinations.deleteDestination,
+				listTelegramChats: destinations.listTelegramChats,
 				testDestination: destinations.testDestination,
 				listRules: rules.listRules,
 				createRule: rules.createRule,

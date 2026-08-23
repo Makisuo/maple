@@ -53,6 +53,9 @@ const IOS_OPERATIONS = [
 	"unregisterMobileDevice",
 	"registerLiveActivity",
 	"endLiveActivity",
+	"mintWidgetCredential",
+	"revokeWidgetCredential",
+	"getWidgetSummary",
 ] as const
 
 /**

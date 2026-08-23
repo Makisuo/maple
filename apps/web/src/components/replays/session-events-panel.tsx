@@ -12,7 +12,38 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
 import { DetailRail } from "@maple/ui/components/detail-rail"
-import { ExternalLinkIcon } from "@/components/icons"
+import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
+import {
+	AlertWarningIcon,
+	ArrowRightFromLineIcon,
+	CircleInfoIcon,
+	CubeIcon,
+	CursorPointerIcon,
+	EnvelopeIcon,
+	ExternalLinkIcon,
+	EyeIcon,
+	FileIcon,
+	FingerprintIcon,
+	GlobeIcon,
+	IdBadgeIcon,
+	LinkIcon,
+	LogoutIcon,
+	PaperPlaneIcon,
+	PixelBracketsCurlyIcon,
+	PixelCrosshairsIcon,
+	PixelNodesIcon,
+	PixelSparkleIcon,
+	PixelTriangleWarningIcon,
+	PixelWindowIcon,
+	RocketIcon,
+	ServerIcon,
+	TagIcon,
+	UserIcon,
+	type IconComponent,
+} from "@/components/icons"
+import { countryFlag, countryName } from "@/components/analytics/labels"
+import { browserIconFor, deviceIconFor } from "./session-icons"
 import { formatClock, formatSessionDuration, type ReplayPartitionWindow } from "./replay-format"
 import { useReplayPlayer } from "./replay-player-context"
 import { parseChTimestampMs } from "./replay-timeline"
@@ -72,15 +103,31 @@ export interface SessionRailSession {
 type RailTab = "events" | "traces" | "session"
 type EventFilter = "all" | "custom" | "console" | "network" | "error"
 
-const EVENT_FILTERS: ReadonlyArray<{ id: EventFilter; label: string }> = [
-	{ id: "all", label: "All" },
-	// Product events from `track()`. First after All because they are the ones
-	// someone reading a session for *behaviour* is looking for.
-	{ id: "custom", label: "Product" },
-	{ id: "console", label: "Console" },
-	{ id: "network", label: "Network" },
-	{ id: "error", label: "Errors" },
-]
+/**
+ * The kind filters, as glyphs.
+ *
+ * They were word chips, which wrapped to two rows in the rail and read as a
+ * second menu under the tab bar — same pill shape, same altitude, twice the
+ * height. The rows already speak in glyphs and the legend keys them, so the
+ * filters can borrow that vocabulary and fit on one line. Every id here is a
+ * key of {@link EVENT_KIND_VISUALS}; `all` is the only one carrying a word,
+ * because "no filter" has no glyph.
+ *
+ * Product events from `track()` come first: they are what someone reading a
+ * session for *behaviour* is looking for.
+ */
+const KIND_FILTERS = ["custom", "console", "network", "error"] as const satisfies ReadonlyArray<
+	Exclude<EventFilter, "all">
+>
+
+/** Long-form names for the filter's tooltip and the empty state. */
+const FILTER_LABELS = {
+	all: "All events",
+	custom: "Product events",
+	console: "Console messages",
+	network: "Network requests",
+	error: "Errors",
+} satisfies Record<EventFilter, string>
 
 /**
  * The detail page's right rail: a tabbed panel over the distilled
@@ -189,6 +236,9 @@ function useClockAt() {
 function EventsTab({ sessionId, window }: { sessionId: string; window?: ReplayPartitionWindow }) {
 	const result = useAtomValue(getSessionTranscriptResultAtom({ data: { sessionId, ...window } }))
 	const [filter, setFilter] = React.useState<EventFilter>("all")
+	// Row indexes are filter-relative, so a filter change has to close whatever
+	// was open rather than carry the index onto a different row.
+	const [openIndex, setOpenIndex] = React.useState<number | null>(null)
 
 	const renderBody = (events: ReadonlyArray<EventRow>) => {
 		const counts = {
@@ -201,36 +251,32 @@ function EventsTab({ sessionId, window }: { sessionId: string; window?: ReplayPa
 		const rows = filter === "all" ? events : events.filter((e) => e.type === filter)
 		return (
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-				<div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-card px-3 py-2">
-					{EVENT_FILTERS.map((f) => (
-						<button
-							key={f.id}
-							type="button"
-							onClick={() => setFilter(f.id)}
-							aria-pressed={filter === f.id}
-							className={cn(
-								"rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
-								filter === f.id
-									? "bg-foreground text-background"
-									: f.id === "error" && counts.error > 0
-										? "border border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/15"
-										: "border border-border text-muted-foreground hover:text-foreground",
-							)}
-						>
-							{f.label}{" "}
-							<span className="font-mono tabular-nums opacity-70">{counts[f.id]}</span>
-						</button>
-					))}
-				</div>
+				<EventFilterBar
+					counts={counts}
+					filter={filter}
+					onChange={(next) => {
+						setFilter(next)
+						setOpenIndex(null)
+					}}
+				/>
 				{rows.length === 0 ? (
 					<div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
-						No {filter === "all" ? "" : `${filter === "custom" ? "product" : filter} `}events in
-						this session.
+						{/* The filters are glyphs now, so the empty state is where the
+						    chosen one gets named — except "All events", which only reads
+						    as a label. Nothing was filtered, so nothing needs naming. */}
+						No {filter === "all" ? "events" : FILTER_LABELS[filter].toLowerCase()} in this
+						session.
 					</div>
 				) : (
 					<ul className="divide-y divide-border font-mono text-xs">
 						{rows.map((ev, i) => (
-							<EventLine key={i} ev={ev} showNetworkBar={filter === "network"} />
+							<EventLine
+								key={i}
+								ev={ev}
+								showNetworkBar={filter === "network"}
+								open={openIndex === i}
+								onToggle={() => setOpenIndex(openIndex === i ? null : i)}
+							/>
 						))}
 					</ul>
 				)}
@@ -255,33 +301,267 @@ function statusTone(status: number): string {
 	return "text-success-foreground"
 }
 
-/** Uppercase type tag + tone for the row gutter, per event kind. */
-function eventTag(ev: EventRow): { label: string; tone: string } {
+/**
+ * Split a URL into the part worth reading and the part that repeats.
+ *
+ * The rail truncates at the tail, so the path leads and the host trails: within
+ * one session the host is the same on row after row, while the path is the only
+ * thing that distinguishes them. Anything unparseable stays whole.
+ */
+export function splitUrl(url: string): { lead: string; trail: string } {
+	try {
+		const parsed = new URL(url)
+		return { lead: `${parsed.pathname}${parsed.search}`, trail: parsed.host }
+	} catch {
+		return { lead: url, trail: "" }
+	}
+}
+
+/**
+ * Glyph, tone and name per event kind — the single source both the rows and
+ * {@link EventKindLegend} read, so the key can never drift from the rail.
+ *
+ * The kind is a glyph rather than a word because a fixed-width text tag either
+ * truncates or overflows the moment a label is longer than the slot, which is
+ * how `navigation` used to print across the URL beside it. Glyphs need a key;
+ * words don't. Keys are the gateway's closed type set (session_analytics.rs).
+ */
+const EVENT_KIND_VISUALS = {
+	navigation: {
+		Icon: PixelWindowIcon,
+		tone: "text-success-foreground",
+		selected: "bg-success/15 text-success-foreground",
+		label: "Page",
+	},
+	click: {
+		Icon: PixelCrosshairsIcon,
+		tone: "text-warning-foreground",
+		selected: "bg-warning/15 text-warning-foreground",
+		label: "Click",
+	},
+	network: {
+		Icon: PixelNodesIcon,
+		tone: "text-info-foreground",
+		selected: "bg-info/15 text-info-foreground",
+		label: "Request",
+	},
+	custom: {
+		Icon: PixelSparkleIcon,
+		tone: "text-primary",
+		selected: "bg-primary/15 text-primary",
+		label: "Product",
+	},
+	console: {
+		Icon: PixelBracketsCurlyIcon,
+		tone: "text-muted-foreground",
+		selected: "bg-muted text-foreground",
+		label: "Console",
+	},
+	error: {
+		Icon: PixelTriangleWarningIcon,
+		tone: "text-destructive",
+		selected: "bg-destructive/15 text-destructive",
+		label: "Error",
+	},
+} as const satisfies Record<string, { Icon: IconComponent; tone: string; selected: string; label: string }>
+
+const LEGEND_KINDS = Object.keys(EVENT_KIND_VISUALS) as ReadonlyArray<keyof typeof EVENT_KIND_VISUALS>
+
+/** The row's type marker and its two text lanes. */
+export function eventVisual(ev: EventRow): {
+	Icon: IconComponent
+	tone: string
+	lead: string
+	trail: string
+} {
 	switch (ev.type) {
-		case "nav":
-			return { label: "NAV", tone: "text-success-foreground" }
+		case "navigation": {
+			const { lead, trail } = splitUrl(ev.url)
+			return { ...EVENT_KIND_VISUALS.navigation, lead, trail }
+		}
 		case "click":
-			return { label: "CLICK", tone: "text-warning-foreground" }
-		case "network":
 			return {
-				label: ev.netMethod || "NET",
-				tone: isFailedRequest(ev) ? "text-destructive" : "text-info-foreground",
+				...EVENT_KIND_VISUALS.click,
+				lead: ev.targetText || ev.targetSelector || "click",
+				trail: ev.targetText ? ev.targetSelector : "",
 			}
+		case "network": {
+			const { lead, trail } = splitUrl(ev.netUrl)
+			return {
+				...EVENT_KIND_VISUALS.network,
+				// A failed request is an error wherever it appears, so it takes the
+				// error tone while keeping the request glyph.
+				tone: isFailedRequest(ev) ? EVENT_KIND_VISUALS.error.tone : EVENT_KIND_VISUALS.network.tone,
+				lead: ev.netMethod ? `${ev.netMethod} ${lead}` : lead,
+				trail,
+			}
+		}
 		case "error":
-			return { label: "ERROR", tone: "text-destructive" }
+			return { ...EVENT_KIND_VISUALS.error, lead: ev.message, trail: "" }
 		case "custom":
-			// Not "CUSTOM": in the transcript these read as product events, and the
-			// gutter is only wide enough for a short word.
-			return { label: "EVENT", tone: "text-primary" }
+			return { ...EVENT_KIND_VISUALS.custom, lead: ev.message, trail: "" }
 		case "console": {
-			const level = (ev.level || "log").toUpperCase()
-			if (ev.level === "error") return { label: level, tone: "text-destructive" }
-			if (ev.level === "warn") return { label: level, tone: "text-warning-foreground" }
-			return { label: level, tone: "text-muted-foreground" }
+			const tone =
+				ev.level === "error"
+					? EVENT_KIND_VISUALS.error.tone
+					: ev.level === "warn"
+						? EVENT_KIND_VISUALS.click.tone
+						: EVENT_KIND_VISUALS.console.tone
+			return { ...EVENT_KIND_VISUALS.console, tone, lead: ev.message, trail: "" }
 		}
 		default:
-			return { label: ev.type.toUpperCase(), tone: "text-muted-foreground" }
+			return {
+				...EVENT_KIND_VISUALS.console,
+				lead: ev.message || ev.url,
+				trail: "",
+			}
 	}
+}
+
+/**
+ * Key for the row glyphs, behind an info button in the filter bar.
+ *
+ * The rail trades words for glyphs to survive its width, and glyphs owe the
+ * reader a key. On screen permanently it was a second strip of chips competing
+ * with the filters beside it, so it waits until asked — the icons are
+ * guessable, the key settles the guess.
+ */
+/** One-line kind filter: `All <n>` plus a glyph toggle per kind, then the key. */
+function EventFilterBar({
+	counts,
+	filter,
+	onChange,
+}: {
+	counts: Record<EventFilter, number>
+	filter: EventFilter
+	onChange: (next: EventFilter) => void
+}) {
+	return (
+		<TooltipProvider delay={300}>
+			<div className="sticky top-0 z-10 flex shrink-0 items-center gap-0.5 border-b border-border bg-card px-2 py-1">
+				<FilterChip
+					active={filter === "all"}
+					count={counts.all}
+					label={FILTER_LABELS.all}
+					tone="text-muted-foreground"
+					selected="bg-muted text-foreground"
+					onClick={() => onChange("all")}
+				>
+					<span className="text-[11px] font-medium">All</span>
+				</FilterChip>
+				{KIND_FILTERS.map((id) => {
+					const { Icon, tone, selected } = EVENT_KIND_VISUALS[id]
+					return (
+						<FilterChip
+							key={id}
+							active={filter === id}
+							count={counts[id]}
+							label={FILTER_LABELS[id]}
+							tone={tone}
+							selected={selected}
+							onClick={() => onChange(id)}
+						>
+							<Icon size={13} aria-hidden />
+						</FilterChip>
+					)
+				})}
+				<EventKindLegend className="ml-auto" />
+			</div>
+		</TooltipProvider>
+	)
+}
+
+function FilterChip({
+	active,
+	count,
+	label,
+	tone,
+	selected,
+	onClick,
+	children,
+}: {
+	active: boolean
+	count: number
+	label: string
+	/** Idle colour — carried by the whole chip, so the glyph and its count agree. */
+	tone: string
+	/** Selected colour: the same hue as a tinted ground, not a neutral highlight. */
+	selected: string
+	onClick: () => void
+	children: React.ReactNode
+}) {
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<button
+						type="button"
+						onClick={onClick}
+						aria-pressed={active}
+						aria-label={`${label} (${count})`}
+						className={cn(
+							"flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 transition-colors",
+							active ? selected : cn(tone, "hover:bg-muted/60"),
+							// A kind with nothing in it stays reachable — the empty state
+							// names what you filtered to — but drops its colour rather than
+							// spending it on a count of zero.
+							count === 0 && !active && "text-muted-foreground opacity-45",
+						)}
+					>
+						{children}
+						<span className="font-mono text-[10px] tabular-nums">{count}</span>
+					</button>
+				}
+			/>
+			<TooltipContent>{label}</TooltipContent>
+		</Tooltip>
+	)
+}
+
+function EventKindLegend({ className }: { className?: string }) {
+	return (
+		<Popover>
+			<PopoverTrigger
+				// Hover is how a key like this actually gets read — you pause on the
+				// icon mid-scan rather than committing to a click. Click still works,
+				// and the close delay keeps the popup alive while the pointer travels.
+				openOnHover
+				delay={350}
+				closeDelay={120}
+				className={cn(
+					"inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[popup-open]:bg-muted data-[popup-open]:text-foreground",
+					className,
+				)}
+				aria-label="What the event icons mean"
+			>
+				<CircleInfoIcon size={13} />
+			</PopoverTrigger>
+			{/* `tooltipStyle` is the compact variant: the default popup viewport pads
+			    itself 16px on every side, which on six short rows is more padding
+			    than content. This one pads 8/4 and sizes to its text. */}
+			<PopoverContent align="end" tooltipStyle sideOffset={6}>
+				<div className="flex flex-col gap-1.5 py-0.5">
+					<p className="text-[9px] font-semibold uppercase leading-none tracking-[0.08em] text-muted-foreground">
+						Event kinds
+					</p>
+					<ul className="flex flex-col gap-1">
+						{LEGEND_KINDS.map((kind) => {
+							const { Icon, tone, label } = EVENT_KIND_VISUALS[kind]
+							return (
+								<li
+									key={kind}
+									className="flex items-center gap-1.5 whitespace-nowrap text-[11px] leading-none text-foreground"
+								>
+									<Icon size={12} className={cn("shrink-0", tone)} aria-hidden />
+									{label}
+								</li>
+							)
+						})}
+					</ul>
+				</div>
+			</PopoverContent>
+		</Popover>
+	)
 }
 
 /**
@@ -317,79 +597,110 @@ function isFailedRequest(ev: EventRow): boolean {
 	return ev.type === "network" && (ev.netStatus >= 500 || ev.netStatus === 0)
 }
 
-function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boolean }) {
+/**
+ * One event, on one line: clock · kind glyph · what happened · what came back.
+ *
+ * The row is a single click target — it seeks the player to the moment and
+ * opens the detail underneath, so the full URL, stack and trace link live one
+ * click away instead of competing for the ~380px the rail actually has.
+ */
+function EventLine({
+	ev,
+	showNetworkBar,
+	open,
+	onToggle,
+}: {
+	ev: EventRow
+	showNetworkBar: boolean
+	open: boolean
+	onToggle: () => void
+}) {
 	const seekTo = useSeekToTimestamp()
 	const clockAt = useClockAt()
-	const tag = eventTag(ev)
+	const { Icon, tone, lead, trail } = eventVisual(ev)
 	const isError = ev.type === "error" || isFailedRequest(ev)
 
 	return (
-		<li
-			className={cn(
-				"relative flex items-start gap-2.5 px-3 py-2 hover:bg-muted/50",
-				isError && "bg-destructive/5",
-			)}
-		>
+		<li className={cn("relative", isError && "bg-destructive/5")}>
 			{isError && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-destructive" />}
 			<button
 				type="button"
-				onClick={() => seekTo(ev.timestamp)}
-				className="w-10 shrink-0 text-left tabular-nums text-muted-foreground hover:text-foreground"
+				onClick={() => {
+					seekTo(ev.timestamp)
+					onToggle()
+				}}
+				aria-expanded={open}
+				className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/50"
 				title="Seek replay to this moment"
 			>
-				{clockAt(ev.timestamp)}
-			</button>
-			<span className={cn("w-11 shrink-0 text-[10px] font-semibold leading-4", tag.tone)}>
-				{tag.label}
-			</span>
-			<div className="min-w-0 flex-1">
-				{ev.type === "console" && (
-					<span className={cn(ev.level === "error" && "text-destructive")}>{ev.message}</span>
-				)}
-				{ev.type === "network" && (
-					<span className="flex flex-col gap-1">
-						<span className="flex items-center gap-2">
-							<span className="min-w-0 truncate">{ev.netUrl}</span>
-							<span className={cn("ml-auto shrink-0 font-semibold", statusTone(ev.netStatus))}>
+				<span className="w-[30px] shrink-0 text-[10px] tabular-nums text-muted-foreground">
+					{clockAt(ev.timestamp)}
+				</span>
+				<span className="grid size-4 shrink-0 place-items-center">
+					<Icon size={16} className={tone} />
+				</span>
+				<span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
+					<span className={cn("truncate", isError ? "text-destructive" : "text-foreground")}>
+						{lead}
+					</span>
+					{trail && <span className="shrink-0 text-[10px] text-muted-foreground">{trail}</span>}
+				</span>
+				<span className="flex w-[72px] shrink-0 items-center justify-end gap-1.5 text-[10px] tabular-nums">
+					{ev.type === "network" ? (
+						<>
+							<span className={cn("font-semibold", statusTone(ev.netStatus))}>
 								{ev.netStatus || "ERR"}
 							</span>
 							<span
 								className={cn(
-									"shrink-0",
-									isError ? "font-semibold text-destructive" : "opacity-60",
+									isError || ev.netDurationMs >= 1000
+										? "font-semibold text-warning-foreground"
+										: "text-muted-foreground",
+									isError && "text-destructive",
 								)}
 							>
 								{formatNetDuration(ev.netDurationMs)}
 							</span>
-						</span>
-						{showNetworkBar && <NetDurationBar durationMs={ev.netDurationMs} failed={isError} />}
-					</span>
-				)}
-				{ev.type === "error" && (
-					<span className="text-destructive">
-						{ev.message}
-						{ev.errorStack && (
-							<span className="mt-0.5 block whitespace-pre-wrap text-[11px] text-muted-foreground">
-								{ev.errorStack.split("\n").slice(0, 3).join("\n")}
-							</span>
-						)}
-					</span>
-				)}
-				{ev.type === "click" && <span>{ev.targetText || ev.targetSelector || "click"}</span>}
-				{ev.type === "nav" && <span>{ev.url}</span>}
-				{ev.type === "custom" && (
-					<span className="flex flex-col gap-0.5">
-						<span className="text-foreground">{ev.message}</span>
-						<EventProps attributes={ev.attributes} />
-					</span>
-				)}
-				{ev.type !== "console" &&
-					ev.type !== "network" &&
-					ev.type !== "error" &&
-					ev.type !== "click" &&
-					ev.type !== "custom" &&
-					ev.type !== "nav" && <span>{ev.message || ev.url}</span>}
-			</div>
+						</>
+					) : ev.type === "console" && ev.level ? (
+						<span className={tone}>{ev.level}</span>
+					) : null}
+				</span>
+			</button>
+			{showNetworkBar && ev.type === "network" && (
+				<span className="block px-3 pb-1.5 pl-[50px]">
+					<NetDurationBar durationMs={ev.netDurationMs} failed={isError} />
+				</span>
+			)}
+			{open && <EventDetail ev={ev} />}
+		</li>
+	)
+}
+
+/** The row's overflow: everything the single line had to drop. */
+function EventDetail({ ev }: { ev: EventRow }) {
+	const fullUrl = ev.type === "network" ? ev.netUrl : ev.url
+	return (
+		<div className="flex flex-col gap-1.5 px-3 pb-2.5 pl-[50px]">
+			{fullUrl && (
+				<span className="break-all text-[11px] leading-4 text-muted-foreground">{fullUrl}</span>
+			)}
+			{ev.type === "click" && ev.targetText && ev.targetSelector && (
+				<span className="break-all text-[11px] leading-4 text-muted-foreground">
+					{ev.targetSelector}
+				</span>
+			)}
+			{ev.type === "console" && (
+				<span className="whitespace-pre-wrap break-words text-[11px] leading-4 text-foreground/80">
+					{ev.message}
+				</span>
+			)}
+			{ev.type === "error" && ev.errorStack && (
+				<span className="whitespace-pre-wrap text-[11px] leading-4 text-muted-foreground">
+					{ev.errorStack.split("\n").slice(0, 3).join("\n")}
+				</span>
+			)}
+			{ev.type === "custom" && <EventProps attributes={ev.attributes} />}
 			{ev.traceId && (
 				<Link
 					to="/traces/$traceId"
@@ -397,13 +708,13 @@ function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boole
 					// Carry the event timestamp so the span-hierarchy query narrows the
 					// ClickHouse partition scan instead of reading the full retention.
 					search={{ t: ev.timestamp }}
-					className="shrink-0 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+					className="w-fit rounded-sm border border-input px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
 					title="Open backend trace"
 				>
-					trace
+					Open trace
 				</Link>
 			)}
-		</li>
+		</div>
 	)
 }
 
@@ -553,44 +864,24 @@ function TraceListRow({ summary }: { summary: SessionTraceSummary }) {
 	)
 }
 
+/**
+ * The rail's Session tab.
+ *
+ * Two shapes, not one: the numbers that describe the *recording* (how long, how
+ * much of it was someone actually doing something, how much went wrong) are a
+ * summary block, because they are read as a set and compared against each
+ * other; everything else is a labelled fact and stays in the shared
+ * `DetailRail` rows, each keyed by a glyph so the rail can be scanned down its
+ * left edge instead of read line by line.
+ */
 function SessionTab({ sessionId, session }: { sessionId: string; session: SessionRailSession }) {
 	return (
 		<div className="min-h-0 flex-1 overflow-y-auto">
-			<DetailRail.Group label="Session">
-				<DetailRail.Row label="Duration">
-					<Value mono>{formatSessionDuration(session.durationMs)}</Value>
-				</DetailRail.Row>
-				{session.activeTimeMs !== undefined && (
-					<DetailRail.Row label="Active">
-						<Value mono>{formatSessionDuration(session.activeTimeMs)}</Value>
-					</DetailRail.Row>
-				)}
-				{session.idleTimeMs !== undefined && (
-					<DetailRail.Row label="Idle">
-						<Value mono>{formatSessionDuration(session.idleTimeMs)}</Value>
-					</DetailRail.Row>
-				)}
-				<DetailRail.Row label="Pages">
-					<Value mono>{String(session.pageViews || 1)}</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="Clicks">
-					<Value mono>{String(session.clickCount)}</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="Errors">
-					<span
-						className={cn(
-							"font-mono text-xs tabular-nums",
-							session.errorCount > 0 ? "font-semibold text-destructive" : "text-foreground",
-						)}
-					>
-						{session.errorCount}
-					</span>
-				</DetailRail.Row>
-			</DetailRail.Group>
+			<SessionSummary session={session} />
 
 			{session.visitorId ? (
 				<DetailRail.Group label="Visitor">
-					<DetailRail.Row label="Visitor ID" title={session.visitorId}>
+					<Row icon={FingerprintIcon} label="Visitor ID" title={session.visitorId}>
 						{/* The link is the point of this group: one visitor id spans this
 						    person's anonymous marketing sessions and their signed-in ones,
 						    so this is how you walk from a signup back to the campaign. */}
@@ -602,23 +893,21 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 						>
 							{session.visitorId.slice(0, 12)}…
 						</Link>
-					</DetailRail.Row>
-					<DetailRail.Row label="Visitor">
-						<Value mono>{session.visitorIsNew ? "New" : "Returning"}</Value>
-					</DetailRail.Row>
+					</Row>
+					<Row icon={UserIcon} label="Visitor">
+						<Value>{session.visitorIsNew ? "New" : "Returning"}</Value>
+					</Row>
 					{session.groupName && (
-						<DetailRail.Row label="Group">
-							<Value mono className="truncate">
-								{session.groupName}
-							</Value>
-						</DetailRail.Row>
+						<Row icon={TagIcon} label="Group" title={session.groupName}>
+							<Value className="truncate">{session.groupName}</Value>
+						</Row>
 					)}
 					{session.userEmail && (
-						<DetailRail.Row label="Email" title={session.userEmail}>
+						<Row icon={EnvelopeIcon} label="Email" title={session.userEmail}>
 							<Value mono className="truncate">
 								{session.userEmail}
 							</Value>
-						</DetailRail.Row>
+						</Row>
 					)}
 				</DetailRail.Group>
 			) : null}
@@ -626,114 +915,292 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 			{session.entryPath || session.referrerHost || session.utmSource ? (
 				<DetailRail.Group label="Acquisition">
 					{session.entryPath && (
-						<DetailRail.Row label="Entry" title={session.entryPath}>
-							<Value mono className="truncate">
-								{session.entryPath}
-							</Value>
-						</DetailRail.Row>
+						<Row icon={ArrowRightFromLineIcon} label="Entry" title={session.entryPath}>
+							<Path value={session.entryPath} />
+						</Row>
 					)}
 					{session.exitPath && (
-						<DetailRail.Row label="Exit" title={session.exitPath}>
-							<Value mono className="truncate">
-								{session.exitPath}
-							</Value>
-						</DetailRail.Row>
+						<Row icon={LogoutIcon} label="Exit" title={session.exitPath}>
+							<Path value={session.exitPath} />
+						</Row>
 					)}
-					<DetailRail.Row label="Referrer">
+					<Row icon={LinkIcon} label="Referrer">
 						{/* '' is direct *or* a referrer the browser suppressed — "Direct"
 						    would assert more than the column knows. */}
-						<Value mono className="truncate">
-							{session.referrerHost || "None"}
-						</Value>
-					</DetailRail.Row>
-					{session.utmSource && (
-						<DetailRail.Row label="Source">
+						{session.referrerHost ? (
 							<Value mono className="truncate">
+								{session.referrerHost}
+							</Value>
+						) : (
+							<Value className="text-muted-foreground">None</Value>
+						)}
+					</Row>
+					{session.utmSource && (
+						<Row icon={PaperPlaneIcon} label="Source">
+							<Value className="truncate">
 								{[session.utmSource, session.utmMedium].filter(Boolean).join(" / ")}
 							</Value>
-						</DetailRail.Row>
+						</Row>
 					)}
 					{session.utmCampaign && (
-						<DetailRail.Row label="Campaign" title={session.utmCampaign}>
-							<Value mono className="truncate">
-								{session.utmCampaign}
-							</Value>
-						</DetailRail.Row>
+						<Row icon={RocketIcon} label="Campaign" title={session.utmCampaign}>
+							<Value className="truncate">{session.utmCampaign}</Value>
+						</Row>
 					)}
 				</DetailRail.Group>
 			) : null}
 
 			<DetailRail.Group label="Environment">
-				<DetailRail.Row label="Browser">
-					<Value mono>{session.browserName || "—"}</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="OS">
-					<Value mono>{session.osName || "—"}</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="Device">
-					<Value mono className="capitalize">
-						{session.deviceType || "—"}
-					</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="Country">
-					<Value mono>{session.country || "—"}</Value>
-				</DetailRail.Row>
+				{/* Four one-word facts. As rows they were four near-empty lines with the
+				    value pinned to the far edge; as glyph + word pairs they read at a
+				    glance and cost two lines. */}
+				<div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-0.5">
+					<EnvFact
+						icon={browserIconFor(session.browserName || "")}
+						label="Browser"
+						value={session.browserName}
+					/>
+					<EnvFact icon={CubeIcon} label="Operating system" value={session.osName} />
+					<EnvFact
+						icon={deviceIconFor(session.deviceType || "")}
+						label="Device"
+						value={session.deviceType}
+						className="capitalize"
+					/>
+					<EnvFact
+						glyph={session.country ? countryFlag(session.country) : undefined}
+						icon={GlobeIcon}
+						label="Country"
+						value={session.country ? countryName(session.country) : null}
+					/>
+				</div>
 			</DetailRail.Group>
 
 			<DetailRail.Group label="Context">
 				{session.serviceName && (
-					<DetailRail.Row label="Service">
-						<span className="flex min-w-0 items-center gap-1">
-							<Value mono className="truncate">
-								{session.serviceName}
-							</Value>
-							<CopyButton
-								value={session.serviceName}
-								label="Service name"
-								iconSize={12}
-								className="size-5"
-								toast={false}
-							/>
-						</span>
-					</DetailRail.Row>
-				)}
-				<DetailRail.Row label="Session ID" title={sessionId}>
-					<span className="flex min-w-0 items-center gap-1">
+					<Row icon={ServerIcon} label="Service" title={session.serviceName}>
 						<Value mono className="truncate">
-							{sessionId.slice(0, 12)}…
+							{session.serviceName}
 						</Value>
 						<CopyButton
-							value={sessionId}
-							label="Session ID"
+							value={session.serviceName}
+							label="Service name"
 							iconSize={12}
-							className="size-5"
+							className="ml-1 size-5 shrink-0"
 							toast={false}
 						/>
-					</span>
-				</DetailRail.Row>
+					</Row>
+				)}
+				<Row icon={IdBadgeIcon} label="Session ID" title={sessionId}>
+					<Value mono className="truncate">
+						{sessionId.slice(0, 12)}…
+					</Value>
+					<CopyButton
+						value={sessionId}
+						label="Session ID"
+						iconSize={12}
+						className="ml-1 size-5 shrink-0"
+						toast={false}
+					/>
+				</Row>
 				{session.recorded !== undefined && (
-					<DetailRail.Row label="Recording">
-						<span
-							className={cn(
-								"font-mono text-xs",
-								session.recorded ? "text-success-foreground" : "text-muted-foreground",
-							)}
-						>
-							{session.recorded ? "Complete" : "Not recorded"}
+					<Row icon={EyeIcon} label="Recording">
+						<span className="flex items-center gap-1.5 text-xs">
+							<span
+								aria-hidden
+								className={cn(
+									"size-1.5 rounded-full",
+									session.recorded ? "bg-success-foreground" : "bg-muted-foreground/50",
+								)}
+							/>
+							<span className={session.recorded ? "text-foreground" : "text-muted-foreground"}>
+								{session.recorded ? "Complete" : "Not recorded"}
+							</span>
 						</span>
-					</DetailRail.Row>
+					</Row>
 				)}
 				{session.userAgent && (
-					<div className="flex flex-col gap-1 pt-1">
-						<span className="text-xs text-muted-foreground">User agent</span>
-						<span className="break-words font-mono text-[10px] leading-[15px] text-foreground/80">
+					<DetailRail.Field label="User agent">
+						<span className="break-words font-mono text-[10px] leading-[15px] text-muted-foreground">
 							{session.userAgent}
 						</span>
-					</div>
+					</DetailRail.Field>
 				)}
 			</DetailRail.Group>
 		</div>
 	)
+}
+
+/** `DetailRail.Row` with this rail's label column: every row carries a glyph. */
+function Row({
+	icon,
+	label,
+	title,
+	children,
+}: {
+	icon: IconComponent
+	label: string
+	title?: string
+	children: React.ReactNode
+}) {
+	return (
+		<DetailRail.Row icon={icon} label={label} title={title} labelWidth="102px">
+			{children}
+		</DetailRail.Row>
+	)
+}
+
+/**
+ * The recording's own numbers: total time, the active/idle split of it, and the
+ * three counts. The split is a bar rather than two more rows because "14s of
+ * 11m" is a proportion, and a proportion is the one thing a pair of numbers in
+ * a label/value list will not tell you.
+ */
+function SessionSummary({ session }: { session: SessionRailSession }) {
+	const total = session.durationMs ?? null
+	const active = session.activeTimeMs ?? null
+	const idle = session.idleTimeMs ?? null
+	const share =
+		total && total > 0 && (active != null || idle != null)
+			? {
+					active: Math.min(100, ((active ?? 0) / total) * 100),
+					idle: Math.min(100, ((idle ?? 0) / total) * 100),
+				}
+			: null
+	const errored = session.errorCount > 0
+
+	return (
+		<section className="border-b border-border/40 px-4 py-3.5">
+			<div className="flex items-baseline gap-1.5">
+				<span className="font-mono text-2xl font-semibold leading-none tracking-tight tabular-nums">
+					{formatSessionDuration(total)}
+				</span>
+				<span className="text-[11px] text-muted-foreground">on the page</span>
+			</div>
+
+			{share && (
+				<>
+					<div aria-hidden className="mt-3 flex h-1 gap-px overflow-hidden rounded-full bg-muted">
+						<span className="bg-primary" style={{ width: `${share.active}%` }} />
+						<span className="bg-muted-foreground/40" style={{ width: `${share.idle}%` }} />
+					</div>
+					<div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+						{active != null && (
+							<Legend
+								swatch="bg-primary"
+								label="Active"
+								value={formatSessionDuration(active)}
+							/>
+						)}
+						{idle != null && (
+							<Legend
+								swatch="bg-muted-foreground/40"
+								label="Idle"
+								value={formatSessionDuration(idle)}
+							/>
+						)}
+					</div>
+				</>
+			)}
+
+			<div className="mt-3 grid grid-cols-3 gap-1.5">
+				<Stat icon={FileIcon} label="Pages" value={session.pageViews || 1} />
+				<Stat icon={CursorPointerIcon} label="Clicks" value={session.clickCount} />
+				<Stat
+					icon={AlertWarningIcon}
+					label={session.errorCount === 1 ? "Error" : "Errors"}
+					value={session.errorCount}
+					danger={errored}
+				/>
+			</div>
+		</section>
+	)
+}
+
+function Legend({ swatch, label, value }: { swatch: string; label: string; value: string }) {
+	return (
+		<span className="flex items-center gap-1.5">
+			<span aria-hidden className={cn("size-1.5 rounded-full", swatch)} />
+			{label}
+			<span className="font-mono tabular-nums text-foreground">{value}</span>
+		</span>
+	)
+}
+
+function Stat({
+	icon: Icon,
+	label,
+	value,
+	danger,
+}: {
+	icon: IconComponent
+	label: string
+	value: number
+	danger?: boolean
+}) {
+	return (
+		<div
+			className={cn(
+				"flex flex-col gap-0.5 rounded-md border border-border/50 bg-muted/30 px-2 py-1.5",
+				danger && "border-destructive/30 bg-destructive/5",
+			)}
+		>
+			<span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+				<Icon className={cn("size-3 shrink-0", danger && "text-destructive")} aria-hidden />
+				<span className="truncate">{label}</span>
+			</span>
+			<span
+				className={cn(
+					"font-mono text-sm font-semibold tabular-nums",
+					danger ? "text-destructive" : "text-foreground",
+				)}
+			>
+				{value}
+			</span>
+		</div>
+	)
+}
+
+/** One glyph + one word from the Environment grid. Unknown values stay as a dash. */
+function EnvFact({
+	icon: Icon,
+	glyph,
+	label,
+	value,
+	className,
+}: {
+	icon: IconComponent
+	/** Rendered instead of `icon` when the value is its own mark (a country flag). */
+	glyph?: string
+	label: string
+	value?: string | null
+	className?: string
+}) {
+	return (
+		<span className="flex min-w-0 items-center gap-2" title={`${label}: ${value || "unknown"}`}>
+			{glyph ? (
+				<span aria-hidden className="w-3.5 shrink-0 text-center text-[13px] leading-none">
+					{glyph}
+				</span>
+			) : (
+				<Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+			)}
+			<span
+				className={cn(
+					"min-w-0 truncate text-xs",
+					value ? "text-foreground" : "text-muted-foreground",
+					className,
+				)}
+			>
+				{value || "—"}
+			</span>
+		</span>
+	)
+}
+
+/** A pathname. The full value is on the row's `title`, so truncation is safe. */
+function Path({ value }: { value: string }) {
+	return <span className="min-w-0 truncate font-mono text-xs text-foreground">{value}</span>
 }
 
 function Value({

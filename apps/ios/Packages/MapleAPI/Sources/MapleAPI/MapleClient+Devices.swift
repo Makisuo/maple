@@ -12,8 +12,8 @@ public struct PushPreferences: Hashable, Sendable, Codable {
 
 	public init(
 		criticalIncidents: Bool = true,
-		warningIncidents: Bool = true,
-		resolvedIncidents: Bool = true,
+		warningIncidents: Bool = false,
+		resolvedIncidents: Bool = false,
 		newErrorIssues: Bool = false,
 		anomalies: Bool = false
 	) {
@@ -24,7 +24,9 @@ public struct PushPreferences: Hashable, Sendable, Codable {
 		self.anomalies = anomalies
 	}
 
-	/// The server's defaults — what a device gets before it has said anything.
+	/// The server's defaults — what a device gets before it has said anything:
+	/// critical incidents only. Kept in step with
+	/// `resolveMobileDevicePreferences` in `@maple/domain`.
 	public static let `default` = PushPreferences()
 
 	public init(_ wire: MobileDevice.PreferencesPayload) {

@@ -22,7 +22,7 @@ const stars = await getGitHubStars();
 // Two slots, both live numbers we can point at: the GitHub star count (a
 // build-time fetch) and the volume we've ingested.
 const stats = [
-	stars !== null && { value: formatStars(stars), label: m.stat_github(), star: true, href: "https://github.com/Makisuo/maple" },
+	stars !== null && { value: formatStars(stars), label: m.stat_github(), star: true, href: "https://github.com/MapleTechLabs/maple" },
 	{ value: `${formatDataPoints(DATA_POINTS_INGESTED)}+`, label: m.ingest_stats_label() },
 ].filter(Boolean) as { value: string; label: string; star?: boolean; href?: string }[];
 ---
@@ -75,7 +75,7 @@ const stats = [
 		<div class="mt-10 flex flex-wrap items-center gap-3">
 			<HeroCta client:load className={buttonVariants({ size: "xl" })} />
 			<a
-				href="https://github.com/Makisuo/maple"
+				href="https://github.com/MapleTechLabs/maple"
 				target="_blank"
 				rel="noopener noreferrer"
 				class={buttonVariants({ variant: "outline", size: "xl" })}

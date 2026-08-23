@@ -625,3 +625,107 @@ describe("SQL parity", () => {
 		}
 	})
 })
+
+describe("Apple crash frames", () => {
+	// The shape `maple-swift`'s CrashReport.stacktrace renders: frame index, binary
+	// name, hex address, hex offset. Unsymbolicated — MetricKit has no symbols.
+	const appleStack = (frames: ReadonlyArray<[string, string, string]>) =>
+		frames
+			.map(([binary, address, offset], i) => `${i}   ${binary}   0x${address}   +0x${offset}`)
+			.join("\n")
+
+	it("matches Apple frames and strips address and offset", () => {
+		const result = computeFingerprintInputs({
+			exceptionType: "EXC_BAD_ACCESS",
+			exceptionStacktrace: appleStack([
+				["MyApp", "104112600", "1d0f0"],
+				["MyApp", "1041125a0", "a112"],
+				["UIKitCore", "1a2b3c4d0", "44"],
+				["libdyld.dylib", "700000000", "1000"],
+			]),
+			statusMessage: "EXC_BAD_ACCESS (SIGSEGV)",
+		})
+
+		expect(result.topFrame).toBe("0   MyApp      +")
+		expect(result.fpFrames.split("\n")).toHaveLength(MAX_FINGERPRINT_FRAMES)
+		expect(result.fpFrames).toContain("UIKitCore")
+		expect(result.fpFrames).not.toContain("libdyld")
+	})
+
+	it("groups the same crash site across rebuilds", () => {
+		// An offset moves with any code change above it. If it survived redaction every
+		// release would re-split every iOS issue.
+		const before = computeFingerprintInputs({
+			exceptionType: "EXC_BAD_ACCESS",
+			exceptionStacktrace: appleStack([["MyApp", "104112600", "1d0f0"]]),
+			statusMessage: "",
+		})
+		const after = computeFingerprintInputs({
+			exceptionType: "EXC_BAD_ACCESS",
+			exceptionStacktrace: appleStack([["MyApp", "104999999", "2f4a1"]]),
+			statusMessage: "",
+		})
+		expect(after.fpFrames).toBe(before.fpFrames)
+	})
+
+	it("separates crash sites that differ by binary", () => {
+		const inApp = computeFingerprintInputs({
+			exceptionType: "EXC_BAD_ACCESS",
+			exceptionStacktrace: appleStack([["MyApp", "104112600", "1d0f0"]]),
+			statusMessage: "",
+		})
+		const inUIKit = computeFingerprintInputs({
+			exceptionType: "EXC_BAD_ACCESS",
+			exceptionStacktrace: appleStack([["UIKitCore", "1a2b3c4d0", "1d0f0"]]),
+			statusMessage: "",
+		})
+		expect(inUIKit.fpFrames).not.toBe(inApp.fpFrames)
+	})
+
+	it("matches a binary name containing spaces", () => {
+		// A Mach-O image name is the target's PRODUCT_NAME, and "My App" is an
+		// ordinary thing to call an app. Requiring one space-free token silently
+		// excluded those apps from frame matching and left them collapsed on the
+		// message hash — the exact failure this alternative exists to fix.
+		const result = computeFingerprintInputs({
+			exceptionType: "EXC_BAD_ACCESS",
+			exceptionStacktrace: [
+				"0   My App   0x104112600   +0x1d0f0",
+				"1   My App   0x1041125a0   +0xa112",
+			].join("\n"),
+			statusMessage: "",
+		})
+		expect(result.fpFrames.split("\n")).toHaveLength(2)
+		expect(result.topFrame).toContain("My App")
+		expect(result.msgSignature).toBe("")
+	})
+
+	it("does not swallow other runtimes' lines", () => {
+		// The alternative is anchored on a leading frame index, so a message that merely
+		// mentions an address must not be read as a frame.
+		const result = computeFingerprintInputs({
+			exceptionType: "Error",
+			exceptionStacktrace: "Error: mapping failed at 0x1f into region",
+			statusMessage: "",
+		})
+		expect(result.fpFrames).toBe("")
+	})
+
+	it("does not match other runtimes' address-bearing frames", () => {
+		// The alternative is anchored on a leading frame index with no punctuation
+		// after it, which is what keeps these out.
+		for (const line of [
+			" 1: 0xb09bc0 node::Abort() [node]",
+			"1: 0xb09bc0 node::Abort() [node]",
+			"    #00 pc 0000000000045e7c  /system/lib/libc.so",
+			"   0: rust_begin_unwind",
+		]) {
+			const result = computeFingerprintInputs({
+				exceptionType: "Error",
+				exceptionStacktrace: line,
+				statusMessage: "",
+			})
+			expect(result.fpFrames, line).toBe("")
+		}
+	})
+})

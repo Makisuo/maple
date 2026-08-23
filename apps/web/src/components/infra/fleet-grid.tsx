@@ -118,7 +118,7 @@ export function FleetGrid({ hosts }: FleetGridProps) {
 	}, [annotated])
 
 	const actions = (
-		<div className="flex items-center gap-1">
+		<div className="flex flex-wrap items-center gap-1">
 			<span className="mr-1 text-[11px] text-muted-foreground">Sort</span>
 			{SORT_OPTIONS.map((opt) => (
 				<button

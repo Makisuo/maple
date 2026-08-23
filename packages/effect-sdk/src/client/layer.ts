@@ -84,7 +84,9 @@ export const layer = (config: MapleClientConfig) => {
 	} satisfies Record<string, unknown>
 	const nav = browserNavigator()
 	if (nav) {
-		if (nav.userAgent) attributes["browser.user_agent"] = nav.userAgent
+		// `user_agent.original` is the semconv key; `browser.user_agent` was
+		// deprecated in favour of it.
+		if (nav.userAgent) attributes["user_agent.original"] = nav.userAgent
 		if (nav.language) attributes["browser.language"] = nav.language
 	}
 	if (typeof Intl !== "undefined") {

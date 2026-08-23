@@ -15,7 +15,7 @@ Lightweight projection of trace spans for the service dependency map.
 | Column | Extracted from | Line |
 |---|---|---|
 | `PeerService` | `SpanAttributes['peer.service']` | `materializations.ts:246` |
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:247` |
+| `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:247` |
 
 ## `service_map_children_mv`
 
@@ -23,7 +23,7 @@ Spans with a parent, for child-of-edge analysis in the service map.
 
 | Column | Extracted from | Line |
 |---|---|---|
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:315` |
+| `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:315` |
 
 ## `service_map_edges_hourly_mv`
 
@@ -32,7 +32,7 @@ Pre-aggregated client-to-peer edges. Pre-filters to spans with `peer.service != 
 | Column | Extracted from | Line |
 |---|---|---|
 | `TargetService` | `SpanAttributes['peer.service']` | `materializations.ts:341` |
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:342` |
+| `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:342` |
 
 ## `service_overview_spans_mv`
 
@@ -40,7 +40,7 @@ Hourly service-overview rollup.
 
 | Column | Extracted from | Line |
 |---|---|---|
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:277` |
+| `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:277` |
 | `CommitSha` | `ResourceAttributes['deployment.commit_sha']` | `materializations.ts:278` (see file for the field) |
 
 ## `service_platforms_hourly_mv`
@@ -49,7 +49,7 @@ Per-service hosting-platform attributes for the service map's runtime-icon resol
 
 | Column | Extracted from | Line |
 |---|---|---|
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:414` |
+| `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:414` |
 | `K8sCluster` | `max(ResourceAttributes['k8s.cluster.name'])` | `materializations.ts:415` |
 | `K8sPodName` | `max(ResourceAttributes['k8s.pod.name'])` | `materializations.ts:416` |
 | `K8sDeploymentName` | `max(ResourceAttributes['k8s.deployment.name'])` | `materializations.ts:417` |
@@ -57,14 +57,6 @@ Per-service hosting-platform attributes for the service map's runtime-icon resol
 | `CloudProvider` | `max(ResourceAttributes['cloud.provider'])` | `materializations.ts:419` |
 
 Additionally extracts (see file): `faas.name`, `sdk.type`, `process.runtime.name`.
-
-## `error_spans_mv`
-
-Materializes spans with `StatusCode = 'Error'`.
-
-| Column | Extracted from | Line |
-|---|---|---|
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:454` |
 
 ## `error_events_mv`
 
@@ -77,7 +69,7 @@ Unwraps the first OTel `exception` event from `EventsName` / `EventsAttributes` 
 | `ExceptionStacktrace` | first `exception` event's `exception.stacktrace` | `materializations.ts:499` |
 | `TopFrame` | (computed from stacktrace) | `materializations.ts` |
 | `FingerprintHash` | cityHash64 of grouping keys | `materializations.ts:489` |
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:525` |
+| `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:525` |
 
 ## `trace_list_mv`
 
@@ -88,7 +80,7 @@ Trace list optimized for the trace search UI. Pre-filters to entry-point spans.
 | `HttpMethod` | `SpanAttributes['http.method']` (fallback `http.request.method`) | `materializations.ts:596` |
 | `HttpRoute` | `SpanAttributes['http.route']` (fallbacks `url.path`, `http.target`) | `materializations.ts:597` |
 | `HttpStatusCode` | `SpanAttributes['http.status_code']` (fallback `http.response.status_code`) | `materializations.ts:598` |
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:599` |
+| `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:599` |
 
 ## `traces_aggregates_hourly_mv`
 
@@ -96,13 +88,13 @@ Hourly trace-shape rollup.
 
 | Column | Extracted from | Line |
 |---|---|---|
-| `DeploymentEnv` | `ResourceAttributes['deployment.environment']` | `materializations.ts:778` |
+| `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:778` |
 
 Plus dimension keys pre-aggregated on the trace itself: `ServiceName`, `SpanName`, `SpanKind`, `StatusCode`, `IsEntryPoint`.
 
 ## `logs_aggregates_hourly_mv` (referenced)
 
-Same pattern — extracts `DeploymentEnv` from `ResourceAttributes['deployment.environment']`. See `materializations.ts:809`.
+Same pattern — extracts `DeploymentEnv` through `DEPLOYMENT_ENV_SQL`. See `materializations.ts:809`.
 
 ---
 
@@ -112,7 +104,7 @@ Same pattern — extracts `DeploymentEnv` from `ResourceAttributes['deployment.e
 
 Example: if you add a new MV column `HttpUserAgent` that extracts `SpanAttributes['http.user_agent']`, every service emitting spans **must** use `http.user_agent` as the attribute key. Don't have one service emit `http.user_agent` and another `userAgent` — only one will populate the column.
 
-Corollary: **the dual-emit rule for `deployment.environment` is here**. Every MV in this file extracts `ResourceAttributes['deployment.environment']` (the legacy key). Until those MVs migrate to `coalesce(deployment.environment.name, deployment.environment)`, the legacy resource attribute **must** be emitted alongside the new one. See `rules/resource-attributes.md`.
+Corollary: every MV here extracts `DeploymentEnv` through the shared `DEPLOYMENT_ENV_SQL` fragment (`packages/domain/src/tinybird/semconv-renames.ts`), which coalesces `deployment.environment.name` over the deprecated `deployment.environment` — as `MESSAGING_DESTINATION_SQL` does for `messaging.destination(.name)` in the external-edge rollup. A bare lookup on either key alone silently materializes an empty environment for half the instrumentation in the wild. See `rules/resource-attributes.md`.
 
 ## When NOT to extract into a column
 

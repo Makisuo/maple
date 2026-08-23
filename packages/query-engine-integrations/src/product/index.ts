@@ -40,6 +40,8 @@ export {
 } from "./setup-audit"
 
 export {
+	dailyProductEventCountQuery,
+	dailyProductEventCountRowSchema,
 	dailySessionCountQuery,
 	dailySessionCountRowSchema,
 	dailySignalVolumeQuery,

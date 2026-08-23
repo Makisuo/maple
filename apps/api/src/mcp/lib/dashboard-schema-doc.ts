@@ -6,6 +6,7 @@ import {
 	type WidgetTypeMeta,
 } from "@maple/domain/http"
 import {
+	makeProductEventsFunnelDataSource,
 	makeQueryDataSource,
 	makeRawSqlDataSource,
 	makeStaticDataSource,
@@ -140,6 +141,36 @@ const exampleBreakdownSource = () =>
 		],
 	})
 
+/** The steps a product-event funnel example runs; shared by the data-source and widget examples. */
+const exampleFunnelDefinition = () => ({
+	steps: [
+		{ kind: "page" as const, pagePath: "/pricing" },
+		{ kind: "event" as const, eventName: "signup_completed" },
+		{ kind: "event" as const, eventName: "plan_started", attributeEquals: { plan: "pro" } },
+	],
+	keyBy: "person" as const,
+	windowSeconds: 7 * 24 * 3600,
+})
+
+/**
+ * A product-event funnel widget in full: the definition on `display.funnel`
+ * (what `add_dashboard_widget` reads) and the route data source it derives.
+ */
+const exampleFunnelWidget = () => {
+	const funnel = exampleFunnelDefinition()
+	return {
+		id: "w-signup-funnel",
+		visualization: "funnel",
+		dataSource: makeProductEventsFunnelDataSource(funnel),
+		display: {
+			title: "Signup funnel",
+			chartId: "query-builder-funnel",
+			funnel: { showStepPercent: true, ...funnel },
+		},
+		layout: { x: 0, y: 0, w: 6, h: 4 },
+	}
+}
+
 /**
  * A complete persisted widget, not just its data source.
  *
@@ -226,6 +257,40 @@ const dataSourcesSection = (): string =>
 		"the rows (honoured for 1–100).",
 		"",
 		json(exampleBreakdownSource()),
+		"",
+		'### Product-event funnels (`panel_type: "funnel"` + `display.funnel.steps`)',
+		"",
+		"A funnel widget has two modes. Without `display.funnel.steps` it draws a group-by breakdown",
+		"as descending stages (the shape above). With them it is a **conversion funnel over product",
+		"events** — page views, `track()` events and server-side events, stitched per person — and",
+		"the query set is not used at all. Set the definition on `display_json.funnel` and",
+		'`add_dashboard_widget` derives the data source (`kind: "route"`,',
+		'`endpoint: "product_events_funnel"`) for you; do not pass `data_source_json`.',
+		"",
+		'- `steps` — 1–10, in order. `{ kind: "event", eventName, attributeEquals? }`,',
+		'  `{ kind: "page", pagePath, host? }`, or — **step 1 only** —',
+		'  `{ kind: "session", dimension, value }` with `dimension` one of `referrerHost`,',
+		"  `utmSource`, `utmMedium`, `utmCampaign`, `country`, `host`.",
+		"- `keyBy` — `person` (default; user id, else the visitor's linked user, else the visitor),",
+		"  `visitor`, `user`, or `session`.",
+		"- `windowSeconds` — the whole chain must complete within this many seconds of step 1",
+		"  (default 86400). Must be positive.",
+		"- `breakdownBy` — split the funnel by a session dimension (`referrerHost`, `utmSource`,",
+		"  `utmMedium`, `utmCampaign`, `country`, `host`) or `attribute:<key>`; the widget draws one",
+		"  bar per group per step for the top 6 groups by step-1 count.",
+		"- `filters` — the population filter: only persons with a session matching these",
+		"  dimensions take part. `{ host?, pagePath?, referrerHost?, country?, deviceType?,",
+		"  browserName?, osName?, language?, utmSource?, utmMedium?, utmCampaign?,",
+		'  visitorType?: "new" | "returning" }`. They are spread FLAT into the derived route params.',
+		"",
+		"The step count, the step-1-only session rule and a positive `windowSeconds` are enforced on",
+		"write: a definition that breaks one of them is rejected rather than saved, because the",
+		"query engine would reject it again on every render.",
+		"",
+		"Use `list_product_events` to see which event names exist, and `query_funnel` to try a",
+		"definition before pinning it to a board.",
+		"",
+		json(exampleFunnelWidget()),
 		"",
 		"### A complete widget",
 		"",
@@ -371,7 +436,7 @@ const displaySection = (): string =>
 		"| `gauge` | gauge | `{ min, max }` — defaults to 0–100, which is wrong for a `percent` unit. |",
 		"| `histogram` | histogram | `{ bucketCount, bucketWidth, logScaleY }`. |",
 		"| `heatmap` | heatmap | `{ colorScale, scaleType }`. |",
-		"| `funnel` | funnel | `{ showStepPercent }`. |",
+		"| `funnel` | funnel | `{ showStepPercent, steps?, keyBy?, windowSeconds?, breakdownBy?, filters? }` — with `steps` it is a product-event funnel (see Data sources). |",
 		"| `markdown` | markdown | `{ content }` — the note body. |",
 		"| `sparkline` | stat | `{ enabled, dataSource? }`; embeds a full nested data source. |",
 		"",

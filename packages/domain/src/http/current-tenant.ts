@@ -34,6 +34,34 @@ export class AuthorizationUnavailableError extends HttpTaggedError<Authorization
 	},
 ) {}
 
+/**
+ * The caller asked for an organization it cannot prove membership of.
+ *
+ * 403, and deliberately NOT the 401 `UnauthorizedError` that a missing active
+ * organization produces: the credential is fine, the selection is not. A client
+ * that cannot tell them apart re-authenticates when it should instead stop
+ * asking for that organization — which is exactly what an iOS widget pinned to
+ * an org the user has left needs to do.
+ */
+export class OrganizationAccessDeniedError extends HttpTaggedError<OrganizationAccessDeniedError>()(
+	"@maple/http/errors/OrganizationAccessDeniedError",
+	{
+		message: Schema.String,
+		// Set only when the requested value decoded as an OrgId. An undecodable
+		// header is never cast into the brand just to put it in an error.
+		requestedOrgId: Schema.optionalKey(OrgId),
+	},
+	{
+		status: 403,
+		code: "organization_access_denied",
+		title: "Organization not available",
+		message: "You are not a member of the requested organization.",
+		retry: "never",
+		recovery: "request_access",
+		exposure: "public_message",
+	},
+) {}
+
 export class TenantSchema extends Schema.Class<TenantSchema>("TenantSchema")({
 	orgId: OrgId,
 	userId: UserId,
@@ -54,7 +82,7 @@ export class Authorization extends HttpApiMiddleware.Service<
 		provides: Context
 	}
 >()("Authorization", {
-	error: [UnauthorizedError, AuthorizationUnavailableError],
+	error: [UnauthorizedError, AuthorizationUnavailableError, OrganizationAccessDeniedError],
 	security: {
 		bearer: HttpApiSecurity.bearer,
 	},
@@ -97,7 +125,12 @@ export class SessionAuthorization extends HttpApiMiddleware.Service<
 		provides: Context
 	}
 >()("SessionAuthorization", {
-	error: [UnauthorizedError, AuthorizationUnavailableError, ApiKeyNotAcceptedError],
+	error: [
+		UnauthorizedError,
+		AuthorizationUnavailableError,
+		ApiKeyNotAcceptedError,
+		OrganizationAccessDeniedError,
+	],
 	security: {
 		bearer: HttpApiSecurity.bearer,
 	},

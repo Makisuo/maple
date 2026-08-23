@@ -4,7 +4,14 @@ import {
 	parseMapleRegion,
 	resolveAwsRegion,
 	resolveAwsResourceName,
+	resolveCollectorEndpoint,
+	resolveCollectorTaskSize,
 	resolveIngestCidrBlock,
+	resolveIngestDesiredCount,
+	resolveIngestNamespaceName,
+	resolveIngestScaling,
+	stageDeploysCollector,
+	stageDeploysIngest,
 } from "./stage.ts"
 
 describe("parseMapleRegion", () => {
@@ -45,5 +52,64 @@ describe("region topology", () => {
 		expect(resolveAwsRegion("us")).toBe("us-east-1")
 		expect(resolveAwsRegion("eu")).toBe("eu-central-1")
 		expect(resolveIngestCidrBlock("us")).not.toBe(resolveIngestCidrBlock("eu"))
+	})
+})
+
+describe("collector service discovery", () => {
+	it("puts the collector in a per-stage namespace the gateway can name at plan time", () => {
+		expect(resolveIngestNamespaceName(parseMapleStage("prd"))).toBe("maple-ingest.internal")
+		expect(resolveIngestNamespaceName(parseMapleStage("stg"))).toBe("maple-ingest-stg.internal")
+		expect(resolveIngestNamespaceName(parseMapleStage("pr-12"))).toBe("maple-ingest-pr-12.internal")
+		expect(resolveIngestNamespaceName(parseMapleStage("prd"), "eu")).toBe("maple-ingest-eu.internal")
+	})
+
+	it("derives the gateway's forward endpoint from the same names", () => {
+		expect(resolveCollectorEndpoint(parseMapleStage("prd"))).toBe(
+			"http://otel-collector.maple-ingest.internal:4318",
+		)
+		expect(resolveCollectorEndpoint(parseMapleStage("pr-12"), "eu")).toBe(
+			"http://otel-collector.maple-ingest-eu-pr-12.internal:4318",
+		)
+	})
+
+	it("deploys the gateway to every deployed stage, but never to a dev stage", () => {
+		expect(stageDeploysIngest(parseMapleStage("prd"))).toBe(true)
+		expect(stageDeploysIngest(parseMapleStage("stg"))).toBe(true)
+		expect(stageDeploysIngest(parseMapleStage("pr-12"))).toBe(true)
+		expect(stageDeploysIngest(parseMapleStage("dev-alice"))).toBe(false)
+	})
+
+	it("deploys the collector to prd only for now, a subset of the gateway stages", () => {
+		expect(stageDeploysCollector(parseMapleStage("prd"))).toBe(true)
+		expect(stageDeploysCollector(parseMapleStage("stg"))).toBe(false)
+		expect(stageDeploysCollector(parseMapleStage("pr-12"))).toBe(false)
+		for (const stage of ["prd", "stg", "pr-12", "dev-alice"]) {
+			if (stageDeploysCollector(parseMapleStage(stage))) {
+				expect(stageDeploysIngest(parseMapleStage(stage))).toBe(true)
+			}
+		}
+	})
+
+	it("sizes the collector task with 1 GiB everywhere so the memory limiter can fire", () => {
+		expect(resolveCollectorTaskSize(parseMapleStage("prd"))).toEqual({ cpu: 512, memory: 1024 })
+		expect(resolveCollectorTaskSize(parseMapleStage("stg"))).toEqual({ cpu: 256, memory: 1024 })
+		expect(resolveCollectorTaskSize(parseMapleStage("pr-12"))).toEqual({ cpu: 256, memory: 1024 })
+	})
+})
+
+describe("resolveIngestScaling", () => {
+	it("autoscales production between the fixed count and a burst ceiling", () => {
+		const scaling = resolveIngestScaling(parseMapleStage("prd"))
+		expect(scaling).toBeDefined()
+		expect(scaling!.min).toBe(resolveIngestDesiredCount(parseMapleStage("prd")))
+		expect(scaling!.max).toBeGreaterThan(scaling!.min)
+		expect(scaling!.cpuUtilization).toBeGreaterThan(0)
+		expect(scaling!.cpuUtilization).toBeLessThan(100)
+	})
+
+	it("keeps every other stage at a fixed count", () => {
+		expect(resolveIngestScaling(parseMapleStage("stg"))).toBeUndefined()
+		expect(resolveIngestScaling(parseMapleStage("pr-12"))).toBeUndefined()
+		expect(resolveIngestScaling(parseMapleStage("dev-alice"))).toBeUndefined()
 	})
 })

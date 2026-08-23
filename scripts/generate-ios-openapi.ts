@@ -65,6 +65,10 @@ const IOS_OPERATIONS: ReadonlyArray<string> = [
 	"unregisterMobileDevice",
 	"registerLiveActivity",
 	"endLiveActivity",
+	"mintWidgetCredential",
+	"revokeWidgetCredential",
+	// Home Screen widgets — one read, and the only one a device credential reaches.
+	"getWidgetSummary",
 ]
 
 const ERROR_ENVELOPE_SCHEMA_NAME = "MapleErrorEnvelope"

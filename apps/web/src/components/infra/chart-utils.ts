@@ -74,10 +74,21 @@ export function isoToLabel(iso: string): string {
 	return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
 }
 
+/** Compact time-of-day for a dated label: "3pm", or "3:35pm" off the hour. */
+function compactTimeOfDay(d: Date): string {
+	const hours24 = d.getHours()
+	const minutes = d.getMinutes()
+	const hour = hours24 % 12 === 0 ? 12 : hours24 % 12
+	const suffix = hours24 < 12 ? "am" : "pm"
+	return minutes === 0 ? `${hour}${suffix}` : `${hour}:${String(minutes).padStart(2, "0")}${suffix}`
+}
+
 /**
  * Window-aware axis labeler: plain time-of-day while the plotted buckets span
- * a single day, "Jul 3, 02:35 PM" once they cross 24h — the multi-day presets
- * (4d/10d/6w/…) make bare times ambiguous.
+ * a single day, "Jul 3, 2pm" once they cross 24h — the multi-day presets
+ * (4d/10d/6w/…) make bare times ambiguous. The time is compact there because
+ * the date already takes the width; multi-day buckets land on the hour, so
+ * the minutes only appear when they carry information.
  */
 export function makeBucketLabeler(bucketIsos: ReadonlyArray<string>): (iso: string) => string {
 	let min = Number.POSITIVE_INFINITY
@@ -92,7 +103,7 @@ export function makeBucketLabeler(bucketIsos: ReadonlyArray<string>): (iso: stri
 	if (max - min <= 24 * 60 * 60 * 1000) return isoToLabel
 	return (iso) => {
 		const d = new Date(iso)
-		return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${isoToLabel(iso)}`
+		return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${compactTimeOfDay(d)}`
 	}
 }
 

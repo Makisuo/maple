@@ -12,8 +12,8 @@
 //
 // Cloudflare error 10021 ("Script startup exceeded CPU time limit") fires during
 // upload validation, which runs ONLY the worker's top-level module scope against
-// a fixed budget (~400ms documented; behaved like ~1s here). So the only thing
-// that matters is: how much CPU does *constructing* these schemas burn at import?
+// a fixed 1s budget. The relevant question is therefore: how much CPU does
+// *constructing* these schemas burn at import?
 //
 //   bun run scripts/bench-startup-cpu.ts                 # micro (default)
 //   bun run scripts/bench-startup-cpu.ts micro --json
@@ -35,9 +35,9 @@ import { join, resolve } from "node:path"
 import { Predicate, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
-const CF_STARTUP_BUDGET_MS = 400 // documented startup CPU ceiling
+// https://developers.cloudflare.com/workers/platform/limits/#worker-startup-time
+const CF_STARTUP_BUDGET_MS = 1_000
 const OBSERVED_BLOWUP_MS = 1000 // what the team saw blow up (per the fix session)
-const POST_FIX_STARTUP_MS = 25 // post lazy-import startup CPU (per memory)
 
 type Sample = { wallMs: number; cpuMs: number }
 
@@ -224,10 +224,10 @@ const runMicro = (opts: {
 		`  evaluating the ENTIRE static import graph (all of @maple/domain + MCP tool/JSON-schema` +
 			` derivation + OpenApi.fromApi), not the error taxonomy — which is why the fix was deferring`,
 	)
+	console.log(`  ./app behind a dynamic import, not trimming error classes.`)
 	console.log(
-		`  ./app behind a dynamic import, not trimming error classes. Post-fix startup is ~${POST_FIX_STARTUP_MS} ms.`,
+		`  Use \`bun run scripts/bench-startup-cpu.ts worker\` for the current authoritative V8/workerd number.\n`,
 	)
-	console.log(`  Authoritative V8/workerd number: \`bun run scripts/bench-startup-cpu.ts worker\`.\n`)
 }
 
 type CpuProfile = {

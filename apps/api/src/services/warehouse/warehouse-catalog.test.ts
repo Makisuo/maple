@@ -7,7 +7,6 @@ describe("listWarehouseTables", () => {
 		expect(names).toContain("logs")
 		expect(names).toContain("traces")
 		expect(names).toContain("service_overview_spans")
-		expect(names).toContain("error_spans")
 		expect(names).toContain("metrics_gauge")
 	})
 

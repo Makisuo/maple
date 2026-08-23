@@ -16,6 +16,7 @@ import { emailTransport } from "./transports/email"
 import { hazelTransport } from "./transports/hazel"
 import { pagerDutyTransport } from "./transports/pagerduty"
 import { makeSlackTransport } from "./transports/slack"
+import { telegramTransport } from "./transports/telegram"
 import { webhookTransport } from "./transports/webhook"
 import { runEffectTransport, runHttpTransport, type TransportRuntime } from "./runTransport"
 import type { RenderInput } from "./Transport"
@@ -65,6 +66,7 @@ export const dispatchDelivery = (
 			webhook: (config) => runHttpTransport(webhookTransport, input(config), runtime),
 			"hazel-oauth": (config) => runHttpTransport(hazelTransport, input(config), runtime),
 			discord: (config) => runHttpTransport(discordTransport, input(config), runtime),
+			telegram: (config) => runHttpTransport(telegramTransport, input(config), runtime),
 			email: (config) => runEffectTransport(emailTransport, input(config), deps),
 		}),
 	)

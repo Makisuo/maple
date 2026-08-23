@@ -4,6 +4,7 @@ import {
 	ErrorIssueDetailResponse,
 	ErrorIssueDocument,
 	ErrorIssueSampleTrace,
+	ErrorIssueEnvironment,
 	ErrorIssueTimeseriesPoint,
 	IsoDateTimeString,
 	type IssueKind,
@@ -156,5 +157,8 @@ export const errorIssueDetailFromV2 = (detail: V2ErrorIssueDetail): ErrorIssueDe
 					resolvedAt: asIsoOrNull(incident.resolved_at),
 					occurrenceCount: incident.occurrence_count,
 				}),
+		),
+		environments: detail.environments.map(
+			(env) => new ErrorIssueEnvironment({ name: env.name, count: env.count }),
 		),
 	})

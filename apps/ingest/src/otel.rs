@@ -21,11 +21,11 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
         KeyValue::new("service.version", cfg.service_version),
         KeyValue::new("service.instance.id", cfg.service_instance_id),
         KeyValue::new("deployment.environment.name", cfg.deployment_env.clone()),
-        // Dual-emit the legacy `deployment.environment` key — every Tinybird MV
-        // (service_overview_spans_mv, service_map_*_mv, error_*_mv,
-        // logs_aggregates_hourly_mv, service_platforms_hourly_mv) still pre-extracts
-        // ResourceAttributes['deployment.environment'] at write time. Drop only
-        // after those MVs migrate to coalesce() both keys.
+        // Dual-emit the deprecated `deployment.environment` key. Since ClickHouse
+        // migration 0020 the MVs coalesce both spellings, so this is no longer
+        // load-bearing for OUR rollups — it stays for the rows those MVs already
+        // materialized under the legacy key, and for customer queries and BYO
+        // ClickHouse deployments still pinned to a pre-0020 schema.
         KeyValue::new("deployment.environment", cfg.deployment_env),
         KeyValue::new("process.runtime.name", "rust"),
         KeyValue::new("process.runtime.version", rustc_version()),
@@ -40,7 +40,7 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
     attrs.push(KeyValue::new(
         "vcs.repository.url.full",
         env::var("VCS_REPOSITORY_URL")
-            .unwrap_or_else(|_| "https://github.com/Makisuo/maple".to_owned()),
+            .unwrap_or_else(|_| "https://github.com/MapleTechLabs/maple".to_owned()),
     ));
     if let Some(revision) = detect_head_revision() {
         attrs.push(KeyValue::new("vcs.ref.head.revision", revision));

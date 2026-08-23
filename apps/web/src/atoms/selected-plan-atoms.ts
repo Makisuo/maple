@@ -3,14 +3,16 @@ import { Schema } from "effect"
 import { localStorageRuntime } from "@/lib/services/common/storage-runtime"
 
 /**
- * Per-org memory of "this org was last seen holding an active selected plan",
- * used by the `__root` gate to optimistically render the dashboard while the
- * Autumn customer query is still loading. Keyed by orgId so a brand-new org
- * (fresh signup) starts with no record — taking the no-flash "wait for the plan
- * to settle" path — while a returning paid org skips straight to the dashboard.
- * Cleared the moment an org is seen planless (e.g. after unsubscribing), so that
- * case flashes the dashboard at most once and then reverts to the wait path.
- * See MAP-45.
+ * Per-org memory of "this org was last seen entitled to render the app", used by
+ * the `__root` gate to optimistically render the dashboard while the Autumn
+ * customer query is still loading. Keyed by orgId so a brand-new org (fresh
+ * signup) starts with no record — taking the no-flash "wait for the plan to
+ * settle" path — while a returning org skips straight to the dashboard.
+ *
+ * "Entitled" is broader than "holds an active plan": a lapsed subscriber also
+ * renders the app (behind the reactivation banner), so unsubscribing no longer
+ * clears the flag. Only an org seen with no plan history at all clears it, which
+ * is exactly the org the gate sends to onboarding. See MAP-45.
  */
 const selectedPlanKnownAtomFamily = Atom.family((orgId: string) =>
 	Atom.kvs({

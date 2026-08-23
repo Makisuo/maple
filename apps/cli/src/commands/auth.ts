@@ -1,7 +1,8 @@
 import * as os from "node:os"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
-import { Console, Duration, Effect, Option, Redacted, Schema } from "effect"
+import { Console, Duration, Effect, Option, Redacted, Schema, Stream } from "effect"
+import { Stdio } from "effect/Stdio"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { MapleConfig } from "../core/config"
 import { deleteNativeCredential } from "../core/credential-store"
@@ -27,33 +28,21 @@ type DevicePoll =
 	| { readonly status: "denied" }
 	| { readonly status: "expired" }
 
-const readStdinLine = Effect.tryPromise(
-	() =>
-		new Promise<string>((resolve) => {
-			let data = ""
-			const onData = (chunk: string) => {
-				data += chunk
-				const nl = data.indexOf("\n")
-				if (nl >= 0) {
-					cleanup()
-					resolve(data.slice(0, nl))
-				}
-			}
-			const onEnd = () => {
-				cleanup()
-				resolve(data)
-			}
-			const cleanup = () => {
-				process.stdin.off("data", onData)
-				process.stdin.off("end", onEnd)
-				process.stdin.pause()
-			}
-			process.stdin.setEncoding("utf8")
-			process.stdin.on("data", onData)
-			process.stdin.on("end", onEnd)
-			process.stdin.resume()
-		}),
-).pipe(Effect.orElseSucceed(() => ""))
+/**
+ * Read the first line of standard input, or everything before EOF when the
+ * input never ends in a newline (a piped `--with-token` secret usually does
+ * not). `Stdio.stdin` terminates at EOF and `splitLines` flushes the trailing
+ * partial line, so both cases resolve rather than hanging.
+ *
+ * Deliberately NOT `Terminal.readLine`: that waits for a readline "line" event
+ * and never resolves on EOF, so `printf tok | maple auth login --with-token`
+ * would hang forever.
+ */
+const readStdinLine = Effect.gen(function* () {
+	const stdio = yield* Stdio
+	const line = yield* Stream.decodeText(stdio.stdin).pipe(Stream.splitLines, Stream.take(1), Stream.runHead)
+	return Option.getOrElse(line, () => "")
+}).pipe(Effect.orElseSucceed(() => ""))
 
 const normalizeApiUrl = (value: string) =>
 	Effect.try({
@@ -162,7 +151,7 @@ const saveCredential = (apiUrl: string, token: string, session: Session, managed
 			yield* revokeManagedToken(previousApiUrl, previousToken).pipe(Effect.ignore)
 		}
 		if (previousApiUrl && previousApiUrl !== apiUrl) {
-			yield* Effect.promise(() => deleteNativeCredential(previousApiUrl))
+			yield* deleteNativeCredential(previousApiUrl)
 		}
 		return store
 	})

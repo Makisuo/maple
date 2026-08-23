@@ -305,6 +305,7 @@ fn spawn_ingest(cfg: &LoadConfig, tinybird_host: &str) -> Result<Child, DynError
         .env("TINYBIRD_TOKEN", "load-test-token")
         .env("INGEST_KEY_STORE_BACKEND", "static")
         .env("MAPLE_ORG_ID_OVERRIDE", "org_load_test")
+        .env("MAPLE_INTERNAL_ORG_ID", "org_load_test")
         .env("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY", "load-test-hmac-secret")
         .env("INGEST_QUEUE_DIR", &cfg.queue_dir)
         .env("INGEST_WAL_SHARDS", "4")

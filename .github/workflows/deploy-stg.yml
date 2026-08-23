@@ -17,16 +17,17 @@ permissions:
     id-token: write # Infisical OIDC machine-identity auth
 
 jobs:
+    # Separate job because it needs an arm64 runner — see the workflow itself.
+    ingest-binary:
+        uses: ./.github/workflows/build-ingest-binary.yml
+
     deploy-stg:
+        needs: ingest-binary
         runs-on: ubuntu-latest
         timeout-minutes: 45
         if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
         environment: staging
         env:
-            # Opt-in for the AWS/ECS ingest half (see alchemy.run.ts). Unset or not
-            # "1", the deploy is the pure-Cloudflare stack that shipped in 2m05s.
-            # Set the repo variable to "1" to reproduce the hang under investigation.
-            MAPLE_DEPLOY_AWS_INGEST: ${{ vars.MAPLE_DEPLOY_AWS_INGEST }}
             INFISICAL_ENV_SLUG: staging
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
@@ -53,6 +54,7 @@ jobs:
 
             # AFTER Infisical — see the note in deploy-prd.yml.
             - name: Configure AWS credentials (OIDC)
+              id: aws
               uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -61,39 +63,29 @@ jobs:
             - name: Install dependencies
               run: bun install --frozen-lockfile
 
-            # Compiled outside the image build, in a bookworm container — see the
-            # note in deploy-prd.yml.
-            - name: Cache ingest cargo build
-              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+            # Compiled by the `ingest-binary` job above, on an arm64 runner —
+            # the ECS tasks are Graviton. The artifact upload drops the exec
+            # bit, and `Dockerfile.prebuilt` COPYs the file mode straight into
+            # the image, so restore it here or the task exits on `permission
+            # denied`.
+            # `Dockerfile.prebuilt` builds for linux/arm64 (the tasks are Graviton)
+            # and has a `RUN apt-get` layer, so this x86 runner has to be able to
+            # execute arm64 binaries to build it. Registers the binfmt handlers.
+            # The COPYed binary itself is compiled natively by the build job —
+            # nothing heavy is emulated here, just one apt-get layer.
+            - name: Register arm64 binfmt handlers (QEMU)
+              uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
               with:
-                  path: |
-                      ~/.cargo-ingest
-                      ${{ runner.temp }}/ingest-target
-                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
-                  restore-keys: |
-                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
-                      ingest-cargo-${{ runner.os }}-
+                  platforms: arm64
 
-            # --target-dir points OUTSIDE apps/ingest deliberately. Alchemy hashes
-            # the image context with `hashDirectory`, which has no .dockerignore
-            # support and derives its exclusions from gitignore rules WITHOUT
-            # rebasing root-anchored ones onto the context dir — `/apps/ingest/target`
-            # becomes the glob `apps/ingest/target/**` evaluated with cwd=apps/ingest,
-            # which matches nothing. A target dir inside the context would therefore
-            # be walked and hashed in full on every deploy.
-            - name: Build ingest binary
-              run: |
-                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
-                  docker run --rm \
-                      --user "$(id -u):$(id -g)" \
-                      -e CARGO_HOME=/cargo \
-                      -v "$HOME/.cargo-ingest:/cargo" \
-                      -v "$PWD/apps/ingest:/app" \
-                      -v "$RUNNER_TEMP/ingest-target:/target" \
-                      -w /app \
-                      rust:1.94-bookworm \
-                      cargo build --release --target-dir /target
-                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
+            - name: Download ingest binary
+              uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+              with:
+                  name: maple-ingest
+                  path: apps/ingest/dist
+
+            - name: Restore exec bit on ingest binary
+              run: chmod +x apps/ingest/dist/maple-ingest
 
             # BEFORE migrate: installs default privileges granting PUBLIC on every
             # table created from here on, so a new or rebuilt table can never land
@@ -110,5 +102,34 @@ jobs:
             - name: Run database migrations
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
 
+            # AWS_ACCOUNT_ID: see the note in deploy-prd.yml.
+            # continue-on-error so the certificate step below can finish the job;
+            # the last step turns an unrecovered failure back into a red run.
             - name: Deploy STG stack with Alchemy
+              id: deploy
+              continue-on-error: true
               run: bun run alchemy:deploy:stg
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+
+            # First pass of a stage with the AWS half on: the ingest ACM certificate
+            # is created PENDING_VALIDATION and the 443 listener fails. Finish the
+            # job here — create the validation CNAME in the Cloudflare zone with the
+            # token Infisical already provides, wait for ISSUED, deploy again. A
+            # deploy that failed for any other reason reaches this too: the script
+            # is a no-op on an ISSUED certificate and the retry fails the same way.
+            - name: Validate the ingest certificate and retry the deploy
+              id: retry
+              if: ${{ steps.deploy.outcome == 'failure' }}
+              env:
+                  INGEST_DOMAIN: ingest-staging.maple.dev
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+              run: |
+                  bash scripts/ingest-cert-validate.sh
+                  bun run alchemy:deploy:stg
+
+            - name: Fail the run if the deploy did not succeed
+              if: ${{ steps.deploy.outcome == 'failure' && steps.retry.outcome != 'success' }}
+              run: |
+                  echo "::error::alchemy deploy failed and the certificate-validation retry did not recover it (retry outcome: ${{ steps.retry.outcome }})"
+                  exit 1

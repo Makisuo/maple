@@ -65,23 +65,40 @@ public struct WidgetSnapshotStore<Value: Codable & Sendable>: Sendable {
 	// ISO-8601 rather than the default seconds-since-reference-date: these are
 	// read by a different process, possibly built from a different commit, and
 	// a dated string survives inspection by eye.
-	private static var encoder: JSONEncoder {
-		let encoder = JSONEncoder()
-		encoder.dateEncodingStrategy = .iso8601
-		return encoder
-	}
-
-	private static var decoder: JSONDecoder {
-		let decoder = JSONDecoder()
-		decoder.dateDecodingStrategy = .iso8601
-		return decoder
-	}
+	private static var encoder: JSONEncoder { WidgetJSON.encoder }
+	/// Tolerant of fractional seconds — see `WidgetJSON`.
+	private static var decoder: JSONDecoder { WidgetJSON.decoder }
 }
 
+// Keys are per organization, because a widget can be pinned to one. The `v1`
+// keys below are read-only leftovers: a widget placed before this shipped has a
+// snapshot under the old key and would otherwise render "Open Maple" until the
+// next publish. Delete them, and the fallbacks that read them, one release on.
+
 extension WidgetSnapshotStore where Value == IssuesSnapshot {
-	public static var issues: WidgetSnapshotStore<IssuesSnapshot> { .init(key: "issues.snapshot.v1") }
+	public static func issues(
+		organizationId: String,
+		appGroupIdentifier: String = WidgetAppGroup.identifier
+	) -> WidgetSnapshotStore<IssuesSnapshot> {
+		.init(key: "issues.snapshot.v2.\(organizationId)", appGroupIdentifier: appGroupIdentifier)
+	}
+
+	/// Read-only fallback for widgets placed before per-organization snapshots.
+	/// Delete one release after that shipped, along with its readers.
+	public static var legacyIssues: WidgetSnapshotStore<IssuesSnapshot> { .init(key: "issues.snapshot.v1") }
 }
 
 extension WidgetSnapshotStore where Value == ThroughputSnapshot {
-	public static var throughput: WidgetSnapshotStore<ThroughputSnapshot> { .init(key: "throughput.snapshot.v1") }
+	public static func throughput(
+		organizationId: String,
+		appGroupIdentifier: String = WidgetAppGroup.identifier
+	) -> WidgetSnapshotStore<ThroughputSnapshot> {
+		.init(key: "throughput.snapshot.v2.\(organizationId)", appGroupIdentifier: appGroupIdentifier)
+	}
+
+	/// Read-only fallback for widgets placed before per-organization snapshots.
+	/// Delete one release after that shipped, along with its readers.
+	public static var legacyThroughput: WidgetSnapshotStore<ThroughputSnapshot> {
+		.init(key: "throughput.snapshot.v1")
+	}
 }

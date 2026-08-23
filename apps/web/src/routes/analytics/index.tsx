@@ -12,7 +12,7 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import { PlayRotateClockwiseIcon } from "@/components/icons"
 import { chartBucketSeconds } from "@/components/infra/chart-utils"
-import type { WebAnalyticsBreakdowns } from "@/api/warehouse/web-analytics"
+import type { WebAnalyticsBreakdowns, WebAnalyticsEvent } from "@/api/warehouse/web-analytics"
 import type { QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	AnalyticsBreakdownPanel,
@@ -33,7 +33,7 @@ import {
 	type AnalyticsMetricKey,
 	type AnalyticsMetricSource,
 } from "@/components/analytics/metrics"
-import { countryLabel, languageLabel } from "@/components/analytics/labels"
+import { countryLabel, languageLabel, referrerLabel, utmLabel } from "@/components/analytics/labels"
 import {
 	activeFilterChips,
 	analyticsFilterSearchFields,
@@ -44,6 +44,7 @@ import {
 } from "@/components/analytics/filters"
 import {
 	webAnalyticsBreakdownsResultAtom,
+	webAnalyticsEventsResultAtom,
 	webAnalyticsPagesResultAtom,
 	webAnalyticsPageviewsResultAtom,
 	webAnalyticsSummaryResultAtom,
@@ -62,6 +63,7 @@ const analyticsSearchSchema = Schema.Struct({
 
 const DEFAULT_PRESET = "7d"
 const PAGES_LIMIT = 100
+const EVENTS_LIMIT = 100
 const BREAKDOWN_LIMIT = 50
 
 export const Route = createFileRoute("/analytics/")({
@@ -99,6 +101,8 @@ function WebAnalyticsPage() {
 		onFilterChange(key, toggleFilterValue(filters[key], value))
 	}
 
+	// Clearing filters keeps the time range: that is what you are looking at,
+	// the filters are how narrowly.
 	const onClearFilters = () => {
 		navigate({
 			search: {
@@ -119,6 +123,15 @@ function WebAnalyticsPage() {
 		}),
 	)
 
+	// Its own query, not a branch of the breakdowns union: custom events live on
+	// the page-view source, not `session_replays`. Read here rather than in the
+	// content so the sidebar's Event section and the Events card share one fetch.
+	const eventsResult = useRetainedRefreshableResultValue(
+		webAnalyticsEventsResultAtom({
+			data: { startTime, endTime, limit: EVENTS_LIMIT, ...filters },
+		}),
+	)
+
 	const chips = activeFilterChips(filters)
 
 	return (
@@ -129,6 +142,7 @@ function WebAnalyticsPage() {
 					<DashboardLayout.Filters>
 						<AnalyticsFilterSidebar
 							breakdownsResult={breakdownsResult}
+							eventsResult={eventsResult}
 							filters={filters}
 							onFilterChange={onFilterChange}
 							onClearFilters={onClearFilters}
@@ -206,6 +220,7 @@ function WebAnalyticsPage() {
 									endTime={endTime}
 									filters={filters}
 									breakdownsResult={breakdownsResult}
+									eventsResult={eventsResult}
 									onToggleFilter={onToggleFilter}
 								/>
 							</div>
@@ -256,12 +271,14 @@ function AnalyticsContent({
 	endTime,
 	filters,
 	breakdownsResult,
+	eventsResult,
 	onToggleFilter,
 }: {
 	startTime: string
 	endTime: string
 	filters: AnalyticsFilters
 	breakdownsResult: Result.Result<WebAnalyticsBreakdowns, QueryAtomFailure>
+	eventsResult: Result.Result<{ data: ReadonlyArray<WebAnalyticsEvent> }, QueryAtomFailure>
 	onToggleFilter: (key: AnalyticsFilterKey, value: string) => void
 }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
@@ -367,7 +384,7 @@ function AnalyticsContent({
 
 			{Result.builder(breakdownsResult)
 				.onInitial(() => (
-					<div className="grid gap-4 lg:grid-cols-2">
+					<div className="grid gap-4 @min-[880px]/page:grid-cols-2">
 						<Skeleton className="h-72 w-full" />
 						<Skeleton className="h-72 w-full" />
 					</div>
@@ -389,8 +406,7 @@ function AnalyticsContent({
 							filterKey: "referrerHost",
 							noun: "referrer",
 							nounPlural: "referrers",
-							emptyMessage:
-								"No referrers recorded. Sessions with an empty referrer are excluded rather than bucketed as direct — an empty value also covers internal navigation and Referrer-Policy suppression.",
+							formatValue: referrerLabel,
 						},
 						{
 							tab: "UTM source",
@@ -398,6 +414,7 @@ function AnalyticsContent({
 							filterKey: "utmSource",
 							noun: "source",
 							nounPlural: "sources",
+							formatValue: utmLabel,
 						},
 						{
 							tab: "Medium",
@@ -405,6 +422,7 @@ function AnalyticsContent({
 							filterKey: "utmMedium",
 							noun: "medium",
 							nounPlural: "mediums",
+							formatValue: utmLabel,
 						},
 						{
 							tab: "Campaign",
@@ -412,6 +430,7 @@ function AnalyticsContent({
 							filterKey: "utmCampaign",
 							noun: "campaign",
 							nounPlural: "campaigns",
+							formatValue: utmLabel,
 						},
 					]
 
@@ -507,6 +526,29 @@ function AnalyticsContent({
 						},
 					]
 
+					const events = Result.builder(eventsResult)
+						.onSuccess((rows) => rows.data)
+						.orElse(() => [])
+
+					const eventDimensions: ReadonlyArray<BreakdownDimension> = [
+						{
+							tab: "Events",
+							// Ranked by firings, with the sessions that fired each beside it —
+							// the same two-column shape as Pages, read from the same source.
+							rows: events.map((event) => ({
+								name: event.name,
+								count: event.sessions,
+								views: event.events,
+							})),
+							filterKey: "eventName",
+							noun: "event",
+							nounPlural: "events",
+							viewsLabel: "Events",
+							emptyMessage:
+								'No custom events in the selected window. Send one with track("name", props) from the browser SDK.',
+						},
+					]
+
 					// `items-start` so each card sizes to its own content instead of
 					// stretching to match the tallest in its row — a Devices card with
 					// three rows should not be as tall as a Pages card with fifty.
@@ -519,10 +561,11 @@ function AnalyticsContent({
 						{ id: "content", dimensions: pageDimensions },
 						{ id: "technology", dimensions: devices },
 						{ id: "audience", dimensions: geography },
+						{ id: "events", dimensions: eventDimensions },
 					]
 
 					return (
-						<div className="grid items-start gap-4 lg:grid-cols-2">
+						<div className="grid items-start gap-4 @min-[880px]/page:grid-cols-2">
 							{cards.map((card) => (
 								<AnalyticsBreakdownPanel
 									key={card.id}

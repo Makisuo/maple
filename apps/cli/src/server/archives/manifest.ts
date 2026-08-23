@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { Schema } from "effect"
 import {
 	type ArchiveTuningRecord,
 	type TuningConfigIdentity,
 	LEGACY_TUNING_CONFIG_FORMAT_VERSION,
 	TUNING_CONFIG_FORMAT_VERSION,
 } from "./config"
+import { NonNegativeSafeInt, Sha256Lower } from "./schemas"
 import { KNOWN_COMPLEX_DIGEST_ALGORITHMS } from "./export"
 import {
 	assertNoSymlinkSync,
@@ -150,12 +152,14 @@ const requiredString = (record: Record<string, unknown>, key: string): string =>
 	return value
 }
 
+const decodeCount = Schema.decodeUnknownSync(NonNegativeSafeInt)
+
 const requiredCount = (record: Record<string, unknown>, key: string): number => {
-	const value = record[key]
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+	try {
+		return decodeCount(record[key])
+	} catch {
 		throw new Error(`invalid archive manifest field: ${key} (must be a safe non-negative integer)`)
 	}
-	return value
 }
 
 const requiredPositiveInteger = (record: Record<string, unknown>, key: string): number => {
@@ -166,7 +170,9 @@ const requiredPositiveInteger = (record: Record<string, unknown>, key: string): 
 	return value
 }
 
-const SHA256_HEX = /^[0-9a-f]{64}$/
+/** The same 64-hex rule the journal enforces, stated once in ./schemas. */
+const isSha256Hex = (value: string): boolean =>
+	Schema.decodeUnknownResult(Sha256Lower)(value)._tag === "Success"
 
 /** A safe logical config name (no path separators, no traversal). */
 const SAFE_CONFIG_NAME = /^[A-Za-z0-9._-]+$/
@@ -208,7 +214,7 @@ const parseTuningConfig = (value: unknown): TuningConfigIdentity | null => {
 		throw new Error(`invalid archive manifest tuningConfig.configName (unsafe name): ${configName}`)
 	}
 	const sha256 = requiredString(value, "sha256")
-	if (!SHA256_HEX.test(sha256)) {
+	if (!isSha256Hex(sha256)) {
 		throw new Error(`invalid archive manifest tuningConfig.sha256 (must be 64 hex chars): ${sha256}`)
 	}
 	return { formatVersion, configName, sha256 }
@@ -297,7 +303,7 @@ const parseShardRecord = (
 		return c
 	})
 	const sha256 = requiredString(value, "sha256")
-	if (!SHA256_HEX.test(sha256))
+	if (!isSha256Hex(sha256))
 		throw new Error(`invalid archive shard sha256 (must be 64 hex chars): ${sha256}`)
 	const rowCount = requiredCount(value, "rowCount")
 	const minNano = requiredNanoDecimal(value, "minEventTimeUnixNano")

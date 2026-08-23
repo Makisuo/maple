@@ -9,7 +9,7 @@ Maple is fully compatible with the OpenTelemetry Protocol (OTLP). This document 
 
 Maple stores every OTel attribute you send verbatim, but a curated set get special treatment — pre-extracted into fast columns at ingest, exposed as short filter aliases, rendered as colored badges, used to draw the service map, or scored higher in the attribute chip strip. Most of these follow the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) — if your SDK emits standard attributes you usually don't need to do anything extra.
 
-> **Audit with Claude Code:** `maple-audit` reviews an existing setup against these conventions — per service, with severities — and fixes the gaps. See the [maple-audit skill](https://github.com/Makisuo/maple/tree/main/skills/maple-audit).
+> **Audit with Claude Code:** `maple-audit` reviews an existing setup against these conventions — per service, with severities — and fixes the gaps. See the [maple-audit skill](https://github.com/MapleTechLabs/maple/tree/main/skills/maple-audit).
 
 ## Ingest Endpoints
 

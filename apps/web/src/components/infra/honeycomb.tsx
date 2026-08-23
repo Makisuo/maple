@@ -174,7 +174,7 @@ export function HoneycombSection({
 }: HoneycombSectionProps) {
 	return (
 		<section aria-label={`${label} honeycomb`} className="rounded-md border bg-card">
-			<div className="flex items-center justify-between gap-3 border-b px-4 py-2">
+			<div className="flex flex-wrap items-center justify-between gap-3 gap-y-1.5 border-b px-4 py-2">
 				<div className="flex items-baseline gap-3">
 					<span className="text-[12px] font-medium text-foreground">{label}</span>
 					<span className="text-[11px] tabular-nums text-muted-foreground">

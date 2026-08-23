@@ -1,4 +1,5 @@
 import {
+	ArrowTrendDownIcon,
 	PulseIcon,
 	FileIcon,
 	AlertWarningIcon,
@@ -15,7 +16,12 @@ import type {
 	WidgetDataSource,
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
-import { makeQueryDataSource, makeRouteDataSource, makeStaticDataSource } from "@maple/widgets/dashboard"
+import {
+	makeProductEventsFunnelDataSource,
+	makeQueryDataSource,
+	makeRouteDataSource,
+	makeStaticDataSource,
+} from "@maple/widgets/dashboard"
 
 export interface WidgetPresetDefinition {
 	id: string
@@ -358,6 +364,22 @@ export const piePresets: WidgetPresetDefinition[] = [
 ]
 
 export const funnelPresets: WidgetPresetDefinition[] = [
+	{
+		id: "funnel-product-events",
+		name: "Product-event funnel",
+		description: "Conversion through page views and track() events, stitched per person",
+		icon: ArrowTrendDownIcon,
+		visualization: "funnel",
+		// No steps yet: the route answers an empty funnel with no rows and the
+		// editor opens on the Product events panel asking for the first step.
+		dataSource: makeProductEventsFunnelDataSource({ steps: [] }),
+		display: {
+			title: "Conversion funnel",
+			chartId: "query-builder-funnel",
+			unit: "number",
+			funnel: { showStepPercent: true, steps: [] },
+		},
+	},
 	{
 		id: "funnel-traces-by-service",
 		name: "Traces by Service",

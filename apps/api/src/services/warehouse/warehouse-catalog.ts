@@ -35,11 +35,6 @@ const TABLE_NOTES: Record<string, ReadonlyArray<string>> = {
 		"`StatusCode` is Title Case: 'Ok', 'Error', 'Unset'.",
 		"Does NOT include `SpanAttributes`/`ResourceAttributes` — query `traces` if you need attribute access.",
 	],
-	error_spans: [
-		"Pre-filtered to `StatusCode = 'Error'`. Use this instead of `traces WHERE StatusCode = 'Error'`.",
-		"`Duration` is NANOSECONDS.",
-		"`DeploymentEnv` is pre-extracted from ResourceAttributes['deployment.environment'].",
-	],
 	error_events: [
 		"Per-error-occurrence rows with the OTel `exception` event unwrapped — surfaces `ExceptionType`, `ExceptionMessage`, `Stacktrace`, and a stable `FingerprintHash` for grouping.",
 		"Use `FingerprintHash` to group occurrences into issues; `(OrgId, FingerprintHash, Timestamp)` is the sort key.",

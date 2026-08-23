@@ -9,6 +9,7 @@ struct MapleApp: App {
 	@State private var clerk: Clerk
 	@State private var session: SessionController
 	@State private var navigation: AppNavigation
+	@State private var opener: DestinationOpener
 
 	init() {
 		// `Clerk.shared` traps until `configure` has run, and Swift evaluates
@@ -22,8 +23,10 @@ struct MapleApp: App {
 		let tokens = ClerkTokenProvider()
 		let navigation = AppNavigation()
 		_navigation = State(initialValue: navigation)
+		let opener = DestinationOpener(navigation: navigation)
+		_opener = State(initialValue: opener)
 		// Notification taps arrive on the app delegate, outside the view tree.
-		PushRegistrar.shared.navigation = navigation
+		PushRegistrar.shared.opener = opener
 		// Before Clerk and the API client, so a cold launch is inside a session.
 		Self.startTelemetry()
 		// And before anything it should measure. Ends at the first frame, in
@@ -31,7 +34,17 @@ struct MapleApp: App {
 		Telemetry.Launch.begin()
 		if FixtureAPI.isEnabled {
 			_clerk = State(initialValue: Clerk.configure(publishableKey: FixtureSession.publishableKey))
-			_session = State(initialValue: SessionController.fixture(api: FixtureAPI(), tokens: tokens))
+			let fixtureAPI = FixtureAPI()
+			let session = SessionController.fixture(api: fixtureAPI, tokens: tokens)
+			_session = State(initialValue: session)
+			opener.session = session
+			// `configure`, not `bootstrap`: fixture mode has no Clerk session and
+			// nothing in the App Group, so the headless path would correctly bail
+			// and screenshots would have no widgets to take.
+			WidgetPublisher.shared.configure(
+				api: fixtureAPI,
+				organizationId: FixtureSession.organizationId
+			)
 			return
 		}
 
@@ -52,7 +65,19 @@ struct MapleApp: App {
 		} catch {
 			fatalError("Invalid API base URL: \(error)")
 		}
-		_session = State(initialValue: SessionController(api: api, tokens: tokens))
+		let session = SessionController(api: api, tokens: tokens)
+		_session = State(initialValue: session)
+		// After `Clerk.configure` above, which is what restores the session this
+		// reads. A launch into the background for a `BGAppRefreshTask` or a
+		// silent push builds no view tree, so this is the *only* place those
+		// wakes get a client and an organization; without it they woke up, found
+		// no context, and did nothing at all. `MainTabView` still calls
+		// `configure` with the verified membership list and overrides this.
+		WidgetPublisher.shared.bootstrap(api: api)
+		// Assigned here rather than in `body`: a tap that launched the app can
+		// reach the delegate before the first frame, and an opener with no
+		// session parks every destination it is handed.
+		opener.session = session
 	}
 
 	/// Session replay and tracing, configured entirely from Info.plist — see the
@@ -88,6 +113,7 @@ struct MapleApp: App {
 				.environment(clerk)
 				.environment(session)
 				.environment(navigation)
+				.environment(opener)
 		}
 	}
 }

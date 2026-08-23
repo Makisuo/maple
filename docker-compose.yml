@@ -75,6 +75,10 @@ services:
         environment:
             INGEST_PORT: 3474
             INGEST_FORWARD_OTLP_ENDPOINT: http://otel-collector:4318
+            # Required: the org the gateway files its OWN telemetry under. Local
+            # stacks point it at the default org so self-telemetry is readable in
+            # the local UI rather than orphaned under an id nothing owns.
+            MAPLE_INTERNAL_ORG_ID: ${MAPLE_INTERNAL_ORG_ID:-${MAPLE_DEFAULT_ORG_ID:-default}}
             INGEST_FORWARD_TIMEOUT_MS: 10000
             INGEST_MAX_REQUEST_BODY_BYTES: 20971520
             INGEST_REQUIRE_TLS: "false"

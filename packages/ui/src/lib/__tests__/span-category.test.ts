@@ -78,6 +78,24 @@ describe("describeSpan", () => {
 		).toMatchObject({ id: "messaging", label: "Consumer" })
 	})
 
+	// BYO ClickHouse stores the short spelling ("Consumer"), the managed schema the OTLP enum
+	// name ("SPAN_KIND_CONSUMER"). Both must categorize the same — comparing raw strings sent
+	// every Server/Producer/Consumer span on BYO ClickHouse to the "internal" fallback.
+	it("categorizes short-form span kinds the same as the OTLP enum names", () => {
+		expect(describeSpan(span({ spanName: "publish", spanKind: "Producer" })).category).toMatchObject({
+			id: "messaging",
+			label: "Producer",
+		})
+		expect(describeSpan(span({ spanName: "receive", spanKind: "Consumer" })).category).toMatchObject({
+			id: "messaging",
+			label: "Consumer",
+		})
+		expect(describeSpan(span({ spanName: "handle", spanKind: "Server" })).category).toMatchObject({
+			id: "server",
+			label: "Server",
+		})
+	})
+
 	it("categorizes a Class.method span as function", () => {
 		const { category, className } = describeSpan(
 			span({ spanName: "UserService.findById", spanKind: "SPAN_KIND_INTERNAL" }),

@@ -88,6 +88,16 @@ export const V2ErrorIssueSampleTrace = Schema.Struct({
 }).annotate({ identifier: "ErrorIssueSampleTrace" })
 export type V2ErrorIssueSampleTrace = Schema.Schema.Type<typeof V2ErrorIssueSampleTrace>
 
+export const V2ErrorIssueEnvironment = Schema.Struct({
+	name: Schema.String,
+	count: Schema.Number,
+}).annotate({
+	identifier: "ErrorIssueEnvironment",
+	description:
+		"A deployment environment the issue was observed in over the requested window, with its occurrence count.",
+})
+export type V2ErrorIssueEnvironment = Schema.Schema.Type<typeof V2ErrorIssueEnvironment>
+
 export const V2ErrorIncident = Schema.Struct({
 	id: ErrorIncidentPublicId,
 	object: Schema.Literal("error_incident"),
@@ -106,10 +116,12 @@ export const V2ErrorIssueDetail = Schema.Struct({
 	timeseries: Schema.Array(V2ErrorIssueTimeseriesPoint),
 	sample_traces: Schema.Array(V2ErrorIssueSampleTrace),
 	incidents: Schema.Array(V2ErrorIncident),
+	environments: Schema.Array(V2ErrorIssueEnvironment),
 }).annotate({
 	identifier: "ErrorIssueDetail",
 	title: "Error issue detail",
-	description: "The issue resource with its requested timeseries window, sample traces, and incidents.",
+	description:
+		"The issue resource with its requested timeseries window, sample traces, incidents, and the environments it was seen in.",
 })
 export type V2ErrorIssueDetail = Schema.Schema.Type<typeof V2ErrorIssueDetail>
 

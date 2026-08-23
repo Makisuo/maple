@@ -144,36 +144,39 @@ const makeHandler = <Id extends string, Groups extends HttpApiGroup.Constraint>(
   readonly source: ScalarSource
   readonly scalar: ScalarConfig | undefined
 }) => {
-  const spec = OpenApi.fromApi(options.api)
-  const { customFetch, ...scalar } = options.scalar ?? {}
-  const scalarConfig = {
-    _integration: "html",
-    ...scalar
-  }
-  const scalarScript = options.source._tag === "Cdn"
-    ? `<script src="${
-      Html.escapeAttribute(
-        `https://cdn.jsdelivr.net/npm/@scalar/api-reference@${
-          encodeURIComponent(options.source.version ?? "latest")
-        }/dist/browser/standalone.min.js`
-      )
-    }" crossorigin></script>`
-    : `<script>${options.source.source}</script>`
-  const response = HttpServerResponse.html(`<!doctype html>
+  let response: HttpServerResponse.HttpServerResponse | undefined
+  return Effect.sync(() => {
+    if (response !== undefined) return response
+    const spec = OpenApi.fromApi(options.api)
+    const { customFetch, ...scalar } = options.scalar ?? {}
+    const scalarConfig = {
+      _integration: "html",
+      ...scalar
+    }
+    const scalarScript = options.source._tag === "Cdn"
+      ? `<script src="${
+        Html.escapeAttribute(
+          `https://cdn.jsdelivr.net/npm/@scalar/api-reference@${
+            encodeURIComponent(options.source.version ?? "latest")
+          }/dist/browser/standalone.min.js`
+        )
+      }" crossorigin></script>`
+      : `<script>${options.source.source}</script>`
+    response = HttpServerResponse.html(`<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <title>${Html.escape(spec.info.title)}</title>
     ${
-    !spec.info.description
-      ? ""
-      : `<meta name="description" content="${Html.escapeAttribute(spec.info.description)}"/>`
-  }
+      !spec.info.description
+        ? ""
+        : `<meta name="description" content="${Html.escapeAttribute(spec.info.description)}"/>`
+    }
     ${
-    !spec.info.description
-      ? ""
-      : `<meta name="og:description" content="${Html.escapeAttribute(spec.info.description)}"/>`
-  }
+      !spec.info.description
+        ? ""
+        : `<meta name="og:description" content="${Html.escapeAttribute(spec.info.description)}"/>`
+    }
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1" />
@@ -185,14 +188,15 @@ const makeHandler = <Id extends string, Groups extends HttpApiGroup.Constraint>(
       window.Scalar.createApiReference(document.getElementById('api-reference-container'), {
         ...${Html.escapeJson(scalarConfig)},
         content: ${Html.escapeJson(spec)}${
-    customFetch === undefined ? "" : `,
+      customFetch === undefined ? "" : `,
         customFetch: ${customFetch}`
-  }
+    }
       })
     </script>
   </body>
 </html>`)
-  return Effect.succeed(response)
+    return response
+  })
 }
 
 /**
@@ -201,7 +205,9 @@ const makeHandler = <Id extends string, Groups extends HttpApiGroup.Constraint>(
  * **Details**
  *
  * The route serves the OpenAPI specification generated from the API at the
- * configured path, defaulting to `/docs`.
+ * configured path, defaulting to `/docs`. The document and response are
+ * generated on the first request and memoized after successful generation;
+ * defects are retried by later requests.
  *
  * @category layers
  * @since 4.0.0
@@ -232,7 +238,9 @@ export const layer = <Id extends string, Groups extends HttpApiGroup.Constraint>
  *
  * The route serves the OpenAPI specification generated from the API at the
  * configured path, defaulting to `/docs`; `version` selects the Scalar package
- * version loaded from the CDN.
+ * version loaded from the CDN. The document and response are generated on the
+ * first request and memoized after successful generation; defects are retried
+ * by later requests.
  *
  * @category layers
  * @since 4.0.0
