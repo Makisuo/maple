@@ -309,7 +309,10 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 
 						// The same Tinybird target and token the gateway writes with.
 						secrets: { TINYBIRD_TOKEN: tinybirdToken.secretArn },
-						env: { TINYBIRD_HOST: yield* requiredPlain("TINYBIRD_HOST") },
+						env: { TINYBIRD_HOST: yield* requiredPlain("TINYBIRD_HOST") } satisfies Record<
+							string,
+							string
+						>,
 
 						tags: { Service: "maple-ingest", Region: region },
 					})
@@ -483,7 +486,11 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				MAPLE_INTERNAL_ORG_ID: yield* requiredPlain("MAPLE_INTERNAL_ORG_ID"),
 				...(yield* optionalPlain("AUTUMN_API_URL")),
 				...(yield* optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim())),
-			},
+				// `satisfies` rather than a bare literal: alchemy types `env` as
+				// `Record<string, any>`, which is what let a spread `Config` object
+				// through unnoticed. Pinning the literal to string values makes that
+				// mistake a type error instead of a silently dropped variable.
+			} satisfies Record<string, string>,
 
 			tags: { Service: "maple-ingest", Region: region },
 		})
