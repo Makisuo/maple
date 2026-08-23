@@ -21,8 +21,11 @@ import * as OpenApi from "./OpenApi.ts"
 const makeHandler = <Id extends string, Groups extends HttpApiGroup.Constraint>(options: {
   readonly api: HttpApi.HttpApi<Id, Groups>
 }) => {
-  const spec = OpenApi.fromApi(options.api)
-  const response = HttpServerResponse.html(`<!DOCTYPE html>
+  let response: HttpServerResponse.HttpServerResponse | undefined
+  return Effect.sync(() => {
+    if (response !== undefined) return response
+    const spec = OpenApi.fromApi(options.api)
+    response = HttpServerResponse.html(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -46,12 +49,15 @@ const makeHandler = <Id extends string, Groups extends HttpApiGroup.Constraint>(
   </script>
 </body>
 </html>`)
-  return Effect.succeed(response)
+    return response
+  })
 }
 
 /**
  * Mounts Swagger UI for an `HttpApi` at the configured path, defaulting to
- * `/docs`, using the OpenAPI specification generated from the API.
+ * `/docs`, using the OpenAPI specification generated from the API. The document
+ * and response are generated on the first request and memoized after successful
+ * generation; defects are retried by later requests.
  *
  * @category layers
  * @since 4.0.0
