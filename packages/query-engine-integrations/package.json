@@ -16,6 +16,7 @@
 	},
 	"dependencies": {
 		"@maple-dev/clickhouse-builder": "workspace:*",
+		"@maple/domain": "workspace:*",
 		"@maple/query-engine": "workspace:*",
 		"effect": "catalog:effect"
 	},

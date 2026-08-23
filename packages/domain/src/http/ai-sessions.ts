@@ -1,7 +1,9 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import { AiAgentSpanSchema, AiGenAiValuesSchema } from "../gen-ai"
 import { TinybirdDateTime } from "../query-engine"
 import { SessionAuthorization } from "./current-tenant"
+import { HttpTaggedError } from "./error-policy"
 import { warehouseReadHttpErrors } from "./warehouse"
 
 // AI agent session endpoint schemas
@@ -16,10 +18,9 @@ import { warehouseReadHttpErrors } from "./warehouse"
 export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("ListAiSessionsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	// `Schema.optional`, not `optionalKey` — matches the `ListReplaysRequest`
-	// optional-payload contract for JS-constructed clients (see the note in
-	// session-replay.ts and CLAUDE.md, optional vs optionalKey).
-	limit: Schema.optional(Schema.Number),
+	limit: Schema.optional(
+		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 })),
+	),
 	// Both filters land on the session-detection subquery, so `serviceNames`
 	// means "the session-bearing spans came from this service", not "the trace
 	// touched it" — see `aiSessionListQuery`.
@@ -71,24 +72,130 @@ export class ListAiSessionsFacetsResponse extends Schema.Class<ListAiSessionsFac
 	services: Schema.Array(AiSessionFacetItem),
 }) {}
 
-// Exactly what a compiled warehouse read can fail with — not the wider
-// `sessionReplayEndpointErrors` union, whose extra members (the legacy
-// QueryEngine wrappers, token-mint errors) this endpoint can never produce.
-const aiSessionEndpointErrors = warehouseReadHttpErrors
+export class GetAiSessionSpansRequest extends Schema.Class<GetAiSessionSpansRequest>(
+	"GetAiSessionSpansRequest",
+)({
+	/** The framework's own session id, verbatim — `maple_ai.session.id`. */
+	sessionId: Schema.String.check(Schema.isMinLength(1)),
+	// Optional, and the two halves are read as a pair — supply both or neither.
+	//
+	// With a window the read is partition-pruned on both levels (detection and
+	// fan-out), which is the fast path every link from the list page takes: the
+	// row already knows the session's own bounds, so it hands them over.
+	//
+	// Without one the warehouse resolves the session from the id alone. That is
+	// viable rather than reckless: `traces` carries a `bloom_filter(0.01)` skip
+	// index over `mapValues(SpanAttributes)`, and its TTL caps any scan at 30
+	// days, so the id lookup was measured instant against production and found
+	// sessions several days back that spanned multiple traces. Bloom pruning
+	// still degrades as an org's volume grows, so this is the exception path for
+	// hint-less deep links — a pasted id, an MCP answer — and not the default.
+	// The client is expected to write the bounds it got back into its URL, which
+	// makes the second load of any such link the pruned one.
+	startTime: Schema.optionalKey(TinybirdDateTime),
+	endTime: Schema.optionalKey(TinybirdDateTime),
+}) {}
+
+/**
+ * Every `gen_ai.*` value the integration layer decoded off the span, one
+ * optional key per catalog field. Generated from `AI_GENAI_FIELDS`, so the
+ * wire shape and the decoder read the same list.
+ */
+export const AiSessionGenAiValues = AiGenAiValuesSchema
+export type AiSessionGenAiValues = Schema.Schema.Type<typeof AiSessionGenAiValues>
+
+/**
+ * One span of a session, already normalized onto Maple's standard AI span
+ * shape. The raw attribute maps the query reads are the bulk of that read and
+ * are dropped server-side, so what lands here is the decoded view alone.
+ */
+export const AiSessionSpan = AiAgentSpanSchema
+export type AiSessionSpan = Schema.Schema.Type<typeof AiSessionSpan>
+
+export class GetAiSessionSpansResponse extends Schema.Class<GetAiSessionSpansResponse>(
+	"GetAiSessionSpansResponse",
+)({
+	data: Schema.Array(AiSessionSpan),
+	/**
+	 * The session has more spans than one response carries. Truncation drops the
+	 * END of the session, so a client must say so rather than present the result
+	 * as a complete transcript.
+	 */
+	truncated: Schema.Boolean,
+}) {}
+
+/**
+ * Row ceiling for one session's spans. The handler asks the query for one row
+ * past it, so an exactly-full session is distinguishable from a truncated one.
+ */
+export const AI_SESSION_SPANS_MAX_SPANS = 2_000
+
+/**
+ * Response ceiling for one session's spans, measured over the warehouse rows —
+ * which still carry the raw attribute maps, in production ~17KB on a single
+ * agent span.
+ *
+ * The byte counter accumulates over rows that are already parsed, so the
+ * ceiling only trips once that much of the JS object graph is resident: it has
+ * to sit far below the 128MB isolate heap, not near it. Replay events get 8MB
+ * for opaque strings; 10MB here because these rows are attribute-map-heavy, and
+ * `AI_SESSION_SPANS_MAX_SPANS` bounds the ordinary session well before this
+ * does.
+ *
+ * For a pathologically attribute-heavy session the byte cap fires first and the
+ * request 413s instead of truncating. That is the designed outcome — the
+ * alternative is an OOM that takes the isolate with it.
+ */
+export const MAX_AI_SESSION_SPANS_RESPONSE_BYTES = 10_000_000
+
+/**
+ * The session's spans exceed `MAX_AI_SESSION_SPANS_RESPONSE_BYTES`.
+ *
+ * Distinct from the row cap, which truncates and reports `truncated: true`: the
+ * byte ceiling aborts the read before a response can be materialized, so there
+ * is nothing to return. The endpoint takes no size parameter, but it does take
+ * a window, and when one is supplied both the session detection and the span
+ * fan-out are bounded by it — so a narrower range genuinely returns fewer
+ * bytes, which is what `recovery: "fix_request"` points the caller at.
+ */
+export class AiSessionTooLargeError extends HttpTaggedError<AiSessionTooLargeError>()(
+	"@maple/http/ai-sessions/AiSessionTooLargeError",
+	{
+		sessionId: Schema.String,
+		message: Schema.String,
+	},
+	{
+		status: 413,
+		code: "ai_session_too_large",
+		title: "Session is too large to load",
+		message:
+			"This session's spans are too large to return in one response. Open it from the Agent Sessions list, or narrow the time range.",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "redacted",
+	},
+) {}
 
 export class AiSessionsInternalApiGroup extends HttpApiGroup.make("aiSessionsInternal")
 	.add(
 		HttpApiEndpoint.post("list", "/list", {
 			payload: ListAiSessionsRequest,
 			success: ListAiSessionsResponse,
-			error: aiSessionEndpointErrors,
+			error: warehouseReadHttpErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("facets", "/facets", {
 			payload: ListAiSessionsFacetsRequest,
 			success: ListAiSessionsFacetsResponse,
-			error: aiSessionEndpointErrors,
+			error: warehouseReadHttpErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("spans", "/spans", {
+			payload: GetAiSessionSpansRequest,
+			success: GetAiSessionSpansResponse,
+			error: [...warehouseReadHttpErrors, AiSessionTooLargeError],
 		}),
 	)
 	.prefix("/internal/ai-sessions")

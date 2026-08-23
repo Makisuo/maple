@@ -34,6 +34,9 @@ interface SpanDetailPanelProps {
 	/** Start of the whole trace (earliest span start) — anchors the position-in-trace bar. */
 	traceStartTime: string
 	totalDurationMs: number
+	/** Extra header controls, left of the close button — e.g. the session page's
+	 *  "open full trace" link. The trace page itself needs none. */
+	headerActions?: ReactNode
 	className?: string
 }
 
@@ -190,6 +193,7 @@ export function SpanDetailPanel({
 	onClose,
 	traceStartTime,
 	totalDurationMs,
+	headerActions,
 	className,
 }: SpanDetailPanelProps) {
 	const { effectiveTimezone } = useTimezonePreference()
@@ -257,9 +261,12 @@ export function SpanDetailPanel({
 						<span className="text-[10px] text-muted-foreground">{kindLabel}</span>
 					</div>
 				</div>
-				<Button variant="ghost" size="icon" onClick={onClose} className="shrink-0">
-					<XmarkIcon size={16} />
-				</Button>
+				<div className="flex shrink-0 items-center gap-0.5">
+					{headerActions}
+					<Button variant="ghost" size="icon" onClick={onClose}>
+						<XmarkIcon size={16} />
+					</Button>
+				</div>
 			</div>
 
 			{/* Summary stats */}

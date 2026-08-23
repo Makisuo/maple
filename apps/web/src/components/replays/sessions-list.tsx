@@ -1,9 +1,10 @@
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
-import { useCallback, useState } from "react"
+import { useCallback } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { cn } from "@maple/ui/lib/utils"
 import { EyeIcon } from "@/components/icons"
+import { usePageScrollMargin } from "@/hooks/use-page-scroll-margin"
 import { browserIconFor, deviceIconFor } from "./session-icons"
 import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 
@@ -123,14 +124,13 @@ export function SessionsList({
 	durationP95,
 }: SessionsListProps) {
 	const navigate = useNavigate()
-	const [listElement, setListElement] = useState<HTMLDivElement | null>(null)
-	const scrollElement = listElement?.closest<HTMLDivElement>('[data-slot="page-scroll-area"]') ?? null
+	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
 	const virtualizer = useVirtualizer({
 		count: sessions.length,
-		getScrollElement: () => scrollElement,
+		getScrollElement,
 		estimateSize: () => 65,
 		overscan: 8,
-		scrollMargin: listElement?.offsetTop ?? 0,
+		scrollMargin,
 	})
 	const virtualItems = virtualizer.getVirtualItems()
 
@@ -158,11 +158,7 @@ export function SessionsList({
 
 	return (
 		<div className="@container">
-			<div
-				ref={setListElement}
-				className="relative w-full"
-				style={{ height: virtualizer.getTotalSize() }}
-			>
+			<div ref={listRef} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
 				{virtualItems.map((virtualRow) => {
 					const session = sessions[virtualRow.index]!
 					const id = identity(session)

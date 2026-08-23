@@ -462,6 +462,9 @@ export interface SpanHierarchyResponse {
 	spans: Span[]
 	rootSpans: SpanNode[]
 	totalDurationMs: number
+	/** Earliest span start — anchors every position-in-trace bar. Absent when the
+	 *  trace returned no spans. */
+	traceStartTime: string | undefined
 }
 
 const GetSpanHierarchyInputSchema = Schema.Struct({
@@ -509,12 +512,19 @@ const getSpanHierarchyEffect = Effect.fn("QueryEngine.getSpanHierarchy")(functio
 	const spans = dedupeBySpanId(result.data.map((raw) => transformSpan(raw as SpanHierarchyRow)))
 	const rootSpans = buildSpanTree(spans)
 	const totalDurationMs = spans.length > 0 ? Math.max(...spans.map((span) => span.durationMs)) : 0
+	const traceStartTime =
+		spans.length === 0
+			? undefined
+			: spans.reduce((earliest, candidate) =>
+					new Date(candidate.startTime) < new Date(earliest.startTime) ? candidate : earliest,
+				).startTime
 
 	return {
 		traceId: input.traceId,
 		spans,
 		rootSpans,
 		totalDurationMs,
+		traceStartTime,
 	}
 })
 

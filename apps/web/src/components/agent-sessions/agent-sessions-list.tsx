@@ -1,6 +1,10 @@
+import { Link } from "@tanstack/react-router"
+
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 
 /** The wire row from `listAiSessions` — one AI agent session, newest first. */
 export interface AgentSessionRow {
@@ -14,44 +18,6 @@ export interface AgentSessionRow {
 	readonly startTime: string
 	readonly endTime: string
 	readonly durationMs: number
-}
-
-/**
- * Vendor ids the ingest gateway stamps (`AI_VENDORS` in
- * apps/ingest/src/ai_session.rs) → brand names. Listed here are the ids whose
- * brand casing the title-case fallback below can't derive — acronyms (SDK,
- * ADK), camel brands (LiteLLM, DSPy), and deliberately lowercase ones (eve,
- * smolagents). Anything unlisted falls back to Title Case with the `unknown:`
- * dialect prefix stripped, so a newly stamped vendor degrades to a readable
- * name instead of a raw id.
- */
-const VENDOR_LABELS = new Map<string, string>([
-	["claude_agent_sdk", "Claude Agent SDK"],
-	["crewai", "CrewAI"],
-	["dspy", "DSPy"],
-	["effect_ai", "Effect AI"],
-	["eve", "eve"],
-	["google_adk", "Google ADK"],
-	["langchain", "LangChain"],
-	["litellm", "LiteLLM"],
-	["llamaindex", "LlamaIndex"],
-	["openai_agents_sdk", "OpenAI Agents SDK"],
-	["openinference-openai", "OpenInference · OpenAI"],
-	["pydantic_ai", "Pydantic AI"],
-	["smolagents", "smolagents"],
-	["spring_ai", "Spring AI"],
-	["vercel_ai_sdk", "Vercel AI SDK"],
-])
-
-export function vendorLabel(vendorId: string): string {
-	const known = VENDOR_LABELS.get(vendorId)
-	if (known) return known
-	return vendorId
-		.replace(/^unknown:/, "")
-		.split(/[_-]+/)
-		.filter(Boolean)
-		.map((word) => word[0]!.toUpperCase() + word.slice(1))
-		.join(" ")
 }
 
 function absoluteTs(startTime: string): string {
@@ -68,17 +34,19 @@ interface AgentSessionsListProps {
 export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 	if (sessions.length === 0) {
 		return (
-			<div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 py-20 text-center">
-				<div className="mb-4 grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
-					<ChatBubbleSparkleIcon className="size-6" />
-				</div>
-				<p className="text-sm font-medium">No agent sessions yet</p>
-				<p className="mt-1.5 max-w-md text-sm text-muted-foreground">
-					Trace your AI agents with a supported framework or OpenTelemetry{" "}
-					<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em]">gen_ai</code>{" "}
-					spans, and their sessions will show up here.
-				</p>
-			</div>
+			<Empty>
+				<EmptyHeader>
+					<EmptyMedia variant="icon">
+						<ChatBubbleSparkleIcon />
+					</EmptyMedia>
+					<EmptyTitle>No agent sessions yet</EmptyTitle>
+					<EmptyDescription>
+						Trace your AI agents with a supported framework or OpenTelemetry{" "}
+						<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em]">gen_ai</code>{" "}
+						spans, and their sessions will show up here.
+					</EmptyDescription>
+				</EmptyHeader>
+			</Empty>
 		)
 	}
 
@@ -92,19 +60,21 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 						? `${vendor} · v${session.vendorVersion}`
 						: vendor
 				return (
-					<div
+					<Link
 						key={session.sessionId}
-						className="relative flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left @2xl:gap-4"
+						to="/agent-sessions/$sessionId"
+						params={{ sessionId: session.sessionId }}
+						// The session's own bounds, not this page's time range: the list
+						// query aggregates each qualifying trace in full, so the detail
+						// page can read straight from these.
+						search={{ t: session.startTime, end: session.endTime }}
+						className="relative flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset @2xl:gap-4"
 					>
 						{/* Errored sessions get a left accent so they can be picked out
 						    while scanning — same signal as the replays list. */}
 						{hasErrors && (
 							<span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-destructive" />
 						)}
-
-						{/* No leading avatar: the replays list uses one because a gradient
-						    initial encodes a *person*; an initial for a framework just reads
-						    as a counterfeit vendor logo. The framework is named in text. */}
 
 						{/* Identity lane: session id, framework underneath */}
 						<div className="min-w-0 flex-1 overflow-hidden">
@@ -124,7 +94,7 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 							<div className="mt-0.5 truncate text-xs text-muted-foreground">{secondary}</div>
 							{hasErrors && (
 								<div className="mt-1.5 flex items-center gap-1.5 @2xl:hidden">
-									<SessionBadges session={session} />
+									<ErrorChip count={session.errorSpanCount} />
 								</div>
 							)}
 						</div>
@@ -152,7 +122,7 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 
 						{/* Signal lane: error chip */}
 						<div className="hidden w-[8.75rem] shrink-0 items-center gap-1.5 overflow-hidden @2xl:flex">
-							<SessionBadges session={session} />
+							{hasErrors && <ErrorChip count={session.errorSpanCount} />}
 						</div>
 
 						{/* Time lane */}
@@ -164,7 +134,7 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 								{formatRelativeTimeOrDate(session.startTime)}
 							</span>
 						</div>
-					</div>
+					</Link>
 				)
 			})}
 
@@ -178,12 +148,11 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 	)
 }
 
-function SessionBadges({ session }: { session: AgentSessionRow }) {
-	if (session.errorSpanCount === 0) return null
+function ErrorChip({ count }: { count: number }) {
 	return (
 		<span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-destructive">
 			<span className="size-1 rounded-full bg-destructive" aria-hidden />
-			{session.errorSpanCount} error{session.errorSpanCount === 1 ? "" : "s"}
+			{count} error{count === 1 ? "" : "s"}
 		</span>
 	)
 }

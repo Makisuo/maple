@@ -1,9 +1,13 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
+	AiSessionTooLargeError,
+	AI_SESSION_SPANS_MAX_SPANS,
 	CurrentTenant,
+	GetAiSessionSpansResponse,
 	ListAiSessionsFacetsResponse,
 	ListAiSessionsResponse,
 	MapleInternalApi,
+	MAX_AI_SESSION_SPANS_RESPONSE_BYTES,
 } from "@maple/domain/http"
 import { Effect } from "effect"
 import { CH } from "@maple/query-engine"
@@ -39,8 +43,7 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							{ rowSchema: Integrations.aiSessionListRowSchema },
 						)
 						// The row schema already coerces the UInt64 aggregates and decodes
-						// exactly the response's fields, so rows pass through unmapped
-						// (unlike listReplays, which re-brands and re-coerces per field).
+						// exactly the response's fields, so rows pass through unmapped.
 						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 							profile: "list",
 							context: "listAiSessions",
@@ -69,6 +72,72 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 						return new ListAiSessionsFacetsResponse({
 							vendors: pick("vendor"),
 							services: pick("service"),
+						})
+					}),
+				)
+				.handle("spans", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						// Both halves or neither: a lone bound would silently pin the
+						// other end of the read to the param placeholder.
+						const window =
+							payload.startTime !== undefined && payload.endTime !== undefined
+								? { startTime: payload.startTime, endTime: payload.endTime }
+								: undefined
+						// Annotated before the read: a 413 never reaches the code below.
+						// `window_source` is how often the unwindowed retention scan runs
+						// gets watched — it should stay the exception.
+						yield* Effect.annotateCurrentSpan({
+							orgId: tenant.orgId,
+							"maple.ai.session.id": payload.sessionId,
+							"maple.ai.window_source": window === undefined ? "resolved" : "client",
+						})
+						// One row past the cap: the extra row is what distinguishes a
+						// session that exactly fills the cap from one whose tail was cut.
+						const compiled = CH.compile(
+							Integrations.aiSessionSpansQuery({
+								limit: AI_SESSION_SPANS_MAX_SPANS + 1,
+								windowed: window !== undefined,
+							}),
+							// The unwindowed variant references neither window param, so
+							// passing them would leave two values with nothing to bind to.
+							window === undefined
+								? { orgId: tenant.orgId, sessionId: payload.sessionId }
+								: { orgId: tenant.orgId, sessionId: payload.sessionId, ...window },
+							{ rowSchema: Integrations.aiSessionSpansRowSchema },
+						)
+						const rows = yield* warehouse
+							.compiledQueryBounded(tenant, compiled, {
+								profile: "list",
+								context: "aiSessionSpans",
+								responseLimits: {
+									maxRows: AI_SESSION_SPANS_MAX_SPANS + 1,
+									maxBytes: MAX_AI_SESSION_SPANS_RESPONSE_BYTES,
+								},
+							})
+							.pipe(
+								Effect.catchTag(
+									"@maple/query-engine/execution/WarehouseResponseLimitError",
+									() =>
+										Effect.fail(
+											new AiSessionTooLargeError({
+												sessionId: payload.sessionId,
+												message: "AI session spans exceeded the response byte limit.",
+											}),
+										),
+								),
+							)
+						const truncated = rows.length > AI_SESSION_SPANS_MAX_SPANS
+						const spans = rows.slice(0, AI_SESSION_SPANS_MAX_SPANS)
+						yield* Effect.annotateCurrentSpan({
+							"maple.ai.span_count": spans.length,
+							"maple.ai.truncated": truncated,
+						})
+						// Mapped server-side: the raw attribute maps are the dominant
+						// weight of this read and nothing downstream needs them.
+						return new GetAiSessionSpansResponse({
+							data: Integrations.mapAiSpans(spans),
+							truncated,
 						})
 					}),
 				)

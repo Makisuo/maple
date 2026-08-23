@@ -1,5 +1,9 @@
 import { Clock, Effect, Schema } from "effect"
-import { ListAiSessionsFacetsRequest, ListAiSessionsRequest } from "@maple/domain/http"
+import {
+	GetAiSessionSpansRequest,
+	ListAiSessionsFacetsRequest,
+	ListAiSessionsRequest,
+} from "@maple/domain/http"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
@@ -26,7 +30,7 @@ export const listAiSessions = Effect.fn("AiSessions.listAiSessions")(function* (
 }: {
 	data: ListAiSessionsInput
 }) {
-	const input = yield* decodeInput(ListAiSessionsInput, data ?? {}, "listAiSessions")
+	const input = yield* decodeInput(ListAiSessionsInput, data, "listAiSessions")
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
 	const result = yield* runWarehouseQuery("listAiSessions", () =>
 		Effect.gen(function* () {
@@ -35,7 +39,7 @@ export const listAiSessions = Effect.fn("AiSessions.listAiSessions")(function* (
 				payload: new ListAiSessionsRequest({
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
-					limit: input.limit ?? 50,
+					limit: input.limit,
 					vendorIds: input.vendorIds,
 					serviceNames: input.serviceNames,
 				}),
@@ -58,7 +62,7 @@ export const getAiSessionsFacets = Effect.fn("AiSessions.aiSessionsFacets")(func
 }: {
 	data: AiSessionsFacetsInput
 }) {
-	const input = yield* decodeInput(AiSessionsFacetsInput, data ?? {}, "aiSessionsFacets")
+	const input = yield* decodeInput(AiSessionsFacetsInput, data, "aiSessionsFacets")
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
 	const result = yield* runWarehouseQuery("aiSessionsFacets", () =>
 		Effect.gen(function* () {
@@ -72,4 +76,42 @@ export const getAiSessionsFacets = Effect.fn("AiSessions.aiSessionsFacets")(func
 		}),
 	)
 	return { vendors: result.vendors, services: result.services }
+})
+
+// Session spans (detail page)
+
+const AiSessionSpansInput = Schema.Struct({
+	sessionId: Schema.String.check(Schema.isMinLength(1)),
+	// Optional, and sent as a pair. A caller that knows the session's bounds —
+	// anything opened from the list, and any link the detail page has already
+	// stamped — gets the partition-pruned read; one that does not lets the
+	// warehouse find the session by id across retention.
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
+})
+export type AiSessionSpansInput = Schema.Schema.Type<typeof AiSessionSpansInput>
+
+export const getAiSessionSpans = Effect.fn("AiSessions.aiSessionSpans")(function* ({
+	data,
+}: {
+	data: AiSessionSpansInput
+}) {
+	const input = yield* decodeInput(AiSessionSpansInput, data, "aiSessionSpans")
+	yield* Effect.annotateCurrentSpan("sessionId", input.sessionId)
+	const result = yield* runWarehouseQuery("aiSessionSpans", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			return yield* client.aiSessionsInternal.spans({
+				payload: new GetAiSessionSpansRequest({
+					sessionId: input.sessionId,
+					// Spread rather than assigned: the payload keys are `optionalKey`,
+					// so an explicit `undefined` is not the same as an absent key.
+					...(input.startTime !== undefined && input.endTime !== undefined
+						? { startTime: input.startTime, endTime: input.endTime }
+						: undefined),
+				}),
+			})
+		}),
+	)
+	return { data: result.data, truncated: result.truncated }
 })

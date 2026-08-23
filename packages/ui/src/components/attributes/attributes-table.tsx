@@ -6,7 +6,9 @@ import { cn } from "../../lib/utils"
 import { useCopy } from "../../hooks/use-copy"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "../ui/collapsible"
 import { groupAttributesByNamespace } from "../../lib/log-attributes"
+import { splitGenAiAttributes } from "../../lib/gen-ai"
 import { CollapsibleJsonValue } from "./json-value"
+import { GenAiSection } from "./gen-ai-section"
 import { useAttributesConfig } from "./context"
 
 /**
@@ -68,18 +70,29 @@ export function tryParseJson(value: string): unknown | null {
 	}
 }
 
-function AttributeRow({
+export function AttributeRow({
 	attrKey,
 	value,
 	displayKey,
+	displayValue,
+	plainKey,
 }: {
 	attrKey: string
 	value: string
 	/** Label shown in the key column; defaults to `attrKey`. Copies still use the full `attrKey`. */
 	displayKey?: string
+	/**
+	 * Reading text for the value column; defaults to `value`, and a copy still
+	 * yields `value`. A display string that differs from the raw value has
+	 * already been formatted for reading, so it renders as text — that is what
+	 * separates a flattened `["stop"]` from a payload worth expanding.
+	 */
+	displayValue?: string
+	/** The key column holds a label rather than a key: drop the mono face. */
+	plainKey?: boolean
 }) {
 	const { renderValue } = useAttributesConfig()
-	const parsed = tryParseJson(value)
+	const parsed = displayValue !== undefined && displayValue !== value ? null : tryParseJson(value)
 	// Only non-JSON values are overridable; JSON keeps its collapsible renderer.
 	const override = parsed === null ? renderValue?.(attrKey, value) : null
 	return (
@@ -87,7 +100,10 @@ function AttributeRow({
 			<CopyableValue
 				value={attrKey}
 				label="attribute key"
-				className="font-mono text-[11px] leading-relaxed text-muted-foreground break-words"
+				className={cn(
+					"text-[11px] leading-relaxed text-muted-foreground break-words",
+					!plainKey && "font-mono",
+				)}
 			>
 				{displayKey ?? attrKey}
 			</CopyableValue>
@@ -98,7 +114,7 @@ function AttributeRow({
 					override
 				) : (
 					<CopyableValue value={value} label={attrKey}>
-						{value}
+						{displayValue ?? value}
 					</CopyableValue>
 				)}
 			</div>
@@ -240,10 +256,11 @@ function partitionInternalAttributes(attrs: Record<string, string>) {
 }
 
 /**
- * An `AttributesTable` with the `maple_` keys folded into a collapsed
- * "Maple Internal" table beneath it. Use this anywhere a raw attribute map from
- * the pipeline is shown — span, resource, or log — since any of them can carry
- * gateway-stamped keys.
+ * An `AttributesTable` with the two namespaces that read better on their own
+ * lifted out: `gen_ai.*` into a labelled AI block above it, and `maple_` into a
+ * collapsed "Maple Internal" table beneath it. Use this anywhere a raw
+ * attribute map from the pipeline is shown — span, resource, or log — since any
+ * of them can carry either.
  */
 export function AttributesSection({
 	attributes,
@@ -251,17 +268,27 @@ export function AttributesSection({
 	searchQuery,
 	groupByNamespace,
 }: AttributesTableProps) {
-	const { standard, internal } = partitionInternalAttributes(attributes)
+	const { groups, rest } = splitGenAiAttributes(attributes)
+	const { standard, internal } = partitionInternalAttributes(rest)
 	const internalCount = Object.keys(internal).length
+
+	// An LLM or tool span often carries nothing BUT gen_ai.* keys; "No span
+	// attributes available" under a populated AI block would read as a
+	// contradiction, so the raw table only renders when it has rows to show —
+	// or when nothing at all does, where its empty line is the right message.
+	const showRawTable = Object.keys(standard).length > 0 || groups.length === 0
 
 	return (
 		<div className="space-y-2">
-			<AttributesTable
-				attributes={standard}
-				title={title}
-				searchQuery={searchQuery}
-				groupByNamespace={groupByNamespace}
-			/>
+			<GenAiSection groups={groups} searchQuery={searchQuery} />
+			{showRawTable && (
+				<AttributesTable
+					attributes={standard}
+					title={title}
+					searchQuery={searchQuery}
+					groupByNamespace={groupByNamespace}
+				/>
+			)}
 			{internalCount > 0 && (
 				<Collapsible>
 					<CollapsibleTrigger className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors group">

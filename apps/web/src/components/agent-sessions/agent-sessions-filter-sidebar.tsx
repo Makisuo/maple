@@ -13,7 +13,7 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { vendorLabel } from "./agent-sessions-list"
+import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 
 const routeApi = getRouteApi("/agent-sessions/")
 

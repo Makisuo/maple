@@ -72,6 +72,21 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 			),
 	},
 	{
+		// A session detail page opened from a link that carries no time hints.
+		// Compiled with no window params at all, which is half the point: the
+		// baseline is what proves neither level kept a `Timestamp` predicate (or
+		// an unsubstituted `__PARAM_startTime__`) behind.
+		module: "ai-sessions",
+		name: "aiSessionSpansQuery",
+		label: "unwindowed",
+		compile: () =>
+			compile(
+				CH.aiSessionSpansQuery({ windowed: false }),
+				{ orgId: ORG_ID, sessionId: "wrun_sql_catalog" },
+				{ rowSchema: CH.aiSessionSpansRowSchema },
+			),
+	},
+	{
 		module: "cloudflare-infra",
 		name: "cloudflareZoneLatencySQL",
 		label: "default",

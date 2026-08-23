@@ -342,12 +342,17 @@ function RightSidebar({
 	className,
 	title = "Details",
 	width = "w-72",
+	open,
+	onOpenChange,
 }: {
 	children: React.ReactNode
 	className?: string
 	/** Accessible name for the sheet at narrow widths. */
 	title?: string
 	width?: string
+	/** Controlled sheet state, for a rail that opens from a selection rather than the header trigger. */
+	open?: boolean
+	onOpenChange?: (open: boolean) => void
 }) {
 	const { filterSidebarCollapsed, rightSheetOpen, setRightSheetOpen, setHasRightSidebar } = usePageLayout()
 	const hasContent = React.Children.toArray(children).length > 0
@@ -364,7 +369,13 @@ function RightSidebar({
 
 	if (filterSidebarCollapsed) {
 		return (
-			<Sheet open={rightSheetOpen} onOpenChange={setRightSheetOpen}>
+			<Sheet
+				open={open ?? rightSheetOpen}
+				onOpenChange={(next) => {
+					setRightSheetOpen(next)
+					onOpenChange?.(next)
+				}}
+			>
 				<SheetContent side="right" className="w-80 overflow-y-auto p-4">
 					<SheetHeader className="sr-only">
 						<SheetTitle>{title}</SheetTitle>
