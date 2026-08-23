@@ -42,6 +42,21 @@ function usePageLayout() {
 	return ctx
 }
 
+const noopScrolledReporter = (_scrolled: boolean) => {}
+
+/**
+ * `setIsScrolled` for a pane that owns its own scroller and so sits under
+ * {@link Fill} rather than {@link ScrollArea} — a virtualized table, say — but
+ * still wants the sticky area above it to raise its shadow.
+ *
+ * Unlike {@link usePageLayout} this tolerates being outside a `PageLayout`
+ * (returning a no-op), because such panes are also mounted standalone in the
+ * `/lab/bench` harnesses.
+ */
+function usePageScrolledReporter(): (scrolled: boolean) => void {
+	return React.use(PageLayoutContext)?.setIsScrolled ?? noopScrolledReporter
+}
+
 /* -------------------------------------------------------------------------------------------------
  * Root
  * -------------------------------------------------------------------------------------------------*/
@@ -426,4 +441,4 @@ export const PageLayout = {
 	RightSidebarTrigger,
 }
 
-export { usePageLayout }
+export { usePageLayout, usePageScrolledReporter }

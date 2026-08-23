@@ -76,9 +76,14 @@ function LogsPage() {
 								}
 							/>
 						</DashboardLayout.Sticky>
-						<DashboardLayout.Scroll>
-							<LogsTable filters={search} />
-						</DashboardLayout.Scroll>
+						{/* `Fill`, not `Scroll`: the logs stream is virtualized and owns its
+						    own scroller, so an outer `overflow-auto` only adds a second
+						    scrollbar for the wheel to chain into at the ends. */}
+						<DashboardLayout.Fill>
+							<div className="flex min-h-0 flex-1 flex-col p-4">
+								<LogsTable filters={search} />
+							</div>
+						</DashboardLayout.Fill>
 					</DashboardLayout.Content>
 				</DashboardLayout.Body>
 			</DashboardLayout.Root>
