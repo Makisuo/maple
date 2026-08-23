@@ -19,6 +19,10 @@ import {
 } from "@maple/infra/aws"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { resolveDeploymentEnvironment } from "@maple/infra/cloudflare"
+// Only the primitives. The grouped helpers in that module return Worker-binding
+// shapes (Redacted secrets inline); these values feed ECS `env:` and Secrets
+// Manager ARNs instead, so the gateway composes them itself.
+import { optionalPlain, requireEnv } from "@maple/infra/env"
 
 /**
  * Binary the deploy workflows compile ahead of time (with a warm cargo cache)
@@ -45,19 +49,6 @@ const PREBUILT_DOCKERFILE = resolve("apps/ingest/Dockerfile.prebuilt")
  */
 const COLLECTOR_CONTEXT = "packages/infra/otel-collector"
 const COLLECTOR_DOCKERFILE = resolve(COLLECTOR_CONTEXT, "Dockerfile")
-
-const requireEnv = (key: string): string => {
-	const value = process.env[key]?.trim()
-	if (!value) {
-		throw new Error(`Missing required deployment env: ${key}`)
-	}
-	return value
-}
-
-const optionalPlain = (key: string, fallback?: string): Record<string, string> => {
-	const value = process.env[key]?.trim() || fallback
-	return value ? { [key]: value } : {}
-}
 
 /** Port the gateway binds (`apps/ingest/Dockerfile` EXPOSEs the same). */
 const INGEST_PORT = 3474

@@ -9,29 +9,24 @@ import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	formatMapleStage,
 	resolveDatabaseMode,
-	resolveDeploymentEnvironment,
 	resolveHyperdriveName,
 	resolveHyperdriveRefId,
 	resolveWorkerName,
 } from "@maple/infra/cloudflare"
-
-const requireEnv = (key: string): string => {
-	const value = process.env[key]?.trim()
-	if (!value) {
-		throw new Error(`Missing required deployment env: ${key}`)
-	}
-	return value
-}
-
-const optionalPlain = (key: string, fallback?: string): Record<string, string> => {
-	const value = process.env[key]?.trim() || fallback
-	return value ? { [key]: value } : {}
-}
-
-const optionalSecret = (key: string): Record<string, Redacted.Redacted<string>> => {
-	const value = process.env[key]?.trim()
-	return value ? { [key]: Redacted.make(value) } : {}
-}
+import {
+	apnsEnv,
+	appUrlsEnv,
+	authEnv,
+	cloudflareOAuthEnv,
+	ingestKeyCryptoEnv,
+	optionalPlain,
+	optionalSecret,
+	planetScaleOAuthEnv,
+	requireEnv,
+	requireSecret,
+	selfObservabilityEnv,
+	tinybirdEnv,
+} from "@maple/infra/env"
 
 export interface CreateMapleApiOptions {
 	stage: MapleStage
@@ -137,8 +132,8 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			name: planetScaleWebhookQueueName,
 		})
 
-		// Session-replay rrweb payloads. The ingest gateway (a Railway container,
-		// not a Worker) writes these over the S3 API with SigV4; this binding is
+		// Session-replay rrweb payloads. The ingest gateway (a Rust service on ECS
+		// Fargate, not a Worker) writes these over the S3 API with SigV4; this binding is
 		// the read side, hydrating `session_replay_events` rows whose `Events` is
 		// empty. Stage-isolated, so a pr/stg deploy can never serve or overwrite
 		// prd recordings.
@@ -239,27 +234,16 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 							}),
 						}
 					: undefined),
-				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
-				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
-				...optionalSecret("TINYBIRD_SIGNING_KEY"),
-				...optionalPlain("TINYBIRD_WORKSPACE_ID"),
-				...optionalPlain("TINYBIRD_RAW_SQL_JWT_RPS_LIMIT"),
+				...tinybirdEnv(),
 				...optionalPlain("CLICKHOUSE_URL"),
 				CLICKHOUSE_PROVIDER: process.env.CLICKHOUSE_PROVIDER?.trim() || "tinybird",
 				...optionalPlain("CLICKHOUSE_USER"),
 				...optionalPlain("CLICKHOUSE_DATABASE"),
 				...optionalSecret("CLICKHOUSE_PASSWORD"),
-				MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
-				MAPLE_DEFAULT_ORG_ID: process.env.MAPLE_DEFAULT_ORG_ID?.trim() || "default",
-				MAPLE_INGEST_KEY_ENCRYPTION_KEY: Redacted.make(requireEnv("MAPLE_INGEST_KEY_ENCRYPTION_KEY")),
-				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Redacted.make(
-					requireEnv("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
-				),
-				MAPLE_SHARE_TOKEN_HMAC_KEY: Redacted.make(requireEnv("MAPLE_SHARE_TOKEN_HMAC_KEY")),
-				MAPLE_INGEST_PUBLIC_URL:
-					process.env.MAPLE_INGEST_PUBLIC_URL?.trim() || "https://ingest.maple.dev",
-				MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
-				EMAIL_FROM: process.env.EMAIL_FROM?.trim() || "Maple <notifications@noreply.maple.dev>",
+				...authEnv(),
+				...ingestKeyCryptoEnv(),
+				MAPLE_SHARE_TOKEN_HMAC_KEY: requireSecret("MAPLE_SHARE_TOKEN_HMAC_KEY"),
+				...appUrlsEnv(),
 				// Bucket-cache knobs: on by default in deployed stages. Override via
 				// deploy-time env (e.g. `QE_BUCKET_CACHE_ENABLED=false`) if needed.
 				QE_BUCKET_CACHE_ENABLED: process.env.QE_BUCKET_CACHE_ENABLED?.trim() || "true",
@@ -275,19 +259,8 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				// 16/250 and the code defaults moved to 6/40 underneath them.
 				QE_BUCKET_CACHE_READ_CONCURRENCY: process.env.QE_BUCKET_CACHE_READ_CONCURRENCY?.trim() || "6",
 				EDGE_CACHE_READ_TIMEOUT_MS: process.env.EDGE_CACHE_READ_TIMEOUT_MS?.trim() || "40",
-				...optionalPlain("MAPLE_ENDPOINT"),
-				// Derived from the stage, deliberately NOT `optionalPlain` — that helper
-				// lets `process.env` win over the fallback, so a stray
-				// MAPLE_ENVIRONMENT=production in a pr-N deploy environment would open
-				// EmailService.emailAllowed on a stage that shares live org data.
-				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
-				// GITHUB_SHA fallback so a deploy that did not export COMMIT_SHA still
-				// stamps a build. An unstamped Worker reports no `service.version`, and
-				// the error evaluator treats a build it cannot identify as a regression —
-				// so a missing binding quietly restores the behaviour where any occurrence
-				// reopens a fixed issue. Matches what apps/ingest already does.
-				...optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim()),
-				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
+				// MAPLE_ENDPOINT / MAPLE_ENVIRONMENT / COMMIT_SHA / MAPLE_INGEST_KEY.
+				...selfObservabilityEnv(stage),
 				// Agent LLM path. `MAPLE_LLM_PROVIDER` flips between OpenRouter (default) and
 				// Workers AI; both stay wired, so a switch is this one var plus a redeploy.
 				// See `@/platform/Llm` for the provider-scoped model overrides.
@@ -295,10 +268,6 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalPlain("MAPLE_TRIAGE_MODEL_OPENROUTER"),
 				...optionalPlain("MAPLE_TRIAGE_MODEL_WORKERS_AI"),
 				...optionalSecret("OPENROUTER_API_KEY"),
-				...optionalSecret("MAPLE_ROOT_PASSWORD"),
-				...optionalSecret("CLERK_SECRET_KEY"),
-				...optionalPlain("CLERK_PUBLISHABLE_KEY"),
-				...optionalSecret("CLERK_JWT_KEY"),
 				// Svix signing secrets for the public webhook receivers (`/webhooks/clerk`,
 				// `/webhooks/autumn`); each route answers 503 until its secret is set.
 				...optionalSecret("CLERK_WEBHOOK_SECRET"),
@@ -321,10 +290,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalPlain("SLACK_CLIENT_ID"),
 				...optionalSecret("SLACK_CLIENT_SECRET"),
 				...optionalSecret("SLACK_INTERNAL_SERVICE_TOKEN"),
-				// Apple push (iOS app) — token auth; see platform/Apns.ts
-				...optionalPlain("APNS_TEAM_ID"),
-				...optionalPlain("APNS_KEY_ID"),
-				...optionalSecret("APNS_PRIVATE_KEY"),
+				...apnsEnv(),
 				...optionalPlain("GITHUB_APP_ID"),
 				...optionalPlain("GITHUB_APP_SLUG"),
 				...optionalSecret("GITHUB_APP_PRIVATE_KEY"),
@@ -332,21 +298,8 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalSecret("GITHUB_APP_CLIENT_SECRET"),
 				...optionalSecret("GITHUB_APP_WEBHOOK_SECRET"),
 				...optionalPlain("GITHUB_API_BASE_URL"),
-				// Cloudflare integration (account OAuth — Authorization Code + PKCE)
-				...optionalPlain("CLOUDFLARE_OAUTH_CLIENT_ID"),
-				...optionalSecret("CLOUDFLARE_OAUTH_CLIENT_SECRET"),
-				...optionalPlain("CLOUDFLARE_OAUTH_SCOPES"),
-				...optionalPlain("CLOUDFLARE_OAUTH_AUTHORIZE_URL"),
-				...optionalPlain("CLOUDFLARE_OAUTH_TOKEN_URL"),
-				...optionalPlain("CLOUDFLARE_OAUTH_REVOKE_URL"),
-				...optionalPlain("MAPLE_CLOUDFLARE_API_BASE_URL"),
-				// PlanetScale integration (OAuth application — confidential client, no PKCE)
-				...optionalPlain("PLANETSCALE_OAUTH_CLIENT_ID"),
-				...optionalSecret("PLANETSCALE_OAUTH_CLIENT_SECRET"),
-				...optionalPlain("PLANETSCALE_OAUTH_AUTHORIZE_URL"),
-				...optionalPlain("PLANETSCALE_OAUTH_TOKEN_URL"),
-				...optionalPlain("PLANETSCALE_OAUTH_TOKEN_INFO_URL"),
-				...optionalPlain("MAPLE_PLANETSCALE_API_BASE_URL"),
+				...cloudflareOAuthEnv(),
+				...planetScaleOAuthEnv(),
 			},
 		})) as MapleApiWorker
 

@@ -1,31 +1,9 @@
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
-import * as Redacted from "effect/Redacted"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
-import {
-	CLOUDFLARE_WORKER_PLACEMENT,
-	resolveDeploymentEnvironment,
-	resolveWorkerName,
-} from "@maple/infra/cloudflare"
-
-const requireEnv = (key: string): string => {
-	const value = process.env[key]?.trim()
-	if (!value) {
-		throw new Error(`Missing required deployment env: ${key}`)
-	}
-	return value
-}
-
-const optionalPlain = (key: string, fallback?: string): Record<string, string> => {
-	const value = process.env[key]?.trim() || fallback
-	return value ? { [key]: value } : {}
-}
-
-const optionalSecret = (key: string): Record<string, Redacted.Redacted<string>> => {
-	const value = process.env[key]?.trim()
-	return value ? { [key]: Redacted.make(value) } : {}
-}
+import { CLOUDFLARE_WORKER_PLACEMENT, resolveWorkerName } from "@maple/infra/cloudflare"
+import { authEnv, optionalPlain, optionalSecret, selfObservabilityEnv } from "@maple/infra/env"
 
 export interface CreateElectricSyncWorkerOptions {
 	stage: MapleStage
@@ -49,13 +27,8 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 			domain: domains.sync,
 			env: {
 				// Auth (same AuthEnv subset the api worker sets; no DB).
-				MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
-				MAPLE_DEFAULT_ORG_ID: process.env.MAPLE_DEFAULT_ORG_ID?.trim() || "default",
+				...authEnv(),
 				...optionalPlain("MAPLE_ORG_ID_OVERRIDE"),
-				...optionalSecret("MAPLE_ROOT_PASSWORD"),
-				...optionalSecret("CLERK_SECRET_KEY"),
-				...optionalPlain("CLERK_PUBLISHABLE_KEY"),
-				...optionalSecret("CLERK_JWT_KEY"),
 				// ElectricSQL upstream: base URL (Electric Cloud in prod) + Cloud source
 				// credentials. The shape proxy 503s if URL is unset.
 				//
@@ -72,15 +45,10 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 						}
 					: undefined),
 				// Self-observability (OTLP export through the ingest gateway).
-				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
-				...optionalPlain("MAPLE_ENDPOINT"),
-				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
-				// GITHUB_SHA fallback so a deploy that did not export COMMIT_SHA still
-				// stamps a build. An unstamped Worker reports no `service.version`, and
-				// the error evaluator treats a build it cannot identify as a regression —
-				// so a missing binding quietly restores the behaviour where any occurrence
-				// reopens a fixed issue. Matches what apps/ingest already does.
-				...optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim()),
+				// NOTE: MAPLE_ENVIRONMENT used to be `optionalPlain(…, stageDefault)` here,
+				// which let `process.env` win — the exact override `api` and `alerting`
+				// both guard against. It is stage-derived now, like theirs.
+				...selfObservabilityEnv(stage),
 			},
 		})
 

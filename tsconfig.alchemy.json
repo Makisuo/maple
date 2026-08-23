@@ -9,8 +9,14 @@
 		"strict": true,
 		"skipLibCheck": true,
 		"types": ["node"],
+		// Every `@maple/infra` subpath the stack files import. Listing only some of
+		// them let the rest resolve through node_modules instead, so the root
+		// typecheck and turbo's disagreed about which sources they were checking.
 		"paths": {
-			"@maple/infra/cloudflare": ["./packages/infra/src/cloudflare/index.ts"]
+			"@maple/infra": ["./packages/infra/src/index.ts"],
+			"@maple/infra/aws": ["./packages/infra/src/aws/index.ts"],
+			"@maple/infra/cloudflare": ["./packages/infra/src/cloudflare/index.ts"],
+			"@maple/infra/env": ["./packages/infra/src/env.ts"]
 		}
 	},
 	"include": ["alchemy.run.ts", "apps/*/alchemy.run.ts", "scripts/aws-probe.run.ts", "scripts/ingest-preview.run.ts"]
