@@ -1,10 +1,10 @@
 import * as React from "react"
 
-import { ChevronDownIcon, ChevronRightIcon } from "../icons"
+import { ChevronDownIcon, ChevronRightIcon, LayersIcon } from "../icons"
 import { cn } from "../../lib/utils"
 import { getServiceColor } from "../../lib/colors"
 import { formatDuration } from "../../lib/format"
-import { getCacheInfo } from "../../lib/cache"
+import { describeSpan } from "../../lib/span-category"
 import type { TimelineBar } from "./trace-timeline-types"
 import { DEPTH_INDENT, ROW_HEIGHT } from "./trace-timeline-types"
 
@@ -55,7 +55,8 @@ function TraceTimelineRowImpl({
 	onHover,
 }: TraceTimelineRowProps) {
 	const spanId = bar.span.spanId
-	const cacheInfo = getCacheInfo(bar.span.spanAttributes)
+	const { category, cacheInfo } = describeSpan(bar.span)
+	const CategoryIcon = category.Icon
 	const durationLabel = formatDuration(bar.span.durationMs)
 
 	return (
@@ -113,6 +114,14 @@ function TraceTimelineRowImpl({
 				) : (
 					<span className="inline-block size-4 shrink-0" />
 				)}
+				{/* Category glyph. The timeline row has no room to spell the category out, so the
+				    title carries it; `describeSpan` already ran here for `cacheInfo`. */}
+				<span className="flex shrink-0 items-center" title={category.label}>
+					<CategoryIcon
+						size={11}
+						className={bar.isError ? "text-destructive" : category.accent.text}
+					/>
+				</span>
 				<span
 					className={cn(
 						"truncate font-mono font-medium text-foreground/90",
@@ -139,7 +148,13 @@ function TraceTimelineRowImpl({
 					</span>
 				)}
 				{bar.isCollapsed && bar.childCount > 0 && (
-					<span className="text-[9px] text-muted-foreground/70 shrink-0">+{bar.childCount}</span>
+					<span
+						className="flex items-center gap-0.5 shrink-0 text-[9px] text-muted-foreground/70"
+						title={`${bar.childCount} hidden ${bar.childCount === 1 ? "span" : "spans"}`}
+					>
+						<LayersIcon size={9} />
+						{bar.childCount}
+					</span>
 				)}
 				<span className="ml-auto shrink-0 pl-1 font-mono text-[10px] tabular-nums text-muted-foreground">
 					{durationLabel}

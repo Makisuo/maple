@@ -4,7 +4,25 @@
 // so non-DOM consumers (mobile) can import it; `span-category.ts` re-exports
 // SPAN_KIND_LABELS for its existing importers.
 
-/** OTel span kind → human label ("SPAN_KIND_SERVER" → "Server"). */
+/**
+ * Canonical span kinds. The warehouse carries two spellings of the same value: the managed
+ * (Tinybird) schema stores the OTLP enum name `SPAN_KIND_SERVER`, while the BYO-ClickHouse /
+ * ClickStack schema stores the short `Server` (see `IsEntryPoint` in
+ * `packages/domain/src/clickhouse`). Compare against a normalized kind, never against a raw
+ * string — a `=== "SPAN_KIND_CONSUMER"` check silently never fires on BYO ClickHouse.
+ */
+export type SpanKind = "SERVER" | "CLIENT" | "PRODUCER" | "CONSUMER" | "INTERNAL"
+
+const CANONICAL_KINDS: ReadonlySet<string> = new Set(["SERVER", "CLIENT", "PRODUCER", "CONSUMER", "INTERNAL"])
+
+/** Both warehouse spellings (and any casing) → a canonical kind; `null` for anything else. */
+export function normalizeSpanKind(spanKind: string | null | undefined): SpanKind | null {
+	if (!spanKind) return null
+	const bare = spanKind.replace(/^SPAN_KIND_/i, "").toUpperCase()
+	return CANONICAL_KINDS.has(bare) ? (bare as SpanKind) : null
+}
+
+/** OTel span kind → human label ("SPAN_KIND_SERVER" and "Server" → "Server"). */
 export const SPAN_KIND_LABELS: Record<string, string> = {
 	SPAN_KIND_SERVER: "Server",
 	SPAN_KIND_CLIENT: "Client",
@@ -16,6 +34,8 @@ export const SPAN_KIND_LABELS: Record<string, string> = {
 /** Human label for a span kind, degrading gracefully for unknown/absent kinds. */
 export function getSpanKindLabel(spanKind: string | null | undefined): string {
 	if (!spanKind) return "Unknown"
+	const kind = normalizeSpanKind(spanKind)
+	if (kind) return SPAN_KIND_LABELS[`SPAN_KIND_${kind}`] ?? kind
 	return SPAN_KIND_LABELS[spanKind] ?? spanKind.replace("SPAN_KIND_", "")
 }
 

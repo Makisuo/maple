@@ -1,10 +1,14 @@
 import {
-	ArrowLeftIcon,
-	ArrowRightIcon,
+	BoxArchiveIcon,
 	CodeIcon,
 	DatabaseIcon,
-	GlobeIcon,
+	GlobePointerIcon,
+	IndustryIcon,
+	MessagesIcon,
+	PaperPlaneIcon,
 	PulseIcon,
+	PuzzlePieceIcon,
+	StackPerspectiveIcon,
 } from "../components/icons"
 import type { IconComponent } from "../components/icons"
 
@@ -15,7 +19,7 @@ import { getCloudPlatform } from "./cloud-platforms"
 import type { CloudPlatformInfo } from "./cloud-platforms"
 import { getHttpInfo } from "./http"
 import type { HttpInfo } from "./http"
-import { SPAN_KIND_LABELS } from "./span-kind"
+import { normalizeSpanKind, SPAN_KIND_LABELS } from "./span-kind"
 import type { Span } from "./types"
 
 export { SPAN_KIND_LABELS }
@@ -65,12 +69,12 @@ const ACCENTS: Record<SpanCategoryId, SpanCategoryAccent> = {
 /** Ordered legend entries — default label/icon per category. */
 export const SPAN_CATEGORIES: ReadonlyArray<SpanCategory> = [
 	{ id: "server", label: "Server", Icon: PulseIcon, accent: ACCENTS.server },
-	{ id: "http", label: "HTTP", Icon: GlobeIcon, accent: ACCENTS.http },
+	{ id: "http", label: "HTTP", Icon: GlobePointerIcon, accent: ACCENTS.http },
 	{ id: "db", label: "Database", Icon: DatabaseIcon, accent: ACCENTS.db },
-	{ id: "cache", label: "Cache", Icon: DatabaseIcon, accent: ACCENTS.cache },
-	{ id: "messaging", label: "Messaging", Icon: ArrowRightIcon, accent: ACCENTS.messaging },
-	{ id: "platform", label: "Platform", Icon: GlobeIcon, accent: ACCENTS.platform },
-	{ id: "function", label: "Function", Icon: CodeIcon, accent: ACCENTS.function },
+	{ id: "cache", label: "Cache", Icon: StackPerspectiveIcon, accent: ACCENTS.cache },
+	{ id: "messaging", label: "Messaging", Icon: MessagesIcon, accent: ACCENTS.messaging },
+	{ id: "platform", label: "Platform", Icon: IndustryIcon, accent: ACCENTS.platform },
+	{ id: "function", label: "Function", Icon: PuzzlePieceIcon, accent: ACCENTS.function },
 	{ id: "internal", label: "Internal", Icon: CodeIcon, accent: ACCENTS.internal },
 ]
 
@@ -101,13 +105,14 @@ export function describeSpan(span: SpanCategoryInput): SpanDescription {
 	const platform = getCloudPlatform(attrs)
 	const httpInfo = getHttpInfo(span)
 	const className = extractClassName(span.spanName)
+	const spanKind = normalizeSpanKind(span.spanKind)
 
 	const category = ((): SpanCategory => {
 		if (cacheInfo) {
 			return {
 				id: "cache",
 				label: cacheInfo.system ?? "Cache",
-				Icon: DatabaseIcon,
+				Icon: StackPerspectiveIcon,
 				accent: ACCENTS.cache,
 			}
 		}
@@ -118,24 +123,24 @@ export function describeSpan(span: SpanCategoryInput): SpanDescription {
 			return { id: "platform", label: platform.kind, Icon: platform.Icon, accent: ACCENTS.platform }
 		}
 		if (httpInfo) {
-			return httpInfo.kind === "server" || span.spanKind === "SPAN_KIND_SERVER"
+			return httpInfo.kind === "server" || spanKind === "SERVER"
 				? { id: "server", label: "Server", Icon: PulseIcon, accent: ACCENTS.server }
-				: { id: "http", label: "HTTP", Icon: GlobeIcon, accent: ACCENTS.http }
+				: { id: "http", label: "HTTP", Icon: GlobePointerIcon, accent: ACCENTS.http }
 		}
-		if (span.spanKind === "SPAN_KIND_SERVER") {
+		if (spanKind === "SERVER") {
 			return { id: "server", label: "Server", Icon: PulseIcon, accent: ACCENTS.server }
 		}
-		if (span.spanKind === "SPAN_KIND_PRODUCER" || span.spanKind === "SPAN_KIND_CONSUMER") {
-			const isProducer = span.spanKind === "SPAN_KIND_PRODUCER"
+		if (spanKind === "PRODUCER" || spanKind === "CONSUMER") {
+			const isProducer = spanKind === "PRODUCER"
 			return {
 				id: "messaging",
-				label: SPAN_KIND_LABELS[span.spanKind],
-				Icon: isProducer ? ArrowRightIcon : ArrowLeftIcon,
+				label: SPAN_KIND_LABELS[`SPAN_KIND_${spanKind}`],
+				Icon: isProducer ? PaperPlaneIcon : BoxArchiveIcon,
 				accent: ACCENTS.messaging,
 			}
 		}
 		if (className) {
-			return { id: "function", label: "Function", Icon: CodeIcon, accent: ACCENTS.function }
+			return { id: "function", label: "Function", Icon: PuzzlePieceIcon, accent: ACCENTS.function }
 		}
 		const kindLabel =
 			SPAN_KIND_LABELS[span.spanKind] ?? (span.spanKind.replace("SPAN_KIND_", "") || "Internal")

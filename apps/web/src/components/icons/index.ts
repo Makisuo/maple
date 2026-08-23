@@ -8,6 +8,9 @@ export {
 	ArrowLeftIcon,
 	ArrowRightIcon,
 	ArrowRotateClockwiseIcon,
+	BellIcon,
+	BoltIcon,
+	BracketsCurlyIcon,
 	CheckIcon,
 	ChevronDownIcon,
 	ChevronExpandYIcon,
@@ -26,11 +29,14 @@ export {
 	DatabaseIcon,
 	DotsIcon,
 	EyeIcon,
+	FileIcon,
 	FireIcon,
+	FolderOpenIcon,
 	GlobeIcon,
 	LineHeightIcon,
 	LinkIcon,
 	LoaderIcon,
+	MagnifierCheckIcon,
 	MagnifierIcon,
 	MenuIcon,
 	MinusIcon,
@@ -38,10 +44,13 @@ export {
 	NetworkNodesIcon,
 	PulseIcon,
 	RadioCheckedIcon,
+	RocketIcon,
 	SidebarLeftIcon,
 	TabletIcon,
 	TextWrapIcon,
 	ThumbtackIcon,
+	TrashIcon,
+	UserIcon,
 	XmarkIcon,
 } from "@maple/ui/components/icons"
 
@@ -55,10 +64,7 @@ export { ArrowTrendUpIcon } from "./arrow-trend-up"
 export { ArrowUpIcon } from "./arrow-up"
 export { ArrowUpDownIcon } from "./arrow-up-down"
 export { AwsLambdaIcon } from "./aws-lambda"
-export { BellIcon } from "./bell"
 export { BluetoothIcon } from "./bluetooth"
-export { BoltIcon } from "./bolt"
-export { BracketsCurlyIcon } from "./brackets-curly"
 export { ChatBubbleSparkleIcon } from "./chat-bubble-sparkle"
 export { ChartBarIcon } from "./chart-bar"
 export { ChartBarHorizontalIcon } from "./chart-bar-horizontal"
@@ -81,12 +87,10 @@ export { EdgeIcon } from "./edge"
 export { EnvelopeIcon } from "./envelope"
 export { ExternalLinkIcon } from "./external-link"
 export { FaceRobotIcon } from "./face-robot"
-export { FileIcon } from "./file"
 export { FingerprintIcon } from "./fingerprint"
 export { FirefoxIcon } from "./firefox"
 export { FloppyDiskIcon } from "./floppy-disk"
 export { FolderIcon } from "./folder"
-export { FolderOpenIcon } from "./folder-open"
 export { GearIcon } from "./gear"
 export { GithubIcon } from "./github"
 export { GoogleIcon } from "./google"
@@ -109,7 +113,6 @@ export { LockIcon } from "./lock"
 export { LayoutLeftIcon } from "./layout-left"
 export { LayoutRightIcon } from "./layout-right"
 export { LogoutIcon } from "./logout"
-export { MagnifierCheckIcon } from "./magnifier-check"
 export { MaximizeIcon } from "./maximize"
 export { MediaPauseIcon } from "./media-pause"
 export { MediaPlayIcon } from "./media-play"
@@ -142,7 +145,6 @@ export { RabbitmqIcon } from "./rabbitmq"
 export { PriorityBarsIcon, PRIORITY_LABEL } from "./priority-bars"
 export type { PriorityLevel } from "./priority-bars"
 export { RedisIcon } from "./redis"
-export { RocketIcon } from "./rocket"
 export { SafariIcon } from "./safari"
 export { ServerIcon } from "./server"
 export { ShieldIcon } from "./shield"
@@ -154,9 +156,7 @@ export { SquareTerminalIcon } from "./square-terminal"
 export { StarIcon, StarFilledIcon } from "./star"
 export { SunIcon } from "./sun"
 export { TelegramIcon, TelegramMonoIcon } from "./telegram"
-export { TrashIcon } from "./trash"
 export { TruckIcon } from "./truck"
 export { WarpStreamIcon } from "./warpstream"
 export { UploadIcon } from "./upload"
-export { UserIcon } from "./user"
 export { WorkflowRingIcon, WORKFLOW_LABEL, WORKFLOW_COLOR } from "./workflow-ring"
