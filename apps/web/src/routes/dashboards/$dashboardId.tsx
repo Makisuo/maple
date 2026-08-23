@@ -5,6 +5,7 @@ import { Atom, useAtom } from "@/lib/effect-atom"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { DashboardSections } from "@/components/dashboard-builder/sections/dashboard-sections"
+import { BlankDashboardEmpty } from "@/components/dashboard-builder/blank-dashboard-empty"
 import { LiveWidgetRenderer } from "@/components/dashboard-builder/canvas/live-widget-renderer"
 import {
 	withActiveTab,
@@ -389,27 +390,13 @@ function DashboardViewPage() {
 												onRestored={() => setPreviewed(null)}
 											/>
 										) : activeDashboard.widgets.length === 0 &&
-										  (activeDashboard.sections?.length ?? 0) === 0 &&
-										  mode === "view" ? (
-											<div className="flex flex-col items-center justify-center gap-4 px-4 py-24 text-center">
-												<div className="flex gap-2">
-													<div className="size-8 rounded bg-primary/15" />
-													<div className="size-8 rounded bg-primary/10" />
-													<div className="size-8 rounded bg-primary/15" />
-												</div>
-												<div className="flex flex-col items-center gap-1">
-													<p className="text-sm font-medium text-foreground">
-														No widgets yet
-													</p>
-													<p className="text-xs text-muted-foreground">
-														Add charts, stats, and tables to build your dashboard.
-													</p>
-												</div>
-												<button
-													type="button"
-													disabled={readOnly}
-													className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
-													onClick={() => {
+										  (activeDashboard.sections?.length ?? 0) === 0 ? (
+											// Shown while editing too: an edit-mode board with nothing on it
+											// renders as a blank page, which reads as a failed load.
+											<BlankDashboardEmpty
+												readOnly={readOnly}
+												onAddWidget={() => {
+													if (mode !== "edit") {
 														navigate({
 															to: "/dashboards/$dashboardId",
 															params: { dashboardId },
@@ -418,12 +405,10 @@ function DashboardViewPage() {
 																mode: "edit" as const,
 															}),
 														})
-														setChartPickerOpen(true)
-													}}
-												>
-													Add your first widget
-												</button>
-											</div>
+													}
+													setChartPickerOpen(true)
+												}}
+											/>
 										) : (
 											<DashboardSections
 												renderWidget={LiveWidgetRenderer}
