@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { parseMapleRegion, resolveAwsRegion, stageDeploysIngest } from "@maple/infra/aws"
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
-import { requireEnv } from "@maple/infra/env"
+import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi } from "./apps/api/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
@@ -52,7 +52,7 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
 			/\/+$/,
 			"",
 		)
-		const headers = { authorization: `Bearer ${requireEnv("MAPLE_OTEL_INGEST_KEY")}` }
+		const headers = { authorization: `Bearer ${yield* requiredPlain("MAPLE_OTEL_INGEST_KEY")}` }
 		const tracesDestination = yield* Cloudflare.Workers.ObservabilityDestination(
 			"workers-observability-traces",
 			{

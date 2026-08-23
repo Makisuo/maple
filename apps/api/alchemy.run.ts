@@ -19,11 +19,13 @@ import {
 	authEnv,
 	cloudflareOAuthEnv,
 	ingestKeyCryptoEnv,
+	merge,
 	optionalPlain,
 	optionalSecret,
 	planetScaleOAuthEnv,
-	requireEnv,
-	requireSecret,
+	plainWithDefault,
+	requiredPlain,
+	requireSecretEntry,
 	selfObservabilityEnv,
 	tinybirdEnv,
 } from "@maple/infra/env"
@@ -33,11 +35,88 @@ export interface CreateMapleApiOptions {
 	domains: MapleDomains
 }
 
+/**
+ * Everything in the api worker's env that comes from configuration rather than
+ * from a resource. Resolved as one `Config` so a deploy missing several vars
+ * reports all of them at once, and so `.env` / `--env-file` reach it — see
+ * `@maple/infra/env`.
+ */
+const apiConfiguredEnv = (stage: MapleStage) =>
+	merge(
+		tinybirdEnv,
+		// ClickHouse (BYO warehouse); `tinybird` unless an org config overrides it.
+		optionalPlain("CLICKHOUSE_URL"),
+		plainWithDefault("CLICKHOUSE_PROVIDER", "tinybird"),
+		optionalPlain("CLICKHOUSE_USER"),
+		optionalPlain("CLICKHOUSE_DATABASE"),
+		optionalSecret("CLICKHOUSE_PASSWORD"),
+		authEnv,
+		ingestKeyCryptoEnv,
+		requireSecretEntry("MAPLE_SHARE_TOKEN_HMAC_KEY"),
+		appUrlsEnv,
+		// Bucket-cache knobs: on by default in deployed stages. Override via
+		// deploy-time env (e.g. `QE_BUCKET_CACHE_ENABLED=false`) if needed.
+		plainWithDefault("QE_BUCKET_CACHE_ENABLED", "true"),
+		plainWithDefault("QE_BUCKET_CACHE_TTL_SECONDS", "86400"),
+		plainWithDefault("QE_BUCKET_CACHE_FLUX_SECONDS", "60"),
+		plainWithDefault("QE_BUCKET_CACHE_SEGMENT_BUCKETS", "120"),
+		// Both of the next two knobs are bounded by Cloudflare's
+		// six-simultaneous-connection limit, which `cache.match()` counts against
+		// while it waits for response headers. Keep the deploy-time values in step
+		// with the reasoning in `bucket-cache.ts` and `edge-cache.ts` — a stale
+		// override here silently defeats a tuned default, which is exactly what
+		// happened when these were pinned to 16/250 and the code defaults moved to
+		// 6/40 underneath them.
+		plainWithDefault("QE_BUCKET_CACHE_READ_CONCURRENCY", "6"),
+		plainWithDefault("EDGE_CACHE_READ_TIMEOUT_MS", "40"),
+		// MAPLE_ENDPOINT / MAPLE_ENVIRONMENT / COMMIT_SHA / MAPLE_INGEST_KEY.
+		selfObservabilityEnv(stage),
+		// Agent LLM path. `MAPLE_LLM_PROVIDER` flips between OpenRouter (default) and
+		// Workers AI; both stay wired, so a switch is this one var plus a redeploy.
+		// See `@/platform/Llm` for the provider-scoped model overrides.
+		optionalPlain("MAPLE_LLM_PROVIDER"),
+		optionalPlain("MAPLE_TRIAGE_MODEL_OPENROUTER"),
+		optionalPlain("MAPLE_TRIAGE_MODEL_WORKERS_AI"),
+		optionalSecret("OPENROUTER_API_KEY"),
+		// Svix signing secrets for the public webhook receivers (`/webhooks/clerk`,
+		// `/webhooks/autumn`); each route answers 503 until its secret is set.
+		optionalSecret("CLERK_WEBHOOK_SECRET"),
+		optionalSecret("AUTUMN_WEBHOOK_SECRET"),
+		// Server-side product events default to MAPLE_INGEST_KEY; set this only if
+		// the funnel should land in a different org than the API's traces.
+		optionalSecret("MAPLE_PRODUCT_EVENTS_INGEST_KEY"),
+		optionalSecret("AUTUMN_SECRET_KEY"),
+		// Billing details (company name, address, tax IDs) are written to the Stripe
+		// customer Autumn links; Autumn itself has no API for them.
+		optionalSecret("STRIPE_SECRET_KEY"),
+		optionalSecret("SD_INTERNAL_TOKEN"),
+		optionalSecret("INTERNAL_SERVICE_TOKEN"),
+		optionalPlain("HAZEL_API_BASE_URL"),
+		optionalPlain("HAZEL_OAUTH_DISCOVERY_URL"),
+		optionalPlain("HAZEL_OAUTH_CLIENT_ID"),
+		optionalSecret("HAZEL_OAUTH_CLIENT_SECRET"),
+		optionalPlain("HAZEL_OAUTH_SCOPES"),
+		// Slack integration (bot install via OAuth v2)
+		optionalPlain("SLACK_CLIENT_ID"),
+		optionalSecret("SLACK_CLIENT_SECRET"),
+		optionalSecret("SLACK_INTERNAL_SERVICE_TOKEN"),
+		apnsEnv,
+		optionalPlain("GITHUB_APP_ID"),
+		optionalPlain("GITHUB_APP_SLUG"),
+		optionalSecret("GITHUB_APP_PRIVATE_KEY"),
+		optionalPlain("GITHUB_APP_CLIENT_ID"),
+		optionalSecret("GITHUB_APP_CLIENT_SECRET"),
+		optionalSecret("GITHUB_APP_WEBHOOK_SECRET"),
+		optionalPlain("GITHUB_API_BASE_URL"),
+		cloudflareOAuthEnv,
+		planetScaleOAuthEnv,
+	)
+
 /** Alchemy resource type for the API Worker, carrying its internal RPC surface. */
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcContract>
 
 const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
-	const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
+	const pgUrl = new URL(yield* requiredPlain("MAPLE_PG_URL"))
 	return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
 		name: resolveHyperdriveName(stage),
 		origin: {
@@ -88,6 +167,10 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		const databaseMode = resolveDatabaseMode(stage)
 		const hyperdriveRefId = resolveHyperdriveRefId(stage, "api")
 		const mapleDb = databaseMode !== "managed" ? undefined : yield* createManagedMapleDb(stage)
+
+		// Resolved before any resource is created, so a misconfigured deploy fails
+		// with the full list of missing vars rather than part-way through applying.
+		const configuredEnv = yield* apiConfiguredEnv(stage)
 
 		const mcpSessions = yield* Cloudflare.KV.Namespace("MCP_SESSIONS", {
 			title: resolveWorkerName("mcp-sessions", stage),
@@ -234,72 +317,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 							}),
 						}
 					: undefined),
-				...tinybirdEnv(),
-				...optionalPlain("CLICKHOUSE_URL"),
-				CLICKHOUSE_PROVIDER: process.env.CLICKHOUSE_PROVIDER?.trim() || "tinybird",
-				...optionalPlain("CLICKHOUSE_USER"),
-				...optionalPlain("CLICKHOUSE_DATABASE"),
-				...optionalSecret("CLICKHOUSE_PASSWORD"),
-				...authEnv(),
-				...ingestKeyCryptoEnv(),
-				MAPLE_SHARE_TOKEN_HMAC_KEY: requireSecret("MAPLE_SHARE_TOKEN_HMAC_KEY"),
-				...appUrlsEnv(),
-				// Bucket-cache knobs: on by default in deployed stages. Override via
-				// deploy-time env (e.g. `QE_BUCKET_CACHE_ENABLED=false`) if needed.
-				QE_BUCKET_CACHE_ENABLED: process.env.QE_BUCKET_CACHE_ENABLED?.trim() || "true",
-				QE_BUCKET_CACHE_TTL_SECONDS: process.env.QE_BUCKET_CACHE_TTL_SECONDS?.trim() || "86400",
-				QE_BUCKET_CACHE_FLUX_SECONDS: process.env.QE_BUCKET_CACHE_FLUX_SECONDS?.trim() || "60",
-				QE_BUCKET_CACHE_SEGMENT_BUCKETS: process.env.QE_BUCKET_CACHE_SEGMENT_BUCKETS?.trim() || "120",
-				// Both of the next two knobs are bounded by Cloudflare's
-				// six-simultaneous-connection limit, which `cache.match()` counts
-				// against while it waits for response headers. Keep the deploy-time
-				// values in step with the reasoning in `bucket-cache.ts` and
-				// `edge-cache.ts` — a stale override here silently defeats a tuned
-				// default, which is exactly what happened when these were pinned to
-				// 16/250 and the code defaults moved to 6/40 underneath them.
-				QE_BUCKET_CACHE_READ_CONCURRENCY: process.env.QE_BUCKET_CACHE_READ_CONCURRENCY?.trim() || "6",
-				EDGE_CACHE_READ_TIMEOUT_MS: process.env.EDGE_CACHE_READ_TIMEOUT_MS?.trim() || "40",
-				// MAPLE_ENDPOINT / MAPLE_ENVIRONMENT / COMMIT_SHA / MAPLE_INGEST_KEY.
-				...selfObservabilityEnv(stage),
-				// Agent LLM path. `MAPLE_LLM_PROVIDER` flips between OpenRouter (default) and
-				// Workers AI; both stay wired, so a switch is this one var plus a redeploy.
-				// See `@/platform/Llm` for the provider-scoped model overrides.
-				...optionalPlain("MAPLE_LLM_PROVIDER"),
-				...optionalPlain("MAPLE_TRIAGE_MODEL_OPENROUTER"),
-				...optionalPlain("MAPLE_TRIAGE_MODEL_WORKERS_AI"),
-				...optionalSecret("OPENROUTER_API_KEY"),
-				// Svix signing secrets for the public webhook receivers (`/webhooks/clerk`,
-				// `/webhooks/autumn`); each route answers 503 until its secret is set.
-				...optionalSecret("CLERK_WEBHOOK_SECRET"),
-				...optionalSecret("AUTUMN_WEBHOOK_SECRET"),
-				// Server-side product events default to MAPLE_INGEST_KEY (below); set this
-				// only if the funnel should land in a different org than the API's traces.
-				...optionalSecret("MAPLE_PRODUCT_EVENTS_INGEST_KEY"),
-				...optionalSecret("AUTUMN_SECRET_KEY"),
-				// Billing details (company name, address, tax IDs) are written to the
-				// Stripe customer Autumn links; Autumn itself has no API for them.
-				...optionalSecret("STRIPE_SECRET_KEY"),
-				...optionalSecret("SD_INTERNAL_TOKEN"),
-				...optionalSecret("INTERNAL_SERVICE_TOKEN"),
-				...optionalPlain("HAZEL_API_BASE_URL"),
-				...optionalPlain("HAZEL_OAUTH_DISCOVERY_URL"),
-				...optionalPlain("HAZEL_OAUTH_CLIENT_ID"),
-				...optionalSecret("HAZEL_OAUTH_CLIENT_SECRET"),
-				...optionalPlain("HAZEL_OAUTH_SCOPES"),
-				// Slack integration (bot install via OAuth v2)
-				...optionalPlain("SLACK_CLIENT_ID"),
-				...optionalSecret("SLACK_CLIENT_SECRET"),
-				...optionalSecret("SLACK_INTERNAL_SERVICE_TOKEN"),
-				...apnsEnv(),
-				...optionalPlain("GITHUB_APP_ID"),
-				...optionalPlain("GITHUB_APP_SLUG"),
-				...optionalSecret("GITHUB_APP_PRIVATE_KEY"),
-				...optionalPlain("GITHUB_APP_CLIENT_ID"),
-				...optionalSecret("GITHUB_APP_CLIENT_SECRET"),
-				...optionalSecret("GITHUB_APP_WEBHOOK_SECRET"),
-				...optionalPlain("GITHUB_API_BASE_URL"),
-				...cloudflareOAuthEnv(),
-				...planetScaleOAuthEnv(),
+				...configuredEnv,
 			},
 		})) as MapleApiWorker
 

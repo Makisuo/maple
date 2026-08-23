@@ -18,8 +18,18 @@ put it here instead. Git blame does not survive a refactor of the line it annota
   groups. Pure functions, unit-tested, no cloud calls.
   - `cloudflare/stage.ts` — `MapleStage`, domains, worker names, Hyperdrive resolution.
   - `aws/stage.ts` — `MapleRegion`, AWS naming, task sizing, Cloud Map.
-  - `env.ts` — `requireEnv` / `optionalPlain` / `optionalSecret` and the shared env
-    groups the workers spread.
+  - `env.ts` — the deploy-time env primitives and the shared groups the workers spread.
+
+**Read deploy-time config through `@maple/infra/env`, not `process.env`.** Alchemy resolves
+config through a ConfigProvider built as `fromDotEnv(--env-file ?? ".env")` **orElse**
+`fromEnv()` (`alchemy/Util/ConfigProvider.ts`), and never copies the file-sourced values
+into `process.env`. A `process.env` read therefore silently ignores `.env` and
+`--env-file` — and does so *selectively*, since alchemy's own settings
+(`CLOUDFLARE_ACCOUNT_ID`, `CI`, …) still pick them up, so half the deploy sees the file and
+half does not. `Config` also reports every missing key in one pass instead of throwing on
+the first, and keeps the failure in the typed error channel. `packages/alchemy-maple`'s
+`MapleEnvironment` is the same pattern inside a provider; the runtime worker env schemas
+use `@maple/effect-cloudflare/config-helpers`, which `env.ts` builds on.
 
 ## Local dev, and the `alchemy dev` question
 

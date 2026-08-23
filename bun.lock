@@ -606,6 +606,7 @@
     "packages/infra": {
       "name": "@maple/infra",
       "dependencies": {
+        "@maple/effect-cloudflare": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {

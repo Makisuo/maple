@@ -13,6 +13,7 @@ import {
 	authEnv,
 	cloudflareOAuthEnv,
 	ingestKeyCryptoEnv,
+	merge,
 	optionalPlain,
 	optionalSecret,
 	planetScaleOAuthEnv,
@@ -27,8 +28,42 @@ export interface CreateAlertingWorkerOptions {
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
 }
 
+/**
+ * Everything in the alerting worker's env that comes from configuration rather
+ * than from a resource. Largely the api worker's set — the two share 32 keys,
+ * which is why the groups live in `@maple/infra/env`.
+ */
+const alertingConfiguredEnv = (stage: MapleStage) =>
+	merge(
+		// Alert-rule evaluation runs Tinybird-scoped raw SQL through
+		// TinybirdOrgTokenService, so this is the same set the api worker binds.
+		tinybirdEnv,
+		authEnv,
+		ingestKeyCryptoEnv,
+		appUrlsEnv,
+		// MAPLE_ENDPOINT / MAPLE_ENVIRONMENT / COMMIT_SHA / MAPLE_INGEST_KEY.
+		// MAPLE_ENVIRONMENT is stage-derived and NOT env-overridable: it gates both
+		// this worker's scheduled() early-return and EmailService.emailAllowed, so an
+		// override would open both at once and leave the prd-only EMAIL binding as
+		// the sole guard.
+		selfObservabilityEnv(stage),
+		// Non-prod stages skip all crons (they share live org data via the prod DB);
+		// set to "1" on a stage to deliberately exercise crons there.
+		optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
+		optionalSecret("AUTUMN_SECRET_KEY"),
+		optionalSecret("INTERNAL_SERVICE_TOKEN"),
+		// The alerting worker is where incidents open and resolve, so it is the one
+		// that sends push (platform/Apns.ts) — and it runs the Cloudflare analytics
+		// and PlanetScale inventory pollers, each of which resolves and refreshes
+		// per-org OAuth tokens with the same config the api worker uses.
+		apnsEnv,
+		cloudflareOAuthEnv,
+		planetScaleOAuthEnv,
+	)
+
 export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOptions) =>
 	Effect.gen(function* () {
+		const configuredEnv = yield* alertingConfiguredEnv(stage)
 		// `alerting` binds its own Hyperdrive config on prd — it issues ~97% of the
 		// workers' Postgres traffic and was starving the api's connection pool.
 		const hyperdriveRefId = resolveHyperdriveRefId(stage, "alerting")
@@ -72,30 +107,7 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 							}),
 						}
 					: undefined),
-				// Alert-rule evaluation runs Tinybird-scoped raw SQL through
-				// TinybirdOrgTokenService, so this is the same set the api worker binds.
-				...tinybirdEnv(),
-				...authEnv(),
-				...ingestKeyCryptoEnv(),
-				...appUrlsEnv(),
-				// MAPLE_ENDPOINT / MAPLE_ENVIRONMENT / COMMIT_SHA / MAPLE_INGEST_KEY.
-				// MAPLE_ENVIRONMENT is stage-derived and NOT env-overridable: it gates
-				// both this worker's scheduled() early-return and
-				// EmailService.emailAllowed, so an override would open both at once and
-				// leave the prd-only EMAIL binding as the sole guard.
-				...selfObservabilityEnv(stage),
-				// Non-prod stages skip all crons (they share live org data via the prod
-				// DB); set to "1" on a stage to deliberately exercise crons there.
-				...optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
-				...optionalSecret("AUTUMN_SECRET_KEY"),
-				...optionalSecret("INTERNAL_SERVICE_TOKEN"),
-				// The alerting worker is where incidents open and resolve, so it is the
-				// one that sends push (platform/Apns.ts) — and it runs the Cloudflare
-				// analytics and PlanetScale inventory pollers, each of which resolves and
-				// refreshes per-org OAuth tokens with the same config the api worker uses.
-				...apnsEnv(),
-				...cloudflareOAuthEnv(),
-				...planetScaleOAuthEnv(),
+				...configuredEnv,
 			},
 		})
 

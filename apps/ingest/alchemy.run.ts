@@ -22,7 +22,7 @@ import { resolveDeploymentEnvironment } from "@maple/infra/cloudflare"
 // Only the primitives. The grouped helpers in that module return Worker-binding
 // shapes (Redacted secrets inline); these values feed ECS `env:` and Secrets
 // Manager ARNs instead, so the gateway composes them itself.
-import { optionalPlain, requireEnv } from "@maple/infra/env"
+import { merge, optionalPlain, requiredPlain } from "@maple/infra/env"
 
 /**
  * Binary the deploy workflows compile ahead of time (with a warm cargo cache)
@@ -183,19 +183,19 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				tags: { Service: "maple-ingest", Region: region },
 			})
 
-		const tinybirdToken = yield* secret("tinybird-token", requireEnv("TINYBIRD_TOKEN"))
+		const tinybirdToken = yield* secret("tinybird-token", yield* requiredPlain("TINYBIRD_TOKEN"))
 		// Deliberately NOT `MAPLE_PG_URL`. That one is the direct-5432 admin URL the
 		// deploy workflows use for DDL; the gateway must reach Postgres through
 		// PSBouncer (6432) as a role that only reads ingest keys. Sharing the name
 		// would silently hand every task the migration admin's credentials.
-		const pgUrl = yield* secret("maple-pg-url", requireEnv("MAPLE_INGEST_PG_URL"))
+		const pgUrl = yield* secret("maple-pg-url", yield* requiredPlain("MAPLE_INGEST_PG_URL"))
 		const keyEncryptionKey = yield* secret(
 			"ingest-key-encryption-key",
-			requireEnv("MAPLE_INGEST_KEY_ENCRYPTION_KEY"),
+			yield* requiredPlain("MAPLE_INGEST_KEY_ENCRYPTION_KEY"),
 		)
 		const keyLookupHmacKey = yield* secret(
 			"ingest-key-lookup-hmac-key",
-			requireEnv("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
+			yield* requiredPlain("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
 		)
 
 		// Optional credentials — absent in a stage that hasn't enabled the feature.
@@ -215,7 +215,10 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 		// later.
 		const replayR2Endpoint = process.env.INGEST_REPLAY_R2_ENDPOINT?.trim()
 		const replayR2Secret = replayR2Endpoint
-			? yield* secret("replay-r2-secret-access-key", requireEnv("INGEST_REPLAY_R2_SECRET_ACCESS_KEY"))
+			? yield* secret(
+					"replay-r2-secret-access-key",
+					yield* requiredPlain("INGEST_REPLAY_R2_SECRET_ACCESS_KEY"),
+				)
 			: undefined
 
 		// ── OTel collector ──────────────────────────────────────────────────
@@ -304,7 +307,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 
 						// The same Tinybird target and token the gateway writes with.
 						secrets: { TINYBIRD_TOKEN: tinybirdToken.secretArn },
-						env: { TINYBIRD_HOST: requireEnv("TINYBIRD_HOST") },
+						env: { TINYBIRD_HOST: yield* requiredPlain("TINYBIRD_HOST") },
 
 						tags: { Service: "maple-ingest", Region: region },
 					})
@@ -401,7 +404,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			env: {
 				INGEST_PORT: String(INGEST_PORT),
 				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
-				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
+				TINYBIRD_HOST: yield* requiredPlain("TINYBIRD_HOST"),
 				INGEST_KEY_STORE_BACKEND: "postgres",
 
 				// Trust `Cf-IPCountry` on inbound requests, which is what gates
@@ -421,14 +424,16 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				// single-digit dollars a month; moving them to S3 would save nothing
 				// and would require a SigV4 or presigned read path in the Worker
 				// (`apps/api/src/platform/ReplayBlobStore.ts` uses the native R2
-				// binding). `requireEnv` on the companions rather than
+				// binding). `requiredPlain` on the companions rather than
 				// `optionalPlain`, so a half-set config fails the deploy instead of
 				// reaching a task that refuses to boot.
 				...(replayR2Endpoint
 					? {
 							INGEST_REPLAY_R2_ENDPOINT: replayR2Endpoint,
-							INGEST_REPLAY_R2_BUCKET: requireEnv("INGEST_REPLAY_R2_BUCKET"),
-							INGEST_REPLAY_R2_ACCESS_KEY_ID: requireEnv("INGEST_REPLAY_R2_ACCESS_KEY_ID"),
+							INGEST_REPLAY_R2_BUCKET: yield* requiredPlain("INGEST_REPLAY_R2_BUCKET"),
+							INGEST_REPLAY_R2_ACCESS_KEY_ID: yield* requiredPlain(
+								"INGEST_REPLAY_R2_ACCESS_KEY_ID",
+							),
 							...optionalPlain("INGEST_REPLAY_R2_REGION", "auto"),
 						}
 					: undefined),
