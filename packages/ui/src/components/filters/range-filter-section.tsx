@@ -5,6 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/colla
 import { Input } from "../ui/input"
 import { cn } from "../../lib/utils"
 import { useDebouncedCallback } from "../../hooks/use-debounced-callback"
+import { useSectionCollapse } from "../../hooks/use-section-collapse"
 import { FILTER_SECTION_LABEL } from "./filter-styles"
 
 /** The unit the caller's numbers are already in. Only affects parsing and display —
@@ -47,7 +48,12 @@ interface RangeFilterSectionProps {
 	histogram?: ReadonlyArray<RangeBucket>
 	/** Noun for the histogram readout, e.g. "sessions". */
 	histogramUnitLabel?: string
+	/** Open unless the reader has collapsed this section before. Ranges default
+	 *  open like every `FilterSection` does: the histogram and presets inside are
+	 *  the whole point of the control, and a shut drawer hides both. */
 	defaultOpen?: boolean
+	/** Overrides the remembered-collapse key, which defaults to `title`. */
+	persistKey?: string
 	/** Pause before typed values commit. Local mode uses a shorter one since every commit re-queries chDB. */
 	debounceMs?: number
 }
@@ -62,11 +68,15 @@ export function RangeFilterSection({
 	presets,
 	histogram,
 	histogramUnitLabel = "sessions",
-	defaultOpen = false,
+	defaultOpen = true,
+	persistKey,
 	debounceMs = 400,
 }: RangeFilterSectionProps) {
 	const hasActiveRange = minValue !== undefined || maxValue !== undefined
-	const [isOpen, setIsOpen] = React.useState(defaultOpen || hasActiveRange)
+	// A section carrying an active range opens even if the default is closed, so a
+	// filter you cannot see is never one you cannot clear. Seeded, not derived: a
+	// deliberate collapse still shuts it, and the header keeps the range badge.
+	const [isOpen, setIsOpen] = useSectionCollapse(persistKey ?? title, defaultOpen || hasActiveRange)
 
 	// Inputs edit a local draft; the caller's state (and the queries behind it) only
 	// updates after a pause in typing, on blur/Enter, or immediately for preset and

@@ -5,6 +5,7 @@ import { Checkbox } from "../ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "../ui/input-group"
 import { Label } from "../ui/label"
+import { useSectionCollapse } from "../../hooks/use-section-collapse"
 import { getServiceColor } from "../../lib/colors"
 import { formatNumber } from "../../lib/format"
 import { cn } from "../../lib/utils"
@@ -84,6 +85,8 @@ interface FilterSectionBaseProps {
 	selected: ReadonlyArray<string>
 	onChange: (selected: string[]) => void
 	defaultOpen?: boolean
+	/** Overrides the remembered-collapse key, which defaults to `title`. */
+	persistKey?: string
 	maxVisible?: number
 	colorMap?: Record<string, string>
 	/** Option-name → icon, rendered before the label (like colorMap's swatch). */
@@ -110,6 +113,7 @@ function FilterSectionBase({
 	selected,
 	onChange,
 	defaultOpen = true,
+	persistKey,
 	maxVisible = 5,
 	searchable,
 	colorMap,
@@ -117,7 +121,7 @@ function FilterSectionBase({
 	renderOptionIcon,
 	getOptionLabel,
 }: FilterSectionBaseProps & { searchable: boolean }) {
-	const [isOpen, setIsOpen] = React.useState(defaultOpen)
+	const [isOpen, setIsOpen] = useSectionCollapse(persistKey ?? title, defaultOpen)
 	const [showAll, setShowAll] = React.useState(false)
 	const [searchText, setSearchText] = React.useState("")
 	const inputRef = React.useRef<HTMLInputElement>(null)

@@ -122,28 +122,11 @@ function AnalyticsFilterSidebarView({
 		<FilterSidebarFrame waiting={waiting}>
 			<FilterSidebarHeader canClear={canClear} onClear={onClearFilters} />
 			<FilterSidebarBody>
-				{/* Two exclusive checkboxes rather than a FilterSection: that component
-				    requires a `count` per option and always renders it, and this filter has
-				    no per-option count to give — the sidebar's other counts come from
-				    server-side facet branches, and a hard-coded 0 beside "New" reads as
-				    "zero new visitors" rather than as "not counted". Unchecking both means
-				    all visitors. */}
-				<div className="py-1">
-					<h4 className={cn(FILTER_SECTION_LABEL, "py-1 text-muted-foreground")}>
-						{FILTER_SECTION_LABEL_TEXT.visitorType}
-					</h4>
-					<SingleCheckboxFilter
-						title="New"
-						checked={filters.visitorType === "new"}
-						onChange={(on) => onFilterChange("visitorType", on ? "new" : undefined)}
-					/>
-					<SingleCheckboxFilter
-						title="Returning"
-						checked={filters.visitorType === "returning"}
-						onChange={(on) => onFilterChange("visitorType", on ? "returning" : undefined)}
-					/>
-				</div>
-				<Separator className="my-1" />
+				{/* Grouped into the same four themes the breakdown cards use — content,
+				    acquisition, audience, technology — and ordered within each group by how
+				    often you actually slice by it. Interleaving them (Country between
+				    Referrer and Device, UTM stranded at the bottom) is what made the rail
+				    read as unsorted. Separators mark the group boundaries. */}
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.host}
 					options={toOptions(breakdowns.hosts)}
@@ -165,6 +148,7 @@ function AnalyticsFilterSidebarView({
 						{...single("eventName")}
 					/>
 				) : null}
+				<Separator className="my-1" />
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.referrerHost}
 					options={toOptions(breakdowns.referrerHosts)}
@@ -172,36 +156,6 @@ function AnalyticsFilterSidebarView({
 					renderOptionIcon={referrerIcon}
 					{...single("referrerHost")}
 				/>
-				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL_TEXT.country}
-					options={toOptions(breakdowns.countries)}
-					getOptionLabel={countryLabel}
-					{...single("country")}
-				/>
-				<FilterSection
-					title={FILTER_SECTION_LABEL_TEXT.deviceType}
-					options={toOptions(breakdowns.deviceTypes)}
-					getOptionIcon={deviceIconFor}
-					{...single("deviceType")}
-				/>
-				<FilterSection
-					title={FILTER_SECTION_LABEL_TEXT.browserName}
-					options={toOptions(breakdowns.browsers)}
-					getOptionIcon={browserIconFor}
-					{...single("browserName")}
-				/>
-				<FilterSection
-					title={FILTER_SECTION_LABEL_TEXT.osName}
-					options={toOptions(breakdowns.operatingSystems)}
-					{...single("osName")}
-				/>
-				<SearchableFilterSection
-					title={FILTER_SECTION_LABEL_TEXT.language}
-					options={toOptions(breakdowns.languages)}
-					getOptionLabel={languageLabel}
-					{...single("language")}
-				/>
-				<Separator className="my-1" />
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.utmSource}
 					options={toOptions(breakdowns.utmSources)}
@@ -220,6 +174,58 @@ function AnalyticsFilterSidebarView({
 					options={toOptions(breakdowns.utmCampaigns)}
 					getOptionLabel={utmLabel}
 					{...single("utmCampaign")}
+				/>
+				<Separator className="my-1" />
+				{/* Two exclusive checkboxes rather than a FilterSection: that component
+				    requires a `count` per option and always renders it, and this filter has
+				    no per-option count to give — the sidebar's other counts come from
+				    server-side facet branches, and a hard-coded 0 beside "New" reads as
+				    "zero new visitors" rather than as "not counted". Unchecking both means
+				    all visitors. */}
+				<div className="py-1">
+					<h4 className={cn(FILTER_SECTION_LABEL, "py-1 text-muted-foreground")}>
+						{FILTER_SECTION_LABEL_TEXT.visitorType}
+					</h4>
+					<SingleCheckboxFilter
+						title="New"
+						checked={filters.visitorType === "new"}
+						onChange={(on) => onFilterChange("visitorType", on ? "new" : undefined)}
+					/>
+					<SingleCheckboxFilter
+						title="Returning"
+						checked={filters.visitorType === "returning"}
+						onChange={(on) => onFilterChange("visitorType", on ? "returning" : undefined)}
+					/>
+				</div>
+				<SearchableFilterSection
+					title={FILTER_SECTION_LABEL_TEXT.country}
+					options={toOptions(breakdowns.countries)}
+					getOptionLabel={countryLabel}
+					{...single("country")}
+				/>
+				<SearchableFilterSection
+					title={FILTER_SECTION_LABEL_TEXT.language}
+					options={toOptions(breakdowns.languages)}
+					getOptionLabel={languageLabel}
+					{...single("language")}
+				/>
+				<Separator className="my-1" />
+				<FilterSection
+					title={FILTER_SECTION_LABEL_TEXT.deviceType}
+					options={toOptions(breakdowns.deviceTypes)}
+					getOptionIcon={deviceIconFor}
+					{...single("deviceType")}
+				/>
+				<FilterSection
+					title={FILTER_SECTION_LABEL_TEXT.browserName}
+					options={toOptions(breakdowns.browsers)}
+					getOptionIcon={browserIconFor}
+					{...single("browserName")}
+				/>
+				<FilterSection
+					title={FILTER_SECTION_LABEL_TEXT.osName}
+					options={toOptions(breakdowns.operatingSystems)}
+					{...single("osName")}
 				/>
 			</FilterSidebarBody>
 		</FilterSidebarFrame>
