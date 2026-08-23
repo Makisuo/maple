@@ -5,6 +5,7 @@ import { describeActions, truncateTypingStatus } from "#lib/action-status.js"
 import { botUserIdForTeam, rememberBotUserId } from "#lib/bot-identity.js"
 import { loadChannelContext } from "#lib/channel-context.js"
 import { notifyThreadDisengagement } from "#lib/disengage-notice.js"
+import { judgeFollowUpRelevance } from "#lib/follow-up-relevance.js"
 import { resolveBotToken, verifySlackV0Signature, type SlackTokenContext } from "#lib/maple.js"
 import { emitAgentLog } from "#lib/telemetry-log.js"
 import { formatThreadContext, loadThreadMessages } from "#lib/thread-context.js"
@@ -131,8 +132,9 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
  * follow-up decision lives here rather than in the verifier: this handler
  * already loads the thread, and here it can take as long as it needs. It must
  * not otherwise throw: eve drops the whole mention when this handler does, so
- * both loads degrade to no context instead — the one deliberate throw is the
- * disengagement drop below, which is exactly what that escape hatch is for.
+ * both loads degrade to no context instead — the deliberate throws are the
+ * two follow-up drops below (disengaged / not addressed to the bot), which is
+ * exactly what that escape hatch is for.
  */
 async function dispatchWithConversationContext(
 	ctx: SlackContext,
@@ -202,7 +204,42 @@ async function dispatchWithConversationContext(
 				`Thread follow-up not dispatched (${decision.reason}): the bot is no longer engaged in ${pending.channelId}:${pending.threadTs}.`,
 			)
 		}
-		// Confirmed, so the :eyes: is now a promise we keep.
+		// Engaged is necessary, not sufficient: the bot being part of the thread
+		// says nothing about whether THIS reply is for it. Without this gate every
+		// human reply in an engaged thread — including two people talking to each
+		// other — dispatched a full turn. Runs before the ack and the typing
+		// indicator so a message the bot stays out of gets no reaction at all;
+		// the pass is silent on purpose (the bot is still engaged, and the next
+		// reply that IS for it will be answered). Fails open — see the module.
+		const relevance = await judgeFollowUpRelevance({
+			reply: {
+				text: message.text,
+				markdown: message.markdown,
+				user: message.author?.userId,
+				ts: message.ts,
+				threadTs: message.threadTs,
+				raw: message.raw,
+			},
+			threadMessages,
+			botUserId: pending.botUserId,
+		})
+		if (!relevance.respond) {
+			// Ids only, never text — same rule as the disengagement log above. This
+			// line is the only trace the drop leaves.
+			emitAgentLog("info", "follow_up_not_relevant", {
+				"maple.agent.event": "follow_up_not_relevant",
+				"maple.slack.team_id": pending.teamId,
+				"maple.slack.channel_id": pending.channelId,
+				"maple.slack.thread_ts": pending.threadTs,
+				"maple.slack.message_ts": pending.messageTs,
+			})
+			// Same escape hatch as the disengagement drop: throwing is the only way
+			// to un-dispatch an event eve has already accepted.
+			throw new Error(
+				`Thread follow-up not dispatched (not addressed to the bot): ${pending.channelId}:${pending.threadTs}.`,
+			)
+		}
+		// Confirmed and relevant, so the :eyes: is now a promise we keep.
 		if (pending.ackable) {
 			void acknowledgeMessage({
 				teamId: pending.teamId,
