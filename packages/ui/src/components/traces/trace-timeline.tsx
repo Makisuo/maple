@@ -2,11 +2,12 @@ import * as React from "react"
 import * as ReactDOM from "react-dom"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
-import { ChevronExpandYIcon, ChevronDownIcon, ChevronRightIcon } from "../icons"
+import { AlertWarningIcon, AspectRatioIcon } from "../icons"
 import { Button } from "../ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 import { formatDuration } from "../../lib/format"
 import { summarizeClockSkew } from "../../lib/span-tree"
+import type { SpanNode } from "../../lib/types"
 import { getServiceColor } from "../../lib/colors"
 import { isEditableTarget } from "../../lib/keyboard"
 import { useContainerSize } from "../../hooks/use-container-size"
@@ -28,6 +29,7 @@ import { TraceTimelineTooltipContent } from "./trace-timeline-tooltip"
 import { SidebarResizeHandle } from "./trace-timeline-sidebar"
 import { TraceTimelineRow } from "./trace-timeline-row"
 import { ColorByPicker } from "./color-by-picker"
+import { TraceDepthControls } from "./trace-depth-controls"
 import {
 	OVERSCAN,
 	ROW_GAP,
@@ -186,6 +188,21 @@ export function TraceTimeline() {
 	)
 
 	const handleCollapseAll = React.useCallback(() => dispatch({ type: "COLLAPSE_ALL" }), [dispatch])
+
+	// `bars` holds only the rows a collapse left visible, so it undercounts the trace. The
+	// toolbar shows both numbers rather than a second, quietly smaller "N spans".
+	const visibleSpanCount = bars.length
+	const totalSpanCount = React.useMemo(() => {
+		let n = 0
+		const walk = (nodes: readonly SpanNode[]) => {
+			for (const node of nodes) {
+				n++
+				walk(node.children)
+			}
+		}
+		walk(rootSpans)
+		return n
+	}, [rootSpans])
 
 	const expandedRef = React.useRef(state.expandedSpanIds)
 	expandedRef.current = state.expandedSpanIds
@@ -435,7 +452,7 @@ export function TraceTimeline() {
 	return (
 		<div
 			ref={containerRef}
-			className="border flex flex-col h-full outline-none relative"
+			className="@container/timeline border flex flex-col h-full outline-none relative"
 			// One source of truth for the label-column width. The rows, the minimap spacer and the
 			// ruler spacer all read it, so they cannot drift out of alignment, and a resize drag
 			// updates one property instead of re-rendering every row through a prop.
@@ -453,16 +470,56 @@ export function TraceTimeline() {
 				inputRef={searchInputRef}
 			/>
 
-			<div className="flex flex-wrap items-center justify-between gap-y-1 border-b border-border bg-muted/30 px-3 py-1.5 shrink-0">
-				<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-					<span className="font-medium">Timeline</span>
-					<span className="tabular-nums">{bars.length} spans</span>
+			<div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 shrink-0">
+				{/* Depth controls, sitting above the tree they operate on. Four actions on one
+				    axis — how deep the tree is opened — so they read as one segmented control
+				    rather than four loose buttons. The bare glyphs step one level; the boxed
+				    ones go all the way, which is the whole distinction the labels used to carry. */}
+				<TraceDepthControls
+					onCollapseOneLevel={handleCollapseOneLevel}
+					onExpandOneLevel={handleExpandOneLevel}
+					onCollapseAll={handleCollapseAll}
+					onExpandAll={handleExpandAll}
+					showShortcuts
+				/>
+
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={() => controller.fit()}
+								aria-label="Fit trace to view"
+								className="h-5 w-5 p-0"
+							>
+								<AspectRatioIcon size={11} />
+							</Button>
+						}
+					/>
+					<TooltipContent side="bottom" className="text-xs">
+						Fit trace to view <span className="text-muted-foreground">(F)</span>
+					</TooltipContent>
+				</Tooltip>
+
+				<div className="ml-auto flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
+					{/* Collapsing hides rows, so this count and the trace header's disagree. Say
+					    so explicitly instead of quietly showing a second, smaller "N spans". */}
+					{/* Only while rows are hidden. Uncollapsed this just repeats the trace header's
+					    span count, and the bar is quieter without it. */}
+					{visibleSpanCount < totalSpanCount && (
+						<span className="shrink-0 tabular-nums">
+							{visibleSpanCount} of {totalSpanCount}
+							<span className="hidden @min-[420px]/timeline:inline"> spans</span>
+						</span>
+					)}
 					{skewSummary && (
 						<Tooltip>
 							<TooltipTrigger
 								render={
-									<span className="cursor-default rounded border border-border px-1.5 py-px tabular-nums">
-										clock skew adjusted
+									<span className="flex shrink-0 cursor-default items-center gap-1 text-severity-warn">
+										<AlertWarningIcon size={11} />
+										<span className="hidden @min-[400px]/timeline:inline">skew</span>
 									</span>
 								}
 							/>
@@ -479,54 +536,7 @@ export function TraceTimeline() {
 							</TooltipContent>
 						</Tooltip>
 					)}
-				</div>
-				<div className="flex flex-wrap items-center gap-1">
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={handleCollapseOneLevel}
-						title="Collapse one level (⇧E)"
-						aria-label="Collapse one level"
-						className="h-5 w-5 p-0"
-					>
-						<ChevronRightIcon size={12} />
-					</Button>
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={handleExpandOneLevel}
-						title="Expand one level (E)"
-						aria-label="Expand one level"
-						className="h-5 w-5 p-0"
-					>
-						<ChevronDownIcon size={12} />
-					</Button>
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={handleExpandAll}
-						className="h-5 text-[10px] px-2"
-					>
-						Expand all
-					</Button>
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={handleCollapseAll}
-						className="h-5 text-[10px] px-2"
-					>
-						Collapse all
-					</Button>
 					<ColorByPicker value={colorBy} onChange={setColorBy} rootSpans={rootSpans} />
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={() => controller.fit()}
-						className="h-5 gap-1 text-[10px] px-2"
-					>
-						<ChevronExpandYIcon size={11} />
-						Fit
-					</Button>
 				</div>
 			</div>
 

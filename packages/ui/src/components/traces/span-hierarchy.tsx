@@ -1,10 +1,17 @@
 import * as React from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
-import { Button } from "../ui/button"
 import { SpanRow } from "./span-row"
+import { TraceDepthControls } from "./trace-depth-controls"
 import { useTraceView } from "./trace-view-context"
-import { collectAllCollapsibleIds, collectAncestorIds, computeDefaultExpandedSpanIds } from "./auto-collapse"
+import {
+	collectAllCollapsibleIds,
+	collectAncestorIds,
+	computeCollapseOneLevel,
+	computeDefaultExpandedSpanIds,
+	computeExpandOneLevel,
+} from "./auto-collapse"
+import { collectParentIdsByLevel } from "./use-trace-timeline"
 import type { SpanNode } from "../../lib/types"
 
 // Estimated row height; the virtualizer self-corrects via measureElement.
@@ -63,7 +70,31 @@ export function SpanHierarchy() {
 		})
 	}, [])
 
+	const parentIdsByLevel = React.useMemo(() => collectParentIdsByLevel(rootSpans), [rootSpans])
+	const handleExpandOneLevel = React.useCallback(
+		() => setExpandedSpans((prev) => computeExpandOneLevel(prev, parentIdsByLevel)),
+		[parentIdsByLevel],
+	)
+	const handleCollapseOneLevel = React.useCallback(
+		() => setExpandedSpans((prev) => computeCollapseOneLevel(prev, parentIdsByLevel)),
+		[parentIdsByLevel],
+	)
+
 	const flat = React.useMemo(() => flattenVisible(rootSpans, expandedSpans), [rootSpans, expandedSpans])
+
+	// Collapsing hides rows, so this count and the trace header's disagree. Shown only while
+	// they do — uncollapsed it would just repeat the header.
+	const totalSpanCount = React.useMemo(() => {
+		let n = 0
+		const walk = (nodes: readonly SpanNode[]) => {
+			for (const node of nodes) {
+				n++
+				walk(node.children)
+			}
+		}
+		walk(rootSpans)
+		return n
+	}, [rootSpans])
 
 	const scrollRef = React.useRef<HTMLDivElement>(null)
 
@@ -158,24 +189,18 @@ export function SpanHierarchy() {
 			<div className="@container/row flex shrink-0 items-center border-b bg-muted/30 px-2 py-1.5 text-xs font-medium text-muted-foreground">
 				{/* Left section header */}
 				<div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
-					<div className="flex items-center gap-0.5">
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-5 px-1.5 text-[10px]"
-							onClick={() => setExpandedSpans(collectAllCollapsibleIds(rootSpans))}
-						>
-							Expand<span className="hidden @min-[480px]/row:inline">&nbsp;all</span>
-						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-5 px-1.5 text-[10px]"
-							onClick={() => setExpandedSpans(new Set())}
-						>
-							Collapse<span className="hidden @min-[480px]/row:inline">&nbsp;all</span>
-						</Button>
-					</div>
+					<TraceDepthControls
+						onCollapseOneLevel={handleCollapseOneLevel}
+						onExpandOneLevel={handleExpandOneLevel}
+						onCollapseAll={() => setExpandedSpans(new Set())}
+						onExpandAll={() => setExpandedSpans(collectAllCollapsibleIds(rootSpans))}
+					/>
+					{flat.length < totalSpanCount && (
+						<span className="shrink-0 font-normal tabular-nums text-[10px]">
+							{flat.length} of {totalSpanCount}
+							<span className="hidden @min-[420px]/row:inline"> spans</span>
+						</span>
+					)}
 				</div>
 				{/* Right section header (fixed widths matching rows) */}
 				<div className="flex items-center gap-2 shrink-0 ml-2">
