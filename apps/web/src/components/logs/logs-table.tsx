@@ -400,6 +400,11 @@ export function LogsTableView({
 	// row seen so far and only ever grows, which keeps the horizontal range
 	// still while you scroll. It resets when the layout or the query changes.
 	const [trackWidth, setTrackWidth] = React.useState(0)
+	// Mirrored in a ref so the effect can decide *not* to call `setTrackWidth` at
+	// all: a `setState` in a layout effect costs a second commit even when the
+	// updater returns the current value, and this effect runs on every scroll
+	// frame — which doubled the list's commits per frame.
+	const trackWidthRef = React.useRef(0)
 	const trackResetKey = `${wrap}|${density}|${pinnedColumns.join("\u0000")}`
 	const trackStateRef = React.useRef({ key: trackResetKey, count: allData.length })
 
@@ -410,14 +415,18 @@ export function LogsTableView({
 		const reset = previous.key !== trackResetKey || allData.length < previous.count
 		trackStateRef.current = { key: trackResetKey, count: allData.length }
 		if (reset) {
+			if (trackWidthRef.current === 0) return
+			trackWidthRef.current = 0
 			setTrackWidth(0)
 			return
 		}
 		// Wrap mode fills the container and never scrolls sideways.
 		if (wrap) return
 		const measured = element.scrollWidth
-		setTrackWidth((current) => (measured > current ? measured : current))
-	}, [virtualItems, trackWidth, trackResetKey, allData.length, wrap])
+		if (measured <= trackWidthRef.current) return
+		trackWidthRef.current = measured
+		setTrackWidth(measured)
+	}, [virtualItems, trackResetKey, allData.length, wrap])
 
 	const trackStyle = React.useMemo<React.CSSProperties>(
 		() => ({ width: trackWidth > 0 ? trackWidth : "100%", minWidth: "100%" }),
