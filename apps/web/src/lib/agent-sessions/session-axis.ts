@@ -8,7 +8,6 @@
 
 import { formatDurationAtStep } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
-import { niceIntervalAtLeast } from "@maple/ui/components/traces/use-trace-timeline"
 
 import type { IdleGap } from "./session-summary"
 
@@ -29,6 +28,25 @@ export interface SessionAxis {
 }
 
 const AXIS_TICK_TARGET = 6
+
+// Session-scale tick ladder: the 1/2/5 decade steps up to a minute, then the
+// clock values a wall-clock ruler wants. Deliberately NOT shared with the trace
+// waterfall's `niceIntervalAtLeast` — extending that ladder would change the
+// core trace ruler's output as a side effect of this page.
+const NICE_STEPS_MS = [
+	100, 200, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000, 900_000,
+	1_800_000, 3_600_000,
+]
+
+/** Snap up to the nearest nice step — never down, or the tick count overshoots the target. */
+function niceStepAtLeast(raw: number): number {
+	for (const nice of NICE_STEPS_MS) {
+		if (nice >= raw) return nice
+	}
+	// Past the ladder (sessions that wait on a human): keep stepping by whole hours.
+	const hour = 3_600_000
+	return Math.max(hour, Math.ceil(raw / hour) * hour)
+}
 
 export function buildSessionAxis(options: {
 	readonly startMs: number
@@ -66,7 +84,7 @@ export function buildSessionAxis(options: {
 }
 
 function axisTicks(totalMs: number): readonly AxisTick[] {
-	const step = niceIntervalAtLeast(totalMs / (AXIS_TICK_TARGET - 1))
+	const step = niceStepAtLeast(totalMs / (AXIS_TICK_TARGET - 1))
 	const ticks: AxisTick[] = []
 	for (let i = 0, count = Math.floor(totalMs / step); i <= count; i++) {
 		const axisMs = i * step

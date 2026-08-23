@@ -272,15 +272,23 @@ export function AttributesSection({
 	const { standard, internal } = partitionInternalAttributes(rest)
 	const internalCount = Object.keys(internal).length
 
+	// An LLM or tool span often carries nothing BUT gen_ai.* keys; "No span
+	// attributes available" under a populated AI block would read as a
+	// contradiction, so the raw table only renders when it has rows to show —
+	// or when nothing at all does, where its empty line is the right message.
+	const showRawTable = Object.keys(standard).length > 0 || groups.length === 0
+
 	return (
 		<div className="space-y-2">
 			<GenAiSection groups={groups} searchQuery={searchQuery} />
-			<AttributesTable
-				attributes={standard}
-				title={title}
-				searchQuery={searchQuery}
-				groupByNamespace={groupByNamespace}
-			/>
+			{showRawTable && (
+				<AttributesTable
+					attributes={standard}
+					title={title}
+					searchQuery={searchQuery}
+					groupByNamespace={groupByNamespace}
+				/>
+			)}
 			{internalCount > 0 && (
 				<Collapsible>
 					<CollapsibleTrigger className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors group">

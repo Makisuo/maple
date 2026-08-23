@@ -48,6 +48,25 @@ describe("AttributesSection", () => {
 		expect(screen.getByText("http.route")).toBeTruthy()
 	})
 
+	it("shows no contradictory empty line when every key is a gen_ai one", () => {
+		// The common LLM/tool span: nothing but gen_ai.* and maple_* keys.
+		render(
+			<AttributesSection
+				title="Span Attributes"
+				attributes={{ "gen_ai.operation.name": "chat", "maple_ai.vendor.id": "anthropic" }}
+			/>,
+		)
+
+		expect(screen.getByText("AI Attributes")).toBeTruthy()
+		expect(screen.queryByText(/No span attributes available/i)).toBeNull()
+	})
+
+	it("still says the map is empty when it truly is", () => {
+		render(<AttributesSection title="Span Attributes" attributes={{}} />)
+
+		expect(screen.getByText(/No span attributes available/i)).toBeTruthy()
+	})
+
 	it("renders no fold when nothing is internal", () => {
 		render(<AttributesSection title="Span Attributes" attributes={{ "http.route": "/v1" }} />)
 

@@ -312,7 +312,8 @@ function formatValue(key: string, rawValue: string): string {
 	}
 	if (LIST_KEYS.has(key)) {
 		const flat = parseFlatArray(rawValue)
-		return flat === null ? rawValue : flat.join(", ")
+		// An empty array keeps its raw "[]" — a blank value cell reads as missing.
+		return flat === null || flat.length === 0 ? rawValue : flat.join(", ")
 	}
 	return rawValue
 }

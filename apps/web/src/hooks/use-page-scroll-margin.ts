@@ -6,8 +6,12 @@ import { useState } from "react"
  *
  * The margin is measured from rects, not `offsetTop`: `offsetTop` resolves
  * against the nearest positioned ancestor, which on these pages is the layout
- * shell above the scroller, not the scroller itself. Outside a page layout (a
- * bare render in tests) the list stands in for the scroller and the margin is 0.
+ * shell above the scroller, not the scroller itself — measured ~200px high on
+ * /replays, previously masked by overscan. Clamped at zero so a hidden
+ * ancestor (rects collapse to 0) can never produce a negative margin, and the
+ * scroll element falls back to the list itself outside a page layout (a bare
+ * render in tests) so the virtualizer still mounts rows there; both production
+ * callers sit inside a `PageLayout.ScrollArea`.
  */
 export function usePageScrollMargin() {
 	const [list, setList] = useState<HTMLElement | null>(null)
@@ -20,10 +24,13 @@ export function usePageScrollMargin() {
 		scrollMargin:
 			list === null || scroller === null
 				? 0
-				: Math.round(
-						list.getBoundingClientRect().top -
-							scroller.getBoundingClientRect().top +
-							scroller.scrollTop,
+				: Math.max(
+						0,
+						Math.round(
+							list.getBoundingClientRect().top -
+								scroller.getBoundingClientRect().top +
+								scroller.scrollTop,
+						),
 					),
 	}
 }
