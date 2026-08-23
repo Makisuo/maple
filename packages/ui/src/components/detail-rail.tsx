@@ -1,6 +1,7 @@
 import type * as React from "react"
 
 import { cn } from "../lib/utils"
+import type { IconComponent } from "./icons"
 
 /* -------------------------------------------------------------------------------------------------
  * DetailRail — the label/value rail every detail page hangs off its trailing edge.
@@ -41,6 +42,13 @@ function Group({
 }
 
 function Row({
+	/**
+	 * Optional glyph in front of the label. A rail that gives every row one
+	 * reads as a scannable list rather than a wall of words; a rail that gives
+	 * none keeps the original two-column shape, so this is opt-in per rail —
+	 * never per row, or the labels stop aligning with each other.
+	 */
+	icon: Icon,
 	label,
 	/**
 	 * Provenance or scope for the value, set under the label in the label's own
@@ -53,23 +61,31 @@ function Row({
 	children,
 	/** Width of the label column. Narrow rails (recommendations) run tighter. */
 	labelWidth = "88px",
+	className,
 }: {
+	icon?: IconComponent
 	label: string
 	hint?: string
 	title?: string
 	children: React.ReactNode
 	labelWidth?: string
+	className?: string
 }) {
 	return (
 		<div
 			data-slot="detail-rail-row"
 			title={title}
-			className="grid min-h-8 items-center gap-x-3 py-0.5"
+			className={cn("grid min-h-8 items-center gap-x-3 py-0.5", className)}
 			style={{ gridTemplateColumns: `${labelWidth} 1fr` }}
 		>
-			<span className="flex min-w-0 flex-col text-xs text-muted-foreground">
-				<span className="truncate">{label}</span>
-				{hint ? <span className="truncate text-[10px] text-muted-foreground/70">{hint}</span> : null}
+			<span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+				{Icon ? <Icon className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden /> : null}
+				<span className="flex min-w-0 flex-col">
+					<span className="truncate">{label}</span>
+					{hint ? (
+						<span className="truncate text-[10px] text-muted-foreground/70">{hint}</span>
+					) : null}
+				</span>
 			</span>
 			<div className="flex min-w-0 items-center justify-end">{children}</div>
 		</div>

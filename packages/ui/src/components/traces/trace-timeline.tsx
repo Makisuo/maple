@@ -37,6 +37,7 @@ import {
 	SIDEBAR_WIDTH_DEFAULT,
 	SIDEBAR_WIDTH_MAX,
 	SIDEBAR_WIDTH_MIN,
+	SIDEBAR_WIDTH_NARROW_MIN,
 	SIDEBAR_WIDTH_STORAGE_KEY,
 } from "./trace-timeline-types"
 
@@ -114,7 +115,17 @@ export function TraceTimeline() {
 	const controller = useViewportController({ traceStartMs, traceEndMs, initialViewport: defaultViewport })
 
 	const containerSize = useContainerSize(scrollRef)
-	const timelineWidthPx = Math.max(0, containerSize.width - sidebarWidth)
+	// A width stored from a wide pane must not follow the user onto a narrow one: 320px of labels
+	// on a phone leaves the bars a sliver to draw in. Cap the column at half the pane for as long
+	// as it is narrow — the stored preference is untouched and returns with the width.
+	const effectiveSidebarWidth =
+		containerSize.width > 0
+			? Math.max(
+					SIDEBAR_WIDTH_NARROW_MIN,
+					Math.min(sidebarWidth, Math.round(containerSize.width * 0.5)),
+				)
+			: sidebarWidth
+	const timelineWidthPx = Math.max(0, containerSize.width - effectiveSidebarWidth)
 
 	const rowVirtualizer = useVirtualizer({
 		count: bars.length,
@@ -123,7 +134,11 @@ export function TraceTimeline() {
 		overscan: OVERSCAN,
 	})
 
-	const interactions = useTimelineInteractions({ bodyRef: scrollRef, sidebarWidth, controller })
+	const interactions = useTimelineInteractions({
+		bodyRef: scrollRef,
+		sidebarWidth: effectiveSidebarWidth,
+		controller,
+	})
 
 	const rowsContainerRef = React.useRef<HTMLDivElement>(null)
 	const repaintRowDecorations = useRowDecorations(controller, rowsContainerRef)
@@ -456,7 +471,7 @@ export function TraceTimeline() {
 			// One source of truth for the label-column width. The rows, the minimap spacer and the
 			// ruler spacer all read it, so they cannot drift out of alignment, and a resize drag
 			// updates one property instead of re-rendering every row through a prop.
-			style={{ ["--sidebar-w" as string]: `${sidebarWidth}px` }}
+			style={{ ["--sidebar-w" as string]: `${effectiveSidebarWidth}px` }}
 			tabIndex={0}
 			onKeyDown={handleKeyDown}
 		>
@@ -491,7 +506,7 @@ export function TraceTimeline() {
 								size="sm"
 								onClick={() => controller.fit()}
 								aria-label="Fit trace to view"
-								className="h-5 w-5 p-0"
+								className="h-5 w-5 p-0 pointer-coarse:size-7"
 							>
 								<AspectRatioIcon size={11} />
 							</Button>
@@ -617,6 +632,7 @@ export function TraceTimeline() {
 									hovered={hoveredSpanId === id}
 									dimmed={isSearchActive && !matched}
 									matched={matched}
+									showService={services.length > 1}
 									onSelect={handleSelect}
 									onToggleCollapse={handleToggleCollapse}
 									onZoomSpan={handleZoomSpan}
@@ -627,7 +643,7 @@ export function TraceTimeline() {
 					</div>
 				</div>
 
-				<SidebarResizeHandle left={sidebarWidth} onResize={handleSidebarResize} />
+				<SidebarResizeHandle left={effectiveSidebarWidth} onResize={handleSidebarResize} />
 
 				{/* Crosshair + drag-zoom marquee (px relative to the scroll container's left edge).
 				    The crosshair stays mounted; the interactions hook drives it (and its time
@@ -647,8 +663,9 @@ export function TraceTimeline() {
 				)}
 			</div>
 
-			<div className="flex items-center justify-between border-t border-border bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground shrink-0">
-				<div className="flex items-center gap-3 text-foreground/30 max-sm:hidden">
+			<div className="flex shrink-0 items-center gap-3 border-t border-border bg-muted/30 px-2 py-1.5 text-[10px] text-muted-foreground @min-[560px]/timeline:px-3">
+				{/* Pointer/keyboard hints are meaningless on touch — the legend takes the whole bar there. */}
+				<div className="hidden shrink-0 items-center gap-3 text-foreground/30 @min-[560px]/timeline:flex">
 					<span>
 						<kbd className="border border-foreground/10 bg-muted px-1 py-0.5 font-mono text-[9px]">
 							Drag
@@ -678,17 +695,18 @@ export function TraceTimeline() {
 						all shortcuts
 					</button>
 				</div>
-				<div className="flex min-w-0 flex-wrap items-center justify-end gap-2.5">
+				{/* Legend: scrolls sideways on narrow screens rather than wrapping the bar taller. */}
+				<div className="-mx-2 flex min-w-0 flex-1 items-center gap-2.5 overflow-x-auto px-2 [mask-image:linear-gradient(to_right,black_calc(100%-12px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @min-[560px]/timeline:mx-0 @min-[560px]/timeline:flex-wrap @min-[560px]/timeline:justify-end @min-[560px]/timeline:overflow-x-visible @min-[560px]/timeline:px-0 @min-[560px]/timeline:[mask-image:none]">
 					{services.map((service) => (
-						<div key={service} className="flex items-center gap-1">
+						<div key={service} className="flex shrink-0 items-center gap-1">
 							<div
 								className="size-2 shrink-0"
 								style={{ backgroundColor: getServiceColor(service) }}
 							/>
-							<span className="font-medium">{service}</span>
+							<span className="font-medium whitespace-nowrap">{service}</span>
 						</div>
 					))}
-					<div className="flex items-center gap-1">
+					<div className="flex shrink-0 items-center gap-1">
 						<div className="size-2 bg-destructive shrink-0" />
 						<span className="font-medium">Error</span>
 					</div>
@@ -701,7 +719,7 @@ export function TraceTimeline() {
 					onClick={() => setShowShortcuts(false)}
 				>
 					<div
-						className="w-[420px] max-w-[90%] border border-border bg-popover p-4 shadow-lg"
+						className="max-h-[80%] w-[420px] max-w-[90%] overflow-y-auto border border-border bg-popover p-4 shadow-lg"
 						onClick={(e) => e.stopPropagation()}
 					>
 						<div className="mb-3 flex items-center justify-between">

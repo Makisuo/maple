@@ -19,6 +19,8 @@ interface TraceTimelineRowProps {
 	dimmed: boolean
 	/** Search active and this row matches → ring it. */
 	matched: boolean
+	/** A single-service trace repeats one name down every row — the header already said it. */
+	showService: boolean
 	onSelect: (spanId: string) => void
 	/** `wholeSubtree` comes from an Alt/Option-click. */
 	onToggleCollapse: (spanId: string, wholeSubtree: boolean) => void
@@ -49,6 +51,7 @@ function TraceTimelineRowImpl({
 	hovered,
 	dimmed,
 	matched,
+	showService,
 	onSelect,
 	onToggleCollapse,
 	onZoomSpan,
@@ -80,7 +83,9 @@ function TraceTimelineRowImpl({
 			{/* Label cell. Sticky so it survives any horizontal scroll of the timeline column,
 			    and sized from `--sidebar-w` so a resize drag doesn't re-render a single row. */}
 			<div
-				className="sticky left-0 z-10 relative flex items-center gap-1 shrink-0 border-r border-border bg-inherit pr-2 text-[11px]"
+				// A container, so the trailing chips can drop out at narrow column widths without a
+				// re-render: a resize drag only rewrites `--sidebar-w`.
+				className="@container/label sticky left-0 z-10 relative flex items-center gap-1 shrink-0 border-r border-border bg-inherit pr-2 text-[11px]"
 				style={{ width: "var(--sidebar-w)", paddingLeft: bar.depth * DEPTH_INDENT + 4 }}
 			>
 				{/* Ancestor indent guides */}
@@ -131,12 +136,17 @@ function TraceTimelineRowImpl({
 				>
 					{bar.span.spanName}
 				</span>
-				<span
-					className="truncate text-[10px] shrink-0"
-					style={{ color: getServiceColor(bar.span.serviceName) }}
-				>
-					{bar.span.serviceName}
-				</span>
+				{showService && (
+					// Shrinkable, unlike the rest of the trailing run, and gone entirely once the
+					// column is narrow: the span name must not be crushed to three characters for a
+					// service the row's colour stripe and the legend already name.
+					<span
+						className="min-w-0 max-w-[40%] truncate text-[10px] @max-[240px]/label:hidden"
+						style={{ color: getServiceColor(bar.span.serviceName) }}
+					>
+						{bar.span.serviceName}
+					</span>
+				)}
 				{cacheInfo?.result && (
 					<span
 						className={cn(

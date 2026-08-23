@@ -30,7 +30,7 @@ function DepthButton({
 						size="sm"
 						onClick={onClick}
 						aria-label={label}
-						className="h-5 w-6 rounded-[3px] p-0 text-muted-foreground hover:text-foreground"
+						className="h-5 w-6 rounded-[3px] p-0 text-muted-foreground hover:text-foreground pointer-coarse:h-7 pointer-coarse:w-8"
 					>
 						{icon}
 					</Button>

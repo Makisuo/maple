@@ -15,16 +15,35 @@ import { DetailRail } from "@maple/ui/components/detail-rail"
 import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import {
+	AlertWarningIcon,
+	ArrowRightFromLineIcon,
 	CircleInfoIcon,
+	CubeIcon,
+	CursorPointerIcon,
+	EnvelopeIcon,
 	ExternalLinkIcon,
+	EyeIcon,
+	FileIcon,
+	FingerprintIcon,
+	GlobeIcon,
+	IdBadgeIcon,
+	LinkIcon,
+	LogoutIcon,
+	PaperPlaneIcon,
 	PixelBracketsCurlyIcon,
 	PixelCrosshairsIcon,
 	PixelNodesIcon,
 	PixelSparkleIcon,
 	PixelTriangleWarningIcon,
 	PixelWindowIcon,
+	RocketIcon,
+	ServerIcon,
+	TagIcon,
+	UserIcon,
 	type IconComponent,
 } from "@/components/icons"
+import { countryFlag, countryName } from "@/components/analytics/labels"
+import { browserIconFor, deviceIconFor } from "./session-icons"
 import { formatClock, formatSessionDuration, type ReplayPartitionWindow } from "./replay-format"
 import { useReplayPlayer } from "./replay-player-context"
 import { parseChTimestampMs } from "./replay-timeline"
@@ -845,44 +864,24 @@ function TraceListRow({ summary }: { summary: SessionTraceSummary }) {
 	)
 }
 
+/**
+ * The rail's Session tab.
+ *
+ * Two shapes, not one: the numbers that describe the *recording* (how long, how
+ * much of it was someone actually doing something, how much went wrong) are a
+ * summary block, because they are read as a set and compared against each
+ * other; everything else is a labelled fact and stays in the shared
+ * `DetailRail` rows, each keyed by a glyph so the rail can be scanned down its
+ * left edge instead of read line by line.
+ */
 function SessionTab({ sessionId, session }: { sessionId: string; session: SessionRailSession }) {
 	return (
 		<div className="min-h-0 flex-1 overflow-y-auto">
-			<DetailRail.Group label="Session">
-				<DetailRail.Row label="Duration">
-					<Value mono>{formatSessionDuration(session.durationMs)}</Value>
-				</DetailRail.Row>
-				{session.activeTimeMs !== undefined && (
-					<DetailRail.Row label="Active">
-						<Value mono>{formatSessionDuration(session.activeTimeMs)}</Value>
-					</DetailRail.Row>
-				)}
-				{session.idleTimeMs !== undefined && (
-					<DetailRail.Row label="Idle">
-						<Value mono>{formatSessionDuration(session.idleTimeMs)}</Value>
-					</DetailRail.Row>
-				)}
-				<DetailRail.Row label="Pages">
-					<Value mono>{String(session.pageViews || 1)}</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="Clicks">
-					<Value mono>{String(session.clickCount)}</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="Errors">
-					<span
-						className={cn(
-							"font-mono text-xs tabular-nums",
-							session.errorCount > 0 ? "font-semibold text-destructive" : "text-foreground",
-						)}
-					>
-						{session.errorCount}
-					</span>
-				</DetailRail.Row>
-			</DetailRail.Group>
+			<SessionSummary session={session} />
 
 			{session.visitorId ? (
 				<DetailRail.Group label="Visitor">
-					<DetailRail.Row label="Visitor ID" title={session.visitorId}>
+					<Row icon={FingerprintIcon} label="Visitor ID" title={session.visitorId}>
 						{/* The link is the point of this group: one visitor id spans this
 						    person's anonymous marketing sessions and their signed-in ones,
 						    so this is how you walk from a signup back to the campaign. */}
@@ -894,23 +893,21 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 						>
 							{session.visitorId.slice(0, 12)}…
 						</Link>
-					</DetailRail.Row>
-					<DetailRail.Row label="Visitor">
-						<Value mono>{session.visitorIsNew ? "New" : "Returning"}</Value>
-					</DetailRail.Row>
+					</Row>
+					<Row icon={UserIcon} label="Visitor">
+						<Value>{session.visitorIsNew ? "New" : "Returning"}</Value>
+					</Row>
 					{session.groupName && (
-						<DetailRail.Row label="Group">
-							<Value mono className="truncate">
-								{session.groupName}
-							</Value>
-						</DetailRail.Row>
+						<Row icon={TagIcon} label="Group" title={session.groupName}>
+							<Value className="truncate">{session.groupName}</Value>
+						</Row>
 					)}
 					{session.userEmail && (
-						<DetailRail.Row label="Email" title={session.userEmail}>
+						<Row icon={EnvelopeIcon} label="Email" title={session.userEmail}>
 							<Value mono className="truncate">
 								{session.userEmail}
 							</Value>
-						</DetailRail.Row>
+						</Row>
 					)}
 				</DetailRail.Group>
 			) : null}
@@ -918,114 +915,292 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 			{session.entryPath || session.referrerHost || session.utmSource ? (
 				<DetailRail.Group label="Acquisition">
 					{session.entryPath && (
-						<DetailRail.Row label="Entry" title={session.entryPath}>
-							<Value mono className="truncate">
-								{session.entryPath}
-							</Value>
-						</DetailRail.Row>
+						<Row icon={ArrowRightFromLineIcon} label="Entry" title={session.entryPath}>
+							<Path value={session.entryPath} />
+						</Row>
 					)}
 					{session.exitPath && (
-						<DetailRail.Row label="Exit" title={session.exitPath}>
-							<Value mono className="truncate">
-								{session.exitPath}
-							</Value>
-						</DetailRail.Row>
+						<Row icon={LogoutIcon} label="Exit" title={session.exitPath}>
+							<Path value={session.exitPath} />
+						</Row>
 					)}
-					<DetailRail.Row label="Referrer">
+					<Row icon={LinkIcon} label="Referrer">
 						{/* '' is direct *or* a referrer the browser suppressed — "Direct"
 						    would assert more than the column knows. */}
-						<Value mono className="truncate">
-							{session.referrerHost || "None"}
-						</Value>
-					</DetailRail.Row>
-					{session.utmSource && (
-						<DetailRail.Row label="Source">
+						{session.referrerHost ? (
 							<Value mono className="truncate">
+								{session.referrerHost}
+							</Value>
+						) : (
+							<Value className="text-muted-foreground">None</Value>
+						)}
+					</Row>
+					{session.utmSource && (
+						<Row icon={PaperPlaneIcon} label="Source">
+							<Value className="truncate">
 								{[session.utmSource, session.utmMedium].filter(Boolean).join(" / ")}
 							</Value>
-						</DetailRail.Row>
+						</Row>
 					)}
 					{session.utmCampaign && (
-						<DetailRail.Row label="Campaign" title={session.utmCampaign}>
-							<Value mono className="truncate">
-								{session.utmCampaign}
-							</Value>
-						</DetailRail.Row>
+						<Row icon={RocketIcon} label="Campaign" title={session.utmCampaign}>
+							<Value className="truncate">{session.utmCampaign}</Value>
+						</Row>
 					)}
 				</DetailRail.Group>
 			) : null}
 
 			<DetailRail.Group label="Environment">
-				<DetailRail.Row label="Browser">
-					<Value mono>{session.browserName || "—"}</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="OS">
-					<Value mono>{session.osName || "—"}</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="Device">
-					<Value mono className="capitalize">
-						{session.deviceType || "—"}
-					</Value>
-				</DetailRail.Row>
-				<DetailRail.Row label="Country">
-					<Value mono>{session.country || "—"}</Value>
-				</DetailRail.Row>
+				{/* Four one-word facts. As rows they were four near-empty lines with the
+				    value pinned to the far edge; as glyph + word pairs they read at a
+				    glance and cost two lines. */}
+				<div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-0.5">
+					<EnvFact
+						icon={browserIconFor(session.browserName || "")}
+						label="Browser"
+						value={session.browserName}
+					/>
+					<EnvFact icon={CubeIcon} label="Operating system" value={session.osName} />
+					<EnvFact
+						icon={deviceIconFor(session.deviceType || "")}
+						label="Device"
+						value={session.deviceType}
+						className="capitalize"
+					/>
+					<EnvFact
+						glyph={session.country ? countryFlag(session.country) : undefined}
+						icon={GlobeIcon}
+						label="Country"
+						value={session.country ? countryName(session.country) : null}
+					/>
+				</div>
 			</DetailRail.Group>
 
 			<DetailRail.Group label="Context">
 				{session.serviceName && (
-					<DetailRail.Row label="Service">
-						<span className="flex min-w-0 items-center gap-1">
-							<Value mono className="truncate">
-								{session.serviceName}
-							</Value>
-							<CopyButton
-								value={session.serviceName}
-								label="Service name"
-								iconSize={12}
-								className="size-5"
-								toast={false}
-							/>
-						</span>
-					</DetailRail.Row>
-				)}
-				<DetailRail.Row label="Session ID" title={sessionId}>
-					<span className="flex min-w-0 items-center gap-1">
+					<Row icon={ServerIcon} label="Service" title={session.serviceName}>
 						<Value mono className="truncate">
-							{sessionId.slice(0, 12)}…
+							{session.serviceName}
 						</Value>
 						<CopyButton
-							value={sessionId}
-							label="Session ID"
+							value={session.serviceName}
+							label="Service name"
 							iconSize={12}
-							className="size-5"
+							className="ml-1 size-5 shrink-0"
 							toast={false}
 						/>
-					</span>
-				</DetailRail.Row>
+					</Row>
+				)}
+				<Row icon={IdBadgeIcon} label="Session ID" title={sessionId}>
+					<Value mono className="truncate">
+						{sessionId.slice(0, 12)}…
+					</Value>
+					<CopyButton
+						value={sessionId}
+						label="Session ID"
+						iconSize={12}
+						className="ml-1 size-5 shrink-0"
+						toast={false}
+					/>
+				</Row>
 				{session.recorded !== undefined && (
-					<DetailRail.Row label="Recording">
-						<span
-							className={cn(
-								"font-mono text-xs",
-								session.recorded ? "text-success-foreground" : "text-muted-foreground",
-							)}
-						>
-							{session.recorded ? "Complete" : "Not recorded"}
+					<Row icon={EyeIcon} label="Recording">
+						<span className="flex items-center gap-1.5 text-xs">
+							<span
+								aria-hidden
+								className={cn(
+									"size-1.5 rounded-full",
+									session.recorded ? "bg-success-foreground" : "bg-muted-foreground/50",
+								)}
+							/>
+							<span className={session.recorded ? "text-foreground" : "text-muted-foreground"}>
+								{session.recorded ? "Complete" : "Not recorded"}
+							</span>
 						</span>
-					</DetailRail.Row>
+					</Row>
 				)}
 				{session.userAgent && (
-					<div className="flex flex-col gap-1 pt-1">
-						<span className="text-xs text-muted-foreground">User agent</span>
-						<span className="break-words font-mono text-[10px] leading-[15px] text-foreground/80">
+					<DetailRail.Field label="User agent">
+						<span className="break-words font-mono text-[10px] leading-[15px] text-muted-foreground">
 							{session.userAgent}
 						</span>
-					</div>
+					</DetailRail.Field>
 				)}
 			</DetailRail.Group>
 		</div>
 	)
+}
+
+/** `DetailRail.Row` with this rail's label column: every row carries a glyph. */
+function Row({
+	icon,
+	label,
+	title,
+	children,
+}: {
+	icon: IconComponent
+	label: string
+	title?: string
+	children: React.ReactNode
+}) {
+	return (
+		<DetailRail.Row icon={icon} label={label} title={title} labelWidth="102px">
+			{children}
+		</DetailRail.Row>
+	)
+}
+
+/**
+ * The recording's own numbers: total time, the active/idle split of it, and the
+ * three counts. The split is a bar rather than two more rows because "14s of
+ * 11m" is a proportion, and a proportion is the one thing a pair of numbers in
+ * a label/value list will not tell you.
+ */
+function SessionSummary({ session }: { session: SessionRailSession }) {
+	const total = session.durationMs ?? null
+	const active = session.activeTimeMs ?? null
+	const idle = session.idleTimeMs ?? null
+	const share =
+		total && total > 0 && (active != null || idle != null)
+			? {
+					active: Math.min(100, ((active ?? 0) / total) * 100),
+					idle: Math.min(100, ((idle ?? 0) / total) * 100),
+				}
+			: null
+	const errored = session.errorCount > 0
+
+	return (
+		<section className="border-b border-border/40 px-4 py-3.5">
+			<div className="flex items-baseline gap-1.5">
+				<span className="font-mono text-2xl font-semibold leading-none tracking-tight tabular-nums">
+					{formatSessionDuration(total)}
+				</span>
+				<span className="text-[11px] text-muted-foreground">on the page</span>
+			</div>
+
+			{share && (
+				<>
+					<div aria-hidden className="mt-3 flex h-1 gap-px overflow-hidden rounded-full bg-muted">
+						<span className="bg-primary" style={{ width: `${share.active}%` }} />
+						<span className="bg-muted-foreground/40" style={{ width: `${share.idle}%` }} />
+					</div>
+					<div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+						{active != null && (
+							<Legend
+								swatch="bg-primary"
+								label="Active"
+								value={formatSessionDuration(active)}
+							/>
+						)}
+						{idle != null && (
+							<Legend
+								swatch="bg-muted-foreground/40"
+								label="Idle"
+								value={formatSessionDuration(idle)}
+							/>
+						)}
+					</div>
+				</>
+			)}
+
+			<div className="mt-3 grid grid-cols-3 gap-1.5">
+				<Stat icon={FileIcon} label="Pages" value={session.pageViews || 1} />
+				<Stat icon={CursorPointerIcon} label="Clicks" value={session.clickCount} />
+				<Stat
+					icon={AlertWarningIcon}
+					label={session.errorCount === 1 ? "Error" : "Errors"}
+					value={session.errorCount}
+					danger={errored}
+				/>
+			</div>
+		</section>
+	)
+}
+
+function Legend({ swatch, label, value }: { swatch: string; label: string; value: string }) {
+	return (
+		<span className="flex items-center gap-1.5">
+			<span aria-hidden className={cn("size-1.5 rounded-full", swatch)} />
+			{label}
+			<span className="font-mono tabular-nums text-foreground">{value}</span>
+		</span>
+	)
+}
+
+function Stat({
+	icon: Icon,
+	label,
+	value,
+	danger,
+}: {
+	icon: IconComponent
+	label: string
+	value: number
+	danger?: boolean
+}) {
+	return (
+		<div
+			className={cn(
+				"flex flex-col gap-0.5 rounded-md border border-border/50 bg-muted/30 px-2 py-1.5",
+				danger && "border-destructive/30 bg-destructive/5",
+			)}
+		>
+			<span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+				<Icon className={cn("size-3 shrink-0", danger && "text-destructive")} aria-hidden />
+				<span className="truncate">{label}</span>
+			</span>
+			<span
+				className={cn(
+					"font-mono text-sm font-semibold tabular-nums",
+					danger ? "text-destructive" : "text-foreground",
+				)}
+			>
+				{value}
+			</span>
+		</div>
+	)
+}
+
+/** One glyph + one word from the Environment grid. Unknown values stay as a dash. */
+function EnvFact({
+	icon: Icon,
+	glyph,
+	label,
+	value,
+	className,
+}: {
+	icon: IconComponent
+	/** Rendered instead of `icon` when the value is its own mark (a country flag). */
+	glyph?: string
+	label: string
+	value?: string | null
+	className?: string
+}) {
+	return (
+		<span className="flex min-w-0 items-center gap-2" title={`${label}: ${value || "unknown"}`}>
+			{glyph ? (
+				<span aria-hidden className="w-3.5 shrink-0 text-center text-[13px] leading-none">
+					{glyph}
+				</span>
+			) : (
+				<Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+			)}
+			<span
+				className={cn(
+					"min-w-0 truncate text-xs",
+					value ? "text-foreground" : "text-muted-foreground",
+					className,
+				)}
+			>
+				{value || "—"}
+			</span>
+		</span>
+	)
+}
+
+/** A pathname. The full value is on the row's `title`, so truncation is safe. */
+function Path({ value }: { value: string }) {
+	return <span className="min-w-0 truncate font-mono text-xs text-foreground">{value}</span>
 }
 
 function Value({

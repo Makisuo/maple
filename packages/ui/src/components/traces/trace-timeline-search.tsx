@@ -37,8 +37,9 @@ export function TraceTimelineSearch({
 						onNavigate(e.shiftKey ? -1 : 1)
 					}
 				}}
-				placeholder="Search spans... (Enter next · ⇧Enter prev)"
-				className="flex-1 bg-transparent text-xs font-mono text-foreground placeholder:text-muted-foreground/50 outline-none"
+				placeholder="Search spans…"
+				// 16px on touch: iOS Safari zooms the whole page in on a focused input below that size.
+				className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/50 pointer-coarse:text-base"
 			/>
 			{query && (
 				<>
@@ -50,7 +51,8 @@ export function TraceTimelineSearch({
 					<button
 						type="button"
 						onClick={() => onQueryChange("")}
-						className="text-muted-foreground hover:text-foreground shrink-0"
+						aria-label="Clear search"
+						className="-m-1.5 shrink-0 p-1.5 text-muted-foreground hover:text-foreground"
 					>
 						<XmarkIcon size={12} />
 					</button>

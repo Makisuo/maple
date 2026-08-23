@@ -65,6 +65,11 @@ export const SIDEBAR_WIDTH_DEFAULT = 320
 export const SIDEBAR_WIDTH_MIN = 180
 export const SIDEBAR_WIDTH_MAX = 640
 export const SIDEBAR_WIDTH_STORAGE_KEY = "traceTimelineSidebarWidth"
+/**
+ * Floor for the auto-narrowed label column. Below `SIDEBAR_WIDTH_MIN` because this is not a width
+ * anyone chose — it is what a phone-width pane can spare before the bars have nowhere to draw.
+ */
+export const SIDEBAR_WIDTH_NARROW_MIN = 140
 
 /**
  * Narrowest label a tick can carry ("1.23 s" plus headroom). The ruler budgets ticks against

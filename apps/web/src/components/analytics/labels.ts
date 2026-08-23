@@ -28,19 +28,33 @@ const displayNames = (type: "region" | "language"): Intl.DisplayNames | undefine
 let regionNames: Intl.DisplayNames | undefined | null = null
 let languageNames: Intl.DisplayNames | undefined | null = null
 
-/** `DE` → `Germany 🇩🇪`, falling back to the raw code where CLDR has no entry. */
-export const countryLabel = (code: string): string => {
+/**
+ * `DE` → `🇩🇪`, or `undefined` for anything that is not a region code.
+ *
+ * Only well-formed two-letter codes reach the flag path; the gateway already
+ * rejects anything else (`derive_country` in apps/ingest/src/main.rs), but a
+ * stray value must render as itself rather than as mojibake.
+ */
+export const countryFlag = (code: string): string | undefined => {
+	if (!/^[A-Za-z]{2}$/.test(code)) return undefined
+	return String.fromCodePoint(
+		...[...code.toUpperCase()].map((char) => 0x1f1e6 + (char.charCodeAt(0) - "A".charCodeAt(0))),
+	)
+}
+
+/** `DE` → `Germany`, falling back to the raw code where CLDR has no entry. */
+export const countryName = (code: string): string => {
 	if (regionNames === null) regionNames = displayNames("region")
-	// Only well-formed two-letter codes reach the flag path; the gateway already
-	// rejects anything else (`derive_country` in apps/ingest/src/main.rs), but a
-	// stray value must render as itself rather than as mojibake.
 	if (!/^[A-Za-z]{2}$/.test(code)) return code
 	const upper = code.toUpperCase()
-	const name = regionNames?.of(upper)
-	const flag = String.fromCodePoint(
-		...[...upper].map((char) => 0x1f1e6 + (char.charCodeAt(0) - "A".charCodeAt(0))),
-	)
-	return name ? `${flag} ${name}` : `${flag} ${upper}`
+	return regionNames?.of(upper) ?? upper
+}
+
+/** `DE` → `🇩🇪 Germany`, falling back to the raw code where CLDR has no entry. */
+export const countryLabel = (code: string): string => {
+	const flag = countryFlag(code)
+	if (!flag) return code
+	return `${flag} ${countryName(code)}`
 }
 
 /** `en-US` → `American English`, falling back to the raw tag. */
