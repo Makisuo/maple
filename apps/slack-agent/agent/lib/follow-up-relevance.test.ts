@@ -85,6 +85,23 @@ describe("relevancePrompt", () => {
 	test("system prompt names the bot's user id", () => {
 		expect(relevanceSystemPrompt(BOT_USER_ID)).toContain(`<@${BOT_USER_ID}>`)
 	})
+
+	test("system prompt classifies criticism of the bot's output as RESPOND", () => {
+		// Regression: a jokey complaint about a chart the bot had posted was
+		// dropped as banter; criticism must be called out on both sides of the
+		// verdict, not left to the tiebreak.
+		const system = relevanceSystemPrompt(BOT_USER_ID)
+		expect(system).toContain("criticism of its output")
+		expect(system).toContain("Do not file criticism")
+	})
+
+	test("system prompt splits thanks/praise by who it is meant for", () => {
+		// A thank-you to the assistant gets a reply (ghosting reads wrong); one
+		// meant for another person stays untouched (butting in reads worse).
+		const system = relevanceSystemPrompt(BOT_USER_ID)
+		expect(system).toContain("thanks and praise clearly meant for the assistant")
+		expect(system).toContain("meant for another person")
+	})
 })
 
 describe("judgeFollowUpRelevance", () => {

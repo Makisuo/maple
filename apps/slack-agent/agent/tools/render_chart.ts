@@ -36,7 +36,12 @@ const inputSchema = z.object({
 		),
 	unit: z
 		.enum(["number", "percent", "duration_ms", "bytes", "requests_per_sec"])
-		.describe("Unit of the values; drives axis and label formatting."),
+		.describe(
+			"Unit of the values; drives axis and label formatting. percent values are " +
+				"percentage points on the 0–100 scale: pass 3.2 for 3.2%. Maple tools " +
+				"report rates (errorRate, hit rates) as fractions of 1 — always multiply " +
+				"them by 100 before charting as percent (0.0004 → 0.04).",
+		),
 	// Not z.tuple(): tuples serialize to the draft-07 `items: [..]` array form,
 	// which Workers AI rejects as an invalid 2020-12 tool schema.
 	// .finite() because bare z.number() admits Infinity/-Infinity, which turn

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { WorkflowState } from "@maple/domain/http"
 import type { V2Investigation } from "@maple/domain/http/v2"
 
-import { densifySpark, resolveSignalState, surgeRatio } from "./error-signal"
+import { densifySpark, resolveSignalState, sparkFingerprintHashes, surgeRatio } from "./error-signal"
 
 const HOUR_MS = 3_600_000
 
@@ -45,6 +45,21 @@ describe("resolveSignalState", () => {
 	it("falls back to the workflow state when nothing is running", () => {
 		const state = resolveSignalState(issue({ workflowState: "in_review" }), undefined)
 		expect(state).toEqual({ kind: "workflow", state: "in_review" })
+	})
+})
+
+describe("sparkFingerprintHashes", () => {
+	it("keeps only the issues whose fingerprint the warehouse can parse", () => {
+		// Alert and integration issues reuse the fingerprint column for a
+		// synthetic key. Sending one to the batched spark query makes ClickHouse
+		// reject `toUInt64('alert:…')` and fails the sparklines for every row.
+		const hashes = sparkFingerprintHashes([
+			{ kind: "error", fingerprintHash: "753390793895937054" },
+			{ kind: "alert", fingerprintHash: "alert:550bb2c5-8fe0-4ab9-b2f8-e566674cb0a2:scraper" },
+			{ kind: "integration", fingerprintHash: "planetscale:maple:branch.out_of_memory" },
+			{ kind: "error", fingerprintHash: "1037926342141719040" },
+		])
+		expect(hashes).toEqual(["753390793895937054", "1037926342141719040"])
 	})
 })
 
