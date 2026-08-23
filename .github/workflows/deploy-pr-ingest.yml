@@ -47,9 +47,21 @@ permissions:
     id-token: write # Infisical + AWS OIDC
 
 jobs:
+    # Separate job because it needs an arm64 runner — see the workflow itself.
+    # Skipped on a destroy (including every closed-PR teardown): there is
+    # nothing to deploy, so nothing to compile.
+    ingest-binary:
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'deploy' }}
+        uses: ./.github/workflows/build-ingest-binary.yml
+
     ingest:
         # Fork PRs get no staging credentials.
-        if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+        # `!cancelled()` rather than a plain `needs`: a destroy skips the build
+        # job, and a skipped dependency would otherwise skip the teardown with
+        # it. The explicit `result != 'failure'` keeps a BROKEN build from
+        # deploying anyway.
+        needs: ingest-binary
+        if: ${{ !cancelled() && needs.ingest-binary.result != 'failure' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
         runs-on: ubuntu-latest
         timeout-minutes: 30
         environment: staging
@@ -90,9 +102,33 @@ jobs:
             - name: Install dependencies
               run: bun install --frozen-lockfile
 
-            # Same prebuilt-binary path as deploy-prd.yml (and the same cache key,
-            # so this rides its warm cache): the image build is a COPY, not a
-            # from-scratch cargo build inside docker.
+            # Compiled by the `ingest-binary` job above, on an arm64 runner —
+            # the ECS tasks are Graviton. The artifact upload drops the exec
+            # bit, and `Dockerfile.prebuilt` COPYs the file mode straight into
+            # the image, so restore it here or the task exits on `permission
+            # denied`.
+            # `Dockerfile.prebuilt` builds for linux/arm64 (the tasks are Graviton)
+            # and has a `RUN apt-get` layer, so this x86 runner has to be able to
+            # execute arm64 binaries to build it. Registers the binfmt handlers.
+            # The COPYed binary itself is compiled natively by the build job —
+            # nothing heavy is emulated here, just one apt-get layer.
+            - name: Register arm64 binfmt handlers (QEMU)
+              if: env.ACTION == 'deploy'
+              uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+              with:
+                  platforms: arm64
+
+            - name: Download ingest binary
+              if: env.ACTION == 'deploy'
+              uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+              with:
+                  name: maple-ingest
+                  path: apps/ingest/dist
+
+            - name: Restore exec bit on ingest binary
+              if: env.ACTION == 'deploy'
+              run: chmod +x apps/ingest/dist/maple-ingest
+
             # Only a stack that exists gets destroyed: the ECS cluster is created
             # with the stack and named deterministically, so its absence means
             # "nothing to tear down" (every closed PR reaches this step).
@@ -104,33 +140,6 @@ jobs:
                       --query 'clusters[0].status' --output text 2>/dev/null || echo "NONE")
                   echo "cluster status: $status"
                   if [ "$status" = "ACTIVE" ]; then echo "stack=true" >> "$GITHUB_OUTPUT"; else echo "stack=false" >> "$GITHUB_OUTPUT"; fi
-
-            - name: Cache ingest cargo build
-              if: env.ACTION == 'deploy'
-              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-              with:
-                  path: |
-                      ~/.cargo-ingest
-                      ${{ runner.temp }}/ingest-target
-                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
-                  restore-keys: |
-                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
-                      ingest-cargo-${{ runner.os }}-
-
-            - name: Build ingest binary
-              if: env.ACTION == 'deploy'
-              run: |
-                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
-                  docker run --rm \
-                      --user "$(id -u):$(id -g)" \
-                      -e CARGO_HOME=/cargo \
-                      -v "$HOME/.cargo-ingest:/cargo" \
-                      -v "$PWD/apps/ingest:/app" \
-                      -v "$RUNNER_TEMP/ingest-target:/target" \
-                      -w /app \
-                      rust:1.94-bookworm \
-                      cargo build --release --target-dir /target
-                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
 
             # AWS_ACCOUNT_ID: see the note in deploy-prd.yml — without it alchemy's
             # env-credential path deadlocks silently.

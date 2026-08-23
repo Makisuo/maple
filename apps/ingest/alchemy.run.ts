@@ -65,8 +65,8 @@ const WAL_MAX_BYTES = 8 * 1024 * 1024 * 1024
 
 /**
  * Pinned rather than derived. The gateway defaults to `num_cpus * 2`, which
- * makes on-disk layout and fd count a function of task size — so a Fargate to
- * EC2 move, or a cpu bump, would silently reshape the WAL. Two lanes per shard
+ * makes on-disk layout and fd count a function of task size — so a cpu bump, or
+ * a move to another capacity provider, would silently reshape the WAL. Two lanes per shard
  * (Tinybird + ClickHouse) means this is 8 open WAL files.
  */
 const WAL_SHARDS = 4
@@ -84,7 +84,12 @@ export interface CreateMapleIngestOptions {
  * Migrated off Railway. Fargate rather than EC2 because below ~16 vCPU the
  * fractional-vCPU pricing beats EC2 on-demand and there is no ASG or AMI to
  * own; the two are capacity providers on the same cluster, so crossing that
- * threshold later is a config change, not a rearchitecture.
+ * threshold later is a config change, not a rearchitecture. (EC2 would also not
+ * buy the per-task CPU/memory metrics it is sometimes reached for: the free
+ * cluster-level ECS metrics are `CPUReservation`/`MemoryReservation`, which
+ * describe how much of a fleet YOU own is claimed. Per-task usage needs
+ * Container Insights on either launch type.) Tasks run on ARM64 — see
+ * `runtimePlatform` below.
  *
  * One fleet per `MapleRegion`. A second instance is this factory called again
  * with `region: "eu"` and that instance's own TINYBIRD_* / MAPLE_PG_URL — the
@@ -288,7 +293,9 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 						// exporter) and cannot run this config.
 						context: COLLECTOR_CONTEXT,
 						dockerfile: COLLECTOR_DOCKERFILE,
-						runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" },
+						// Graviton, same as the gateway. Nothing to rebuild for it: the
+						// upstream contrib image is multi-arch.
+						runtimePlatform: { cpuArchitecture: "ARM64", operatingSystemFamily: "LINUX" },
 						cpu: collectorTaskSize.cpu,
 						memory: collectorTaskSize.memory,
 
@@ -356,15 +363,22 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			// path here has broken the deploy in both directions.
 			context: "apps/ingest",
 			...(existsSync(PREBUILT_BINARY) ? { dockerfile: PREBUILT_DOCKERFILE } : undefined),
-			// The docker build platform is derived from this (`taskImagePlatform` in
-			// alchemy's ECS/Task). Explicit so a build from an Apple Silicon machine
-			// produces the same artifact CI does — an arm64 image on an X86_64 task
-			// fails at start with "image Manifest does not contain descriptor
-			// matching platform 'linux/amd64'". Flipping cpuArchitecture to "ARM64"
-			// is the whole Graviton switch (~20% cheaper), but it needs an ARM
-			// builder: cross-compiling Rust under QEMU is 10-30 min a build, for
-			// single-digit dollars a month at this size. Revisit with an ARM runner.
-			runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" },
+			// Graviton. AWS's own ARM cores, ~20% cheaper per vCPU-hour on Fargate at
+			// comparable per-core performance for this workload (gzip + protobuf
+			// decode), and the saving grows with the autoscaler rather than being a
+			// one-off.
+			//
+			// The docker build platform is DERIVED from this (`taskImagePlatform` in
+			// alchemy's ECS/Task) — there is no separate `platform` prop — so it also
+			// dictates what the binary inside has to be. A mismatch is not a build
+			// error: the task pulls, starts and dies with `exec format error`, or the
+			// pull itself fails with "image Manifest does not contain descriptor
+			// matching platform". CI compiles aarch64 natively on an `ubuntu-24.04-arm`
+			// runner (`.github/workflows/build-ingest-binary.yml`, free on public
+			// repos); a local `alchemy deploy` from an Apple Silicon machine is also
+			// native. An x86 machine would emulate the source build — slow, but
+			// correct.
+			runtimePlatform: { cpuArchitecture: "ARM64", operatingSystemFamily: "LINUX" },
 			cpu: taskSize.cpu,
 			memory: taskSize.memory,
 

@@ -95,7 +95,11 @@ export default Alchemy.Stack(
 			repositoryUri: repository.repositoryUri,
 			context: "apps/ingest",
 			dockerfile: "Dockerfile.prebuilt",
-			platform: "linux/amd64",
+			// Matches the ECS tasks' `runtimePlatform` (ARM64, see
+			// apps/ingest/alchemy.run.ts) and the aarch64 binary the build job
+			// produces. `ECR.Image` takes an explicit platform; the ECS image
+			// source derives one instead.
+			platform: "linux/arm64",
 		})
 		return { level, imageUri: image.imageUri }
 	}),

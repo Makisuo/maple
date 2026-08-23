@@ -19,7 +19,12 @@ permissions:
     id-token: write # Infisical OIDC machine-identity auth
 
 jobs:
+    # Separate job because it needs an arm64 runner — see the workflow itself.
+    ingest-binary:
+        uses: ./.github/workflows/build-ingest-binary.yml
+
     deploy-prd:
+        needs: ingest-binary
         runs-on: ubuntu-latest
         timeout-minutes: 45
         # On a workflow_run event `github.sha` is the default branch head, not the
@@ -71,52 +76,29 @@ jobs:
             - name: Install dependencies
               run: bun install --frozen-lockfile
 
-            # The Rust gateway is compiled HERE, not inside the image build.
-            # alchemy's docker build passes no --cache-from (AWS/ECR/Image.ts), and
-            # a fresh runner's layer cache is empty, so a Dockerfile that runs
-            # `cargo build` recompiles all 385 crates on every deploy, however the
-            # layers are arranged. Cold cost is 2m54s, MEASURED — an earlier
-            # version of this comment guessed ~20 minutes, which was wrong by ~7x
-            # and has already been quoted back as fact in a review, so treat the
-            # number here as load-bearing. Out here the cargo cache survives
-            # between runs, so an unchanged ingest is a no-op and a one-crate
-            # change is about a minute. Dockerfile.prebuilt then COPYs the result.
-            #
-            # Inside rust:1.94-bookworm rather than on the runner: the runtime base
-            # is debian:bookworm-slim (glibc 2.36) and ubuntu-24.04 ships 2.39, so a
-            # host-built binary starts and immediately dies with
-            # `version 'GLIBC_2.39' not found`.
-            - name: Cache ingest cargo build
-              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+            # Compiled by the `ingest-binary` job above, on an arm64 runner —
+            # the ECS tasks are Graviton. The artifact upload drops the exec
+            # bit, and `Dockerfile.prebuilt` COPYs the file mode straight into
+            # the image, so restore it here or the task exits on `permission
+            # denied`.
+            # `Dockerfile.prebuilt` builds for linux/arm64 (the tasks are Graviton)
+            # and has a `RUN apt-get` layer, so this x86 runner has to be able to
+            # execute arm64 binaries to build it. Registers the binfmt handlers.
+            # The COPYed binary itself is compiled natively by the build job —
+            # nothing heavy is emulated here, just one apt-get layer.
+            - name: Register arm64 binfmt handlers (QEMU)
+              uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
               with:
-                  path: |
-                      ~/.cargo-ingest
-                      ${{ runner.temp }}/ingest-target
-                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
-                  restore-keys: |
-                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
-                      ingest-cargo-${{ runner.os }}-
+                  platforms: arm64
 
-            # --target-dir points OUTSIDE apps/ingest deliberately. Alchemy hashes
-            # the image context with `hashDirectory`, which has no .dockerignore
-            # support and derives its exclusions from gitignore rules WITHOUT
-            # rebasing root-anchored ones onto the context dir — `/apps/ingest/target`
-            # becomes the glob `apps/ingest/target/**` evaluated with cwd=apps/ingest,
-            # which matches nothing. A target dir inside the context would therefore
-            # be walked and hashed in full on every deploy.
-            - name: Build ingest binary
-              run: |
-                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
-                  docker run --rm \
-                      --user "$(id -u):$(id -g)" \
-                      -e CARGO_HOME=/cargo \
-                      -v "$HOME/.cargo-ingest:/cargo" \
-                      -v "$PWD/apps/ingest:/app" \
-                      -v "$RUNNER_TEMP/ingest-target:/target" \
-                      -w /app \
-                      rust:1.94-bookworm \
-                      cargo build --release --target-dir /target
-                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
+            - name: Download ingest binary
+              uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+              with:
+                  name: maple-ingest
+                  path: apps/ingest/dist
+
+            - name: Restore exec bit on ingest binary
+              run: chmod +x apps/ingest/dist/maple-ingest
 
             # NOTE: prod schema migrations are applied OUT OF BAND (manually, via
             # `bun run migrate:prod` → `ps:apply-schema main`, against the direct 5432

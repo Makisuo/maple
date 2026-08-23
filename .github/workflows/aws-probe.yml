@@ -39,12 +39,24 @@ permissions:
     id-token: write
 
 jobs:
+    # Only the `image` level needs a binary to COPY; the cheaper levels skip the
+    # compile entirely. Separate job because it needs an arm64 runner — see the
+    # workflow itself.
+    ingest-binary:
+        if: ${{ inputs.level == 'image' }}
+        uses: ./.github/workflows/build-ingest-binary.yml
+
     probe:
+        # `!cancelled()` because the ecr/network levels skip the build job, and a
+        # skipped dependency would otherwise skip the probe with it.
+        needs: ingest-binary
+        if: ${{ !cancelled() && needs.ingest-binary.result != 'failure' }}
         runs-on: ubuntu-latest
         # Not a long-running deploy: if a level has not settled in this window it
-        # has hung, and that IS the result. Sized so a COLD cargo build (measured
-        # at 2m54s, not the ~20min this repo used to claim) cannot eat the budget
-        # and masquerade as the hang being investigated.
+        # has hung, and that IS the result. The compile no longer competes for
+        # this budget at all — it is its own job now (build-ingest-binary.yml),
+        # so a slow build shows up as a slow build rather than masquerading as
+        # the hang being investigated.
         timeout-minutes: 20
         # The OIDC role's trust policy only accepts
         # `repo:MapleTechLabs/maple:environment:{production,staging}` subs, so the
@@ -83,37 +95,32 @@ jobs:
             - name: Install dependencies
               run: bun install --frozen-lockfile
 
-            # Only the image level needs a binary to COPY; the cheaper levels skip
-            # the three-minute compile entirely.
-            # Same key as deploy-prd.yml on purpose: the probe rides that
-            # workflow's warm cache instead of compiling from scratch inside a
-            # budget meant for the probe itself.
-            - name: Cache ingest cargo build
+            # Compiled by the `ingest-binary` job above, on an arm64 runner —
+            # the ECS tasks are Graviton. The artifact upload drops the exec
+            # bit, and `Dockerfile.prebuilt` COPYs the file mode straight into
+            # the image, so restore it here or the task exits on `permission
+            # denied`.
+            # `Dockerfile.prebuilt` builds for linux/arm64 (the tasks are Graviton)
+            # and has a `RUN apt-get` layer, so this x86 runner has to be able to
+            # execute arm64 binaries to build it. Registers the binfmt handlers.
+            # The COPYed binary itself is compiled natively by the build job —
+            # nothing heavy is emulated here, just one apt-get layer.
+            - name: Register arm64 binfmt handlers (QEMU)
               if: inputs.level == 'image'
-              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
               with:
-                  path: |
-                      ~/.cargo-ingest
-                      ${{ runner.temp }}/ingest-target
-                  key: ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-${{ hashFiles('apps/ingest/src/**') }}
-                  restore-keys: |
-                      ingest-cargo-${{ runner.os }}-${{ hashFiles('apps/ingest/Cargo.lock') }}-
-                      ingest-cargo-${{ runner.os }}-
+                  platforms: arm64
 
-            - name: Build ingest binary
+            - name: Download ingest binary
               if: inputs.level == 'image'
-              run: |
-                  mkdir -p ~/.cargo-ingest "$RUNNER_TEMP/ingest-target" apps/ingest/dist
-                  docker run --rm \
-                      --user "$(id -u):$(id -g)" \
-                      -e CARGO_HOME=/cargo \
-                      -v "$HOME/.cargo-ingest:/cargo" \
-                      -v "$PWD/apps/ingest:/app" \
-                      -v "$RUNNER_TEMP/ingest-target:/target" \
-                      -w /app \
-                      rust:1.94-bookworm \
-                      cargo build --release --target-dir /target
-                  cp "$RUNNER_TEMP/ingest-target/release/maple-ingest" apps/ingest/dist/maple-ingest
+              uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+              with:
+                  name: maple-ingest
+                  path: apps/ingest/dist
+
+            - name: Restore exec bit on ingest binary
+              if: inputs.level == 'image'
+              run: chmod +x apps/ingest/dist/maple-ingest
 
             # The watchdog is the whole point on a hang: alchemy prints nothing, so
             # the process table is the only witness. A busy cargo/docker child means
