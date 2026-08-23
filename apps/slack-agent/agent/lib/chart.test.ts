@@ -30,6 +30,40 @@ describe("formatValue", () => {
 	test("requests_per_sec appends /s", () => {
 		expect(formatValue(1200, "requests_per_sec")).toBe("1.2k/s")
 	})
+
+	test("tick step drives precision so tiny ranges stay distinct", () => {
+		expect(formatValue(0, "percent", 0.01)).toBe("0%")
+		expect(formatValue(0.01, "percent", 0.01)).toBe("0.01%")
+		expect(formatValue(0.04, "percent", 0.01)).toBe("0.04%")
+		expect(formatValue(0.02, "number", 0.01)).toBe("0.02")
+		expect(formatValue(0.03, "duration_ms", 0.01)).toBe("0.03 ms")
+		expect(formatValue(0.5, "requests_per_sec", 0.25)).toBe("0.5/s")
+	})
+
+	test("step precision respects the unit's display scale", () => {
+		expect(formatValue(1500, "duration_ms", 500)).toBe("1.5 s") // step 0.5 s → 1 decimal
+		expect(formatValue(2_500_000, "number", 500_000)).toBe("2.5M")
+		expect(formatValue(1536, "bytes", 512)).toBe("1.5 KiB")
+	})
+
+	test("coarse steps do not add decimal noise", () => {
+		expect(formatValue(2000, "duration_ms", 1000)).toBe("2 s")
+		expect(formatValue(40, "percent", 10)).toBe("40%")
+	})
+
+	test("a 2.5-mantissa step earns one extra decimal", () => {
+		expect(formatValue(2.5, "number", 2.5)).toBe("2.5")
+		expect(formatValue(0.025, "percent", 0.025)).toBe("0.025%")
+	})
+
+	test("every tick of a 0–0.04 percent axis formats distinctly", () => {
+		const ticks = niceTicks(0.012, 0.04)
+		const step = ticks[1]! - ticks[0]!
+		const labels = ticks.map((t) => formatValue(t, "percent", step))
+		expect(labels.length).toBeGreaterThanOrEqual(3)
+		expect(new Set(labels).size).toBe(labels.length)
+		expect(labels).not.toContain("0.00%")
+	})
 })
 
 // ── niceTicks ───────────────────────────────────────────────────────────────
@@ -118,6 +152,23 @@ describe("renderChartSvg", () => {
 	test("bar charts render one path per point", () => {
 		const svg = renderChartSvg(spec({ kind: "bar" }))
 		expect(svg.match(/<path/gu)?.length).toBe(12)
+	})
+
+	test("a 0.04%-peak error-rate series renders distinct y-axis labels", () => {
+		// Regression: fixed toFixed(2) rendered every tick of this chart "0.00%".
+		const svg = renderChartSvg(
+			spec({
+				unit: "percent",
+				points: Array.from({ length: 12 }, (_, i) => [T0 + i * 300_000, 0.005 + (0.035 * i) / 11] as const),
+			}),
+		)
+		const labels = [...svg.matchAll(/x="56" y="[^"]+" text-anchor="end"[^>]*>([^<]+)<\/text>/gu)].map(
+			(m) => m[1]!,
+		)
+		expect(labels.length).toBeGreaterThanOrEqual(3)
+		expect(new Set(labels).size).toBe(labels.length)
+		expect(labels.every((l) => l.endsWith("%"))).toBe(true)
+		expect(labels).not.toContain("0.00%")
 	})
 
 	test("throws on an empty series", () => {

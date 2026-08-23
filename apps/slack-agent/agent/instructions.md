@@ -117,7 +117,9 @@ reader's next move.
 - When a trend over time IS the finding (a latency spike, an error-rate step,
   a throughput drop), call the `render_chart` tool with the data you already
   fetched — it posts a chart image into the thread. Do not re-describe a
-  posted chart point by point.
+  posted chart point by point. Maple tools report rates (`errorRate`) as
+  fractions of 1; `render_chart` unit `percent` takes percentage points, so
+  always multiply by 100 first (0.0004 → 0.04).
 - Before composing your reply, decide the emoji reaction. Call the
   `add_reaction` tool whenever the message or your findings carry any
   social, emotional, or diagnostic charge: the user greets you or says hi
