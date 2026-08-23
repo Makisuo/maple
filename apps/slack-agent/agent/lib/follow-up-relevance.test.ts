@@ -94,6 +94,14 @@ describe("relevancePrompt", () => {
 		expect(system).toContain("criticism of its output")
 		expect(system).toContain("Do not file criticism")
 	})
+
+	test("system prompt splits thanks/praise by who it is meant for", () => {
+		// A thank-you to the assistant gets a reply (ghosting reads wrong); one
+		// meant for another person stays untouched (butting in reads worse).
+		const system = relevanceSystemPrompt(BOT_USER_ID)
+		expect(system).toContain("thanks and praise clearly meant for the assistant")
+		expect(system).toContain("meant for another person")
+	})
 })
 
 describe("judgeFollowUpRelevance", () => {
