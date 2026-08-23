@@ -125,6 +125,15 @@ export { PaletteIcon } from "./palette"
 export { PaperPlaneIcon } from "./paper-plane"
 export { PencilIcon } from "./pencil"
 export { PlanetScaleIcon } from "./planetscale"
+// Nucleo Pixel Essential — a deliberately separate family, used where a row
+// needs a type marker rather than an action affordance (the session replay
+// event rail). Don't mix them with the outline icons inside one control.
+export { PixelBracketsCurlyIcon } from "./pixel-brackets-curly"
+export { PixelCrosshairsIcon } from "./pixel-crosshairs"
+export { PixelNodesIcon } from "./pixel-nodes"
+export { PixelSparkleIcon } from "./pixel-sparkle"
+export { PixelTriangleWarningIcon } from "./pixel-triangle-warning"
+export { PixelWindowIcon } from "./pixel-window"
 export { PlayRotateClockwiseIcon } from "./play-rotate-clockwise"
 export { PlusIcon } from "./plus"
 export { PostgresIcon } from "./postgres"
