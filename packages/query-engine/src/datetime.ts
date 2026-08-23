@@ -76,7 +76,9 @@ export function formatWarehouseDateTimeMs(epochMs: number): string {
 // `mo` came to mean different spans depending on which one you asked.
 //
 // Month and day arithmetic is done on **local** calendar components, matching
-// date-fns' `subMonths`/`startOfDay`. In the browser that is the viewer's
+// date-fns' `subMonths`/`startOfDay`. Day and week windows additionally snap
+// their start to local midnight and count today as day one, so "7d" is seven
+// calendar days rather than a rolling 168 hours. In the browser that is the viewer's
 // calendar (unchanged behaviour); on a Worker, local is UTC, which is the only
 // sensible reading server-side. One implementation serves both.
 
@@ -163,6 +165,17 @@ export function resolveRelativeRange(
 	const unit = match[2]
 	if (unit === "mo") {
 		return { startMs: addCalendarMonths(now, -amount).getTime(), endMs: nowMs }
+	}
+
+	// Day-or-wider windows are counted in whole local calendar days, inclusive
+	// of today: "7d" is the last seven days *on the calendar* — midnight six
+	// days ago through now — not a rolling 168-hour window that starts mid-
+	// afternoon. Counting today as one of the N keeps the span at or under the
+	// nominal duration, so the range-width ceilings (`isTimeRangeWithin`, the
+	// exact 365-day limit the service and alert endpoints enforce) still pass.
+	if (unit === "d" || unit === "w") {
+		const days = unit === "w" ? amount * 7 : amount
+		return { startMs: startOfLocalDay(new Date(nowMs - (days - 1) * MS.d)).getTime(), endMs: nowMs }
 	}
 
 	const unitMs = MS[unit]

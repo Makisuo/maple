@@ -362,11 +362,46 @@ describe("relativeRangeSeconds", () => {
 describe("resolveRelativeRange", () => {
 	const now = AT("2026-03-08T14:30:00.000Z")
 
-	it("subtracts fixed-width units exactly", () => {
+	const startOfLocalDayOf = (epochMs: number): number => {
+		const d = new Date(epochMs)
+		d.setHours(0, 0, 0, 0)
+		return d.getTime()
+	}
+
+	it("subtracts sub-day units exactly", () => {
 		expect(resolveRelativeRange("15m", now)).toEqual({ startMs: now - 900_000, endMs: now })
 		expect(resolveRelativeRange("6h", now)).toEqual({ startMs: now - 21_600_000, endMs: now })
-		expect(resolveRelativeRange("7d", now)).toEqual({ startMs: now - 604_800_000, endMs: now })
-		expect(resolveRelativeRange("2w", now)).toEqual({ startMs: now - 1_209_600_000, endMs: now })
+	})
+
+	it("counts days and weeks as whole local calendar days, today included", () => {
+		// "7d" is the last seven days on the calendar — local midnight six days
+		// ago — not a rolling 168 hours that starts mid-afternoon.
+		const week = new Date(resolveRelativeRange("7d", now)!.startMs)
+		expect(week.getHours()).toBe(0)
+		expect(week.getMinutes()).toBe(0)
+		expect(week.getSeconds()).toBe(0)
+		expect(week.getMilliseconds()).toBe(0)
+		expect(week.getTime()).toBe(startOfLocalDayOf(now - 6 * 86_400_000))
+
+		expect(resolveRelativeRange("2w", now)!.startMs).toBe(startOfLocalDayOf(now - 13 * 86_400_000))
+	})
+
+	it("resolves '1d' to the start of today", () => {
+		expect(resolveRelativeRange("1d", now)).toEqual(resolveRelativeRange("today", now))
+	})
+
+	it("never spans more than the nominal duration", () => {
+		// The service and alert endpoints enforce an exact 365-day ceiling, and
+		// the picker rejects ranges wider than a page's `maxRangeSeconds`.
+		for (const [shorthand, seconds] of [
+			["1d", 86_400],
+			["7d", 7 * 86_400],
+			["2w", 14 * 86_400],
+			["365d", 365 * 86_400],
+		] as const) {
+			const { startMs, endMs } = resolveRelativeRange(shorthand, now)!
+			expect((endMs - startMs) / 1000).toBeLessThanOrEqual(seconds)
+		}
 	})
 
 	it("uses real calendar months, not 30-day approximations", () => {
