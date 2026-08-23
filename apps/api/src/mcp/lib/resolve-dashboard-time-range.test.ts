@@ -44,10 +44,14 @@ describe("resolveDashboardTimeRange", () => {
 			Date.parse(`${range.startTime}Z`.replace(" ", "T"))) /
 		1000
 
-	it("resolves a 30-day relative range to a 30-day window", () => {
+	it("resolves a 30-day relative range to a 30-calendar-day window", () => {
+		// Day windows count whole local calendar days with today as day one, so
+		// "30d" starts at midnight 29 days ago and runs to now — 30 days on the
+		// calendar, and never more than 30 * 86_400 seconds wide.
 		const resolved = resolveDashboardTimeRange({ type: "relative", value: "30d" })
 		expect(resolved).not.toBeNull()
-		expect(spanSeconds(resolved!)).toBeCloseTo(30 * 86_400, -1)
+		expect(spanSeconds(resolved!)).toBeLessThanOrEqual(30 * 86_400)
+		expect(spanSeconds(resolved!)).toBeGreaterThan(29 * 86_400)
 	})
 
 	it('resolves "today", which the picker can persist but this used to reject', () => {
