@@ -158,6 +158,18 @@ struct AppConfig {
     /// terminated by Cloudflare. Off simply writes `''`, which is what the
     /// column held before this existed — it cannot regress anything.
     trust_proxy_geo: bool,
+    /// Shared secret that proves a request came through OUR Cloudflare zone,
+    /// not merely from Cloudflare's address space. Cloudflare adds
+    /// `X-Maple-Origin-Token: <value>` to every request for the ingest host
+    /// (a Transform Rule on the zone); when this is `Some`, every route except
+    /// the health probes rejects a request whose header does not match. An IP
+    /// allow-list at the load balancer cannot do this: those ranges are shared
+    /// by every Cloudflare tenant, and a Worker on another account can dial the
+    /// origin from them and forge `Cf-IPCountry`. `None` (unset or empty) keeps
+    /// the gateway open — the right state for a preview stack that is hit
+    /// directly, and the state to deploy FIRST, before the Transform Rule exists,
+    /// so enabling it can never outrun the header.
+    origin_token: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -486,6 +498,11 @@ impl AppConfig {
             false,
         )?;
 
+        let origin_token = std::env::var("MAPLE_INGEST_ORIGIN_TOKEN")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+
         Ok(Self {
             port,
             otlp_grpc_port,
@@ -507,6 +524,7 @@ impl AppConfig {
             replay_max_session_bytes,
             replay_blob_store,
             trust_proxy_geo,
+            origin_token,
         })
     }
 }
@@ -2108,6 +2126,13 @@ async fn main() {
         )
         .layer(cors)
         .layer(DefaultBodyLimit::max(config.max_request_body_bytes))
+        // Outermost, so it runs before CORS and the body limit: an unproven
+        // request is answered before a byte of its body is read. Cloudflare adds
+        // the header to preflights too, so browser traffic is unaffected.
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            require_origin_token,
+        ))
         .with_state(state);
 
     let listener = match tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await {
@@ -2712,6 +2737,50 @@ fn is_safe_replay_id(value: &str) -> bool {
 /// breakdown carry two junk buckets.
 ///
 /// The client IP is deliberately never read or stored — country is all we take.
+/// Header Cloudflare stamps on every request for the ingest host (Transform
+/// Rule on the zone) when `MAPLE_INGEST_ORIGIN_TOKEN` is in use.
+const ORIGIN_TOKEN_HEADER: &str = "x-maple-origin-token";
+
+/// Paths the load balancer probes itself. Its health checker never passes
+/// through Cloudflare, so these stay open; they carry no data and need no key.
+const ORIGIN_TOKEN_EXEMPT_PATHS: [&str; 2] = ["/health", "/ready"];
+
+/// Length-guarded comparison that does not short-circuit on the first
+/// differing byte, so response timing says nothing about how much of a guess
+/// was right. (The length check leaks only the length, which is not secret.)
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn origin_token_matches(headers: &HeaderMap, expected: &str) -> bool {
+    headers
+        .get(ORIGIN_TOKEN_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|presented| constant_time_eq(presented.as_bytes(), expected.as_bytes()))
+}
+
+/// Enforces `Config::origin_token` on every route except the health probes.
+/// A rejection is a 403 — distinct from the 401 a missing ingest key earns, so
+/// a misconfigured Transform Rule is not mistaken for a credential problem —
+/// and deliberately says nothing about which of "missing" or "wrong" applied.
+async fn require_origin_token(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Some(expected) = state.config.origin_token.as_deref() else {
+        return next.run(request).await;
+    };
+    let path = request.uri().path();
+    if ORIGIN_TOKEN_EXEMPT_PATHS.contains(&path) || origin_token_matches(request.headers(), expected) {
+        return next.run(request).await;
+    }
+    ApiError::new(StatusCode::FORBIDDEN, "Origin token missing or invalid").into_response()
+}
+
 fn derive_country(headers: &HeaderMap, trust_proxy_geo: bool) -> String {
     if !trust_proxy_geo {
         return String::new();
@@ -6115,6 +6184,34 @@ fn parse_usize(name: &str, raw: Option<String>, default: usize) -> Result<usize,
 
 #[cfg(test)]
 mod tests {
+    mod origin_token {
+        use super::super::{constant_time_eq, origin_token_matches, ORIGIN_TOKEN_HEADER};
+        use axum::http::{HeaderMap, HeaderValue};
+
+        fn headers_with(value: &str) -> HeaderMap {
+            let mut headers = HeaderMap::new();
+            headers.insert(ORIGIN_TOKEN_HEADER, HeaderValue::from_str(value).unwrap());
+            headers
+        }
+
+        #[test]
+        fn constant_time_eq_compares_bytes() {
+            assert!(constant_time_eq(b"secret", b"secret"));
+            assert!(!constant_time_eq(b"secret", b"secreT"));
+            assert!(!constant_time_eq(b"secret", b"secre"));
+            assert!(!constant_time_eq(b"", b"x"));
+            assert!(constant_time_eq(b"", b""));
+        }
+
+        #[test]
+        fn matches_only_the_exact_token() {
+            assert!(origin_token_matches(&headers_with("tok-1"), "tok-1"));
+            assert!(!origin_token_matches(&headers_with("tok-2"), "tok-1"));
+            assert!(!origin_token_matches(&headers_with("tok-1 "), "tok-1"));
+            assert!(!origin_token_matches(&HeaderMap::new(), "tok-1"));
+        }
+    }
+
     use super::*;
     // `AtomicBool` is only used by the test fakes below; keeping it out of the
     // top-level import avoids an unused-import warning in non-test bin builds.
@@ -7122,6 +7219,7 @@ mod tests {
                 replay_max_session_bytes: 1024 * 1024 * 1024,
                 replay_blob_store: None,
                 trust_proxy_geo: false,
+                origin_token: None,
             },
             #[expect(
                 clippy::useless_conversion,

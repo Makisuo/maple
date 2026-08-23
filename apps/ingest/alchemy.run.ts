@@ -232,6 +232,25 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 		const autumnKey = process.env.AUTUMN_SECRET_KEY?.trim()
 		const autumnSecret = autumnKey ? yield* secret("autumn-secret-key", autumnKey) : undefined
 
+		// Origin token: proves a request came through OUR Cloudflare zone, which
+		// the Cloudflare IP allow-list on the ALB cannot (those ranges are shared
+		// by every tenant, so a Worker elsewhere can dial the origin from them and
+		// forge Cf-IPCountry). The gateway rejects every non-health request
+		// without a matching `X-Maple-Origin-Token` once this is set.
+		//
+		// Rollout ORDER matters, because enabling it before the header exists
+		// blackholes ingest:
+		//   1. Cloudflare → maple.dev → Rules → Transform Rules → Modify Request
+		//      Header: for hostname `ingest.<domain>` set `X-Maple-Origin-Token`
+		//      to the value (use a long random string).
+		//   2. Add MAPLE_INGEST_ORIGIN_TOKEN with that value to the stage's
+		//      Infisical environment.
+		//   3. Deploy. Verify: requests via the domain succeed, requests straight
+		//      at the ALB hostname get 403.
+		// Unset (PR previews, or before step 2) the gateway stays open.
+		const originToken = process.env.MAPLE_INGEST_ORIGIN_TOKEN?.trim()
+		const originTokenSecret = originToken ? yield* secret("ingest-origin-token", originToken) : undefined
+
 		// Replay blob storage keys off the ENDPOINT, matching the gateway's own
 		// switch (`Config::from_env` in `apps/ingest/src/main.rs` treats
 		// INGEST_REPLAY_R2_ENDPOINT as the enable flag and `required()`s the rest).
@@ -425,6 +444,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				MAPLE_INGEST_KEY_ENCRYPTION_KEY: keyEncryptionKey.secretArn,
 				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: keyLookupHmacKey.secretArn,
 				...(autumnSecret ? { AUTUMN_SECRET_KEY: autumnSecret.secretArn } : undefined),
+				...(originTokenSecret ? { MAPLE_INGEST_ORIGIN_TOKEN: originTokenSecret.secretArn } : undefined),
 				...(replayR2Secret
 					? { INGEST_REPLAY_R2_SECRET_ACCESS_KEY: replayR2Secret.secretArn }
 					: undefined),
@@ -438,13 +458,15 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 
 				// Trust `Cf-IPCountry` on inbound requests, which is what gates
 				// `derive_country` in `apps/ingest/src/main.rs` and therefore whether
-				// `session_replays.Country` is ever non-empty. Safe on proxied stages
-				// because the ALB security group admits only Cloudflare's published
-				// ranges (`albIngress` above), so the header cannot be client-supplied.
-				// A PR preview is open and unproxied, so there the value is only as
-				// honest as the caller — acceptable for a test stack. Left unset until now, which is why every session
-				// recorded before this deploy has `Country = ''` — the gateway never
-				// stores a client IP, so there is nothing to backfill from.
+				// `session_replays.Country` is ever non-empty. Honest on proxied
+				// stages once MAPLE_INGEST_ORIGIN_TOKEN is enforced (see below): the
+				// ALB's Cloudflare-only ingress keeps the open internet out, and the
+				// origin token keeps other Cloudflare tenants out. A PR preview is
+				// open and unproxied, so there the value is only as honest as the
+				// caller — acceptable for a test stack. Left unset until 2026-08,
+				// which is why every session recorded before then has `Country = ''`
+				// — the gateway never stores a client IP, so there is nothing to
+				// backfill from.
 				MAPLE_INGEST_TRUST_PROXY_GEO: "true",
 
 				INGEST_QUEUE_MAX_BYTES: String(WAL_MAX_BYTES),
