@@ -517,21 +517,29 @@ function EventKindLegend({ className }: { className?: string }) {
 			>
 				<CircleInfoIcon size={13} />
 			</PopoverTrigger>
-			<PopoverContent align="end" className="w-44 p-2">
-				<p className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-					Event kinds
-				</p>
-				<ul className="flex flex-col gap-1 text-xs text-foreground">
-					{LEGEND_KINDS.map((kind) => {
-						const { Icon, tone, label } = EVENT_KIND_VISUALS[kind]
-						return (
-							<li key={kind} className="flex items-center gap-2 px-1">
-								<Icon size={14} className={cn("shrink-0", tone)} aria-hidden />
-								{label}
-							</li>
-						)
-					})}
-				</ul>
+			{/* `tooltipStyle` is the compact variant: the default popup viewport pads
+			    itself 16px on every side, which on six short rows is more padding
+			    than content. This one pads 8/4 and sizes to its text. */}
+			<PopoverContent align="end" tooltipStyle sideOffset={6}>
+				<div className="flex flex-col gap-1.5 py-0.5">
+					<p className="text-[9px] font-semibold uppercase leading-none tracking-[0.08em] text-muted-foreground">
+						Event kinds
+					</p>
+					<ul className="flex flex-col gap-1">
+						{LEGEND_KINDS.map((kind) => {
+							const { Icon, tone, label } = EVENT_KIND_VISUALS[kind]
+							return (
+								<li
+									key={kind}
+									className="flex items-center gap-1.5 whitespace-nowrap text-[11px] leading-none text-foreground"
+								>
+									<Icon size={12} className={cn("shrink-0", tone)} aria-hidden />
+									{label}
+								</li>
+							)
+						})}
+					</ul>
+				</div>
 			</PopoverContent>
 		</Popover>
 	)
