@@ -23,7 +23,12 @@
 			"ignoreDependencies": ["@paper-design/shaders"]
 		},
 		"apps/api": {
-			"entry": ["alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
+			"entry": [
+				"alchemy.run.ts",
+				"autumn.config.ts",
+				"scripts/cold-path/*.mjs",
+				"scripts/service-binding-bench/*.worker.ts"
+			],
 			"ignoreDependencies": ["cloudflare"]
 		},
 		"apps/alerting": {

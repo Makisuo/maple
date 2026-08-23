@@ -1,0 +1,12 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "maple-api-route-router-bench",
+	"main": "./router.worker.ts",
+	"compatibility_date": "2026-04-08",
+	"compatibility_flags": ["nodejs_compat"],
+	"services": [
+		{ "binding": "ECHO", "service": "maple-api-route-echo-bench" },
+		{ "binding": "MONOLITH", "service": "maple-api-route-monolith-bench" },
+		{ "binding": "TELEMETRY", "service": "maple-api-route-telemetry-bench" },
+	],
+}
