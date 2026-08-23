@@ -45,8 +45,12 @@ interface ReplayStudioSession {
 	// All optional because pre-migration-0011 sessions have none.
 	readonly visitorId?: string | null
 	readonly visitorIsNew?: boolean
+	readonly userName?: string | null
+	readonly groupId?: string | null
 	readonly groupName?: string | null
 	readonly userEmail?: string | null
+	/** `identify()` traits, JSON-encoded `Record<string, string>`. */
+	readonly userTraits?: string | null
 	readonly entryPath?: string | null
 	readonly exitPath?: string | null
 	readonly referrerHost?: string | null
@@ -68,7 +72,10 @@ export function ReplayStudio({
 	window?: ReplayPartitionWindow
 }) {
 	const isActive = session.status === "active"
-	const label = session.userId || "Anonymous session"
+	// Same walk as the list rows: a person is recognizable by name long before
+	// they are by an opaque id, and only a session that was never identified
+	// falls all the way through.
+	const label = session.userName || session.userEmail || session.userId || "Anonymous session"
 	const recorded = recordedMarker(session.resourceAttributes)
 	// Which engine plays this session (browser rrweb vs mobile H.264 segments).
 	// Read from the already-loaded session metadata, so the player never has to

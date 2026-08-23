@@ -83,6 +83,13 @@ export interface SessionRailSession {
 	readonly userAgent?: string | null
 	/** From `recordedMarker()`: true/false when the SDK stamped the session, undefined when unknown. */
 	readonly recorded?: boolean
+	// identify() identity. Every one of these is `""` on a session the SDK never
+	// identified, which is what the Identity group keys off.
+	readonly userId?: string | null
+	readonly userName?: string | null
+	readonly groupId?: string | null
+	/** `identify()` traits, JSON-encoded `Record<string, string>`. */
+	readonly userTraits?: string | null
 	// Analytics dimensions. Optional because sessions written before migration 0011 have none.
 	/** Persistent per-browser id — the same value on this visitor's other sessions,
 	 *  including anonymous ones on the marketing site. */
@@ -879,6 +886,8 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 		<div className="min-h-0 flex-1 overflow-y-auto">
 			<SessionSummary session={session} />
 
+			<IdentityGroup session={session} />
+
 			{session.visitorId ? (
 				<DetailRail.Group label="Visitor">
 					<Row icon={FingerprintIcon} label="Visitor ID" title={session.visitorId}>
@@ -897,18 +906,6 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 					<Row icon={UserIcon} label="Visitor">
 						<Value>{session.visitorIsNew ? "New" : "Returning"}</Value>
 					</Row>
-					{session.groupName && (
-						<Row icon={TagIcon} label="Group" title={session.groupName}>
-							<Value className="truncate">{session.groupName}</Value>
-						</Row>
-					)}
-					{session.userEmail && (
-						<Row icon={EnvelopeIcon} label="Email" title={session.userEmail}>
-							<Value mono className="truncate">
-								{session.userEmail}
-							</Value>
-						</Row>
-					)}
 				</DetailRail.Group>
 			) : null}
 
@@ -1031,20 +1028,131 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 	)
 }
 
+/**
+ * Who this session belongs to, when the SDK called `identify()`.
+ *
+ * The identity columns are the answer to the first question anyone opens a
+ * replay with, so they lead the tab rather than hiding inside the Visitor group
+ * — which they used to, and which meant a session identified without a visitor
+ * id (anything recorded before migration 0011, or an SDK that identifies
+ * without the analytics cookie) rendered as anonymous. The user id and the
+ * group are links: both are list filters, so this is how you walk from one
+ * session to every other session by the same person or company.
+ */
+function IdentityGroup({ session }: { session: SessionRailSession }) {
+	const traits = React.useMemo(
+		() => Object.entries(parseAttributes(session.userTraits)),
+		[session.userTraits],
+	)
+	const userName = session.userName || ""
+	const userEmail = session.userEmail || ""
+	const userId = session.userId || ""
+	const groupName = session.groupName || ""
+	const groupId = session.groupId || ""
+
+	if (!userName && !userEmail && !userId && !groupName && !groupId && traits.length === 0) return null
+
+	return (
+		<DetailRail.Group label="Identity">
+			{userName && (
+				<Row icon={UserIcon} label="Name" title={userName}>
+					<Value className="truncate">{userName}</Value>
+				</Row>
+			)}
+			{userEmail && (
+				<Row icon={EnvelopeIcon} label="Email" title={userEmail}>
+					<Value mono className="truncate">
+						{userEmail}
+					</Value>
+					<CopyButton
+						value={userEmail}
+						label="Email"
+						iconSize={12}
+						className="ml-1 size-5 shrink-0"
+						toast={false}
+					/>
+				</Row>
+			)}
+			{userId && (
+				<Row icon={IdBadgeIcon} label="User ID" title={userId}>
+					<Link
+						to="/replays"
+						search={{ userId }}
+						className="truncate font-mono text-xs text-primary underline-offset-2 hover:underline"
+						title="All sessions from this user"
+					>
+						{userId}
+					</Link>
+					<CopyButton
+						value={userId}
+						label="User ID"
+						iconSize={12}
+						className="ml-1 size-5 shrink-0"
+						toast={false}
+					/>
+				</Row>
+			)}
+			{(groupName || groupId) && (
+				<Row
+					icon={TagIcon}
+					label="Group"
+					// The id is provenance for the name, not a row of its own — a group
+					// with both would otherwise cost two lines saying one thing.
+					hint={groupName && groupId ? groupId : undefined}
+					title={[groupName, groupId].filter(Boolean).join(" · ")}
+				>
+					{groupName ? (
+						<Link
+							to="/replays"
+							search={{ group: groupName }}
+							className="truncate text-xs text-primary underline-offset-2 hover:underline"
+							title="All sessions from this group"
+						>
+							{groupName}
+						</Link>
+					) : (
+						<Value mono className="truncate">
+							{groupId}
+						</Value>
+					)}
+				</Row>
+			)}
+			{traits.length > 0 && (
+				<DetailRail.Field label="Traits">
+					<div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+						{traits.map(([key, value]) => (
+							<span
+								key={key}
+								className="min-w-0 max-w-full truncate"
+								title={`${key}: ${value}`}
+							>
+								{key}=<span className="text-foreground/80">{String(value)}</span>
+							</span>
+						))}
+					</div>
+				</DetailRail.Field>
+			)}
+		</DetailRail.Group>
+	)
+}
+
 /** `DetailRail.Row` with this rail's label column: every row carries a glyph. */
 function Row({
 	icon,
 	label,
+	hint,
 	title,
 	children,
 }: {
 	icon: IconComponent
 	label: string
+	/** Second line under the label — provenance for the value beside it. */
+	hint?: string
 	title?: string
 	children: React.ReactNode
 }) {
 	return (
-		<DetailRail.Row icon={icon} label={label} title={title} labelWidth="102px">
+		<DetailRail.Row icon={icon} label={label} hint={hint} title={title} labelWidth="102px">
 			{children}
 		</DetailRail.Row>
 	)
