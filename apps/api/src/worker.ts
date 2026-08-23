@@ -19,6 +19,7 @@ import { serverErrorSpanMiddleware } from "./http/server-error-span"
 import { v2WorkerUnavailableResponse } from "./http/v2-worker-unavailable"
 import { API_CORS_RESPONSE_HEADERS, apiCorsPreflightResponse } from "./http/api-cors"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
+import { makeRecoverablePromiseMemo } from "./platform/recoverable-promise-memo"
 import { classifyWorkerQueue } from "./queue-dispatch"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
@@ -137,16 +138,7 @@ const buildHandler = async () => {
 // Memoized via the build promise so concurrent first requests share one build.
 // A rejected build is cleared after those callers observe it, allowing a later
 // request to recover instead of pinning the isolate to a rejected promise.
-let handlerPromise: ReturnType<typeof buildHandler> | undefined
-const getHandler = (): ReturnType<typeof buildHandler> => {
-	if (handlerPromise !== undefined) return handlerPromise
-	const pending = buildHandler()
-	handlerPromise = pending
-	void pending.catch(() => {
-		if (handlerPromise === pending) handlerPromise = undefined
-	})
-	return pending
-}
+const handlerMemo = makeRecoverablePromiseMemo(buildHandler)
 
 // RPC has no HttpApi request to construct the application services for it, so
 // it gets a sibling isolate-wide ManagedRuntime. Its headless service graph
@@ -156,7 +148,7 @@ const buildRpcRuntime = async (env: Record<string, unknown>) => {
 		import("./runtime/mcp-service-graph"),
 		import("@/platform/DatabasePgLive"),
 	])
-	return ManagedRuntime.make(
+	const runtime = ManagedRuntime.make(
 		InvestigationServicesLive.pipe(
 			Layer.provideMerge(WorkerPlatformLive),
 			Layer.provideMerge(layerPg),
@@ -165,18 +157,19 @@ const buildRpcRuntime = async (env: Record<string, unknown>) => {
 			Layer.provideMerge(WorkerConfigProviderLayer),
 		),
 	)
+	try {
+		// ManagedRuntime also acquires lazily and retains a failed build fiber.
+		// Acquire before resolving the recoverable outer promise so a later RPC
+		// can construct a fresh runtime after an initialization failure.
+		await runtime.context()
+		return runtime
+	} catch (error) {
+		await runtime.dispose()
+		throw error
+	}
 }
 
-let rpcRuntimePromise: ReturnType<typeof buildRpcRuntime> | undefined
-const getRpcRuntime = (env: Record<string, unknown>): ReturnType<typeof buildRpcRuntime> => {
-	if (rpcRuntimePromise !== undefined) return rpcRuntimePromise
-	const pending = buildRpcRuntime(env)
-	rpcRuntimePromise = pending
-	void pending.catch(() => {
-		if (rpcRuntimePromise === pending) rpcRuntimePromise = undefined
-	})
-	return pending
-}
+const rpcRuntimeMemo = makeRecoverablePromiseMemo(buildRpcRuntime)
 
 type InternalRpcMethod = "listMcpTools" | "callMcpTool" | "submitDiagnosis"
 
@@ -207,7 +200,7 @@ const runInternalRpc = async (
 	ctx: ExecutionContext,
 ) => {
 	const [runtime, { callMcpToolRpc, listMcpToolsRpc, submitDiagnosisRpc }] = await Promise.all([
-		getRpcRuntime(env),
+		rpcRuntimeMemo.get(env),
 		import("./internal-rpc"),
 	])
 	let exit: Exit.Exit<unknown, unknown>
@@ -326,7 +319,7 @@ const handle = async (
 	// Start the expensive cold handler build and the independent KV read before
 	// buffering an MCP body. Warm requests resolve both promises immediately;
 	// cold MCP requests hide module evaluation and KV latency behind body I/O.
-	const pendingHandler = getHandler()
+	const pendingHandler = handlerMemo.get()
 	const pendingSession = kv && reqSid ? preloadSession(kv, reqSid) : undefined
 
 	// MCP diagnostics: buffer the body so we can peek the JSON-RPC method/id
@@ -350,10 +343,19 @@ const handle = async (
 	}
 
 	try {
-		const { handler } = pendingSession
+		const built = pendingSession
 			? (await Promise.all([pendingHandler, pendingSession]))[0]
 			: await pendingHandler
-		const response = await handler(forwardRequest, HandlerContext)
+		let response: Response
+		try {
+			response = await built.handler(forwardRequest, HandlerContext)
+		} catch (error) {
+			// `toWebHandler` acquires lazily and pins a rejected inner build.
+			// Evict only the exact wrapper used by this request so the next real
+			// request can rebuild it; overlapping failures cannot clear a retry.
+			if (handlerMemo.evict(pendingHandler)) await built.dispose()
+			throw error
+		}
 		if (kv && isMcp) {
 			const resSid = response.headers.get("mcp-session-id")
 			// Only persist when the server issued a new session — i.e. on
