@@ -148,15 +148,24 @@ describe("POST /internal/ai-sessions/spans", () => {
 		}
 	})
 
-	// A link that arrives with no `t`/`end` — pasted, or written by an agent.
-	// The endpoint must resolve the session from the id rather than invent a
-	// range, and the compiled SQL is where that is actually decidable: a
-	// fabricated window would show up as a `Timestamp` predicate.
-	it("resolves the session from its id alone when the request carries no window", async () => {
-		let compiledSql: string | undefined
+	// A link that arrives with no `t`/`end` — pasted, or written by an agent. The
+	// endpoint must resolve the session's real bounds rather than invent a range
+	// OR read unbounded, and the compiled SQL is where that is decidable: the
+	// resolve step is the only one allowed to carry no `Timestamp` predicate.
+	it("resolves bounds from the id, then reads the spans within them", async () => {
+		const resolved = {
+			startTime: "2026-08-18 09:00:00.000000000",
+			endTime: "2026-08-20 11:00:00.000000000",
+		}
+		let windowSql: string | undefined
+		let spansSql: string | undefined
 		const harness = makeHarness({
+			compiledQuery: (_tenant, compiled) => {
+				windowSql = compiled.sql
+				return compiled.decodeRows([{ ...resolved, spanCount: "9" }]).pipe(Effect.orDie)
+			},
 			compiledQueryBounded: (_tenant, compiled) => {
-				compiledSql = compiled.sql
+				spansSql = compiled.sql
 				return compiled.decodeRows([spanRow(0), spanRow(1)]).pipe(Effect.orDie)
 			},
 		})
@@ -165,11 +174,45 @@ describe("POST /internal/ai-sessions/spans", () => {
 			const response = await harness.post("/internal/ai-sessions/spans", { sessionId: SESSION_ID })
 			expect(response.status).toBe(200)
 			expect(response.body.data).toHaveLength(2)
-			expect(compiledSql).toContain(`SpanAttributes['maple_ai.session.id'] = '${SESSION_ID}'`)
-			expect(compiledSql).not.toContain("Timestamp >=")
-			expect(compiledSql).not.toContain("Timestamp <=")
+			// The bloom-indexed detection scan, unbounded on purpose.
+			expect(windowSql).toContain(`SpanAttributes['maple_ai.session.id'] = '${SESSION_ID}'`)
+			expect(windowSql).not.toContain("Timestamp >=")
+			// The fan-out, which never runs that way.
+			expect(spansSql).toContain(`Timestamp >= '${resolved.startTime}'`)
+			expect(spansSql).toContain(`Timestamp <= '${resolved.endTime}'`)
 			// An unbound placeholder would reach ClickHouse verbatim.
-			expect(compiledSql).not.toContain("__PARAM_")
+			expect(spansSql).not.toContain("__PARAM_")
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("answers an id nothing in retention carries without reading spans", async () => {
+		let spansRead = false
+		const harness = makeHarness({
+			// `min`/`max` over no rows come back as the epoch, so the count is the
+			// only thing that says the session does not exist.
+			compiledQuery: (_tenant, compiled) =>
+				compiled
+					.decodeRows([
+						{
+							startTime: "1970-01-01 00:00:00.000000000",
+							endTime: "1970-01-02 00:00:00.000000000",
+							spanCount: "0",
+						},
+					])
+					.pipe(Effect.orDie),
+			compiledQueryBounded: (_tenant, compiled) => {
+				spansRead = true
+				return compiled.decodeRows([spanRow(0)]).pipe(Effect.orDie)
+			},
+		})
+
+		try {
+			const response = await harness.post("/internal/ai-sessions/spans", { sessionId: SESSION_ID })
+			expect(response.status).toBe(200)
+			expect(response.body).toMatchObject({ data: [], truncated: false })
+			expect(spansRead).toBe(false)
 		} finally {
 			await harness.dispose()
 		}
