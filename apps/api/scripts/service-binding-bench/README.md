@@ -69,6 +69,10 @@ Layer acquisition, authentication results, database dialing, and warehouse I/O.
 
 ## Recommended rollout and acceptance gate
 
+This benchmark is intentionally separate from the two runtime optimizations it measured. The
+implementation sequence, topology, developer experience, production canary, and rollback design
+live in [`docs/cloudflare-native-api.md`](../../../../docs/cloudflare-native-api.md).
+
 Use coarse islands, not one Worker per endpoint. Start with the read-heavy v2 telemetry surface; it
 has a coherent dependency graph and the benchmarked 34% module-evaluation reduction. Keep health and
 preflight handling in the tiny public router. Let the target Worker own auth, request scope,
