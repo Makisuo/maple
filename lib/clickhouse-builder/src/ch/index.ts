@@ -117,6 +117,7 @@ export {
 	toStartOfMinute,
 	toUnixTimestamp,
 	toUnixTimestamp64Nano,
+	intervalAdd,
 	intervalSub,
 	formatDateTime,
 	toDateTime,
