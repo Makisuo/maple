@@ -150,15 +150,18 @@ export function resolveIngestTaskSize(stage: MapleStage): IngestTaskSize {
 /**
  * Whether a stage gets an AWS ingest deployment at all.
  *
- * PR previews are excluded deliberately: `resolveMapleDomains` gives them no
- * `ingest` domain, and a VPC + ALB per PR is real money for a stack nothing
- * points at. Testing the gateway on Fargate for one PR is the separate,
- * on-demand `scripts/ingest-preview.run.ts` stack (deploy-pr-ingest.yml),
- * which calls `createMapleIngest` directly and is torn down by hand. Dev
- * stages run the gateway through docker-compose instead.
+ * Every deployed stage does — prd, stg and PR previews. Dev stages run the
+ * gateway through docker-compose instead and never reach AWS.
+ *
+ * A VPC + ALB + ECS cluster per preview is real money, so the spend gate is not
+ * here: previews only deploy at all when the PR carries the `preview` label
+ * (`.github/workflows/deploy-pr-preview.yml`), and the whole stack is torn down
+ * when the label comes off or the PR closes. A preview gets no `ingest` domain
+ * from `resolveMapleDomains`, so its ALB answers plain HTTP on 80 with no ACM
+ * certificate — point an OTLP exporter at `http://<alb>/v1/traces`.
  */
 export function stageDeploysIngest(stage: MapleStage): boolean {
-	return stage.kind === "prd" || stage.kind === "stg"
+	return stage.kind === "prd" || stage.kind === "stg" || stage.kind === "pr"
 }
 
 /**
@@ -201,9 +204,9 @@ export function resolveCollectorEndpoint(
  * stage that deploys the gateway (`stageDeploysIngest`), so stg and previews
  * carry their own self-telemetry too; flip this to `stageDeploysIngest(stage)`
  * when the budget allows (~$13.5/mo per stage at the non-prd size). Until
- * then a preview can opt in for one run with MAPLE_DEPLOY_AWS_COLLECTOR=1
- * (the `collector` input of deploy-pr-ingest.yml), which is how the collector
- * was verified on Fargate before it reached prod.
+ * then a preview can opt in by also carrying the `preview:collector` label,
+ * which sets MAPLE_DEPLOY_AWS_COLLECTOR=1 for that deploy — this is how the
+ * collector was verified on Fargate before it reached prod.
  */
 export function stageDeploysCollector(stage: MapleStage): boolean {
 	return stage.kind === "prd"

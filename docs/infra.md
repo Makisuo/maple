@@ -72,14 +72,22 @@ that parses each `wrangler.jsonc` and asserts its crons, DO class names, KV bind
 rate-limit namespace ids match what the app's `create*` factory declares turns a silent
 drift into a failing build, and stays useful right up until the wrangler files are deleted.
 
-## The AWS opt-in flag (`MAPLE_DEPLOY_AWS_INGEST`)
+## The retired AWS opt-in flag (`MAPLE_DEPLOY_AWS_INGEST`)
 
-The Rust OTLP gateway (`apps/ingest`) moved from Railway to ECS Fargate. The flag gates
-both `AWS.providers()` and the ingest resources.
+The Rust OTLP gateway (`apps/ingest`) moved from Railway to ECS Fargate. While the
+cut-over was in flight, `MAPLE_DEPLOY_AWS_INGEST=1` gated both `AWS.providers()` and the
+ingest resources, so an unset variable produced a byte-identical pure-Cloudflare stack.
 
-It is often mistaken for dead code. It is not — see the comment on `DEPLOY_AWS_INGEST` in
-`alchemy.run.ts` for the two live reasons (it is the staging cost gate, and the providers
-Layer is built before the stage is readable).
+**The flag is gone (2026-08).** ECS is the only ingest path now, so the gate had nothing
+left to protect: `AWS.providers()` is registered unconditionally (it cannot be
+stage-derived — the `Alchemy.Stack` options are evaluated before `Alchemy.Stage` is
+readable inside the stack effect), and `stageDeploysIngest` alone decides which stages get
+a fleet. It covers prd, stg **and PR previews**; dev stages run the gateway through
+docker-compose. The spend gate moved to where the spend is: a preview only exists while
+its PR carries the `preview` label.
+
+Do not reintroduce a global on/off env flag for this. If a stage should not have a fleet,
+say so in `stageDeploysIngest`, where it is typed, unit-tested and visible in review.
 
 **The #378 hang.** The flag was *also* introduced because turning the AWS half on wedged
 every production deploy with no log line and no network I/O. The cause was alchemy's
@@ -87,8 +95,8 @@ env-credential path (`CI=true`): it discovered the account with an STS `GetCalle
 issued while its own `AWSEnvironment` was still being constructed, and that call waited on
 the half-built environment for its endpoint resolver — a self-deadlock. Supplying
 `AWS_ACCOUNT_ID` skips the lookup. Reproduced locally with `CI=true` and the id unset, on
-alchemy 2.0.0-beta.64 through beta.74. The deploy workflows now set it. This part is fixed
-and is no longer a reason the flag exists.
+alchemy 2.0.0-beta.64 through beta.74. The deploy workflows now set it — **every workflow
+that deploys the stack must**, including `deploy-pr-preview.yml`.
 
 **Why the binary is compiled outside the image build.** Alchemy's docker build passes no
 `--cache-from`, and a fresh runner's layer cache is empty, so a Dockerfile that runs
@@ -171,13 +179,20 @@ architecture:
   Frankfurt, where NO AWS region colocates and the move costs more than Railway did.
   Verify `TINYBIRD_HOST` before changing `resolveAwsRegion`.
 - **The OTel collector is prd-only** (`stageDeploysCollector`). The intent is every stage
-  that deploys the gateway, at ~$13.5/mo per stage at the non-prd size. `MAPLE_DEPLOY_AWS_COLLECTOR=1`
-  opts a single deploy in, which is how it was verified on Fargate before it reached prod.
-- **PR previews get no database and no ingest fleet.** PlanetScale PR branches billed
-  continuously and consumed the account's Hyperdrive config cap; a VPC + ALB per PR is real
-  money for a stack nothing points at. `resolveDatabaseMode` returns `"none"` for `pr`, so
-  DB-backed routes 500 and the rest of the preview works. The reverse path is documented on
-  that function.
+  that deploys the gateway, at ~$13.5/mo per stage at the non-prd size. Adding the
+  `preview:collector` label to a PR sets `MAPLE_DEPLOY_AWS_COLLECTOR=1` for that preview,
+  which is how it was verified on Fargate before it reached prod.
+- **PR previews get an ingest fleet, but no database.** PlanetScale PR branches billed
+  continuously and consumed the account's Hyperdrive config cap, so `resolveDatabaseMode`
+  returns `"none"` for `pr`: DB-backed routes 500 and the rest of the preview works. The
+  reverse path is documented on that function. The AWS half *is* deployed — a preview gets
+  its own VPC + ALB + ECS fleet, which is real money, so it only runs while the PR carries
+  the `preview` label and is destroyed the moment the label comes off or the PR closes.
+  A preview has no ingest domain, so its ALB answers plain HTTP on 80 with no ACM
+  certificate; the URL is posted on the PR comment. There is no longer a separate
+  on-demand ingest preview stack (`scripts/ingest-preview.run.ts` and
+  `deploy-pr-ingest.yml` are deleted) — two alchemy stacks claiming the same
+  `maple-ingest-pr-<n>` physical names is how orphan fleets accumulate.
 - **x86_64, not Graviton.** Flipping `cpuArchitecture` to `"ARM64"` is the whole switch
   (~20% cheaper) but needs an ARM builder: cross-compiling Rust under QEMU is 10-30 min a
   build, for single-digit dollars a month at this size. Revisit with an ARM runner.

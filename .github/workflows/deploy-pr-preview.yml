@@ -1,22 +1,31 @@
-name: Deploy PR Preview (Cloudflare via Alchemy)
+name: Deploy PR Preview (Cloudflare + AWS via Alchemy)
 
-# PREVIEW DEPLOYS ARE DISABLED (2026-08, cost). Only the `closed` event still
-# fires, so this workflow now does teardown ONLY: it tears down the stacks of
-# PRs that were deployed before the cutover and never deploys a new one. The
-# deploy-side steps below are kept intact and simply never run.
+# PREVIEW DEPLOYS ARE LABEL-GATED. A pull request gets a preview only while it
+# carries the `preview` label; the stack is torn down when the label is removed
+# or the PR closes. The label is the spend gate: a preview is now the FULL
+# stack, AWS half included — its own VPC, ALB and ECS ingest fleet
+# (`stageDeploysIngest` covers `pr`), which is real money for as long as the
+# label is on.
 #
-# To re-enable, restore the full trigger list:
-#     types: [opened, synchronize, reopened, closed]
-# Previews will then deploy without an application database — see the comment
-# further down and `resolveDatabaseMode` in packages/infra/src/cloudflare/stage.ts.
+# Add `preview:collector` alongside it to also get the in-VPC OTel collector
+# (prd-only by default — see `stageDeploysCollector`); that is how the collector
+# is verified on Fargate before it reaches prod.
 #
-# While disabled, cleanup-preview-orphans.yml stays the backstop: its 6-hourly
-# sweeps reap any preview worker, queue, Tinybird branch or Hyperdrive config
-# whose PR closes without a teardown run (GitHub creates no `closed` run for a
-# PR that conflicts with its base branch).
+# Previews deploy without an application database — see the comment further down
+# and `resolveDatabaseMode` in packages/infra/src/cloudflare/stage.ts.
+#
+# cleanup-preview-orphans.yml stays the backstop: its 6-hourly sweeps reap any
+# preview worker, queue, Tinybird branch or Hyperdrive config whose PR closes
+# without a teardown run (GitHub creates no `closed` run for a PR that conflicts
+# with its base branch).
 on:
     pull_request:
         types:
+            - opened
+            - reopened
+            - synchronize
+            - labeled
+            - unlabeled
             - closed
 
 concurrency:
@@ -30,8 +39,33 @@ permissions:
     pull-requests: write
 
 jobs:
+    # Separate job because it needs an arm64 runner — see the workflow itself.
+    # Skipped on a teardown: there is nothing to deploy, so nothing to compile.
+    ingest-binary:
+        if: >-
+            ${{ github.event.pull_request.head.repo.full_name == github.repository
+            && github.event.action != 'closed'
+            && github.event.action != 'unlabeled'
+            && contains(github.event.pull_request.labels.*.name, 'preview') }}
+        uses: ./.github/workflows/build-ingest-binary.yml
+
     deploy-pr-preview:
-        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        # Deploy while the `preview` label is on; tear down when it comes off or
+        # the PR closes. On an `unlabeled` event the payload's label list already
+        # excludes the removed label, so the first two clauses do not overlap.
+        #
+        # `!cancelled()` rather than a plain `needs`: a teardown skips the binary
+        # build, and a skipped dependency would otherwise skip the teardown with
+        # it. The explicit `result != 'failure'` keeps a BROKEN build from
+        # deploying anyway.
+        needs: ingest-binary
+        if: >-
+            ${{ !cancelled() && needs.ingest-binary.result != 'failure'
+            && github.event.pull_request.head.repo.full_name == github.repository
+            && (github.event.action == 'closed'
+                || (github.event.action == 'unlabeled' && github.event.label.name == 'preview')
+                || (github.event.action != 'unlabeled'
+                    && contains(github.event.pull_request.labels.*.name, 'preview'))) }}
         runs-on: ubuntu-latest
         timeout-minutes: 45
         # `pr-preview` environment must require manual approval in repo settings.
@@ -54,6 +88,12 @@ jobs:
             # Uses Infisical's default `dev` environment for now; swap to a
             # dedicated `preview` env later if PR previews need isolated secrets.
             INFISICAL_ENV_SLUG: dev
+            # The job runs on `unlabeled` only when the removed label was
+            # `preview` (see the `if` above), so both actions mean "tear down".
+            TEARDOWN: ${{ (github.event.action == 'closed' || github.event.action == 'unlabeled') && 'true' || 'false' }}
+            # Opt the preview into the in-VPC OTel collector (prd-only otherwise —
+            # a cash-flow call, see `stageDeploysCollector`).
+            MAPLE_DEPLOY_AWS_COLLECTOR: ${{ contains(github.event.pull_request.labels.*.name, 'preview:collector') && '1' || '' }}
             PR_NUMBER: ${{ github.event.pull_request.number }}
             PR_BRANCH: ${{ github.head_ref }}
             # Stamped onto deployed telemetry as `deployment.commit_sha`. Use the PR
@@ -77,14 +117,54 @@ jobs:
                   export-type: "env"
                   secret-path: "/"
 
+            # AFTER Infisical — see the note in deploy-prd.yml.
+            #
+            # ⚠️ The deploy role's trust policy must accept this job's OIDC
+            # subject (`repo:<org>/<repo>:environment:pr-preview`). It was
+            # written for the production and staging subjects only; previews get
+            # AccessDenied until it is widened.
+            - name: Configure AWS credentials (OIDC)
+              id: aws
+              uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: us-east-1
+
             - name: Install dependencies
               run: bun install --frozen-lockfile
+
+            # Compiled by the `ingest-binary` job above, on an arm64 runner —
+            # the ECS tasks are Graviton. The artifact upload drops the exec
+            # bit, and `Dockerfile.prebuilt` COPYs the file mode straight into
+            # the image, so restore it here or the task exits on `permission
+            # denied`.
+            # `Dockerfile.prebuilt` builds for linux/arm64 (the tasks are Graviton)
+            # and has a `RUN apt-get` layer, so this x86 runner has to be able to
+            # execute arm64 binaries to build it. Registers the binfmt handlers.
+            # The COPYed binary itself is compiled natively by the build job —
+            # nothing heavy is emulated here, just one apt-get layer.
+            - name: Register arm64 binfmt handlers (QEMU)
+              if: ${{ env.TEARDOWN != 'true' }}
+              uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+              with:
+                  platforms: arm64
+
+            - name: Download ingest binary
+              if: ${{ env.TEARDOWN != 'true' }}
+              uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+              with:
+                  name: maple-ingest
+                  path: apps/ingest/dist
+
+            - name: Restore exec bit on ingest binary
+              if: ${{ env.TEARDOWN != 'true' }}
+              run: chmod +x apps/ingest/dist/maple-ingest
 
             # Tinybird's TypeScript resource generator loads @maple/domain from source,
             # whose span-display helpers import this package through its dist exports.
             # A clean runner has no dist/ until the workspace dependency is built.
             - name: Build Tinybird TypeScript workspace dependencies
-              if: ${{ github.event.action != 'closed' }}
+              if: ${{ env.TEARDOWN != 'true' }}
               run: bun turbo build --filter=@maple-dev/clickhouse-builder
 
             # Needed for both branch create (deploy) and rm (close). `tb` is the
@@ -97,7 +177,7 @@ jobs:
             # TINYBIRD_HOST/TINYBIRD_TOKEN (from Infisical `dev`) with the branch's
             # values so the Alchemy deploy below binds the whole stack to the branch.
             - name: Create/refresh Tinybird PR branch
-              if: ${{ github.event.action != 'closed' }}
+              if: ${{ env.TEARDOWN != 'true' }}
               run: bun scripts/tinybird-pr-branch.ts up "$PR_NUMBER"
 
             # NO DATABASE STEP HERE, ON PURPOSE. PR previews used to provision an
@@ -116,15 +196,31 @@ jobs:
             # `planetscale-pr-branch.ts down` teardown). Every script is still in the
             # repo, dormant.
 
+            # AWS_ACCOUNT_ID: see the note in deploy-prd.yml — without it alchemy's
+            # env-credential path deadlocks silently.
             - name: Deploy PR preview stack with Alchemy
               id: deploy
-              if: ${{ github.event.action != 'closed' }}
+              if: ${{ env.TEARDOWN != 'true' }}
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: bun run alchemy:deploy:pr
 
             - name: Destroy PR preview stack with Alchemy
               id: destroy
-              if: ${{ github.event.action == 'closed' }}
+              if: ${{ env.TEARDOWN == 'true' }}
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: bun run alchemy:destroy:pr
+
+            # Is the collector running, discoverable by the name the gateway was
+            # given, and exporting — and did the gateway's own telemetry land in
+            # the stage's warehouse? Fails the job if the collector is missing or
+            # logs export errors.
+            - name: Verify the collector beside the gateway
+              if: ${{ env.TEARDOWN != 'true' && env.MAPLE_DEPLOY_AWS_COLLECTOR == '1' }}
+              env:
+                  AWS_REGION: us-east-1
+              run: bash scripts/ingest-preview-verify.sh
 
             # `!cancelled()` keeps each teardown step running even when a sibling
             # teardown step fails — a failed `alchemy destroy` must not leave the
@@ -138,13 +234,13 @@ jobs:
             # and is a no-op afterwards. Kept because each old source still holds
             # a plan max-databases slot.
             - name: Remove Electric Cloud PR source
-              if: ${{ !cancelled() && github.event.action == 'closed' && env.ELECTRIC_API_TOKEN != '' }}
+              if: ${{ !cancelled() && env.TEARDOWN == 'true' && env.ELECTRIC_API_TOKEN != '' }}
               run: bun scripts/electric-pr-branch.ts down "$PR_NUMBER"
 
             # Tear the branch down after the stack — branches share compute with
             # production, so this must run on every PR close.
             - name: Remove Tinybird PR branch
-              if: ${{ !cancelled() && github.event.action == 'closed' }}
+              if: ${{ !cancelled() && env.TEARDOWN == 'true' }}
               run: bun scripts/tinybird-pr-branch.ts down "$PR_NUMBER"
 
             - name: Post or update PR preview comment
@@ -153,6 +249,8 @@ jobs:
                   GH_TOKEN: ${{ github.token }}
                   REPO: ${{ github.repository }}
                   ACTION: ${{ github.event.action }}
+                  TEARDOWN: ${{ env.TEARDOWN }}
+                  INGEST_URL: ${{ steps.deploy.outputs.ingest_url }}
                   DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
                   DESTROY_OUTCOME: ${{ steps.destroy.outcome }}
                   WEB_URL: ${{ steps.deploy.outputs.web_url }}
@@ -176,10 +274,14 @@ jobs:
                     echo "## 🍁 Maple PR preview"
                     echo
 
-                    if [ "$ACTION" = "closed" ]; then
+                    if [ "$TEARDOWN" = "true" ]; then
                       if [ "$DESTROY_OUTCOME" = "success" ]; then
                         echo "> [!NOTE]"
-                        echo "> Preview resources were removed when this pull request closed."
+                        if [ "$ACTION" = "closed" ]; then
+                          echo "> Preview resources were removed when this pull request closed."
+                        else
+                          echo "> Preview resources were removed when the \`preview\` label came off."
+                        fi
                       else
                         echo "> [!WARNING]"
                         printf '> Preview cleanup could not be confirmed. The Alchemy teardown outcome was `%s`.\n' "$DESTROY_OUTCOME"
@@ -195,6 +297,9 @@ jobs:
                       printf '| Web | [%s](%s) |\n' "${WEB_URL#https://}" "$WEB_URL"
                       printf '| API | [%s](%s) |\n' "${API_URL#https://}" "$API_URL"
                       printf '| Electric Sync | [%s](%s) |\n' "${SYNC_URL#https://}" "$SYNC_URL"
+                      if [ -n "$INGEST_URL" ]; then
+                        printf '| Ingest (OTLP, plain HTTP) | [%s](%s) |\n' "${INGEST_URL#http://}" "$INGEST_URL"
+                      fi
                       echo
                       printf 'Deployed from [`%s`](%s) · [View workflow run](%s)\n' "$short_sha" "$COMMIT_URL" "$RUN_URL"
                     else

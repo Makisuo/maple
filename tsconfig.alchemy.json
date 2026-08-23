@@ -19,5 +19,5 @@
 			"@maple/infra/env": ["./packages/infra/src/env.ts"]
 		}
 	},
-	"include": ["alchemy.run.ts", "apps/*/alchemy.run.ts", "scripts/aws-probe.run.ts", "scripts/ingest-preview.run.ts"]
+	"include": ["alchemy.run.ts", "apps/*/alchemy.run.ts", "scripts/aws-probe.run.ts"]
 }

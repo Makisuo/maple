@@ -72,6 +72,13 @@ describe("collector service discovery", () => {
 		)
 	})
 
+	it("deploys the gateway to every deployed stage, but never to a dev stage", () => {
+		expect(stageDeploysIngest(parseMapleStage("prd"))).toBe(true)
+		expect(stageDeploysIngest(parseMapleStage("stg"))).toBe(true)
+		expect(stageDeploysIngest(parseMapleStage("pr-12"))).toBe(true)
+		expect(stageDeploysIngest(parseMapleStage("dev-alice"))).toBe(false)
+	})
+
 	it("deploys the collector to prd only for now, a subset of the gateway stages", () => {
 		expect(stageDeploysCollector(parseMapleStage("prd"))).toBe(true)
 		expect(stageDeploysCollector(parseMapleStage("stg"))).toBe(false)

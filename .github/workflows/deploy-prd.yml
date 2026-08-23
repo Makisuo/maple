@@ -33,10 +33,6 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
         environment: production
         env:
-            # Opt-in for the AWS/ECS ingest half (see alchemy.run.ts). Unset or not
-            # "1", the deploy is the pure-Cloudflare stack that shipped in 2m05s.
-            # Set the repo variable to "1" to ship the ingest gateway to ECS as well.
-            MAPLE_DEPLOY_AWS_INGEST: ${{ vars.MAPLE_DEPLOY_AWS_INGEST }}
             INFISICAL_ENV_SLUG: prod
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
@@ -134,7 +130,7 @@ jobs:
             # is a no-op on an ISSUED certificate and the retry fails the same way.
             - name: Validate the ingest certificate and retry the deploy
               id: retry
-              if: ${{ steps.deploy.outcome == 'failure' && env.MAPLE_DEPLOY_AWS_INGEST == '1' }}
+              if: ${{ steps.deploy.outcome == 'failure' }}
               env:
                   INGEST_DOMAIN: ingest.maple.dev
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Post-deploy check for the on-demand PR ingest preview
-# (.github/workflows/deploy-pr-ingest.yml): is the in-VPC OTel collector
+# (.github/workflows/deploy-pr-preview.yml): is the in-VPC OTel collector
 # running, discoverable by the name the gateway was given, and exporting?
 #
 # Runs inside the workflow because that is where the deploy account's

@@ -77,40 +77,21 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
 		return { logsDestination, tracesDestination }
 	})
 
-/**
- * Opt-in switch for the AWS half of the stack (`apps/ingest` on ECS).
- *
- * Set `MAPLE_DEPLOY_AWS_INGEST=1` to include it. Unset, both the AWS providers
- * and the ingest resources drop out.
- *
- * STILL LOAD-BEARING — do not fold this into `stageDeploysIngest` and delete it.
- * Two reasons:
- *
- *   1. It is the cost gate. The variable is set on the `production` GitHub
- *      environment only; `stageDeploysIngest` also returns true for `stg`, so
- *      removing the flag would hand staging a VPC + ALB + ACM certificate + ECS
- *      cluster it does not have today. deploy-stg.yml's `aws_ingest` input
- *      forces it on for a single run when staging genuinely needs one.
- *   2. It cannot be stage-derived anyway. `providers` is part of the
- *      `Alchemy.Stack` options, which are evaluated before `Alchemy.Stage` is
- *      readable inside the stack effect — and `AWS.providers()` pulls the whole
- *      AWS provider surface into the plan, so registering it unconditionally is
- *      not free.
- *
- * It was ALSO once a workaround for the #378 hang (alchemy's env-credential
- * account lookup deadlocking without `AWS_ACCOUNT_ID`). That part is fixed — the
- * workflows set `AWS_ACCOUNT_ID`, see deploy-prd.yml — but the two reasons above
- * are independent of it.
- */
-const DEPLOY_AWS_INGEST = process.env.MAPLE_DEPLOY_AWS_INGEST === "1"
-
 type StackProviderServices =
 	| Layer.Services<ReturnType<typeof Cloudflare.providers>>
 	| Layer.Services<ReturnType<typeof AWS.providers>>
 
-const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> = DEPLOY_AWS_INGEST
-	? Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()))
-	: Cloudflare.providers()
+/**
+ * Both clouds, unconditionally.
+ *
+ * `providers` is part of the `Alchemy.Stack` options, which are evaluated
+ * before `Alchemy.Stage` is readable inside the stack effect, so this cannot be
+ * stage-derived — every stage registers the AWS provider surface even when it
+ * creates no AWS resource. Whether a stage actually gets an ingest fleet is
+ * `stageDeploysIngest`, below.
+ */
+const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> =
+	Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()))
 
 export default Alchemy.Stack(
 	"maple",
@@ -120,12 +101,10 @@ export default Alchemy.Stack(
 		// Infisical exactly like the Cloudflare ones — `AWS.providers()` reads
 		// AWS_REGION / AWS_ACCOUNT_ID / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
 		//
-		// OPT-IN (MAPLE_DEPLOY_AWS_INGEST=1): unset, this stack is byte-identical
-		// to the pure-Cloudflare one that ships today, so the ECS cut-over is a
-		// repo-variable flip rather than a code change. `AWS.providers()` also
-		// needs AWS_ACCOUNT_ID in CI — without it the env-credential path looks
-		// the account up over STS from inside its own environment construction
-		// and deadlocks silently (the #378 hang).
+		// AWS_ACCOUNT_ID is REQUIRED in CI. Without it alchemy's env-credential
+		// path looks the account up over STS from inside its own environment
+		// construction and deadlocks silently, with no log line and no network
+		// I/O — the #378 hang. Every deploy workflow sets it; see deploy-prd.yml.
 		providers,
 		// Shared account-wide state store (Worker + DO SQLite) — bootstrapped once
 		// per Cloudflare account (`alchemy bootstrap cloudflare` or the first
@@ -156,17 +135,14 @@ export default Alchemy.Stack(
 			)
 		}
 
-		// The Rust OTLP gateway on ECS Fargate (prd/stg only — PR previews get no
-		// ingest domain, and a VPC + ALB per PR is real money for a stack nothing
-		// points at; dev stages run it through docker-compose). `domains.ingest`
-		// reaches it via a Cloudflare CNAME at the ALB, so the URL below stays a
-		// plain string and does not depend on the service resource.
-		// Gated on the same flag as `AWS.providers()` above — creating the resource
-		// without its provider registered is not a runnable combination.
-		const ingest =
-			DEPLOY_AWS_INGEST && stageDeploysIngest(stage)
-				? yield* createMapleIngest({ stage, domains, region })
-				: undefined
+		// The Rust OTLP gateway on ECS Fargate (prd/stg/pr — dev stages run it
+		// through docker-compose instead). On prd/stg `domains.ingest` reaches it
+		// via a Cloudflare CNAME at the ALB, so the URL below stays a plain string
+		// and does not depend on the service resource; a PR preview gets no ingest
+		// domain, so its ALB answers plain HTTP on 80 at `ingest.serviceUrl`.
+		const ingest = stageDeploysIngest(stage)
+			? yield* createMapleIngest({ stage, domains, region })
+			: undefined
 
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
 
@@ -231,6 +207,10 @@ export default Alchemy.Stack(
 						`api_url=${summary.apiUrl}`,
 						`sync_url=${summary.electricSyncUrl}`,
 						`landing_url=${summary.landingUrl}`,
+						// Empty on a stage with no ingest fleet. On a PR preview this is
+						// the ALB's plain-HTTP hostname — the preview has no ingest
+						// domain, so there is no certificate and no CNAME.
+						`ingest_url=${ingest?.serviceUrl ?? ""}`,
 					].join("\n")}\n`,
 				)
 			}

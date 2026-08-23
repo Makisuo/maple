@@ -1,7 +1,7 @@
 name: Build ingest binary
 
 # Compiles `apps/ingest` for the deploy image and hands it to the caller as an
-# artifact. Called by deploy-prd / deploy-stg / deploy-pr-ingest / aws-probe,
+# artifact. Called by deploy-prd / deploy-stg / deploy-pr-preview / aws-probe,
 # which all COPY the result via `apps/ingest/Dockerfile.prebuilt`.
 #
 # It is a separate job purely because of the RUNNER. The ECS tasks run on
