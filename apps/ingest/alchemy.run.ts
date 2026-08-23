@@ -5,6 +5,8 @@ import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import type { MapleRegion } from "@maple/infra/aws"
 import {
+	CLOUDFLARE_IPV4_RANGES,
+	CLOUDFLARE_IPV6_RANGES,
 	COLLECTOR_DNS_LABEL,
 	COLLECTOR_OTLP_HTTP_PORT,
 	resolveAwsRegion,
@@ -133,23 +135,50 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 		// alchemy's default HTTP listener on 80, and the group has to admit THAT
 		// port or the load balancer is unreachable (the first preview deploy came
 		// up healthy and timed out on every request for exactly this reason).
-		const listenerPort = domains.ingest ? 443 : 80
+		//
+		// WHO may reach it also follows the domain. A stage with an ingest domain
+		// is proxied by Cloudflare, which terminates the public TLS, rate-limits,
+		// and stamps `Cf-IPCountry` — a header the gateway trusts
+		// (MAPLE_INGEST_TRUST_PROXY_GEO below). So only Cloudflare's published
+		// egress ranges may dial the ALB; anything else would bypass the proxy and
+		// be free to forge that header. A PR preview has no domain and is hit
+		// directly, so it stays open.
+		const proxiedByCloudflare = Boolean(domains.ingest)
+		const listenerPort = proxiedByCloudflare ? 443 : 80
+		const listenerDescription = proxiedByCloudflare ? "OTLP over HTTPS from Cloudflare" : "OTLP over HTTP (no ingest domain, no certificate)"
+		const albIngress = proxiedByCloudflare
+			? [
+					...CLOUDFLARE_IPV4_RANGES.map((cidrIpv4) => ({
+						ipProtocol: "tcp" as const,
+						fromPort: listenerPort,
+						toPort: listenerPort,
+						cidrIpv4,
+						description: listenerDescription,
+					})),
+					...CLOUDFLARE_IPV6_RANGES.map((cidrIpv6) => ({
+						ipProtocol: "tcp" as const,
+						fromPort: listenerPort,
+						toPort: listenerPort,
+						cidrIpv6,
+						description: listenerDescription,
+					})),
+				]
+			: [
+					{
+						ipProtocol: "tcp" as const,
+						fromPort: listenerPort,
+						toPort: listenerPort,
+						cidrIpv4: "0.0.0.0/0",
+						description: listenerDescription,
+					},
+				]
 		const albSecurityGroup = yield* AWS.EC2.SecurityGroup("ingest-alb-sg", {
 			vpcId: network.vpcId,
 			groupName: name("ingest-alb"),
-			description: `Maple OTLP ingest - public ${listenerPort === 443 ? "HTTPS" : "HTTP"} to the load balancer`,
-			ingress: [
-				{
-					ipProtocol: "tcp",
-					fromPort: listenerPort,
-					toPort: listenerPort,
-					cidrIpv4: "0.0.0.0/0",
-					description:
-						listenerPort === 443
-							? "OTLP over HTTPS"
-							: "OTLP over HTTP (no ingest domain, no certificate)",
-				},
-			],
+			description: proxiedByCloudflare
+				? "Maple OTLP ingest - HTTPS to the load balancer from Cloudflare only"
+				: "Maple OTLP ingest - public HTTP to the load balancer",
+			ingress: albIngress,
 		})
 
 		const taskSecurityGroup = yield* AWS.EC2.SecurityGroup("ingest-sg", {
@@ -409,10 +438,11 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 
 				// Trust `Cf-IPCountry` on inbound requests, which is what gates
 				// `derive_country` in `apps/ingest/src/main.rs` and therefore whether
-				// `session_replays.Country` is ever non-empty. Safe here specifically
-				// because the ALB security group only admits Cloudflare's proxy ranges
-				// (see `albSecurityGroup` above), so the header cannot be
-				// client-supplied. Left unset until now, which is why every session
+				// `session_replays.Country` is ever non-empty. Safe on proxied stages
+				// because the ALB security group admits only Cloudflare's published
+				// ranges (`albIngress` above), so the header cannot be client-supplied.
+				// A PR preview is open and unproxied, so there the value is only as
+				// honest as the caller — acceptable for a test stack. Left unset until now, which is why every session
 				// recorded before this deploy has `Country = ''` — the gateway never
 				// stores a client IP, so there is nothing to backfill from.
 				MAPLE_INGEST_TRUST_PROXY_GEO: "true",
