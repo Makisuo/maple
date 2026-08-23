@@ -57,10 +57,10 @@ boundaries. Seven fresh-process runs produced:
 
 | Graph            | Cold module-evaluation samples       | Median |
 | ---------------- | ------------------------------------ | -----: |
-| monolith         | 148, 146, 144, 146, 145, 145, 147 ms | 146 ms |
-| telemetry island | 104, 96, 96, 97, 97, 97, 97 ms       |  97 ms |
+| monolith         | 153, 154, 150, 151, 157, 152, 152 ms | 152 ms |
+| telemetry island | 107, 101, 101, 101, 103, 102, 102 ms | 102 ms |
 
-The telemetry island reduces module evaluation by **33.6%**. A representative 250-request warm run
+The telemetry island reduces module evaluation by **32.9%**. A representative 250-request warm run
 measured the service-binding call at **0 ms median / 1 ms p95** at workerd's timer resolution.
 
 This is enough evidence to build a functional canary, not enough evidence to route production
