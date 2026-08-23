@@ -7,7 +7,9 @@ import {
 	resolveCollectorEndpoint,
 	resolveCollectorTaskSize,
 	resolveIngestCidrBlock,
+	resolveIngestDesiredCount,
 	resolveIngestNamespaceName,
+	resolveIngestScaling,
 	stageDeploysCollector,
 	stageDeploysIngest,
 } from "./stage.ts"
@@ -85,5 +87,22 @@ describe("collector service discovery", () => {
 		expect(resolveCollectorTaskSize(parseMapleStage("prd"))).toEqual({ cpu: 512, memory: 1024 })
 		expect(resolveCollectorTaskSize(parseMapleStage("stg"))).toEqual({ cpu: 256, memory: 1024 })
 		expect(resolveCollectorTaskSize(parseMapleStage("pr-12"))).toEqual({ cpu: 256, memory: 1024 })
+	})
+})
+
+describe("resolveIngestScaling", () => {
+	it("autoscales production between the fixed count and a burst ceiling", () => {
+		const scaling = resolveIngestScaling(parseMapleStage("prd"))
+		expect(scaling).toBeDefined()
+		expect(scaling!.min).toBe(resolveIngestDesiredCount(parseMapleStage("prd")))
+		expect(scaling!.max).toBeGreaterThan(scaling!.min)
+		expect(scaling!.cpuUtilization).toBeGreaterThan(0)
+		expect(scaling!.cpuUtilization).toBeLessThan(100)
+	})
+
+	it("keeps every other stage at a fixed count", () => {
+		expect(resolveIngestScaling(parseMapleStage("stg"))).toBeUndefined()
+		expect(resolveIngestScaling(parseMapleStage("pr-12"))).toBeUndefined()
+		expect(resolveIngestScaling(parseMapleStage("dev-alice"))).toBeUndefined()
 	})
 })
