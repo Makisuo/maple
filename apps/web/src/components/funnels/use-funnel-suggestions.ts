@@ -34,7 +34,9 @@ export interface FunnelSuggestions {
  * resolved range yet. A fresh org's panel shows none and the inputs stay
  * free-text — a funnel is often built for an event that has not fired yet.
  */
-export function useFunnelSuggestions(window: { startTime: string; endTime: string } | undefined): FunnelSuggestions {
+export function useFunnelSuggestions(
+	window: { startTime: string; endTime: string } | undefined,
+): FunnelSuggestions {
 	const startTime = window?.startTime ?? formatWarehouseDateTime(Date.now() - SEVEN_DAYS_MS)
 	const endTime = window?.endTime ?? formatWarehouseDateTime(Date.now())
 
@@ -61,7 +63,8 @@ export function useFunnelSuggestions(window: { startTime: string; endTime: strin
 		.orElse(() => [])
 	const facets = Result.builder(facetsResult)
 		.onSuccess((rows): FunnelSuggestions["facets"] => {
-			const names = (facet: ReadonlyArray<{ name: string }>) => facet.map((row) => row.name).filter(Boolean)
+			const names = (facet: ReadonlyArray<{ name: string }>) =>
+				facet.map((row) => row.name).filter(Boolean)
 			return {
 				referrerHost: names(rows.referrerHosts),
 				country: names(rows.countries),

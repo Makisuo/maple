@@ -18,8 +18,8 @@ const ATTRIBUTE = "__attribute__"
 /**
  * Breakdown: none, one of the session dimensions, or `attribute:<key>` typed
  * by hand — the attribute keys on `track()` events are the customer's own
- * vocabulary and there is no cheap way to list them. Shared by the /analytics
- * Funnels view and the dashboard funnel panel's Breakdown add-on.
+ * vocabulary and there is no cheap way to list them. Mounted by the dashboard
+ * funnel panel's Breakdown add-on.
  *
  * "Attribute…" and the key it needs are two interactions, so the mode is held
  * here and only a NON-EMPTY key becomes a `breakdownBy`. Emitting the bare

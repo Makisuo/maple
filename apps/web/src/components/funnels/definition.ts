@@ -1,19 +1,15 @@
-// The funnel definition vocabulary shared by the /analytics Funnels view, the
-// dashboard funnel widget and the step builder they both mount.
+// The funnel definition vocabulary shared by the dashboard funnel widget and
+// the step builder it mounts.
 //
 // A definition is `steps` + `keyBy` + `windowSeconds` (+ optional
 // `breakdownBy`), exactly the option bag `productEventsFunnelQuery` takes; the
 // wire schemas live in `@maple/query-model` and are reused here unchanged so a
-// URL, a widget's stored config and an API request all decode the same shape.
+// widget's stored config and an API request decode the same shape.
 
-import { Schema } from "effect"
 import {
 	FUNNEL_MAX_STEPS,
 	FUNNEL_SESSION_DIMENSION_LABEL,
-	FunnelBreakdownBy,
-	FunnelKeyBy,
 	FunnelSessionDimension,
-	FunnelStep,
 	funnelStepLabel,
 	type FunnelBreakdownBy as FunnelBreakdownByType,
 	type FunnelKeyBy as FunnelKeyByType,
@@ -71,33 +67,6 @@ export { FUNNEL_SESSION_DIMENSION_LABEL }
 export const FUNNEL_SESSION_DIMENSIONS: ReadonlyArray<FunnelSessionDimensionType> =
 	FunnelSessionDimension.literals
 
-/** URL search-param fields for the /analytics Funnels view. Spread into `validateSearch`. */
-export const funnelSearchFields = {
-	view: Schema.optional(Schema.Literals(["overview", "funnels"])),
-	steps: Schema.optional(Schema.Array(FunnelStep)),
-	keyBy: Schema.optional(FunnelKeyBy),
-	window: Schema.optional(Schema.Number),
-	breakdown: Schema.optional(FunnelBreakdownBy),
-} as const
-
-export type AnalyticsView = "overview" | "funnels"
-
-/** Read a definition off the route's decoded search object, defaults filled in. */
-export const funnelFromSearch = (search: {
-	readonly steps?: ReadonlyArray<FunnelStepType>
-	readonly keyBy?: FunnelKeyByType
-	readonly window?: number
-	readonly breakdown?: FunnelBreakdownByType
-}): FunnelDefinition => ({
-	steps: search.steps ?? [],
-	keyBy: search.keyBy ?? DEFAULT_FUNNEL_KEY_BY,
-	windowSeconds:
-		search.window !== undefined && Number.isFinite(search.window) && search.window > 0
-			? search.window
-			: DEFAULT_FUNNEL_WINDOW_SECONDS,
-	...(search.breakdown !== undefined ? { breakdownBy: search.breakdown } : undefined),
-})
-
 /** A fresh event step; the builder's default when a step is added. */
 export const emptyEventStep = (): FunnelStepType => ({ kind: "event", eventName: "" })
 
@@ -122,11 +91,3 @@ export const breakdownLabel = (breakdownBy: FunnelBreakdownByType): string =>
 	breakdownBy.startsWith("attribute:")
 		? `attribute ${breakdownBy.slice("attribute:".length)}`
 		: FUNNEL_SESSION_DIMENSION_LABEL[breakdownBy as FunnelSessionDimensionType]
-
-/** Encode a definition into the search-param fields (empty steps drop the keys). */
-export const funnelToSearch = (definition: FunnelDefinition) => ({
-	steps: definition.steps.length > 0 ? definition.steps : undefined,
-	keyBy: definition.keyBy === DEFAULT_FUNNEL_KEY_BY ? undefined : definition.keyBy,
-	window: definition.windowSeconds === DEFAULT_FUNNEL_WINDOW_SECONDS ? undefined : definition.windowSeconds,
-	breakdown: definition.breakdownBy,
-})

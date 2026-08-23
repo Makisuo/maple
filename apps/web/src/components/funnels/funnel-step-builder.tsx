@@ -24,10 +24,10 @@ import {
 } from "./definition"
 
 // The step builder: an ordered list of up to ten steps, each an event name, a
-// page path, or — first step only — a session's acquisition dimension. Shared
-// by the /analytics Funnels view and the dashboard funnel widget's query panel,
-// so it owns no fetching: the event-name and page-path suggestions come in as
-// props and every edit goes straight back out through `onChange`.
+// page path, or — first step only — a session's acquisition dimension. Mounted
+// by the dashboard funnel widget's query panel, so it owns no fetching: the
+// event-name and page-path suggestions come in as props and every edit goes
+// straight back out through `onChange`.
 //
 // It holds `FunnelStepDraft`s — wire steps plus the raw filter text an event
 // step is typed with. A plain `FunnelStep` is a draft too, so the /analytics
@@ -191,144 +191,144 @@ function StepRow({
 			)}
 		>
 			<div className="flex items-center gap-1.5">
-			<span
-				className={cn(
-					"grid shrink-0 place-items-center rounded-sm bg-muted font-mono text-[10px] tabular-nums text-muted-foreground",
-					compact ? "size-5" : "size-6",
-				)}
-				aria-label={`Step ${index + 1}`}
-			>
-				{index + 1}
-			</span>
+				<span
+					className={cn(
+						"grid shrink-0 place-items-center rounded-sm bg-muted font-mono text-[10px] tabular-nums text-muted-foreground",
+						compact ? "size-5" : "size-6",
+					)}
+					aria-label={`Step ${index + 1}`}
+				>
+					{index + 1}
+				</span>
 
-			<Select
-				items={kindItems}
-				value={step.kind}
-				onValueChange={(value) => {
-					if (value === "event" || value === "page" || value === "session")
-						onChange(withKind(step, value))
-				}}
-			>
-				<SelectTrigger size="sm" className="w-24 min-w-0 shrink-0" aria-label="Step type">
-					<SelectValue />
-				</SelectTrigger>
-				<SelectContent>
-					{kinds.map((kind) => (
-						<SelectItem key={kind} value={kind}>
-							{KIND_LABEL[kind]}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
+				<Select
+					items={kindItems}
+					value={step.kind}
+					onValueChange={(value) => {
+						if (value === "event" || value === "page" || value === "session")
+							onChange(withKind(step, value))
+					}}
+				>
+					<SelectTrigger size="sm" className="w-24 min-w-0 shrink-0" aria-label="Step type">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						{kinds.map((kind) => (
+							<SelectItem key={kind} value={kind}>
+								{KIND_LABEL[kind]}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
 
-			<div className="flex min-w-0 flex-1 items-center gap-1.5">
-				{step.kind === "event" ? (
-					<SuggestingInput
-						value={step.eventName}
-						onChange={(eventName) => onChange({ ...step, eventName })}
-						suggestions={eventNames}
-						placeholder="Event name, e.g. signup_completed"
-						ariaLabel={`Step ${index + 1} event name`}
-						empty="No events recorded in this window — type a name."
-					/>
-				) : step.kind === "page" ? (
-					<>
+				<div className="flex min-w-0 flex-1 items-center gap-1.5">
+					{step.kind === "event" ? (
 						<SuggestingInput
-							value={step.pagePath}
-							onChange={(pagePath) => onChange({ ...step, pagePath })}
-							suggestions={pagePaths}
-							placeholder="Page path, e.g. /pricing"
-							ariaLabel={`Step ${index + 1} page path`}
-							empty="No page paths in this window — type a path."
-							mono
+							value={step.eventName}
+							onChange={(eventName) => onChange({ ...step, eventName })}
+							suggestions={eventNames}
+							placeholder="Event name, e.g. signup_completed"
+							ariaLabel={`Step ${index + 1} event name`}
+							empty="No events recorded in this window — type a name."
 						/>
-						{pageStepHost ? (
+					) : step.kind === "page" ? (
+						<>
+							<SuggestingInput
+								value={step.pagePath}
+								onChange={(pagePath) => onChange({ ...step, pagePath })}
+								suggestions={pagePaths}
+								placeholder="Page path, e.g. /pricing"
+								ariaLabel={`Step ${index + 1} page path`}
+								empty="No page paths in this window — type a path."
+								mono
+							/>
+							{pageStepHost ? (
+								<Input
+									size="sm"
+									value={step.host ?? ""}
+									onChange={(event) => {
+										const host = event.target.value
+										const { host: _host, ...rest } = step
+										onChange(host === "" ? rest : { ...rest, host })
+									}}
+									placeholder="host (optional)"
+									aria-label={`Step ${index + 1} page host`}
+									className="w-40 min-w-0 shrink-0 font-mono text-xs"
+								/>
+							) : null}
+						</>
+					) : (
+						<>
+							<Select
+								items={FUNNEL_SESSION_DIMENSION_LABEL}
+								value={step.dimension}
+								onValueChange={(value) => {
+									if (
+										value &&
+										FUNNEL_SESSION_DIMENSIONS.includes(value as FunnelSessionDimension)
+									) {
+										onChange({ ...step, dimension: value as FunnelSessionDimension })
+									}
+								}}
+							>
+								<SelectTrigger
+									size="sm"
+									className="w-32 min-w-0 shrink-0"
+									aria-label="Session dimension"
+								>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{FUNNEL_SESSION_DIMENSIONS.map((dimension) => (
+										<SelectItem key={dimension} value={dimension}>
+											{FUNNEL_SESSION_DIMENSION_LABEL[dimension]}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
 							<Input
 								size="sm"
-								value={step.host ?? ""}
-								onChange={(event) => {
-									const host = event.target.value
-									const { host: _host, ...rest } = step
-									onChange(host === "" ? rest : { ...rest, host })
-								}}
-								placeholder="host (optional)"
-								aria-label={`Step ${index + 1} page host`}
-								className="w-40 min-w-0 shrink-0 font-mono text-xs"
+								value={step.value}
+								onChange={(event) => onChange({ ...step, value: event.target.value })}
+								placeholder={sessionValuePlaceholder(step.dimension)}
+								aria-label={`Step ${index + 1} session value`}
+								className="min-w-0 flex-1 font-mono text-xs"
 							/>
-						) : null}
-					</>
-				) : (
-					<>
-						<Select
-							items={FUNNEL_SESSION_DIMENSION_LABEL}
-							value={step.dimension}
-							onValueChange={(value) => {
-								if (
-									value &&
-									FUNNEL_SESSION_DIMENSIONS.includes(value as FunnelSessionDimension)
-								) {
-									onChange({ ...step, dimension: value as FunnelSessionDimension })
-								}
-							}}
-						>
-							<SelectTrigger
-								size="sm"
-								className="w-32 min-w-0 shrink-0"
-								aria-label="Session dimension"
-							>
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								{FUNNEL_SESSION_DIMENSIONS.map((dimension) => (
-									<SelectItem key={dimension} value={dimension}>
-										{FUNNEL_SESSION_DIMENSION_LABEL[dimension]}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-						<Input
-							size="sm"
-							value={step.value}
-							onChange={(event) => onChange({ ...step, value: event.target.value })}
-							placeholder={sessionValuePlaceholder(step.dimension)}
-							aria-label={`Step ${index + 1} session value`}
-							className="min-w-0 flex-1 font-mono text-xs"
-						/>
-					</>
-				)}
-			</div>
+						</>
+					)}
+				</div>
 
-			<div className="flex shrink-0 items-center">
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-xs"
-					onClick={onMoveUp}
-					disabled={index === 0}
-					aria-label="Move step up"
-				>
-					<ArrowUpIcon size={12} />
-				</Button>
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-xs"
-					onClick={onMoveDown}
-					disabled={index === total - 1}
-					aria-label="Move step down"
-				>
-					<ArrowDownIcon size={12} />
-				</Button>
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-xs"
-					onClick={onRemove}
-					aria-label="Remove step"
-				>
-					<XmarkIcon size={12} />
-				</Button>
-			</div>
+				<div className="flex shrink-0 items-center">
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						onClick={onMoveUp}
+						disabled={index === 0}
+						aria-label="Move step up"
+					>
+						<ArrowUpIcon size={12} />
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						onClick={onMoveDown}
+						disabled={index === total - 1}
+						aria-label="Move step down"
+					>
+						<ArrowDownIcon size={12} />
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						onClick={onRemove}
+						aria-label="Remove step"
+					>
+						<XmarkIcon size={12} />
+					</Button>
+				</div>
 			</div>
 			{eventStepFilter && step.kind === "event" ? (
 				<div className={cn("flex flex-col gap-0.5", compact ? "pl-6" : "pl-7")}>
