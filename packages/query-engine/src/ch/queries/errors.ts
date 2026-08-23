@@ -1076,6 +1076,49 @@ export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
 		.format("JSON")
 }
 
+// Fix verification — occurrences of one fingerprint since a merge, per build.
+//
+// The verdict on "did the fix work" is a membership question, not a count: an
+// occurrence from a build that was already running when the fix merged is an old
+// client still in the wild, while one from a build absent from that set is the
+// fix demonstrably not working. So this returns the split by `ServiceVersion`
+// and lets the caller partition it against the merge-time baseline, rather than
+// pushing the baseline array down into the SQL — which would have to be
+// re-templated per issue and would defeat the compiled query's parameter reuse.
+//
+// Reads the per-occurrence table, not the minutely rollup: verification windows
+// start at an arbitrary instant (the merge), and a minute-granular rollup would
+// smear occurrences across the boundary in exactly the direction that matters.
+
+export const ErrorIssueVersionsSinceOutputSchema = Schema.Struct({
+	serviceVersion: Schema.String,
+	count: CHNumber,
+})
+export type ErrorIssueVersionsSinceOutput = Schema.Schema.Type<typeof ErrorIssueVersionsSinceOutputSchema>
+
+export function errorIssueVersionsSinceQuery(opts: { limit?: number } = {}) {
+	return (
+		from(ErrorEvents)
+			.select(($) => ({
+				serviceVersion: $.ServiceVersion,
+				count: CH.count(),
+			}))
+			.where(($) => [
+				$.OrgId.eq(param.string("orgId")),
+				$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
+				$.Timestamp.gte(param.dateTime("startTime")),
+				$.Timestamp.lte(param.dateTime("endTime")),
+			])
+			.groupBy("serviceVersion")
+			.orderBy(["count", "desc"])
+			// Capped because an org running many builds could otherwise return a long
+			// tail; the partition only needs the builds that actually fired, and the
+			// count that matters is dominated by the head.
+			.limit(opts.limit ?? 100)
+			.format("JSON")
+	)
+}
+
 // Error Issue environments — where one fingerprint was seen in the window.
 //
 // The Postgres `error_issues` row carries no environment: a fingerprint spans

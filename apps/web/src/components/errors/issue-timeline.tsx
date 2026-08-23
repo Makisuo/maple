@@ -27,6 +27,11 @@ const EVENT_LABEL: Record<ErrorIssueEventDocument["type"], string> = {
 	ai_triage: "AI triage",
 	anomaly_linked: "Anomaly",
 	severity_change: "Severity",
+	pr_linked: "PR linked",
+	pr_unlinked: "PR unlinked",
+	pr_merged: "PR merged",
+	verification_started: "Verifying fix",
+	verification_verdict: "Verification",
 } satisfies Record<ErrorIssueEventDocument["type"], string>
 
 const DOT_CLASS: Record<ErrorIssueEventDocument["type"], string> = {
@@ -45,6 +50,13 @@ const DOT_CLASS: Record<ErrorIssueEventDocument["type"], string> = {
 	ai_triage: "bg-violet-500",
 	anomaly_linked: "bg-amber-500",
 	severity_change: "bg-orange-500",
+	pr_linked: "bg-muted-foreground",
+	pr_unlinked: "bg-muted-foreground/60",
+	pr_merged: "bg-purple-500",
+	// Teal matches the `verifying` workflow badge, so the timeline row and the
+	// state chip read as the same thing happening.
+	verification_started: "bg-teal-500",
+	verification_verdict: "bg-teal-500",
 } satisfies Record<ErrorIssueEventDocument["type"], string>
 
 /**
@@ -60,6 +72,9 @@ const MESSAGE_TYPES = new Set<ErrorIssueEventDocument["type"]>([
 	"agent_note",
 	"ai_triage",
 	"fix_proposed",
+	// The verdict carries the agent's reasoning and its evidence. A one-line
+	// ledger row would bury exactly the part a human needs to trust an auto-close.
+	"verification_verdict",
 ])
 
 /**
@@ -87,6 +102,11 @@ const MESSAGE_VERB = {
 	ai_triage: "triaged this",
 	anomaly_linked: null,
 	severity_change: null,
+	pr_linked: null,
+	pr_unlinked: null,
+	pr_merged: null,
+	verification_started: null,
+	verification_verdict: "checked the fix",
 } satisfies Record<ErrorIssueEventDocument["type"], string | null>
 
 function payloadString(value: unknown): string | null {
@@ -142,9 +162,85 @@ function renderPayload(event: ErrorIssueEventDocument): string | null {
 						: ""
 			return `${from} → ${to}${suffix}${note ? ` — ${note}` : ""}`
 		}
+		case "pr_linked":
+		case "pr_unlinked": {
+			const repo = payloadString(p.repoFullName)
+			const number = payloadString(p.number)
+			const source = payloadString(p.source)
+			if (!repo || !number) return payloadString(p.url)
+			const via =
+				source === "auto"
+					? " (referenced in the pull request)"
+					: source === "agent"
+						? " by an agent"
+						: ""
+			return `${repo}#${number}${via}`
+		}
+		case "pr_merged": {
+			const repo = payloadString(p.repoFullName)
+			const number = payloadString(p.number)
+			return repo && number ? `${repo}#${number} merged` : payloadString(p.url)
+		}
+		case "verification_started": {
+			// The window length is meaningless without the rate it came from — this
+			// is the row that has to answer "why are we waiting six hours?".
+			const windowMs = Number(payloadString(p.windowMs) ?? Number.NaN)
+			const rate = Number(payloadString(p.ratePerHour) ?? Number.NaN)
+			const window = Number.isFinite(windowMs) ? formatDuration(windowMs) : null
+			if (window === null) return "Watching for this error to come back."
+			const because =
+				Number.isFinite(rate) && rate > 0
+					? ` — it fired about ${formatRate(rate)} before the merge`
+					: " — this error fires too rarely to judge quickly"
+			return `Watching for ${window}${because}.`
+		}
+		case "verification_verdict": {
+			const verdict = payloadString(p.verdict)
+			const note = payloadString(p.note)
+			const autoClosed = p.autoClosed === true
+			const headline =
+				verdict === "verified"
+					? autoClosed
+						? "**The fix holds.** Closing this issue."
+						: "**The fix holds.** Leaving it open for a human to close."
+					: verdict === "not_fixed"
+						? "**The error is still happening.** Reopening this issue."
+						: "**Could not tell yet.**"
+			return note ? `${headline}\n\n${note}` : headline
+		}
 		default:
 			return null
 	}
+}
+
+/** "6 hours", "3 days" — a duration a person would say out loud. */
+function formatDuration(ms: number): string {
+	const minutes = Math.round(ms / 60_000)
+	if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`
+	const hours = Math.round(minutes / 60)
+	if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`
+	const days = Math.round(hours / 24)
+	return `${days} day${days === 1 ? "" : "s"}`
+}
+
+/**
+ * A per-hour rate in whatever unit reads naturally. "0.02 times per hour" is
+ * technically right and useless; "3 times a week" is the same number said in a
+ * way a reader can picture.
+ */
+function formatRate(perHour: number): string {
+	if (perHour >= 1) {
+		const rounded = perHour >= 10 ? Math.round(perHour) : Math.round(perHour * 10) / 10
+		return `${rounded}× an hour`
+	}
+	const perDay = perHour * 24
+	if (perDay >= 1) {
+		const rounded = perDay >= 10 ? Math.round(perDay) : Math.round(perDay * 10) / 10
+		return `${rounded}× a day`
+	}
+	const perWeek = perHour * 24 * 7
+	const rounded = perWeek >= 10 ? Math.round(perWeek) : Math.round(perWeek * 10) / 10
+	return `${rounded}× a week`
 }
 
 type TimelineItem =

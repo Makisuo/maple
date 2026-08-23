@@ -1,0 +1,318 @@
+import { MAX_VERIFICATION_ATTEMPTS, type VerificationVerdict, type OrgId } from "@maple/domain/http"
+import { RoleName, UserId } from "@maple/domain/primitives"
+import { errorIssuePullRequests, errorIssues, type ErrorIssueVerificationRow } from "@maple/db"
+import { and, eq } from "drizzle-orm"
+import { CH, formatWarehouseDateTime } from "@maple/query-engine"
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import type { TenantContext } from "@/services/auth/AuthService"
+import { Database } from "@/platform/DatabaseLive"
+import { dateToMs } from "@/platform/time"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueue"
+import { enqueueFixVerification } from "@/services/errors/fix-verification-enqueue"
+import { IssueFixVerificationService } from "./IssueFixVerificationService"
+import { makeErrorDatabaseExecute } from "./error-persistence"
+
+const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
+const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
+
+/**
+ * Verifications examined per tick. The tick runs every minute and each row costs
+ * one warehouse read plus (usually) one workflow start, so the cap is what keeps
+ * a burst of simultaneous merges from turning one minute's tick into a long
+ * outbound-call queue. Leftovers are simply due again next minute.
+ */
+const MAX_VERIFICATIONS_PER_TICK = 20
+
+export interface FixVerificationTickResult {
+	readonly examined: number
+	readonly refuted: number
+	readonly investigationsStarted: number
+	readonly verdictsApplied: number
+	readonly skipped: number
+}
+
+export interface FixVerificationTickServiceApi {
+	/**
+	 * Never fails. A tick that cannot read its own rows logs and reports nothing
+	 * done — the rows stay `waiting` and are due again next minute, which is the
+	 * right answer for a transient database problem and avoids a failed cron
+	 * invocation for something that self-heals.
+	 */
+	readonly runTick: () => Effect.Effect<FixVerificationTickResult>
+}
+
+const make: Effect.Effect<
+	FixVerificationTickServiceApi,
+	never,
+	Database | WarehouseQueryService | IssueFixVerificationService
+> = Effect.gen(function* () {
+	const database = yield* Database
+	const warehouse = yield* WarehouseQueryService
+	const verification = yield* IssueFixVerificationService
+	const dbExecute = makeErrorDatabaseExecute(database, "FixVerificationTickService")
+
+	// Present only inside a Worker isolate; absent in tests and local runs, where
+	// the enqueue records `no_binding` rather than silently degrading.
+	const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
+	const fanoutBinding = Option.match(workerEnv, {
+		onNone: () => undefined,
+		onSome: (env) => env[INVESTIGATION_FANOUT_BINDING],
+	})
+
+	const systemTenant = (orgId: OrgId): TenantContext => ({
+		orgId,
+		userId: decodeUserIdSync("system-errors"),
+		roles: [decodeRoleNameSync("root")],
+		authMode: "self_hosted",
+	})
+
+	/**
+	 * Split occurrences since the merge into "from a build that postdates the fix"
+	 * and "from a build that was already running".
+	 *
+	 * Only the first is evidence against the fix. The second is what the whole
+	 * baseline mechanism exists to discount — without it, any product with users
+	 * on old builds could never have a fix verified.
+	 */
+	const occurrenceSplit = Effect.fn("FixVerificationTick.occurrenceSplit")(function* (
+		row: ErrorIssueVerificationRow,
+		fingerprintHash: string,
+		nowMs: number,
+	) {
+		const mergedAtMs = dateToMs(row.mergedAt) ?? nowMs
+		const compiled = CH.compile(
+			CH.errorIssueVersionsSinceQuery(),
+			{
+				orgId: row.orgId,
+				fingerprintHash,
+				startTime: formatWarehouseDateTime(mergedAtMs),
+				endTime: formatWarehouseDateTime(nowMs),
+			},
+			{ rowSchema: CH.ErrorIssueVersionsSinceOutputSchema },
+		)
+		const rows = yield* warehouse.compiledQuery(systemTenant(row.orgId), compiled, {
+			context: "errorIssueVersionsSince",
+		})
+		const baseline = new Set(row.baselineVersionsJson)
+		let postMerge = 0
+		let staleClients = 0
+		for (const entry of rows) {
+			// An occurrence with no reported build cannot be attributed either way.
+			// Counting it as post-merge would refute every fix from a service that
+			// does not report `service.version`; counting it as a stale client would
+			// hide a real failure. It is counted as neither, and its absence is what
+			// makes the verdict "inconclusive" rather than confidently wrong.
+			if (entry.serviceVersion === "") continue
+			if (baseline.has(entry.serviceVersion)) staleClients += entry.count
+			else postMerge += entry.count
+		}
+		return { postMerge, staleClients }
+	})
+
+	/**
+	 * Turn a finished verification investigation into a verdict.
+	 *
+	 * The mapping reads backwards until you hold the question the run was asked.
+	 * For an incident, `diagnosed` means the agent established a cause and that
+	 * is the good outcome. For a verification, the agent was pointed at an error
+	 * whose occurrence counts already looked clean and asked to find anything
+	 * that contradicts the fix — so establishing a live cause means the fix did
+	 * NOT hold, and failing to establish one corroborates that it did.
+	 *
+	 * `failed` is not a verdict either way: the run never reached an answer, so
+	 * it is inconclusive and gets the retry the status earns it.
+	 */
+	const verdictFromRun = (
+		investigationStatus: string,
+	): { readonly verdict: VerificationVerdict; readonly reason: string } => {
+		if (investigationStatus === "diagnosed") {
+			return {
+				verdict: "not_fixed",
+				reason: "The verification agent established a live cause for this error after the merge.",
+			}
+		}
+		if (investigationStatus === "inconclusive") {
+			return {
+				verdict: "verified",
+				reason: "No occurrences from post-merge builds, and the verification agent found nothing contradicting the fix.",
+			}
+		}
+		return {
+			verdict: "inconclusive",
+			reason: `The verification run ended as '${investigationStatus}' without reaching an answer.`,
+		}
+	}
+
+	// Not annotated with the public signature: this one can fail on persistence.
+	// `runTickSafely` below is what satisfies the never-failing contract.
+	const runTick = Effect.fn("FixVerificationTick.runTick")(function* () {
+		const nowMs = yield* Clock.currentTimeMillis
+
+		// Phase 1: settle runs that have finished since the last tick. Done first so
+		// a verification that already has an answer is not competing for this
+		// minute's budget with one that still needs an agent.
+		let verdictsApplied = 0
+		const settled = yield* verification.settledRuns(MAX_VERIFICATIONS_PER_TICK)
+		for (const run of settled) {
+			const { verdict, reason } = verdictFromRun(run.investigationStatus)
+			const note = run.summary === null ? reason : `${reason}\n\n${run.summary}`
+			yield* verification.applyVerdict(run.verification, verdict, note, nowMs)
+			verdictsApplied += 1
+		}
+
+		const due = yield* verification.dueVerifications(nowMs, MAX_VERIFICATIONS_PER_TICK)
+
+		let refuted = 0
+		let investigationsStarted = 0
+		let skipped = 0
+
+		for (const row of due) {
+			const context = yield* dbExecute((db) =>
+				db
+					.select({
+						fingerprintHash: errorIssues.fingerprintHash,
+						workflowState: errorIssues.workflowState,
+						url: errorIssuePullRequests.url,
+					})
+					.from(errorIssues)
+					.innerJoin(errorIssuePullRequests, eq(errorIssuePullRequests.id, row.pullRequestId))
+					.where(and(eq(errorIssues.orgId, row.orgId), eq(errorIssues.id, row.issueId)))
+					.limit(1),
+			)
+			const subject = context[0]
+			if (subject === undefined) {
+				skipped += 1
+				continue
+			}
+
+			const split = yield* occurrenceSplit(row, subject.fingerprintHash, nowMs).pipe(
+				Effect.map(Option.some),
+				Effect.catchCause((cause) =>
+					Effect.logWarning("[FixVerification] occurrence split unavailable").pipe(
+						Effect.annotateLogs({
+							orgId: row.orgId,
+							verificationId: row.id,
+							error: String(cause),
+						}),
+						// Leave the row waiting; the warehouse being down is not a verdict.
+						Effect.as(Option.none<{ postMerge: number; staleClients: number }>()),
+					),
+				),
+			)
+			if (Option.isNone(split)) {
+				skipped += 1
+				continue
+			}
+
+			// The decisive case, and it needs no agent: the error fired from a build
+			// that did not exist when the fix merged.
+			if (split.value.postMerge > 0) {
+				yield* verification.applyVerdict(
+					row,
+					"not_fixed",
+					`${split.value.postMerge} occurrence(s) since the merge came from builds that were not running when the fix landed.`,
+					nowMs,
+				)
+				refuted += 1
+				continue
+			}
+
+			// Nothing observed at all, from any build, and the window has run its
+			// course. That is only meaningful if the issue had enough traffic for
+			// silence to mean something — which is exactly what the window length
+			// was computed from, so reaching here with a usable pre-merge rate is
+			// itself the evidence. With no usable rate, say so rather than guess.
+			const hadUsableRate = row.baselineRatePerHour > 0
+			if (!hadUsableRate && split.value.staleClients === 0) {
+				yield* verification.applyVerdict(
+					row,
+					"inconclusive",
+					"This error fired too rarely before the merge for silence afterwards to confirm the fix.",
+					nowMs,
+				)
+				skipped += 1
+				continue
+			}
+
+			const enqueued = yield* enqueueFixVerification({
+				verification: row,
+				pullRequestUrl: subject.url,
+				postMergeOccurrences: split.value.postMerge,
+				staleClientOccurrences: split.value.staleClients,
+				fanoutBinding,
+			}).pipe(
+				Effect.provideService(Database, database),
+				Effect.catchCause((cause) =>
+					Effect.logWarning("[FixVerification] could not enqueue verification agent").pipe(
+						Effect.annotateLogs({
+							orgId: row.orgId,
+							verificationId: row.id,
+							error: String(cause),
+						}),
+						Effect.as({ enqueued: false, reason: "error" } as const),
+					),
+				),
+			)
+
+			if (enqueued.enqueued) {
+				yield* verification.markRunning(row, enqueued.investigationId, nowMs)
+				investigationsStarted += 1
+				continue
+			}
+
+			// No agent available. Rather than leaving the row waiting forever, fall
+			// back to the deterministic reading: zero post-merge occurrences across a
+			// window sized from this issue's own rate IS the evidence, and the agent
+			// was only ever going to corroborate it. Recorded as a verdict so the
+			// timeline says what happened and why.
+			const fallbackVerdict: VerificationVerdict =
+				row.attempt + 1 >= MAX_VERIFICATION_ATTEMPTS || hadUsableRate ? "verified" : "inconclusive"
+			yield* verification.applyVerdict(
+				row,
+				fallbackVerdict,
+				fallbackVerdict === "verified"
+					? `No occurrences from post-merge builds across the verification window. (Verified from the occurrence data; no agent pass ran: ${enqueued.reason}.)`
+					: `Verification could not reach a confident answer and no agent pass was available: ${enqueued.reason}.`,
+				nowMs,
+			)
+			skipped += 1
+		}
+
+		yield* Effect.annotateCurrentSpan({
+			"maple.verification.examined": due.length,
+			"maple.verification.refuted": refuted,
+			"maple.verification.investigations_started": investigationsStarted,
+			"maple.verification.verdicts_applied": verdictsApplied,
+			"maple.verification.skipped": skipped,
+		})
+
+		return { examined: due.length, refuted, investigationsStarted, verdictsApplied, skipped }
+	})
+
+	const runTickSafely: FixVerificationTickServiceApi["runTick"] = () =>
+		runTick().pipe(
+			Effect.catchCause((cause) =>
+				Effect.logError("[FixVerification] verification tick failed").pipe(
+					Effect.annotateLogs({ error: String(cause) }),
+					Effect.as({
+						examined: 0,
+						refuted: 0,
+						investigationsStarted: 0,
+						verdictsApplied: 0,
+						skipped: 0,
+					} satisfies FixVerificationTickResult),
+				),
+			),
+		)
+
+	return { runTick: runTickSafely } satisfies FixVerificationTickServiceApi
+})
+
+export class FixVerificationTickService extends Context.Service<
+	FixVerificationTickService,
+	FixVerificationTickServiceApi
+>()("@maple/api/services/errors/FixVerificationTickService", { make }) {
+	static readonly layer = Layer.effect(this, this.make)
+}

@@ -1,5 +1,11 @@
 import { Schema } from "effect"
-import { ErrorIssueId, InvestigationId, IsoDateTimeString, UserId } from "../primitives"
+import {
+	ErrorIssueId,
+	ErrorIssueVerificationId,
+	InvestigationId,
+	IsoDateTimeString,
+	UserId,
+} from "../primitives"
 import { AiTriageEvidence, AiTriageIncidentKind, AiTriageResult } from "./ai-triage"
 import { HttpTaggedError } from "./error-policy"
 import { IssueSeverity } from "./errors"
@@ -358,9 +364,34 @@ export class InvestigationFreeformSubject extends Schema.Class<InvestigationFree
 	contextRefs: Schema.Array(InvestigationContextRef),
 }) {}
 
+/**
+ * "Did the merged fix actually work?" — opened by the verification tick once a
+ * linked pull request has merged and its quiet window has elapsed.
+ *
+ * A distinct subject rather than a freeform question because the answer is a
+ * verdict, not a conversation: the run is bounded, the evidence is already
+ * gathered (the deterministic occurrence split lives in the snapshot's facts),
+ * and the agent's job is to confirm or refute a specific claim rather than to
+ * diagnose an unknown. Carrying `verificationId` lets the verdict be applied
+ * back to the exact row that asked for it, even after a retry re-armed the
+ * window.
+ */
+export class InvestigationFixVerificationSubject extends Schema.Class<InvestigationFixVerificationSubject>(
+	"InvestigationFixVerificationSubject",
+)({
+	type: Schema.Literal("fix_verification"),
+	issueId: ErrorIssueId,
+	verificationId: ErrorIssueVerificationId,
+	pullRequestUrl: Schema.String,
+	/** Builds the issue was seen from at merge time; the membership set. */
+	baselineVersions: Schema.Array(Schema.String),
+	mergedAt: IsoDateTimeString,
+}) {}
+
 export const InvestigationSubject = Schema.Union([
 	InvestigationIncidentSubject,
 	InvestigationFreeformSubject,
+	InvestigationFixVerificationSubject,
 ]).annotate({ identifier: "@maple/InvestigationSubject", title: "Investigation Subject" })
 export type InvestigationSubject = Schema.Schema.Type<typeof InvestigationSubject>
 

@@ -45,7 +45,11 @@ import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-clo
 import { randomUUID } from "node:crypto"
 import { and, eq, sql } from "drizzle-orm"
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
-import { applyDiagnosisWrites, applyInconclusiveWrites } from "@/services/errors/apply-diagnosis"
+import {
+	applyDiagnosisWrites,
+	applyInconclusiveWrites,
+	subjectTypeOf,
+} from "@/services/errors/apply-diagnosis"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
@@ -1027,6 +1031,7 @@ async function runWithDb(
 						investigationId: idTyped,
 						report: decodeReport(report),
 						issueId,
+						subjectType: subjectTypeOf(subject),
 						model: lanes[0]?.model ?? null,
 						inputTokens,
 						outputTokens,
@@ -1314,6 +1319,7 @@ async function runWithDb(
 					investigationId: idTyped,
 					report: decodeReport(verdict.report),
 					issueId,
+					subjectType: subjectTypeOf(subject),
 					model: verdict.model,
 					inputTokens,
 					outputTokens,

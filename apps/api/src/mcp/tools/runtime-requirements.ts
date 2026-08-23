@@ -7,6 +7,7 @@ import type { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueRe
 import type { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import type { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import type { ErrorsService } from "@/services/errors/ErrorsService"
+import type { IssueFixVerificationService } from "@/services/errors/IssueFixVerificationService"
 import type { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import type { VcsSourceService } from "@/services/integrations/vcs/VcsSourceService"
 import type { SetupAuditService } from "@/services/org/SetupAuditService"
@@ -29,6 +30,7 @@ export type McpToolRuntimeRequirements =
 	| ErrorIssueWorkflowService
 	| ErrorPolicyService
 	| ErrorsService
+	| IssueFixVerificationService
 	| QueryEngineService
 	| RecommendationIssueService
 	| SetupAuditService

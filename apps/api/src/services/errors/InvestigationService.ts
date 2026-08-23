@@ -38,7 +38,7 @@ import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Clock, Context, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
-import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
+import { applyDiagnosisWrites, subjectTypeOf } from "@/services/errors/apply-diagnosis"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
 import { routeInvestigation, type InvestigationRoute } from "@/services/errors/investigation-route"
 import { FanoutStartError } from "@/services/errors/investigation-fanout-error"
@@ -236,7 +236,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					title:
 						subject.type === "freeform"
 							? subject.title
-							: `${subject.incidentKind[0]?.toUpperCase() ?? ""}${subject.incidentKind.slice(1)} incident`,
+							: subject.type === "fix_verification"
+								? "Fix verification"
+								: `${subject.incidentKind[0]?.toUpperCase() ?? ""}${subject.incidentKind.slice(1)} incident`,
 					scope: null,
 					status: "open",
 					severity: null,
@@ -248,7 +250,14 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 										value: subject.incidentId,
 									}),
 								]
-							: [],
+							: subject.type === "fix_verification"
+								? [
+										new InvestigationSnapshotFact({
+											label: "Pull request",
+											value: subject.pullRequestUrl,
+										}),
+									]
+								: [],
 					references: [],
 					incidentStartedAt: null,
 					incidentEndedAt: null,
@@ -991,6 +1000,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						investigationId: id,
 						report: result,
 						issueId: row.issueId ?? null,
+						subjectType: subjectTypeOf(row.subjectJson),
 						model: request.model ?? row.model ?? null,
 						inputTokens: request.inputTokens ?? row.inputTokens ?? null,
 						outputTokens: request.outputTokens ?? row.outputTokens ?? null,

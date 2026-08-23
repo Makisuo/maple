@@ -21,6 +21,12 @@ const WORKFLOW_BADGE: Record<WorkflowState, { label: string; tone: string }> = {
 		label: "In review",
 		tone: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
 	},
+	// Teal, distinct from both `in_review` (a human is looking) and `done` (it is
+	// over): a merged fix is being watched, and nobody needs to act yet.
+	verifying: {
+		label: "Verifying",
+		tone: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+	},
 	done: { label: "Done", tone: "bg-success/10 text-success" },
 	cancelled: { label: "Cancelled", tone: "bg-muted text-muted-foreground" },
 	wontfix: { label: "Wontfix", tone: "bg-muted text-muted-foreground" },

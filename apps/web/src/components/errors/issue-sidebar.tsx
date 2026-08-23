@@ -21,7 +21,16 @@ import { StateSelect } from "./state-select"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 import { DetailRail } from "@maple/ui/components/detail-rail"
 
-type Busy = "state" | "claim" | "release" | "heartbeat" | "comment" | "severity" | "investigation" | null
+type Busy =
+	| "state"
+	| "claim"
+	| "release"
+	| "heartbeat"
+	| "comment"
+	| "severity"
+	| "investigation"
+	| "pull-request"
+	| null
 
 interface IssueSidebarProps {
 	issue: ErrorIssueDocument

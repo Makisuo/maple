@@ -29,6 +29,7 @@ import { AiTriageService } from "@/services/errors/AiTriageService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
+import { IssueFixVerificationService } from "@/services/errors/IssueFixVerificationService"
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
@@ -188,6 +189,15 @@ const SlackIntegrationServiceLive = SlackIntegrationService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, OAuthStateRepository.layer)),
 )
 
+// Issue⇄pull-request links and post-merge fix verification. Depends only on the
+// issue kernel (workflow + actors), never on the VCS services: the webhook
+// reaches it through `PullRequestEventSink`, which points the other way.
+const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
+	Layer.provideMerge(
+		Layer.mergeAll(CoreServicesLive, ErrorActorsServiceLive, ErrorIssueWorkflowServiceLive),
+	),
+)
+
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
@@ -199,6 +209,8 @@ const ErrorsServiceLive = ErrorsService.layer.pipe(
 			ErrorIssueReadModelsServiceLive,
 			ErrorIssueWorkflowServiceLive,
 			ErrorPolicyServiceLive,
+			// Lets `propose_fix` turn its `pr_url` into a durable link.
+			IssueFixVerificationServiceLive,
 		),
 	),
 )
@@ -287,6 +299,7 @@ const MainServicesLive = Layer.mergeAll(
 	ErrorPolicyServiceLive,
 	ErrorIssueReadModelsServiceLive,
 	ErrorsServiceLive,
+	IssueFixVerificationServiceLive,
 	RecommendationIssueServiceLive,
 	SetupAuditServiceLive,
 	DigestServiceLive,

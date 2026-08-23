@@ -59,6 +59,7 @@ import {
 	type ErrorIssueReadModelsPublicApi,
 } from "./ErrorIssueReadModelsService"
 import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicApi } from "./ErrorIssueWorkflowService"
+import { IssueFixVerificationService } from "./IssueFixVerificationService"
 import { ErrorPolicyService, type ErrorPolicyPublicApi } from "./ErrorPolicyService"
 import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
 import { summarizeCause } from "@/platform/describe-cause"
@@ -227,6 +228,13 @@ const make: Effect.Effect<
 	const workflow = yield* ErrorIssueWorkflowService
 	const readModels = yield* ErrorIssueReadModelsService
 	const policies = yield* ErrorPolicyService
+	// Optional on purpose. `propose_fix` works exactly as before without it — the
+	// `prUrl` still lands on the event payload — and gains a durable, watchable
+	// link when it is present. Requiring it would have forced the dependency
+	// through every partial stub of this service in the test suite to buy
+	// nothing: no caller wants a fix proposal to FAIL because a link could not
+	// be stored.
+	const fixVerification = yield* Effect.serviceOption(IssueFixVerificationService)
 	const loadPolicyRow = policies.loadNotificationPolicyRow
 	const defaultPolicy = policies.defaultNotificationPolicy
 	const parsePolicyDestinations = policies.parseNotificationDestinationIds
@@ -537,6 +545,22 @@ const make: Effect.Effect<
 				payload,
 				timestamp,
 			})
+
+			// Promote the free-text `prUrl` into a real link, so the merge webhook has
+			// something to match on. A URL that is not a pull request, or a link that
+			// cannot be stored, is not worth failing a fix proposal over — the
+			// proposal itself already succeeded above.
+			if (request.prUrl !== undefined && Option.isSome(fixVerification)) {
+				yield* fixVerification.value
+					.linkPullRequest(orgId, actorId, issueId, request.prUrl, "agent")
+					.pipe(
+						Effect.catch((error) =>
+							Effect.logInfo("[FixVerification] propose_fix URL did not become a link").pipe(
+								Effect.annotateLogs({ issueId, reason: error.message }),
+							),
+						),
+					)
+			}
 
 			let next = current
 			if (current.workflowState !== "in_review") {
@@ -1138,6 +1162,55 @@ const make: Effect.Effect<
 			),
 			Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
 		)
+
+		// Post-merge refutation. An issue sitting in `verifying` has a merged fix and
+		// a running quiet window; an occurrence in this window from a build that was
+		// NOT already running when the fix merged says the fix did not work. That is
+		// a decisive answer, available right here from data the tick already read, so
+		// it short-circuits the wait and the agent pass entirely.
+		//
+		// Same membership predicate as `isRegression`, and deliberately scoped by a
+		// query rather than folded into `persistErrorTickWindow`: it must observe the
+		// committed window, and it touches only the handful of issues in `verifying`.
+		if (Option.isSome(fixVerification) && rows.length > 0) {
+			const verifyingIssues = yield* dbExecute((db) =>
+				db
+					.select({
+						id: errorIssues.id,
+						fingerprintHash: errorIssues.fingerprintHash,
+					})
+					.from(errorIssues)
+					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.workflowState, "verifying"))),
+			)
+			if (verifyingIssues.length > 0) {
+				const versionsByFingerprint = new Map(
+					rows.map((row) => [row.fingerprintHash, row.serviceVersions]),
+				)
+				yield* Effect.forEach(
+					verifyingIssues,
+					(issue) => {
+						const observed = versionsByFingerprint.get(issue.fingerprintHash)
+						if (observed === undefined) return Effect.void
+						return fixVerification.value
+							.refuteOnPostMergeOccurrence(orgId, issue.id, observed, nowMs)
+							.pipe(
+								Effect.catch((error) =>
+									Effect.logWarning(
+										"[FixVerification] post-merge refutation check failed",
+									).pipe(
+										Effect.annotateLogs({
+											orgId,
+											issueId: issue.id,
+											error: error.message,
+										}),
+									),
+								),
+							)
+					},
+					{ discard: true },
+				)
+			}
+		}
 
 		// The authoritative state and notification outbox are committed above.
 		// Workflow fan-out remains best-effort and runs only after that commit.

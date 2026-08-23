@@ -31,6 +31,8 @@ import { IssueOccurrencesTable } from "@/components/errors/issue-occurrences-tab
 import { IssueSidebar } from "@/components/errors/issue-sidebar"
 import { ISSUE_TABS, IssueTabs, type IssueTab } from "@/components/errors/issue-tabs"
 import { IssueTimeline } from "@/components/errors/issue-timeline"
+import { IssuePullRequestsPanel } from "@/components/errors/issue-pull-requests-panel"
+import { IssueVerificationCard } from "@/components/errors/issue-verification-card"
 import { LinkedInvestigationPanel } from "@/components/errors/linked-investigation-panel"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -42,6 +44,8 @@ import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { errorIssueDetailFromV2 } from "@/lib/services/error-issues"
 import {
 	ErrorIssueId,
+	ErrorIssueLinkPullRequestRequest,
+	type ErrorIssuePullRequestId,
 	ErrorIssueSetSeverityRequest,
 	EscalationPolicyEvaluationRequest,
 	type IssueSeverity,
@@ -162,6 +166,19 @@ function IssueDetailContent() {
 		reactivityKeys: ["investigations", `errorIssue:${issueId}:investigations`],
 	})
 	const investigationsResult = useAtomValue(investigationsQueryAtom)
+	const pullRequestsQueryAtom = retainedQuery("errors", "listIssuePullRequests", {
+		params: { issueId },
+		reactivityKeys: [`errorIssue:${issueId}:pull-requests`],
+	})
+	const pullRequestsResult = useAtomValue(pullRequestsQueryAtom)
+	const verificationsQueryAtom = retainedQuery("errors", "listIssueVerifications", {
+		params: { issueId },
+		// Shares the events key: a verdict lands as a timeline event and a
+		// verification-row update in the same tick, so one invalidation refreshes both.
+		reactivityKeys: [`errorIssue:${issueId}:events`, `errorIssue:${issueId}:verifications`],
+	})
+	const verificationsResult = useAtomValue(verificationsQueryAtom)
+
 	const escalationQueryAtom = retainedQuery("errors", "listIssueEscalations", {
 		params: { issueId },
 		reactivityKeys: [`errorIssue:${issueId}:escalations`],
@@ -193,10 +210,24 @@ function IssueDetailContent() {
 	const createInvestigation = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "create"), {
 		mode: "promiseExit",
 	})
+	const linkPullRequest = useAtomSet(MapleApiAtomClient.mutation("errors", "linkIssuePullRequest"), {
+		mode: "promiseExit",
+	})
+	const unlinkPullRequest = useAtomSet(MapleApiAtomClient.mutation("errors", "unlinkIssuePullRequest"), {
+		mode: "promiseExit",
+	})
 
 	const [commentDraft, setCommentDraft] = useState("")
 	const [busy, setBusy] = useState<
-		"state" | "claim" | "release" | "heartbeat" | "comment" | "severity" | "investigation" | null
+		| "state"
+		| "claim"
+		| "release"
+		| "heartbeat"
+		| "comment"
+		| "severity"
+		| "investigation"
+		| "pull-request"
+		| null
 	>(null)
 	const [severityConfirmation, setSeverityConfirmation] = useState<{
 		readonly severity: IssueSeverity
@@ -209,6 +240,8 @@ function IssueDetailContent() {
 			`errorIssue:${issueId}`,
 			`errorIssue:${issueId}:events`,
 			`errorIssue:${issueId}:escalations`,
+			`errorIssue:${issueId}:pull-requests`,
+			`errorIssue:${issueId}:verifications`,
 		],
 		[issueId],
 	)
@@ -262,6 +295,35 @@ function IssueDetailContent() {
 		setBusy(null)
 		if (Exit.isSuccess(result)) toastManager.add({ title: "Released", type: "success" })
 		else toastManager.add({ title: "Release failed", type: "error" })
+	}
+
+	const attachPullRequest = async (url: string) => {
+		setBusy("pull-request")
+		const result = await linkPullRequest({
+			params: { issueId },
+			payload: new ErrorIssueLinkPullRequestRequest({ url }),
+			reactivityKeys: invalidateKeys,
+		})
+		setBusy(null)
+		if (Exit.isSuccess(result)) {
+			toastManager.add({ title: "Pull request attached", type: "success" })
+		} else {
+			toastManager.add({
+				title: "That does not look like a pull request URL",
+				type: "error",
+			})
+		}
+	}
+
+	const detachPullRequest = async (pullRequestId: ErrorIssuePullRequestId) => {
+		setBusy("pull-request")
+		const result = await unlinkPullRequest({
+			params: { issueId, pullRequestId },
+			reactivityKeys: invalidateKeys,
+		})
+		setBusy(null)
+		if (Exit.isSuccess(result)) toastManager.add({ title: "Pull request detached", type: "success" })
+		else toastManager.add({ title: "Could not detach the pull request", type: "error" })
 	}
 
 	const applySeverity = async (next: IssueSeverity | null) => {
@@ -441,6 +503,14 @@ function IssueDetailContent() {
 			const escalationAttempts = Result.builder(escalationResult)
 				.onSuccess((response) => response.attempts)
 				.orElse(() => [])
+			const pullRequests = Result.builder(pullRequestsResult)
+				.onSuccess((response) => response.pullRequests)
+				.orElse(() => [])
+			// Newest first from the API, so the head is the check that matters — an
+			// older settled verification is history the timeline already carries.
+			const latestVerification = Result.builder(verificationsResult)
+				.onSuccess((response) => response.verifications[0] ?? null)
+				.orElse(() => null)
 			const events = Result.builder(eventsResult)
 				.onSuccess((value) => value.events)
 				.orElse(() => [])
@@ -612,16 +682,30 @@ function IssueDetailContent() {
 							</DashboardLayout.Scroll>
 						</DashboardLayout.Content>
 						<DashboardLayout.RightPanel>
-							<IssueSidebar
-								issue={issue}
-								environments={environments}
-								busy={busy}
-								onTransition={transitionTo}
-								onClaim={claim}
-								onHeartbeat={heartbeat}
-								onRelease={release}
-								onSetSeverity={changeSeverity}
-							/>
+							<div className="flex flex-col gap-4">
+								<IssueSidebar
+									issue={issue}
+									environments={environments}
+									busy={busy}
+									onTransition={transitionTo}
+									onClaim={claim}
+									onHeartbeat={heartbeat}
+									onRelease={release}
+									onSetSeverity={changeSeverity}
+								/>
+								{/* Above the PR list: while a check is running it is the most
+								    load-bearing thing on the page — it explains why the issue is
+								    sitting in `verifying` and nobody needs to touch it. */}
+								{latestVerification ? (
+									<IssueVerificationCard verification={latestVerification} />
+								) : null}
+								<IssuePullRequestsPanel
+									pullRequests={pullRequests}
+									onLink={attachPullRequest}
+									onUnlink={detachPullRequest}
+									busy={busy === "pull-request"}
+								/>
+							</div>
 						</DashboardLayout.RightPanel>
 					</DashboardLayout.Body>
 				</DashboardLayout.Root>

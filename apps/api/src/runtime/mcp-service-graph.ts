@@ -17,6 +17,7 @@ import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadMod
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
+import { IssueFixVerificationService } from "@/services/errors/IssueFixVerificationService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
@@ -109,6 +110,10 @@ const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
 	Layer.provide(Layer.mergeAll(WarehouseQueryServiceLive, ErrorIssueWorkflowServiceLive)),
 )
 
+const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
+	Layer.provide(Layer.mergeAll(InfraLive, ErrorActorsServiceLive, ErrorIssueWorkflowServiceLive)),
+)
+
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provide(
 		Layer.mergeAll(
@@ -120,6 +125,10 @@ const ErrorsServiceLive = ErrorsService.layer.pipe(
 			ErrorIssueReadModelsServiceLive,
 			ErrorIssueWorkflowServiceLive,
 			ErrorPolicyServiceLive,
+			// Lets `propose_fix` turn its `pr_url` into a durable link. Optional in
+			// the service, so an graph that omits it still works — but this is the
+			// agent's primary path, so it is wired here deliberately.
+			IssueFixVerificationServiceLive,
 		),
 	),
 )
@@ -150,6 +159,7 @@ const McpRuntimeServicesLive = Layer.mergeAll(
 	ErrorIssueWorkflowServiceLive,
 	ErrorPolicyServiceLive,
 	ErrorsServiceLive,
+	IssueFixVerificationServiceLive,
 	QueryEngineServiceLive,
 	RecommendationIssueServiceLive,
 	SetupAuditServiceLive,

@@ -44,6 +44,15 @@ const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* 
 			context_refs: subject.contextRefs,
 		}
 	}
+	if (subject.type === "fix_verification") {
+		return {
+			type: "fix_verification",
+			issue_id: subject.issueId,
+			pull_request_url: subject.pullRequestUrl,
+			baseline_versions: subject.baselineVersions,
+			merged_at: subject.mergedAt,
+		}
+	}
 	const shared = {
 		type: "incident" as const,
 		issue_id: subject.issueId ?? null,

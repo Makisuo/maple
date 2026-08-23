@@ -50,14 +50,22 @@ const factValue = (facts: V2Investigation["snapshot"]["facts"], label: string): 
 
 const contextFromInvestigation = (investigation: V2Investigation): InvestigationContext => {
 	const subject = investigation.subject
-	const kind = subject.type === "freeform" ? "freeform" : subject.incident_kind
+	const kind =
+		subject.type === "freeform"
+			? "freeform"
+			: subject.type === "fix_verification"
+				? "error"
+				: subject.incident_kind
 	// Without this the signal is always unknown, every alert falls through to
 	// `investigationSuggestions`' generic branch, and its per-signal prompts are
 	// dead code on the one page that should use them.
 	const signalType = factValue(investigation.snapshot.facts, "signal")
 	return {
 		kind,
-		id: subject.type === "freeform" ? investigation.id : subject.incident_id,
+		id:
+			subject.type === "freeform" || subject.type === "fix_verification"
+				? investigation.id
+				: subject.incident_id,
 		title: investigation.snapshot.title,
 		severity: investigation.severity ?? investigation.snapshot.severity ?? "unclassified",
 		status: investigation.status,

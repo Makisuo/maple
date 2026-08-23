@@ -41,6 +41,20 @@ export const deterministicInvestigationEventId = (investigationId: string): stri
 	].join("-")
 }
 
+/**
+ * The `type` discriminator off a stored `subjectJson`, or undefined when the
+ * column holds something unreadable.
+ *
+ * Tolerant by design: callers pass a `jsonb` value straight from the row, and a
+ * subject that fails to parse must not break the diagnosis write — it just means
+ * the caller cannot claim the run was a verification, which is the safe default.
+ */
+export const subjectTypeOf = (subjectJson: unknown): string | undefined => {
+	if (typeof subjectJson !== "object" || subjectJson === null) return undefined
+	const type = (subjectJson as { type?: unknown }).type
+	return typeof type === "string" ? type : undefined
+}
+
 export interface ApplyDiagnosisInput {
 	readonly orgId: OrgId
 	readonly investigationId: InvestigationId
@@ -51,6 +65,21 @@ export interface ApplyDiagnosisInput {
 	readonly inputTokens: number | null
 	readonly outputTokens: number | null
 	readonly nowMs: number
+	/**
+	 * The investigation's subject type, when the caller knows it.
+	 *
+	 * Only `"fix_verification"` changes anything, and it changes one thing: the
+	 * issue-side severity write is skipped. A verification run answers "did the
+	 * merged fix work", and its `severityAssessment` is an artifact of the report
+	 * schema rather than a judgement about how bad the issue is — applying it
+	 * would let a routine post-merge check silently re-rank an issue a human had
+	 * already triaged. Those runs still link an `issueId` (the UI lists them on
+	 * the issue), which is exactly why the null-issue guard below is not enough.
+	 *
+	 * The verdict itself is applied by the verification tick, which owns that
+	 * lifecycle and can move the issue through the workflow state machine.
+	 */
+	readonly subjectType?: string
 	/**
 	 * Fan-out bookkeeping written in the same statement as the report, so the row
 	 * can never say `diagnosed` while still claiming the validator is running.
@@ -94,6 +123,8 @@ export const applyDiagnosisWrites = async (db: MaplePgClient, input: ApplyDiagno
 		.where(and(eq(investigations.orgId, input.orgId), eq(investigations.id, input.investigationId)))
 
 	if (!input.issueId) return
+	// See `subjectType` above: a verification's report must not re-rank the issue.
+	if (input.subjectType === "fix_verification") return
 	const decodedIssueId = decodeIssueId(input.issueId)
 	await db.transaction(async (tx) => {
 		const applied = await applyTriageSeverity(tx, {

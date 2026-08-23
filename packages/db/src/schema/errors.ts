@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
 	boolean,
+	doublePrecision,
 	index,
 	integer,
 	jsonb,
@@ -16,6 +17,9 @@ import type {
 	ErrorIncidentId,
 	ErrorIssueEventId,
 	ErrorIssueId,
+	ErrorIssuePullRequestId,
+	ErrorIssueVerificationId,
+	InvestigationId,
 	OrgId,
 	UserId,
 } from "@maple/domain/primitives"
@@ -28,6 +32,11 @@ import type {
 	IssueKind,
 	IssueSeverity,
 	IssueSeveritySource,
+	PullRequestLinkSource,
+	PullRequestLinkState,
+	VcsProviderId,
+	VerificationStatus,
+	VerificationVerdict,
 	WorkflowState,
 } from "@maple/domain/http"
 
@@ -345,6 +354,129 @@ export const errorNotificationDeliveries = pgTable(
 	],
 )
 
+/**
+ * A pull request attached to an issue — the durable half of what `propose_fix`
+ * used to record as a bare `prUrl` string on an event payload.
+ *
+ * The repository is denormalized (`provider` + `repoFullName` + the provider's
+ * own `externalRepoId`) rather than carried as a foreign key into
+ * `vcs_repositories`. Three reasons, and the first is the load-bearing one:
+ *   1. A PR can be attached to an issue for a repository Maple has never synced
+ *      — an agent pastes a URL, or the org connected only some of its repos. A
+ *      FK would reject exactly the link a user most wants to make.
+ *   2. `external_repo_id` is null until a webhook or sync resolves it, so the
+ *      merge lookup matches on it when present and on `repo_full_name` otherwise.
+ *   3. It keeps this table out of the `vcs.ts` ownership rule (only
+ *      `VcsRepository` may import those tables) — this one is issue-owned and is
+ *      written by the errors services.
+ */
+export const errorIssuePullRequests = pgTable(
+	"error_issue_pull_requests",
+	{
+		id: text("id").$type<ErrorIssuePullRequestId>().notNull().primaryKey(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		issueId: text("issue_id").$type<ErrorIssueId>().notNull(),
+		provider: text("provider").$type<VcsProviderId>().notNull(),
+		/** The provider's repo id, once a webhook or sync has resolved one. */
+		externalRepoId: text("external_repo_id"),
+		/** `owner/name`, always known — it is parsed straight out of the PR URL. */
+		repoFullName: text("repo_full_name").notNull(),
+		number: integer("number").notNull(),
+		url: text("url").notNull(),
+		title: text("title"),
+		authorLogin: text("author_login"),
+		state: text("state").$type<PullRequestLinkState>().notNull().default("open"),
+		mergedAt: timestamp("merged_at", { withTimezone: true, mode: "date" }),
+		mergeCommitSha: text("merge_commit_sha"),
+		linkSource: text("link_source").$type<PullRequestLinkSource>().notNull(),
+		linkedByActorId: text("linked_by_actor_id").$type<ActorId>(),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [
+		// One link per (issue, PR). Makes re-linking idempotent, which matters
+		// because three paths can create the same link: `propose_fix`, the manual
+		// dialog, and the webhook's body scan.
+		uniqueIndex("error_issue_pull_requests_issue_pr_idx").on(
+			table.orgId,
+			table.issueId,
+			table.provider,
+			table.repoFullName,
+			table.number,
+		),
+		// The merge webhook's lookup: "which issues point at this PR?". Keyed on
+		// repo_full_name because that is the column always populated; the webhook
+		// knows the full name from its own payload.
+		index("error_issue_pull_requests_repo_number_idx").on(
+			table.orgId,
+			table.provider,
+			table.repoFullName,
+			table.number,
+		),
+		index("error_issue_pull_requests_issue_idx").on(table.orgId, table.issueId),
+	],
+)
+
+/**
+ * One post-merge verification run: the quiet window, the evidence it rests on,
+ * and the verdict it reached.
+ *
+ * `baselineVersionsJson` is the whole rule. It is snapshotted at merge time from
+ * the issue's `seen_versions_json` — the identical snapshot `applyTransition`
+ * takes into `resolved_versions_json` when an issue is closed — and every later
+ * occurrence is judged against it by membership: a build already running when
+ * the fix merged is an old client still in the wild, and a build absent from the
+ * set is the fix demonstrably not working. Same predicate as `isRegression` in
+ * `error-tick-persistence.ts`, applied to a merge rather than to a resolution.
+ */
+export const errorIssueVerifications = pgTable(
+	"error_issue_verifications",
+	{
+		id: text("id").$type<ErrorIssueVerificationId>().notNull().primaryKey(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		issueId: text("issue_id").$type<ErrorIssueId>().notNull(),
+		pullRequestId: text("pull_request_id").$type<ErrorIssuePullRequestId>().notNull(),
+		status: text("status").$type<VerificationStatus>().notNull().default("waiting"),
+		mergedAt: timestamp("merged_at", { withTimezone: true, mode: "date" }).notNull(),
+		/** When the window closes and the verification tick may act. */
+		verifyAfter: timestamp("verify_after", { withTimezone: true, mode: "date" }).notNull(),
+		/** Builds the issue had been seen from at merge time. See the note above. */
+		baselineVersionsJson: jsonb("baseline_versions_json")
+			.$type<ReadonlyArray<string>>()
+			.notNull()
+			.default([]),
+		baselineOccurrenceCount: integer("baseline_occurrence_count").notNull().default(0),
+		/**
+		 * Pre-merge occurrences per hour. Stored, not re-derived, because it is the
+		 * input that chose `verify_after` — without it the window length is an
+		 * unexplainable number, and the UI's "waiting ~6h because this fired
+		 * ~3x/hour" line has nothing to say.
+		 */
+		baselineRatePerHour: doublePrecision("baseline_rate_per_hour").notNull().default(0),
+		investigationId: text("investigation_id").$type<InvestigationId>(),
+		verdict: text("verdict").$type<VerificationVerdict>(),
+		verdictNote: text("verdict_note"),
+		/** Occurrences since the merge from builds NOT in the baseline. Zero is the good case. */
+		postMergeOccurrenceCount: integer("post_merge_occurrence_count").notNull().default(0),
+		/** 0 on the first pass; bumped when an inconclusive verdict re-arms a longer window. */
+		attempt: integer("attempt").notNull().default(0),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [
+		// The tick scan: `status = 'waiting' AND verify_after <= now`. Status
+		// leftmost so the scan is an index range over just the waiting rows rather
+		// than a walk of every verification that ever ran.
+		index("error_issue_verifications_due_idx").on(table.status, table.verifyAfter),
+		index("error_issue_verifications_issue_idx").on(table.orgId, table.issueId),
+		// The error tick's short-circuit reads the live verification for an issue it
+		// finds in `verifying`; partial so the index holds only rows still in play.
+		index("error_issue_verifications_open_idx")
+			.on(table.orgId, table.issueId, table.status)
+			.where(sql`${table.status} in ('waiting', 'running')`),
+	],
+)
+
 export type ActorRow = typeof actors.$inferSelect
 export type ActorInsert = typeof actors.$inferInsert
 export type ErrorIssueRow = typeof errorIssues.$inferSelect
@@ -357,3 +489,7 @@ export type ErrorIncidentRow = typeof errorIncidents.$inferSelect
 export type ErrorNotificationPolicyRow = typeof errorNotificationPolicies.$inferSelect
 export type ErrorTickStateRow = typeof errorTickStates.$inferSelect
 export type ErrorNotificationDeliveryRow = typeof errorNotificationDeliveries.$inferSelect
+export type ErrorIssuePullRequestRow = typeof errorIssuePullRequests.$inferSelect
+export type ErrorIssuePullRequestInsert = typeof errorIssuePullRequests.$inferInsert
+export type ErrorIssueVerificationRow = typeof errorIssueVerifications.$inferSelect
+export type ErrorIssueVerificationInsert = typeof errorIssueVerifications.$inferInsert

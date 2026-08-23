@@ -31,6 +31,7 @@ import { registerCommentOnErrorIssueTool } from "./comment-on-error-issue"
 import { registerListErrorIncidentsTool } from "./list-error-incidents"
 import { registerListErrorIssueEventsTool } from "./list-error-issue-events"
 import { registerListErrorIssuesTool } from "./list-error-issues"
+import { registerLinkPullRequestTool } from "./link-pull-request"
 import { registerProposeFixTool } from "./propose-fix"
 import { registerRegisterAgentTool } from "./register-agent"
 import { registerReleaseErrorIssueTool } from "./release-error-issue"
@@ -231,6 +232,7 @@ const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
 	registerReleaseErrorIssueTool(registrar)
 	registerCommentOnErrorIssueTool(registrar)
 	registerProposeFixTool(registrar)
+	registerLinkPullRequestTool(registrar)
 	registerListErrorIssueEventsTool(registrar)
 	registerRegisterAgentTool(registrar)
 	registerListErrorIncidentsTool(registrar)

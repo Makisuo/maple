@@ -6,6 +6,7 @@ import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadMod
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
+import { IssueFixVerificationService } from "@/services/errors/IssueFixVerificationService"
 import { requireAdmin } from "@/services/auth/auth"
 import { warehouseReadHandlers } from "@/services/warehouse/warehouse-error-handlers"
 import { makePersistenceError } from "@/services/errors/error-persistence"
@@ -21,6 +22,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 		const workflow = yield* ErrorIssueWorkflowService
 		const policies = yield* ErrorPolicyService
 		const errors = yield* ErrorsService
+		const verification = yield* IssueFixVerificationService
 
 		return handlers
 			.handle("listIssues", ({ query }) =>
@@ -147,6 +149,43 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						artifacts: payload.artifacts,
 					})
 				}).pipe(Effect.withSpan("HttpErrors.proposeFix")),
+			)
+			.handle("listIssuePullRequests", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					return yield* verification.listPullRequests(tenant.orgId, params.issueId)
+				}).pipe(Effect.withSpan("HttpErrors.listIssuePullRequests")),
+			)
+			.handle("linkIssuePullRequest", ({ params, payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
+					return yield* verification.linkPullRequest(
+						tenant.orgId,
+						actor.id,
+						params.issueId,
+						payload.url,
+						"user",
+					)
+				}).pipe(Effect.withSpan("HttpErrors.linkIssuePullRequest")),
+			)
+			.handle("unlinkIssuePullRequest", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
+					return yield* verification.unlinkPullRequest(
+						tenant.orgId,
+						actor.id,
+						params.issueId,
+						params.pullRequestId,
+					)
+				}).pipe(Effect.withSpan("HttpErrors.unlinkIssuePullRequest")),
+			)
+			.handle("listIssueVerifications", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					return yield* verification.listVerifications(tenant.orgId, params.issueId)
+				}).pipe(Effect.withSpan("HttpErrors.listIssueVerifications")),
 			)
 			.handle("assignIssue", ({ params, payload }) =>
 				Effect.gen(function* () {

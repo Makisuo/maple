@@ -3,7 +3,14 @@ import type { V2Investigation } from "@maple/domain/http/v2"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { cn } from "@maple/ui/lib/utils"
 
-import { BellIcon, CircleQuestionIcon, CircleWarningIcon, PulseIcon, UserIcon } from "@/components/icons"
+import {
+	BellIcon,
+	CircleQuestionIcon,
+	CircleWarningIcon,
+	MagnifierCheckIcon,
+	PulseIcon,
+	UserIcon,
+} from "@/components/icons"
 import { investigationKindKey, type InvestigationKindKey } from "./investigation-display"
 
 type InvestigationStatus = V2Investigation["status"]
@@ -56,6 +63,7 @@ const KIND_LABEL: Record<InvestigationKindKey, string> = {
 	anomaly: "Anomaly",
 	error: "Error",
 	question: "Question",
+	verification: "Fix check",
 } satisfies Record<InvestigationKindKey, string>
 
 export const investigationKindLabel = (subject: V2Investigation["subject"]): string =>
@@ -66,6 +74,7 @@ const KIND_ICON: Record<InvestigationKindKey, ComponentType<{ className?: string
 	anomaly: PulseIcon,
 	error: CircleWarningIcon,
 	question: CircleQuestionIcon,
+	verification: MagnifierCheckIcon,
 } satisfies Record<InvestigationKindKey, ComponentType<{ className?: string }>>
 
 /**
