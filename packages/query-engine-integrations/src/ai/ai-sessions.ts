@@ -33,14 +33,20 @@
 // the read, which a JOIN does not do.
 //
 // Where the window predicate sits differs by query, and it is a correctness
-// choice rather than a cost one. `aiSessionSpansQuery` keeps it on both levels:
-// its caller already knows the session's bounds and passes them in, so bounding
-// the fan-out is what keeps a session read to the session. `aiSessionListQuery`
-// keeps it on detection ONLY — see that function's comment; a bounded fan-out
-// there clamps the reported start/end of every session that began before the
-// range. The unbounded seek costs nothing measurable: `TraceId` is a sort-key
-// prefix, and a `TraceId IN (…)` fan-out over `trace_detail_spans` with no time
-// filter at all returns instantly in production.
+// choice rather than a cost one. `aiSessionSpansQuery` keeps it on both levels
+// when it has one: the caller that links from the list already knows the
+// session's bounds and passes them in, so bounding the fan-out is what keeps a
+// session read to the session. `aiSessionListQuery` keeps it on detection ONLY
+// — see that function's comment; a bounded fan-out there clamps the reported
+// start/end of every session that began before the range. The unbounded seek
+// costs nothing measurable: `TraceId` is a sort-key prefix, and a `TraceId IN
+// (…)` fan-out over `trace_detail_spans` with no time filter at all returns
+// instantly in production.
+//
+// A caller with no window at all (`windowed: false`) drops the predicate from
+// both levels and leans on the detection scan's bloom index and the table's
+// 30-day TTL instead — see `aiSessionSpansQuery` for what that was measured to
+// cost and why it is the exception rather than the norm.
 //
 // Tenant scoping: a subquery contributes nothing to the outer query's scope, so
 // every level that reads a table repeats `OrgId = {orgId}` itself. The outermost
@@ -314,6 +320,14 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 
 export interface AiSessionSpansOpts {
 	readonly limit?: number
+	/**
+	 * Bound both levels by `startTime`/`endTime` (the default), or resolve the
+	 * session from its id across whatever the table still retains.
+	 *
+	 * `false` also drops the two window params from the compiled SQL, so an
+	 * unwindowed compile takes `orgId` + `sessionId` and nothing else.
+	 */
+	readonly windowed?: boolean
 }
 
 export interface AiSessionSpansOutput {
@@ -366,8 +380,22 @@ export const aiSessionSpansRowSchema: CompiledQueryRowSchema<AiSessionSpansOutpu
  * scope-based vendor detection at write time and encoded its verdict in
  * `maple_ai.vendor.id`; re-deriving the dialect here would only second-guess it.
  *
- * Known v1 limitation: the time window bounds BOTH levels, so a session whose
- * traces straddle the window edge returns only the spans inside it.
+ * The window, when the caller has one, bounds BOTH levels: a session whose
+ * traces straddle the window edge then returns only the spans inside it, which
+ * is why the padding a caller applies has to contain the whole session.
+ *
+ * `windowed: false` drops it from both instead, and the session id alone
+ * carries the read. Measured against production: the detection scan has the
+ * `idx_span_attr_vals` bloom index (`bloom_filter(0.01)` over
+ * `mapValues(SpanAttributes)`) to prune with and a 30-day table TTL to bound
+ * it, and an unfiltered `SpanAttributes['maple_ai.session.id'] = …` lookup
+ * returned instantly while correctly finding a multi-trace session days back;
+ * the fan-out is a `TraceId` sort-key seek that is instant with no time filter
+ * regardless — `aiSessionListQuery` already runs it that way. Bloom pruning
+ * degrades as an org's span volume grows, so this is the exception path for a
+ * deep link that arrives with no bounds, not the shape the product should
+ * settle on: a client that gets rows back is expected to record the session's
+ * real bounds and ask with them next time.
  *
  * Truncation drops the END of the session, because the rows come back oldest
  * first and an agent's answer is the last thing it writes. Ask for
@@ -380,13 +408,14 @@ export const aiSessionSpansRowSchema: CompiledQueryRowSchema<AiSessionSpansOutpu
  */
 export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 	const limit = opts.limit ?? AI_SESSION_SPANS_MAX_SPANS
+	const windowed = opts.windowed ?? true
 
 	const sessionTraceIds = from(Traces)
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			windowed ? $.Timestamp.gte(param.dateTime("startTime")) : undefined,
+			windowed ? $.Timestamp.lte(param.dateTime("endTime")) : undefined,
 			// The presence guard is what stops an empty `sessionId` param from
 			// matching every span that simply LACKS the key — ClickHouse reads a
 			// missing Map key back as `''`, so equality alone would turn a blank
@@ -413,8 +442,8 @@ export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.Timestamp.gte(param.dateTime("startTime")),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				windowed ? $.Timestamp.gte(param.dateTime("startTime")) : undefined,
+				windowed ? $.Timestamp.lte(param.dateTime("endTime")) : undefined,
 				inSubquery($.TraceId, sessionTraceIds),
 			])
 			// `spanId` breaks ties: agent spans routinely share a millisecond, and

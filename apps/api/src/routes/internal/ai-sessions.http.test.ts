@@ -148,6 +148,52 @@ describe("POST /internal/ai-sessions/spans", () => {
 		}
 	})
 
+	// A link that arrives with no `t`/`end` — pasted, or written by an agent.
+	// The endpoint must resolve the session from the id rather than invent a
+	// range, and the compiled SQL is where that is actually decidable: a
+	// fabricated window would show up as a `Timestamp` predicate.
+	it("resolves the session from its id alone when the request carries no window", async () => {
+		let compiledSql: string | undefined
+		const harness = makeHarness({
+			compiledQueryBounded: (_tenant, compiled) => {
+				compiledSql = compiled.sql
+				return compiled.decodeRows([spanRow(0), spanRow(1)]).pipe(Effect.orDie)
+			},
+		})
+
+		try {
+			const response = await harness.post("/internal/ai-sessions/spans", { sessionId: SESSION_ID })
+			expect(response.status).toBe(200)
+			expect(response.body.data).toHaveLength(2)
+			expect(compiledSql).toContain(`SpanAttributes['maple_ai.session.id'] = '${SESSION_ID}'`)
+			expect(compiledSql).not.toContain("Timestamp >=")
+			expect(compiledSql).not.toContain("Timestamp <=")
+			// An unbound placeholder would reach ClickHouse verbatim.
+			expect(compiledSql).not.toContain("__PARAM_")
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("bounds the read by the window when the caller supplies one", async () => {
+		let compiledSql: string | undefined
+		const harness = makeHarness({
+			compiledQueryBounded: (_tenant, compiled) => {
+				compiledSql = compiled.sql
+				return compiled.decodeRows([spanRow(0)]).pipe(Effect.orDie)
+			},
+		})
+
+		try {
+			const response = await harness.post("/internal/ai-sessions/spans", SPANS_BODY)
+			expect(response.status).toBe(200)
+			expect(compiledSql).toContain(`Timestamp >= '${WINDOW.startTime}'`)
+			expect(compiledSql).toContain(`Timestamp <= '${WINDOW.endTime}'`)
+		} finally {
+			await harness.dispose()
+		}
+	})
+
 	it("puts the mapped attribute values on the wire, not just the keys", async () => {
 		const harness = makeHarness({
 			compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows([spanRow(0)]).pipe(Effect.orDie),

@@ -1,51 +1,40 @@
 import { describe, expect, it } from "vitest"
 
-import { parseWarehouseDateTime } from "@maple/query-engine/datetime"
-
 import {
 	breadcrumbSessionId,
 	buildBackToSessionsHref,
 	resolveWindow,
 } from "@/lib/agent-sessions/session-window"
 
-const NOW_MS = Date.UTC(2026, 7, 19, 18, 0, 0)
-
 describe("resolveWindow", () => {
 	it("pads a minute either side of the hints the list row carried", () => {
-		const window = resolveWindow("2026-08-19 12:00:00.000000000", "2026-08-19 12:30:00.000000000", NOW_MS)
+		const window = resolveWindow("2026-08-19 12:00:00.000000000", "2026-08-19 12:30:00.000000000")
 
-		expect(window.startTime).toBe("2026-08-19 11:59:00")
-		expect(window.endTime).toBe("2026-08-19 12:31:00")
+		expect(window).toEqual({ startTime: "2026-08-19 11:59:00", endTime: "2026-08-19 12:31:00" })
 	})
 
 	it("still narrows the read when only the start hint is present", () => {
-		const window = resolveWindow("2026-08-19 12:00:00.000000000", undefined, NOW_MS)
+		const window = resolveWindow("2026-08-19 12:00:00.000000000", undefined)
 
-		expect(window.startTime).toBe("2026-08-19 11:59:00")
-		expect(window.endTime).toBe("2026-08-19 12:01:00")
+		expect(window).toEqual({ startTime: "2026-08-19 11:59:00", endTime: "2026-08-19 12:01:00" })
 	})
 
-	// An unusable `end` must not cost the reader a perfectly good `t`: falling all
-	// the way back to the fixed look-back reads a window that need not contain the
-	// session at all, and the page then claims it has no spans.
+	// An unusable `end` must not cost the reader a perfectly good `t`: dropping
+	// the window entirely turns a cheap pruned read into the retention-wide one.
 	it("keeps a valid start hint when the end hint is unparseable", () => {
-		const window = resolveWindow("2026-08-19 12:00:00.000000000", "not-a-timestamp", NOW_MS)
+		const window = resolveWindow("2026-08-19 12:00:00.000000000", "not-a-timestamp")
 
-		expect(window.startTime).toBe("2026-08-19 11:59:00")
-		expect(window.endTime).toBe("2026-08-19 12:01:00")
+		expect(window).toEqual({ startTime: "2026-08-19 11:59:00", endTime: "2026-08-19 12:01:00" })
 	})
 
-	it("falls back to a window ending now when there is no start hint", () => {
-		const window = resolveWindow(undefined, undefined, NOW_MS)
-
-		expect(parseWarehouseDateTime(window.endTime)).toBe(NOW_MS)
-		expect(parseWarehouseDateTime(window.startTime)).toBeLessThan(NOW_MS)
+	// No window at all, rather than a fabricated look-back: the endpoint resolves
+	// the session by id, and the page writes the bounds it finds back into the URL.
+	it("returns no window when there is no start hint", () => {
+		expect(resolveWindow(undefined, undefined)).toBeUndefined()
 	})
 
 	it("treats an unparseable start hint as no hint at all", () => {
-		expect(resolveWindow("not-a-timestamp", undefined, NOW_MS)).toEqual(
-			resolveWindow(undefined, undefined, NOW_MS),
-		)
+		expect(resolveWindow("not-a-timestamp", undefined)).toBeUndefined()
 	})
 })
 

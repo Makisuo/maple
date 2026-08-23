@@ -138,6 +138,32 @@ SELECT
         LIMIT 2000
         FORMAT JSON
 
+-- builder:ai-sessions:aiSessionSpansQuery:unwindowed
+SELECT
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          SpanName AS spanName,
+          SpanKind AS spanKind,
+          ServiceName AS serviceName,
+          Duration / 1000000 AS durationMs,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          toString(Timestamp) AS timestamp,
+          SpanAttributes AS spanAttributes,
+          ResourceAttributes AS resourceAttributes
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND TraceId IN (SELECT
+          TraceId AS TraceId
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
+          AND SpanAttributes['maple_ai.session.id'] = 'wrun_sql_catalog')
+        ORDER BY timestamp ASC, spanId ASC
+        LIMIT 2000
+        FORMAT JSON
+
 -- builder:cloudflare-infra-breakdowns:cloudflareZoneBreakdownTimeseriesSQL:default
 SELECT
           formatDateTime(toStartOfInterval(TimeUnix, INTERVAL 300 SECOND), '%Y-%m-%dT%H:%i:%S.%fZ') AS bucket,

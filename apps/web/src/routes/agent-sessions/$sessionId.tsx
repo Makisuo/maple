@@ -1,8 +1,9 @@
-import { useCallback, useMemo, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, type ReactNode } from "react"
 import { createFileRoute, Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Schema } from "effect"
 
 import type { AiSessionSpan } from "@maple/domain/http"
+import { formatWarehouseDateTime } from "@maple/query-engine"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
@@ -33,9 +34,11 @@ import { displayError } from "@/lib/error-messages"
 import { aiSessionSpansResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 
 const agentSessionSearchSchema = Schema.Struct({
-	// Warehouse timestamps carried in from the list row: the session's first and
-	// last span. They bound the warehouse read, which is what makes it cheap —
-	// without them the query scans every retained partition.
+	// Warehouse timestamps: the session's first and last span, carried in from
+	// the list row or — for a link that arrived without them — written back here
+	// once the read resolved the session. They bound the warehouse read, which is
+	// what makes it cheap; without them it finds the session by id across
+	// retention instead, which is why the page bothers to stamp them.
 	t: Schema.optional(Schema.String),
 	end: Schema.optional(Schema.String),
 	// The in-page trace pane: the trace it shows and, optionally, the span it has
@@ -74,7 +77,9 @@ function AgentSessionDetailPage() {
 function AgentSessionDetailContent() {
 	const { sessionId } = Route.useParams()
 	const search = Route.useSearch()
-	const queryWindow = useMemo(() => resolveWindow(search.t, search.end, Date.now()), [search.t, search.end])
+	const queryWindow = useMemo(() => resolveWindow(search.t, search.end), [search.t, search.end])
+	// `undefined` spreads to nothing, which is exactly the request the endpoint
+	// reads as "resolve this session from its id".
 	const result = useAtomValue(aiSessionSpansResultAtom({ data: { sessionId, ...queryWindow } }))
 
 	return Result.builder(result)
@@ -135,7 +140,7 @@ function AgentSessionDetailContent() {
 							<DashboardLayout.Header title={breadcrumbSessionId(sessionId)} />
 						</DashboardLayout.Sticky>
 						<DashboardLayout.Scroll>
-							<EmptySession sessionId={sessionId} />
+							<EmptySession sessionId={sessionId} windowed={queryWindow !== undefined} />
 						</DashboardLayout.Scroll>
 					</DashboardLayout.Content>
 				</SessionShell>
@@ -160,6 +165,32 @@ function SessionDetailBody({
 
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+
+	// A link that arrived without hints cost the warehouse a session lookup across
+	// retention; stamping the bounds it found into the URL means this link never
+	// pays for that again — a reload, a share, a bookmark all take the pruned
+	// read. The exact bounds go in, unpadded: `resolveWindow` pads on the way out,
+	// and padding here would compound on every write.
+	//
+	// An effect for the same reason `useCheckoutReturn` uses one: the URL is
+	// external state being reconciled after an async result landed, which is not
+	// something render can derive. `search.t` is both the guard and the result, so
+	// it runs once and the re-render it causes is a no-op.
+	//
+	// A session still being written gets the bounds it had at read time, exactly
+	// as a link from the list page does — the padding `resolveWindow` adds is the
+	// only slack either one has.
+	useEffect(() => {
+		if (search.t !== undefined) return
+		navigate({
+			replace: true,
+			search: (prev: Record<string, unknown>) => ({
+				...prev,
+				t: formatWarehouseDateTime(summary.startMs),
+				end: formatWarehouseDateTime(summary.endMs),
+			}),
+		})
+	}, [navigate, search.t, summary.startMs, summary.endMs])
 
 	// Memoized because `SessionViews` and the views below it key their own work on
 	// this object.
@@ -293,7 +324,7 @@ function SessionShell({ sessionId, children }: { sessionId: string; children: Re
 	)
 }
 
-function EmptySession({ sessionId }: { sessionId: string }) {
+function EmptySession({ sessionId, windowed }: { sessionId: string; windowed: boolean }) {
 	return (
 		<Empty>
 			<EmptyHeader>
@@ -301,9 +332,16 @@ function EmptySession({ sessionId }: { sessionId: string }) {
 					<ChatBubbleSparkleIcon />
 				</EmptyMedia>
 				<EmptyTitle>No spans for this session</EmptyTitle>
+				{/* Two genuinely different failures. With a window the read was
+				    bounded by the link's own timestamps, so a stale or hand-edited
+				    link can miss a session that exists; without one the search
+				    already covered everything still retained, and promising a wider
+				    range would be a lie. */}
 				<EmptyDescription>
-					Nothing was found for <span className="font-mono">{sessionId}</span>. Open it from the
-					Agent Sessions list, or widen the range there first.
+					Nothing was found for <span className="font-mono">{sessionId}</span>
+					{windowed
+						? " around the time this link points at. Open it from the Agent Sessions list to search again."
+						: " in any retained trace — the session may be older than the trace retention."}
 				</EmptyDescription>
 			</EmptyHeader>
 			<Button variant="outline" size="sm" render={<Link to="/agent-sessions" />}>

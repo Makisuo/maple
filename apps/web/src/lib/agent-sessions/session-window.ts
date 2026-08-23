@@ -9,10 +9,6 @@ import { toEpochMs } from "@maple/ui/lib/time-format"
 // one trace crosses.
 const WINDOW_PADDING_MS = 60_000
 
-/** Deep link with no usable start hint: look back far enough to find most
- *  sessions, and accept the slower read that comes with it. */
-const FALLBACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
-
 export interface SessionWindow {
 	readonly startTime: string
 	readonly endTime: string
@@ -22,15 +18,18 @@ export interface SessionWindow {
  * The warehouse window for one session, from the `t`/`end` hints the list row
  * carried. The two hints are validated independently: an unusable `end` degrades
  * to the start-only window rather than discarding a good `t`.
+ *
+ * `undefined` when there is no usable `t`, and the caller then asks for the
+ * session without a window at all. Guessing a look-back was worse on both
+ * counts: it read a range that need not contain the session — the page then
+ * claimed it had no spans — while still scanning days of partitions. The
+ * endpoint resolves an unwindowed session by id across retention instead, and
+ * the page stamps the bounds it gets back into the URL, so a link only pays
+ * that once.
  */
-export function resolveWindow(t: string | undefined, end: string | undefined, nowMs: number): SessionWindow {
+export function resolveWindow(t: string | undefined, end: string | undefined): SessionWindow | undefined {
 	const startHint = t === undefined ? Number.NaN : toEpochMs(t)
-	if (Number.isNaN(startHint)) {
-		return {
-			startTime: formatWarehouseDateTime(nowMs - FALLBACK_WINDOW_MS),
-			endTime: formatWarehouseDateTime(nowMs),
-		}
-	}
+	if (Number.isNaN(startHint)) return undefined
 
 	// A link carrying only `t` (copied from a trace, say) still narrows the read:
 	// the session started there, so pad around that instant alone.

@@ -82,9 +82,12 @@ export const getAiSessionsFacets = Effect.fn("AiSessions.aiSessionsFacets")(func
 
 const AiSessionSpansInput = Schema.Struct({
 	sessionId: Schema.String.check(Schema.isMinLength(1)),
-	// Required: the window bounds which spans exist, so the caller states it.
-	startTime: WarehouseDateTimeString,
-	endTime: WarehouseDateTimeString,
+	// Optional, and sent as a pair. A caller that knows the session's bounds —
+	// anything opened from the list, and any link the detail page has already
+	// stamped — gets the partition-pruned read; one that does not lets the
+	// warehouse find the session by id across retention.
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
 })
 export type AiSessionSpansInput = Schema.Schema.Type<typeof AiSessionSpansInput>
 
@@ -101,8 +104,11 @@ export const getAiSessionSpans = Effect.fn("AiSessions.aiSessionSpans")(function
 			return yield* client.aiSessionsInternal.spans({
 				payload: new GetAiSessionSpansRequest({
 					sessionId: input.sessionId,
-					startTime: input.startTime,
-					endTime: input.endTime,
+					// Spread rather than assigned: the payload keys are `optionalKey`,
+					// so an explicit `undefined` is not the same as an absent key.
+					...(input.startTime !== undefined && input.endTime !== undefined
+						? { startTime: input.startTime, endTime: input.endTime }
+						: undefined),
 				}),
 			})
 		}),

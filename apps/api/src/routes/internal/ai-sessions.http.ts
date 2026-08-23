@@ -78,23 +78,32 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 				.handle("spans", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
+						// Both halves or neither: a lone bound would silently pin the
+						// other end of the read to the param placeholder.
+						const window =
+							payload.startTime !== undefined && payload.endTime !== undefined
+								? { startTime: payload.startTime, endTime: payload.endTime }
+								: undefined
 						// Annotated before the read: a 413 never reaches the code below.
+						// `window_source` is how often the unwindowed retention scan runs
+						// gets watched — it should stay the exception.
 						yield* Effect.annotateCurrentSpan({
 							orgId: tenant.orgId,
 							"maple.ai.session.id": payload.sessionId,
+							"maple.ai.window_source": window === undefined ? "resolved" : "client",
 						})
 						// One row past the cap: the extra row is what distinguishes a
 						// session that exactly fills the cap from one whose tail was cut.
 						const compiled = CH.compile(
 							Integrations.aiSessionSpansQuery({
 								limit: AI_SESSION_SPANS_MAX_SPANS + 1,
+								windowed: window !== undefined,
 							}),
-							{
-								orgId: tenant.orgId,
-								startTime: payload.startTime,
-								endTime: payload.endTime,
-								sessionId: payload.sessionId,
-							},
+							// The unwindowed variant references neither window param, so
+							// passing them would leave two values with nothing to bind to.
+							window === undefined
+								? { orgId: tenant.orgId, sessionId: payload.sessionId }
+								: { orgId: tenant.orgId, sessionId: payload.sessionId, ...window },
 							{ rowSchema: Integrations.aiSessionSpansRowSchema },
 						)
 						const rows = yield* warehouse

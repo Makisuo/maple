@@ -77,11 +77,23 @@ export class GetAiSessionSpansRequest extends Schema.Class<GetAiSessionSpansRequ
 )({
 	/** The framework's own session id, verbatim — `maple_ai.session.id`. */
 	sessionId: Schema.String.check(Schema.isMinLength(1)),
-	// Required, unlike the list endpoints' optional window: it bounds both the
-	// session detection and the span fan-out, so a session straddling the window
-	// edge returns only the spans inside it.
-	startTime: TinybirdDateTime,
-	endTime: TinybirdDateTime,
+	// Optional, and the two halves are read as a pair — supply both or neither.
+	//
+	// With a window the read is partition-pruned on both levels (detection and
+	// fan-out), which is the fast path every link from the list page takes: the
+	// row already knows the session's own bounds, so it hands them over.
+	//
+	// Without one the warehouse resolves the session from the id alone. That is
+	// viable rather than reckless: `traces` carries a `bloom_filter(0.01)` skip
+	// index over `mapValues(SpanAttributes)`, and its TTL caps any scan at 30
+	// days, so the id lookup was measured instant against production and found
+	// sessions several days back that spanned multiple traces. Bloom pruning
+	// still degrades as an org's volume grows, so this is the exception path for
+	// hint-less deep links — a pasted id, an MCP answer — and not the default.
+	// The client is expected to write the bounds it got back into its URL, which
+	// makes the second load of any such link the pruned one.
+	startTime: Schema.optionalKey(TinybirdDateTime),
+	endTime: Schema.optionalKey(TinybirdDateTime),
 }) {}
 
 /**
@@ -142,9 +154,9 @@ export const MAX_AI_SESSION_SPANS_RESPONSE_BYTES = 10_000_000
  * Distinct from the row cap, which truncates and reports `truncated: true`: the
  * byte ceiling aborts the read before a response can be materialized, so there
  * is nothing to return. The endpoint takes no size parameter, but it does take
- * a window, and both the session detection and the span fan-out are bounded by
- * it — so a narrower range genuinely returns fewer bytes, which is what
- * `recovery: "fix_request"` points the caller at.
+ * a window, and when one is supplied both the session detection and the span
+ * fan-out are bounded by it — so a narrower range genuinely returns fewer
+ * bytes, which is what `recovery: "fix_request"` points the caller at.
  */
 export class AiSessionTooLargeError extends HttpTaggedError<AiSessionTooLargeError>()(
 	"@maple/http/ai-sessions/AiSessionTooLargeError",
