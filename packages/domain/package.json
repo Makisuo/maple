@@ -35,6 +35,8 @@
 		"./chat-session": "./src/chat-session.ts"
 	},
 	"scripts": {
+		"gen:anticipated-errors": "bun scripts/gen-anticipated-errors.ts",
+		"gen:anticipated-errors:check": "bun scripts/gen-anticipated-errors.ts --check",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
 	},
