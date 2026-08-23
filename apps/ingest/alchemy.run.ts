@@ -22,7 +22,7 @@ import { resolveDeploymentEnvironment } from "@maple/infra/cloudflare"
 // Only the primitives. The grouped helpers in that module return Worker-binding
 // shapes (Redacted secrets inline); these values feed ECS `env:` and Secrets
 // Manager ARNs instead, so the gateway composes them itself.
-import { merge, optionalPlain, requiredPlain } from "@maple/infra/env"
+import { optionalPlain, requiredPlain } from "@maple/infra/env"
 
 /**
  * Binary the deploy workflows compile ahead of time (with a warm cargo cache)
@@ -434,7 +434,7 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 							INGEST_REPLAY_R2_ACCESS_KEY_ID: yield* requiredPlain(
 								"INGEST_REPLAY_R2_ACCESS_KEY_ID",
 							),
-							...optionalPlain("INGEST_REPLAY_R2_REGION", "auto"),
+							...(yield* optionalPlain("INGEST_REPLAY_R2_REGION", "auto")),
 						}
 					: undefined),
 
@@ -449,20 +449,34 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				// of the way.
 				...(collectorEndpoint
 					? { INGEST_FORWARD_OTLP_ENDPOINT: collectorEndpoint }
-					: optionalPlain("INGEST_FORWARD_OTLP_ENDPOINT")),
-				...optionalPlain("INGEST_WRITE_MODE"),
-				...optionalPlain("INGEST_BATCH_MAX_ROWS"),
-				...optionalPlain("INGEST_BATCH_MAX_BYTES"),
-				...optionalPlain("INGEST_BATCH_MAX_WAIT_MS"),
-				...optionalPlain("INGEST_ORG_QUEUE_MAX_BYTES"),
-				...optionalPlain("INGEST_ORG_MAX_IN_FLIGHT"),
-				...optionalPlain("INGEST_MAX_REQUEST_BODY_BYTES"),
-				...optionalPlain("INGEST_EXPORT_MAX_ATTEMPTS"),
-				...optionalPlain("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD"),
-				...optionalPlain("INGEST_REPLAY_MAX_SESSION_BYTES"),
-				...optionalPlain("MAPLE_INTERNAL_ORG_ID"),
-				...optionalPlain("AUTUMN_API_URL"),
-				...optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim()),
+					: yield* optionalPlain("INGEST_FORWARD_OTLP_ENDPOINT")),
+				// Every optional entry below is `yield*`-ed. `optionalPlain` returns a
+				// `Config`, not a record, so a bare `...optionalPlain("X")` spreads the
+				// Config's own fields (`_tag`, `original`, `mapOrFail`) into the task
+				// definition and drops X entirely — which is what this block did until
+				// now: none of these variables ever reached an ECS task, and the type
+				// checker let it pass because alchemy's `env` accepts wider values.
+				...(yield* optionalPlain("INGEST_WRITE_MODE")),
+				...(yield* optionalPlain("INGEST_BATCH_MAX_ROWS")),
+				...(yield* optionalPlain("INGEST_BATCH_MAX_BYTES")),
+				...(yield* optionalPlain("INGEST_BATCH_MAX_WAIT_MS")),
+				...(yield* optionalPlain("INGEST_ORG_QUEUE_MAX_BYTES")),
+				...(yield* optionalPlain("INGEST_ORG_MAX_IN_FLIGHT")),
+				...(yield* optionalPlain("INGEST_MAX_REQUEST_BODY_BYTES")),
+				...(yield* optionalPlain("INGEST_EXPORT_MAX_ATTEMPTS")),
+				...(yield* optionalPlain("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD")),
+				...(yield* optionalPlain("INGEST_REPLAY_MAX_SESSION_BYTES")),
+				// The org Maple's own telemetry is filed under. Required here and in
+				// the gateway (`AppConfig::from_env`), with no fallback on either
+				// side: the old `"internal"` default did not disable self-telemetry,
+				// it wrote traces, logs and metrics into the warehouse under an
+				// `OrgId` no org owns and no UI can read. The AWS fleet spent its
+				// first day looking like it had lost its self-telemetry for exactly
+				// that reason. A missing value now fails the deploy rather than the
+				// task, which is the earlier and cheaper of the two.
+				MAPLE_INTERNAL_ORG_ID: yield* requiredPlain("MAPLE_INTERNAL_ORG_ID"),
+				...(yield* optionalPlain("AUTUMN_API_URL")),
+				...(yield* optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim())),
 			},
 
 			tags: { Service: "maple-ingest", Region: region },
