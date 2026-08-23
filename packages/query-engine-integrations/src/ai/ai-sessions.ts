@@ -32,9 +32,15 @@
 // rather than a JOIN for the same reason too — ClickHouse pushes the id set into
 // the read, which a JOIN does not do.
 //
-// The window predicate stays on BOTH levels. On `trace_detail_spans` it prunes
-// partitions (`PARTITION BY toDate(Timestamp)`) as well as riding the sort key,
-// so it is strictly cheaper than omitting it.
+// Where the window predicate sits differs by query, and it is a correctness
+// choice rather than a cost one. `aiSessionSpansQuery` keeps it on both levels:
+// its caller already knows the session's bounds and passes them in, so bounding
+// the fan-out is what keeps a session read to the session. `aiSessionListQuery`
+// keeps it on detection ONLY — see that function's comment; a bounded fan-out
+// there clamps the reported start/end of every session that began before the
+// range. The unbounded seek costs nothing measurable: `TraceId` is a sort-key
+// prefix, and a `TraceId IN (…)` fan-out over `trace_detail_spans` with no time
+// filter at all returns instantly in production.
 //
 // Tenant scoping: a subquery contributes nothing to the outer query's scope, so
 // every level that reads a table repeats `OrgId = {orgId}` itself. The outermost
@@ -56,6 +62,7 @@ import {
 } from "@maple-dev/clickhouse-builder"
 import { TraceDetailSpans, Traces } from "@maple/query-engine/ch/tables"
 import { CHNumber } from "@maple/query-engine/ch/schema"
+import { AI_SESSION_SPANS_MAX_SPANS } from "@maple/domain/http"
 
 const SESSION_ID_ATTR = "maple_ai.session.id"
 const VENDOR_ID_ATTR = "maple_ai.vendor.id"
@@ -70,14 +77,6 @@ const VENDOR_VERSION_ATTR = "maple_ai.vendor.version"
  * tops out at 2106-02-07 and anything past it fails to parse.
  */
 const SESSION_ORDER_SENTINEL = "2106-01-01 00:00:00"
-
-/**
- * Default span cap for `aiSessionSpansQuery`, exported so a caller can request
- * `+ 1` and detect truncation instead of hardcoding the number. Mirrors
- * `SPAN_HIERARCHY_MAX_SPANS`, which is exported from the core package for the
- * same reason.
- */
-export const AI_SESSION_SPANS_MAX_SPANS = 2_000
 
 /** ClickHouse returns `''` for a missing Map key, so presence needs both halves. */
 const hasSessionId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<string>) =>
@@ -148,6 +147,16 @@ export const aiSessionListRowSchema: CompiledQueryRowSchema<AiSessionListOutput>
  * services by definition, so the alternative — filtering the fan-out — would
  * silently drop spans and under-count `spanCount`. The session-bearing spans come
  * from the agent's own service, which is the one a user filtering by service means.
+ *
+ * The time window bounds DETECTION only. Once a trace qualifies it is aggregated
+ * in full, so `startTime`/`endTime`/`durationMs`/`spanCount`/`errorSpanCount`/
+ * `serviceNames` describe the whole trace rather than the slice of it that fell
+ * inside the range — a session that began an hour before the range no longer
+ * reports the range edge as its start, and the detail page can read the bounds
+ * this row carries as the session's own. The remaining gap is between traces,
+ * not inside one: a session whose OTHER traces lie entirely outside the range is
+ * still found only by the traces that touched it, which needs a session-keyed
+ * table to fix and not a wider window.
  */
 export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 	const limit = opts.limit ?? 50
@@ -165,7 +174,9 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 			opts.serviceNames?.length ? CH.inList($.ServiceName, opts.serviceNames) : undefined,
 		])
 
-	// Per trace: every span of a qualifying trace, session-bearing or not.
+	// Per trace: every span of a qualifying trace, session-bearing or not — and
+	// deliberately without the window predicate, so "every span" means every span
+	// the trace has rather than every span it has inside the range.
 	const perTrace = from(TraceDetailSpans)
 		.select(($) => {
 			const sessionOrder = CH.if_(
@@ -202,12 +213,7 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 				traceEndNanos: CH.max_(CH.toUnixTimestamp64Nano($.Timestamp).add(CH.toInt64($.Duration))),
 			}
 		})
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
-			inSubquery($.TraceId, sessionTraceIds),
-		])
+		.where(($) => [$.OrgId.eq(param.string("orgId")), inSubquery($.TraceId, sessionTraceIds)])
 		.groupBy("traceId")
 
 	return (
@@ -233,8 +239,11 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 					1_000_000,
 				),
 			}))
-			// A trace can qualify via the IN and still roll up empty if its only
-			// session-bearing span fell outside the window.
+			// A trace that qualified on `traces` normally cannot roll up empty now
+			// that the fan-out sees all of its spans — but `trace_detail_spans` is a
+			// materialized view, so a trace whose session-bearing span has landed in
+			// one table and not yet the other would otherwise group every such trace
+			// together under an empty session id.
 			.where(($) => [$.sessionId.neq("")])
 			.groupBy("sessionId")
 			.orderBy(["startTime", "desc"])

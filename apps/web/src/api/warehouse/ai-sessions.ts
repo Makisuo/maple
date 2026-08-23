@@ -30,7 +30,7 @@ export const listAiSessions = Effect.fn("AiSessions.listAiSessions")(function* (
 }: {
 	data: ListAiSessionsInput
 }) {
-	const input = yield* decodeInput(ListAiSessionsInput, data ?? {}, "listAiSessions")
+	const input = yield* decodeInput(ListAiSessionsInput, data, "listAiSessions")
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
 	const result = yield* runWarehouseQuery("listAiSessions", () =>
 		Effect.gen(function* () {
@@ -39,7 +39,7 @@ export const listAiSessions = Effect.fn("AiSessions.listAiSessions")(function* (
 				payload: new ListAiSessionsRequest({
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
-					limit: input.limit ?? 50,
+					limit: input.limit,
 					vendorIds: input.vendorIds,
 					serviceNames: input.serviceNames,
 				}),
@@ -62,7 +62,7 @@ export const getAiSessionsFacets = Effect.fn("AiSessions.aiSessionsFacets")(func
 }: {
 	data: AiSessionsFacetsInput
 }) {
-	const input = yield* decodeInput(AiSessionsFacetsInput, data ?? {}, "aiSessionsFacets")
+	const input = yield* decodeInput(AiSessionsFacetsInput, data, "aiSessionsFacets")
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
 	const result = yield* runWarehouseQuery("aiSessionsFacets", () =>
 		Effect.gen(function* () {
@@ -82,9 +82,7 @@ export const getAiSessionsFacets = Effect.fn("AiSessions.aiSessionsFacets")(func
 
 const AiSessionSpansInput = Schema.Struct({
 	sessionId: Schema.String.check(Schema.isMinLength(1)),
-	// No `defaultTimeRange` fallback: the window bounds which spans of the
-	// session are found at all, so the caller supplies one derived from the
-	// session it is opening rather than inheriting the list page's 24h default.
+	// Required: the window bounds which spans exist, so the caller states it.
 	startTime: WarehouseDateTimeString,
 	endTime: WarehouseDateTimeString,
 })
@@ -96,6 +94,7 @@ export const getAiSessionSpans = Effect.fn("AiSessions.aiSessionSpans")(function
 	data: AiSessionSpansInput
 }) {
 	const input = yield* decodeInput(AiSessionSpansInput, data, "aiSessionSpans")
+	yield* Effect.annotateCurrentSpan("sessionId", input.sessionId)
 	const result = yield* runWarehouseQuery("aiSessionSpans", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleInternalAtomClient

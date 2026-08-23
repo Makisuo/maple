@@ -1,14 +1,17 @@
 // Everything the session header states, derived from the spans.
 //
-// Two rules shape this module. Time is measured as *occupancy* of the wall
+// Three rules shape this module. Time is measured as *occupancy* of the wall
 // clock, never as a sum of span durations — a session running four tools in
-// parallel would otherwise report 180% of itself. And tokens are counted at the
+// parallel would otherwise report 180% of itself. Tokens are counted at the
 // deepest span that reports them, because frameworks that also roll usage up to
-// the agent span would otherwise double the bill.
+// the agent span would otherwise double the bill. And a token total is only ever
+// added up per the convention the reporting provider bills under: most of them
+// count cached tokens inside the prompt figure, and summing the buckets there
+// would bill the cache twice.
 
 import type { AiSessionSpan } from "@maple/domain/http"
 import {
-	classifySpan,
+	classifyAiSpan,
 	isLlmCall,
 	spanEndMs,
 	spanModel,
@@ -21,10 +24,7 @@ import {
  * Shortest hole in the session that counts as the user thinking rather than the
  * framework working. Below it, a gap is overhead and stays in active time.
  */
-export const IDLE_GAP_MIN_MS = 5_000
-
-/** No span for this long and the session is no longer running. */
-export const SESSION_ACTIVE_WINDOW_MS = 30 * 60_000
+const IDLE_GAP_MIN_MS = 5_000
 
 export interface IdleGap {
 	readonly id: string
@@ -47,8 +47,24 @@ export interface SessionTokenTotals {
 	readonly cacheWrite: number
 	readonly output: number
 	readonly reasoning: number
+	/**
+	 * What the buckets add up to under the reporting provider's convention —
+	 * which is not always their sum. See `cacheInclusiveInput`.
+	 */
 	readonly total: number
 }
+
+/**
+ * Where the session's usage figures came from, so a view can say why a number
+ * is missing rather than printing a zero it cannot stand behind.
+ *
+ * - `per-call` — each model call reported its own usage.
+ * - `roll-up` — a wrapper span reported the sum of calls that also reported.
+ * - `session-level` — every figure comes from a span covering more than one
+ *   turn, so the session has a total and the individual turns do not.
+ * - `none` — nothing reported usage.
+ */
+export type SessionTokenReporting = "per-call" | "roll-up" | "session-level" | "none"
 
 export interface SessionModelUsage {
 	readonly model: string
@@ -60,17 +76,15 @@ export interface SessionWorkCounts {
 	readonly turns: number
 	readonly llmCalls: number
 	readonly toolCalls: number
-	readonly retries: number
 }
 
 export interface SessionFailureCounts {
-	readonly toolErrors: number
+	/** Every errored span not named by one of the buckets below. */
+	readonly errors: number
 	readonly rateLimited: number
 	readonly contextExceeded: number
 	readonly refusals: number
 }
-
-export type SessionStatus = "active" | "completed" | "failed" | "abandoned"
 
 export interface SessionSummary {
 	readonly startMs: number
@@ -81,7 +95,8 @@ export interface SessionSummary {
 	readonly idleGaps: readonly IdleGap[]
 	/** Non-zero segments only: an unavailable TTFT is absent, never a zero bar. */
 	readonly occupancy: readonly OccupancySegment[]
-	readonly status: SessionStatus
+	/** The last turn did not close cleanly. */
+	readonly failed: boolean
 	/** The opening user message, when content was captured. */
 	readonly title: string | undefined
 	readonly agentNames: readonly string[]
@@ -89,6 +104,17 @@ export interface SessionSummary {
 	readonly serviceNames: readonly string[]
 	readonly models: readonly SessionModelUsage[]
 	readonly tokens: SessionTokenTotals
+	/** How those tokens were reported — the one thing a per-turn number cannot
+	 *  express, and the reason a turn may have none. */
+	readonly tokenReporting: SessionTokenReporting
+	/**
+	 * Spend in USD as the instrumentation reported it. Maple does not price
+	 * tokens itself: no convention attribute carries a price, so only spans
+	 * stamped with one by an instrumentation that did its own pricing
+	 * (`gen_ai.usage.cost` and its vendor spellings) contribute. `undefined`
+	 * when no span reported a cost at all.
+	 */
+	readonly cost: number | undefined
 	readonly work: SessionWorkCounts
 	readonly failures: SessionFailureCounts
 	readonly spanCount: number
@@ -100,25 +126,30 @@ export interface SessionSummary {
 // deliberately absent from the context pattern: as a finish reason it means
 // max_tokens was reached, which is a normal completion, not a failure.
 const RATE_LIMIT_PATTERN = /\b429\b|rate.?limit|too.many.requests|resource.exhausted|overloaded/i
-const SERVER_ERROR_PATTERN = /\b5\d{2}\b|unavailable|internal.server|bad.gateway|timeout/i
 const CONTEXT_EXCEEDED_PATTERN =
 	/context.{0,16}(length|window|limit)|maximum.context|prompt is too long|too many tokens/i
 const REFUSAL_FINISH_REASONS = new Set(["refusal", "content_filter"])
 
-export function buildSessionSummary(
-	spans: readonly AiSessionSpan[],
-	turns: readonly SessionTurn[],
-	nowMs: number,
-): SessionSummary {
-	const startMs = Math.min(...spans.map(spanStartMs))
-	const endMs = Math.max(...spans.map(spanEndMs))
+export function buildSessionSummary({
+	spans,
+	turns,
+}: {
+	readonly spans: readonly AiSessionSpan[]
+	readonly turns: readonly SessionTurn[]
+}): SessionSummary {
+	// Sorted here so the first-seen orders below (agent names, vendors) are the
+	// session's own order rather than the order the warehouse returned rows in.
+	const ordered = [...spans].sort((a, b) => spanStartMs(a) - spanStartMs(b))
+	const byId = new Map(ordered.map((span) => [span.spanId, span]))
+
+	const startMs = Math.min(...ordered.map(spanStartMs))
+	const endMs = Math.max(...ordered.map(spanEndMs))
 	const wallClockMs = endMs - startMs
 
-	const idleGaps = findIdleGaps(spans)
+	const idleGaps = findIdleGaps(ordered)
 	const idleMs = idleGaps.reduce((total, gap) => total + gap.durationMs, 0)
 
-	const tokensBySpan = countableUsageSpans(spans)
-	const tokens = sumTokens([...tokensBySpan.values()])
+	const usage = countableUsageSpans(ordered, byId)
 
 	return {
 		startMs,
@@ -127,23 +158,24 @@ export function buildSessionSummary(
 		activeMs: wallClockMs - idleMs,
 		idleMs,
 		idleGaps,
-		occupancy: computeOccupancy(spans, wallClockMs, idleMs),
-		status: sessionStatus(turns, endMs, nowMs),
+		occupancy: computeOccupancy(ordered, wallClockMs, idleMs),
+		failed: turns[turns.length - 1]?.failed === true,
 		title: turns[0]?.label,
-		agentNames: distinctInOrder(spans.map((span) => span.genAi.agentName)),
-		vendorIds: distinctInOrder(spans.map((span) => span.vendorId)),
-		serviceNames: byFrequency(spans.map((span) => span.serviceName)),
-		models: modelUsage(spans, tokensBySpan),
-		tokens,
+		agentNames: distinctInOrder(ordered.map((span) => span.genAi.agentName)),
+		vendorIds: distinctInOrder(ordered.map((span) => span.vendorId)),
+		serviceNames: byFrequency(ordered.map((span) => span.serviceName)),
+		models: modelUsage(ordered, usage.bySpan),
+		tokens: sumTokens([...usage.bySpan.values()]),
+		tokenReporting: classifyTokenReporting(usage, byId, turns),
+		cost: sessionCost(ordered, byId),
 		work: {
 			turns: turns.length,
-			llmCalls: spans.filter(isLlmCall).length,
-			toolCalls: spans.filter((span) => classifySpan(span) === "tool").length,
-			retries: countRetries(turns),
+			llmCalls: ordered.filter(isLlmCall).length,
+			toolCalls: ordered.filter((span) => classifyAiSpan(span) === "tool").length,
 		},
-		failures: countFailures(spans),
-		spanCount: spans.length,
-		traceCount: new Set(spans.map((span) => span.traceId)).size,
+		failures: countFailures(ordered),
+		spanCount: ordered.length,
+		traceCount: new Set(ordered.map((span) => span.traceId)).size,
 	}
 }
 
@@ -232,7 +264,7 @@ function computeOccupancy(
 	for (const span of spans) {
 		const startMs = spanStartMs(span)
 		const endMs = spanEndMs(span)
-		const category = classifySpan(span)
+		const category = classifyAiSpan(span)
 		if (category === "tool") {
 			toolIntervals.push({ startMs, endMs })
 			continue
@@ -257,7 +289,6 @@ function computeOccupancy(
 	const ttftMs = totalMs(ttft)
 	const inferenceMs = totalMs(inference)
 	const toolMs = totalMs(tool)
-	const unaccountedMs = Math.max(0, wallClockMs - idleMs - ttftMs - inferenceMs - toolMs)
 
 	return (
 		[
@@ -265,26 +296,13 @@ function computeOccupancy(
 			{ kind: "ttft", ms: ttftMs },
 			{ kind: "inference", ms: inferenceMs },
 			{ kind: "tool", ms: toolMs },
-			{ kind: "unaccounted", ms: unaccountedMs },
+			{ kind: "unaccounted", ms: wallClockMs - idleMs - ttftMs - inferenceMs - toolMs },
 		] as const
 	).filter((segment) => segment.ms > 0)
 }
 
-function sessionStatus(turns: readonly SessionTurn[], endMs: number, nowMs: number): SessionStatus {
-	const lastTurn = turns[turns.length - 1]
-	// Failure is checked before the active window: the window measures silence,
-	// and a session that errored two minutes ago is silent for a known reason.
-	if (lastTurn?.failed === true) return "failed"
-	if (nowMs - endMs < SESSION_ACTIVE_WINDOW_MS) return "active"
-	if (lastTurn === undefined) return "abandoned"
-	// Completion needs positive evidence. Turns recovered from trace boundaries
-	// carry none — nothing in the data says the agent finished — so a session
-	// that simply stopped reads as abandoned rather than quietly successful.
-	return lastTurn.anchorKind === "trace" ? "abandoned" : "completed"
-}
-
 /* -------------------------------------------------------------------------- */
-/* Tokens, models, spend inputs                                               */
+/* Tokens, models, cost                                                       */
 /* -------------------------------------------------------------------------- */
 
 const EMPTY_TOKENS: SessionTokenTotals = {
@@ -296,7 +314,67 @@ const EMPTY_TOKENS: SessionTokenTotals = {
 	total: 0,
 }
 
-function spanTokens(span: AiSessionSpan): SessionTokenTotals | undefined {
+/** Whether a reporter's `input` bucket already contains its cache buckets. */
+type CacheConvention = "inclusive" | "exclusive"
+
+/**
+ * `gen_ai.provider.name` → whether that provider's prompt count already
+ * CONTAINS the cached tokens reported beside it.
+ *
+ * Anthropic's Messages API bills the three separately: `input_tokens` excludes
+ * both `cache_read_input_tokens` and `cache_creation_input_tokens`, so its
+ * total really is the sum of the buckets. Everyone else folds the cache into
+ * the prompt figure — OpenAI's `prompt_tokens` contains
+ * `prompt_tokens_details.cached_tokens`, Gemini's `promptTokenCount` contains
+ * `cachedContentTokenCount`, OpenRouter is OpenAI-shaped — and adding the cache
+ * on top of that bills those tokens twice, which on a cache-heavy agent loop is
+ * a near-doubling rather than a rounding error.
+ *
+ * Only providers whose wire shape was checked are listed. Anything else takes
+ * the dominant convention, `"inclusive"`: it is what most of the field does,
+ * and it errs toward the smaller number rather than inventing tokens.
+ */
+const PROVIDER_CACHE_CONVENTION = new Map<string, CacheConvention>([
+	["anthropic", "exclusive"],
+	["openai", "inclusive"],
+	["gcp.gemini", "inclusive"],
+	["gcp.vertex_ai", "inclusive"],
+	["openrouter", "inclusive"],
+])
+
+/**
+ * Vendors that re-normalise usage before emitting it, whichever provider ran
+ * the call — so the vendor, not the provider, decides.
+ *
+ * The Vercel AI SDK emits `gen_ai.usage.input_tokens` as
+ * `result.usage.inputTokens.total`, and its Anthropic provider builds that
+ * total as `noCache + cacheRead + cacheWrite`: an Anthropic call made through
+ * the SDK is inclusive even though the raw API is not. Verified against the
+ * installed packages — `ai/dist/index.mjs` for the attribute and
+ * `@ai-sdk/anthropic` (vendored under `eve`) for the sum.
+ */
+const VENDOR_CACHE_CONVENTION = new Map<string, CacheConvention>([["vercel_ai_sdk", "inclusive"]])
+
+/**
+ * True when the span's `input` bucket already covers its cache buckets, so
+ * adding them to the total would count the same tokens twice.
+ *
+ * The vendor is asked first: a framework that re-added the buckets before
+ * emitting them has overwritten whatever its provider's own API said.
+ */
+function cacheInclusiveInput(span: AiSessionSpan): boolean {
+	const vendor = VENDOR_CACHE_CONVENTION.get(span.vendorId ?? "")
+	const provider = PROVIDER_CACHE_CONVENTION.get(span.genAi.providerName ?? "")
+	return (vendor ?? provider ?? "inclusive") === "inclusive"
+}
+
+/**
+ * The five `gen_ai.usage.*` buckets a span reports and what they total under
+ * its provider's convention, or nothing when it reports none. Exported so the
+ * waterfall and the flow split a span's usage the same way the header does
+ * rather than re-deriving the prompt/completion halves.
+ */
+export function spanTokenBuckets(span: AiSessionSpan): SessionTokenTotals | undefined {
 	const { usageInputTokens, usageCacheReadInputTokens, usageCacheCreationInputTokens } = span.genAi
 	const { usageOutputTokens, usageReasoningOutputTokens } = span.genAi
 	if (
@@ -308,32 +386,38 @@ function spanTokens(span: AiSessionSpan): SessionTokenTotals | undefined {
 	) {
 		return undefined
 	}
-	return tokenTotals({
-		input: usageInputTokens ?? 0,
-		cacheRead: usageCacheReadInputTokens ?? 0,
-		cacheWrite: usageCacheCreationInputTokens ?? 0,
-		output: usageOutputTokens ?? 0,
-		reasoning: usageReasoningOutputTokens ?? 0,
-	})
+	return tokenTotals(
+		{
+			input: usageInputTokens ?? 0,
+			cacheRead: usageCacheReadInputTokens ?? 0,
+			cacheWrite: usageCacheCreationInputTokens ?? 0,
+			output: usageOutputTokens ?? 0,
+			reasoning: usageReasoningOutputTokens ?? 0,
+		},
+		cacheInclusiveInput(span),
+	)
 }
 
 /**
- * The five buckets plus the headline total.
+ * The five buckets plus what they come to.
  *
- * Cached input is a SUBSET of `gen_ai.usage.input_tokens` under the dominant
- * vendor convention — one production call reports 4935 input against 4932 cache
- * writes — so adding the cache buckets to input nearly doubles the figure the
- * header prints. Where they exceed input they are evidently reported beside it,
- * and the additive total is the honest one. The bucket legend is unaffected
- * either way: it shows what was reported.
+ * Under the exclusive convention that is their sum. Under the inclusive one the
+ * cache buckets are a *breakdown* of `input`, not tokens beside it, so they
+ * stay in the legend — a cache hit rate is worth seeing — and out of the total.
  */
-function tokenTotals(buckets: Omit<SessionTokenTotals, "total">): SessionTokenTotals {
-	const cached = buckets.cacheRead + buckets.cacheWrite
-	const total =
-		cached <= buckets.input
-			? buckets.input + buckets.output + buckets.reasoning
-			: buckets.input + cached + buckets.output + buckets.reasoning
-	return { ...buckets, total }
+function tokenTotals(
+	buckets: Omit<SessionTokenTotals, "total">,
+	cacheInclusive: boolean,
+): SessionTokenTotals {
+	const cached = cacheInclusive ? 0 : buckets.cacheRead + buckets.cacheWrite
+	return { ...buckets, total: buckets.input + cached + buckets.output + buckets.reasoning }
+}
+
+interface CountableUsage {
+	/** Dedup-adjusted usage per reporting span; reporters left with nothing are absent. */
+	readonly bySpan: ReadonlyMap<string, SessionTokenTotals>
+	/** Some reporter summed usage that a span beneath it also reported. */
+	readonly rolledUp: boolean
 }
 
 /**
@@ -346,58 +430,144 @@ function tokenTotals(buckets: Omit<SessionTokenTotals, "total">): SessionTokenTo
  * it — zero for a clean roll-up, and the missing call's usage when one of its
  * children reported none.
  */
-function countableUsageSpans(spans: readonly AiSessionSpan[]): Map<string, SessionTokenTotals> {
-	const byId = new Map(spans.map((span) => [span.spanId, span]))
+function countableUsageSpans(
+	spans: readonly AiSessionSpan[],
+	byId: ReadonlyMap<string, AiSessionSpan>,
+): CountableUsage {
 	const reported = new Map<string, SessionTokenTotals>()
 	for (const span of spans) {
-		const tokens = spanTokens(span)
+		const tokens = spanTokenBuckets(span)
 		if (tokens !== undefined) reported.set(span.spanId, tokens)
 	}
 
-	// Each reporter is charged to the NEAREST ancestor that also reports, so a
-	// two-level roll-up subtracts each figure once rather than at every level.
-	const claimed = new Map<string, SessionTokenTotals[]>()
-	for (const [spanId, tokens] of reported) {
+	const bySpan = new Map<string, SessionTokenTotals>()
+	let rolledUp = false
+	for (const [spanId, beneath] of chargeToNearestReporter(byId, reported)) {
+		if (beneath.length > 0) rolledUp = true
+		// The residual is priced under the PARENT's own convention: it is the
+		// parent's figure less its children's, and the parent is what reported it.
+		const tokens = excessTokens(
+			reported.get(spanId)!,
+			sumTokens(beneath),
+			cacheInclusiveInput(byId.get(spanId)!),
+		)
+		if (tokens.total > 0) bySpan.set(spanId, tokens)
+	}
+	return { bySpan, rolledUp }
+}
+
+/**
+ * Each reporter charged to the NEAREST ancestor that also reports, so a
+ * two-level roll-up subtracts each figure once rather than at every level.
+ * Every reporter has an entry; a leaf's list is empty.
+ */
+function chargeToNearestReporter<T>(
+	byId: ReadonlyMap<string, AiSessionSpan>,
+	reported: ReadonlyMap<string, T>,
+): Map<string, T[]> {
+	const claimed = new Map<string, T[]>([...reported.keys()].map((spanId) => [spanId, []]))
+	for (const [spanId, value] of reported) {
 		const seen = new Set<string>([spanId])
 		let parent = byId.get(byId.get(spanId)!.parentSpanId)
 		while (parent !== undefined && !seen.has(parent.spanId)) {
 			seen.add(parent.spanId)
 			if (reported.has(parent.spanId)) {
-				claimed.set(parent.spanId, [...(claimed.get(parent.spanId) ?? []), tokens])
+				claimed.get(parent.spanId)!.push(value)
 				break
 			}
 			parent = byId.get(parent.parentSpanId)
 		}
 	}
+	return claimed
+}
 
-	const countable = new Map<string, SessionTokenTotals>()
-	for (const [spanId, tokens] of reported) {
-		const beneath = claimed.get(spanId)
-		const countableTokens = beneath === undefined ? tokens : excessTokens(tokens, sumTokens(beneath))
-		if (countableTokens.total > 0) countable.set(spanId, countableTokens)
+/**
+ * Reported cost under the same deepest-reporter rule as tokens: a wrapper that
+ * sums its children's cost onto itself contributes only what it claims above
+ * them.
+ */
+function sessionCost(
+	spans: readonly AiSessionSpan[],
+	byId: ReadonlyMap<string, AiSessionSpan>,
+): number | undefined {
+	const reported = new Map<string, number>()
+	for (const span of spans) {
+		const cost = span.genAi.usageCost
+		if (cost !== undefined && cost >= 0) reported.set(span.spanId, cost)
 	}
-	return countable
+	if (reported.size === 0) return undefined
+
+	let usd = 0
+	for (const [spanId, beneath] of chargeToNearestReporter(byId, reported)) {
+		usd += Math.max(0, reported.get(spanId)! - beneath.reduce((sum, cost) => sum + cost, 0))
+	}
+	return usd
 }
 
 /** Per bucket, what `reported` claims over `counted`. Never negative: a wrapper
  *  that under-reports its own children adds nothing rather than subtracting. */
-function excessTokens(reported: SessionTokenTotals, counted: SessionTokenTotals): SessionTokenTotals {
-	return tokenTotals({
-		input: Math.max(0, reported.input - counted.input),
-		cacheRead: Math.max(0, reported.cacheRead - counted.cacheRead),
-		cacheWrite: Math.max(0, reported.cacheWrite - counted.cacheWrite),
-		output: Math.max(0, reported.output - counted.output),
-		reasoning: Math.max(0, reported.reasoning - counted.reasoning),
-	})
+function excessTokens(
+	reported: SessionTokenTotals,
+	counted: SessionTokenTotals,
+	cacheInclusive: boolean,
+): SessionTokenTotals {
+	return tokenTotals(
+		{
+			input: Math.max(0, reported.input - counted.input),
+			cacheRead: Math.max(0, reported.cacheRead - counted.cacheRead),
+			cacheWrite: Math.max(0, reported.cacheWrite - counted.cacheWrite),
+			output: Math.max(0, reported.output - counted.output),
+			reasoning: Math.max(0, reported.reasoning - counted.reasoning),
+		},
+		cacheInclusive,
+	)
 }
 
 /**
- * The five usage buckets over any set of spans. Exported so the waterfall counts
- * a turn's tokens by the same rule the header counts the session's, and the
- * turns therefore add up to the total printed above them.
+ * A span that reports usage for more than the turn it started in.
+ *
+ * Turns are partitioned by time, so a span belongs to the turn its start falls
+ * in. A session root — or a long-lived agent span — that reports the whole
+ * session's usage would therefore dump all of it into turn 1 and leave every
+ * later turn reading zero, which is the one number that is certainly wrong. It
+ * counts for the session and for the per-model table, and for no single turn.
+ *
+ * `turns` is in start order, so the first turn starting after this span is the
+ * next one; a reporter that outlives that boundary covers more than one turn.
  */
-export function countSessionTokens(spans: readonly AiSessionSpan[]): SessionTokenTotals {
-	return sumTokens([...countableUsageSpans(spans).values()])
+function isSessionLevelReporter(span: AiSessionSpan, turns: readonly SessionTurn[]): boolean {
+	const next = turns.find((turn) => turn.startMs > spanStartMs(span))
+	return next !== undefined && spanEndMs(span) > next.startMs
+}
+
+/**
+ * One turn's tokens, by the same deepest-reporter rule the header counts the
+ * session by, less any session-level reporter. The turns therefore add up to
+ * the total printed above them whenever the usage was reported per turn, and
+ * read as absent rather than as a wrong number when it was not.
+ */
+export function countTurnTokens(turn: SessionTurn, turns: readonly SessionTurn[]): SessionTokenTotals {
+	const byId = new Map(turn.spans.map((span) => [span.spanId, span]))
+	const { bySpan } = countableUsageSpans(turn.spans, byId)
+	return sumTokens(
+		[...bySpan]
+			.filter(([spanId]) => !isSessionLevelReporter(byId.get(spanId)!, turns))
+			.map(([, tokens]) => tokens),
+	)
+}
+
+/** Which of the three reporting shapes the session's instrumentation used. */
+function classifyTokenReporting(
+	usage: CountableUsage,
+	byId: ReadonlyMap<string, AiSessionSpan>,
+	turns: readonly SessionTurn[],
+): SessionTokenReporting {
+	const reporters = [...usage.bySpan.keys()]
+	if (reporters.length === 0) return "none"
+	if (reporters.every((spanId) => isSessionLevelReporter(byId.get(spanId)!, turns))) {
+		return "session-level"
+	}
+	return usage.rolledUp ? "roll-up" : "per-call"
 }
 
 function sumTokens(totals: readonly SessionTokenTotals[]): SessionTokenTotals {
@@ -414,26 +584,29 @@ function sumTokens(totals: readonly SessionTokenTotals[]): SessionTokenTotals {
 	)
 }
 
-const UNKNOWN_MODEL = "unknown model"
-
+/**
+ * Tokens and calls per model, over the model calls alone. A span that reported
+ * usage without naming a model gets no row — its tokens are in the session
+ * total, which is where a number with no model belongs.
+ */
 function modelUsage(
 	spans: readonly AiSessionSpan[],
 	tokensBySpan: ReadonlyMap<string, SessionTokenTotals>,
 ): readonly SessionModelUsage[] {
 	const byModel = new Map<string, { llmCalls: number; tokens: SessionTokenTotals[] }>()
-	const entryFor = (model: string) => {
-		const existing = byModel.get(model)
-		if (existing !== undefined) return existing
-		const created = { llmCalls: 0, tokens: [] as SessionTokenTotals[] }
-		byModel.set(model, created)
-		return created
-	}
 
 	for (const span of spans) {
-		const model = spanModel(span) ?? UNKNOWN_MODEL
-		if (isLlmCall(span)) entryFor(model).llmCalls++
+		if (!isLlmCall(span)) continue
+		const model = spanModel(span)
+		if (model === undefined) continue
+		let entry = byModel.get(model)
+		if (entry === undefined) {
+			entry = { llmCalls: 0, tokens: [] }
+			byModel.set(model, entry)
+		}
+		entry.llmCalls++
 		const tokens = tokensBySpan.get(span.spanId)
-		if (tokens !== undefined) entryFor(model).tokens.push(tokens)
+		if (tokens !== undefined) entry.tokens.push(tokens)
 	}
 
 	return [...byModel]
@@ -470,9 +643,8 @@ function refusalSignal(span: AiSessionSpan): string | undefined {
  * Ancestors carrying a signal a span below them already carries.
  *
  * Frameworks stamp the model call's error and its finish reasons on the agent
- * span wrapping it as well. Counted at both levels, one refusal is two, and the
- * outer copy of a failed call becomes a retry that never happened — so only the
- * deepest span carrying a given signal counts.
+ * span wrapping it as well. Counted at both levels, one refusal is two and one
+ * failure is two — so only the deepest span carrying a given signal counts.
  */
 function shadowedAncestorIds(
 	spans: readonly AiSessionSpan[],
@@ -495,46 +667,9 @@ function shadowedAncestorIds(
 }
 
 /**
- * The spans counted as retries: errored-then-resent inference.
- *
- * No convention field records "this was attempt 2", so the heuristic is: a model
- * span that failed with a rate limit or a server error, and was followed by
- * another model span in the same turn. It names the failures the agent had to
- * pay for again — the successful attempt is the call, not the retry — and it
- * misses a retry the client swallowed without emitting a span for the failure.
- *
- * Exported as a set of span ids so the waterfall can mark the same spans the
- * header counted, rather than re-deriving the rule beside it.
- */
-export function retriedSpanIds(turns: readonly SessionTurn[]): ReadonlySet<string> {
-	const shadowed = shadowedAncestorIds(
-		turns.flatMap((turn) => [...turn.spans]),
-		failureSignal,
-	)
-	const retried = new Set<string>()
-	for (const turn of turns) {
-		const llmSpans = turn.spans.filter(isLlmCall)
-		for (let i = 0; i < llmSpans.length - 1; i++) {
-			const span = llmSpans[i]!
-			if (span.statusCode !== "Error" || shadowed.has(span.spanId)) continue
-			const signal = errorSignal(span)
-			if (RATE_LIMIT_PATTERN.test(signal) || SERVER_ERROR_PATTERN.test(signal)) {
-				retried.add(span.spanId)
-			}
-		}
-	}
-	return retried
-}
-
-function countRetries(turns: readonly SessionTurn[]): number {
-	return retriedSpanIds(turns).size
-}
-
-/**
  * Errored spans, grouped by why. First match wins — a tool call that failed with
  * a 429 counts once, as rate limiting, because that is the cause worth acting
- * on. An errored span matching none of the three is left out of all of them
- * rather than swelling `tool errors`.
+ * on — and `errors` is the catch-all, so every errored span lands somewhere.
  *
  * Refusals are the exception: they are a finish reason on a span that succeeded,
  * so they are counted independently of span status.
@@ -546,7 +681,7 @@ function countRetries(turns: readonly SessionTurn[]): number {
 function countFailures(spans: readonly AiSessionSpan[]): SessionFailureCounts {
 	const shadowedFailures = shadowedAncestorIds(spans, failureSignal)
 	const shadowedRefusals = shadowedAncestorIds(spans, refusalSignal)
-	let toolErrors = 0
+	let errors = 0
 	let rateLimited = 0
 	let contextExceeded = 0
 	let refusals = 0
@@ -557,10 +692,10 @@ function countFailures(spans: readonly AiSessionSpan[]): SessionFailureCounts {
 		const signal = errorSignal(span)
 		if (RATE_LIMIT_PATTERN.test(signal)) rateLimited++
 		else if (CONTEXT_EXCEEDED_PATTERN.test(signal)) contextExceeded++
-		else if (classifySpan(span) === "tool") toolErrors++
+		else errors++
 	}
 
-	return { toolErrors, rateLimited, contextExceeded, refusals }
+	return { errors, rateLimited, contextExceeded, refusals }
 }
 
 /* -------------------------------------------------------------------------- */

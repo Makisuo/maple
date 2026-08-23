@@ -6,6 +6,10 @@
 // every rule below is a heuristic over the OTel gen_ai attributes — which is
 // exactly why they live here, named and commented, instead of inside the
 // components that render them.
+//
+// Timestamps are parsed as reported, without the clock-skew correction
+// `span-tree.ts` applies inside a single trace, so a child that a skewed clock
+// placed outside its parent can land in a neighbouring turn.
 
 import type { AiSessionSpan } from "@maple/domain/http"
 import { toEpochMs } from "@maple/ui/lib/time-format"
@@ -15,19 +19,17 @@ import { toEpochMs } from "@maple/ui/lib/time-format"
  * distinctions the waterfall colors, the occupancy bar splits on, and the work
  * counters tally, and nothing else needs a finer taxonomy.
  */
-export type SpanCategory = "agent" | "inference" | "tool" | "other"
+export type AiSpanCategory = "agent" | "inference" | "tool" | "other"
 
-// `gen_ai.operation.name` is an open set (see AI_KNOWN_OPERATION_NAMES in
-// @maple/query-engine-integrations), so these group the documented values and
-// an unknown one falls through to the span-name rules below rather than being
-// rejected.
+// `gen_ai.operation.name` is an open set, so these group the semantic
+// convention's operation names plus `agent_step`, which the Vercel AI SDK emits
+// and production data carries. An unknown value falls through to the span-name
+// rules below rather than being rejected.
 const INFERENCE_OPS = new Set(["chat", "generate_content", "text_completion", "fetch_response"])
 /** Inference-shaped work that is not a chat completion: counted as inference
  *  occupancy, never as an "llm call" — an embedding is not a model turn. */
 const RETRIEVAL_OPS = new Set(["embeddings", "retrieval"])
 const TOOL_OPS = new Set(["execute_tool"])
-// `agent_step` is Vercel AI SDK's, not the convention's, and already appears in
-// production data.
 const AGENT_OPS = new Set(["invoke_agent", "create_agent", "invoke_workflow", "plan", "agent_step"])
 
 export function spanStartMs(span: AiSessionSpan): number {
@@ -43,7 +45,7 @@ export function spanModel(span: AiSessionSpan): string | undefined {
 	return span.genAi.responseModel ?? span.genAi.requestModel
 }
 
-export function classifySpan(span: AiSessionSpan): SpanCategory {
+export function classifyAiSpan(span: AiSessionSpan): AiSpanCategory {
 	const operation = span.genAi.operationName
 	if (operation !== undefined) {
 		if (INFERENCE_OPS.has(operation) || RETRIEVAL_OPS.has(operation)) return "inference"
@@ -73,7 +75,7 @@ export function classifySpan(span: AiSessionSpan): SpanCategory {
  * time, but counting them here would make the calls-per-turn ratio (the agent's
  * loop depth) meaningless.
  *
- * Everything else `classifySpan` reads as inference counts, including the
+ * Everything else `classifyAiSpan` reads as inference counts, including the
  * open-set operation names vendors invent (`generate_text`): matching only the
  * documented four would color a span as inference and then leave it out of the
  * call count, the model rows and the token column.
@@ -81,7 +83,7 @@ export function classifySpan(span: AiSessionSpan): SpanCategory {
 export function isLlmCall(span: AiSessionSpan): boolean {
 	const operation = span.genAi.operationName
 	if (operation !== undefined && RETRIEVAL_OPS.has(operation)) return false
-	return classifySpan(span) === "inference"
+	return classifyAiSpan(span) === "inference"
 }
 
 /** `gen_ai.response.time_to_first_chunk` is in SECONDS (see ai-vendors.ts). */
@@ -94,8 +96,8 @@ export function spanTtftMs(span: AiSessionSpan): number | undefined {
 	return ms > span.durationMs ? undefined : ms
 }
 
-/** Which rule produced a turn boundary — the header reads this to tell a
- *  session that ended from one that was simply abandoned mid-flight. */
+/** Which of the three rules below produced a turn boundary — the waterfall
+ *  labels the turn by it. */
 export type TurnAnchorKind = "conversation" | "agent-root" | "trace"
 
 export interface SessionTurn {
@@ -105,7 +107,7 @@ export interface SessionTurn {
 	readonly anchorKind: TurnAnchorKind
 	/** The span that opened the turn. */
 	readonly anchor: AiSessionSpan
-	/** The turn's opening user message, when the vendor captured message content. */
+	/** The turn's newest user message, when the vendor captured message content. */
 	readonly label: string | undefined
 	readonly agentName: string | undefined
 	readonly startMs: number
@@ -113,7 +115,7 @@ export interface SessionTurn {
 	readonly durationMs: number
 	/** Every span of the turn, in start order. */
 	readonly spans: readonly AiSessionSpan[]
-	/** A span that roots the turn ended `Error` — the turn did not close cleanly. */
+	/** An AI span that roots the turn ended `Error` — the turn did not close cleanly. */
 	readonly failed: boolean
 	/** Traces the turn's spans came from, first-seen first. A turn may cross traces. */
 	readonly traceIds: readonly string[]
@@ -132,8 +134,10 @@ interface TurnAnchor {
  * "the user said something new":
  *
  * 1. `gen_ai.conversation.id` — the only turn key the convention has, and the
- *    one eve stamps with its turn id. One id, one turn, but only where the ids
- *    actually partition the session (see `findAnchors`).
+ *    one eve stamps with its turn id. One id, one turn. `findAnchors` requires
+ *    more than one distinct id, and ignores vendors that derive the session id
+ *    from it; it does not check that the ids are non-interleaved in time, so a
+ *    vendor stamping one per concurrent sub-agent would mis-partition here.
  * 2. Agent invocations with no agent above them — a session with no usable
  *    conversation id still opens each turn by invoking the agent.
  * 3. One turn per trace — the floor. Wrong for a trace holding several turns,
@@ -147,15 +151,19 @@ interface TurnAnchor {
 export function buildSessionTurns(spans: readonly AiSessionSpan[]): readonly SessionTurn[] {
 	if (spans.length === 0) return []
 
-	const ordered = [...spans].sort((a, b) => spanStartMs(a) - spanStartMs(b))
-	const anchors = findAnchors(ordered)
+	// Decorate/sort/undecorate: one timestamp parse per span rather than one per
+	// comparison.
+	const ordered = spans
+		.map((span) => ({ span, startMs: spanStartMs(span) }))
+		.sort((a, b) => a.startMs - b.startMs)
+	const anchors = findAnchors(ordered.map((entry) => entry.span))
+	const anchorStarts = anchors.map((anchor) => spanStartMs(anchor.span))
 	const buckets: AiSessionSpan[][] = anchors.map(() => [])
 
 	// Both lists are in start order, so one forward cursor assigns every span.
 	let cursor = 0
-	for (const span of ordered) {
-		const start = spanStartMs(span)
-		while (cursor + 1 < anchors.length && spanStartMs(anchors[cursor + 1]!.span) <= start) cursor++
+	for (const { span, startMs } of ordered) {
+		while (cursor + 1 < anchors.length && anchorStarts[cursor + 1]! <= startMs) cursor++
 		buckets[cursor]!.push(span)
 	}
 
@@ -176,17 +184,19 @@ export function buildSessionTurns(spans: readonly AiSessionSpan[]): readonly Ses
 				index: index + 1,
 				anchorKind: anchor.kind,
 				anchor: anchor.span,
-				label: turnLabel(turnSpans),
+				label: turnLabel(anchor.span, turnSpans),
 				agentName:
 					anchor.span.genAi.agentName ?? turnSpans.find((s) => s.genAi.agentName)?.genAi.agentName,
 				startMs,
 				endMs,
 				durationMs: endMs - startMs,
 				spans: turnSpans,
-				// Only spans that root the turn count: a retried inference that errored
-				// and then succeeded is a retry, not a failed turn.
+				// Only AI spans that root the turn count: a retried inference that
+				// errored and then succeeded is a retry, not a failed turn, and the
+				// app's own errored HTTP span is not the agent failing.
 				failed: turnSpans.some(
 					(span) =>
+						span.isAiSpan &&
 						span.statusCode === "Error" &&
 						(span.parentSpanId === "" || !spanIds.has(span.parentSpanId)),
 				),
@@ -218,19 +228,22 @@ function findAnchors(ordered: readonly AiSessionSpan[]): readonly TurnAnchor[] {
 	// Not "no parent in the session": the query returns the app's own spans too,
 	// so the trace root is an HTTP or workflow span and every agent span has an
 	// in-session parent. A turn opens where agent work starts, which is an agent
-	// span with no agent work above it anywhere in the chain.
-	const underAgent = (span: AiSessionSpan): boolean => {
+	// span with no AI span above it anywhere in the chain — any AI ancestor
+	// disqualifies, not just an agent one, so a sub-agent invoked from inside a
+	// tool or an inference span does not open a turn. That errs toward fewer
+	// turns, which is the safe direction.
+	const underAiSpan = (span: AiSessionSpan): boolean => {
 		const seen = new Set<string>([span.spanId])
 		let parent = byId.get(span.parentSpanId)
 		while (parent !== undefined && !seen.has(parent.spanId)) {
-			if (parent.isAiSpan || classifySpan(parent) === "agent") return true
+			if (parent.isAiSpan) return true
 			seen.add(parent.spanId)
 			parent = byId.get(parent.parentSpanId)
 		}
 		return false
 	}
 	const agentRoots = ordered.filter(
-		(span) => span.isAiSpan && classifySpan(span) === "agent" && !underAgent(span),
+		(span) => span.isAiSpan && classifyAiSpan(span) === "agent" && !underAiSpan(span),
 	)
 	if (agentRoots.length > 0) {
 		return agentRoots.map((span) => ({ span, kind: "agent-root" as const, id: `span:${span.spanId}` }))
@@ -241,9 +254,18 @@ function findAnchors(ordered: readonly AiSessionSpan[]): readonly TurnAnchor[] {
 	return [...byTrace].map(([traceId, span]) => ({ span, kind: "trace" as const, id: `trace:${traceId}` }))
 }
 
-function turnLabel(turnSpans: readonly AiSessionSpan[]): string | undefined {
+/**
+ * The turn's label: the newest user message the turn captured.
+ *
+ * The anchor is asked first — on a `chat`-shaped span `gen_ai.input.messages`
+ * is the whole history sent to the model, so a descendant several turns deep
+ * still carries turn 1's opening prompt.
+ */
+function turnLabel(anchor: AiSessionSpan, turnSpans: readonly AiSessionSpan[]): string | undefined {
+	const fromAnchor = lastUserMessageText(anchor.genAi.inputMessages)
+	if (fromAnchor !== undefined) return fromAnchor
 	for (const span of turnSpans) {
-		const text = firstUserMessageText(span.genAi.inputMessages)
+		const text = lastUserMessageText(span.genAi.inputMessages)
 		if (text !== undefined) return text
 	}
 	return undefined
@@ -253,28 +275,21 @@ function turnLabel(turnSpans: readonly AiSessionSpan[]): string | undefined {
  *  can be tens of kilobytes, and the title is one line. */
 const MAX_LABEL_LENGTH = 80
 
-// Frameworks prepend pseudo-XML context blocks to the user's message
-// (`<current_time>…</current_time>`, `<slack_channel_context>…`). They are
-// identical on every turn, so a label taken from one names nothing — it would
-// print the same title above the session and the same row on all eight turns.
-const TAG_BLOCK = /<([a-z_][\w.-]*)\b[^>]*>[\s\S]*?<\/\1>/gi
-const ORPHAN_TAG = /<\/?[a-z_][\w.-]*\b[^>]*>/gi
-// What survives the blocks is often injected metadata rather than prose: a
-// single `key: value` with no sentence around it.
-const KEY_VALUE_LINE = /^[\w .-]{1,32}:\s*\S*$/
-
 /**
- * The first user text inside a `gen_ai.input.messages` value.
+ * The newest user text inside a `gen_ai.input.messages` value.
  *
  * The value is captured JSON whose exact shape belongs to the vendor, so this
  * walks it and gives up rather than guessing: the documented shape is
  * `[{ role, parts: [{ type: "text", content }] }]`, and vendors also emit the
- * content as a bare string. Message capture is opt-in and off by default, so
- * returning `undefined` is the ordinary case, not a failure.
+ * content as a bare string. The LAST user entry is the prompt this call was
+ * made for; the ones before it are the chat history. Message capture is opt-in
+ * and off by default, so returning `undefined` is the ordinary case, not a
+ * failure.
  */
-export function firstUserMessageText(value: unknown): string | undefined {
+function lastUserMessageText(value: unknown): string | undefined {
 	if (!Array.isArray(value)) return undefined
-	for (const entry of value) {
+	for (let i = value.length - 1; i >= 0; i--) {
+		const entry: unknown = value[i]
 		if (!isRecord(entry) || entry.role !== "user") continue
 		const text = messageText(entry.parts) ?? messageText(entry.content)
 		if (text !== undefined) return text
@@ -300,19 +315,11 @@ function messageText(value: unknown): string | undefined {
 	return undefined
 }
 
-/**
- * The first line of a captured message that reads as something a person wrote.
- *
- * Injected context is dropped rather than truncated, and a message that is only
- * injected context has no label at all — the callers' fallbacks (the agent name
- * and start time for the title, "no captured message" for a turn row) say more
- * than `<current_time>2026-08-…` would.
- */
+/** The message's first non-empty line, collapsed to one line's worth of text. */
 function proseLine(value: string): string | undefined {
-	const stripped = value.replace(TAG_BLOCK, "\n").replace(ORPHAN_TAG, "\n")
-	for (const rawLine of stripped.split("\n")) {
+	for (const rawLine of value.split("\n")) {
 		const line = rawLine.trim().replace(/\s+/g, " ")
-		if (line.length === 0 || !/\p{L}/u.test(line) || KEY_VALUE_LINE.test(line)) continue
+		if (line.length === 0) continue
 		return line.length > MAX_LABEL_LENGTH ? `${line.slice(0, MAX_LABEL_LENGTH - 1)}…` : line
 	}
 	return undefined

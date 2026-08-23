@@ -2,11 +2,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
 	AiSessionsInternalApiGroup,
+	AI_SESSION_SPANS_MAX_SPANS,
 	CurrentTenant,
 	V1SchemaErrors,
 	V1UnexpectedErrors,
 } from "@maple/domain/http"
-import { AI_SESSION_SPANS_MAX_SPANS } from "@maple/query-engine-integrations"
+
 import { WarehouseResponseLimitError } from "@maple/query-engine/execution"
 import { Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
@@ -21,6 +22,10 @@ import { HttpAiSessionsInternalLive } from "./ai-sessions.http"
  * The truncation contract of `POST /internal/ai-sessions/spans`: what the row
  * cap does, and what the byte cap does instead. Both are one-off shapes the
  * other warehouse reads have no equivalent of.
+ *
+ * Plus that `mapAiSpans` actually puts values on the wire, and that the facets
+ * split agrees with the literals the query emits — both sides of which are
+ * bare strings.
  */
 
 class AiSessionsOnlyApi extends HttpApi.make("MapleInternalApi")
@@ -29,6 +34,9 @@ class AiSessionsOnlyApi extends HttpApi.make("MapleInternalApi")
 	.middleware(V1UnexpectedErrors) {}
 
 const SESSION_ID = "wrun_01KZTEST"
+const TRACE_ID = "7f3a4b5c6d7e8f901234567890abcdef"
+const WINDOW = { startTime: "2026-08-19 09:00:00", endTime: "2026-08-19 11:00:00" }
+const SPANS_BODY = { sessionId: SESSION_ID, ...WINDOW }
 
 const TENANT = new CurrentTenant.TenantSchema({
 	orgId: "org_ai_sessions" as CurrentTenant.TenantSchema["orgId"],
@@ -46,8 +54,8 @@ const AuthorizationStubLayer = Layer.succeed(
 
 /** One warehouse row, in the wire shape `aiSessionSpansRowSchema` decodes. */
 const spanRow = (index: number) => ({
-	traceId: "trace-1",
-	spanId: `span-${index}`,
+	traceId: TRACE_ID,
+	spanId: index.toString(16).padStart(16, "0"),
 	parentSpanId: "",
 	spanName: "chat",
 	spanKind: "SPAN_KIND_CLIENT",
@@ -69,29 +77,22 @@ const makeHarness = (overrides: Partial<WarehouseQueryServiceApi>) => {
 	)
 	const { handler, dispose } = HttpRouter.toWebHandler(routes as never, { disableLogger: true })
 
-	const spans = async () => {
+	const post = async (path: string, body: unknown) => {
 		// SAFETY: the handler's second argument is the Worker environment context,
-		// and this route reads nothing out of it.
+		// and these routes read nothing out of it.
 		const response = await handler(
-			new Request("http://maple.test/internal/ai-sessions/spans", {
+			new Request(`http://maple.test${path}`, {
 				method: "POST",
 				headers: { authorization: "Bearer test-token", "content-type": "application/json" },
-				body: JSON.stringify({
-					sessionId: SESSION_ID,
-					startTime: "2026-08-19 09:00:00",
-					endTime: "2026-08-19 11:00:00",
-				}),
+				body: JSON.stringify(body),
 			}),
 			Context.empty() as never,
 		)
 		const text = await response.text()
-		return {
-			status: response.status,
-			body: text.length === 0 ? null : (JSON.parse(text) as Record<string, unknown>),
-		}
+		return { status: response.status, body: JSON.parse(text) as Record<string, unknown> }
 	}
 
-	return { spans, dispose }
+	return { post, dispose }
 }
 
 describe("POST /internal/ai-sessions/spans", () => {
@@ -104,9 +105,10 @@ describe("POST /internal/ai-sessions/spans", () => {
 		})
 
 		try {
-			const response = await harness.spans()
+			const response = await harness.post("/internal/ai-sessions/spans", SPANS_BODY)
 			expect(response.status).toBe(413)
-			expect(response.body?._tag).toBe("@maple/http/ai-sessions/AiSessionTooLargeError")
+			expect(response.body._tag).toBe("@maple/http/ai-sessions/AiSessionTooLargeError")
+			expect(response.body.sessionId).toBe(SESSION_ID)
 		} finally {
 			await harness.dispose()
 		}
@@ -121,10 +123,10 @@ describe("POST /internal/ai-sessions/spans", () => {
 		})
 
 		try {
-			const response = await harness.spans()
+			const response = await harness.post("/internal/ai-sessions/spans", SPANS_BODY)
 			expect(response.status).toBe(200)
-			expect(response.body?.truncated).toBe(true)
-			expect(response.body?.data).toHaveLength(AI_SESSION_SPANS_MAX_SPANS)
+			expect(response.body.truncated).toBe(true)
+			expect(response.body.data).toHaveLength(AI_SESSION_SPANS_MAX_SPANS)
 		} finally {
 			await harness.dispose()
 		}
@@ -137,10 +139,61 @@ describe("POST /internal/ai-sessions/spans", () => {
 		})
 
 		try {
-			const response = await harness.spans()
+			const response = await harness.post("/internal/ai-sessions/spans", SPANS_BODY)
 			expect(response.status).toBe(200)
-			expect(response.body?.truncated).toBe(false)
-			expect(response.body?.data).toHaveLength(2)
+			expect(response.body.truncated).toBe(false)
+			expect(response.body.data).toHaveLength(2)
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("puts the mapped attribute values on the wire, not just the keys", async () => {
+		const harness = makeHarness({
+			compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows([spanRow(0)]).pipe(Effect.orDie),
+		})
+
+		try {
+			const response = await harness.post("/internal/ai-sessions/spans", SPANS_BODY)
+			const [span] = response.body.data as ReadonlyArray<Record<string, unknown>>
+			expect(span).toMatchObject({
+				sessionId: SESSION_ID,
+				spanName: "chat",
+				serviceName: "agent-runner",
+				isAiSpan: true,
+				genAi: { operationName: "chat" },
+			})
+		} finally {
+			await harness.dispose()
+		}
+	})
+})
+
+describe("POST /internal/ai-sessions/facets", () => {
+	// `pick("vendor")` in the handler and `facet("vendor", …)` in the query are
+	// two independent string literals in two packages. If either drifts both
+	// arrays come back empty behind a 200 and the sidebar silently loses every
+	// option — a failure that looks exactly like "no data in this window".
+	it("splits one union result into the two dimensions the sidebar reads", async () => {
+		const harness = makeHarness({
+			compiledQuery: (_tenant, compiled) =>
+				compiled
+					.decodeRows([
+						{ facetType: "vendor", name: "eve", count: 7 },
+						{ facetType: "service", name: "agent-runner", count: 4 },
+						{ facetType: "vendor", name: "vercel_ai_sdk", count: 2 },
+					])
+					.pipe(Effect.orDie),
+		})
+
+		try {
+			const response = await harness.post("/internal/ai-sessions/facets", WINDOW)
+			expect(response.status).toBe(200)
+			expect(response.body.vendors).toEqual([
+				{ name: "eve", count: 7 },
+				{ name: "vercel_ai_sdk", count: 2 },
+			])
+			expect(response.body.services).toEqual([{ name: "agent-runner", count: 4 }])
 		} finally {
 			await harness.dispose()
 		}

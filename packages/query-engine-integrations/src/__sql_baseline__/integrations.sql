@@ -53,8 +53,6 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
           AND TraceId IN (SELECT
           TraceId AS TraceId
         FROM traces
@@ -94,8 +92,6 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
           AND TraceId IN (SELECT
           TraceId AS TraceId
         FROM traces

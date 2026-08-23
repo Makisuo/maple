@@ -250,7 +250,7 @@ export const aiSessionsFacetsResultAtom = makeQueryAtomFamily(getAiSessionsFacet
 })
 
 export const aiSessionSpansResultAtom = makeQueryAtomFamily(getAiSessionSpans, {
-	staleTime: 30_000,
+	staleTime: 60_000,
 })
 
 export const replaysFacetsResultAtom = makeQueryAtomFamily(getReplaysFacets, {

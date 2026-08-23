@@ -1,9 +1,9 @@
 // Span builders for the colocated tests in this directory.
 //
-// The real shape has fifteen required fields and a sixty-key `genAi` bag, so a
-// test that spelled one out per span would be unreadable and would say nothing
-// about the rule under test. Everything here defaults to "an ordinary AI span";
-// each test overrides only the attribute its rule reads.
+// The real shape has a dozen required fields and a sixty-five-key `genAi` bag,
+// so a test that spelled one out per span would be unreadable and would say
+// nothing about the rule under test. Everything here defaults to "an ordinary
+// AI span"; each test overrides only the attribute its rule reads.
 
 import type { AiSessionGenAiValues, AiSessionSpan } from "@maple/domain/http"
 import { formatWarehouseDateTimeMs } from "@maple/query-engine"
@@ -11,9 +11,9 @@ import { formatWarehouseDateTimeMs } from "@maple/query-engine"
 /** Session start, fixed so offsets in the tests read as seconds into the session. */
 export const T0 = Date.UTC(2026, 7, 19, 10, 0, 0)
 
-export const at = (offsetMs: number): string => formatWarehouseDateTimeMs(T0 + offsetMs)
+const at = (offsetMs: number): string => formatWarehouseDateTimeMs(T0 + offsetMs)
 
-export interface SpanInput {
+interface SpanInput {
 	readonly spanId: string
 	readonly parentSpanId?: string
 	readonly traceId?: string
@@ -31,57 +31,44 @@ export interface SpanInput {
 }
 
 export function makeSpan(input: SpanInput): AiSessionSpan {
-	const span: AiSessionSpan = {
+	return {
 		traceId: input.traceId ?? "trace-1",
 		spanId: input.spanId,
 		parentSpanId: input.parentSpanId ?? "",
 		spanName: input.spanName ?? "gen_ai.chat",
-		spanKind: "SPAN_KIND_CLIENT",
+		spanKind: "Internal",
 		serviceName: input.serviceName ?? "agent-runner",
 		timestamp: at(input.startMs),
 		durationMs: input.durationMs,
 		statusCode: input.statusCode ?? "Unset",
 		statusMessage: input.statusMessage ?? "",
-		integrationId: "gen_ai",
-		isAiSpan: input.isAiSpan ?? true,
+		// The server derives this rather than accepting it, so the default follows
+		// the same evidence: a vendor stamp or decoded gen_ai attributes.
+		isAiSpan: input.isAiSpan ?? (input.vendorId !== undefined || input.genAi !== undefined),
+		vendorId: input.vendorId,
+		sessionId: input.sessionId,
 		genAi: input.genAi ?? {},
 	}
-	// `vendorId` and `sessionId` are optional keys on the wire shape: present or
-	// absent, never present-and-undefined.
-	const withVendor = input.vendorId === undefined ? span : { ...span, vendorId: input.vendorId }
-	return input.sessionId === undefined ? withVendor : { ...withVendor, sessionId: input.sessionId }
 }
 
-/** A model call. Tokens are the five `gen_ai.usage.*` buckets, in order. */
+/** A model call. Usage goes in `genAi` under its `gen_ai.usage.*` names. */
 export function llmSpan({
 	model,
-	tokens,
 	ttftSeconds,
 	...input
 }: SpanInput & {
 	readonly model?: string
-	readonly tokens?: readonly [number, number, number, number, number]
 	readonly ttftSeconds?: number
 }): AiSessionSpan {
-	const base: AiSessionGenAiValues = { operationName: "chat" }
-	const withModel = model === undefined ? base : { ...base, responseModel: model }
-	const withTtft =
-		ttftSeconds === undefined ? withModel : { ...withModel, responseTimeToFirstChunk: ttftSeconds }
-	const withUsage =
-		tokens === undefined
-			? withTtft
-			: {
-					...withTtft,
-					usageInputTokens: tokens[0],
-					usageCacheReadInputTokens: tokens[1],
-					usageCacheCreationInputTokens: tokens[2],
-					usageOutputTokens: tokens[3],
-					usageReasoningOutputTokens: tokens[4],
-				}
 	return makeSpan({
 		...input,
 		spanName: input.spanName ?? "chat",
-		genAi: { ...withUsage, ...input.genAi },
+		genAi: {
+			operationName: "chat",
+			responseModel: model,
+			responseTimeToFirstChunk: ttftSeconds,
+			...input.genAi,
+		},
 	})
 }
 
@@ -118,10 +105,10 @@ interface OtelMessage {
 	readonly parts: readonly OtelTextPart[]
 }
 
-/** An OTel `gen_ai.input.messages` value carrying one user message. */
-export function userMessages(text: string): readonly OtelMessage[] {
+/** An OTel `gen_ai.input.messages` value: a system message and the user turns. */
+export function userMessages(...texts: readonly string[]): readonly OtelMessage[] {
 	return [
 		{ role: "system", parts: [{ type: "text", content: "you are a helpful agent" }] },
-		{ role: "user", parts: [{ type: "text", content: text }] },
+		...texts.map((text): OtelMessage => ({ role: "user", parts: [{ type: "text", content: text }] })),
 	]
 }

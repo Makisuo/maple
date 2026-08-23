@@ -1,26 +1,35 @@
-import { useMemo, type ReactNode } from "react"
-import { createFileRoute, useRouterState } from "@tanstack/react-router"
+import { useCallback, useMemo, type ReactNode } from "react"
+import { createFileRoute, Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Schema } from "effect"
 
 import type { AiSessionSpan } from "@maple/domain/http"
-import { formatWarehouseDateTime } from "@maple/query-engine"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { toEpochMs } from "@maple/ui/lib/time-format"
+import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
 import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Button } from "@maple/ui/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { NotFoundError } from "@/components/route-error"
 import { QueryErrorState } from "@/components/common/query-error-state"
-import { vendorLabel } from "@/components/agent-sessions/agent-sessions-list"
 import { SessionHeader } from "@/components/agent-sessions/session-detail/session-header"
 import { SessionViews } from "@/components/agent-sessions/session-detail/session-views"
+import type { TraceSelection } from "@/lib/agent-sessions/span-filters"
+import { TraceSpanDetailPanel } from "@/components/traces/trace-span-detail-panel"
+import { useAppHotkey } from "@/hooks/use-app-hotkey"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
-import { useTimezonePreference } from "@/hooks/use-timezone-preference"
-import { buildSessionSummary } from "@/lib/agent-sessions/session-summary"
+import {
+	breadcrumbSessionId,
+	buildBackToSessionsHref,
+	resolveWindow,
+} from "@/lib/agent-sessions/session-window"
+import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns } from "@/lib/agent-sessions/session-turns"
+import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { displayError } from "@/lib/error-messages"
-import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import { aiSessionSpansResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 
 const agentSessionSearchSchema = Schema.Struct({
@@ -29,20 +38,17 @@ const agentSessionSearchSchema = Schema.Struct({
 	// without them the query scans every retained partition.
 	t: Schema.optional(Schema.String),
 	end: Schema.optional(Schema.String),
+	// The in-page trace pane: the trace it shows and, optionally, the span it has
+	// focused. In the URL rather than component state so a pane the reader opened
+	// survives a reload and travels in a pasted link.
+	//
+	// Checked, not bare: the pane decodes this through the `TraceId` brand with
+	// `decodeSync`, so a hand-edited `?trace=` or `?trace=%20` would throw during
+	// render — past the pane's own error branch and into the router's error
+	// component. Rejecting it here drops the param instead.
+	trace: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())),
+	span: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())),
 })
-
-// Padding around the session's own window, so a session that straddles the list
-// page's range edge still arrives whole. It is asymmetric because the hint is:
-// the list clamps a row's start to the list's own window, so a session that began
-// before the visible range reports its start as the range edge and reading from
-// there alone silently drops its opening turns. The end needs no such allowance —
-// a session running past the range edge is still running now.
-const WINDOW_START_PADDING_MS = 24 * 60 * 60 * 1000
-const WINDOW_END_PADDING_MS = 60 * 60 * 1000
-
-/** Deep link with no hints: look back far enough to find most sessions, and
- *  accept the slower read that comes with it. */
-const FALLBACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 const SESSION_TOO_LARGE_TAG = "@maple/http/ai-sessions/AiSessionTooLargeError"
 
@@ -68,59 +74,75 @@ function AgentSessionDetailPage() {
 function AgentSessionDetailContent() {
 	const { sessionId } = Route.useParams()
 	const search = Route.useSearch()
-	const queryWindow = useMemo(() => resolveWindow(search.t, search.end), [search.t, search.end])
+	const queryWindow = useMemo(() => resolveWindow(search.t, search.end, Date.now()), [search.t, search.end])
 	const result = useAtomValue(aiSessionSpansResultAtom({ data: { sessionId, ...queryWindow } }))
 
 	return Result.builder(result)
 		.onInitial(() => (
 			<SessionShell sessionId={sessionId}>
-				<DashboardLayout.Sticky>
-					<Skeleton className="h-7 w-80" />
-					<Skeleton className="h-10 w-56" />
-					<Skeleton className="h-2.5 w-full rounded-full" />
-					<div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-						{Array.from({ length: 5 }).map((_, index) => (
-							<Skeleton key={index} className="h-20" />
-						))}
-					</div>
-				</DashboardLayout.Sticky>
-				<DashboardLayout.Fill>
-					<div className="space-y-1 px-4">
-						{Array.from({ length: 12 }).map((_, index) => (
-							<Skeleton key={index} className="h-6 w-full" />
-						))}
-					</div>
-				</DashboardLayout.Fill>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<Skeleton className="h-9 w-80" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Fill>
+						<div className="space-y-4 p-4">
+							<Skeleton className="h-8 w-44" />
+							<Skeleton className="h-1.5 w-full rounded-full" />
+							{/* The same container-query ladder `SessionHeader`'s stat band uses,
+							    so the page doesn't reflow on resolve. */}
+							<div className="@container grid grid-cols-1 gap-4 @2xl:grid-cols-2 @3xl:grid-cols-3 @4xl:grid-cols-5">
+								{Array.from({ length: 5 }).map((_, index) => (
+									<Skeleton key={index} className="h-20" />
+								))}
+							</div>
+						</div>
+						<div className="space-y-1 px-4">
+							{Array.from({ length: 12 }).map((_, index) => (
+								<Skeleton key={index} className="h-6 w-full" />
+							))}
+						</div>
+					</DashboardLayout.Fill>
+				</DashboardLayout.Content>
 			</SessionShell>
 		))
 		.onError((error) => (
 			<SessionShell sessionId={sessionId}>
-				<DashboardLayout.Scroll>
-					<QueryErrorState
-						error={error}
-						// The 413 describes itself precisely ("Session is too large to
-						// load"); overriding it would replace a specific, actionable
-						// message with a generic one.
-						titleOverride={
-							displayError(error)._tag === SESSION_TOO_LARGE_TAG
-								? undefined
-								: "Failed to load this agent session"
-						}
-					/>
-				</DashboardLayout.Scroll>
-			</SessionShell>
-		))
-		.onSuccess((value) => (
-			<SessionShell sessionId={sessionId}>
-				{value.data.length === 0 ? (
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title={breadcrumbSessionId(sessionId)} />
+					</DashboardLayout.Sticky>
 					<DashboardLayout.Scroll>
-						<EmptySession sessionId={sessionId} />
+						<QueryErrorState
+							error={error}
+							// The 413 describes itself precisely ("Session is too large to
+							// load"); overriding it would replace a specific, actionable
+							// message with a generic one.
+							titleOverride={
+								displayError(error)._tag === SESSION_TOO_LARGE_TAG
+									? undefined
+									: "Failed to load this agent session"
+							}
+						/>
 					</DashboardLayout.Scroll>
-				) : (
-					<SessionDetailBody sessionId={sessionId} spans={value.data} truncated={value.truncated} />
-				)}
+				</DashboardLayout.Content>
 			</SessionShell>
 		))
+		.onSuccess((value) =>
+			value.data.length === 0 ? (
+				<SessionShell sessionId={sessionId}>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title={breadcrumbSessionId(sessionId)} />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<EmptySession sessionId={sessionId} />
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</SessionShell>
+			) : (
+				<SessionDetailBody sessionId={sessionId} spans={value.data} truncated={value.truncated} />
+			),
+		)
 		.render()
 }
 
@@ -133,41 +155,128 @@ function SessionDetailBody({
 	spans: readonly AiSessionSpan[]
 	truncated: boolean
 }) {
-	const { effectiveTimezone } = useTimezonePreference()
 	const turns = useMemo(() => buildSessionTurns(spans), [spans])
-	const summary = useMemo(() => buildSessionSummary(spans, turns, Date.now()), [spans, turns])
+	const summary = useMemo(() => buildSessionSummary({ spans, turns }), [spans, turns])
+
+	const search = Route.useSearch()
+	const navigate = useNavigate({ from: Route.fullPath })
+
+	// Memoized because `SessionViews` and the views below it key their own work on
+	// this object.
+	const selection: TraceSelection | undefined = useMemo(
+		() => (search.trace === undefined ? undefined : { traceId: search.trace, spanId: search.span }),
+		[search.trace, search.span],
+	)
+
+	const openTrace = useCallback(
+		(target: TraceSelection) => {
+			navigate({
+				search: (prev: Record<string, unknown>) => ({
+					...prev,
+					trace: target.traceId,
+					span: target.spanId,
+				}),
+				// Opening the pane is a step the reader may want Back to undo;
+				// refocusing inside an open pane is not.
+				replace: search.trace === target.traceId,
+			})
+		},
+		[navigate, search.trace],
+	)
+
+	const closeTrace = useCallback(() => {
+		navigate({
+			search: (prev: Record<string, unknown>) => ({ ...prev, trace: undefined, span: undefined }),
+			replace: true,
+		})
+	}, [navigate])
+
+	// Esc closes the pane. The dialog guard defers to any sheet the panel opened,
+	// so that closes first.
+	useAppHotkey("list.clear", closeTrace, { enabled: selection !== undefined })
+
+	// The pane's warehouse read needs a timestamp inside the trace to stay off the
+	// full partition scan. Deliberately the trace's first span here rather than the
+	// focused one: a per-span hint re-keys the pane's atom on every click inside
+	// the same trace, re-running the hierarchy query against a shifted window.
+	const paneTimestamp =
+		selection === undefined
+			? search.t
+			: (spans.find((span) => span.traceId === selection.traceId)?.timestamp ?? search.t)
 
 	// Message content is opt-in and off by default, so most sessions have no
-	// opening user message to title the page with. Naming the agent and when it
-	// ran is the next most identifying thing about it.
-	const fallbackTitle = `${summary.agentNames[0] ?? primaryVendorLabel(summary.vendorIds)} · ${formatTimestampInTimezone(summary.startMs, { timeZone: effectiveTimezone })}`
+	// opening user message to title the page with.
+	const title = summary.title ?? breadcrumbSessionId(sessionId)
 
 	return (
-		<>
-			<DashboardLayout.Sticky>
-				<SessionHeader summary={summary} sessionId={sessionId} fallbackTitle={fallbackTitle} />
-				{truncated && (
-					<p className="rounded-md border border-warning/30 bg-warning/8 px-3 py-2 text-xs text-warning-foreground">
-						This session has more spans than one response carries — everything after the{" "}
-						{summary.spanCount.toLocaleString()} spans below is missing, so the totals and the
-						waterfall both stop early.
-					</p>
+		<SessionShell sessionId={sessionId}>
+			<DashboardLayout.Content>
+				<DashboardLayout.Sticky>
+					<DashboardLayout.Header
+						titleContent={
+							<div className="flex min-w-0 items-center gap-2">
+								<DashboardLayout.Title title={title}>{title}</DashboardLayout.Title>
+								{summary.failed && <Badge variant="error">Failed</Badge>}
+							</div>
+						}
+						description={sessionSubtitle(summary)}
+					/>
+				</DashboardLayout.Sticky>
+				{/* `pt-0` (the stats block carries the padding instead) so the views'
+				    sticky control bar pins flush to the scroller's top — sticky offsets
+				    resolve against the padding edge. */}
+				<DashboardLayout.Scroll className="pt-0">
+					<div className="shrink-0 space-y-4 py-4">
+						<SessionHeader summary={summary} />
+						{truncated && (
+							<Alert variant="warning">
+								<AlertDescription>
+									This session has more spans than one response carries — everything after
+									the {summary.spanCount.toLocaleString()} spans below is missing, so the
+									totals and the waterfall both stop early.
+								</AlertDescription>
+							</Alert>
+						)}
+					</div>
+					{/* Content-driven height inside the scroller: `shrink-0` because a
+					    scroll container's flex items shrink to fit before they overflow,
+					    which would collapse the views instead of scrolling them; `grow`
+					    (basis auto, not `flex-1`'s basis 0) so short content still fills
+					    the viewport; the floor keeps the empty states from a sliver. */}
+					<div className="flex min-h-64 shrink-0 grow flex-col">
+						<SessionViews
+							turns={turns}
+							summary={summary}
+							selection={selection}
+							onOpenTrace={openTrace}
+						/>
+					</div>
+				</DashboardLayout.Scroll>
+			</DashboardLayout.Content>
+			{/* Inline beside the content above `lg`, a sheet below it that opens on
+			    selection. Empty children render no rail at all. */}
+			<DashboardLayout.RightPanel
+				title="Span detail"
+				width="w-[28rem]"
+				open={selection !== undefined}
+				onOpenChange={(open) => {
+					if (!open) closeTrace()
+				}}
+			>
+				{selection === undefined ? undefined : (
+					<TraceSpanDetailPanel
+						traceId={selection.traceId}
+						timestamp={paneTimestamp}
+						selectedSpanId={selection.spanId}
+						onClose={closeTrace}
+					/>
 				)}
-			</DashboardLayout.Sticky>
-			<DashboardLayout.Fill>
-				{/* A floor rather than `min-h-0`: the header above is a sticky sibling
-				    that cannot shrink, so on a short window this pane is what gives way,
-				    and at zero the tabs and the waterfall are gone rather than scrolled.
-				    16rem still lets the pane shrink far below its content — the waterfall
-				    owns its own scrolling. */}
-				<div className="flex min-h-64 flex-1 flex-col px-4 pb-2">
-					<SessionViews turns={turns} summary={summary} />
-				</div>
-			</DashboardLayout.Fill>
-		</>
+			</DashboardLayout.RightPanel>
+		</SessionShell>
 	)
 }
 
+/** Root, breadcrumbs, and the body row every branch fills with a `Content` column. */
 function SessionShell({ sessionId, children }: { sessionId: string; children: ReactNode }) {
 	const searchStr = useRouterState({ select: (state) => state.location.searchStr })
 
@@ -179,71 +288,41 @@ function SessionShell({ sessionId, children }: { sessionId: string; children: Re
 					{ label: breadcrumbSessionId(sessionId) },
 				]}
 			/>
-			<DashboardLayout.Body>
-				<DashboardLayout.Content>{children}</DashboardLayout.Content>
-			</DashboardLayout.Body>
+			<DashboardLayout.Body>{children}</DashboardLayout.Body>
 		</DashboardLayout.Root>
 	)
 }
 
 function EmptySession({ sessionId }: { sessionId: string }) {
 	return (
-		<div className="flex flex-col items-center justify-center rounded-xl border border-border border-dashed px-6 py-20 text-center">
-			<div className="mb-4 grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
-				<ChatBubbleSparkleIcon className="size-6" />
-			</div>
-			<p className="font-medium text-sm">No spans for this session</p>
-			<p className="mt-1.5 max-w-md text-muted-foreground text-sm">
-				Nothing was found for <span className="font-mono">{sessionId}</span> in this time range. Open
-				it from the Agent Sessions list, or widen the range there first.
-			</p>
-		</div>
+		<Empty>
+			<EmptyHeader>
+				<EmptyMedia variant="icon">
+					<ChatBubbleSparkleIcon />
+				</EmptyMedia>
+				<EmptyTitle>No spans for this session</EmptyTitle>
+				<EmptyDescription>
+					Nothing was found for <span className="font-mono">{sessionId}</span>. Open it from the
+					Agent Sessions list, or widen the range there first.
+				</EmptyDescription>
+			</EmptyHeader>
+			<Button variant="outline" size="sm" render={<Link to="/agent-sessions" />}>
+				Back to agent sessions
+			</Button>
+		</Empty>
 	)
 }
 
-/** Everything but this page's own params, so Back lands on the list the reader
- *  left — same time range, same filters. Mirrors `buildBackToTracesHref` in
- *  traces/$traceId, including reading the raw `searchStr`: the list owns its
- *  search schema, and re-encoding it through this route's would drop it. */
-function buildBackToSessionsHref(searchStr: string): string {
-	const params = new URLSearchParams(searchStr)
-	params.delete("t")
-	params.delete("end")
-	const nextSearch = params.toString()
-	return nextSearch ? `/agent-sessions?${nextSearch}` : "/agent-sessions"
-}
-
-/** Session ids belong to the framework that wrote them, and the long ones carry
- *  their entropy at both ends — `slice(0, 8)` of a `wrun_01KZ…` id renders the
- *  word "wrun_01K", which identifies nothing. */
-const BREADCRUMB_ID_MAX_CHARS = 24
-
-function breadcrumbSessionId(sessionId: string): string {
-	if (sessionId.length <= BREADCRUMB_ID_MAX_CHARS) return sessionId
-	return `${sessionId.slice(0, 9)}…${sessionId.slice(-4)}`
+/** The identifying facts the list row carried and this page had dropped. */
+function sessionSubtitle(summary: SessionSummary): string {
+	return [
+		primaryVendorLabel(summary.vendorIds),
+		formatRelativeTimeOrDate(summary.startMs),
+		`${summary.traceCount.toLocaleString()} trace${summary.traceCount === 1 ? "" : "s"}`,
+	].join(" · ")
 }
 
 function primaryVendorLabel(vendorIds: readonly string[]): string {
 	const vendorId = vendorIds[0]
 	return vendorId === undefined ? "Agent session" : vendorLabel(vendorId)
-}
-
-function resolveWindow(t: string | undefined, end: string | undefined) {
-	const startHint = t === undefined ? Number.NaN : toEpochMs(t)
-	// A link that carries only `t` (copied from a trace, say) still narrows the
-	// read: the session started there, so pad around that instant alone.
-	const endHint = end === undefined ? startHint : toEpochMs(end)
-
-	if (Number.isNaN(startHint) || Number.isNaN(endHint)) {
-		const now = Date.now()
-		return {
-			startTime: formatWarehouseDateTime(now - FALLBACK_WINDOW_MS),
-			endTime: formatWarehouseDateTime(now),
-		}
-	}
-
-	return {
-		startTime: formatWarehouseDateTime(startHint - WINDOW_START_PADDING_MS),
-		endTime: formatWarehouseDateTime(endHint + WINDOW_END_PADDING_MS),
-	}
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-import { agentSpan, llmSpan, makeSpan, toolSpan, userMessages } from "./span-fixtures"
-import { buildSessionTurns, classifySpan, firstUserMessageText, isLlmCall, spanTtftMs } from "./session-turns"
+import { agentSpan, llmSpan, makeSpan, toolSpan, userMessages } from "./span-test-support"
+import { buildSessionTurns, classifyAiSpan, isLlmCall, spanTtftMs } from "./session-turns"
 
 const SECOND = 1000
 
@@ -200,7 +200,7 @@ describe("buildSessionTurns", () => {
 		expect(turns[0]!.durationMs).toBe(25 * SECOND)
 	})
 
-	it("takes its label from the first captured user message", () => {
+	it("takes its label from a captured user message", () => {
 		const turns = buildSessionTurns([
 			agentSpan({ spanId: "agent", startMs: 0, durationMs: 10 * SECOND }),
 			llmSpan({
@@ -214,6 +214,56 @@ describe("buildSessionTurns", () => {
 
 		expect(turns[0]!.label).toBe("fix the webhook retry backoff")
 		expect(turns[0]!.agentName).toBe("billing-agent")
+	})
+
+	it("labels each turn with its own prompt, not the history's first one", () => {
+		// A chat-shaped span carries the WHOLE conversation, so turn 2's messages
+		// open with turn 1's prompt.
+		const turns = buildSessionTurns([
+			agentSpan({ spanId: "agent-1", startMs: 0, durationMs: 10 * SECOND }),
+			llmSpan({
+				spanId: "llm-1",
+				parentSpanId: "agent-1",
+				startMs: SECOND,
+				durationMs: SECOND,
+				genAi: { inputMessages: userMessages("fix the webhook retry backoff") },
+			}),
+			agentSpan({ spanId: "agent-2", startMs: 60 * SECOND, durationMs: 10 * SECOND }),
+			llmSpan({
+				spanId: "llm-2",
+				parentSpanId: "agent-2",
+				startMs: 61 * SECOND,
+				durationMs: SECOND,
+				genAi: {
+					inputMessages: userMessages("fix the webhook retry backoff", "now add a test for it"),
+				},
+			}),
+		])
+
+		expect(turns.map((turn) => turn.label)).toEqual([
+			"fix the webhook retry backoff",
+			"now add a test for it",
+		])
+	})
+
+	it("prefers the anchor's own messages over a descendant's history", () => {
+		const turns = buildSessionTurns([
+			agentSpan({
+				spanId: "agent",
+				startMs: 0,
+				durationMs: 10 * SECOND,
+				genAi: { operationName: "invoke_agent", inputMessages: userMessages("deploy the worker") },
+			}),
+			llmSpan({
+				spanId: "llm",
+				parentSpanId: "agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				genAi: { inputMessages: userMessages("something the model was handed later") },
+			}),
+		])
+
+		expect(turns[0]!.label).toBe("deploy the worker")
 	})
 
 	it("has no label when message content was not captured", () => {
@@ -242,16 +292,33 @@ describe("buildSessionTurns", () => {
 		expect(retriedTurn!.failed).toBe(false)
 	})
 
+	it("does not fail a turn on the app's own errored span", () => {
+		// The query returns the app's HTTP/DB spans too; a 5xx on the gateway that
+		// carried the request is not the agent failing.
+		const [turn] = buildSessionTurns([
+			agentSpan({ spanId: "agent", startMs: SECOND, durationMs: 10 * SECOND }),
+			makeSpan({
+				spanId: "route",
+				startMs: 0,
+				durationMs: 12 * SECOND,
+				isAiSpan: false,
+				statusCode: "Error",
+			}),
+		])
+
+		expect(turn!.failed).toBe(false)
+	})
+
 	it("returns nothing for a session with no spans", () => {
 		expect(buildSessionTurns([])).toEqual([])
 	})
 })
 
-describe("classifySpan", () => {
+describe("classifyAiSpan", () => {
 	it("reads gen_ai.operation.name when it is there", () => {
-		expect(classifySpan(llmSpan({ spanId: "a", startMs: 0, durationMs: 1 }))).toBe("inference")
-		expect(classifySpan(toolSpan({ spanId: "b", startMs: 0, durationMs: 1 }))).toBe("tool")
-		expect(classifySpan(agentSpan({ spanId: "c", startMs: 0, durationMs: 1 }))).toBe("agent")
+		expect(classifyAiSpan(llmSpan({ spanId: "a", startMs: 0, durationMs: 1 }))).toBe("inference")
+		expect(classifyAiSpan(toolSpan({ spanId: "b", startMs: 0, durationMs: 1 }))).toBe("tool")
+		expect(classifyAiSpan(agentSpan({ spanId: "c", startMs: 0, durationMs: 1 }))).toBe("agent")
 	})
 
 	it("accepts operation names outside the documented set", () => {
@@ -262,12 +329,16 @@ describe("classifySpan", () => {
 			genAi: { operationName: "agent_step" },
 		})
 
-		expect(classifySpan(vercelStep)).toBe("agent")
+		expect(classifyAiSpan(vercelStep)).toBe("agent")
 	})
 
 	it("falls back to the span name when the operation is not recorded", () => {
+		// A name-only AI span is one the ingest gateway stamped from its scope: a
+		// vendor id, no decoded gen_ai attributes.
 		const named = (spanName: string) =>
-			classifySpan(makeSpan({ spanId: "a", startMs: 0, durationMs: 1, spanName }))
+			classifyAiSpan(
+				makeSpan({ spanId: "a", startMs: 0, durationMs: 1, spanName, vendorId: "vercel_ai_sdk" }),
+			)
 
 		expect(named("ai.toolCall")).toBe("tool")
 		expect(named("workflow.run")).toBe("agent")
@@ -283,7 +354,7 @@ describe("classifySpan", () => {
 			isAiSpan: false,
 		})
 
-		expect(classifySpan(httpSpan)).toBe("other")
+		expect(classifyAiSpan(httpSpan)).toBe("other")
 	})
 })
 
@@ -292,7 +363,7 @@ describe("isLlmCall", () => {
 		expect(isLlmCall(llmSpan({ spanId: "a", startMs: 0, durationMs: 1 }))).toBe(true)
 	})
 
-	it("agrees with classifySpan on an operation name outside the documented set", () => {
+	it("agrees with classifyAiSpan on an operation name outside the documented set", () => {
 		const openSet = makeSpan({
 			spanId: "a",
 			startMs: 0,
@@ -300,7 +371,7 @@ describe("isLlmCall", () => {
 			genAi: { operationName: "generate_text", responseModel: "gpt-5" },
 		})
 
-		expect(classifySpan(openSet)).toBe("inference")
+		expect(classifyAiSpan(openSet)).toBe("inference")
 		expect(isLlmCall(openSet)).toBe(true)
 	})
 
@@ -312,7 +383,7 @@ describe("isLlmCall", () => {
 			genAi: { operationName: "embeddings" },
 		})
 
-		expect(classifySpan(embedding)).toBe("inference")
+		expect(classifyAiSpan(embedding)).toBe("inference")
 		expect(isLlmCall(embedding)).toBe(false)
 	})
 })
@@ -335,55 +406,40 @@ describe("spanTtftMs", () => {
 	})
 })
 
-describe("firstUserMessageText", () => {
+describe("turn labels", () => {
+	const labelFor = (inputMessages: unknown) =>
+		buildSessionTurns([
+			agentSpan({
+				spanId: "agent",
+				startMs: 0,
+				durationMs: SECOND,
+				genAi: { operationName: "invoke_agent", inputMessages },
+			}),
+		])[0]!.label
+
 	it("reads the user's text out of an OTel messages array", () => {
-		expect(firstUserMessageText(userMessages("hello"))).toBe("hello")
+		expect(labelFor(userMessages("hello"))).toBe("hello")
 	})
 
 	it("accepts content as a bare string", () => {
-		expect(firstUserMessageText([{ role: "user", content: "just run the whole suite" }])).toBe(
+		expect(labelFor([{ role: "user", content: "just run the whole suite" }])).toBe(
 			"just run the whole suite",
 		)
 	})
 
-	it("collapses whitespace and elides a very long message", () => {
-		expect(firstUserMessageText([{ role: "user", content: "  two   words  " }])).toBe("two words")
+	it("keeps the first line, collapses whitespace and elides a very long message", () => {
+		expect(labelFor([{ role: "user", content: "  two   words  " }])).toBe("two words")
+		expect(labelFor([{ role: "user", content: "first line\nsecond line" }])).toBe("first line")
 
-		const long = firstUserMessageText([{ role: "user", content: "x".repeat(500) }])
+		const long = labelFor([{ role: "user", content: "x".repeat(500) }])
 		expect(long).toHaveLength(80)
 		expect(long?.endsWith("…")).toBe(true)
 	})
 
-	it("drops the pseudo-XML context frameworks inject, keeping the prose", () => {
-		const withContext = [
-			{
-				role: "user",
-				content:
-					"<current_time>2026-08-19T10:33:25Z</current_time>\n" +
-					"<slack_channel_context>\nchannel: #eng\nuser: U123\n</slack_channel_context>\n" +
-					"fix the webhook retry backoff",
-			},
-		]
-
-		expect(firstUserMessageText(withContext)).toBe("fix the webhook retry backoff")
-	})
-
-	it("has no label when the message is only injected context", () => {
-		expect(
-			firstUserMessageText([
-				{ role: "user", content: "<current_time>2026-08-19T10:33:25Z</current_time>" },
-			]),
-		).toBeUndefined()
-		// The block left open — its contents are metadata either way.
-		expect(
-			firstUserMessageText([{ role: "user", content: "<slack_channel_context>\nchannel: #eng" }]),
-		).toBeUndefined()
-	})
-
 	it("gives up rather than guessing on a shape it does not recognize", () => {
-		expect(firstUserMessageText(undefined)).toBeUndefined()
-		expect(firstUserMessageText("a plain string")).toBeUndefined()
-		expect(firstUserMessageText([{ role: "assistant", content: "hi" }])).toBeUndefined()
-		expect(firstUserMessageText([{ role: "user", content: [{ type: "image" }] }])).toBeUndefined()
+		expect(labelFor(undefined)).toBeUndefined()
+		expect(labelFor("a plain string")).toBeUndefined()
+		expect(labelFor([{ role: "assistant", content: "hi" }])).toBeUndefined()
+		expect(labelFor([{ role: "user", content: [{ type: "image" }] }])).toBeUndefined()
 	})
 })

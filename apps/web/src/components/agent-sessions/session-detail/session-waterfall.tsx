@@ -1,5 +1,4 @@
-import { useMemo, useRef, type ReactNode } from "react"
-import { Link } from "@tanstack/react-router"
+import { useMemo, type ReactNode } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
@@ -8,24 +7,31 @@ import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
 
-import { buildSessionAxis, type SessionAxis } from "@/lib/agent-sessions/active-axis"
+import { usePageScrollMargin } from "@/hooks/use-page-scroll-margin"
+import { buildSessionAxis, type AxisTick, type SessionAxis } from "@/lib/agent-sessions/session-axis"
 import {
-	countSessionTokens,
-	retriedSpanIds,
+	countTurnTokens,
+	spanTokenBuckets,
 	type IdleGap,
 	type SessionSummary,
 } from "@/lib/agent-sessions/session-summary"
 import {
-	classifySpan,
+	classifyAiSpan,
 	isLlmCall,
 	spanEndMs,
 	spanModel,
 	spanStartMs,
 	spanTtftMs,
 	type SessionTurn,
-	type SpanCategory,
+	type AiSpanCategory,
 } from "@/lib/agent-sessions/session-turns"
-import { CATEGORY_FILL, filterSpans, isDelegation, shortTarget } from "./span-visuals"
+import {
+	filterSpans,
+	isDelegation,
+	shortTarget,
+	type TraceSelection,
+} from "@/lib/agent-sessions/span-filters"
+import { CATEGORY_FILL } from "./span-visuals"
 
 // Row heights are fixed and known, so the virtualizer never has to measure.
 const TURN_ROW_HEIGHT = 30
@@ -33,37 +39,31 @@ const ROW_HEIGHT = 26
 /** Past this the indent eats the span name; deep agent trees are common. */
 const MAX_INDENT_DEPTH = 6
 const INDENT_PX = 14
+/** A last tick this close to the end anchors right instead of centring. */
+const AXIS_EDGE_FRACTION = 0.9
+/** Stable identity for the no-collapse case, so the axis memo can hold. */
+const NO_GAPS: readonly IdleGap[] = []
 
 const COL_SPAN = "w-[398px] max-w-[46%] min-w-0 shrink-0 flex items-center gap-1.5"
 const COL_MODEL = "hidden w-[150px] shrink-0 truncate px-2 text-muted-foreground @3xl:block"
-// Wider than the design's 84px, and `truncate` on top of that: the prompt figure
-// counts cache reads, which run to six digits on a real agent session, and the
-// product's type is monospace. Rows are absolutely positioned at a fixed height,
-// so a cell that wrapped to two lines would spill into the row below.
+/** Rows are fixed-height, so the cell truncates rather than wrapping into the row below. */
 const COL_TOKENS =
 	"hidden w-[104px] shrink-0 truncate px-2 text-right tabular-nums text-muted-foreground @3xl:block"
-// A margin, not padding: the bars and ticks inside are positioned in percent,
-// which resolves against the padding box and would ignore padding entirely.
+/** A margin, not padding: the bars inside position in percent, which resolves
+ *  against the padding box and would ignore padding entirely. */
 const COL_AXIS = "relative ml-3 min-w-0 flex-1 self-stretch"
 const COL_DUR = "w-[60px] shrink-0 pl-2 text-right tabular-nums"
 
-interface TraceLinkTarget {
-	readonly traceId: string
-	readonly timestamp: string
-}
-
 type WaterfallRow =
-	| { readonly kind: "trace"; readonly key: string; readonly link: TraceLinkTarget; readonly turns: string }
 	| {
 			readonly kind: "turn"
 			readonly key: string
 			readonly turn: SessionTurn
-			readonly hiddenCount: number
-			/** Set only when the turn is the whole of its trace band (B3). */
-			readonly link: TraceLinkTarget | undefined
+			/** Spans of the turn the filter kept, for the collapsed-row count. */
+			readonly visibleCount: number
 	  }
 	| { readonly kind: "span"; readonly key: string; readonly span: AiSessionSpan; readonly depth: number }
-	| { readonly kind: "gap"; readonly key: string; readonly gap: IdleGap; readonly collapsed: boolean }
+	| { readonly kind: "gap"; readonly key: string; readonly gap: IdleGap }
 
 interface SessionWaterfallProps {
 	turns: readonly SessionTurn[]
@@ -76,8 +76,10 @@ interface SessionWaterfallProps {
 	/** Expansion state lives in SessionViews so a Trace → Flow → Trace round-trip keeps it. */
 	collapsedTurns: ReadonlySet<string>
 	onToggleTurn: (turnId: string) => void
-	expandedGaps: ReadonlySet<string>
-	onToggleGap: (gapId: string) => void
+	/** The trace (and span) the page's trace pane is showing, for highlighting. */
+	selection: TraceSelection | undefined
+	/** Raised by every trace and span click; the page decides what "open" means. */
+	onOpenTrace: (target: TraceSelection) => void
 }
 
 export function SessionWaterfall({
@@ -88,84 +90,84 @@ export function SessionWaterfall({
 	collapseIdle,
 	collapsedTurns,
 	onToggleTurn,
-	expandedGaps,
-	onToggleGap,
+	selection,
+	onOpenTrace,
 }: SessionWaterfallProps) {
-	const scrollRef = useRef<HTMLDivElement>(null)
+	// The page scrolls as one, so the virtualizer rides the page's scroller.
+	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
 
 	const spansById = useMemo(
 		() => new Map(turns.flatMap((turn) => turn.spans).map((span) => [span.spanId, span])),
 		[turns],
 	)
-	const retried = useMemo(() => retriedSpanIds(turns), [turns])
 
+	const collapsedGaps = collapseIdle ? summary.idleGaps : NO_GAPS
 	const axis = useMemo(
-		() =>
-			buildSessionAxis({
-				startMs: summary.startMs,
-				endMs: summary.endMs,
-				collapsedGaps: collapseIdle
-					? summary.idleGaps.filter((gap) => !expandedGaps.has(gap.id))
-					: [],
-			}),
-		[summary.startMs, summary.endMs, summary.idleGaps, collapseIdle, expandedGaps],
+		() => buildSessionAxis({ startMs: summary.startMs, endMs: summary.endMs, collapsedGaps }),
+		[summary.startMs, summary.endMs, collapsedGaps],
 	)
 	const ticks = axis.ticks
 
 	const rows = useMemo(
-		() =>
-			buildRows({
-				turns,
-				gaps: collapseIdle ? summary.idleGaps : [],
-				expandedGaps,
-				collapsedTurns,
-				query,
-				agentSpansOnly,
-			}),
-		[turns, summary.idleGaps, collapseIdle, expandedGaps, collapsedTurns, query, agentSpansOnly],
+		() => buildRows({ turns, gaps: collapsedGaps, collapsedTurns, query, agentSpansOnly }),
+		[turns, collapsedGaps, collapsedTurns, query, agentSpansOnly],
 	)
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
-		getScrollElement: () => scrollRef.current,
+		getScrollElement,
 		estimateSize: (index) => (rows[index]!.kind === "turn" ? TURN_ROW_HEIGHT : ROW_HEIGHT),
 		getItemKey: (index) => rows[index]!.key,
 		overscan: 16,
+		scrollMargin,
 	})
 
 	return (
-		<div className="@container flex h-full min-h-0 flex-col">
-			<div className="flex h-7 shrink-0 items-center border-border border-b px-2.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
-				<span className={COL_SPAN}>Span</span>
-				<span className={COL_MODEL}>Model / target</span>
-				<span className={COL_TOKENS}>Tokens</span>
-				<span className={cn(COL_AXIS, "flex items-center")}>
-					{ticks.map((tick, index) => (
-						<span
-							key={tick.axisMs}
-							className={cn(
-								// The ruler is a reading of the clock, not a column name —
-								// the row's uppercase belongs to the headings alone.
-								"absolute whitespace-nowrap normal-case tabular-nums",
-								index === ticks.length - 1 && "-translate-x-full",
-							)}
-							style={{ left: `${(tick.axisMs / axis.totalMs) * 100}%` }}
-						>
-							{tick.label}
-						</span>
-					))}
-				</span>
-				<span className={COL_DUR}>Dur</span>
+		<div className="@container flex grow flex-col">
+			{/* Stacks under the views' sticky control bar, whose height that bar
+			    publishes as a variable, so the ruler stays readable while scrolling. */}
+			<div className="sticky top-[var(--session-controls-height,0px)] z-10 bg-background">
+				<div className="flex h-7 items-center border-border border-b px-2.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+					<span className={COL_SPAN}>Span</span>
+					<span className={COL_MODEL}>Model / target</span>
+					<span className={COL_TOKENS}>Tokens</span>
+					<span className={cn(COL_AXIS, "flex items-center")}>
+						{ticks.map((tick, index) => (
+							<span
+								key={tick.fraction}
+								className={cn(
+									// The ruler is a reading of the clock, not a column name.
+									"absolute whitespace-nowrap normal-case tabular-nums",
+									tickAnchor(index, ticks),
+								)}
+								style={{ left: `${tick.fraction * 100}%` }}
+							>
+								{tick.label}
+							</span>
+						))}
+						{/* Where a removed gap was: the seam is what stops the collapsed
+						    axis from reading as linear time. */}
+						{collapsedGaps.map((gap) => (
+							<span
+								key={gap.id}
+								aria-hidden
+								className="absolute inset-y-0 border-border border-l-2 border-dashed"
+								style={{ left: `${axis.fraction(gap.startMs) * 100}%` }}
+							/>
+						))}
+					</span>
+					<span className={COL_DUR}>Dur</span>
+				</div>
+
+				{axis.removedGapCount > 0 && (
+					<p className="border-border border-b px-2.5 py-1 text-[11px] text-muted-foreground">
+						Axis shows active time. {formatSessionDuration(axis.removedMs)} of idle removed across{" "}
+						{axis.removedGapCount} gap{axis.removedGapCount === 1 ? "" : "s"}.
+					</p>
+				)}
 			</div>
 
-			{axis.removedGapCount > 0 && (
-				<p className="shrink-0 border-border border-b px-2.5 py-1 text-[11px] text-muted-foreground">
-					Axis shows active time. {formatSessionDuration(axis.removedMs)} of idle removed across{" "}
-					{axis.removedGapCount} gap{axis.removedGapCount === 1 ? "" : "s"}.
-				</p>
-			)}
-
-			<div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+			<div ref={listRef}>
 				{rows.length === 0 ? (
 					<p className="px-2.5 py-8 text-center text-muted-foreground text-sm">
 						No spans match this filter.
@@ -178,15 +180,22 @@ export function SessionWaterfall({
 								<div
 									key={item.key}
 									className="absolute inset-x-0 top-0"
-									style={{ height: item.size, transform: `translateY(${item.start}px)` }}
+									style={{
+										height: item.size,
+										// `start` is in the page scroller's coordinates; the margin
+										// brings it back to this list's own.
+										transform: `translateY(${item.start - scrollMargin}px)`,
+									}}
 								>
-									{row.kind === "trace" && <TraceRule row={row} />}
 									{row.kind === "turn" && (
 										<TurnHeader
 											row={row}
+											turns={turns}
 											axis={axis}
 											collapsed={collapsedTurns.has(row.turn.id)}
 											onToggle={() => onToggleTurn(row.turn.id)}
+											selection={selection}
+											onOpenTrace={onOpenTrace}
 										/>
 									)}
 									{row.kind === "span" && (
@@ -194,13 +203,14 @@ export function SessionWaterfall({
 											row={row}
 											axis={axis}
 											spansById={spansById}
-											retried={retried}
-											singleService={summary.serviceNames.length <= 1}
+											selected={
+												selection?.spanId === row.span.spanId &&
+												selection.traceId === row.span.traceId
+											}
+											onOpenTrace={onOpenTrace}
 										/>
 									)}
-									{row.kind === "gap" && (
-										<GapRow row={row} onToggle={() => onToggleGap(row.gap.id)} />
-									)}
+									{row.kind === "gap" && <GapRow gap={row.gap} />}
 								</div>
 							)
 						})}
@@ -211,6 +221,14 @@ export function SessionWaterfall({
 	)
 }
 
+/** Labels sit centred on their instant; the ends anchor inward so a label can't
+ *  hang off the column. */
+function tickAnchor(index: number, ticks: readonly AxisTick[]): string {
+	if (index === 0) return ""
+	const atEnd = index === ticks.length - 1 && ticks[index]!.fraction > AXIS_EDGE_FRACTION
+	return atEnd ? "-translate-x-full" : "-translate-x-1/2"
+}
+
 /* -------------------------------------------------------------------------- */
 /* Rows                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -218,7 +236,6 @@ export function SessionWaterfall({
 function buildRows(input: {
 	turns: readonly SessionTurn[]
 	gaps: readonly IdleGap[]
-	expandedGaps: ReadonlySet<string>
 	collapsedTurns: ReadonlySet<string>
 	query: string
 	agentSpansOnly: boolean
@@ -232,49 +249,23 @@ function buildRows(input: {
 	// of orphaned idle rows.
 	if (surviving.length === 0) return []
 
-	// Traces band the turns: a trace commonly holds several turns and a turn can
-	// cross traces, so neither nests inside the other and the rule is drawn where
-	// the trace changes. Banding the *surviving* turns keeps a rule from
-	// advertising turns the filter removed.
-	const bands = traceBands(surviving.map((entry) => entry.turn))
-
 	const rows: WaterfallRow[] = []
 	let gapIndex = 0
 	const flushGaps = (limitMs: number) => {
 		while (gapIndex < input.gaps.length && input.gaps[gapIndex]!.startMs < limitMs) {
 			const gap = input.gaps[gapIndex]!
-			rows.push({ kind: "gap", key: gap.id, gap, collapsed: !input.expandedGaps.has(gap.id) })
+			rows.push({ kind: "gap", key: gap.id, gap })
 			gapIndex++
 		}
 	}
 
-	surviving.forEach(({ turn, spans }, index) => {
+	for (const { turn, spans } of surviving) {
 		flushGaps(turn.startMs)
-
-		const band = bands.ranges[bands.byTurn[index]!]!
-		const link = { traceId: band.traceId, timestamp: turn.anchor.timestamp }
-		// A band covering one turn would spend a whole row saying what fits in the
-		// spare width of that turn's own header.
-		if (bands.byTurn[index] !== bands.byTurn[index - 1] && band.turnCount > 1) {
-			rows.push({
-				kind: "trace",
-				key: `trace:${band.traceId}:${band.from}`,
-				link,
-				turns: `turns ${band.from}–${band.to}`,
-			})
-		}
-
-		rows.push({
-			kind: "turn",
-			key: turn.id,
-			turn,
-			hiddenCount: turn.spans.length - spans.length,
-			link: band.turnCount === 1 ? link : undefined,
-		})
+		rows.push({ kind: "turn", key: turn.id, turn, visibleCount: spans.length })
 
 		if (input.collapsedTurns.has(turn.id)) {
 			flushGaps(turn.endMs)
-			return
+			continue
 		}
 		for (const { span, depth } of orderByTree(spans)) {
 			// Nothing at all runs during an idle gap, so no span straddles one: the
@@ -283,31 +274,10 @@ function buildRows(input: {
 			rows.push({ kind: "span", key: `${turn.id}:${span.spanId}`, span, depth })
 		}
 		flushGaps(turn.endMs)
-	})
+	}
 
 	flushGaps(Number.POSITIVE_INFINITY)
 	return rows
-}
-
-/** Contiguous runs of turns sharing a primary trace; one band opens each rule. */
-function traceBands(turns: readonly SessionTurn[]): {
-	byTurn: readonly number[]
-	ranges: readonly { traceId: string; from: number; to: number; turnCount: number }[]
-} {
-	const byTurn: number[] = []
-	const ranges: { traceId: string; from: number; to: number; turnCount: number }[] = []
-	for (const turn of turns) {
-		const traceId = turn.traceIds[0] ?? ""
-		const open = ranges.at(-1)
-		if (open === undefined || traceId !== open.traceId) {
-			ranges.push({ traceId, from: turn.index, to: turn.index, turnCount: 1 })
-		} else {
-			open.to = turn.index
-			open.turnCount++
-		}
-		byTurn.push(ranges.length - 1)
-	}
-	return { byTurn, ranges }
 }
 
 /** Depth-first over the parent chain, with anything whose parent was filtered
@@ -339,46 +309,52 @@ function orderByTree(spans: readonly AiSessionSpan[]): readonly { span: AiSessio
 /* Row components                                                             */
 /* -------------------------------------------------------------------------- */
 
-function TraceLink({ link, className }: { link: TraceLinkTarget; className?: string }) {
+/** The header's ticks, mirrored behind the bars so a bar can be read against the ruler. */
+function AxisGrid({ ticks }: { ticks: readonly AxisTick[] }) {
 	return (
-		<Link
-			to="/traces/$traceId"
-			params={{ traceId: link.traceId }}
-			search={{ t: link.timestamp }}
-			className={cn("shrink-0 font-mono hover:text-foreground", className)}
-		>
-			Trace {link.traceId.slice(0, 8)}
-		</Link>
-	)
-}
-
-function TraceRule({ row }: { row: Extract<WaterfallRow, { kind: "trace" }> }) {
-	return (
-		<div className="flex h-full items-center gap-3 px-2.5 text-[10px] text-muted-foreground uppercase tracking-wider">
-			<TraceLink link={row.link} />
-			<span aria-hidden className="h-px flex-1 bg-border" />
-			<span className="shrink-0 normal-case">{row.turns}</span>
-		</div>
+		<>
+			{ticks.map((tick) => (
+				<span
+					key={tick.fraction}
+					aria-hidden
+					className="absolute inset-y-0 w-px bg-border/40"
+					style={{ left: `${tick.fraction * 100}%` }}
+				/>
+			))}
+		</>
 	)
 }
 
 function TurnHeader({
 	row,
+	turns,
 	axis,
 	collapsed,
 	onToggle,
+	selection,
+	onOpenTrace,
 }: {
 	row: Extract<WaterfallRow, { kind: "turn" }>
+	/** The whole session's turns: a reporter wider than this one belongs to none. */
+	turns: readonly SessionTurn[]
 	axis: SessionAxis
 	collapsed: boolean
 	onToggle: () => void
+	selection: TraceSelection | undefined
+	onOpenTrace: (target: TraceSelection) => void
 }) {
 	const { turn } = row
 	// Tokens and duration are facts about the turn, not about the rows on screen:
-	// they stay whole while a filter narrows the spans under them.
-	const tokens = countSessionTokens(turn.spans)
+	// they stay whole while a filter narrows the spans under them. A session-level
+	// reporter is left out, so the column reads "—" rather than crediting one turn
+	// with the whole session.
+	const tokens = countTurnTokens(turn, turns)
 	const left = axis.fraction(turn.startMs) * 100
 	const width = Math.max(0.4, (axis.fraction(turn.endMs) - axis.fraction(turn.startMs)) * 100)
+	// A trace-anchored turn is the fallback partition — one turn per trace — so it
+	// is a segment of the session, not an established exchange with the user.
+	const ordinal = `${turn.anchorKind === "trace" ? "Segment" : "Turn"} ${turn.index}`
+	const traceId = turn.traceIds[0]
 
 	return (
 		<div className="flex h-full w-full items-center rounded-md bg-card px-2.5 text-left text-xs hover:bg-accent/40">
@@ -387,7 +363,10 @@ function TurnHeader({
 					type="button"
 					onClick={onToggle}
 					aria-expanded={!collapsed}
-					className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+					className={cn(
+						"flex min-w-0 flex-1 items-center gap-1.5 rounded-xs text-left",
+						"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+					)}
 				>
 					{collapsed ? (
 						<ChevronRightIcon size={12} className="shrink-0 text-muted-foreground" />
@@ -395,32 +374,35 @@ function TurnHeader({
 						<ChevronDownIcon size={12} className="shrink-0 text-muted-foreground" />
 					)}
 					<span className="shrink-0 font-medium text-[10px] text-primary uppercase tracking-wider">
-						Turn {turn.index}
+						{ordinal}
 					</span>
+					{/* The label is the first prose line of a captured message, not a
+					    verbatim quote, so it is set as muted text rather than quoted. */}
 					<span className="min-w-0 truncate text-muted-foreground">
 						{turn.label === undefined ? (
 							<span className="italic">no captured message</span>
 						) : (
-							`“${turn.label}”`
+							turn.label
 						)}
 					</span>
 					{turn.failed && <Pill tone="error">Failed</Pill>}
 					{collapsed && (
 						<span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] text-muted-foreground tabular-nums">
-							{turn.spans.length - row.hiddenCount} spans
+							{row.visibleCount} spans
 						</span>
 					)}
 				</button>
-				{row.link !== undefined && (
-					<TraceLink
-						link={row.link}
-						className="text-[10px] text-muted-foreground uppercase tracking-wider"
-					/>
+				{traceId !== undefined && (
+					<span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider">
+						<TraceButton traceId={traceId} selection={selection} onOpenTrace={onOpenTrace} />
+						{turn.traceIds.length > 1 && <span>+{turn.traceIds.length - 1}</span>}
+					</span>
 				)}
 			</span>
 			<span className={COL_MODEL}>{turn.agentName ?? "—"}</span>
 			<span className={COL_TOKENS}>{tokens.total > 0 ? formatNumber(tokens.total) : "—"}</span>
 			<span className={COL_AXIS}>
+				<AxisGrid ticks={axis.ticks} />
 				<span
 					className="absolute inset-y-0 my-auto h-1.5 rounded-xs bg-muted"
 					style={{ left: `${left}%`, width: `${width}%` }}
@@ -433,35 +415,61 @@ function TurnHeader({
 	)
 }
 
+function TraceButton({
+	traceId,
+	selection,
+	onOpenTrace,
+}: {
+	traceId: string
+	selection: TraceSelection | undefined
+	onOpenTrace: (target: TraceSelection) => void
+}) {
+	return (
+		<button
+			type="button"
+			onClick={() => onOpenTrace({ traceId })}
+			className={cn(
+				"shrink-0 cursor-pointer rounded-xs font-mono hover:text-foreground",
+				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+				selection?.traceId === traceId && "text-foreground",
+			)}
+		>
+			Trace {traceId.slice(0, 8)}
+		</button>
+	)
+}
+
 function SpanRow({
 	row,
 	axis,
 	spansById,
-	retried,
-	singleService,
+	selected,
+	onOpenTrace,
 }: {
 	row: Extract<WaterfallRow, { kind: "span" }>
 	axis: SessionAxis
 	spansById: ReadonlyMap<string, AiSessionSpan>
-	retried: ReadonlySet<string>
-	singleService: boolean
+	selected: boolean
+	onOpenTrace: (target: TraceSelection) => void
 }) {
 	const { span } = row
-	const category = classifySpan(span)
+	const category = classifyAiSpan(span)
 	const errored = span.statusCode === "Error"
-	const target = spanTarget(span, category, singleService)
+	const target = spanTarget(span, category)
 	// Only a model id is a provider path — a tool's target is usually a file path,
 	// whose last segment is not the part worth keeping.
 	const targetLabel = target === undefined ? "—" : category === "tool" ? target : shortTarget(target)
 
 	return (
-		<Link
-			to="/traces/$traceId"
-			params={{ traceId: span.traceId }}
-			search={{ spanId: span.spanId, t: span.timestamp }}
+		<button
+			type="button"
+			onClick={() => onOpenTrace({ traceId: span.traceId, spanId: span.spanId })}
+			aria-current={selected || undefined}
 			className={cn(
-				"flex h-full items-center px-2.5 text-xs hover:bg-accent/40",
+				"flex h-full w-full cursor-pointer items-center px-2.5 text-left text-xs hover:bg-accent/40",
+				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 				errored && "bg-destructive/6",
+				selected && "border-l-2 border-l-primary bg-primary/5",
 			)}
 		>
 			<span
@@ -478,18 +486,18 @@ function SpanRow({
 				<span className="shrink-0 truncate font-medium">{span.spanName}</span>
 				<span className="min-w-0 truncate text-muted-foreground">{spanMeta(span, category)}</span>
 				{errored && <Pill tone="error">{span.genAi.errorType ?? "Error"}</Pill>}
-				{retried.has(span.spanId) && <Pill tone="warn">Retry</Pill>}
 				{isDelegation(span, spansById) && <Pill tone="outline">Subagent</Pill>}
 			</span>
 			<span className={cn(COL_MODEL, errored && "text-destructive")} title={target}>
 				{targetLabel}
 			</span>
-			<span className={cn(COL_TOKENS, errored && "text-destructive")}>{spanTokenSummary(span)}</span>
+			<span className={cn(COL_TOKENS, errored && "text-destructive")}>{spanTokens(span)}</span>
 			<span className={COL_AXIS}>
+				<AxisGrid ticks={axis.ticks} />
 				<SpanBar span={span} axis={axis} category={category} errored={errored} />
 			</span>
 			<span className={cn(COL_DUR, "text-muted-foreground")}>{formatDuration(span.durationMs)}</span>
-		</Link>
+		</button>
 	)
 }
 
@@ -501,7 +509,7 @@ function SpanBar({
 }: {
 	span: AiSessionSpan
 	axis: SessionAxis
-	category: SpanCategory
+	category: AiSpanCategory
 	errored: boolean
 }) {
 	const startMs = spanStartMs(span)
@@ -511,22 +519,18 @@ function SpanBar({
 	const width = Math.max(0.35, (axis.fraction(spanEndMs(span)) - axis.fraction(startMs)) * 100)
 	const ttftMs = spanTtftMs(span)
 	const ttftShare = ttftMs === undefined ? 0 : (ttftMs / span.durationMs) * 100
-	// An agent span contains the leaf work rather than being work, and at full
-	// strength its bar is the longest and loudest thing in the column.
+	/** An agent span contains the leaf work rather than being work, so it recedes. */
 	const container = category === "agent" && !errored
 
 	return (
 		<span
-			className={cn(
-				"absolute inset-y-0 my-auto overflow-hidden rounded-xs",
-				container ? "h-1" : "h-1.5",
-			)}
+			className="absolute inset-y-0 my-auto h-1.5 overflow-hidden rounded-xs"
 			style={{ left: `${left}%`, width: `${width}%` }}
 		>
 			{ttftMs !== undefined && !errored ? (
 				<>
 					<span
-						className="absolute inset-y-0 left-0 bg-chart-5"
+						className="absolute inset-y-0 left-0 bg-chart-2/45"
 						style={{ width: `${ttftShare}%` }}
 					/>
 					<span
@@ -547,14 +551,11 @@ function SpanBar({
 	)
 }
 
-function GapRow({ row, onToggle }: { row: Extract<WaterfallRow, { kind: "gap" }>; onToggle: () => void }) {
+function GapRow({ gap }: { gap: IdleGap }) {
 	return (
 		<div className="flex h-full items-center gap-3 pr-2.5 pl-20 text-[11px] text-muted-foreground">
-			<span className="shrink-0">idle {formatSessionDuration(row.gap.durationMs)} · awaiting user</span>
+			<span className="shrink-0">idle {formatSessionDuration(gap.durationMs)}</span>
 			<span aria-hidden className="h-px flex-1 bg-border" />
-			<button type="button" onClick={onToggle} className="shrink-0 hover:text-foreground">
-				{row.collapsed ? "expand" : "collapse"}
-			</button>
 		</div>
 	)
 }
@@ -582,18 +583,13 @@ function Pill({ tone, children }: { tone: keyof typeof PILL_TONE; children: Reac
 /* Cell content                                                               */
 /* -------------------------------------------------------------------------- */
 
-/** Inline meta, and never a second copy of what the span name already says. */
-function spanMeta(span: AiSessionSpan, category: SpanCategory): string {
-	const name = span.spanName.toLowerCase()
+/** Inline meta beside the span name. */
+function spanMeta(span: AiSessionSpan, category: AiSpanCategory): string {
 	const parts: string[] = []
 	const agentName = span.genAi.agentName
-	if (category === "agent" && agentName !== undefined && !name.includes(agentName.toLowerCase())) {
-		parts.push(agentName)
-	}
+	if (category === "agent" && agentName !== undefined) parts.push(agentName)
 	const toolName = span.genAi.toolName
-	if (category === "tool" && toolName !== undefined && !name.includes(toolName.toLowerCase())) {
-		parts.push(toolName)
-	}
+	if (category === "tool" && toolName !== undefined) parts.push(toolName)
 	const ttftMs = spanTtftMs(span)
 	if (ttftMs !== undefined) parts.push(`ttft ${formatDuration(ttftMs)}`)
 	const reasoning = span.genAi.usageReasoningOutputTokens
@@ -602,23 +598,11 @@ function spanMeta(span: AiSessionSpan, category: SpanCategory): string {
 	return parts.join(" · ")
 }
 
-/**
- * The MODEL / TARGET cell: what the row adds to the span name.
- *
- * An agent span's target is the agent itself, which the name and the meta
- * already carry, so the column stays empty rather than printing the same word a
- * third time.
- */
-function spanTarget(span: AiSessionSpan, category: SpanCategory, singleService: boolean): string | undefined {
-	if (category === "agent") return undefined
+/** The MODEL / TARGET cell: the model that ran, or what the tool acted on. The
+ *  app's own spans borrow the column for the service that ran them. */
+function spanTarget(span: AiSessionSpan, category: AiSpanCategory): string | undefined {
 	if (category === "tool") return toolTarget(span)
-	const model = spanModel(span)
-	if (model !== undefined) {
-		return span.spanName.toLowerCase().includes(model.toLowerCase()) ? undefined : model
-	}
-	// The app's own spans borrow the column for the service that ran them, which
-	// only says anything when the session crosses services.
-	return span.isAiSpan || singleService ? undefined : span.serviceName
+	return spanModel(span) ?? (span.isAiSpan ? undefined : span.serviceName)
 }
 
 /** Argument keys that name what a tool acted on, most specific first. */
@@ -641,8 +625,7 @@ function toolTarget(span: AiSessionSpan): string | undefined {
 		const value = record[key]
 		if (typeof value === "string") return clipTarget(value)
 	}
-	const strings = Object.values(record).filter((value): value is string => typeof value === "string")
-	return strings.length === 1 ? clipTarget(strings[0]!) : undefined
+	return undefined
 }
 
 function clipTarget(value: string): string | undefined {
@@ -651,14 +634,17 @@ function clipTarget(value: string): string | undefined {
 	return text.length > MAX_TARGET_LENGTH ? `${text.slice(0, MAX_TARGET_LENGTH - 1)}…` : text
 }
 
-function spanTokenSummary(span: AiSessionSpan): string {
+/**
+ * `prompt → completion`, taken from the same total the header sums, so a row and
+ * the session total can never tell different stories. The prompt half is the
+ * residual rather than a sum of the input buckets: whether the cache buckets
+ * belong inside `input` or beside it is the provider's convention, and the total
+ * is where that convention has already been applied.
+ */
+function spanTokens(span: AiSessionSpan): string {
 	if (!isLlmCall(span)) return "—"
-	const { genAi } = span
-	const prompt =
-		(genAi.usageInputTokens ?? 0) +
-		(genAi.usageCacheReadInputTokens ?? 0) +
-		(genAi.usageCacheCreationInputTokens ?? 0)
-	const completion = (genAi.usageOutputTokens ?? 0) + (genAi.usageReasoningOutputTokens ?? 0)
-	if (prompt === 0 && completion === 0) return "—"
-	return `${formatNumber(prompt)} → ${formatNumber(completion)}`
+	const buckets = spanTokenBuckets(span)
+	if (buckets === undefined || buckets.total === 0) return "—"
+	const completion = buckets.output + buckets.reasoning
+	return `${formatNumber(buckets.total - completion)} → ${formatNumber(completion)}`
 }

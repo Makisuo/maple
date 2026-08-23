@@ -33,6 +33,21 @@ describe("AttributesSection", () => {
 		expect(screen.getByText("http.request.method")).toBeTruthy()
 	})
 
+	it("lifts gen_ai keys into the AI block instead of the raw table", () => {
+		render(
+			<AttributesSection
+				title="Span Attributes"
+				attributes={{ "gen_ai.usage.input_tokens": "178", "http.route": "/v1" }}
+			/>,
+		)
+
+		expect(screen.getByText("AI Attributes")).toBeTruthy()
+		expect(screen.getByText("Input")).toBeTruthy()
+		// The key column is the label now; the key itself is only the copy payload.
+		expect(screen.queryByText("gen_ai.usage.input_tokens")).toBeNull()
+		expect(screen.getByText("http.route")).toBeTruthy()
+	})
+
 	it("renders no fold when nothing is internal", () => {
 		render(<AttributesSection title="Span Attributes" attributes={{ "http.route": "/v1" }} />)
 

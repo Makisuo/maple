@@ -174,19 +174,22 @@ export function timelineReducer(state: TimelineState, action: TimelineAction): T
 	}
 }
 
+// Sub-millisecond up to an hour: the 1/2/5 x 10^n ladder plus the clock values a
+// duration ruler wants (15s, 30s, and the quarter-hour rungs a session axis
+// spends most of its time on).
 const NICE_INTERVALS = [
-	0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000,
-	5000, 10000, 20000, 60000,
+	0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000,
+	5_000, 10_000, 15_000, 20_000, 30_000, 60_000, 120_000, 300_000, 600_000, 900_000, 1_800_000, 3_600_000,
 ]
 
 /** Snap up to the nearest nice interval — never down, or the tick count overshoots the budget. */
-function niceIntervalAtLeast(rawInterval: number): number {
+export function niceIntervalAtLeast(rawInterval: number): number {
 	for (const nice of NICE_INTERVALS) {
 		if (nice >= rawInterval) return nice
 	}
-	// Past the ladder (multi-minute windows): keep stepping by whole minutes.
-	const minute = 60_000
-	return Math.max(minute, Math.ceil(rawInterval / minute) * minute)
+	// Past the ladder (sessions that wait on a human): keep stepping by whole hours.
+	const hour = 3_600_000
+	return Math.max(hour, Math.ceil(rawInterval / hour) * hour)
 }
 
 /**
