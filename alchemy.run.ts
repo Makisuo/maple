@@ -1,3 +1,10 @@
+// The Maple stack: one `create*` factory per app, composed here.
+//
+// Comments in these files explain what a reader needs in order not to break the
+// code. The history behind those decisions — the #378 deploy hang, the
+// CONNECT_TIMEOUT cold-start regression, the Hyperdrive split measurements, the
+// v1→v2 equivalences, the cost calls, and the local-dev/`alchemy dev` state of
+// play — lives in `docs/infra.md`.
 import { appendFileSync } from "node:fs"
 import * as Alchemy from "alchemy"
 import * as AWS from "alchemy/AWS"
@@ -7,6 +14,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { parseMapleRegion, resolveAwsRegion, stageDeploysIngest } from "@maple/infra/aws"
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
+import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi } from "./apps/api/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
@@ -31,14 +39,6 @@ if (!process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_DEFAULT_ACCOUNT
 const resolveUrl = (domain: string | undefined, envKey: string, fallback = ""): string =>
 	domain ? `https://${domain}` : process.env[envKey]?.trim() || fallback
 
-const requireEnv = (key: string): string => {
-	const value = process.env[key]?.trim()
-	if (!value) {
-		throw new Error(`Missing required deployment env: ${key}`)
-	}
-	return value
-}
-
 const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStage>) =>
 	Effect.gen(function* () {
 		// Bootstrap these account/zone-wide resources in production first. Other
@@ -52,7 +52,7 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
 			/\/+$/,
 			"",
 		)
-		const headers = { authorization: `Bearer ${requireEnv("MAPLE_OTEL_INGEST_KEY")}` }
+		const headers = { authorization: `Bearer ${yield* requiredPlain("MAPLE_OTEL_INGEST_KEY")}` }
 		const tracesDestination = yield* Cloudflare.Workers.ObservabilityDestination(
 			"workers-observability-traces",
 			{
@@ -81,12 +81,26 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
  * Opt-in switch for the AWS half of the stack (`apps/ingest` on ECS).
  *
  * Set `MAPLE_DEPLOY_AWS_INGEST=1` to include it. Unset, both the AWS providers
- * and the ingest resources drop out and the stack is exactly what shipped
- * before the AWS work landed. It was made opt-in when the AWS half wedged
- * every production deploy (#378); that hang turned out to be alchemy's
- * env-credential account lookup deadlocking without `AWS_ACCOUNT_ID` (the
- * workflows now set it — see deploy-prd.yml), so the flag is only the
- * migration switch now, not a workaround.
+ * and the ingest resources drop out.
+ *
+ * STILL LOAD-BEARING — do not fold this into `stageDeploysIngest` and delete it.
+ * Two reasons:
+ *
+ *   1. It is the cost gate. The variable is set on the `production` GitHub
+ *      environment only; `stageDeploysIngest` also returns true for `stg`, so
+ *      removing the flag would hand staging a VPC + ALB + ACM certificate + ECS
+ *      cluster it does not have today. deploy-stg.yml's `aws_ingest` input
+ *      forces it on for a single run when staging genuinely needs one.
+ *   2. It cannot be stage-derived anyway. `providers` is part of the
+ *      `Alchemy.Stack` options, which are evaluated before `Alchemy.Stage` is
+ *      readable inside the stack effect — and `AWS.providers()` pulls the whole
+ *      AWS provider surface into the plan, so registering it unconditionally is
+ *      not free.
+ *
+ * It was ALSO once a workaround for the #378 hang (alchemy's env-credential
+ * account lookup deadlocking without `AWS_ACCOUNT_ID`). That part is fixed — the
+ * workflows set `AWS_ACCOUNT_ID`, see deploy-prd.yml — but the two reasons above
+ * are independent of it.
  */
 const DEPLOY_AWS_INGEST = process.env.MAPLE_DEPLOY_AWS_INGEST === "1"
 

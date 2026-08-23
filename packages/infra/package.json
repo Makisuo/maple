@@ -6,11 +6,16 @@
 		".": "./src/index.ts",
 		"./aws": "./src/aws/index.ts",
 		"./cloudflare": "./src/cloudflare/index.ts",
-		"./dev-urls": "./src/dev-urls.ts"
+		"./dev-urls": "./src/dev-urls.ts",
+		"./env": "./src/env.ts"
 	},
 	"scripts": {
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@maple/effect-cloudflare": "workspace:*",
+		"effect": "catalog:effect"
 	},
 	"devDependencies": {
 		"@types/node": "catalog:tooling",

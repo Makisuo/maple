@@ -605,6 +605,10 @@
     },
     "packages/infra": {
       "name": "@maple/infra",
+      "dependencies": {
+        "@maple/effect-cloudflare": "workspace:*",
+        "effect": "catalog:effect",
+      },
       "devDependencies": {
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
