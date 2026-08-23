@@ -46,8 +46,19 @@ export function ReplaySurface({
 	 *  corners so surface + transport read as one unit. */
 	docked?: boolean
 }) {
-	const { status, error, retry, sessionActive, figureRef, surfaceRef, mountRef, isFullscreen } =
-		useReplayPlayer()
+	const {
+		status,
+		error,
+		retry,
+		sessionActive,
+		figureRef,
+		surfaceRef,
+		mountRef,
+		isFullscreen,
+		isPlaying,
+		finished,
+		togglePlay,
+	} = useReplayPlayer()
 	// A scrubber over a session that has no recording is a dead control; drop the
 	// whole transport rather than offer it.
 	const showTransport = status !== "unrecorded"
@@ -90,6 +101,36 @@ export function ReplaySurface({
 				)}
 			>
 				<div ref={mountRef} className="absolute inset-0" />
+				{/* Click-the-video play/pause, the way every video player behaves. The
+				    rebuilt page lives in an iframe that swallows clicks, so this sits
+				    above it as a transparent layer. It's a redundant affordance —
+				    `aria-hidden`, not focusable — since the transport's play button
+				    (and Space) remain the accessible controls. */}
+				{status === "ready" && (
+					<div
+						aria-hidden
+						onClick={togglePlay}
+						className="group absolute inset-0 grid cursor-pointer place-items-center"
+					>
+						<span
+							className={cn(
+								"grid size-16 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-opacity duration-200",
+								// Paused: the glyph stands in for a poster-frame play button.
+								// Playing: it only ghosts in on hover so it never sits over the
+								// recording while you're watching.
+								isPlaying ? "opacity-0 group-hover:opacity-70" : "opacity-100",
+							)}
+						>
+							{finished ? (
+								<ArrowPathIcon className="size-7" />
+							) : isPlaying ? (
+								<MediaPauseIcon className="size-7" />
+							) : (
+								<MediaPlayIcon className="size-7 translate-x-0.5" />
+							)}
+						</span>
+					</div>
+				)}
 				{status !== "ready" && (
 					<div className="absolute inset-0 bg-muted/30">
 						{status === "loading" && <PlayerMessage spinner>Loading replay…</PlayerMessage>}
