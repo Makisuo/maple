@@ -47,6 +47,7 @@ export function startReplaySession(options: ReplaySessionOptions): ReplaySession
 		sdk: options.sdk,
 		maskAllInputs: options.maskAllInputs,
 		maskAllText: options.maskAllText,
+		getIdentity: options.getIdentity,
 	}
 
 	let recorder: Recorder | undefined

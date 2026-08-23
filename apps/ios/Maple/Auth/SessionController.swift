@@ -2,6 +2,7 @@ import ClerkKit
 import Foundation
 import Maple
 import MapleAPI
+import MapleWidgetData
 import Observation
 
 /// Owns "who is signed in, to which organization, and is the API usable yet".
@@ -45,6 +46,13 @@ final class SessionController {
 	private(set) var organizationError: String?
 
 	let api: any MapleAPI
+	/// Which load is running for each screen, across model instances.
+	///
+	/// It lives here rather than on a model because that is the whole point: the
+	/// models are rebuilt whenever `dataGeneration` moves, and a load started by
+	/// the instance before the switch has to be cancellable by the one after it.
+	/// See `LoadRegistry`.
+	let loads = LoadRegistry()
 	private let tokens: ClerkTokenProvider
 	/// True when the phase is pinned by `fixture(api:tokens:)` and Clerk's
 	/// state must be ignored.
@@ -69,10 +77,6 @@ final class SessionController {
 		SessionController(fixtureAPI: api, tokens: tokens)
 	}
 
-	var activeOrganization: Organization? {
-		Clerk.shared.organization
-	}
-
 	var activeOrganizationId: String? {
 		Clerk.shared.session?.lastActiveOrganizationId
 	}
@@ -88,6 +92,47 @@ final class SessionController {
 	/// switcher is worth showing.
 	var canSwitchOrganization: Bool {
 		memberships.count > 1
+	}
+
+	/// The organizations a destination is allowed to switch into. Paired with
+	/// `membershipsLoaded`, which says whether this set is trustworthy — an
+	/// unverified list must never be used to *refuse* anything.
+	var memberIds: Set<String> {
+		Set(memberships.map(\.organization.id))
+	}
+
+	/// Every membership, in the shape the widget publisher and the widget
+	/// extension's organization picker use.
+	///
+	/// No `lastPublishedAt`: a membership says nothing about whether a snapshot
+	/// has ever been fetched for it, and the index keeps the timestamp it
+	/// already had.
+	var widgetOrganizations: [WidgetOrganization] {
+		memberships.map { WidgetOrganization(id: $0.organization.id, name: $0.organization.name) }
+	}
+
+	/// Re-runs the widget publish when the active organization *or* the set the
+	/// user belongs to changes — an organization joined after launch should get
+	/// a snapshot without waiting for a switch.
+	var widgetPublishKey: String {
+		([currentOrganizationId ?? "none"] + memberIds.sorted()).joined(separator: "|")
+	}
+
+	/// The active organization's display name.
+	///
+	/// Looked up by id in the membership list rather than read off
+	/// `Clerk.shared.organization`, which is a separate object fed by the client
+	/// payload and can still be naming the previous organization while a
+	/// `setActive` settles. Reading the two together is what let the widgets
+	/// record one organization's id under another's name.
+	var activeOrganizationName: String? {
+		currentOrganizationId.flatMap(name(of:))
+	}
+
+	/// The display name for an organization the user belongs to, for the line
+	/// shown after a switch. Nil when only the id is known.
+	func name(of organizationId: String) -> String? {
+		memberships.first { $0.organization.id == organizationId }?.organization.name
 	}
 
 	/// Recompute the phase from Clerk's current state.

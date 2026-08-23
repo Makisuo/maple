@@ -151,35 +151,98 @@ Deep links are handled by `AppNavigation.open(_:)`, which owns both tab stacks.
 Every widget must also be listed in `MapleWidgetBundle` — one that compiles but
 is missing from that body never appears in the gallery, with no error anywhere.
 
-The extension makes **no network requests**. Every v2 request needs a Clerk
-session token with a one-minute TTL, and an extension has no interactive way to
-recover when refreshing one fails — so the app fetches and writes two small JSON
-snapshots into the App Group `group.com.maple.mobile`, and the widgets only
-render them. The snapshot types, their ranking, the shared store and the
-formatters live in `Packages/MapleAPI/Sources/MapleWidgetData` — a module with
-**no dependency on `MapleAPI`**, which is why the extension does not link the
-generated client. They are covered by `swift test` alongside the client's own
-tests.
+**The extension fetches for itself.** It used to render only what the app had
+published, which meant the Home Screen was as fresh as the app's last run — for
+most people, hours. The provider was already being woken roughly hourly; it was
+spending every one of those wake-ups re-rendering the same bytes.
 
-Throughput costs three requests per round: the service list (whose numbers the
-organization total is summed from), one `group_by: service` timeseries for every
-service's shape at once, and one ungrouped timeseries for the total's shape —
-summing only the charted services would under-report a big org. Bucket counts
-are divided by the bucket length before publishing, so the sparkline and the
-headline are both "per second" and cannot disagree.
+It still holds no Clerk session — those tokens live one minute, and two
+processes refreshing the same rotating refresh token is a way to sign the user
+out. Instead the app mints a **device credential** for it (`WidgetCredential`,
+`PUT /v2/widget_credentials/{installation_id}`): read-only, 30 days, and fenced
+by the server to `/v2/widget_summary` and nothing else. It lives as a file in
+the App Group with `completeUntilFirstUserAuthentication` — not `UserDefaults`,
+which would be a bearer token in cleartext in a backup, and not the app's
+keychain group, which is where Clerk keeps the session this design exists to
+keep out of the extension.
 
-Four things republish it, which between them cover how a phone is used:
+The extension still does not link `MapleAPI`: it gets ~30MB and a few seconds,
+and the generated client is 30k lines plus `OpenAPIRuntime`. The hand-written
+client for that one endpoint is `WidgetSummaryFetcher`, and the whole module —
+snapshots, ranking, store, formatters, fetch — is
+`Packages/MapleAPI/Sources/MapleWidgetData`, covered by `swift test`.
+
+The fetch **enriches** a timeline; it never gates one. `makeEntry` runs first and
+would answer on its own, so a fetch that fails, times out, or never happens
+costs nothing but freshness — the widget renders its last snapshot with an
+honest age, which is what it did before it could fetch at all. The rules that
+keep that true:
+
+- 5s total budget, `waitsForConnectivity = false`. A killed provider costs a
+  rebuild from a metered budget having rendered nothing.
+- Snapshots are written to the App Group **before** the entries are built, so a
+  provider killed on the way to rendering still leaves the data behind.
+- One fetch covers both widgets, and `WidgetSummaryFetcher` coalesces: three
+  pinned instances woken together make one request between them. A stamp written
+  to the App Group before the request covers the app racing the extension.
+- A 401 or 403 is **terminal**. A rolled credential answers 401 forever, and
+  retrying every rebuild would spend the whole day's budget on failures. Only
+  the app can lift it, by minting again — which it does, and then reloads.
+- `refreshAfter` stays at 45 minutes. The date in a `TimelineReloadPolicy` is a
+  floor, not a promise: asking four times as often does not get four times the
+  rebuilds, it gets a widget that has spent its allotment by mid-afternoon.
+  Repeated failures back off further (15m → 30m → 1h → 4h).
+
+The extension links no telemetry, so a fetch that fails there fails in complete
+silence — which is the exact shape of the bug this replaced. It records
+`WidgetFetchState` into the App Group and `WidgetPublisher` drains it onto the
+next `widget.refresh` span.
+
+One organization costs **one request**: `GET /v2/widget_summary`, which returns
+both surfaces in a payload sized for a Home Screen. It used to cost four —
+issues, the service list, a `group_by: service` timeseries and an ungrouped one
+— and the composition was the problem: a `BGAppRefreshTask` gets tens of
+seconds, and four round-trips per organization is how a background round runs
+out of them having written nothing.
+
+That endpoint is deliberately its own scope family rather than a shaped view
+over `/v2/error_issues` + `/v2/services` + `/v2/traces/timeseries`. An API key's
+required scope is derived from the first path segment, so a credential scoped
+`widget_summary:read` reaches exactly this endpoint — which is what will let a
+device credential live on a phone without being an organization read key.
+
+The wire carries bucket **counts** and the bucket length; `WidgetSummaryPayload`
+divides them on the way into a snapshot, so the sparkline and the headline are
+both "per second" and cannot disagree. It also carries the raw naming fields
+(`exception_type`, `error_label`, `exception_message`) rather than a rendered
+title: `WidgetIssueTitle` owns the fallback and the app's issue list uses it
+too, so a title cannot resolve differently on the Home Screen than in the list.
+
+The app still publishes, in a reduced role the extension cannot cover: it owns
+the organization index (the picker, and how an unconfigured widget resolves),
+mints and renews credentials, warms a newly placed widget so it renders
+immediately rather than showing "Open Maple", and clears everything on sign-out.
+Four things trigger it:
 
 - the tabs appearing, and every return to the foreground (`RootView`),
 - an organization switch — the counts belong to one org, so a switch republishes
   at once rather than leaving the previous org's numbers on the Home Screen,
-- `BGAppRefreshTask` while the app is closed (`WidgetRefreshScheduler`),
-- a push arriving, silent or visible (`AppDelegate`).
+- `BGAppRefreshTask` while the app is closed (`WidgetRefreshScheduler`), kept as
+  a fallback for one release now that the widget refreshes itself,
+- a push arriving (`AppDelegate`).
 
-Background refresh is opportunistic — iOS decides whether to run it at all — so
-the widgets render their own age rather than implying the numbers are current:
-past thirty minutes they dim and say "as of 2h ago". Sign-out clears both
-snapshots; the Home Screen outlives the session.
+An incident also sends a **silent wake-up** (`content-available`, priority 5,
+collapsed per organization) so the Home Screen does not wait for the next
+scheduled rebuild at the one moment its numbers are most wrong. It is a hint,
+never a guarantee: iOS throttles background pushes on an unpublished schedule,
+and it only reaches phones that accepted notifications at all. The widget's own
+refresh is the mechanism; this makes it timely. See
+`MobilePushService.refreshWidgets`.
+
+The widgets render their own age rather than implying the numbers are current:
+past thirty minutes they dim and say "updated 2h ago". Sign-out clears both
+snapshots and the credential, locally and server-side; the Home Screen outlives
+the session.
 
 Both targets carry the App Group entitlement. With automatic signing Xcode
 creates the group on first build; a mismatch between the two entitlements files

@@ -259,6 +259,7 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "error_issues", label: "default", params: {} },
 	{ pipe: "error_issue_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "error_issue_sample_traces", label: "default", params: { fingerprint_hash: FINGERPRINT } },
+	{ pipe: "error_issue_environments", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 
 	{ pipe: "list_metrics", label: "default", params: {} },
 	{ pipe: "metrics_summary", label: "default", params: {} },
@@ -686,6 +687,40 @@ export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
 		query: { kind: "list", source: "traces", limit: 50, filters: TRACES_FILTERS },
 		allCapabilities: true,
 	},
+	{
+		label: "traces-list-grouped",
+		query: { kind: "list", source: "traces", groupByTrace: true, limit: 50, filters: TRACES_FILTERS },
+		allCapabilities: true,
+	},
+	{
+		// An attribute filter the MV cannot express — covers the raw-`traces`
+		// stage-1 fallback of traceListQuery.
+		label: "traces-list-grouped-attr-fallback",
+		query: {
+			kind: "list",
+			source: "traces",
+			groupByTrace: true,
+			limit: 50,
+			filters: {
+				...TRACES_FILTERS,
+				attributeFilters: [{ key: "user.id", value: "u1", mode: "equals" }],
+			},
+		},
+		allCapabilities: true,
+	},
+	{
+		label: "traces-list-grouped-duration-sort",
+		query: {
+			kind: "list",
+			source: "traces",
+			groupByTrace: true,
+			limit: 50,
+			offset: 100,
+			sortBy: "durationMs",
+			sortDir: "desc",
+			filters: TRACES_FILTERS,
+		},
+	},
 	// NB: `{kind: "list", source: "logs"}` is a declared QuerySpec variant that
 	// `QueryEngineService.execute` does not implement — log lists only reach the
 	// warehouse through the `list_logs` pipe, covered above.
@@ -948,14 +983,14 @@ export function routeCoverage(): ReadonlyMap<string, { true: number; false: numb
 		)
 	}
 
-	// `useWebEvents` picks the page-view source: the `web_events` rollup, or raw
+	// `useProductEvents` picks the page-view source: the `product_events` rollup, or raw
 	// `session_events`. Read off the fixture labels rather than re-deriving it —
 	// `webAnalyticsVariants` emits every web-analytics fixture in both variants
 	// and suffixes the rollup one, so this records exactly what the baseline
 	// contains. If someone adds a one-sided fixture by hand, this is what notices.
 	for (const fixture of builderFixtures) {
 		if (fixture.module !== "web-analytics") continue
-		record("useWebEvents", fixture.label.endsWith("-rollup"))
+		record("useProductEvents", fixture.label.endsWith("-rollup"))
 	}
 
 	return coverage

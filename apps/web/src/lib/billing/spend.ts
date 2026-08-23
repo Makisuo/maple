@@ -3,6 +3,7 @@ import {
 	cycleSpend,
 	isActivePlanSubscription,
 	isPricedPlan,
+	meteredUsage,
 	projectCycleSpend,
 	resolveSubscriptionPlan,
 	type FeatureUsagePricing,
@@ -20,7 +21,7 @@ import {
  */
 
 /** Features Maple meters, in the order they stack in the chart and read across the cards. */
-export const SPEND_FEATURES = ["logs", "traces", "metrics", "browser_sessions"] as const
+export const SPEND_FEATURES = ["logs", "traces", "metrics", "browser_sessions", "product_events"] as const
 export type SpendFeatureId = (typeof SPEND_FEATURES)[number]
 
 export const FEATURE_LABELS: Record<SpendFeatureId, string> = {
@@ -28,6 +29,7 @@ export const FEATURE_LABELS: Record<SpendFeatureId, string> = {
 	traces: "Traces",
 	metrics: "Metrics",
 	browser_sessions: "Browser Sessions",
+	product_events: "Product Events",
 } satisfies Record<SpendFeatureId, string>
 
 /**
@@ -38,27 +40,70 @@ export const FEATURE_LABELS: Record<SpendFeatureId, string> = {
 export const FEATURE_SHORT_LABELS: Record<SpendFeatureId, string> = {
 	...FEATURE_LABELS,
 	browser_sessions: "Sessions",
+	product_events: "Events",
 } satisfies Record<SpendFeatureId, string>
 
 /**
  * Series colors, validated for contrast on the card surface and for deutan CVD
  * separation. Amber is deliberately absent: it belongs to the limit line, the
  * projection, and the brand — a data band in amber would read as one of those.
+ *
+ * `product_events` takes the cyan/teal slot of the shared chart palette. That
+ * hue lives on a different token per theme (`--chart-5` is cyan in light,
+ * purple in dark; `--chart-4` is purple in light, teal in dark), so it is picked
+ * per scheme rather than by one token name — the point is a stable hue that sits
+ * between the blue of logs and the green of traces without touching either.
  */
 export const FEATURE_COLORS: Record<SpendFeatureId, string> = {
 	logs: "#3987e5",
 	traces: "#199e70",
 	metrics: "#9085e9",
 	browser_sessions: "#d55181",
+	product_events: "light-dark(var(--chart-5), var(--chart-4))",
 } satisfies Record<SpendFeatureId, string>
 
-/** `browser_sessions` is metered per session; every other feature per GB. */
-export const featureUnit = (featureId: string): "GB" | "sessions" =>
-	featureId === "browser_sessions" ? "sessions" : "GB"
+/** Singular unit for the count-metered features; every other feature is per GB. */
+const COUNT_UNITS = {
+	browser_sessions: "session",
+	product_events: "event",
+} as const satisfies Partial<Record<SpendFeatureId, string>>
+
+type CountFeatureId = keyof typeof COUNT_UNITS
+const isCountFeature = (featureId: string): featureId is CountFeatureId => featureId in COUNT_UNITS
+const countUnitOf = (featureId: string) => (isCountFeature(featureId) ? COUNT_UNITS[featureId] : undefined)
+
+/** `browser_sessions` is metered per session and `product_events` per event; every other feature per GB. */
+export const featureUnit = (featureId: string): "GB" | "sessions" | "events" => {
+	const unit = countUnitOf(featureId)
+	return unit === undefined ? "GB" : `${unit}s`
+}
+
+/**
+ * The overage rate as the catalog quotes it: per GB for the byte signals, per
+ * unit for sessions, and per `billingUnits` for events ("$0.05/1,000 events") —
+ * the per-event rate is a fraction of a cent and would read as "$0" if rendered
+ * through the currency formatter.
+ */
+export const formatRateLabel = (feature: FeatureSpend): string | null => {
+	if (feature.ratePerUnit === null) return null
+	const unit = countUnitOf(feature.featureId)
+	if (unit === undefined) return `$${feature.ratePerUnit.toFixed(2)}/GB`
+	if (feature.billingUnits > 1) {
+		const perBlock = feature.ratePerUnit * feature.billingUnits
+		return `$${Number(perBlock.toPrecision(6))}/${feature.billingUnits.toLocaleString("en-US")} ${unit}s`
+	}
+	return `$${feature.ratePerUnit}/${unit}`
+}
 
 export interface FeatureSpend extends FeatureUsagePricing {
 	readonly featureId: SpendFeatureId
 	readonly label: string
+	/**
+	 * Units the catalog quotes the rate per (1 for GB and sessions, 1,000 for
+	 * events). `ratePerUnit` is already normalized to ONE unit; this is kept only
+	 * so the rate can be shown the way the price list states it.
+	 */
+	readonly billingUnits: number
 	readonly overageUnits: number
 	readonly overageCents: number
 }
@@ -147,13 +192,20 @@ export function buildSpendModel({
 					addOns.reduce((sum, addOn) => sum + (addOn.price?.amount ?? 0), 0)
 
 	const pricing: Record<string, FeatureUsagePricing> = {}
+	const billingUnitsByFeature: Record<string, number> = {}
 	for (const featureId of SPEND_FEATURES) {
 		const balance = customer.balances?.[featureId]
 		const item = basePlan?.items?.find((entry) => entry.featureId === featureId)
+		// The catalog quotes `amount` per `billingUnits` (e.g. $0.05 per 1,000
+		// events); every consumer here prices ONE unit, so normalize once.
+		const rawBillingUnits = item?.price?.billingUnits ?? 1
+		const billingUnits = rawBillingUnits > 0 ? rawBillingUnits : 1
+		billingUnitsByFeature[featureId] = billingUnits
+		const amount = item?.price?.amount
 		pricing[featureId] = {
-			used: usage?.[featureId]?.sum ?? 0,
+			used: meteredUsage(balance, usage?.[featureId]?.sum),
 			included: balance?.granted ?? item?.included ?? null,
-			ratePerUnit: item?.price?.amount ?? null,
+			ratePerUnit: amount == null ? null : amount / billingUnits,
 			unlimited: balance?.unlimited === true,
 			// A hard-capped feature bills no overage — see `billsOverage`.
 			overageAllowed: balance?.overageAllowed,
@@ -170,6 +222,7 @@ export function buildSpendModel({
 			...entry,
 			featureId,
 			label: FEATURE_LABELS[featureId],
+			billingUnits: billingUnitsByFeature[featureId] ?? 1,
 			overageUnits: overUnits,
 			overageCents: spend.overageByFeature[featureId] ?? 0,
 		}
@@ -228,6 +281,7 @@ export interface CumulativePoint {
 	readonly traces: number | null
 	readonly metrics: number | null
 	readonly browser_sessions: number | null
+	readonly product_events: number | null
 	/** Cumulative total so far, for the tooltip. `null` for future days. */
 	readonly total: number | null
 	/**
@@ -276,7 +330,9 @@ export function buildCumulativeSeries({
 				? day.tracesGB
 				: featureId === "metrics"
 					? day.metricsGB
-					: day.browserSessions
+					: featureId === "browser_sessions"
+						? day.browserSessions
+						: (day.productEvents ?? 0)
 
 	const byFeature = new Map<
 		SpendFeatureId,
@@ -301,6 +357,7 @@ export function buildCumulativeSeries({
 		traces: 0,
 		metrics: 0,
 		browser_sessions: 0,
+		product_events: 0,
 	} satisfies Record<SpendFeatureId, number>
 
 	const todayMs = Math.floor(model.cycle.nowMs / DAY_MS) * DAY_MS
@@ -323,7 +380,13 @@ export function buildCumulativeSeries({
 			}
 		}
 
-		const total = baseDollars + accrued.logs + accrued.traces + accrued.metrics + accrued.browser_sessions
+		const total =
+			baseDollars +
+			accrued.logs +
+			accrued.traces +
+			accrued.metrics +
+			accrued.browser_sessions +
+			accrued.product_events
 
 		// Two anchors only. Recharts joins them into one straight dashed segment,
 		// which is the honest shape for a linear projection — a curve through
@@ -339,6 +402,7 @@ export function buildCumulativeSeries({
 			traces: future ? null : accrued.traces,
 			metrics: future ? null : accrued.metrics,
 			browser_sessions: future ? null : accrued.browser_sessions,
+			product_events: future ? null : accrued.product_events,
 			total: future ? null : total,
 			projected,
 			future,

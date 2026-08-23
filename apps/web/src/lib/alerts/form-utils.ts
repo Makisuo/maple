@@ -424,6 +424,9 @@ export type DestinationFormState = {
 	integrationKey: string
 	url: string
 	signingSecret: string
+	/** Telegram bot token from @BotFather, and the chat it posts to. */
+	telegramBotToken: string
+	telegramChatId: string
 	hazelOrganizationId: string
 	hazelOrganizationName: string
 	hazelOrganizationLogoUrl: string | null
@@ -447,6 +450,8 @@ export function defaultDestinationForm(type: AlertDestinationType = "slack-bot")
 		integrationKey: "",
 		url: "",
 		signingSecret: "",
+		telegramBotToken: "",
+		telegramChatId: "",
 		hazelOrganizationId: "",
 		hazelOrganizationName: "",
 		hazelOrganizationLogoUrl: null,
@@ -470,6 +475,10 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		integrationKey: "",
 		url: "",
 		signingSecret: "",
+		// The bot token is a secret and never returned; the chat id is not, and
+		// comes back as `channelLabel` so an edit doesn't demand retyping it.
+		telegramBotToken: "",
+		telegramChatId: destination.type === "telegram" ? (destination.channelLabel ?? "") : "",
 		hazelOrganizationId: "",
 		hazelOrganizationName: "",
 		hazelOrganizationLogoUrl: null,
@@ -529,6 +538,14 @@ export function buildDestinationCreateParamsV2(form: DestinationFormState): V2Al
 				name: form.name.trim(),
 				enabled: form.enabled,
 				webhook_url: form.webhookUrl.trim(),
+			}
+		case "telegram":
+			return {
+				type: "telegram",
+				name: form.name.trim(),
+				enabled: form.enabled,
+				bot_token: form.telegramBotToken.trim(),
+				chat_id: form.telegramChatId.trim(),
 			}
 		case "email":
 			return {
@@ -607,6 +624,17 @@ export function buildDestinationUpdateParamsV2(form: DestinationFormState): V2Al
 				enabled: form.enabled,
 				...(name ? { name } : undefined),
 				...(webhookUrl ? { webhook_url: webhookUrl } : undefined),
+			}
+		}
+		case "telegram": {
+			const botToken = form.telegramBotToken.trim()
+			const chatId = form.telegramChatId.trim()
+			return {
+				type: "telegram",
+				enabled: form.enabled,
+				...(name ? { name } : undefined),
+				...(botToken ? { bot_token: botToken } : undefined),
+				...(chatId ? { chat_id: chatId } : undefined),
 			}
 		}
 		case "email":

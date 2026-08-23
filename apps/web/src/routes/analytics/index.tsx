@@ -6,13 +6,14 @@ import { formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-en
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import { PlayRotateClockwiseIcon } from "@/components/icons"
 import { chartBucketSeconds } from "@/components/infra/chart-utils"
-import type { WebAnalyticsBreakdowns } from "@/api/warehouse/web-analytics"
+import type { WebAnalyticsBreakdowns, WebAnalyticsEvent } from "@/api/warehouse/web-analytics"
 import type { QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	AnalyticsBreakdownPanel,
@@ -33,7 +34,7 @@ import {
 	type AnalyticsMetricKey,
 	type AnalyticsMetricSource,
 } from "@/components/analytics/metrics"
-import { countryLabel, languageLabel } from "@/components/analytics/labels"
+import { countryLabel, languageLabel, referrerLabel, utmLabel } from "@/components/analytics/labels"
 import {
 	activeFilterChips,
 	analyticsFilterSearchFields,
@@ -44,11 +45,20 @@ import {
 } from "@/components/analytics/filters"
 import {
 	webAnalyticsBreakdownsResultAtom,
+	webAnalyticsEventsResultAtom,
 	webAnalyticsPagesResultAtom,
 	webAnalyticsPageviewsResultAtom,
 	webAnalyticsSummaryResultAtom,
 	webAnalyticsTimeseriesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
+import { AnalyticsFunnelsView } from "@/components/funnels/analytics-funnels-view"
+import {
+	funnelFromSearch,
+	funnelSearchFields,
+	funnelToSearch,
+	type AnalyticsView,
+	type FunnelDefinition,
+} from "@/components/funnels/definition"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -58,10 +68,14 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 const analyticsSearchSchema = Schema.Struct({
 	...analyticsFilterSearchFields,
 	...TimeRangeSearchFields,
+	// `view` picks Overview or Funnels; the funnel definition rides in the URL
+	// too so a funnel is a shareable link.
+	...funnelSearchFields,
 })
 
 const DEFAULT_PRESET = "7d"
 const PAGES_LIMIT = 100
+const EVENTS_LIMIT = 100
 const BREAKDOWN_LIMIT = 50
 
 export const Route = createFileRoute("/analytics/")({
@@ -99,14 +113,33 @@ function WebAnalyticsPage() {
 		onFilterChange(key, toggleFilterValue(filters[key], value))
 	}
 
+	// Clearing filters keeps the view and the funnel: those are what you are
+	// looking at, the filters are how narrowly.
 	const onClearFilters = () => {
 		navigate({
 			search: {
 				startTime: search.startTime,
 				endTime: search.endTime,
 				timePreset: search.timePreset,
+				view: search.view,
+				steps: search.steps,
+				keyBy: search.keyBy,
+				window: search.window,
+				breakdown: search.breakdown,
 			},
 		})
+	}
+
+	const view: AnalyticsView = search.view ?? "overview"
+	const onViewChange = (next: AnalyticsView) => {
+		navigate({ search: (prev) => ({ ...prev, view: next === "overview" ? undefined : next }) })
+	}
+
+	const funnel = funnelFromSearch(search)
+	// An edit per history entry would make Back useless while
+	// typing an event name, so definition edits replace the current entry.
+	const onFunnelChange = (definition: FunnelDefinition) => {
+		navigate({ replace: true, search: (prev) => ({ ...prev, ...funnelToSearch(definition) }) })
 	}
 
 	// Retained, not bare: the filters are part of every atom key, so each row click
@@ -116,6 +149,15 @@ function WebAnalyticsPage() {
 	const breakdownsResult = useRetainedRefreshableResultValue(
 		webAnalyticsBreakdownsResultAtom({
 			data: { startTime, endTime, limitPerDimension: BREAKDOWN_LIMIT, ...filters },
+		}),
+	)
+
+	// Its own query, not a branch of the breakdowns union: custom events live on
+	// the page-view source, not `session_replays`. Read here rather than in the
+	// content so the sidebar's Event section and the Events card share one fetch.
+	const eventsResult = useRetainedRefreshableResultValue(
+		webAnalyticsEventsResultAtom({
+			data: { startTime, endTime, limit: EVENTS_LIMIT, ...filters },
 		}),
 	)
 
@@ -129,6 +171,7 @@ function WebAnalyticsPage() {
 					<DashboardLayout.Filters>
 						<AnalyticsFilterSidebar
 							breakdownsResult={breakdownsResult}
+							eventsResult={eventsResult}
 							filters={filters}
 							onFilterChange={onFilterChange}
 							onClearFilters={onClearFilters}
@@ -136,7 +179,23 @@ function WebAnalyticsPage() {
 					</DashboardLayout.Filters>
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
-							<DashboardLayout.Header>
+							<DashboardLayout.Header
+								titleContent={
+									<ToggleGroup
+										value={[view]}
+										onValueChange={(values) => {
+											const next = values[0]
+											if (next === "overview" || next === "funnels") onViewChange(next)
+										}}
+										variant="outline"
+										size="sm"
+										aria-label="Analytics view"
+									>
+										<ToggleGroupItem value="overview">Overview</ToggleGroupItem>
+										<ToggleGroupItem value="funnels">Funnels</ToggleGroupItem>
+									</ToggleGroup>
+								}
+							>
 								<div className="flex flex-wrap items-center gap-2">
 									{/* The reciprocal of the Analytics button on Session Replays: this
 									    page aggregates the sessions that page plays back one at a time,
@@ -175,8 +234,12 @@ function WebAnalyticsPage() {
 						<DashboardLayout.Scroll>
 							<div className="space-y-6">
 								<PageHero
-									title="Web Analytics"
-									description="Who visited your sites, what they read, and where they came from — from the same browser SDK that records sessions."
+									title={view === "funnels" ? "Funnels" : "Web Analytics"}
+									description={
+										view === "funnels"
+											? "How many people made it from one step to the next — page views, track() events and server-side events, stitched per person."
+											: "Who visited your sites, what they read, and where they came from — from the same browser SDK that records sessions."
+									}
 									meta={
 										chips.length > 0 ? (
 											<div className="flex flex-wrap items-center gap-1.5">
@@ -201,13 +264,24 @@ function WebAnalyticsPage() {
 										) : undefined
 									}
 								/>
-								<AnalyticsContent
-									startTime={startTime}
-									endTime={endTime}
-									filters={filters}
-									breakdownsResult={breakdownsResult}
-									onToggleFilter={onToggleFilter}
-								/>
+								{view === "funnels" ? (
+									<AnalyticsFunnelsView
+										startTime={startTime}
+										endTime={endTime}
+										filters={filters}
+										definition={funnel}
+										onDefinitionChange={onFunnelChange}
+									/>
+								) : (
+									<AnalyticsContent
+										startTime={startTime}
+										endTime={endTime}
+										filters={filters}
+										breakdownsResult={breakdownsResult}
+										eventsResult={eventsResult}
+										onToggleFilter={onToggleFilter}
+									/>
+								)}
 							</div>
 						</DashboardLayout.Scroll>
 					</DashboardLayout.Content>
@@ -256,12 +330,14 @@ function AnalyticsContent({
 	endTime,
 	filters,
 	breakdownsResult,
+	eventsResult,
 	onToggleFilter,
 }: {
 	startTime: string
 	endTime: string
 	filters: AnalyticsFilters
 	breakdownsResult: Result.Result<WebAnalyticsBreakdowns, QueryAtomFailure>
+	eventsResult: Result.Result<{ data: ReadonlyArray<WebAnalyticsEvent> }, QueryAtomFailure>
 	onToggleFilter: (key: AnalyticsFilterKey, value: string) => void
 }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
@@ -367,7 +443,7 @@ function AnalyticsContent({
 
 			{Result.builder(breakdownsResult)
 				.onInitial(() => (
-					<div className="grid gap-4 lg:grid-cols-2">
+					<div className="grid gap-4 @min-[880px]/page:grid-cols-2">
 						<Skeleton className="h-72 w-full" />
 						<Skeleton className="h-72 w-full" />
 					</div>
@@ -389,8 +465,7 @@ function AnalyticsContent({
 							filterKey: "referrerHost",
 							noun: "referrer",
 							nounPlural: "referrers",
-							emptyMessage:
-								"No referrers recorded. Sessions with an empty referrer are excluded rather than bucketed as direct — an empty value also covers internal navigation and Referrer-Policy suppression.",
+							formatValue: referrerLabel,
 						},
 						{
 							tab: "UTM source",
@@ -398,6 +473,7 @@ function AnalyticsContent({
 							filterKey: "utmSource",
 							noun: "source",
 							nounPlural: "sources",
+							formatValue: utmLabel,
 						},
 						{
 							tab: "Medium",
@@ -405,6 +481,7 @@ function AnalyticsContent({
 							filterKey: "utmMedium",
 							noun: "medium",
 							nounPlural: "mediums",
+							formatValue: utmLabel,
 						},
 						{
 							tab: "Campaign",
@@ -412,6 +489,7 @@ function AnalyticsContent({
 							filterKey: "utmCampaign",
 							noun: "campaign",
 							nounPlural: "campaigns",
+							formatValue: utmLabel,
 						},
 					]
 
@@ -507,6 +585,29 @@ function AnalyticsContent({
 						},
 					]
 
+					const events = Result.builder(eventsResult)
+						.onSuccess((rows) => rows.data)
+						.orElse(() => [])
+
+					const eventDimensions: ReadonlyArray<BreakdownDimension> = [
+						{
+							tab: "Events",
+							// Ranked by firings, with the sessions that fired each beside it —
+							// the same two-column shape as Pages, read from the same source.
+							rows: events.map((event) => ({
+								name: event.name,
+								count: event.sessions,
+								views: event.events,
+							})),
+							filterKey: "eventName",
+							noun: "event",
+							nounPlural: "events",
+							viewsLabel: "Events",
+							emptyMessage:
+								'No custom events in the selected window. Send one with track("name", props) from the browser SDK.',
+						},
+					]
+
 					// `items-start` so each card sizes to its own content instead of
 					// stretching to match the tallest in its row — a Devices card with
 					// three rows should not be as tall as a Pages card with fifty.
@@ -519,10 +620,11 @@ function AnalyticsContent({
 						{ id: "content", dimensions: pageDimensions },
 						{ id: "technology", dimensions: devices },
 						{ id: "audience", dimensions: geography },
+						{ id: "events", dimensions: eventDimensions },
 					]
 
 					return (
-						<div className="grid items-start gap-4 lg:grid-cols-2">
+						<div className="grid items-start gap-4 @min-[880px]/page:grid-cols-2">
 							{cards.map((card) => (
 								<AnalyticsBreakdownPanel
 									key={card.id}

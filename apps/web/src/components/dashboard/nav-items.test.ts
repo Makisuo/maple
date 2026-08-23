@@ -97,9 +97,7 @@ describe("navGroups", () => {
 		// loads and for unentitled orgs), not just an absent argument. A presence
 		// check instead of `flags?.agentTracing` must fail here.
 		for (const off of [undefined, DISABLED_ORGANIZATION_FEATURE_FLAGS]) {
-			expect(findItem("Explore", off).subItems?.map((sub) => sub.href)).not.toContain(
-				"/agent-sessions",
-			)
+			expect(findItem("Explore", off).subItems?.map((sub) => sub.href)).not.toContain("/agent-sessions")
 			expect(paletteNavItems(off).map((entry) => entry.href)).not.toContain("/agent-sessions")
 		}
 

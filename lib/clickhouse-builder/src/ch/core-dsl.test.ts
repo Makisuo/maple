@@ -195,6 +195,50 @@ describe("expression functions", () => {
 	})
 })
 
+// Parametric aggregates
+
+describe("parametric aggregates", () => {
+	it("compiles windowFunnel with the window as a parameter and the conditions as arguments", () => {
+		const q = CH.from(TestTable)
+			.select(($) => ({
+				id: $.Id,
+				level: CH.windowFunnel(3600)($.Timestamp, $.Name.eq("a"), $.Name.eq("b"), $.Value.gt(1)),
+			}))
+			.groupBy("id")
+		const { sql } = compileCH(q, {})
+		expect(sql).toContain("windowFunnel(3600)(Timestamp, Name = 'a', Name = 'b', Value > 1) AS level")
+	})
+
+	it("compiles windowFunnel with a mode", () => {
+		const q = CH.from(TestTable).select(($) => ({
+			level: CH.windowFunnel(86400, "strict_order")($.Timestamp, $.Name.eq("a"), $.Name.eq("b")),
+		}))
+		const { sql } = compileCH(q, {})
+		expect(sql).toContain(
+			"windowFunnel(86400, 'strict_order')(Timestamp, Name = 'a', Name = 'b') AS level",
+		)
+	})
+
+	it("windowFunnel refuses an empty condition list", () => {
+		const q = CH.from(TestTable).select(($) => ({ level: CH.windowFunnel(60)($.Timestamp) }))
+		expect(() => compileCH(q, {})).toThrow(/at least one condition/)
+	})
+
+	it("compiles sequenceMatch with the pattern as a parameter", () => {
+		const q = CH.from(TestTable).select(($) => ({
+			matched: CH.sequenceMatch("(?1)(?t<3600)(?2)")($.Timestamp, $.Name.eq("a"), $.Name.eq("b")),
+		}))
+		const { sql } = compileCH(q, {})
+		expect(sql).toContain(
+			"sequenceMatch('(?1)(?t<3600)(?2)')(Timestamp, Name = 'a', Name = 'b') AS matched",
+		)
+	})
+
+	it("sequenceMatch refuses a pattern that could break out of the literal", () => {
+		expect(() => CH.sequenceMatch("(?1)'; DROP")).toThrow(/quotes/)
+	})
+})
+
 // Condition combinators
 
 describe("condition combinators", () => {

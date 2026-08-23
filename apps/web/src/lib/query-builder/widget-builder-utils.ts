@@ -9,6 +9,7 @@ import type { LegendPosition } from "@/components/dashboard-builder/config/setti
 import { widgetTypes } from "@/components/dashboard-builder/widgets/types"
 import { fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
 import {
+	defaultFunnelDraft,
 	deriveDefaultWidgetTitle,
 	hasActiveGroupBy,
 	inferDefaultUnitForQueries,
@@ -124,6 +125,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		heatmapColorScale: undefined,
 		heatmapScaleType: "linear",
 		markdownContent: "",
+		funnel: defaultFunnelDraft(),
 		...definition.initialState?.(widget),
 	}
 
@@ -259,6 +261,13 @@ export function validateQueries(state: QueryBuilderWidgetState): string | null {
 	// a note doesn't query at all, so validating their placeholder draft would
 	// block Apply on an error the user has no panel to fix.
 	if (definition.queryEditor !== "builder") return null
+
+	// A type that has swapped its query set for a source of its own (a funnel
+	// with product-event steps) validates that source instead: its query drafts
+	// are the placeholder the state shape requires, not what reaches the warehouse.
+	if (definition.ownsDataSource?.(state)) {
+		return definition.validate?.({ state, activeQueries: [], visibleQueries: [] }) ?? null
+	}
 
 	const activeQueries = state.queries.filter((query) => query.enabled !== false)
 	if (activeQueries.length === 0) return "Add at least one query"

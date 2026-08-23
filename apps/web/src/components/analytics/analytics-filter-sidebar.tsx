@@ -3,7 +3,7 @@ import { Result } from "@/lib/effect-atom"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { cn } from "@maple/ui/lib/utils"
 
-import type { WebAnalyticsBreakdowns } from "@/api/warehouse/web-analytics"
+import type { WebAnalyticsBreakdowns, WebAnalyticsEvent } from "@/api/warehouse/web-analytics"
 import type { QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	FilterSection,
@@ -24,12 +24,15 @@ import {
 	type AnalyticsFilterKey,
 	type AnalyticsFilters,
 } from "./filters"
-import { countryLabel, languageLabel } from "./labels"
+import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
+import { countryLabel, languageLabel, referrerLabel, utmLabel } from "./labels"
 import { Favicon, isHostLike } from "./row-icon"
+import { ArrowThroughLineRightIcon } from "@/components/icons"
 import { browserIconFor, deviceIconFor } from "@/components/replays/session-icons"
 
 interface AnalyticsFilterSidebarProps {
 	breakdownsResult: Result.Result<WebAnalyticsBreakdowns, QueryAtomFailure>
+	eventsResult: Result.Result<{ data: ReadonlyArray<WebAnalyticsEvent> }, QueryAtomFailure>
 	filters: AnalyticsFilters
 	onFilterChange: (key: AnalyticsFilterKey, value: string | undefined) => void
 	onClearFilters: () => void
@@ -45,11 +48,20 @@ const toOptions = (rows: ReadonlyArray<{ name: string; count: number }>): Readon
  */
 const hostIcon = (name: string) => <Favicon host={name} className="size-3.5" />
 
+/** The referrer list's direct-traffic row gets the same mark as its breakdown row. */
+const referrerIcon = (name: string) =>
+	name === WEB_ANALYTICS_UNSET ? (
+		<ArrowThroughLineRightIcon className="size-3.5 shrink-0 text-foreground" />
+	) : (
+		hostIcon(name)
+	)
+
 /** `utm_source` is free text — only give it a favicon when it is actually a domain. */
 const utmSourceIcon = (name: string) => (isHostLike(name) ? hostIcon(name) : null)
 
 export function AnalyticsFilterSidebar({
 	breakdownsResult,
+	eventsResult,
 	filters,
 	onFilterChange,
 	onClearFilters,
@@ -60,6 +72,11 @@ export function AnalyticsFilterSidebar({
 		.onSuccess((breakdowns, result) => (
 			<AnalyticsFilterSidebarView
 				breakdowns={breakdowns}
+				// Decorative beside the breakdowns: a slow or failed events query
+				// drops the Event section rather than blanking the whole sidebar.
+				events={Result.builder(eventsResult)
+					.onSuccess((rows) => rows.data)
+					.orElse(() => [])}
 				waiting={result.waiting}
 				filters={filters}
 				onFilterChange={onFilterChange}
@@ -71,12 +88,14 @@ export function AnalyticsFilterSidebar({
 
 function AnalyticsFilterSidebarView({
 	breakdowns,
+	events,
 	waiting,
 	filters,
 	onFilterChange,
 	onClearFilters,
 }: {
 	breakdowns: WebAnalyticsBreakdowns
+	events: ReadonlyArray<WebAnalyticsEvent>
 	waiting: boolean
 	filters: AnalyticsFilters
 	onFilterChange: (key: AnalyticsFilterKey, value: string | undefined) => void
@@ -136,10 +155,21 @@ function AnalyticsFilterSidebarView({
 					options={toOptions(breakdowns.entryPaths)}
 					{...single("pagePath")}
 				/>
+				{/* Counts are sessions that fired the event, matching every other count
+				    in this rail; firings live on the card. Hidden outright when nothing
+				    is tracked — an empty "Event" section would read as a broken filter. */}
+				{events.length > 0 || filters.eventName ? (
+					<SearchableFilterSection
+						title={FILTER_SECTION_LABEL_TEXT.eventName}
+						options={events.map((event) => ({ name: event.name, count: event.sessions }))}
+						{...single("eventName")}
+					/>
+				) : null}
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.referrerHost}
 					options={toOptions(breakdowns.referrerHosts)}
-					renderOptionIcon={hostIcon}
+					getOptionLabel={referrerLabel}
+					renderOptionIcon={referrerIcon}
 					{...single("referrerHost")}
 				/>
 				<SearchableFilterSection
@@ -175,17 +205,20 @@ function AnalyticsFilterSidebarView({
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.utmSource}
 					options={toOptions(breakdowns.utmSources)}
+					getOptionLabel={utmLabel}
 					renderOptionIcon={utmSourceIcon}
 					{...single("utmSource")}
 				/>
 				<FilterSection
 					title={FILTER_SECTION_LABEL_TEXT.utmMedium}
 					options={toOptions(breakdowns.utmMediums)}
+					getOptionLabel={utmLabel}
 					{...single("utmMedium")}
 				/>
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.utmCampaign}
 					options={toOptions(breakdowns.utmCampaigns)}
+					getOptionLabel={utmLabel}
 					{...single("utmCampaign")}
 				/>
 			</FilterSidebarBody>

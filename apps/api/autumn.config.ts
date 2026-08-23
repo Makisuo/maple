@@ -29,6 +29,16 @@ export const browserSessions = feature({
 	consumable: true,
 })
 
+// Product events (`track()` calls, `/v1/events` rows) — unit is one event.
+// Metered by the ingest gateway on both paths (see `PRODUCT_EVENTS_FEATURE_ID`
+// in apps/ingest/src/main.rs).
+export const productEvents = feature({
+	id: "product_events",
+	name: "Product Events",
+	type: "metered",
+	consumable: true,
+})
+
 export const aiInputTokens = feature({
 	id: "ai_input_tokens",
 	name: "AI Input Tokens",
@@ -96,6 +106,16 @@ export const startup = plan({
 				billingMethod: "usage_based",
 				interval: "month",
 			},
+		},
+		{
+			// BETA (2026-08-17): free and unlimited while product events are in
+			// beta. Usage is still metered by the gateway and tracked in Autumn so
+			// we know real volumes before pricing it. To start charging, replace
+			// `unlimited` with e.g. `included: 1_000_000` and a
+			// `price: { amount: 0.05, billingUnits: 1000, billingMethod:
+			// "usage_based", interval: "month" }` ($0.05 per 1,000 events).
+			featureId: "product_events",
+			unlimited: true,
 		},
 	],
 	freeTrial: {

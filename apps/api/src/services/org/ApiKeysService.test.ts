@@ -229,8 +229,8 @@ describe("ApiKeysService.touchLastUsed", () => {
 				kind: "mcp",
 			})
 
-			// `resolveByBearer` forks the touch detached, so it is driven directly here to
-			// keep the assertions off that race.
+			// Driven directly rather than through `resolveByBearer` so the assertions
+			// stay on the memo and the SQL gate, not on key resolution.
 			yield* svc.touchLastUsed(created.id)
 			const afterFirst = yield* readLastUsed(testDb, created.id)
 			assert.isOk(afterFirst?.lastUsedAt, "the first touch stamps last_used_at")

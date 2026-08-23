@@ -12,8 +12,8 @@ interface LeaseHudProps {
 }
 
 const DANGER_MS = 60_000
-const RING_SIZE = 40
-const RING_RADIUS = 16
+const RING_SIZE = 36
+const RING_RADIUS = 14
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
 export function LeaseHud({ leaseExpiresAt, claimedAt, leaseHolder, className }: LeaseHudProps) {
@@ -44,7 +44,7 @@ export function LeaseHud({ leaseExpiresAt, claimedAt, leaseHolder, className }: 
 	return (
 		<div
 			className={cn(
-				"flex items-center gap-4 rounded-md border border-border/60 bg-card/50 px-4 py-3",
+				"flex items-center gap-3 rounded-lg border border-border/60 bg-card/50 px-3 py-2.5",
 				danger && "border-destructive/40",
 				className,
 			)}
@@ -80,32 +80,41 @@ export function LeaseHud({ leaseExpiresAt, claimedAt, leaseHolder, className }: 
 					/>
 				</svg>
 			</div>
-			<div className="flex min-w-0 flex-col gap-0.5">
-				<div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+			{/* Two lines beside the ring, not three things in a row: the rail is
+			    ~256px wide, and label + countdown + holder side by side wrapped the
+			    label into the holder. */}
+			<div className="flex min-w-0 flex-1 flex-col gap-1">
+				<div className="flex items-baseline justify-between gap-3">
+					<span className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+						<span
+							className={cn(
+								"inline-block size-1.5 rounded-full",
+								expired
+									? "bg-muted-foreground"
+									: danger
+										? "bg-destructive animate-pulse"
+										: "bg-primary",
+							)}
+						/>
+						{expired ? "Lease expired" : "Active lease"}
+					</span>
 					<span
 						className={cn(
-							"inline-block size-1.5 rounded-full",
+							"font-mono text-base font-semibold tabular-nums leading-none",
 							expired
-								? "bg-muted-foreground"
+								? "text-muted-foreground"
 								: danger
-									? "bg-destructive animate-pulse"
-									: "bg-primary",
+									? "text-destructive"
+									: "text-foreground",
 						)}
-					/>
-					{expired ? "Lease expired" : "Active lease"}
+					>
+						{formatCountdown(remainingMs)}
+					</span>
 				</div>
-				<div
-					className={cn(
-						"font-mono text-xl font-semibold tabular-nums",
-						expired ? "text-muted-foreground" : danger ? "text-destructive" : "text-foreground",
-					)}
-				>
-					{formatCountdown(remainingMs)}
+				<div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+					<span className="shrink-0">held by</span>
+					<ActorChip actor={leaseHolder} className="min-w-0" />
 				</div>
-			</div>
-			<div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-				<span>held by</span>
-				<ActorChip actor={leaseHolder} />
 			</div>
 		</div>
 	)

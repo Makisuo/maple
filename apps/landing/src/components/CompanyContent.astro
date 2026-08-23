@@ -1,0 +1,51 @@
+---
+/**
+ * Renders a `CompanyPage` (see `lib/company.ts`) with the same typography as
+ * `PrivacyContent.astro`, so /about and /contact read as siblings of /privacy.
+ * Paragraphs are markdown with inline links only, converted here so the copy
+ * stays a single literal string shared with the `.md` twin.
+ */
+import type { CompanyPage } from "../lib/company";
+
+interface Props {
+    page: CompanyPage;
+}
+
+const { page } = Astro.props;
+
+const escape = (text: string) =>
+    text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** `[text](url)`, `` `code` `` and `**bold**` → HTML; everything else escaped. */
+const inline = (markdown: string) =>
+    escape(markdown)
+        .replace(/`([^`]+)`/g, '<code class="font-mono text-[0.85em] text-fg">$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-fg font-medium">$1</strong>')
+        .replace(
+            /\[([^\]]+)\]\(([^)]+)\)/g,
+            '<a href="$2" class="text-fg underline underline-offset-4 hover:text-primary transition-colors">$1</a>',
+        );
+---
+
+<main class="mx-auto max-w-3xl px-6 py-24">
+    <h1 class="text-fg text-2xl font-medium mb-4">{page.title}</h1>
+    <p class="text-fg-muted text-sm leading-relaxed mb-12">{page.description}</p>
+
+    <div class="space-y-10 text-fg-muted text-sm leading-relaxed">
+        {page.sections.map((section) => (
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">{section.heading}</h2>
+                {section.paragraphs.map((paragraph) => (
+                    <p class="mb-3 last:mb-0" set:html={inline(paragraph)} />
+                ))}
+                {section.bullets && (
+                    <ul class="list-disc pl-5 space-y-1 mt-3">
+                        {section.bullets.map((bullet) => (
+                            <li set:html={inline(bullet)} />
+                        ))}
+                    </ul>
+                )}
+            </section>
+        ))}
+    </div>
+</main>

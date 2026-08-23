@@ -1,6 +1,10 @@
 import { Effect, Schema } from "effect"
 import type { EdgeCacheServiceApi } from "@maple/cache"
-import { isActivePlanSubscription } from "@maple/domain/billing"
+import {
+	isActivePlanSubscription,
+	isPlanSubscription,
+	type PlanGatingSubscription,
+} from "@maple/domain/billing"
 import {
 	BillingConflictError,
 	BillingCustomer,
@@ -29,21 +33,87 @@ import type { AutumnResult, AutumnTransportFailure } from "./autumn-http"
 export const CUSTOMER_CACHE_BUCKET = "autumn-customer"
 export const CUSTOMER_CACHE_TTL_SECONDS = 300
 
-// Short TTL for a customer with no active plan: caching that "no plan" snapshot
-// for the full 5 min would strand a just-subscribed user on the /quick-start
-// gate until the post-checkout Stripe→Autumn sync lands. Re-check soon instead.
+// Short TTL for a customer with no plan history at all: this org is mid-signup
+// and about to check out, and caching that "no plan" snapshot for the full 5 min
+// would strand it on the /quick-start gate until the post-checkout Stripe→Autumn
+// sync lands. Re-check almost immediately instead.
 export const CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS = 5
+
+// A lapsed customer (held a plan, holds none now) is planless *durably* — that
+// state normally persists for weeks, so the 5s unsettled TTL would send every
+// one of their page loads upstream (p50 ~94ms, p95 ~603ms) for an answer that
+// hasn't changed. They browse the app now rather than being parked on the
+// onboarding gate, so this is a real hot path. A minute keeps a resubscribe
+// visible promptly — `attach` also invalidates the entry outright — while
+// cutting the upstream call rate ~12x.
+export const CUSTOMER_CACHE_LAPSED_TTL_SECONDS = 60
 
 /**
  * Does this raw `getOrCreateCustomer` response carry an active, non-add-on,
  * non-free plan? Delegates to the shared `isActivePlanSubscription` gate
  * (@maple/domain/billing) so the cache TTL can't drift from the web redirect gate.
  */
-export const responseHasActivePlan = (response: unknown): boolean => {
-	if (typeof response !== "object" || response === null) return false
+export const responseHasActivePlan = (response: unknown): boolean =>
+	subscriptionsOf(response).some(isActivePlanSubscription)
+
+/**
+ * Has this org ever held a real plan, whatever its status? Mirrors the web
+ * `hasLapsedPlan` gate — together with `responseHasActivePlan` it separates a
+ * never-subscribed org (short TTL, checkout imminent) from a lapsed one
+ * (durably planless, so worth caching).
+ */
+export const responseHasPlanHistory = (response: unknown): boolean =>
+	subscriptionsOf(response).some(isPlanSubscription)
+
+// Every field of `PlanGatingSubscription` is optional, so "is an object" is the
+// whole shape check — the gating predicates answer for themselves what a missing
+// `status` or `planId` means. Anything else in the array is not a subscription.
+const isSubscriptionLike = (value: unknown): value is PlanGatingSubscription =>
+	typeof value === "object" && value !== null
+
+const subscriptionsOf = (response: unknown): ReadonlyArray<PlanGatingSubscription> => {
+	if (typeof response !== "object" || response === null) return []
 	const subscriptions = (response as { subscriptions?: unknown }).subscriptions
-	if (!Array.isArray(subscriptions)) return false
-	return subscriptions.some((sub) => isActivePlanSubscription(sub))
+	return Array.isArray(subscriptions) ? subscriptions.filter(isSubscriptionLike) : []
+}
+
+/**
+ * A PII-free description of the subscription rows Autumn returned, for the
+ * `getCustomer` span.
+ *
+ * The plan gate ("does this org see the app or the new-user wizard?") is derived
+ * entirely from this array, so when an org is gated wrongly the array is the
+ * only thing worth looking at — and it is upstream data we otherwise never
+ * record. Statuses and plan ids are catalog identifiers, not customer data.
+ */
+export const summariseSubscriptions = (response: unknown): Record<string, string | number | boolean> => {
+	const subscriptions = subscriptionsOf(response)
+	// A row is positional: a missing field reads as "-" so the lists stay aligned.
+	const describe = (pick: (sub: PlanGatingSubscription) => string | null | undefined) =>
+		subscriptions.map((sub) => pick(sub) ?? "-").join(",")
+	return {
+		"billing.subscription_count": subscriptions.length,
+		"billing.subscription_statuses": describe((sub) => sub.status),
+		"billing.subscription_plan_ids": describe((sub) => sub.planId),
+		// Which rows the gate discards, positionally aligned with the two lists
+		// above: "addon" / "auto" / "-" per subscription.
+		"billing.subscription_excluded": subscriptions
+			.map((sub) => (sub.addOn ? "addon" : sub.autoEnable ? "auto" : "-"))
+			.join(","),
+		"billing.has_active_plan": responseHasActivePlan(response),
+		"billing.has_plan_history": responseHasPlanHistory(response),
+	}
+}
+
+/**
+ * How long a `getOrCreateCustomer` response stays cached. Three tiers, because
+ * "no active plan" covers two states with opposite cache economics: an org
+ * seconds away from its first checkout, and one that lapsed weeks ago.
+ */
+const customerCacheTtl = (response: unknown): number => {
+	if (responseHasActivePlan(response)) return CUSTOMER_CACHE_TTL_SECONDS
+	if (responseHasPlanHistory(response)) return CUSTOMER_CACHE_LAPSED_TTL_SECONDS
+	return CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS
 }
 
 // Sentinel keeping non-200 Autumn responses out of the edge cache: the compute
@@ -58,10 +128,9 @@ class UncacheableAutumnResult extends Schema.TaggedError<UncacheableAutumnResult
 ) {}
 
 /**
- * Run `getOrCreateCustomer` through the per-org edge cache (200-only). Active-plan
- * 200s get the full TTL; planless ones a short TTL so the gate re-checks soon
- * after a post-checkout sync. Returns the resolved result plus whether it came
- * from the cache (for span annotation).
+ * Run `getOrCreateCustomer` through the per-org edge cache (200-only), on the
+ * tiered TTL above. Returns the resolved result plus whether it came from the
+ * cache (for span annotation).
  */
 export const readCustomerCached = (
 	edgeCache: Pick<EdgeCacheServiceApi, "getOrCompute">,
@@ -73,10 +142,7 @@ export const readCustomerCached = (
 			{
 				bucket: CUSTOMER_CACHE_BUCKET,
 				key: orgId,
-				ttlSeconds: (result: AutumnResult) =>
-					responseHasActivePlan(result.response)
-						? CUSTOMER_CACHE_TTL_SECONDS
-						: CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
+				ttlSeconds: (result: AutumnResult) => customerCacheTtl(result.response),
 			},
 			runAutumn.pipe(
 				Effect.flatMap((res) =>

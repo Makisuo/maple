@@ -1,20 +1,17 @@
 // BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import type { Chdb } from "./chdb"
 import type { LocalSchemaIdentity } from "./schema-identity"
+import type {
+	MigrationPhase,
+	MigrationStepJournalSchema,
+	MigrationStepStatus,
+} from "./local-store-migrations/journal-schema"
 
 /** Coordinator-owned transaction phases. Modules may report progress, but
- * only the coordinator advances this top-level state machine. */
-export type MigrationPhase =
-	| "planned"
-	| "preflight-complete"
-	| "target-created"
-	| "copying"
-	| "copy-verified"
-	| "promotion-started"
-	| "promoted"
-	| "failed"
-
-export type MigrationStepStatus = "pending" | "running" | "verified" | "completed"
+ * only the coordinator advances this top-level state machine. Both unions are
+ * derived from the journal schema so the persisted form and the in-memory type
+ * cannot drift. */
+export type { MigrationPhase, MigrationStepStatus }
 
 export type StateDisposition =
 	| "preserve-exact"
@@ -48,15 +45,7 @@ export interface StateDispositionEntry {
 /** The persisted binding for one edge in a migration chain. The identities
  * are copied into the journal so a later build cannot reinterpret an old
  * step through its current-schema constant. */
-export interface MigrationStepJournal {
-	readonly id: string
-	readonly moduleVersion: number
-	readonly from: LocalSchemaIdentity
-	readonly to: LocalSchemaIdentity
-	readonly status: MigrationStepStatus
-	readonly state?: unknown
-	readonly progress?: unknown
-}
+export type MigrationStepJournal = typeof MigrationStepJournalSchema.Type
 
 export interface MigrationDbOptions {
 	readonly schemaSql?: string

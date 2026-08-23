@@ -9,7 +9,7 @@ import {
 	fallbackStrategyFromWire,
 	runTimeseriesQuerySet,
 } from "@maple/query-engine/query-set"
-import { decodeInput, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
+import { decodeInput, invalidWarehouseInput, querySetFailure } from "@/api/warehouse/effect-utils"
 import { makeWarehouseExecutor } from "@/api/warehouse/query-set-executor"
 
 /**
@@ -130,8 +130,12 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 		...(!(input.maxDataPoints === undefined) ? { maxDataPoints: input.maxDataPoints } : undefined),
 	}).pipe(
 		// The runner's tagged failures carry the message this app already showed;
-		// re-raising them as `WarehouseInvalidInputError` keeps `displayError` and
-		// `mapBuilderChartFailure` working unchanged.
+		// re-raising them keeps `displayError` and `mapBuilderChartFailure` working
+		// unchanged. `querySetFailure` rather than `invalidWarehouseInput` for the
+		// no-data case: the runner stringifies each per-query failure into
+		// `details`, so a dropped connection arrived here as text and was re-raised
+		// as "Invalid query" — telling the user to fix a request that never left
+		// the browser.
 		Effect.catchTags({
 			"@maple/query-engine/query-set/QuerySetInputError": (error) =>
 				invalidWarehouseInput("getQueryBuilderTimeseries", error.message),
@@ -144,7 +148,7 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 							rows: [],
 							diagnostics: emptyTimeseriesResponse(input).diagnostics,
 						} satisfies TimeseriesQuerySetResult)
-					: invalidWarehouseInput("getQueryBuilderTimeseries", error.message),
+					: querySetFailure("getQueryBuilderTimeseries", error.message),
 		}),
 	)
 

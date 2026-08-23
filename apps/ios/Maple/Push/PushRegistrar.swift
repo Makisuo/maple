@@ -1,8 +1,10 @@
 import Foundation
 import Maple
 import MapleAPI
+import MapleWidgetData
 import Observation
 import UIKit
+import WidgetKit
 import UserNotifications
 
 /// Owns everything push: the permission, the APNs token, keeping the server's
@@ -35,8 +37,9 @@ final class PushRegistrar: NSObject {
 	/// True while a sync is in flight; the settings sheet dims its toggles.
 	private(set) var isSyncing = false
 
-	/// Set by the app at launch so a notification tap can navigate.
-	var navigation: AppNavigation?
+	/// Set by the app at launch so a notification tap can be routed — including
+	/// into the organization the alert actually fired in.
+	var opener: DestinationOpener?
 
 	private let defaults = UserDefaults.standard
 	private let center = UNUserNotificationCenter.current()
@@ -221,7 +224,7 @@ enum PushEnvironmentDetector {
 }
 
 /// APNs and notification callbacks arrive on UIKit's app delegate; this
-/// forwards them to the registrar and to navigation.
+/// forwards them to the registrar and to `DestinationOpener`.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 	func application(
 		_ application: UIApplication,
@@ -231,6 +234,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		// Must happen before `didFinishLaunching` returns — registering a
 		// BGTaskScheduler handler later throws.
 		WidgetRefreshScheduler.register()
+		// The only other caller lives inside `MainTabView`, which exists only in
+		// the `.ready` phase — so a user sitting on the sign-in screen, or one
+		// who launches and immediately force-quits, never queued a background
+		// refresh at all.
+		Task { await WidgetRefreshScheduler.scheduleIfNeeded() }
 		return true
 	}
 
@@ -240,13 +248,27 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 	/// Runs for a silent (`content-available`) push and for a visible one
 	/// delivered while the app has background time; iOS ignores the completion
 	/// result beyond deciding how generous to be next time.
+	///
+	/// Two shapes, and the cheap one is the common one. A push whose only job is
+	/// to refresh the Home Screen just reloads the timelines: the widget holds
+	/// its own credential now and fetches for itself, so a `reloadAllTimelines`
+	/// buys the same freshness as a full publish for a fraction of the few
+	/// seconds iOS grants — and background time spent here is background time
+	/// iOS is deciding whether to keep granting.
 	func application(
 		_ application: UIApplication,
 		didReceiveRemoteNotification userInfo: [AnyHashable: Any],
 		fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
 	) {
+		let isWidgetRefresh = userInfo["maple_kind"] as? String == "widget_refresh"
 		Task { @MainActor in
-			await WidgetPublisher.shared.refresh(trigger: .push, force: true)
+			if isWidgetRefresh {
+				WidgetCenter.shared.reloadAllTimelines()
+			} else {
+				// An alert push also renews credentials and warms the snapshots,
+				// which the widget cannot do for itself.
+				await WidgetPublisher.shared.refresh(trigger: .push, force: true)
+			}
 			completionHandler(.newData)
 		}
 	}
@@ -262,6 +284,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 	/// A push while the app is open still shows as a banner — the user asked
 	/// to be told, and the Home screen may be showing something else.
 	///
+	/// An all-clear arrives without a sound: it is delivered silently by APNs,
+	/// and playing one here would put the noise back for exactly the people
+	/// already looking at the app.
+	///
 	/// `nonisolated`: `UIApplicationDelegate` puts the class on the main actor,
 	/// but the notification centre calls these off it with non-Sendable
 	/// arguments. Everything read from them is reduced to strings before
@@ -271,7 +297,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		willPresent notification: UNNotification,
 		withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
 	) {
-		completionHandler([.banner, .sound, .list])
+		let event = notification.request.content.userInfo["maple_event"] as? String
+		completionHandler(event == "resolve" ? [.banner, .list] : [.banner, .sound, .list])
 	}
 
 	nonisolated func userNotificationCenter(
@@ -282,6 +309,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 		let userInfo = response.notification.request.content.userInfo
 		let kind = userInfo["maple_kind"] as? String
 		let incidentId = userInfo["maple_incident_id"] as? String
+		// The organization the alert fired in. Every push has carried it since
+		// `MobilePushService` was written; until `DestinationOpener` existed
+		// nothing on the device read it, so a tap on another org's alert opened
+		// an incident id the active token could not fetch.
+		let organizationId = userInfo["maple_org_id"] as? String
 		Task { @MainActor in
 			switch kind {
 			case "alert_incident":
@@ -296,7 +328,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 					coldStart: Telemetry.Launch.isColdStart
 				)
 				Telemetry.track(Telemetry.Event.pushOpened, ["kind": "alert_incident"])
-				PushRegistrar.shared.navigation?.openIncident(id: incidentId)
+				await PushRegistrar.shared.opener?.open(
+					WidgetDeepLink(target: .incident(id: incidentId), organizationId: organizationId),
+					source: .push
+				)
+			case "alert_rule_digest":
+				// The stand-in for a storm: one card for the incidents a rule opened
+				// past its share of a tick. There is no single incident to open, so
+				// it lands on the list they are all in.
+				Telemetry.PushOpen.begin(
+					kind: "alert_rule_digest",
+					screen: Screen.incidents,
+					coldStart: Telemetry.Launch.isColdStart
+				)
+				Telemetry.track(Telemetry.Event.pushOpened, ["kind": "alert_rule_digest"])
+				await PushRegistrar.shared.opener?.open(
+					WidgetDeepLink(target: .incidentsList, organizationId: organizationId),
+					source: .push
+				)
 			default:
 				break
 			}

@@ -42,6 +42,7 @@ import {
 	planetScaleBearerHeader,
 	type PlanetScaleAccessTokenError,
 } from "@/services/auth/PlanetScaleOAuthService"
+import { summarizeCause } from "@/platform/describe-cause"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -782,7 +783,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 								Effect.annotateLogs({
 									orgId,
 									scrapeTargetId: id,
-									error: Cause.pretty(cause),
+									error: summarizeCause(cause),
 								}),
 							),
 						),
@@ -1152,8 +1153,12 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				} else {
 					headers = yield* authHeadersForRow(row.value)
 				}
+				// The ceiling is 60s, not 10s: slow upstreams (PlanetScale metrics under
+				// load) were being cut off at exactly 10s and surfacing as a 502 to the
+				// collector. The scrape interval still bounds it, so a scrape can never
+				// overlap the next one.
 				const timeoutMs = Math.min(
-					10_000,
+					60_000,
 					Math.max(1_000, (row.value.scrapeIntervalSeconds - 1) * 1000),
 				)
 

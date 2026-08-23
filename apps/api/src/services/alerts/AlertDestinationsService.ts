@@ -42,6 +42,12 @@ import {
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
 import { PAGERDUTY_ROUTING_KEY_PATTERN, verifyPagerDutyRoutingKey } from "./delivery/transports/pagerduty"
 import {
+	fetchTelegramChats,
+	TELEGRAM_BOT_TOKEN_PATTERN,
+	verifyTelegramCredentials,
+	type TelegramChat,
+} from "./delivery/transports/telegram"
+import {
 	DestinationPublicConfigSchema,
 	type DestinationPublicConfig,
 	type DestinationSecretConfig,
@@ -119,6 +125,12 @@ const summarizeWebhookUrl = (url: string) =>
 		onSome: (parsed) => `POST ${parsed.host}`,
 	})
 
+const TELEGRAM_MALFORMED_TOKEN_MESSAGE =
+	"Telegram bot token must look like `123456789:ABC-DEF…` — copy it from @BotFather without the `bot` prefix."
+
+/** A chat id is not a secret, but it is also not a name — label it as what it is. */
+const telegramSummary = (chatId: string) => `Chat ${chatId.trim()}`
+
 const buildPublicConfig = (
 	request: Exclude<AlertDestinationCreateRequest, { readonly type: "email" }>,
 ): DestinationPublicConfig =>
@@ -140,6 +152,11 @@ const buildPublicConfig = (
 				hazelChannelName: r.hazelChannelName,
 			}),
 			discord: (r) => ({ summary: summarizeWebhookUrl(r.webhookUrl), channelLabel: null }),
+			// The chat id, not the token: this config is Electric-synced to the
+			// browser, so nothing secret may appear here. It rides in
+			// `channelLabel` as well as the summary so the edit form can prefill it
+			// — without that, renaming a destination would demand retyping the id.
+			telegram: (r) => ({ summary: telegramSummary(r.chatId), channelLabel: r.chatId.trim() }),
 		}),
 	)
 
@@ -160,6 +177,11 @@ const buildSecretConfig = (
 				signingSecret: normalizeOptionalString(r.signingSecret),
 			}),
 			discord: (r) => ({ type: "discord" as const, webhookUrl: r.webhookUrl.trim() }),
+			telegram: (r) => ({
+				type: "telegram" as const,
+				botToken: r.botToken.trim(),
+				chatId: r.chatId.trim(),
+			}),
 		}),
 	)
 
@@ -266,6 +288,10 @@ export interface AlertDestinationsServiceApi {
 		| AlertDestinationInUseError
 		| AlertRuleStoredConfigInvalidError
 	>
+	readonly listTelegramChats: (
+		roles: ReadonlyArray<RoleName>,
+		botToken: string,
+	) => Effect.Effect<ReadonlyArray<TelegramChat>, AlertForbiddenError | AlertValidationError>
 	readonly testDestination: (
 		orgId: OrgId,
 		userId: UserId,
@@ -412,6 +438,40 @@ export class AlertDestinationsService extends Context.Service<
 			}
 		})
 
+		const validateTelegramCredentials = Effect.fn("AlertsService.validateTelegramCredentials")(function* (
+			botToken: string,
+			chatId: string,
+		) {
+			if (!TELEGRAM_BOT_TOKEN_PATTERN.test(botToken)) {
+				return yield* Effect.fail(makeValidationError(TELEGRAM_MALFORMED_TOKEN_MESSAGE))
+			}
+			const result = yield* verifyTelegramCredentials(
+				botToken,
+				chatId,
+				runtime.fetch,
+				runtime.deliveryTimeoutMs(),
+			)
+			if (result.status === "invalid") {
+				return yield* Effect.fail(makeValidationError(result.reason))
+			}
+		})
+
+		const listTelegramChats: AlertDestinationsServiceApi["listTelegramChats"] = Effect.fn(
+			"AlertsService.listTelegramChats",
+		)(function* (roles, botToken) {
+			// Admin-gated for the same reason the Slack channel list is: it reads
+			// somebody's chat inventory, and it accepts an arbitrary token, so it
+			// must not be a probe any org member can drive.
+			yield* requireAdmin(roles)
+			const trimmed = botToken.trim()
+			if (!TELEGRAM_BOT_TOKEN_PATTERN.test(trimmed)) {
+				return yield* Effect.fail(makeValidationError(TELEGRAM_MALFORMED_TOKEN_MESSAGE))
+			}
+			const result = yield* fetchTelegramChats(trimmed, runtime.fetch, runtime.deliveryTimeoutMs())
+			if (result.status === "invalid") return yield* Effect.fail(makeValidationError(result.reason))
+			return result.chats
+		})
+
 		const createDestination: AlertDestinationsServiceApi["createDestination"] = Effect.fn(
 			"AlertsService.createDestination",
 		)(function* (orgId, userId, roles, request) {
@@ -451,6 +511,9 @@ export class AlertDestinationsService extends Context.Service<
 						: buildSecretConfig(request)
 			}
 			if (secretConfig.type === "pagerduty") yield* validatePagerDutyKey(secretConfig.integrationKey)
+			if (secretConfig.type === "telegram") {
+				yield* validateTelegramCredentials(secretConfig.botToken, secretConfig.chatId)
+			}
 			const encryptedSecret = yield* encryptSecret(
 				JSON.stringify(secretConfig),
 				encryptionKey,
@@ -643,6 +706,25 @@ export class AlertDestinationsService extends Context.Service<
 										: ""),
 							} satisfies DestinationSecretConfig,
 						}),
+					telegram: (r) => {
+						const previous =
+							hydrated.secretConfig.type === "telegram" ? hydrated.secretConfig : null
+						const nextChatId = normalizeOptionalString(r.chatId)
+						return Effect.succeed({
+							nextPublicConfig: {
+								summary:
+									nextChatId != null
+										? telegramSummary(nextChatId)
+										: hydrated.publicConfig.summary,
+								channelLabel: nextChatId ?? hydrated.publicConfig.channelLabel,
+							} satisfies DestinationPublicConfig,
+							nextSecretConfig: {
+								type: "telegram" as const,
+								botToken: normalizeOptionalString(r.botToken) ?? previous?.botToken ?? "",
+								chatId: nextChatId ?? previous?.chatId ?? "",
+							} satisfies DestinationSecretConfig,
+						})
+					},
 					email: (r) =>
 						Effect.gen(function* () {
 							const supplied =
@@ -670,6 +752,16 @@ export class AlertDestinationsService extends Context.Service<
 				nextSecretConfig.type === "pagerduty"
 			) {
 				yield* validatePagerDutyKey(nextSecretConfig.integrationKey)
+			}
+			if (
+				request.type === "telegram" &&
+				// Either half changing can invalidate the pair — a new chat the old
+				// bot was never added to fails exactly like a new token would.
+				(normalizeOptionalString(request.botToken) != null ||
+					normalizeOptionalString(request.chatId) != null) &&
+				nextSecretConfig.type === "telegram"
+			) {
+				yield* validateTelegramCredentials(nextSecretConfig.botToken, nextSecretConfig.chatId)
 			}
 			const encryptedSecret = yield* encryptSecret(
 				JSON.stringify(nextSecretConfig),
@@ -820,6 +912,7 @@ export class AlertDestinationsService extends Context.Service<
 			createDestination,
 			updateDestination,
 			deleteDestination,
+			listTelegramChats,
 			testDestination,
 		} satisfies AlertDestinationsServiceApi
 	}),

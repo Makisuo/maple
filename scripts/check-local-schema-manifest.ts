@@ -4,27 +4,7 @@ import {
 	LOCAL_SCHEMA_HISTORY,
 	LOCAL_SCHEMA_MANIFEST,
 	LOCAL_SCHEMA_MANIFEST_DIGEST,
-	LOCAL_SCHEMA_V1,
-	LOCAL_SCHEMA_V1_MANIFEST_DIGEST,
-	LOCAL_SCHEMA_V1_SQL,
-	LOCAL_SCHEMA_V2,
-	LOCAL_SCHEMA_V2_MANIFEST_DIGEST,
-	LOCAL_SCHEMA_V2_SQL,
-	LOCAL_SCHEMA_V3,
-	LOCAL_SCHEMA_V3_MANIFEST_DIGEST,
-	LOCAL_SCHEMA_V3_SQL,
-	LOCAL_SCHEMA_V4,
-	LOCAL_SCHEMA_V4_MANIFEST_DIGEST,
-	LOCAL_SCHEMA_V4_SQL,
-	LOCAL_SCHEMA_V5,
-	LOCAL_SCHEMA_V5_MANIFEST_DIGEST,
-	LOCAL_SCHEMA_V5_SQL,
-	LOCAL_SCHEMA_V6,
-	LOCAL_SCHEMA_V6_MANIFEST_DIGEST,
-	LOCAL_SCHEMA_V6_SQL,
-	LOCAL_SCHEMA_V7,
-	LOCAL_SCHEMA_V7_MANIFEST_DIGEST,
-	LOCAL_SCHEMA_V7_SQL,
+	LOCAL_SCHEMA_SNAPSHOTS,
 	LOCAL_SCHEMA_VERSION,
 } from "../apps/cli/src/server/schema-identity"
 import { resolveMigrationChain } from "../apps/cli/src/server/local-store-migrations"
@@ -65,88 +45,31 @@ if (!sameIdentity(latest, CURRENT_LOCAL_SCHEMA)) {
 	)
 }
 
-const v1 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V1.version)
-if (
-	!v1 ||
-	LOCAL_SCHEMA_V1_MANIFEST_DIGEST !== v1.manifestDigest ||
-	schemaFingerprint(LOCAL_SCHEMA_V1_SQL) !== v1.fingerprint ||
-	schemaDigest(LOCAL_SCHEMA_V1_SQL) !== v1.digest ||
-	LOCAL_SCHEMA_V1.fingerprint !== v1.fingerprint ||
-	LOCAL_SCHEMA_V1.digest !== v1.digest
-) {
-	fail("the immutable local schema v1 snapshot no longer matches its historical identity")
+// A loop is only a gate while it has something to iterate. The history carries
+// one entry per schema version plus v0, which has no DDL of its own.
+const snapshotCount = LOCAL_SCHEMA_SNAPSHOTS.filter(Boolean).length
+if (snapshotCount !== LOCAL_SCHEMA_HISTORY.length - 1) {
+	fail(
+		`local schema snapshots (${snapshotCount}) do not cover every versioned history entry (${LOCAL_SCHEMA_HISTORY.length - 1})`,
+	)
 }
 
-const v2 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V2.version)
-if (
-	!v2 ||
-	LOCAL_SCHEMA_V2_MANIFEST_DIGEST !== v2.manifestDigest ||
-	schemaFingerprint(LOCAL_SCHEMA_V2_SQL) !== v2.fingerprint ||
-	schemaDigest(LOCAL_SCHEMA_V2_SQL) !== v2.digest ||
-	LOCAL_SCHEMA_V2.fingerprint !== v2.fingerprint ||
-	LOCAL_SCHEMA_V2.digest !== v2.digest
-) {
-	fail("the immutable local schema v2 snapshot no longer matches its historical identity")
-}
-
-const v3 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V3.version)
-if (
-	!v3 ||
-	LOCAL_SCHEMA_V3_MANIFEST_DIGEST !== v3.manifestDigest ||
-	schemaFingerprint(LOCAL_SCHEMA_V3_SQL) !== v3.fingerprint ||
-	schemaDigest(LOCAL_SCHEMA_V3_SQL) !== v3.digest ||
-	LOCAL_SCHEMA_V3.fingerprint !== v3.fingerprint ||
-	LOCAL_SCHEMA_V3.digest !== v3.digest
-) {
-	fail("the immutable local schema v3 snapshot no longer matches its historical identity")
-}
-
-const v4 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V4.version)
-if (
-	!v4 ||
-	LOCAL_SCHEMA_V4_MANIFEST_DIGEST !== v4.manifestDigest ||
-	schemaFingerprint(LOCAL_SCHEMA_V4_SQL) !== v4.fingerprint ||
-	schemaDigest(LOCAL_SCHEMA_V4_SQL) !== v4.digest ||
-	LOCAL_SCHEMA_V4.fingerprint !== v4.fingerprint ||
-	LOCAL_SCHEMA_V4.digest !== v4.digest
-) {
-	fail("the immutable local schema v4 snapshot no longer matches its historical identity")
-}
-
-const v5 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V5.version)
-if (
-	!v5 ||
-	LOCAL_SCHEMA_V5_MANIFEST_DIGEST !== v5.manifestDigest ||
-	schemaFingerprint(LOCAL_SCHEMA_V5_SQL) !== v5.fingerprint ||
-	schemaDigest(LOCAL_SCHEMA_V5_SQL) !== v5.digest ||
-	LOCAL_SCHEMA_V5.fingerprint !== v5.fingerprint ||
-	LOCAL_SCHEMA_V5.digest !== v5.digest
-) {
-	fail("the immutable local schema v5 snapshot no longer matches its historical identity")
-}
-
-const v6 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V6.version)
-if (
-	!v6 ||
-	LOCAL_SCHEMA_V6_MANIFEST_DIGEST !== v6.manifestDigest ||
-	schemaFingerprint(LOCAL_SCHEMA_V6_SQL) !== v6.fingerprint ||
-	schemaDigest(LOCAL_SCHEMA_V6_SQL) !== v6.digest ||
-	LOCAL_SCHEMA_V6.fingerprint !== v6.fingerprint ||
-	LOCAL_SCHEMA_V6.digest !== v6.digest
-) {
-	fail("the immutable local schema v6 snapshot no longer matches its historical identity")
-}
-
-const v7 = LOCAL_SCHEMA_HISTORY.find((entry) => entry.version === LOCAL_SCHEMA_V7.version)
-if (
-	!v7 ||
-	LOCAL_SCHEMA_V7_MANIFEST_DIGEST !== v7.manifestDigest ||
-	schemaFingerprint(LOCAL_SCHEMA_V7_SQL) !== v7.fingerprint ||
-	schemaDigest(LOCAL_SCHEMA_V7_SQL) !== v7.digest ||
-	LOCAL_SCHEMA_V7.fingerprint !== v7.fingerprint ||
-	LOCAL_SCHEMA_V7.digest !== v7.digest
-) {
-	fail("the immutable local schema v7 snapshot no longer matches its historical identity")
+// Every frozen snapshot must still hash to the identity the history recorded
+// for it. A snapshot that drifts silently retargets a historical migration
+// edge, which is the failure this gate exists to make impossible.
+for (const snapshot of LOCAL_SCHEMA_SNAPSHOTS) {
+	if (!snapshot) continue
+	const entry = LOCAL_SCHEMA_HISTORY.find((candidate) => candidate.version === snapshot.version)
+	if (
+		!entry ||
+		snapshot.manifestDigest !== entry.manifestDigest ||
+		schemaFingerprint(snapshot.sql) !== entry.fingerprint ||
+		schemaDigest(snapshot.sql) !== entry.digest
+	) {
+		fail(
+			`the immutable local schema v${snapshot.version} snapshot no longer matches its historical identity`,
+		)
+	}
 }
 
 const names = LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name)

@@ -55,8 +55,9 @@ export function useAlertRulePreview(
 	form: RuleFormState | null,
 	range?: { startTime: string; endTime: string },
 ): AlertRulePreviewState {
-	// Callers that own a page-level time window (the rule detail page) pass it in;
-	// the create form + live hero pass nothing and keep the canned last-24h window.
+	// Callers own their window: the rule detail page passes its page-level range,
+	// the create/edit form passes the lookback picked next to the preview chart.
+	// Only callers with no window at all fall back to the canned last 24h.
 	const fallback = useEffectiveTimeRange(undefined, undefined, "24h")
 	const startTime = range?.startTime ?? fallback.startTime
 	const endTime = range?.endTime ?? fallback.endTime

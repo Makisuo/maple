@@ -1,4 +1,4 @@
-import { isActivePlanSubscription } from "@maple/domain/billing"
+import { isActivePlanSubscription, isPlanSubscription } from "@maple/domain/billing"
 import type { BillingBalance, BillingCustomer, BillingSubscription, CatalogPlan } from "@maple/domain/http"
 
 type Customer = BillingCustomer
@@ -70,6 +70,73 @@ export function getActivePlan(customer: Customer | null | undefined): Subscripti
 
 export function hasSelectedPlan(customer: Customer | null | undefined): boolean {
 	return getActivePlan(customer) !== null
+}
+
+/**
+ * The plan this org used to hold and no longer does — cancelled, expired, or
+ * otherwise lapsed. Non-null only when there is no active plan, so a returning
+ * customer is distinguishable from a brand-new org whose customer carries no
+ * plan history at all. That distinction is the whole point: without it the
+ * `__root` gate bounces a lapsed subscriber into the new-user onboarding wizard.
+ *
+ * Autumn keeps lapsed subscription rows on the customer, so this reads history
+ * straight off the payload. When several have lapsed, the one that ended last
+ * wins — it's the plan the customer actually remembers being on.
+ */
+export function getLapsedPlan(customer: Customer | null | undefined): Subscription | null {
+	if (!isUsableCustomer(customer)) return null
+	if (getActivePlan(customer) !== null) return null
+
+	let lapsed: Subscription | null = null
+	for (const sub of customer.subscriptions) {
+		if (!isPlanSubscription(sub)) continue
+		if (lapsed === null) {
+			lapsed = sub
+			continue
+		}
+		// `currentPeriodEnd` is optional upstream; a row that carries one is
+		// always a better answer than one that doesn't.
+		if ((sub.currentPeriodEnd ?? -1) > (lapsed.currentPeriodEnd ?? -1)) lapsed = sub
+	}
+	return lapsed
+}
+
+export function hasLapsedPlan(customer: Customer | null | undefined): boolean {
+	return getLapsedPlan(customer) !== null
+}
+
+/**
+ * What the plan gate may conclude from one customer-query outcome. The `__root`
+ * redirect and the `/quick-start` bail-out both derive their behaviour from this
+ * so they cannot disagree — the original lapsed-subscriber bug was exactly that
+ * disagreement: `__root` failed open on a broken customer read while
+ * `/quick-start` read the same failure as "brand new org, show the wizard".
+ *
+ * - `loading`  — nothing known yet; show a splash (or the optimistic shell).
+ * - `unknown`  — the read failed or came back unusable. Fail OPEN: an outage
+ *                must never push an existing customer into new-user onboarding.
+ * - `app`      — holds a plan, or held one and let it lapse. The app (plus the
+ *                reactivation banner) is where both belong.
+ * - `onboarding` — genuinely never subscribed. The only state that onboards.
+ */
+export type PlanAccess = "loading" | "unknown" | "app" | "onboarding"
+
+export function resolvePlanAccess({
+	customer,
+	error,
+	isLoading,
+}: {
+	customer: Customer | null | undefined
+	error?: unknown
+	isLoading: boolean
+}): PlanAccess {
+	if (isLoading) return "loading"
+	// A settled query with neither a customer nor an error is a state we have no
+	// reading for — treated as an outage rather than as "no plan", for the same
+	// reason as above.
+	if (error || !isUsableCustomer(customer)) return "unknown"
+	if (hasSelectedPlan(customer) || hasLapsedPlan(customer)) return "app"
+	return "onboarding"
 }
 
 export interface TrialStatus {

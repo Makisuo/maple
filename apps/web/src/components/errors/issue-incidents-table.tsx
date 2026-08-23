@@ -1,6 +1,7 @@
-import type { ErrorIncidentDocument } from "@maple/domain/http"
+import { ERROR_INCIDENT_AUTO_RESOLVE_MINUTES, type ErrorIncidentDocument } from "@maple/domain/http"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { cn } from "@maple/ui/lib/utils"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
@@ -14,6 +15,14 @@ const REASON_LABEL: Record<ErrorIncidentDocument["reason"], string> = {
 	regression: "Regression",
 	manual: "Manual",
 } satisfies Record<ErrorIncidentDocument["reason"], string>
+
+// Nothing in the product asks you to close an incident, so `resolved` needs
+// saying out loud: the error tick flips it after the silence window, and
+// moving the issue to Done resolves whatever is still open.
+const STATUS_EXPLANATION = {
+	open: "Open until the error goes quiet, or you mark the issue Done.",
+	resolved: `Incidents resolve on their own when the error goes quiet — no new occurrences for ${ERROR_INCIDENT_AUTO_RESOLVE_MINUTES} minutes after the last one. Marking the issue Done resolves its open incidents too.`,
+} satisfies Record<ErrorIncidentDocument["status"], string>
 
 export function IssueIncidentsTable({ incidents }: IssueIncidentsTableProps) {
 	if (incidents.length === 0) {
@@ -54,26 +63,33 @@ export function IssueIncidentsTable({ incidents }: IssueIncidentsTableProps) {
 								/>
 							</TableCell>
 							<TableCell>
-								<span className="inline-flex items-center gap-2">
-									<span className="relative inline-flex size-1.5">
-										{isOpen ? (
-											<>
-												<span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-60" />
-												<span className="relative inline-flex size-full rounded-full bg-destructive" />
-											</>
-										) : (
-											<span className="relative inline-flex size-full rounded-full bg-muted-foreground/60" />
-										)}
-									</span>
-									<span
-										className={cn(
-											"text-xs font-medium uppercase tracking-wide",
-											isOpen ? "text-destructive" : "text-muted-foreground",
-										)}
+								<Tooltip>
+									<TooltipTrigger
+										render={<span className="inline-flex cursor-default items-center gap-2" />}
 									>
-										{incident.status}
-									</span>
-								</span>
+										<span className="relative inline-flex size-1.5">
+											{isOpen ? (
+												<>
+													<span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-60" />
+													<span className="relative inline-flex size-full rounded-full bg-destructive" />
+												</>
+											) : (
+												<span className="relative inline-flex size-full rounded-full bg-muted-foreground/60" />
+											)}
+										</span>
+										<span
+											className={cn(
+												"text-xs font-medium uppercase tracking-wide",
+												isOpen ? "text-destructive" : "text-muted-foreground",
+											)}
+										>
+											{incident.status}
+										</span>
+									</TooltipTrigger>
+									<TooltipPopup className="max-w-[36ch]">
+										{STATUS_EXPLANATION[incident.status]}
+									</TooltipPopup>
+								</Tooltip>
 							</TableCell>
 							<TableCell className="text-muted-foreground">
 								{REASON_LABEL[incident.reason]}

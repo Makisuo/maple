@@ -3,7 +3,7 @@ import { getRouteApi } from "@tanstack/react-router"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-import { FilterSection } from "@/components/traces/filter-section"
+import { FilterSection, SearchableFilterSection } from "@/components/traces/filter-section"
 import { getServicesFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { isServiceHealth, useServiceHealthSummary } from "@/components/services/use-service-health-summary"
 import {
@@ -45,6 +45,7 @@ export function ServicesFilterSidebar() {
 		startTime: effectiveStartTime,
 		endTime: effectiveEndTime,
 		environments: search.environments,
+		namespaces: search.namespaces,
 		commitShas: search.commitShas,
 	})
 
@@ -70,6 +71,7 @@ export function ServicesFilterSidebar() {
 
 	const hasActiveFilters =
 		(search.environments?.length ?? 0) > 0 ||
+		(search.namespaces?.length ?? 0) > 0 ||
 		(search.commitShas?.length ?? 0) > 0 ||
 		search.health !== undefined
 
@@ -110,6 +112,15 @@ export function ServicesFilterSidebar() {
 							onChange={(val) => updateFilter("environments", val)}
 						/>
 
+						{facets.namespaces.length > 0 && (
+							<SearchableFilterSection
+								title="Namespace"
+								options={facets.namespaces}
+								selected={search.namespaces ?? []}
+								onChange={(val) => updateFilter("namespaces", val)}
+							/>
+						)}
+
 						<FilterSection
 							title="Commit SHA"
 							options={facets.commitShas}
@@ -117,7 +128,9 @@ export function ServicesFilterSidebar() {
 							onChange={(val) => updateFilter("commitShas", val)}
 						/>
 
-						{facets.environments.length === 0 && facets.commitShas.length === 0 && (
+						{facets.environments.length === 0 &&
+							facets.namespaces.length === 0 &&
+							facets.commitShas.length === 0 && (
 							<p className="text-sm text-muted-foreground py-4">No filter options available</p>
 						)}
 					</FilterSidebarBody>

@@ -26,8 +26,8 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
 use axum::extract::Query;
 use axum::extract::State;
-use axum::http::header::{HeaderName, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::header::{HeaderName, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, RETRY_AFTER};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -50,7 +50,7 @@ use maple_ingest::otel::{
 use maple_ingest::otlp_json;
 use maple_ingest::r2::{replay_object_key, ReplayBlobStore};
 use maple_ingest::session_analytics::{
-    derive_referrer_host, sanitize_session_event, sanitize_session_meta,
+    derive_referrer_host, sanitize_product_event, sanitize_session_event, sanitize_session_meta,
 };
 use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
@@ -68,7 +68,8 @@ use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, InstrumentationScope, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource;
-use opentelemetry_sdk::logs::{BatchLogProcessor, SdkLoggerProvider};
+use opentelemetry_sdk::logs::log_processor_with_async_runtime::BatchLogProcessor;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
 use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
 use opentelemetry_sdk::runtime::Tokio as OtelTokio;
@@ -84,6 +85,7 @@ use tracing::Instrument;
 use tracing::{debug, error, info, warn, Span};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer as _;
 
 const INGEST_SOURCE: &str = "maple-ingest-gateway";
 const CLOUDFLARE_LOGPUSH_SOURCE: &str = "cloudflare-logpush";
@@ -148,6 +150,13 @@ struct AppConfig {
     /// rrweb JSON inline in the `session_replay_events` row. `Some` diverts the
     /// payload to R2 and writes a thin index row with an empty `events`.
     replay_blob_store: Option<ReplayBlobStoreConfig>,
+    /// The org Maple's own telemetry is filed under (`maple_org_id` on every
+    /// self-telemetry resource, which the downstream collector writes into
+    /// `OrgId`). Required, with no default: the old `"internal"` fallback was a
+    /// string no org has, so an unset value did not disable self-telemetry — it
+    /// wrote a full stream of traces, logs and metrics into the warehouse under
+    /// an id nothing can read. Failing at boot is the only honest option.
+    internal_org_id: String,
     /// Whether `Cf-IPCountry` on an inbound request can be believed.
     ///
     /// Off by default, and that default is the safe one: container deployments
@@ -236,6 +245,15 @@ impl AppConfig {
 
         if forward_endpoint.is_empty() {
             return Err("INGEST_FORWARD_OTLP_ENDPOINT is required".to_owned());
+        }
+
+        let internal_org_id = std::env::var("MAPLE_INTERNAL_ORG_ID")
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+
+        if internal_org_id.is_empty() {
+            return Err("MAPLE_INTERNAL_ORG_ID is required".to_owned());
         }
 
         let forward_timeout_ms = parse_u64(
@@ -330,6 +348,8 @@ impl AppConfig {
             .unwrap_or_else(|_| "session_replay_events".to_owned()),
             datasource_session_events: std::env::var("INGEST_TINYBIRD_DATASOURCE_SESSION_EVENTS")
                 .unwrap_or_else(|_| "session_events".to_owned()),
+            datasource_product_events: std::env::var("INGEST_TINYBIRD_DATASOURCE_PRODUCT_EVENTS")
+                .unwrap_or_else(|_| "product_events".to_owned()),
         };
         if write_mode.uses_tinybird() {
             tinybird.validate()?;
@@ -502,6 +522,7 @@ impl AppConfig {
             org_routing_cache_ttl_secs,
             replay_max_session_bytes,
             replay_blob_store,
+            internal_org_id,
             trust_proxy_geo,
         })
     }
@@ -756,6 +777,87 @@ impl OrgRouting {
 /// spend-cap key, and the usage metric's `signal` dimension, and those three must
 /// never drift apart.
 const BROWSER_SESSIONS_FEATURE_ID: &str = "browser_sessions";
+
+/// The Autumn feature ID product events meter as — one unit per event, whether
+/// it arrived on `/v1/events` or as a `type == "custom"` row on
+/// `/v1/sessionEvents` (a browser `track()` call is the same product event as a
+/// server-side one; only the transport differs).
+const PRODUCT_EVENTS_FEATURE_ID: &str = "product_events";
+
+/// What a DENIED Autumn reservation means for the batch in flight.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OnDenied {
+    /// 402 the request: the metered feature IS the payload, so an exhausted
+    /// allowance is a reason not to accept it (session starts, `/v1/events`).
+    Reject,
+    /// Keep the batch and record the usage fail-open. For a feature that is only
+    /// PART of the payload — the `type == "custom"` rows of a session-events
+    /// batch — a rejection would also drop the clicks, navigations and errors
+    /// beside them, which is the incoherent outcome the `browser_sessions` gate
+    /// exists to avoid. Autumn also answers `allowed: false` for a customer that
+    /// simply has no balance for the feature yet (a plan item not pushed, or not
+    /// granted to a live subscription), so denial here must never break ingest.
+    MeterAnyway,
+}
+
+/// Meter `value` units of `feature_id` around a WAL enqueue: reserve through
+/// Autumn's atomic check+event lock, run `enqueue`, then confirm or release the
+/// lock. When Autumn could not reserve (disabled, unavailable, or denied under
+/// `OnDenied::MeterAnyway`) the quantity is recorded fail-open through the
+/// retrying tracker after the enqueue succeeds, so provider outages never drop
+/// data or usage. `value <= 0` meters nothing.
+///
+/// This is the one shape every count-metered handler uses (session starts on
+/// the metadata endpoint, product events on both event endpoints); keeping it in
+/// one place is what stops the reserve → enqueue → finalize ordering drifting
+/// between them.
+async fn metered_enqueue<T, F, Fut>(
+    state: &AppState,
+    org_id: &str,
+    feature_id: &'static str,
+    value: f64,
+    on_denied: OnDenied,
+    enqueue: F,
+) -> Result<T, ApiError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T, ApiError>>,
+{
+    // `reserve_autumn_usage` fails only on a denial (every other outcome is an
+    // `Ok(None)` fail-open), so swallowing the error here is exactly "denied".
+    let reservation = match reserve_autumn_usage(state, org_id, feature_id, value).await {
+        Ok(reservation) => reservation,
+        Err(error) => {
+            if on_denied == OnDenied::Reject {
+                return Err(error);
+            }
+            warn!(
+                org_id,
+                feature_id, value, "Autumn denied the reservation; metering fail-open"
+            );
+            None
+        }
+    };
+    let enqueue_result = enqueue().await;
+
+    if let (Some(entitlements), Some(reservation)) =
+        (&state.autumn_entitlements, reservation.as_ref())
+    {
+        let _ = entitlements
+            .finalize(reservation, enqueue_result.is_ok())
+            .await;
+    }
+    let accepted = enqueue_result?;
+
+    // Fail-open fallback: if Autumn could not reserve, record after the WAL
+    // commit through the retrying tracker.
+    if reservation.is_none() && org_id != SENTINEL_ORG_ID && value > 0.0 {
+        if let Some(tracker) = &state.autumn_tracker {
+            tracker.track(org_id, feature_id, value);
+        }
+    }
+    Ok(accepted)
+}
 
 /// The 402 Autumn's entitlement check produces for `feature_id`, or `None` when
 /// the org may ingest it.
@@ -1020,23 +1122,248 @@ impl Drop for OrgInFlightPermit {
     }
 }
 
+/// Public error envelope, matching the shape every other Maple HTTP surface
+/// emits (`docs/api-v2.md#errors`).
+///
+/// The gateway used to answer with a bare `{"error": "<sentence>"}`, so a client
+/// had nothing to branch on and no way to tell a retryable queue stall from a
+/// permanent server bug. `_tag` is the stable semantic identity (the wire
+/// counterpart of an Effect `Schema.TaggedError` tag), `type`/`code` are
+/// presentation categories, `title`/`message` are safe copy, and
+/// `retryable`/`recovery`/`retry_after_seconds` say what to do next without
+/// parsing prose.
 #[derive(Serialize)]
 struct ErrorBody {
-    error: String,
+    error: PublicError,
 }
+
+#[derive(Serialize)]
+struct PublicError {
+    #[serde(rename = "_tag")]
+    tag: &'static str,
+    r#type: &'static str,
+    code: &'static str,
+    title: &'static str,
+    message: String,
+    retryable: bool,
+    recovery: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_after_seconds: Option<u64>,
+}
+
+/// The identity half of an `ApiError`: everything about a failure that is fixed
+/// at compile time, so a tag can never drift from its code, copy, or retry
+/// semantics. Internal cause strings (WAL paths, upstream bodies, driver
+/// messages) are deliberately *not* here — they stay on the span and in the
+/// handler's log line, per `docs/api-v2.md#errors`.
+#[derive(Clone, Copy, Debug)]
+struct FailureKind {
+    tag: &'static str,
+    code: &'static str,
+    title: &'static str,
+    recovery: &'static str,
+    retryable: bool,
+    /// Stable `error.type` span/metric label. The status-derived kinds keep the
+    /// existing vocabulary; explicitly named failures narrow it.
+    error_kind: &'static str,
+    retry_after_seconds: Option<u64>,
+}
+
+impl FailureKind {
+    /// Generic fallback for the many call sites that only have a status and a
+    /// sentence. Named failures below are preferred for anything a client or a
+    /// dashboard needs to tell apart.
+    fn for_status(status: StatusCode) -> &'static Self {
+        match status {
+            StatusCode::UNAUTHORIZED => &INGEST_UNAUTHORIZED,
+            StatusCode::BAD_REQUEST => &INGEST_BAD_REQUEST,
+            StatusCode::PAYMENT_REQUIRED => &INGEST_PLAN_LIMIT_REACHED,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE => &INGEST_UNSUPPORTED_MEDIA_TYPE,
+            StatusCode::PAYLOAD_TOO_LARGE => &INGEST_PAYLOAD_TOO_LARGE,
+            StatusCode::TOO_MANY_REQUESTS => &INGEST_RATE_LIMITED,
+            StatusCode::SERVICE_UNAVAILABLE => &INGEST_SERVICE_UNAVAILABLE,
+            _ => &INGEST_INTERNAL_ERROR,
+        }
+    }
+}
+
+static INGEST_UNAUTHORIZED: FailureKind = FailureKind {
+    tag: "@maple/ingest/Unauthorized",
+    code: "ingest_unauthorized",
+    title: "Ingest key rejected",
+    recovery: "reauthenticate",
+    retryable: false,
+    error_kind: "auth",
+    retry_after_seconds: None,
+};
+
+static INGEST_BAD_REQUEST: FailureKind = FailureKind {
+    tag: "@maple/ingest/BadRequest",
+    code: "ingest_bad_request",
+    title: "Malformed ingest request",
+    recovery: "fix_request",
+    retryable: false,
+    error_kind: "bad_request",
+    retry_after_seconds: None,
+};
+
+static INGEST_PLAN_LIMIT_REACHED: FailureKind = FailureKind {
+    tag: "@maple/ingest/PlanLimitReached",
+    code: "ingest_plan_limit_reached",
+    title: "Ingestion blocked by plan limits",
+    recovery: "contact_support",
+    retryable: false,
+    error_kind: "billing",
+    retry_after_seconds: None,
+};
+
+static INGEST_UNSUPPORTED_MEDIA_TYPE: FailureKind = FailureKind {
+    tag: "@maple/ingest/UnsupportedMediaType",
+    code: "ingest_unsupported_media_type",
+    title: "Unsupported content type",
+    recovery: "fix_request",
+    retryable: false,
+    error_kind: "unsupported_media",
+    retry_after_seconds: None,
+};
+
+static INGEST_PAYLOAD_TOO_LARGE: FailureKind = FailureKind {
+    tag: "@maple/ingest/PayloadTooLarge",
+    code: "ingest_payload_too_large",
+    title: "Payload too large",
+    recovery: "fix_request",
+    retryable: false,
+    error_kind: "payload_too_large",
+    retry_after_seconds: None,
+};
+
+static INGEST_RATE_LIMITED: FailureKind = FailureKind {
+    tag: "@maple/ingest/RateLimited",
+    code: "ingest_rate_limited",
+    title: "Ingest rate limit reached",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "throttle",
+    retry_after_seconds: Some(1),
+};
+
+static INGEST_SERVICE_UNAVAILABLE: FailureKind = FailureKind {
+    tag: "@maple/ingest/ServiceUnavailable",
+    code: "ingest_unavailable",
+    title: "Ingest gateway unavailable",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "unavailable",
+    retry_after_seconds: Some(5),
+};
+
+static INGEST_INTERNAL_ERROR: FailureKind = FailureKind {
+    tag: "@maple/ingest/InternalError",
+    code: "ingest_internal_error",
+    title: "Ingest gateway error",
+    recovery: "contact_support",
+    retryable: false,
+    error_kind: "error",
+    retry_after_seconds: None,
+};
+
+/// The per-org byte budget is full: the caller's batch was refused, nothing was
+/// written, and the same batch will be accepted once the lane drains.
+static INGEST_THROTTLED: FailureKind = FailureKind {
+    tag: "@maple/ingest/OrgQueueThrottled",
+    code: "ingest_queue_throttled",
+    title: "Ingest queue full for this org",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "throttle",
+    retry_after_seconds: Some(1),
+};
+
+/// An export lane's channel is full — usually a slow downstream target (a
+/// customer's own ClickHouse) backing the lane up. Retryable, caller's data
+/// untouched, and deliberately *not* an error span (`otel_status_for_rejection`).
+static INGEST_BACKPRESSURE: FailureKind = FailureKind {
+    tag: "@maple/ingest/ExportLaneBackpressure",
+    code: "ingest_export_lane_full",
+    title: "Ingest export lane saturated",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "backpressure",
+    retry_after_seconds: Some(2),
+};
+
+/// The durable queue (WAL) could not take the batch — disk I/O, a full lane
+/// file, or a closed writer. Server fault, but the batch is safe to resend.
+static INGEST_QUEUE_UNAVAILABLE: FailureKind = FailureKind {
+    tag: "@maple/ingest/QueueUnavailable",
+    code: "ingest_queue_unavailable",
+    title: "Ingest queue unavailable",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "queue_unavailable",
+    retry_after_seconds: Some(5),
+};
+
+/// The decoded payload could not be encoded for the warehouse. This is a
+/// gateway bug or an unrepresentable record, not a transient condition —
+/// resending the identical batch fails the same way.
+static INGEST_ENCODE_FAILED: FailureKind = FailureKind {
+    tag: "@maple/ingest/PayloadEncodeFailed",
+    code: "ingest_encode_failed",
+    title: "Telemetry could not be encoded for storage",
+    recovery: "contact_support",
+    retryable: false,
+    error_kind: "encode",
+    retry_after_seconds: None,
+};
+
+/// The upstream collector answered with a 5xx, or its response could not be
+/// read. Distinct from a queue failure: nothing about the caller's batch is
+/// wrong and the forward is safe to repeat.
+static INGEST_COLLECTOR_UNAVAILABLE: FailureKind = FailureKind {
+    tag: "@maple/ingest/CollectorUnavailable",
+    code: "ingest_collector_unavailable",
+    title: "Upstream collector unavailable",
+    recovery: "retry",
+    retryable: true,
+    error_kind: "collector_unavailable",
+    retry_after_seconds: Some(5),
+};
 
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
+    kind: &'static FailureKind,
     message: String,
+    /// Internal cause, kept off the wire. Recorded as the span's reject reason
+    /// so a 503 in the dashboard names the underlying I/O failure.
+    detail: Option<String>,
 }
 
 impl ApiError {
     fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,
+            kind: FailureKind::for_status(status),
             message: message.into(),
+            detail: None,
         }
+    }
+
+    /// Attach an explicit failure identity, replacing the status-derived one.
+    fn tagged(status: StatusCode, kind: &'static FailureKind, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            kind,
+            message: message.into(),
+            detail: None,
+        }
+    }
+
+    /// Internal cause for telemetry only — never serialized.
+    fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
     }
 
     fn unauthorized(message: impl Into<String>) -> Self {
@@ -1063,31 +1390,60 @@ impl ApiError {
         Self::new(StatusCode::SERVICE_UNAVAILABLE, message)
     }
 
-    /// Stable `error.type` label for this error, by HTTP status. Reuses the same
-    /// vocabulary as `handle_signal_inner` so the native replay/session handlers
-    /// produce categorizable spans instead of "Unknown Error".
+    /// Stable `error.type` label for this error. Reuses the same vocabulary as
+    /// `handle_signal_inner` so the native replay/session handlers produce
+    /// categorizable spans instead of "Unknown Error".
     fn error_kind(&self) -> &'static str {
+        self.kind.error_kind
+    }
+
+    /// What `maple.ingest.reject_reason` records: the safe message plus the
+    /// internal cause when there is one.
+    fn reason(&self) -> String {
+        match &self.detail {
+            Some(detail) => format!("{}: {detail}", self.message),
+            None => self.message.clone(),
+        }
+    }
+
+    /// v2 error `type`, the closed status-family vocabulary from
+    /// `docs/api-v2.md#errors`.
+    fn error_type(&self) -> &'static str {
         match self.status {
-            StatusCode::UNAUTHORIZED => "auth",
-            StatusCode::BAD_REQUEST => "bad_request",
-            StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported_media",
-            StatusCode::PAYLOAD_TOO_LARGE => "payload_too_large",
-            StatusCode::TOO_MANY_REQUESTS => "throttle",
-            StatusCode::SERVICE_UNAVAILABLE => "unavailable",
-            _ => "error",
+            StatusCode::UNAUTHORIZED => "authentication_error",
+            StatusCode::PAYMENT_REQUIRED => "payment_error",
+            StatusCode::FORBIDDEN => "permission_error",
+            StatusCode::NOT_FOUND => "not_found_error",
+            StatusCode::CONFLICT => "conflict_error",
+            StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
+            status if status.is_server_error() => "api_error",
+            _ => "invalid_request_error",
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            self.status,
-            axum::Json(ErrorBody {
-                error: self.message,
-            }),
-        )
-            .into_response()
+        let retry_after = self.kind.retry_after_seconds;
+        let body = ErrorBody {
+            error: PublicError {
+                tag: self.kind.tag,
+                r#type: self.error_type(),
+                code: self.kind.code,
+                title: self.kind.title,
+                message: self.message,
+                retryable: self.kind.retryable,
+                recovery: self.kind.recovery,
+                retry_after_seconds: retry_after,
+            },
+        };
+        let mut response = (self.status, axum::Json(body)).into_response();
+        if let Some(seconds) = retry_after {
+            if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            }
+        }
+        response
     }
 }
 
@@ -1193,16 +1549,43 @@ fn record_grpc_outcome<T>(span: &Span, result: &Result<tonic::Response<T>, tonic
 /// variant to 503).
 fn api_error_from_pipeline(error: &PipelineError) -> ApiError {
     match error {
-        PipelineError::Throttled(_) => {
-            ApiError::too_many_requests("Ingest queue full for org, retry shortly")
-        }
-        PipelineError::Backpressure(_) => {
-            ApiError::too_many_requests("Ingest export lane full, retry shortly")
-        }
-        PipelineError::QueueUnavailable(_) | PipelineError::Encode(_) => {
-            ApiError::service_unavailable("Telemetry backend unavailable")
-        }
+        PipelineError::Throttled(detail) => ApiError::tagged(
+            StatusCode::TOO_MANY_REQUESTS,
+            &INGEST_THROTTLED,
+            "This org's ingest queue is at capacity. No data was written; resend this batch after the suggested delay.",
+        )
+        .with_detail(*detail),
+        PipelineError::Backpressure(detail) => ApiError::tagged(
+            StatusCode::TOO_MANY_REQUESTS,
+            &INGEST_BACKPRESSURE,
+            "The export lane for this org is saturated. No data was written; resend this batch after the suggested delay.",
+        )
+        .with_detail(*detail),
+        PipelineError::QueueUnavailable(detail) => ApiError::tagged(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &INGEST_QUEUE_UNAVAILABLE,
+            "Maple could not durably queue this batch. No data was written; resend it after the suggested delay.",
+        )
+        .with_detail(detail.clone()),
+        PipelineError::Encode(detail) => ApiError::tagged(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &INGEST_ENCODE_FAILED,
+            "Maple could not encode this batch for storage. Resending the same payload will fail again — contact support with this request's trace id.",
+        )
+        .with_detail(detail.clone()),
     }
+}
+
+/// A forward to the upstream collector could not be completed. `message` is the
+/// safe, caller-facing sentence; `detail` is the internal cause, which stays on
+/// the span and out of the response body.
+fn collector_unavailable(message: &'static str, detail: impl Into<String>) -> ApiError {
+    ApiError::tagged(
+        StatusCode::SERVICE_UNAVAILABLE,
+        &INGEST_COLLECTOR_UNAVAILABLE,
+        message,
+    )
+    .with_detail(detail)
 }
 
 /// Resolve the deployment environment in maple's canonical priority order.
@@ -1221,6 +1604,13 @@ struct TelemetryProviders {
     logger: SdkLoggerProvider,
 }
 
+/// Registry-wide filter: what reaches the OTel span layer. Spans are always
+/// `info`, so this must stay at `info` regardless of log verbosity.
+const SPAN_FILTER_DIRECTIVES: &str = "maple_ingest=info,tower_http=info";
+/// Default per-layer filter for the stdout and OTLP-log layers (`RUST_LOG`
+/// overrides). Hot-path `info!` logs are dropped in production by default.
+const LOG_FILTER_DIRECTIVES: &str = "maple_ingest=warn,tower_http=warn";
+
 #[expect(
     clippy::too_many_lines,
     reason = "linear construction of one OTel pipeline; every step feeds the next"
@@ -1229,18 +1619,26 @@ fn init_tracing(
     forward_endpoint: &str,
     bind_port: u16,
     service_instance_id: &str,
+    internal_org_id: &str,
 ) -> Option<TelemetryProviders> {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "maple_ingest=info,tower_http=info".into());
+    // Two filters on purpose. The registry-wide filter is pinned at `info`
+    // because every gateway span (`ingest`, `ingest.authenticate`, the Postgres
+    // client spans, …) is an `info_span!`; a global `warn` filter discards them
+    // before `tracing_opentelemetry` ever sees them and the gateway goes silent
+    // in its own traces. Log verbosity is a per-layer filter on the stdout and
+    // OTLP-log layers only: `RUST_LOG` still overrides it, default `warn`.
+    let env_filter = tracing_subscriber::EnvFilter::new(SPAN_FILTER_DIRECTIVES);
+    let log_filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| LOG_FILTER_DIRECTIVES.into())
+    };
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
-        .compact();
+        .compact()
+        .with_filter(log_filter());
 
     let deployment_env = resolve_deployment_env();
-    let internal_org_id =
-        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_owned());
-
     let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
     let skip_dev = deployment_env == "development" && !forward_explicit;
     let loopback = endpoint_loopback_to_self(forward_endpoint, bind_port);
@@ -1264,7 +1662,7 @@ fn init_tracing(
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
-        internal_org_id,
+        internal_org_id: internal_org_id.to_owned(),
     });
 
     let exporter = match SpanExporter::builder()
@@ -1324,7 +1722,12 @@ fn init_tracing(
         .with_resource(resource.clone())
         .with_span_processor(processor)
         .build();
-    let log_processor = BatchLogProcessor::builder(log_exporter)
+    // The runtime argument is not optional here: the runtime-less
+    // `logs::BatchLogProcessor` drives exports from its own OS thread
+    // ("OpenTelemetry.Logs.BatchProcessor"), which has no Tokio reactor, and the
+    // reqwest-backed OTLP exporter panics there with "there is no reactor
+    // running". Spans and metrics already use their async-runtime variants.
+    let log_processor = BatchLogProcessor::builder(log_exporter, OtelTokio)
         .with_batch_config(
             opentelemetry_sdk::logs::BatchConfigBuilder::default()
                 .with_max_queue_size(2048)
@@ -1340,7 +1743,7 @@ fn init_tracing(
 
     let tracer = provider.tracer("maple-ingest");
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider).with_filter(log_filter());
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -1366,11 +1769,9 @@ fn init_metrics(
     forward_endpoint: &str,
     bind_port: u16,
     service_instance_id: &str,
+    internal_org_id: &str,
 ) -> Option<SdkMeterProvider> {
     let deployment_env = resolve_deployment_env();
-    let internal_org_id =
-        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_owned());
-
     let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
     let skip_dev = deployment_env == "development" && !forward_explicit;
     if skip_dev || endpoint_loopback_to_self(forward_endpoint, bind_port) {
@@ -1383,7 +1784,7 @@ fn init_metrics(
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
-        internal_org_id,
+        internal_org_id: internal_org_id.to_owned(),
     });
 
     let exporter = match MetricExporter::builder()
@@ -1430,11 +1831,9 @@ fn init_usage_metrics(
     forward_endpoint: &str,
     bind_port: u16,
     service_instance_id: &str,
+    internal_org_id: &str,
 ) -> Option<UsageMetrics> {
     let deployment_env = resolve_deployment_env();
-    let internal_org_id =
-        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_owned());
-
     let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
     let skip_dev = deployment_env == "development" && !forward_explicit;
     if skip_dev || endpoint_loopback_to_self(forward_endpoint, bind_port) {
@@ -1447,7 +1846,7 @@ fn init_usage_metrics(
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
-        internal_org_id,
+        internal_org_id: internal_org_id.to_owned(),
     });
 
     let exporter = match MetricExporter::builder()
@@ -1512,12 +1911,25 @@ async fn main() {
     // One UUID per process, shared by the trace and metric resources so both
     // signals attribute to the same `service.instance.id`.
     let service_instance_id = uuid::Uuid::new_v4().to_string();
-    let telemetry_providers =
-        init_tracing(&config.forward_endpoint, config.port, &service_instance_id);
-    let meter_provider = init_metrics(&config.forward_endpoint, config.port, &service_instance_id);
-    let usage_metrics =
-        init_usage_metrics(&config.forward_endpoint, config.port, &service_instance_id)
-            .map(Arc::new);
+    let telemetry_providers = init_tracing(
+        &config.forward_endpoint,
+        config.port,
+        &service_instance_id,
+        &config.internal_org_id,
+    );
+    let meter_provider = init_metrics(
+        &config.forward_endpoint,
+        config.port,
+        &service_instance_id,
+        &config.internal_org_id,
+    );
+    let usage_metrics = init_usage_metrics(
+        &config.forward_endpoint,
+        config.port,
+        &service_instance_id,
+        &config.internal_org_id,
+    )
+    .map(Arc::new);
 
     let http_client = match Client::builder()
         .timeout(config.forward_timeout)
@@ -1713,6 +2125,7 @@ async fn main() {
         .route("/v1/sessionReplays/meta", post(handle_replay_meta))
         .route("/v1/sessionReplays/blob", post(handle_replay_blob))
         .route("/v1/sessionEvents", post(handle_session_events))
+        .route("/v1/events", post(handle_product_events))
         .route(
             "/v1/logpush/cloudflare/http_requests/{connector_id}",
             post(handle_cloudflare_logpush_http_requests),
@@ -2405,7 +2818,7 @@ async fn handle_replay_meta(
                 &span_handle,
                 status,
                 error.error_kind(),
-                error.message.as_str(),
+                error.reason().as_str(),
             );
             error.into_response()
         }
@@ -2513,49 +2926,29 @@ async fn handle_replay_meta_inner(
         reason = "a single request carries far fewer than 2^53 session starts"
     )]
     let billable_sessions = session_starts as f64;
-    let reservation = reserve_autumn_usage(
+    metered_enqueue(
         state,
         &org_id,
         BROWSER_SESSIONS_FEATURE_ID,
         billable_sessions,
+        OnDenied::Reject,
+        || async {
+            pipeline
+                .accept_rows_to(
+                    &org_id,
+                    state.config.tinybird.datasource_session_replays.clone(),
+                    rows,
+                    TelemetrySignal::SessionReplays,
+                    destination,
+                )
+                .await
+                .map_err(|e| {
+                    warn!(org_id = %org_id, error = %e, "session metadata enqueue rejected");
+                    api_error_from_pipeline(&e)
+                })
+        },
     )
     .await?;
-    let enqueue_result = pipeline
-        .accept_rows_to(
-            &org_id,
-            state.config.tinybird.datasource_session_replays.clone(),
-            rows,
-            TelemetrySignal::SessionReplays,
-            destination,
-        )
-        .await
-        .map_err(|e| {
-            warn!(org_id = %org_id, error = %e, "session metadata enqueue rejected");
-            api_error_from_pipeline(&e)
-        });
-
-    if let Err(error) = enqueue_result {
-        if let (Some(entitlements), Some(reservation)) =
-            (&state.autumn_entitlements, reservation.as_ref())
-        {
-            let _ = entitlements.finalize(reservation, false).await;
-        }
-        return Err(error);
-    }
-
-    if let (Some(entitlements), Some(reservation)) =
-        (&state.autumn_entitlements, reservation.as_ref())
-    {
-        let _ = entitlements.finalize(reservation, true).await;
-    }
-
-    // Fail-open fallback: if Autumn could not reserve, record after the WAL
-    // commit through the retrying tracker.
-    if reservation.is_none() && org_id != SENTINEL_ORG_ID && session_starts > 0 {
-        if let Some(tracker) = &state.autumn_tracker {
-            tracker.track(&org_id, "browser_sessions", billable_sessions);
-        }
-    }
 
     Ok(count)
 }
@@ -2584,6 +2977,7 @@ async fn handle_session_events(
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
         "maple.session_events.dropped" = tracing::field::Empty,
+        "maple.product_events.metered" = tracing::field::Empty,
         "maple.sdk" = tracing::field::Empty,
         "user_agent.original" = tracing::field::Empty,
     );
@@ -2606,7 +3000,7 @@ async fn handle_session_events(
                 &span_handle,
                 status,
                 error.error_kind(),
-                error.message.as_str(),
+                error.reason().as_str(),
             );
             error.into_response()
         }
@@ -2630,13 +3024,16 @@ async fn handle_session_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
-    // Same Autumn gate as the metadata endpoint. Session events
-    // are not separately metered — `browser_sessions` remains the billed unit,
-    // and introducing a `browser_events` meter is a pricing decision, not a
-    // schema one — but they must still be entitlement-gated: an out-of-quota org
-    // whose metadata rows are rejected while its event stream keeps writing is
-    // the incoherent half of the old design, and it only widens now that custom
-    // events are a promoted feature.
+    // Same Autumn gate as the metadata endpoint. Automatic session events
+    // (clicks, navigations, errors, ...) are not separately metered —
+    // `browser_sessions` remains their billed unit — but they must still be
+    // entitlement-gated: an out-of-quota org whose metadata rows are rejected
+    // while its event stream keeps writing is the incoherent half of the old
+    // design. `type == "custom"` rows are different: a browser `track()` call is
+    // a product event, and it is metered as `product_events` below (same unit as
+    // `/v1/events`). The REJECTION here deliberately stays on `browser_sessions`:
+    // an exhausted product-events allowance is billed as usage_based overage and
+    // must not 402 a whole session transcript.
     if org_id != SENTINEL_ORG_ID {
         if let Some(error) =
             entitlement_rejection(state, &org_id, BROWSER_SESSIONS_FEATURE_ID).await
@@ -2655,6 +3052,7 @@ async fn handle_session_events_inner(
     // metadata, org_id is taken from the authenticated key, never the body.
     let mut rows: Vec<Vec<u8>> = Vec::new();
     let mut dropped: u64 = 0;
+    let mut custom_events: u64 = 0;
     for line in body.split(|&b| b == b'\n') {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
@@ -2671,6 +3069,9 @@ async fn handle_session_events_inner(
         if !sanitize_session_event(obj) {
             dropped += 1;
             continue;
+        }
+        if obj.get("type").and_then(|v| v.as_str()) == Some("custom") {
+            custom_events += 1;
         }
         obj.insert(
             "org_id".to_owned(),
@@ -2695,19 +3096,200 @@ async fn handle_session_events_inner(
         return Ok(0);
     }
     let count = rows.len();
-    pipeline
-        .accept_rows_to(
-            &org_id,
-            state.config.tinybird.datasource_session_events.clone(),
-            rows,
-            TelemetrySignal::SessionEvents,
-            destination,
-        )
+    Span::current().record("maple.product_events.metered", custom_events);
+    // Only the custom rows are metered; the automatic ones ride on the
+    // session's `browser_sessions` unit. A batch with no custom rows reserves
+    // nothing (`metered_enqueue` skips zero) and just enqueues.
+    metered_enqueue(
+        state,
+        &org_id,
+        PRODUCT_EVENTS_FEATURE_ID,
+        custom_events as f64,
+        OnDenied::MeterAnyway,
+        || async {
+            pipeline
+                .accept_rows_to(
+                    &org_id,
+                    state.config.tinybird.datasource_session_events.clone(),
+                    rows,
+                    TelemetrySignal::SessionEvents,
+                    destination,
+                )
+                .await
+                .map_err(|e| {
+                    warn!(org_id = %org_id, error = %e, "session events enqueue rejected");
+                    api_error_from_pipeline(&e)
+                })
+        },
+    )
+    .await?;
+    Ok(count)
+}
+
+async fn handle_product_events(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    metrics::request_started();
+    let _guard = InFlightGuard;
+    let span = tracing::info_span!(
+        "ingest_product_events",
+        otel.name = "POST /v1/events",
+        otel.kind = "server",
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
+        "http.request.method" = "POST",
+        "http.route" = "/v1/events",
+        "http.request.body.size" = body.len(),
+        "http.response.status_code" = tracing::field::Empty,
+        "error.type" = tracing::field::Empty,
+        "maple.signal" = "product_events",
+        "maple.org_id" = tracing::field::Empty,
+        "maple.ingest.clickhouse_ready" = tracing::field::Empty,
+        "maple.ingest.destination" = tracing::field::Empty,
+        "maple.product_events.dropped" = tracing::field::Empty,
+        "maple.product_events.metered" = tracing::field::Empty,
+    );
+    let span_handle = span.clone();
+    match handle_product_events_inner(&state, &headers, body)
+        .instrument(span)
         .await
-        .map_err(|e| {
-            warn!(org_id = %org_id, error = %e, "session events enqueue rejected");
-            api_error_from_pipeline(&e)
-        })?;
+    {
+        Ok(count) => {
+            span_handle.record("http.response.status_code", 200u16);
+            span_handle.record("otel.status_code", "Ok");
+            (StatusCode::OK, axum::Json(AcceptedBody { accepted: count })).into_response()
+        }
+        Err(error) => {
+            let status = error.status.as_u16();
+            span_handle.record("http.response.status_code", status);
+            span_handle.record("error.type", error.error_kind());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
+            error.into_response()
+        }
+    }
+}
+
+/// `POST /v1/events` — product events posted directly by backends and mobile
+/// apps (browser rows reach `product_events` through the `session_events`
+/// materialized view instead). Same auth, NDJSON framing and per-row drop
+/// policy as `/v1/sessionEvents`; the row shape is fixed by
+/// `sanitize_product_event`. Entitlement-gated and metered as `product_events`,
+/// one unit per row that reaches the WAL.
+async fn handle_product_events_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<usize, ApiError> {
+    let resolved_key = match resolve_replay_key(state, headers).await? {
+        Some(resolved_key) => resolved_key,
+        None => return Ok(0),
+    };
+    let org_id = resolved_key.org_id.clone();
+    Span::current().record("maple.org_id", org_id.as_str());
+    Span::current().record(
+        "maple.ingest.clickhouse_ready",
+        resolved_key.clickhouse_ready,
+    );
+    let destination = native_destination_for(&resolved_key);
+    Span::current().record("maple.ingest.destination", destination.as_str());
+
+    // Product events are their own metered feature, but they are NOT gated on
+    // it — same reasoning as the `type == "custom"` rows on `/v1/sessionEvents`.
+    // Autumn answers `allowed: false` for a customer that simply has no balance
+    // for the feature yet (a plan item not pushed, or not granted to a live
+    // subscription), which is every org until the `atmn push` in the rollout
+    // checklist lands. A gate here would turn that window into a 402 on every
+    // backend and mobile event — including the API's own signup/plan emits —
+    // and `decide_allowed` reads a well-formed `allowed: false` as a real
+    // denial, so the fail-open in `is_allowed` never rescues it. The quantity is
+    // still reserved and recorded per accepted row below.
+    let pipeline = native_rows_pipeline_for(
+        state,
+        destination,
+        "Product event storage is not configured",
+    )?;
+
+    // One receipt time for the whole batch: rows without a `timestamp` all
+    // land at the moment the request arrived, not spread across the parse.
+    let received_at = chrono::Utc::now();
+    let mut rows: Vec<Vec<u8>> = Vec::new();
+    let mut dropped: u64 = 0;
+    for line in body.split(|&b| b == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let mut value: serde_json::Value = serde_json::from_slice(line)
+            .map_err(|e| ApiError::bad_request(format!("invalid product event JSON: {e}")))?;
+        let obj = value
+            .as_object_mut()
+            .ok_or_else(|| ApiError::bad_request("product event must be a JSON object"))?;
+        if !sanitize_product_event(obj, received_at) {
+            dropped += 1;
+            continue;
+        }
+        // org_id comes from the authenticated key, never the body — the
+        // sanitizer already discarded whatever the client sent under that name.
+        obj.insert(
+            "org_id".to_string(),
+            serde_json::Value::String(org_id.clone()),
+        );
+        rows.push(
+            serde_json::to_vec(&value)
+                .map_err(|e| ApiError::bad_request(format!("failed to re-serialize event: {e}")))?,
+        );
+    }
+
+    if dropped > 0 {
+        Span::current().record("maple.product_events.dropped", dropped);
+        warn!(
+            org_id = %org_id,
+            dropped,
+            "dropped malformed product events (name, source or timestamp)"
+        );
+    }
+
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    // Metered quantity = rows actually enqueued, i.e. after the sanitiser's
+    // drops — a malformed line is neither stored nor billed.
+    let count = rows.len();
+    Span::current().record("maple.product_events.metered", count as u64);
+    metered_enqueue(
+        state,
+        &org_id,
+        PRODUCT_EVENTS_FEATURE_ID,
+        count as f64,
+        // Fail-open, matching the entitlement decision above: a denial here is
+        // far more likely to mean "the feature is not provisioned yet" than
+        // "this org is over its allowance", and dropping a backend's buffered
+        // batch is not a recoverable outcome for the caller.
+        OnDenied::MeterAnyway,
+        || async {
+            pipeline
+                .accept_rows_to(
+                    &org_id,
+                    state.config.tinybird.datasource_product_events.clone(),
+                    rows,
+                    TelemetrySignal::ProductEvents,
+                    destination,
+                )
+                .await
+                .map_err(|e| {
+                    warn!(org_id = %org_id, error = %e, "product events enqueue rejected");
+                    api_error_from_pipeline(&e)
+                })
+        },
+    )
+    .await?;
     Ok(count)
 }
 
@@ -2773,7 +3355,7 @@ async fn handle_replay_blob(
                 &span_handle,
                 status,
                 error.error_kind(),
-                error.message.as_str(),
+                error.reason().as_str(),
             );
             error.into_response()
         }
@@ -3048,7 +3630,6 @@ async fn handle_signal(
         .instrument(span)
         .await;
     let duration = start.elapsed();
-    let duration_ms = duration_millis(duration);
 
     match result {
         Ok((response, item_count, org_id, decoded_bytes, metered_atomically)) => {
@@ -3070,17 +3651,13 @@ async fn handle_signal(
                     }
                 }
             }
-            info!(
-                status = status_code,
-                duration_ms, item_count, "Request processed"
-            );
             response
         }
         Err((error, error_kind)) => {
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            record_rejection_reason(&span_handle, status, error_kind, error.message.as_str());
+            record_rejection_reason(&span_handle, status, error_kind, error.reason().as_str());
             metrics::request_completed(signal.path(), "error", error_kind, duration.as_secs_f64());
             error.into_response()
         }
@@ -3141,7 +3718,7 @@ async fn handle_cloudflare_logpush(
             span_handle.record("maple.cloudflare.is_validation", is_validation);
             metrics::request_completed("logs", "ok", "none", duration.as_secs_f64());
             metrics::cloudflare_batch("http_requests", is_validation);
-            info!(
+            debug!(
                 status = status_code,
                 duration_ms = duration_millis(duration),
                 item_count,
@@ -3154,7 +3731,7 @@ async fn handle_cloudflare_logpush(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            record_rejection_reason(&span_handle, status, error_kind, error.message.as_str());
+            record_rejection_reason(&span_handle, status, error_kind, error.reason().as_str());
             metrics::request_completed("logs", "error", error_kind, duration.as_secs_f64());
             if error_kind == "auth" {
                 metrics::cloudflare_auth_failure("http_requests");
@@ -4254,7 +4831,10 @@ async fn forward_to_collector(
             url = %url,
             "Collector forwarding failed"
         );
-        ApiError::service_unavailable("Collector forwarding failed: transport error")
+        collector_unavailable(
+            "Maple could not reach the upstream collector. No data was stored; resend this batch after the suggested delay.",
+            error.to_string(),
+        )
     })?;
 
     let forward_duration = forward_start.elapsed();
@@ -4291,11 +4871,23 @@ async fn forward_to_collector(
             org_id = %resolved_key.org_id,
             "Collector returned error"
         );
-        return Err(ApiError::service_unavailable(
-            "Collector returned server error",
+        return Err(collector_unavailable(
+            "The upstream collector rejected this batch with a server error. No data was stored; resend it after the suggested delay.",
+            format!("collector responded {upstream_status_code}"),
         ));
     }
 
+    relay_collector_response(response, upstream_status_code, signal, resolved_key).await
+}
+
+/// Copy the collector's own (non-5xx) answer back to the caller verbatim, so an
+/// OTLP partial-success body reaches the SDK unchanged.
+async fn relay_collector_response(
+    response: reqwest::Response,
+    upstream_status_code: u16,
+    signal: Signal,
+    resolved_key: &ResolvedIngestKey,
+) -> Result<Response, ApiError> {
     let status = StatusCode::from_u16(upstream_status_code).unwrap_or(StatusCode::BAD_GATEWAY);
 
     let upstream_content_type = response.headers().get(CONTENT_TYPE).cloned();
@@ -4307,7 +4899,10 @@ async fn forward_to_collector(
             key_id = %resolved_key.key_id,
             "Failed reading collector response"
         );
-        ApiError::service_unavailable("Telemetry backend unavailable")
+        collector_unavailable(
+            "Maple could not read the upstream collector's response. The batch may or may not have been stored; resend it after the suggested delay.",
+            error.to_string(),
+        )
     })?;
 
     let mut response = Response::builder().status(status);
@@ -4317,7 +4912,13 @@ async fn forward_to_collector(
 
     response
         .body(axum::body::Body::from(upstream_body))
-        .map_err(|_| ApiError::service_unavailable("Telemetry backend unavailable"))
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Maple could not relay the upstream collector's response.",
+            )
+            .with_detail(error.to_string())
+        })
 }
 
 #[hotpath::measure]
@@ -5665,6 +6266,63 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn api_error_body_uses_the_tagged_error_envelope() {
+        let response = api_error_from_pipeline(&PipelineError::QueueUnavailable(
+            "wal lane 46 is full".into(),
+        ))
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(RETRY_AFTER).unwrap(),
+            HeaderValue::from_static("5")
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: JsonValue = serde_json::from_slice(&body).unwrap();
+        let error = &body["error"];
+        assert_eq!(error["_tag"], "@maple/ingest/QueueUnavailable");
+        assert_eq!(error["type"], "api_error");
+        assert_eq!(error["code"], "ingest_queue_unavailable");
+        assert_eq!(error["retryable"], true);
+        assert_eq!(error["recovery"], "retry");
+        assert_eq!(error["retry_after_seconds"], 5);
+        // The internal cause is telemetry-only: it never reaches the wire.
+        assert!(!body.to_string().contains("wal lane 46"));
+    }
+
+    #[test]
+    fn pipeline_failures_carry_distinct_tags_and_retry_semantics() {
+        let queue = api_error_from_pipeline(&PipelineError::QueueUnavailable("wal closed".into()));
+        let encode = api_error_from_pipeline(&PipelineError::Encode("bad row".into()));
+
+        // Both are 503, but one is worth retrying and the other never is — the
+        // single "Telemetry backend unavailable" string said neither.
+        assert_eq!(queue.status, encode.status);
+        assert_ne!(queue.kind.tag, encode.kind.tag);
+        assert!(queue.kind.retryable);
+        assert!(!encode.kind.retryable);
+        assert_eq!(encode.kind.recovery, "contact_support");
+
+        // The cause survives on the span even though it is off the wire.
+        assert!(queue.reason().contains("wal closed"));
+    }
+
+    #[test]
+    fn pipeline_error_kinds_match_the_pipeline_vocabulary() {
+        for error in [
+            PipelineError::Throttled("x"),
+            PipelineError::Backpressure("x"),
+            PipelineError::QueueUnavailable("x".into()),
+            PipelineError::Encode("x".into()),
+        ] {
+            assert_eq!(api_error_from_pipeline(&error).error_kind(), error.kind());
+        }
+    }
+
     #[test]
     fn api_error_from_pipeline_maps_variants_to_status() {
         // Transient queue conditions are retryable → 429 (classified Ok via
@@ -6380,6 +7038,7 @@ mod tests {
             datasource_session_replays: "session_replays".to_owned(),
             datasource_session_replay_events: "session_replay_events".to_owned(),
             datasource_session_events: "session_events".to_owned(),
+            datasource_product_events: "product_events".to_owned(),
         }
     }
 
@@ -6467,6 +7126,7 @@ mod tests {
             config: AppConfig {
                 port: 0,
                 otlp_grpc_port: None,
+                internal_org_id: "org_test_internal".to_owned(),
                 forward_endpoint,
                 forward_timeout: Duration::from_secs(5),
                 write_mode: WriteMode::Forward,
@@ -6795,6 +7455,249 @@ mod tests {
         drop(std::fs::remove_dir_all(&queue_dir));
     }
 
+    /// One request a fake Autumn saw: which endpoint, and the JSON body.
+    #[derive(Debug)]
+    struct AutumnCall {
+        path: String,
+        body: serde_json::Value,
+    }
+
+    impl AutumnCall {
+        fn feature_id(&self) -> &str {
+            self.body["feature_id"].as_str().unwrap_or_default()
+        }
+        /// `required_balance` is only sent by `reserve`; a plain `is_allowed`
+        /// gate omits it. That is how the tests tell the two apart.
+        fn reserved_value(&self) -> Option<f64> {
+            self.body.get("required_balance").and_then(|v| v.as_f64())
+        }
+    }
+
+    async fn fake_autumn(
+        axum::extract::State(tx): axum::extract::State<
+            tokio::sync::mpsc::UnboundedSender<AutumnCall>,
+        >,
+        Path(path): Path<String>,
+        body: Bytes,
+    ) -> axum::Json<serde_json::Value> {
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        let _ = tx.send(AutumnCall { path, body });
+        axum::Json(serde_json::json!({ "allowed": true }))
+    }
+
+    /// Spawn a fake Autumn that allows everything and records every call, and
+    /// point `state` at it with billing enforcement enabled.
+    async fn with_fake_autumn(
+        mut state: AppState,
+    ) -> (AppState, tokio::sync::mpsc::UnboundedReceiver<AutumnCall>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/v1/{*path}", post(fake_autumn))
+            .with_state(tx);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        state.autumn_entitlements = Some(AutumnEntitlements::new(
+            state.http_client.clone(),
+            "am_sk_test".to_string(),
+            &format!("http://{addr}"),
+        ));
+        (state, rx)
+    }
+
+    /// Drain everything the fake Autumn has seen so far. Reserve → enqueue →
+    /// finalize all complete before the handler returns, so no waiting is
+    /// needed once the handler future has resolved.
+    fn drain_autumn_calls(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<AutumnCall>,
+    ) -> Vec<AutumnCall> {
+        let mut calls = Vec::new();
+        while let Ok(call) = rx.try_recv() {
+            calls.push(call);
+        }
+        calls
+    }
+
+    fn bearer_headers(raw_key: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {raw_key}").parse().unwrap(),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn product_events_endpoint_meters_each_enqueued_row_as_product_events() {
+        let queue_dir = unique_main_test_dir("product-events-meter");
+        let state =
+            replay_blob_test_state("maple_sk_test_pe_meter", "org_pe_meter", queue_dir.clone())
+                .await;
+        let (state, mut rx) = with_fake_autumn(state).await;
+
+        // Three valid rows and one the sanitiser drops (reserved `$`-prefixed
+        // name). The dropped row is neither stored nor billed.
+        let body = concat!(
+            r#"{"name":"plan_started"}"#,
+            "\n",
+            r#"{"name":"$not_allowed"}"#,
+            "\n",
+            r#"{"name":"checkout_viewed","source":"mobile"}"#,
+            "\n",
+            r#"{"name":"$screen","source":"mobile","page_path":"Home"}"#,
+            "\n",
+        );
+        let accepted = handle_product_events_inner(
+            &state,
+            &bearer_headers("maple_sk_test_pe_meter"),
+            Bytes::from_static(body.as_bytes()),
+        )
+        .await
+        .expect("product events should be accepted");
+        assert_eq!(accepted, 3);
+
+        let calls = drain_autumn_calls(&mut rx);
+        let checks: Vec<&AutumnCall> = calls
+            .iter()
+            .filter(|c| c.path == "balances.check")
+            .collect();
+        // Every check on this endpoint is against `product_events`, never
+        // `browser_sessions`.
+        assert!(!checks.is_empty(), "expected Autumn checks, saw {calls:?}");
+        for check in &checks {
+            assert_eq!(check.feature_id(), "product_events", "{check:?}");
+        }
+        // ...and there is NO entitlement gate (a check with no
+        // `required_balance`), only the reservation. A gate would 402 every org
+        // whose Autumn customer has no `product_events` balance yet, which is
+        // every org until the plan item is pushed and granted — Autumn answers
+        // that with a real `allowed: false`, not an error, so the fail-open in
+        // `is_allowed` does not cover it.
+        let gates: Vec<&str> = checks
+            .iter()
+            .filter(|c| c.reserved_value().is_none())
+            .map(|c| c.feature_id())
+            .collect();
+        assert!(gates.is_empty(), "expected no entitlement gate, saw {gates:?}");
+        let reservations: Vec<f64> = checks.iter().filter_map(|c| c.reserved_value()).collect();
+        assert_eq!(
+            reservations,
+            vec![3.0],
+            "exactly one reservation for the enqueued row count"
+        );
+        let finalizes: Vec<&AutumnCall> = calls
+            .iter()
+            .filter(|c| c.path == "balances.finalize")
+            .collect();
+        assert_eq!(finalizes.len(), 1, "{calls:?}");
+        assert_eq!(finalizes[0].body["action"], "confirm");
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[tokio::test]
+    async fn custom_session_events_are_metered_as_product_events_but_gated_on_browser_sessions() {
+        let queue_dir = unique_main_test_dir("session-events-custom-meter");
+        let state =
+            replay_blob_test_state("maple_sk_test_se_meter", "org_se_meter", queue_dir.clone())
+                .await;
+        let (state, mut rx) = with_fake_autumn(state).await;
+
+        // Two `track()` calls, one automatic click, one unknown type (dropped).
+        let body = concat!(
+            r#"{"type":"custom","message":"signup_completed"}"#,
+            "\n",
+            r#"{"type":"click","message":"button#buy"}"#,
+            "\n",
+            r#"{"type":"custom","message":"plan_selected","attributes":{"plan":"pro"}}"#,
+            "\n",
+            r#"{"type":"not-a-real-type"}"#,
+            "\n",
+        );
+        let accepted = handle_session_events_inner(
+            &state,
+            &bearer_headers("maple_sk_test_se_meter"),
+            Bytes::from_static(body.as_bytes()),
+        )
+        .await
+        .expect("session events should be accepted");
+        assert_eq!(
+            accepted, 3,
+            "custom + click rows are stored, unknown is dropped"
+        );
+
+        let calls = drain_autumn_calls(&mut rx);
+        let checks: Vec<&AutumnCall> = calls
+            .iter()
+            .filter(|c| c.path == "balances.check")
+            .collect();
+
+        // The entitlement gate (no `required_balance`) stays on browser_sessions:
+        // an exhausted product-events allowance must not 402 a whole transcript.
+        let gates: Vec<&str> = checks
+            .iter()
+            .filter(|c| c.reserved_value().is_none())
+            .map(|c| c.feature_id())
+            .collect();
+        assert_eq!(gates, vec!["browser_sessions"], "{calls:?}");
+
+        // The reservation is for the two custom rows only, as product_events.
+        let reservations: Vec<(&str, f64)> = checks
+            .iter()
+            .filter_map(|c| c.reserved_value().map(|v| (c.feature_id(), v)))
+            .collect();
+        assert_eq!(reservations, vec![("product_events", 2.0)], "{calls:?}");
+
+        let finalizes: Vec<&AutumnCall> = calls
+            .iter()
+            .filter(|c| c.path == "balances.finalize")
+            .collect();
+        assert_eq!(finalizes.len(), 1, "{calls:?}");
+        assert_eq!(finalizes[0].body["action"], "confirm");
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[tokio::test]
+    async fn session_events_without_custom_rows_reserve_nothing() {
+        let queue_dir = unique_main_test_dir("session-events-no-custom");
+        let state =
+            replay_blob_test_state("maple_sk_test_se_auto", "org_se_auto", queue_dir.clone()).await;
+        let (state, mut rx) = with_fake_autumn(state).await;
+
+        let body = concat!(
+            r#"{"type":"click","message":"a"}"#,
+            "\n",
+            r#"{"type":"navigation","message":"/pricing"}"#,
+            "\n",
+        );
+        let accepted = handle_session_events_inner(
+            &state,
+            &bearer_headers("maple_sk_test_se_auto"),
+            Bytes::from_static(body.as_bytes()),
+        )
+        .await
+        .expect("session events should be accepted");
+        assert_eq!(accepted, 2);
+
+        let calls = drain_autumn_calls(&mut rx);
+        // Automatic events ride on the session's browser_sessions unit: only
+        // the gate fires, no reservation and no finalize.
+        assert!(
+            calls
+                .iter()
+                .all(|c| c.path == "balances.check" && c.reserved_value().is_none()),
+            "{calls:?}"
+        );
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(calls[0].feature_id(), "browser_sessions");
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
     #[tokio::test]
     async fn replay_chunks_stay_inline_when_no_blob_store_is_configured() {
         // The self-hosted / BYO-ClickHouse path, and the pre-cutover managed
@@ -7114,6 +8017,60 @@ mod tests {
             "connector identity should stay cached while routing refreshes"
         );
         assert_eq!(store.routing_fetches.load(Ordering::Relaxed), 1);
+    }
+
+    /// Regression for the gateway going silent in its own traces: a global
+    /// `warn` filter (the #581 default) discards every `info_span!` before the
+    /// OTel layer sees it. The span filter must admit info spans; the log
+    /// filter is the one allowed to drop info events — and only as a
+    /// per-layer filter, never registry-wide.
+    #[test]
+    fn span_filter_admits_info_spans_that_the_log_filter_would_drop() {
+        use tracing::callsite::{DefaultCallsite, Identifier};
+        use tracing::field::FieldSet;
+        use tracing::metadata::Kind;
+        use tracing::{Level, Metadata, Subscriber};
+
+        static SPAN_CALLSITE: DefaultCallsite = DefaultCallsite::new(&SPAN_META);
+        static SPAN_META: Metadata<'static> = Metadata::new(
+            "filter_probe_span",
+            "maple_ingest::probe",
+            Level::INFO,
+            None,
+            None,
+            None,
+            FieldSet::new(&[], Identifier(&SPAN_CALLSITE)),
+            Kind::SPAN,
+        );
+        static EVENT_CALLSITE: DefaultCallsite = DefaultCallsite::new(&EVENT_META);
+        static EVENT_META: Metadata<'static> = Metadata::new(
+            "filter_probe_event",
+            "maple_ingest::probe",
+            Level::INFO,
+            None,
+            None,
+            None,
+            FieldSet::new(&[], Identifier(&EVENT_CALLSITE)),
+            Kind::EVENT,
+        );
+
+        let span_filter = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new(SPAN_FILTER_DIRECTIVES));
+        assert!(
+            span_filter.enabled(&SPAN_META),
+            "the registry-wide filter must let info spans reach the OTel layer"
+        );
+
+        let log_filter = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new(LOG_FILTER_DIRECTIVES));
+        assert!(
+            !log_filter.enabled(&EVENT_META),
+            "hot-path info logs stay off by default"
+        );
+        assert!(
+            !log_filter.enabled(&SPAN_META),
+            "the log filter drops info spans too, which is why it must stay per-layer"
+        );
     }
 
     /// Records `(thread, span name, parent span name)` for every span opened

@@ -31,9 +31,18 @@ import {
 	ErrorsByTypeRequest,
 	ErrorsSummaryRequest,
 	ListLogsRequest,
+	ProductEventsFunnelBreakdownRequest,
+	ProductEventsFunnelRequest,
 	ServiceOverviewRequest,
 	ServiceUsageRequest,
 } from "@maple/domain/http"
+import {
+	FUNNEL_WIDGET_BREAKDOWN_LIMIT,
+	ProductEventsFunnelWidgetParams,
+	funnelWidgetBreakdownRows,
+	funnelWidgetRows,
+} from "@maple/query-model"
+import { PRODUCT_EVENTS_FUNNEL_ENDPOINT } from "@maple/widgets/dashboard"
 import { Effect, Schema } from "effect"
 import {
 	coerceErrorsByTypeRows,
@@ -44,7 +53,8 @@ import {
 	serviceUsagePreviousTotals,
 	windowDurationSeconds,
 } from "@maple/query-engine"
-import { Queries, type QueryDefinition } from "@maple/query-engine/registry"
+import { Queries, productEventsFunnelOpts, type QueryDefinition } from "@maple/query-engine/registry"
+import { validateFunnelDefinition } from "@/routes/query-helpers"
 import { makeQueryRunners } from "@/routes/query-runner"
 import type { QueryEngineServiceApi } from "@/services/warehouse/QueryEngineService"
 import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
@@ -122,6 +132,10 @@ const asRows = <Row>(rows: ReadonlyArray<Row>): ReadonlyArray<Record<string, unk
 	// field with `?? 0` / `String(...)` defaults exactly as the browser does.
 	rows as ReadonlyArray<Record<string, unknown>>
 
+const decodeProductEventsFunnel = Schema.decodeUnknownEffect(ProductEventsFunnelRequest)
+const decodeProductEventsFunnelBreakdown = Schema.decodeUnknownEffect(ProductEventsFunnelBreakdownRequest)
+const decodeProductEventsFunnelWidgetParams = Schema.decodeUnknownEffect(ProductEventsFunnelWidgetParams)
+
 export const ROUTE_ENDPOINT_PLANS: RouteEndpointPlanRegistry = {
 	errors_by_type: readModelPlan(ErrorsByTypeRequest, Queries.errorsByType, (rows) => ({
 		data: coerceErrorsByTypeRows(asRows(rows)),
@@ -156,4 +170,66 @@ export const ROUTE_ENDPOINT_PLANS: RouteEndpointPlanRegistry = {
 		const cursor = logs.length === limit && logs.length > 0 ? logs[logs.length - 1].timestamp : null
 		return { data: logs, meta: { limit, cursor } }
 	}),
+	// The product-event funnel widget. The stored params are the flat
+	// `ProductEventsFunnelWidgetParams` bag (`steps`, optional `keyBy` /
+	// `windowSeconds` / `breakdownBy`, population filters); the defaults and the
+	// `{ name, value[, group] }` row shape match the browser's
+	// `getProductEventsFunnelWidget` exactly, so a shared funnel tile draws the
+	// same bars as the signed-in one.
+	[PRODUCT_EVENTS_FUNNEL_ENDPOINT]: {
+		run: (params, context) =>
+			Effect.gen(function* () {
+				const widgetParams = yield* decodeProductEventsFunnelWidgetParams(params)
+				// No steps yet: the empty state, not a 400 from the builder.
+				if (widgetParams.steps.length === 0) return { data: [] }
+				const { breakdownBy, ...rest } = widgetParams
+				const request = {
+					keyBy: "person",
+					windowSeconds: 24 * 3600,
+					...rest,
+					startTime: context.window.startTime,
+					endTime: context.window.endTime,
+				}
+				const payload = yield* decodeProductEventsFunnel(request)
+				const { runQuery } = makeQueryRunners({
+					warehouse: context.warehouse,
+					queryEngine: context.queryEngine,
+				})
+				if (breakdownBy !== undefined) {
+					const breakdownPayload = yield* decodeProductEventsFunnelBreakdown({
+						...request,
+						breakdownBy,
+						limit: FUNNEL_WIDGET_BREAKDOWN_LIMIT,
+					})
+					yield* validateFunnelDefinition({
+						...productEventsFunnelOpts(breakdownPayload),
+						breakdownBy: breakdownPayload.breakdownBy,
+						limit: breakdownPayload.limit,
+					})
+					const rows = yield* runQuery(
+						Queries.productEventsFunnelBreakdown,
+						context.tenant,
+						breakdownPayload,
+					)
+					return {
+						data: funnelWidgetBreakdownRows(
+							payload.steps,
+							rows.map((row) => ({
+								group: String(row.group),
+								step: Number(row.step),
+								count: Number(row.count) || 0,
+							})),
+						),
+					}
+				}
+				yield* validateFunnelDefinition(productEventsFunnelOpts(payload))
+				const rows = yield* runQuery(Queries.productEventsFunnel, context.tenant, payload)
+				return {
+					data: funnelWidgetRows(
+						payload.steps,
+						rows.map((row) => ({ step: Number(row.step), count: Number(row.count) || 0 })),
+					),
+				}
+			}),
+	},
 }

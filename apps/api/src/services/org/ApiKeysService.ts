@@ -14,11 +14,10 @@ import {
 	RoleName,
 } from "@maple/domain/http"
 import { API_KEY_PREFIX, apiKeys, generateApiKey, hashApiKey, parseIngestKeyLookupHmacKey } from "@maple/db"
-import { and, desc, eq, getTableColumns, isNull, lt, or } from "drizzle-orm"
+import { and, desc, eq, getTableColumns, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { Clock, Effect, Layer, Option, Redacted, Schema, Context } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
-import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 
@@ -53,6 +52,28 @@ const McpApiKeyMetadata = Schema.Struct({
 })
 const decodeMcpApiKeyMetadata = Schema.decodeUnknownOption(McpApiKeyMetadata)
 
+/**
+ * Metadata written when a signed-in app mints a credential for one of its own
+ * devices. Two fields carry weight:
+ *
+ * - `roles` pins the *minting user's* roles onto the key, so a credential that
+ *   lives on a phone can never outrank the human who created it. Without it the
+ *   key would resolve with the `root` default in `ApiAuthorizationV2Layer`,
+ *   fenced only by its scopes.
+ * - `deviceId` is what makes the credential replaceable: minting is idempotent
+ *   per device, so a reinstall or a roll retires the previous key instead of
+ *   leaving a live one behind on a phone nobody has any more.
+ */
+const DeviceApiKeyMetadata = Schema.Struct({
+	source: Schema.Literal("maple_ios_widget"),
+	roles: Schema.Array(RoleName),
+	deviceId: Schema.String,
+})
+const decodeDeviceApiKeyMetadata = Schema.decodeUnknownOption(DeviceApiKeyMetadata)
+
+/** The one `source` a `kind: "device"` key may carry today. */
+export const WIDGET_DEVICE_KEY_SOURCE = "maple_ios_widget"
+
 const McpOAuthApiKeyMetadata = Schema.Struct({
 	source: Schema.Literal("maple_mcp_oauth"),
 	roles: Schema.Array(RoleName),
@@ -62,7 +83,7 @@ const McpOAuthApiKeyMetadata = Schema.Struct({
 const decodeMcpOAuthApiKeyMetadata = Schema.decodeUnknownOption(McpOAuthApiKeyMetadata)
 
 /** Metadata `source` values that pin roles onto a key. */
-const ROLE_BEARING_SOURCES = ["maple_cli", "maple_mcp", "maple_mcp_oauth"] as const
+const ROLE_BEARING_SOURCES = ["maple_cli", "maple_mcp", "maple_mcp_oauth", WIDGET_DEVICE_KEY_SOURCE] as const
 
 interface KeyRoleMetadata {
 	readonly roles: ReadonlyArray<RoleName> | null
@@ -88,6 +109,10 @@ const readKeyRoleMetadata = (metadata: unknown): Option.Option<KeyRoleMetadata> 
 	const mcp = decodeMcpApiKeyMetadata(metadata)
 	if (Option.isSome(mcp)) {
 		return Option.some({ roles: mcp.value.roles, cliManaged: false, mcpOAuthResource: null })
+	}
+	const device = decodeDeviceApiKeyMetadata(metadata)
+	if (Option.isSome(device)) {
+		return Option.some({ roles: device.value.roles, cliManaged: false, mcpOAuthResource: null })
 	}
 	const mcpOAuth = decodeMcpOAuthApiKeyMetadata(metadata)
 	if (Option.isSome(mcpOAuth)) {
@@ -167,6 +192,16 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			return rowToResponse(row)
 		})
 
+		/**
+		 * The organization's keys, **excluding device credentials**.
+		 *
+		 * A device key is not a thing anyone manages from the API-keys screen: it
+		 * is minted, rolled, and revoked by the app that owns the phone, one per
+		 * pinned organization per device. Listing them would put a dozen rows
+		 * nobody created by hand in front of an admin looking for the two they
+		 * did — and inviting them to revoke one just breaks a Home Screen until
+		 * the app next mints again.
+		 */
 		const list = Effect.fn("ApiKeysService.list")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			const rows = yield* database
@@ -174,7 +209,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 					db
 						.select()
 						.from(apiKeys)
-						.where(eq(apiKeys.orgId, orgId))
+						.where(and(eq(apiKeys.orgId, orgId), ne(apiKeys.kind, "device")))
 						.orderBy(desc(apiKeys.createdAt)),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
@@ -250,6 +285,146 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				secret: rawKey,
 				...(txid !== undefined ? { txid } : undefined),
 			})
+		})
+
+		/**
+		 * Matches the live device credentials this app minted for one device.
+		 *
+		 * Containment (`@>`) rather than three column comparisons because the
+		 * association lives in `metadata_json`; the source is pinned too, so a
+		 * future `kind: "device"` credential for something other than the widgets
+		 * cannot be caught by a widget revoke.
+		 */
+		const liveDeviceKeysFor = (orgId: OrgId, deviceId: string) =>
+			and(
+				eq(apiKeys.orgId, orgId),
+				eq(apiKeys.kind, "device"),
+				eq(apiKeys.revoked, false),
+				sql`${apiKeys.metadataJson} @> ${JSON.stringify({
+					source: WIDGET_DEVICE_KEY_SOURCE,
+					deviceId,
+				})}::jsonb`,
+			)
+
+		/**
+		 * Mint the widget credential for one device, retiring whatever it had.
+		 *
+		 * Every ceiling here is the server's, which is the whole point of a
+		 * dedicated operation rather than `create` with a `kind`: the caller
+		 * names a device and nothing else, so a compromised or simply wrong
+		 * client cannot ask for wider scopes, a longer life, or more authority
+		 * than the human running it.
+		 *
+		 * Idempotent per device: mint and roll are the same call, because the app
+		 * re-mints on its own schedule and a phone that gets a new key must not
+		 * leave the old one live. Revoke-then-insert inside one transaction, in
+		 * that order, for the same reason `roll` does it that way.
+		 */
+		const replaceDeviceKey = Effect.fn("ApiKeysService.replaceDeviceKey")(function* (
+			orgId: OrgId,
+			userId: UserId,
+			params: {
+				deviceId: string
+				name: string
+				scopes: ReadonlyArray<string>
+				expiresInSeconds: number
+				roles: ReadonlyArray<RoleName>
+				createdByEmail?: string | null
+			},
+		) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"tenant.userId": userId,
+				"maple.device.id": params.deviceId,
+			})
+			const id = decodeApiKeyIdSync(randomUUID())
+			const rawKey = generateApiKey()
+			const keyHash = hashApiKey(rawKey, hmacKey)
+			const keyPrefix = rawKey.slice(0, 12) + "..."
+			const now = yield* Clock.currentTimeMillis
+			const expiresAt = now + params.expiresInSeconds * 1000
+			const scopes = [...params.scopes]
+			const createdByEmail = params.createdByEmail ?? null
+
+			const inserted = yield* database
+				.execute((db) =>
+					db.transaction(async (tx) => {
+						await tx
+							.update(apiKeys)
+							.set({ revoked: true, revokedAt: msToDate(now) })
+							.where(liveDeviceKeysFor(orgId, params.deviceId))
+						return await tx
+							.insert(apiKeys)
+							.values({
+								id,
+								orgId,
+								name: params.name,
+								description: null,
+								keyHash,
+								keyPrefix,
+								kind: "device",
+								scopes,
+								expiresAt: msToDate(expiresAt),
+								createdAt: new Date(now),
+								createdBy: userId,
+								createdByEmail,
+								metadataJson: {
+									source: WIDGET_DEVICE_KEY_SOURCE,
+									// The minting session's roles, so the key on the
+									// phone can never outrank the human who created it.
+									roles: [...params.roles],
+									deviceId: params.deviceId,
+								},
+							})
+							.returning(txidColumn)
+					}),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+			const txid = readTxid(inserted)
+
+			return new ApiKeyCreatedResponse({
+				id,
+				name: params.name,
+				description: null,
+				keyPrefix,
+				kind: "device",
+				scopes,
+				revoked: false,
+				revokedAt: null,
+				lastUsedAt: null,
+				expiresAt,
+				createdAt: now,
+				createdBy: userId,
+				createdByEmail,
+				secret: rawKey,
+				...(txid !== undefined ? { txid } : undefined),
+			})
+		})
+
+		/**
+		 * Retire one device's widget credentials. Called on sign-out, when the
+		 * user leaves the organization, and when the widget is unpinned — the
+		 * Home Screen outlives the session, and so would the key.
+		 *
+		 * Returns how many it retired, so a caller can tell "revoked" from
+		 * "there was nothing to revoke" without a second read.
+		 */
+		const revokeDeviceKeys = Effect.fn("ApiKeysService.revokeDeviceKeys")(function* (
+			orgId: OrgId,
+			deviceId: string,
+		) {
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.device.id": deviceId })
+			const now = yield* Clock.currentTimeMillis
+			const revokedRows = yield* database
+				.execute((db) =>
+					db
+						.update(apiKeys)
+						.set({ revoked: true, revokedAt: msToDate(now) })
+						.where(liveDeviceKeysFor(orgId, deviceId))
+						.returning({ id: apiKeys.id }),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+			return revokedRows.length
 		})
 
 		const roll = Effect.fn("ApiKeysService.roll")(function* (
@@ -482,9 +657,16 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 					"tenant.userId": resolved.value.userId,
 					"maple.api_key.id": resolved.value.keyId,
 				})
-				// Scoped, not detached: this write shares the request's single Postgres
-				// connection, and a detached fiber can outlive its release.
-				yield* forkRequestScoped(touchLastUsed(resolved.value.keyId).pipe(Effect.ignore))
+				// Awaited, not forked. A fork — even one started immediately and bound
+				// to the request scope — still lost the race on requests whose handler
+				// had no further async work (`GET /mcp`): the response went out, the
+				// Postgres scope closed, and the UPDATE died with CONNECTION_ENDED
+				// before it reached the socket, recorded as an error span on every
+				// such request. The memo and the SQL predicate already make this at
+				// most one cheap UPDATE per key per heartbeat on an already-dialed
+				// connection, so there is nothing worth racing for. Failure is
+				// still best-effort: a missed heartbeat must never fail auth.
+				yield* touchLastUsed(resolved.value.keyId).pipe(Effect.ignore)
 			}
 			return resolved
 		})
@@ -498,6 +680,8 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			resolveByKey,
 			resolveByBearer,
 			touchLastUsed,
+			replaceDeviceKey,
+			revokeDeviceKeys,
 		}
 	}),
 }) {

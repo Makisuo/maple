@@ -17,7 +17,9 @@ import type {
 } from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
 import { STAT_AGGREGATES, type StatAggregate } from "@maple/domain/http"
-import type { QueryComparisonMode } from "@maple/query-model"
+import type { FunnelBreakdownBy, FunnelKeyBy, QueryComparisonMode } from "@maple/query-model"
+import type { FunnelStepDraft } from "@/lib/query-builder/funnel-filters"
+import { DEFAULT_FUNNEL_KEY_BY, DEFAULT_FUNNEL_WINDOW_SECONDS } from "@/components/funnels/definition"
 import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } from "@maple/domain/where-clause"
 
@@ -89,7 +91,50 @@ export interface QueryBuilderWidgetState {
 	heatmapScaleType: HeatmapScaleType
 	// Markdown-specific: the note body. Static — never hits the warehouse.
 	markdownContent: string
+	/**
+	 * Funnel-specific: the product-event funnel definition, edited as the
+	 * widget's query panel. `source` is the panel's source choice — "Product
+	 * events" fetches through the funnel route from this definition; the query
+	 * set draws a group-by breakdown as a funnel, exactly as before.
+	 */
+	funnel: FunnelWidgetDraft
 }
+
+/** What a funnel widget's one query panel reads from. */
+export type FunnelSource = "product_events" | "query_set"
+
+export type FunnelAddOnKey = "keyBy" | "window" | "breakdown"
+
+/** The funnel widget's editor state for its `display.funnel` definition block. */
+export interface FunnelWidgetDraft {
+	source: FunnelSource
+	/** Wire steps plus the raw filter text an event step is typed with. */
+	steps: FunnelStepDraft[]
+	keyBy: FunnelKeyBy
+	windowSeconds: number
+	breakdownBy?: FunnelBreakdownBy
+	/** The population filter as typed; compiled to `display.funnel.filters` on Apply. */
+	filterClause: string
+	/** `display.funnel.showStepPercent` — the chart's tri-state label mode. */
+	showStepPercent: boolean | undefined
+	/** Which optional rows the panel shows, mirroring a query panel's add-on bar. */
+	addOns: Record<FunnelAddOnKey, boolean>
+}
+
+/** A fresh funnel draft: the query-set funnel, no steps, the /analytics defaults. */
+export const defaultFunnelDraft = (): FunnelWidgetDraft => ({
+	source: "query_set",
+	steps: [],
+	keyBy: DEFAULT_FUNNEL_KEY_BY,
+	windowSeconds: DEFAULT_FUNNEL_WINDOW_SECONDS,
+	filterClause: "",
+	showStepPercent: undefined,
+	addOns: { keyBy: false, window: false, breakdown: false },
+})
+
+/** Whether the widget is a product-event funnel — fetched from its definition, not its query set. */
+export const isProductEventsFunnel = (state: Pick<QueryBuilderWidgetState, "visualization" | "funnel">): boolean =>
+	state.visualization === "funnel" && state.funnel.source === "product_events"
 
 /**
  * What a panel type's `buildDataSource` is handed. `base` is the timeseries

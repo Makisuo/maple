@@ -45,3 +45,14 @@ export {
 	type SessionReplayDetailOutput,
 	type SessionTraceSummaryOutput,
 } from "./session-replays"
+export {
+	productEventsFunnel,
+	productEventsFunnelBreakdown,
+	productEventNames,
+	type ProductEventsFunnelInput,
+	type ProductEventsFunnelBreakdownInput,
+	type ProductEventNamesInput,
+	type ProductEventsFunnelOutput,
+	type ProductEventsFunnelBreakdownOutput,
+	type ProductEventNamesOutput,
+} from "./product-events"

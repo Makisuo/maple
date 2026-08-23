@@ -104,32 +104,34 @@ export const RAW_TELEMETRY_TTL_COLUMNS = [
 export const MINIMUM_RAW_TELEMETRY_RETENTION_DAYS = 90
 export const MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS = 3_650
 
-interface RawTelemetryRetentionConfig {
-	readonly formatVersion: 1
-	readonly minimumDays: number
-}
+/**
+ * The retention floor an operator has pinned for this store.
+ *
+ * Unknown fields are rejected rather than ignored: a config carrying a field
+ * this build does not understand was written by a different build, and reading
+ * only the half we recognise would silently apply a policy nobody chose.
+ */
+const RawTelemetryRetentionConfigSchema = Schema.Struct({
+	formatVersion: Schema.Literal(1),
+	minimumDays: Schema.Int.check(
+		Schema.makeFilter((days: number) =>
+			days >= MINIMUM_RAW_TELEMETRY_RETENTION_DAYS && days <= MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS
+				? undefined
+				: `raw telemetry retention minimum must be an integer from ${MINIMUM_RAW_TELEMETRY_RETENTION_DAYS} through ${MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS} days`,
+		),
+	),
+})
+
+type RawTelemetryRetentionConfig = typeof RawTelemetryRetentionConfigSchema.Type
 
 export const rawTelemetryRetentionConfigPath = (dataDir: string): string =>
 	`${resolve(dataDir)}.raw-telemetry-retention.json`
 
-const parseRawTelemetryRetentionDays = (value: unknown): number => {
-	if (typeof value !== "object" || value === null || Array.isArray(value))
-		throw new Error("raw telemetry retention config must be a record")
-	const record = value as Record<string, unknown>
-	if (Object.keys(record).sort().join(",") !== "formatVersion,minimumDays" || record.formatVersion !== 1)
-		throw new Error("unsupported or malformed raw telemetry retention config")
-	const days = record.minimumDays
-	if (
-		typeof days !== "number" ||
-		!Number.isSafeInteger(days) ||
-		days < MINIMUM_RAW_TELEMETRY_RETENTION_DAYS ||
-		days > MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS
-	)
-		throw new Error(
-			`raw telemetry retention minimum must be an integer from ${MINIMUM_RAW_TELEMETRY_RETENTION_DAYS} through ${MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS} days`,
-		)
-	return days
-}
+const decodeRetentionConfig = Schema.decodeUnknownSync(RawTelemetryRetentionConfigSchema, {
+	onExcessProperty: "error",
+})
+
+const parseRawTelemetryRetentionDays = (value: unknown): number => decodeRetentionConfig(value).minimumDays
 
 export const readRawTelemetryRetentionDays = (dataDir: string): number | undefined => {
 	const path = rawTelemetryRetentionConfigPath(dataDir)

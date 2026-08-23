@@ -36,7 +36,7 @@ import {
 } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
-import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
@@ -50,6 +50,7 @@ import {
 import { Database } from "@/platform/DatabaseLive"
 import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /**
  * Cloudflare Workflow binding that runs a fan-out. Named here rather than read
@@ -542,7 +543,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							orgId,
 							investigationId: doc.id,
 							instanceId,
-							error: Cause.pretty(started.cause),
+							error: summarizeCause(started.cause),
 						}),
 					)
 					yield* markStartFailed(
@@ -1019,7 +1020,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					).pipe(
 						Effect.catchCause((cause) =>
 							Effect.logWarning("token usage tracking failed").pipe(
-								Effect.annotateLogs({ investigationId: id, cause: Cause.pretty(cause) }),
+								Effect.annotateLogs({ investigationId: id, cause: summarizeCause(cause) }),
 							),
 						),
 					)

@@ -7,6 +7,7 @@
 // union that neither the KPI row nor the coverage figure could attribute.
 
 import { Schema } from "effect"
+import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
 
 /** URL search-param fields. Spread into the route's `validateSearch` schema. */
 export const analyticsFilterSearchFields = {
@@ -22,6 +23,7 @@ export const analyticsFilterSearchFields = {
 	utmMedium: Schema.optional(Schema.String),
 	utmCampaign: Schema.optional(Schema.String),
 	visitorType: Schema.optional(Schema.Literals(["new", "returning"])),
+	eventName: Schema.optional(Schema.String),
 }
 
 export interface AnalyticsFilters {
@@ -37,6 +39,8 @@ export interface AnalyticsFilters {
 	utmMedium?: string
 	utmCampaign?: string
 	visitorType?: "new" | "returning"
+	/** Sessions in which a `track(eventName)` call fired. */
+	eventName?: string
 }
 
 export type AnalyticsFilterKey = keyof AnalyticsFilters
@@ -55,6 +59,7 @@ export const FILTER_CHIP_LABEL: Record<AnalyticsFilterKey, string> = {
 	utmMedium: "utm_medium",
 	utmCampaign: "utm_campaign",
 	visitorType: "visitor",
+	eventName: "event",
 } satisfies Record<AnalyticsFilterKey, string>
 
 /** Filter key → sidebar section heading. Sentence case, matching the rest of the app. */
@@ -71,6 +76,7 @@ export const FILTER_SECTION_LABEL: Record<AnalyticsFilterKey, string> = {
 	utmMedium: "UTM medium",
 	utmCampaign: "UTM campaign",
 	visitorType: "Visitor",
+	eventName: "Event",
 } satisfies Record<AnalyticsFilterKey, string>
 
 const FILTER_KEYS = Object.keys(FILTER_CHIP_LABEL) as ReadonlyArray<AnalyticsFilterKey>
@@ -97,11 +103,20 @@ export interface ActiveFilterChip {
 	readonly label: string
 }
 
+/**
+ * The empty-group sentinel as a chip reads — lower case like the rest of the
+ * chip, and the same words the breakdown row used (`referrerLabel`/`utmLabel`).
+ */
+const chipValue = (key: AnalyticsFilterKey, value: string): string => {
+	if (value !== WEB_ANALYTICS_UNSET) return value
+	return key === "referrerHost" ? "direct" : "not set"
+}
+
 /** Flatten the filter object into one removable chip per set filter. */
 export const activeFilterChips = (filters: AnalyticsFilters): ReadonlyArray<ActiveFilterChip> =>
 	FILTER_KEYS.flatMap((key) => {
 		const value = filters[key]
-		return value ? [{ key, value, label: `${FILTER_CHIP_LABEL[key]}:${value}` }] : []
+		return value ? [{ key, value, label: `${FILTER_CHIP_LABEL[key]}:${chipValue(key, value)}` }] : []
 	})
 
 /**

@@ -8,6 +8,7 @@ import {
 	AlertDestinationNotFoundError,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
+	TelegramAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "@maple/domain/http"
 import type {
@@ -15,6 +16,7 @@ import type {
 	V2AlertDestinationCreateParams,
 	V2AlertDestinationMutationResponse,
 	V2AlertDestinationUpdateParams,
+	V2TelegramChatList,
 } from "@maple/domain/http/v2"
 import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import { Effect } from "effect"
@@ -87,6 +89,14 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				type: "discord",
 				name: params.name,
 				webhookUrl: params.webhook_url,
+				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
+			})
+		case "telegram":
+			return new TelegramAlertDestinationConfig({
+				type: "telegram",
+				name: params.name,
+				botToken: params.bot_token,
+				chatId: params.chat_id,
 				...(params.enabled !== undefined ? { enabled: params.enabled } : undefined),
 			})
 		case "email":
@@ -163,6 +173,13 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 				...shared,
 				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : undefined),
 			}
+		case "telegram":
+			return {
+				type: "telegram",
+				...shared,
+				...(params.bot_token !== undefined ? { botToken: params.bot_token } : undefined),
+				...(params.chat_id !== undefined ? { chatId: params.chat_id } : undefined),
+			}
 		case "email":
 			return {
 				type: "email",
@@ -202,6 +219,16 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 							}),
 						)
 					return toV2Destination(destination)
+				}),
+			)
+			.handle("telegramChats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const chats = yield* destinations.listTelegramChats(tenant.roles, payload.bot_token)
+					return {
+						object: "alert_destination.telegram_chat_list" as const,
+						chats,
+					} satisfies V2TelegramChatList
 				}),
 			)
 			.handle("create", ({ payload }) =>

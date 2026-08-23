@@ -109,7 +109,9 @@ describe("serviceExternalEdgesSQL", () => {
 			baseParams,
 		)
 		expect(sql).toContain("DeploymentEnv = 'production'")
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] = 'production'")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) = 'production'",
+		)
 	})
 
 	it("groups by target identity and orders by callCount desc", () => {
@@ -536,7 +538,9 @@ describe("serviceDbEdgesForServiceQuery", () => {
 			baseParams,
 		)
 		expect(sql).toContain("DeploymentEnv = 'production'")
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] = 'production'")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) = 'production'",
+		)
 	})
 
 	it("orders by callCount desc, limits to 200, formats as JSON", () => {
@@ -579,7 +583,9 @@ describe("service-map database query summaries", () => {
 		expect(sql).toContain("Timestamp <= toDateTime('2024-01-02 00:00:00')")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("ServiceName = 'artifacts-api'")
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] = 'production'")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) = 'production'",
+		)
 		expect(sql).toContain(
 			"coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) = 'postgresql'",
 		)
@@ -706,7 +712,9 @@ describe("service-map database query summaries", () => {
 		})
 		expect(sql).toContain("= 'post\\'gres'")
 		expect(sql).toContain("ServiceName = 'svc\\'one'")
-		expect(sql).toContain("ResourceAttributes['deployment.environment'] = 'prod\\'west'")
+		expect(sql).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) = 'prod\\'west'",
+		)
 	})
 
 	it.effect("decodes summary rows with numeric strings from ClickHouse JSON", () =>

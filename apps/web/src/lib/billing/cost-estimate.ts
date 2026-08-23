@@ -1,18 +1,30 @@
 import type { BillingCustomer, BillingUsage, CatalogPlan } from "@maple/domain/http"
 
-import { isActivePlanSubscription, resolveSubscriptionPlan, type PlanLike } from "@maple/domain/billing"
+import {
+	isActivePlanSubscription,
+	meteredUsage,
+	resolveSubscriptionPlan,
+	type PlanLike,
+} from "@maple/domain/billing"
 import { formatCurrency } from "./currency"
 import { formatCount, formatUsage } from "./usage"
 
 // Metered features surfaced on the billing page. AI token features stay hidden,
 // matching HIDDEN_FEATURE_IDS in pricing-cards.tsx.
-const METERED_FEATURES = ["logs", "traces", "metrics", "browser_sessions"] as const
+const METERED_FEATURES = ["logs", "traces", "metrics", "browser_sessions", "product_events"] as const
 
 const FEATURE_LABELS: Record<string, string> = {
 	logs: "Logs",
 	traces: "Traces",
 	metrics: "Metrics",
 	browser_sessions: "Browser Sessions",
+	product_events: "Product Events",
+} satisfies Record<string, string>
+
+// Count-metered features and their singular unit; everything else is per GB.
+const COUNT_UNITS: Record<string, string> = {
+	browser_sessions: "session",
+	product_events: "event",
 } satisfies Record<string, string>
 
 export interface CostLine {
@@ -34,15 +46,17 @@ export interface CycleCostEstimate {
 	partial: boolean
 }
 
-const featureUnit = (featureId: string): string => (featureId === "browser_sessions" ? "session" : "GB")
+const featureUnit = (featureId: string): string => COUNT_UNITS[featureId] ?? "GB"
 
 // Sub-cent rates (e.g. $0.003/session) would round to "$0.00" through the
 // 2-decimal currency formatter, so render those raw.
 const formatRate = (rate: number): string =>
 	rate > 0 && rate < 0.01 ? `$${rate}` : formatCurrency(rate, "usd")
 
-const formatQuantity = (featureId: string, value: number): string =>
-	featureId === "browser_sessions" ? `${formatCount(value)} sessions` : formatUsage(value)
+const formatQuantity = (featureId: string, value: number): string => {
+	const unit = COUNT_UNITS[featureId]
+	return unit === undefined ? formatUsage(value) : `${formatCount(value)} ${unit}s`
+}
 
 /**
  * Actual-to-date cost estimate for the current billing cycle, computed purely
@@ -115,7 +129,7 @@ export function estimateCycleCost({
 
 		const item = basePlan?.items?.find((i) => i.featureId === featureId)
 		const included = balance?.granted ?? item?.included ?? null
-		const used = usage?.[featureId]?.sum ?? 0
+		const used = meteredUsage(balance, usage?.[featureId]?.sum)
 		if (included == null) continue
 		const over = Math.max(0, used - included)
 		if (over <= 0) continue

@@ -157,6 +157,7 @@ describe("ErrorIssueReadModelsService", () => {
 				"errorIssueEnvFingerprints",
 				"errorIssueTimeseries",
 				"errorIssueSampleTraces",
+				"errorIssueEnvironments",
 			])
 		}).pipe(Effect.provide(makeLayer(contexts)))
 	})

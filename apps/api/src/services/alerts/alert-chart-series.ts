@@ -35,9 +35,10 @@ import {
 	type ChartPoint,
 	type ChartUnit,
 } from "@maple/widgets/chart/static-chart"
-import { Array as Arr, Cause, Duration, Effect, Option, Order, Result, Schema } from "effect"
+import { Array as Arr, Duration, Effect, Option, Order, Result, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import type { WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /**
  * Points to draw. More than this and a 720px-wide card is drawing sub-pixel
@@ -237,7 +238,7 @@ export const loadChartSeries = (
 				Effect.annotateLogs({
 					orgId: options.orgId,
 					"maple.alert.rule_id": options.ruleId,
-					cause: Cause.pretty(cause),
+					cause: summarizeCause(cause),
 				}),
 				Effect.as(null),
 			),

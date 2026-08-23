@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { dataSourceEndpoint, dataSourceQuerySet, dataSourceRawSql } from "./access"
-import { makeQueryDataSource, makeRawSqlDataSource, makeRouteDataSource } from "./construct"
+import { dataSourceEndpoint, dataSourceQuerySet, dataSourceRawSql, dataSourceRouteParams } from "./access"
+import {
+	makeProductEventsFunnelDataSource,
+	makeQueryDataSource,
+	makeRawSqlDataSource,
+	makeRouteDataSource,
+	PRODUCT_EVENTS_FUNNEL_ENDPOINT,
+} from "./construct"
 
 /**
  * The round trip is the whole contract: whatever a constructor writes, the
@@ -100,6 +106,39 @@ describe("makeRouteDataSource", () => {
 		expect(makeRouteDataSource("service_overview")).toEqual({
 			kind: "route",
 			endpoint: "service_overview",
+		})
+	})
+})
+
+describe("makeProductEventsFunnelDataSource", () => {
+	const steps = [
+		{ kind: "page" as const, pagePath: "/pricing" },
+		{ kind: "event" as const, eventName: "signup_completed" },
+	]
+
+	it("is a route the accessors read back, with the definition as its params", () => {
+		const source = makeProductEventsFunnelDataSource({ steps, keyBy: "person", windowSeconds: 3600 })
+		expect(dataSourceEndpoint(source)).toBe(PRODUCT_EVENTS_FUNNEL_ENDPOINT)
+		expect(dataSourceRouteParams(source)).toEqual({ steps, keyBy: "person", windowSeconds: 3600 })
+		expect(dataSourceQuerySet(source)).toBeNull()
+		expect(dataSourceRawSql(source)).toBeNull()
+	})
+
+	it("forwards only the definition fields that are set", () => {
+		expect(dataSourceRouteParams(makeProductEventsFunnelDataSource({ steps }))).toEqual({ steps })
+	})
+
+	it("spreads the population filters flat and forwards the breakdown", () => {
+		const source = makeProductEventsFunnelDataSource({
+			steps,
+			breakdownBy: "referrerHost",
+			filters: { country: "DE", utmSource: "twitter", host: undefined, pagePath: "" },
+		})
+		expect(dataSourceRouteParams(source)).toEqual({
+			steps,
+			breakdownBy: "referrerHost",
+			country: "DE",
+			utmSource: "twitter",
 		})
 	})
 })

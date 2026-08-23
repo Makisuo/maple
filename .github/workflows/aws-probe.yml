@@ -1,7 +1,11 @@
 name: AWS Probe (manual)
 
-# Bisect harness for the ingest deploy hang. Manual only — nothing triggers it
-# automatically, and it deploys no application code.
+# Bisect harness for the ingest deploy hang — now explained: alchemy's
+# env-credential path deadlocks on its STS account lookup unless AWS_ACCOUNT_ID
+# is set (see deploy-prd.yml), which every step here now does. Kept as the
+# cheap way to exercise the AWS provider path in CI without a production
+# deploy. Manual only — nothing triggers it automatically, and it deploys no
+# application code.
 #
 # Why this exists: the hang only reproduces in CI, and reproducing it through
 # `Deploy PRD` costs a 45-minute timeout per attempt and blocks production
@@ -70,6 +74,7 @@ jobs:
                   secret-path: "/"
 
             - name: Configure AWS credentials (OIDC)
+              id: aws
               uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -114,6 +119,8 @@ jobs:
             # the process table is the only witness. A busy cargo/docker child means
             # slow; bun at 0% CPU means blocked, and wchan names the kernel wait.
             - name: Probe
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: |
                   (
                       while true; do
@@ -159,6 +166,8 @@ jobs:
 
             - name: Destroy probe resources
               if: always() && !inputs.keep
+              env:
+                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: |
                   if ! bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe; then
                       echo "::warning title=Probe teardown failed::Probe resources may still exist in 465760687006. Download the alchemy-probe-state artifact from this run, unpack it at the repo root, and re-run: bunx alchemy destroy scripts/aws-probe.run.ts --yes --stage probe"

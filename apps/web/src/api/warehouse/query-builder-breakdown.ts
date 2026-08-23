@@ -1,7 +1,17 @@
 import { Effect, Schema } from "effect"
 import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
-import { runBreakdownQuerySet } from "@maple/query-engine/query-set"
-import { decodeInput, invalidWarehouseInput } from "@/api/warehouse/effect-utils"
+import {
+	runBreakdownQuerySet,
+	type BreakdownQuerySetResult,
+	type QuerySetNoDataError,
+} from "@maple/query-engine/query-set"
+import {
+	decodeInput,
+	invalidWarehouseInput,
+	querySetFailure,
+	type WarehouseInvalidInputError,
+	type WarehouseUnreachableError,
+} from "@/api/warehouse/effect-utils"
 import { makeWarehouseExecutor } from "@/api/warehouse/query-set-executor"
 
 const executor = makeWarehouseExecutor("queryEngine.breakdownQuery")
@@ -23,6 +33,22 @@ const QueryBuilderBreakdownInputSchema = Schema.Struct({
 
 export type QueryBuilderBreakdownInput = Schema.Schema.Type<typeof QueryBuilderBreakdownInputSchema>
 
+/**
+ * An empty window is a normal answer, not a failure.
+ *
+ * The same reasoning as `getQueryBuilderTimeseries`, which this path was left
+ * out of: failing here marked the span `Error` and billed an exception event for
+ * a panel the user simply has no data for, and `use-widget-data` already renders
+ * an empty envelope as the muted "No data" frame. A populated `details` carries
+ * a real per-query failure and stays an error.
+ */
+const onNoData = (
+	error: QuerySetNoDataError,
+): Effect.Effect<BreakdownQuerySetResult, WarehouseInvalidInputError | WarehouseUnreachableError> =>
+	error.details.length === 0
+		? Effect.succeed({ rows: [], diagnostics: [] })
+		: querySetFailure("getQueryBuilderBreakdown", error.message)
+
 export function getQueryBuilderBreakdown({ data }: { data: QueryBuilderBreakdownInput }) {
 	return getQueryBuilderBreakdownEffect({ data })
 }
@@ -43,8 +69,7 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 		Effect.catchTags({
 			"@maple/query-engine/query-set/QuerySetInputError": (error) =>
 				invalidWarehouseInput("getQueryBuilderBreakdown", error.message),
-			"@maple/query-engine/query-set/QuerySetNoDataError": (error) =>
-				invalidWarehouseInput("getQueryBuilderBreakdown", error.message),
+			"@maple/query-engine/query-set/QuerySetNoDataError": onNoData,
 		}),
 	)
 
@@ -54,4 +79,4 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 // The merge and the per-query execution moved to `@maple/query-engine/query-set`
 // and are tested there; what stays worth asserting here is that this module adds
 // no rescaling of its own on the way out.
-export const __testables = {}
+export const __testables = { onNoData }

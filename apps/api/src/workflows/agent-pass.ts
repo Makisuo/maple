@@ -31,6 +31,7 @@ import { runChatTurn, makeTurnUsage, type TurnCompletion, type TurnUsage } from 
 import type { AgentDefinition } from "@/chat/agents"
 import { McpToolExecutor } from "@/mcp/dispatcher"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { summarizeCause } from "@/platform/describe-cause"
 
 export interface AgentPassInput<S extends Schema.Top> {
 	/** Correlation id; becomes the turn's `messageId`. */
@@ -135,7 +136,7 @@ export const runAgentPass = <S extends Schema.Top>(
 								messageId: input.id,
 								submitted: Option.isSome(answer),
 								toolCallCount: toolCalls,
-								cause: Cause.pretty(cause),
+								cause: summarizeCause(cause),
 							}),
 							Effect.tap(() =>
 								Effect.annotateCurrentSpan("maple.agent.recovered_failure", true),

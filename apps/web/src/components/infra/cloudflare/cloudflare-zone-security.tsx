@@ -107,7 +107,7 @@ function SecurityTopTable({
 	return (
 		<DataTable.Root ariaLabel="Top security rules" waiting={waiting}>
 			<DataTable.Head>
-				<ColumnHead label="Rule" width="flex-1 min-w-[200px]" />
+				<ColumnHead label="Rule" width="w-0 flex-1 min-w-[200px]" />
 				<ColumnHead label="Source" width="w-[130px]" hidden="hidden md:flex" />
 				<ColumnHead label="Action" width="w-[130px]" />
 				<ColumnHead label="Host" width="w-[180px]" hidden="hidden lg:flex" />
@@ -119,7 +119,7 @@ function SecurityTopTable({
 
 			{rows.map((row) => (
 				<div key={`${row.source}:${row.action}:${row.ruleId}:${row.host}`} className={ROW_CLASS}>
-					<div className="min-w-[200px] flex-1 truncate font-mono text-[13px] text-foreground">
+					<div className="w-0 min-w-[200px] flex-1 truncate font-mono text-[13px] text-foreground">
 						{row.ruleId}
 					</div>
 					<div className="hidden w-[130px] truncate font-mono text-[12px] text-foreground/80 md:block">

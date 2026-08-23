@@ -136,6 +136,7 @@ import {
 	type SettingsResponseContract,
 } from "./cloudflare-analytics/queries"
 import * as Integrations from "@maple/query-engine-integrations"
+import { summarizeCause } from "@/platform/describe-cause"
 
 /**
  * OAuth scopes the poller needs (space-delimited ids in `oauth_connections.scope`). Kept next to
@@ -2124,7 +2125,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 								Effect.catchCause((cause) =>
 									Effect.logWarning("cloudflare-analytics lease release failed", {
 										orgId,
-										error: Cause.pretty(cause),
+										error: summarizeCause(cause),
 									}),
 								),
 							),
@@ -2181,7 +2182,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 								? Effect.interrupt
 								: Effect.logWarning("cloudflare-analytics org poll failed", {
 										orgId: row.orgId,
-										error: Cause.pretty(cause),
+										error: summarizeCause(cause),
 									}).pipe(
 										// A crashed org must still appear in the rollup — otherwise perOrg
 										// silently omits it, `skipped` undercounts, and the zero-rows warning

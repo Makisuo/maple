@@ -50,6 +50,7 @@ export const warehouseQueries = [
 	"resource_attribute_keys",
 	"resource_attribute_values",
 	"metric_attribute_values",
+	"error_issue_environments",
 ] as const
 
 export type WarehouseQueryName = (typeof warehouseQueries)[number]

@@ -14,12 +14,23 @@ export interface PlanGatingSubscription {
 	readonly plan?: { readonly name?: string | null } | null
 }
 
-/** Active, and not an add-on / auto-enabled / legacy-free tier. Trials count — Autumn reports them as `active`. */
-export function isActivePlanSubscription(sub: PlanGatingSubscription | null | undefined): boolean {
+/**
+ * A real plan subscription — not an add-on, an auto-enabled entitlement, or the
+ * legacy free tier — whatever its status. Status-blind on purpose: a lapsed
+ * (`expired` / `canceled`) row still identifies a returning customer, which is
+ * what tells the web gate to keep them in the app rather than dropping them back
+ * into new-user onboarding.
+ */
+export function isPlanSubscription(sub: PlanGatingSubscription | null | undefined): boolean {
 	if (!sub) return false
 	if (sub.addOn || sub.autoEnable) return false
 	if (sub.planId?.toLowerCase() === "free" || sub.plan?.name?.toLowerCase() === "free") return false
-	return sub.status === "active"
+	return true
+}
+
+/** Active, and not an add-on / auto-enabled / legacy-free tier. Trials count — Autumn reports them as `active`. */
+export function isActivePlanSubscription(sub: PlanGatingSubscription | null | undefined): boolean {
+	return isPlanSubscription(sub) && sub?.status === "active"
 }
 
 // Cycle pricing
@@ -63,6 +74,17 @@ export interface CycleSpend {
 }
 
 const toCents = (dollars: number) => dollars * 100
+
+/**
+ * Units consumed this cycle. The balance's `usage` is the meter Autumn invoices
+ * from — it resets with the cycle — so it is the authority whenever the feature
+ * has a balance. The event aggregate is only the fallback for a feature the
+ * customer has no balance for (metered but not on their plan).
+ */
+export const meteredUsage = (
+	balance: { readonly usage?: number | null | undefined } | undefined,
+	aggregate: number | null | undefined,
+): number => balance?.usage ?? aggregate ?? 0
 
 /** Units of `feature` beyond its included allotment. Never negative. */
 export function overageUnits(feature: FeatureUsagePricing): number {

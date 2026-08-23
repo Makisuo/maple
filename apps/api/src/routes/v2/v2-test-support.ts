@@ -53,6 +53,8 @@ import {
 	HttpV2ServicesLive,
 	HttpV2TracesLive,
 } from "./telemetry.http"
+import { HttpV2WidgetSummaryLive } from "./widget-summary.http"
+import { HttpV2WidgetCredentialsLive } from "./widget-credentials.http"
 
 /**
  * Test-only support for the v2 HTTP harnesses. `HttpApiBuilder.layer(MapleApiV2)`
@@ -90,6 +92,8 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
+	HttpV2WidgetSummaryLive,
+	HttpV2WidgetCredentialsLive,
 	// The share group's own dependencies are satisfied here rather than by every
 	// harness: most v2 route tests never touch the share endpoints, and threading
 	// inert services through two dozen call sites to register a group they never
@@ -324,6 +328,7 @@ const alertDestinationStubs = {
 	createDestination: die,
 	updateDestination: die,
 	deleteDestination: die,
+	listTelegramChats: die,
 	testDestination: die,
 }
 

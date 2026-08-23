@@ -61,6 +61,8 @@ import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
 
 const sdk = new NodeSDK({
+  // Without this your service shows up as "unknown_service:node".
+  serviceName: "my-service",
   traceExporter: new OTLPTraceExporter({
     url: "{{INGEST_URL}}/v1/traces",
     headers: { Authorization: "Bearer {{API_KEY}}" },
@@ -88,11 +90,13 @@ sdk.start();`,
   opentelemetry-instrumentation`,
 		instrument: `# tracing.py
 from opentelemetry import trace
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-provider = TracerProvider()
+# Without a service name your service shows up as "unknown_service".
+provider = TracerProvider(resource=Resource.create({SERVICE_NAME: "my-service"}))
 exporter = OTLPSpanExporter(
     endpoint="{{INGEST_URL}}/v1/traces",
     headers={"Authorization": "Bearer {{API_KEY}}"},
@@ -121,7 +125,9 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 func main() {
@@ -137,7 +143,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tp := trace.NewTracerProvider(trace.WithBatcher(exporter))
+	// Without a service name your service shows up as "unknown_service".
+	res := resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceName("my-service"))
+	tp := trace.NewTracerProvider(trace.WithBatcher(exporter), trace.WithResource(res))
 	defer tp.Shutdown(ctx)
 	otel.SetTracerProvider(tp)
 

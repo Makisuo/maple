@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest"
 import {
 	cycleSpend,
 	isActivePlanSubscription,
+	isPlanSubscription,
 	isPricedPlan,
 	overageUnits,
 	projectCycleSpend,
 	resolveSubscriptionPlan,
+	meteredUsage,
 } from "./billing"
 
 // The Startup plan as it ships in apps/api/autumn.config.ts: $39/mo, 100 GB of
@@ -16,6 +18,21 @@ const startupFeatures = {
 	metrics: { used: 160, included: 100, ratePerUnit: 0.3 },
 	browser_sessions: { used: 26_700, included: 5_000, ratePerUnit: 0.002 },
 }
+
+describe("meteredUsage", () => {
+	it("prefers the balance meter Autumn invoices from over the event aggregate", () => {
+		// The aggregate is a rolling cycle-length window, so mid-cycle it overstates.
+		expect(meteredUsage({ usage: 379.75 }, 433.98)).toBe(379.75)
+		expect(meteredUsage({ usage: 0 }, 12)).toBe(0)
+	})
+
+	it("falls back to the aggregate for a feature with no balance (not on the plan)", () => {
+		expect(meteredUsage(undefined, 1_576)).toBe(1_576)
+		expect(meteredUsage({ usage: null }, 1_576)).toBe(1_576)
+		expect(meteredUsage({}, undefined)).toBe(0)
+		expect(meteredUsage(undefined, undefined)).toBe(0)
+	})
+})
 
 describe("overageUnits", () => {
 	it("is the excess over included, floored at zero", () => {
@@ -116,6 +133,27 @@ describe("isActivePlanSubscription", () => {
 		expect(isActivePlanSubscription({})).toBe(false)
 		expect(isActivePlanSubscription(null)).toBe(false)
 		expect(isActivePlanSubscription(undefined)).toBe(false)
+	})
+})
+
+describe("isPlanSubscription", () => {
+	it("is true for a real base plan whatever its status", () => {
+		expect(isPlanSubscription({ planId: "startup", status: "active" })).toBe(true)
+		expect(isPlanSubscription({ planId: "startup", status: "expired" })).toBe(true)
+		expect(isPlanSubscription({ planId: "startup", status: "canceled" })).toBe(true)
+		expect(isPlanSubscription({ planId: "startup", status: "scheduled" })).toBe(true)
+	})
+
+	it("is false for add-on, auto-enabled, and free plans", () => {
+		expect(isPlanSubscription({ planId: "byoc", status: "expired", addOn: true })).toBe(false)
+		expect(isPlanSubscription({ planId: "starter", status: "expired", autoEnable: true })).toBe(false)
+		expect(isPlanSubscription({ planId: "free", status: "expired" })).toBe(false)
+		expect(isPlanSubscription({ planId: "x", status: "expired", plan: { name: "Free" } })).toBe(false)
+	})
+
+	it("is false for missing input", () => {
+		expect(isPlanSubscription(null)).toBe(false)
+		expect(isPlanSubscription(undefined)).toBe(false)
 	})
 })
 

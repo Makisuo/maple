@@ -24,6 +24,8 @@ vi.mock("@/api/warehouse/effect-utils", async () => {
 // does not leak between tests.
 const defaultExecuteQueryEngine = (operation: string) => {
 	if (operation.includes("listTraces")) {
+		// Grouped (one-row-per-trace) shape — the default list mode. See the
+		// `groupByTrace` branch of the query-engine list dispatch.
 		return Effect.succeed({
 			result: {
 				kind: "list",
@@ -31,18 +33,20 @@ const defaultExecuteQueryEngine = (operation: string) => {
 				data: [
 					{
 						traceId: "t1",
-						timestamp: "2026-03-28 00:00:00",
+						startTime: "2026-03-28 00:00:00",
+						endTime: "2026-03-28 00:00:01",
 						durationMs: 142,
-						serviceName: "api-gw",
-						spanName: "GET /api/users",
-						spanKind: "SERVER",
-						statusCode: "Ok",
-						hasError: 0,
-						spanAttributes: {
+						spanCount: 3,
+						services: ["api-gw"],
+						rootSpanName: "GET /api/users",
+						rootSpanKind: "Server",
+						rootSpanStatusCode: "Ok",
+						rootSpanAttributes: {
 							"http.method": "GET",
 							"http.route": "/api/users",
 							"http.status_code": "200",
 						},
+						hasError: false,
 					},
 				],
 			},

@@ -1,4 +1,4 @@
-const REPO = "Makisuo/maple"
+const REPO = "MapleTechLabs/maple"
 
 let cached: Promise<number | null> | undefined
 

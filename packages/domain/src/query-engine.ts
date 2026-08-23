@@ -126,8 +126,9 @@ export const MetricsFilters = Schema.Struct({
 	metricType: MetricType,
 	serviceName: Schema.optional(ServiceName),
 	// Metrics tables have no pre-extracted DeploymentEnv column, so this lowers to
-	// a predicate on `ResourceAttributes['deployment.environment']` (see
-	// `metricsTimeseriesQuery`). Same field name as TracesFilters/LogsFilters.
+	// a predicate on `DEPLOYMENT_ENV_SQL` over `ResourceAttributes` — either
+	// semconv spelling of the key (see `metricsTimeseriesQuery`). Same field name
+	// as TracesFilters/LogsFilters.
 	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	groupByAttributeKey: Schema.optional(Schema.String),
 	// Resource-attribute counterpart of `groupByAttributeKey` — groups by a
@@ -238,16 +239,27 @@ export type MetricsSparklinesQuery = Schema.Schema.Type<typeof MetricsSparklines
 export const TracesListQuery = Schema.Struct({
 	kind: Schema.Literal("list"),
 	source: Schema.Literal("traces"),
+	/**
+	 * One row per TraceId (real span count, wall-clock duration, every
+	 * participating service) instead of one row per entry-point span. Grouped
+	 * rows have a different shape — see the `groupByTrace` branch of the list
+	 * dispatch. Ignores `cursor`; pages with `offset`.
+	 */
+	groupByTrace: Schema.optionalKey(Schema.Boolean),
 	filters: Schema.optional(TracesFilters),
 	columns: Schema.optional(Schema.Array(Schema.String)),
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(200)),
 	),
+	// Bound matches the web list's MAX_RETAINED_TRACES (2000): with server-side
+	// noise filtering the client pages by rows CONSUMED, so a 1000 cap would end
+	// pagination while far fewer rows are visible. Stage 1 only reads the three
+	// light sort columns, so a deep offset stays cheap.
 	offset: Schema.optional(
 		Schema.Number.check(
 			Schema.isInt(),
 			Schema.isGreaterThanOrEqualTo(0),
-			Schema.isLessThanOrEqualTo(1000),
+			Schema.isLessThanOrEqualTo(2000),
 		),
 	),
 	cursor: Schema.optional(Schema.String),
@@ -618,3 +630,17 @@ export class CompiledAlertQueryPlan extends Schema.Class<CompiledAlertQueryPlan>
 	sampleCountStrategy: Schema.NullOr(QueryEngineSampleCountStrategy),
 	noDataBehavior: QueryEngineNoDataBehavior,
 }) {}
+
+/**
+ * The value the web-analytics acquisition breakdowns (`referrerHost`, `utm*`)
+ * emit for a session whose column is empty — direct traffic for the referrer,
+ * an untagged visit for UTM — and the value a filter sends back to select that
+ * group.
+ *
+ * A sentinel rather than the raw `''` because the value has to survive a round
+ * trip as a filter through a URL search param, the HTTP payload and an MCP tool
+ * argument, and an empty string is dropped or defaulted at every one of those
+ * boundaries. Parenthesised so it cannot collide with a real hostname and reads
+ * as a marker wherever it shows up unlabelled.
+ */
+export const WEB_ANALYTICS_UNSET = "(none)"

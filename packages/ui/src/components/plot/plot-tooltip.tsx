@@ -253,12 +253,15 @@ export function PlotTooltipBody<TDatum>({
 				{heading(datum)}
 			</div>
 			<div className="grid gap-1.5">
-				{series.map((spec) => {
+				{series.map((spec, index) => {
 					const value = spec.value(datum)
 					if (value == null) return null
 					return (
 						<div
-							key={spec.label}
+							// Position-qualified: two series CAN share a label (a chart
+							// that folds case variants imperfectly, say), and duplicate
+							// keys make React leak stale rows across re-renders.
+							key={`${index}:${spec.label}`}
 							className={
 								spec.label === highlightLabel
 									? "flex w-full items-center gap-2 [&_*]:font-semibold"

@@ -1,6 +1,6 @@
 import { formatStars } from "../lib/github-stars"
 
-const REPO_URL = "https://github.com/Makisuo/maple"
+const REPO_URL = "https://github.com/MapleTechLabs/maple"
 
 /** GitHub "octocat" mark. Inherits color via `currentColor`. */
 export function Octocat({ className }: { className?: string }) {

@@ -64,7 +64,7 @@ const headerCells = (
 			currentKey={sort?.sortKey}
 			dir={sort?.sortDir}
 			onSort={sort?.handleSort}
-			width="flex-1 min-w-[220px]"
+			width="w-0 flex-1 min-w-[220px]"
 		/>
 		<ColumnHead<SortKey>
 			label="Branches"
@@ -134,7 +134,7 @@ export function PlanetScaleDatabaseTableLoading() {
 		<DataTable.Root ariaLabel="Databases">
 			<DataTable.Head>{headerCells()}</DataTable.Head>
 			<DataTable.SkeletonRows count={3}>
-				<div className="min-w-[220px] flex-1">
+				<div className="w-0 min-w-[220px] flex-1">
 					<Skeleton className="h-4 w-44" />
 				</div>
 				<Skeleton className="hidden h-3 w-[80px] md:block" />
@@ -212,7 +212,7 @@ export function PlanetScaleDatabaseTable({
 						params={{ dbName: row.name }}
 						className={ROW_LINK_CLASS}
 					>
-						<div className="flex min-w-[220px] flex-1 items-center gap-2 overflow-hidden">
+						<div className="flex w-0 min-w-[220px] flex-1 items-center gap-2 overflow-hidden">
 							<span className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 								{row.name}
 							</span>

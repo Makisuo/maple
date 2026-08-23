@@ -20,7 +20,7 @@ Pick your package manager. Homebrew is the easiest path on macOS and Linux; the 
 
 <InstallTabs />
 
-> Prefer to do it by hand? Download a release bundle (both `maple` + `libchdb`) from [GitHub Releases](https://github.com/Makisuo/maple/releases), or read [`scripts/install.sh`](https://github.com/Makisuo/maple/blob/main/scripts/install.sh) first before piping it to a shell.
+> Prefer to do it by hand? Download a release bundle (both `maple` + `libchdb`) from [GitHub Releases](https://github.com/MapleTechLabs/maple/releases), or read [`scripts/install.sh`](https://github.com/MapleTechLabs/maple/blob/main/scripts/install.sh) first before piping it to a shell.
 
 ## Start the server
 
@@ -82,4 +82,4 @@ The same CLI talks to either your local server or a hosted Maple workspace. The 
 
 ## How it works
 
-One Bun-compiled binary is both the CLI and the server, talking to ClickHouse in-process via `bun:ffi` → `libchdb` (no subprocess, no second language). For the architecture, the `/local/query` contract, the UI-origin model, and the release bundle, see the [local-mode design doc](https://github.com/Makisuo/maple/blob/main/docs/local-mode.md).
+One Bun-compiled binary is both the CLI and the server, talking to ClickHouse in-process via `bun:ffi` → `libchdb` (no subprocess, no second language). For the architecture, the `/local/query` contract, the UI-origin model, and the release bundle, see the [local-mode design doc](https://github.com/MapleTechLabs/maple/blob/main/docs/local-mode.md).

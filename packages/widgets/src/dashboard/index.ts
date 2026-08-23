@@ -39,10 +39,13 @@ export {
 } from "./access"
 export { toWidgetRequest, type WidgetRequest } from "./request"
 export {
+	makeProductEventsFunnelDataSource,
 	makeQueryDataSource,
 	makeRawSqlDataSource,
 	makeRouteDataSource,
 	makeStaticDataSource,
+	PRODUCT_EVENTS_FUNNEL_ENDPOINT,
+	type ProductEventsFunnelDefinition,
 	type QueryDataSourceInput,
 	type RawSqlDataSourceInput,
 } from "./construct"

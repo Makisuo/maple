@@ -301,6 +301,14 @@ before eve's 200, so anything it fetches is spent out of Slack's ~3s delivery bu
 is parse-only and optimistic; the mention handler confirms it afterwards, against the thread it loads
 for turn context anyway.
 
+Being engaged in a thread is necessary but not sufficient: a confirmed follow-up still passes a
+**relevance gate** — one tiny RESPOND/PASS classifier call (`agent/lib/follow-up-relevance.ts`,
+model via `OPENROUTER_GATE_MODEL`) asking whether the reply is actually directed at the bot. Humans
+talking to each other in a thread the bot answered once no longer trigger a turn for every message;
+the pass is silent (no reaction, no reply), and the next message that _is_ for the bot gets
+answered. Real `@mentions` and DMs skip the gate — an explicit address answers the question itself —
+and the gate fails open, so a classifier outage means an extra answer, never a silent drop.
+
 Changing a request URL does **not** require reinstalling the app; only changing _scopes_ does. (If
 you did edit scopes, the sidebar shows a yellow reinstall banner — follow it, and note that
 reinstalling issues a **new** `SLACK_BOT_TOKEN` that you must copy back into Railway.)

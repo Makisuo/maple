@@ -33,6 +33,10 @@ import {
 } from "../share"
 import { SORT_DIRECTIONS, STAT_AGGREGATES } from "@maple/widgets/dashboard"
 import {
+	FunnelBreakdownBy,
+	FunnelKeyBy,
+	FunnelPopulationFilters,
+	FunnelStep,
 	QUERY_RESULT_KINDS,
 	QueryBuilderFormulaSchema,
 	QueryBuilderQueryDraftSchema,
@@ -332,9 +336,39 @@ export const V2WidgetDisplay = Schema.Struct({
 			}),
 		),
 	),
+	// The product-event funnel definition rides on the display block (see the
+	// stored schema in `@maple/widgets`). Step objects keep their own camelCase
+	// keys on the wire: they are the query-engine's `FunnelStep` contract, the
+	// same shape `query_funnel` and the internal endpoint speak.
 	funnel: optional(
-		Schema.Struct({ showStepPercent: optional(Schema.Boolean) }).pipe(
-			Schema.encodeKeys({ showStepPercent: "show_step_percent" }),
+		Schema.Struct({
+			showStepPercent: optional(Schema.Boolean),
+			steps: optional(Schema.Array(FunnelStep)),
+			keyBy: optional(FunnelKeyBy),
+			windowSeconds: optional(Schema.Number),
+			breakdownBy: optional(FunnelBreakdownBy),
+			filters: optional(
+				Schema.Struct(FunnelPopulationFilters.fields).pipe(
+					Schema.encodeKeys({
+						pagePath: "page_path",
+						referrerHost: "referrer_host",
+						deviceType: "device_type",
+						browserName: "browser_name",
+						osName: "os_name",
+						utmSource: "utm_source",
+						utmMedium: "utm_medium",
+						utmCampaign: "utm_campaign",
+						visitorType: "visitor_type",
+					}),
+				),
+			),
+		}).pipe(
+			Schema.encodeKeys({
+				showStepPercent: "show_step_percent",
+				keyBy: "key_by",
+				windowSeconds: "window_seconds",
+				breakdownBy: "breakdown_by",
+			}),
 		),
 	),
 	histogram: optional(

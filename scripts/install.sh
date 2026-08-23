@@ -4,7 +4,7 @@
 #   curl -fsSL https://maple.dev/cli/install | sh
 #
 # (maple.dev/cli/install is this same file, served by apps/landing. The raw
-#  GitHub URL — raw.githubusercontent.com/Makisuo/maple/main/scripts/install.sh —
+#  GitHub URL — raw.githubusercontent.com/MapleTechLabs/maple/main/scripts/install.sh —
 #  works too.)
 #
 # Downloads the platform bundle from the latest GitHub release, verifies its
@@ -29,7 +29,7 @@
 #   MAPLE_SKIP_CHECKSUM  set to 1 to skip SHA-256 verification (not recommended)
 set -eu
 
-REPO="Makisuo/maple"
+REPO="MapleTechLabs/maple"
 INSTALL_DIR="${MAPLE_INSTALL_DIR:-$HOME/.maple/bin}"
 
 say() { printf '%s\n' "$*"; }

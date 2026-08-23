@@ -12,6 +12,9 @@ import { billingCustomerAtom, billingPlansAtom } from "@/lib/services/atoms/bill
 import { useBillingActions } from "@/hooks/use-billing-actions"
 import { displayError } from "@/lib/error-messages"
 import { getTrialStatus } from "@/lib/billing/plan-gating"
+import { buildCheckoutSuccessUrl } from "@/lib/billing/checkout-return"
+import { useCheckoutReturn } from "@/hooks/use-checkout-return"
+import { CheckoutConfirmingPanel, CheckoutTimedOutNotice } from "@/components/settings/checkout-return-panel"
 import { getPlanFeatures, TRIAL_DURATION_DAYS } from "@/lib/billing/plans"
 import { featureUnit, type SpendModel } from "@/lib/billing/spend"
 
@@ -37,7 +40,7 @@ const includedRun = (plan: CatalogPlan): string =>
 		.map((item) => {
 			const unit = featureUnit(item.featureId as string)
 			const amount = Number(item.included).toLocaleString()
-			return unit === "GB" ? `${amount} GB ${item.featureId}` : `${amount} sessions`
+			return unit === "GB" ? `${amount} GB ${item.featureId}` : `${amount} ${unit}`
 		})
 		.join(" · ")
 
@@ -135,11 +138,15 @@ export function PlanOffer({
 	const { attach } = useBillingActions()
 	const refreshCustomer = useAtomRefresh(billingCustomerAtom)
 	const [attaching, setAttaching] = useState<string | null>(null)
+	const checkoutReturn = useCheckoutReturn()
 
 	const { isTrialing, daysRemaining } = getTrialStatus(
 		Result.isSuccess(customerResult) ? customerResult.value : undefined,
 	)
 
+	// Back from Stripe with the plan not yet synced: wait it out rather than
+	// re-offering the plan the buyer just bought.
+	if (checkoutReturn === "confirming") return <CheckoutConfirmingPanel />
 	if (Result.isInitial(plansResult)) return <PlanOfferSkeleton />
 	if (!Result.isSuccess(plansResult)) {
 		return <p className="text-sm text-muted-foreground">Unable to load pricing plans.</p>
@@ -156,7 +163,7 @@ export function PlanOffer({
 	async function handleSubscribe(planId: string) {
 		setAttaching(planId)
 		try {
-			const result = await attach({ planId })
+			const result = await attach({ planId, successUrl: buildCheckoutSuccessUrl(window.location.href) })
 			if (result.paymentUrl) {
 				// Keep the button disabled through the redirect — see the note in
 				// pricing-cards.tsx. Clearing it here invites the double-click that
@@ -175,6 +182,7 @@ export function PlanOffer({
 
 	return (
 		<div className="space-y-3">
+			{checkoutReturn === "timed_out" && <CheckoutTimedOutNotice />}
 			{showCustomPlate && model && <CustomPlanPlate model={model} onManageBilling={onManageBilling} />}
 			{offers.map((plan) => {
 				const isActive = !showCustomPlate && plan.customerEligibility?.status === "active"

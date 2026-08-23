@@ -3477,6 +3477,87 @@ describe("AlertsService.previewRule", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
+	it.effect("covers the whole requested range for the create form's default shape", () => {
+		const testDb = createTestDb(trackedDbs)
+		const state = { tracesAggregateRows: [bucketRow("2026-01-01 00:00:00", 10)] }
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_preview_full_range")
+
+			const request = decodePreviewRequest({
+				rule: {
+					name: "Preview rule",
+					severity: "critical",
+					enabled: true,
+					serviceNames: ["checkout"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					// The create form's defaults: a 5-minute window over the last 24h.
+					windowMinutes: 5,
+					minimumSampleCount: 10,
+					consecutiveBreachesRequired: 2,
+					consecutiveHealthyRequired: 2,
+					renotifyIntervalMinutes: 30,
+					destinationIds: [],
+				},
+				startTime: "2026-01-01T00:00:00.000Z",
+				endTime: "2026-01-02T00:00:00.000Z",
+			})
+
+			const response = yield* alerts.previewRule(orgId, adminRoles, request)
+
+			// 288 windows — the bucket cap used to stop at 200, so the chart drew
+			// only the newest 16h40m of a full-width 24h axis.
+			const points = response.series[0]!.points
+			assert.lengthOf(points, 288)
+			assert.isNull(response.truncatedToStart)
+			assert.strictEqual(points[0]?.bucket, "2026-01-01T00:00:00.000Z")
+			assert.strictEqual(points[287]?.bucket, "2026-01-01T23:55:00.000Z")
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
+	})
+
+	it.effect("clamps to the newest windows and reports the clamp when the range is too long", () => {
+		const testDb = createTestDb(trackedDbs)
+		const state = { tracesAggregateRows: [bucketRow("2026-01-01 00:00:00", 10)] }
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_preview_clamped")
+
+			const request = decodePreviewRequest({
+				rule: {
+					name: "Preview rule",
+					severity: "critical",
+					enabled: true,
+					serviceNames: ["checkout"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					// 1-minute windows over 30 days is 43,200 evaluations — far past
+					// anything a preview replays.
+					windowMinutes: 1,
+					minimumSampleCount: 10,
+					consecutiveBreachesRequired: 2,
+					consecutiveHealthyRequired: 2,
+					renotifyIntervalMinutes: 30,
+					destinationIds: [],
+				},
+				startTime: "2026-01-01T00:00:00.000Z",
+				endTime: "2026-01-31T00:00:00.000Z",
+			})
+
+			const response = yield* alerts.previewRule(orgId, adminRoles, request)
+
+			const points = response.series[0]!.points
+			assert.lengthOf(points, 1500)
+			// The clamped start is what the chart frames its axis on.
+			assert.strictEqual(response.truncatedToStart, "2026-01-29T23:00:00.000Z")
+			assert.strictEqual(points[0]?.bucket, "2026-01-29T23:00:00.000Z")
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
+	})
+
 	it.effect("adds a provisional point for the trailing partial window", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {

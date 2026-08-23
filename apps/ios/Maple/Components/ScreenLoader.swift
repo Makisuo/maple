@@ -74,12 +74,20 @@ final class ScreenLoader<Value: Sendable> {
 		case .refresh:
 			// Join an in-flight load instead of stacking a second one behind
 			// it — a pull during the tick, or two quick pulls, is one request.
-			if let current {
-				await current.value
+			//
+			// Asked of the registry rather than of `current`, because the load
+			// worth joining may belong to a previous instance of this model.
+			if let running = session.loads.inFlightTask(for: screen) {
+				await running.value
 				return
 			}
 		case .initial, .replace:
-			current?.cancel()
+			// Supersede whatever is loading this screen — including a load a
+			// previous model instance started. `current?.cancel()` alone could
+			// not reach that one: `.task(id: dataGeneration)` rebuilds the model
+			// on an organization switch, so the new instance's `current` is nil
+			// and the old instance's load ran to completion beside it.
+			session.loads.supersede(screen)
 			current = nil
 		}
 
@@ -115,7 +123,12 @@ final class ScreenLoader<Value: Sendable> {
 			self.finish(next, reason: reason)
 		}
 		current = task
+		session.loads.register(screen, task)
 		await task.value
+		// Retire only if this load is still the registered one — a superseded
+		// load finishing late must not clear the entry belonging to the load
+		// that replaced it.
+		session.loads.retire(screen, task)
 		if mine == generation { current = nil }
 	}
 

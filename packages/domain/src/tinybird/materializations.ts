@@ -22,7 +22,6 @@ import {
 	serviceOverviewSpans,
 	serviceOverviewHourly,
 	serviceOverviewMinutely,
-	errorSpans,
 	errorEvents,
 	errorEventsByTime,
 	errorFingerprintsMinutely,
@@ -36,7 +35,8 @@ import {
 	spanMetricsCallsHourly,
 	serviceOperationsMinutely,
 	serviceOperationsHourly,
-	webEvents,
+	productEvents,
+	identityLinks,
 } from "./datasources"
 import {
 	DB_NAMESPACE_ATTR_SQL,
@@ -45,6 +45,7 @@ import {
 	DB_STATEMENT_SQL,
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
+import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
 import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
 
 /**
@@ -273,7 +274,7 @@ export const serviceMapSpansMv = defineMaterializedView("service_map_spans_mv", 
           Duration,
           StatusCode,
           TraceState,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer', 'Server', 'Consumer')
       `,
@@ -303,7 +304,7 @@ export const serviceOverviewSpansMv = defineMaterializedView("service_overview_s
           Duration,
           StatusCode,
           TraceState,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ResourceAttributes['deployment.commit_sha'] AS CommitSha,
           SampleRate,
           ResourceAttributes['service.namespace'] AS ServiceNamespace
@@ -330,7 +331,7 @@ export const serviceOverviewHourlyMv = defineMaterializedView("service_overview_
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ResourceAttributes['service.namespace'] AS ServiceNamespace,
           ResourceAttributes['deployment.commit_sha'] AS CommitSha,
           count() AS SpanCount,
@@ -376,7 +377,7 @@ export const serviceOverviewMinutelyMv = defineMaterializedView("service_overvie
           OrgId,
           toStartOfMinute(toDateTime(Timestamp)) AS Minute,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ResourceAttributes['service.namespace'] AS ServiceNamespace,
           ResourceAttributes['deployment.commit_sha'] AS CommitSha,
           count() AS SpanCount,
@@ -424,7 +425,7 @@ export const serviceMapChildrenMv = defineMaterializedView("service_map_children
           Duration,
           StatusCode,
           TraceState,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv
         FROM traces
         WHERE SpanKind IN ('Server', 'Consumer')
           AND ParentSpanId != ''
@@ -502,7 +503,7 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
           ServiceName,
           ${DB_SYSTEM_ATTR_SQL} AS DbSystem,
           ${DB_NAMESPACE_ATTR_SQL} AS DbNamespace,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           count() AS CallCount,
           countIf(StatusCode = 'Error') AS ErrorCount,
           sum(Duration / 1000000) AS DurationSumMs,
@@ -547,7 +548,7 @@ export const serviceMapDbQuerySignaturesHourlyMv = defineMaterializedView(
           ServiceName,
           ${DB_SYSTEM_ATTR_SQL} AS DbSystem,
           ${DB_NAMESPACE_ATTR_SQL} AS DbNamespace,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ${DB_QUERY_KEY_SQL} AS QueryKey,
           any(substring(${DB_QUERY_LABEL_SQL}, 1, 220)) AS QueryLabel,
           any(substring(${DB_STATEMENT_SQL}, 1, 1000)) AS SampleStatement,
@@ -596,18 +597,18 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', 'messaging',
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '', 'messaging',
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', 'rpc',
             'http'
           ) AS TargetType,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', SpanAttributes['rpc.system'],
             ''
           ) AS TargetSystem,
           multiIf(
-            SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '',
-              if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']),
+            ${MESSAGING_DESTINATION_SQL} != '' OR SpanAttributes['messaging.system'] != '',
+              if(${MESSAGING_DESTINATION_SQL} != '', ${MESSAGING_DESTINATION_SQL}, SpanAttributes['messaging.system']),
             SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '',
               if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']),
             if(SpanAttributes['server.address'] != '',
@@ -616,7 +617,7 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
                 SpanAttributes['http.host'],
                 SpanAttributes['url.authority']))
           ) AS TargetName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           count() AS CallCount,
           countIf(StatusCode = 'Error') AS ErrorCount,
           sum(Duration / 1000000) AS DurationSumMs,
@@ -630,7 +631,7 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
                SpanAttributes['server.address'] != ''
             OR SpanAttributes['http.host'] != ''
             OR SpanAttributes['url.authority'] != ''
-            OR SpanAttributes['messaging.destination'] != ''
+            OR ${MESSAGING_DESTINATION_SQL} != ''
             OR SpanAttributes['messaging.system'] != ''
             OR SpanAttributes['rpc.service'] != ''
             OR SpanAttributes['rpc.system'] != ''
@@ -660,7 +661,7 @@ export const servicePlatformsHourlyMv = defineMaterializedView("service_platform
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           max(ResourceAttributes['k8s.cluster.name']) AS K8sCluster,
           max(ResourceAttributes['k8s.pod.name']) AS K8sPodName,
           max(ResourceAttributes['k8s.deployment.name']) AS K8sDeploymentName,
@@ -676,36 +677,6 @@ export const servicePlatformsHourlyMv = defineMaterializedView("service_platform
         FROM traces
         WHERE ServiceName != ''
         GROUP BY OrgId, Hour, ServiceName, DeploymentEnv
-      `,
-		}),
-	],
-})
-
-/**
- * Materialized view populating error_spans from error spans.
- * Pre-filters to StatusCode='Error' and pre-extracts deployment.environment
- * so error queries avoid scanning the full traces table and Map columns.
- */
-export const errorSpansMv = defineMaterializedView("error_spans_mv", {
-	description:
-		"Materializes error spans from traces. Pre-filters to StatusCode='Error' and pre-extracts deployment.environment.",
-	datasource: errorSpans,
-	nodes: [
-		node({
-			name: "error_spans_mv_node",
-			sql: `
-        SELECT
-          OrgId,
-          toDateTime(Timestamp) AS Timestamp,
-          TraceId,
-          SpanId,
-          ParentSpanId,
-          ServiceName,
-          StatusMessage,
-          Duration,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv
-        FROM traces
-        WHERE StatusCode = 'Error'
       `,
 		}),
 	],
@@ -872,7 +843,7 @@ const errorEventsSelectSql = `
           SpanId,
           ParentSpanId,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           _exType AS ExceptionType,
           _exMsg AS ExceptionMessage,
           _exStack AS ExceptionStacktrace,
@@ -983,10 +954,7 @@ export const traceDetailSpansMv = defineMaterializedView("trace_detail_spans_mv"
           StatusCode,
           StatusMessage,
           SpanAttributes,
-          ResourceAttributes,
-          EventsTimestamp,
-          EventsName,
-          EventsAttributes
+          ResourceAttributes
         FROM traces
       `,
 		}),
@@ -1022,7 +990,7 @@ export const traceListMvMv = defineMaterializedView("trace_list_mv_mv", {
           if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) AS HttpMethod,
           if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], if(SpanAttributes['url.path'] != '', SpanAttributes['url.path'], SpanAttributes['http.target'])) AS HttpRoute,
           if(SpanAttributes['http.status_code'] != '', SpanAttributes['http.status_code'], SpanAttributes['http.response.status_code']) AS HttpStatusCode,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           toUInt8(
             StatusCode = 'Error'
             OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500)
@@ -1178,7 +1146,14 @@ export const spanMetricsCallsHourlyMv = defineMaterializedView("span_metrics_cal
           StartTimeUnix,
           argMaxState(Value, TimeUnix) AS LastValue
         FROM metrics_sum
-        WHERE MetricName IN ('span.metrics.calls', 'calls') AND IsMonotonic
+        -- 'traces.span.metrics.calls' is the name the collector actually emits:
+        -- spanmetricsconnector output is namespaced by the pipeline it is attached
+        -- to. Without it this MV matched nothing and the target sat at 0 rows since
+        -- it was created, while ~880k rows / 2 days of the real counter flowed past
+        -- into metrics_sum and every read fell back to the raw window-function scan
+        -- (~7s p95 -- see queries/metrics.ts). Keep this list in sync with
+        -- SPAN_METRICS_CALLS_NAMES on the read side.
+        WHERE MetricName IN ('span.metrics.calls', 'calls', 'traces.span.metrics.calls') AND IsMonotonic
         GROUP BY OrgId, Hour, ServiceName, MetricName, SpanKind, AttrFingerprint, ResourceFingerprint, StartTimeUnix
       `,
 		}),
@@ -1263,6 +1238,46 @@ export const metricCatalogExpHistogramMv = defineMaterializedView("metric_catalo
 	],
 })
 
+/**
+ * Cardinality bound shared by all four `attribute_values_hourly` materializations.
+ *
+ * That table is an AUTOCOMPLETE INDEX — it exists so the filter builder can
+ * suggest values for a key. It is read a couple of hundred times a week. With
+ * `AttributeValue != ''` as its only filter it had grown to 1.59 billion rows /
+ * 12.3 GB, because `ARRAY JOIN` over an attribute map turns every distinct value
+ * into its own row per (org, key, hour).
+ *
+ * The three rules below were chosen against what was actually in the table, not
+ * from intuition — measured over a 6h slice:
+ *
+ *   - NUMERIC MEASUREMENTS dominated: `idle_ns` (4.9M rows) and `busy_ns` (1.7M)
+ *     alone were ~70% of it, with `http.request.body.size` and the
+ *     `maple.ingest.*_bytes` counters behind them. Nobody picks
+ *     `idle_ns = 486123904` from a dropdown. Digits-only values longer than four
+ *     characters are dropped; the threshold deliberately spares HTTP status
+ *     codes and ports, which are low-cardinality and genuinely pickable.
+ *   - LONG VALUES: `db.query.text` averaged 864 characters, `body` 334,
+ *     `http.response.header.report-to` 241, `url.full` 146. Useless as
+ *     suggestions and the bulk of the bytes.
+ *   - UNBOUNDED IDENTIFIERS: ids and captured HTTP headers (`cf-ray`,
+ *     `x-request-id`, `traceparent`, `date`) are unique per request by
+ *     definition. Matched by shape rather than by an exact key list so this
+ *     generalizes past whichever keys one customer happens to emit.
+ *
+ * This narrows VALUE suggestions only. `attribute_keys_hourly` is untouched, so
+ * every key stays discoverable and filterable — you just do not get a dropdown
+ * of values for a nanosecond counter.
+ *
+ * Regexes use `[.]` rather than an escaped dot to keep the emitted SQL free of
+ * backslash escaping across the TS template → DDL → chDB path.
+ */
+const attributeValueCardinalityBound = `WHERE AttributeValue != ''
+          AND length(AttributeValue) <= 128
+          AND NOT (length(AttributeValue) > 4 AND match(AttributeValue, '^[0-9]+([.][0-9]+)?$'))
+          AND NOT match(AttributeKey, '(_id|[.]id|Id|_ns)$')
+          AND AttributeKey NOT LIKE 'http.request.header.%'
+          AND AttributeKey NOT LIKE 'http.response.header.%'`
+
 export const logAttributeValuesMv = defineMaterializedView("log_attribute_values_mv", {
 	description: "Aggregates log attribute values from logs hourly.",
 	datasource: attributeValuesHourly,
@@ -1281,7 +1296,7 @@ export const logAttributeValuesMv = defineMaterializedView("log_attribute_values
         ARRAY JOIN
           mapKeys(LogAttributes) AS AttributeKey,
           mapValues(LogAttributes) AS AttributeValue
-        WHERE AttributeValue != ''
+        ${attributeValueCardinalityBound}
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
 		}),
@@ -1306,7 +1321,7 @@ export const metricAttributeValuesMv = defineMaterializedView("metric_attribute_
         ARRAY JOIN
           mapKeys(Attributes) AS AttributeKey,
           mapValues(Attributes) AS AttributeValue
-        WHERE AttributeValue != ''
+        ${attributeValueCardinalityBound}
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
 		}),
@@ -1331,7 +1346,7 @@ export const traceSpanAttributeValuesMv = defineMaterializedView("trace_span_att
         ARRAY JOIN
           mapKeys(SpanAttributes) AS AttributeKey,
           mapValues(SpanAttributes) AS AttributeValue
-        WHERE AttributeValue != ''
+        ${attributeValueCardinalityBound}
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
 		}),
@@ -1356,7 +1371,7 @@ export const traceResourceAttributeValuesMv = defineMaterializedView("trace_reso
         ARRAY JOIN
           mapKeys(ResourceAttributes) AS AttributeKey,
           mapValues(ResourceAttributes) AS AttributeValue
-        WHERE AttributeValue != ''
+        ${attributeValueCardinalityBound}
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
 		}),
@@ -1390,7 +1405,7 @@ export const tracesAggregatesHourlyMv = defineMaterializedView("traces_aggregate
           SpanKind,
           StatusCode,
           IsEntryPoint,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           sum(SampleRate) AS WeightedCount,
           sum(toFloat64(Duration) * SampleRate) AS WeightedDurationSum,
           sumIf(SampleRate, StatusCode = 'Error') AS WeightedErrorCount,
@@ -1421,7 +1436,7 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
           OrgId,
           toStartOfMinute(toDateTime(Timestamp)) AS Minute,
           ServiceName,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ${NORMALIZED_SPAN_NAME_SQL} AS SpanName,
           count() AS SpanCount,
           sum(SampleRate) AS EstimatedSpanCount,
@@ -1484,7 +1499,7 @@ export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_ho
           toStartOfHour(TimestampTime) AS Hour,
           ServiceName,
           SeverityText,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           count() AS Count,
           sum(length(Body) + 200) AS SizeBytes,
           ResourceAttributes['service.namespace'] AS ServiceNamespace
@@ -1496,7 +1511,7 @@ export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_ho
 })
 
 /**
- * Populates `web_events` — the web analytics fact table.
+ * Populates the browser half of `product_events` — the product events fact table.
  *
  * A pure row-wise projection: filter to the two product-analytics event types,
  * pre-extract `domain(Url)`/`path(Url)`, re-sort by time in the target. No
@@ -1517,30 +1532,69 @@ export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_ho
  * the page-view predicate stays provably identical to the pre-rollup
  * `Type = 'navigation'` even if a customer calls `track('$pageview')`.
  *
- * Column order must match the `web_events` SCHEMA order — enforced by
+ * `Source` is the literal `'browser'`: this view is the only writer of browser
+ * rows, and the backfill deletes by it. Identity columns are copied through from
+ * the SDK-stamped `session_events` row — never joined from `session_replays`,
+ * whose v1/v2 rows may land after the event.
+ *
+ * Column order must match the `product_events` SCHEMA order — enforced by
  * `materialized-projection-order.test.ts`.
  */
-export const webEventsMv = defineMaterializedView("web_events_mv", {
+export const productEventsMv = defineMaterializedView("product_events_mv", {
 	description:
-		"Populates web_events from session_events navigation and custom rows, with domain(Url)/path(Url) pre-extracted and the event name normalized.",
-	datasource: webEvents,
+		"Populates product_events from session_events navigation and custom rows, with domain(Url)/path(Url) pre-extracted, the event name normalized and the SDK-stamped identity copied through.",
+	datasource: productEvents,
 	nodes: [
 		node({
-			name: "web_events_mv_node",
+			name: "product_events_mv_node",
 			sql: `
         SELECT
           OrgId,
           Timestamp,
+          'browser' AS Source,
           SessionId,
           Seq,
+          VisitorId,
+          UserId,
+          GroupId,
           Type AS Kind,
           if(Type = 'navigation', '$pageview', Message) AS EventName,
           domain(Url) AS Host,
           path(Url) AS PagePath,
           Url,
+          '' AS ServiceName,
           Attributes
         FROM session_events
         WHERE Type IN ('navigation', 'custom')
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `identity_links` from `session_replays` rows that carry both a
+ * visitor and a user id.
+ *
+ * Per-block firing is harmless here for the same reason it is fatal for
+ * per-session aggregates: this is a pure filter+project of one row, and the
+ * target is a ReplacingMergeTree keyed on the pair, so seeing the v1 and v2 rows
+ * of one session just re-inserts the same link.
+ */
+export const identityLinksMv = defineMaterializedView("identity_links_mv", {
+	description:
+		"Populates identity_links with every (VisitorId, UserId) pair observed on a session_replays row.",
+	datasource: identityLinks,
+	nodes: [
+		node({
+			name: "identity_links_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          VisitorId,
+          UserId,
+          StartTime AS FirstSeen
+        FROM session_replays
+        WHERE VisitorId != '' AND UserId != ''
       `,
 		}),
 	],

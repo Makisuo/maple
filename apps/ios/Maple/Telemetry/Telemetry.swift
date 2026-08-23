@@ -48,6 +48,8 @@ enum Telemetry {
 		static let widgetRefresh = "widget.refresh"
 		/// One of the two Home Screen surfaces, inside a refresh.
 		static let widgetSnapshot = "widget.snapshot"
+		/// Minting or rolling the credential the widget extension fetches with.
+		static let widgetCredential = "widget.credential"
 		static let liveActivitySubmit = "live_activity.submit"
 		static let liveActivityEnd = "live_activity.end"
 	}
@@ -70,7 +72,45 @@ enum Telemetry {
 		static let pushKind = "maple.app.push.kind"
 		static let pushColdStart = "maple.app.push.cold_start"
 		static let widgetTrigger = "maple.app.widget.trigger"
+		static let widgetOrganizationCount = "maple.app.widget.organization_count"
+		static let pushAbandonReason = "maple.app.push.abandon_reason"
+		static let pushOrganizationSwitched = "maple.app.push.org_switched"
 		static let widgetSurface = "maple.app.widget.surface"
+		/// Whether this surface's fetch found anything the widget would draw
+		/// differently. False means the round deliberately spent no reload.
+		static let widgetChanged = "maple.app.widget.changed"
+		/// `WidgetCenter` reloads this round actually spent. iOS meters these,
+		/// so a widget that stopped updating is usually this number being too
+		/// high on the rounds where nothing happened.
+		static let widgetReloadCount = "maple.app.widget.reload_count"
+		/// Organizations a placed widget is pinned to. `currentConfigurations()`
+		/// failing is indistinguishable from "nothing is pinned" at the call
+		/// site, and both silently shrink a round to the active organization.
+		static let widgetPinnedCount = "maple.app.widget.pinned_count"
+		/// Organizations the picker can offer. Below the account's membership
+		/// count means the index write is not reaching it — the bug where an
+		/// organization could not be picked until it had been picked.
+		static let widgetKnownOrganizationCount = "maple.app.widget.known_organization_count"
+		/// The round reloaded because the widgets would resolve a *different*
+		/// organization or name, not because any snapshot's numbers moved.
+		static let widgetResolutionChanged = "maple.app.widget.resolution_changed"
+
+		// What the widget extension recorded about its *own* fetches. The
+		// extension links no telemetry — it carries MapleWidgetData and nothing
+		// else — so without these the path that actually keeps the Home Screen
+		// current is completely unobservable, which is the failure this whole
+		// change exists to fix. Drained by WidgetPublisher on the next round.
+		/// How the extension's last fetch ended: success, unauthorized, …
+		static let widgetFetchOutcome = "maple.app.widget.fetch.outcome"
+		/// Seconds since the extension last fetched successfully. Absent when it
+		/// never has, which is a different statement from "a long time ago".
+		static let widgetFetchAgeSeconds = "maple.app.widget.fetch.age_seconds"
+		static let widgetFetchFailures = "maple.app.widget.fetch.consecutive_failures"
+		/// The extension has stopped fetching until the app mints again.
+		static let widgetFetchCredentialRejected = "maple.app.widget.fetch.credential_rejected"
+		/// How the publisher got its session: the view tree, or a headless
+		/// bootstrap in a background launch.
+		static let widgetContextSource = "maple.app.widget.context_source"
 		static let liveActivityAction = "maple.app.live_activity.action"
 	}
 
@@ -142,6 +182,7 @@ enum Screen {
 private struct ScreenSpanModifier: ViewModifier {
 	let name: String
 	@State private var span: Span?
+	@Environment(\.scenePhase) private var scenePhase
 
 	func body(content: Content) -> some View {
 		content
@@ -152,10 +193,29 @@ private struct ScreenSpanModifier: ViewModifier {
 				// win — it is what the session transcript is built from.
 				span?.end()
 				span = Maple.trackScreen(name)
+				Telemetry.Visit.began(name, span: span)
 			}
 			.onDisappear {
+				Telemetry.Visit.ended(name, span: span)
 				span?.end()
 				span = nil
+			}
+			.onChange(of: scenePhase) { _, phase in
+				// The SDK closes every open screen span when the app backgrounds,
+				// because neither `onDisappear` nor `viewDidDisappear` fires on the
+				// way out — a screen left open overnight used to report one span
+				// covering the whole night. Nothing re-opens it from that side: the
+				// SDK cannot hand a replacement to a `@State` it cannot see. So the
+				// second sitting is opened here.
+				//
+				// Guarded on `hasEnded` rather than on the phase alone: `.inactive`
+				// arrives for the app switcher and Control Center too, and those
+				// never reach `didEnterBackground`, so the span is still running and
+				// must not be replaced.
+				guard phase == .active, let current = span, current.hasEnded else { return }
+				Telemetry.Visit.ended(name, span: current)
+				span = Maple.trackScreen(name)
+				Telemetry.Visit.began(name, span: span)
 			}
 	}
 }
@@ -247,7 +307,7 @@ extension Telemetry {
 		static func begin(kind: String, screen: String, coldStart: Bool) {
 			// A second tap before the first landed: the older one is abandoned,
 			// not left open beside it.
-			expire()
+			abandon(reason: "superseded")
 			let span = MapleTracing.shared.startSpan(
 				Name.pushOpen,
 				attributes: [
@@ -264,7 +324,7 @@ extension Telemetry {
 			let expiry = Task {
 				try? await Task.sleep(for: .seconds(30))
 				guard !Task.isCancelled else { return }
-				expire()
+				abandon(reason: "expired")
 			}
 			pending = Pending(span: span, screen: screen, expiry: expiry)
 		}
@@ -283,14 +343,61 @@ extension Telemetry {
 			self.pending = nil
 		}
 
-		private static func expire() {
+		/// The tap will never reach its screen. `reason` distinguishes the ways
+		/// that happens — a refused organization is a product problem worth
+		/// counting; a superseded tap is not.
+		static func abandon(reason: String) {
 			guard let pending else { return }
 			pending.expiry.cancel()
 			// Not an error: an abandoned open is a user changing their mind, and
 			// marking it `Error` would put it in the error dashboards.
 			pending.span.setAttribute("maple.app.push.abandoned", true)
+			pending.span.setAttribute(Key.pushAbandonReason, reason)
 			pending.span.end()
 			self.pending = nil
+		}
+
+		/// The tap landed in a different organization than the one on screen, so
+		/// answering it cost a `setActive` plus a forced token round-trip. That is
+		/// real latency on the alert-to-eyes number and is invisible otherwise.
+		static func recordOrganizationSwitch() {
+			pending?.span.setAttribute(Key.pushOrganizationSwitched, true)
+		}
+	}
+
+	/// The open `ui.screen` span for a screen, so a load can hang under the visit
+	/// that caused it.
+	///
+	/// `trackScreen` hands the span back but nothing carries it: the SDK starts it
+	/// without making it ambient, and rightly so — a span that lives for the whole
+	/// visit is not a scope anything can nest inside. The result was that every
+	/// `ui.screen` arrived as a childless root while the load it caused sat in a
+	/// trace of its own. Registering by name is the same shape `PushOpen` already
+	/// uses to parent a load to the tap that asked for it.
+	@MainActor
+	enum Visit {
+		private static var spans: [String: Span] = [:]
+
+		static func began(_ screen: String, span: Span?) {
+			guard let span else { return }
+			spans[screen] = span
+		}
+
+		static func ended(_ screen: String, span: Span?) {
+			guard let span, spans[screen] === span else { return }
+			spans.removeValue(forKey: screen)
+		}
+
+		/// A span the SDK closed behind our back — backgrounding closes every open
+		/// screen span — is not a parent: a child that starts after its parent ended
+		/// draws as a bar hanging outside the one above it.
+		static func parent(for screen: String) -> Span? {
+			guard let span = spans[screen] else { return nil }
+			guard !span.hasEnded else {
+				spans.removeValue(forKey: screen)
+				return nil
+			}
+			return span
 		}
 	}
 }
@@ -320,7 +427,10 @@ extension Telemetry {
 		]
 		if let organizationId { attributes[Key.organizationId] = .string(organizationId) }
 
-		let state = await withParent(PushOpen.parent(for: screen)) {
+		// A tapped notification owns the story when there is one — tap → load →
+		// requests. Otherwise the visit does.
+		let parent = PushOpen.parent(for: screen) ?? Visit.parent(for: screen)
+		let state = await withParent(parent) {
 			await Telemetry.span(Name.screenLoad, attributes: attributes) { span in
 				let state = await body()
 				record(state, on: span)

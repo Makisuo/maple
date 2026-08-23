@@ -33,6 +33,21 @@ export const HttpV2MobileDevicesLive = HttpApiBuilder.group(MapleApiV2, "mobileD
 		const devices = yield* MobileDevicesService
 		const activities = yield* LiveActivitiesService
 
+		/** The device the credential belongs to, or a 404 rather than a key. */
+		const requireDevice = Effect.fn("HttpV2MobileDevices.requireDevice")(function* (
+			orgId: CurrentTenant.TenantSchema["orgId"],
+			token: string,
+		) {
+			const device = yield* devices.find(orgId, "ios", token)
+			if (device === null) {
+				return yield* new MobileDeviceNotFoundError({
+					message: "Device not registered",
+					token,
+				})
+			}
+			return device
+		})
+
 		return handlers
 			.handle("list", () =>
 				Effect.gen(function* () {
@@ -77,13 +92,7 @@ export const HttpV2MobileDevicesLive = HttpApiBuilder.group(MapleApiV2, "mobileD
 					// The activity belongs to a device, and the device is what says
 					// which APNs host its tokens live on — an activity whose device is
 					// gone could never be pushed to.
-					const device = yield* devices.find(tenant.orgId, "ios", params.token)
-					if (device === null) {
-						return yield* new MobileDeviceNotFoundError({
-							message: "Device not registered",
-							token: params.token,
-						})
-					}
+					const device = yield* requireDevice(tenant.orgId, params.token)
 					const activity = yield* activities.register({
 						orgId: tenant.orgId,
 						deviceId: device.id,
@@ -105,13 +114,7 @@ export const HttpV2MobileDevicesLive = HttpApiBuilder.group(MapleApiV2, "mobileD
 			.handle("endLiveActivity", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const device = yield* devices.find(tenant.orgId, "ios", params.token)
-					if (device === null) {
-						return yield* new MobileDeviceNotFoundError({
-							message: "Device not registered",
-							token: params.token,
-						})
-					}
+					const device = yield* requireDevice(tenant.orgId, params.token)
 					yield* activities.endForDevice(
 						tenant.orgId,
 						device.id,

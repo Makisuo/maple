@@ -99,6 +99,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"DELETE /v2/mobile_devices/{token}",
 			"DELETE /v2/mobile_devices/{token}/live_activities/{incident_id}",
 			"DELETE /v2/scrape_targets/{id}",
+			"DELETE /v2/widget_credentials/{installation_id}",
 			"GET /v2/alerts/deliveries",
 			"GET /v2/alerts/destinations",
 			"GET /v2/alerts/destinations/{id}",
@@ -155,6 +156,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/session_replays/{id}/transcript",
 			"GET /v2/traces/{trace_id}",
 			"GET /v2/traces/{trace_id}/spans/{span_id}",
+			"GET /v2/widget_summary",
 			"PATCH /v2/alerts/destinations/{id}",
 			"PATCH /v2/alerts/rules/{id}",
 			"PATCH /v2/anomalies/settings",
@@ -162,6 +164,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"PATCH /v2/dashboards/{id}",
 			"PATCH /v2/scrape_targets/{id}",
 			"POST /v2/alerts/destinations",
+			"POST /v2/alerts/destinations/telegram/chats",
 			"POST /v2/alerts/destinations/{id}/test",
 			"POST /v2/alerts/rules",
 			"POST /v2/alerts/rules/preview",
@@ -212,6 +215,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"PUT /v2/dashboards/{id}/widgets/{widget_id}/share",
 			"PUT /v2/mobile_devices/{token}",
 			"PUT /v2/mobile_devices/{token}/live_activities/{incident_id}",
+			"PUT /v2/widget_credentials/{installation_id}",
 		])
 	})
 
@@ -510,6 +514,9 @@ describe("MapleApiV2 OpenAPI", () => {
 		const adminTags = [
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		]
 		expect([...responseErrorTags("post", "/v2/integrations/slack/install", "403")].sort()).toEqual(
 			adminTags,
@@ -524,6 +531,9 @@ describe("MapleApiV2 OpenAPI", () => {
 		// for every member, so its 403 comes from the scope middleware alone.
 		expect(responseErrorTags("get", "/v2/integrations/slack", "403")).toEqual([
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 	})
 
@@ -628,10 +638,16 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(responseErrorTags("post", "/v2/api_keys", "403")).toEqual([
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 		expect(responseErrorTags("get", "/v2/ingest_keys", "403")).toEqual([
 			"@maple/http/v2/InsufficientPermissionsError",
 			"@maple/http/v2/InsufficientScopeError",
+			// From `AuthorizationV2` itself, so every v2 operation carries it: a request
+			// can always name an organization (`x-maple-org-id`) the caller is not in.
+			"@maple/http/v2/OrganizationAccessDeniedError",
 		])
 	})
 

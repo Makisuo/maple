@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import {
 	ActorDocument,
 	type ActorId,
+	ERROR_INCIDENT_AUTO_RESOLVE_MINUTES,
 	ErrorIncidentDocument,
 	ErrorIssueDocument,
 	ErrorIssueEventId as ErrorIssueEventIdSchema,
@@ -39,6 +40,7 @@ import { Cause, Clock, Context, Effect, Layer, Option, Ref, Schema } from "effec
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
+import { toPgText } from "@/platform/pg-text"
 import { SYSTEM_ERRORS_AGENT_NAME } from "@/services/auth/system-actors"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database } from "@/platform/DatabaseLive"
@@ -59,6 +61,7 @@ import {
 import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicApi } from "./ErrorIssueWorkflowService"
 import { ErrorPolicyService, type ErrorPolicyPublicApi } from "./ErrorPolicyService"
 import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
+import { summarizeCause } from "@/platform/describe-cause"
 
 export { describeCause, makePersistenceError } from "./error-persistence"
 
@@ -84,7 +87,6 @@ const ErrorNotificationOutboxPayload = Schema.Struct({
 type ErrorNotificationOutboxPayload = Schema.Schema.Type<typeof ErrorNotificationOutboxPayload>
 const decodeErrorNotificationOutboxPayload = Schema.decodeUnknownOption(ErrorNotificationOutboxPayload)
 
-const AUTO_RESOLVE_MINUTES = 30
 const TICK_MINUTE_MS = 60_000
 /** Wait one full minute beyond bucket close so ordinary OTLP/exporter lag lands
  * before the event-time cursor makes the bucket immutable. */
@@ -329,7 +331,7 @@ const make: Effect.Effect<
 						: Effect.gen(function* () {
 								yield* Effect.logWarning(
 									"Error active-org discovery failed; reusing last-known active set",
-								).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+								).pipe(Effect.annotateLogs({ error: summarizeCause(cause) }))
 								const cached = yield* edgeCache
 									.rawGet<ReadonlyArray<string>>(
 										ACTIVE_ORGS_CACHE_BUCKET,
@@ -1072,13 +1074,15 @@ const make: Effect.Effect<
 			scanFingerprints: issuesRaw.length,
 		})
 
+		// Every display string crosses from ClickHouse bytes into Postgres text
+		// here — the one place to strip what Postgres refuses (`PgText` in `pg-text.ts`).
 		const rows = issuesRaw.map((raw) => ({
 			fingerprintHash: String(raw.fingerprintHash ?? ""),
-			serviceName: String(raw.serviceName ?? ""),
-			exceptionType: String(raw.exceptionType ?? ""),
-			exceptionMessage: String(raw.exceptionMessage ?? ""),
-			errorLabel: String(raw.errorLabel ?? ""),
-			topFrame: String(raw.topFrame ?? ""),
+			serviceName: toPgText(String(raw.serviceName ?? "")),
+			exceptionType: toPgText(String(raw.exceptionType ?? "")),
+			exceptionMessage: toPgText(String(raw.exceptionMessage ?? "")),
+			errorLabel: toPgText(String(raw.errorLabel ?? "")),
+			topFrame: toPgText(String(raw.topFrame ?? "")),
 			// The warehouse returns every distinct build seen for the fingerprint in
 			// the window; an older cluster that predates the column returns nothing.
 			serviceVersions: Array.isArray(raw.serviceVersions)
@@ -1108,7 +1112,7 @@ const make: Effect.Effect<
 				policy,
 				destinationIds: parsePolicyDestinations(policy.destinationIdsJson),
 				windowEndMs,
-				autoResolveMinutes: AUTO_RESOLVE_MINUTES,
+				autoResolveMinutes: ERROR_INCIDENT_AUTO_RESOLVE_MINUTES,
 				claimToken: tickWindow.claimToken,
 				makeIssueId: newErrorIssueId,
 				makeIncidentId: newErrorIncidentId,
@@ -1363,13 +1367,13 @@ const make: Effect.Effect<
 										yield* Effect.logInfo(
 											"Org warehouse rejected queries with a config-class error; quarantined",
 										).pipe(
-											Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+											Effect.annotateLogs({ orgId: org, error: summarizeCause(cause) }),
 										)
 									} else {
 										yield* Effect.logError("Error tick failed for org").pipe(
 											Effect.annotateLogs({
 												orgId: org,
-												error: Cause.pretty(cause),
+												error: summarizeCause(cause),
 											}),
 										)
 									}

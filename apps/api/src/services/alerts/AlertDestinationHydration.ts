@@ -51,6 +51,11 @@ const DestinationSecretConfigSchema = Schema.Union([
 		webhookUrl: Schema.String,
 	}),
 	Schema.Struct({
+		type: Schema.Literal("telegram"),
+		botToken: Schema.String,
+		chatId: Schema.String,
+	}),
+	Schema.Struct({
 		type: Schema.Literal("email"),
 		// Snapshot of the selected workspace members, resolved from the auth
 		// provider at save time.

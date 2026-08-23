@@ -1,4 +1,4 @@
-import { Cause, Context, Data, Effect } from "effect"
+import { Cause, Context, Effect, Schema } from "effect"
 import { HttpMiddleware } from "effect/unstable/http"
 import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
 
@@ -39,11 +39,14 @@ import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
  * would receive the raw two-reason cause; the `Die(response)` reason is
  * skipped by reporters via `HttpServerResponse`'s `ErrorReporter.ignore` flag.
  */
-export class Http5xxResponseError extends Data.TaggedError("@maple/api/http/Http5xxResponseError")<{
-	readonly status: number
-	readonly method: string
-	readonly path: string
-}> {
+export class Http5xxResponseError extends Schema.TaggedError<Http5xxResponseError>()(
+	"@maple/api/http/Http5xxResponseError",
+	{
+		status: Schema.Number,
+		method: Schema.String,
+		path: Schema.String,
+	},
+) {
 	override get message(): string {
 		return `HTTP ${this.status} (${this.method} ${this.path})`
 	}

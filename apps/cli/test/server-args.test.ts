@@ -5,6 +5,7 @@ import {
 	defaultLocalUrl,
 	hostedDashboardUrl,
 	hostedUiOrigin,
+	isProcessAlive,
 	type DirtyStorePolicy,
 	resolveAdvertiseHost,
 	resolveBindHost,
@@ -130,5 +131,26 @@ describe("buildDetachedChildArgs", () => {
 				"fail",
 			],
 		)
+	})
+})
+
+describe("isProcessAlive", () => {
+	it("treats a PID file naming this very process as stale", () => {
+		// A container restarts `maple start` as PID 1 every time, and the PID file
+		// survives on the data volume — `kill(1, 0)` succeeding must not read as
+		// "already running" or the container never starts again.
+		strictEqual(isProcessAlive(process.pid), false)
+	})
+
+	it("never treats a non-positive PID as alive", () => {
+		// kill(0, 0) / kill(-n, 0) signal process groups and succeed for our own.
+		strictEqual(isProcessAlive(0), false)
+		strictEqual(isProcessAlive(-1), false)
+		strictEqual(isProcessAlive(Number.NaN), false)
+	})
+
+	it("still reports a real foreign process as alive", () => {
+		// The parent shell/runner is the one live process whose PID we can know.
+		strictEqual(isProcessAlive(process.ppid), true)
 	})
 })

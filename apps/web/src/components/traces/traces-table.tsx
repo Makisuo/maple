@@ -27,9 +27,11 @@ interface TracesTableViewProps {
 	isFetchingNextPage: boolean
 	hasNextPage: boolean
 	isCapped: boolean
+	hiddenCount: number
 	fetchNextPage: () => void
 	waiting: boolean
 	onTraceClick: (trace: Trace) => void
+	onShowNoise: () => void
 	sortBy: TraceSortKey
 	sortDir: TraceSortDir
 	onSortChange: (key: TraceSortKey) => void
@@ -136,7 +138,8 @@ const HEADER_CELL_CLASS = "h-10 px-2 text-left align-middle font-medium text-mut
  * At a 768px viewport the table has ~480px, which a `md:` media query would wrongly call roomy.
  *
  * Budget: Trace ID (100) + Status (80) are always on, leaving `container - 180` for Root Span.
- * Duration (100) joins at 480 and Services (160) at 680, each keeping Root Span at ≥200px.
+ * Duration (100) joins at 480, Spans (70) at 560 and Services (160) at 680, each keeping Root
+ * Span at ≥200px.
  */
 interface TraceColumnLayout {
 	readonly id: string
@@ -158,6 +161,13 @@ const TRACE_COLUMNS: readonly TraceColumnLayout[] = [
 		width: 160,
 		skeleton: "w-24",
 		responsive: "hidden @min-[680px]/page:table-cell",
+	},
+	{
+		id: "spanCount",
+		header: "Spans",
+		width: 70,
+		skeleton: "w-8",
+		responsive: "hidden @min-[560px]/page:table-cell",
 	},
 	{
 		id: "durationMs",
@@ -205,9 +215,11 @@ function TracesTableView({
 	isFetchingNextPage,
 	hasNextPage,
 	isCapped,
+	hiddenCount,
 	fetchNextPage,
 	waiting,
 	onTraceClick,
+	onShowNoise,
 	sortBy,
 	sortDir,
 	onSortChange,
@@ -240,41 +252,49 @@ function TracesTableView({
 			{
 				id: "rootSpan",
 				header: "Root Span",
-				cell: ({ row }) => (
-					<div className="flex flex-col min-w-0">
-						<HttpSpanLabel
-							spanName={row.original.rootSpan.name || row.original.rootSpanName || "Unknown"}
-							spanAttributes={row.original.rootSpan.attributes}
-							spanKind={row.original.rootSpan.kind}
-							textClassName="text-xs"
-						/>
-						{/*
-						 * One slot, two sub-lines — switched at the same 480px the Duration column
-						 * uses, so exactly one of them shows the duration. While Duration is hidden
-						 * the absolute timestamp gives way to it (the more useful of the two at a
-						 * glance); the full timestamp stays available on the tooltip.
-						 */}
-						<span
-							className="truncate text-[10px] text-muted-foreground"
-							title={formatTimestampInTimezone(row.original.startTime, {
-								timeZone: effectiveTimezone,
-							})}
-						>
-							<span className="hidden @min-[480px]/page:inline">
-								{formatTimestampInTimezone(row.original.startTime, {
+				cell: ({ row }) => {
+					const name = row.original.rootSpan.name || row.original.rootSpanName || "Unknown"
+					// Mobile screen spans are all named `ui.screen`/`screen.load`; the
+					// identity that distinguishes rows lives in `screen.name`.
+					const screenName = row.original.rootSpan.attributes["screen.name"]
+					const displayName =
+						screenName && !name.includes(screenName) ? `${name} · ${screenName}` : name
+					return (
+						<div className="flex flex-col min-w-0">
+							<HttpSpanLabel
+								spanName={displayName}
+								spanAttributes={row.original.rootSpan.attributes}
+								spanKind={row.original.rootSpan.kind}
+								textClassName="text-xs"
+							/>
+							{/*
+							 * One slot, two sub-lines — switched at the same 480px the Duration column
+							 * uses, so exactly one of them shows the duration. While Duration is hidden
+							 * the absolute timestamp gives way to it (the more useful of the two at a
+							 * glance); the full timestamp stays available on the tooltip.
+							 */}
+							<span
+								className="truncate text-[10px] text-muted-foreground"
+								title={formatTimestampInTimezone(row.original.startTime, {
 									timeZone: effectiveTimezone,
-								})}{" "}
+								})}
+							>
+								<span className="hidden @min-[480px]/page:inline">
+									{formatTimestampInTimezone(row.original.startTime, {
+										timeZone: effectiveTimezone,
+									})}{" "}
+								</span>
+								<span className="text-muted-foreground/60">
+									({formatRelativeTime(row.original.startTime)})
+								</span>
+								<span className="@min-[480px]/page:hidden">
+									{" · "}
+									{formatDuration(row.original.durationMs)}
+								</span>
 							</span>
-							<span className="text-muted-foreground/60">
-								({formatRelativeTime(row.original.startTime)})
-							</span>
-							<span className="@min-[480px]/page:hidden">
-								{" · "}
-								{formatDuration(row.original.durationMs)}
-							</span>
-						</span>
-					</div>
-				),
+						</div>
+					)
+				},
 			},
 			{
 				id: "services",
@@ -299,6 +319,16 @@ function TracesTableView({
 							</Badge>
 						)}
 					</div>
+				),
+			},
+			{
+				accessorKey: "spanCount",
+				header: "Spans",
+				size: 70,
+				cell: ({ row }) => (
+					<span className="font-mono text-xs text-muted-foreground">
+						{row.original.spanCount.toLocaleString()}
+					</span>
 				),
 			},
 			{
@@ -502,6 +532,21 @@ function TracesTableView({
 				{isCapped
 					? `Showing first ${allData.length.toLocaleString()} traces — narrow filters to continue`
 					: `Showing ${allData.length.toLocaleString()} traces${!hasNextPage ? " (all loaded)" : ""}`}
+				{/* Hidden rows are never silently dropped — say how many and offer the way back. */}
+				{hiddenCount > 0 && (
+					<>
+						{" · "}
+						{hiddenCount.toLocaleString()} single-span noise{" "}
+						{hiddenCount === 1 ? "trace" : "traces"} hidden{" "}
+						<button
+							type="button"
+							onClick={onShowNoise}
+							className="text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
+						>
+							show
+						</button>
+					</>
+				)}
 			</div>
 		</div>
 	)
@@ -512,8 +557,19 @@ export function TracesTable({ filters }: TracesTableProps) {
 	// Bound to the traces route so the sort patch keeps the rest of the search
 	// params typed and intact.
 	const navigateTraces = useNavigate({ from: "/traces/" })
-	const { firstPageResult, allData, isFetchingNextPage, hasNextPage, isCapped, fetchNextPage } =
-		useInfiniteTraces(filters)
+	const {
+		firstPageResult,
+		allData,
+		isFetchingNextPage,
+		hasNextPage,
+		isCapped,
+		hiddenCount,
+		fetchNextPage,
+	} = useInfiniteTraces(filters)
+
+	const onShowNoise = React.useCallback(() => {
+		navigateTraces({ search: (prev) => ({ ...prev, hideNoise: false }) })
+	}, [navigateTraces])
 
 	const onTraceClick = React.useCallback(
 		(trace: Trace) => {
@@ -552,9 +608,11 @@ export function TracesTable({ filters }: TracesTableProps) {
 				isFetchingNextPage={isFetchingNextPage}
 				hasNextPage={hasNextPage}
 				isCapped={isCapped}
+				hiddenCount={hiddenCount}
 				fetchNextPage={fetchNextPage}
 				waiting={result.waiting ?? false}
 				onTraceClick={onTraceClick}
+				onShowNoise={onShowNoise}
 				sortBy={sortBy}
 				sortDir={sortDir}
 				onSortChange={onSortChange}

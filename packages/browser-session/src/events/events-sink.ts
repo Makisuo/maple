@@ -5,6 +5,7 @@ import { postSessionEvents } from "../platform/transport"
 import { approximateSize } from "../platform/approximate-size"
 import { markActivity, noteNavigation } from "../session/session"
 import { activeTraceId } from "./trace-id"
+import { getVisitorId } from "../identity/visitor"
 
 /**
  * A distilled, structured session event. Sparse: only the fields relevant to
@@ -114,7 +115,7 @@ export function startEventSink(config: IngestConfig, sessionId: string): Session
 		const batch = buffer
 		buffer = []
 		bufferBytes = 0
-		const rows = batch.map(({ ev, seq }) => toRow(sessionId, ev, seq))
+		const rows = batch.map(({ ev, seq }) => toRow(config, sessionId, ev, seq))
 		await postSessionEvents(config, rows, keepalive)
 	}
 
@@ -196,13 +197,18 @@ function installNavigationObserver(onNavigate: (url: string) => void): () => voi
 
 	const origPush = history.pushState
 	const origReplace = history.replaceState
-	history.pushState = function (this: History, ...args) {
-		const result = origPush.apply(this, args as never)
+	// Callers that grab `history.pushState` off the object and invoke it
+	// detached (or with something that isn't a History) would otherwise make the
+	// native method throw "Illegal invocation" from inside our wrapper, turning a
+	// working navigation into an unhandled rejection blamed on the SDK.
+	const receiver = (self: unknown): History => (self instanceof History ? self : history)
+	history.pushState = function (this: unknown, ...args) {
+		const result = origPush.apply(receiver(this), args as never)
 		emitNav()
 		return result
 	}
-	history.replaceState = function (this: History, ...args) {
-		const result = origReplace.apply(this, args as never)
+	history.replaceState = function (this: unknown, ...args) {
+		const result = origReplace.apply(receiver(this), args as never)
 		emitNav()
 		return result
 	}
@@ -287,10 +293,27 @@ function drainPending(sink: SessionEventSink): void {
 	for (const ev of queued) sink.emit(ev)
 }
 
-/** Map an internal event to the snake_case ingest row (org_id is added server-side). */
-function toRow(sessionId: string, ev: SessionEvent, seq: number): Record<string, unknown> {
+/**
+ * Map an internal event to the snake_case ingest row (org_id is added server-side).
+ *
+ * Identity is resolved here, at flush time, alongside the trace id: it is the
+ * person key funnels group on, and reading it late means an `identify()` that
+ * lands shortly after init still stamps the initial page view. `visitor_id` is
+ * `""` whenever the visitor cookie is off (consent, GPC, `persistVisitorId:
+ * false`) — the same rule the metadata row applies.
+ */
+function toRow(
+	config: IngestConfig,
+	sessionId: string,
+	ev: SessionEvent,
+	seq: number,
+): Record<string, unknown> {
+	const identity = config.getIdentity?.()
 	return {
 		session_id: sessionId,
+		visitor_id: getVisitorId() ?? "",
+		user_id: identity?.id ?? "",
+		group_id: identity?.groupId ?? "",
 		timestamp: formatCHDateTime(new Date(ev.timestamp ?? Date.now())),
 		seq,
 		type: ev.type,

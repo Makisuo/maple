@@ -7,7 +7,7 @@ import type {
 	CatalogPlan,
 	DailySpendResponse,
 } from "@maple/domain/http"
-import { buildCumulativeSeries, buildSpendModel } from "./spend"
+import { buildCumulativeSeries, buildSpendModel, featureUnit, formatRateLabel } from "./spend"
 
 // Mock builders construct only the consumed subset of each domain schema, the
 // same approach cost-estimate.test.ts takes.
@@ -24,6 +24,8 @@ const startupPlan = {
 		{ featureId: "traces", included: 100, price: { amount: 0.3 } },
 		{ featureId: "metrics", included: 100, price: { amount: 0.3 } },
 		{ featureId: "browser_sessions", included: 5_000, price: { amount: 0.002 } },
+		// Quoted per 1,000 events: `amount` is the price of one billing block.
+		{ featureId: "product_events", included: 1_000_000, price: { amount: 0.05, billingUnits: 1_000 } },
 	],
 } as CatalogPlan
 
@@ -49,6 +51,7 @@ const buildCustomer = (
 			traces: { granted: 100 },
 			metrics: { granted: 100 },
 			browser_sessions: { granted: 5_000 },
+			product_events: { granted: 1_000_000 },
 		},
 	}) as BillingCustomer
 
@@ -85,6 +88,35 @@ describe("buildSpendModel", () => {
 		// Sessions ingest 26,700 units vs logs' 390 GB, but logs cost more.
 		expect(result.topDriver?.featureId).toBe("logs")
 		expect(result.topDriver?.overageCents).toBe(8_700)
+	})
+
+	it("reads usage from the balance meter, not the event aggregate, when the feature has a balance", () => {
+		// Autumn's aggregate window is a rolling cycle-length ending now, so on day 9
+		// of a cycle it folds three weeks of the PREVIOUS cycle in. The balance's
+		// `usage` is what the invoice is built from.
+		const result = buildSpendModel({
+			customer: buildCustomer({
+				balances: {
+					metrics: { granted: 100, usage: 379.75 },
+					browser_sessions: { granted: 5_000, usage: 101_928 },
+				},
+			}),
+			plans: [startupPlan],
+			usage: {
+				metrics: { sum: 433.98 },
+				browser_sessions: { sum: 401_015 },
+				// No balance for this one: the aggregate is all we have.
+				product_events: { sum: 1_576 },
+			} as BillingUsage["total"],
+			nowMs: NOW,
+		})
+		if (result === null) throw new Error("expected a model")
+		const byId = Object.fromEntries(result.features.map((feature) => [feature.featureId, feature]))
+		expect(byId.metrics?.used).toBe(379.75)
+		expect(byId.metrics?.overageUnits).toBeCloseTo(279.75)
+		expect(byId.browser_sessions?.used).toBe(101_928)
+		expect(byId.browser_sessions?.overageUnits).toBe(96_928)
+		expect(byId.product_events?.used).toBe(1_576)
 	})
 
 	it("has no top driver while everything is within its allotment", () => {
@@ -139,6 +171,43 @@ describe("buildSpendModel", () => {
 			nowMs: NOW,
 		})
 		expect(result?.partial).toBe(true)
+	})
+
+	it("prices product events per event from a rate quoted per 1,000", () => {
+		const result = buildSpendModel({
+			customer: buildCustomer(),
+			plans: [startupPlan],
+			usage: { product_events: { sum: 1_400_000 } } as BillingUsage["total"],
+			nowMs: NOW,
+		})
+		if (result === null) throw new Error("expected a model")
+
+		const events = result.features.find((feature) => feature.featureId === "product_events")
+		if (events === undefined) throw new Error("expected product_events")
+		// 400,000 events over × $0.05 / 1,000 = $20 — NOT 400,000 × $0.05.
+		expect(events.overageUnits).toBe(400_000)
+		expect(events.overageCents).toBe(2_000)
+		expect(events.ratePerUnit).toBeCloseTo(0.00005, 10)
+		expect(events.billingUnits).toBe(1_000)
+		expect(result.topDriver?.featureId).toBe("product_events")
+	})
+
+	it("labels rates the way the price list quotes them", () => {
+		const result = model()
+		if (result === null) throw new Error("expected a model")
+		const labels = Object.fromEntries(
+			result.features.map((feature) => [feature.featureId, formatRateLabel(feature)]),
+		)
+		expect(labels).toEqual({
+			logs: "$0.30/GB",
+			traces: "$0.30/GB",
+			metrics: "$0.30/GB",
+			browser_sessions: "$0.002/session",
+			product_events: "$0.05/1,000 events",
+		})
+		expect(featureUnit("product_events")).toBe("events")
+		expect(featureUnit("browser_sessions")).toBe("sessions")
+		expect(featureUnit("logs")).toBe("GB")
 	})
 
 	it("falls back to the calendar month with no active subscription", () => {

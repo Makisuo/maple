@@ -33,6 +33,7 @@ import { Env } from "@/platform/Env"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
 import { makePersistenceError } from "./alert-persistence"
 import { NotificationDispatcher, type NotificationRequest } from "./NotificationDispatcher"
+import { summarizeCause } from "@/platform/describe-cause"
 
 const ESCALATIONS_PER_TICK = 50
 const MAX_ATTEMPTS = 3
@@ -297,7 +298,7 @@ const make: Effect.Effect<EscalationServiceApi, never, Database | NotificationDi
 									Effect.annotateLogs({
 										escalationId: row.id,
 										orgId: row.orgId,
-										cause: Cause.pretty(cause),
+										cause: summarizeCause(cause),
 									}),
 									Effect.as("failed" as const),
 								),

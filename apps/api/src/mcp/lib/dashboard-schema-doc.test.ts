@@ -47,8 +47,25 @@ describe("generated JSON examples decode", () => {
 		// inferred that envelope correctly but reported it as a guess.
 		const examples = jsonExamples(renderDashboardSchemaSection("data_sources"))
 		const widgets = examples.filter((example) => Object.hasOwn(example as object, "dataSource"))
-		expect(widgets).toHaveLength(1)
-		expect(() => decodeWidget(widgets[0])).not.toThrow()
+		// The generic widget and the product-event funnel widget, whose data source
+		// is derived from `display.funnel` and so only makes sense shown whole.
+		expect(widgets).toHaveLength(2)
+		for (const widget of widgets) expect(() => decodeWidget(widget)).not.toThrow()
+	})
+
+	it("shows the product-event funnel definition on `display.funnel` with a derived route", () => {
+		const doc = renderDashboardSchemaSection("data_sources")
+		expect(doc).toContain("product_events_funnel")
+		const funnel = jsonExamples(doc).find(
+			(example) =>
+				Object.hasOwn(example as object, "dataSource") &&
+				(example as { visualization?: string }).visualization === "funnel",
+		) as {
+			dataSource: { endpoint?: string; params?: { steps?: unknown[] } }
+			display: { funnel?: { steps?: unknown[] } }
+		}
+		expect(funnel.dataSource.endpoint).toBe("product_events_funnel")
+		expect(funnel.dataSource.params?.steps).toEqual(funnel.display.funnel?.steps)
 	})
 
 	it("no example uses the retired v2 shape", () => {

@@ -22,6 +22,7 @@ export const AlertDestinationType = Schema.Literals([
 	"webhook",
 	"hazel-oauth",
 	"discord",
+	"telegram",
 	"email",
 ]).annotate({
 	identifier: "@maple/AlertDestinationType",
@@ -207,6 +208,18 @@ export class DiscordAlertDestinationConfig extends Schema.Class<DiscordAlertDest
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class TelegramAlertDestinationConfig extends Schema.Class<TelegramAlertDestinationConfig>(
+	"TelegramAlertDestinationConfig",
+)({
+	type: Schema.Literal("telegram"),
+	name: ChannelLabel,
+	/** Bot token from @BotFather (`<botId>:<secret>`). Write-only — never returned. */
+	botToken: NonEmptyString,
+	/** Target chat: a numeric id (`-1001234567890`) or an `@channelusername`. */
+	chatId: NonEmptyString,
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const MAX_EMAIL_RECIPIENTS = 10
 
 /**
@@ -234,6 +247,7 @@ export const AlertDestinationCreateRequest = Schema.Union([
 	WebhookAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
 	DiscordAlertDestinationConfig,
+	TelegramAlertDestinationConfig,
 	EmailAlertDestinationConfig,
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<typeof AlertDestinationCreateRequest>
@@ -284,6 +298,15 @@ export class UpdateDiscordAlertDestinationConfig extends Schema.Class<UpdateDisc
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class UpdateTelegramAlertDestinationConfig extends Schema.Class<UpdateTelegramAlertDestinationConfig>(
+	"UpdateTelegramAlertDestinationConfig",
+)({
+	name: OptionalNonEmptyString,
+	botToken: Schema.optionalKey(Schema.String),
+	chatId: Schema.optionalKey(Schema.String),
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export class UpdateEmailAlertDestinationConfig extends Schema.Class<UpdateEmailAlertDestinationConfig>(
 	"UpdateEmailAlertDestinationConfig",
 )({
@@ -312,6 +335,10 @@ export const AlertDestinationUpdateRequest = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("discord"),
 		...UpdateDiscordAlertDestinationConfig.fields,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("telegram"),
+		...UpdateTelegramAlertDestinationConfig.fields,
 	}),
 	Schema.Struct({
 		type: Schema.Literal("email"),
