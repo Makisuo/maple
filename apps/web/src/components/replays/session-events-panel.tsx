@@ -12,7 +12,19 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
 import { DetailRail } from "@maple/ui/components/detail-rail"
-import { ExternalLinkIcon } from "@/components/icons"
+import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
+import {
+	CircleInfoIcon,
+	ExternalLinkIcon,
+	PixelBracketsCurlyIcon,
+	PixelCrosshairsIcon,
+	PixelNodesIcon,
+	PixelSparkleIcon,
+	PixelTriangleWarningIcon,
+	PixelWindowIcon,
+	type IconComponent,
+} from "@/components/icons"
 import { formatClock, formatSessionDuration, type ReplayPartitionWindow } from "./replay-format"
 import { useReplayPlayer } from "./replay-player-context"
 import { parseChTimestampMs } from "./replay-timeline"
@@ -72,15 +84,31 @@ export interface SessionRailSession {
 type RailTab = "events" | "traces" | "session"
 type EventFilter = "all" | "custom" | "console" | "network" | "error"
 
-const EVENT_FILTERS: ReadonlyArray<{ id: EventFilter; label: string }> = [
-	{ id: "all", label: "All" },
-	// Product events from `track()`. First after All because they are the ones
-	// someone reading a session for *behaviour* is looking for.
-	{ id: "custom", label: "Product" },
-	{ id: "console", label: "Console" },
-	{ id: "network", label: "Network" },
-	{ id: "error", label: "Errors" },
-]
+/**
+ * The kind filters, as glyphs.
+ *
+ * They were word chips, which wrapped to two rows in the rail and read as a
+ * second menu under the tab bar — same pill shape, same altitude, twice the
+ * height. The rows already speak in glyphs and the legend keys them, so the
+ * filters can borrow that vocabulary and fit on one line. Every id here is a
+ * key of {@link EVENT_KIND_VISUALS}; `all` is the only one carrying a word,
+ * because "no filter" has no glyph.
+ *
+ * Product events from `track()` come first: they are what someone reading a
+ * session for *behaviour* is looking for.
+ */
+const KIND_FILTERS = ["custom", "console", "network", "error"] as const satisfies ReadonlyArray<
+	Exclude<EventFilter, "all">
+>
+
+/** Long-form names for the filter's tooltip and the empty state. */
+const FILTER_LABELS = {
+	all: "All events",
+	custom: "Product events",
+	console: "Console messages",
+	network: "Network requests",
+	error: "Errors",
+} satisfies Record<EventFilter, string>
 
 /**
  * The detail page's right rail: a tabbed panel over the distilled
@@ -189,6 +217,9 @@ function useClockAt() {
 function EventsTab({ sessionId, window }: { sessionId: string; window?: ReplayPartitionWindow }) {
 	const result = useAtomValue(getSessionTranscriptResultAtom({ data: { sessionId, ...window } }))
 	const [filter, setFilter] = React.useState<EventFilter>("all")
+	// Row indexes are filter-relative, so a filter change has to close whatever
+	// was open rather than carry the index onto a different row.
+	const [openIndex, setOpenIndex] = React.useState<number | null>(null)
 
 	const renderBody = (events: ReadonlyArray<EventRow>) => {
 		const counts = {
@@ -201,36 +232,32 @@ function EventsTab({ sessionId, window }: { sessionId: string; window?: ReplayPa
 		const rows = filter === "all" ? events : events.filter((e) => e.type === filter)
 		return (
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-				<div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-card px-3 py-2">
-					{EVENT_FILTERS.map((f) => (
-						<button
-							key={f.id}
-							type="button"
-							onClick={() => setFilter(f.id)}
-							aria-pressed={filter === f.id}
-							className={cn(
-								"rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
-								filter === f.id
-									? "bg-foreground text-background"
-									: f.id === "error" && counts.error > 0
-										? "border border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/15"
-										: "border border-border text-muted-foreground hover:text-foreground",
-							)}
-						>
-							{f.label}{" "}
-							<span className="font-mono tabular-nums opacity-70">{counts[f.id]}</span>
-						</button>
-					))}
-				</div>
+				<EventFilterBar
+					counts={counts}
+					filter={filter}
+					onChange={(next) => {
+						setFilter(next)
+						setOpenIndex(null)
+					}}
+				/>
 				{rows.length === 0 ? (
 					<div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
-						No {filter === "all" ? "" : `${filter === "custom" ? "product" : filter} `}events in
-						this session.
+						{/* The filters are glyphs now, so the empty state is where the
+						    chosen one gets named — except "All events", which only reads
+						    as a label. Nothing was filtered, so nothing needs naming. */}
+						No {filter === "all" ? "events" : FILTER_LABELS[filter].toLowerCase()} in this
+						session.
 					</div>
 				) : (
 					<ul className="divide-y divide-border font-mono text-xs">
 						{rows.map((ev, i) => (
-							<EventLine key={i} ev={ev} showNetworkBar={filter === "network"} />
+							<EventLine
+								key={i}
+								ev={ev}
+								showNetworkBar={filter === "network"}
+								open={openIndex === i}
+								onToggle={() => setOpenIndex(openIndex === i ? null : i)}
+							/>
 						))}
 					</ul>
 				)}
@@ -255,33 +282,267 @@ function statusTone(status: number): string {
 	return "text-success-foreground"
 }
 
-/** Uppercase type tag + tone for the row gutter, per event kind. */
-function eventTag(ev: EventRow): { label: string; tone: string } {
+/**
+ * Split a URL into the part worth reading and the part that repeats.
+ *
+ * The rail truncates at the tail, so the path leads and the host trails: within
+ * one session the host is the same on row after row, while the path is the only
+ * thing that distinguishes them. Anything unparseable stays whole.
+ */
+export function splitUrl(url: string): { lead: string; trail: string } {
+	try {
+		const parsed = new URL(url)
+		return { lead: `${parsed.pathname}${parsed.search}`, trail: parsed.host }
+	} catch {
+		return { lead: url, trail: "" }
+	}
+}
+
+/**
+ * Glyph, tone and name per event kind — the single source both the rows and
+ * {@link EventKindLegend} read, so the key can never drift from the rail.
+ *
+ * The kind is a glyph rather than a word because a fixed-width text tag either
+ * truncates or overflows the moment a label is longer than the slot, which is
+ * how `navigation` used to print across the URL beside it. Glyphs need a key;
+ * words don't. Keys are the gateway's closed type set (session_analytics.rs).
+ */
+const EVENT_KIND_VISUALS = {
+	navigation: {
+		Icon: PixelWindowIcon,
+		tone: "text-success-foreground",
+		selected: "bg-success/15 text-success-foreground",
+		label: "Page",
+	},
+	click: {
+		Icon: PixelCrosshairsIcon,
+		tone: "text-warning-foreground",
+		selected: "bg-warning/15 text-warning-foreground",
+		label: "Click",
+	},
+	network: {
+		Icon: PixelNodesIcon,
+		tone: "text-info-foreground",
+		selected: "bg-info/15 text-info-foreground",
+		label: "Request",
+	},
+	custom: {
+		Icon: PixelSparkleIcon,
+		tone: "text-primary",
+		selected: "bg-primary/15 text-primary",
+		label: "Product",
+	},
+	console: {
+		Icon: PixelBracketsCurlyIcon,
+		tone: "text-muted-foreground",
+		selected: "bg-muted text-foreground",
+		label: "Console",
+	},
+	error: {
+		Icon: PixelTriangleWarningIcon,
+		tone: "text-destructive",
+		selected: "bg-destructive/15 text-destructive",
+		label: "Error",
+	},
+} as const satisfies Record<string, { Icon: IconComponent; tone: string; selected: string; label: string }>
+
+const LEGEND_KINDS = Object.keys(EVENT_KIND_VISUALS) as ReadonlyArray<keyof typeof EVENT_KIND_VISUALS>
+
+/** The row's type marker and its two text lanes. */
+export function eventVisual(ev: EventRow): {
+	Icon: IconComponent
+	tone: string
+	lead: string
+	trail: string
+} {
 	switch (ev.type) {
-		case "nav":
-			return { label: "NAV", tone: "text-success-foreground" }
+		case "navigation": {
+			const { lead, trail } = splitUrl(ev.url)
+			return { ...EVENT_KIND_VISUALS.navigation, lead, trail }
+		}
 		case "click":
-			return { label: "CLICK", tone: "text-warning-foreground" }
-		case "network":
 			return {
-				label: ev.netMethod || "NET",
-				tone: isFailedRequest(ev) ? "text-destructive" : "text-info-foreground",
+				...EVENT_KIND_VISUALS.click,
+				lead: ev.targetText || ev.targetSelector || "click",
+				trail: ev.targetText ? ev.targetSelector : "",
 			}
+		case "network": {
+			const { lead, trail } = splitUrl(ev.netUrl)
+			return {
+				...EVENT_KIND_VISUALS.network,
+				// A failed request is an error wherever it appears, so it takes the
+				// error tone while keeping the request glyph.
+				tone: isFailedRequest(ev) ? EVENT_KIND_VISUALS.error.tone : EVENT_KIND_VISUALS.network.tone,
+				lead: ev.netMethod ? `${ev.netMethod} ${lead}` : lead,
+				trail,
+			}
+		}
 		case "error":
-			return { label: "ERROR", tone: "text-destructive" }
+			return { ...EVENT_KIND_VISUALS.error, lead: ev.message, trail: "" }
 		case "custom":
-			// Not "CUSTOM": in the transcript these read as product events, and the
-			// gutter is only wide enough for a short word.
-			return { label: "EVENT", tone: "text-primary" }
+			return { ...EVENT_KIND_VISUALS.custom, lead: ev.message, trail: "" }
 		case "console": {
-			const level = (ev.level || "log").toUpperCase()
-			if (ev.level === "error") return { label: level, tone: "text-destructive" }
-			if (ev.level === "warn") return { label: level, tone: "text-warning-foreground" }
-			return { label: level, tone: "text-muted-foreground" }
+			const tone =
+				ev.level === "error"
+					? EVENT_KIND_VISUALS.error.tone
+					: ev.level === "warn"
+						? EVENT_KIND_VISUALS.click.tone
+						: EVENT_KIND_VISUALS.console.tone
+			return { ...EVENT_KIND_VISUALS.console, tone, lead: ev.message, trail: "" }
 		}
 		default:
-			return { label: ev.type.toUpperCase(), tone: "text-muted-foreground" }
+			return {
+				...EVENT_KIND_VISUALS.console,
+				lead: ev.message || ev.url,
+				trail: "",
+			}
 	}
+}
+
+/**
+ * Key for the row glyphs, behind an info button in the filter bar.
+ *
+ * The rail trades words for glyphs to survive its width, and glyphs owe the
+ * reader a key. On screen permanently it was a second strip of chips competing
+ * with the filters beside it, so it waits until asked — the icons are
+ * guessable, the key settles the guess.
+ */
+/** One-line kind filter: `All <n>` plus a glyph toggle per kind, then the key. */
+function EventFilterBar({
+	counts,
+	filter,
+	onChange,
+}: {
+	counts: Record<EventFilter, number>
+	filter: EventFilter
+	onChange: (next: EventFilter) => void
+}) {
+	return (
+		<TooltipProvider delay={300}>
+			<div className="sticky top-0 z-10 flex shrink-0 items-center gap-0.5 border-b border-border bg-card px-2 py-1">
+				<FilterChip
+					active={filter === "all"}
+					count={counts.all}
+					label={FILTER_LABELS.all}
+					tone="text-muted-foreground"
+					selected="bg-muted text-foreground"
+					onClick={() => onChange("all")}
+				>
+					<span className="text-[11px] font-medium">All</span>
+				</FilterChip>
+				{KIND_FILTERS.map((id) => {
+					const { Icon, tone, selected } = EVENT_KIND_VISUALS[id]
+					return (
+						<FilterChip
+							key={id}
+							active={filter === id}
+							count={counts[id]}
+							label={FILTER_LABELS[id]}
+							tone={tone}
+							selected={selected}
+							onClick={() => onChange(id)}
+						>
+							<Icon size={13} aria-hidden />
+						</FilterChip>
+					)
+				})}
+				<EventKindLegend className="ml-auto" />
+			</div>
+		</TooltipProvider>
+	)
+}
+
+function FilterChip({
+	active,
+	count,
+	label,
+	tone,
+	selected,
+	onClick,
+	children,
+}: {
+	active: boolean
+	count: number
+	label: string
+	/** Idle colour — carried by the whole chip, so the glyph and its count agree. */
+	tone: string
+	/** Selected colour: the same hue as a tinted ground, not a neutral highlight. */
+	selected: string
+	onClick: () => void
+	children: React.ReactNode
+}) {
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<button
+						type="button"
+						onClick={onClick}
+						aria-pressed={active}
+						aria-label={`${label} (${count})`}
+						className={cn(
+							"flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 transition-colors",
+							active ? selected : cn(tone, "hover:bg-muted/60"),
+							// A kind with nothing in it stays reachable — the empty state
+							// names what you filtered to — but drops its colour rather than
+							// spending it on a count of zero.
+							count === 0 && !active && "text-muted-foreground opacity-45",
+						)}
+					>
+						{children}
+						<span className="font-mono text-[10px] tabular-nums">{count}</span>
+					</button>
+				}
+			/>
+			<TooltipContent>{label}</TooltipContent>
+		</Tooltip>
+	)
+}
+
+function EventKindLegend({ className }: { className?: string }) {
+	return (
+		<Popover>
+			<PopoverTrigger
+				// Hover is how a key like this actually gets read — you pause on the
+				// icon mid-scan rather than committing to a click. Click still works,
+				// and the close delay keeps the popup alive while the pointer travels.
+				openOnHover
+				delay={350}
+				closeDelay={120}
+				className={cn(
+					"inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[popup-open]:bg-muted data-[popup-open]:text-foreground",
+					className,
+				)}
+				aria-label="What the event icons mean"
+			>
+				<CircleInfoIcon size={13} />
+			</PopoverTrigger>
+			{/* `tooltipStyle` is the compact variant: the default popup viewport pads
+			    itself 16px on every side, which on six short rows is more padding
+			    than content. This one pads 8/4 and sizes to its text. */}
+			<PopoverContent align="end" tooltipStyle sideOffset={6}>
+				<div className="flex flex-col gap-1.5 py-0.5">
+					<p className="text-[9px] font-semibold uppercase leading-none tracking-[0.08em] text-muted-foreground">
+						Event kinds
+					</p>
+					<ul className="flex flex-col gap-1">
+						{LEGEND_KINDS.map((kind) => {
+							const { Icon, tone, label } = EVENT_KIND_VISUALS[kind]
+							return (
+								<li
+									key={kind}
+									className="flex items-center gap-1.5 whitespace-nowrap text-[11px] leading-none text-foreground"
+								>
+									<Icon size={12} className={cn("shrink-0", tone)} aria-hidden />
+									{label}
+								</li>
+							)
+						})}
+					</ul>
+				</div>
+			</PopoverContent>
+		</Popover>
+	)
 }
 
 /**
@@ -317,79 +578,110 @@ function isFailedRequest(ev: EventRow): boolean {
 	return ev.type === "network" && (ev.netStatus >= 500 || ev.netStatus === 0)
 }
 
-function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boolean }) {
+/**
+ * One event, on one line: clock · kind glyph · what happened · what came back.
+ *
+ * The row is a single click target — it seeks the player to the moment and
+ * opens the detail underneath, so the full URL, stack and trace link live one
+ * click away instead of competing for the ~380px the rail actually has.
+ */
+function EventLine({
+	ev,
+	showNetworkBar,
+	open,
+	onToggle,
+}: {
+	ev: EventRow
+	showNetworkBar: boolean
+	open: boolean
+	onToggle: () => void
+}) {
 	const seekTo = useSeekToTimestamp()
 	const clockAt = useClockAt()
-	const tag = eventTag(ev)
+	const { Icon, tone, lead, trail } = eventVisual(ev)
 	const isError = ev.type === "error" || isFailedRequest(ev)
 
 	return (
-		<li
-			className={cn(
-				"relative flex items-start gap-2.5 px-3 py-2 hover:bg-muted/50",
-				isError && "bg-destructive/5",
-			)}
-		>
+		<li className={cn("relative", isError && "bg-destructive/5")}>
 			{isError && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-destructive" />}
 			<button
 				type="button"
-				onClick={() => seekTo(ev.timestamp)}
-				className="w-10 shrink-0 text-left tabular-nums text-muted-foreground hover:text-foreground"
+				onClick={() => {
+					seekTo(ev.timestamp)
+					onToggle()
+				}}
+				aria-expanded={open}
+				className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/50"
 				title="Seek replay to this moment"
 			>
-				{clockAt(ev.timestamp)}
-			</button>
-			<span className={cn("w-11 shrink-0 text-[10px] font-semibold leading-4", tag.tone)}>
-				{tag.label}
-			</span>
-			<div className="min-w-0 flex-1">
-				{ev.type === "console" && (
-					<span className={cn(ev.level === "error" && "text-destructive")}>{ev.message}</span>
-				)}
-				{ev.type === "network" && (
-					<span className="flex flex-col gap-1">
-						<span className="flex items-center gap-2">
-							<span className="min-w-0 truncate">{ev.netUrl}</span>
-							<span className={cn("ml-auto shrink-0 font-semibold", statusTone(ev.netStatus))}>
+				<span className="w-[30px] shrink-0 text-[10px] tabular-nums text-muted-foreground">
+					{clockAt(ev.timestamp)}
+				</span>
+				<span className="grid size-4 shrink-0 place-items-center">
+					<Icon size={16} className={tone} />
+				</span>
+				<span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
+					<span className={cn("truncate", isError ? "text-destructive" : "text-foreground")}>
+						{lead}
+					</span>
+					{trail && <span className="shrink-0 text-[10px] text-muted-foreground">{trail}</span>}
+				</span>
+				<span className="flex w-[72px] shrink-0 items-center justify-end gap-1.5 text-[10px] tabular-nums">
+					{ev.type === "network" ? (
+						<>
+							<span className={cn("font-semibold", statusTone(ev.netStatus))}>
 								{ev.netStatus || "ERR"}
 							</span>
 							<span
 								className={cn(
-									"shrink-0",
-									isError ? "font-semibold text-destructive" : "opacity-60",
+									isError || ev.netDurationMs >= 1000
+										? "font-semibold text-warning-foreground"
+										: "text-muted-foreground",
+									isError && "text-destructive",
 								)}
 							>
 								{formatNetDuration(ev.netDurationMs)}
 							</span>
-						</span>
-						{showNetworkBar && <NetDurationBar durationMs={ev.netDurationMs} failed={isError} />}
-					</span>
-				)}
-				{ev.type === "error" && (
-					<span className="text-destructive">
-						{ev.message}
-						{ev.errorStack && (
-							<span className="mt-0.5 block whitespace-pre-wrap text-[11px] text-muted-foreground">
-								{ev.errorStack.split("\n").slice(0, 3).join("\n")}
-							</span>
-						)}
-					</span>
-				)}
-				{ev.type === "click" && <span>{ev.targetText || ev.targetSelector || "click"}</span>}
-				{ev.type === "nav" && <span>{ev.url}</span>}
-				{ev.type === "custom" && (
-					<span className="flex flex-col gap-0.5">
-						<span className="text-foreground">{ev.message}</span>
-						<EventProps attributes={ev.attributes} />
-					</span>
-				)}
-				{ev.type !== "console" &&
-					ev.type !== "network" &&
-					ev.type !== "error" &&
-					ev.type !== "click" &&
-					ev.type !== "custom" &&
-					ev.type !== "nav" && <span>{ev.message || ev.url}</span>}
-			</div>
+						</>
+					) : ev.type === "console" && ev.level ? (
+						<span className={tone}>{ev.level}</span>
+					) : null}
+				</span>
+			</button>
+			{showNetworkBar && ev.type === "network" && (
+				<span className="block px-3 pb-1.5 pl-[50px]">
+					<NetDurationBar durationMs={ev.netDurationMs} failed={isError} />
+				</span>
+			)}
+			{open && <EventDetail ev={ev} />}
+		</li>
+	)
+}
+
+/** The row's overflow: everything the single line had to drop. */
+function EventDetail({ ev }: { ev: EventRow }) {
+	const fullUrl = ev.type === "network" ? ev.netUrl : ev.url
+	return (
+		<div className="flex flex-col gap-1.5 px-3 pb-2.5 pl-[50px]">
+			{fullUrl && (
+				<span className="break-all text-[11px] leading-4 text-muted-foreground">{fullUrl}</span>
+			)}
+			{ev.type === "click" && ev.targetText && ev.targetSelector && (
+				<span className="break-all text-[11px] leading-4 text-muted-foreground">
+					{ev.targetSelector}
+				</span>
+			)}
+			{ev.type === "console" && (
+				<span className="whitespace-pre-wrap break-words text-[11px] leading-4 text-foreground/80">
+					{ev.message}
+				</span>
+			)}
+			{ev.type === "error" && ev.errorStack && (
+				<span className="whitespace-pre-wrap text-[11px] leading-4 text-muted-foreground">
+					{ev.errorStack.split("\n").slice(0, 3).join("\n")}
+				</span>
+			)}
+			{ev.type === "custom" && <EventProps attributes={ev.attributes} />}
 			{ev.traceId && (
 				<Link
 					to="/traces/$traceId"
@@ -397,13 +689,13 @@ function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boole
 					// Carry the event timestamp so the span-hierarchy query narrows the
 					// ClickHouse partition scan instead of reading the full retention.
 					search={{ t: ev.timestamp }}
-					className="shrink-0 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+					className="w-fit rounded-sm border border-input px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
 					title="Open backend trace"
 				>
-					trace
+					Open trace
 				</Link>
 			)}
-		</li>
+		</div>
 	)
 }
 
