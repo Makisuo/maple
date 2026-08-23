@@ -65,32 +65,59 @@ const FONT = `"Geist Mono", "Geist Mono Variable", "DejaVu Sans Mono", ui-monosp
 
 const round = (n: number, digits = 1): string => {
 	const s = n.toFixed(digits)
-	return s.endsWith(".0") ? s.slice(0, -2) : s
+	return s.includes(".") ? s.replace(/\.?0+$/u, "") : s
 }
 
-/** Formats a value for axis labels and direct labels, unit-aware. */
-export function formatValue(value: number, unit: ChartUnit): string {
+/**
+ * Decimals needed to tell values `step` apart after formatting: magnitude
+ * (0.0001 → 4) plus one when the mantissa itself carries a decimal (2.5 → 1).
+ * Fixed 1–2 decimals collapsed every tick of a 0–0.04% axis to "0.00%".
+ */
+const stepDecimals = (step: number): number => {
+	if (!(step > 0) || !Number.isFinite(step)) return 0
+	const d = Math.max(0, -Math.floor(Math.log10(step)))
+	const mantissa = step * 10 ** d
+	return Math.abs(mantissa - Math.round(mantissa)) < 1e-6 ? d : d + 1
+}
+
+/** `base` decimals, widened by `step` when adjacent ticks need more to differ. */
+const decimalsFor = (base: number, step: number | undefined): number =>
+	step !== undefined ? Math.max(base, stepDecimals(step)) : base
+
+/**
+ * Formats a value for axis labels and direct labels, unit-aware. `step` is the
+ * spacing between adjacent axis ticks (same raw unit as `value`); when given,
+ * precision widens so neighboring ticks never format to the same string —
+ * `round`'s trailing-zero trim keeps the extra decimals invisible elsewhere.
+ */
+export function formatValue(value: number, unit: ChartUnit, step?: number): string {
 	switch (unit) {
 		case "percent":
-			return `${round(value, Math.abs(value) < 1 ? 2 : 1)}%`
-		case "duration_ms":
-			if (Math.abs(value) >= 60_000) return `${round(value / 60_000)} min`
-			if (Math.abs(value) >= 1000) return `${round(value / 1000)} s`
-			return `${round(value)} ms`
+			return `${round(value, decimalsFor(Math.abs(value) < 1 ? 2 : 1, step))}%`
+		case "duration_ms": {
+			const abs = Math.abs(value)
+			const [div, suffix] = abs >= 60_000 ? [60_000, " min"] : abs >= 1000 ? [1000, " s"] : [1, " ms"]
+			return `${round(value / div, decimalsFor(1, step === undefined ? undefined : step / div))}${suffix}`
+		}
 		case "bytes": {
 			const abs = Math.abs(value)
-			if (abs >= 1024 ** 3) return `${round(value / 1024 ** 3)} GiB`
-			if (abs >= 1024 ** 2) return `${round(value / 1024 ** 2)} MiB`
-			if (abs >= 1024) return `${round(value / 1024)} KiB`
-			return `${round(value)} B`
+			const [div, suffix] =
+				abs >= 1024 ** 3
+					? [1024 ** 3, " GiB"]
+					: abs >= 1024 ** 2
+						? [1024 ** 2, " MiB"]
+						: abs >= 1024
+							? [1024, " KiB"]
+							: [1, " B"]
+			return `${round(value / div, decimalsFor(1, step === undefined ? undefined : step / div))}${suffix}`
 		}
 		case "requests_per_sec":
-			return `${formatValue(value, "number")}/s`
+			return `${formatValue(value, "number", step)}/s`
 		case "number": {
 			const abs = Math.abs(value)
-			if (abs >= 1_000_000) return `${round(value / 1_000_000)}M`
-			if (abs >= 1000) return `${round(value / 1000)}k`
-			return round(value, abs < 10 && !Number.isInteger(value) ? 1 : 0)
+			const [div, suffix] = abs >= 1_000_000 ? [1_000_000, "M"] : abs >= 1000 ? [1000, "k"] : [1, ""]
+			const base = div === 1 ? (abs < 10 && !Number.isInteger(value) ? 1 : 0) : 1
+			return `${round(value / div, decimalsFor(base, step === undefined ? undefined : step / div))}${suffix}`
 		}
 	}
 }
@@ -139,6 +166,7 @@ export function renderChartSvg(spec: ChartSpec): string {
 	const ticks = niceTicks(Math.min(...values), Math.max(...values))
 	const yMin = ticks[0]!
 	const yMax = ticks[ticks.length - 1]!
+	const tickStep = ticks.length > 1 ? ticks[1]! - ticks[0]! : undefined
 	const tMin = points[0]![0]
 	const tMax = points[points.length - 1]![0]
 	const tRange = Math.max(1, tMax - tMin)
@@ -175,7 +203,7 @@ export function renderChartSvg(spec: ChartSpec): string {
 		const isBaseline = tick === yMin
 		parts.push(
 			`<line x1="${PAD_LEFT}" y1="${ty}" x2="${WIDTH - PAD_RIGHT}" y2="${ty}" stroke="${COLORS.border}"${isBaseline ? "" : ' stroke-opacity="0.5"'} stroke-width="1"/>`,
-			`<text x="${PAD_LEFT - 8}" y="${ty + 4}" text-anchor="end" font-family='${FONT}' font-size="12" fill="${COLORS.muted}">${esc(formatValue(tick, spec.unit))}</text>`,
+			`<text x="${PAD_LEFT - 8}" y="${ty + 4}" text-anchor="end" font-family='${FONT}' font-size="12" fill="${COLORS.muted}">${esc(formatValue(tick, spec.unit, tickStep))}</text>`,
 		)
 	}
 
@@ -212,7 +240,7 @@ export function renderChartSvg(spec: ChartSpec): string {
 		const dx = anchor === "end" ? -8 : 8
 		parts.push(
 			`<circle cx="${x(lt).toFixed(1)}" cy="${y(lv).toFixed(1)}" r="4" fill="${series}" stroke="${COLORS.surface}" stroke-width="2"/>`,
-			`<text x="${(x(lt) + dx).toFixed(1)}" y="${(y(lv) - 8).toFixed(1)}" text-anchor="${anchor}" font-family='${FONT}' font-size="12" font-weight="600" fill="${COLORS.primaryInk}">${esc(formatValue(lv, spec.unit))}</text>`,
+			`<text x="${(x(lt) + dx).toFixed(1)}" y="${(y(lv) - 8).toFixed(1)}" text-anchor="${anchor}" font-family='${FONT}' font-size="12" font-weight="600" fill="${COLORS.primaryInk}">${esc(formatValue(lv, spec.unit, tickStep))}</text>`,
 		)
 	}
 
