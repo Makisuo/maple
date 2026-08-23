@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import {
 	ActorDocument,
 	type ActorId,
+	ERROR_INCIDENT_AUTO_RESOLVE_MINUTES,
 	ErrorIncidentDocument,
 	ErrorIssueDocument,
 	ErrorIssueEventId as ErrorIssueEventIdSchema,
@@ -86,7 +87,6 @@ const ErrorNotificationOutboxPayload = Schema.Struct({
 type ErrorNotificationOutboxPayload = Schema.Schema.Type<typeof ErrorNotificationOutboxPayload>
 const decodeErrorNotificationOutboxPayload = Schema.decodeUnknownOption(ErrorNotificationOutboxPayload)
 
-const AUTO_RESOLVE_MINUTES = 30
 const TICK_MINUTE_MS = 60_000
 /** Wait one full minute beyond bucket close so ordinary OTLP/exporter lag lands
  * before the event-time cursor makes the bucket immutable. */
@@ -1112,7 +1112,7 @@ const make: Effect.Effect<
 				policy,
 				destinationIds: parsePolicyDestinations(policy.destinationIdsJson),
 				windowEndMs,
-				autoResolveMinutes: AUTO_RESOLVE_MINUTES,
+				autoResolveMinutes: ERROR_INCIDENT_AUTO_RESOLVE_MINUTES,
 				claimToken: tickWindow.claimToken,
 				makeIssueId: newErrorIssueId,
 				makeIncidentId: newErrorIncidentId,
