@@ -243,8 +243,10 @@ function EventsTab({ sessionId, window }: { sessionId: string; window?: ReplayPa
 				{rows.length === 0 ? (
 					<div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
 						{/* The filters are glyphs now, so the empty state is where the
-						    chosen one gets named. */}
-						No {FILTER_LABELS[filter].toLowerCase()} in this session.
+						    chosen one gets named — except "All events", which only reads
+						    as a label. Nothing was filtered, so nothing needs naming. */}
+						No {filter === "all" ? "events" : FILTER_LABELS[filter].toLowerCase()} in this
+						session.
 					</div>
 				) : (
 					<ul className="divide-y divide-border font-mono text-xs">
