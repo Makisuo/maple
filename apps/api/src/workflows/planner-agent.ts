@@ -48,6 +48,9 @@ export const runPlannerAgent = Effect.fn("investigation.plan")(function* (input:
 
 	const pass = yield* runAgentPass({
 		id: `inv_${input.investigationId}_plan`,
+		// The seeded transcript's chat session id, so the workflow's passes and any
+		// attended follow-up land in one agent session.
+		sessionId: `${input.tenant.orgId}:inv-${input.investigationId}`,
 		agent: plannerAgent(),
 		tenant: input.tenant,
 		model: input.model,

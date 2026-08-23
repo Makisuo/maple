@@ -58,6 +58,15 @@ import {
 } from "./budgets"
 import { dropOldestToolStep, isNearContextLimit } from "./context"
 import { buildTaskTool } from "./delegate"
+import {
+	annotateModelCallEnd,
+	genAiIdentityOf,
+	invokeAgentAttributes,
+	invokeAgentSpanName,
+	modelCallAttributes,
+	modelCallSpanName,
+	withToolCallSpan,
+} from "./genai"
 import { isRetryableStepFailure, stepRetryDelayMs } from "./retry"
 import { initialDoomLoopState, observeToolCallBatch } from "./stop"
 import {
@@ -250,7 +259,15 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 				emptyRecoveryUsed: false,
 				doomLoop: initialDoomLoopState,
 			}
-			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, state))
+			// The turn's gen-ai root span. Sub-agent turns nest under the parent's
+			// `execute_tool task` span, attended turns under `chat.turn`, headless
+			// passes under their `investigation.*` span — the semconv identity lives
+			// here so every caller gets it without repeating it.
+			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, state)).pipe(
+				Stream.withSpan(invokeAgentSpanName(agent.name), {
+					attributes: invokeAgentAttributes(agent.name, input.model, genAiIdentityOf(input)),
+				}),
+			)
 		}),
 	)
 
@@ -290,8 +307,26 @@ const runStep = (
 		// zero, and only text that actually reached a consumer is ever taken back.
 		let emitted = 0
 
+		const identity = genAiIdentityOf(input)
+
 		const live: Stream.Stream<ChatTurnEvent> = LLM.stream(request).pipe(
 			Stream.tap((event) => Effect.sync(() => collected.push(event))),
+			// The response half of the model-call span, written while the span is
+			// still open: `collected` holds every event up to and including the
+			// terminal one, so it folds into a completed response right here.
+			Stream.tap((event) =>
+				event.type === "finish" || event.type === "provider-error"
+					? annotateModelCallEnd(collected)
+					: Effect.void,
+			),
+			// One span per model call — an attempt, not a logical step, because a
+			// retry costs the same money and wall clock and deserves its own record.
+			// The catch below sits outside, so a failed call ends this span with the
+			// error exit and the retry opens a fresh one.
+			Stream.withSpan(modelCallSpanName(input.model), {
+				kind: "client",
+				attributes: modelCallAttributes(input.model, request.messages, identity),
+			}),
 			Stream.filter((event) => event.type === "text-delta" && event.text !== ""),
 			// One durable row, one SSE frame and one React commit per *token* is more fidelity than
 			// a screen can show. Coalescing into roughly one frame's worth of deltas is invisible
@@ -627,7 +662,7 @@ const runStep = (
 							const dispatched = yield* Effect.forEach(
 								forced,
 								(call) =>
-									ToolRuntime.dispatch(tools, call).pipe(
+									withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call)).pipe(
 										Effect.map((result) => [call, result] as const),
 									),
 								{ concurrency: 1 },
@@ -705,7 +740,7 @@ const runStep = (
 						const dispatched = yield* Effect.forEach(
 							calls,
 							(call) =>
-								ToolRuntime.dispatch(tools, call).pipe(
+								withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call)).pipe(
 									Effect.map((result) => [call, result] as const),
 								),
 							{ concurrency: TOOL_CONCURRENCY },

@@ -118,6 +118,7 @@ export const runValidatorAgent = Effect.fn("investigation.validator")(function* 
 
 	const pass = yield* runAgentPass({
 		id: `inv_${input.investigationId}_validator`,
+		sessionId: `${input.tenant.orgId}:inv-${input.investigationId}`,
 		agent,
 		tenant: input.tenant,
 		model: input.model,

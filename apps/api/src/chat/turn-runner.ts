@@ -149,7 +149,8 @@ const compactIfNeeded = (
 ): Effect.Effect<void> =>
 	Effect.gen(function* () {
 		const { contextLimitOf, outputLimitOf } = yield* Effect.promise(() => import("../platform/Llm"))
-		const { isNearContextLimit } = yield* Effect.promise(() => import("./loop"))
+		const { isNearContextLimit, annotateModelResponse, modelCallAttributes, modelCallSpanName } =
+			yield* Effect.promise(() => import("./loop"))
 		if (
 			!isNearContextLimit(usage.input, {
 				context: contextLimitOf(model),
@@ -167,12 +168,25 @@ const compactIfNeeded = (
 		const throughSeq = input.session.cursor()
 		const previous = input.session.compaction()
 
+		const messages = [...toLlmMessages(history, previous)]
+		// A model call like any other to the gen-ai session, even though it is
+		// housekeeping: it costs real tokens, and a session view that hides it
+		// under-reports what the conversation spent.
 		const response = yield* LLM.generate(
 			LLM.request({
 				model,
 				system: COMPACTION_SYSTEM_PROMPT,
-				messages: [...toLlmMessages(history, previous)],
+				messages,
 				prompt: "Compact the conversation above now.",
+			}),
+		).pipe(
+			Effect.tap((generated) => annotateModelResponse(generated)),
+			Effect.withSpan(modelCallSpanName(model), {
+				kind: "client",
+				attributes: modelCallAttributes(model, messages, {
+					sessionId: input.sessionId,
+					turnId: input.messageId,
+				}),
 			}),
 		)
 		const summary = response.text.trim()

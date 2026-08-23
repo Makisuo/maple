@@ -57,6 +57,7 @@ export const runHypothesisAgent = Effect.fn("investigation.hypothesis")(function
 
 	const pass = yield* runAgentPass({
 		id: `inv_${input.investigationId}_${input.hypothesis.id}`,
+		sessionId: `${input.tenant.orgId}:inv-${input.investigationId}`,
 		agent: hypothesisAgent(input.hypothesis),
 		tenant: input.tenant,
 		model: input.model,
@@ -126,6 +127,7 @@ export const runSoloHypothesisAgent = Effect.fn("investigation.solo")(function* 
 
 	const pass = yield* runAgentPass({
 		id: `inv_${input.investigationId}_${input.hypothesis.id}`,
+		sessionId: `${input.tenant.orgId}:inv-${input.investigationId}`,
 		agent: hypothesisAgent(input.hypothesis),
 		tenant: input.tenant,
 		model: input.model,
