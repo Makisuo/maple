@@ -14,6 +14,7 @@ import {
 	resolveIngestCidrBlock,
 	resolveIngestDesiredCount,
 	resolveIngestNamespaceName,
+	resolveIngestScaling,
 	resolveIngestTaskSize,
 	stageDeploysCollector,
 } from "@maple/infra/aws"
@@ -101,6 +102,7 @@ export interface CreateMapleIngestOptions {
 export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestOptions) =>
 	Effect.gen(function* () {
 		const taskSize = resolveIngestTaskSize(stage)
+		const scaling = resolveIngestScaling(stage)
 		const name = (base: string) => resolveAwsResourceName(base, stage, region)
 
 		// Public subnets with public IPs on the tasks, and NO NAT gateway. NAT
@@ -364,6 +366,10 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 			memory: taskSize.memory,
 
 			desiredCount: resolveIngestDesiredCount(stage),
+			// prd autoscales on CPU between this count and a burst ceiling; alchemy
+			// stops pinning desiredCount while `scaling` is set, so the autoscaler's
+			// decisions survive redeploys. Other stages stay fixed.
+			...(scaling ? { scaling } : undefined),
 			vpcId: network.vpcId,
 			subnets: network.publicSubnetIds,
 			securityGroups: [albSecurityGroup.groupId, taskSecurityGroup.groupId],
