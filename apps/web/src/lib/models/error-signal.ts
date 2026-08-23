@@ -10,7 +10,13 @@
 //
 // An `ErrorSignal` is those three joined on the fingerprint hash.
 
-import type { ErrorIssueDocument, ErrorIssueId, IssueSeverity, WorkflowState } from "@maple/domain/http"
+import type {
+	ErrorIssueDocument,
+	ErrorIssueId,
+	IssueKind,
+	IssueSeverity,
+	WorkflowState,
+} from "@maple/domain/http"
 import type { V2Investigation } from "@maple/domain/http/v2"
 
 import type { ErrorByType } from "@/api/warehouse/errors"
@@ -124,6 +130,22 @@ export function resolveSignalState(
 		}
 	}
 	return { kind: "workflow", state: issue.workflowState }
+}
+
+/**
+ * The fingerprints a sparkline can actually be drawn for.
+ *
+ * Only `kind === "error"` issues carry a real ClickHouse fingerprint (a decimal
+ * UInt64 string). Alert and integration issues reuse the column for a synthetic
+ * key — `alert:{ruleId}:{groupKey}`, `planetscale:{database}:{event}` — which
+ * `toUInt64()` rejects, failing the whole batched spark query for every row on
+ * screen. `ErrorIssueReadModelsService.getIssue` skips the warehouse for the
+ * same reason.
+ */
+export function sparkFingerprintHashes(
+	issues: ReadonlyArray<{ readonly kind: IssueKind; readonly fingerprintHash: string }>,
+): ReadonlyArray<string> {
+	return issues.filter((issue) => issue.kind === "error").map((issue) => issue.fingerprintHash)
 }
 
 /**

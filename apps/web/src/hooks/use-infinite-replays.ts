@@ -1,8 +1,9 @@
 import * as React from "react"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 
 import { listReplays } from "@/api/warehouse/replays"
 import { listReplaysResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import type { SessionRow } from "@/components/replays/sessions-list"
 import { logClientError } from "@/lib/services/common/telemetry"
 import { mapleRuntime } from "@/lib/registry"
@@ -48,7 +49,12 @@ interface ReplaysPage {
 export function useInfiniteReplays(filterInputs: ReplaysFilterInputs) {
 	const filterKey = React.useMemo(() => JSON.stringify(filterInputs), [filterInputs])
 
-	const firstPageResult = useAtomValue(
+	// Retained, as in `useInfiniteTraces`/`useInfiniteLogs`: changing a filter
+	// builds a new atom key, whose first read is `Initial`. Read bare, that
+	// repaints the whole list as a skeleton on every checkbox tick. Retention
+	// holds the last rows on screen and flips the result to `waiting`, so
+	// refiltering dims rather than blanks.
+	const firstPageResult = useRetainedRefreshableResultValue(
 		listReplaysResultAtom({ data: { ...filterInputs, limit: PAGE_SIZE, offset: 0 } }),
 	)
 

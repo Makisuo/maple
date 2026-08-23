@@ -21,6 +21,7 @@ import { pickImportantAttributes } from "@/lib/log-attributes"
 import { LogAttributeChip } from "./log-attribute-chip"
 import { ChevronRightIcon } from "@/components/icons"
 import { QueryErrorState } from "@/components/common/query-error-state"
+import { usePageScrolledReporter } from "@maple/ui/components/ui/page-layout"
 
 const ROW_HEIGHT = 36
 const ROW_HEIGHT_COMFORTABLE = 48
@@ -121,8 +122,10 @@ const LogRow = React.memo(function LogRow({
 				position: "absolute",
 				top: 0,
 				left: 0,
-				width: fill ? "100%" : "max-content",
-				minWidth: "100%",
+				// The track owns the horizontal size (see `trackStyle`). A row that
+				// needs more than the track still overflows via the inner `w-max`,
+				// which is what grows the track on the next frame.
+				width: "100%",
 				transform: `translateY(${top}px)`,
 			}}
 			className="border-b border-border"
@@ -237,13 +240,22 @@ const LogRow = React.memo(function LogRow({
 })
 
 /** Slim sticky header that labels the pinned-attribute columns. */
-function PinnedHeader({ pinnedColumns, wrap }: { pinnedColumns: string[]; wrap: boolean }) {
+function PinnedHeader({
+	pinnedColumns,
+	wrap,
+	trackStyle,
+}: {
+	pinnedColumns: string[]
+	wrap: boolean
+	trackStyle: React.CSSProperties
+}) {
 	return (
 		<div
-			className={cn(
-				"sticky top-0 left-0 z-10 flex items-center gap-2 px-3 py-1.5 bg-background border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground/70 select-none",
-				wrap ? "w-full" : "w-max min-w-full",
-			)}
+			// `top-0` only: a `left-0` sticky header stays glued to the viewport
+			// while the rows scroll sideways underneath it, so the labels drift off
+			// the columns they name. It shares the rows' track width instead.
+			style={trackStyle}
+			className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 bg-background border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground/70 select-none"
 		>
 			<span className="shrink-0 size-4" aria-hidden="true" />
 			<span className="shrink-0 size-1.5" aria-hidden="true" />
@@ -292,6 +304,9 @@ export function LogsTableView({
 	const [expandedRows, setExpandedRows] = React.useState<ReadonlySet<number>>(() => new Set())
 	const { effectiveTimezone } = useTimezonePreference()
 	const scrollContainerRef = React.useRef<HTMLDivElement>(null)
+	// This pane owns its scroller (the route mounts it under `DashboardLayout.Fill`,
+	// not `.Scroll`), so it has to raise the sticky area's shadow itself.
+	const reportScrolled = usePageScrolledReporter()
 
 	const handleRowClick = React.useCallback(
 		(log: Log) => {
@@ -319,7 +334,20 @@ export function LogsTableView({
 		if (!open) setSelectedLog(null)
 	}, [])
 
+	// Measured row heights, feeding an adaptive estimate. The constants below are
+	// only a cold start: a compact row actually lands near 31px (an 18px chip
+	// between two 6px paddings plus the border), so every measurement used to
+	// shrink `getTotalSize()` and drag the scrollbar out from under the cursor.
+	// Expanded rows are excluded — they are not representative of the rest.
+	const sizeStatsRef = React.useRef({ sum: 0, byIndex: new Map<number, number>() })
+	const expandedRowsRef = React.useRef(expandedRows)
+	React.useLayoutEffect(() => {
+		expandedRowsRef.current = expandedRows
+	}, [expandedRows])
+
 	const estimateSize = React.useCallback(() => {
+		const stats = sizeStatsRef.current
+		if (stats.byIndex.size >= 8) return Math.round(stats.sum / stats.byIndex.size)
 		if (wrap) return density === "comfortable" ? 88 : 72
 		return density === "comfortable" ? ROW_HEIGHT_COMFORTABLE : ROW_HEIGHT
 	}, [wrap, density])
@@ -328,18 +356,73 @@ export function LogsTableView({
 		count: allData.length,
 		getScrollElement: () => scrollContainerRef.current,
 		estimateSize,
-		overscan: 4,
+		// 4 rows of buffer is ~140px at compact density — a flick outruns it and
+		// leaves blank bands, which reads as the list stuttering.
+		overscan: wrap ? 6 : 12,
 	})
+
+	// Every row is measured, not just the wrapped/expanded ones: an unmeasured
+	// row keeps its estimate, and a list of wrong estimates is exactly the drift
+	// above. Recording the height here (rather than reading the virtualizer's
+	// cache) keeps the mean deduped by index.
+	const measureElement = React.useCallback(
+		(node: Element | null) => {
+			virtualizer.measureElement(node)
+			if (!(node instanceof HTMLElement)) return
+			const index = Number(node.dataset.index)
+			if (!Number.isInteger(index) || expandedRowsRef.current.has(index)) return
+			const height = node.offsetHeight
+			if (height <= 0) return
+			const stats = sizeStatsRef.current
+			const previous = stats.byIndex.get(index)
+			if (previous === height) return
+			stats.sum += height - (previous ?? 0)
+			stats.byIndex.set(index, height)
+		},
+		[virtualizer],
+	)
 
 	// A global wrap/density change resizes every row at once. Clear the
 	// measurement cache so off-screen rows re-measure from the corrected
 	// estimate instead of jumping on the stale one. Per-row expand/collapse
 	// re-measures automatically via the row's ResizeObserver.
 	React.useLayoutEffect(() => {
+		sizeStatsRef.current = { sum: 0, byIndex: new Map() }
 		virtualizer.measure()
 	}, [wrap, density, virtualizer])
 
 	const virtualItems = virtualizer.getVirtualItems()
+
+	// A virtualized list's horizontal scroll width is the width of whichever rows
+	// happen to be mounted, and in the default layout a row sizes to its content
+	// — so scrolling vertically swung `scrollWidth` by hundreds of px and the
+	// browser yanked `scrollLeft` along with it. The track is sized to the widest
+	// row seen so far and only ever grows, which keeps the horizontal range
+	// still while you scroll. It resets when the layout or the query changes.
+	const [trackWidth, setTrackWidth] = React.useState(0)
+	const trackResetKey = `${wrap}|${density}|${pinnedColumns.join("\u0000")}`
+	const trackStateRef = React.useRef({ key: trackResetKey, count: allData.length })
+
+	React.useLayoutEffect(() => {
+		const element = scrollContainerRef.current
+		if (!element) return
+		const previous = trackStateRef.current
+		const reset = previous.key !== trackResetKey || allData.length < previous.count
+		trackStateRef.current = { key: trackResetKey, count: allData.length }
+		if (reset) {
+			setTrackWidth(0)
+			return
+		}
+		// Wrap mode fills the container and never scrolls sideways.
+		if (wrap) return
+		const measured = element.scrollWidth
+		setTrackWidth((current) => (measured > current ? measured : current))
+	}, [virtualItems, trackWidth, trackResetKey, allData.length, wrap])
+
+	const trackStyle = React.useMemo<React.CSSProperties>(
+		() => ({ width: trackWidth > 0 ? trackWidth : "100%", minWidth: "100%" }),
+		[trackWidth],
+	)
 
 	// Index-keyed nav ids: logs have no stable row id, and the list is
 	// append-only for a given query, so indices stay stable while browsing.
@@ -415,12 +498,20 @@ export function LogsTableView({
 				<div className="flex-1 min-h-0 relative">
 					<div
 						ref={scrollContainerRef}
-						className="absolute inset-0 overflow-auto rounded-md border"
+						onScroll={(e) => reportScrolled(e.currentTarget.scrollTop > 0)}
+						className="absolute inset-0 overflow-auto overscroll-contain rounded-md border"
 					>
 						{pinnedColumns.length > 0 && (
-							<PinnedHeader pinnedColumns={pinnedColumns} wrap={wrap} />
+							<PinnedHeader pinnedColumns={pinnedColumns} wrap={wrap} trackStyle={trackStyle} />
 						)}
-						<div style={{ height: virtualizer.getTotalSize(), position: "relative" }} role="log">
+						<div
+							style={{
+								...trackStyle,
+								height: virtualizer.getTotalSize(),
+								position: "relative",
+							}}
+							role="log"
+						>
 							{virtualItems.map((virtualRow) => {
 								const log = allData[virtualRow.index]
 								const isSelected = selectedLog === log
@@ -438,9 +529,7 @@ export function LogsTableView({
 										wrap={wrap}
 										density={density}
 										pinnedColumns={pinnedColumns}
-										measureRef={
-											wrap || isExpanded ? virtualizer.measureElement : undefined
-										}
+										measureRef={measureElement}
 										onClick={handleRowClick}
 										onToggleExpand={toggleExpanded}
 									/>
