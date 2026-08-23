@@ -12,7 +12,7 @@ import { BooleanFromStringParam, NumberFromStringParam } from "@/lib/search-para
 import { replaysFilterInputs } from "@/components/replays/replays-filter-inputs"
 import { REPLAYS_PAGE_SIZE, useInfiniteReplays } from "@/hooks/use-infinite-replays"
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { listReplaysResultAtom, replaysFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -101,7 +101,7 @@ function ReplaysPage() {
 	// Retained for the same reason as the list: without it, ticking one sidebar
 	// checkbox drops the sidebar that contains it into its own skeleton, and the
 	// option you just clicked disappears out from under the cursor.
-	const facetsResult = useRetainedRefreshableResultValue(replaysFacetsResultAtom({ data: filterInputs }))
+	const facetsResult = useRefreshableAtomValue(replaysFacetsResultAtom({ data: filterInputs }))
 
 	const handleTimeChange = (range: TimeRange, options?: { replace?: boolean }) => {
 		navigate({

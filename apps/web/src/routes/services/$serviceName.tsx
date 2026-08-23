@@ -7,7 +7,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { UnnamedServiceHint, isUnnamedService } from "@/components/services/unnamed-service-hint"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
 import type { ChartLegendMode, ChartTooltipMode } from "@maple/ui/components/charts/_shared/chart-types"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
@@ -332,7 +332,7 @@ function OverviewTab({
 			environments,
 		},
 	})
-	const overviewResult = useRetainedRefreshableResultValue(overviewAtom)
+	const overviewResult = useRefreshableAtomValue(overviewAtom)
 	const refreshOverview = useAtomRefresh(overviewAtom)
 
 	// Sampling verdict from the already-loaded primary chart. Drives a separate,

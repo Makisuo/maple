@@ -5,7 +5,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { planetscaleQueryInsightsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatNumber } from "@maple/ui/lib/format"
@@ -61,7 +61,7 @@ export function PlanetScaleTopQueries({
 		}),
 		[database, branch, startTime, endTime, limit],
 	)
-	const result = useRetainedRefreshableResultValue(planetscaleQueryInsightsResultAtom(input))
+	const result = useRefreshableAtomValue(planetscaleQueryInsightsResultAtom(input))
 
 	if (Result.isInitial(result)) {
 		// Row-shaped, so the section doesn't resize when the rows arrive.

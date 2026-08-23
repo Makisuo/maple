@@ -51,7 +51,7 @@ import {
 	webAnalyticsTimeseriesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -117,7 +117,7 @@ function WebAnalyticsPage() {
 	// instantiates a fresh atom whose first emission is `Initial`. Reading that
 	// directly would replace the sidebar with a skeleton on every click and reset
 	// each section's open/search state — same reasoning as the Cloudflare pages.
-	const breakdownsResult = useRetainedRefreshableResultValue(
+	const breakdownsResult = useRefreshableAtomValue(
 		webAnalyticsBreakdownsResultAtom({
 			data: { startTime, endTime, limitPerDimension: BREAKDOWN_LIMIT, ...filters },
 		}),
@@ -126,7 +126,7 @@ function WebAnalyticsPage() {
 	// Its own query, not a branch of the breakdowns union: custom events live on
 	// the page-view source, not `session_replays`. Read here rather than in the
 	// content so the sidebar's Event section and the Events card share one fetch.
-	const eventsResult = useRetainedRefreshableResultValue(
+	const eventsResult = useRefreshableAtomValue(
 		webAnalyticsEventsResultAtom({
 			data: { startTime, endTime, limit: EVENTS_LIMIT, ...filters },
 		}),
@@ -299,16 +299,14 @@ function AnalyticsContent({
 	// and every back-button step.
 	const [picked, setPicked] = useState<AnalyticsMetricKey | null>(null)
 
-	const summaryResult = useRetainedRefreshableResultValue(
-		webAnalyticsSummaryResultAtom({ data: windowInput }),
-	)
-	const timeseriesResult = useRetainedRefreshableResultValue(
+	const summaryResult = useRefreshableAtomValue(webAnalyticsSummaryResultAtom({ data: windowInput }))
+	const timeseriesResult = useRefreshableAtomValue(
 		webAnalyticsTimeseriesResultAtom({ data: { ...windowInput, bucketSeconds } }),
 	)
-	const pageviewsResult = useRetainedRefreshableResultValue(
+	const pageviewsResult = useRefreshableAtomValue(
 		webAnalyticsPageviewsResultAtom({ data: { ...windowInput, bucketSeconds } }),
 	)
-	const pagesResult = useRetainedRefreshableResultValue(
+	const pagesResult = useRefreshableAtomValue(
 		webAnalyticsPagesResultAtom({ data: { ...windowInput, limit: PAGES_LIMIT } }),
 	)
 
@@ -316,10 +314,10 @@ function AnalyticsContent({
 	// Pages / session are measured over `session_events`, which the summary query
 	// deliberately does not read — without the second, those two tiles would be
 	// the only ones with no delta.
-	const previousSummaryResult = useRetainedRefreshableResultValue(
+	const previousSummaryResult = useRefreshableAtomValue(
 		webAnalyticsSummaryResultAtom({ data: previousInput }),
 	)
-	const previousPageviewsResult = useRetainedRefreshableResultValue(
+	const previousPageviewsResult = useRefreshableAtomValue(
 		webAnalyticsPageviewsResultAtom({ data: { ...previousInput, bucketSeconds } }),
 	)
 

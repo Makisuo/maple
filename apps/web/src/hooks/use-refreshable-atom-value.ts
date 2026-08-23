@@ -4,6 +4,12 @@ import * as React from "react"
 import { useOptionalPageRefreshContext } from "@/components/time-range-picker/page-refresh-context"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 
+/**
+ * `useAtomValue`, wired to the page's manual-refresh / auto-reload control.
+ *
+ * Keep-previous-data across atom identity changes comes from `useAtomValue`
+ * itself — see `useRetainedResult` in `@/lib/effect-atom`.
+ */
 export function useRefreshableAtomValue<A>(atom: Atom.Atom<A>): A {
 	const value = useAtomValue(atom)
 	const refresh = useAtomRefresh(atom)

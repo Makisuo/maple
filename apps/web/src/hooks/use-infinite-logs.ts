@@ -3,7 +3,7 @@ import { Result } from "@/lib/effect-atom"
 
 import { listLogs, type Log, type LogsResponse } from "@/api/warehouse/logs"
 import { listLogsResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import { mapleRuntime } from "@/lib/registry"
 import type { LogsSearchParams } from "@/routes/logs"
@@ -53,7 +53,7 @@ export function useInfiniteLogs(filters: LogsSearchParams | undefined): UseInfin
 
 	const filterKey = React.useMemo(() => JSON.stringify(queryParams), [queryParams])
 
-	const firstPageResult = useRetainedRefreshableResultValue(listLogsResultAtom({ data: queryParams }))
+	const firstPageResult = useRefreshableAtomValue(listLogsResultAtom({ data: queryParams }))
 
 	const [additionalPages, setAdditionalPages] = React.useState<LogsResponse[]>([])
 	const [isFetchingNextPage, setIsFetchingNextPage] = React.useState(false)

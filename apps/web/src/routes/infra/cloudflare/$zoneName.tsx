@@ -40,7 +40,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatNumber } from "@maple/ui/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -123,7 +123,7 @@ function ZoneDetailPage() {
 	// instantiates a fresh atom whose first emission is `Initial`. Reading that directly replaced the
 	// whole sidebar with a skeleton on each click and reset every section's open/search/show-all
 	// state. Retaining the last success keeps the sections in place and merely dims the counts.
-	const facetsResult = useRetainedRefreshableResultValue(
+	const facetsResult = useRefreshableAtomValue(
 		cloudflareZoneFacetsResultAtom({ data: { serviceName, startTime, endTime, ...filters } }),
 	)
 
@@ -205,14 +205,14 @@ function ZoneDetailContent({
 }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
 
-	const detailResult = useRetainedRefreshableResultValue(
+	const detailResult = useRefreshableAtomValue(
 		cloudflareZoneDetailResultAtom({
 			data: { serviceName, startTime, endTime, bucketSeconds, ...filters },
 		}),
 	)
 	// The list rollup carries the bytes/visits/latency KPIs; picking this
 	// zone's row client-side shares the 30s-cached atom with the list page.
-	const zonesResult = useRetainedRefreshableResultValue(
+	const zonesResult = useRefreshableAtomValue(
 		cloudflareZonesResultAtom({ data: { startTime, endTime, ...filters } }),
 	)
 	const zoneRow = Result.builder(zonesResult)

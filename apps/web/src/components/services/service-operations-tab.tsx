@@ -7,7 +7,7 @@ import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 import { ChevronDownIcon, ChevronUpIcon, ChevronExpandYIcon } from "@/components/icons"
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { getServiceOperationsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import type { ServiceOperation } from "@/api/warehouse/service-operations"
@@ -76,7 +76,7 @@ export function ServiceOperationsTab({
 	const [sortKey, setSortKey] = useState<SortKey>("calls")
 	const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-	const result = useRetainedRefreshableResultValue(
+	const result = useRefreshableAtomValue(
 		getServiceOperationsResultAtom({
 			data: serviceOperationsQueryInput({
 				serviceName,

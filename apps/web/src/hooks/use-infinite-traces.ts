@@ -3,7 +3,7 @@ import { Result } from "@/lib/effect-atom"
 
 import { listTraces, type Trace, type TracesResponse } from "@/api/warehouse/traces"
 import { listTracesResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import type { TracesSearchParams } from "@/routes/traces"
 import { logClientError } from "@/lib/services/common/telemetry"
@@ -75,7 +75,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 
 	const filterKey = React.useMemo(() => JSON.stringify(queryParams), [queryParams])
 
-	const firstPageResult = useRetainedRefreshableResultValue(
+	const firstPageResult = useRefreshableAtomValue(
 		listTracesResultAtom({
 			data: { ...queryParams, limit: PAGE_SIZE, offset: 0 },
 		}),

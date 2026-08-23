@@ -36,7 +36,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { retainedQuery } from "@/lib/services/common/atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -133,13 +133,11 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 
 	// Retained so a manual refresh or a time-range nudge fades the current numbers instead of
 	// replacing the whole page with skeletons; it also wires these atoms to PageRefreshProvider.
-	const zonesResult = useRetainedRefreshableResultValue(
-		cloudflareZonesResultAtom({ data: { startTime, endTime } }),
-	)
-	const timeseriesResult = useRetainedRefreshableResultValue(
+	const zonesResult = useRefreshableAtomValue(cloudflareZonesResultAtom({ data: { startTime, endTime } }))
+	const timeseriesResult = useRefreshableAtomValue(
 		cloudflareZoneTimeseriesResultAtom({ data: { startTime, endTime, bucketSeconds } }),
 	)
-	const workersResult = useRetainedRefreshableResultValue(
+	const workersResult = useRefreshableAtomValue(
 		cloudflareWorkersResultAtom({ data: { startTime, endTime } }),
 	)
 	const [zoneFilter, setZoneFilter] = useState("")

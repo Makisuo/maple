@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { type ReactNode, useState } from "react"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { useRetainedRefreshableResultValue } from "./use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "./use-refreshable-atom-value"
 
 function createWrapper() {
 	const registry = Registry.make()
@@ -21,7 +21,7 @@ const initialAtom = Atom.make(Result.initial<{ rows: string[] }, never>())
 function Harness() {
 	const [currentAtom, setCurrentAtom] =
 		useState<Atom.Atom<Result.Result<{ rows: string[] }, never>>>(successAtom)
-	const result = useRetainedRefreshableResultValue(currentAtom)
+	const result = useRefreshableAtomValue(currentAtom)
 
 	return (
 		<div>
@@ -37,7 +37,7 @@ function Harness() {
 	)
 }
 
-describe("useRetainedRefreshableResultValue", () => {
+describe("useRefreshableAtomValue", () => {
 	afterEach(() => {
 		cleanup()
 	})

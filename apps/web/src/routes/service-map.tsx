@@ -4,7 +4,7 @@ import { useMemo } from "react"
 
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { getServicesFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ServiceMapView } from "@/components/service-map/service-map-view"
@@ -68,7 +68,7 @@ function ServiceMapContent() {
 		}
 	}, [])
 	const facetsAtom = getServicesFacetsResultAtom({ data: facetsRange })
-	const facetsResult = useRetainedRefreshableResultValue(facetsAtom)
+	const facetsResult = useRefreshableAtomValue(facetsAtom)
 	const refreshFacets = useAtomRefresh(facetsAtom)
 
 	const environments = Result.builder(facetsResult)

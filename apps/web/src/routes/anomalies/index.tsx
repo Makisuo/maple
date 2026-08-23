@@ -6,7 +6,7 @@ import { Schema } from "effect"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { useListNavigation } from "@/hooks/use-list-navigation"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { AnomaliesFilterSidebar, type AnomalyFilters } from "@/components/anomalies/anomalies-filter-sidebar"
 import {
 	ANOMALY_GROUP_ORDER,
@@ -75,7 +75,7 @@ function AnomaliesPage() {
 		() => (status === "all" ? { limit: INCIDENTS_PAGE_LIMIT } : { status, limit: INCIDENTS_PAGE_LIMIT }),
 		[status],
 	)
-	// Memoized because `useRetainedRefreshableResultValue` updates state during
+	// Memoized because `useRefreshableAtomValue` updates state during
 	// render when the Result identity changes: a fresh atom per render would
 	// feed it a fresh Result every time and never converge.
 	const incidentsQueryAtom = useMemo(
@@ -88,7 +88,7 @@ function AnomaliesPage() {
 	)
 	// Retain the previous list across tab switches so the page never collapses
 	// back to skeletons; live refresh ticks keep the same atom and never dim.
-	const incidentsResult = useRetainedRefreshableResultValue(incidentsQueryAtom)
+	const incidentsResult = useRefreshableAtomValue(incidentsQueryAtom)
 	const refreshFirstPage = useAtomRefresh(incidentsQueryAtom)
 
 	// Pages loaded past the first. Keyed by the tab they were fetched for, so a

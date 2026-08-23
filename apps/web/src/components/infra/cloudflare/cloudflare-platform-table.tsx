@@ -4,7 +4,7 @@
 // accounts without either dataset — most orgs never see it.
 
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import type { CloudflareDurableObjectRow, CloudflareQueueRow } from "@/api/warehouse/cloudflare-infra"
 import { cloudflarePlatformResourcesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatNumber } from "@maple/ui/lib/format"
@@ -158,7 +158,7 @@ function DurableObjectTable({
 export function CloudflarePlatformSection({ startTime, endTime }: { startTime: string; endTime: string }) {
 	// Retained: this section hides itself on an empty result, so a bare read made it vanish and
 	// return on every page refresh.
-	const result = useRetainedRefreshableResultValue(
+	const result = useRefreshableAtomValue(
 		cloudflarePlatformResourcesResultAtom({ data: { startTime, endTime } }),
 	)
 

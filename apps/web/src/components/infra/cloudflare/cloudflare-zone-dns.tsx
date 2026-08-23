@@ -7,7 +7,7 @@ import { useMemo } from "react"
 
 import { Result } from "@/lib/effect-atom"
 import { cloudflareZoneDnsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { formatNumber } from "@maple/ui/lib/format"
 import { ColumnHead, DataTable } from "../primitives/data-table"
 import { formatPercent } from "@maple/ui/lib/format"
@@ -46,7 +46,7 @@ export function CloudflareZoneDnsSection({
 	syncId?: string
 }) {
 	// Retained for the same reason as the security section: an empty result hides the whole panel.
-	const result = useRetainedRefreshableResultValue(
+	const result = useRefreshableAtomValue(
 		cloudflareZoneDnsResultAtom({
 			data: { serviceName, startTime, endTime, bucketSeconds, ...filters },
 		}),

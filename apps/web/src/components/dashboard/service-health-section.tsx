@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { getServiceHealthSnapshotResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { openAnomalyServiceCountsAtom } from "@/lib/services/atoms/anomaly-atoms"
 import { anomalyServiceCountFromV2, type AnomalyServiceCount } from "@/lib/services/anomalies"
@@ -106,13 +106,13 @@ function metricTone(cause: ServiceHealthCause | undefined): "ok" | "warn" | "cri
  * components dedupes to one aggregate query and one relational incident read.
  */
 function useServiceHealthData({ startTime, endTime, environments, canFetch }: ServiceHealthProps) {
-	const snapshotResult = useRetainedRefreshableResultValue(
+	const snapshotResult = useRefreshableAtomValue(
 		canFetch
 			? getServiceHealthSnapshotResultAtom({ data: { startTime, endTime, environments } })
 			: disabledResultAtom<{ data: ServiceHealthSnapshot[] }, unknown>(),
 	)
 
-	const anomaliesResult = useRetainedRefreshableResultValue(openAnomalyServiceCountsAtom)
+	const anomaliesResult = useRefreshableAtomValue(openAnomalyServiceCountsAtom)
 
 	const { result: alertIncidentsResult } = useAlertIncidentsList()
 	const { result: rulesResult } = useAlertRulesList()

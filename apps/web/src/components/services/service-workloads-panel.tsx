@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { cn } from "@maple/ui/lib/utils"
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { getServiceWorkloadsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
 import { UsageBar } from "@/components/infra/usage-bar"
@@ -38,7 +38,7 @@ export function ServiceWorkloadsPanel({
 	effectiveEndTime,
 	envFilterActive,
 }: ServiceWorkloadsPanelProps) {
-	const result = useRetainedRefreshableResultValue(
+	const result = useRefreshableAtomValue(
 		getServiceWorkloadsResultAtom({
 			data: {
 				services: [serviceName],

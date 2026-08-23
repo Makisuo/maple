@@ -281,7 +281,10 @@ function InvestigationsHub() {
 								<InvestigateBar onSubmit={handleCreate} busy={creating} />
 							</DashboardLayout.Sticky>
 							<DashboardLayout.Scroll>
-								<div className="overflow-hidden rounded-xl border">
+								{/* `shrink-0`, or the flex column shrinks this below its
+								    content height and `overflow-hidden` clips the rows the
+								    scroller then thinks it doesn't need to scroll to. */}
+								<div className="shrink-0 overflow-hidden rounded-xl border">
 									{toolbar}
 									{Result.builder(result)
 										.onInitial(() => <InvestigationTableSkeleton />)

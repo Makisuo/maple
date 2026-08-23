@@ -2,7 +2,7 @@ import { formatWarehouseDateTime } from "@maple/query-engine"
 import type { FunnelPopulationFilterField } from "@maple/query-model"
 
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import {
 	productEventNamesResultAtom,
 	webAnalyticsBreakdownsResultAtom,
@@ -40,13 +40,13 @@ export function useFunnelSuggestions(
 	const startTime = window?.startTime ?? formatWarehouseDateTime(Date.now() - SEVEN_DAYS_MS)
 	const endTime = window?.endTime ?? formatWarehouseDateTime(Date.now())
 
-	const eventNamesResult = useRetainedRefreshableResultValue(
+	const eventNamesResult = useRefreshableAtomValue(
 		productEventNamesResultAtom({ data: { startTime, endTime, limit: EVENT_NAME_LIMIT } }),
 	)
-	const pagesResult = useRetainedRefreshableResultValue(
+	const pagesResult = useRefreshableAtomValue(
 		webAnalyticsPagesResultAtom({ data: { startTime, endTime, limit: PAGE_SUGGESTION_LIMIT } }),
 	)
-	const facetsResult = useRetainedRefreshableResultValue(
+	const facetsResult = useRefreshableAtomValue(
 		webAnalyticsBreakdownsResultAtom({ data: { startTime, endTime, limitPerDimension: FACET_LIMIT } }),
 	)
 

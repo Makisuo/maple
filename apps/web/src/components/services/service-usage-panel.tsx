@@ -2,7 +2,7 @@ import { formatNumber, formatStorageBytes } from "@maple/ui/lib/format"
 import { useMemo } from "react"
 import { cn } from "@maple/ui/lib/utils"
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { getServiceUsageResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { ServiceUsageTotals } from "@/api/warehouse/service-usage"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
@@ -49,7 +49,7 @@ export function ServiceUsagePanel({
 }: ServiceUsagePanelProps) {
 	const previous = previousWindow(effectiveStartTime, effectiveEndTime)
 
-	const result = useRetainedRefreshableResultValue(
+	const result = useRefreshableAtomValue(
 		getServiceUsageResultAtom({
 			data: {
 				service: serviceName,

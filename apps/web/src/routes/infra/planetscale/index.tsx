@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 
@@ -162,7 +162,7 @@ function PlanetScaleData({
 	)
 	// Retained so changing the time range dims the numbers instead of replacing
 	// the whole page with skeletons.
-	const statsResult = useRetainedRefreshableResultValue(
+	const statsResult = useRefreshableAtomValue(
 		getServiceMapPlanetScaleResultAtom({ data: { startTime, endTime } }),
 	)
 

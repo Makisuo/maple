@@ -3,7 +3,7 @@ import { Result } from "@/lib/effect-atom"
 
 import { listReplays } from "@/api/warehouse/replays"
 import { listReplaysResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import type { SessionRow } from "@/components/replays/sessions-list"
 import { logClientError } from "@/lib/services/common/telemetry"
 import { mapleRuntime } from "@/lib/registry"
@@ -54,7 +54,7 @@ export function useInfiniteReplays(filterInputs: ReplaysFilterInputs) {
 	// repaints the whole list as a skeleton on every checkbox tick. Retention
 	// holds the last rows on screen and flips the result to `waiting`, so
 	// refiltering dims rather than blanks.
-	const firstPageResult = useRetainedRefreshableResultValue(
+	const firstPageResult = useRefreshableAtomValue(
 		listReplaysResultAtom({ data: { ...filterInputs, limit: PAGE_SIZE, offset: 0 } }),
 	)
 

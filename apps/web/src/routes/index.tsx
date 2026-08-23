@@ -12,7 +12,7 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { formatErrorRate } from "@maple/ui/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { ServiceUsageCards } from "@/components/dashboard/service-usage-cards"
 import { ServiceHealthOverview, ServiceHealthList } from "@/components/dashboard/service-health-section"
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
@@ -116,7 +116,7 @@ function DashboardPage() {
 	}, [])
 
 	const facetsAtom = getServicesFacetsResultAtom({ data: facetsRange })
-	const facetsResult = useRetainedRefreshableResultValue(facetsAtom)
+	const facetsResult = useRefreshableAtomValue(facetsAtom)
 	const refreshFacets = useAtomRefresh(facetsAtom)
 
 	const defaultPreset = useMemo(() => {
@@ -223,7 +223,7 @@ function DashboardContent({
 	//
 	// On the eventual facets resolution the params may change (hint → real); the
 	// atom family re-keys (it's keyed by encoded params) and refetches, and
-	// `useRetainedRefreshableResultValue` keeps the prior value on screen
+	// `useRefreshableAtomValue` keeps the prior value on screen
 	// (`waiting`) so there's no flash to a spinner.
 	const canFetch = facetsReady || hint.seen
 
@@ -237,7 +237,7 @@ function DashboardContent({
 			})
 		: // eslint-disable-next-line @typescript-eslint/no-explicit-any
 			disabledResultAtom<{ data: ServiceDetailTimeSeriesPoint[] }, any>()
-	const overviewResult = useRetainedRefreshableResultValue(overviewAtom)
+	const overviewResult = useRefreshableAtomValue(overviewAtom)
 	const refreshOverview = useAtomRefresh(overviewAtom)
 
 	const logVolumeAtom = canFetch
@@ -256,7 +256,7 @@ function DashboardContent({
 			})
 		: // eslint-disable-next-line @typescript-eslint/no-explicit-any
 			disabledResultAtom<CustomChartTimeSeriesResponse, any>()
-	const logVolumeResult = useRetainedRefreshableResultValue(logVolumeAtom)
+	const logVolumeResult = useRefreshableAtomValue(logVolumeAtom)
 	const refreshLogVolume = useAtomRefresh(logVolumeAtom)
 
 	const isWaiting =

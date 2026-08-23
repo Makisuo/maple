@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { cn } from "@maple/ui/lib/utils"
 import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import { Result } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { getServiceOperationsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 import type { ServiceOperation } from "@/api/warehouse/service-operations"
@@ -45,7 +45,7 @@ export function ServiceTopOperationsPanel({
 	environments,
 	onViewAll,
 }: ServiceTopOperationsPanelProps) {
-	const result = useRetainedRefreshableResultValue(
+	const result = useRefreshableAtomValue(
 		getServiceOperationsResultAtom({
 			data: serviceOperationsQueryInput({
 				serviceName,

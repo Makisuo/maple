@@ -16,7 +16,7 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import type { TimeRange } from "@/components/time-range-picker/types"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ToolbarStat } from "@maple/ui/components/toolbar"
@@ -98,7 +98,7 @@ function AgentSessionsBody({
 	const window = { startTime, endTime, limit: AGENT_SESSIONS_LIMIT }
 	// Refreshable (not plain useAtomValue): on an absolute time range the atom
 	// key never rolls, so Reload only works through the refresh subscription.
-	const result = useRetainedRefreshableResultValue(
+	const result = useRefreshableAtomValue(
 		listAiSessionsResultAtom({
 			data: {
 				...window,

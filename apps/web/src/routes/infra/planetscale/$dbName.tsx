@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -189,7 +189,7 @@ function PlanetScaleDatabasePage() {
 	const neverCollected = status !== null && status.connected && metricsNeverCollected(status)
 	const setupSteps = status !== null ? derivePlanetScaleSetup(status, Date.now()).steps : []
 
-	const branchStatsResult = useRetainedRefreshableResultValue(
+	const branchStatsResult = useRefreshableAtomValue(
 		getPlanetScaleBranchStatsResultAtom({ data: { database: dbName, startTime, endTime } }),
 	)
 	const branchStats = Result.builder(branchStatsResult)
@@ -465,7 +465,7 @@ function PlanetScaleDatabaseData({
 	onSelectBranch: (branch: string | undefined) => void
 }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
-	const timeseriesResult = useRetainedRefreshableResultValue(
+	const timeseriesResult = useRefreshableAtomValue(
 		planetscaleInfraTimeseriesResultAtom({
 			data: {
 				database,
@@ -484,7 +484,7 @@ function PlanetScaleDatabaseData({
 
 	// The lifecycle timeline: one fetch feeds both the chart markers and the feed
 	// below, so the two can never disagree about what happened.
-	const eventsResult = useRetainedRefreshableResultValue(
+	const eventsResult = useRefreshableAtomValue(
 		planetscaleEventsResultAtom({
 			data: {
 				database,

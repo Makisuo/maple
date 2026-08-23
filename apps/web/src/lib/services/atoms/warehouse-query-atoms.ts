@@ -174,9 +174,9 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 			resultAtom = Atom.setIdleTTL(resultAtom, options.staleTime)
 		}
 
-		// Applied at the atom rather than in a hook so that every consumer gets it
-		// — `useAtomValue`, `useRefreshableAtomValue` and
-		// `useRetainedRefreshableResultValue` alike — with no call-site changes.
+		// Applied at the atom rather than in a hook so that both consumers get it
+		// — `useAtomValue` and `useRefreshableAtomValue` alike — with no
+		// call-site changes.
 		return withRetention(resultAtom, identity)
 	})
 
