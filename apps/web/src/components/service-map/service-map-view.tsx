@@ -1892,10 +1892,22 @@ export function ServiceMapCanvas({
 	// remains the timeout/error fallback, so a worker failure never blanks the map.
 	const layoutRequest = useLayoutRequest(effectiveNodes, effectiveEdges, layoutConfig, layoutSignature)
 	// The layout currently on screen, and the anchor every later layout is built
-	// from. Written below once positions are actually applied.
+	// from. Written by an effect once positions are actually applied.
 	const lastLayoutRef = useRef<PreviousPositions | undefined>(undefined)
-	const carriedPositions = lastLayoutRef.current
 	const elkSnapshot = useElkLayout(layoutRequest, lastLayoutRef)
+	// Snapshot the anchor ONCE per layout signature rather than reading the ref
+	// during render. Reading it live fed the ref's own writes back into the
+	// `layoutedNodes` memo — each write produced a fresh Map, which invalidated
+	// the memo, which re-ran the effect — an idle render loop that cost ~50fps and
+	// ~700ms of blocking time per 4s while the map just sat there.
+	const [carriedSnapshot, setCarriedSnapshot] = useState<{
+		signature: string
+		positions: PreviousPositions | undefined
+	}>(() => ({ signature: layoutSignature, positions: undefined }))
+	if (carriedSnapshot.signature !== layoutSignature) {
+		setCarriedSnapshot({ signature: layoutSignature, positions: lastLayoutRef.current })
+	}
+	const carriedPositions = carriedSnapshot.positions
 	// Wait for the first final/fallback layout so the initial graph never jumps.
 	// Once revealed, keep the current map visible during later ELK recomputes,
 	// matching the previous behavior for filter and topology changes.
