@@ -229,16 +229,10 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		const autumnKey = process.env.AUTUMN_SECRET_KEY?.trim()
 		const autumnSecret = autumnKey ? yield* secret("autumn-secret-key", autumnKey) : undefined
 
-		// Replay blob storage. Both halves of the credential are stack-minted now
-		// (`createReplayBlobStore`), so there is no half-set configuration to guard
-		// against any more — the whole group arrives together or not at all, and
-		// `stageEnablesReplayBlobs` is what decides which.
-		//
-		// The ACCESS KEY ID goes through Secrets Manager alongside the secret, even
-		// though it is not sensitive: it is the API token's id, which does not exist
-		// until the token is created, and ECS task-definition `env` takes plan-time
-		// strings only. ECS injects `secrets` into the container as environment
-		// variables, so `AppConfig::from_env` reads it exactly as before.
+		// Both halves are stack-minted (`createReplayBlobStore`), so there is no
+		// half-set config left to guard against. The access key id is not secret,
+		// but it only exists once the token does and `env` takes plan-time strings
+		// only — ECS injects `secrets` as env vars, so the Rust side is unchanged.
 		const replayR2Secret = replayBlobs
 			? yield* secretFrom("replay-r2-secret-access-key", replayBlobs.secretAccessKey)
 			: undefined
@@ -464,19 +458,9 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 				INGEST_QUEUE_MAX_BYTES: String(WAL_MAX_BYTES),
 				INGEST_WAL_SHARDS: String(WAL_SHARDS),
 
-				// Replay blobs stay on Cloudflare R2 rather than S3. Measured at
-				// $0.002/session, the two land within ~$0.0001 of each other: R2
-				// charges nothing for egress but pays AWS internet egress on the way
-				// in, while S3 writes free from this region and then bills $0.09/GB
-				// back out on every playback. What actually dominates either bill is
-				// per-object PUTs (~65%), because the SDK flushes a chunk every 100 KB
-				// — so the lever is `FLUSH_BYTES`, not the vendor. S3 would also need a
-				// SigV4 or presigned read path in the Worker, which does not exist
-				// (`apps/api/src/platform/ReplayBlobStore.ts` uses the native R2
-				// binding).
-				//
-				// Endpoint and bucket are plan-time strings; the two credential halves
-				// arrive through `secrets` above. See `createReplayBlobStore`.
+				// R2, not S3: within ~$0.0001/session of each other, and S3 would need
+				// a Worker SigV4 read path that does not exist. Per-object PUTs are
+				// ~65% of either bill, so the lever is `FLUSH_BYTES`, not the vendor.
 				...(replayBlobs
 					? {
 							INGEST_REPLAY_R2_ENDPOINT: replayBlobs.endpoint,

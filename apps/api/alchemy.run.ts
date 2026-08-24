@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Output from "alchemy/Output"
+import * as RemovalPolicy from "alchemy/RemovalPolicy"
 import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -51,26 +52,16 @@ export interface ReplayBlobCredentials {
 	secretAccessKey: Output.Output<Redacted.Redacted<string>>
 }
 
-/**
- * R2's S3 credentials are not a Cloudflare resource — there is no "create
- * access key" API. They are a rendering of an ordinary API token:
- * the Access Key ID is the token's id, and the Secret Access Key is the
- * SHA-256 of the token's value. Cloudflare documents exactly this, and it is
- * why alchemy has nothing to provision here beyond the token itself.
- */
+/** R2 renders an API token as S3 credentials: key id = token id, secret = SHA-256 of its value. */
 const deriveSecretAccessKey = (value: Output.Output<Redacted.Redacted<string>>) =>
 	Output.map(value, (token) =>
 		Redacted.make(createHash("sha256").update(Redacted.value(token)).digest("hex")),
 	)
 
 /**
- * The session-replay payload store: one R2 bucket, plus (on stages that write)
- * a bucket-scoped API token for the ingest gateway.
- *
- * Lives here rather than inside `createMapleApi` because it has two consumers in
- * two clouds — the api Worker reads it over the native binding, and the Rust
- * gateway on ECS writes it over the S3 API. The gateway stack is constructed
- * FIRST in the root stack, so this has to be hoisted above both of them.
+ * Bucket + (where the stage writes) a bucket-scoped token for the gateway.
+ * Hoisted out of `createMapleApi` because the ECS gateway writes it and is
+ * constructed first, so neither consumer can own it.
  */
 export const createReplayBlobStore = ({ stage }: { stage: MapleStage }) =>
 	Effect.gen(function* () {
@@ -86,20 +77,11 @@ export const createReplayBlobStore = ({ stage }: { stage: MapleStage }) =>
 		// the row must disappear before the object does. The other way round
 		// leaves a session that lists as recorded but plays back empty, which is
 		// the one failure mode with no good client-side handling.
+		// Don't add `locationHint`: it is advisory (the bucket stayed `wnam` anyway)
+		// and changing it replaces a name-pinned bucket, which GC then deletes.
+		// Took prd red on 2026-08-24. Colocation needs a new bucket, not a replace.
 		const bucket = yield* Cloudflare.R2.Bucket("replay-blobs", {
 			name: bucketName,
-			// Colocated with the ingest gateway, which runs in us-east-1
-			// (`resolveAwsRegion` maps the `us` MapleRegion there). Left unset, R2
-			// picked `wnam` from wherever the creating API call originated, putting
-			// every PUT on a cross-continent hop — and the write path is synchronous
-			// on the ingest request (object first, row second), at ~60 objects per
-			// session and 267 for the largest org.
-			//
-			// This is a REPLACE, not an update: changing it destroys and recreates
-			// the bucket. Safe only while the bucket is empty, which it is until a
-			// stage first passes `stageEnablesReplayBlobs`. After that, changing
-			// this line deletes recordings.
-			locationHint: "enam",
 			// Deliberately unprefixed, so the rule covers whatever key scheme is
 			// current. `replay_object_key` is versioned (`v1/…`) precisely so a
 			// format change can write under a new prefix while the old one ages
@@ -113,28 +95,24 @@ export const createReplayBlobStore = ({ stage }: { stage: MapleStage }) =>
 					deleteObjectsTransition: { condition: { type: "Age", maxAge: 32 * 24 * 60 * 60 } },
 				},
 			],
-		})
+			// Holds customer recordings. `retain` also drops a replaced generation
+			// from state without the physical delete, which unwedges a half-applied
+			// replace (`retainOldGeneration` in alchemy's `collectGarbage`).
+		}).pipe(RemovalPolicy.retain())
 
-		if (!stageEnablesReplayBlobs(stage)) {
-			// Bucket still exists and stays bound, so any objects written before the
-			// gate closed keep playing back. The gateway just has no credentials and
-			// falls back to storing payloads inline.
-			return { bucket, credentials: undefined }
-		}
+		// Bucket stays bound either way, so anything already written keeps playing
+		// back; without credentials the gateway just stores payloads inline.
+		if (!stageEnablesReplayBlobs(stage)) return { bucket, credentials: undefined }
 
-		// Plan-time, not an Output: it keys the policy's `resources` map below and
-		// builds the endpoint string, neither of which can take a lazy value. The
-		// root stack normalizes CLOUDFLARE_DEFAULT_ACCOUNT_ID onto this name.
+		// Plan-time: it keys the policy map and the endpoint, neither of which
+		// can take a lazy value.
 		const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim()
 		if (!accountId) {
 			throw new Error("CLOUDFLARE_ACCOUNT_ID is required to mint the replay blob store's R2 token.")
 		}
 
-		// Bucket-scoped, not account-wide: this credential reaches exactly one
-		// bucket and can only write to it. Minting it requires the DEPLOY token to
-		// carry the account-level `API Tokens > Write` permission — the same class
-		// of prerequisite as the AI Gateway binding below, and it fails the deploy
-		// outright rather than degrading.
+		// Bucket-scoped, not account-wide. Minting it needs the DEPLOY token to
+		// carry account-level `API Tokens > Write`, or the deploy fails outright.
 		const token = yield* Cloudflare.ApiToken.AccountApiToken("replay-blobs-writer", {
 			name: `${bucketName}-writer`,
 			accountId,
@@ -142,8 +120,7 @@ export const createReplayBlobStore = ({ stage }: { stage: MapleStage }) =>
 				{
 					effect: "allow",
 					permissionGroups: ["Workers R2 Storage Bucket Item Write"],
-					// `<account>_<jurisdiction>_<bucket>`; `default` is the
-					// non-jurisdictional case, which is what `Bucket` creates here.
+					// `<account>_<jurisdiction>_<bucket>`, `default` = non-jurisdictional.
 					resources: {
 						[`com.cloudflare.edge.r2.bucket.${accountId}_default_${bucketName}`]: "*",
 					},
