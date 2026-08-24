@@ -129,9 +129,9 @@ const eveIntegration: AiIntegration = {
 
 /**
  * maple — Maple's own native convention (`apps/api` chat + investigations), and
- * the opt-in for any generic emitter that adopts `maple.session.id`. The spans
+ * the opt-in for any generic emitter that adopts `maple_ai.session.id`. The spans
  * carry canonical `gen_ai.*`, so the default integration decodes them; like eve,
- * only the turn id needs lifting — `maple.turn.id` is the conversation-level
+ * only the turn id needs lifting — `maple_ai.turn.id` is the conversation-level
  * grouping key inside a session, kept out of `gen_ai.conversation.id` on the
  * wire because the semconv key names the whole conversation, not one turn.
  */
