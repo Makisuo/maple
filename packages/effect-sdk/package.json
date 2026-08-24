@@ -63,7 +63,7 @@
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",
-		"@effect/vitest": "4.0.0-rc.108",
+		"@effect/vitest": "catalog:effect",
 		"@maple/browser-session": "workspace:*",
 		"@types/node": "catalog:tooling",
 		"effect": "catalog:effect",
@@ -72,6 +72,6 @@
 		"vitest": "catalog:"
 	},
 	"peerDependencies": {
-		"effect": ">=4.0.0-rc.108"
+		"effect": ">=4.0.0-rc.111"
 	}
 }

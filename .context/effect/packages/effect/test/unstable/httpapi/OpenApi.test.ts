@@ -97,6 +97,22 @@ describe("OpenApi", () => {
     assert.isUndefined(third.paths["/resource"]!.get!.summary)
   })
 
+  it("preserves JSON.rawJSON values when cloning cached specs", () => {
+    const rawJson = (JSON as unknown as { rawJSON: (value: string) => unknown }).rawJSON("9223372036854775807")
+    const Api = HttpApi.make("Api").annotate(OpenApi.Transform, (spec) => ({
+      ...spec,
+      info: {
+        ...spec.info,
+        "x-raw": rawJson
+      }
+    }))
+
+    const expected = `{"title":"Api","version":"0.0.1","x-raw":9223372036854775807}`
+
+    assert.strictEqual(JSON.stringify(OpenApi.fromApi(Api).info), expected)
+    assert.strictEqual(JSON.stringify(OpenApi.fromApi(Api).info), expected)
+  })
+
   it("isolates the cached spec from external override mutations", () => {
     const info = { title: "Api", version: "1.0.0" }
     const Api = HttpApi.make("Api").annotate(OpenApi.Override, { info })
@@ -266,7 +282,7 @@ describe("OpenApi", () => {
       spec.paths["/encoded"]?.get?.responses[404]?.headers?.["x-error-id"]?.schema,
       {
         type: "string",
-        allOf: [{ pattern: "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$" }]
+        pattern: "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
       }
     )
     assert.deepStrictEqual(
@@ -293,7 +309,7 @@ describe("OpenApi", () => {
       "x-retry-after": {
         schema: {
           type: "string",
-          allOf: [{ pattern: "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$" }]
+          pattern: "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
         },
         required: true
       }
@@ -317,7 +333,7 @@ describe("OpenApi", () => {
       "x-stream-id": {
         schema: {
           type: "string",
-          allOf: [{ pattern: "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$" }]
+          pattern: "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
         },
         required: true
       }

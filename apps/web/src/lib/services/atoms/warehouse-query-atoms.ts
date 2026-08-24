@@ -108,6 +108,7 @@ import { getAiSessionSpans, getAiSessionsFacets, listAiSessions } from "@/api/wa
 import {
 	getWebAnalyticsBreakdowns,
 	getWebAnalyticsEvents,
+	getWebAnalyticsLive,
 	getWebAnalyticsPages,
 	getWebAnalyticsPageviews,
 	getWebAnalyticsSummary,
@@ -274,6 +275,13 @@ export const replaysFacetsResultAtom = makeQueryAtomFamily(getReplaysFacets, {
 // re-runs the same 30-day-TTL scans.
 export const webAnalyticsSummaryResultAtom = makeQueryAtomFamily(getWebAnalyticsSummary, {
 	staleTime: 30_000,
+})
+
+// The live counter polls itself (see `AnalyticsLiveBadge`), and its window is
+// resolved server-side, so a stale entry here would just hold a number the badge
+// is actively trying to advance.
+export const webAnalyticsLiveResultAtom = makeQueryAtomFamily(getWebAnalyticsLive, {
+	staleTime: 5_000,
 })
 
 export const webAnalyticsTimeseriesResultAtom = makeQueryAtomFamily(getWebAnalyticsTimeseries, {

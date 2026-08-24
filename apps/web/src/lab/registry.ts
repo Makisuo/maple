@@ -76,6 +76,14 @@ export const LAB_ENTRIES: ReadonlyArray<LabEntry> = [
 		session: "none",
 	},
 	{
+		path: "/lab/service-map-3d",
+		title: "Service map 3D",
+		description:
+			"The service graph as storeys and pipes \u2014 tiers stack vertically, calls flow as packets, WebGL over a fixture.",
+		kind: "lab",
+		session: "none",
+	},
+	{
 		path: "/lab/query-builder",
 		title: "Query builder",
 		description: "MVP query builder against real warehouse data for the signed-in org.",

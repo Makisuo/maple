@@ -10,27 +10,18 @@ import {
 	FUNNEL_MAX_STEPS,
 	FUNNEL_SESSION_DIMENSION_LABEL,
 	FunnelSessionDimension,
-	funnelStepLabel,
 	type FunnelBreakdownBy as FunnelBreakdownByType,
 	type FunnelKeyBy as FunnelKeyByType,
 	type FunnelSessionDimension as FunnelSessionDimensionType,
 	type FunnelStep as FunnelStepType,
 } from "@maple/query-model"
 
-export type { FunnelStepType as FunnelStep, FunnelKeyByType as FunnelKeyBy }
 export type {
 	FunnelBreakdownByType as FunnelBreakdownBy,
 	FunnelSessionDimensionType as FunnelSessionDimension,
 }
 
 export { FUNNEL_MAX_STEPS }
-
-export interface FunnelDefinition {
-	readonly steps: ReadonlyArray<FunnelStepType>
-	readonly keyBy: FunnelKeyByType
-	readonly windowSeconds: number
-	readonly breakdownBy?: FunnelBreakdownByType
-}
 
 export const DEFAULT_FUNNEL_KEY_BY: FunnelKeyByType = "person"
 export const DEFAULT_FUNNEL_WINDOW_SECONDS = 24 * 3600
@@ -83,11 +74,3 @@ export const completedSteps = (steps: ReadonlyArray<FunnelStepType>): ReadonlyAr
 		}
 	})
 
-/** Human label for a step — the bar label in the chart and the row label in the table. */
-export const stepLabel = funnelStepLabel
-
-/** What the breakdown select shows for a `breakdownBy` value. */
-export const breakdownLabel = (breakdownBy: FunnelBreakdownByType): string =>
-	breakdownBy.startsWith("attribute:")
-		? `attribute ${breakdownBy.slice("attribute:".length)}`
-		: FUNNEL_SESSION_DIMENSION_LABEL[breakdownBy as FunnelSessionDimensionType]

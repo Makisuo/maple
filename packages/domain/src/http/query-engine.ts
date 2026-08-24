@@ -1210,6 +1210,29 @@ export class WebAnalyticsSummaryResponse extends Schema.Class<WebAnalyticsSummar
 	}),
 }) {}
 
+export class WebAnalyticsLiveRequest extends Schema.Class<WebAnalyticsLiveRequest>("WebAnalyticsLiveRequest")(
+	{
+		// No time range on purpose: "live" is always the window ending now, and a
+		// client-pinned one would freeze the counter at the moment the page mounted.
+		// The handler resolves it per request, which also keeps the cache key stable
+		// across polls — see the `webAnalyticsLive` query definition.
+		...WebAnalyticsFilterFields,
+	},
+) {}
+
+export class WebAnalyticsLiveResponse extends Schema.Class<WebAnalyticsLiveResponse>(
+	"WebAnalyticsLiveResponse",
+)({
+	data: Schema.Struct({
+		/** Distinct visitor ids active in the window. 0 on SDK builds with no analytics block. */
+		visitors: Schema.Number,
+		/** Distinct active sessions — what the badge falls back to when no visitor ids are reported. */
+		sessions: Schema.Number,
+		/** The window the two counts cover, so the badge's copy comes from the server. */
+		windowSeconds: Schema.Number,
+	}),
+}) {}
+
 export class WebAnalyticsTimeseriesRequest extends Schema.Class<WebAnalyticsTimeseriesRequest>(
 	"WebAnalyticsTimeseriesRequest",
 )({
@@ -2238,6 +2261,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("webAnalyticsSummary", "/web-analytics-summary", {
 			payload: WebAnalyticsSummaryRequest,
 			success: WebAnalyticsSummaryResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("webAnalyticsLive", "/web-analytics-live", {
+			payload: WebAnalyticsLiveRequest,
+			success: WebAnalyticsLiveResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

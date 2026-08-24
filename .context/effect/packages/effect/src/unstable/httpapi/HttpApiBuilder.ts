@@ -57,12 +57,6 @@ import * as OpenApi from "./OpenApi.ts"
 /**
  * Registers an `HttpApi` with a `HttpRouter`.
  *
- * **Details**
- *
- * When `openapiPath` is configured, the OpenAPI document and response are
- * generated on the first request to that path. If generation defects, the
- * response is left uninitialized so a later request can retry it.
- *
  * @category layers
  * @since 4.0.0
  */
@@ -106,17 +100,8 @@ export const layer = <Id extends string, Groups extends HttpApiGroup.Constraint>
     }
     yield* (router.addAll(routes) as Effect.Effect<void>)
     if (options?.openapiPath) {
-      let response: HttpServerResponse | undefined
-      yield* router.add(
-        "GET",
-        options.openapiPath,
-        Effect.sync(() => {
-          if (response !== undefined) return response
-          const spec = OpenApi.fromApi(api)
-          response = Response.jsonUnsafe(spec)
-          return response
-        })
-      )
+      const spec = OpenApi.fromApi(api)
+      yield* router.add("GET", options.openapiPath, Effect.succeed(Response.jsonUnsafe(spec)))
     }
   }))
 
@@ -128,10 +113,6 @@ export const layer = <Id extends string, Groups extends HttpApiGroup.Constraint>
  * The `build` function receives an unimplemented `Handlers` instance that can
  * be used to add handlers to the group. Implement endpoints with
  * `handlers.handle`.
- *
- * Endpoint schema codecs and middleware wrappers are initialized when their
- * route is first requested. A synchronous initialization defect fails that
- * request and leaves the route uninitialized so a later request can retry it.
  *
  * @category handlers
  * @since 4.0.0
@@ -858,13 +839,10 @@ export function handlerToRoute(
   context: Context.Context<any>
 ): HttpRouter.Route<any, any> {
   const endpoint = handler.endpoint
-  // Schema encoders, decoders, and middleware are route-local, so defer them
-  // until this route first runs instead of charging every endpoint up front.
-  let httpEffect: Effect.Effect<any, any, any> | undefined
   return HttpRouter.route(
     endpoint.method,
     endpoint.path as HttpRouter.PathInput,
-    Effect.suspend(() => httpEffect ??= handlerToHttpEffect(group, endpoint, context, handler.handler, handler.isRaw)),
+    handlerToHttpEffect(group, endpoint, context, handler.handler, handler.isRaw),
     { uninterruptible: handler.uninterruptible }
   )
 }

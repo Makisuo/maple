@@ -98,6 +98,12 @@ const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
 	...webAnalyticsVariants("webAnalyticsSummaryQuery", "filtered", (useProductEvents) =>
 		CH.compile(CH.webAnalyticsSummaryQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }), window),
 	),
+	...webAnalyticsVariants("webAnalyticsLiveQuery", "default", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsLiveQuery({ useProductEvents }), window),
+	),
+	...webAnalyticsVariants("webAnalyticsLiveQuery", "filtered", (useProductEvents) =>
+		CH.compile(CH.webAnalyticsLiveQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }), window),
+	),
 	...webAnalyticsVariants("webAnalyticsTimeseriesQuery", "default", (useProductEvents) =>
 		CH.compile(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }), window),
 	),

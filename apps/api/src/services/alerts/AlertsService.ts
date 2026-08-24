@@ -79,7 +79,8 @@ import * as AlertingMetrics from "@/observability/AlertingMetrics"
 import { INVESTIGATION_FANOUT_BINDING } from "@/services/errors/ai-triage-enqueue"
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
-import { advanceAlertCounters, simulateFiringSpans, type AlertCounters } from "./alert-counters"
+import { simulateFiringSpans } from "./alert-firing-spans"
+import { foldObservation, type HysteresisConfig, type HysteresisRow } from "./incident-hysteresis"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { formatComparator } from "./alert-formatting"
@@ -1286,7 +1287,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 
 					// The would-fire shading is the scheduler's own state machine replayed
 					// over the series — not a second implementation of it.
-					for (const span of simulateFiringSpans(evaluations, normalized, windowMs)) {
+					for (const span of yield* simulateFiringSpans(evaluations, normalized, windowMs)) {
 						wouldFire.push(
 							new AlertRulePreviewFiringSpan({
 								groupKey,
@@ -1849,17 +1850,28 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						)
 					}
 
-					const priorCounters: AlertCounters = {
+					// The rule's thresholds in the shared machine's terms. No cooldown:
+					// a human chose these thresholds, so a re-open is their instruction
+					// rather than a detector second-guessing itself.
+					const hysteresis: HysteresisConfig = {
+						breachesToOpen: normalized.consecutiveBreachesRequired,
+						healthyToResolve: normalized.consecutiveHealthyRequired,
+						cooldownMs: 0,
+					}
+					const priorRow: HysteresisRow = {
 						consecutiveBreaches: state?.consecutiveBreaches ?? 0,
 						consecutiveHealthy: state?.consecutiveHealthy ?? 0,
+						incidentOpen: openIncident != null,
+						lastResolvedAtMs: null,
 					}
 
 					if (evaluation.status === "skipped") {
 						// Freezing both counters is the machine's rule, not a local one.
-						const { consecutiveBreaches, consecutiveHealthy } = advanceAlertCounters(
-							priorCounters,
+						const { consecutiveBreaches, consecutiveHealthy } = yield* foldObservation(
+							priorRow,
 							"skipped",
-							normalized,
+							hysteresis,
+							timestamp,
 						)
 						yield* upsertState({
 							consecutiveBreaches,
@@ -1877,10 +1889,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						}
 					}
 
-					const { consecutiveBreaches, consecutiveHealthy } = advanceAlertCounters(
-						priorCounters,
+					const { consecutiveBreaches, consecutiveHealthy } = yield* foldObservation(
+						priorRow,
 						evaluation.status,
-						normalized,
+						hysteresis,
+						timestamp,
 					)
 
 					yield* upsertState({

@@ -1,4 +1,4 @@
-import type { IssueSeverity, IssueSeveritySource } from "@maple/domain/http"
+import type { IssueSeverity } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { cn } from "@maple/ui/lib/utils"
 
@@ -64,12 +64,6 @@ export function severityRank(severity: IssueSeverity | null): number {
 	if (severity === null) return SEVERITY_ORDER.length
 	return SEVERITY_ORDER.indexOf(severity)
 }
-
-export const SEVERITY_SOURCE_LABEL: Record<IssueSeveritySource, string> = {
-	detector: "from detector",
-	ai: "set by AI triage",
-	manual: "manual override",
-} satisfies Record<IssueSeveritySource, string>
 
 export function SeverityBadge({
 	severity,

@@ -91,37 +91,26 @@ const snapshotAt = (version: number): LocalSchemaSnapshot => {
 
 export const LOCAL_SCHEMA_V1_SQL = snapshotAt(1).sql
 export const LOCAL_SCHEMA_V1_MANIFEST = snapshotAt(1).manifest
-export const LOCAL_SCHEMA_V1_MANIFEST_DIGEST = snapshotAt(1).manifestDigest
 export const LOCAL_SCHEMA_V2_SQL = snapshotAt(2).sql
 export const LOCAL_SCHEMA_V2_MANIFEST = snapshotAt(2).manifest
-export const LOCAL_SCHEMA_V2_MANIFEST_DIGEST = snapshotAt(2).manifestDigest
 export const LOCAL_SCHEMA_V3_SQL = snapshotAt(3).sql
 export const LOCAL_SCHEMA_V3_MANIFEST = snapshotAt(3).manifest
-export const LOCAL_SCHEMA_V3_MANIFEST_DIGEST = snapshotAt(3).manifestDigest
 export const LOCAL_SCHEMA_V4_SQL = snapshotAt(4).sql
 export const LOCAL_SCHEMA_V4_MANIFEST = snapshotAt(4).manifest
-export const LOCAL_SCHEMA_V4_MANIFEST_DIGEST = snapshotAt(4).manifestDigest
 export const LOCAL_SCHEMA_V5_SQL = snapshotAt(5).sql
 export const LOCAL_SCHEMA_V5_MANIFEST = snapshotAt(5).manifest
-export const LOCAL_SCHEMA_V5_MANIFEST_DIGEST = snapshotAt(5).manifestDigest
 export const LOCAL_SCHEMA_V6_SQL = snapshotAt(6).sql
 export const LOCAL_SCHEMA_V6_MANIFEST = snapshotAt(6).manifest
-export const LOCAL_SCHEMA_V6_MANIFEST_DIGEST = snapshotAt(6).manifestDigest
 export const LOCAL_SCHEMA_V7_SQL = snapshotAt(7).sql
 export const LOCAL_SCHEMA_V7_MANIFEST = snapshotAt(7).manifest
-export const LOCAL_SCHEMA_V7_MANIFEST_DIGEST = snapshotAt(7).manifestDigest
 export const LOCAL_SCHEMA_V8_SQL = snapshotAt(8).sql
 export const LOCAL_SCHEMA_V8_MANIFEST = snapshotAt(8).manifest
-export const LOCAL_SCHEMA_V8_MANIFEST_DIGEST = snapshotAt(8).manifestDigest
 export const LOCAL_SCHEMA_V9_SQL = snapshotAt(9).sql
 export const LOCAL_SCHEMA_V9_MANIFEST = snapshotAt(9).manifest
-export const LOCAL_SCHEMA_V9_MANIFEST_DIGEST = snapshotAt(9).manifestDigest
 export const LOCAL_SCHEMA_V10_SQL = snapshotAt(10).sql
 export const LOCAL_SCHEMA_V10_MANIFEST = snapshotAt(10).manifest
-export const LOCAL_SCHEMA_V10_MANIFEST_DIGEST = snapshotAt(10).manifestDigest
 export const LOCAL_SCHEMA_V11_SQL = snapshotAt(11).sql
 export const LOCAL_SCHEMA_V11_MANIFEST = snapshotAt(11).manifest
-export const LOCAL_SCHEMA_V11_MANIFEST_DIGEST = snapshotAt(11).manifestDigest
 
 export interface LocalSchemaIdentity {
 	readonly version: number

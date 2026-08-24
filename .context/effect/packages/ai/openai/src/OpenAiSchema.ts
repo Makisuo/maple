@@ -9,6 +9,7 @@
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as SchemaTransformation from "effect/SchemaTransformation"
 
 const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
 
@@ -662,7 +663,7 @@ export const CreateResponse = Schema.Struct({
   previous_response_id: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   reasoning: Schema.optional(Schema.Struct({
-    effort: Schema.optional(Schema.Literals(["none", "minimal", "low", "medium", "high", "xhigh"])),
+    effort: Schema.optional(Schema.Literals(["none", "minimal", "low", "medium", "high", "xhigh", "max"])),
 
     summary: Schema.optional(Schema.Literals(["auto", "concise", "detailed"])),
     generate_summary: Schema.optional(Schema.Literals(["auto", "concise", "detailed"]))
@@ -1041,6 +1042,26 @@ const ResponseErrorEvent = Schema.Struct({
   status: Schema.optionalKey(Schema.Int)
 })
 
+// OpenAI can nest stream error details under `error`.
+const NestedResponseErrorEvent = Schema.Struct({
+  type: Schema.Literal("error"),
+  error: Schema.Struct({
+    code: Schema.NullOr(Schema.String),
+    message: Schema.String,
+    param: Schema.NullOr(Schema.String)
+  }),
+  sequence_number: Schema.Int,
+  status: Schema.optionalKey(Schema.Int)
+}).pipe(
+  Schema.decodeTo(
+    ResponseErrorEvent,
+    SchemaTransformation.transform({
+      decode: ({ error, ...rest }) => ({ ...rest, ...error }),
+      encode: ({ code, message, param, ...rest }) => ({ ...rest, error: { code, message, param } })
+    })
+  )
+)
+
 const knownResponseStreamEventTypes = new Set([
   "response.created",
   "response.completed",
@@ -1129,6 +1150,7 @@ export const ResponseStreamEvent = Schema.Union([
   ResponseApplyPatchCallOperationDiffDoneEvent,
   ResponseImageGenerationCallPartialImageEvent,
   ResponseErrorEvent,
+  NestedResponseErrorEvent,
   UnknownResponseStreamEvent
 ])
 

@@ -644,3 +644,12 @@ export class CompiledAlertQueryPlan extends Schema.Class<CompiledAlertQueryPlan>
  * as a marker wherever it shows up unlabelled.
  */
 export const WEB_ANALYTICS_UNSET = "(none)"
+
+/**
+ * How far back "live" reaches: a visitor counts as on the site now if their
+ * session showed activity within this many seconds.
+ *
+ * Shared so the badge's own copy ("in the last 5 minutes") and the window the
+ * query actually applies cannot drift apart.
+ */
+export const WEB_ANALYTICS_LIVE_WINDOW_SECONDS = 300

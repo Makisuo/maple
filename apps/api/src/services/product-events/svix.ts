@@ -16,13 +16,6 @@ import { Effect, Schema } from "effect"
 
 export const SVIX_TOLERANCE_SECONDS = 5 * 60
 
-export type SvixRejection =
-	| "missing_headers"
-	| "bad_timestamp"
-	| "stale_timestamp"
-	| "bad_secret"
-	| "signature_mismatch"
-
 export class SvixVerificationError extends Schema.TaggedError<SvixVerificationError>()(
 	"@maple/api/services/product-events/SvixVerificationError",
 	{

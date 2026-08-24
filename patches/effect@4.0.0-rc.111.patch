@@ -16,55 +16,55 @@ index b71c514f6c36983a6fb94a663e9ff878d58a3c1b..6192bdac6f761aef3c8e1ed2f3b4747f
  export const value = self => {
    if (redactedRegistry.has(self)) {
 diff --git a/dist/unstable/ai/McpServer.d.ts b/dist/unstable/ai/McpServer.d.ts
-index 58e3fd6cf9c4e4c3d3c970ebef5ae2e44a16da35..ccd5027e268bd4888d66b443c557a80dcb2569be 100644
+index d9fa504a9c7c85cfb6b786dc6974f7ad2a963689..3c454c9daa4d88847c77948f368ebe99954fb7a7 100644
 --- a/dist/unstable/ai/McpServer.d.ts
 +++ b/dist/unstable/ai/McpServer.d.ts
-@@ -25,7 +25,7 @@ import * as RpcMessage from "../rpc/RpcMessage.ts";
- import * as RpcServer from "../rpc/RpcServer.ts";
+@@ -24,7 +24,7 @@ import * as RpcServer from "../rpc/RpcServer.ts";
  import type * as McpProtocol from "./McpProtocol.ts";
- import { CallToolResult, ElicitationDeclined, GetPromptResult, InternalError, InvalidParams, McpErrorBase, McpServerClient, Prompt, Resource, ResourceTemplate, ServerNotificationRpcs, Tool as McpTool } from "./McpSchema.ts";
--import type { CallTool, ClientCapabilities, Complete, CompleteResult, GetPrompt, Param, PromptMessage, ReadResourceResult } from "./McpSchema.ts";
-+import type { CallTool, ClientCapabilities, Complete, CompleteResult, GetPrompt, Initialize, Param, PromptMessage, ReadResourceResult } from "./McpSchema.ts";
+ import * as McpSchema from "./McpSchema.ts";
+ import { CallToolResult, ElicitationDeclined, GetPromptResult, InternalError, InvalidParams, McpServerClient, Prompt, Resource, ResourceTemplate, Tool as McpTool } from "./McpSchema.ts";
+-import type { CallTool, ClientCapabilities, Complete, CompleteResult, GetPrompt, McpErrorBase, Param, PromptMessage, ReadResourceResult, ServerCapabilities } from "./McpSchema.ts";
++import type { CallTool, ClientCapabilities, Complete, CompleteResult, GetPrompt, Initialize, McpErrorBase, Param, PromptMessage, ReadResourceResult, ServerCapabilities } from "./McpSchema.ts";
  import * as Tool from "./Tool.ts";
  import type * as Toolkit from "./Toolkit.ts";
  type CompletionContext = typeof Complete.payloadSchema.Type["context"];
-@@ -167,6 +167,7 @@ export declare const run: (options: {
-     readonly version: string;
+@@ -177,6 +177,7 @@ export declare const run: (options: {
+     readonly icons?: ReadonlyArray<McpSchema.Icon> | undefined;
      readonly protocols: Arr.NonEmptyReadonlyArray<McpProtocol.ProtocolAdapter>;
-     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
+     readonly extensions?: ServerExtensions | undefined;
 +    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
  }) => Effect.Effect<never, Cause.IllegalArgumentError, McpServer | RpcServer.Protocol>;
  /**
   * Creates a layer that starts an MCP server over an existing
-@@ -202,6 +203,7 @@ export declare const layer: (options: {
-     readonly version: string;
+@@ -215,6 +216,7 @@ export declare const layer: (options: {
+     readonly icons?: ReadonlyArray<McpSchema.Icon> | undefined;
      readonly protocols: Arr.NonEmptyReadonlyArray<McpProtocol.ProtocolAdapter>;
-     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
+     readonly extensions?: ServerExtensions | undefined;
 +    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
  }) => Layer.Layer<McpServer | McpServerClient, Cause.IllegalArgumentError, RpcServer.Protocol>;
  /**
-  * Runs the McpServer, using stdio for input and output.
-@@ -254,6 +256,7 @@ export declare const layerStdio: (options: {
-     readonly version: string;
+  * Creates a layer that runs an MCP server over standard input and output.
+@@ -244,6 +246,7 @@ export declare const layerStdio: (options: {
+     readonly icons?: ReadonlyArray<McpSchema.Icon> | undefined;
      readonly protocols: Arr.NonEmptyReadonlyArray<McpProtocol.ProtocolAdapter>;
-     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
+     readonly extensions?: ServerExtensions | undefined;
 +    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
  }) => Layer.Layer<McpServer | McpServerClient, Cause.IllegalArgumentError, Stdio>;
  /**
   * Registers a Streamable HTTP MCP endpoint at `options.path`.
-@@ -281,6 +284,7 @@ export declare const layerHttp: (options: {
+@@ -282,6 +285,7 @@ export declare const layerHttp: (options: {
+     readonly path: HttpRouter.PathInput;
      readonly protocols: Arr.NonEmptyReadonlyArray<McpProtocol.ProtocolAdapter>;
-     readonly allowedOrigins?: ReadonlyArray<string> | undefined;
-     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
+     readonly extensions?: ServerExtensions | undefined;
 +    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+     readonly allowedOrigins?: ReadonlyArray<string> | undefined;
  }) => Layer.Layer<McpServer | McpServerClient, Cause.IllegalArgumentError, HttpRouter.HttpRouter>;
  /**
-  * Registers a `Toolkit` with the `McpServer`.
 diff --git a/dist/unstable/ai/McpServer.js b/dist/unstable/ai/McpServer.js
-index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a256efa475 100644
+index d8525be5cc4e5463300abaaec001f5c228130d36..2edd4f3d8a7d99c9e0171f8970143f9f08ec81ed 100644
 --- a/dist/unstable/ai/McpServer.js
 +++ b/dist/unstable/ai/McpServer.js
-@@ -228,16 +228,57 @@ const decodeCancelledNotification = /*#__PURE__*/Schema.decodeUnknownEffect(/*#_
+@@ -406,19 +406,60 @@ const MCP_INVALID_BATCH_METHOD = "invalid/json-rpc-batch";
  const requestKey = requestId => `${typeof requestId}:${requestId}`;
  class McpClientKey extends Data.Class {}
  class McpProtocolState extends /*#__PURE__*/Context.Service()("effect/ai/McpServer/McpProtocolState") {}
@@ -111,6 +111,9 @@ index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a2
 +}
 +const makeMcpProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (protocols, clientSessions) {
 +  const protocolRegistry = yield* McpProtocolRegistry.make(protocols);
+   // TODO: Replace the shared session map with an adapter-owned lifecycle strategy
+   // before v2026-07-28. The strategy must let sessionful revisions pin a profile
+   // after initialize while stateless revisions select and derive it per request.
    return McpProtocolState.of({
      sessions: {
 -      bySessionId: new Map(),
@@ -126,7 +129,7 @@ index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a2
  /**
   * Runs an MCP server over the current `RpcServer.Protocol`.
   *
-@@ -252,7 +293,7 @@ const layerMcpProtocolState = protocols => Layer.effect(McpProtocolState)(makeMc
+@@ -433,7 +474,7 @@ const layerMcpProtocolState = protocols => Layer.effect(McpProtocolState)(makeMc
   */
  export const run = /*#__PURE__*/Effect.fnUntraced(function* (options) {
    const protocolStateOption = yield* Effect.serviceOption(McpProtocolState);
@@ -135,7 +138,7 @@ index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a2
    return yield* runWithProtocolState(options, protocolState);
  });
  const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options, protocolState) {
-@@ -579,7 +620,7 @@ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options,
+@@ -819,7 +860,7 @@ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options,
   * @category layers
   * @since 4.0.0
   */
@@ -144,7 +147,7 @@ index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a2
  const layerWithProtocolState = options => Layer.effectDiscard(Effect.gen(function* () {
    const protocolState = yield* McpProtocolState;
    yield* Effect.forkScoped(runWithProtocolState(options, protocolState));
-@@ -721,7 +762,7 @@ export const layerStdio = options => layer(options).pipe(Layer.provide(RpcServer
+@@ -930,7 +971,7 @@ const mcpStdioSerialization = protocols => {
   * @since 4.0.0
   */
  export const layerHttp = options => {
@@ -154,9 +157,10 @@ index 073350187152036c2c8432428ea073645d8eb77d..51a027528d22a665b77e4bfef1a999a2
      status: 405,
      headers: {
 diff --git a/dist/unstable/httpapi/HttpApiBuilder.js b/dist/unstable/httpapi/HttpApiBuilder.js
+index c7a0ca450b5310a16f59447dba1334374cef332e..14cc08f3bc99439f1b4d2d13d3a5f027473e0398 100644
 --- a/dist/unstable/httpapi/HttpApiBuilder.js
 +++ b/dist/unstable/httpapi/HttpApiBuilder.js
-@@ -52,8 +52,13 @@
+@@ -52,8 +52,13 @@ export const layer = (api, options) => HttpRouter.use(Effect.fnUntraced(function
    }
    yield* router.addAll(routes);
    if (options?.openapiPath) {
@@ -172,7 +176,7 @@ diff --git a/dist/unstable/httpapi/HttpApiBuilder.js b/dist/unstable/httpapi/Htt
    }
  }));
  /**
-@@ -347,7 +352,8 @@
+@@ -347,7 +352,8 @@ function handlerToHttpEffect(group, endpoint, context, handler, isRaw) {
  /** @internal */
  export function handlerToRoute(group, handler, context) {
    const endpoint = handler.endpoint;
@@ -183,9 +187,10 @@ diff --git a/dist/unstable/httpapi/HttpApiBuilder.js b/dist/unstable/httpapi/Htt
    });
  }
 diff --git a/dist/unstable/httpapi/HttpApiScalar.js b/dist/unstable/httpapi/HttpApiScalar.js
+index 5ca063414fbe976b01906190a63d4aeb16504c71..448fa363504b3105ac0d22aa7671301160a03842 100644
 --- a/dist/unstable/httpapi/HttpApiScalar.js
 +++ b/dist/unstable/httpapi/HttpApiScalar.js
-@@ -15,17 +15,20 @@
+@@ -15,17 +15,20 @@ import * as Html from "./internal/html.js";
  import * as internal from "./internal/httpApiScalar.js";
  import * as OpenApi from "./OpenApi.js";
  const makeHandler = options => {
@@ -217,7 +222,7 @@ diff --git a/dist/unstable/httpapi/HttpApiScalar.js b/dist/unstable/httpapi/Http
  <html>
    <head>
      <meta charset="utf-8" />
-@@ -48,7 +51,8 @@
+@@ -48,7 +51,8 @@ const makeHandler = options => {
      </script>
    </body>
  </html>`);
@@ -228,9 +233,10 @@ diff --git a/dist/unstable/httpapi/HttpApiScalar.js b/dist/unstable/httpapi/Http
  /**
   * Mounts a Scalar API reference page for an `HttpApi` using the bundled Scalar script.
 diff --git a/dist/unstable/httpapi/HttpApiSwagger.js b/dist/unstable/httpapi/HttpApiSwagger.js
+index 9d919816fa2540fbfa1a00a15a3702323dab021e..e57768856b70bca43339ff18c4646c10e4af1986 100644
 --- a/dist/unstable/httpapi/HttpApiSwagger.js
 +++ b/dist/unstable/httpapi/HttpApiSwagger.js
-@@ -15,8 +15,11 @@
+@@ -15,8 +15,11 @@ import * as Html from "./internal/html.js";
  import * as internal from "./internal/httpApiSwagger.js";
  import * as OpenApi from "./OpenApi.js";
  const makeHandler = options => {
@@ -244,7 +250,7 @@ diff --git a/dist/unstable/httpapi/HttpApiSwagger.js b/dist/unstable/httpapi/Htt
  <html lang="en">
  <head>
    <meta charset="utf-8" />
-@@ -40,7 +43,8 @@
+@@ -40,7 +43,8 @@ const makeHandler = options => {
    </script>
  </body>
  </html>`);
