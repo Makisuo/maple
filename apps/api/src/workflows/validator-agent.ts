@@ -14,6 +14,7 @@
  * could not be checked, and the strongest remaining lead at low confidence. The
  * run lands on `status: "inconclusive"`, not `failed`.
  */
+import { makeChatSessionId } from "@maple/domain/chat-session"
 import { ValidatorVerdict } from "@maple/domain/http"
 import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
 import type { Model } from "@maple/llm"
@@ -118,6 +119,7 @@ export const runValidatorAgent = Effect.fn("investigation.validator")(function* 
 
 	const pass = yield* runAgentPass({
 		id: `inv_${input.investigationId}_validator`,
+		sessionId: makeChatSessionId(input.tenant.orgId, `inv-${input.investigationId}`),
 		agent,
 		tenant: input.tenant,
 		model: input.model,

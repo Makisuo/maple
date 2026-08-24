@@ -22,6 +22,23 @@ export const MAPLE_AI_VENDOR_VERSION_ATTR = "maple_ai.vendor.version"
 /** The vendor's own session id, verbatim. */
 export const MAPLE_AI_SESSION_ID_ATTR = "maple_ai.session.id"
 
+// Maple's native convention — the one dialect an app opts into deliberately
+// rather than inheriting from a framework. Distinct from the gateway-owned
+// `maple_ai.*` namespace above: these are ordinary span attributes an emitter
+// writes itself (the gateway strips `maple_ai.*` but honours `maple.*`), and
+// Maple's own agents (`apps/api` chat + investigations) are the first emitter.
+
+/** Groups every span of one conversation/investigation into one agent session. */
+export const MAPLE_NATIVE_SESSION_ID_ATTR = "maple.session.id"
+/** Groups one turn's spans inside a session; lifted into `conversationId` read-side. */
+export const MAPLE_NATIVE_TURN_ID_ATTR = "maple.turn.id"
+/**
+ * Count of whole oldest messages dropped from `gen_ai.input.messages` to fit
+ * the emitter's attribute budget. Write-only diagnostics: nothing decodes it,
+ * it is visible in raw span attributes.
+ */
+export const MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR = "maple.genai.input_messages_dropped"
+
 export interface AiFieldDef {
 	/** Primary source attribute key (the semconv key where one exists). */
 	readonly key: string

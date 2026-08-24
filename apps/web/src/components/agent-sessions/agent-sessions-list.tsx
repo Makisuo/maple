@@ -41,9 +41,13 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 					</EmptyMedia>
 					<EmptyTitle>No agent sessions yet</EmptyTitle>
 					<EmptyDescription>
-						Trace your AI agents with a supported framework or OpenTelemetry{" "}
+						Trace your AI agents with a supported framework, or emit OpenTelemetry{" "}
 						<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em]">gen_ai</code>{" "}
-						spans, and their sessions will show up here.
+						spans with a{" "}
+						<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em]">
+							maple.session.id
+						</code>{" "}
+						attribute, and their sessions will show up here.
 					</EmptyDescription>
 				</EmptyHeader>
 			</Empty>

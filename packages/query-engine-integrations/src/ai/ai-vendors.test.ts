@@ -246,6 +246,39 @@ describe("eve", () => {
 	})
 })
 
+describe("maple", () => {
+	it("maps a self-instrumented chat span: canonical gen_ai plus the lifted turn id", () => {
+		// What `apps/api`'s chat loop actually emits — canonical `gen_ai.*` the
+		// default integration decodes, with only the turn id needing the vendor.
+		const mapped = mapAiSpan(
+			row("maple", {
+				"gen_ai.operation.name": "chat",
+				"gen_ai.request.model": "openai/gpt-5.6-luna",
+				"gen_ai.provider.name": "openrouter",
+				"gen_ai.usage.input_tokens": "15400",
+				"maple.session.id": "org_1:inv-abc",
+				"maple.turn.id": "msg_1",
+				"maple_ai.session.id": "org_1:inv-abc",
+			}),
+		)
+
+		expect(mapped.genAi.conversationId).toBe("msg_1")
+		expect(mapped.genAi.operationName).toBe("chat")
+		expect(mapped.genAi.usageInputTokens).toBe(15400)
+		expect(mapped.sessionId).toBe("org_1:inv-abc")
+		expect(resolveAiIntegration("maple").id).toBe("maple")
+		expect(mapped.isAiSpan).toBe(true)
+	})
+
+	it("does not overwrite a conversation id the span already declared", () => {
+		const mapped = mapAiSpan(
+			row("maple", { "gen_ai.conversation.id": "conv-1", "maple.turn.id": "msg_1" }),
+		)
+
+		expect(mapped.genAi.conversationId).toBe("conv-1")
+	})
+})
+
 describe("the vendor merge only ever adds keys", () => {
 	it("maps a legacy-only span identically under every vendor", () => {
 		// A vendor's dialect keys are appended to the default's list, so an
