@@ -60,6 +60,14 @@ export const LAB_ENTRIES: ReadonlyArray<LabEntry> = [
 		session: "none",
 	},
 	{
+		path: "/lab/agent-session",
+		title: "Agent session detail",
+		description:
+			"The session detail page's Overview, Trace and Flow views over a fourteen-turn fixture that ends in a context-window failure.",
+		kind: "lab",
+		session: "none",
+	},
+	{
 		path: "/lab/flow",
 		title: "Trace flow",
 		description:

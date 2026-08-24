@@ -8,6 +8,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
 import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { CopyableValue } from "@/components/attributes"
 import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -15,11 +16,11 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@m
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { NotFoundError } from "@/components/route-error"
 import { QueryErrorState } from "@/components/common/query-error-state"
-import { SessionHeader } from "@/components/agent-sessions/session-detail/session-header"
-import { SessionViews } from "@/components/agent-sessions/session-detail/session-views"
-import type { TraceSelection } from "@/lib/agent-sessions/span-filters"
-import { TraceSpanDetailPanel } from "@/components/traces/trace-span-detail-panel"
-import { useAppHotkey } from "@/hooks/use-app-hotkey"
+import {
+	isSessionView,
+	SessionViews,
+	type SessionView,
+} from "@/components/agent-sessions/session-detail/session-views"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import {
 	breadcrumbSessionId,
@@ -41,15 +42,13 @@ const agentSessionSearchSchema = Schema.Struct({
 	// retention instead, which is why the page bothers to stamp them.
 	t: Schema.optional(Schema.String),
 	end: Schema.optional(Schema.String),
-	// The in-page trace pane: the trace it shows and, optionally, the span it has
-	// focused. In the URL rather than component state so a pane the reader opened
-	// survives a reload and travels in a pasted link.
-	//
-	// Checked, not bare: the pane decodes this through the `TraceId` brand with
-	// `decodeSync`, so a hand-edited `?trace=` or `?trace=%20` would throw during
-	// render — past the pane's own error branch and into the router's error
-	// component. Rejecting it here drops the param instead.
-	trace: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())),
+	// Which of the three views is open. A search param rather than a route
+	// segment on purpose: Back from the detail page returns to the list the
+	// reader came from, not to the view they looked at before this one.
+	view: Schema.optional(Schema.String),
+	// The span expanded inline (Trace) or open in the docked drawer (Flow). In
+	// the URL rather than component state so a pasted link reopens the exact
+	// span someone was looking at, in either debug view.
 	span: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())),
 })
 
@@ -90,21 +89,27 @@ function AgentSessionDetailContent() {
 						<Skeleton className="h-9 w-80" />
 					</DashboardLayout.Sticky>
 					<DashboardLayout.Fill>
-						<div className="space-y-4 p-4">
-							<Skeleton className="h-8 w-44" />
-							<Skeleton className="h-1.5 w-full rounded-full" />
-							{/* The same container-query ladder `SessionHeader`'s stat band uses,
-							    so the page doesn't reflow on resolve. */}
-							<div className="@container grid grid-cols-1 gap-4 @2xl:grid-cols-2 @3xl:grid-cols-3 @4xl:grid-cols-5">
-								{Array.from({ length: 5 }).map((_, index) => (
-									<Skeleton key={index} className="h-20" />
+						{/* The Overview's own shape — switcher, verdict, vitals, time bar —
+						    so the page doesn't reflow on resolve. */}
+						<div className="space-y-6 p-4">
+							<Skeleton className="h-8 w-72" />
+							<div className="flex flex-wrap items-start justify-between gap-8">
+								<div className="space-y-3">
+									<Skeleton className="h-9 w-[26rem] max-w-full" />
+									<Skeleton className="h-4 w-80 max-w-full" />
+								</div>
+								<div className="flex gap-6">
+									{Array.from({ length: 3 }).map((_, index) => (
+										<Skeleton key={index} className="h-16 w-32" />
+									))}
+								</div>
+							</div>
+							<Skeleton className="h-4 w-full rounded-sm" />
+							<div className="space-y-2">
+								{Array.from({ length: 8 }).map((_, index) => (
+									<Skeleton key={index} className="h-12 w-full" />
 								))}
 							</div>
-						</div>
-						<div className="space-y-1 px-4">
-							{Array.from({ length: 12 }).map((_, index) => (
-								<Skeleton key={index} className="h-6 w-full" />
-							))}
 						</div>
 					</DashboardLayout.Fill>
 				</DashboardLayout.Content>
@@ -166,6 +171,19 @@ function SessionDetailBody({
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 
+	// An unknown or absent `?view=` reads as the default rather than as an error:
+	// the param is a hint from a link, and a mistyped one should still land the
+	// reader on a page.
+	const view: SessionView =
+		search.view !== undefined && isSessionView(search.view) ? search.view : "overview"
+
+	const changeView = useCallback(
+		(next: SessionView) => {
+			navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, view: next }) })
+		},
+		[navigate],
+	)
+
 	// A link that arrived without hints cost the warehouse a session lookup across
 	// retention; stamping the bounds it found into the URL means this link never
 	// pays for that again — a reload, a share, a bookmark all take the pruned
@@ -192,48 +210,17 @@ function SessionDetailBody({
 		})
 	}, [navigate, search.t, summary.startMs, summary.endMs])
 
-	// Memoized because `SessionViews` and the views below it key their own work on
-	// this object.
-	const selection: TraceSelection | undefined = useMemo(
-		() => (search.trace === undefined ? undefined : { traceId: search.trace, spanId: search.span }),
-		[search.trace, search.span],
-	)
-
-	const openTrace = useCallback(
-		(target: TraceSelection) => {
+	const selectSpan = useCallback(
+		(spanId: string | undefined) => {
 			navigate({
-				search: (prev: Record<string, unknown>) => ({
-					...prev,
-					trace: target.traceId,
-					span: target.spanId,
-				}),
-				// Opening the pane is a step the reader may want Back to undo;
-				// refocusing inside an open pane is not.
-				replace: search.trace === target.traceId,
+				search: (prev: Record<string, unknown>) => ({ ...prev, span: spanId }),
+				// Expanding a span is a step the reader may want Back to undo;
+				// moving the expansion, or collapsing it, is not.
+				replace: search.span !== undefined,
 			})
 		},
-		[navigate, search.trace],
+		[navigate, search.span],
 	)
-
-	const closeTrace = useCallback(() => {
-		navigate({
-			search: (prev: Record<string, unknown>) => ({ ...prev, trace: undefined, span: undefined }),
-			replace: true,
-		})
-	}, [navigate])
-
-	// Esc closes the pane. The dialog guard defers to any sheet the panel opened,
-	// so that closes first.
-	useAppHotkey("list.clear", closeTrace, { enabled: selection !== undefined })
-
-	// The pane's warehouse read needs a timestamp inside the trace to stay off the
-	// full partition scan. Deliberately the trace's first span here rather than the
-	// focused one: a per-span hint re-keys the pane's atom on every click inside
-	// the same trace, re-running the hierarchy query against a shifted window.
-	const paneTimestamp =
-		selection === undefined
-			? search.t
-			: (spans.find((span) => span.traceId === selection.traceId)?.timestamp ?? search.t)
 
 	// Message content is opt-in and off by default, so most sessions have no
 	// opening user message to title the page with.
@@ -246,20 +233,40 @@ function SessionDetailBody({
 					<DashboardLayout.Header
 						titleContent={
 							<div className="flex min-w-0 items-center gap-2">
-								<DashboardLayout.Title title={title}>{title}</DashboardLayout.Title>
+								<DashboardLayout.Title title={title}>
+									{summary.title === undefined ? (
+										// The id fallback title copies the full session id.
+										<CopyableValue value={sessionId} label="Session ID">
+											{title}
+										</CopyableValue>
+									) : (
+										title
+									)}
+								</DashboardLayout.Title>
 								{summary.failed && <Badge variant="error">Failed</Badge>}
+								{summary.title !== undefined && (
+									<CopyableValue
+										value={sessionId}
+										label="Session ID"
+										className="shrink-0 font-mono font-normal text-muted-foreground text-xs"
+									>
+										{breadcrumbSessionId(sessionId)}
+									</CopyableValue>
+								)}
 							</div>
 						}
 						description={sessionSubtitle(summary)}
 					/>
 				</DashboardLayout.Sticky>
-				{/* `pt-0` (the stats block carries the padding instead) so the views'
-				    sticky control bar pins flush to the scroller's top — sticky offsets
-				    resolve against the padding edge. */}
-				<DashboardLayout.Scroll className="pt-0">
-					<div className="shrink-0 space-y-4 py-4">
-						<SessionHeader summary={summary} />
-						{truncated && (
+				{/* `py-0` (the content blocks carry the padding instead) so the views'
+				    sticky elements pin flush to the scroller's edges — sticky offsets
+				    resolve against the padding edge. The top edge is the control bar;
+				    the bottom is the Flow view's floor, whose docked span drawer
+				    otherwise floats a padding's height short of the viewport with the
+				    canvas scrolling visibly beneath it. */}
+				<DashboardLayout.Scroll className="py-0">
+					{truncated && (
+						<div className="shrink-0 py-4">
 							<Alert variant="warning">
 								<AlertDescription>
 									This session has more spans than one response carries — everything after
@@ -267,8 +274,8 @@ function SessionDetailBody({
 									totals and the waterfall both stop early.
 								</AlertDescription>
 							</Alert>
-						)}
-					</div>
+						</div>
+					)}
 					{/* Content-driven height inside the scroller: `shrink-0` because a
 					    scroll container's flex items shrink to fit before they overflow,
 					    which would collapse the views instead of scrolling them; `grow`
@@ -276,33 +283,18 @@ function SessionDetailBody({
 					    the viewport; the floor keeps the empty states from a sliver. */}
 					<div className="flex min-h-64 shrink-0 grow flex-col">
 						<SessionViews
+							view={view}
+							onViewChange={changeView}
 							turns={turns}
 							summary={summary}
-							selection={selection}
-							onOpenTrace={openTrace}
+							selectedSpanId={search.span}
+							onSelectSpan={selectSpan}
 						/>
 					</div>
 				</DashboardLayout.Scroll>
 			</DashboardLayout.Content>
-			{/* Inline beside the content above `lg`, a sheet below it that opens on
-			    selection. Empty children render no rail at all. */}
-			<DashboardLayout.RightPanel
-				title="Span detail"
-				width="w-[28rem]"
-				open={selection !== undefined}
-				onOpenChange={(open) => {
-					if (!open) closeTrace()
-				}}
-			>
-				{selection === undefined ? undefined : (
-					<TraceSpanDetailPanel
-						traceId={selection.traceId}
-						timestamp={paneTimestamp}
-						selectedSpanId={selection.spanId}
-						onClose={closeTrace}
-					/>
-				)}
-			</DashboardLayout.RightPanel>
+			{/* No side panel at any width: span detail expands inline under its
+			    waterfall row, or in the Flow view's docked drawer. */}
 		</SessionShell>
 	)
 }
@@ -351,13 +343,10 @@ function EmptySession({ sessionId, windowed }: { sessionId: string; windowed: bo
 	)
 }
 
-/** The identifying facts the list row carried and this page had dropped. */
+/** The identifying facts the list row carried and this page had dropped. The
+ *  trace count is not one of them — the views below count what they draw. */
 function sessionSubtitle(summary: SessionSummary): string {
-	return [
-		primaryVendorLabel(summary.vendorIds),
-		formatRelativeTimeOrDate(summary.startMs),
-		`${summary.traceCount.toLocaleString()} trace${summary.traceCount === 1 ? "" : "s"}`,
-	].join(" · ")
+	return [primaryVendorLabel(summary.vendorIds), formatRelativeTimeOrDate(summary.startMs)].join(" · ")
 }
 
 function primaryVendorLabel(vendorIds: readonly string[]): string {

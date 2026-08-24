@@ -8,16 +8,6 @@ import type { AiSessionSpan } from "@maple/domain/http"
 import { classifyAiSpan, spanModel } from "./session-turns"
 
 /**
- * What a click in either view asks the page to open in the trace pane: a trace,
- * optionally focused on one span. Both views raise it and both highlight from
- * it, so it lives here with the other rules they must agree on.
- */
-export interface TraceSelection {
-	readonly traceId: string
-	readonly spanId?: string
-}
-
-/**
  * The toolbar's filter, applied identically by every view.
  *
  * The query is normalized here rather than at each call site: the count in the
