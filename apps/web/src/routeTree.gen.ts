@@ -48,6 +48,7 @@ import { Route as LabChartsRouteImport } from './routes/lab/charts'
 import { Route as LabFlowRouteImport } from './routes/lab/flow'
 import { Route as LabNodesRouteImport } from './routes/lab/nodes'
 import { Route as LabQueryBuilderRouteImport } from './routes/lab/query-builder'
+import { Route as LabServiceMap3dRouteImport } from './routes/lab/service-map-3d'
 import { Route as LabTimelineRouteImport } from './routes/lab/timeline'
 import { Route as LabWidgetsRouteImport } from './routes/lab/widgets'
 import { Route as LogsIndexRouteImport } from './routes/logs/index'
@@ -278,6 +279,11 @@ const LabQueryBuilderRoute = LabQueryBuilderRouteImport.update({
   path: '/query-builder',
   getParentRoute: () => LabRouteRoute,
 } as any)
+const LabServiceMap3dRoute = LabServiceMap3dRouteImport.update({
+  id: '/service-map-3d',
+  path: '/service-map-3d',
+  getParentRoute: () => LabRouteRoute,
+} as any)
 const LabTimelineRoute = LabTimelineRouteImport.update({
   id: '/timeline',
   path: '/timeline',
@@ -489,6 +495,7 @@ export interface FileRoutesByFullPath {
   '/lab/flow': typeof LabFlowRoute
   '/lab/nodes': typeof LabNodesRoute
   '/lab/query-builder': typeof LabQueryBuilderRoute
+  '/lab/service-map-3d': typeof LabServiceMap3dRoute
   '/lab/timeline': typeof LabTimelineRoute
   '/lab/widgets': typeof LabWidgetsRoute
   '/logs/$logId': typeof LogsLogIdRoute
@@ -563,6 +570,7 @@ export interface FileRoutesByTo {
   '/lab/flow': typeof LabFlowRoute
   '/lab/nodes': typeof LabNodesRoute
   '/lab/query-builder': typeof LabQueryBuilderRoute
+  '/lab/service-map-3d': typeof LabServiceMap3dRoute
   '/lab/timeline': typeof LabTimelineRoute
   '/lab/widgets': typeof LabWidgetsRoute
   '/logs/$logId': typeof LogsLogIdRoute
@@ -639,6 +647,7 @@ export interface FileRoutesById {
   '/lab/flow': typeof LabFlowRoute
   '/lab/nodes': typeof LabNodesRoute
   '/lab/query-builder': typeof LabQueryBuilderRoute
+  '/lab/service-map-3d': typeof LabServiceMap3dRoute
   '/lab/timeline': typeof LabTimelineRoute
   '/lab/widgets': typeof LabWidgetsRoute
   '/logs/$logId': typeof LogsLogIdRoute
@@ -716,6 +725,7 @@ export interface FileRouteTypes {
     | '/lab/flow'
     | '/lab/nodes'
     | '/lab/query-builder'
+    | '/lab/service-map-3d'
     | '/lab/timeline'
     | '/lab/widgets'
     | '/logs/$logId'
@@ -790,6 +800,7 @@ export interface FileRouteTypes {
     | '/lab/flow'
     | '/lab/nodes'
     | '/lab/query-builder'
+    | '/lab/service-map-3d'
     | '/lab/timeline'
     | '/lab/widgets'
     | '/logs/$logId'
@@ -865,6 +876,7 @@ export interface FileRouteTypes {
     | '/lab/flow'
     | '/lab/nodes'
     | '/lab/query-builder'
+    | '/lab/service-map-3d'
     | '/lab/timeline'
     | '/lab/widgets'
     | '/logs/$logId'
@@ -1247,6 +1259,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LabQueryBuilderRouteImport
       parentRoute: typeof LabRouteRoute
     }
+    '/lab/service-map-3d': {
+      id: '/lab/service-map-3d'
+      path: '/service-map-3d'
+      fullPath: '/lab/service-map-3d'
+      preLoaderRoute: typeof LabServiceMap3dRouteImport
+      parentRoute: typeof LabRouteRoute
+    }
     '/lab/timeline': {
       id: '/lab/timeline'
       path: '/timeline'
@@ -1494,6 +1513,7 @@ interface LabRouteRouteChildren {
   LabFlowRoute: typeof LabFlowRoute
   LabNodesRoute: typeof LabNodesRoute
   LabQueryBuilderRoute: typeof LabQueryBuilderRoute
+  LabServiceMap3dRoute: typeof LabServiceMap3dRoute
   LabTimelineRoute: typeof LabTimelineRoute
   LabWidgetsRoute: typeof LabWidgetsRoute
   LabIndexRoute: typeof LabIndexRoute
@@ -1511,6 +1531,7 @@ const LabRouteRouteChildren: LabRouteRouteChildren = {
   LabFlowRoute: LabFlowRoute,
   LabNodesRoute: LabNodesRoute,
   LabQueryBuilderRoute: LabQueryBuilderRoute,
+  LabServiceMap3dRoute: LabServiceMap3dRoute,
   LabTimelineRoute: LabTimelineRoute,
   LabWidgetsRoute: LabWidgetsRoute,
   LabIndexRoute: LabIndexRoute,
