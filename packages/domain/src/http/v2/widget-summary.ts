@@ -30,6 +30,12 @@ import { ErrorIssuePublicId } from "./resource-ids"
  * The windows are the server's, not the caller's: "ongoing issues" and "traffic
  * right now" are product definitions the widgets render, and a query parameter
  * would let two builds of the app disagree about what the Home Screen means.
+ *
+ * `deployment_environment` is a parameter anyway, and the two are not in
+ * tension. A window is what the Home Screen *means*; an environment is which
+ * slice of the organization the person holding the phone asked to look at. The
+ * server cannot know the second, and two builds cannot disagree about it —
+ * whatever they send comes back echoed on the response.
  */
 
 /** Ongoing means the app's "Needs attention" filter over the day Home considers recent. */
@@ -160,6 +166,16 @@ export const V2WidgetSummary = Schema.Struct({
 	 * one organization's name over another's numbers.
 	 */
 	organization_id: OrgId,
+	/**
+	 * The environment the payload was filtered to, or null for all of them.
+	 *
+	 * Echoed for the same reason `organization_id` is: the caller keeps one
+	 * cached snapshot per (organization, environment) and has to prove a
+	 * response belongs to the slot it is about to overwrite. Without it a
+	 * request whose filter the server ignored would quietly overwrite a
+	 * production widget's numbers with organization-wide ones.
+	 */
+	deployment_environment: Schema.NullOr(Schema.String),
 	issues: V2WidgetSummaryIssues,
 	throughput: V2WidgetSummaryThroughput,
 }).annotate({
@@ -173,6 +189,7 @@ export const V2WidgetSummary = Schema.Struct({
 			schema_version: 1,
 			generated_at: "2026-08-21T09:10:00.000Z",
 			organization_id: "org_2abcDEF",
+			deployment_environment: "production",
 			issues: {
 				window_seconds: 86_400,
 				has_more: false,
@@ -210,9 +227,19 @@ export const V2WidgetSummary = Schema.Struct({
 })
 export type V2WidgetSummary = Schema.Schema.Type<typeof V2WidgetSummary>
 
+export const V2WidgetSummaryQuery = Schema.Struct({
+	/**
+	 * Restrict every half of the payload to one deployment environment. Absent
+	 * means the whole organization, which is what widgets placed before this
+	 * parameter existed keep asking for.
+	 */
+	deployment_environment: Schema.optional(Schema.String),
+}).annotate({ identifier: "WidgetSummaryQuery", title: "Widget summary query" })
+
 export class V2WidgetSummaryApiGroup extends HttpApiGroup.make("widgetSummary")
 	.add(
 		HttpApiEndpoint.get("retrieve", "/", {
+			query: V2WidgetSummaryQuery,
 			success: V2WidgetSummary,
 			error: [publicError(ErrorPersistenceError), ...V2QueryErrors],
 		}).annotateMerge(
@@ -220,7 +247,7 @@ export class V2WidgetSummaryApiGroup extends HttpApiGroup.make("widgetSummary")
 				identifier: "getWidgetSummary",
 				summary: "Retrieve the mobile widget summary",
 				description:
-					"Returns ongoing error issues and per-service traffic in a single small payload sized for a Home Screen widget. The windows are fixed by the server. Requires the `widget_summary:read` scope.",
+					"Returns ongoing error issues and per-service traffic in a single small payload sized for a Home Screen widget. The windows are fixed by the server; `deployment_environment` optionally narrows both halves to one environment and is echoed on the response. Requires the `widget_summary:read` scope.",
 			}),
 		),
 	)

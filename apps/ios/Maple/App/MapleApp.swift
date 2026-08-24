@@ -10,6 +10,10 @@ struct MapleApp: App {
 	@State private var session: SessionController
 	@State private var navigation: AppNavigation
 	@State private var opener: DestinationOpener
+	/// The second scoping axis, alongside `session`'s organization. Owned here
+	/// rather than by a screen because the choice is app-wide — see
+	/// `EnvironmentController`.
+	@State private var environments = EnvironmentController()
 
 	init() {
 		// `Clerk.shared` traps until `configure` has run, and Swift evaluates
@@ -43,7 +47,8 @@ struct MapleApp: App {
 			// and screenshots would have no widgets to take.
 			WidgetPublisher.shared.configure(
 				api: fixtureAPI,
-				organizationId: FixtureSession.organizationId
+				organizationId: FixtureSession.organizationId,
+				environment: nil
 			)
 			return
 		}
@@ -114,6 +119,7 @@ struct MapleApp: App {
 				.environment(session)
 				.environment(navigation)
 				.environment(opener)
+				.environment(environments)
 		}
 	}
 }

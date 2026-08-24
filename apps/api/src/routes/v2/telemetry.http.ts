@@ -1241,6 +1241,54 @@ const toMapEdge = (row: {
 	}
 }
 
+const serviceEnvironmentsRowSchema = Schema.Struct({
+	environment: Schema.String,
+})
+
+/**
+ * The values every other endpoint's `deployment_environment` filter accepts.
+ *
+ * `"discovery"` rather than `"aggregation"`: the read is a `GROUP BY` over one
+ * LowCardinality column, and clients poll it to keep an environment picker
+ * populated. A cheap ceiling is the honest description of that work, and it
+ * stops a slow one from spending an analytical budget it never needed.
+ */
+export const HttpV2EnvironmentsLive = HttpApiBuilder.group(MapleApiV2, "environments", (handlers) =>
+	Effect.gen(function* () {
+		const warehouse = yield* WarehouseQueryService
+		return handlers.handle("list", ({ query }) =>
+			Effect.gen(function* () {
+				const tenant = yield* CurrentTenant.Context
+				const window = yield* parseWindow(query.start_time, query.end_time, {
+					maxSeconds: MAX_SUMMARY_RANGE_SECONDS,
+					// Reads the hourly rollups, whose Timestamp is a plain DateTime.
+					precision: "second",
+					rangeLabel: "Environment queries",
+				})
+				const compiled = CH.compile(
+					CH.serviceEnvironmentsQuery(),
+					{ orgId: tenant.orgId, ...window },
+					{ rowSchema: serviceEnvironmentsRowSchema },
+				)
+				const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+					profile: "discovery",
+					context: "v2Environments",
+				})
+
+				return {
+					object: "list" as const,
+					data: rows.map((row) => ({ object: "environment" as const, name: row.environment })),
+					// The query's own limit sits well above any real organization's
+					// environment count, so a page is always the whole list. Paginating
+					// would hand clients a cursor that is never non-null.
+					has_more: false,
+					next_cursor: null,
+				}
+			}),
+		)
+	}),
+)
+
 export const HttpV2ServiceMapLive = HttpApiBuilder.group(MapleApiV2, "serviceMap", (handlers) =>
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService

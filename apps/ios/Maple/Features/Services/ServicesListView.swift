@@ -7,6 +7,12 @@ final class ServicesListModel {
 	private(set) var loader: ScreenLoader<[Service]>!
 	/// Open-issue counts, keyed by service. Fetched once alongside the list so
 	/// each row can carry a badge without an N+1.
+	///
+	/// **Organization-wide, even when an environment is selected.**
+	/// `/v2/error_issues/service_counts` takes no parameters at all, so with
+	/// "staging" chosen a row's metrics are staging and its badge is not. It is
+	/// the only place in the app where one row mixes the two; the fix is a
+	/// parameter on that endpoint, not a second request here.
 	private(set) var openIssueCounts: [String: Int] = [:]
 	var window: TimeWindow = .default
 	let generation: Int
@@ -50,6 +56,7 @@ final class ServicesListModel {
 struct ServicesListView: View {
 	@Environment(SessionController.self) private var session
 	@Environment(AppNavigation.self) private var navigation
+	@Environment(EnvironmentController.self) private var environments
 	@State private var model: ServicesListModel?
 	@State private var search = ""
 
@@ -68,6 +75,9 @@ struct ServicesListView: View {
 				ToolbarItem(placement: .topBarLeading) {
 					OrganizationSwitcherButton()
 				}
+				ToolbarItem(placement: .topBarLeading) {
+					EnvironmentPickerView()
+				}
 				if let model {
 					ToolbarItem(placement: .topBarTrailing) {
 						TimeWindowMenu(window: windowBinding(model))
@@ -81,7 +91,7 @@ struct ServicesListView: View {
 		// the next org's arrive.
 		.task(id: session.dataGeneration) {
 			let model = model?.generation == session.dataGeneration
-				? model! : ServicesListModel(api: session.api, session: session)
+				? model! : ServicesListModel(api: session.api.scoped(toEnvironment: environments.selected), session: session)
 			self.model = model
 			await model.loader.loadIfNeeded()
 		}

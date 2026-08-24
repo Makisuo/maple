@@ -246,6 +246,23 @@ final class SessionController {
 		}
 	}
 
+	/// Declare that every screen's data is stale, without the organization
+	/// having changed.
+	///
+	/// The one other thing that scopes what a screen shows is the deployment
+	/// environment (`EnvironmentController`), and it needs exactly the same
+	/// effect an organization switch has: cancel what is in flight, rebuild the
+	/// models, refetch. Reusing the lever rather than teaching every screen a
+	/// second one is the point — the alternative is a filter each screen has to
+	/// remember to apply, and the one that forgets looks like stale data rather
+	/// than a bug.
+	///
+	/// No token invalidation here: the environment is a query parameter, not a
+	/// claim, so the token that was valid a moment ago still is.
+	func invalidateData() {
+		dataGeneration += 1
+	}
+
 	/// React to an API failure that the session is responsible for.
 	///
 	/// Returns true when the caller should retry once — a 401 is most often a

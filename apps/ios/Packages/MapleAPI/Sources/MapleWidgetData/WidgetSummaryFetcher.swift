@@ -87,9 +87,13 @@ public actor WidgetSummaryFetcher {
 	/// Writes a successful payload's snapshots into the App Group **before**
 	/// returning, so a provider killed on the way to rendering still leaves the
 	/// data behind for the next rebuild.
+	/// - Parameter environment: the deployment environment to filter to, or nil
+	///   for the whole organization. It selects the snapshot slot as well as the
+	///   query, so two widgets on one organization can hold different answers.
 	public func fetch(
 		organizationId: String,
 		organizationName: String?,
+		environment: String? = nil,
 		storedGeneratedAt: Date?,
 		now: Date = Date()
 	) async -> Attempt {
@@ -105,6 +109,12 @@ public actor WidgetSummaryFetcher {
 		// The app and the extension are different processes and share nothing but
 		// the App Group, so this is the only thing standing between them when a
 		// foreground and a timeline rebuild land in the same second.
+		//
+		// Per organization, not per environment: the state it guards is the
+		// credential's, and a credential is bound to an organization. The cost
+		// is that a staging widget can be told `.coalesced` while production is
+		// fetching — which it answers by rendering its own stored snapshot with
+		// an honest age, the same thing it does for every other skip.
 		if state.isInFlight(at: now, within: Self.attemptLock) { return .coalesced }
 
 		guard let credential = credentials.load(organizationId: organizationId) else {
@@ -115,7 +125,12 @@ public actor WidgetSummaryFetcher {
 		// request to be told so helps nobody.
 		if credential.isExpired(at: now) { return .needsApp }
 
-		if let existing = inFlight[organizationId] {
+		// Keyed by organization *and* environment: within this process two
+		// widgets asking for different environments are asking different
+		// questions, and folding them together would hand one of them the
+		// other's answer.
+		let inFlightKey = "\(organizationId)|\(environment ?? "")"
+		if let existing = inFlight[inFlightKey] {
 			return await existing.value.map(Attempt.fetched) ?? .coalesced
 		}
 
@@ -124,14 +139,27 @@ public actor WidgetSummaryFetcher {
 		fetchStates.save(state.attempting(at: now), organizationId: organizationId)
 
 		let task = Task<WidgetSummaryPayload?, Never> { [credentials, fetchStates, session] in
-			let outcome = await Self.request(credential: credential, session: session)
+			let outcome = await Self.request(
+				credential: credential,
+				environment: environment,
+				session: session
+			)
 			switch outcome {
 			case .success(let payload):
 				// The organization the credential is bound to is the one the
 				// server answers for. A disagreement would write one
 				// organization's numbers under another's name — invisible until
 				// someone reads the wrong figure off their Home Screen.
-				guard payload.organizationId == organizationId, payload.isSupported else {
+				//
+				// The environment is checked for the same reason and is the more
+				// likely of the two to disagree: a server that predates the
+				// parameter answers organization-wide, cheerfully, with a 200.
+				// Writing that into the staging slot would put production's
+				// numbers under a staging label.
+				guard payload.organizationId == organizationId,
+					payload.deploymentEnvironment == environment,
+					payload.isSupported
+				else {
 					fetchStates.save(
 						fetchStates.load(organizationId: organizationId)
 							.recording(.undecodable, at: Date()),
@@ -142,10 +170,10 @@ public actor WidgetSummaryFetcher {
 				// Saved before the caller gets it back: a provider killed between
 				// here and rendering still leaves the data for the next rebuild.
 				WidgetSnapshotStore<IssuesSnapshot>
-					.issues(organizationId: organizationId)
+					.issues(organizationId: organizationId, environment: environment)
 					.save(payload.issuesSnapshot(organizationName: organizationName))
 				WidgetSnapshotStore<ThroughputSnapshot>
-					.throughput(organizationId: organizationId)
+					.throughput(organizationId: organizationId, environment: environment)
 					.save(payload.throughputSnapshot())
 				fetchStates.save(
 					fetchStates.load(organizationId: organizationId).recording(.success, at: Date()),
@@ -161,9 +189,9 @@ public actor WidgetSummaryFetcher {
 				return nil
 			}
 		}
-		inFlight[organizationId] = task
+		inFlight[inFlightKey] = task
 		let payload = await task.value
-		inFlight[organizationId] = nil
+		inFlight[inFlightKey] = nil
 		return payload.map(Attempt.fetched) ?? .failed
 	}
 
@@ -174,12 +202,18 @@ public actor WidgetSummaryFetcher {
 
 	private static func request(
 		credential: WidgetCredential,
+		environment: String?,
 		session: URLSession
 	) async -> RequestOutcome {
-		var request = URLRequest(
-			url: credential.apiBaseURL.appendingPathComponent("v2/widget_summary"),
-			timeoutInterval: deadline
-		)
+		let path = credential.apiBaseURL.appendingPathComponent("v2/widget_summary")
+		// `URLComponents` rather than string interpolation: environment names
+		// are user-defined and may carry a space or a slash, which would
+		// otherwise produce a URL that silently fails to build.
+		var components = URLComponents(url: path, resolvingAgainstBaseURL: false)
+		if let environment, !environment.isEmpty {
+			components?.queryItems = [URLQueryItem(name: "deployment_environment", value: environment)]
+		}
+		var request = URLRequest(url: components?.url ?? path, timeoutInterval: deadline)
 		request.httpMethod = "GET"
 		request.setValue("Bearer \(credential.secret)", forHTTPHeaderField: "Authorization")
 		request.setValue("application/json", forHTTPHeaderField: "Accept")

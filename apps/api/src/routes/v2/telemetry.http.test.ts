@@ -168,6 +168,12 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 			},
 		]
 	}
+	// Before the catalog branch below: both read `service_overview_spans`, and
+	// the environments listing projects a single column the catalog rows would
+	// not decode against.
+	if (sql.includes("AS environment")) {
+		return [{ environment: "production" }, { environment: "staging" }]
+	}
 	if (sql.includes("FROM service_overview_spans")) {
 		return [
 			{
@@ -726,6 +732,54 @@ describe("v2 telemetry reads over HTTP", () => {
 		})
 		expect(response.status).toBe(200)
 		expect(observedOptions?.settings).toMatchObject({ maxBlockSize: 512 })
+		await harness.dispose()
+	})
+
+	it("lists the organization's deployment environments", async () => {
+		const observedSql: string[] = []
+		const observingWarehouse: WarehouseQueryServiceApi = {
+			...warehouseStub,
+			compiledQuery: (tenant, compiled, options) => {
+				observedSql.push(compiled.sql)
+				return warehouseStub.compiledQuery(tenant, compiled, options)
+			},
+		}
+		const harness = makeHarness(observingWarehouse)
+		const key = await harness.bootstrapKey(["environments:read"])
+
+		const environments = await harness.request(
+			"GET",
+			`/v2/environments?start_time=${START}&end_time=${END}`,
+			key.secret,
+		)
+		expect(environments.status).toBe(200)
+		expect(environments.body).toEqual({
+			object: "list",
+			data: [
+				{ object: "environment", name: "production" },
+				{ object: "environment", name: "staging" },
+			],
+			// Always the whole list — a cursor here would never be non-null.
+			has_more: false,
+			next_cursor: null,
+		})
+		// The blank environment is excluded in SQL, not filtered afterwards: the
+		// DSL reads `''` as "no filter", so offering it would hand the caller back
+		// every environment under a label claiming otherwise.
+		expect(observedSql[0]).toContain("!= ''")
+		await harness.dispose()
+	})
+
+	it("fences the environments listing behind its own scope family", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["services:read"])
+		const environments = await harness.request(
+			"GET",
+			`/v2/environments?start_time=${START}&end_time=${END}`,
+			key.secret,
+		)
+		expect(environments.status).toBe(403)
+		expect(environments.body.error.message).toContain("environments:read")
 		await harness.dispose()
 	})
 

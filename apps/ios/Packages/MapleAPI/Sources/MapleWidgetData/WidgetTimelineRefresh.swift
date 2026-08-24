@@ -33,11 +33,16 @@ public enum WidgetTimelineRefresh {
 	///   - organizationName: from the widget's organization index, passed
 	///     through so a fetched snapshot is named the same way a published one
 	///     is.
+	///   - environment: the deployment environment this widget is pinned to, or
+	///     nil for the whole organization. It selects the snapshot slot as well
+	///     as the query, so a production widget and a staging widget on the same
+	///     organization neither share data nor overwrite each other.
 	///   - storedGeneratedAt: the snapshot already on disk, so a widget woken
 	///     moments after the app published does not re-fetch what it has.
 	public static func run(
 		organizationId: String?,
 		organizationName: String?,
+		environment: String? = nil,
 		storedGeneratedAt: Date?,
 		now: Date = Date(),
 		fetcher: WidgetSummaryFetcher = .shared,
@@ -50,6 +55,7 @@ public enum WidgetTimelineRefresh {
 		let attempt = await fetcher.fetch(
 			organizationId: organizationId,
 			organizationName: organizationName,
+			environment: environment,
 			storedGeneratedAt: storedGeneratedAt,
 			now: now
 		)

@@ -86,6 +86,7 @@ struct MainTabView: View {
 	@Environment(AppNavigation.self) private var navigation
 	@Environment(SessionController.self) private var session
 	@Environment(DestinationOpener.self) private var opener
+	@Environment(EnvironmentController.self) private var environments
 	@Environment(\.scenePhase) private var scenePhase
 	private let push = PushRegistrar.shared
 	private let widgets = WidgetPublisher.shared
@@ -122,13 +123,32 @@ struct MainTabView: View {
 			guard let orgId = session.currentOrganizationId else { return }
 			liveActivities.configure(api: session.api, organizationId: orgId)
 		}
-		.task(id: session.widgetPublishKey) {
+		// The environment picker's options, keyed on the organization rather
+		// than on `dataGeneration`: environments are an organization's facts,
+		// and re-reading them every time the user *changes* the environment
+		// would be a request per selection to learn nothing new.
+		//
+		// Unscoped `session.api` on purpose — this is the list the picker
+		// offers, and filtering it by the current choice would leave the user
+		// unable to pick anything else.
+		.task(id: session.currentOrganizationId) {
+			guard let orgId = session.currentOrganizationId else { return }
+			await environments.load(organizationId: orgId, api: session.api)
+		}
+		// The environment joins the key rather than moving into
+		// `widgetPublishKey` itself: that property is the session's, and the
+		// session has no business knowing about a filter. What matters is that
+		// changing the environment republishes at once — a widget following the
+		// app would otherwise keep the environment the user just left on the
+		// Home Screen until some later trigger.
+		.task(id: "\(session.widgetPublishKey)|\(environments.selected ?? "")") {
 			guard let orgId = session.currentOrganizationId else { return }
 			widgets.configure(
 				api: session.api,
 				organizationId: orgId,
 				memberships: session.widgetOrganizations,
-				membershipsVerified: session.membershipsLoaded
+				membershipsVerified: session.membershipsLoaded,
+				environment: environments.selected
 			)
 			// Only a verified list may prune: `membershipsLoaded` is false when
 			// Clerk's client payload was the source, and that list can be partial —

@@ -116,9 +116,15 @@ extension MapleClient {
 		}
 	}
 
+	/// The environment comes from the client's scope rather than the request:
+	/// it is a property of what the user is looking at, not of one chart.
+	///
+	/// Note the guard covers it too. Before, an environment-only filter would
+	/// have fallen through to `nil` and been dropped on the floor — the request
+	/// would still succeed, and the chart would quietly show every environment.
 	private func filters(serviceName: String?, hasError: Bool?) -> Components.Schemas.TraceFilters? {
-		guard serviceName != nil || hasError != nil else { return nil }
-		return .init(hasError: hasError, serviceName: serviceName)
+		guard serviceName != nil || hasError != nil || environment != nil else { return nil }
+		return .init(deploymentEnvironment: environment, hasError: hasError, serviceName: serviceName)
 	}
 }
 

@@ -7,6 +7,7 @@ import SwiftUI
 struct AlertsHubView: View {
 	@Environment(AppNavigation.self) private var navigation
 	@Environment(SessionController.self) private var session
+	@Environment(EnvironmentController.self) private var environments
 	@State private var models: AlertsHubModels?
 
 	var body: some View {
@@ -39,14 +40,18 @@ struct AlertsHubView: View {
 				ToolbarItem(placement: .topBarLeading) {
 					OrganizationSwitcherButton()
 				}
+				ToolbarItem(placement: .topBarLeading) {
+					EnvironmentPickerView()
+				}
 			}
 			.mapleDestinations()
 		}
-		// Re-runs on org switch, replacing all three models at once so no
-		// segment shows one org's rows under the next org's title.
+		// Re-runs on org switch — and on an environment change, which bumps the
+		// same generation — replacing all three models at once so no segment
+		// shows one scope's rows under the next scope's title.
 		.task(id: session.dataGeneration) {
 			if models?.generation != session.dataGeneration {
-				models = AlertsHubModels(session: session)
+				models = AlertsHubModels(session: session, environment: environments.selected)
 			}
 		}
 	}
@@ -73,10 +78,16 @@ final class AlertsHubModels {
 	let anomalies: AnomaliesListModel
 	let generation: Int
 
-	init(session: SessionController) {
-		incidents = IncidentsListModel(api: session.api, session: session)
-		issues = IssuesListModel(api: session.api, session: session)
-		anomalies = AnomaliesListModel(api: session.api, session: session)
+	/// - Parameter environment: the app-wide deployment-environment scope. It
+	///   reaches issues and anomalies, whose endpoints take the filter, and is
+	///   ignored by incidents, whose endpoints do not — the scoped client is
+	///   still handed to all three so the day `/v2/alerts` grows the parameter,
+	///   this segment starts honouring it without another change here.
+	init(session: SessionController, environment: String?) {
+		let api = session.api.scoped(toEnvironment: environment)
+		incidents = IncidentsListModel(api: api, session: session)
+		issues = IssuesListModel(api: api, session: session)
+		anomalies = AnomaliesListModel(api: api, session: session)
 		generation = session.dataGeneration
 	}
 }

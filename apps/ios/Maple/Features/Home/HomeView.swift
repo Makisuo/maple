@@ -6,6 +6,7 @@ import SwiftUI
 struct HomeView: View {
 	@Environment(SessionController.self) private var session
 	@Environment(AppNavigation.self) private var navigation
+	@Environment(EnvironmentController.self) private var environments
 	@Environment(\.scenePhase) private var scenePhase
 	@State private var model: HomeModel?
 	@State private var showsNotificationSettings = false
@@ -33,6 +34,9 @@ struct HomeView: View {
 				ToolbarItem(placement: .topBarLeading) {
 					OrganizationSwitcherButton()
 				}
+				ToolbarItem(placement: .topBarLeading) {
+					EnvironmentPickerView()
+				}
 				ToolbarItem(placement: .topBarTrailing) {
 					Button {
 						showsNotificationSettings = true
@@ -55,7 +59,7 @@ struct HomeView: View {
 			// left on screen until the new one arrives, and any refresh still
 			// running against the old org has nowhere to write.
 			let model = model?.generation == session.dataGeneration
-				? model! : HomeModel(api: session.api, session: session)
+				? model! : HomeModel(api: session.api.scoped(toEnvironment: environments.selected), session: session)
 			self.model = model
 			await model.loader.loadIfNeeded()
 			// Home is a status board: keep it current while it's on screen.

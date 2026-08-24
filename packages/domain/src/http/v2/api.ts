@@ -22,6 +22,7 @@ import { V2SharePublicApiGroup } from "./share"
 import { V2WidgetCredentialsApiGroup } from "./widget-credentials"
 import { V2WidgetSummaryApiGroup } from "./widget-summary"
 import {
+	V2EnvironmentsApiGroup,
 	V2LogsApiGroup,
 	V2MetricsApiGroup,
 	V2ServiceMapApiGroup,
@@ -106,6 +107,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2MetricsApiGroup)
 	.add(V2ServicesApiGroup)
 	.add(V2ServiceMapApiGroup)
+	.add(V2EnvironmentsApiGroup)
 	.add(V2SharePublicApiGroup)
 	.add(V2WidgetSummaryApiGroup)
 	.add(V2WidgetCredentialsApiGroup)

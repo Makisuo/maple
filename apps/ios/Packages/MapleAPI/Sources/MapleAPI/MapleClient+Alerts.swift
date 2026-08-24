@@ -84,6 +84,10 @@ extension MapleClient {
 						cursor: cursor,
 						status: status,
 						serviceName: serviceName,
+						// `deployment_env`, not `deployment_environment`: this is the
+						// one v2 endpoint that spells the parameter short, and the
+						// generated names follow the wire.
+						deploymentEnv: environment,
 						startTime: window?.startTime,
 						endTime: window?.endTime
 					)
