@@ -7,7 +7,7 @@ const cronCases = [
 	["*/5 * * * *", ["anomaly", "cloudflareAnalytics", "planetScale"]],
 	["*/15 * * * *", ["digest"]],
 	["0 * * * *", ["serviceMapRollup"]],
-	["* * * * *", ["alert", "error", "escalation"]],
+	["* * * * *", ["alert", "error", "escalation", "fixVerification"]],
 ] as const
 
 describe("alerting Effect root", () => {
@@ -26,6 +26,7 @@ describe("alerting Effect root", () => {
 				digest: tick("digest"),
 				error: tick("error"),
 				escalation: tick("escalation"),
+				fixVerification: tick("fixVerification"),
 				planetScale: tick("planetScale"),
 				serviceMapRollup: tick("serviceMapRollup"),
 			} satisfies ScheduledTickPrograms
@@ -48,6 +49,7 @@ describe("alerting Effect root", () => {
 			digest: tick("digest"),
 			error: tick("error"),
 			escalation: tick("escalation"),
+			fixVerification: tick("fixVerification"),
 			planetScale: tick("planetScale"),
 			serviceMapRollup: tick("serviceMapRollup"),
 		} satisfies ScheduledTickPrograms

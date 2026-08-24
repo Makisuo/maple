@@ -37,7 +37,7 @@ type HubView = "active" | "history"
 
 const searchSchema = Schema.Struct({
 	view: Schema.optional(Schema.Literals(["active", "history"])),
-	kind: Schema.optional(Schema.Literals(["alert", "error", "anomaly", "question"])),
+	kind: Schema.optional(Schema.Literals(["alert", "error", "anomaly", "question", "verification"])),
 	sort: Schema.optional(Schema.Literals(["updated", "severity", "confidence"])),
 	dir: Schema.optional(Schema.Literals(["asc", "desc"])),
 	q: Schema.optional(Schema.String),
@@ -64,6 +64,7 @@ const KIND_FILTER_LABEL: Record<InvestigationKindKey | "all", string> = {
 	error: "Errors",
 	anomaly: "Anomalies",
 	question: "Questions",
+	verification: "Fix checks",
 } satisfies Record<InvestigationKindKey | "all", string>
 
 const KIND_FILTER_VALUES = Object.keys(KIND_FILTER_LABEL) as ReadonlyArray<InvestigationKindKey | "all">

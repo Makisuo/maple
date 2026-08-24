@@ -101,6 +101,20 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
+-- builder:errors:errorIssueVersionsSinceQuery:default  [77012b3a]
+SELECT
+          ServiceVersion AS serviceVersion,
+          count() AS count
+        FROM error_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND FingerprintHash = toUInt64('11640393269246331608')
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY serviceVersion
+        ORDER BY count DESC
+        LIMIT 100
+        FORMAT JSON
+
 -- builder:errors:errorsSparkQuery:default  [89ec2bb4]
 SELECT
           toString(FingerprintHash) AS fingerprintHash,

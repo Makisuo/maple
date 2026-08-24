@@ -50,14 +50,29 @@ const factValue = (facts: V2Investigation["snapshot"]["facts"], label: string): 
 
 const contextFromInvestigation = (investigation: V2Investigation): InvestigationContext => {
 	const subject = investigation.subject
-	const kind = subject.type === "freeform" ? "freeform" : subject.incident_kind
+	const kind =
+		subject.type === "freeform"
+			? "freeform"
+			: subject.type === "fix_verification"
+				? "error"
+				: subject.incident_kind
 	// Without this the signal is always unknown, every alert falls through to
 	// `investigationSuggestions`' generic branch, and its per-signal prompts are
 	// dead code on the one page that should use them.
 	const signalType = factValue(investigation.snapshot.facts, "signal")
 	return {
 		kind,
-		id: subject.type === "freeform" ? investigation.id : subject.incident_id,
+		// A fix-verification is presented as an error investigation, so its id must
+		// be the error issue's — everything downstream keys on it as one: the chat
+		// tab id, the preamble's `error_issue_id`, and the error tool hints. Using
+		// the investigation id there pointed all three at a resource that is not an
+		// error issue.
+		id:
+			subject.type === "freeform"
+				? investigation.id
+				: subject.type === "fix_verification"
+					? subject.issue_id
+					: subject.incident_id,
 		title: investigation.snapshot.title,
 		severity: investigation.severity ?? investigation.snapshot.severity ?? "unclassified",
 		status: investigation.status,
@@ -77,7 +92,14 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 							? { serviceName: investigation.snapshot.scope }
 							: undefined),
 					}
-				: undefined,
+				: subject.type === "fix_verification"
+					? {
+							issueId: subject.issue_id,
+							...(investigation.snapshot.scope
+								? { serviceName: investigation.snapshot.scope }
+								: undefined),
+						}
+					: undefined,
 		...(investigation.report
 			? {
 					aiSummary: investigation.report.summary,

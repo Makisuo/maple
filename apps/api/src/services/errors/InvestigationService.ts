@@ -38,7 +38,7 @@ import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Clock, Context, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
-import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
+import { applyDiagnosisWrites, subjectTypeOf } from "@/services/errors/apply-diagnosis"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
 import { routeInvestigation, type InvestigationRoute } from "@/services/errors/investigation-route"
 import { FanoutStartError } from "@/services/errors/investigation-fanout-error"
@@ -236,7 +236,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					title:
 						subject.type === "freeform"
 							? subject.title
-							: `${subject.incidentKind[0]?.toUpperCase() ?? ""}${subject.incidentKind.slice(1)} incident`,
+							: subject.type === "fix_verification"
+								? "Fix verification"
+								: `${subject.incidentKind[0]?.toUpperCase() ?? ""}${subject.incidentKind.slice(1)} incident`,
 					scope: null,
 					status: "open",
 					severity: null,
@@ -248,7 +250,14 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 										value: subject.incidentId,
 									}),
 								]
-							: [],
+							: subject.type === "fix_verification"
+								? [
+										new InvestigationSnapshotFact({
+											label: "Pull request",
+											value: subject.pullRequestUrl,
+										}),
+									]
+								: [],
 					references: [],
 					incidentStartedAt: null,
 					incidentEndedAt: null,
@@ -985,22 +994,26 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				// Shared with the fan-out workflow's `persist` step so a diagnosis means
 				// the same thing whichever path produced it — same status transition, same
 				// severity application, same deterministically-keyed timeline event.
-				yield* dbExecute((db) =>
-					applyDiagnosisWrites(db, {
-						orgId,
-						investigationId: id,
-						report: result,
-						issueId: row.issueId ?? null,
-						model: request.model ?? row.model ?? null,
-						inputTokens: request.inputTokens ?? row.inputTokens ?? null,
-						outputTokens: request.outputTokens ?? row.outputTokens ?? null,
-						nowMs,
-						// A human follow-up that re-diagnoses a ranked fan-out orphans the lens
-						// verdicts: they explain a cause that is no longer on screen.
-						...(row.fanoutState === "ranked"
-							? { fanoutState: "superseded" as const }
-							: undefined),
-					}),
+				// `provideService(Database, database)`: the shared writer carries Database
+				// in R, while this service's API effects are R = never. `mapError` keeps
+				// this method's persistence-error channel — the writer stays neutral
+				// because the fan-out workflow maps it differently.
+				yield* applyDiagnosisWrites({
+					orgId,
+					investigationId: id,
+					report: result,
+					issueId: row.issueId ?? null,
+					subjectType: subjectTypeOf(row.subjectJson),
+					model: request.model ?? row.model ?? null,
+					inputTokens: request.inputTokens ?? row.inputTokens ?? null,
+					outputTokens: request.outputTokens ?? row.outputTokens ?? null,
+					nowMs,
+					// A human follow-up that re-diagnoses a ranked fan-out orphans the lens
+					// verdicts: they explain a cause that is no longer on screen.
+					...(row.fanoutState === "ranked" ? { fanoutState: "superseded" as const } : undefined),
+				}).pipe(
+					Effect.mapError(makePersistenceError),
+					Effect.provideService(Database, database),
 				)
 
 				const env = Option.getOrUndefined(workerEnv)

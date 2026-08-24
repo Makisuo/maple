@@ -1,6 +1,7 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { randomUUID } from "node:crypto"
 import {
+	type PullRequestEventJob,
 	VcsInstallation,
 	VcsInstallationGoneError,
 	VcsProviderError,
@@ -25,6 +26,7 @@ import {
 	VcsProviderRegistry,
 	type VcsProviderRegistryApi,
 } from "@/services/integrations/vcs/VcsProviderRegistry"
+import { PullRequestEventSink } from "@/services/integrations/vcs/PullRequestEventSink"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import { clampQueueDelaySeconds } from "@/services/integrations/vcs/VcsSyncQueue"
 import {
@@ -215,6 +217,103 @@ describe("GithubProvider.webhookToJobs", () => {
 			// committer login against the commit's own host (here github.com), so the
 			// dashboard never has to patch a null avatar.
 			assert.strictEqual(job.commits[0]!.authorAvatarUrl, "https://github.com/octocat.png?size=64")
+		}).pipe(Effect.provide(providerLayer())),
+	)
+
+	const pullRequestBody = ({
+		pull_request: prOverrides,
+		...overrides
+	}: Record<string, unknown> & { pull_request?: Record<string, unknown> } = {}) =>
+		JSON.stringify({
+			action: "closed",
+			number: 612,
+			repository: { id: 7, full_name: "octo/repo" },
+			installation: { id: 42 },
+			...overrides,
+			// Merged separately, and after the top-level spread, so an override of
+			// one PR field does not drop the rest of the payload.
+			pull_request: {
+				html_url: "https://github.com/octo/repo/pull/612",
+				title: "Fix the checkout crash",
+				body: "Fixes the crash.",
+				user: { login: "octocat" },
+				merged: true,
+				merge_commit_sha: SHA,
+				merged_at: "2026-01-02T03:04:05Z",
+				...(prOverrides ?? {}),
+			},
+		})
+
+	it.effect("maps a merged pull request to a pull-request-event job", () =>
+		Effect.gen(function* () {
+			const provider = yield* GithubProvider
+			const body = pullRequestBody()
+			const jobs = yield* provider.webhookToJobs({
+				headers: { "x-github-event": "pull_request", "x-hub-signature-256": sign(body) },
+				rawBody: body,
+			})
+			assert.strictEqual(jobs.length, 1)
+			const job = jobs[0]!
+			assert.strictEqual(job.kind, "pull-request-event")
+			if (job.kind !== "pull-request-event") return
+			assert.strictEqual(job.repoFullName, "octo/repo")
+			assert.strictEqual(job.number, 612)
+			assert.strictEqual(job.merged, true)
+			assert.strictEqual(job.mergeCommitSha, SHA)
+			assert.strictEqual(job.authorLogin, "octocat")
+			assert.strictEqual(job.mergedAtMs, Date.parse("2026-01-02T03:04:05Z"))
+		}).pipe(Effect.provide(providerLayer())),
+	)
+
+	it.effect("distinguishes a pull request closed without merging", () =>
+		Effect.gen(function* () {
+			const provider = yield* GithubProvider
+			const body = pullRequestBody({
+				pull_request: { merged: false, merged_at: null, merge_commit_sha: null },
+			})
+			const jobs = yield* provider.webhookToJobs({
+				headers: { "x-github-event": "pull_request", "x-hub-signature-256": sign(body) },
+				rawBody: body,
+			})
+			const job = jobs[0]!
+			assert.strictEqual(job.kind, "pull-request-event")
+			if (job.kind !== "pull-request-event") return
+			// `closed` covers both outcomes on GitHub; only `merged` separates them,
+			// and everything downstream keys off it.
+			assert.strictEqual(job.action, "closed")
+			assert.strictEqual(job.merged, false)
+			assert.strictEqual(job.mergedAtMs, null)
+		}).pipe(Effect.provide(providerLayer())),
+	)
+
+	it.effect("skips pull-request actions that change nothing this feature reads", () =>
+		Effect.gen(function* () {
+			const provider = yield* GithubProvider
+			const body = pullRequestBody({ action: "labeled" })
+			const jobs = yield* provider.webhookToJobs({
+				headers: { "x-github-event": "pull_request", "x-hub-signature-256": sign(body) },
+				rawBody: body,
+			})
+			// Otherwise every label click enqueues a job.
+			assert.strictEqual(jobs.length, 0)
+		}).pipe(Effect.provide(providerLayer())),
+	)
+
+	it.effect("carries the pull request's text so the issue side can scan it", () =>
+		Effect.gen(function* () {
+			const provider = yield* GithubProvider
+			const body = pullRequestBody({
+				action: "opened",
+				pull_request: { merged: false, merged_at: null, body: "Fixes maple-issue:abc" },
+			})
+			const jobs = yield* provider.webhookToJobs({
+				headers: { "x-github-event": "pull_request", "x-hub-signature-256": sign(body) },
+				rawBody: body,
+			})
+			const job = jobs[0]!
+			if (job.kind !== "pull-request-event") return assert.fail("expected a pull-request job")
+			assert.strictEqual(job.body, "Fixes maple-issue:abc")
+			assert.strictEqual(job.title, "Fix the checkout crash")
 		}).pipe(Effect.provide(providerLayer())),
 	)
 
@@ -1216,6 +1315,12 @@ describe("VcsSyncService orchestrator", () => {
 	interface StubOpts {
 		readonly sent: Array<VcsSyncJob>
 		readonly sentDelays?: Array<number | undefined>
+		/**
+		 * Pull-request events the sync service forwarded, in order. The sink is a
+		 * port precisely so this can be a plain array rather than the whole
+		 * error-issue stack.
+		 */
+		readonly forwardedPullRequests?: Array<{ orgId: string; job: PullRequestEventJob }>
 		readonly repos?: ReadonlyArray<{
 			externalRepoId: string
 			owner: string
@@ -1274,7 +1379,14 @@ describe("VcsSyncService orchestrator", () => {
 		} satisfies VcsProviderRegistryApi)
 		const queue = recordingQueueLayer(opts.sent, { sentDelays: opts.sentDelays })
 		const repoLive = testRepoLayer(testDb)
-		return VcsSyncService.layer.pipe(Layer.provideMerge(Layer.mergeAll(repoLive, registry, queue)))
+		const forwarded = opts.forwardedPullRequests
+		const sink = Layer.succeed(PullRequestEventSink, {
+			onPullRequestEvent: (orgId, job) =>
+				Effect.sync(() => {
+					forwarded?.push({ orgId, job })
+				}),
+		})
+		return VcsSyncService.layer.pipe(Layer.provideMerge(Layer.mergeAll(repoLive, registry, queue, sink)))
 	}
 
 	const seedInstallation = (repo: VcsRepo, orgId: ReturnType<typeof asOrgId>) =>
@@ -1349,6 +1461,75 @@ describe("VcsSyncService orchestrator", () => {
 				}),
 			),
 		)
+	})
+
+	it.effect("forwards a pull-request event to the sink, resolved to the installation's org", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		const forwardedPullRequests: Array<{ orgId: string; job: PullRequestEventJob }> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_orch")
+			yield* seedInstallation(repo, orgId)
+			yield* upsertReposFor(repo, "42", oneRepo)
+
+			const job: VcsSyncJob = {
+				kind: "pull-request-event",
+				provider: "github",
+				externalInstallationId: "42",
+				externalRepoId: "7",
+				repoFullName: "octo/repo",
+				number: 612,
+				action: "closed",
+				url: "https://github.com/octo/repo/pull/612",
+				title: "Fix the thing",
+				body: "maple-issue:3f1c8a2e-9b4d-4f7a-8c1e-2d5b6a7c8e90",
+				authorLogin: "octocat",
+				merged: true,
+				mergeCommitSha: "abc123",
+				mergedAtMs: 1_700_000_000_000,
+				deliveryId: "delivery-1",
+			}
+			// Round-trips through the queue encoding like every other job kind: this
+			// is the one union member the encode sweep above does not cover, and
+			// `deliveryId` is an `optionalKey` that a wire-shape drift would drop.
+			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(job))
+
+			assert.strictEqual(forwardedPullRequests.length, 1)
+			const forwarded = forwardedPullRequests[0]
+			assert.strictEqual(forwarded?.orgId, orgId)
+			assert.deepStrictEqual(forwarded?.job, job)
+		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, forwardedPullRequests })))
+	})
+
+	it.effect("drops a pull-request event for an installation it does not know", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		const forwardedPullRequests: Array<{ orgId: string; job: PullRequestEventJob }> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const job: VcsSyncJob = {
+				kind: "pull-request-event",
+				provider: "github",
+				externalInstallationId: "does-not-exist",
+				externalRepoId: "7",
+				repoFullName: "octo/repo",
+				number: 613,
+				action: "closed",
+				url: "https://github.com/octo/repo/pull/613",
+				title: null,
+				body: null,
+				authorLogin: null,
+				merged: true,
+				mergeCommitSha: null,
+				mergedAtMs: null,
+			}
+			// No org to attribute it to, so forwarding it would mean guessing a
+			// tenant. Succeeds rather than failing so the queue does not retry.
+			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(job))
+			assert.strictEqual(forwardedPullRequests.length, 0)
+		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, forwardedPullRequests })))
 	})
 
 	it.effect("sync-branches keeps local branches when the provider listing was truncated", () => {

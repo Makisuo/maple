@@ -371,12 +371,45 @@ export const BranchEventJob = Schema.Struct({
 })
 export type BranchEventJob = Schema.Schema.Type<typeof BranchEventJob>
 
+// A pull request webhook. Unlike every other job here this one touches no VCS
+// table: it is forwarded to the errors side, which owns the issue⇄PR link and
+// the post-merge verification window. The job carries only VCS facts (the
+// provider's own ids, the PR's text) so this layer stays ignorant of issues —
+// `VcsSyncService` resolves the org and hands it over.
+//
+// `title` and `body` are carried because the auto-link scan reads them: a PR
+// that names a Maple issue in its description links itself. `body` is nullable
+// (GitHub sends null for an empty description) and unbounded here; the scan
+// itself is a bounded regex.
+export const PullRequestEventJob = Schema.Struct({
+	kind: Schema.Literal("pull-request-event"),
+	provider: VcsProviderId,
+	externalInstallationId: Schema.String,
+	externalRepoId: Schema.String,
+	repoFullName: Schema.String,
+	number: Schema.Number,
+	// GitHub's `action`, narrowed to the ones that change a link's meaning.
+	// `closed` covers both "merged" and "closed without merging"; `merged`
+	// below is what distinguishes them.
+	action: Schema.Literals(["opened", "edited", "reopened", "closed", "synchronize"]),
+	url: Schema.String,
+	title: Schema.NullOr(Schema.String),
+	body: Schema.NullOr(Schema.String),
+	authorLogin: Schema.NullOr(Schema.String),
+	merged: Schema.Boolean,
+	mergeCommitSha: Schema.NullOr(Schema.String),
+	mergedAtMs: Schema.NullOr(Schema.Number),
+	deliveryId: Schema.optionalKey(Schema.String),
+})
+export type PullRequestEventJob = Schema.Schema.Type<typeof PullRequestEventJob>
+
 export const VcsSyncJob = Schema.Union([
 	InstallationSyncJob,
 	SyncCommitsJob,
 	PushJob,
 	SyncBranchesJob,
 	BranchEventJob,
+	PullRequestEventJob,
 ])
 export type VcsSyncJob = Schema.Schema.Type<typeof VcsSyncJob>
 

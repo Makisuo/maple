@@ -3,6 +3,7 @@ import {
 	type BranchEventJob,
 	type InstallationSyncJob,
 	isInstallationProcessable,
+	type PullRequestEventJob,
 	type PushJob,
 	type SyncCommitsJob,
 	type SyncBranchesJob,
@@ -20,6 +21,7 @@ import {
 } from "@maple/domain/http"
 import { Clock, Effect, Context, Layer, Option, Schema, Match } from "effect"
 import type { VcsProviderClient } from "./VcsProviderClient"
+import { PullRequestEventSink } from "./PullRequestEventSink"
 import { VcsProviderRegistry } from "./VcsProviderRegistry"
 import { VcsRepository } from "./VcsRepository"
 import { VcsSyncQueue } from "./VcsSyncQueue"
@@ -69,6 +71,7 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 			const repo = yield* VcsRepository
 			const registry = yield* VcsProviderRegistry
 			const queue = yield* VcsSyncQueue
+			const sink = yield* PullRequestEventSink
 
 			// The repo's single tracked branch, with the default-branch fallback for a
 			// row whose `trackedBranch` was never set (legacy) — the one place the
@@ -761,6 +764,29 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 				yield* applyBranchEvent(installation, repositoryOpt.value, job)
 			})
 
+			/**
+			 * A pull request changed. Unlike every other handler this one persists
+			 * nothing here — it resolves the owning org and forwards to the sink,
+			 * which owns the issue link and the verification window.
+			 *
+			 * Deliberately NOT behind `ensureProcessable`: that gate asks whether a
+			 * repository is synced, and a PR can name an issue in a repository this
+			 * org never asked Maple to index. Requiring a synced repo would drop
+			 * exactly the link a user most wants.
+			 */
+			const handlePullRequestEvent = Effect.fn("VcsSyncService.handlePullRequestEvent")(function* (
+				installation: VcsInstallation,
+				job: PullRequestEventJob,
+			) {
+				yield* Effect.annotateCurrentSpan({
+					"vcs.repository.external_id": job.externalRepoId,
+					"vcs.pull_request.number": job.number,
+					"vcs.pull_request.action": job.action,
+					"vcs.pull_request.merged": job.merged,
+				})
+				yield* sink.onPullRequestEvent(installation.orgId, job)
+			})
+
 			const processMessage = Effect.fn("VcsSyncService.processMessage")(function* (raw: unknown) {
 				const jobOpt = yield* decodeJob(raw).pipe(
 					Effect.map(Option.some),
@@ -837,6 +863,9 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 					Match.discriminator("kind")("push", (job) => handlePush(installation, job)),
 					Match.discriminator("kind")("branch-event", (job) =>
 						handleBranchEvent(installation, job),
+					),
+					Match.discriminator("kind")("pull-request-event", (job) =>
+						handlePullRequestEvent(installation, job),
 					),
 					Match.exhaustive,
 				)

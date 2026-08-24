@@ -18,6 +18,10 @@ import {
 	VcsSyncQueue,
 } from "./services/integrations/vcs/VcsSyncQueue"
 import { VcsSyncService } from "./services/integrations/vcs/VcsSyncService"
+import { ErrorActorsService } from "./services/errors/ErrorActorsService"
+import { ErrorIssueWorkflowService } from "./services/errors/ErrorIssueWorkflowService"
+import { IssueFixVerificationService } from "./services/errors/IssueFixVerificationService"
+import { PullRequestEventSinkLive } from "./services/errors/pull-request-sink-live"
 import { summarizeCause } from "@/platform/describe-cause"
 
 // Per-invocation runtime for the `VCS_SYNC_QUEUE` consumer. Mirrors the
@@ -46,8 +50,22 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 	)
 	const VcsProviderRegistryLive = VcsProviderRegistry.layer.pipe(Layer.provide(GithubProviderLive))
 	const VcsSyncQueueLive = VcsSyncQueue.layer.pipe(Layer.provide(WorkerEnvironment.layer))
+	// The issue side of a pull-request webhook. Only the queue consumer needs it —
+	// the scheduled producer below never sees a PR event — so it is built here
+	// rather than in `Base`, keeping the cron layer as light as it was.
+	const ErrorActorsServiceLive = ErrorActorsService.layer.pipe(Layer.provide(Base))
+	const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
+		Layer.provide(Layer.mergeAll(Base, ErrorActorsServiceLive)),
+	)
+	const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
+		Layer.provide(Layer.mergeAll(Base, ErrorActorsServiceLive, ErrorIssueWorkflowServiceLive)),
+	)
+	const PullRequestSinkLive = PullRequestEventSinkLive.pipe(Layer.provide(IssueFixVerificationServiceLive))
+
 	const VcsSyncServiceLive = VcsSyncService.layer.pipe(
-		Layer.provide(Layer.mergeAll(VcsRepositoryLive, VcsProviderRegistryLive, VcsSyncQueueLive)),
+		Layer.provide(
+			Layer.mergeAll(VcsRepositoryLive, VcsProviderRegistryLive, VcsSyncQueueLive, PullRequestSinkLive),
+		),
 	)
 
 	// `WorkerEnvironment` is merged into the output, not just provided inward, so

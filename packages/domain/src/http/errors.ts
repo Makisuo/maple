@@ -6,6 +6,8 @@ import {
 	ErrorIncidentId,
 	ErrorIssueEventId,
 	ErrorIssueId,
+	ErrorIssuePullRequestId,
+	ErrorIssueVerificationId,
 	InvestigationId,
 	IsoDateTimeString,
 	IssueEscalationId,
@@ -16,6 +18,13 @@ import {
 } from "../primitives"
 import { Authorization } from "./current-tenant"
 import { AlertSeverity } from "./alerts"
+import {
+	PullRequestLinkSource,
+	PullRequestLinkState,
+	VerificationStatus,
+	VerificationVerdict,
+} from "./fix-verification"
+import { VcsProviderId } from "./vcs"
 import { HttpTaggedError } from "./error-policy"
 
 // Workflow state machine literals
@@ -31,6 +40,11 @@ export const WorkflowState = Schema.Literals([
 	"todo",
 	"in_progress",
 	"in_review",
+	// A linked pull request has merged and the fix is being confirmed against real
+	// traffic. Machine-owned like `regressed`: entering it asserts an observation
+	// (a merge landed) rather than an intention, and the verification tick owns
+	// the exit. Ordered after `in_review` because that is where work flows from.
+	"verifying",
 	"done",
 	"cancelled",
 	"wontfix",
@@ -63,9 +77,13 @@ export const WORKFLOW_TRANSITIONS: Record<WorkflowState, ReadonlyArray<WorkflowS
 	triage: ["todo", "in_progress", "done", "cancelled", "wontfix"],
 	regressed: ["triage", "todo", "in_progress", "done", "cancelled", "wontfix"],
 	todo: ["triage", "in_progress", "done", "cancelled", "wontfix"],
-	in_progress: ["triage", "todo", "in_review", "done", "cancelled", "wontfix"],
-	in_review: ["triage", "in_progress", "done", "cancelled", "wontfix"],
-	done: ["triage", "regressed", "in_progress", "cancelled", "wontfix"],
+	in_progress: ["triage", "todo", "in_review", "verifying", "done", "cancelled", "wontfix"],
+	in_review: ["triage", "in_progress", "verifying", "done", "cancelled", "wontfix"],
+	verifying: ["triage", "todo", "in_progress", "in_review", "done", "cancelled", "wontfix"],
+	// `done → verifying` is the merge path for an issue somebody already closed by
+	// hand: the merge is still worth confirming, and a verdict of "not fixed" is
+	// how it gets reopened without waiting for the next occurrence.
+	done: ["triage", "regressed", "in_progress", "verifying", "cancelled", "wontfix"],
 	cancelled: [],
 	wontfix: ["triage", "cancelled"],
 } satisfies Record<WorkflowState, ReadonlyArray<WorkflowState>>
@@ -83,11 +101,17 @@ export const WORKFLOW_STATE_ORDER: ReadonlyArray<WorkflowState> = WorkflowState.
  * `regressed` records something observed — a fixed issue started firing from a
  * build that was not running when it was resolved. A human picking it from a
  * menu would be asserting that observation rather than making it, and the
- * evaluator would overwrite the claim on its next tick anyway. The edge stays
- * legal in {@link WORKFLOW_TRANSITIONS} because the tick does travel it; it is
- * the human-facing surfaces that filter it out.
+ * evaluator would overwrite the claim on its next tick anyway. `verifying` is
+ * the same shape: it says a linked pull request merged and a verification window
+ * is running, which is a fact about the world rather than a decision, and the
+ * verification tick owns the exit. Both edges stay legal in
+ * {@link WORKFLOW_TRANSITIONS} because the ticks do travel them; it is the
+ * human-facing surfaces that filter them out.
  */
-export const MACHINE_OWNED_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>(["regressed"])
+export const MACHINE_OWNED_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>([
+	"regressed",
+	"verifying",
+])
 
 /**
  * The states that *every* one of `from` can legally move to — the intersection
@@ -109,18 +133,63 @@ export const allowedTransitionsForAll = (from: Iterable<WorkflowState>): Readonl
 	)
 }
 
-/** States from which no further transition is possible. */
-export const TERMINAL_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>([
+/**
+ * States in which the work is over: the lease is dropped on arrival and the
+ * issue cannot be claimed.
+ *
+ * NOT "no further transition is possible", which is what the old name
+ * (`CLOSED_WORKFLOW_STATES`) claimed and what `done` plainly contradicts —
+ * `done` reopens to `regressed` on the errors tick, to `verifying` when a linked
+ * PR merges, and to `triage` for a human re-triaging by hand. `cancelled` is the
+ * only state with genuinely no outgoing moves.
+ */
+export const CLOSED_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>([
 	"done",
 	"cancelled",
 ])
 
 /**
+ * The states to walk through to get an issue to `in_review`, from wherever it is.
+ *
+ * `triage → in_review` is deliberately NOT a legal edge — an issue nobody has
+ * picked up cannot be under review — and for months that meant `propose_fix` on
+ * an untriaged issue failed outright with "Illegal transition from 'triage' to
+ * 'in_review'". Agents do not read the state machine before acting; they land on
+ * an issue in `triage`, propose the fix they just wrote, and get an error. It
+ * fired 18 times in production in two days.
+ *
+ * So the route is computed instead of assumed: one hop where the matrix allows
+ * it, otherwise via `in_progress`, which is the same state a claim moves an
+ * issue into. Empty means `in_review` is unreachable and the caller should say
+ * so *before* writing anything.
+ */
+export const fixProposalRoute = (from: WorkflowState): ReadonlyArray<WorkflowState> => {
+	if (from === "in_review") return []
+	if (WORKFLOW_TRANSITIONS[from].includes("in_review")) return ["in_review"]
+	if (WORKFLOW_TRANSITIONS[from].includes("in_progress")) return ["in_progress", "in_review"]
+	return []
+}
+
+/** Whether {@link fixProposalRoute} can get `from` to `in_review` at all. */
+export const canReachInReview = (from: WorkflowState): boolean =>
+	from === "in_review" || fixProposalRoute(from).length > 0
+
+/**
  * Renders the matrix as the prose an LLM tool description needs, so the
  * description can never drift from the rules the server actually enforces.
+ *
+ * Machine-owned targets are omitted, because the only caller is agent-facing and
+ * every surface that lets a caller *pick* a state filters them out — see
+ * {@link MACHINE_OWNED_WORKFLOW_STATES}. Listing `in_review→verifying` in the
+ * `transition_error_issue` description while the tool rejected `verifying` was
+ * an instruction to make a call that could only fail.
  */
 export const describeWorkflowTransitions = (): string =>
 	Object.entries(WORKFLOW_TRANSITIONS)
+		.map(
+			([from, targets]) =>
+				[from, targets.filter((target) => !MACHINE_OWNED_WORKFLOW_STATES.has(target))] as const,
+		)
 		.filter(([, targets]) => targets.length > 0)
 		.map(([from, targets]) => `${from}→(${targets.join("|")})`)
 		.join("; ")
@@ -182,6 +251,11 @@ export const ErrorIssueEventType = Schema.Literals([
 	"ai_triage",
 	"anomaly_linked",
 	"severity_change",
+	"pr_linked",
+	"pr_unlinked",
+	"pr_merged",
+	"verification_started",
+	"verification_verdict",
 ]).annotate({
 	identifier: "@maple/ErrorIssueEventType",
 	title: "Error Issue Event Type",
@@ -396,6 +470,75 @@ export class ErrorIssueSetSeverityRequest extends Schema.Class<ErrorIssueSetSeve
 )({
 	severity: Schema.NullOr(IssueSeverity),
 	note: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2_000))),
+}) {}
+
+// Pull request links + fix verification
+
+export class ErrorIssuePullRequestDocument extends Schema.Class<ErrorIssuePullRequestDocument>(
+	"ErrorIssuePullRequestDocument",
+)({
+	id: ErrorIssuePullRequestId,
+	issueId: ErrorIssueId,
+	provider: VcsProviderId,
+	/** `owner/name`. */
+	repoFullName: Schema.String,
+	number: Schema.Number,
+	url: Schema.String,
+	title: Schema.NullOr(Schema.String),
+	authorLogin: Schema.NullOr(Schema.String),
+	state: PullRequestLinkState,
+	mergedAt: Schema.NullOr(IsoDateTimeString),
+	mergeCommitSha: Schema.NullOr(Schema.String),
+	linkSource: PullRequestLinkSource,
+	linkedByActor: Schema.NullOr(ActorDocument),
+	createdAt: IsoDateTimeString,
+}) {}
+
+export class ErrorIssuePullRequestsResponse extends Schema.Class<ErrorIssuePullRequestsResponse>(
+	"ErrorIssuePullRequestsResponse",
+)({
+	pullRequests: Schema.Array(ErrorIssuePullRequestDocument),
+}) {}
+
+export class ErrorIssueLinkPullRequestRequest extends Schema.Class<ErrorIssueLinkPullRequestRequest>(
+	"ErrorIssueLinkPullRequestRequest",
+)({
+	/** A full pull request URL. Parsed server-side — see `parsePullRequestUrl`. */
+	url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_000)),
+}) {}
+
+/**
+ * A post-merge verification run, as the issue page renders it.
+ *
+ * `verifyAfter` and `baselineRatePerHour` travel together on purpose: the UI
+ * explains the wait ("~6h, because this fired ~3x/hour before the merge") and
+ * needs both halves to do it. A window with no explanation reads as arbitrary.
+ */
+export class ErrorIssueVerificationDocument extends Schema.Class<ErrorIssueVerificationDocument>(
+	"ErrorIssueVerificationDocument",
+)({
+	id: ErrorIssueVerificationId,
+	issueId: ErrorIssueId,
+	pullRequestId: ErrorIssuePullRequestId,
+	status: VerificationStatus,
+	mergedAt: IsoDateTimeString,
+	verifyAfter: IsoDateTimeString,
+	baselineVersions: Schema.Array(Schema.String),
+	baselineOccurrenceCount: Schema.Number,
+	baselineRatePerHour: Schema.Number,
+	postMergeOccurrenceCount: Schema.Number,
+	investigationId: Schema.NullOr(InvestigationId),
+	verdict: Schema.NullOr(VerificationVerdict),
+	verdictNote: Schema.NullOr(Schema.String),
+	attempt: Schema.Number,
+	createdAt: IsoDateTimeString,
+	updatedAt: IsoDateTimeString,
+}) {}
+
+export class ErrorIssueVerificationsResponse extends Schema.Class<ErrorIssueVerificationsResponse>(
+	"ErrorIssueVerificationsResponse",
+)({
+	verifications: Schema.Array(ErrorIssueVerificationDocument),
 }) {}
 
 export class RegisterAgentRequest extends Schema.Class<RegisterAgentRequest>("RegisterAgentRequest")({
@@ -633,6 +776,25 @@ export class ErrorValidationError extends Schema.TaggedError<ErrorValidationErro
 	{ httpApiStatus: 400 },
 ) {}
 
+export class ErrorIssuePullRequestInvalidError extends Schema.TaggedError<ErrorIssuePullRequestInvalidError>()(
+	"@maple/http/errors/ErrorIssuePullRequestInvalidError",
+	{
+		message: Schema.String,
+		/** Echoed back unparsed and explicitly named `raw` — it never became a link. */
+		rawUrl: Schema.String,
+	},
+	{ httpApiStatus: 400 },
+) {}
+
+export class ErrorIssuePullRequestNotFoundError extends Schema.TaggedError<ErrorIssuePullRequestNotFoundError>()(
+	"@maple/http/errors/ErrorIssuePullRequestNotFoundError",
+	{
+		message: Schema.String,
+		pullRequestId: ErrorIssuePullRequestId,
+	},
+	{ httpApiStatus: 404 },
+) {}
+
 export class ErrorForbiddenError extends Schema.TaggedError<ErrorForbiddenError>()(
 	"@maple/http/errors/ErrorForbiddenError",
 	{
@@ -774,7 +936,17 @@ export class ErrorsApiGroup extends HttpApiGroup.make("errors")
 			params: { issueId: ErrorIssueId },
 			payload: ErrorIssueProposeFixRequest,
 			success: ErrorIssueDocument,
-			error: [ErrorPersistenceError, ErrorIssueNotFoundError, ErrorIssueTransitionError],
+			// `ErrorIssueLeaseConflictError`: proposing a fix takes the lease, so it
+			// can collide with whoever is already working the issue.
+			error: [
+				ErrorPersistenceError,
+				ErrorIssueNotFoundError,
+				ErrorIssueTransitionError,
+				ErrorIssueLeaseConflictError,
+				// A `prUrl` that is not a pull request URL is a 400, not a silent
+				// no-op that reports the fix as attached.
+				ErrorIssuePullRequestInvalidError,
+			],
 		}),
 	)
 	.add(
@@ -879,6 +1051,35 @@ export class ErrorsApiGroup extends HttpApiGroup.make("errors")
 			},
 			success: IssueEscalationAttemptsResponse,
 			error: ErrorPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("listIssuePullRequests", "/issues/:issueId/pull-requests", {
+			params: { issueId: ErrorIssueId },
+			success: ErrorIssuePullRequestsResponse,
+			error: [ErrorPersistenceError, ErrorIssueNotFoundError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("linkIssuePullRequest", "/issues/:issueId/pull-requests", {
+			params: { issueId: ErrorIssueId },
+			payload: ErrorIssueLinkPullRequestRequest,
+			success: ErrorIssuePullRequestDocument,
+			error: [ErrorPersistenceError, ErrorIssueNotFoundError, ErrorIssuePullRequestInvalidError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.delete("unlinkIssuePullRequest", "/issues/:issueId/pull-requests/:pullRequestId", {
+			params: { issueId: ErrorIssueId, pullRequestId: ErrorIssuePullRequestId },
+			success: ErrorIssuePullRequestsResponse,
+			error: [ErrorPersistenceError, ErrorIssueNotFoundError, ErrorIssuePullRequestNotFoundError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("listIssueVerifications", "/issues/:issueId/verifications", {
+			params: { issueId: ErrorIssueId },
+			success: ErrorIssueVerificationsResponse,
+			error: [ErrorPersistenceError, ErrorIssueNotFoundError],
 		}),
 	)
 	.prefix("/api/errors")

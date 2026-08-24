@@ -178,6 +178,7 @@ describe("MUTATING_TOOL_NAMES", () => {
 				"set_issue_severity",
 				"update_error_notification_policy",
 				"propose_fix",
+				"link_pull_request",
 				"register_agent",
 			].sort(),
 		)

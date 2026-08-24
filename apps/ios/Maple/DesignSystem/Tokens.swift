@@ -54,6 +54,8 @@ enum Token {
 	static let blueFill = constant(.init(0.623, 0.214, 259.815)) // blue-500
 	static let purpleText = theme(light: .init(0.558, 0.288, 302.321), dark: .init(0.714, 0.203, 305.504))
 	static let purpleFill = constant(.init(0.606, 0.25, 292.717)) // violet-500
+	static let tealText = theme(light: .init(0.6, 0.118, 184.704), dark: .init(0.777, 0.152, 181.912))
+	static let tealFill = constant(.init(0.704, 0.14, 182.503)) // teal-500
 
 	// MARK: Chart palette (percentile-specific — not the generic 1..5 ramp)
 

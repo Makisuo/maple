@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
 	MACHINE_OWNED_WORKFLOW_STATES,
-	TERMINAL_WORKFLOW_STATES,
+	CLOSED_WORKFLOW_STATES,
 	WORKFLOW_STATE_ORDER,
 	WORKFLOW_TRANSITIONS,
 	allowedTransitionsForAll,
+	canReachInReview,
+	fixProposalRoute,
 	WorkflowState,
 	describeWorkflowTransitions,
 } from "./errors"
@@ -52,8 +54,45 @@ describe("WORKFLOW_TRANSITIONS", () => {
 		expect(WORKFLOW_TRANSITIONS.wontfix).toContain("triage")
 	})
 
-	it("marks exactly the states with no outbound moves plus done as terminal", () => {
-		expect([...TERMINAL_WORKFLOW_STATES].sort()).toEqual(["cancelled", "done"])
+	it("treats done and cancelled as closed — the states that end the work and drop the lease", () => {
+		// `done` is closed but NOT a dead end: it reopens to `regressed`,
+		// `verifying` and `triage`. `cancelled` is the only real dead end.
+		expect([...CLOSED_WORKFLOW_STATES].sort()).toEqual(["cancelled", "done"])
+		expect(WORKFLOW_TRANSITIONS.done.length).toBeGreaterThan(0)
+	})
+})
+
+describe("fixProposalRoute", () => {
+	it("reaches in_review from every state an issue can be worked from", () => {
+		// The regression this exists for: `propose_fix` on a `triage` issue used to
+		// fail with "Illegal transition from 'triage' to 'in_review'" AFTER it had
+		// already written the fix_proposed event and linked the PR.
+		for (const from of ["triage", "regressed", "todo", "in_progress", "verifying", "done"] as const) {
+			expect(canReachInReview(from), from).toBe(true)
+		}
+	})
+
+	it("walks a route the matrix actually permits, hop by hop", () => {
+		for (const from of ALL_STATES) {
+			let at: WorkflowState = from
+			for (const hop of fixProposalRoute(from)) {
+				expect(WORKFLOW_TRANSITIONS[at], `${from}: ${at}→${hop}`).toContain(hop)
+				at = hop
+			}
+			if (canReachInReview(from)) expect(at, from).toBe("in_review")
+		}
+	})
+
+	it("is a no-op for an issue already in review", () => {
+		expect(fixProposalRoute("in_review")).toEqual([])
+		expect(canReachInReview("in_review")).toBe(true)
+	})
+
+	it("reports the dead ends rather than routing through them", () => {
+		// `cancelled` has no moves at all; `wontfix` only wakes to `triage`. Both
+		// must be refused up front, not discovered mid-write.
+		expect(canReachInReview("cancelled")).toBe(false)
+		expect(canReachInReview("wontfix")).toBe(false)
 	})
 })
 
@@ -64,6 +103,21 @@ describe("describeWorkflowTransitions", () => {
 		expect(description).toContain("wontfix→(triage|cancelled)")
 		// `cancelled` has no legal moves, so listing it would only mislead the model.
 		expect(description).not.toContain("cancelled→")
+	})
+
+	it("never advertises a target the transition tool would reject", () => {
+		// `done→verifying` and `done→regressed` are legal edges the ticks travel,
+		// but no caller may ask for them. Advertising them told an agent to make a
+		// call that could only come back a validation error.
+		// Only as TARGETS. They stay as sources — an agent handed an issue already
+		// sitting in `regressed` or `verifying` still needs to know its moves.
+		const description = describeWorkflowTransitions()
+		for (const [, targets] of description.matchAll(/→\(([^)]+)\)/g)) {
+			for (const target of targets.split("|")) {
+				expect([...MACHINE_OWNED_WORKFLOW_STATES], target).not.toContain(target)
+			}
+		}
+		expect(description).toContain("done→(triage|in_progress|cancelled|wontfix)")
 	})
 })
 
@@ -86,8 +140,17 @@ describe("allowedTransitionsForAll", () => {
 		// it from a menu would be asserting that, and the next tick would overwrite
 		// the claim anyway.
 		expect(WORKFLOW_TRANSITIONS.done).toContain("regressed")
+		// Named literally rather than derived from MACHINE_OWNED_WORKFLOW_STATES: a
+		// test that filters by the same set the implementation filters by passes no
+		// matter what the set contains, so dropping a state from it would be
+		// invisible here — and the state would start appearing in the web state
+		// picker and the MCP transition tool.
+		const machineOwned = ["regressed", "verifying"] as const
+		expect([...MACHINE_OWNED_WORKFLOW_STATES].sort()).toEqual([...machineOwned].sort())
 		for (const state of ALL_STATES) {
-			expect(allowedTransitionsForAll([state]), state).not.toContain("regressed")
+			for (const target of machineOwned) {
+				expect(allowedTransitionsForAll([state]), state).not.toContain(target)
+			}
 		}
 	})
 

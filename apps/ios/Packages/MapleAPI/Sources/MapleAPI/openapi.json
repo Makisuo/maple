@@ -3378,6 +3378,7 @@
           "todo",
           "in_progress",
           "in_review",
+          "verifying",
           "done",
           "cancelled",
           "wontfix"

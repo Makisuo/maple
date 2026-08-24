@@ -24,7 +24,12 @@ const parseArtifactList = (raw: string | undefined): ReadonlyArray<string> => {
 export function registerProposeFixTool(server: McpToolRegistrar) {
 	server.tool(
 		"propose_fix",
-		"Attach a fix proposal (PR URL, patch summary, artifacts) to an error issue. Transitions the issue to 'in_review'. The human owner can then accept (→ done) or reject.",
+		[
+			"Record a fix you are proposing for an error issue — a patch summary, optionally a PR URL and supporting artifacts — and move the issue to `in_review`.",
+			"Claims the issue for you and walks it there from wherever it is, so you do not need `claim_error_issue` or `transition_error_issue` first; it fails if another agent already holds the issue, or if `pr_url` is not a GitHub pull request URL.",
+			"Passing `pr_url` also links the PR, so this is the only tool you need when you have just opened one; use `link_pull_request` for a PR that already exists and needs no new proposal.",
+			"Once a linked PR merges, Maple watches the error for a window sized by its severity and rate, then closes the issue itself if it stopped. Do not transition to `done` by hand.",
+		].join(" "),
 		Schema.Struct({
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),
 			patch_summary: requiredStringParam("Short description of the proposed fix (1..4000 chars)"),
@@ -63,11 +68,17 @@ export function registerProposeFixTool(server: McpToolRegistrar) {
 					),
 				)
 
+			// Say what happens next, because "State: in_review" does not convey that
+			// nobody should touch the issue again until the PR merges.
 			const lines = [
 				`## Fix proposed`,
 				`- Issue: ${issue.id}`,
 				`- State: ${issue.workflowState}`,
+				`- Held by you until you release it or the issue closes`,
 				pr_url ? `- PR: ${pr_url}` : null,
+				pr_url
+					? `- When that PR merges, Maple verifies the fix against real traffic and closes the issue if the error stopped. Don't transition it to 'done' yourself.`
+					: `- No PR attached, so nothing will verify this fix. Call link_pull_request when you open one.`,
 			].filter((l): l is string => l !== null)
 
 			return {
@@ -76,7 +87,6 @@ export function registerProposeFixTool(server: McpToolRegistrar) {
 					data: {
 						issueId: issue.id,
 						workflowState: issue.workflowState,
-						eventId: "",
 						prUrl: pr_url ?? null,
 					},
 				}),

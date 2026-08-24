@@ -2037,6 +2037,202 @@ describe("ErrorsService.runTick", () => {
 	)
 })
 
+describe("ErrorsService.proposeFix claims the issue", () => {
+	// The production bug, pinned. `propose_fix` on a `triage` issue failed with
+	// "Illegal transition from 'triage' to 'in_review'" — 18 occurrences in two
+	// days in the internal org — and failed only AFTER writing the fix_proposed
+	// event. Agents land on issues in `triage`; this is the state that matters.
+	it.effect("takes a triage issue all the way to in_review", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const issueId = asIssueId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			yield* seedIssue(issueId, { workflowState: "triage" })
+
+			const issue = yield* errors.proposeFix(ORG, actor.id, issueId, {
+				patchSummary: "Guard the self-PID case",
+			})
+
+			assert.strictEqual(issue.workflowState, "in_review")
+
+			// The lease is the whole point: an agent that only ever calls
+			// `propose_fix` must still end up holding it.
+			const [row] = yield* database.execute((db) =>
+				db
+					.select({
+						leaseHolderActorId: errorIssues.leaseHolderActorId,
+						leaseExpiresAt: errorIssues.leaseExpiresAt,
+					})
+					.from(errorIssues)
+					.where(eq(errorIssues.id, issueId)),
+			)
+			assert.strictEqual(row?.leaseHolderActorId, actor.id)
+			assert.isNotNull(row?.leaseExpiresAt)
+
+			const events = yield* database.execute((db) =>
+				db
+					.select({ type: errorIssueEvents.type, toState: errorIssueEvents.toState })
+					.from(errorIssueEvents)
+					.where(eq(errorIssueEvents.issueId, issueId)),
+			)
+			const types = events.map((event) => event.type)
+			expect(types).toContain("claim")
+			expect(types).toContain("fix_proposed")
+			// It walked triage → in_progress → in_review, not a single illegal hop.
+			expect(events.filter((e) => e.type === "state_change").map((e) => e.toState)).toEqual([
+				"in_progress",
+				"in_review",
+			])
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("works from every state an issue can be worked from", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			for (const from of ["triage", "regressed", "todo", "in_progress", "in_review"] as const) {
+				const issueId = asIssueId(randomUUID())
+				yield* seedIssue(issueId, { workflowState: from })
+				const issue = yield* errors.proposeFix(ORG, actor.id, issueId, {
+					patchSummary: `fix from ${from}`,
+				})
+				assert.strictEqual(issue.workflowState, "in_review", from)
+			}
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("refuses a closed issue before writing anything", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const issueId = asIssueId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			yield* seedIssue(issueId, { workflowState: "cancelled" })
+
+			const exit = yield* errors
+				.proposeFix(ORG, actor.id, issueId, { patchSummary: "too late" })
+				.pipe(Effect.exit)
+			assert.isTrue(exit._tag === "Failure")
+
+			// The regression that made the old ordering dangerous: no half-written
+			// proposal left behind by a rejected call.
+			const events = yield* database.execute((db) =>
+				db
+					.select({ type: errorIssueEvents.type })
+					.from(errorIssueEvents)
+					.where(eq(errorIssueEvents.issueId, issueId)),
+			)
+			expect(events.map((event) => event.type)).not.toContain("fix_proposed")
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("refuses a pr_url that is not a pull request, instead of silently dropping it", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const issueId = asIssueId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			yield* seedIssue(issueId, { workflowState: "triage" })
+
+			const exit = yield* errors
+				.proposeFix(ORG, actor.id, issueId, {
+					patchSummary: "fixed it",
+					prUrl: "https://example.com/not-a-pr",
+				})
+				.pipe(Effect.exit)
+
+			// It used to succeed, swallow the link failure, and report back
+			// "- PR: https://example.com/not-a-pr" — so the agent believed the fix
+			// was attached and would be verified after merge. Nothing was linked and
+			// no verification would ever run.
+			assert.isTrue(exit._tag === "Failure")
+			const events = yield* database.execute((db) =>
+				db
+					.select({ type: errorIssueEvents.type })
+					.from(errorIssueEvents)
+					.where(eq(errorIssueEvents.issueId, issueId)),
+			)
+			expect(events.map((event) => event.type)).not.toContain("fix_proposed")
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("fails when another actor holds the lease", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const issueId = asIssueId(randomUUID())
+			const mine = yield* errors.ensureUserActor(ORG, USER)
+			const now = yield* Clock.currentTimeMillis
+			yield* seedIssue(issueId, {
+				workflowState: "in_progress",
+				leaseHolderActorId: asActorId(randomUUID()),
+				claimedAt: new Date(now),
+				leaseExpiresAt: new Date(now + 600_000),
+			})
+
+			const exit = yield* errors
+				.proposeFix(ORG, mine.id, issueId, { patchSummary: "racing" })
+				.pipe(Effect.exit)
+
+			// The duplicate-work collision the lease exists to catch, finally caught
+			// on the path agents actually take.
+			assert.isTrue(exit._tag === "Failure")
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+})
+
+describe("ErrorsService.transitionIssue claims on in_progress", () => {
+	// The path the internal org's agent actually took: transition to in_progress
+	// by hand, then to in_review. It left every one of 50 live issues unclaimed.
+	it.effect("takes the lease when an actor moves an issue to in_progress", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const issueId = asIssueId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			yield* seedIssue(issueId, { workflowState: "triage" })
+
+			yield* errors.transitionIssue(ORG, actor.id, issueId, "in_progress")
+
+			const [row] = yield* database.execute((db) =>
+				db
+					.select({ leaseHolderActorId: errorIssues.leaseHolderActorId })
+					.from(errorIssues)
+					.where(eq(errorIssues.id, issueId)),
+			)
+			assert.strictEqual(row?.leaseHolderActorId, actor.id)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("leaves another actor's lease alone rather than refusing the move", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			const issueId = asIssueId(randomUUID())
+			const holder = asActorId(randomUUID())
+			const actor = yield* errors.ensureUserActor(ORG, USER)
+			const now = yield* Clock.currentTimeMillis
+			yield* seedIssue(issueId, {
+				workflowState: "triage",
+				leaseHolderActorId: holder,
+				claimedAt: new Date(now),
+				leaseExpiresAt: new Date(now + 600_000),
+			})
+
+			const issue = yield* errors.transitionIssue(ORG, actor.id, issueId, "in_progress")
+
+			assert.strictEqual(issue.workflowState, "in_progress")
+			const [row] = yield* database.execute((db) =>
+				db
+					.select({ leaseHolderActorId: errorIssues.leaseHolderActorId })
+					.from(errorIssues)
+					.where(eq(errorIssues.id, issueId)),
+			)
+			assert.strictEqual(row?.leaseHolderActorId, holder)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+})
+
 describe("ErrorsService.transitionIssue lease renewal", () => {
 	// Covers the non-terminal branch of `applyTransition`: an agent moving its own
 	// claimed issue along is working on it, so the lease should follow rather than

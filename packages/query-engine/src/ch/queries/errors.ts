@@ -43,8 +43,33 @@ function errorEventsTableForRecentScan(opts: {
 
 const fingerprintHashLiteral = (hash: string) => CH.toUInt64(CH.lit(hash))
 const fingerprintHashEq = (expr: CH.Expr<number>, hash: string) => expr.eq(fingerprintHashLiteral(hash))
-const fingerprintHashIn = (expr: CH.Expr<number>, hashes: readonly string[]) =>
-	CH.inExprList(expr, hashes.map(fingerprintHashLiteral))
+
+/**
+ * Whether a fingerprint is one the warehouse could hold.
+ *
+ * `error_issues.fingerprint_hash` is shared by three issue kinds: "error" rows
+ * hold the decimal UInt64 that ClickHouse computed, while "alert" and
+ * "integration" rows reuse the column for a synthetic key
+ * (`alert:{ruleId}:{groupKey}`, `planetscale:{database}:{event}`). Only the
+ * first kind ever appears in `error_events`.
+ *
+ * The failure this prevents is not a wrong row, it is a dead request:
+ * `toUInt64('alert:…')` does not skip that value, it aborts the whole query, so
+ * a single alert-backed issue in a batch of twenty 500s the lot. It did — the
+ * errors hub's sparklines, 83 times in three days, until #573 filtered the list
+ * client-side. This is the same guard on the side that cannot be bypassed by a
+ * different caller.
+ */
+const isWarehouseFingerprint = (hash: string) => /^[0-9]+$/.test(hash)
+
+const fingerprintHashIn = (expr: CH.Expr<number>, hashes: readonly string[]) => {
+	const usable = hashes.filter(isWarehouseFingerprint)
+	// Dropping every hash is a real answer, not an error: the caller asked about
+	// fingerprints that cannot exist here, and the answer is no rows. Emitted as
+	// a false literal because `IN ()` is a ClickHouse syntax error.
+	if (usable.length === 0) return CH.rawCond("1 = 0")
+	return CH.inExprList(expr, usable.map(fingerprintHashLiteral))
+}
 
 /**
  * Filters every errors surface shares. `errorLabels` and `serviceVersions` are
@@ -1074,6 +1099,49 @@ export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
 		.orderBy(["timestamp", "desc"])
 		.limit(opts.limit ?? 25)
 		.format("JSON")
+}
+
+// Fix verification — occurrences of one fingerprint since a merge, per build.
+//
+// The verdict on "did the fix work" is a membership question, not a count: an
+// occurrence from a build that was already running when the fix merged is an old
+// client still in the wild, while one from a build absent from that set is the
+// fix demonstrably not working. So this returns the split by `ServiceVersion`
+// and lets the caller partition it against the merge-time baseline, rather than
+// pushing the baseline array down into the SQL — which would have to be
+// re-templated per issue and would defeat the compiled query's parameter reuse.
+//
+// Reads the per-occurrence table, not the minutely rollup: verification windows
+// start at an arbitrary instant (the merge), and a minute-granular rollup would
+// smear occurrences across the boundary in exactly the direction that matters.
+
+export const ErrorIssueVersionsSinceOutputSchema = Schema.Struct({
+	serviceVersion: Schema.String,
+	count: CHNumber,
+})
+export type ErrorIssueVersionsSinceOutput = Schema.Schema.Type<typeof ErrorIssueVersionsSinceOutputSchema>
+
+export function errorIssueVersionsSinceQuery(opts: { limit?: number } = {}) {
+	return (
+		from(ErrorEvents)
+			.select(($) => ({
+				serviceVersion: $.ServiceVersion,
+				count: CH.count(),
+			}))
+			.where(($) => [
+				$.OrgId.eq(param.string("orgId")),
+				$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
+				$.Timestamp.gte(param.dateTime("startTime")),
+				$.Timestamp.lte(param.dateTime("endTime")),
+			])
+			.groupBy("serviceVersion")
+			.orderBy(["count", "desc"])
+			// Capped because an org running many builds could otherwise return a long
+			// tail; the partition only needs the builds that actually fired, and the
+			// count that matters is dominated by the head.
+			.limit(opts.limit ?? 100)
+			.format("JSON")
+	)
 }
 
 // Error Issue environments — where one fingerprint was seen in the window.
