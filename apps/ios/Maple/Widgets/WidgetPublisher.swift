@@ -65,6 +65,19 @@ final class WidgetPublisher {
 	/// ceiling now: each one is a bearer token that then has to be revoked.
 	private static let maximumOrganizations = 3
 
+	/// One organization filtered to one deployment environment — the unit a
+	/// round actually fetches and stores.
+	///
+	/// The organization alone stopped being enough once widgets could be pinned
+	/// to an environment: two widgets on the same organization, one on
+	/// production and one on staging, are two different questions with two
+	/// different snapshot slots. Nil is the whole organization, which is what
+	/// every widget placed before the environment picker asks for.
+	struct PublishTarget: Hashable, Sendable {
+		var organizationId: String
+		var environment: String?
+	}
+
 	private let index: WidgetOrganizationIndex
 	/// Where the widgets' own credential lives — a file in the shared App Group
 	/// container, written here and read by the extension.
@@ -91,6 +104,12 @@ final class WidgetPublisher {
 		/// Every organization the user belongs to, for widgets pinned to one
 		/// that is not active.
 		var memberships: [WidgetOrganization]
+		/// The environment the app itself is showing, or nil for all of them.
+		///
+		/// The floor of every round: whatever else is pinned, what the user is
+		/// looking at right now gets published. It is also what an unconfigured
+		/// widget resolves to through the index.
+		var activeEnvironment: String?
 	}
 
 	/// What asked for this refresh. Recorded on every `widget.refresh` span,
@@ -139,7 +158,15 @@ final class WidgetPublisher {
 		// costs nothing: `organizationsToPublish` intersects with what is
 		// actually pinned anyway, and a background round's budget is one extra
 		// organization.
-		context = Context(api: api, active: organization, memberships: published)
+		// The environment comes off the index too — a headless launch has no
+		// `EnvironmentController`, and the index is where the app last wrote
+		// what it was showing.
+		context = Context(
+			api: api,
+			active: organization,
+			memberships: published,
+			activeEnvironment: organization.activeEnvironment
+		)
 	}
 
 	/// Called whenever the signed-in organization, or the set the user belongs
@@ -156,11 +183,17 @@ final class WidgetPublisher {
 	/// - Parameter membershipsVerified: false when the list came from Clerk's
 	///   client payload, which can be partial. Only a verified list may be
 	///   written to the index — the same rule `prune` documents.
+	/// - Parameter environment: what the app is showing right now, or nil for
+	///   the whole organization. Not defaulted: an omitted argument would read
+	///   as "organization-wide" at every call site that simply had not been
+	///   updated, which is the silent-reset this parameter exists to make
+	///   impossible.
 	func configure(
 		api: any MapleAPI,
 		organizationId: String,
 		memberships: [WidgetOrganization] = [],
-		membershipsVerified: Bool = false
+		membershipsVerified: Bool = false,
+		environment: String?
 	) {
 		let isNewOrganization = context?.active.id != organizationId
 		let active = WidgetOrganization(
@@ -174,7 +207,8 @@ final class WidgetPublisher {
 		context = Context(
 			api: api,
 			active: active,
-			memberships: memberships.isEmpty ? [active] : memberships
+			memberships: memberships.isEmpty ? [active] : memberships,
+			activeEnvironment: environment
 		)
 		// Every membership goes into the index, not just the ones a round will
 		// fetch for: the picker reads it, and an organization the app has never
@@ -186,6 +220,29 @@ final class WidgetPublisher {
 		// A switch invalidates the throttle: the numbers on the Home Screen
 		// belong to the organization the user just left.
 		if isNewOrganization { lastRefreshedAt = nil }
+	}
+
+	/// Publish what the app has learned about one organization's environments:
+	/// which exist, and which the app is showing.
+	///
+	/// Separate from `configure` because the sources differ — memberships come
+	/// from Clerk on launch, environments from the warehouse whenever the
+	/// organization changes — and because only this one can arrive late. See
+	/// `WidgetOrganizationIndex.record(environments:activeEnvironment:for:)`.
+	///
+	/// An environment change moves what an unconfigured widget renders without
+	/// moving any snapshot's contents, exactly as an organization switch does,
+	/// so it sets the same flag: the next round spends a reload on it.
+	func recordEnvironments(_ environments: [String], selected: String?, for organizationId: String) {
+		if index.record(environments: environments, activeEnvironment: selected, for: organizationId) {
+			resolutionChanged = true
+		}
+		if context?.active.id == organizationId, context?.activeEnvironment != selected {
+			context?.activeEnvironment = selected
+			// The Home Screen's numbers belong to the environment the user just
+			// left — the same reason an organization switch clears the throttle.
+			lastRefreshedAt = nil
+		}
 	}
 
 	/// One `reloadAllTimelines` after an update that changed how widgets resolve
@@ -211,6 +268,9 @@ final class WidgetPublisher {
 	/// when the list came from Clerk's client payload, which can be partial —
 	/// pruning against that would wipe live organizations.
 	func prune(to memberIds: Set<String>) {
+		// Read before pruning: the entries carry the environments whose
+		// snapshots have to be wiped, and `prune` is what deletes the entries.
+		let knownBefore = index.load()
 		let evicted = index.prune(to: memberIds)
 		// Nothing changed on the common path — this runs on every launch and every
 		// organization switch, and `reloadAllTimelines` spends the widget refresh
@@ -219,8 +279,10 @@ final class WidgetPublisher {
 		let api = context?.api
 		let installationId = AppInstallation.identifier
 		for organizationId in evicted {
-			WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organizationId).clear()
-			WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organizationId).clear()
+			Self.clearSnapshots(
+				organizationId: organizationId,
+				environments: knownBefore.first { $0.id == organizationId }
+			)
 			credentials.clear(organizationId: organizationId)
 			fetchStates.clear(organizationId: organizationId)
 			// Server-side too, and not only locally: deleting the file stops this
@@ -233,6 +295,30 @@ final class WidgetPublisher {
 			}
 		}
 		WidgetCenter.shared.reloadAllTimelines()
+	}
+
+	/// Wipe every snapshot one organization has, across every environment.
+	///
+	/// The organization-wide slot alone is not enough any more. Snapshots are
+	/// keyed per (organization, environment), so clearing only the first would
+	/// leave one account's staging issue list readable in the App Group to
+	/// whoever holds the phone next — which is the whole point of clearing.
+	///
+	/// The index entry is the list of what to wipe. `activeEnvironment` is
+	/// included separately because the app can be showing an environment that
+	/// the environments list has not caught up with yet.
+	private static func clearSnapshots(organizationId: String, environments organization: WidgetOrganization?) {
+		var slots: [String?] = [nil]
+		slots.append(contentsOf: (organization?.environments ?? []).map { $0 })
+		if let active = organization?.activeEnvironment, !slots.contains(active) { slots.append(active) }
+		for environment in slots {
+			WidgetSnapshotStore<IssuesSnapshot>
+				.issues(organizationId: organizationId, environment: environment)
+				.clear()
+			WidgetSnapshotStore<ThroughputSnapshot>
+				.throughput(organizationId: organizationId, environment: environment)
+				.clear()
+		}
 	}
 
 	/// Fetch and publish both snapshots.
@@ -249,6 +335,7 @@ final class WidgetPublisher {
 
 		let plan = await organizationsToPublish(context, trigger: trigger)
 		let organizations = plan.organizations
+		let targets = plan.targets
 		// A widget with no configuration — every instance migrated from before
 		// the picker — resolves through the index's active organization, so a
 		// switch changes what it renders without changing any snapshot's
@@ -272,8 +359,10 @@ final class WidgetPublisher {
 				Telemetry.Key.widgetKnownOrganizationCount: .int(Int64(known.count)),
 			]
 		) { span in
-			let rounds = organizations.map { organization in
-				PublishRound(
+			let rounds = targets.compactMap { target -> PublishRound? in
+				guard let organization = organizations.first(where: { $0.id == target.organizationId })
+				else { return nil }
+				return PublishRound(
 					// Resolved again here, not taken as assembled: this name is
 					// baked into `IssuesSnapshot.organizationName`, and a
 					// snapshot that carries the wrong organization's name
@@ -287,7 +376,12 @@ final class WidgetPublisher {
 						),
 						lastPublishedAt: organization.lastPublishedAt
 					),
-					api: context.api.scoped(to: organization.id),
+					environment: target.environment,
+					// Both scopes, and both are needed: the organization travels
+					// in a header, the environment in the query string.
+					api: context.api
+						.scoped(to: organization.id)
+						.scoped(toEnvironment: target.environment),
 					isActive: organization.id == context.active.id
 				)
 			}
@@ -369,6 +463,10 @@ final class WidgetPublisher {
 	/// actor.
 	private struct PublishRound: Sendable {
 		let organization: WidgetOrganization
+		/// Nil for the whole organization. Selects the snapshot slot as well as
+		/// the query, so two rounds for one organization do not overwrite each
+		/// other.
+		let environment: String?
 		let api: any MapleAPI
 		let isActive: Bool
 	}
@@ -376,7 +474,11 @@ final class WidgetPublisher {
 	/// One organization's round: one request covering both surfaces, then record
 	/// it in the index the widget extension reads.
 	private func publish(_ round: PublishRound) async -> (issues: PublishOutcome, throughput: PublishOutcome) {
-		let outcome = await publishSummary(round.organization, api: round.api)
+		let outcome = await publishSummary(
+			round.organization,
+			environment: round.environment,
+			api: round.api
+		)
 
 		// Only a round that actually published stamps the time. It used to
 		// stamp unconditionally, which made a repeatedly failing organization
@@ -493,10 +595,11 @@ final class WidgetPublisher {
 	private func organizationsToPublish(
 		_ context: Context,
 		trigger: Trigger
-	) async -> (organizations: [WidgetOrganization], pinnedCount: Int) {
-		let pinned = await pinnedOrganizationIds()
+	) async -> (targets: [PublishTarget], organizations: [WidgetOrganization], pinnedCount: Int) {
+		let pinned = await pinnedTargets()
+		let pinnedOrganizationIds = Set(pinned.map(\.organizationId))
 		let others = context.memberships.filter {
-			$0.id != context.active.id && pinned.contains($0.id)
+			$0.id != context.active.id && pinnedOrganizationIds.contains($0.id)
 		}
 
 		// There used to be an oldest-first ordering here, so a background round
@@ -513,26 +616,48 @@ final class WidgetPublisher {
 		// organization nobody pinned is battery spent to make iOS trust the app
 		// less.
 		let budget = trigger == .background ? 1 : Self.maximumOrganizations - 1
-		return ([context.active] + others.prefix(budget), pinned.count)
+		let organizations = [context.active] + others.prefix(budget)
+		let covered = Set(organizations.map(\.id))
+
+		// The environments come from what is *pinned*, never from the
+		// organization's full environment list. Fanning out over every
+		// environment would multiply a five-environment organization's round by
+		// five, to publish four snapshots nobody put on a Home Screen — the same
+		// mistake as publishing every membership, one level down.
+		//
+		// The app's own selection is the floor, and it is added unconditionally.
+		// `currentConfigurations()` failing is indistinguishable from "nothing
+		// pinned" at the call site, so without the floor a single failed read
+		// would publish nothing at all for the organization on screen.
+		var targets = [PublishTarget(
+			organizationId: context.active.id,
+			environment: context.activeEnvironment
+		)]
+		for target in pinned where covered.contains(target.organizationId) {
+			if !targets.contains(target) { targets.append(target) }
+		}
+
+		return (targets, organizations, pinned.count)
 	}
 
-	/// The organizations the user actually pinned a widget to.
-	private func pinnedOrganizationIds() async -> Set<String> {
+	/// The (organization, environment) pairs the user actually pinned a widget
+	/// to.
+	private func pinnedTargets() async -> [PublishTarget] {
 		guard let configurations = try? await WidgetCenter.shared.currentConfigurations() else { return [] }
-		var ids: Set<String> = []
+		var targets: [PublishTarget] = []
 		for info in configurations {
 			if let intent = info.widgetConfigurationIntent(of: SelectOrganizationIntent.self),
 				let id = intent.organization?.id
 			{
-				ids.insert(id)
+				targets.append(PublishTarget(organizationId: id, environment: intent.environment?.id))
 			}
 			if let intent = info.widgetConfigurationIntent(of: SelectServiceIntent.self),
 				let id = intent.organization?.id
 			{
-				ids.insert(id)
+				targets.append(PublishTarget(organizationId: id, environment: intent.environment?.id))
 			}
 		}
-		return ids
+		return targets
 	}
 
 	/// One surface's fetch-and-publish, as a child of the refresh.
@@ -578,13 +703,18 @@ final class WidgetPublisher {
 		credentials.clearAll()
 		// Every organization, not just the active one: anything left behind
 		// stays readable on the Home Screen of a phone that has been signed out.
+		// Read before clearing, for the environments each entry carries — every
+		// one of them has its own snapshot slot to wipe.
+		let knownBefore = index.load()
 		for organizationId in index.clear() {
 			fetchStates.clear(organizationId: organizationId)
 			if let api {
 				Task { try? await api.scoped(to: organizationId).revokeWidgetCredential(installationId: installationId) }
 			}
-			WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organizationId).clear()
-			WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organizationId).clear()
+			Self.clearSnapshots(
+				organizationId: organizationId,
+				environments: knownBefore.first { $0.id == organizationId }
+			)
 		}
 		// The pre-per-organization keys too. They are not in the index — nothing
 		// published them — so iterating it alone would leave a widget placed
@@ -605,6 +735,7 @@ final class WidgetPublisher {
 	/// whichever half failed before.
 	private func publishSummary(
 		_ organization: WidgetOrganization,
+		environment: String?,
 		api: any MapleAPI
 	) async -> (issues: PublishOutcome, throughput: PublishOutcome) {
 		await snapshot("summary") {
@@ -620,7 +751,12 @@ final class WidgetPublisher {
 			// class of error as opening the wrong organization from a
 			// notification, and just as invisible once it has happened.
 			guard payload.organizationId == organization.id else { return failed }
-			return await self.store(payload, for: organization)
+			// And the same check for the environment, which is the more likely
+			// of the two to disagree: a server that predates the parameter
+			// answers organization-wide with a cheerful 200, and storing that
+			// would put production's numbers in the staging slot.
+			guard payload.deploymentEnvironment == environment else { return failed }
+			return await self.store(payload, for: organization, environment: environment)
 		}
 	}
 
@@ -628,7 +764,8 @@ final class WidgetPublisher {
 	/// reload budget is still spent per widget kind.
 	private func store(
 		_ payload: WidgetSummaryPayload,
-		for organization: WidgetOrganization
+		for organization: WidgetOrganization,
+		environment: String?
 	) async -> (issues: PublishOutcome, throughput: PublishOutcome) {
 		// The name comes from the caller (resolved against the membership index),
 		// never from the payload — see the endpoint's own note on why it carries
@@ -636,8 +773,14 @@ final class WidgetPublisher {
 		let issues = payload.issuesSnapshot(organizationName: organization.name)
 		let throughput = payload.throughputSnapshot()
 
-		let issuesStore = WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organization.id)
-		let throughputStore = WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organization.id)
+		let issuesStore = WidgetSnapshotStore<IssuesSnapshot>.issues(
+			organizationId: organization.id,
+			environment: environment
+		)
+		let throughputStore = WidgetSnapshotStore<ThroughputSnapshot>.throughput(
+			organizationId: organization.id,
+			environment: environment
+		)
 		// Read before writing: the reload decision is "does this differ from what
 		// is on screen", and after the save there is nothing to compare to.
 		let storedIssues = issuesStore.load()

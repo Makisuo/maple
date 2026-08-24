@@ -34,5 +34,6 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 	"update_error_notification_policy",
 	// fixes / agents
 	"propose_fix",
+	"link_pull_request",
 	"register_agent",
 ])

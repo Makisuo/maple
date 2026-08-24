@@ -10,9 +10,15 @@ import MapleWidgetData
 /// the same one the widget extension decodes for itself, so the app and the
 /// Home Screen cannot drift apart about what a row says.
 extension MapleClient {
+	/// Filtered to the client's environment scope, if it has one. The server
+	/// echoes the filter it applied, and `payload(from:)` carries that echo —
+	/// not the value asked for — into the snapshot, so a server that ignored
+	/// the parameter cannot be mistaken for one that honoured it.
 	public func widgetSummary() async throws -> WidgetSummaryPayload {
 		try await mapping {
-			let output = try await client.getWidgetSummary(.init())
+			let output = try await client.getWidgetSummary(
+				.init(query: .init(deploymentEnvironment: environment))
+			)
 			return try Self.payload(from: output.ok.body.json)
 		}
 	}
@@ -35,6 +41,7 @@ extension MapleClient {
 			schemaVersion: Int(summary.schemaVersion),
 			generatedAt: generatedAt,
 			organizationId: summary.organizationId,
+			deploymentEnvironment: summary.deploymentEnvironment,
 			issues: WidgetSummaryPayload.Issues(
 				windowSeconds: Int(summary.issues.windowSeconds),
 				hasMore: summary.issues.hasMore,

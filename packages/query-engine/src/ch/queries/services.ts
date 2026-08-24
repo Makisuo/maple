@@ -593,21 +593,33 @@ export function serviceReleasesTimelineQuery(
 
 // Service environments
 //
-// Distinct non-empty deployment environments a single service reports in the
-// window. Backs the service-detail environment switcher, replacing an
+// Distinct non-empty deployment environments reported in the window, for one
+// service or for the whole organization. Backs the service-detail environment
+// switcher and the mobile app's global environment picker, replacing an
 // all-services overview scan that fetched every service's rows just to extract
-// one service's environments. Service-scoped + time-windowed so ClickHouse
-// prunes both the service and the date partitions.
+// one service's environments. Time-windowed — and service-scoped when a service
+// is named — so ClickHouse prunes the date partitions and, where it can, the
+// service too.
+//
+// Deriving the organization-wide list from a page of `serviceCatalogQuery`
+// instead would be wrong rather than merely slower: that listing is capped by
+// its own `limit`, so an environment that only appears on the hundredth service
+// would never be discovered.
+//
+// The empty environment is dropped on purpose. The DSL reads `''` as "no
+// filter", so offering it as a choice would hand the caller back every
+// environment under a label claiming otherwise.
 
 export interface ServiceEnvironmentsOpts {
-	serviceName: string
+	/** Omitted for the organization-wide list. */
+	serviceName?: string
 }
 
 export interface ServiceEnvironmentsOutput {
 	readonly environment: string
 }
 
-export function serviceEnvironmentsQuery(opts: ServiceEnvironmentsOpts) {
+export function serviceEnvironmentsQuery(opts: ServiceEnvironmentsOpts = {}) {
 	return serviceOverviewWindows({ serviceName: opts.serviceName })
 		.select(($) => ({
 			environment: $.bEnvironment,

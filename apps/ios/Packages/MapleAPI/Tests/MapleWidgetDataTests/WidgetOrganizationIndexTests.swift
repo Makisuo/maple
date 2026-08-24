@@ -156,6 +156,86 @@ struct WidgetOrganizationIndexTests {
 		#expect(index.load().isEmpty)
 		#expect(index.activeOrganizationId == nil)
 	}
+
+	// MARK: Environments
+
+	/// Environments are the app's to know — the extension holds no session and
+	/// its one network call is fenced to the widget summary — so the index is
+	/// the only place its picker can read them from.
+	@Test("Records an organization's environments and the one the app is showing")
+	func recordsEnvironments() {
+		let index = makeIndex()
+		index.record(organization("org_a", name: "Initech"), isActive: true)
+
+		#expect(index.record(environments: ["production", "staging"], activeEnvironment: "staging", for: "org_a"))
+		let stored = try? #require(index.load().first)
+		#expect(stored?.environments == ["production", "staging"])
+		#expect(stored?.activeEnvironment == "staging")
+	}
+
+	/// The caller spends a metered widget reload on `true`, so a call that
+	/// teaches the index nothing has to say so.
+	@Test("Recording the same environments again reports no change")
+	func recordingEnvironmentsIsIdempotent() {
+		let index = makeIndex()
+		index.record(organization("org_a", name: "Initech"), isActive: true)
+		index.record(environments: ["production"], activeEnvironment: nil, for: "org_a")
+
+		#expect(index.record(environments: ["production"], activeEnvironment: nil, for: "org_a") == false)
+	}
+
+	/// A publish round knows nothing about environments. Letting it write an
+	/// empty list would empty the widget's environment picker on the next
+	/// background fetch — the same reason a round never blanks a name.
+	@Test("A publish round does not blank the environments it does not know")
+	func publishPreservesEnvironments() {
+		let index = makeIndex()
+		index.record(organization("org_a", name: "Initech"), isActive: true)
+		index.record(environments: ["production", "staging"], activeEnvironment: "staging", for: "org_a")
+
+		index.record(organization("org_a", name: "Initech", minutesAgo: 0), isActive: true)
+
+		#expect(index.load().first?.environments == ["production", "staging"])
+		#expect(index.load().first?.activeEnvironment == "staging")
+	}
+
+	/// Same rule for the membership refresh, which is authoritative for the
+	/// name and silent about everything else.
+	@Test("A membership refresh does not blank the environments")
+	func membershipsPreserveEnvironments() {
+		let index = makeIndex()
+		index.record(organization("org_a", name: "Initech"), isActive: true)
+		index.record(environments: ["production"], activeEnvironment: "production", for: "org_a")
+
+		index.record(memberships: [WidgetOrganization(id: "org_a", name: "Initech Renamed")])
+
+		#expect(index.load().first?.name == "Initech Renamed")
+		#expect(index.load().first?.environments == ["production"])
+	}
+
+	/// An organization the index has never heard of has no name and no
+	/// snapshot; adding one here would put a bare `org_…` id in the picker.
+	@Test("Environments for an unknown organization are ignored")
+	func ignoresUnknownOrganizations() {
+		let index = makeIndex()
+		#expect(index.record(environments: ["production"], activeEnvironment: nil, for: "org_ghost") == false)
+		#expect(index.load().isEmpty)
+	}
+
+	/// The upgrade path. An entry written by a build before the environment
+	/// picker has no `environments` key at all; a synthesized decoder would
+	/// treat that as required and drop the whole index, sending every widget on
+	/// the Home Screen back to "Open Maple".
+	@Test("An entry written before environments existed still decodes")
+	func decodesPreEnvironmentEntries() throws {
+		let json = Data(#"[{"id":"org_a","name":"Initech"}]"#.utf8)
+		let decoded = try WidgetJSON.decoder.decode([WidgetOrganization].self, from: json)
+
+		#expect(decoded.first?.id == "org_a")
+		#expect(decoded.first?.environments.isEmpty == true)
+		#expect(decoded.first?.activeEnvironment == nil)
+	}
+
 }
 
 /// The rule that keeps a widget from putting one organization's name over
@@ -264,4 +344,5 @@ struct PerOrganizationSnapshotStoreTests {
 		issues.save(snapshot(organizationId: "org_a"))
 		#expect(throughput.load() == nil)
 	}
+
 }

@@ -53,6 +53,8 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00' - INTERVAL 86400 SECOND
+          AND Timestamp <= '2026-01-03 14:15:00' + INTERVAL 86400 SECOND
           AND TraceId IN (SELECT
           TraceId AS TraceId
         FROM traces
@@ -92,6 +94,8 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00' - INTERVAL 86400 SECOND
+          AND Timestamp <= '2026-01-03 14:15:00' + INTERVAL 86400 SECOND
           AND TraceId IN (SELECT
           TraceId AS TraceId
         FROM traces
@@ -138,30 +142,15 @@ SELECT
         LIMIT 2000
         FORMAT JSON
 
--- builder:ai-sessions:aiSessionSpansQuery:unwindowed
+-- builder:ai-sessions:aiSessionWindowQuery:default
 SELECT
-          TraceId AS traceId,
-          SpanId AS spanId,
-          ParentSpanId AS parentSpanId,
-          SpanName AS spanName,
-          SpanKind AS spanKind,
-          ServiceName AS serviceName,
-          Duration / 1000000 AS durationMs,
-          StatusCode AS statusCode,
-          StatusMessage AS statusMessage,
-          toString(Timestamp) AS timestamp,
-          SpanAttributes AS spanAttributes,
-          ResourceAttributes AS resourceAttributes
-        FROM trace_detail_spans
-        WHERE OrgId = 'org_sql_catalog'
-          AND TraceId IN (SELECT
-          TraceId AS TraceId
+          toString(min(Timestamp) - INTERVAL 86400 SECOND) AS startTime,
+          toString(max(Timestamp) + INTERVAL 86400 SECOND) AS endTime,
+          count() AS spanCount
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
           AND (mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')
-          AND SpanAttributes['maple_ai.session.id'] = 'wrun_sql_catalog')
-        ORDER BY timestamp ASC, spanId ASC
-        LIMIT 2000
+          AND SpanAttributes['maple_ai.session.id'] = 'wrun_sql_catalog'
         FORMAT JSON
 
 -- builder:cloudflare-infra-breakdowns:cloudflareZoneBreakdownTimeseriesSQL:default

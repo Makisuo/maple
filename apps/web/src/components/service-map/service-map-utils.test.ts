@@ -401,3 +401,71 @@ describe("topologyKey", () => {
 		expect(topologyKey(built.nodes, built.edges)).toBe(topologyKey(reversed.nodes, reversed.edges))
 	})
 })
+
+describe("layout anchoring on the synchronous fallback", () => {
+	// Two independent pairs, so they form two connected components that the flat
+	// layout stacks vertically. Component order is the thing that used to flip.
+	const twoComponents = (extra: string[] = []) =>
+		buildFlowElements({
+			edges: [
+				baseEdge({ sourceService: "api", targetService: "auth" }),
+				baseEdge({ sourceService: "web", targetService: "cart" }),
+				...extra.map((name) => baseEdge({ sourceService: name, targetService: `${name}-db` })),
+			],
+			serviceOverviews: [],
+			durationSeconds: 3600,
+		})
+
+	it("is unchanged when no previous layout is supplied", () => {
+		const { nodes, edges } = twoComponents()
+		expect(computeFlatPositions(nodes, edges, undefined, undefined)).toEqual(
+			computeFlatPositions(nodes, edges),
+		)
+	})
+
+	it("keeps components in the vertical order the previous layout had", () => {
+		const { nodes, edges } = twoComponents()
+		const natural = computeFlatPositions(nodes, edges)
+
+		// Previous layout with the two components swapped top-to-bottom.
+		const flipped = new Map(
+			[...natural].map(([id, at]) => [
+				id,
+				{ x: at.x, y: ["api", "auth"].includes(id) ? at.y + 10_000 : at.y - 10_000 },
+			]),
+		)
+		const anchored = computeFlatPositions(nodes, edges, undefined, flipped)
+
+		const midY = (ids: string[]) => ids.reduce((sum, id) => sum + anchored.get(id)!.y, 0) / ids.length
+		// The anchored layout follows the previous order: web/cart above api/auth.
+		expect(midY(["web", "cart"])).toBeLessThan(midY(["api", "auth"]))
+		// ...which is the opposite of what it produces unanchored.
+		const naturalMid = (ids: string[]) =>
+			ids.reduce((sum, id) => sum + natural.get(id)!.y, 0) / ids.length
+		expect(naturalMid(["api", "auth"])).toBeLessThan(naturalMid(["web", "cart"]))
+	})
+
+	it("holds surviving nodes closer to where they were when the graph grows", () => {
+		const before = twoComponents()
+		const previous = computeFlatPositions(before.nodes, before.edges)
+
+		// A third component appears — the kind of delta a sliding time window makes.
+		const after = twoComponents(["billing"])
+		const survivors = [...previous.keys()].filter((id) => after.nodes.some((n) => n.id === id))
+		const drift = (positions: Map<string, { x: number; y: number }>) =>
+			survivors.reduce((sum, id) => {
+				const from = previous.get(id)!
+				const to = positions.get(id)!
+				return sum + Math.hypot(to.x - from.x, to.y - from.y)
+			}, 0) / survivors.length
+
+		const unanchored = drift(computeFlatPositions(after.nodes, after.edges))
+		const anchored = drift(computeFlatPositions(after.nodes, after.edges, undefined, previous))
+
+		expect(survivors.length).toBeGreaterThan(0)
+		// Unanchored, a new component shifts every survivor (mean 85 units here).
+		// Anchored, the survivors do not move at all.
+		expect(unanchored).toBeGreaterThan(0)
+		expect(anchored).toBe(0)
+	})
+})

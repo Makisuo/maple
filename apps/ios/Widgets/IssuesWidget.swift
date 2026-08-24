@@ -53,6 +53,11 @@ struct IssuesEntry: TimelineEntry {
 	/// resolves in that organization rather than in whichever one is active.
 	var organizationId: String?
 	var organizationName: String?
+	/// The deployment environment on screen, or nil for the whole
+	/// organization. Carried so the header can say which — a widget filtered to
+	/// staging that looks identical to one that is not is a widget nobody can
+	/// read.
+	var environment: String?
 	/// Shown only when the account publishes more than one organization — a
 	/// single-organization Home Screen does not need its name repeated. Decided
 	/// at timeline-build time so the view does no I/O.
@@ -106,7 +111,13 @@ struct IssuesProvider: AppIntentTimelineProvider {
 			return IssuesEntry(date: date, snapshot: legacySnapshot())
 		}
 
-		let stored = WidgetSnapshotStore<IssuesSnapshot>.issues(organizationId: organizationId).load()
+		// A widget with no environment configured reads the organization-wide
+		// slot — the same key it read before the environment picker existed, so
+		// a migrated instance keeps rendering what it always did.
+		let environment = configuration.environment?.id
+		let stored = WidgetSnapshotStore<IssuesSnapshot>
+			.issues(organizationId: organizationId, environment: environment)
+			.load()
 		// Deliberately no fallback to another organization's snapshot. Rendering
 		// one organization's counts under another's name is the same class of
 		// error as opening the wrong organization from a notification.
@@ -121,6 +132,7 @@ struct IssuesProvider: AppIntentTimelineProvider {
 			snapshot: snapshot,
 			organizationId: organizationId,
 			organizationName: name,
+			environment: environment,
 			showsOrganization: known.count > 1,
 			// Configured, and not an organization the user belongs to: they
 			// were removed from it. An organization that is known but has no
@@ -157,6 +169,7 @@ struct IssuesProvider: AppIntentTimelineProvider {
 		let outcome = await WidgetTimelineRefresh.run(
 			organizationId: base.organizationId,
 			organizationName: base.organizationName,
+			environment: base.environment,
 			storedGeneratedAt: base.snapshot?.generatedAt,
 			now: now
 		)

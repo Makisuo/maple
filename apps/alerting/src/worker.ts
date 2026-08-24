@@ -20,9 +20,11 @@ import {
 	ErrorPolicyService,
 	ErrorsService,
 	EscalationService,
+	FixVerificationTickService,
 	HazelOAuthService,
 	layerPg,
 	NotificationDispatcher,
+	IssueFixVerificationService,
 	OrgClickHouseSettingsService,
 	OrgIngestKeysService,
 	OrgMembersService,
@@ -147,6 +149,10 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 		Layer.provide(Layer.mergeAll(DatabaseLive, WarehouseQueryServiceLive, ErrorIssueWorkflowServiceLive)),
 	)
 
+	const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, ErrorActorsServiceLive, ErrorIssueWorkflowServiceLive)),
+	)
+
 	// WorkerEnvironment is merged in so incident-open investigations can see the
 	// cross-script fan-out workflow binding.
 	const ErrorsServiceLive = ErrorsService.layer.pipe(
@@ -160,6 +166,20 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 				ErrorIssueReadModelsServiceLive,
 				ErrorIssueWorkflowServiceLive,
 				ErrorPolicyServiceLive,
+				IssueFixVerificationServiceLive,
+				WorkerEnvironmentLive,
+			),
+		),
+	)
+
+	// WorkerEnvironment merged in so the tick can reach the fan-out workflow
+	// binding when it opens a verification investigation.
+	const FixVerificationTickServiceLive = FixVerificationTickService.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				BaseLive,
+				WarehouseQueryServiceLive,
+				IssueFixVerificationServiceLive,
 				WorkerEnvironmentLive,
 			),
 		),
@@ -210,6 +230,7 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 		PlanetScaleServiceLive,
 		DigestServiceLive,
 		ErrorsServiceLive,
+		FixVerificationTickServiceLive,
 		EscalationServiceLive,
 		ServiceMapRollupServiceLive,
 		// Exposed in the output, not just provided inward: `withPgConnectionScope`
@@ -292,6 +313,19 @@ const errorTick = makeTick(
 		issuesArchived: result.issuesArchived,
 		issuesDeleted: result.issuesDeleted,
 		retentionRan: result.retentionRan,
+	}),
+)
+
+const fixVerificationTick = makeTick(
+	FixVerificationTickService.use((service) => service.runTick()),
+	"fix_verification",
+	(result) => ({
+		examined: result.examined,
+		refuted: result.refuted,
+		investigationsStarted: result.investigationsStarted,
+		verdictsApplied: result.verdictsApplied,
+		skipped: result.skipped,
+		failedRows: result.failedRows,
 	}),
 )
 
@@ -388,6 +422,7 @@ export interface ScheduledTickPrograms<R = never> {
 	readonly digest: Effect.Effect<void, never, R>
 	readonly error: Effect.Effect<void, never, R>
 	readonly escalation: Effect.Effect<void, never, R>
+	readonly fixVerification: Effect.Effect<void, never, R>
 	readonly planetScale: Effect.Effect<void, never, R>
 	readonly serviceMapRollup: Effect.Effect<void, never, R>
 }
@@ -411,7 +446,10 @@ export const selectScheduledProgram = <R>(
 		Match.when("*/15 * * * *", () => ticks.digest),
 		Match.when("0 * * * *", () => ticks.serviceMapRollup),
 		Match.when("* * * * *", () =>
-			Effect.all([ticks.alert, ticks.error, ticks.escalation], {
+			// `fixVerification` runs after `error` in the same group so a window that
+			// this minute's error tick just refuted is already settled when the
+			// verification tick looks at it — one fewer wasted agent start.
+			Effect.all([ticks.alert, ticks.error, ticks.escalation, ticks.fixVerification], {
 				concurrency: 2,
 				discard: true,
 			}),
@@ -432,6 +470,7 @@ type ScheduledServices =
 	| DigestService
 	| ErrorsService
 	| EscalationService
+	| FixVerificationTickService
 	| PlanetScaleService
 	| ServiceMapRollupService
 
@@ -442,6 +481,7 @@ const scheduledTicks: ScheduledTickPrograms<ScheduledServices> = {
 	digest: digestTick,
 	error: errorTick,
 	escalation: escalationTick,
+	fixVerification: fixVerificationTick,
 	planetScale: planetScaleTick,
 	serviceMapRollup: serviceMapRollupTick,
 }

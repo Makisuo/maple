@@ -327,6 +327,66 @@ The switcher lives in the title slot on both tabs. The gate alone is not enough:
 once an organization is active the gate is unreachable, so without it a
 multi-org account is stuck.
 
+## The environment axis
+
+Everything on screen is scoped twice: by organization, and by **deployment
+environment**. `EnvironmentController` owns the second, and it is deliberately
+shaped like the first — one app-wide choice, a control next to the switcher, and
+a change that invalidates every screen at once rather than each screen growing
+its own filter.
+
+Both axes travel together as `SessionController.DataScope`, which the list
+screens key `.task(id:)` on and store on their models. The environment is part
+of what a model *is* rather than something pushed at it, because it is not
+always known when a screen first builds: `EnvironmentController.load` restores a
+stored selection and drops one the organization no longer has, and the second of
+those can only happen once the network answers. Making it part of the scope
+rebuilds the affected screens when it resolves, whatever order the tasks
+happened to start in — and rebuilds nothing when it does not. The detail screens
+stay keyed on `dataGeneration` alone; they are unfiltered, so an environment
+change cannot alter what they show.
+
+The mechanism is where they differ, and the difference is the thing to know:
+
+- The **organization** travels in the session token, so every request carries it
+  whether the endpoint knows about it or not.
+- The **environment** is a query parameter or body field, **per endpoint**. So
+  `MapleClient.scoped(toEnvironment:)` reaches the reads that declare one and
+  silently does not reach the rest.
+
+What it does not reach, and why:
+
+| Read                                | Behaviour                                                         |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| `GET /v2/services/{name}`           | Aggregates across environments by contract — service detail is unfiltered. |
+| `/v2/alerts/*`                      | No filter exists. A rule's `environments` is the scope it fires on, not a filter over rules. |
+| `GET /v2/error_issues/service_counts` | No parameters at all. **The one visible seam:** with an environment selected, a Services row's metrics are filtered and its open-issue badge is not. |
+
+`GET /v2/anomalies/incidents` spells the parameter **`deployment_env`**, not
+`deployment_environment`. It is the only one that does; sending the long name
+there is not an error, it is an ignored parameter and an unfiltered list.
+`EnvironmentScopeTests` pins it.
+
+The picker's options come from `GET /v2/environments`, not from unioning
+`deployment_environments` across a page of services — that listing is capped by
+its own `limit`, so an environment appearing only on the hundredth service would
+never be offered. The blank environment is never returned: the warehouse DSL
+reads `''` as "no filter", so offering it would hand back every environment
+under a label claiming otherwise.
+
+The selection persists in `UserDefaults.standard` **keyed per organization**.
+A single key would carry "staging" into an organization that has no such
+environment, where it filters every screen to nothing and looks like an outage;
+a stored value the organization does not have falls back to all environments.
+
+Widgets pin their own environment, the way they pin their own organization —
+two widgets, two environments, both correct at once. That makes snapshots
+per `(organization, environment)`: one slot per organization would let a
+production widget and a staging widget overwrite each other on every publish,
+each then rendering the other's numbers under its own label. The unfiltered slot
+keeps the key it always had, so a widget placed before this shipped needs no
+migration.
+
 ## Design system
 
 `Maple/DesignSystem` ports the product's visual language rather than inventing a

@@ -33,6 +33,7 @@ const schemas = spec.components.schemas as JsonObject
 /** Every operation the app calls. Must match `IOS_OPERATIONS` in the generator. */
 const IOS_OPERATIONS = [
 	"listServices",
+	"listEnvironments",
 	"getService",
 	"queryTraceTimeseries",
 	"queryTraceBreakdown",

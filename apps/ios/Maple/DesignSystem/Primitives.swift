@@ -80,6 +80,7 @@ extension WorkflowState {
 		case .todo: "Todo"
 		case .inProgress: "In progress"
 		case .inReview: "In review"
+		case .verifying: "Verifying"
 		case .done: "Done"
 		case .cancelled: "Cancelled"
 		case .wontfix: "Wontfix"
@@ -95,6 +96,9 @@ extension WorkflowState {
 		case .regressed: Token.destructive
 		case .inProgress: Token.blueText
 		case .inReview: Token.purpleText
+		// Teal, distinct from both `inReview` (a human is looking) and `done` (it
+		// is over): a merged fix is being watched, and nobody needs to act yet.
+		case .verifying: Token.tealText
 		case .done: Token.success
 		case .todo, .cancelled, .wontfix: Token.mutedForeground
 		}
@@ -106,6 +110,7 @@ extension WorkflowState {
 		case .regressed: Token.destructive
 		case .inProgress: Token.blueFill
 		case .inReview: Token.purpleFill
+		case .verifying: Token.tealFill
 		case .done: Token.success
 		case .todo, .cancelled, .wontfix: Token.muted
 		}

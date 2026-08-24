@@ -41,6 +41,7 @@ import { MapleApiV2 } from "../packages/domain/src/http/v2/api"
 const IOS_OPERATIONS: ReadonlyArray<string> = [
 	// Services
 	"listServices",
+	"listEnvironments",
 	"getService",
 	"queryTraceTimeseries",
 	"queryTraceBreakdown",

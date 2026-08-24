@@ -77,7 +77,31 @@ const RefEventPayload = Schema.Struct({
 	installation: Schema.Struct({ id: Schema.Number }),
 })
 
+// `pull_request` events. Only the fields the issue link and the verification
+// window need: the PR's identity, its text (scanned for a Maple issue
+// reference), and — the load-bearing part — whether this `closed` action was a
+// merge or an abandonment.
+const PullRequestPayload = Schema.Struct({
+	action: Schema.String,
+	number: Schema.Number,
+	pull_request: Schema.Struct({
+		html_url: Schema.String,
+		title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		body: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		user: Schema.optionalKey(Schema.NullOr(Schema.Struct({ login: Schema.optionalKey(Schema.String) }))),
+		merged: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+		merge_commit_sha: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		merged_at: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	}),
+	repository: Schema.Struct({
+		id: Schema.Number,
+		full_name: Schema.String,
+	}),
+	installation: Schema.Struct({ id: Schema.Number }),
+})
+
 const decodePush = Schema.decodeUnknownEffect(PushPayload)
+const decodePullRequest = Schema.decodeUnknownEffect(PullRequestPayload)
 const decodeInstallationEvent = Schema.decodeUnknownEffect(InstallationPayload)
 const decodeRefEvent = Schema.decodeUnknownEffect(RefEventPayload)
 
@@ -491,12 +515,69 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 					return [job]
 				})
 
+			// Actions that can change what a PR link means. `assigned`, `labeled`,
+			// `review_requested` and the rest of GitHub's long tail carry nothing this
+			// feature reads, and mapping them would enqueue a job per label click.
+			//
+			// The guard narrows rather than asserts, so the job's `action` union is
+			// proved here instead of cast at the call site — GitHub sends `action` as
+			// an open string and a new value must skip, not slip through mistyped.
+			const PULL_REQUEST_ACTIONS = ["opened", "edited", "reopened", "closed", "synchronize"] as const
+			type PullRequestAction = (typeof PULL_REQUEST_ACTIONS)[number]
+			const isPullRequestAction = (action: string): action is PullRequestAction =>
+				PULL_REQUEST_ACTIONS.some((candidate) => candidate === action)
+
+			const mapPullRequest = (raw: unknown) =>
+				Effect.gen(function* () {
+					const payload = yield* parsePayload("pull_request", decodePullRequest(raw))
+					const externalInstallationId = String(payload.installation.id)
+					const externalRepoId = String(payload.repository.id)
+					yield* Effect.annotateCurrentSpan({
+						"vcs.provider.installation_id": externalInstallationId,
+						"vcs.repository.external_id": externalRepoId,
+						"vcs.pull_request.number": payload.number,
+						"vcs.pull_request.action": payload.action,
+					})
+					if (!isPullRequestAction(payload.action)) {
+						yield* Effect.annotateCurrentSpan({
+							"vcs.webhook.outcome": "skipped",
+							"vcs.webhook.skip_reason": "unhandled_pull_request_action",
+						})
+						return []
+					}
+					const pr = payload.pull_request
+					const merged = pr.merged ?? false
+					const mergedAtMs = pr.merged_at ? finiteOrNull(Date.parse(pr.merged_at)) : null
+					yield* Effect.annotateCurrentSpan({
+						"vcs.webhook.outcome": "handled",
+						"vcs.pull_request.merged": merged,
+					})
+					const job: VcsSyncJob = {
+						kind: "pull-request-event",
+						provider: PROVIDER,
+						externalInstallationId,
+						externalRepoId,
+						repoFullName: payload.repository.full_name,
+						number: payload.number,
+						action: payload.action,
+						url: pr.html_url,
+						title: pr.title ?? null,
+						body: pr.body ?? null,
+						authorLogin: pr.user?.login ?? null,
+						merged,
+						mergeCommitSha: pr.merge_commit_sha ?? null,
+						mergedAtMs,
+					}
+					return [job]
+				})
+
 			// Dispatch a verified, parsed event to its mapper. Annotations (outcome /
 			// skip_reason / identifiers) are made by each mapper onto the surrounding
 			// `webhookToJobs` span.
 			const mapEvent = (event: string | undefined, parsed: unknown, now: number) =>
 				Match.value(event).pipe(
 					Match.when("push", () => mapPush(parsed, now)),
+					Match.when("pull_request", () => mapPullRequest(parsed)),
 					Match.when("installation", () => mapInstallation(parsed)),
 					Match.when("installation_repositories", () => mapInstallationRepositories(parsed)),
 					Match.when("create", () => mapRefEvent("created")(parsed)),

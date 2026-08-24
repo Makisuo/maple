@@ -246,6 +246,25 @@ final class SessionController {
 		}
 	}
 
+	/// Everything a screen's rows are scoped to, as one value.
+	///
+	/// Screens key `.task(id:)` on this and rebuild their models whenever it
+	/// moves, so the two axes are handled by one mechanism instead of the
+	/// organization getting a generation counter and the environment getting
+	/// its own reload path.
+	///
+	/// The environment belongs here rather than being pushed at the screens
+	/// because it is not always known when they first build.
+	/// `EnvironmentController` restores a stored selection and drops one the
+	/// organization no longer has, and the second of those can only happen
+	/// after a network read — by which time the screens have already built.
+	/// Making the value part of what a model *is* rebuilds them when it
+	/// resolves, whatever order the tasks happened to start in.
+	struct DataScope: Equatable {
+		var generation: Int
+		var environment: String?
+	}
+
 	/// React to an API failure that the session is responsible for.
 	///
 	/// Returns true when the caller should retry once — a 401 is most often a

@@ -14,7 +14,7 @@ import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-r
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { QueryErrorState } from "@/components/common/query-error-state"
-import { LONG_RANGE_PRESET_OPTIONS } from "@/lib/time-utils"
+import { LONG_RANGE_PRESET_OPTIONS, snapRangeForCache } from "@/lib/time-utils"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 // `__all__` is the sentinel for the "All Environments" option. Storing it in the
@@ -58,14 +58,19 @@ function ServiceMapContent() {
 
 	// Stable 24h window for the environment dropdown — environments move slowly, so
 	// a fixed range keeps this a single cached facets request independent of the
-	// map's own time range. Matches the dashboard's facets probe.
+	// map's own time range.
+	//
+	// Snapped: `formatWarehouseDateTime` is second-precision, so an unsnapped
+	// `new Date()` minted a distinct atom key on every single mount. The atom's
+	// 5-minute `staleTime` could therefore never fire — every visit re-queried
+	// facets and leaked another retained atom. Snapping floors the endpoint to the
+	// window's cache grid so revisits share one entry.
 	const facetsRange = useMemo(() => {
-		const end = new Date()
-		const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
-		return {
-			startTime: formatWarehouseDateTime(start.getTime()),
-			endTime: formatWarehouseDateTime(end.getTime()),
-		}
+		const end = Date.now()
+		return snapRangeForCache({
+			startTime: formatWarehouseDateTime(end - 24 * 60 * 60 * 1000),
+			endTime: formatWarehouseDateTime(end),
+		})
 	}, [])
 	const facetsAtom = getServicesFacetsResultAtom({ data: facetsRange })
 	const facetsResult = useRefreshableAtomValue(facetsAtom)

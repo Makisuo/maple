@@ -54,7 +54,7 @@ struct FixtureAPI: MapleAPI {
 		return Service(
 			baselineP95LatencyMs: seed.baselineP95,
 			baselineSpanCount: (seed.throughput * 7 * 24 * 3_600).rounded(),
-			deploymentEnvironments: ["production"],
+			deploymentEnvironments: Self.environments,
 			errorCount: (spans * seed.errorRate).rounded(),
 			errorRate: seed.errorRate,
 			hasSampling: false,
@@ -69,6 +69,22 @@ struct FixtureAPI: MapleAPI {
 			throughput: seed.throughput,
 			tracedThroughput: seed.throughput
 		)
+	}
+
+	/// Two, not one: the environment picker hides itself when there is nothing
+	/// to switch to, so a single-environment fixture organization would make
+	/// the control invisible in exactly the mode the screens are built and
+	/// screenshotted in.
+	///
+	/// The fixture client ignores the environment scope — `FixtureAPI` serves
+	/// one fixed world, like every other stub — so switching here proves the
+	/// control and its layout, not the filtering. The filtering is proved
+	/// against the real API and in `MapleAPI`'s own tests.
+	static let environments = ["production", "staging"]
+
+	func environments(window: ResolvedTimeWindow) async throws -> [String] {
+		try await pause()
+		return Self.environments
 	}
 
 	func services(window: ResolvedTimeWindow, limit: Int) async throws -> Page<Service> {

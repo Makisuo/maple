@@ -45,6 +45,9 @@ struct ThroughputEntry: TimelineEntry {
 	/// The organization whose numbers are on screen, carried into deep links.
 	var organizationId: String?
 	var organizationName: String?
+	/// The deployment environment on screen, or nil for the whole
+	/// organization. Carried so the header can say which — see `IssuesEntry`.
+	var environment: String?
 	/// Only worth showing when the account has more than one.
 	var showsOrganization = false
 	/// Pinned to an organization the app no longer publishes.
@@ -87,7 +90,12 @@ struct ThroughputProvider: AppIntentTimelineProvider {
 			return ThroughputEntry(date: date, snapshot: legacySnapshot(), serviceName: serviceName)
 		}
 
-		let stored = WidgetSnapshotStore<ThroughputSnapshot>.throughput(organizationId: organizationId).load()
+		// Unset reads the organization-wide slot, which is the key a widget
+		// placed before the environment picker already reads.
+		let environment = configuration.environment?.id
+		let stored = WidgetSnapshotStore<ThroughputSnapshot>
+			.throughput(organizationId: organizationId, environment: environment)
+			.load()
 		// No fallback to another organization's snapshot — see `IssuesProvider`.
 		let snapshot = stored ?? (configuredId == nil ? legacySnapshot() : nil)
 
@@ -97,6 +105,7 @@ struct ThroughputProvider: AppIntentTimelineProvider {
 			serviceName: serviceName,
 			organizationId: organizationId,
 			organizationName: known.first { $0.id == organizationId }?.name,
+			environment: environment,
 			showsOrganization: known.count > 1,
 			// "Not a member any more", not "nothing fetched yet" — see
 			// `IssuesProvider.makeEntry`.
@@ -124,6 +133,7 @@ struct ThroughputProvider: AppIntentTimelineProvider {
 		let outcome = await WidgetTimelineRefresh.run(
 			organizationId: base.organizationId,
 			organizationName: base.organizationName,
+			environment: base.environment,
 			storedGeneratedAt: base.snapshot?.generatedAt,
 			now: now
 		)

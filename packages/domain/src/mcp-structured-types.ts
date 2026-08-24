@@ -707,8 +707,16 @@ export interface CommentOnErrorIssueData {
 export interface ProposeFixData {
 	issueId: string
 	workflowState: string
-	eventId: string
 	prUrl: string | null
+}
+
+export interface LinkPullRequestData {
+	pullRequestId: string
+	issueId: string
+	repoFullName: string
+	number: number
+	url: string
+	state: "open" | "merged" | "closed"
 }
 
 export interface ListErrorIssueEventsData {
@@ -957,6 +965,7 @@ export type StructuredToolOutput =
 	| { tool: "release_error_issue"; data: ReleaseErrorIssueData }
 	| { tool: "comment_on_error_issue"; data: CommentOnErrorIssueData }
 	| { tool: "propose_fix"; data: ProposeFixData }
+	| { tool: "link_pull_request"; data: LinkPullRequestData }
 	| { tool: "list_error_issue_events"; data: ListErrorIssueEventsData }
 	| { tool: "register_agent"; data: RegisterAgentData }
 	| { tool: "list_error_incidents"; data: ListErrorIncidentsData }

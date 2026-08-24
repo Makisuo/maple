@@ -120,14 +120,39 @@ public protocol MapleAPI: Sendable {
 	/// the exact bug this exists to prevent.
 	func scoped(to organizationId: String) -> any MapleAPI
 
+	/// A view of this client that filters every read it can to one deployment
+	/// environment. Nil means the whole organization.
+	///
+	/// A scoped instance for the same reason as `scoped(to:)` above, but the
+	/// mechanism is different and the difference matters: the organization
+	/// travels in the token (or, when named, in a header), while the
+	/// environment is a **query parameter or body field, per endpoint**. Several
+	/// endpoints have no such parameter, so this scope is not uniform — see the
+	/// per-method notes below for which reads ignore it.
+	func scoped(toEnvironment environment: String?) -> any MapleAPI
+
+	/// Every environment the organization has reported telemetry in. The list
+	/// that populates a picker, so it is deliberately *not* filtered by the
+	/// environment scope.
+	func environments(window: ResolvedTimeWindow) async throws -> [String]
+
 	func services(window: ResolvedTimeWindow, limit: Int) async throws -> Page<Service>
+	/// Aggregated across environments: `GET /v2/services/{name}` takes no
+	/// environment parameter, so the scope is ignored here rather than faked.
 	func service(named name: String, window: ResolvedTimeWindow) async throws -> Service
 	func issues(query: IssueQuery, window: ResolvedTimeWindow?, limit: Int, cursor: String?) async throws
 		-> Page<ErrorIssue>
 	func issue(id: String) async throws -> ErrorIssueDetail
+	/// Organization-wide. `GET /v2/error_issues/service_counts` takes no
+	/// parameters at all, so with an environment selected these badges keep
+	/// counting every environment's issues — the one place in the app where a
+	/// filtered row carries an unfiltered number.
 	func issueCountsByService() async throws -> [ErrorIssueServiceCount]
 
 	// Alerts — see MapleClient+Alerts.swift
+	// None of the alerts reads take an environment parameter; a rule's
+	// `environments` field is the scope it fires on, not a filter over rules.
+	// The scope is ignored throughout this section.
 	func alertIncidents(status: AlertIncidentStatus?, ruleId: String?, limit: Int, cursor: String?) async throws
 		-> Page<AlertIncident>
 	func alertIncident(id: String) async throws -> AlertIncident
@@ -163,6 +188,9 @@ public protocol MapleAPI: Sendable {
 extension MapleAPI {
 	/// Stubs and fixtures serve one organization and ignore the scope.
 	public func scoped(to organizationId: String) -> any MapleAPI { self }
+
+	/// Same for the environment scope: a fixture serves one fixed world.
+	public func scoped(toEnvironment environment: String?) -> any MapleAPI { self }
 }
 
 /// The live client: generated operations, wrapped so call sites see plain
@@ -172,6 +200,14 @@ public struct MapleClient: MapleAPI {
 	private let tokens: any MapleTokenProvider
 	let serverURL: URL
 	private let transport: any ClientTransport
+	/// Nil means every environment. Sent per request as a query parameter or a
+	/// body filter — never a header, unlike the organization scope — so it only
+	/// reaches the endpoints that declare one.
+	let environment: String?
+	/// Retained, not just consumed when building the middleware chain, so that
+	/// scoping to an environment can carry the organization forward instead of
+	/// silently dropping it back to the token's active one.
+	private let organizationId: String?
 	/// Shared with every client `scoped(to:)` produces, so a widget fetch for
 	/// one organization still dedupes against a foreground fetch for another
 	/// when they happen to be identical.
@@ -188,6 +224,7 @@ public struct MapleClient: MapleAPI {
 			serverURL: try baseURL ?? Servers.Server1.url(),
 			transport: URLSessionTransport(),
 			organizationId: nil,
+			environment: nil,
 			coalescer: RequestCoalescer()
 		)
 	}
@@ -205,6 +242,7 @@ public struct MapleClient: MapleAPI {
 			serverURL: serverURL,
 			transport: transport,
 			organizationId: nil,
+			environment: nil,
 			coalescer: coalescer
 		)
 	}
@@ -214,11 +252,14 @@ public struct MapleClient: MapleAPI {
 		serverURL: URL,
 		transport: any ClientTransport,
 		organizationId: String?,
+		environment: String?,
 		coalescer: RequestCoalescer
 	) {
 		self.tokens = tokens
 		self.serverURL = serverURL
 		self.transport = transport
+		self.environment = environment
+		self.organizationId = organizationId
 		self.coalescer = coalescer
 
 		// Order matters, outermost first: auth runs outermost so the error
@@ -249,8 +290,35 @@ public struct MapleClient: MapleAPI {
 			serverURL: serverURL,
 			transport: transport,
 			organizationId: organizationId,
+			environment: environment,
 			coalescer: coalescer
 		)
+	}
+
+	/// Composes with `scoped(to:)` in either order — both carry the other's
+	/// scope forward, so a widget fetch can name an organization and an
+	/// environment without the second call dropping the first.
+	public func scoped(toEnvironment environment: String?) -> any MapleAPI {
+		MapleClient(
+			tokens: tokens,
+			serverURL: serverURL,
+			transport: transport,
+			organizationId: organizationId,
+			environment: environment,
+			coalescer: coalescer
+		)
+	}
+
+	/// Deliberately unfiltered by the environment scope: this is the list the
+	/// picker offers, so filtering it by the current choice would leave a user
+	/// unable to pick anything else.
+	public func environments(window: ResolvedTimeWindow) async throws -> [String] {
+		try await mapping {
+			let output = try await client.listEnvironments(
+				.init(query: .init(startTime: window.startTime, endTime: window.endTime))
+			)
+			return try output.ok.body.json.data.map(\.name)
+		}
 	}
 
 	public func services(window: ResolvedTimeWindow, limit: Int = 50) async throws -> Page<Service> {
@@ -260,7 +328,8 @@ public struct MapleClient: MapleAPI {
 					query: .init(
 						startTime: window.startTime,
 						endTime: window.endTime,
-						limit: String(limit)
+						limit: String(limit),
+						deploymentEnvironment: environment
 					)
 				)
 			)
@@ -297,6 +366,7 @@ public struct MapleClient: MapleAPI {
 						severity: query.severity,
 						kind: query.kind,
 						serviceName: query.serviceName,
+						deploymentEnvironment: environment,
 						startTime: window?.startTime,
 						endTime: window?.endTime,
 						// The contract accepts the literal string "true" only —

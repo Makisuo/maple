@@ -153,8 +153,8 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 ### Date/time
 
 `toStartOfInterval(col, seconds)`, `toStartOfHour(col)`, `toUnixTimestamp(col)`,
-`toUnixTimestamp64Nano(col)`, `intervalSub(col, seconds)`, `formatDateTime(col, format)`,
-`toDateTime(col)`. `toHour(col)` is on `/expr` only.
+`toUnixTimestamp64Nano(col)`, `intervalSub(col, seconds)`, `intervalAdd(col, seconds)`,
+`formatDateTime(col, format)`, `toDateTime(col)`. `toHour(col)` is on `/expr` only.
 
 ### Conditional
 

@@ -13,6 +13,8 @@ export { ErrorIssueReadModelsService } from "./services/errors/ErrorIssueReadMod
 export { ErrorIssueWorkflowService } from "./services/errors/ErrorIssueWorkflowService"
 export { ErrorPolicyService } from "./services/errors/ErrorPolicyService"
 export { ErrorsService } from "./services/errors/ErrorsService"
+export { FixVerificationTickService } from "./services/errors/FixVerificationTickService"
+export { IssueFixVerificationService } from "./services/errors/IssueFixVerificationService"
 export { NotificationDispatcher } from "./services/alerts/NotificationDispatcher"
 export { summarizeCause } from "@/platform/describe-cause"
 export { Database } from "@/platform/DatabaseLive"

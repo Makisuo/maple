@@ -9,6 +9,7 @@ import { appendFileSync } from "node:fs"
 import * as Alchemy from "alchemy"
 import * as AWS from "alchemy/AWS"
 import * as Cloudflare from "alchemy/Cloudflare"
+import * as Output from "alchemy/Output"
 import * as RemovalPolicy from "alchemy/RemovalPolicy"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -16,7 +17,7 @@ import { parseMapleRegion, resolveAwsRegion, stageDeploysIngest } from "@maple/i
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
 import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
-import { createMapleApi } from "./apps/api/alchemy.run.ts"
+import { createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
 import { createMapleIngest } from "./apps/ingest/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
@@ -38,6 +39,14 @@ if (!process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_DEFAULT_ACCOUNT
 // local dev runs through wrangler/portless instead).
 const resolveUrl = (domain: string | undefined, envKey: string, fallback = ""): string =>
 	domain ? `https://${domain}` : process.env[envKey]?.trim() || fallback
+
+/** Append `key=value` lines to the GitHub Actions step-output file, if any. */
+const appendStepOutputs = (lines: string[]): void => {
+	const file = process.env.GITHUB_OUTPUT
+	if (file) {
+		appendFileSync(file, `${lines.join("\n")}\n`)
+	}
+}
 
 const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStage>) =>
 	Effect.gen(function* () {
@@ -140,8 +149,20 @@ export default Alchemy.Stack(
 		// via a Cloudflare CNAME at the ALB, so the URL below stays a plain string
 		// and does not depend on the service resource; a PR preview gets no ingest
 		// domain, so its ALB answers plain HTTP on 80 at `ingest.serviceUrl`.
+		// Hoisted above BOTH consumers on purpose. The bucket is read by the api
+		// Worker over its native binding and written by the Rust gateway on ECS over
+		// the S3 API, and the gateway is constructed first — so neither factory can
+		// own it. `credentials` is undefined on stages that keep replay payloads
+		// inline (`stageEnablesReplayBlobs`).
+		const replayBlobStore = yield* createReplayBlobStore({ stage })
+
 		const ingest = stageDeploysIngest(stage)
-			? yield* createMapleIngest({ stage, domains, region })
+			? yield* createMapleIngest({
+					stage,
+					domains,
+					region,
+					replayBlobs: replayBlobStore.credentials,
+				})
 			: undefined
 
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
@@ -151,6 +172,7 @@ export default Alchemy.Stack(
 		const { worker: api, db: mapleDb } = yield* createMapleApi({
 			stage,
 			domains,
+			replayBlobs: replayBlobStore.bucket,
 		})
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
@@ -198,23 +220,16 @@ export default Alchemy.Stack(
 
 		// In GitHub Actions, expose the deployed URLs as step outputs so the
 		// workflow can attach the web preview to the PR as a clickable deployment.
-		yield* Effect.sync(() => {
-			if (process.env.GITHUB_OUTPUT) {
-				appendFileSync(
-					process.env.GITHUB_OUTPUT,
-					`${[
-						`web_url=${summary.webUrl}`,
-						`api_url=${summary.apiUrl}`,
-						`sync_url=${summary.electricSyncUrl}`,
-						`landing_url=${summary.landingUrl}`,
-						// Empty on a stage with no ingest fleet. On a PR preview this is
-						// the ALB's plain-HTTP hostname — the preview has no ingest
-						// domain, so there is no certificate and no CNAME.
-						`ingest_url=${ingest?.serviceUrl ?? ""}`,
-					].join("\n")}\n`,
-				)
-			}
-		})
+		// Only plan-time strings belong here — an Output cannot be interpolated
+		// (see resolveUrl above); the ingest URL is written after the deploy below.
+		yield* Effect.sync(() =>
+			appendStepOutputs([
+				`web_url=${summary.webUrl}`,
+				`api_url=${summary.apiUrl}`,
+				`sync_url=${summary.electricSyncUrl}`,
+				`landing_url=${summary.landingUrl}`,
+			]),
+		)
 
 		// Reference the remaining workers so nothing is tree-shaken out of the plan
 		// and the summary carries their identity for the CLI output.
@@ -224,7 +239,19 @@ export default Alchemy.Stack(
 			// validation record — both are manual entries in the Cloudflare
 			// `maple.dev` zone, surfaced here so they come out of the deploy rather
 			// than the AWS console.
-			ingestServiceUrl: ingest?.serviceUrl,
+			// The ALB hostname only exists once the service does, so `ingest_url`
+			// is emitted as this output resolves — after apply — rather than at
+			// plan time with the URLs above. On a PR preview this is the ALB's
+			// plain-HTTP hostname: the preview has no ingest domain, so there is
+			// no certificate and no CNAME.
+			ingestServiceUrl: ingest
+				? Output.mapEffect((serviceUrl: string | undefined) =>
+						Effect.sync(() => {
+							appendStepOutputs([`ingest_url=${serviceUrl ?? ""}`])
+							return serviceUrl
+						}),
+					)(ingest.serviceUrl)
+				: undefined,
 			ingestCollectorEndpoint: ingest?.collectorEndpoint,
 			ingestCertificateValidation: ingest?.certificateValidation,
 			electricSyncWorker: electricSync.workerName,

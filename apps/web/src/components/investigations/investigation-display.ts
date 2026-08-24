@@ -4,7 +4,7 @@ import { toEpochMs } from "@maple/ui/lib/time-format"
 import { SEVERITY_ORDER, severityRank } from "@/components/errors/severity-badge"
 import { CONFIDENCE_RANK } from "./confidence-meter"
 
-export type InvestigationKindKey = "alert" | "error" | "anomaly" | "question"
+export type InvestigationKindKey = "alert" | "error" | "anomaly" | "question" | "verification"
 
 /**
  * The exact title the API writes when the seed context carried no name of its
@@ -21,7 +21,11 @@ const trimmed = (value: string | null | undefined): string | null => {
 }
 
 export const investigationKindKey = (subject: V2Investigation["subject"]): InvestigationKindKey =>
-	subject.type === "freeform" ? "question" : subject.incident_kind
+	subject.type === "freeform"
+		? "question"
+		: subject.type === "fix_verification"
+			? "verification"
+			: subject.incident_kind
 
 /**
  * The most specific human sentence available. A snapshot title of

@@ -119,6 +119,7 @@ enum Telemetry {
 	enum Event {
 		static let organizationSwitched = "organization.switched"
 		static let timeWindowChanged = "time_window.changed"
+		static let environmentChanged = "environment.changed"
 		static let screenRefreshed = "screen.refreshed"
 		static let issuesFiltered = "issues.filtered"
 		static let notificationsPrompted = "notifications.prompted"

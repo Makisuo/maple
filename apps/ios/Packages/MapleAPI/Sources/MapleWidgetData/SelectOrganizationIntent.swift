@@ -14,10 +14,21 @@ public struct SelectOrganizationIntent: WidgetConfigurationIntent {
 	@Parameter(title: "Organization")
 	public var organization: OrganizationEntity?
 
+	/// Which deployment environment's issues, or all of them when unset.
+	///
+	/// Added as a new optional parameter rather than as a new intent type: iOS
+	/// persists the intent *type name* for every configured widget, so renaming
+	/// or replacing this type would unconfigure every widget already on a Home
+	/// Screen. Existing instances decode with this nil, which is the
+	/// organization-wide behaviour they already had.
+	@Parameter(title: "Environment")
+	public var environment: EnvironmentEntity?
+
 	public init() {}
 
-	public init(organization: OrganizationEntity?) {
+	public init(organization: OrganizationEntity?, environment: EnvironmentEntity? = nil) {
 		self.organization = organization
+		self.environment = environment
 	}
 }
 

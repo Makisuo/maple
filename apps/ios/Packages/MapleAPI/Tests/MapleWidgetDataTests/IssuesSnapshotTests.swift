@@ -132,6 +132,55 @@ struct IssuesSnapshotStoreTests {
 		#expect(store.load() == nil)
 	}
 
+	/// The bug this keying exists to prevent: two widgets on one organization,
+	/// one filtered to production and one to staging, writing over each other on
+	/// every publish — each then rendering the other's numbers under its own
+	/// label, which looks exactly like working software.
+	@Test("Two environments in one organization do not share a slot")
+	func environmentsGetTheirOwnSlots() {
+		UserDefaults(suiteName: Self.suiteName)?.removePersistentDomain(forName: Self.suiteName)
+		let production = WidgetSnapshotStore<IssuesSnapshot>.issues(
+			organizationId: "org_1",
+			environment: "production",
+			appGroupIdentifier: Self.suiteName
+		)
+		let staging = WidgetSnapshotStore<IssuesSnapshot>.issues(
+			organizationId: "org_1",
+			environment: "staging",
+			appGroupIdentifier: Self.suiteName
+		)
+
+		production.save(IssuesSnapshot.make(
+			organizationId: "org_1",
+			organizationName: "Maple",
+			generatedAt: now,
+			issues: [issue("prod", severity: .critical, incident: true)]
+		))
+		staging.save(IssuesSnapshot.empty(organizationId: "org_1", generatedAt: now))
+
+		#expect(production.load()?.issues.count == 1)
+		#expect(staging.load()?.issues.isEmpty == true)
+	}
+
+	/// "All environments" keeps the key it always had, so a widget placed before
+	/// the environment picker keeps reading the snapshot it has always read
+	/// instead of falling back to "Open Maple" on upgrade.
+	@Test("The unfiltered slot is the pre-environment key, unchanged")
+	func unfilteredSlotIsUnchanged() {
+		UserDefaults(suiteName: Self.suiteName)?.removePersistentDomain(forName: Self.suiteName)
+		let unfiltered = WidgetSnapshotStore<IssuesSnapshot>.issues(
+			organizationId: "org_1",
+			appGroupIdentifier: Self.suiteName
+		)
+		let legacyShaped = WidgetSnapshotStore<IssuesSnapshot>(
+			key: "issues.snapshot.v2.org_1",
+			appGroupIdentifier: Self.suiteName
+		)
+
+		unfiltered.save(IssuesSnapshot.empty(organizationId: "org_1", generatedAt: now))
+		#expect(legacyShaped.load() != nil)
+	}
+
 	/// Dates cross the process boundary as ISO-8601 strings; a lossy encoding
 	/// would make "12m" drift between the app and the widget.
 	@Test("Preserves the timestamp exactly")

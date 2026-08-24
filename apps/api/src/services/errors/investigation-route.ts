@@ -30,11 +30,32 @@ export interface RouteInvestigationInput {
 	readonly snapshot: InvestigationSubjectSnapshot | null
 }
 
+/**
+ * Hypotheses a fix verification may dispatch.
+ *
+ * Narrow, and narrower than any incident: the question is "did this specific
+ * merged change stop this specific error", the deterministic occurrence split is
+ * already in the snapshot, and the honest answers are few — it holds, it does
+ * not, or there was not enough traffic to say. Giving it an incident-sized
+ * fan-out would spend a diagnosis budget re-deriving a conclusion the evidence
+ * already contains.
+ */
+export const FIX_VERIFICATION_MAX_WIDTH = 2
+
 export function routeInvestigation(input: RouteInvestigationInput): InvestigationRoute {
 	// A free-form question is a conversation, not an incident. There is nothing for
 	// the planner to scope and no incident window to establish, and the user is
 	// expected to keep talking to it afterwards — which the workflow path cannot do.
 	if (input.subject.type === "freeform") return { kind: "single_pass", reason: "freeform" }
+	// A verification is planned like an incident — it needs the workflow's
+	// retry-safety and its verdict lanes — but capped, for the reason above.
+	if (input.subject.type === "fix_verification") {
+		return {
+			kind: "planned",
+			maxWidth: FIX_VERIFICATION_MAX_WIDTH,
+			reservedPasses: FIX_VERIFICATION_MAX_WIDTH + 2,
+		}
+	}
 	const maxWidth = widthFor(input.snapshot?.severity ?? null, input.subject.incidentKind)
 	return { kind: "planned", maxWidth, reservedPasses: maxWidth + 2 }
 }

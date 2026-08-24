@@ -19,7 +19,7 @@ import { isChatSessionNamespace } from "@/chat/session"
 import { widthFor } from "@/workflows/plan-normalize"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
 import { evaluateInvestigationQuota, selectInvestigationUsage } from "@/services/errors/investigation-quota"
-import { FanoutStartError } from "@/services/errors/investigation-fanout-error"
+import { startInvestigationFanout } from "@/services/errors/investigation-fanout-start"
 import {
 	isInvestigationStale,
 	staleBudgetMs,
@@ -191,15 +191,6 @@ export interface MaybeEnqueueTriageInput {
 	readonly force?: boolean
 }
 
-interface FanoutWorkflowBinding {
-	readonly create: (options: { id: string; params: unknown }) => Promise<{ id: string }>
-}
-
-const isFanoutWorkflowBinding = (value: unknown): value is FanoutWorkflowBinding =>
-	typeof value === "object" &&
-	value !== null &&
-	typeof (value as { create?: unknown }).create === "function"
-
 export interface MaybeEnqueueTriageResult {
 	readonly enqueued: boolean
 	readonly investigationId?: InvestigationId
@@ -344,62 +335,17 @@ export const maybeEnqueueTriage: (
 			return { enqueued: false, reason: "duplicate" as const }
 		}
 
-		const markFailed = (error: string) =>
-			database
-				.execute((db) =>
-					db
-						.update(investigations)
-						.set({ status: "failed", error, updatedAt: new Date(nowMs) })
-						.where(eq(investigations.id, investigationId)),
-				)
-				.pipe(Effect.asVoid)
-
-		// The run goes to the Cloudflare Workflow. There is no chat-session fallback:
-		// a run that was planned and quietly executed as one shallow pass is a lie in
-		// the boards, so a missing binding records why and stops.
-		const workflow = input.fanoutBinding
-		if (!isFanoutWorkflowBinding(workflow)) {
-			yield* markFailed(
-				"agent_unavailable: the investigation fan-out workflow is not configured; retry",
-			)
-			return { enqueued: false, investigationId, reason: "no_binding" as const }
-		}
-		// `Exit`, not `Effect.option`: the reason a create() failed is the whole
-		// diagnostic value here — an id collision means a live instance already
-		// owns this investigation, a network error means retry.
-		const created = yield* Effect.exit(
-			Effect.tryPromise({
-				try: () =>
-					workflow.create({
-						id: investigationId,
-						params: {
-							orgId: input.orgId,
-							investigationId,
-							maxWidth,
-							reservedPasses,
-							attempt: 0,
-						},
-					}),
-				catch: FanoutStartError.fromCause,
-			}),
-		)
-		if (Exit.isFailure(created)) {
-			yield* Effect.logWarning("Investigation fan-out could not be started").pipe(
-				Effect.annotateLogs({
-					orgId: input.orgId,
-					investigationId,
-					error: summarizeCause(created.cause),
-				}),
-			)
-			yield* markFailed("start_failed: the investigation fan-out could not be started; retry")
-			return { enqueued: false, investigationId, reason: "error" as const }
-		}
-		yield* Effect.annotateCurrentSpan({
+		const started = yield* startInvestigationFanout({
 			orgId: input.orgId,
-			"maple.investigation.id": investigationId,
-			"maple.investigation.start_result": "fanout_started",
-			"maple.investigation.fanout_max_width": maxWidth,
+			investigationId,
+			maxWidth,
+			reservedPasses,
+			nowMs,
+			fanoutBinding: input.fanoutBinding,
 		})
+		if (!started.started) {
+			return { enqueued: false, investigationId, reason: started.reason }
+		}
 		return { enqueued: true, investigationId }
 	},
 	(effect, input) =>

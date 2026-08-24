@@ -77,6 +77,9 @@ describe("API runtime graph boundaries", () => {
 			"ErrorIssueWorkflowServiceLive",
 			"ErrorPolicyServiceLive",
 			"ErrorsServiceLive",
+			// Backs `link_pull_request`, and is what lets `propose_fix` turn its
+			// `pr_url` into a durable link rather than an event-payload string.
+			"IssueFixVerificationServiceLive",
 			"QueryEngineServiceLive",
 			"RecommendationIssueServiceLive",
 			"SetupAuditServiceLive",

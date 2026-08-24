@@ -6,9 +6,12 @@ import {
 	NS_PADDING_Y,
 	nodeNamespace,
 	type LayoutConfig,
+	type PreviousPositions,
 	type ServiceEdgeData,
 	type ServiceNodeData,
 } from "./service-map-utils"
+
+export type { PreviousPositions }
 import { logClientWarning } from "@/lib/services/common/telemetry"
 
 // ELK runs inside a dedicated web worker (elk-api + elk-worker) so laying out a
@@ -61,6 +64,29 @@ export interface ElkLayoutResult {
 	positions: Map<string, { x: number; y: number }>
 }
 
+// Below this share of known positions, the previous layout describes a graph too
+// different from this one to anchor it — seeding a mostly-new graph with a few
+// stale coordinates biases the result without buying any continuity, so fall
+// back to the deterministic model-order layout.
+const MIN_SEED_COVERAGE = 0.6
+
+/**
+ * The subset of `previous` covering the nodes being laid out, or `undefined`
+ * when coverage is too thin to be worth anchoring to.
+ */
+function seedablePositions(
+	nodes: Node<ServiceNodeData>[],
+	previous: PreviousPositions | undefined,
+): PreviousPositions | undefined {
+	if (!previous || previous.size === 0 || nodes.length === 0) return undefined
+	const known = new Map<string, { x: number; y: number }>()
+	for (const node of nodes) {
+		const at = previous.get(node.id)
+		if (at) known.set(node.id, at)
+	}
+	return known.size / nodes.length >= MIN_SEED_COVERAGE ? known : undefined
+}
+
 /**
  * Build the ELK input graph. Each namespace becomes a compound container node
  * (so same-namespace services stay together and the dotted boxes never
@@ -72,6 +98,7 @@ export function buildElkGraph(
 	nodes: Node<ServiceNodeData>[],
 	edges: Edge<ServiceEdgeData>[],
 	config: LayoutConfig,
+	previous?: PreviousPositions,
 ): ElkNode {
 	const lanes = new Map<string, Node<ServiceNodeData>[]>()
 	const topLevel: Node<ServiceNodeData>[] = []
@@ -87,11 +114,16 @@ export function buildElkGraph(
 	}
 	const hasContainers = lanes.size > 0
 
-	const toElkNode = (node: Node<ServiceNodeData>): ElkNode => ({
-		id: node.id,
-		width: config.nodeWidth,
-		height: config.nodeHeight,
-	})
+	// Seeding: when most nodes carry a position from the previous layout, hand
+	// those coordinates to ELK as hints. Absolute coordinates are fine even for
+	// container children — INTERACTIVE strategies read them for RELATIVE order
+	// within a parent, and every child of a namespace shares its offset.
+	const seeded = seedablePositions(nodes, previous)
+	const toElkNode = (node: Node<ServiceNodeData>): ElkNode => {
+		const base: ElkNode = { id: node.id, width: config.nodeWidth, height: config.nodeHeight }
+		const at = seeded?.get(node.id)
+		return at ? { ...base, x: at.x, y: at.y } : base
+	}
 
 	const children: ElkNode[] = []
 	for (const ns of Array.from(lanes.keys()).sort()) {
@@ -135,6 +167,23 @@ export function buildElkGraph(
 		"elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
 	} satisfies Record<string, string>
 
+	if (seeded) {
+		// A one-edge topology delta used to re-derive layer and barycenter order
+		// from scratch, which could flip both and move every node on the canvas
+		// (measured: 131 of 132 nodes displaced, mean ~1600 units). Seeded with the
+		// previous coordinates, INTERACTIVE keeps layering and in-layer order
+		// anchored to what the user is already looking at, so the delta moves the
+		// nodes it actually affects and leaves the rest put.
+		//
+		// `considerModelOrder` is dropped here deliberately: it competes with the
+		// positional hints for the same decision, and model order is exactly the
+		// thing that reshuffles when the node list changes.
+		layoutOptions["elk.layered.layering.strategy"] = "INTERACTIVE"
+		layoutOptions["elk.layered.crossingMinimization.strategy"] = "INTERACTIVE"
+		layoutOptions["elk.layered.cycleBreaking.strategy"] = "INTERACTIVE"
+		delete layoutOptions["elk.layered.considerModelOrder.strategy"]
+	}
+
 	if (nodes.length > LARGE_GRAPH_NODE_COUNT) {
 		layoutOptions["elk.layered.nodePlacement.strategy"] = "BRANDES_KOEPF"
 		layoutOptions["elk.layered.thoroughness"] = "3"
@@ -176,14 +225,17 @@ export function buildElkGraph(
  * long cross-namespace edges into a sprawl of rectangular detours.
  *
  * Deterministic: ELK layered uses no randomness, so the same topology yields the
- * same layout (callers memoize on a topology key).
+ * same layout (callers memoize on a topology key). Passing `previous` anchors
+ * the result to the layout already on screen — still deterministic, but now a
+ * function of (topology, previous) rather than topology alone.
  */
 export async function layoutServiceMapWithElk(
 	nodes: Node<ServiceNodeData>[],
 	edges: Edge<ServiceEdgeData>[],
 	config: LayoutConfig,
+	previous?: PreviousPositions,
 ): Promise<ElkLayoutResult> {
-	const graph = buildElkGraph(nodes, edges, config)
+	const graph = buildElkGraph(nodes, edges, config, previous)
 
 	let result: ElkNode
 	try {

@@ -83,15 +83,15 @@ export class GetAiSessionSpansRequest extends Schema.Class<GetAiSessionSpansRequ
 	// fan-out), which is the fast path every link from the list page takes: the
 	// row already knows the session's own bounds, so it hands them over.
 	//
-	// Without one the warehouse resolves the session from the id alone. That is
-	// viable rather than reckless: `traces` carries a `bloom_filter(0.01)` skip
-	// index over `mapValues(SpanAttributes)`, and its TTL caps any scan at 30
-	// days, so the id lookup was measured instant against production and found
-	// sessions several days back that spanned multiple traces. Bloom pruning
-	// still degrades as an org's volume grows, so this is the exception path for
-	// hint-less deep links — a pasted id, an MCP answer — and not the default.
-	// The client is expected to write the bounds it got back into its URL, which
-	// makes the second load of any such link the pruned one.
+	// Without one the handler resolves the session's bounds from the id first and
+	// then runs the same pruned read. That resolve step is viable rather than
+	// reckless where the fan-out would not be: `traces` carries a
+	// `bloom_filter(0.01)` skip index over `mapValues(SpanAttributes)` for the id
+	// to prune with, and its TTL caps any scan at 30 days. It still costs an
+	// extra round trip and still degrades as an org's volume grows, so this is
+	// the exception path for hint-less deep links — a pasted id, an MCP answer —
+	// and not the default. The client is expected to write the bounds it got back
+	// into its URL, which makes the second load of any such link the direct one.
 	startTime: Schema.optionalKey(TinybirdDateTime),
 	endTime: Schema.optionalKey(TinybirdDateTime),
 }) {}

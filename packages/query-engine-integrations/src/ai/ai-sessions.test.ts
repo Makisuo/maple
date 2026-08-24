@@ -8,6 +8,8 @@ import {
 	aiSessionListRowSchema,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
+	aiSessionWindowQuery,
+	aiSessionWindowRowSchema,
 } from "./ai-sessions"
 
 const params = {
@@ -98,6 +100,22 @@ describe("aiSessionListQuery", () => {
 		expect(detection).toContain("ServiceName IN ('maple-slack-agent')")
 		expect(fanOut).not.toContain("IN ('eve')")
 		expect(sql).toContain("LIMIT 25")
+	})
+
+	it("pads the fan-out window rather than dropping it", () => {
+		const { sql } = compileCH(aiSessionListQuery(), params)
+		const [fanOut, detection] = sql.split("TraceId IN (SELECT")
+
+		// `trace_detail_spans` is PARTITION BY toDate(Timestamp), so this predicate
+		// is the only thing standing between a seek over the window's partitions
+		// and a seek over every partition the 30-day TTL retains.
+		expect(fanOut).toContain(`Timestamp >= '${params.startTime}' - INTERVAL 86400 SECOND`)
+		expect(fanOut).toContain(`Timestamp <= '${params.endTime}' + INTERVAL 86400 SECOND`)
+		// Detection stays exact: the pad keeps a straddling trace whole, it does not
+		// widen which sessions the range reports.
+		expect(detection).toContain(`Timestamp >= '${params.startTime}'`)
+		expect(detection).toContain(`Timestamp <= '${params.endTime}'`)
+		expect(detection).not.toContain("INTERVAL")
 	})
 
 	it("leaves no unresolved param placeholder", () => {
@@ -236,6 +254,15 @@ describe("aiSessionSpansQuery", () => {
 		expect(escaped.sql).toContain("SpanAttributes['maple_ai.session.id'] = 'sess\\'evil'")
 	})
 
+	it("bounds both levels by the window", () => {
+		const { sql } = compileCH(aiSessionSpansQuery(), spanParams)
+
+		// Both, not one: the fan-out's copy is what prunes partitions, and the
+		// caller is responsible for bounds that contain the whole session.
+		expect(sql.split(`Timestamp >= '${params.startTime}'`).length - 1).toBe(2)
+		expect(sql.split(`Timestamp <= '${params.endTime}'`).length - 1).toBe(2)
+	})
+
 	it("honours a caller-supplied limit", () => {
 		expect(compileCH(aiSessionSpansQuery({ limit: 100 }), spanParams).sql).toContain("LIMIT 100")
 	})
@@ -275,5 +302,70 @@ describe("aiSessionSpansQuery", () => {
 			"maple_ai.session.id": "wrun_01M0CSAEW96BH2W9185XZPRPKH",
 		})
 		expect(row?.resourceAttributes).toEqual({ "service.name": "maple-slack-agent" })
+	})
+})
+
+describe("aiSessionWindowQuery", () => {
+	const windowParams = { orgId: params.orgId, sessionId: spanParams.sessionId }
+
+	it("resolves the bounds from the id alone, without a time predicate", () => {
+		const { sql } = compileCH(aiSessionWindowQuery(), windowParams)
+
+		// The one read in this file that runs unbounded, and the only one that can:
+		// `traces` has the mapValues bloom index for the id and a 30-day TTL. The
+		// fan-out has neither, which is why the caller resolves bounds first.
+		expect(sql).toContain("FROM traces")
+		expect(sql).not.toContain("trace_detail_spans")
+		expect(sql).not.toContain("Timestamp >=")
+		expect(sql).not.toContain("Timestamp <=")
+	})
+
+	it("reports bounds already padded for the fan-out", () => {
+		const { sql } = compileCH(aiSessionWindowQuery(), windowParams)
+
+		// The bounds are measured over session-BEARING spans; the read they bound
+		// returns every span of those spans' traces.
+		expect(sql).toContain("toString(min(Timestamp) - INTERVAL 86400 SECOND) AS startTime")
+		expect(sql).toContain("toString(max(Timestamp) + INTERVAL 86400 SECOND) AS endTime")
+	})
+
+	it("guards session-id presence, and escapes the id", () => {
+		const { sql } = compileCH(aiSessionWindowQuery(), windowParams)
+		expect(sql).toContain(
+			"(mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')",
+		)
+
+		const escaped = compileCH(aiSessionWindowQuery(), { ...windowParams, sessionId: "sess'evil" })
+		expect(escaped.sql).toContain("SpanAttributes['maple_ai.session.id'] = 'sess\\'evil'")
+	})
+
+	it("is org-scoped", () => {
+		expect(compileCH(aiSessionWindowQuery(), windowParams).tenantScope).toBe("org")
+	})
+
+	it("leaves no unresolved param placeholder", () => {
+		expect(compileCH(aiSessionWindowQuery(), windowParams).sql).not.toContain("__PARAM_")
+	})
+
+	it("decodes the quoted 64-bit count", () => {
+		const compiled = compileCH(aiSessionWindowQuery(), windowParams, {
+			rowSchema: aiSessionWindowRowSchema,
+		})
+
+		expect(
+			decodeRows(compiled, [
+				{
+					startTime: "2026-08-18 10:33:25.825000000",
+					endTime: "2026-08-20 10:33:36.242000000",
+					spanCount: "17",
+				},
+			]),
+		).toEqual([
+			{
+				startTime: "2026-08-18 10:33:25.825000000",
+				endTime: "2026-08-20 10:33:36.242000000",
+				spanCount: 17,
+			},
+		])
 	})
 })

@@ -32,21 +32,25 @@
 // rather than a JOIN for the same reason too — ClickHouse pushes the id set into
 // the read, which a JOIN does not do.
 //
-// Where the window predicate sits differs by query, and it is a correctness
-// choice rather than a cost one. `aiSessionSpansQuery` keeps it on both levels
-// when it has one: the caller that links from the list already knows the
-// session's bounds and passes them in, so bounding the fan-out is what keeps a
-// session read to the session. `aiSessionListQuery` keeps it on detection ONLY
-// — see that function's comment; a bounded fan-out there clamps the reported
-// start/end of every session that began before the range. The unbounded seek
-// costs nothing measurable: `TraceId` is a sort-key prefix, and a `TraceId IN
-// (…)` fan-out over `trace_detail_spans` with no time filter at all returns
-// instantly in production.
+// The window predicate sits on BOTH levels, and the fan-out's copy is PADDED
+// rather than exact. That is what reconciles the two demands on it:
+// `trace_detail_spans` is `PARTITION BY toDate(Timestamp)`, so the predicate is
+// the only thing that prunes partitions there, while an exact copy of the
+// window would clamp the reported start/end of every session that began before
+// the range. A day of padding costs one extra partition on each side and
+// contains any trace shorter than 24h.
 //
-// A caller with no window at all (`windowed: false`) drops the predicate from
-// both levels and leans on the detection scan's bloom index and the table's
-// 30-day TTL instead — see `aiSessionSpansQuery` for what that was measured to
-// cost and why it is the exception rather than the norm.
+// What omitting it costs is invisible warm and severe cold. Measured against
+// production, one fixed set of 20 trace ids whose parts were not cached:
+// 328ms with an exact window, 1,089ms with the padded one, 8,389ms with no
+// predicate at all — while re-running all three against warm parts puts them
+// within ~100ms of each other. Cold is the normal state of a dashboard query
+// against a month of partitions, and the `list` profile kills it at 15s.
+//
+// A caller that has no window — a deep link carrying only a session id —
+// resolves one with `aiSessionWindowQuery` first, rather than running the
+// fan-out unpruned. That query is the detection scan alone, which the
+// `mapValues(SpanAttributes)` bloom index and the table's 30-day TTL do bound.
 //
 // Tenant scoping: a subquery contributes nothing to the outer query's scope, so
 // every level that reads a table repeats `OrgId = {orgId}` itself. The outermost
@@ -83,6 +87,15 @@ const VENDOR_VERSION_ATTR = "maple_ai.vendor.version"
  * tops out at 2106-02-07 and anything past it fails to parse.
  */
 const SESSION_ORDER_SENTINEL = "2106-01-01 00:00:00"
+
+/**
+ * How far past the caller's window the `trace_detail_spans` fan-out reads, in
+ * seconds. See this file's header: the point is a predicate ClickHouse can
+ * prune partitions with, not an exact bound, so the pad is chosen to be a whole
+ * partition (`PARTITION BY toDate(Timestamp)`) and to contain any trace that
+ * straddles the window edge.
+ */
+const FAN_OUT_PAD_SECONDS = 86_400
 
 /** ClickHouse returns `''` for a missing Map key, so presence needs both halves. */
 const hasSessionId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<string>) =>
@@ -154,15 +167,18 @@ export const aiSessionListRowSchema: CompiledQueryRowSchema<AiSessionListOutput>
  * silently drop spans and under-count `spanCount`. The session-bearing spans come
  * from the agent's own service, which is the one a user filtering by service means.
  *
- * The time window bounds DETECTION only. Once a trace qualifies it is aggregated
- * in full, so `startTime`/`endTime`/`durationMs`/`spanCount`/`errorSpanCount`/
+ * The time window bounds DETECTION exactly and the fan-out loosely. Once a trace
+ * qualifies it is aggregated across the padded window rather than the caller's,
+ * so `startTime`/`endTime`/`durationMs`/`spanCount`/`errorSpanCount`/
  * `serviceNames` describe the whole trace rather than the slice of it that fell
  * inside the range — a session that began an hour before the range no longer
  * reports the range edge as its start, and the detail page can read the bounds
- * this row carries as the session's own. The remaining gap is between traces,
- * not inside one: a session whose OTHER traces lie entirely outside the range is
- * still found only by the traces that touched it, which needs a session-keyed
- * table to fix and not a wider window.
+ * this row carries as the session's own. A trace longer than `FAN_OUT_PAD_SECONDS`
+ * is clamped again, which no observed trace comes close to.
+ *
+ * The remaining gap is between traces, not inside one: a session whose OTHER
+ * traces lie entirely outside the range is still found only by the traces that
+ * touched it, which needs a session-keyed table to fix and not a wider window.
  */
 export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 	const limit = opts.limit ?? 50
@@ -180,9 +196,9 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 			opts.serviceNames?.length ? CH.inList($.ServiceName, opts.serviceNames) : undefined,
 		])
 
-	// Per trace: every span of a qualifying trace, session-bearing or not — and
-	// deliberately without the window predicate, so "every span" means every span
-	// the trace has rather than every span it has inside the range.
+	// Per trace: every span of a qualifying trace, session-bearing or not. The
+	// window is padded here rather than dropped, so "every span" means every span
+	// the trace has, while the read still prunes to a handful of partitions.
 	const perTrace = from(TraceDetailSpans)
 		.select(($) => {
 			const sessionOrder = CH.if_(
@@ -219,7 +235,12 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 				traceEndNanos: CH.max_(CH.toUnixTimestamp64Nano($.Timestamp).add(CH.toInt64($.Duration))),
 			}
 		})
-		.where(($) => [$.OrgId.eq(param.string("orgId")), inSubquery($.TraceId, sessionTraceIds)])
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(CH.intervalSub(param.dateTime("startTime"), FAN_OUT_PAD_SECONDS)),
+			$.Timestamp.lte(CH.intervalAdd(param.dateTime("endTime"), FAN_OUT_PAD_SECONDS)),
+			inSubquery($.TraceId, sessionTraceIds),
+		])
 		.groupBy("traceId")
 
 	return (
@@ -318,16 +339,59 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 	).format("JSON")
 }
 
+// Session window resolution (id → bounds)
+
+export interface AiSessionWindowOutput {
+	/** Warehouse datetime literals, already padded — feed them straight back in. */
+	readonly startTime: string
+	readonly endTime: string
+	/** Zero means no such session, which the bounds cannot say on their own. */
+	readonly spanCount: number
+}
+
+export const aiSessionWindowRowSchema: CompiledQueryRowSchema<AiSessionWindowOutput> = Schema.Struct({
+	startTime: Schema.String,
+	endTime: Schema.String,
+	spanCount: CHNumber,
+})
+
+/**
+ * The bounds of one session, for a caller that holds its id and nothing else.
+ *
+ * This is `aiSessionSpansQuery`'s detection half with the trace ids replaced by
+ * an aggregate, and it is the one read in this file that legitimately runs with
+ * no time predicate: `traces` carries a `bloom_filter(0.01)` skip index over
+ * `mapValues(SpanAttributes)` for the id to prune with, and the table's 30-day
+ * TTL caps what is left. The fan-out has neither and must not be run that way.
+ *
+ * The bounds come back padded by `FAN_OUT_PAD_SECONDS`, because they are
+ * measured over the session-BEARING spans while the read they bound returns
+ * every span of those spans' traces — a trace whose first span is not the
+ * session-bearing one starts earlier than any window this could report exactly.
+ *
+ * `min`/`max` over no rows return the epoch rather than nothing, so a caller
+ * must read `spanCount` to tell an unknown session from a real one.
+ */
+export function aiSessionWindowQuery() {
+	return from(Traces)
+		.select(($) => ({
+			startTime: CH.toString_(CH.intervalSub(CH.min_($.Timestamp), FAN_OUT_PAD_SECONDS)),
+			endTime: CH.toString_(CH.intervalAdd(CH.max_($.Timestamp), FAN_OUT_PAD_SECONDS)),
+			spanCount: CH.count(),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			// Same presence guard as `aiSessionSpansQuery`, for the same reason: a
+			// missing Map key reads back as `''`, so equality alone would resolve a
+			// blank id to the bounds of every span in the org that lacks the key.
+			hasSessionId($.SpanAttributes, $.SpanAttributes.get(SESSION_ID_ATTR)),
+			$.SpanAttributes.get(SESSION_ID_ATTR).eq(param.string("sessionId")),
+		])
+		.format("JSON")
+}
+
 export interface AiSessionSpansOpts {
 	readonly limit?: number
-	/**
-	 * Bound both levels by `startTime`/`endTime` (the default), or resolve the
-	 * session from its id across whatever the table still retains.
-	 *
-	 * `false` also drops the two window params from the compiled SQL, so an
-	 * unwindowed compile takes `orgId` + `sessionId` and nothing else.
-	 */
-	readonly windowed?: boolean
 }
 
 export interface AiSessionSpansOutput {
@@ -380,22 +444,13 @@ export const aiSessionSpansRowSchema: CompiledQueryRowSchema<AiSessionSpansOutpu
  * scope-based vendor detection at write time and encoded its verdict in
  * `maple_ai.vendor.id`; re-deriving the dialect here would only second-guess it.
  *
- * The window, when the caller has one, bounds BOTH levels: a session whose
- * traces straddle the window edge then returns only the spans inside it, which
- * is why the padding a caller applies has to contain the whole session.
- *
- * `windowed: false` drops it from both instead, and the session id alone
- * carries the read. Measured against production: the detection scan has the
- * `idx_span_attr_vals` bloom index (`bloom_filter(0.01)` over
- * `mapValues(SpanAttributes)`) to prune with and a 30-day table TTL to bound
- * it, and an unfiltered `SpanAttributes['maple_ai.session.id'] = …` lookup
- * returned instantly while correctly finding a multi-trace session days back;
- * the fan-out is a `TraceId` sort-key seek that is instant with no time filter
- * regardless — `aiSessionListQuery` already runs it that way. Bloom pruning
- * degrades as an org's span volume grows, so this is the exception path for a
- * deep link that arrives with no bounds, not the shape the product should
- * settle on: a client that gets rows back is expected to record the session's
- * real bounds and ask with them next time.
+ * The window bounds BOTH levels and is required, because the fan-out without one
+ * reads every partition the table retains — see this file's header for what that
+ * was measured to cost. A session whose traces straddle the window edge returns
+ * only the spans inside it, so the bounds a caller passes have to contain the
+ * whole session: the list row's `startTime`/`endTime` do by construction, and a
+ * caller holding only a session id gets bounds that do from
+ * `aiSessionWindowQuery`.
  *
  * Truncation drops the END of the session, because the rows come back oldest
  * first and an agent's answer is the last thing it writes. Ask for
@@ -408,14 +463,13 @@ export const aiSessionSpansRowSchema: CompiledQueryRowSchema<AiSessionSpansOutpu
  */
 export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 	const limit = opts.limit ?? AI_SESSION_SPANS_MAX_SPANS
-	const windowed = opts.windowed ?? true
 
 	const sessionTraceIds = from(Traces)
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			windowed ? $.Timestamp.gte(param.dateTime("startTime")) : undefined,
-			windowed ? $.Timestamp.lte(param.dateTime("endTime")) : undefined,
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
 			// The presence guard is what stops an empty `sessionId` param from
 			// matching every span that simply LACKS the key — ClickHouse reads a
 			// missing Map key back as `''`, so equality alone would turn a blank
@@ -442,8 +496,8 @@ export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				windowed ? $.Timestamp.gte(param.dateTime("startTime")) : undefined,
-				windowed ? $.Timestamp.lte(param.dateTime("endTime")) : undefined,
+				$.Timestamp.gte(param.dateTime("startTime")),
+				$.Timestamp.lte(param.dateTime("endTime")),
 				inSubquery($.TraceId, sessionTraceIds),
 			])
 			// `spanId` breaks ties: agent spans routinely share a millisecond, and

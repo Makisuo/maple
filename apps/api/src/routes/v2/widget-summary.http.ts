@@ -83,9 +83,13 @@ export const HttpV2WidgetSummaryLive = HttpApiBuilder.group(MapleApiV2, "widgetS
 		const warehouse = yield* WarehouseQueryService
 		const queryEngine = yield* QueryEngineService
 
-		return handlers.handle("retrieve", () =>
+		return handlers.handle("retrieve", ({ query }) =>
 			Effect.gen(function* () {
 				const tenant = yield* CurrentTenant.Context
+				// One filter for the whole response, applied to all three reads. A
+				// half filtered to staging next to a half that is not would render as
+				// an error rate the traffic underneath it cannot produce.
+				const deploymentEnv = query.deployment_environment
 				// One clock for the whole response. Two `Date.now()` calls would let
 				// the issues window and the throughput window describe times that do
 				// not line up, which is the sort of skew a widget renders as a
@@ -97,6 +101,11 @@ export const HttpV2WidgetSummaryLive = HttpApiBuilder.group(MapleApiV2, "widgetS
 				const issuesPage = yield* readModels.listIssues(tenant.orgId, {
 					actionable: true,
 					sort: "severity",
+					// Costs one extra warehouse round-trip, and drops alert-kind issues
+					// — their synthetic fingerprints carry no environment. Both are
+					// documented on `listIssues` and both are the right trade here: a
+					// widget filtered to staging must not count production's issues.
+					deploymentEnv,
 					startTime: new Date(issuesStartMs).toISOString(),
 					endTime: new Date(nowMs).toISOString(),
 					limit: WIDGET_SUMMARY_ISSUE_LIMIT,
@@ -105,7 +114,10 @@ export const HttpV2WidgetSummaryLive = HttpApiBuilder.group(MapleApiV2, "widgetS
 				// Whole seconds: the catalog reads the hourly rollups, whose
 				// Timestamp is a plain `DateTime` and rejects a fractional literal.
 				const compiled = CH.compile(
-					CH.serviceCatalogQuery({ limit: WIDGET_SUMMARY_SERVICE_LIMIT }),
+					CH.serviceCatalogQuery({
+						limit: WIDGET_SUMMARY_SERVICE_LIMIT,
+						deploymentEnvironment: deploymentEnv,
+					}),
 					{
 						orgId: tenant.orgId,
 						startTime: formatWarehouseDateTime(throughputStartMs),
@@ -130,6 +142,11 @@ export const HttpV2WidgetSummaryLive = HttpApiBuilder.group(MapleApiV2, "widgetS
 							source: "traces",
 							metric: "count",
 							bucketSeconds,
+							// The runtime takes a list even where the public parameter is
+							// one value, so the single filter becomes a one-element set.
+							...(deploymentEnv === undefined
+								? undefined
+								: { filters: { environments: [deploymentEnv] } }),
 							...(groupByService
 								? { groupBy: ["service"], seriesLimit: WIDGET_SUMMARY_SERIES_LIMIT }
 								: undefined),
@@ -169,6 +186,7 @@ export const HttpV2WidgetSummaryLive = HttpApiBuilder.group(MapleApiV2, "widgetS
 					schema_version: WIDGET_SUMMARY_SCHEMA_VERSION,
 					generated_at: timestamp(new Date(nowMs).toISOString()),
 					organization_id: tenant.orgId,
+					deployment_environment: deploymentEnv ?? null,
 					issues: {
 						window_seconds: WIDGET_SUMMARY_ISSUES_WINDOW_SECONDS,
 						has_more: issuesPage.nextCursor !== undefined,

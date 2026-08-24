@@ -134,6 +134,15 @@ export const rowToSubject = (row: InvestigationRow): V2Investigation["subject"] 
 			context_refs: subject.contextRefs,
 		}
 	}
+	if (subject.type === "fix_verification") {
+		return {
+			type: "fix_verification",
+			issue_id: subject.issueId,
+			pull_request_url: subject.pullRequestUrl,
+			baseline_versions: subject.baselineVersions,
+			merged_at: subject.mergedAt,
+		}
+	}
 	const issueId = subject.issueId == null ? null : Option.getOrNull(decodeIssueId(subject.issueId))
 	switch (subject.incidentKind) {
 		case "error": {
@@ -181,11 +190,18 @@ const fallbackSnapshot = (subject: V2Investigation["subject"]): V2Investigation[
 	title:
 		subject.type === "freeform"
 			? subject.title
-			: `${subject.incident_kind[0]?.toUpperCase() ?? ""}${subject.incident_kind.slice(1)} incident`,
+			: subject.type === "fix_verification"
+				? "Fix verification"
+				: `${subject.incident_kind[0]?.toUpperCase() ?? ""}${subject.incident_kind.slice(1)} incident`,
 	scope: null,
 	status: "open",
 	severity: null,
-	facts: subject.type === "incident" ? [{ label: "Incident", value: subject.incident_id }] : [],
+	facts:
+		subject.type === "incident"
+			? [{ label: "Incident", value: subject.incident_id }]
+			: subject.type === "fix_verification"
+				? [{ label: "Pull request", value: subject.pull_request_url }]
+				: [],
 	references: [],
 	incidentStartedAt: null,
 	incidentEndedAt: null,

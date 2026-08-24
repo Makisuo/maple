@@ -21,6 +21,28 @@ const baseParams = {
 	bucketSeconds: 3600,
 }
 
+describe("errorsSparkQuery synthetic fingerprints", () => {
+	it("drops fingerprints the warehouse cannot parse instead of failing the query", () => {
+		// One alert-backed issue in the batch used to abort the whole request:
+		// `toUInt64('alert:…')` is a query-level error, not a skipped row.
+		const q = errorsSparkQuery({
+			fingerprintHashes: ["123", "alert:28dd3389-5046-4ed7-8a8e-1bf147c1ddd6:all", "456"],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).not.toContain("alert:")
+		expect(sql).toContain("toUInt64('123')")
+		expect(sql).toContain("toUInt64('456')")
+	})
+
+	it("matches nothing when every fingerprint is synthetic", () => {
+		// Must not emit `IN ()`, which is a ClickHouse syntax error.
+		const q = errorsSparkQuery({ fingerprintHashes: ["alert:abc:all", "planetscale:maple:oom"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("1 = 0")
+		expect(sql).not.toContain("IN ()")
+	})
+})
+
 describe("errorsSparkQuery", () => {
 	it("buckets many fingerprints in one fingerprint-keyed scan", () => {
 		const q = errorsSparkQuery({ fingerprintHashes: ["123", "456"] })
