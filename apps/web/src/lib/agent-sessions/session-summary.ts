@@ -353,7 +353,15 @@ const PROVIDER_CACHE_CONVENTION = new Map<string, CacheConvention>([
  * installed packages — `ai/dist/index.mjs` for the attribute and
  * `@ai-sdk/anthropic` (vendored under `eve`) for the sum.
  */
-const VENDOR_CACHE_CONVENTION = new Map<string, CacheConvention>([["vercel_ai_sdk", "inclusive"]])
+const VENDOR_CACHE_CONVENTION = new Map<string, CacheConvention>([
+	["vercel_ai_sdk", "inclusive"],
+	// `@maple/llm` normalises `inputTokens` to the inclusive total for every
+	// provider (see `sumTokens` in its anthropic-messages/bedrock-converse
+	// protocols), so Maple's own spans are inclusive even when the provider's
+	// raw API is not — pinning it here keeps totals right the day a direct
+	// anthropic/bedrock provider is wired.
+	["maple", "inclusive"],
+])
 
 /**
  * True when the span's `input` bucket already covers its cache buckets, so

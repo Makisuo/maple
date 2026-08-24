@@ -32,6 +32,12 @@ export const MAPLE_AI_SESSION_ID_ATTR = "maple_ai.session.id"
 export const MAPLE_NATIVE_SESSION_ID_ATTR = "maple.session.id"
 /** Groups one turn's spans inside a session; lifted into `conversationId` read-side. */
 export const MAPLE_NATIVE_TURN_ID_ATTR = "maple.turn.id"
+/**
+ * Count of whole oldest messages dropped from `gen_ai.input.messages` to fit
+ * the emitter's attribute budget. Write-only diagnostics: nothing decodes it,
+ * it is visible in raw span attributes.
+ */
+export const MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR = "maple.genai.input_messages_dropped"
 
 export interface AiFieldDef {
 	/** Primary source attribute key (the semconv key where one exists). */

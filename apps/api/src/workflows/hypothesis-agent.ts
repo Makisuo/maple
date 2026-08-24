@@ -9,6 +9,7 @@
  * diagnosis would let any one of several rivals declare itself the answer before
  * the validator ran.
  */
+import { makeChatSessionId } from "@maple/domain/chat-session"
 import { AiTriageResult, LensCandidate } from "@maple/domain/http"
 import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
 import type { Model } from "@maple/llm"
@@ -57,7 +58,7 @@ export const runHypothesisAgent = Effect.fn("investigation.hypothesis")(function
 
 	const pass = yield* runAgentPass({
 		id: `inv_${input.investigationId}_${input.hypothesis.id}`,
-		sessionId: `${input.tenant.orgId}:inv-${input.investigationId}`,
+		sessionId: makeChatSessionId(input.tenant.orgId, `inv-${input.investigationId}`),
 		agent: hypothesisAgent(input.hypothesis),
 		tenant: input.tenant,
 		model: input.model,
@@ -127,7 +128,7 @@ export const runSoloHypothesisAgent = Effect.fn("investigation.solo")(function* 
 
 	const pass = yield* runAgentPass({
 		id: `inv_${input.investigationId}_${input.hypothesis.id}`,
-		sessionId: `${input.tenant.orgId}:inv-${input.investigationId}`,
+		sessionId: makeChatSessionId(input.tenant.orgId, `inv-${input.investigationId}`),
 		agent: hypothesisAgent(input.hypothesis),
 		tenant: input.tenant,
 		model: input.model,

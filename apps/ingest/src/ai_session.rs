@@ -52,6 +52,10 @@ pub const VENDOR_ID_ATTR: &str = "maple_ai.vendor.id";
 pub const VENDOR_VERSION_ATTR: &str = "maple_ai.vendor.version";
 pub const SESSION_ID_ATTR: &str = "maple_ai.session.id";
 pub const VENDOR_VERSION: &str = "0";
+/// Maple's native session key (dot, not the gateway-owned underscore namespace
+/// above) — must match `MAPLE_NATIVE_SESSION_ID_ATTR` in
+/// `packages/domain/src/gen-ai.ts`.
+const MAPLE_SESSION_KEY: &str = "maple.session.id";
 
 #[derive(Debug, PartialEq)]
 pub struct AiClassification {
@@ -421,7 +425,7 @@ const SCREEN_KEYS: &[&str] = &[
     "llamaindex.",
     "llm.",
     "logfire.json_schema",
-    "maple.session.id",
+    MAPLE_SESSION_KEY,
     "mastra.",
     "message.",
     "model_request_parameters",
@@ -588,7 +592,7 @@ fn absorb_key<'a>(ev: &mut SpanEvidence<'a>, attr: &'a KeyValue, b0: u8) {
                 ev.message = true;
             } else if key == "model_request_parameters" {
                 ev.model_request_parameters = true;
-            } else if key == "maple.session.id" {
+            } else if key == MAPLE_SESSION_KEY {
                 ev.maple_session = true;
             } else if key.starts_with(ATTR_NAMESPACE) {
                 ev.has_maple_ai = true;
@@ -770,7 +774,7 @@ static VENDORS: &[Vendor] = &[
     Vendor {
         id: "maple",
         detect: detect_maple,
-        session_keys: &["maple.session.id"],
+        session_keys: &[MAPLE_SESSION_KEY],
     },
     Vendor {
         id: "claude_agent_sdk",

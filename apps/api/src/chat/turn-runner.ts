@@ -168,25 +168,29 @@ const compactIfNeeded = (
 		const throughSeq = input.session.cursor()
 		const previous = input.session.compaction()
 
-		const messages = [...toLlmMessages(history, previous)]
 		// A model call like any other to the gen-ai session, even though it is
 		// housekeeping: it costs real tokens, and a session view that hides it
 		// under-reports what the conversation spent.
-		const response = yield* LLM.generate(
-			LLM.request({
-				model,
-				system: COMPACTION_SYSTEM_PROMPT,
-				messages,
-				prompt: "Compact the conversation above now.",
-			}),
-		).pipe(
+		const request = LLM.request({
+			model,
+			system: COMPACTION_SYSTEM_PROMPT,
+			messages: [...toLlmMessages(history, previous)],
+			prompt: "Compact the conversation above now.",
+		})
+		const response = yield* LLM.generate(request).pipe(
 			Effect.tap((generated) => annotateModelResponse(generated)),
 			Effect.withSpan(modelCallSpanName(model), {
 				kind: "client",
-				attributes: modelCallAttributes(model, messages, {
-					sessionId: input.sessionId,
-					turnId: input.messageId,
-				}),
+				// `request.messages` rather than the local list: `LLM.request` appends
+				// the prompt as the trailing user message, and the span should record
+				// what the model was actually sent.
+				attributes: {
+					...modelCallAttributes(model, request.messages, {
+						sessionId: input.sessionId,
+						turnId: input.messageId,
+					}),
+					"gen_ai.conversation.compacted": true,
+				},
 			}),
 		)
 		const summary = response.text.trim()

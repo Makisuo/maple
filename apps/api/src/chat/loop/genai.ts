@@ -20,13 +20,18 @@
  * fans out by `maple_ai.session.id = ?`, so an unstamped span is invisible
  * there.
  *
- * Message and tool payloads are capped. A capped value stays valid JSON —
- * either whole oldest messages are dropped (count reported separately) or the
- * overflow is re-encoded as a JSON string of its own prefix — because the
- * read side parses these fields, and a hard byte-slice would trade a big
- * attribute for an unrenderable one.
+ * Message and tool payloads are capped. A capped value keeps its *shape*, not
+ * just JSON validity: the read side's `json` decoder admits objects and arrays
+ * only, so degrading an over-budget value to a JSON string would make the
+ * attribute vanish rather than render truncated. Message lists drop whole
+ * oldest messages first (count reported separately), then truncate oversized
+ * part payloads in place; tool values are wrapped and truncated as objects.
  */
-import { MAPLE_NATIVE_SESSION_ID_ATTR, MAPLE_NATIVE_TURN_ID_ATTR } from "@maple/domain/gen-ai"
+import {
+	MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR,
+	MAPLE_NATIVE_SESSION_ID_ATTR,
+	MAPLE_NATIVE_TURN_ID_ATTR,
+} from "@maple/domain/gen-ai"
 import { LLMResponse, type LLMEvent, type Message, type Model } from "@maple/llm"
 import { Effect } from "effect"
 import type { ChatTurnInput } from "./types"
@@ -58,9 +63,10 @@ const identityAttributes = (identity: GenAiIdentity): Record<string, unknown> =>
  * Per-attribute size budgets, in JSON characters.
  *
  * Input messages replay the whole transcript each step, so this is the one that
- * meets real pressure — `MAX_REPLAYED_CHARS` alone admits 60k of text. Output
- * and tool payloads are already bounded upstream (model output limits,
- * `mcp/tools/tool-output.ts`); their caps are a backstop.
+ * meets real pressure — `MAX_REPLAYED_CHARS` alone admits 60k of text. The tool
+ * budget is the *primary* limiter for tool results, not a backstop: upstream
+ * bounds them at `MAX_TOOL_OUTPUT_BYTES` (50k, `mcp/tools/tool-output.ts`),
+ * six times this cap, so large query output truncates here routinely.
  */
 const INPUT_MESSAGES_BUDGET = 20_000
 const OUTPUT_MESSAGES_BUDGET = 8_000
@@ -93,38 +99,102 @@ const serializeMessage = (message: Message): { role: string; parts: Array<Serial
 	}),
 })
 
-const messagesJson = (
-	messages: ReadonlyArray<Message>,
-	budget: number,
-): { readonly json: string; readonly dropped: number } => {
-	const rendered = messages.map(serializeMessage)
-	// One serialization per message, so trimming to budget is a prefix-sum walk
-	// rather than a re-stringify of the whole array per dropped message.
-	const sizes = rendered.map((message) => JSON.stringify(message).length + 1)
-	let total = sizes.reduce((sum, size) => sum + size, 1)
-	let start = 0
-	while (total > budget && start < rendered.length - 1) {
-		total -= sizes[start]!
-		start += 1
-	}
-	let json = JSON.stringify(start === 0 ? rendered : rendered.slice(start))
-	// A single message can outweigh the whole budget; keep the value valid JSON
-	// by re-encoding the prefix as a string rather than slicing mid-token.
-	if (json.length > budget) json = JSON.stringify(json.slice(0, budget) + "…[truncated]")
-	return { json, dropped: start }
-}
+const TRUNCATION_MARKER = "…[truncated]"
 
-/** Bounded JSON for tool arguments/results; never throws, never invalid JSON. */
-const boundedJson = (value: unknown): string => {
+const truncated = (text: string, cap: number): string =>
+	text.length > cap ? text.slice(0, cap) + TRUNCATION_MARKER : text
+
+/** The payload's JSON prefix as a string when it outweighs `cap`, or nothing
+ *  when the payload fits and can ride along unchanged. */
+const oversizedPayloadPrefix = (value: unknown, cap: number): string | undefined => {
 	let json: string
 	try {
 		json = JSON.stringify(value) ?? "null"
 	} catch {
-		return JSON.stringify(String(value))
+		return truncated(String(value), cap)
 	}
-	return json.length > TOOL_JSON_BUDGET
-		? JSON.stringify(json.slice(0, TOOL_JSON_BUDGET) + "…[truncated]")
-		: json
+	return json.length > cap ? json.slice(0, cap) + TRUNCATION_MARKER : undefined
+}
+
+const boundPart = (part: SerializedPart, cap: number): SerializedPart => {
+	switch (part.type) {
+		case "text":
+			return part.content.length > cap ? { ...part, content: truncated(part.content, cap) } : part
+		case "tool_call": {
+			const prefix = oversizedPayloadPrefix(part.arguments, cap)
+			return prefix === undefined ? part : { ...part, arguments: prefix }
+		}
+		case "tool_call_response": {
+			const prefix = oversizedPayloadPrefix(part.result, cap)
+			return prefix === undefined ? part : { ...part, result: prefix }
+		}
+	}
+}
+
+/** First message the encoded list can start at and still fit the budget —
+ *  except the newest message, which is never dropped. */
+const fitFrom = (encoded: ReadonlyArray<string>, budget: number): number => {
+	let total = encoded.reduce((sum, json) => sum + json.length + 1, 1)
+	let start = 0
+	while (total > budget && start < encoded.length - 1) {
+		total -= encoded[start]!.length + 1
+		start += 1
+	}
+	return start
+}
+
+const messagesJson = (
+	messages: ReadonlyArray<Message>,
+	budget: number,
+): { readonly json: string; readonly dropped: number } => {
+	let rendered = messages.map(serializeMessage)
+	// One serialization per message, so trimming to budget is a prefix-sum walk
+	// rather than a re-stringify of the whole array per dropped message.
+	let encoded = rendered.map((message) => JSON.stringify(message))
+	let start = fitFrom(encoded, budget)
+	// A single message can outweigh the whole budget — routinely, since a tool
+	// result may run to 50k against the 20k input cap. Bound each surviving
+	// part's payload and re-fit; the attribute stays the array of messages the
+	// read side decodes, just with truncated payloads inside. (The per-part cap
+	// makes this a soft budget: JSON escaping and a message with many parts can
+	// overshoot it, bounded, which beats losing the attribute.)
+	if (encoded.slice(start).reduce((sum, json) => sum + json.length + 1, 1) > budget) {
+		const cap = Math.max(256, Math.floor(budget / 8))
+		rendered = rendered.map((message, index) =>
+			index < start ? message : { ...message, parts: message.parts.map((part) => boundPart(part, cap)) },
+		)
+		encoded = rendered.map((message) => JSON.stringify(message))
+		start = fitFrom(encoded, budget)
+	}
+	return { json: `[${encoded.slice(start).join(",")}]`, dropped: start }
+}
+
+/**
+ * Bounded JSON for tool arguments/results; never throws, and always an object
+ * or array — the read side's `json` decoder drops scalar values, and Maple's
+ * own tool results are strings, so a bare value would never render.
+ *
+ * Exported for tests.
+ */
+export const toolCallJson = (value: unknown): string => {
+	const wrapped = typeof value === "object" && value !== null ? value : { result: value }
+	let json: string
+	try {
+		json = JSON.stringify(wrapped) ?? "{}"
+	} catch {
+		return JSON.stringify({ result: truncated(String(value), TOOL_JSON_BUDGET) })
+	}
+	if (json.length <= TOOL_JSON_BUDGET) return json
+	let prefix = json.slice(0, TOOL_JSON_BUDGET)
+	let out = JSON.stringify({ truncated: true, prefix })
+	if (out.length > TOOL_JSON_BUDGET) {
+		// Re-encoding escapes quotes and backslashes, expanding the prefix; one
+		// corrective re-slice by the measured excess holds the cap, since every
+		// removed input character removes at least one output character.
+		prefix = prefix.slice(0, Math.max(0, prefix.length - (out.length - TOOL_JSON_BUDGET)))
+		out = JSON.stringify({ truncated: true, prefix })
+	}
+	return out
 }
 
 /** Semconv span name: `{operation} {target}`. */
@@ -156,32 +226,48 @@ export const modelCallAttributes = (
 		"gen_ai.provider.name": String(model.provider),
 		"gen_ai.request.model": String(model.id),
 		"gen_ai.input.messages": input.json,
-		...(input.dropped > 0 ? { "maple.genai.input_messages_dropped": input.dropped } : undefined),
+		...(input.dropped > 0 ? { [MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR]: input.dropped } : undefined),
 		...identityAttributes(identity),
 	}
 }
 
+/**
+ * `@maple/llm` finish reasons hyphenate; the read side's vocabulary is the
+ * semconv underscore form (`REFUSAL_FINISH_REASONS` matches `content_filter`,
+ * the default integration normalises `tool_calls`). Exported for tests.
+ */
+export const semconvFinishReason = (reason: string): string =>
+	reason === "tool-calls" ? "tool_calls" : reason === "content-filter" ? "content_filter" : reason
+
 /** The response half of a model-call span: finish reason, usage, output. */
-export const annotateModelResponse = (response: LLMResponse): Effect.Effect<void> => {
-	const usage = response.usage
-	return Effect.annotateCurrentSpan({
-		"gen_ai.response.finish_reasons": [response.finishReason],
-		"gen_ai.output.messages": messagesJson([response.message], OUTPUT_MESSAGES_BUDGET).json,
-		...(usage?.inputTokens === undefined ? undefined : { "gen_ai.usage.input_tokens": usage.inputTokens }),
-		...(usage?.outputTokens === undefined
-			? undefined
-			: { "gen_ai.usage.output_tokens": usage.outputTokens }),
-		...(usage?.cacheReadInputTokens === undefined
-			? undefined
-			: { "gen_ai.usage.cache_read.input_tokens": usage.cacheReadInputTokens }),
-		...(usage?.cacheWriteInputTokens === undefined
-			? undefined
-			: { "gen_ai.usage.cache_creation.input_tokens": usage.cacheWriteInputTokens }),
-		...(usage?.reasoningTokens === undefined
-			? undefined
-			: { "gen_ai.usage.reasoning.output_tokens": usage.reasoningTokens }),
+export const annotateModelResponse = (response: LLMResponse): Effect.Effect<void> =>
+	// Suspended so building the attribute record — which serializes the output
+	// message — happens inside the returned Effect, not at call-site evaluation.
+	Effect.suspend(() => {
+		const usage = response.usage
+		return Effect.annotateCurrentSpan({
+			"gen_ai.response.finish_reasons": [semconvFinishReason(response.finishReason)],
+			// A provider failure surfaced as a stream *event* completes the stream,
+			// so the span exit stays green — this attribute is the record of it.
+			...(response.finishReason === "error" ? { "error.type": "provider_error" } : undefined),
+			"gen_ai.output.messages": messagesJson([response.message], OUTPUT_MESSAGES_BUDGET).json,
+			...(usage?.inputTokens === undefined
+				? undefined
+				: { "gen_ai.usage.input_tokens": usage.inputTokens }),
+			...(usage?.outputTokens === undefined
+				? undefined
+				: { "gen_ai.usage.output_tokens": usage.outputTokens }),
+			...(usage?.cacheReadInputTokens === undefined
+				? undefined
+				: { "gen_ai.usage.cache_read.input_tokens": usage.cacheReadInputTokens }),
+			...(usage?.cacheWriteInputTokens === undefined
+				? undefined
+				: { "gen_ai.usage.cache_creation.input_tokens": usage.cacheWriteInputTokens }),
+			...(usage?.reasoningTokens === undefined
+				? undefined
+				: { "gen_ai.usage.reasoning.output_tokens": usage.reasoningTokens }),
+		})
 	})
-}
 
 /**
  * Annotate the current model-call span from the events collected so far.
@@ -211,7 +297,7 @@ export const withToolCallSpan = <
 	dispatch.pipe(
 		Effect.tap((outcome) =>
 			Effect.annotateCurrentSpan({
-				"gen_ai.tool.call.result": boundedJson(outcome.result.value),
+				"gen_ai.tool.call.result": toolCallJson(outcome.result.value),
 				...(outcome.result.type === "error" ? { "error.type": "tool_error" } : undefined),
 			}),
 		),
@@ -220,7 +306,7 @@ export const withToolCallSpan = <
 				"gen_ai.operation.name": "execute_tool",
 				"gen_ai.tool.name": call.name,
 				"gen_ai.tool.call.id": call.id,
-				"gen_ai.tool.call.arguments": boundedJson(call.input),
+				"gen_ai.tool.call.arguments": toolCallJson(call.input),
 				...identityAttributes(identity),
 			},
 		}),
