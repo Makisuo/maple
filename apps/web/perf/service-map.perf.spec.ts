@@ -245,13 +245,38 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 	// vsync and 33.4ms is exactly one dropped frame — the rendering was perfect on
 	// the run that "failed".
 	//
-	// Pacing still separates the regression this test exists to catch by a wide
-	// margin: the pre-fix per-edge blur + SMIL cost ~23 fps with p50/p95 far above
-	// vsync (~50ms p95), against 16.7/33.4 here. fps keeps a not-frozen floor
-	// only, exactly as pan already does below.
-	expect(idle.frameP50, "idle p50 frame time (ms)").toBeLessThan(ci ? 25 : 20)
-	expect(idle.frameP95, "idle p95 frame time (ms)").toBeLessThan(ci ? 40 : 20)
+	// Pacing still separates the regression this test exists to catch: the pre-fix
+	// per-edge blur + SMIL cost ~23 fps, i.e. p50 around 43ms. fps keeps a
+	// not-frozen floor only, exactly as pan already does below.
+	//
+	// The CI bounds were re-baselined when the map started framing itself
+	// correctly. They previously read 25/40, measured against a map that — after
+	// ELK landed — was left at zoom 1 in a corner of a 6946x3123 graph, so idle
+	// timed a nearly empty viewport at a flattering 16.7/16.7. With the camera
+	// pinned (above) and the graph actually drawn, the same runner measures
+	// 33.3/50 with React fully idle: 0 commits, 0ms blocking, 0 long tasks, three
+	// consecutive attempts, identical to the decimal. That is the runner's
+	// software rasterizer pacing at two vsyncs per frame, not code doing work —
+	// there is no work left to do.
+	//
+	// So p50 is the discriminating bound and sits at 40, between the 33.3 measured
+	// here and the ~43 a returning SVG-filter regression would cost. p95 is only a
+	// not-pathological bound; on a GPU-less host it cannot separate implementation
+	// quality, which is why the structural assertions above (no feGaussianBlur, no
+	// SMIL, particle canvas drawing) and the React commit counts in the sibling
+	// test are what actually guard this code.
+	expect(idle.frameP50, "idle p50 frame time (ms)").toBeLessThan(ci ? 40 : 20)
+	expect(idle.frameP95, "idle p95 frame time (ms)").toBeLessThan(ci ? 60 : 20)
 	expect(idle.fps, "idle fps (not frozen)").toBeGreaterThan(ci ? 20 : 55)
+	// An idle map must do no React work at all. This is the environment-independent
+	// half of the idle gate: it caught a render loop (the layout anchor feeding its
+	// own writes back into a memo) and an un-debounced localStorage write that the
+	// frame-timing numbers above could not separate from runner noise.
+	expect(idle.react.commits, "React commits while idle").toBe(0)
+	// Blocking time is bounded rather than zeroed: commit count is ours to control,
+	// but a long task can also come from the host, and one unrelated hiccup is
+	// ~50ms. The regressions this caught cost 447-694ms.
+	expect(idle.totalBlockingMs, "blocking time while idle (ms)").toBeLessThan(150)
 
 	if (ci) {
 		// GPU-less runner: pan fps can't discriminate impl quality, only catch a
