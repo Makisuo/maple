@@ -2302,7 +2302,15 @@ export function ServiceMapCanvas({
 	}
 
 	return (
-		<div className="flex flex-col h-full">
+		// `data-elk-status` reports whether the positions on screen are ELK's final
+		// answer ("ready") or the synchronous stand-in it publishes after a 2s grace
+		// ("fallback"). The perf bench needs the difference: edges exist in the DOM
+		// as soon as the fallback lands, so "the map has rendered" is true well
+		// before "the map has stopped moving", and on a slow runner ELK finished
+		// INSIDE the idle measurement window and billed its commits as a render
+		// loop. Cheap enough to keep in production, where it also says which layout
+		// a screenshot or a bug report was taken against.
+		<div className="flex flex-col h-full" data-elk-status={elkSnapshot.status}>
 			<ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
 				<ResizablePanel defaultSize={selectedServiceId ? 65 : 100} minSize={40}>
 					<div className="flex flex-col h-full">

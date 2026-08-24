@@ -127,6 +127,20 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 	await page.goto(BENCH_URL)
 	await page.waitForFunction(() => window.__smBench?.ready === true, undefined, { timeout: 60_000 })
 
+	// The map must have stopped moving before anything below measures it. ELK
+	// publishes a synchronous fallback after a 2s grace and renders it, so edges
+	// exist in the DOM while the real layout is still being computed — and on a
+	// slow runner ELK landed inside the 4s idle window, where its re-render was
+	// billed as 4 commits of a render loop that does not exist. Asserted rather
+	// than assumed, because the symptom was intermittent: identical code passed
+	// or failed depending on whether ELK straddled the measurement.
+	expect(
+		await page.evaluate(() =>
+			document.querySelector("[data-elk-status]")?.getAttribute("data-elk-status"),
+		),
+		"ELK layout final before measuring",
+	).toBe("ready")
+
 	// Structural: the per-edge Gaussian-blur filters + SMIL animations are gone,
 	// the single particle canvas is present, and edges actually rendered.
 	const dom = await page.evaluate(() => ({
