@@ -1,2 +1,0 @@
-- [] Create Dashboard MCP tool missusing tables/lists needs to be fixed
-- [] Make it easy for MCP to choose what query should be shown in the UI

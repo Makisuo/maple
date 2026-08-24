@@ -1,3 +1,6 @@
 {
-	"recommendations": []
+  "recommendations": [
+    "oxc.oxc-vscode",
+    "dprint.dprint"
+  ]
 }

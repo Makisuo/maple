@@ -1,52 +1,27 @@
 {
-	"rules": {
-		"no-alert": "error",
-		"oxc/approx-constant": "warn",
-		"no-plusplus": "off",
-		"require-yield": "off",
-		"no-restricted-imports": [
-			"warn",
-			{
-				"paths": [
-					{
-						"name": "react",
-						"importNames": ["useEffect"],
-						"message": "Do not use useEffect. Use useMountEffect for mount-only external sync, derive state inline, use event handlers, or use TanStack Query. See /no-use-effect. Bump to 'error' once all existing call sites are refactored."
-					}
-				]
-			}
-		]
-	},
-	"overrides": [
-		{
-			"files": ["apps/api/src/**/*.ts", "apps/api/src/**/*.tsx"],
-			"rules": {
-				"no-restricted-imports": [
-					"error",
-					{
-						"patterns": [
-							{
-								"group": ["**/vendor/*", "**/vendor/*/**"],
-								"message": "VCS provider implementations under services/vcs/vendor/** are vendor-specific. Do NOT import them directly — go through the provider-agnostic VCS layer (VcsProviderRegistry, VcsSyncService, VcsCommitService, VcsProviderClient, …) so VCS features stay provider-agnostic. The only files allowed to reference vendor code are the composition roots (app.ts, vcs-sync-runtime.ts), the VcsProviderRegistry that wires providers, the GitHub OAuth/connect HTTP route, and tests — see the allowlist in .oxlintrc.json."
-							}
-						]
-					}
-				]
-			}
-		},
-		{
-			"files": [
-				"apps/api/src/app.ts",
-				"apps/api/src/vcs-sync-runtime.ts",
-				"apps/api/src/services/vcs/VcsProviderRegistry.ts",
-				"apps/api/src/routes/integrations.http.ts",
-				"apps/api/src/services/vcs/vendor/**",
-				"apps/api/src/**/__tests__/**"
-			],
-			"rules": {
-				"no-restricted-imports": "off"
-			}
-		}
-	],
-	"ignorePatterns": [".context"]
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "extends": ["./packages/tools/oxc/oxlintrc.json"],
+  "ignorePatterns": [
+    "LLMS.md",
+    "**/dist",
+    "**/build",
+    "**/docs",
+    "**/.tsbuildinfo",
+    "packages/effect/typeperf/**/*",
+    "packages/**/CHANGELOG.md",
+    "!scratchpad/**/*",
+    ".changeset/**/*",
+    ".agents/**/*",
+    ".context/**/*",
+    ".specs/**/*"
+  ],
+  "jsPlugins": ["@effect/oxc/oxlint"],
+  "overrides": [{
+    "files": ["**/{test,typetest,examples,ai-docs,benchmark,bundle,scripts,scratchpad}/**"],
+    "rules": {
+      "effect/no-bigint-literals": "off",
+      "eslint/no-console": "off",
+      "effect/no-import-from-barrel-package": "off"
+    }
+  }]
 }
