@@ -540,7 +540,7 @@
             "type": "string"
           },
           "created_by": {
-            "$ref": "#/components/schemas/_maple_UserId_2"
+            "$ref": "#/components/schemas/_maple_UserId"
           },
           "destination_ids": {
             "description": "The alert destinations (`dest_…`) this rule notifies.",
@@ -696,7 +696,7 @@
             "type": "string"
           },
           "updated_by": {
-            "$ref": "#/components/schemas/_maple_UserId_3"
+            "$ref": "#/components/schemas/_maple_UserId"
           },
           "window_minutes": {
             "description": "Length of the evaluation window in minutes.",
@@ -1481,7 +1481,7 @@
             "$ref": "#/components/schemas/_maple_ActorType"
           },
           "user_id": {
-            "$ref": "#/components/schemas/_maple_UserId_1"
+            "$ref": "#/components/schemas/_maple_UserId"
           }
         },
         "required": [
@@ -2242,7 +2242,7 @@
             "type": "boolean"
           },
           "name": {
-            "$ref": "#/components/schemas/_maple_ServiceName_1"
+            "$ref": "#/components/schemas/_maple_ServiceName"
           },
           "object": {
             "enum": [
@@ -2739,7 +2739,7 @@
             "type": "string"
           },
           "organization_id": {
-            "$ref": "#/components/schemas/_maple_OrgId_1"
+            "$ref": "#/components/schemas/_maple_OrgId"
           },
           "scopes": {
             "description": "Fixed by the server. Today, exactly `widget_summary:read`.",
@@ -2857,7 +2857,7 @@
             "type": "string"
           },
           "organization_id": {
-            "$ref": "#/components/schemas/_maple_OrgId_1"
+            "$ref": "#/components/schemas/_maple_OrgId"
           },
           "schema_version": {
             "type": "number"
@@ -2958,7 +2958,7 @@
             "type": "number"
           },
           "name": {
-            "$ref": "#/components/schemas/_maple_ServiceName_1"
+            "$ref": "#/components/schemas/_maple_ServiceName"
           },
           "p95_latency_ms": {
             "type": "number"
@@ -3384,10 +3384,11 @@
         "title": "Mobile Push Environment",
         "type": "string"
       },
-      "_maple_OrgId_1": {
+      "_maple_OrgId": {
+        "description": "The organization's opaque `org_…` ID (e.g. `org_2abcDEF`).",
         "minLength": 1,
         "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-        "title": "Org ID",
+        "title": "Organization ID",
         "type": "string"
       },
       "_maple_QueryEngineAlertReducer": {
@@ -3415,10 +3416,6 @@
         "title": "Service Name",
         "type": "string"
       },
-      "_maple_ServiceName_1": {
-        "title": "Service Name",
-        "type": "string"
-      },
       "_maple_SpanId": {
         "minLength": 1,
         "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
@@ -3431,21 +3428,8 @@
         "title": "Trace ID",
         "type": "string"
       },
-      "_maple_UserId_1": {
-        "minLength": 1,
-        "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-        "title": "User ID",
-        "type": "string"
-      },
-      "_maple_UserId_2": {
-        "description": "Maple user ID of the rule's creator.",
-        "minLength": 1,
-        "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-        "title": "User ID",
-        "type": "string"
-      },
-      "_maple_UserId_3": {
-        "description": "Maple user ID of the last editor.",
+      "_maple_UserId": {
+        "description": "Maple user ID of the key's creator (e.g. `user_…`).",
         "minLength": 1,
         "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
         "title": "User ID",
@@ -6458,7 +6442,7 @@
             "name": "name",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/_maple_ServiceName_1"
+              "$ref": "#/components/schemas/_maple_ServiceName"
             }
           },
           {
