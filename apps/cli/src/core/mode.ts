@@ -12,7 +12,11 @@ class ModeError extends Schema.TaggedError<ModeError>()("@maple/cli/ModeError", 
 }) {}
 
 type ResolvedMode =
-	| { readonly _tag: "local"; readonly baseUrl: string }
+	| {
+			readonly _tag: "local"
+			readonly baseUrl: string
+			readonly headers?: Readonly<Record<string, string>>
+	  }
 	| {
 			readonly _tag: "remote"
 			readonly apiUrl: string
@@ -65,7 +69,11 @@ export class Mode extends Context.Service<Mode, ModeApi>()("@maple/cli/Mode", {
 			}),
 		)
 		const remote = Option.getOrUndefined(remoteConfig)
-		const local = (): ResolvedMode => ({ _tag: "local", baseUrl: config.localUrl })
+		const local = (): ResolvedMode => ({
+			_tag: "local",
+			baseUrl: config.localUrl,
+			headers: config.localHeaders,
+		})
 
 		const resolve: Effect.Effect<ResolvedMode, ModeError> = Effect.gen(function* () {
 			const forceRemote = hasFlag("--remote")

@@ -429,6 +429,26 @@ Pin the default backend so commands stop auto-detecting, or restore auto-detect.
 2. `defaultMode` pinned via `maple use`.
 3. Auto-detect — a configured token implies remote; otherwise a quick `GET /health` probe of the local server implies local. If neither is available, the CLI prints an actionable error.
 
+### Remote local server behind Cloudflare Access
+
+Authenticate `cloudflared` once, then point local mode at the protected origin:
+
+```bash
+cloudflared access login https://maple.example.com
+MAPLE_LOCAL_URL=https://maple.example.com maple --local services
+```
+
+For a non-loopback HTTPS URL, Maple obtains the cached identity token with
+`cloudflared access token -app=<origin>` and sends it with each local query.
+For service-token or other explicit credentials, provide comma-separated
+headers instead:
+
+```bash
+MAPLE_LOCAL_URL=https://maple.example.com \
+MAPLE_LOCAL_HEADERS='CF-Access-Client-Id=<id>,CF-Access-Client-Secret=<secret>' \
+maple --local services
+```
+
 ## Server endpoints
 
 `maple start` binds `127.0.0.1` by default. `--host` or
@@ -456,6 +476,7 @@ OTLP bodies may be protobuf (default) or JSON, optionally gzip-encoded. The `/lo
 | `MAPLE_LOCAL_BIND_HOST`      | `127.0.0.1`                | Server bind host and default same-machine CLI target; wildcards map to loopback                                                                        |
 | `MAPLE_LOCAL_ADVERTISE_HOST` | connection-safe bind host  | Host printed for clients and the bundled UI                                                                                                            |
 | `MAPLE_LOCAL_URL`            | derived bind host + `4318` | Explicit base URL override for CLI query and mode detection                                                                                            |
+| `MAPLE_LOCAL_HEADERS`        |                            | Comma-separated `Key=Value` headers attached to every local-mode query request                                                                         |
 | `MAPLE_LOCAL_UI_URL`         | `https://local.maple.dev`  | Exact separately hosted UI origin linked by `maple start` and allowed by CORS                                                                          |
 | `MAPLE_LIBCHDB`              | _(auto)_                   | Explicit path to `libchdb`. Otherwise resolved beside the binary (Homebrew keeps it in the same `libexec` dir), then `~/.maple/bin/libchdb.{so,dylib}` |
 | `MAPLE_API_URL`              | `https://api.maple.dev`    | Remote API base URL                                                                                                                                    |

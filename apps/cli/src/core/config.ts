@@ -6,6 +6,20 @@ import * as path from "node:path"
 import { defaultLocalUrl } from "../lib/local-address"
 import { deleteNativeCredential, readNativeCredential, writeNativeCredential } from "./credential-store"
 
+export const parseLocalHeaders = (raw: string | undefined): Record<string, string> => {
+	const headers: Record<string, string> = {}
+	for (const entry of raw?.split(",") ?? []) {
+		const trimmed = entry.trim()
+		if (!trimmed) continue
+		const separator = trimmed.indexOf("=")
+		if (separator < 0) continue
+		const key = trimmed.slice(0, separator).trim()
+		if (!key) continue
+		headers[key] = trimmed.slice(separator + 1).trim()
+	}
+	return headers
+}
+
 /**
  * On-disk CLI config, stored at `~/.maple/config.json` (mode 0600). The same
  * `~/.maple` directory holds the local binary's data dir and the extracted
@@ -80,6 +94,8 @@ export interface MapleConfigValues {
 	readonly envTokenOverride: boolean
 	/** Local binary base URL (env `MAPLE_LOCAL_URL`, else the default). */
 	readonly localUrl: string
+	/** Extra headers for local-mode requests (env `MAPLE_LOCAL_HEADERS`). */
+	readonly localHeaders: Readonly<Record<string, string>>
 	readonly defaultMode: Option.Option<"local" | "remote">
 	/** API URL to use for `maple login` when none is passed. */
 	readonly defaultApiUrl: string
@@ -141,6 +157,7 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigValues>
 			tokenSource,
 			envTokenOverride: envToken !== undefined,
 			localUrl: env.MAPLE_LOCAL_URL ?? defaultLocalUrl(env.MAPLE_LOCAL_BIND_HOST),
+			localHeaders: parseLocalHeaders(env.MAPLE_LOCAL_HEADERS),
 			defaultMode: Option.fromNullishOr(stored.defaultMode),
 			defaultApiUrl: env.MAPLE_API_URL ?? DEFAULT_API_URL,
 			lastUpdateCheck: Option.fromNullishOr(stored.lastUpdateCheck),

@@ -20,21 +20,36 @@
  *                 that accepts the connection but hangs surfaces as an error
  *                 instead of pending forever. Heavy list queries pass nothing.
  */
+export class LocalQueryHttpError extends Error {
+	readonly name = "LocalQueryHttpError"
+
+	constructor(
+		readonly status: number,
+		readonly statusText: string,
+		readonly location: string | null,
+		readonly detail: string,
+	) {
+		super(`Local query failed (${status} ${statusText})${detail ? `: ${detail}` : ""}`)
+	}
+}
+
 export async function executeLocalQuery<T = Record<string, unknown>>(
 	sql: string,
 	baseUrl = "",
 	signal?: AbortSignal,
+	headers: Record<string, string> = {},
 ): Promise<T[]> {
 	const res = await fetch(`${baseUrl}/local/query`, {
 		method: "POST",
-		headers: { "content-type": "application/json" },
+		headers: { "content-type": "application/json", ...headers },
 		body: JSON.stringify({ sql }),
 		signal,
+		redirect: "manual",
 	})
 
 	if (!res.ok) {
 		const detail = await res.text().catch(() => "")
-		throw new Error(`Local query failed (${res.status} ${res.statusText})${detail ? `: ${detail}` : ""}`)
+		throw new LocalQueryHttpError(res.status, res.statusText, res.headers.get("location"), detail)
 	}
 
 	const json = (await res.json()) as unknown
