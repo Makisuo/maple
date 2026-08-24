@@ -8,7 +8,7 @@
  *     `@maple/domain/gen-ai`) carry what happened: operation, model, token
  *     usage, messages, tool calls. The read-side default integration decodes
  *     them with no per-vendor mapping.
- *   - **`maple.session.id` / `maple.turn.id`** carry where it belongs. The
+ *   - **`maple_ai.session.id` / `maple_ai.turn.id`** carry where it belongs. The
  *     ingest gateway's `maple` vendor (see `apps/ingest/src/ai_session.rs`)
  *     detects on the session key and lifts it into `maple_ai.session.id` — the
  *     attribute that actually groups traces into a session. Without it, spans
