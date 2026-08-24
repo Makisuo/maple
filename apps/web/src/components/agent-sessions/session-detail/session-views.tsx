@@ -13,6 +13,7 @@ import { SessionFlow } from "./session-flow"
 import { SessionOverview } from "./session-overview"
 import { filterSpans } from "@/lib/agent-sessions/span-filters"
 import { SessionWaterfall } from "./session-waterfall"
+import type { SpanDetailTab } from "./span-expansion"
 
 export const SESSION_VIEWS = ["overview", "trace", "flow"] as const
 export type SessionView = (typeof SESSION_VIEWS)[number]
@@ -58,6 +59,10 @@ export function SessionViews({
 	// them the place they had found in a 600-span session.
 	const [collapsedTurns, setCollapsedTurns] = useState<ReadonlySet<string>>(() => new Set())
 	const [zoom, setZoom] = useState(1)
+	// One tab choice for every span expansion, in both debug views: switching
+	// spans — or Trace ↔ Flow — keeps the reader on the tab they chose.
+	// `undefined` means no choice yet, and the expansion picks by content.
+	const [spanTab, setSpanTab] = useState<SpanDetailTab | undefined>(undefined)
 
 	// 1/2/3 switch views from anywhere on the page — the switcher stays
 	// reachable without the mouse, which is the point of pinning it up here.
@@ -164,10 +169,13 @@ export function SessionViews({
 				)}
 			</div>
 
-			<TabsContent value="overview" className="flex flex-[1_1_auto] flex-col">
+			{/* Overview and Trace carry the bottom padding the page scroller gave
+			    up (`pb-0`, so the Flow floor can pin flush — see the route); the
+			    Flow view stays unpadded for the same reason. */}
+			<TabsContent value="overview" className="flex flex-[1_1_auto] flex-col pb-4">
 				<SessionOverview turns={turns} summary={summary} />
 			</TabsContent>
-			<TabsContent value="trace" className="flex flex-[1_1_auto] flex-col">
+			<TabsContent value="trace" className="flex flex-[1_1_auto] flex-col pb-4">
 				<SessionWaterfall
 					turns={turns}
 					summary={summary}
@@ -178,6 +186,8 @@ export function SessionViews({
 					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
 					selectedSpanId={selectedSpanId}
 					onSelectSpan={onSelectSpan}
+					spanTab={spanTab}
+					onSpanTabChange={setSpanTab}
 				/>
 			</TabsContent>
 			<TabsContent value="flow" className="flex flex-[1_1_auto] flex-col">
@@ -190,6 +200,8 @@ export function SessionViews({
 					onZoomChange={setZoom}
 					selectedSpanId={selectedSpanId}
 					onSelectSpan={onSelectSpan}
+					spanTab={spanTab}
+					onSpanTabChange={setSpanTab}
 					onOpenTraceView={() => onViewChange("trace")}
 				/>
 			</TabsContent>

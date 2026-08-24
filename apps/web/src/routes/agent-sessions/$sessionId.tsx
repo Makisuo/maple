@@ -8,6 +8,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
 import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { CopyableValue } from "@/components/attributes"
 import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -232,17 +233,38 @@ function SessionDetailBody({
 					<DashboardLayout.Header
 						titleContent={
 							<div className="flex min-w-0 items-center gap-2">
-								<DashboardLayout.Title title={title}>{title}</DashboardLayout.Title>
+								<DashboardLayout.Title title={title}>
+									{summary.title === undefined ? (
+										// The id fallback title copies the full session id.
+										<CopyableValue value={sessionId} label="Session ID">
+											{title}
+										</CopyableValue>
+									) : (
+										title
+									)}
+								</DashboardLayout.Title>
 								{summary.failed && <Badge variant="error">Failed</Badge>}
+								{summary.title !== undefined && (
+									<CopyableValue
+										value={sessionId}
+										label="Session ID"
+										className="shrink-0 font-mono font-normal text-muted-foreground text-xs"
+									>
+										{breadcrumbSessionId(sessionId)}
+									</CopyableValue>
+								)}
 							</div>
 						}
 						description={sessionSubtitle(summary)}
 					/>
 				</DashboardLayout.Sticky>
-				{/* `pt-0` (the stats block carries the padding instead) so the views'
-				    sticky control bar pins flush to the scroller's top — sticky offsets
-				    resolve against the padding edge. */}
-				<DashboardLayout.Scroll className="pt-0">
+				{/* `py-0` (the content blocks carry the padding instead) so the views'
+				    sticky elements pin flush to the scroller's edges — sticky offsets
+				    resolve against the padding edge. The top edge is the control bar;
+				    the bottom is the Flow view's floor, whose docked span drawer
+				    otherwise floats a padding's height short of the viewport with the
+				    canvas scrolling visibly beneath it. */}
+				<DashboardLayout.Scroll className="py-0">
 					{truncated && (
 						<div className="shrink-0 py-4">
 							<Alert variant="warning">

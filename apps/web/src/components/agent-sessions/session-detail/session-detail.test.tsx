@@ -33,6 +33,15 @@ vi.mock("@tanstack/react-router", () => ({
 	},
 }))
 
+// The expansion's Details tab mounts the trace page's lazy spanDetail read;
+// the warehouse is no part of these tests, so the atom stays Initial forever
+// and the tab renders its identity rows over the loading skeletons.
+vi.mock("@/lib/services/atoms/warehouse-query-atoms", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/services/atoms/warehouse-query-atoms")>()
+	const { disabledResultAtom } = await import("@/lib/services/atoms/disabled-result-atom")
+	return { ...actual, getSpanDetailResultAtom: () => disabledResultAtom() }
+})
+
 import type { AiSessionSpan } from "@maple/domain/http"
 import { agentSpan, llmSpan, makeSpan, toolSpan, userMessages } from "@/lib/agent-sessions/span-test-support"
 import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/session-summary"
@@ -41,6 +50,7 @@ import { SessionFlow } from "./session-flow"
 import { SessionOverview } from "./session-overview"
 import { SessionViews, type SessionView } from "./session-views"
 import { SessionWaterfall } from "./session-waterfall"
+import type { SpanDetailTab } from "./span-expansion"
 
 beforeAll(() => {
 	Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, value: 1200 })
@@ -271,6 +281,7 @@ function Waterfall(props: {
 	onToggleTurn?: (turnId: string) => void
 	selectedSpanId?: string
 	onSelectSpan?: (spanId: string | undefined) => void
+	spanTab?: SpanDetailTab
 }) {
 	return (
 		<SessionWaterfall
@@ -283,6 +294,8 @@ function Waterfall(props: {
 			onToggleTurn={props.onToggleTurn ?? noop}
 			selectedSpanId={props.selectedSpanId}
 			onSelectSpan={props.onSelectSpan ?? noop}
+			spanTab={props.spanTab}
+			onSpanTabChange={noop}
 		/>
 	)
 }
@@ -305,6 +318,8 @@ function Flow(props: {
 			onZoomChange={noop}
 			selectedSpanId={props.selectedSpanId}
 			onSelectSpan={props.onSelectSpan ?? noop}
+			spanTab={undefined}
+			onSpanTabChange={noop}
 			onOpenTraceView={noop}
 		/>
 	)
@@ -487,6 +502,30 @@ describe("SessionWaterfall", () => {
 		expect(within(detail as HTMLElement).getByText("fix the webhook retry backoff")).toBeTruthy()
 		expect(within(detail as HTMLElement).getByRole("button", { name: /Messages/ })).toBeTruthy()
 		expect(within(detail as HTMLElement).getByText("Open in Traces")).toBeTruthy()
+	})
+
+	it("leads the expansion's tabs with Details; Attributes and Timing are folded into it", () => {
+		const view = render(<Waterfall selectedSpanId="llm-1" />)
+
+		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
+		const labels = detail
+			.getAllByRole("button")
+			.filter((button) => button.hasAttribute("aria-pressed"))
+			.map((button) => button.textContent ?? "")
+		expect(labels[0]).toContain("Details")
+		expect(labels.some((label) => label.includes("Attributes"))).toBe(false)
+		expect(labels.some((label) => label.includes("Timing"))).toBe(false)
+	})
+
+	it("opens an errored span on Details, where the error and the ids are", () => {
+		const view = render(<Waterfall selectedSpanId="tool-3" />)
+
+		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
+		expect(detail.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
+		// The error banner and the identity rows render ahead of the lazily
+		// loaded attribute maps (held at Initial by the atom mock above).
+		expect(detail.getByText("exit 1")).toBeTruthy()
+		expect(detail.getByText("Trace ID")).toBeTruthy()
 	})
 
 	it("expands one span at a time — the selection, not a set", () => {
@@ -885,5 +924,25 @@ describe("SessionViews", () => {
 
 		fireEvent.keyDown(document.body, { key: "2" })
 		expect(view.container.querySelector('[data-slot="span-inline-detail"]')).toBeTruthy()
+	})
+
+	// The tab choice lives beside the other cross-view state in SessionViews:
+	// moving the expansion to another span must not reset the reader's tab.
+	it("keeps the chosen detail tab open when the expansion moves to another span", () => {
+		const view = render(<Views />)
+
+		// The tool span opens on its own payload (Tool calls); choose Details.
+		fireEvent.click(screen.getByText("grep_repo"))
+		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+
+		// Move the expansion to a different span — the choice holds.
+		fireEvent.click(screen.getAllByText("read_file")[0]!)
+		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
+		expect(detail.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
+
+		// And it holds across the view switch into the Flow drawer too.
+		fireEvent.keyDown(document.body, { key: "3" })
+		const drawer = within(view.container.querySelector('[data-slot="span-drawer"]') as HTMLElement)
+		expect(drawer.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
 	})
 })

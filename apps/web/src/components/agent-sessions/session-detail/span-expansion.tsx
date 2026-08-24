@@ -1,8 +1,12 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
+import { Schema } from "effect"
 
+import { SpanId, TraceId } from "@maple/domain"
 import type { AiSessionSpan } from "@maple/domain/http"
+import { ErrorSection } from "@maple/ui/components/error-section"
 import { Button } from "@maple/ui/components/ui/button"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
@@ -14,12 +18,15 @@ import {
 	ExternalLinkIcon,
 	XmarkIcon,
 } from "@/components/icons"
-import { CopyableValue } from "@/components/attributes"
+import { AttributesSection, CopyableValue, ResourceAttributesSection } from "@/components/attributes"
 import { SpanLogs } from "@/components/traces/span-detail-panel"
+import type { SpanDetailResult } from "@/api/warehouse/traces"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
+import { Result, useAtomValue } from "@/lib/effect-atom"
+import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
+import { getSpanDetailResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import {
-	spanAttributeEntries,
 	spanMessages,
 	spanToolCalls,
 	type SpanMessage,
@@ -37,7 +44,7 @@ import { formatCost } from "./session-overview"
  * header differs, and the caller supplies that through `header`.
  */
 
-type DetailTab = "messages" | "tools" | "attributes" | "logs" | "timing"
+export type SpanDetailTab = "details" | "messages" | "tools" | "logs"
 
 /** A message body clamps at ~12 lines with a "show full" control: prompts run
  *  to tens of thousands of tokens, and the list has to stay navigable. */
@@ -47,41 +54,56 @@ export function SpanExpansion({
 	span,
 	header,
 	tabsInHeader = false,
+	tab,
+	onTabChange,
 }: {
 	span: AiSessionSpan
 	/** Rendered above the tabs; receives the tab strip when `tabsInHeader`. */
 	header?: (tabs: ReactNode) => ReactNode
 	/** Drawer layout: the tab strip rides inside the header row. */
 	tabsInHeader?: boolean
+	/** The reader's tab choice, held by SessionViews so it survives switching
+	 *  spans and views; `undefined` means none made yet — pick by content. */
+	tab: SpanDetailTab | undefined
+	onTabChange: (tab: SpanDetailTab) => void
 }) {
 	const messages = useMemo(() => spanMessages(span), [span])
 	const toolCalls = useMemo(() => spanToolCalls(span), [span])
-	const attributes = useMemo(() => spanAttributeEntries(span), [span])
 
-	const [tab, setTab] = useState<DetailTab>(() =>
-		messages.length > 0 ? "messages" : toolCalls.length > 0 ? "tools" : "attributes",
-	)
+	// Until the reader picks a tab, each span opens on its own payload: an
+	// errored span on its error, a model call on its messages, a tool call on
+	// its arguments. An explicit choice then holds across spans and views.
+	const active: SpanDetailTab =
+		tab ??
+		(span.statusCode === "Error"
+			? "details"
+			: messages.length > 0
+				? "messages"
+				: toolCalls.length > 0
+					? "tools"
+					: "details")
 
 	const tabs = (
 		<div className="flex items-center gap-1">
-			<TabButton active={tab === "messages"} onClick={() => setTab("messages")} count={messages.length}>
-				Messages
-			</TabButton>
-			<TabButton active={tab === "tools"} onClick={() => setTab("tools")} count={toolCalls.length}>
-				Tool calls
+			<TabButton active={active === "details"} onClick={() => onTabChange("details")}>
+				Details
 			</TabButton>
 			<TabButton
-				active={tab === "attributes"}
-				onClick={() => setTab("attributes")}
-				count={attributes.length}
+				active={active === "messages"}
+				onClick={() => onTabChange("messages")}
+				count={messages.length}
 			>
-				Attributes
+				Messages
 			</TabButton>
-			<TabButton active={tab === "logs"} onClick={() => setTab("logs")}>
+			<TabButton
+				active={active === "tools"}
+				onClick={() => onTabChange("tools")}
+				count={toolCalls.length}
+			>
+				Tool calls
+			</TabButton>
+			<TabButton active={active === "logs"} onClick={() => onTabChange("logs")}>
 				Logs
-			</TabButton>
-			<TabButton active={tab === "timing"} onClick={() => setTab("timing")}>
-				Timing
 			</TabButton>
 		</div>
 	)
@@ -101,23 +123,30 @@ export function SpanExpansion({
 
 			<MetaStrip span={span} />
 
-			{tab === "messages" && <MessagesSection messages={messages} span={span} />}
-			{tab === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
-			{tab === "attributes" && <AttributesSection attributes={attributes} />}
-			{tab === "logs" && <LogsSection span={span} />}
-			{tab === "timing" && <TimingSection span={span} />}
+			{active === "details" && <DetailsSection span={span} />}
+			{active === "messages" && <MessagesSection messages={messages} span={span} />}
+			{active === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
+			{active === "logs" && <LogsSection span={span} />}
 		</div>
 	)
 }
 
 /** The inline form the Trace view mounts under the selected row. */
-export function SpanInlineDetail({ span }: { span: AiSessionSpan }) {
+export function SpanInlineDetail({
+	span,
+	tab,
+	onTabChange,
+}: {
+	span: AiSessionSpan
+	tab: SpanDetailTab | undefined
+	onTabChange: (tab: SpanDetailTab) => void
+}) {
 	return (
 		<div
 			data-slot="span-inline-detail"
 			className="border-primary border-l-2 border-border border-b bg-card/40 py-2 pr-3 pl-6"
 		>
-			<SpanExpansion key={span.spanId} span={span} />
+			<SpanExpansion key={span.spanId} span={span} tab={tab} onTabChange={onTabChange} />
 		</div>
 	)
 }
@@ -126,12 +155,16 @@ export function SpanInlineDetail({ span }: { span: AiSessionSpan }) {
 export function SpanDrawer({
 	span,
 	turnOrdinal,
+	tab,
+	onTabChange,
 	onClose,
 	onOpenTraceView,
 }: {
 	span: AiSessionSpan
 	/** "Turn 3" / "Segment 2" — where the span lives, for the drawer's title row. */
 	turnOrdinal: string | undefined
+	tab: SpanDetailTab | undefined
+	onTabChange: (tab: SpanDetailTab) => void
 	onClose: () => void
 	/** Switch to the Trace view with this span still selected. */
 	onOpenTraceView: () => void
@@ -150,6 +183,8 @@ export function SpanDrawer({
 			<SpanExpansion
 				key={span.spanId}
 				span={span}
+				tab={tab}
+				onTabChange={onTabChange}
 				tabsInHeader
 				header={(tabs) => (
 					<div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 bg-background py-2">
@@ -306,8 +341,14 @@ function MetaStrip({ span }: { span: AiSessionSpan }) {
 					</span>
 				),
 			)}
-			<span className="ml-auto font-mono text-[11px] text-muted-foreground/70">
-				span {span.spanId} · trace {span.traceId.slice(0, 8)}…{span.traceId.slice(-4)}
+			<span className="ml-auto flex items-baseline gap-1.5 font-mono text-[11px] text-muted-foreground/70">
+				<CopyableValue value={span.spanId} label="Span ID">
+					span {span.spanId}
+				</CopyableValue>
+				<span aria-hidden>·</span>
+				<CopyableValue value={span.traceId} label="Trace ID">
+					trace {span.traceId.slice(0, 8)}…{span.traceId.slice(-4)}
+				</CopyableValue>
 			</span>
 		</div>
 	)
@@ -508,40 +549,71 @@ function PayloadCard({
 }
 
 /* -------------------------------------------------------------------------- */
-/* Attributes                                                                 */
+/* Details                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** The decoded `gen_ai.*` view the endpoint returns; the raw span attribute
- *  maps stay server-side and live behind "Open in Traces". */
-function AttributesSection({
-	attributes,
-}: {
-	attributes: readonly { readonly key: string; readonly value: string }[]
-}) {
-	if (attributes.length === 0) {
-		return <EmptyNote>This span carried no decoded gen_ai attributes.</EmptyNote>
-	}
+const toTraceId = Schema.decodeSync(TraceId)
+const toSpanId = Schema.decodeSync(SpanId)
+
+/**
+ * The same reading the trace page's span panel gives: the span's error, its
+ * identity and timing, and the full span/resource attribute maps rendered
+ * through the shared attribute sections. The maps are fetched here — the
+ * session endpoint drops them server-side, so this is the panel's own lazy
+ * `spanDetail` read, made once the tab is open.
+ */
+function DetailsSection({ span }: { span: AiSessionSpan }) {
+	const detailResult = useAtomValue(
+		span.traceId !== "" && span.spanId !== ""
+			? getSpanDetailResultAtom({
+					data: {
+						traceId: toTraceId(span.traceId),
+						spanId: toSpanId(span.spanId),
+						timestamp: span.timestamp,
+					},
+				})
+			: disabledResultAtom<SpanDetailResult>(),
+	)
+	const detailAttrs = Result.isSuccess(detailResult) ? detailResult.value : undefined
+
 	return (
-		<div className="divide-y divide-border/40 overflow-hidden rounded-md border border-border/70">
-			{attributes.map((entry) => (
-				<div key={entry.key} className="flex min-w-0 items-baseline gap-3 px-2.5 py-1.5">
-					<span
-						className="w-72 shrink-0 truncate font-mono text-[11px] text-muted-foreground"
-						title={entry.key}
-					>
-						{entry.key}
-					</span>
-					<CopyableValue value={entry.value} className="min-w-0">
-						<span className="block truncate font-mono text-xs">{entry.value}</span>
-					</CopyableValue>
-				</div>
-			))}
+		<div className="flex flex-col gap-3 pb-1">
+			{span.statusCode === "Error" && span.statusMessage !== "" && (
+				<ErrorSection
+					message={span.statusMessage}
+					badge={span.genAi.errorType}
+					prompt={{
+						serviceName: span.serviceName,
+						operation: span.spanName,
+						attributes: detailAttrs?.spanAttributes,
+					}}
+					className="mx-0 my-0"
+				/>
+			)}
+			<IdentityRows span={span} />
+			{Result.builder(detailResult)
+				.onInitial(() => (
+					<div className="flex flex-col gap-2">
+						<Skeleton className="h-4 w-32" />
+						<Skeleton className="h-24 w-full" />
+						<Skeleton className="h-4 w-32" />
+						<Skeleton className="h-24 w-full" />
+					</div>
+				))
+				.onError(() => <EmptyNote>Failed to load this span's full attributes.</EmptyNote>)
+				.onSuccess((detail) => (
+					<>
+						<AttributesSection attributes={detail.spanAttributes} title="Span Attributes" />
+						<ResourceAttributesSection attributes={detail.resourceAttributes} />
+					</>
+				))
+				.render()}
 		</div>
 	)
 }
 
 /* -------------------------------------------------------------------------- */
-/* Logs / Timing                                                              */
+/* Logs                                                                       */
 /* -------------------------------------------------------------------------- */
 
 /** The same read the trace page's panel makes, fetched only once this tab is
@@ -555,7 +627,9 @@ function LogsSection({ span }: { span: AiSessionSpan }) {
 	)
 }
 
-function TimingSection({ span }: { span: AiSessionSpan }) {
+/** Identity and timing, every value click-to-copy — the Details tab's
+ *  counterpart of the trace panel's "Span" card. */
+function IdentityRows({ span }: { span: AiSessionSpan }) {
 	const { effectiveTimezone } = useTimezonePreference()
 	const ttftMs = spanTtftMs(span)
 

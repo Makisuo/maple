@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { spanAttributeEntries, spanMessages, spanToolCalls } from "./span-detail"
+import { spanMessages, spanToolCalls } from "./span-detail"
 import { llmSpan, toolSpan } from "./span-test-support"
 
 describe("spanMessages", () => {
@@ -143,25 +143,5 @@ describe("spanToolCalls", () => {
 		const calls = spanToolCalls(span)
 		expect(calls).toHaveLength(1)
 		expect(calls[0]!.id).toBe("toolu_01")
-	})
-})
-
-describe("spanAttributeEntries", () => {
-	it("lists the present fields under their semconv keys and nothing else", () => {
-		const span = llmSpan({
-			spanId: "l1",
-			startMs: 0,
-			durationMs: 1000,
-			model: "claude-opus-5",
-			genAi: { usageInputTokens: 1200, requestStream: true },
-		})
-
-		const entries = spanAttributeEntries(span)
-		const byKey = new Map(entries.map((entry) => [entry.key, entry.value]))
-		expect(byKey.get("gen_ai.operation.name")).toBe("chat")
-		expect(byKey.get("gen_ai.response.model")).toBe("claude-opus-5")
-		expect(byKey.get("gen_ai.usage.input_tokens")).toBe("1200")
-		expect(byKey.get("gen_ai.request.stream")).toBe("true")
-		expect(byKey.has("gen_ai.usage.output_tokens")).toBe(false)
 	})
 })

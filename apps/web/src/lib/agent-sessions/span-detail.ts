@@ -1,5 +1,5 @@
-// What one expanded span can actually show: the captured messages, the tool
-// calls, and the decoded attributes — read from the span, never synthesised.
+// What one expanded span can actually show: the captured messages and the
+// tool calls — read from the span, never synthesised.
 //
 // `gen_ai.input.messages`, `gen_ai.output.messages` and
 // `gen_ai.system_instructions` are captured JSON whose exact shape belongs to
@@ -12,7 +12,6 @@
 // messages yields an empty list, not a placeholder transcript.
 
 import type { AiSessionSpan } from "@maple/domain/http"
-import { AI_GENAI_FIELDS, type AiGenAiField } from "@maple/domain/gen-ai"
 
 export type SpanMessagePart =
 	| { readonly kind: "text"; readonly text: string }
@@ -99,34 +98,6 @@ function ownToolCall(span: AiSessionSpan): SpanToolCall | undefined {
 		argumentsText: toolCallArguments === undefined ? undefined : jsonText(toolCallArguments),
 		resultText: toolCallResult === undefined ? undefined : jsonText(toolCallResult),
 	}
-}
-
-export interface SpanAttributeEntry {
-	/** The semconv key (`gen_ai.usage.input_tokens`), not the decoded field name. */
-	readonly key: string
-	readonly value: string
-}
-
-/**
- * The decoded `gen_ai.*` values present on the span, under their semconv
- * keys, in catalog order. This is the decoded view the endpoint returns — the
- * raw attribute maps stay server-side, and the full span lives one
- * "Open in Traces" click away.
- */
-export function spanAttributeEntries(span: AiSessionSpan): readonly SpanAttributeEntry[] {
-	const entries: SpanAttributeEntry[] = []
-	for (const field of Object.keys(AI_GENAI_FIELDS) as readonly AiGenAiField[]) {
-		const value = span.genAi[field]
-		if (value === undefined) continue
-		entries.push({ key: AI_GENAI_FIELDS[field].key, value: attributeText(value) })
-	}
-	return entries
-}
-
-function attributeText(value: unknown): string {
-	if (typeof value === "string") return value
-	if (typeof value === "number" || typeof value === "boolean") return String(value)
-	return jsonText(value)
 }
 
 /** Captured values are decoded JSON by the time they reach the client, so a

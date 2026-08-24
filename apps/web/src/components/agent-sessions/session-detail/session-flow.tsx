@@ -18,7 +18,7 @@ import {
 	type AiSpanCategory,
 } from "@/lib/agent-sessions/session-turns"
 import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
-import { SpanDrawer } from "./span-expansion"
+import { SpanDrawer, type SpanDetailTab } from "./span-expansion"
 import { CATEGORY_FILL } from "./span-visuals"
 
 // One lane per turn, positioned by hand. (`investigations/flow` already wraps
@@ -82,6 +82,9 @@ interface SessionFlowProps {
 	selectedSpanId: string | undefined
 	/** Raised with a span id to open the drawer, `undefined` to close it. */
 	onSelectSpan: (spanId: string | undefined) => void
+	/** The drawer's tab, shared with the Trace view's inline expansion. */
+	spanTab: SpanDetailTab | undefined
+	onSpanTabChange: (tab: SpanDetailTab) => void
 	/** The drawer's "Open in Trace view": same span, sibling view. */
 	onOpenTraceView: () => void
 }
@@ -95,6 +98,8 @@ export function SessionFlow({
 	onZoomChange,
 	selectedSpanId,
 	onSelectSpan,
+	spanTab,
+	onSpanTabChange,
 	onOpenTraceView,
 }: SessionFlowProps) {
 	const { lanes, width, height } = useMemo(
@@ -238,6 +243,8 @@ export function SessionFlow({
 						<SpanDrawer
 							span={selectedSpan.span}
 							turnOrdinal={turnOrdinal(selectedSpan.turn)}
+							tab={spanTab}
+							onTabChange={onSpanTabChange}
 							onClose={() => onSelectSpan(undefined)}
 							onOpenTraceView={onOpenTraceView}
 						/>

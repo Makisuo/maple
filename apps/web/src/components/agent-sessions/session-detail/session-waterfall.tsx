@@ -28,7 +28,7 @@ import {
 	type AiSpanCategory,
 } from "@/lib/agent-sessions/session-turns"
 import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
-import { SpanInlineDetail } from "./span-expansion"
+import { SpanInlineDetail, type SpanDetailTab } from "./span-expansion"
 import { CATEGORY_FILL } from "./span-visuals"
 
 // Row heights are fixed and known, so the virtualizer never has to measure —
@@ -83,6 +83,9 @@ interface SessionWaterfallProps {
 	selectedSpanId: string | undefined
 	/** Raised with a span id to expand it, `undefined` to collapse. */
 	onSelectSpan: (spanId: string | undefined) => void
+	/** The expansion's tab, shared with the Flow view's drawer. */
+	spanTab: SpanDetailTab | undefined
+	onSpanTabChange: (tab: SpanDetailTab) => void
 }
 
 export function SessionWaterfall({
@@ -95,6 +98,8 @@ export function SessionWaterfall({
 	onToggleTurn,
 	selectedSpanId,
 	onSelectSpan,
+	spanTab,
+	onSpanTabChange,
 }: SessionWaterfallProps) {
 	// The page scrolls as one, so the virtualizer rides the page's scroller.
 	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
@@ -269,7 +274,13 @@ export function SessionWaterfall({
 											}}
 										/>
 									)}
-									{row.kind === "detail" && <SpanInlineDetail span={row.span} />}
+									{row.kind === "detail" && (
+										<SpanInlineDetail
+											span={row.span}
+											tab={spanTab}
+											onTabChange={onSpanTabChange}
+										/>
+									)}
 									{row.kind === "gap" && <GapRow gap={row.gap} />}
 								</div>
 							)

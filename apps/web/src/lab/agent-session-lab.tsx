@@ -34,7 +34,7 @@ export function AgentSessionLab({ initialView }: { initialView?: SessionView }) 
 			    the waterfall's virtualizer finds its scroller by that attribute, so
 			    a stand-in without it silently takes the fallback path and the view
 			    behaves differently here than on the page. */}
-			<div data-slot="page-scroll-area" className="flex min-h-0 flex-1 flex-col overflow-auto p-4 pt-0">
+			<div data-slot="page-scroll-area" className="flex min-h-0 flex-1 flex-col overflow-auto px-4">
 				<div className="flex min-h-64 shrink-0 grow flex-col">
 					<SessionViews
 						view={view}
