@@ -2314,6 +2314,20 @@ export function ServiceMapCanvas({
 			<ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
 				<ResizablePanel defaultSize={selectedServiceId ? 65 : 100} minSize={40}>
 					<div className="flex flex-col h-full">
+						<ServiceMapToolbar
+							colorMode={colorMode}
+							onColorModeChange={setColorMode}
+							onResort={handleResort}
+							services={services}
+							focus={focus}
+							onFocusChange={setFocus}
+							minTrafficPct={minTrafficPct}
+							onMinTrafficPctChange={(pct) =>
+								setViewPrefs((prev) => ({ ...prev, minTrafficPct: pct }))
+							}
+							hiddenNodeCount={declutter.hiddenNodeCount}
+							hiddenEdgeCount={declutter.hiddenEdgeCount}
+						/>
 						<div className="flex-1 min-h-0 relative">
 							{/* Dev-only: the sliders write `layoutConfig`, which is part of
 							    `layoutSignature`, so every tick re-runs ELK. Compiled out of
@@ -2321,20 +2335,6 @@ export function ServiceMapCanvas({
 							{import.meta.env.DEV && (
 								<LayoutDebugPanel config={layoutConfig} onChange={setLayoutConfig} />
 							)}
-							<ServiceMapToolbar
-								colorMode={colorMode}
-								onColorModeChange={setColorMode}
-								onResort={handleResort}
-								services={services}
-								focus={focus}
-								onFocusChange={setFocus}
-								minTrafficPct={minTrafficPct}
-								onMinTrafficPctChange={(pct) =>
-									setViewPrefs((prev) => ({ ...prev, minTrafficPct: pct }))
-								}
-								hiddenNodeCount={declutter.hiddenNodeCount}
-								hiddenEdgeCount={declutter.hiddenEdgeCount}
-							/>
 							<ParticleRegistryProvider value={registry}>
 								<ReactFlow
 									nodes={renderedNodes}
@@ -2370,12 +2370,14 @@ export function ServiceMapCanvas({
 
 						{/* Legend */}
 						<div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t bg-muted/30 px-3 py-2.5 text-[11px] text-muted-foreground shrink-0">
-							<span className="font-medium">Drag nodes to arrange</span>
-							<span className="text-foreground/30">|</span>
-							<span className="font-medium">Scroll to zoom</span>
+							{/* Pointer hints only: on touch the gestures are different, and the
+							    two lines they cost are the whole legend's height on a phone. */}
+							<span className="font-medium max-sm:hidden">Drag nodes to arrange</span>
+							<span className="text-foreground/30 max-sm:hidden">|</span>
+							<span className="font-medium max-sm:hidden">Scroll to zoom</span>
 							{colorMode === "service" && services.length > 0 && (
 								<>
-									<span className="text-foreground/30">|</span>
+									<span className="text-foreground/30 max-sm:hidden">|</span>
 									{services.slice(0, 3).map((service) => (
 										<div key={service} className="flex items-center gap-1.5">
 											<div
