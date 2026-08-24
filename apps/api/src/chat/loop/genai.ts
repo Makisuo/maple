@@ -82,6 +82,7 @@ const OUTPUT_MESSAGES_BUDGET = 8_000
 const TOOL_JSON_BUDGET = 8_000
 const SYSTEM_INSTRUCTIONS_BUDGET = 8_000
 const TOOL_DEFINITIONS_BUDGET = 16_000
+const AGENT_DESCRIPTION_BUDGET = 1_024
 
 type SerializedPart =
 	| { readonly type: "text"; readonly content: string }
@@ -172,7 +173,9 @@ const messagesJson = (
 	if (encoded.slice(start).reduce((sum, json) => sum + json.length + 1, 1) > budget) {
 		const cap = Math.max(256, Math.floor(budget / 8))
 		rendered = rendered.map((message, index) =>
-			index < start ? message : { ...message, parts: message.parts.map((part) => boundPart(part, cap)) },
+			index < start
+				? message
+				: { ...message, parts: message.parts.map((part) => boundPart(part, cap)) },
 		)
 		encoded = rendered.map((message) => JSON.stringify(message))
 		start = fitFrom(encoded, budget)
@@ -225,8 +228,16 @@ const toolDefinitionsJson = (tools: ReadonlyArray<ToolDefinition>): string => {
 		description: tool.description,
 		parameters: tool.inputSchema,
 	}))
-	const json = JSON.stringify(full)
-	if (json.length <= TOOL_DEFINITIONS_BUDGET) return json
+	// `inputSchema` is customer MCP-server data; a stringify throw here would be
+	// a turn-killing defect (evaluated inside `Effect.sync`), so it degrades to
+	// the compact form instead, like this file's other serializers.
+	let json: string | undefined
+	try {
+		json = JSON.stringify(full)
+	} catch {
+		json = undefined
+	}
+	if (json !== undefined && json.length <= TOOL_DEFINITIONS_BUDGET) return json
 	// 128 keeps the chat agent's real toolbox (~60 MCP tools) inside the budget;
 	// the first sentence of a tool description is the part that identifies it.
 	return JSON.stringify(
@@ -250,12 +261,12 @@ export const invokeAgentAttributes = (
 ): Record<string, unknown> => ({
 	"gen_ai.operation.name": "invoke_agent",
 	"gen_ai.agent.name": agent.name,
+	// Bounded: hypothesis agents put planner-written text here, the one
+	// description with no length guarantee.
 	...(agent.description === undefined || agent.description === ""
 		? undefined
-		: { "gen_ai.agent.description": agent.description }),
-	...(options.workflowName === undefined
-		? undefined
-		: { "gen_ai.workflow.name": options.workflowName }),
+		: { "gen_ai.agent.description": truncated(agent.description, AGENT_DESCRIPTION_BUDGET) }),
+	...(options.workflowName === undefined ? undefined : { "gen_ai.workflow.name": options.workflowName }),
 	"gen_ai.provider.name": String(model.provider),
 	"gen_ai.request.model": String(model.id),
 	...(options.tools === undefined || options.tools.length === 0
@@ -357,9 +368,7 @@ const reportedCost = (usage: LLMResponse["usage"]): number | undefined => {
  * can differ from `gen_ai.request.model`); the vendored protocol surfaces both
  * on the finish event's `providerMetadata.openai`.
  */
-const responseIdentity = (
-	response: LLMResponse,
-): { readonly id?: string; readonly model?: string } => {
+const responseIdentity = (response: LLMResponse): { readonly id?: string; readonly model?: string } => {
 	const finish = response.events.find((event) => event.type === "finish")
 	const openai = finish?.type === "finish" ? finish.providerMetadata?.["openai"] : undefined
 	if (typeof openai !== "object" || openai === null) return {}
@@ -396,7 +405,7 @@ export const modelResponseAttributes = (response: LLMResponse): Record<string, u
 			? undefined
 			: { "gen_ai.usage.cache_read.input_tokens": usage.cacheReadInputTokens }),
 		// The semconv spelling. The read side's primary is the older
-		// `cache_creation` key and decodes both (see `GENAI_SEMCONV_ALIASES`).
+		// `cache_creation` key and decodes both (see `GENAI_LEGACY_ALIASES`).
 		...(usage?.cacheWriteInputTokens === undefined
 			? undefined
 			: { "gen_ai.usage.cache_write.input_tokens": usage.cacheWriteInputTokens }),
@@ -446,10 +455,7 @@ export interface ModelCallTiming {
  * before the network, so the first event of any type is the first byte), the
  * model's own duration on the terminal event.
  */
-export const annotateModelCallTiming = (
-	timing: ModelCallTiming,
-	event: LLMEvent,
-): Effect.Effect<void> =>
+export const annotateModelCallTiming = (timing: ModelCallTiming, event: LLMEvent): Effect.Effect<void> =>
 	Effect.suspend(() => {
 		const first = timing.firstChunkMs === undefined
 		const terminal = event.type === "finish" || event.type === "provider-error"

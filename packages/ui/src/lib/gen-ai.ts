@@ -99,7 +99,11 @@ export const GEN_AI_LABELS: Record<string, string> = {
 	"gen_ai.usage.input_tokens": "Input",
 	"gen_ai.usage.output_tokens": "Output",
 	"gen_ai.usage.cache_read.input_tokens": "Cache read",
+	// Two spellings of the same quantity: `cache_creation` is the Anthropic-SDK
+	// dialect (and the read side's primary), `cache_write` the registry spelling
+	// Maple's own agents emit. An emitter uses one or the other, never both.
 	"gen_ai.usage.cache_creation.input_tokens": "Cache write",
+	"gen_ai.usage.cache_write.input_tokens": "Cache write",
 	"gen_ai.usage.reasoning.output_tokens": "Reasoning",
 	"gen_ai.usage.cost": "Cost",
 	// Legacy spellings, all still in the wild. The suffix is what keeps two rows
@@ -187,6 +191,7 @@ const TOKEN_COUNT_KEYS: ReadonlySet<string> = new Set([
 	"gen_ai.usage.output_tokens",
 	"gen_ai.usage.cache_read.input_tokens",
 	"gen_ai.usage.cache_creation.input_tokens",
+	"gen_ai.usage.cache_write.input_tokens",
 	"gen_ai.usage.reasoning.output_tokens",
 	"gen_ai.usage.prompt_tokens",
 	"gen_ai.usage.completion_tokens",

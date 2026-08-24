@@ -260,8 +260,12 @@ export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
 						OpenRouter.configure({
 							apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
 							headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-							...(!(tags === undefined) ? { http: { body: openRouterTagBody(tags) } } : undefined),
-						}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL),
+							...(!(tags === undefined)
+								? { http: { body: openRouterTagBody(tags) } }
+								: undefined),
+						}).model(
+							readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL,
+						),
 						// No default. This resolver serves chat, AI triage *and* the validator, so a
 						// number picked here would silently retune three stages with different shapes at
 						// once — worth doing per stage, with measurement, not as a side effect of adding
@@ -338,7 +342,9 @@ export const resolveLensModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
 						OpenRouter.configure({
 							apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
 							headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-							...(!(tags === undefined) ? { http: { body: openRouterTagBody(tags) } } : undefined),
+							...(!(tags === undefined)
+								? { http: { body: openRouterTagBody(tags) } }
+								: undefined),
 						}).model(
 							readString(env, "MAPLE_LENS_MODEL_OPENROUTER") ??
 								readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ??

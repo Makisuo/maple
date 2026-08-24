@@ -214,6 +214,19 @@ describe("legacy aliases", () => {
 		expect(mapped.genAi.usageInputTokens).toBe(5033)
 	})
 
+	it("prefers the canonical cache_creation key over the cache_write spelling", () => {
+		// Pins the alias ordering that protects rows materialized under the
+		// Anthropic-era key: reordering GENAI_LEGACY_ALIASES must fail here.
+		const mapped = mapAiSpan(
+			row({
+				"gen_ai.usage.cache_creation.input_tokens": "106",
+				"gen_ai.usage.cache_write.input_tokens": "512",
+			}),
+		)
+
+		expect(mapped.genAi.usageCacheCreationInputTokens).toBe(106)
+	})
+
 	it("maps a real legacy OpenRouter span through the aliases alone", () => {
 		// The dialect an OpenRouter/traceloop-style instrumentor still emits:
 		// prompt/completion/system, and the singular finish reason.

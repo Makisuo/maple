@@ -203,6 +203,19 @@ describe("modelResponseAttributes", () => {
 		assert.notProperty(modelResponseAttributes(response(undefined)), "gen_ai.usage.cost")
 	})
 
+	it("drops a cost that is not a finite non-negative number", () => {
+		// Gateways emit null, strings, and garbage here; none of it may become
+		// an attribute the session header sums.
+		for (const cost of [null, "0.0042", Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+			assert.notProperty(
+				modelResponseAttributes(
+					response(new Usage({ inputTokens: 1, providerMetadata: { openai: { cost } } })),
+				),
+				"gen_ai.usage.cost",
+			)
+		}
+	})
+
 	it("emits cache writes under the semconv cache_write key", () => {
 		const attributes = modelResponseAttributes(response(new Usage({ cacheWriteInputTokens: 512 })))
 
@@ -218,7 +231,9 @@ describe("modelResponseAttributes", () => {
 					{
 						type: "finish",
 						reason: "stop",
-						providerMetadata: { openai: { id: "gen-abc123", model: "openai/gpt-5.6-luna-served" } },
+						providerMetadata: {
+							openai: { id: "gen-abc123", model: "openai/gpt-5.6-luna-served" },
+						},
 					},
 				],
 				usage: undefined,

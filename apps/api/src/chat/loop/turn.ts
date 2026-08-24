@@ -684,9 +684,12 @@ const runStep = (
 							const dispatched = yield* Effect.forEach(
 								forced,
 								(call) =>
-									withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call), toolDescriptions.get(call.name)).pipe(
-										Effect.map((result) => [call, result] as const),
-									),
+									withToolCallSpan(
+										call,
+										identity,
+										ToolRuntime.dispatch(tools, call),
+										toolDescriptions.get(call.name),
+									).pipe(Effect.map((result) => [call, result] as const)),
 								{ concurrency: 1 },
 							)
 							return Stream.concat(
@@ -762,9 +765,12 @@ const runStep = (
 						const dispatched = yield* Effect.forEach(
 							calls,
 							(call) =>
-								withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call), toolDescriptions.get(call.name)).pipe(
-									Effect.map((result) => [call, result] as const),
-								),
+								withToolCallSpan(
+									call,
+									identity,
+									ToolRuntime.dispatch(tools, call),
+									toolDescriptions.get(call.name),
+								).pipe(Effect.map((result) => [call, result] as const)),
 							{ concurrency: TOOL_CONCURRENCY },
 						)
 
