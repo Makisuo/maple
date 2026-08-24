@@ -78,6 +78,7 @@ declare global {
 			runStability: (opts?: { settleMs?: number }) => Promise<LayoutStabilityReportSet>
 			setCamera: (viewport: { x: number; y: number; zoom: number }) => void
 			fitCamera: () => void
+			waitForQuiet: (opts?: { maxMs?: number; quietMs?: number }) => Promise<boolean>
 			getCamera: () => { x: number; y: number; zoom: number }
 		}
 	}
@@ -181,16 +182,17 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 	// Zoom 1 at the origin is the state every threshold below was calibrated
 	// against, so pinning it keeps those baselines valid and makes the scene an
 	// explicit property of the test rather than an accident of layout.
-	await page.evaluate(async () => {
+	const settled = await page.evaluate(async () => {
 		window.__smBench!.setCamera({ x: 0, y: 0, zoom: 1 })
-		// Wait out the camera write, not just the repaint. Moving the viewport
-		// fires the map's `onMoveEnd`, which persists the camera through the layout
-		// snapshot store into localStorage — a JSON encode of the whole snapshot
-		// LRU plus the renders that follow it. At a 300ms settle that landed inside
-		// the measured window and showed up as 6 React commits, ~500ms of blocking
-		// time and a 100ms p95, none of which is what this test is trying to time.
-		await new Promise((resolve) => setTimeout(resolve, 1500))
+		// Wait for React to stop committing, not for a fixed delay. Moving the
+		// viewport fires the map's `onMoveEnd`, which persists the camera through
+		// the layout snapshot store into localStorage, and that path schedules
+		// follow-up work of its own: on CI it produced 6 commits and ~600ms of
+		// blocking time inside a window that had already slept 1.5s waiting for it.
+		// None of that is what this test is trying to time.
+		return await window.__smBench!.waitForQuiet()
 	})
+	expect(settled, "map went quiet before frame timing").toBe(true)
 	const idle = await page.evaluate(() => window.__smBench!.run({ durationMs: 4000, pan: false }))
 	const pan = await page.evaluate(() => window.__smBench!.run({ durationMs: 4000, pan: true }))
 

@@ -338,6 +338,8 @@ interface SmBench {
 	setCamera: (viewport: { x: number; y: number; zoom: number }) => void
 	/** Frame the whole graph, for measuring what a user sees at fit-all. */
 	fitCamera: () => void
+	/** Resolve once React has stopped committing, so a run times a steady state. */
+	waitForQuiet: (opts?: { maxMs?: number; quietMs?: number }) => Promise<boolean>
 	/** The camera as it currently stands, for reporting what a run measured. */
 	getCamera: () => { x: number; y: number; zoom: number }
 }
@@ -611,6 +613,25 @@ function BenchDriver({
 				// react-doctor-disable-next-line react-doctor/server-sequential-independent-await -- Both scenarios mutate the same graph; overlapping them would corrupt the measurement.
 				const topologyChange = await measureStability(onTopologyChange, settleMs)
 				return { metricRefresh, topologyChange }
+			},
+			// Fixed sleeps do not work here: the camera write path schedules its own
+			// follow-up work, and on CI that landed inside a measurement window that
+			// had already waited 1.5s for it. Watch the commit counter instead.
+			waitForQuiet: async ({ maxMs = 15_000, quietMs = 750 } = {}) => {
+				const start = performance.now()
+				let last = recorder.snapshot().commits
+				let lastChange = performance.now()
+				while (performance.now() - start < maxMs) {
+					await new Promise((resolve) => setTimeout(resolve, 100))
+					const now = recorder.snapshot().commits
+					if (now !== last) {
+						last = now
+						lastChange = performance.now()
+					} else if (performance.now() - lastChange >= quietMs) {
+						return true
+					}
+				}
+				return false
 			},
 			setCamera: (viewport) => flow.setViewport(viewport),
 			fitCamera: () => flow.fitView(),

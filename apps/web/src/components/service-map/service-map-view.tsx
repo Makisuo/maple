@@ -131,6 +131,11 @@ const nsGroupId = (namespace: string) => `${NAMESPACE_GROUP_PREFIX}${encodeURICo
 
 // Fallback node dimensions used before ReactFlow has measured a node, so the
 // dotted boxes appear on first paint and refine once real sizes arrive.
+// Long enough to swallow a wheel-zoom's burst of gesture-end events and the
+// programmatic fit that follows a layout, short enough that a camera is never
+// meaningfully at risk of being lost.
+const VIEWPORT_PERSIST_DEBOUNCE_MS = 400
+
 const FALLBACK_NODE_WIDTH = 220
 const FALLBACK_NODE_HEIGHT = 70
 
@@ -2096,12 +2101,40 @@ export function ServiceMapCanvas({
 		[layoutSignature, setLayout],
 	)
 
+	// Persisting the camera JSON-encodes the whole snapshot LRU — every node
+	// position across four layouts — into localStorage, so writing on each
+	// gesture-end turned a burst of them into a burst of long tasks. A wheel zoom
+	// emits many; so does a programmatic fit. Measured on CI, an otherwise idle map
+	// that had just been re-framed spent ~600ms blocked across 6 React commits and
+	// 3-6 long tasks in a 4s window.
+	//
+	// Only the last camera in a burst is worth keeping, so coalesce them. The
+	// cleanup flushes on unmount and before the layout signature changes, using
+	// that render's signature, so a camera is never written under the wrong layout
+	// or dropped on navigation.
+	const pendingViewport = useRef<Viewport | null>(null)
+	const viewportWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const flushViewport = useCallback(() => {
+		if (viewportWriteTimer.current !== null) {
+			clearTimeout(viewportWriteTimer.current)
+			viewportWriteTimer.current = null
+		}
+		const viewport = pendingViewport.current
+		pendingViewport.current = null
+		if (!viewport) return
+		setLayout((prev) => upsertSnapshot(prev, layoutSignature, (snap) => ({ ...snap, viewport })))
+	}, [layoutSignature, setLayout])
+
 	const onMoveEnd = useCallback(
 		(_: unknown, viewport: Viewport) => {
-			setLayout((prev) => upsertSnapshot(prev, layoutSignature, (snap) => ({ ...snap, viewport })))
+			pendingViewport.current = viewport
+			if (viewportWriteTimer.current !== null) clearTimeout(viewportWriteTimer.current)
+			viewportWriteTimer.current = setTimeout(flushViewport, VIEWPORT_PERSIST_DEBOUNCE_MS)
 		},
-		[layoutSignature, setLayout],
+		[flushViewport],
 	)
+
+	useEffect(() => flushViewport, [flushViewport])
 
 	const handleNodeClick = useCallback(
 		(_: React.MouseEvent, node: Node) => {
