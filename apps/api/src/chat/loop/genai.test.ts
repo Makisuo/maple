@@ -5,10 +5,20 @@
  * shape does not render truncated, it vanishes.
  */
 import { MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR } from "@maple/domain/gen-ai"
-import { LLMResponse, Message, SystemPart, ToolResultPart, Usage, type Model } from "@maple/llm"
+import {
+	LLM,
+	LLMResponse,
+	Message,
+	ToolDefinition,
+	ToolResultPart,
+	Usage,
+	type LLMRequest,
+	type Model,
+} from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import { assert, describe, it } from "vitest"
 import {
+	invokeAgentAttributes,
 	modelCallAttributes,
 	modelResponseAttributes,
 	semconvFinishReason,
@@ -22,8 +32,13 @@ const IDENTITY = { sessionId: "org_1:tab-1", turnId: "msg_1" }
 const INPUT_MESSAGES_BUDGET = 20_000
 const TOOL_JSON_BUDGET = 8_000
 
+const requestOf = (input: Partial<Parameters<typeof LLM.request>[0]> = {}): LLMRequest =>
+	LLM.request({ model: MODEL, messages: [], ...input })
+
 const inputMessages = (messages: ReadonlyArray<Message>) => {
-	const attributes = modelCallAttributes(MODEL, messages, IDENTITY)
+	const attributes = modelCallAttributes(requestOf({ messages: [...messages] }), IDENTITY, {
+		stream: true,
+	})
 	const json = attributes["gen_ai.input.messages"] as string
 	return { attributes, json, parsed: JSON.parse(json) as unknown }
 }
@@ -109,9 +124,36 @@ describe("toolCallJson", () => {
 	})
 })
 
+describe("modelCallAttributes request parameters", () => {
+	it("records how the call was made: stream flag, generation cap, reasoning effort", () => {
+		const attributes = modelCallAttributes(
+			requestOf({
+				generation: { maxTokens: 4096 },
+				providerOptions: { openrouter: { reasoning: { effort: "low" } } },
+			}),
+			IDENTITY,
+			{ stream: true },
+		)
+
+		assert.isTrue(attributes["gen_ai.request.stream"])
+		assert.equal(attributes["gen_ai.request.max_tokens"], 4096)
+		assert.equal(attributes["gen_ai.request.reasoning.level"], "low")
+	})
+
+	it("omits what the request does not set", () => {
+		const attributes = modelCallAttributes(requestOf(), IDENTITY, { stream: false })
+
+		assert.isFalse(attributes["gen_ai.request.stream"])
+		assert.notProperty(attributes, "gen_ai.request.max_tokens")
+		assert.notProperty(attributes, "gen_ai.request.reasoning.level")
+	})
+})
+
 describe("modelCallAttributes system instructions", () => {
 	it("emits the system prompt as a decodable part array", () => {
-		const attributes = modelCallAttributes(MODEL, [], IDENTITY, SystemPart.content("You are Maple."))
+		const attributes = modelCallAttributes(requestOf({ system: "You are Maple." }), IDENTITY, {
+			stream: true,
+		})
 
 		assert.deepEqual(JSON.parse(attributes["gen_ai.system_instructions"] as string), [
 			{ type: "text", content: "You are Maple." },
@@ -119,12 +161,16 @@ describe("modelCallAttributes system instructions", () => {
 	})
 
 	it("omits the attribute when the request has no system prompt", () => {
-		assert.notProperty(modelCallAttributes(MODEL, [], IDENTITY, []), "gen_ai.system_instructions")
-		assert.notProperty(modelCallAttributes(MODEL, [], IDENTITY), "gen_ai.system_instructions")
+		assert.notProperty(
+			modelCallAttributes(requestOf(), IDENTITY, { stream: true }),
+			"gen_ai.system_instructions",
+		)
 	})
 
 	it("bounds an oversized system prompt while keeping the array shape", () => {
-		const attributes = modelCallAttributes(MODEL, [], IDENTITY, SystemPart.content("s".repeat(50_000)))
+		const attributes = modelCallAttributes(requestOf({ system: "s".repeat(50_000) }), IDENTITY, {
+			stream: true,
+		})
 		const json = attributes["gen_ai.system_instructions"] as string
 
 		assert.isBelow(json.length, 10_000)
@@ -162,6 +208,84 @@ describe("modelResponseAttributes", () => {
 
 		assert.equal(attributes["gen_ai.usage.cache_write.input_tokens"], 512)
 		assert.notProperty(attributes, "gen_ai.usage.cache_creation.input_tokens")
+	})
+
+	it("emits the served response id and model off the finish event", () => {
+		const attributes = modelResponseAttributes(
+			new LLMResponse({
+				message: Message.assistant("hi"),
+				events: [
+					{
+						type: "finish",
+						reason: "stop",
+						providerMetadata: { openai: { id: "gen-abc123", model: "openai/gpt-5.6-luna-served" } },
+					},
+				],
+				usage: undefined,
+				finishReason: "stop",
+			}),
+		)
+
+		assert.equal(attributes["gen_ai.response.id"], "gen-abc123")
+		assert.equal(attributes["gen_ai.response.model"], "openai/gpt-5.6-luna-served")
+	})
+
+	it("emits neither when the provider metadata carries no identity", () => {
+		const attributes = modelResponseAttributes(response(undefined))
+
+		assert.notProperty(attributes, "gen_ai.response.id")
+		assert.notProperty(attributes, "gen_ai.response.model")
+	})
+})
+
+describe("invokeAgentAttributes", () => {
+	const definition = (
+		name: string,
+		description = `${name} tool`,
+		schema: Record<string, unknown> = { type: "object" },
+	) => new ToolDefinition({ name, description, inputSchema: schema })
+
+	it("carries the agent description, workflow name and full tool definitions", () => {
+		const attributes = invokeAgentAttributes(
+			{ name: "planner", description: "Plans the investigation." },
+			MODEL,
+			IDENTITY,
+			{ tools: [definition("search_traces")], workflowName: "investigation" },
+		)
+
+		assert.equal(attributes["gen_ai.agent.description"], "Plans the investigation.")
+		assert.equal(attributes["gen_ai.workflow.name"], "investigation")
+		assert.deepEqual(JSON.parse(attributes["gen_ai.tool.definitions"] as string), [
+			{
+				type: "function",
+				name: "search_traces",
+				description: "search_traces tool",
+				parameters: { type: "object" },
+			},
+		])
+	})
+
+	it("omits workflow and definitions when a turn has neither", () => {
+		const attributes = invokeAgentAttributes({ name: "default" }, MODEL, IDENTITY)
+
+		assert.notProperty(attributes, "gen_ai.workflow.name")
+		assert.notProperty(attributes, "gen_ai.tool.definitions")
+		assert.notProperty(attributes, "gen_ai.agent.description")
+	})
+
+	it("drops parameter schemas first when the definitions outweigh the budget", () => {
+		const tools = Array.from({ length: 8 }, (_, i) =>
+			definition(`tool_${i}`, `tool ${i}`, { type: "object", filler: "x".repeat(4_000) }),
+		)
+		const attributes = invokeAgentAttributes({ name: "default" }, MODEL, IDENTITY, { tools })
+		const json = attributes["gen_ai.tool.definitions"] as string
+
+		assert.isBelow(json.length, 17_000)
+		// SAFETY: the builder under test emits exactly this shape; the assertions
+		// below fail loudly if it ever does not.
+		const parsed = JSON.parse(json) as Array<{ name: string; parameters?: unknown }>
+		assert.lengthOf(parsed, 8)
+		assert.isUndefined(parsed[0]!.parameters)
 	})
 })
 

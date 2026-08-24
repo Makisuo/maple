@@ -33,7 +33,15 @@ import {
 	MAPLE_NATIVE_SESSION_ID_ATTR,
 	MAPLE_NATIVE_TURN_ID_ATTR,
 } from "@maple/domain/gen-ai"
-import { LLMResponse, type LLMEvent, type Message, type Model, type SystemPart } from "@maple/llm"
+import {
+	LLMResponse,
+	type LLMEvent,
+	type LLMRequest,
+	type Message,
+	type Model,
+	type SystemPart,
+	type ToolDefinition,
+} from "@maple/llm"
 import { Clock, Effect } from "effect"
 import type { ChatTurnInput } from "./types"
 
@@ -73,6 +81,7 @@ const INPUT_MESSAGES_BUDGET = 20_000
 const OUTPUT_MESSAGES_BUDGET = 8_000
 const TOOL_JSON_BUDGET = 8_000
 const SYSTEM_INSTRUCTIONS_BUDGET = 8_000
+const TOOL_DEFINITIONS_BUDGET = 16_000
 
 type SerializedPart =
 	| { readonly type: "text"; readonly content: string }
@@ -202,15 +211,56 @@ export const toolCallJson = (value: unknown): string => {
 /** Semconv span name: `{operation} {target}`. */
 export const invokeAgentSpanName = (agentName: string): string => `invoke_agent ${agentName}`
 
+/**
+ * Semconv-shaped `gen_ai.tool.definitions`: `[{type, name, description,
+ * parameters}]`. Schemas are the bulk, so over budget they are the first thing
+ * dropped — names and truncated descriptions are what the session view needs.
+ * The compact form is a soft bound (many tools with long names can still
+ * exceed it), which beats degrading to a shape the read side cannot decode.
+ */
+const toolDefinitionsJson = (tools: ReadonlyArray<ToolDefinition>): string => {
+	const full = tools.map((tool) => ({
+		type: "function",
+		name: tool.name,
+		description: tool.description,
+		parameters: tool.inputSchema,
+	}))
+	const json = JSON.stringify(full)
+	if (json.length <= TOOL_DEFINITIONS_BUDGET) return json
+	// 128 keeps the chat agent's real toolbox (~60 MCP tools) inside the budget;
+	// the first sentence of a tool description is the part that identifies it.
+	return JSON.stringify(
+		tools.map((tool) => ({
+			type: "function",
+			name: tool.name,
+			description: truncated(tool.description, 128),
+		})),
+	)
+}
+
 export const invokeAgentAttributes = (
-	agentName: string,
+	agent: { readonly name: string; readonly description?: string },
 	model: Model,
 	identity: GenAiIdentity,
+	options: {
+		readonly tools?: ReadonlyArray<ToolDefinition>
+		/** Names the workflow the turn runs inside (`investigation`); attended chat has none. */
+		readonly workflowName?: string
+	} = {},
 ): Record<string, unknown> => ({
 	"gen_ai.operation.name": "invoke_agent",
-	"gen_ai.agent.name": agentName,
+	"gen_ai.agent.name": agent.name,
+	...(agent.description === undefined || agent.description === ""
+		? undefined
+		: { "gen_ai.agent.description": agent.description }),
+	...(options.workflowName === undefined
+		? undefined
+		: { "gen_ai.workflow.name": options.workflowName }),
 	"gen_ai.provider.name": String(model.provider),
 	"gen_ai.request.model": String(model.id),
+	...(options.tools === undefined || options.tools.length === 0
+		? undefined
+		: { "gen_ai.tool.definitions": toolDefinitionsJson(options.tools) }),
 	...identityAttributes(identity),
 })
 
@@ -229,20 +279,49 @@ const systemInstructionsJson = (system: ReadonlyArray<SystemPart>): string => {
 	return JSON.stringify(parts.map((part) => ({ ...part, content: truncated(part.content, cap) })))
 }
 
+/**
+ * The OpenRouter reasoning effort this call runs with — the request's own
+ * options first, then the model defaults the route client merges underneath
+ * them (`resolveRequestOptions`), which is where `withReasoning` puts the
+ * per-stage policy.
+ */
+const requestReasoningLevel = (request: LLMRequest): string | undefined => {
+	const effort = (options: unknown): string | undefined => {
+		if (typeof options !== "object" || options === null) return undefined
+		const reasoning = (options as { readonly reasoning?: unknown }).reasoning
+		if (typeof reasoning !== "object" || reasoning === null) return undefined
+		const level = (reasoning as { readonly effort?: unknown }).effort
+		return typeof level === "string" && level !== "" ? level : undefined
+	}
+	return (
+		effort(request.providerOptions?.["openrouter"]) ??
+		effort(request.model.defaults?.providerOptions?.["openrouter"])
+	)
+}
+
 /** Attributes known at request time; the response half arrives via {@link annotateModelResponse}. */
 export const modelCallAttributes = (
-	model: Model,
-	messages: ReadonlyArray<Message>,
+	request: LLMRequest,
 	identity: GenAiIdentity,
-	system: ReadonlyArray<SystemPart> = [],
+	options: { readonly stream: boolean },
 ): Record<string, unknown> => {
-	const input = messagesJson(messages, INPUT_MESSAGES_BUDGET)
+	const input = messagesJson(request.messages, INPUT_MESSAGES_BUDGET)
+	const reasoning = requestReasoningLevel(request)
 	return {
 		"gen_ai.operation.name": "chat",
-		"gen_ai.provider.name": String(model.provider),
-		"gen_ai.request.model": String(model.id),
+		"gen_ai.provider.name": String(request.model.provider),
+		"gen_ai.request.model": String(request.model.id),
+		"gen_ai.request.stream": options.stream,
+		// Only what the request actually asks for — Maple sets no generation cap
+		// today, so this appears the day a call site does, not before.
+		...(request.generation?.maxTokens === undefined
+			? undefined
+			: { "gen_ai.request.max_tokens": request.generation.maxTokens }),
+		...(reasoning === undefined ? undefined : { "gen_ai.request.reasoning.level": reasoning }),
 		"gen_ai.input.messages": input.json,
-		...(system.length > 0 ? { "gen_ai.system_instructions": systemInstructionsJson(system) } : undefined),
+		...(request.system.length > 0
+			? { "gen_ai.system_instructions": systemInstructionsJson(request.system) }
+			: undefined),
 		...(input.dropped > 0 ? { [MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR]: input.dropped } : undefined),
 		...identityAttributes(identity),
 	}
@@ -273,13 +352,35 @@ const reportedCost = (usage: LLMResponse["usage"]): number | undefined => {
 }
 
 /**
+ * Response identity off the wire — every OpenAI-chat chunk carries the
+ * response id and the model that actually served it (OpenRouter routes, so it
+ * can differ from `gen_ai.request.model`); the vendored protocol surfaces both
+ * on the finish event's `providerMetadata.openai`.
+ */
+const responseIdentity = (
+	response: LLMResponse,
+): { readonly id?: string; readonly model?: string } => {
+	const finish = response.events.find((event) => event.type === "finish")
+	const openai = finish?.type === "finish" ? finish.providerMetadata?.["openai"] : undefined
+	if (typeof openai !== "object" || openai === null) return {}
+	const { id, model } = openai as { readonly id?: unknown; readonly model?: unknown }
+	return {
+		...(typeof id === "string" && id !== "" ? { id } : undefined),
+		...(typeof model === "string" && model !== "" ? { model } : undefined),
+	}
+}
+
+/**
  * The response half of a model-call span, as a plain record. Exported for
  * tests; production callers go through {@link annotateModelResponse}.
  */
 export const modelResponseAttributes = (response: LLMResponse): Record<string, unknown> => {
 	const usage = response.usage
 	const cost = reportedCost(usage)
+	const served = responseIdentity(response)
 	return {
+		...(served.id === undefined ? undefined : { "gen_ai.response.id": served.id }),
+		...(served.model === undefined ? undefined : { "gen_ai.response.model": served.model }),
 		"gen_ai.response.finish_reasons": [semconvFinishReason(response.finishReason)],
 		// A provider failure surfaced as a stream *event* completes the stream,
 		// so the span exit stays green — this attribute is the record of it.
@@ -376,6 +477,7 @@ export const withToolCallSpan = <
 	call: { readonly id: string; readonly name: string; readonly input: unknown },
 	identity: GenAiIdentity,
 	dispatch: Effect.Effect<A, E, R>,
+	description?: string,
 ): Effect.Effect<A, E, R> =>
 	dispatch.pipe(
 		Effect.tap((outcome) =>
@@ -388,6 +490,9 @@ export const withToolCallSpan = <
 			attributes: {
 				"gen_ai.operation.name": "execute_tool",
 				"gen_ai.tool.name": call.name,
+				...(description === undefined || description === ""
+					? undefined
+					: { "gen_ai.tool.description": description }),
 				"gen_ai.tool.call.id": call.id,
 				"gen_ai.tool.call.arguments": toolCallJson(call.input),
 				...identityAttributes(identity),

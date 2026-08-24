@@ -267,7 +267,12 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 			// here so every caller gets it without repeating it.
 			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, state)).pipe(
 				Stream.withSpan(invokeAgentSpanName(agent.name), {
-					attributes: invokeAgentAttributes(agent.name, input.model, genAiIdentityOf(input)),
+					attributes: invokeAgentAttributes(agent, input.model, genAiIdentityOf(input), {
+						tools: request.tools,
+						...(input.genAiWorkflowName === undefined
+							? undefined
+							: { workflowName: input.genAiWorkflowName }),
+					}),
 				}),
 			)
 		}),
@@ -310,6 +315,9 @@ const runStep = (
 		let emitted = 0
 
 		const identity = genAiIdentityOf(input)
+		// For `gen_ai.tool.description` on the execute_tool spans; keyed off the
+		// definitions the model itself was offered, so span and prompt agree.
+		const toolDescriptions = new Map(request.tools.map((tool) => [tool.name, tool.description]))
 
 		// `unwrap` runs the clock read at subscription, the moment before the span
 		// opens and the request goes out — the zero every timing is measured from.
@@ -336,7 +344,7 @@ const runStep = (
 					// error exit and the retry opens a fresh one.
 					Stream.withSpan(modelCallSpanName(input.model), {
 						kind: "client",
-						attributes: modelCallAttributes(input.model, request.messages, identity, request.system),
+						attributes: modelCallAttributes(request, identity, { stream: true }),
 					}),
 				)
 			}),
@@ -676,7 +684,7 @@ const runStep = (
 							const dispatched = yield* Effect.forEach(
 								forced,
 								(call) =>
-									withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call)).pipe(
+									withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call), toolDescriptions.get(call.name)).pipe(
 										Effect.map((result) => [call, result] as const),
 									),
 								{ concurrency: 1 },
@@ -754,7 +762,7 @@ const runStep = (
 						const dispatched = yield* Effect.forEach(
 							calls,
 							(call) =>
-								withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call)).pipe(
+								withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call), toolDescriptions.get(call.name)).pipe(
 									Effect.map((result) => [call, result] as const),
 								),
 							{ concurrency: TOOL_CONCURRENCY },

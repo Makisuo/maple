@@ -157,6 +157,11 @@ const OpenAIChatChoice = Schema.Struct({
 })
 
 const OpenAIChatEvent = Schema.Struct({
+  // Chunk-level response identity — constant across a response's chunks.
+  // Surfaced on the finish event's `providerMetadata.openai` for callers that
+  // record `gen_ai.response.id` / `gen_ai.response.model`.
+  id: optionalNull(Schema.String),
+  model: optionalNull(Schema.String),
   choices: Schema.Array(OpenAIChatChoice),
   usage: optionalNull(OpenAIChatUsage),
 })
@@ -169,6 +174,8 @@ interface ParserState {
   readonly usage?: Usage
   readonly finishReason?: FinishReason
   readonly lifecycle: Lifecycle.State
+  readonly responseId?: string
+  readonly responseModel?: string
 }
 
 const invalid = ProviderShared.invalidRequest
@@ -457,6 +464,8 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         usage,
         finishReason,
         lifecycle,
+        responseId: state.responseId ?? event.id ?? undefined,
+        responseModel: state.responseModel ?? event.model ?? undefined,
       },
       events,
     ] as const
@@ -468,7 +477,16 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
   const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason
   const lifecycle = state.toolCallEvents.length ? Lifecycle.stepStart(state.lifecycle, events) : state.lifecycle
   events.push(...state.toolCallEvents)
-  if (reason) Lifecycle.finish(lifecycle, events, { reason, usage: state.usage })
+  const identity = {
+    ...(state.responseId ? { id: state.responseId } : {}),
+    ...(state.responseModel ? { model: state.responseModel } : {}),
+  }
+  if (reason)
+    Lifecycle.finish(lifecycle, events, {
+      reason,
+      usage: state.usage,
+      ...(Object.keys(identity).length ? { providerMetadata: { openai: identity } } : {}),
+    })
   return events
 }
 
