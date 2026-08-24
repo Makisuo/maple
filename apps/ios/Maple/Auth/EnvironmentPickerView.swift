@@ -17,7 +17,6 @@ import SwiftUI
 /// control with one option is not a choice, and the screen's own title already
 /// says where you are.
 struct EnvironmentPickerView: View {
-	@Environment(SessionController.self) private var session
 	@Environment(EnvironmentController.self) private var environments
 
 	var body: some View {
@@ -58,12 +57,12 @@ struct EnvironmentPickerView: View {
 	}
 
 	/// Writes through the controller rather than binding to its property: the
-	/// selection has to persist and bump `dataGeneration`, and a plain binding
-	/// would set the value and leave every screen showing the old one.
+	/// selection has to be persisted and published to the widgets, and a plain
+	/// binding would set the value and do neither.
 	private var selection: Binding<String?> {
 		Binding(
 			get: { environments.selected },
-			set: { environments.select($0, session: session) }
+			set: { environments.select($0) }
 		)
 	}
 }

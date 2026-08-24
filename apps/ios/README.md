@@ -335,6 +335,17 @@ shaped like the first — one app-wide choice, a control next to the switcher, a
 a change that invalidates every screen at once rather than each screen growing
 its own filter.
 
+Both axes travel together as `SessionController.DataScope`, which the list
+screens key `.task(id:)` on and store on their models. The environment is part
+of what a model *is* rather than something pushed at it, because it is not
+always known when a screen first builds: `EnvironmentController.load` restores a
+stored selection and drops one the organization no longer has, and the second of
+those can only happen once the network answers. Making it part of the scope
+rebuilds the affected screens when it resolves, whatever order the tasks
+happened to start in — and rebuilds nothing when it does not. The detail screens
+stay keyed on `dataGeneration` alone; they are unfiltered, so an environment
+change cannot alter what they show.
+
 The mechanism is where they differ, and the difference is the thing to know:
 
 - The **organization** travels in the session token, so every request carries it

@@ -15,13 +15,15 @@ final class ServicesListModel {
 	/// parameter on that endpoint, not a second request here.
 	private(set) var openIssueCounts: [String: Int] = [:]
 	var window: TimeWindow = .default
-	let generation: Int
+	/// The organization *and* environment these rows answer for. The view
+	/// rebuilds the model when it moves.
+	let scope: SessionController.DataScope
 
 	private let api: any MapleAPI
 
-	init(api: any MapleAPI, session: SessionController) {
+	init(api: any MapleAPI, session: SessionController, scope: SessionController.DataScope) {
 		self.api = api
-		self.generation = session.dataGeneration
+		self.scope = scope
 		self.loader = ScreenLoader(session: session, screen: Screen.services, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetch() }
 	}
 
@@ -58,6 +60,10 @@ struct ServicesListView: View {
 	@Environment(AppNavigation.self) private var navigation
 	@Environment(EnvironmentController.self) private var environments
 	@State private var model: ServicesListModel?
+
+	private var scope: SessionController.DataScope {
+		.init(generation: session.dataGeneration, environment: environments.selected)
+	}
 	@State private var search = ""
 
 	var body: some View {
@@ -87,11 +93,19 @@ struct ServicesListView: View {
 			.mapleDestinations()
 			.mapleScreen(Screen.services)
 		}
-		// Re-runs on org switch, which is what clears one org's services before
-		// the next org's arrive.
-		.task(id: session.dataGeneration) {
-			let model = model?.generation == session.dataGeneration
-				? model! : ServicesListModel(api: session.api.scoped(toEnvironment: environments.selected), session: session)
+		// Re-runs on an org switch or an environment change, which is what clears
+		// one scope's services before the next scope's arrive. The environment is
+		// in the key rather than pushed at this screen because it can resolve
+		// *after* the first build — a stored selection is only checked against
+		// the organization's real environments once the network answers.
+		.task(id: scope) {
+			let model = model?.scope == scope
+				? model!
+				: ServicesListModel(
+					api: session.api.scoped(toEnvironment: scope.environment),
+					session: session,
+					scope: scope
+				)
 			self.model = model
 			await model.loader.loadIfNeeded()
 		}

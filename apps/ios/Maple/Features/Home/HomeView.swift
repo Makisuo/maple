@@ -11,6 +11,10 @@ struct HomeView: View {
 	@State private var model: HomeModel?
 	@State private var showsNotificationSettings = false
 
+	private var scope: SessionController.DataScope {
+		.init(generation: session.dataGeneration, environment: environments.selected)
+	}
+
 	var body: some View {
 		NavigationStack {
 			ZStack {
@@ -54,12 +58,18 @@ struct HomeView: View {
 			.mapleDestinations()
 			.mapleScreen(Screen.home)
 		}
-		.task(id: session.dataGeneration) {
-			// A new org means a new model: the old board is dropped rather than
-			// left on screen until the new one arrives, and any refresh still
-			// running against the old org has nowhere to write.
-			let model = model?.generation == session.dataGeneration
-				? model! : HomeModel(api: session.api.scoped(toEnvironment: environments.selected), session: session)
+		.task(id: scope) {
+			// A new org or environment means a new model: the old board is
+			// dropped rather than left on screen until the new one arrives, and
+			// any refresh still running against the old scope has nowhere to
+			// write.
+			let model = model?.scope == scope
+				? model!
+				: HomeModel(
+					api: session.api.scoped(toEnvironment: scope.environment),
+					session: session,
+					scope: scope
+				)
 			self.model = model
 			await model.loader.loadIfNeeded()
 			// Home is a status board: keep it current while it's on screen.

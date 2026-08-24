@@ -120,10 +120,10 @@ enum OverallStatus {
 @Observable
 final class HomeModel {
 	private(set) var loader: ScreenLoader<HomeSnapshot>!
-	/// The `SessionController.dataGeneration` this model was built for; the
-	/// view builds a fresh one when it moves, so one org's board never lingers
-	/// while the next org loads.
-	let generation: Int
+	/// The organization and environment this model was built for; the view
+	/// builds a fresh one when either moves, so one scope's board never lingers
+	/// while the next one loads.
+	let scope: SessionController.DataScope
 
 	private let api: any MapleAPI
 
@@ -133,9 +133,9 @@ final class HomeModel {
 	static let rateWindow = TimeWindow.lastHour
 	static let recentWindow = TimeWindow.last24Hours
 
-	init(api: any MapleAPI, session: SessionController) {
+	init(api: any MapleAPI, session: SessionController, scope: SessionController.DataScope) {
 		self.api = api
-		self.generation = session.dataGeneration
+		self.scope = scope
 		self.loader = ScreenLoader(session: session, screen: Screen.home) { [unowned self] in try await self.fetch() }
 	}
 

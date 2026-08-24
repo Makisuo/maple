@@ -246,21 +246,23 @@ final class SessionController {
 		}
 	}
 
-	/// Declare that every screen's data is stale, without the organization
-	/// having changed.
+	/// Everything a screen's rows are scoped to, as one value.
 	///
-	/// The one other thing that scopes what a screen shows is the deployment
-	/// environment (`EnvironmentController`), and it needs exactly the same
-	/// effect an organization switch has: cancel what is in flight, rebuild the
-	/// models, refetch. Reusing the lever rather than teaching every screen a
-	/// second one is the point — the alternative is a filter each screen has to
-	/// remember to apply, and the one that forgets looks like stale data rather
-	/// than a bug.
+	/// Screens key `.task(id:)` on this and rebuild their models whenever it
+	/// moves, so the two axes are handled by one mechanism instead of the
+	/// organization getting a generation counter and the environment getting
+	/// its own reload path.
 	///
-	/// No token invalidation here: the environment is a query parameter, not a
-	/// claim, so the token that was valid a moment ago still is.
-	func invalidateData() {
-		dataGeneration += 1
+	/// The environment belongs here rather than being pushed at the screens
+	/// because it is not always known when they first build.
+	/// `EnvironmentController` restores a stored selection and drops one the
+	/// organization no longer has, and the second of those can only happen
+	/// after a network read — by which time the screens have already built.
+	/// Making the value part of what a model *is* rebuilds them when it
+	/// resolves, whatever order the tasks happened to start in.
+	struct DataScope: Equatable {
+		var generation: Int
+		var environment: String?
 	}
 
 	/// React to an API failure that the session is responsible for.

@@ -64,10 +64,13 @@ final class EnvironmentController {
 	func load(organizationId: String, api: any MapleAPI) async {
 		if self.organizationId != organizationId {
 			self.organizationId = organizationId
-			// Restored before the fetch, not after: screens build their models
-			// from `selected` as soon as the generation moves, and a load that
-			// takes a second would otherwise show organization-wide data first
-			// and then re-fetch — a visible flash of the wrong numbers.
+			// Restored before the fetch so a screen that builds after this point
+			// gets the stored value first time and never fetches twice. It is
+			// not relied on: `.task` ordering between this and the screens is
+			// not guaranteed, and the stale-value clear below cannot happen
+			// before the network answers anyway. Both are safe because
+			// `selected` is part of `SessionController.DataScope`, so a screen
+			// that built against the wrong value rebuilds when it changes.
 			selected = defaults.string(forKey: Self.key(for: organizationId))
 			available = []
 		}
@@ -91,13 +94,15 @@ final class EnvironmentController {
 		publishToWidgets()
 	}
 
-	/// Change the selection and make every screen reload against it.
+	/// Change the selection. Every screen reloads against it as a consequence,
+	/// not as something this method arranges.
 	///
-	/// The reload is not this type's doing: it bumps `dataGeneration`, and the
-	/// `.task(id:)` on every screen does the rest. That is the whole reason the
-	/// selection is global — one lever, already built for organization
-	/// switching, rather than a filter each screen has to remember to apply.
-	func select(_ environment: String?, session: SessionController) {
+	/// `selected` is half of `SessionController.DataScope`, which is what the
+	/// screens key `.task(id:)` on — so writing it here is the whole
+	/// notification. That is also why this does *not* bump `dataGeneration`:
+	/// doing both would drag the detail screens, which are unfiltered, through
+	/// a refetch that could not change what they show.
+	func select(_ environment: String?) {
 		guard environment != selected, let organizationId else { return }
 		selected = environment
 
@@ -112,7 +117,6 @@ final class EnvironmentController {
 			["organization.id": organizationId, "environment": environment ?? "all"]
 		)
 		publishToWidgets()
-		session.invalidateData()
 	}
 
 	/// Tell the widget extension what the app knows.
