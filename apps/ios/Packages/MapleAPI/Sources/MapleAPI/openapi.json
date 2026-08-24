@@ -2242,7 +2242,7 @@
             "type": "boolean"
           },
           "name": {
-            "$ref": "#/components/schemas/_maple_ServiceName_1"
+            "$ref": "#/components/schemas/_maple_ServiceName"
           },
           "object": {
             "enum": [
@@ -2958,7 +2958,7 @@
             "type": "number"
           },
           "name": {
-            "$ref": "#/components/schemas/_maple_ServiceName_1"
+            "$ref": "#/components/schemas/_maple_ServiceName"
           },
           "p95_latency_ms": {
             "type": "number"
@@ -3412,10 +3412,6 @@
         "type": "string"
       },
       "_maple_ServiceName": {
-        "title": "Service Name",
-        "type": "string"
-      },
-      "_maple_ServiceName_1": {
         "title": "Service Name",
         "type": "string"
       },
@@ -6458,7 +6454,7 @@
             "name": "name",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/_maple_ServiceName_1"
+              "$ref": "#/components/schemas/_maple_ServiceName"
             }
           },
           {

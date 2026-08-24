@@ -104,6 +104,3 @@ export function edgeColor(errorRate: number, sourceColor: string): string {
 	if (errorRate > 0.01) return SEVERITY.warn
 	return sourceColor
 }
-
-export const NAMESPACE_COLORS = (namespace: string): string =>
-	oklchToHex(0.66, 0.11, getServiceHueFromName(namespace))
