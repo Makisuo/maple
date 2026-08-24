@@ -8,6 +8,17 @@ import { join } from "node:path"
 import { chdbConfigPath, dirtyStoreRecoveryAdvice, resolveChdbConfigFile } from "../src/commands/server"
 import { CheckpointPreconditionError, parseCheckpointId } from "../src/server/checkpoints"
 import { recoverExpected } from "../src/core/outcomes"
+import {
+	BackgroundServerSpawnError,
+	BackgroundServerTimeoutError,
+	CheckpointUnavailableError,
+	LocalStoreDirtyError,
+	LocalStoreIncompatibleError,
+	LocalStoreMigrationError,
+	LocalStoreSchemaStaleError,
+	ServerOptionError,
+	ServerStopTimeoutError,
+} from "../src/commands/server-errors"
 
 /** Run an effect, capturing anything written to stderr and restoring the real
  *  writer + exit code afterwards. */
