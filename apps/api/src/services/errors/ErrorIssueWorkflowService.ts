@@ -19,7 +19,8 @@ import {
 	type OrgId,
 	type WorkflowState,
 	WORKFLOW_TRANSITIONS,
-	TERMINAL_WORKFLOW_STATES,
+	CLOSED_WORKFLOW_STATES,
+	MACHINE_OWNED_WORKFLOW_STATES,
 } from "@maple/domain/http"
 import {
 	alertIncidents,
@@ -334,11 +335,23 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			return yield* dbExecute((db) => db.insert(errorIssueEvents).values(insert))
 		})
 
+		/**
+		 * The message is half the point. "Illegal transition from 'triage' to
+		 * 'in_review'" told a caller nothing it could act on, and it was the single
+		 * most common MCP error in the internal org — so it now names the moves that
+		 * would work, from the same matrix that rejected this one.
+		 */
 		const validateTransition = (issueId: ErrorIssueId, from: WorkflowState, to: WorkflowState) => {
 			if (!WORKFLOW_TRANSITIONS[from].includes(to)) {
+				const offered = WORKFLOW_TRANSITIONS[from].filter(
+					(target) => !MACHINE_OWNED_WORKFLOW_STATES.has(target),
+				)
 				return Effect.fail(
 					new ErrorIssueTransitionError({
-						message: `Illegal transition from '${from}' to '${to}'`,
+						message:
+							offered.length === 0
+								? `Cannot move an issue out of '${from}'.`
+								: `Cannot move an issue from '${from}' to '${to}'. From '${from}' it can go to: ${offered.join(", ")}.`,
 						issueId,
 						fromState: from,
 						toState: to,
@@ -382,7 +395,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			} else if (fromState === "wontfix") {
 				update.snoozeUntil = null
 			}
-			if (TERMINAL_WORKFLOW_STATES.has(toState)) {
+			if (CLOSED_WORKFLOW_STATES.has(toState)) {
 				// Reaching a terminal state ends the work, so the lease ends with it.
 				update.leaseHolderActorId = null
 				update.leaseExpiresAt = null

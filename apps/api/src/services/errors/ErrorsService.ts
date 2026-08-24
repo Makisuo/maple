@@ -16,7 +16,11 @@ import {
 	RoleName,
 	UserId as UserIdSchema,
 	type WorkflowState,
-	TERMINAL_WORKFLOW_STATES,
+	CLOSED_WORKFLOW_STATES,
+	canReachInReview,
+	ErrorIssuePullRequestInvalidError,
+	fixProposalRoute,
+	parsePullRequestUrl,
 } from "@maple/domain/http"
 import { FINGERPRINT_VERSION } from "@maple/domain/tinybird/fingerprint"
 import {
@@ -180,7 +184,13 @@ export interface ErrorsServiceApi
 		},
 	) => Effect.Effect<
 		ErrorIssueDocument,
-		ErrorPersistenceError | ErrorIssueNotFoundError | ErrorIssueTransitionError
+		// Lease conflict included: proposing a fix claims the issue, so it can now
+		// collide with an agent already holding it — which is the point.
+		| ErrorPersistenceError
+		| ErrorIssueNotFoundError
+		| ErrorIssueTransitionError
+		| ErrorIssueLeaseConflictError
+		| ErrorIssuePullRequestInvalidError
 	>
 	readonly recordAnomalyLinkEvent: (
 		orgId: OrgId,
@@ -393,6 +403,7 @@ const make: Effect.Effect<
 	const transitionIssue: ErrorsServiceApi["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
 		function* (orgId, actorId, issueId, toState, opts) {
 			yield* Effect.annotateCurrentSpan({ orgId, issueId, toState })
+			const timestamp = yield* Clock.currentTimeMillis
 			const current = yield* requireIssue(orgId, issueId)
 
 			let snoozeUntilMs: number | null | undefined
@@ -413,9 +424,39 @@ const make: Effect.Effect<
 				}
 			}
 
+			// Moving an issue to `in_progress` IS claiming it, so take the lease.
+			// This is the path the agents in the internal org actually used — walk
+			// `triage → in_progress` by hand, then `→ in_review` — and it left every
+			// issue unclaimed, which is why the lease had never once been held.
+			// Best-effort: somebody else holding the lease is not a reason to refuse a
+			// state change a human or agent is entitled to make, and `applyTransition`
+			// already renews the lease of a holder who is still working.
+			if (toState === "in_progress" && actorId !== null) {
+				yield* acquireLease(orgId, actorId, issueId, DEFAULT_LEASE_DURATION_MS, timestamp).pipe(
+					Effect.flatMap(({ leaseExpiresAt }) =>
+						current.leaseHolderActorId === actorId
+							? Effect.void
+							: recordEvent(orgId, issueId, actorId, "claim", {
+									payload: {
+										leaseExpiresAt,
+										leaseDurationMs: DEFAULT_LEASE_DURATION_MS,
+										viaTransition: true,
+									},
+									timestamp,
+								}),
+					),
+					Effect.catchTag("@maple/http/errors/ErrorIssueLeaseConflictError", (conflict) =>
+						Effect.logInfo("[Errors] in_progress transition left the lease with its holder").pipe(
+							Effect.annotateLogs({ issueId, holder: conflict.currentHolderActorId }),
+						),
+					),
+				)
+			}
+
 			const updated = yield* applyTransition(orgId, actorId, current, toState, {
 				note: opts?.note,
 				snoozeUntilMs,
+				timestamp,
 			})
 
 			yield* maybeNotifyTransition(orgId, actorId, updated, current.workflowState)
@@ -434,15 +475,68 @@ const make: Effect.Effect<
 			leaseExpiresAt: row?.leaseExpiresAt == null ? null : isoFromDate(row.leaseExpiresAt),
 		})
 
+	/**
+	 * Take (or renew) the lease on an issue and return the freshly-read row.
+	 *
+	 * Shared by `claimIssue` and `proposeFix`. Proposing a fix is picking the
+	 * issue up — an agent that only ever calls `propose_fix` should still end up
+	 * holding the lease, or the "two agents don't fix the same bug" guarantee is
+	 * one an agent has to opt into, and none of them do: across 50 live issues in
+	 * the internal org, not one had ever been claimed.
+	 */
+	const acquireLease = Effect.fn("ErrorsService.acquireLease")(function* (
+		orgId: OrgId,
+		actorId: ActorId,
+		issueId: ErrorIssueId,
+		leaseMs: number,
+		timestamp: number,
+	) {
+		const leaseExpiresAt = timestamp + leaseMs
+		const claimed = yield* dbExecute((db) =>
+			db
+				.update(errorIssues)
+				.set({
+					leaseHolderActorId: actorId,
+					leaseExpiresAt: new Date(leaseExpiresAt),
+					claimedAt: new Date(timestamp),
+					updatedAt: new Date(timestamp),
+				})
+				.where(
+					and(
+						eq(errorIssues.orgId, orgId),
+						eq(errorIssues.id, issueId),
+						or(
+							isNull(errorIssues.leaseHolderActorId),
+							eq(errorIssues.leaseHolderActorId, actorId),
+							lt(errorIssues.leaseExpiresAt, new Date(timestamp)),
+						),
+					),
+				)
+				.returning(),
+		)
+
+		if (claimed.length === 0) {
+			const latestRows = yield* dbExecute((db) =>
+				db
+					.select()
+					.from(errorIssues)
+					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
+					.limit(1),
+			)
+			return yield* Effect.fail(leaseConflict(issueId, latestRows[0] ?? null))
+		}
+
+		return { row: claimed[0]!, leaseExpiresAt }
+	})
+
 	const claimIssue: ErrorsServiceApi["claimIssue"] = Effect.fn("ErrorsService.claimIssue")(
 		function* (orgId, actorId, issueId, leaseDurationMs) {
 			const timestamp = yield* Clock.currentTimeMillis
 			const leaseMs = leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS
-			const leaseExpiresAt = timestamp + leaseMs
 			yield* Effect.annotateCurrentSpan({ orgId, issueId, actorId, leaseMs })
 
 			const current = yield* requireIssue(orgId, issueId)
-			if (TERMINAL_WORKFLOW_STATES.has(current.workflowState)) {
+			if (CLOSED_WORKFLOW_STATES.has(current.workflowState)) {
 				return yield* Effect.fail(
 					new ErrorIssueTransitionError({
 						message: `Cannot claim an issue in state '${current.workflowState}'`,
@@ -453,41 +547,7 @@ const make: Effect.Effect<
 				)
 			}
 
-			const claimed = yield* dbExecute((db) =>
-				db
-					.update(errorIssues)
-					.set({
-						leaseHolderActorId: actorId,
-						leaseExpiresAt: new Date(leaseExpiresAt),
-						claimedAt: new Date(timestamp),
-						updatedAt: new Date(timestamp),
-					})
-					.where(
-						and(
-							eq(errorIssues.orgId, orgId),
-							eq(errorIssues.id, issueId),
-							or(
-								isNull(errorIssues.leaseHolderActorId),
-								eq(errorIssues.leaseHolderActorId, actorId),
-								lt(errorIssues.leaseExpiresAt, new Date(timestamp)),
-							),
-						),
-					)
-					.returning(),
-			)
-
-			if (claimed.length === 0) {
-				const latestRows = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(errorIssues)
-						.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
-						.limit(1),
-				)
-				return yield* Effect.fail(leaseConflict(issueId, latestRows[0] ?? null))
-			}
-
-			const row = claimed[0]!
+			const { row, leaseExpiresAt } = yield* acquireLease(orgId, actorId, issueId, leaseMs, timestamp)
 
 			// Move to in_progress if the issue is still waiting to be picked up.
 			// `regressed` belongs here with triage/todo: claiming a bug that came back
@@ -532,10 +592,88 @@ const make: Effect.Effect<
 		},
 	)
 
+	/**
+	 * Record a proposed fix and put the issue under review.
+	 *
+	 * Three things happen in an order that matters, and the order is the fix to a
+	 * real production bug. This used to write the `fix_proposed` event and link
+	 * the PR *first*, then transition — so a proposal against a `triage` issue
+	 * (the state most issues are in, and the state agents most often find them in)
+	 * recorded both writes and only then failed with "Illegal transition from
+	 * 'triage' to 'in_review'". The agent saw an error for something half-done.
+	 *
+	 * Now: everything that can be refused is refused before anything is written,
+	 * the issue is claimed, and the walk to `in_review` follows a route the state
+	 * machine actually permits.
+	 */
 	const proposeFix: ErrorsServiceApi["proposeFix"] = Effect.fn("ErrorsService.proposeFix")(
 		function* (orgId, actorId, issueId, request) {
 			const timestamp = yield* Clock.currentTimeMillis
 			const current = yield* requireIssue(orgId, issueId)
+			yield* Effect.annotateCurrentSpan({ orgId, issueId, fromState: current.workflowState })
+
+			// Refuse up front, with a reason, rather than mid-write. `cancelled` and
+			// `wontfix` cannot reach review; a closed issue has to be reopened
+			// deliberately, which is a decision rather than a side effect of
+			// attaching a patch.
+			if (CLOSED_WORKFLOW_STATES.has(current.workflowState)) {
+				return yield* Effect.fail(
+					new ErrorIssueTransitionError({
+						message: `Issue is '${current.workflowState}' and takes no more fixes. Reopen it first with transition_error_issue if this fix is still needed.`,
+						issueId,
+						fromState: current.workflowState,
+						toState: "in_review",
+					}),
+				)
+			}
+			if (!canReachInReview(current.workflowState)) {
+				return yield* Effect.fail(
+					new ErrorIssueTransitionError({
+						message: `An issue in '${current.workflowState}' cannot go under review. Move it to 'triage' first with transition_error_issue.`,
+						issueId,
+						fromState: current.workflowState,
+						toState: "in_review",
+					}),
+				)
+			}
+
+			// A `pr_url` that is not a pull request URL is refused here, before any
+			// write. It used to be accepted, swallowed by the best-effort link below,
+			// and then reported back as `- PR: <url>` — so an agent that fat-fingered
+			// a URL was told the fix was attached and would be verified after merge,
+			// when nothing had been linked and no verification would ever run.
+			if (request.prUrl !== undefined && parsePullRequestUrl(request.prUrl) === null) {
+				return yield* Effect.fail(
+					new ErrorIssuePullRequestInvalidError({
+						message:
+							"Not a recognizable GitHub pull request URL. Omit pr_url to record the fix without one.",
+						rawUrl: request.prUrl,
+					}),
+				)
+			}
+
+			// Proposing a fix IS picking the issue up, so it takes the lease. If
+			// somebody else holds one this fails here, before any write — which is
+			// the duplicate-work collision the lease exists to catch, finally caught
+			// on the path agents actually take.
+			const { row, leaseExpiresAt } = yield* acquireLease(
+				orgId,
+				actorId,
+				issueId,
+				DEFAULT_LEASE_DURATION_MS,
+				timestamp,
+			)
+			if (row.leaseHolderActorId !== current.leaseHolderActorId) {
+				yield* recordEvent(orgId, issueId, actorId, "claim", {
+					payload: {
+						leaseExpiresAt,
+						leaseDurationMs: DEFAULT_LEASE_DURATION_MS,
+						viaProposeFix: true,
+					},
+					timestamp,
+				})
+			}
+
 			const payload: Record<string, unknown> = {
 				patchSummary: request.patchSummary,
 				...(request.prUrl ? { prUrl: request.prUrl } : undefined),
@@ -562,9 +700,11 @@ const make: Effect.Effect<
 					)
 			}
 
-			let next = current
-			if (current.workflowState !== "in_review") {
-				next = yield* applyTransition(orgId, actorId, current, "in_review", {
+			// Usually `triage → in_progress → in_review`; one hop from a state the
+			// matrix lets straight through. Validated above, so no hop can fail here.
+			let next = row
+			for (const hop of fixProposalRoute(row.workflowState)) {
+				next = yield* applyTransition(orgId, actorId, next, hop, {
 					payload: { viaProposeFix: true },
 					timestamp,
 				})

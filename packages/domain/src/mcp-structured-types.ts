@@ -707,7 +707,6 @@ export interface CommentOnErrorIssueData {
 export interface ProposeFixData {
 	issueId: string
 	workflowState: string
-	eventId: string
 	prUrl: string | null
 }
 
