@@ -1,7 +1,19 @@
-import { useMemo, useRef } from "react"
+import { memo, useMemo, useRef } from "react"
+import {
+	Handle,
+	Position,
+	ReactFlow,
+	ReactFlowProvider,
+	useReactFlow,
+	type Edge,
+	type Node,
+	type NodeProps,
+	type ReactFlowInstance,
+} from "@xyflow/react"
+import "@xyflow/react/dist/style.css"
 
 import type { AiSessionSpan } from "@maple/domain/http"
-import { MaximizeIcon, MinusIcon, PlusIcon } from "@/components/icons"
+import { CircleXmarkIcon, MaximizeIcon, MinusIcon, PlusIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
@@ -19,11 +31,12 @@ import {
 } from "@/lib/agent-sessions/session-turns"
 import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
 import { SpanDrawer, type SpanDetailTab } from "./span-expansion"
-import { CATEGORY_FILL } from "./span-visuals"
+import { CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
-// One lane per turn, positioned by hand. (`investigations/flow` already wraps
-// `@xyflow/react` around hand-computed positions for the same job; moving this
-// view onto it is a rewrite rather than a patch, so it has not been done.)
+// One lane per turn, positioned by hand and handed to `@xyflow/react` — the
+// same division of labour as `investigations/flow/provenance-canvas.tsx`: the
+// grid arithmetic below owns where everything sits, and xyflow is here for
+// pan, zoom and the edge rendering, not for layout.
 const NODE_WIDTH = 148
 const NODE_HEIGHT = 52
 const COLUMN_GAP = 48
@@ -37,7 +50,12 @@ const WRAP_GAP = 24
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 1.5
-const ZOOM_STEP = 0.25
+
+/** Where the hidden ports sit on every card, mirrored by `Ports` below. */
+const STEP_HANDLES: NonNullable<Node["handles"]> = [
+	{ type: "target", position: Position.Left, x: 0, y: NODE_HEIGHT / 2, width: 1, height: 1 },
+	{ type: "source", position: Position.Right, x: NODE_WIDTH, y: NODE_HEIGHT / 2, width: 1, height: 1 },
+]
 
 interface FlowNode {
 	readonly key: string
@@ -58,13 +76,6 @@ interface FlowLane {
 	readonly nodes: readonly FlowNode[]
 	/** Parent/child node pairs to draw a connector between. */
 	readonly edges: readonly (readonly [FlowNode, FlowNode])[]
-	readonly height: number
-}
-
-/** The lanes plus the box they need, measured once while they are built. */
-interface FlowLayout {
-	readonly lanes: readonly FlowLane[]
-	readonly width: number
 	readonly height: number
 }
 
@@ -102,11 +113,12 @@ export function SessionFlow({
 	onSpanTabChange,
 	onOpenTraceView,
 }: SessionFlowProps) {
-	const { lanes, width, height } = useMemo(
+	const lanes = useMemo(
 		() => layoutLanes(turns, { mergeRepeats, query, agentSpansOnly }),
 		[turns, mergeRepeats, query, agentSpansOnly],
 	)
-	const canvasRef = useRef<HTMLDivElement>(null)
+	const paneRef = useRef<HTMLDivElement>(null)
+	const instanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
 
 	// Selection addresses spans the same way in both views, so a span expanded
 	// in the Trace view opens here even when the flow drew no node for it (a
@@ -119,6 +131,12 @@ export function SessionFlow({
 		}
 		return undefined
 	}, [turns, selectedSpanId])
+
+	const nodeBySpanId = useMemo(() => {
+		const byId = new Map<string, FlowNode>()
+		for (const lane of lanes) for (const node of lane.nodes) byId.set(node.span.spanId, node)
+		return byId
+	}, [lanes])
 
 	// The keyboard's span cursor, over the nodes in reading order — lane by
 	// lane, column by column, exactly as they draw.
@@ -134,124 +152,188 @@ export function SessionFlow({
 			onSelectSpan(undefined)
 			return true
 		},
+		// The nodes live inside xyflow's transformed pane, where scrollIntoView
+		// does nothing — the cursor moves the viewport instead, and only when it
+		// has to: recentring on every keypress would yank the canvas around.
 		scrollTo: (spanId) => {
-			canvasRef.current
-				?.querySelector(`[data-span-id="${spanId}"]`)
-				?.scrollIntoView({ block: "nearest", inline: "nearest" })
+			const instance = instanceRef.current
+			const pane = paneRef.current
+			const node = nodeBySpanId.get(spanId)
+			if (instance === null || pane === null || node === undefined) return
+			const viewport = instance.getViewport()
+			const left = node.x * viewport.zoom + viewport.x
+			const top = node.y * viewport.zoom + viewport.y
+			const inView =
+				left >= 0 &&
+				top >= 0 &&
+				left + NODE_WIDTH * viewport.zoom <= pane.clientWidth &&
+				top + NODE_HEIGHT * viewport.zoom <= pane.clientHeight
+			if (inView) return
+			void instance.setCenter(node.x + NODE_WIDTH / 2, node.y + NODE_HEIGHT / 2, {
+				zoom: viewport.zoom,
+				duration: 200,
+			})
 		},
 	})
 
+	const flowNodes = useMemo<Node[]>(
+		() =>
+			lanes.flatMap((lane): Node[] => [
+				{
+					id: `lane:${lane.turn.id}`,
+					type: "laneLabel",
+					position: { x: CANVAS_PADDING, y: lane.nodes[0]!.y + 4 },
+					data: {
+						index: lane.turn.index,
+						durationMs: lane.turn.durationMs,
+						failed: lane.turn.failed,
+					} satisfies LaneLabelData,
+					draggable: false,
+					selectable: false,
+					connectable: false,
+				},
+				...lane.nodes.map(
+					(node): Node => ({
+						id: node.key,
+						type: "step",
+						position: { x: node.x, y: node.y },
+						width: NODE_WIDTH,
+						height: NODE_HEIGHT,
+						// Declared, not measured: with the dimensions and handle spots
+						// known up front (every card is the same box), xyflow can draw
+						// the edges on the very first frame instead of waiting for a
+						// ResizeObserver pass — which also never comes under jsdom.
+						handles: STEP_HANDLES,
+						data: {
+							node,
+							selected: selectedSpanId === node.span.spanId,
+							focused: focusedId === node.span.spanId,
+							onSelect: (spanId: string) => {
+								setFocusedId(spanId)
+								onSelectSpan(selectedSpanId === spanId ? undefined : spanId)
+							},
+						} satisfies StepData,
+						draggable: false,
+						selectable: false,
+						connectable: false,
+						/*
+						 * Load-bearing, from `investigations/flow`: xyflow derives
+						 * pointer-events from selectable/draggable/click handlers and sets
+						 * `none` when all are off — which would make the card's button inert.
+						 */
+						style: { pointerEvents: "all" },
+					}),
+				),
+			]),
+		[lanes, selectedSpanId, focusedId, setFocusedId, onSelectSpan],
+	)
+
+	// One neutral stroke for every connector: the curve says "this ran inside
+	// that", which is not itself an outcome. Colouring it by either end read
+	// as a handoff that failed, and the node cards already carry the red.
+	const flowEdges = useMemo<Edge[]>(
+		() =>
+			lanes.flatMap((lane) =>
+				lane.edges.map(
+					([from, to]): Edge => ({
+						id: `${from.key}->${to.key}`,
+						source: from.key,
+						target: to.key,
+						focusable: false,
+						style: { stroke: "var(--border)", strokeWidth: 1 },
+					}),
+				),
+			),
+		[lanes],
+	)
+
 	return (
-		// Vertical growth belongs to the page's own scroller; only the canvas's
-		// width overflows here, so a wide session pans sideways in place. The
-		// column grows so the floor block below can pin to the viewport's bottom
-		// even under a short canvas.
-		<div className="relative flex grow flex-col">
-			<div ref={canvasRef} className="grow overflow-x-auto">
+		<ReactFlowProvider>
+			{/* The canvas takes whatever height the viewport leaves it (the page
+			    column fills the scroller), and xyflow owns panning inside it; the
+			    floor block below stays a sibling so the drawer can dock under the
+			    canvas rather than float over it. */}
+			<div className="relative flex grow flex-col">
 				{lanes.length === 0 ? (
 					<p className="px-2.5 py-8 text-center text-muted-foreground text-sm">
 						No spans match this filter.
 					</p>
 				) : (
-					<div style={{ width: width * zoom, height: height * zoom }}>
-						<div
-							className="relative"
-							style={{
-								width,
-								height,
-								transform: `scale(${zoom})`,
-								transformOrigin: "top left",
+					<div ref={paneRef} className="relative min-h-48 grow">
+						<ReactFlow
+							nodes={flowNodes}
+							edges={flowEdges}
+							nodeTypes={nodeTypes}
+							onInit={(instance) => {
+								instanceRef.current = instance
 							}}
-						>
-							{lanes.map((lane) => (
-								<Lane
-									key={lane.turn.id}
-									lane={lane}
-									selectedSpanId={selectedSpanId}
-									focusedSpanId={focusedId ?? undefined}
-									onSelectNode={(spanId) => {
-										setFocusedId(spanId)
-										onSelectSpan(selectedSpanId === spanId ? undefined : spanId)
-									}}
-								/>
-							))}
+							// The zoom survives a Trace ↔ Flow round trip through the
+							// parent's state; xyflow owns it while the view is mounted.
+							defaultViewport={{ x: 0, y: 0, zoom }}
+							onMoveEnd={(_, viewport) => {
+								if (viewport.zoom !== zoom) onZoomChange(viewport.zoom)
+							}}
+							minZoom={MIN_ZOOM}
+							maxZoom={MAX_ZOOM}
+							nodesDraggable={false}
+							nodesConnectable={false}
+							nodesFocusable={false}
+							edgesFocusable={false}
+							elementsSelectable={false}
+							connectOnClick={false}
+							// The wheel pans rather than zooms: the canvas fills the
+							// viewport here, and a wheel that zooms traps the reader the
+							// moment they reach for scroll. Zoom is the buttons and pinch.
+							panOnScroll
+							zoomOnScroll={false}
+							zoomOnDoubleClick={false}
+							proOptions={{ hideAttribution: true }}
+							aria-label="Session flow graph"
+						/>
+					</div>
+				)}
+
+				{/* The view's floor, pinned to the viewport's bottom edge: the legend
+				    and zoom on top, and under them the docked drawer when a span is
+				    open. Sticky rather than absolute so a page grown past the
+				    viewport (a tall drawer) still keeps them on screen. Guarded,
+				    because there is nothing to key, zoom or open when the filter
+				    emptied the canvas. */}
+				{lanes.length > 0 && (
+					<div className="sticky bottom-0 z-10 mt-auto flex flex-col">
+						<div className="pointer-events-none flex items-end justify-between gap-4 p-3">
+							<div className="pointer-events-auto flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-muted-foreground text-xs backdrop-blur-sm">
+								{(["agent", "inference", "tool"] as const).map((category) => {
+									const Icon = CATEGORY_ICON[category]
+									return (
+										<span key={category} className="flex items-center gap-1.5">
+											<Icon size={12} className={cn("shrink-0", CATEGORY_TEXT[category])} />
+											{category}
+										</span>
+									)
+								})}
+								<span className="flex items-center gap-1.5">
+									<CircleXmarkIcon size={12} className="shrink-0 text-destructive" />
+									error
+								</span>
+							</div>
+							<FlowControls zoom={zoom} />
 						</div>
+
+						{selectedSpan !== undefined && (
+							<SpanDrawer
+								span={selectedSpan.span}
+								turnOrdinal={turnOrdinal(selectedSpan.turn)}
+								tab={spanTab}
+								onTabChange={onSpanTabChange}
+								onClose={() => onSelectSpan(undefined)}
+								onOpenTraceView={onOpenTraceView}
+							/>
+						)}
 					</div>
 				)}
 			</div>
-
-			{/* The view's floor, pinned to the viewport's bottom edge: the legend
-			    and zoom on top, and under them the docked drawer when a span is
-			    open. Sticky rather than absolute so a canvas taller than the
-			    viewport still keeps them on screen. Guarded, because there is
-			    nothing to key, zoom or open when the filter emptied the canvas. */}
-			{lanes.length > 0 && (
-				<div className="sticky bottom-0 z-10 mt-auto flex flex-col">
-					<div className="pointer-events-none flex items-end justify-between gap-4 p-3">
-						<div className="pointer-events-auto flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-muted-foreground text-xs backdrop-blur-sm">
-							{(["agent", "inference", "tool"] as const).map((category) => (
-								<span key={category} className="flex items-center gap-1.5">
-									<span
-										aria-hidden
-										className={cn("size-1.5 rounded-xs", CATEGORY_FILL[category])}
-									/>
-									{category}
-								</span>
-							))}
-							<span className="flex items-center gap-1.5">
-								<span aria-hidden className="size-1.5 rounded-xs bg-destructive" />
-								error
-							</span>
-						</div>
-						<div className="pointer-events-auto flex items-center gap-1 rounded-md bg-background/80 p-0.5 backdrop-blur-sm">
-							{/* In, out, reset — the order and the reset glyph the repo's other
-						    canvas already uses (`investigations/flow/provenance-canvas.tsx`).
-						    Disabled at the bounds, because clamping silently meant the third
-						    click at 1.5x did nothing with no way to tell that from a dead
-						    button. */}
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label="Zoom in"
-								disabled={zoom >= MAX_ZOOM}
-								onClick={() => onZoomChange(Math.min(MAX_ZOOM, zoom + ZOOM_STEP))}
-							>
-								<PlusIcon size={14} />
-							</Button>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label="Zoom out"
-								disabled={zoom <= MIN_ZOOM}
-								onClick={() => onZoomChange(Math.max(MIN_ZOOM, zoom - ZOOM_STEP))}
-							>
-								<MinusIcon size={14} />
-							</Button>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label="Reset zoom"
-								disabled={zoom === 1}
-								onClick={() => onZoomChange(1)}
-							>
-								<MaximizeIcon size={14} />
-							</Button>
-						</div>
-					</div>
-
-					{selectedSpan !== undefined && (
-						<SpanDrawer
-							span={selectedSpan.span}
-							turnOrdinal={turnOrdinal(selectedSpan.turn)}
-							tab={spanTab}
-							onTabChange={onSpanTabChange}
-							onClose={() => onSelectSpan(undefined)}
-							onOpenTraceView={onOpenTraceView}
-						/>
-					)}
-				</div>
-			)}
-		</div>
+		</ReactFlowProvider>
 	)
 }
 
@@ -260,127 +342,154 @@ function turnOrdinal(turn: SessionTurn): string {
 	return `${turn.anchorKind === "trace" ? "Segment" : "Turn"} ${turn.index}`
 }
 
-function Lane({
-	lane,
-	selectedSpanId,
-	focusedSpanId,
-	onSelectNode,
-}: {
-	lane: FlowLane
-	selectedSpanId: string | undefined
-	focusedSpanId: string | undefined
-	onSelectNode: (spanId: string) => void
-}) {
+/**
+ * In, out, fit — the order and glyphs the repo's other canvas already uses
+ * (`investigations/flow/provenance-canvas.tsx`). The zoom buttons disable at
+ * the bounds, because clamping silently meant the third click at 1.5x did
+ * nothing with no way to tell that from a dead button; fit is always live.
+ */
+function FlowControls({ zoom }: { zoom: number }) {
+	const flow = useReactFlow()
+
+	return (
+		<div className="pointer-events-auto flex items-center gap-1 rounded-md bg-background/80 p-0.5 backdrop-blur-sm">
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label="Zoom in"
+				disabled={zoom >= MAX_ZOOM}
+				onClick={() => void flow.zoomIn()}
+			>
+				<PlusIcon size={14} />
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label="Zoom out"
+				disabled={zoom <= MIN_ZOOM}
+				onClick={() => void flow.zoomOut()}
+			>
+				<MinusIcon size={14} />
+			</Button>
+			{/* A deliberate reset rather than `fitView`: fit clamps against the
+			    0.5 floor on any real session and lands somewhere unpredictable,
+			    while "top of the session at 1:1" is the one place the reader can
+			    always name. (`fitView` also queues behind the flow's own render
+			    when called from outside it, and this button lives in the floor.) */}
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label="Reset view"
+				onClick={() => void flow.setViewport({ x: 0, y: 0, zoom: 1 })}
+			>
+				<MaximizeIcon size={14} />
+			</Button>
+		</div>
+	)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Nodes                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** Both handles are hidden — the graph is read-only, nothing connects by hand. */
+const HANDLE = "!size-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+
+function Ports() {
 	return (
 		<>
-			<div
-				className="absolute w-[110px] text-xs"
-				style={{ left: CANVAS_PADDING, top: lane.nodes[0]!.y + 4 }}
-			>
-				<p className="font-medium text-[10px] text-primary uppercase tracking-wider">
-					Turn {lane.turn.index}
-				</p>
-				<p
-					className={cn(
-						"tabular-nums",
-						lane.turn.failed ? "text-destructive" : "text-muted-foreground",
-					)}
-				>
-					{formatDuration(lane.turn.durationMs)}
-				</p>
-				{lane.turn.failed && <p className="text-destructive text-xs">failed</p>}
-			</div>
-
-			{/* One neutral stroke for every connector: the curve says "this ran inside
-			    that", which is not itself an outcome. Colouring it by either end read
-			    as a handoff that failed, and the node cards already carry the red. */}
-			<svg
-				aria-hidden
-				data-slot="flow-edges"
-				className="pointer-events-none absolute inset-0 size-full overflow-visible"
-				fill="none"
-			>
-				{lane.edges.map(([from, to]) => (
-					<path
-						key={`${from.key}->${to.key}`}
-						d={edgePath(from, to)}
-						className="stroke-border"
-						strokeWidth={1}
-					/>
-				))}
-			</svg>
-
-			{lane.nodes.map((node) => (
-				<FlowNodeCard
-					key={node.key}
-					node={node}
-					selected={selectedSpanId === node.span.spanId}
-					focused={focusedSpanId === node.span.spanId}
-					onClick={() => onSelectNode(node.span.spanId)}
-				/>
-			))}
+			<Handle type="target" position={Position.Left} className={HANDLE} isConnectable={false} />
+			<Handle type="source" position={Position.Right} className={HANDLE} isConnectable={false} />
 		</>
 	)
 }
 
-function FlowNodeCard({
-	node,
-	selected,
-	focused,
-	onClick,
-}: {
-	node: FlowNode
-	selected: boolean
+interface StepData extends Record<string, unknown> {
+	readonly node: FlowNode
+	readonly selected: boolean
 	/** Under the keyboard's span cursor — distinct from `selected`, the open drawer. */
-	focused: boolean
-	onClick: () => void
-}) {
+	readonly focused: boolean
+	readonly onSelect: (spanId: string) => void
+}
+
+const StepNode = memo(function StepNode({ data }: NodeProps & { data: StepData }) {
+	const { node, selected, focused, onSelect } = data
+	// The glyph carries the kind of work; a failure takes it over outright — the
+	// outcome outranks the kind, exactly as the waterfall's dots read.
+	const Icon = node.errored ? CircleXmarkIcon : CATEGORY_ICON[node.category]
+
 	return (
-		<button
-			type="button"
-			onClick={onClick}
-			data-span-id={node.span.spanId}
-			aria-current={selected || undefined}
-			className={cn(
-				"absolute flex cursor-pointer flex-col justify-center gap-1 rounded-md border bg-card px-2.5 py-2 text-left hover:border-ring",
-				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-				node.errored ? "border-destructive/60" : "border-border",
-				focused && "border-ring",
-				// Selection is a state and hover is a pointer, so they cannot share a
-				// token: the waterfall marks its selected row with primary, and the
-				// node card takes the same direction.
-				selected && "border-primary bg-primary/5",
-			)}
-			style={{ left: node.x, top: node.y, width: NODE_WIDTH, height: NODE_HEIGHT }}
-		>
-			<span className="flex items-center gap-1.5">
-				<span
-					aria-hidden
-					className={cn(
-						"size-1.5 shrink-0 rounded-xs",
-						node.errored ? "bg-destructive" : CATEGORY_FILL[node.category],
-					)}
-				/>
-				<span className="min-w-0 truncate text-xs" title={node.title}>
-					{shortTarget(node.title)}
-				</span>
-				{node.count > 1 && (
-					<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-						×{node.count}
-					</span>
-				)}
-			</span>
-			<span
+		<>
+			<Ports />
+			<button
+				type="button"
+				onClick={() => onSelect(node.span.spanId)}
+				data-span-id={node.span.spanId}
+				aria-current={selected || undefined}
 				className={cn(
-					"truncate text-[11px]",
-					node.errored ? "text-destructive" : "text-muted-foreground",
+					"flex size-full cursor-pointer flex-col justify-center gap-1 rounded-md border bg-card px-2.5 py-2 text-left hover:border-ring",
+					"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+					node.errored ? "border-destructive/60" : "border-border",
+					focused && "border-ring",
+					// Selection is a state and hover is a pointer, so they cannot share a
+					// token: the waterfall marks its selected row with primary, and the
+					// node card takes the same direction.
+					selected && "border-primary bg-primary/5",
 				)}
 			>
-				{node.subtitle}
-			</span>
-		</button>
+				<span className="flex items-center gap-1.5">
+					<Icon
+						size={12}
+						className={cn(
+							"shrink-0",
+							node.errored ? "text-destructive" : CATEGORY_TEXT[node.category],
+						)}
+					/>
+					<span className="min-w-0 truncate text-xs" title={node.title}>
+						{shortTarget(node.title)}
+					</span>
+					{node.count > 1 && (
+						<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+							×{node.count}
+						</span>
+					)}
+				</span>
+				<span
+					className={cn(
+						"truncate text-[11px]",
+						node.errored ? "text-destructive" : "text-muted-foreground",
+					)}
+				>
+					{node.subtitle}
+				</span>
+			</button>
+		</>
 	)
+})
+
+interface LaneLabelData extends Record<string, unknown> {
+	readonly index: number
+	readonly durationMs: number
+	readonly failed: boolean
 }
+
+/** The turn's margin note. A node rather than an overlay so it pans and zooms
+ *  with the lane it names. */
+const LaneLabelNode = memo(function LaneLabelNode({ data }: NodeProps & { data: LaneLabelData }) {
+	return (
+		<div className="pointer-events-none w-[110px] text-xs">
+			<p className="font-medium text-[10px] text-primary uppercase tracking-wider">
+				Turn {data.index}
+			</p>
+			<p className={cn("tabular-nums", data.failed ? "text-destructive" : "text-muted-foreground")}>
+				{formatDuration(data.durationMs)}
+			</p>
+			{data.failed && <p className="text-destructive text-xs">failed</p>}
+		</div>
+	)
+})
+
+const nodeTypes = { step: StepNode, laneLabel: LaneLabelNode }
 
 /* -------------------------------------------------------------------------- */
 /* Layout                                                                     */
@@ -397,10 +506,9 @@ interface FlowGroup {
 function layoutLanes(
 	turns: readonly SessionTurn[],
 	options: { mergeRepeats: boolean; query: string; agentSpansOnly: boolean },
-): FlowLayout {
+): readonly FlowLane[] {
 	const lanes: FlowLane[] = []
 	let laneTop = CANVAS_PADDING
-	let contentRight = LANE_LABEL_WIDTH + NODE_WIDTH
 
 	for (const turn of turns) {
 		const spans = flowSpans(turn, options.query, options.agentSpansOnly)
@@ -430,7 +538,7 @@ function layoutLanes(
 		columns.forEach((column, columnIndex) => {
 			column.forEach((group, stackIndex) => {
 				// One member speaks for the group — the failure when there is one — so
-				// the red border, the red dot and the error text all describe the same
+				// the red border, the red glyph and the error text all describe the same
 				// call, and clicking opens it.
 				const lead = group.spans.find((member) => member.statusCode === "Error") ?? group.spans[0]!
 				const node: FlowNode = {
@@ -450,7 +558,6 @@ function layoutLanes(
 						stackIndex * (NODE_HEIGHT + STACK_GAP),
 				}
 				nodes.push(node)
-				contentRight = Math.max(contentRight, node.x + NODE_WIDTH)
 				for (const member of group.spans) placed.set(member.spanId, { node, column: columnIndex })
 			})
 		})
@@ -477,11 +584,7 @@ function layoutLanes(
 		laneTop += height + LANE_GAP
 	}
 
-	return {
-		lanes,
-		width: CANVAS_PADDING + contentRight,
-		height: CANVAS_PADDING * 2 + lanes.reduce((total, lane) => total + lane.height + LANE_GAP, 0),
-	}
+	return lanes
 }
 
 /**
@@ -614,15 +717,6 @@ function groupStartMs(group: FlowGroup): number {
 
 function groupEndMs(group: FlowGroup): number {
 	return Math.max(...group.spans.map(spanEndMs))
-}
-
-function edgePath(from: FlowNode, to: FlowNode): string {
-	const x1 = from.x + NODE_WIDTH
-	const y1 = from.y + NODE_HEIGHT / 2
-	const x2 = to.x
-	const y2 = to.y + NODE_HEIGHT / 2
-	const bend = Math.max(16, (x2 - x1) / 2)
-	return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`
 }
 
 function nodeTitle(span: AiSessionSpan): string {

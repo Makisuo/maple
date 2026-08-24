@@ -680,10 +680,15 @@ describe("SessionFlow", () => {
 		}),
 	]
 
-	/** Node cards are the positioned buttons; the zoom controls carry no style. */
+	/** Node cards are the xyflow step nodes; their layout position lives on the
+	 *  wrapper's transform, which jsdom preserves verbatim. */
 	const cardsOf = (container: HTMLElement) => [
-		...container.querySelectorAll<HTMLButtonElement>("button[style]"),
+		...container.querySelectorAll<HTMLElement>(".react-flow__node-step"),
 	]
+	const positionOf = (card: HTMLElement) => {
+		const match = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(card.style.transform)
+		return { x: Number(match![1]), y: Number(match![2]) }
+	}
 
 	it("lays out one lane per turn", () => {
 		render(<Flow />)
@@ -780,23 +785,18 @@ describe("SessionFlow", () => {
 
 		const cards = cardsOf(view.container)
 		expect(cards).toHaveLength(2)
-		expect(Number.parseFloat(cards[1]!.style.left)).toBeGreaterThan(
-			Number.parseFloat(cards[0]!.style.left),
-		)
-		expect(cards[1]!.style.top).toBe(cards[0]!.style.top)
-		expect(view.container.querySelectorAll('[data-slot="flow-edges"] path')).toHaveLength(1)
+		expect(positionOf(cards[1]!).x).toBeGreaterThan(positionOf(cards[0]!).x)
+		expect(positionOf(cards[1]!).y).toBe(positionOf(cards[0]!).y)
+		expect(view.container.querySelectorAll(".react-flow__edge")).toHaveLength(1)
 	})
 
 	it("draws one connector per parent/child pair, not per adjacent column", () => {
-		// Four children of one anchor across three columns: four connectors from the
-		// anchor, never the column-to-column cartesian product (which would pair the
-		// two parallel tools with the tool after them).
+		// Four children of one anchor across three columns in turn 1 plus one pair
+		// in turn 2: five connectors, never the column-to-column cartesian product
+		// (which would pair the two parallel tools with the tool after them).
 		const view = render(<Flow />)
 
-		const lanes = view.container.querySelectorAll('[data-slot="flow-edges"]')
-		expect(lanes).toHaveLength(2)
-		expect(lanes[0]!.querySelectorAll("path")).toHaveLength(4)
-		expect(lanes[1]!.querySelectorAll("path")).toHaveLength(1)
+		expect(view.container.querySelectorAll(".react-flow__edge")).toHaveLength(5)
 	})
 
 	it("wraps a long turn into a block instead of one endless ribbon", () => {
@@ -816,8 +816,8 @@ describe("SessionFlow", () => {
 
 		const cards = cardsOf(view.container)
 		expect(cards).toHaveLength(10)
-		expect(cards[8]!.style.left).toBe(cards[0]!.style.left)
-		expect(Number.parseFloat(cards[8]!.style.top)).toBeGreaterThan(Number.parseFloat(cards[0]!.style.top))
+		expect(positionOf(cards[8]!).x).toBe(positionOf(cards[0]!).x)
+		expect(positionOf(cards[8]!).y).toBeGreaterThan(positionOf(cards[0]!).y)
 	})
 })
 
