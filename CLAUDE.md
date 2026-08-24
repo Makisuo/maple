@@ -174,7 +174,9 @@ there is no Prometheus `/metrics` endpoint. At high QPS set `OTEL_TRACES_SAMPLER
 
 ## Docs (`docs/`)
 
-`api-v2.md` (v2 public API spec) · `sampling-throughput.md` · `persistence.md` ·
+`api-v2.md` (v2 public API spec) · `error-issue-lifecycle.md` (how an error becomes an issue,
+gets diagnosed, fixed and verified — read before touching `apps/api/src/services/errors/`) ·
+`sampling-throughput.md` · `persistence.md` ·
 `warehouse-rollups.md` (MV/rollup tiering contract — read before adding a materialized view) ·
 `sst-fork-workflow.md` · `local-mode.md` (single-binary CLI + embedded chDB) ·
 `tinybird-pr-branches.md` · `otel-spec/` (OTel spec map @ v1.58.0 — start at its README).

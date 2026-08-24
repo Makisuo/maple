@@ -26,7 +26,12 @@ const SELECTABLE_STATES = WORKFLOW_STATE_ORDER.filter((state) => !MACHINE_OWNED_
 export function registerTransitionErrorIssueTool(server: McpToolRegistrar) {
 	server.tool(
 		"transition_error_issue",
-		`Move an error issue to a new workflow state. Valid transitions: ${describeWorkflowTransitions()}.`,
+		[
+			"Move an error issue to a new workflow state.",
+			`Valid transitions: ${describeWorkflowTransitions()}.`,
+			"`regressed` and `verifying` are set by Maple's own ticks and cannot be requested here: `regressed` means a fixed error started firing from a build that postdates the fix, and `verifying` means a linked PR merged and the post-merge check is running.",
+			"Do not move an issue to `done` yourself once a PR is linked — a merged PR opens a verification window that closes the issue for you when the error stops.",
+		].join(" "),
 		Schema.Struct({
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),
 			to_state: requiredStringParam(`Target workflow state: ${SELECTABLE_STATES.join(", ")}`),

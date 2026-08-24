@@ -14,7 +14,8 @@ export function registerLinkPullRequestTool(server: McpToolRegistrar) {
 		[
 			"Attach a GitHub pull request to an error issue.",
 			"When that PR merges, Maple opens a verification window sized by the issue's severity and its own occurrence rate, then checks whether the error actually stopped — closing the issue automatically if it did.",
-			"Use this when a fix already has a PR but you are not proposing it as new work; propose_fix does the same linking when you pass pr_url.",
+			"Use this when a fix already has a PR but you are not proposing it as new work; `propose_fix` does the same linking when you pass `pr_url`, and also moves the issue to `in_review`.",
+			"Either way, leave the issue alone after linking — the merge moves it to `verifying` and the verdict moves it on from there.",
 		].join(" "),
 		Schema.Struct({
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),

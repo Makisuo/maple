@@ -22,6 +22,66 @@ export const InstructionsResource = McpServer.resource({
 4. Check \`service_map\` for dependency issues
 5. Use \`compare_periods\` to detect regressions
 
+## Error Issue Lifecycle
+
+\`find_errors\` reads the warehouse; **issues** are the durable, assignable records built on top of
+it, and they are what you act on. One issue per error fingerprint, with a workflow state, a lease,
+a severity, an append-only timeline, and — when a PR is attached — an automatic post-merge check.
+
+The flow, end to end:
+
+\`\`\`
+first occurrences ──> (candidate) ──> issue in \`triage\`
+                                          │
+        AI investigation runs automatically (if the org enabled it): it writes a
+        diagnosis and a severity onto the issue as an \`ai_triage\` timeline event
+                                          │
+   claim_error_issue ──> \`in_progress\`   (a lease, so two agents don't fix the same bug)
+                                          │
+   propose_fix (with pr_url) ──> \`in_review\`   (claims it too, if you skipped the step above)
+                                          │
+                    PR merges ──> \`verifying\`   (Maple watches; nobody acts)
+                                          │
+        ┌─────────────────────────────────┼──────────────────────────────┐
+   fix holds                        still firing                   not enough traffic
+   ──> \`done\`, or the verdict       ──> \`in_progress\`,             ──> one longer window,
+   posted for a human to close       reopened for another go        then \`in_review\`
+   (high/critical never auto-close)
+\`\`\`
+
+### The rules that matter
+
+1. **Claiming is how two agents avoid fixing the same bug.** \`claim_error_issue\` takes a 30-minute
+   lease and moves \`triage\`/\`todo\` to \`in_progress\`; any later action renews it, and
+   \`release_error_issue\` hands it back. You do not have to call it first: \`propose_fix\` and a
+   transition to \`in_progress\` both take the lease for you. What you cannot do is work an issue
+   somebody else holds — those calls come back as a lease conflict naming the holder.
+2. **Read the timeline first.** \`list_error_issue_events\` carries the AI diagnosis (\`ai_triage\`),
+   past fix attempts (\`fix_proposed\`), regressions, and prior verdicts
+   (\`verification_verdict\`). An issue that has been fixed and regressed is a different problem from
+   one nobody has touched, and the timeline is the only place that distinction lives.
+3. **Attach the PR.** \`propose_fix\` when you are proposing the work; \`link_pull_request\` when the
+   PR already exists. Both link it; only \`propose_fix\` claims the issue and moves it to
+   \`in_review\` — from wherever it is, including straight from \`triage\`. You never need to walk
+   the state machine by hand to get there.
+4. **Do not close an issue you linked a PR to.** The merge opens a verification window sized by the
+   issue's severity and its own pre-merge rate, and the verdict moves the issue. Closing it yourself
+   throws that check away.
+5. **\`regressed\` and \`verifying\` are not yours to set** — \`transition_error_issue\` rejects them.
+   Each records something Maple observed, not something you intend.
+6. **Severity drives escalation.** \`set_issue_severity\` can page people, and it decides how long a
+   verification window runs and whether a \`verified\` verdict may auto-close. Set it from evidence.
+
+### Picking a tool
+
+- \`list_error_issues\` — the work queue. Filter by \`workflow_state\` and \`severity\`.
+- \`list_error_issue_events\` — one issue's history. Read before acting.
+- \`claim_error_issue\` / \`release_error_issue\` — the lease.
+- \`comment_on_error_issue\` — findings that are not yet a fix.
+- \`set_issue_severity\` — how bad it is, with a reason.
+- \`propose_fix\` / \`link_pull_request\` — attach the fix.
+- \`transition_error_issue\` — everything else, e.g. \`wontfix\` with a \`snooze_until\`.
+
 ## Attribute Filtering
 - Call \`explore_attributes\` before filtering by custom attributes
 - Prefer service_name filters to narrow results before free-text search
@@ -41,6 +101,7 @@ export const InstructionsResource = McpServer.resource({
 
 ## Tool Selection Guide
 - Error investigation: find_errors -> error_detail -> inspect_trace
+- Acting on an error (claiming, fixing, closing): see **Error Issue Lifecycle** above
 - Performance analysis: find_slow_traces -> inspect_trace -> get_service_top_operations
 - Trend analysis: query_data (timeseries or breakdown)
 - Service discovery: list_services -> diagnose_service
