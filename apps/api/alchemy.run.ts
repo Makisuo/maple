@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto"
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
+import * as Output from "alchemy/Output"
 import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -13,6 +15,7 @@ import {
 	resolveHyperdriveRefId,
 	resolveWorkerName,
 } from "@maple/infra/cloudflare"
+import { stageEnablesReplayBlobs } from "@maple/infra/aws"
 import {
 	apnsEnv,
 	appUrlsEnv,
@@ -33,7 +36,131 @@ import {
 export interface CreateMapleApiOptions {
 	stage: MapleStage
 	domains: MapleDomains
+	/** Read side of the replay payload store; see `createReplayBlobStore`. */
+	replayBlobs: Cloudflare.R2.Bucket
 }
+
+/** R2 credentials for the ingest gateway, when this stage writes replay blobs. */
+export interface ReplayBlobCredentials {
+	/** Account-scoped S3 endpoint. A plan-time string — the account id is env-supplied. */
+	endpoint: string
+	bucket: string
+	/** The API token's id. Only known after the token exists, hence an Output. */
+	accessKeyId: Output.Output<string>
+	/** SHA-256 of the token value; see `deriveSecretAccessKey`. */
+	secretAccessKey: Output.Output<Redacted.Redacted<string>>
+}
+
+/**
+ * R2's S3 credentials are not a Cloudflare resource — there is no "create
+ * access key" API. They are a rendering of an ordinary API token:
+ * the Access Key ID is the token's id, and the Secret Access Key is the
+ * SHA-256 of the token's value. Cloudflare documents exactly this, and it is
+ * why alchemy has nothing to provision here beyond the token itself.
+ */
+const deriveSecretAccessKey = (value: Output.Output<Redacted.Redacted<string>>) =>
+	Output.map(value, (token) =>
+		Redacted.make(createHash("sha256").update(Redacted.value(token)).digest("hex")),
+	)
+
+/**
+ * The session-replay payload store: one R2 bucket, plus (on stages that write)
+ * a bucket-scoped API token for the ingest gateway.
+ *
+ * Lives here rather than inside `createMapleApi` because it has two consumers in
+ * two clouds — the api Worker reads it over the native binding, and the Rust
+ * gateway on ECS writes it over the S3 API. The gateway stack is constructed
+ * FIRST in the root stack, so this has to be hoisted above both of them.
+ */
+export const createReplayBlobStore = ({ stage }: { stage: MapleStage }) =>
+	Effect.gen(function* () {
+		const bucketName = resolveWorkerName("replay-blobs", stage)
+
+		// Session-replay rrweb payloads. The ingest gateway (a Rust service on ECS
+		// Fargate, not a Worker) writes these over the S3 API with SigV4; the api
+		// Worker binds the same bucket to hydrate `session_replay_events` rows
+		// whose `Events` is empty. Stage-isolated, so a pr/stg deploy can never
+		// serve or overwrite prd recordings.
+		//
+		// The 32-day expiry is deliberately LONGER than the table's 30-day TTL:
+		// the row must disappear before the object does. The other way round
+		// leaves a session that lists as recorded but plays back empty, which is
+		// the one failure mode with no good client-side handling.
+		const bucket = yield* Cloudflare.R2.Bucket("replay-blobs", {
+			name: bucketName,
+			// Colocated with the ingest gateway, which runs in us-east-1
+			// (`resolveAwsRegion` maps the `us` MapleRegion there). Left unset, R2
+			// picked `wnam` from wherever the creating API call originated, putting
+			// every PUT on a cross-continent hop — and the write path is synchronous
+			// on the ingest request (object first, row second), at ~60 objects per
+			// session and 267 for the largest org.
+			//
+			// This is a REPLACE, not an update: changing it destroys and recreates
+			// the bucket. Safe only while the bucket is empty, which it is until a
+			// stage first passes `stageEnablesReplayBlobs`. After that, changing
+			// this line deletes recordings.
+			locationHint: "enam",
+			// Deliberately unprefixed, so the rule covers whatever key scheme is
+			// current. `replay_object_key` is versioned (`v1/…`) precisely so a
+			// format change can write under a new prefix while the old one ages
+			// out — a rule pinned to `v1/` would silently stop expiring anything
+			// the moment that happens, and the bucket would grow forever with no
+			// failing test to catch it. Nothing else writes here.
+			lifecycleRules: [
+				{
+					id: "expire-replay-chunks",
+					enabled: true,
+					deleteObjectsTransition: { condition: { type: "Age", maxAge: 32 * 24 * 60 * 60 } },
+				},
+			],
+		})
+
+		if (!stageEnablesReplayBlobs(stage)) {
+			// Bucket still exists and stays bound, so any objects written before the
+			// gate closed keep playing back. The gateway just has no credentials and
+			// falls back to storing payloads inline.
+			return { bucket, credentials: undefined }
+		}
+
+		// Plan-time, not an Output: it keys the policy's `resources` map below and
+		// builds the endpoint string, neither of which can take a lazy value. The
+		// root stack normalizes CLOUDFLARE_DEFAULT_ACCOUNT_ID onto this name.
+		const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim()
+		if (!accountId) {
+			throw new Error("CLOUDFLARE_ACCOUNT_ID is required to mint the replay blob store's R2 token.")
+		}
+
+		// Bucket-scoped, not account-wide: this credential reaches exactly one
+		// bucket and can only write to it. Minting it requires the DEPLOY token to
+		// carry the account-level `API Tokens > Write` permission — the same class
+		// of prerequisite as the AI Gateway binding below, and it fails the deploy
+		// outright rather than degrading.
+		const token = yield* Cloudflare.ApiToken.AccountApiToken("replay-blobs-writer", {
+			name: `${bucketName}-writer`,
+			accountId,
+			policies: [
+				{
+					effect: "allow",
+					permissionGroups: ["Workers R2 Storage Bucket Item Write"],
+					// `<account>_<jurisdiction>_<bucket>`; `default` is the
+					// non-jurisdictional case, which is what `Bucket` creates here.
+					resources: {
+						[`com.cloudflare.edge.r2.bucket.${accountId}_default_${bucketName}`]: "*",
+					},
+				},
+			],
+		})
+
+		return {
+			bucket,
+			credentials: {
+				endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+				bucket: bucketName,
+				accessKeyId: Output.asOutput(token.tokenId),
+				secretAccessKey: deriveSecretAccessKey(Output.asOutput(token.value)),
+			} satisfies ReplayBlobCredentials,
+		}
+	})
 
 /**
  * Everything in the api worker's env that comes from configuration rather than
@@ -143,7 +270,7 @@ const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
 	})
 })
 
-export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
+export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
 		// MAPLE_DB Hyperdrive comes in two flavors:
 		//
@@ -213,33 +340,6 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		const planetScaleWebhookQueueName = resolveWorkerName("planetscale-webhooks", stage)
 		const planetScaleWebhookQueue = yield* Cloudflare.Queues.Queue("planetscale-webhooks", {
 			name: planetScaleWebhookQueueName,
-		})
-
-		// Session-replay rrweb payloads. The ingest gateway (a Rust service on ECS
-		// Fargate, not a Worker) writes these over the S3 API with SigV4; this binding is
-		// the read side, hydrating `session_replay_events` rows whose `Events` is
-		// empty. Stage-isolated, so a pr/stg deploy can never serve or overwrite
-		// prd recordings.
-		//
-		// The 32-day expiry is deliberately LONGER than the table's 30-day TTL:
-		// the row must disappear before the object does. The other way round
-		// leaves a session that lists as recorded but plays back empty, which is
-		// the one failure mode with no good client-side handling.
-		const replayBlobs = yield* Cloudflare.R2.Bucket("replay-blobs", {
-			name: resolveWorkerName("replay-blobs", stage),
-			// Deliberately unprefixed, so the rule covers whatever key scheme is
-			// current. `replay_object_key` is versioned (`v1/…`) precisely so a
-			// format change can write under a new prefix while the old one ages
-			// out — a rule pinned to `v1/` would silently stop expiring anything
-			// the moment that happens, and the bucket would grow forever with no
-			// failing test to catch it. Nothing else writes here.
-			lifecycleRules: [
-				{
-					id: "expire-replay-chunks",
-					enabled: true,
-					deleteObjectsTransition: { condition: { type: "Age", maxAge: 32 * 24 * 60 * 60 } },
-				},
-			],
 		})
 
 		const worker = (yield* Cloudflare.Worker("api", {

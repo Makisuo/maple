@@ -17,7 +17,7 @@ import { parseMapleRegion, resolveAwsRegion, stageDeploysIngest } from "@maple/i
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
 import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
-import { createMapleApi } from "./apps/api/alchemy.run.ts"
+import { createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
 import { createMapleIngest } from "./apps/ingest/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
@@ -149,8 +149,20 @@ export default Alchemy.Stack(
 		// via a Cloudflare CNAME at the ALB, so the URL below stays a plain string
 		// and does not depend on the service resource; a PR preview gets no ingest
 		// domain, so its ALB answers plain HTTP on 80 at `ingest.serviceUrl`.
+		// Hoisted above BOTH consumers on purpose. The bucket is read by the api
+		// Worker over its native binding and written by the Rust gateway on ECS over
+		// the S3 API, and the gateway is constructed first — so neither factory can
+		// own it. `credentials` is undefined on stages that keep replay payloads
+		// inline (`stageEnablesReplayBlobs`).
+		const replayBlobStore = yield* createReplayBlobStore({ stage })
+
 		const ingest = stageDeploysIngest(stage)
-			? yield* createMapleIngest({ stage, domains, region })
+			? yield* createMapleIngest({
+					stage,
+					domains,
+					region,
+					replayBlobs: replayBlobStore.credentials,
+				})
 			: undefined
 
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
@@ -160,6 +172,7 @@ export default Alchemy.Stack(
 		const { worker: api, db: mapleDb } = yield* createMapleApi({
 			stage,
 			domains,
+			replayBlobs: replayBlobStore.bucket,
 		})
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
