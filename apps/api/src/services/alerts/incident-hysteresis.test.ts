@@ -1,15 +1,6 @@
-import { Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { advanceAlertCounters, ZERO_ALERT_COUNTERS } from "./alert-counters"
-import type { AnomalyEvaluation } from "./anomaly/detection"
-import { decideTransition, type DetectorStateSnapshot } from "./anomaly/state-machine"
-import {
-	HysteresisEvent,
-	type HysteresisConfig,
-	HysteresisStates,
-	IncidentHysteresis,
-} from "./incident-hysteresis"
+import { foldObservation, type HysteresisConfig, type HysteresisRow } from "./incident-hysteresis"
 
 /**
  * Parity harness. The machine replaces two hand-rolled implementations, so the
@@ -34,32 +25,89 @@ const sequence = (seed: number, length: number): ReadonlyArray<Status> => {
 const TICK_MS = 5 * 60 * 1000
 const START_MS = Date.parse("2026-06-11T12:00:00Z")
 
-/** Replay a status sequence through the machine, collecting emitted decisions. */
+/**
+ * Replay a status sequence the way a tick does: rebuild the row, fold one
+ * observation, write the row back. This exercises the row adapter too, which is
+ * the part the services actually call.
+ */
 const runMachine = (statuses: ReadonlyArray<Status>, config: HysteresisConfig) =>
 	Effect.gen(function* () {
-		const initial = yield* Machine.planInitial(IncidentHysteresis)
-		let snapshot: Machine.Snapshot<typeof HysteresisStates.states> = initial.startingState
+		let row: HysteresisRow = {
+			consecutiveBreaches: 0,
+			consecutiveHealthy: 0,
+			incidentOpen: false,
+			lastResolvedAtMs: null,
+		}
 		const decisions: Array<Decision> = []
 		for (const [index, status] of statuses.entries()) {
 			const nowMs = START_MS + index * TICK_MS
-			const event =
-				status === "skipped"
-					? HysteresisEvent.Skipped()
-					: status === "breached"
-						? HysteresisEvent.Breached({ nowMs, config })
-						: HysteresisEvent.Recovered({ nowMs, config })
-			const planned = yield* Machine.plan(IncidentHysteresis, snapshot, event)
-			snapshot = planned.next
-			for (const emitted of planned.emittedEvents) {
-				decisions.push(emitted._tag === "IncidentOpened" ? "opened" : "resolved")
+			const outcome = yield* foldObservation(row, status, config, nowMs)
+			row = {
+				consecutiveBreaches: outcome.consecutiveBreaches,
+				consecutiveHealthy: outcome.consecutiveHealthy,
+				incidentOpen:
+					outcome.transition === "open"
+						? true
+						: outcome.transition === "resolve"
+							? false
+							: row.incidentOpen,
+				lastResolvedAtMs: outcome.transition === "resolve" ? nowMs : row.lastResolvedAtMs,
 			}
+			if (outcome.transition === "open") decisions.push("opened")
+			if (outcome.transition === "resolve") decisions.push("resolved")
 		}
-		return { snapshot, decisions }
+		return { row, decisions }
 	})
 
-/** What `AnomalyDetectionService` does with each `decideTransition` verdict. */
+/**
+ * `decideTransition` as it stood before the machine replaced it, frozen here on
+ * purpose. Keeping the predecessor in the test rather than in the source tree
+ * is what lets this file keep proving equivalence without keeping dead code
+ * around to be maintained, imported by mistake, or quietly edited into
+ * agreement. Do not "fix" it — if it and the machine disagree, that is the
+ * finding.
+ */
+interface FrozenDetectorState {
+	readonly consecutiveBreaches: number
+	readonly consecutiveHealthy: number
+	readonly openIncidentId: string | null
+	readonly lastResolvedAt: number | null
+}
+
+const frozenDecideTransition = (
+	state: FrozenDetectorState,
+	status: Status,
+	config: HysteresisConfig,
+	nowMs: number,
+) => {
+	if (status === "skipped") {
+		return {
+			transition: "noop" as const,
+			consecutiveBreaches: state.consecutiveBreaches,
+			consecutiveHealthy: state.consecutiveHealthy,
+		}
+	}
+	if (status === "breached") {
+		const consecutiveBreaches = state.consecutiveBreaches + 1
+		if (state.openIncidentId !== null) {
+			return { transition: "continue" as const, consecutiveBreaches, consecutiveHealthy: 0 }
+		}
+		const inCooldown = state.lastResolvedAt !== null && nowMs - state.lastResolvedAt < config.cooldownMs
+		if (consecutiveBreaches >= config.breachesToOpen && !inCooldown) {
+			return { transition: "open" as const, consecutiveBreaches, consecutiveHealthy: 0 }
+		}
+		return { transition: "noop" as const, consecutiveBreaches, consecutiveHealthy: 0 }
+	}
+	const consecutiveHealthy = state.consecutiveHealthy + 1
+	if (state.openIncidentId !== null && consecutiveHealthy >= config.healthyToResolve) {
+		return { transition: "resolve" as const, consecutiveBreaches: 0, consecutiveHealthy }
+	}
+	return { transition: "noop" as const, consecutiveBreaches: 0, consecutiveHealthy }
+}
+
+/** What `AnomalyDetectionService` did with each frozen verdict. */
 const runAnomaly = (statuses: ReadonlyArray<Status>, config: HysteresisConfig): ReadonlyArray<Decision> => {
-	let state: DetectorStateSnapshot = {
+	let state: FrozenDetectorState = {
 		consecutiveBreaches: 0,
 		consecutiveHealthy: 0,
 		openIncidentId: null,
@@ -68,8 +116,7 @@ const runAnomaly = (statuses: ReadonlyArray<Status>, config: HysteresisConfig): 
 	const decisions: Array<Decision> = []
 	for (const [index, status] of statuses.entries()) {
 		const nowMs = START_MS + index * TICK_MS
-		const evaluation = { status } as AnomalyEvaluation
-		const decision = decideTransition(state, evaluation, config, nowMs)
+		const decision = frozenDecideTransition(state, status, config, nowMs)
 		state = {
 			consecutiveBreaches: decision.consecutiveBreaches,
 			consecutiveHealthy: decision.consecutiveHealthy,
@@ -87,17 +134,51 @@ const runAnomaly = (statuses: ReadonlyArray<Status>, config: HysteresisConfig): 
 	return decisions
 }
 
-/** What `AlertsService.processEvaluation` does with each counter fold. No cooldown. */
+/**
+ * `advanceAlertCounters` as it stood before the machine replaced it, frozen for
+ * the same reason as {@link frozenDecideTransition}.
+ */
+const frozenAdvanceCounters = (
+	previous: { readonly consecutiveBreaches: number; readonly consecutiveHealthy: number },
+	status: Status,
+	thresholds: {
+		readonly consecutiveBreachesRequired: number
+		readonly consecutiveHealthyRequired: number
+	},
+) => {
+	switch (status) {
+		case "skipped":
+			return previous
+		case "breached":
+			return {
+				consecutiveBreaches: Math.min(
+					previous.consecutiveBreaches + 1,
+					thresholds.consecutiveBreachesRequired,
+				),
+				consecutiveHealthy: 0,
+			}
+		case "healthy":
+			return {
+				consecutiveBreaches: 0,
+				consecutiveHealthy: Math.min(
+					previous.consecutiveHealthy + 1,
+					thresholds.consecutiveHealthyRequired,
+				),
+			}
+	}
+}
+
+/** What `AlertsService.processEvaluation` did with each frozen counter fold. No cooldown. */
 const runAlerting = (statuses: ReadonlyArray<Status>, config: HysteresisConfig) => {
 	const thresholds = {
 		consecutiveBreachesRequired: config.breachesToOpen,
 		consecutiveHealthyRequired: config.healthyToResolve,
 	}
-	let counters = ZERO_ALERT_COUNTERS
+	let counters = { consecutiveBreaches: 0, consecutiveHealthy: 0 }
 	let open = false
 	const decisions: Array<Decision> = []
 	for (const status of statuses) {
-		counters = advanceAlertCounters(counters, status, thresholds)
+		counters = frozenAdvanceCounters(counters, status, thresholds)
 		if (!open && counters.consecutiveBreaches >= thresholds.consecutiveBreachesRequired) {
 			open = true
 			decisions.push("opened")
@@ -107,22 +188,6 @@ const runAlerting = (statuses: ReadonlyArray<Status>, config: HysteresisConfig) 
 		}
 	}
 	return { counters, decisions }
-}
-
-/** The counters the machine's snapshot implies, in `alert_rule_states` terms. */
-const countersOf = (snapshot: Machine.Snapshot<typeof HysteresisStates.states>) => {
-	const value = snapshot.value
-	switch (value._tag) {
-		case "Clear":
-			return { consecutiveBreaches: 0, consecutiveHealthy: value.consecutiveHealthy }
-		case "Breaching":
-			return { consecutiveBreaches: value.consecutiveBreaches, consecutiveHealthy: 0 }
-		case "Open":
-			return {
-				consecutiveBreaches: value.consecutiveBreaches,
-				consecutiveHealthy: value.consecutiveHealthy,
-			}
-	}
 }
 
 const ANOMALY_CONFIG: HysteresisConfig = {
@@ -150,12 +215,12 @@ describe("IncidentHysteresis", () => {
 	})
 
 	it("leaves the counters untouched on a skipped window", async () => {
-		const { snapshot } = await Effect.runPromise(
+		const { row } = await Effect.runPromise(
 			runMachine(["breached", "skipped", "breached"], ANOMALY_CONFIG),
 		)
 		// Without the freeze the second breach would have been the third tick and
 		// nothing would distinguish it from a two-in-a-row run.
-		expect(countersOf(snapshot).consecutiveBreaches).toBe(2)
+		expect(row.consecutiveBreaches).toBe(2)
 	})
 
 	it("suppresses a re-open inside the cooldown and allows it once the window passes", async () => {
@@ -204,13 +269,19 @@ describe("IncidentHysteresis", () => {
 		})
 	}
 
-	it("decides and counts exactly what advanceAlertCounters does", async () => {
+	it("decides and counts exactly what the frozen alerting counters did", async () => {
 		for (let seed = 1; seed <= 200; seed++) {
 			const statuses = sequence(seed, 40)
-			const { snapshot, decisions } = await Effect.runPromise(runMachine(statuses, ALERTING_CONFIG))
+			const { row, decisions } = await Effect.runPromise(runMachine(statuses, ALERTING_CONFIG))
 			const expected = runAlerting(statuses, ALERTING_CONFIG)
 			expect(decisions, `seed ${seed}`).toEqual(expected.decisions)
-			expect(countersOf(snapshot), `seed ${seed}`).toEqual({
+			expect(
+				{
+					consecutiveBreaches: row.consecutiveBreaches,
+					consecutiveHealthy: row.consecutiveHealthy,
+				},
+				`seed ${seed}`,
+			).toEqual({
 				consecutiveBreaches: expected.counters.consecutiveBreaches,
 				consecutiveHealthy: expected.counters.consecutiveHealthy,
 			})

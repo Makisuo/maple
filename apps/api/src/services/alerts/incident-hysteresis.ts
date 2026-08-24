@@ -1,5 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 
 /**
  * THE breach/recovery hysteresis shared by the two incident paths.
@@ -191,3 +191,129 @@ export const IncidentHysteresis = definition.handle({
 		},
 	},
 })
+
+/**
+ * The persisted shape both callers already store: `alert_rule_states` and
+ * `anomaly_detector_states` keep counters plus whether an incident stands.
+ *
+ * The row stays the storage format and the machine stays the decision layer —
+ * the snapshot is rebuilt from the row on every tick rather than persisted.
+ * Incident *identity* (attach, reopen, the per-tick open budget) lives in the
+ * services, so a plan that says "open" can still be deferred without the
+ * machine and the world disagreeing about what is open.
+ */
+export interface HysteresisRow {
+	readonly consecutiveBreaches: number
+	readonly consecutiveHealthy: number
+	readonly incidentOpen: boolean
+	readonly lastResolvedAtMs: number | null
+}
+
+/** Same verdicts the two hand-rolled predecessors returned, to the letter. */
+export interface HysteresisOutcome {
+	readonly transition: "open" | "continue" | "resolve" | "noop"
+	readonly consecutiveBreaches: number
+	readonly consecutiveHealthy: number
+}
+
+type HysteresisSnapshot = Machine.Snapshot<typeof IncidentHysteresis>
+
+/**
+ * Rebuild the machine's view of a rule from its row.
+ *
+ * Goes through `decodeSnapshot` rather than asserting the shape: the encoded
+ * form is the library's own persistence boundary, so a state renamed or a field
+ * added above fails here with a schema error instead of silently planning from
+ * a snapshot the machine never agreed to.
+ */
+const snapshotFrom = (
+	row: HysteresisRow,
+	config: HysteresisConfig,
+): Effect.Effect<HysteresisSnapshot, Machine.MachineSchemaDecodeError> => {
+	const cooldownUntilMs =
+		row.lastResolvedAtMs !== null && config.cooldownMs > 0
+			? row.lastResolvedAtMs + config.cooldownMs
+			: null
+	const active = row.incidentOpen
+		? {
+				path: "Open",
+				value: {
+					_tag: "Open",
+					consecutiveBreaches: row.consecutiveBreaches,
+					consecutiveHealthy: row.consecutiveHealthy,
+				},
+			}
+		: row.consecutiveBreaches > 0
+			? {
+					path: "Breaching",
+					value: {
+						_tag: "Breaching",
+						consecutiveBreaches: row.consecutiveBreaches,
+						cooldownUntilMs,
+					},
+				}
+			: {
+					path: "Clear",
+					value: {
+						_tag: "Clear",
+						consecutiveHealthy: row.consecutiveHealthy,
+						cooldownUntilMs,
+					},
+				}
+	return Machine.decodeSnapshot(IncidentHysteresis, { _tag: "MachineSnapshot", active: [active] })
+}
+
+/** The counters a snapshot implies, in the columns the rows actually have. */
+export const countersOf = (
+	snapshot: HysteresisSnapshot,
+): { readonly consecutiveBreaches: number; readonly consecutiveHealthy: number } => {
+	const value = snapshot.value
+	switch (value._tag) {
+		case "Clear":
+			return { consecutiveBreaches: 0, consecutiveHealthy: value.consecutiveHealthy }
+		case "Breaching":
+			return { consecutiveBreaches: value.consecutiveBreaches, consecutiveHealthy: 0 }
+		case "Open":
+			return {
+				consecutiveBreaches: value.consecutiveBreaches,
+				consecutiveHealthy: value.consecutiveHealthy,
+			}
+	}
+}
+
+/**
+ * Fold one evaluated window into the persisted counters and a verdict.
+ *
+ * `Machine.plan` is pure — no runtime, no fibers, no timers — which is what a
+ * cron tick holding a row needs. Its failures (`InfiniteTransitionError`,
+ * `MachineSchemaDecodeError`) can only mean the model above is wrong, never
+ * that this observation was bad, so they die rather than widening every
+ * caller's error channel with an impossibility.
+ */
+export const foldObservation = (
+	row: HysteresisRow,
+	status: "breached" | "healthy" | "skipped",
+	config: HysteresisConfig,
+	nowMs: number,
+): Effect.Effect<HysteresisOutcome> =>
+	Effect.gen(function* () {
+		const snapshot = yield* snapshotFrom(row, config)
+		const event =
+			status === "skipped"
+				? HysteresisEvent.Skipped()
+				: status === "breached"
+					? HysteresisEvent.Breached({ nowMs, config })
+					: HysteresisEvent.Recovered({ nowMs, config })
+		const planned = yield* Machine.plan(IncidentHysteresis, snapshot, event)
+		const counters = countersOf(planned.next)
+		const opened = planned.emittedEvents.some((e) => e._tag === "IncidentOpened")
+		const resolved = planned.emittedEvents.some((e) => e._tag === "IncidentResolved")
+		const transition: HysteresisOutcome["transition"] = opened
+			? "open"
+			: resolved
+				? "resolve"
+				: row.incidentOpen && status === "breached"
+					? "continue"
+					: "noop"
+		return { transition, ...counters }
+	}).pipe(Effect.orDie)
