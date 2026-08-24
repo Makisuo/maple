@@ -45,7 +45,7 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 						<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em]">gen_ai</code>{" "}
 						spans with a{" "}
 						<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em]">
-							maple.session.id
+							maple_ai.session.id
 						</code>{" "}
 						attribute, and their sessions will show up here.
 					</EmptyDescription>

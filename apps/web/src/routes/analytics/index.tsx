@@ -19,6 +19,7 @@ import {
 	type BreakdownDimension,
 } from "@/components/analytics/analytics-breakdown-panel"
 import { AnalyticsFilterSidebar } from "@/components/analytics/analytics-filter-sidebar"
+import { AnalyticsLiveBadge } from "@/components/analytics/analytics-live-badge"
 import {
 	AnalyticsMetricStrip,
 	AnalyticsMetricStripLoading,
@@ -152,6 +153,10 @@ function WebAnalyticsPage() {
 						<DashboardLayout.Sticky>
 							<DashboardLayout.Header>
 								<div className="flex flex-wrap items-center gap-2">
+									{/* Ahead of the range controls, because it is the one number
+									    on the page they do not govern: "right now" is its own
+									    window, and the filters still narrow it. */}
+									<AnalyticsLiveBadge filters={filters} />
 									{/* The reciprocal of the Analytics button on Session Replays: this
 									    page aggregates the sessions that page plays back one at a time,
 									    and "who are these people actually" is the next question from

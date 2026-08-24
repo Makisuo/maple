@@ -13,7 +13,7 @@ import { param, from, inSubquery, unionAll, compileFnCall } from "@maple-dev/cli
 import type { ColumnAccessor, CHQuery, CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { SessionReplays, SessionEvents, ProductEvents } from "../tables"
 import type { FacetOutput } from "./query-helpers"
-import { WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
+import { WEB_ANALYTICS_LIVE_WINDOW_SECONDS, WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
 
 /**
  * The page-view discriminator: `session_events.Type` on the raw path,
@@ -472,6 +472,54 @@ export function webAnalyticsSummaryQuery(
 			),
 		}))
 		.where(($) => replaysWhere($, filters))
+		.format("JSON")
+}
+
+// Live visitors
+
+export interface WebAnalyticsLiveOpts extends WebAnalyticsFilters {
+	/** Activity recency that counts as "now". Defaults to {@link WEB_ANALYTICS_LIVE_WINDOW_SECONDS}. */
+	readonly windowSeconds?: number
+}
+
+export interface WebAnalyticsLiveOutput {
+	/** Distinct visitor ids currently active. 0 when no session carries the analytics block. */
+	readonly visitors: number
+	/** Distinct sessions currently active — the fallback readout for orgs with no visitor ids. */
+	readonly sessions: number
+}
+
+/**
+ * Visitors on the site right now: sessions whose last activity lands inside the
+ * trailing window.
+ *
+ * Recency is `LastActivityAt`, not `StartTime`. `StartTime` alone would answer
+ * "sessions that *began* in the last five minutes", which drops every visitor
+ * who has been reading one page for six — the exact population a live counter
+ * exists to show. `LastActivityAt` is heartbeat-refreshed, and NULL on the v1
+ * row of a session whose end has not landed yet, so it coalesces to `StartTime`
+ * rather than dropping that session.
+ *
+ * The `StartTime` bounds still come from the caller and still prune partitions;
+ * they are a lookback floor, not the recency test. A session that started
+ * before the floor and is still active is missed, so the floor belongs a long
+ * way back — see `LIVE_LOOKBACK_SECONDS` in the registry.
+ */
+export function webAnalyticsLiveQuery(
+	opts: WebAnalyticsLiveOpts = {},
+): CHQuery<any, WebAnalyticsLiveOutput, any> {
+	const windowSeconds = opts.windowSeconds ?? WEB_ANALYTICS_LIVE_WINDOW_SECONDS
+	return from(SessionReplays)
+		.select(($) => ({
+			visitors: CH.uniqIf($.VisitorId, $.VisitorId.neq("")),
+			sessions: CH.uniq($.SessionId),
+		}))
+		.where(($) => [
+			...replaysWhere($, opts),
+			CH.coalesce($.LastActivityAt, $.StartTime).gte(
+				CH.intervalSub(CH.toDateTime(param.dateTime("endTime")), windowSeconds),
+			),
+		])
 		.format("JSON")
 }
 

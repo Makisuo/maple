@@ -61,7 +61,7 @@ export interface TurnCompletion {
 export interface ChatTurnInput {
 	readonly sessionId: string
 	/**
-	 * Session id the turn's gen-ai spans are grouped under (`maple.session.id`),
+	 * Session id the turn's gen-ai spans are grouped under (`maple_ai.session.id`),
 	 * when it differs from `sessionId`. A headless investigation pass runs with a
 	 * per-pass `sessionId`, but every pass of one investigation belongs to one
 	 * agent session — this is that session's id. Defaults to `sessionId`, which

@@ -37,7 +37,7 @@ export interface AgentPassInput<S extends Schema.Top> {
 	/** Correlation id; becomes the turn's `messageId`. */
 	readonly id: string
 	/**
-	 * Gen-ai session this pass's spans group under (`maple.session.id`), so every
+	 * Gen-ai session this pass's spans group under (`maple_ai.session.id`), so every
 	 * pass of one investigation lands in one agent session. Omitted, each pass
 	 * fragments into a session of its own under its correlation id.
 	 */

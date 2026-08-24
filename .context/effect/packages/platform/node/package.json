@@ -1,7 +1,7 @@
 {
   "name": "@effect/platform-node",
   "type": "module",
-  "version": "4.0.0-rc.108",
+  "version": "4.0.0-rc.111",
   "license": "MIT",
   "description": "Platform specific implementations for the Node.js runtime",
   "homepage": "https://effect.website",
@@ -68,17 +68,18 @@
   "dependencies": {
     "@effect/platform-node-shared": "workspace:^",
     "mime": "^4.1.0",
-    "undici": "^8.7.0"
+    "undici": "^8.10.0"
   },
   "peerDependencies": {
     "effect": "workspace:^",
-    "ioredis": ">=5.7.0 <6.0.0"
+    "redis": ">=5.0.0 <7.0.0"
   },
   "devDependencies": {
-    "@testcontainers/mysql": "^12.0.4",
-    "@testcontainers/postgresql": "^12.0.4",
-    "@testcontainers/redis": "^12.0.4",
-    "@types/node": "^26.1.2",
-    "effect": "workspace:^"
+    "@testcontainers/mysql": "^12.1.0",
+    "@testcontainers/postgresql": "^12.1.0",
+    "@testcontainers/redis": "^12.1.0",
+    "@types/node": "^26.2.0",
+    "effect": "workspace:^",
+    "redis": "^6.2.1"
   }
 }

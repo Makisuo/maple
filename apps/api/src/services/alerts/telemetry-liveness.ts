@@ -22,7 +22,7 @@ import { formatWarehouseDateTime } from "@maple/query-engine"
  * is recoverable on the next tick; resolving a live incident is not.
  *
  * The verdict maths is pure and lives at the bottom of this file (mirroring the
- * split in services/anomaly/state-machine.ts) so the interesting decisions are
+ * split in services/alerts/incident-hysteresis.ts) so the interesting decisions are
  * testable without standing up a warehouse.
  */
 

@@ -49,6 +49,7 @@
 		"@maple/query-model": "workspace:*",
 		"@maple/widgets": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
+		"@typeonce/effect-machine": "0.24.0",
 		"drizzle-orm": "^0.45.1",
 		"effect": "catalog:effect"
 	},

@@ -1,11 +1,17 @@
 import { describe, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import { ok, strictEqual } from "node:assert"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { chdbConfigPath, dirtyStoreRecoveryAdvice, resolveChdbConfigFile } from "../src/commands/server"
+import {
+	chdbConfigPath,
+	dirtyStoreRecoveryAdvice,
+	needsInitialCheckpoint,
+	parseCheckpointInterval,
+	resolveChdbConfigFile,
+} from "../src/commands/server"
 import { CheckpointPreconditionError, parseCheckpointId } from "../src/server/checkpoints"
 import { recoverExpected } from "../src/core/outcomes"
 import {
@@ -163,6 +169,75 @@ describe("default chDB backups config", () => {
 			strictEqual(existsSync(chdbConfigPath(dataDir)), false)
 		} finally {
 			rmSync(root, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("initial checkpoint on start", () => {
+	// The dead end this exists to close: nothing created a checkpoint except a
+	// user typing `maple checkpoint`, so an unclean shutdown left `maple start`
+	// with only one honest remedy — wipe the store. That was the CLI's largest
+	// source of real errors, and every one was someone losing their telemetry.
+	it("takes one when a store with data has never been checkpointed", () => {
+		strictEqual(needsInitialCheckpoint({ available: false, reason: "none" }, true), true)
+	})
+
+	// Backing up an empty store yields a checkpoint that restores to nothing —
+	// `maple start --reset` wearing a kinder word — at the cost of a BACKUP on
+	// every first run. It would also have broken the crash-recovery probe, which
+	// builds its fixture on a fresh store and asserts exactly one sealed
+	// checkpoint.
+	it("does not back up a store that holds nothing yet", () => {
+		strictEqual(needsInitialCheckpoint({ available: false, reason: "none" }, false), false)
+	})
+
+	it("never takes a second one", () => {
+		strictEqual(
+			needsInitialCheckpoint(
+				{
+					available: true,
+					checkpointId: parseCheckpointId("00000000-0000-4000-8000-000000000000"),
+				},
+				true,
+			),
+			false,
+		)
+	})
+
+	// Overwriting a broken registry would destroy the evidence of why it broke,
+	// and `maple restore` reports that state deliberately.
+	it("leaves an unusable registry alone rather than papering over it", () => {
+		strictEqual(
+			needsInitialCheckpoint(
+				{ available: false, reason: "unusable", detail: "checkpoint backup size mismatch" },
+				true,
+			),
+			false,
+		)
+	})
+})
+
+describe("--checkpoint-interval", () => {
+	it("accepts seconds, minutes and hours", () => {
+		strictEqual(Duration.toSeconds(parseCheckpointInterval("45s") as Duration.Duration), 45)
+		strictEqual(Duration.toSeconds(parseCheckpointInterval("30m") as Duration.Duration), 1800)
+		strictEqual(Duration.toSeconds(parseCheckpointInterval("2h") as Duration.Duration), 7200)
+		// The flag text is what a user types, so tolerate the spacing and case.
+		strictEqual(Duration.toSeconds(parseCheckpointInterval(" 15 M ") as Duration.Duration), 900)
+	})
+
+	it("treats off, none and zero as disabled", () => {
+		for (const value of ["off", "none", "0", "OFF"]) {
+			strictEqual(parseCheckpointInterval(value), undefined, value)
+		}
+	})
+
+	// A typo that fell back to the default would be merely surprising; one that
+	// fell back to *off* would silently reintroduce the data loss the refresh
+	// loop exists to prevent. Neither is acceptable, so it is rejected.
+	it("rejects anything it cannot parse rather than guessing", () => {
+		for (const value of ["30", "later", "5d", "-10m", "m", "30 minutes", ""]) {
+			strictEqual(parseCheckpointInterval(value), "invalid", value)
 		}
 	})
 })

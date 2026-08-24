@@ -343,9 +343,14 @@
             "type": "string"
           },
           "last_observed_value": {
+            "description": "The most recently observed value, or `null`.",
+            "examples": [
+              0.09
+            ],
             "type": "number"
           },
           "last_sample_count": {
+            "description": "Sample count of the most recent observation, or `null`.",
             "type": "number"
           },
           "last_triggered_at": {
@@ -535,14 +540,14 @@
             "type": "string"
           },
           "created_by": {
-            "description": "Maple user ID of the rule's creator.",
-            "minLength": 1,
-            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "title": "User ID",
-            "type": "string"
+            "$ref": "#/components/schemas/_maple_UserId"
           },
           "destination_ids": {
-            "$ref": "#/components/schemas/Arrays_9"
+            "description": "The alert destinations (`dest_…`) this rule notifies.",
+            "items": {
+              "$ref": "#/components/schemas/_maple_AlertDestinationId"
+            },
+            "type": "array"
           },
           "enabled": {
             "description": "Whether the scheduler evaluates this rule.",
@@ -552,12 +557,26 @@
             "type": "boolean"
           },
           "environments": {
-            "$ref": "#/components/schemas/Arrays_6"
+            "description": "Deployment environments the rule is scoped to. Empty for all environments. Always empty for `builder_query` / `raw_query`, whose queries carry their own filters.",
+            "examples": [
+              [
+                "production"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "exclude_service_names": {
-            "$ref": "#/components/schemas/Arrays_5"
+            "description": "Services excluded from evaluation.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "group_by": {
+            "description": "Attribute dimensions to evaluate per-group (each group gets its own incident lifecycle), or `null` for a single aggregate evaluation.",
             "items": {
               "minLength": 1,
               "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
@@ -637,7 +656,16 @@
             "type": "integer"
           },
           "service_names": {
-            "$ref": "#/components/schemas/Arrays_4"
+            "description": "Services the rule is scoped to. Empty for all services.",
+            "examples": [
+              [
+                "checkout"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "severity": {
             "$ref": "#/components/schemas/_maple_AlertSeverity"
@@ -646,23 +674,29 @@
             "$ref": "#/components/schemas/_maple_AlertSignalType"
           },
           "tags": {
-            "$ref": "#/components/schemas/Arrays_7"
+            "description": "Free-form tags used to group and filter rules.",
+            "examples": [
+              [
+                "payments"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "threshold": {
             "type": "number"
           },
           "threshold_upper": {
+            "description": "Upper bound for range comparators (`between` / `not_between`), otherwise `null`.",
             "type": "number"
           },
           "updated_at": {
             "type": "string"
           },
           "updated_by": {
-            "description": "Maple user ID of the last editor.",
-            "minLength": 1,
-            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "title": "User ID",
-            "type": "string"
+            "$ref": "#/components/schemas/_maple_UserId"
           },
           "window_minutes": {
             "description": "Length of the evaluation window in minutes.",
@@ -1061,74 +1095,6 @@
         "title": "Anomaly timeseries bucket",
         "type": "object"
       },
-      "Arrays_15": {
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "Arrays_19": {
-        "items": {
-          "$ref": "#/components/schemas/TimeseriesSeries"
-        },
-        "type": "array"
-      },
-      "Arrays_20": {
-        "items": {
-          "$ref": "#/components/schemas/BreakdownItem"
-        },
-        "type": "array"
-      },
-      "Arrays_4": {
-        "description": "Services the rule is scoped to. Empty for all services.",
-        "examples": [
-          [
-            "checkout"
-          ]
-        ],
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "Arrays_5": {
-        "description": "Services excluded from evaluation.",
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "Arrays_6": {
-        "description": "Deployment environments the rule is scoped to. Empty for all environments. Always empty for `builder_query` / `raw_query`, whose queries carry their own filters.",
-        "examples": [
-          [
-            "production"
-          ]
-        ],
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "Arrays_7": {
-        "description": "Free-form tags used to group and filter rules.",
-        "examples": [
-          [
-            "payments"
-          ]
-        ],
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "Arrays_9": {
-        "description": "The alert destinations (`dest_…`) this rule notifies.",
-        "items": {
-          "$ref": "#/components/schemas/_maple_AlertDestinationId"
-        },
-        "type": "array"
-      },
       "AttributeFilter": {
         "anyOf": [
           {
@@ -1440,7 +1406,10 @@
             "type": "string"
           },
           "resolved_versions": {
-            "$ref": "#/components/schemas/Arrays_15"
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "service_name": {
             "type": "string"
@@ -1512,10 +1481,7 @@
             "$ref": "#/components/schemas/_maple_ActorType"
           },
           "user_id": {
-            "minLength": 1,
-            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "title": "User ID",
-            "type": "string"
+            "$ref": "#/components/schemas/_maple_UserId"
           }
         },
         "required": [
@@ -1612,7 +1578,10 @@
             "type": "string"
           },
           "resolved_versions": {
-            "$ref": "#/components/schemas/Arrays_15"
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "sample_traces": {
             "items": {
@@ -1748,19 +1717,13 @@
             "type": "string"
           },
           "span_id": {
-            "minLength": 1,
-            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "title": "Span ID",
-            "type": "string"
+            "$ref": "#/components/schemas/_maple_SpanId"
           },
           "timestamp": {
             "type": "string"
           },
           "trace_id": {
-            "minLength": 1,
-            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "title": "Trace ID",
-            "type": "string"
+            "$ref": "#/components/schemas/_maple_TraceId"
           }
         },
         "required": [
@@ -2502,7 +2465,10 @@
             "type": "string"
           },
           "data": {
-            "$ref": "#/components/schemas/Arrays_20"
+            "items": {
+              "$ref": "#/components/schemas/BreakdownItem"
+            },
+            "type": "array"
           },
           "end_time": {
             "type": "string"
@@ -2723,7 +2689,10 @@
             "type": "string"
           },
           "series": {
-            "$ref": "#/components/schemas/Arrays_19"
+            "items": {
+              "$ref": "#/components/schemas/TimeseriesSeries"
+            },
+            "type": "array"
           },
           "start_time": {
             "type": "string"
@@ -2770,10 +2739,7 @@
             "type": "string"
           },
           "organization_id": {
-            "minLength": 1,
-            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "title": "Org ID",
-            "type": "string"
+            "$ref": "#/components/schemas/_maple_OrgId"
           },
           "scopes": {
             "description": "Fixed by the server. Today, exactly `widget_summary:read`.",
@@ -2891,10 +2857,7 @@
             "type": "string"
           },
           "organization_id": {
-            "minLength": 1,
-            "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "title": "Org ID",
-            "type": "string"
+            "$ref": "#/components/schemas/_maple_OrgId"
           },
           "schema_version": {
             "type": "number"
@@ -3421,6 +3384,13 @@
         "title": "Mobile Push Environment",
         "type": "string"
       },
+      "_maple_OrgId": {
+        "description": "The organization's opaque `org_…` ID (e.g. `org_2abcDEF`).",
+        "minLength": 1,
+        "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+        "title": "Organization ID",
+        "type": "string"
+      },
       "_maple_QueryEngineAlertReducer": {
         "enum": [
           "identity",
@@ -3444,6 +3414,25 @@
       },
       "_maple_ServiceName": {
         "title": "Service Name",
+        "type": "string"
+      },
+      "_maple_SpanId": {
+        "minLength": 1,
+        "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+        "title": "Span ID",
+        "type": "string"
+      },
+      "_maple_TraceId": {
+        "minLength": 1,
+        "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+        "title": "Trace ID",
+        "type": "string"
+      },
+      "_maple_UserId": {
+        "description": "Maple user ID of the key's creator (e.g. `user_…`).",
+        "minLength": 1,
+        "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+        "title": "User ID",
         "type": "string"
       },
       "_maple_WorkflowState": {

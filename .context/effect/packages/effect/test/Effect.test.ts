@@ -613,6 +613,27 @@ describe("Effect", () => {
       }))
   })
 
+  describe("head", () => {
+    it.effect("returns the first element", () =>
+      Effect.gen(function*() {
+        const result = yield* Effect.head(Effect.succeed([1, 2, 3]))
+        assert.strictEqual(result, 1)
+      }))
+
+    it.effect("fails with NoSuchElementError for an empty iterable", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.head(Effect.succeed([] as Array<number>)).pipe(Effect.flip)
+        assert.isTrue(Cause.isNoSuchElementError(error))
+      }))
+
+    it.effect("preserves the source failure", () =>
+      Effect.gen(function*() {
+        const source: Effect.Effect<Iterable<number>, "failure"> = Effect.fail("failure")
+        const error = yield* Effect.head(source).pipe(Effect.flip)
+        assert.strictEqual(error, "failure")
+      }))
+  })
+
   describe("all", () => {
     it.effect("tuple", () =>
       Effect.gen(function*() {
@@ -2056,7 +2077,7 @@ describe("Effect", () => {
         assert.isTrue(finalized)
       }))
 
-    it.effect("finalizer errors not caught", () =>
+    it.effect("finalizer errors merged", () =>
       Effect.gen(function*() {
         const e2 = new Error("e2")
         const e3 = new Error("e3")
@@ -2068,7 +2089,10 @@ describe("Effect", () => {
           Effect.flip,
           Effect.map((cause) => cause)
         )
-        assert.deepStrictEqual(result, Cause.die(e3))
+        assert.deepStrictEqual(
+          result,
+          Cause.combine(Cause.combine(Cause.fail(ExampleError), Cause.die(e2)), Cause.die(e3))
+        )
       }))
 
     it.effect("finalizer errors reported", () =>
@@ -2091,6 +2115,18 @@ describe("Effect", () => {
         )
         assert.isUndefined(result)
         assert.isFalse(reported !== undefined && Exit.isSuccess(reported))
+      }))
+
+    it.effect("scoped combines usage and finalizer failures", () =>
+      Effect.gen(function*() {
+        const result = yield* Effect.gen(function*() {
+          yield* Effect.addFinalizer(() => Effect.die("finalizer failure"))
+          return yield* Effect.fail("usage failure")
+        }).pipe(Effect.scoped, Effect.exit)
+        assert.deepStrictEqual(
+          result,
+          Exit.failCause(Cause.combine(Cause.fail("usage failure"), Cause.die("finalizer failure")))
+        )
       }))
 
     it.effect("acquireUseRelease usage result", () =>
@@ -2140,6 +2176,19 @@ describe("Effect", () => {
           Effect.exit
         )
         assert.deepStrictEqual(result, Exit.fail(ExampleError))
+      }))
+
+    it.effect("combines usage and release failures", () =>
+      Effect.gen(function*() {
+        const result = yield* Effect.acquireUseRelease(
+          Effect.void,
+          () => Effect.fail("usage failure"),
+          () => Effect.fail("release failure")
+        ).pipe(Effect.exit)
+        assert.deepStrictEqual(
+          result,
+          Exit.failCause(Cause.combine(Cause.fail("usage failure"), Cause.fail("release failure")))
+        )
       }))
 
     it.effect("rethrown caught error in acquisition", () =>
@@ -3120,6 +3169,21 @@ describe("Effect", () => {
       return Effect.gen(function*() {
         const result = yield* fn("a")
         assert.deepStrictEqual(result, [1, "a"])
+      })
+    })
+
+    it.effect("should support self with pipeable arguments", () => {
+      const self = { prefix: "bound" }
+      const fn = Effect.fn(
+        { self },
+        function*(this: typeof self, value: string) {
+          return `${this.prefix}:${value}`
+        },
+        Effect.map((value) => value.toUpperCase())
+      )
+      return Effect.gen(function*() {
+        const result = yield* fn("value")
+        assert.strictEqual(result, "BOUND:VALUE")
       })
     })
 

@@ -999,7 +999,11 @@ describe("MapleApiV2 OpenAPI", () => {
 	it("documents the public-ID and Scope primitives with examples", () => {
 		expect(schemas["_maple_ApiKeyId"].description).toContain("public object ID")
 		expect(schemas["_maple_ApiKeyId"].examples?.[0]).toMatch(/^key_/)
-		expect(schemas["Scope"].allOf?.[0]?.examples).toEqual(expect.arrayContaining(["*"]))
+		// effect rc.111 renders a plain checked string flat instead of wrapping it in
+		// a single-branch `allOf`, so read the examples from wherever they land.
+		const scope = schemas["Scope"]
+		const scopeExamples = [scope, ...(scope.allOf ?? [])].flatMap((part: any) => part.examples ?? [])
+		expect(scopeExamples).toEqual(expect.arrayContaining(["*"]))
 	})
 
 	it("generates syntactically valid examples for every public-ID primitive", () => {

@@ -78,6 +78,7 @@ describe("buildDetachedChildArgs", () => {
 				chdbConfigFile: "/tmp/backup config.xml",
 				onDirtyStore: policy,
 				minimumRawTelemetryRetentionDays: 120,
+				checkpointInterval: "30m",
 			})
 			deepStrictEqual(args, [
 				"/repo/apps/cli/src/bin.ts",
@@ -92,6 +93,8 @@ describe("buildDetachedChildArgs", () => {
 				"/tmp/maple data",
 				"--on-dirty-store",
 				policy,
+				"--checkpoint-interval",
+				"30m",
 				"--chdb-config-file",
 				"/tmp/backup config.xml",
 				"--minimum-raw-telemetry-retention-days",
@@ -116,6 +119,9 @@ describe("buildDetachedChildArgs", () => {
 				chdbConfigFile: undefined,
 				onDirtyStore: "fail",
 				minimumRawTelemetryRetentionDays: undefined,
+				// Not optional, unlike the flags below: an omitted cadence would come
+				// back as the default, so `off` has to survive the re-exec.
+				checkpointInterval: "off",
 			}),
 			[
 				"start",
@@ -129,6 +135,8 @@ describe("buildDetachedChildArgs", () => {
 				"/data",
 				"--on-dirty-store",
 				"fail",
+				"--checkpoint-interval",
+				"off",
 			],
 		)
 	})

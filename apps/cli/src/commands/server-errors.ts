@@ -113,3 +113,22 @@ export class ServerStopTimeoutError extends Schema.TaggedError<ServerStopTimeout
 	"@maple/cli/ServerStopTimeoutError",
 	{ pid: Schema.Number, timeoutMs: Schema.Number, message: Schema.String },
 ) {}
+
+/**
+ * A spawned `maple checkpoint` child that did not succeed.
+ *
+ * Both the opening checkpoint and the refresh loop take checkpoints by spawning
+ * that command rather than calling into chDB, so this is where their failures
+ * land. Never fatal — the server keeps serving — but tagged and carrying the
+ * child's own stderr, because a silently failing loop leaves a store that only
+ * turns out to have no restore point when it finally matters.
+ */
+export class CheckpointChildError extends Schema.TaggedError<CheckpointChildError>()(
+	"@maple/cli/CheckpointChildError",
+	{
+		/** `initial` (opening checkpoint) or `refresh` (the interval loop). */
+		reason: Schema.Literals(["initial", "refresh"]),
+		exitCode: Schema.Number,
+		message: Schema.String,
+	},
+) {}

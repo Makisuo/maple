@@ -58,6 +58,7 @@ import {
 	WorkloadInfraTimeseriesResponse,
 	WorkloadFacetsResponse,
 	WebAnalyticsSummaryResponse,
+	WebAnalyticsLiveResponse,
 	WebAnalyticsTimeseriesResponse,
 	WebAnalyticsPageviewsResponse,
 	WebAnalyticsPagesResponse,
@@ -74,6 +75,7 @@ import {
 	TraceId,
 	SpanId,
 } from "@maple/domain/http"
+import { WEB_ANALYTICS_LIVE_WINDOW_SECONDS } from "@maple/domain/query-engine"
 import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { isMissingProductEvents, isMissingServiceOperationsRollup } from "@/services/warehouse/missing-table"
@@ -1610,6 +1612,26 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								bouncedSessions: Number(row?.bouncedSessions) || 0,
 								identifiedSessions: Number(row?.identifiedSessions) || 0,
 								avgDurationMs: Number(row?.avgDurationMs) || 0,
+							},
+						})
+					}),
+				)
+				.handle("webAnalyticsLive", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const row = yield* withProductEventsFallback(
+							(t, pl) => runQueryFirst(Queries.webAnalyticsLive, t, pl),
+							(t, pl) => runQueryFirst(Queries.webAnalyticsLiveRaw, t, pl),
+							tenant,
+							payload,
+						)
+						// Nobody on the site returns no rows, not a row of zeroes — and
+						// "0 online" is the whole point of the badge, so fill them in.
+						return new WebAnalyticsLiveResponse({
+							data: {
+								visitors: Number(row?.visitors) || 0,
+								sessions: Number(row?.sessions) || 0,
+								windowSeconds: WEB_ANALYTICS_LIVE_WINDOW_SECONDS,
 							},
 						})
 					}),

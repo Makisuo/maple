@@ -148,13 +148,20 @@ function ServiceMapContent() {
 							title="Service Map"
 							description="Visualize service-to-service dependencies and data flow."
 						>
-							<div className="flex items-center gap-2">
+							{/* Wraps, and below the header's side-by-side breakpoint the
+							    environment select takes a row of its own: all three controls
+							    on one narrow row left it ~70px, and unwrapped they stacked
+							    into a ragged two-line block. */}
+							<div className="flex flex-wrap items-center gap-2">
 								<Select
 									items={environmentItems}
 									value={selectedEnvironment}
 									onValueChange={handleEnvironmentChange}
 								>
-									<SelectTrigger size="sm">
+									<SelectTrigger
+										size="sm"
+										className="w-full min-w-0 @2xl/page:w-auto @2xl/page:min-w-36"
+									>
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>

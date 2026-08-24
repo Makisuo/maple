@@ -552,9 +552,10 @@ describe("AnthropicLanguageModel", () => {
   })
 
   describe("generateObject", () => {
-    // A model that supports native structured output requests it via `output_config.format` (json_schema)
-    // rather than falling back to a forced JSON tool.
-    const assertNativeStructuredOutput = (model: string) =>
+    const getRequest = (
+      model: string,
+      config?: { readonly structuredOutputs?: boolean | undefined }
+    ) =>
       Effect.gen(function*() {
         let capturedRequest: HttpClientRequest.HttpClientRequest | undefined = undefined
         const layer = AnthropicClient.layer({ apiKey: Redacted.make("sk-test-key") }).pipe(
@@ -589,25 +590,194 @@ describe("AnthropicLanguageModel", () => {
           prompt: "Give me a person",
           schema: Schema.Struct({ name: Schema.String, age: Schema.Number })
         }).pipe(
-          Effect.provide(AnthropicLanguageModel.model(model)),
+          Effect.provide(AnthropicLanguageModel.model(model, config)),
           Effect.provide(layer),
           Effect.ignore
         )
 
         assert.isDefined(capturedRequest)
         if (capturedRequest === undefined) {
-          return
+          return yield* Effect.die(new Error("Expected a captured request"))
         }
 
-        const body = yield* getRequestBody(capturedRequest)
-        assert.strictEqual(body.output_config?.format?.type, "json_schema")
+        return yield* getRequestBody(capturedRequest)
       })
 
-    it.effect("uses native json_schema output for claude-opus-4-6", () =>
-      assertNativeStructuredOutput("claude-opus-4-6"))
+    it.effect("uses native structured output and 128K for Claude 4.6", () =>
+      Effect.gen(function*() {
+        const body = yield* getRequest("claude-opus-4-6")
 
-    it.effect("uses native json_schema output for claude-sonnet-4-6", () =>
-      assertNativeStructuredOutput("claude-sonnet-4-6"))
+        assert.strictEqual(body.max_tokens, 128000)
+        assert.strictEqual(body.output_config?.format?.type, "json_schema")
+      }))
+
+    it.effect("uses optimistic modern defaults for an unknown future model", () =>
+      Effect.gen(function*() {
+        const body = yield* getRequest("claude-sonnet-6-0")
+
+        assert.strictEqual(body.max_tokens, 128000)
+        assert.strictEqual(body.output_config?.format?.type, "json_schema")
+      }))
+
+    it.effect("preserves frozen legacy model exceptions", () =>
+      Effect.gen(function*() {
+        const body = yield* getRequest("claude-sonnet-4-20250514")
+
+        assert.strictEqual(body.max_tokens, 64000)
+        assert.isUndefined(body.output_config)
+      }))
+
+    it.effect("can disable structured outputs for a modern model", () =>
+      Effect.gen(function*() {
+        const body = yield* getRequest("claude-sonnet-6-0", { structuredOutputs: false })
+
+        assert.strictEqual(body.max_tokens, 128000)
+        assert.isUndefined(body.output_config)
+        assert.notProperty(body, "structuredOutputs")
+      }))
+
+    it.effect("can enable structured outputs for a legacy model", () =>
+      Effect.gen(function*() {
+        const body = yield* getRequest("claude-sonnet-4-20250514", { structuredOutputs: true })
+
+        assert.strictEqual(body.max_tokens, 64000)
+        assert.strictEqual(body.output_config?.format?.type, "json_schema")
+        assert.notProperty(body, "structuredOutputs")
+      }))
+  })
+
+  // The packaged `Memory_20250818` tool ships `customName: "AnthropicMemory"` /
+  // `providerName: "memory"`, and is a client-executed provider tool. These
+  // tests cover the round-trip that was broken on beta.98 (see #2615):
+  //  - the provider wire name ("memory") must resolve to the toolkit's custom
+  //    name ("AnthropicMemory"), otherwise `makeResponse` raises ToolNotFound
+  //  - `view_range` uses `Schema.optionalKey`, otherwise the Anthropic codec
+  //    rejects the tool schema with "Unsupported AST Undefined"
+  //  - `create` must carry `file_text`, otherwise the file body is dropped
+  describe("Memory tool", () => {
+    const memoryResponse = (request: HttpClientRequest.HttpClientRequest, input: unknown) =>
+      jsonResponse(request, {
+        id: "msg_test_1",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-4-20250514",
+        content: [{ type: "tool_use", id: "toolu_mem_1", name: "memory", input }],
+        stop_reason: "tool_use",
+        stop_sequence: null,
+        usage: {
+          cache_creation: null,
+          cache_creation_input_tokens: null,
+          cache_read_input_tokens: null,
+          inference_geo: null,
+          input_tokens: 10,
+          output_tokens: 5,
+          service_tier: null
+        }
+      })
+
+    it.effect("resolves the provider wire name to the tool's custom name (view)", () =>
+      Effect.gen(function*() {
+        let receivedParams: unknown = undefined
+        const toolkit = Toolkit.make(AnthropicTool.Memory_20250818({}))
+        const toolkitLayer = toolkit.toLayer({
+          AnthropicMemory: (params) => {
+            receivedParams = params
+            return Effect.succeed("memory listing")
+          }
+        })
+
+        const layer = AnthropicClient.layer({ apiKey: Redacted.make("sk-test-key") }).pipe(
+          Layer.provide(Layer.succeed(
+            HttpClient.HttpClient,
+            makeHttpClient((request) => Effect.succeed(memoryResponse(request, { command: "view", path: "/memories" })))
+          ))
+        )
+
+        const response = yield* LanguageModel.generateText({
+          prompt: "check memory",
+          toolkit
+        }).pipe(
+          Effect.provide(AnthropicLanguageModel.model("claude-sonnet-4-20250514")),
+          Effect.provide(toolkitLayer),
+          Effect.provide(layer)
+        )
+
+        // Handler was resolved under the custom name and received the decoded command
+        assert.deepStrictEqual(receivedParams, { command: "view", path: "/memories" })
+
+        const toolResult = response.toolResults[0]
+        assert.isDefined(toolResult)
+        assert.strictEqual(toolResult.name, "AnthropicMemory")
+        assert.strictEqual(toolResult.result, "memory listing")
+      }))
+
+    it.effect("decodes the create command including file_text", () =>
+      Effect.gen(function*() {
+        let receivedParams: unknown = undefined
+        const toolkit = Toolkit.make(AnthropicTool.Memory_20250818({}))
+        const toolkitLayer = toolkit.toLayer({
+          AnthropicMemory: (params) => {
+            receivedParams = params
+            return Effect.succeed("File created successfully at: /memories/notes.txt")
+          }
+        })
+
+        const layer = AnthropicClient.layer({ apiKey: Redacted.make("sk-test-key") }).pipe(
+          Layer.provide(Layer.succeed(
+            HttpClient.HttpClient,
+            makeHttpClient((request) =>
+              Effect.succeed(memoryResponse(request, {
+                command: "create",
+                path: "/memories/notes.txt",
+                file_text: "hello world"
+              }))
+            )
+          ))
+        )
+
+        const response = yield* LanguageModel.generateText({
+          prompt: "save a note",
+          toolkit
+        }).pipe(
+          Effect.provide(AnthropicLanguageModel.model("claude-sonnet-4-20250514")),
+          Effect.provide(toolkitLayer),
+          Effect.provide(layer)
+        )
+
+        assert.deepStrictEqual(receivedParams, {
+          command: "create",
+          path: "/memories/notes.txt",
+          file_text: "hello world"
+        })
+        assert.strictEqual(response.toolResults[0]?.name, "AnthropicMemory")
+      }))
+  })
+
+  // Client-executed (`requiresHandler`) provider tools have their `parameters`
+  // decoded via `toCodecAnthropic` when the model calls them. Optional
+  // parameters must use `Schema.optionalKey` (not `Schema.optional`), otherwise
+  // the codec rejects the schema with "Unsupported AST Undefined" (see #2615).
+  describe("client provider tool parameters compile with the Anthropic codec", () => {
+    const displayArgs = { displayWidthPx: 800, displayHeightPx: 600 }
+    const clientTools: ReadonlyArray<readonly [string, Tool.AnyProviderDefined]> = [
+      ["Bash_20241022", AnthropicTool.Bash_20241022({})],
+      ["Bash_20250124", AnthropicTool.Bash_20250124({})],
+      ["ComputerUse_20241022", AnthropicTool.ComputerUse_20241022(displayArgs)],
+      ["ComputerUse_20250124", AnthropicTool.ComputerUse_20250124(displayArgs)],
+      ["ComputerUse_20251124", AnthropicTool.ComputerUse_20251124(displayArgs)],
+      ["Memory_20250818", AnthropicTool.Memory_20250818({})],
+      ["TextEditor_20241022", AnthropicTool.TextEditor_20241022({})],
+      ["TextEditor_20250124", AnthropicTool.TextEditor_20250124({})],
+      ["TextEditor_20250429", AnthropicTool.TextEditor_20250429({})],
+      ["TextEditor_20250728", AnthropicTool.TextEditor_20250728({})]
+    ]
+
+    for (const [name, tool] of clientTools) {
+      it(name, () => {
+        const codec = AnthropicStructuredOutput.toCodecAnthropic(tool.parametersSchema)
+        assert.isDefined(codec)
+      })
+    }
   })
 
   // The packaged `Memory_20250818` tool ships `customName: "AnthropicMemory"` /

@@ -777,16 +777,46 @@ export const findFirstFilter: {
  * @since 2.0.0
  */
 export const forEach: {
-  <B, E, R, S extends Iterable<any>, const Discard extends boolean = false>(
-    f: (a: Arr.ReadonlyArray.Infer<S>, i: number) => Effect<B, E, R>,
+  <A, B, E, R, S extends Iterable<A> = Iterable<A>, const Discard extends boolean = false>(
+    f: (a: A, i: number) => Effect<B, E, R>,
     options?: { readonly concurrency?: Concurrency | undefined; readonly discard?: Discard | undefined } | undefined
-  ): (self: S) => Effect<Discard extends false ? Arr.ReadonlyArray.With<S, B> : void, E, R>
+  ): (
+    self: [S] extends [never] ? Iterable<A> : S
+  ) => Effect<Discard extends false ? Arr.ReadonlyArray.With<S, B> : void, E, R>
   <B, E, R, S extends Iterable<any>, const Discard extends boolean = false>(
     self: S,
     f: (a: Arr.ReadonlyArray.Infer<S>, i: number) => Effect<B, E, R>,
     options?: { readonly concurrency?: Concurrency | undefined; readonly discard?: Discard | undefined } | undefined
   ): Effect<Discard extends false ? Arr.ReadonlyArray.With<S, B> : void, E, R>
 } = internal.forEach
+
+/**
+ * Returns the first element of the iterable produced by an effect, or fails
+ * with `NoSuchElementError` if the iterable is empty.
+ *
+ * **When to use**
+ *
+ * Use when an effect produces a collection that must contain at least one
+ * element and absence should be represented in the typed error channel.
+ *
+ * **Example** (Getting the first element)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect, Option } from "effect"
+ *
+ * const first = await Effect.runPromise(Effect.head(Effect.succeed([1, 2, 3])))
+ * first // => 1
+ *
+ * const empty = Effect.head(Effect.succeed([] as Array<number>)).pipe(Effect.catchNoSuchElement)
+ * await Effect.runPromise(empty) // => Option.none()
+ * ```
+ *
+ * @category getters
+ * @since 2.0.0
+ */
+export const head: <A, E, R>(
+  self: Effect<Iterable<A>, E, R>
+) => Effect<A, E | Cause.NoSuchElementError, R> = internal.head
 
 /**
  * Executes a body effect repeatedly while a condition holds true.
@@ -1813,10 +1843,19 @@ export const fromResult: <A, E>(result: Result.Result<A, E>) => Effect<A, E> = i
  * @category converting
  * @since 4.0.0
  */
-export const fromOption: <Arg extends Option<unknown> | LazyArg<unknown>, E = Cause.NoSuchElementError>(
-  arg: Arg,
-  ...rest: [Arg] extends [Option<unknown>] ? [onNone?: LazyArg<E>] : []
-) => [Arg] extends [Option<infer A>] ? Effect<A, E>
+export const fromOption: <
+  Arg extends Option<unknown> | LazyArg<unknown>,
+  Rest extends [] | [onNone: LazyArg<unknown> | undefined] = []
+>(
+  arg: Arg & (Rest extends [] ? unknown : Option<unknown>),
+  ...rest: Rest
+) => [Arg] extends [Option<infer A>] ? Effect<
+    A,
+    Rest extends [LazyArg<infer E>] ? E
+      : Rest extends [undefined] ? Cause.NoSuchElementError
+      : Rest extends [LazyArg<infer E> | undefined] ? E | Cause.NoSuchElementError
+      : Cause.NoSuchElementError
+  >
   : [Arg] extends [LazyArg<infer E>] ? <A>(option: Option<A>) => Effect<A, E>
   : never = internal.fromOption
 
@@ -5813,7 +5852,7 @@ export const contextWith: <R, A, E, R2>(
  *
  * const Database = Context.Service<Database>("Database")
  *
- * const DatabaseLive = Layer.succeed(Database)({
+ * const DatabaseLayer = Layer.succeed(Database)({
  *   query: Effect.fn("Database.query")((sql: string) => Effect.succeed(`Result for: ${sql}`))
  * })
  *
@@ -5822,7 +5861,7 @@ export const contextWith: <R, A, E, R2>(
  *   return yield* db.query("SELECT * FROM users")
  * })
  *
- * const provided = Effect.provide(program, DatabaseLive)
+ * const provided = Effect.provide(program, DatabaseLayer)
  *
  * await Effect.runPromise(provided) // => "Result for: SELECT * FROM users"
  * ```
@@ -6891,7 +6930,8 @@ export const onErrorFilter: {
  * **Details**
  *
  * This low-level operator preserves the source effect's result unless the
- * finalizer fails. Prefer `onExit` for normal cleanup logic.
+ * finalizer fails. If both the source effect and the finalizer fail, the two
+ * causes are merged. Prefer `onExit` for normal cleanup logic.
  *
  * @see {@link onExit} for ordinary exit-aware cleanup whose finalizer always returns an effect
  *
@@ -6907,6 +6947,8 @@ export const onExitPrimitive: <A, E, R, XE = never, XR = never>(
 /**
  * Ensures that a cleanup function runs whether this effect succeeds, fails, or
  * is interrupted.
+ *
+ * If both the effect and the cleanup function fail, the two causes are merged.
  *
  * **Example** (Observing every exit)
  *
@@ -14520,11 +14562,12 @@ export const tx = <A, E, R>(
   effect: Effect<A, E, R>
 ): Effect<A, E, Exclude<R, Transaction>> =>
   withFiber((fiber) => {
-    if (fiber.context.mapUnsafe.has(Transaction.key)) {
+    let state = Context.getOrUndefined(fiber.context, Transaction)
+    if (state) {
       return effect as Effect<A, E, Exclude<R, Transaction>>
     }
     // Create transaction state only at the outermost boundary
-    const state: Transaction["Service"] = { journal: new Map(), retry: false }
+    state = { journal: new Map(), retry: false }
     let result: Exit.Exit<A, E> | undefined
     return uninterruptibleMask((restore) =>
       flatMap(

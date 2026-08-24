@@ -450,6 +450,22 @@ describe("PubSub", () => {
         assert.deepStrictEqual(yield* PubSub.takeAll(sub), [3, 4, 5])
       }))
 
+    it.effect("unbounded rounds up fractional replay", () =>
+      Effect.gen(function*() {
+        const pubsub = yield* PubSub.unbounded<number>({ replay: 1.5 })
+        yield* PubSub.publishAll(pubsub, [1, 2, 3, 4])
+        const sub = yield* PubSub.subscribe(pubsub)
+        assert.deepStrictEqual(yield* PubSub.takeAll(sub), [3, 4])
+      }))
+
+    it.effect("unbounded disables non-positive replay", () =>
+      Effect.gen(function*() {
+        const pubsub = yield* PubSub.unbounded<number>({ replay: -1 })
+        yield* PubSub.publishAll(pubsub, [1, 2])
+        const sub = yield* PubSub.subscribe(pubsub)
+        assert.deepStrictEqual(yield* PubSub.takeUpTo(sub, 2), [])
+      }))
+
     it.effect("unbounded takeUpTo", () => {
       const messages = [1, 2, 3, 4, 5]
       return PubSub.unbounded<number>({ replay: 3 }).pipe(
@@ -553,20 +569,6 @@ describe("PubSub", () => {
       assert.isTrue(yield* PubSub.publish(pubsub, 42))
       assert.strictEqual(yield* PubSub.take(subscription), 42)
     }))
-
-  it.effect("publish succeeds after interrupting a suspended subscriber", () =>
-    Effect.scoped(
-      Effect.gen(function*() {
-        const pubsub = yield* PubSub.dropping<number>(1)
-        const subscription = yield* PubSub.subscribe(pubsub)
-        const fiber = yield* Effect.forkChild(PubSub.take(subscription), { startImmediately: true })
-
-        yield* Fiber.interrupt(fiber)
-
-        assert.isTrue(yield* PubSub.publish(pubsub, 42))
-        assert.strictEqual(yield* PubSub.take(subscription), 42)
-      })
-    ))
 
   it.effect("shutdown interrupts suspended takeAll subscribers", () =>
     Effect.gen(function*() {

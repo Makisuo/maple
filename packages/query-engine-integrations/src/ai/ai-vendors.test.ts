@@ -256,9 +256,10 @@ describe("maple", () => {
 				"gen_ai.request.model": "openai/gpt-5.6-luna",
 				"gen_ai.provider.name": "openrouter",
 				"gen_ai.usage.input_tokens": "15400",
-				"maple.session.id": "org_1:inv-abc",
-				"maple.turn.id": "msg_1",
+				// Emitter-written and gateway-stamped are the same key now that
+				// the AI surface lives under one namespace.
 				"maple_ai.session.id": "org_1:inv-abc",
+				"maple_ai.turn.id": "msg_1",
 			}),
 		)
 
@@ -272,7 +273,7 @@ describe("maple", () => {
 
 	it("does not overwrite a conversation id the span already declared", () => {
 		const mapped = mapAiSpan(
-			row("maple", { "gen_ai.conversation.id": "conv-1", "maple.turn.id": "msg_1" }),
+			row("maple", { "gen_ai.conversation.id": "conv-1", "maple_ai.turn.id": "msg_1" }),
 		)
 
 		expect(mapped.genAi.conversationId).toBe("conv-1")

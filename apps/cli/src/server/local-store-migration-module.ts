@@ -1,17 +1,13 @@
 // BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import type { Chdb } from "./chdb"
 import type { LocalSchemaIdentity } from "./schema-identity"
-import type {
-	MigrationPhase,
-	MigrationStepJournalSchema,
-	MigrationStepStatus,
-} from "./local-store-migrations/journal-schema"
+import type { MigrationPhase, MigrationStepJournalSchema } from "./local-store-migrations/journal-schema"
 
 /** Coordinator-owned transaction phases. Modules may report progress, but
- * only the coordinator advances this top-level state machine. Both unions are
+ * only the coordinator advances this top-level state machine. The union is
  * derived from the journal schema so the persisted form and the in-memory type
  * cannot drift. */
-export type { MigrationPhase, MigrationStepStatus }
+export type { MigrationPhase }
 
 export type StateDisposition =
 	| "preserve-exact"

@@ -81,7 +81,8 @@ import {
 	effectiveOtherStates,
 } from "./anomaly/detector-state-batch"
 import { rollingCountBuckets } from "./anomaly/rolling-counts"
-import { decideTransition, stateMachineConfigFor, type DetectorStateSnapshot } from "./anomaly/state-machine"
+import { hysteresisConfigFor } from "./anomaly/hysteresis-config"
+import { foldObservation } from "./incident-hysteresis"
 import {
 	attachKeyFor,
 	canAttach,
@@ -1336,21 +1337,19 @@ const make = Effect.gen(function* () {
 			readonly consecutiveHealthy: number
 		}
 
-		const decisions: PendingDecision[] = active.map((evaluation) => {
+		const decisions: PendingDecision[] = yield* Effect.forEach(active, (evaluation) => {
 			const state = stateByKey.get(evaluation.detectorKey)
-			const snapshot: DetectorStateSnapshot = {
-				consecutiveBreaches: state?.consecutiveBreaches ?? 0,
-				consecutiveHealthy: state?.consecutiveHealthy ?? 0,
-				openIncidentId: state?.openIncidentId ?? null,
-				lastResolvedAt: dateToMs(state?.lastResolvedAt ?? null),
-			}
-			const decision = decideTransition(
-				snapshot,
-				evaluation,
-				stateMachineConfigFor(evaluation.signalType),
+			return foldObservation(
+				{
+					consecutiveBreaches: state?.consecutiveBreaches ?? 0,
+					consecutiveHealthy: state?.consecutiveHealthy ?? 0,
+					incidentOpen: (state?.openIncidentId ?? null) !== null,
+					lastResolvedAtMs: dateToMs(state?.lastResolvedAt ?? null),
+				},
+				evaluation.status,
+				hysteresisConfigFor(evaluation.signalType),
 				nowMs,
-			)
-			return { evaluation, state, ...decision }
+			).pipe(Effect.map((outcome) => ({ evaluation, state, ...outcome })))
 		})
 
 		// Opens run first (strongest deviation first) so the lead fingerprint

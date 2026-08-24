@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect"
 import { WarehouseExecutor, type SqlQueryOptions } from "@maple/query-engine/observability"
 import { WarehouseConfigError } from "@maple/domain/http/warehouse-errors"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
-import { Mode } from "./mode"
+import { Mode, ModeError } from "./mode"
 import { makeLocalWarehouseExecutorApi } from "./executor"
 
 /**
@@ -34,17 +34,23 @@ export const WarehouseExecutorFromMode = Layer.effect(
 							// that lands here is an operation that forgot to branch, so
 							// fail loudly rather than silently querying the local store.
 							Effect.fail(
-								new WarehouseConfigError({
+								new ModeError({
 									message:
 										"Remote mode does not use the warehouse executor — this operation is missing its v2 dispatch.",
-									pipeName: "mode",
 								}),
 							),
 				),
-				Effect.mapError((e) =>
-					e instanceof WarehouseConfigError
-						? e
-						: new WarehouseConfigError({ message: e.message, pipeName: "mode" }),
+				// `WarehouseExecutor`'s error channel is the domain warehouse union, so
+				// a mode failure has to travel as one. It rides in `cause` rather than
+				// being flattened into the message: `bin.ts` recovers "No Maple backend
+				// found" as an expected outcome, and deciding that by testing the
+				// carrier's tag is a real check. The previous discriminator was
+				// `pipeName === "mode"` — a string compare against a field that
+				// otherwise holds a query name, so any query that happened to be
+				// called "mode" would have been silently recovered as an Ok outcome.
+				Effect.mapError(
+					(cause) =>
+						new WarehouseConfigError({ message: cause.message, pipeName: "mode", cause }),
 				),
 			),
 		)

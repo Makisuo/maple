@@ -34,6 +34,7 @@ import type {
 	ServiceOverviewRequest,
 	WorkloadDetailSummaryRequest,
 	WebAnalyticsSummaryRequest,
+	WebAnalyticsLiveRequest,
 	WebAnalyticsTimeseriesRequest,
 	WebAnalyticsPageviewsRequest,
 	WebAnalyticsPagesRequest,
@@ -41,6 +42,8 @@ import type {
 	WebAnalyticsBreakdownsRequest,
 } from "@maple/domain/http"
 import { Match } from "effect"
+import { WEB_ANALYTICS_LIVE_WINDOW_SECONDS } from "@maple/domain/query-engine"
+import { formatWarehouseDateTime } from "../datetime"
 import { attributeIndexMode, logBodySearchMode } from "../capabilities"
 import * as CH from "../ch"
 import { LOGS_BODY_SEARCH_SETTINGS } from "../profiles"
@@ -678,6 +681,47 @@ const webAnalyticsSummaryDef = (useProductEvents: boolean) => ({
 
 export const webAnalyticsSummary = defineQuery(webAnalyticsSummaryDef(true))
 export const webAnalyticsSummaryRaw = defineQuery(webAnalyticsSummaryDef(false))
+
+/**
+ * How far back the live counter's `StartTime` floor reaches.
+ *
+ * The floor only prunes partitions — recency is decided by `LastActivityAt`
+ * inside the query — so it has to sit behind the longest session that could
+ * still be active. A day is far past any real browser session and still scans a
+ * single org's sessions for one day.
+ */
+const LIVE_LOOKBACK_SECONDS = 86_400
+
+/**
+ * The window ends at *now*, resolved here rather than sent by the client.
+ *
+ * That is what makes the counter live: the payload carries only filters, so its
+ * cache key holds still while every poll re-resolves the window. Freshness is
+ * the 15s TTL instead of the key churning on each request — the opposite of the
+ * time-range queries, whose key must move with the range being asked about.
+ */
+const webAnalyticsLiveDef = (useProductEvents: boolean) => ({
+	id: "webAnalyticsLive" as const,
+	profile: "aggregation" as const,
+	cache: 15,
+	compile: (payload: WebAnalyticsLiveRequest, orgId: string) => {
+		const now = Date.now()
+		return CH.compile(
+			CH.webAnalyticsLiveQuery({
+				...webAnalyticsFilters(payload, useProductEvents),
+				windowSeconds: WEB_ANALYTICS_LIVE_WINDOW_SECONDS,
+			}),
+			{
+				orgId,
+				startTime: formatWarehouseDateTime(now - LIVE_LOOKBACK_SECONDS * 1000),
+				endTime: formatWarehouseDateTime(now),
+			},
+		)
+	},
+})
+
+export const webAnalyticsLive = defineQuery(webAnalyticsLiveDef(true))
+export const webAnalyticsLiveRaw = defineQuery(webAnalyticsLiveDef(false))
 
 const webAnalyticsTimeseriesDef = (useProductEvents: boolean) => ({
 	id: "webAnalyticsTimeseries" as const,

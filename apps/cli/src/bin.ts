@@ -6,7 +6,7 @@ import * as Command from "effect/unstable/cli/Command"
 import { FetchHttpClient } from "effect/unstable/http"
 import { cli } from "./cli"
 import { MapleConfig } from "./core/config"
-import { Mode } from "./core/mode"
+import { Mode, isModeFailure } from "./core/mode"
 import { annotateOutcome, recoverExpected } from "./core/outcomes"
 import { TelemetryLayer } from "./core/telemetry"
 import { maybeNotifyUpdate } from "./core/update"
@@ -104,13 +104,13 @@ if (checkpointProbeDataDir !== undefined) {
 			// a failure. Same category as the already-running guard above.
 			"@maple/cli/CheckpointPreconditionError": recoverExpected,
 			// Mode resolution ("No Maple backend found", "Cannot use --remote and
-			// --local together") reaches here as a `WarehouseConfigError`, remapped by
-			// `WarehouseExecutorFromMode` in core/warehouse.ts. `pipeName` is the
-			// discriminator: only "mode" is an expected outcome — every other
-			// `WarehouseConfigError` is a real query failure (unknown table, bad
-			// column) and is re-raised so it still closes the span `Error`.
+			// --local together") reaches here as a `WarehouseConfigError`, because
+			// that is the error type `WarehouseExecutor`'s channel admits — the real
+			// `ModeError` rides in `cause`, and `isModeFailure` is what tells the two
+			// apart. Every other `WarehouseConfigError` is a genuine warehouse
+			// misconfiguration and is re-raised so it still closes the span `Error`.
 			"@maple/http/errors/WarehouseConfigError": (error) =>
-				error.pipeName === "mode" ? recoverExpected(error) : Effect.fail(error),
+				isModeFailure(error) ? recoverExpected(error) : Effect.fail(error),
 			// `Command.runWith` renders the help text and then re-fails with the same
 			// error, so `maple --help` recorded as an error span. The text is already
 			// on stdout by now; only the exit code is left to honour — 0 for a plain
