@@ -1156,7 +1156,6 @@ export const ErrorIssueEnvironmentsOutputSchema = Schema.Struct({
 	name: Schema.String,
 	count: CHNumber,
 })
-export type ErrorIssueEnvironmentsOutput = Schema.Schema.Type<typeof ErrorIssueEnvironmentsOutputSchema>
 
 export function errorIssueEnvironmentsQuery(opts: { limit?: number } = {}) {
 	return from(ErrorEvents)

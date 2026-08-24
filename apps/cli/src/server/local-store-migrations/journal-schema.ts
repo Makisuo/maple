@@ -54,8 +54,6 @@ export type MigrationPhase = typeof MigrationPhaseSchema.Type
 
 export const MigrationStepStatusSchema = Schema.Literals(["pending", "running", "verified", "completed"])
 
-export type MigrationStepStatus = typeof MigrationStepStatusSchema.Type
-
 /**
  * A schema identity as persisted in a journal.
  *
