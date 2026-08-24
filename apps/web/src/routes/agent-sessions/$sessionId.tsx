@@ -15,8 +15,11 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@m
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { NotFoundError } from "@/components/route-error"
 import { QueryErrorState } from "@/components/common/query-error-state"
-import { SessionHeader } from "@/components/agent-sessions/session-detail/session-header"
-import { SessionViews } from "@/components/agent-sessions/session-detail/session-views"
+import {
+	isSessionView,
+	SessionViews,
+	type SessionView,
+} from "@/components/agent-sessions/session-detail/session-views"
 import type { TraceSelection } from "@/lib/agent-sessions/span-filters"
 import { TraceSpanDetailPanel } from "@/components/traces/trace-span-detail-panel"
 import { useAppHotkey } from "@/hooks/use-app-hotkey"
@@ -41,6 +44,10 @@ const agentSessionSearchSchema = Schema.Struct({
 	// retention instead, which is why the page bothers to stamp them.
 	t: Schema.optional(Schema.String),
 	end: Schema.optional(Schema.String),
+	// Which of the three views is open. A search param rather than a route
+	// segment on purpose: Back from the detail page returns to the list the
+	// reader came from, not to the view they looked at before this one.
+	view: Schema.optional(Schema.String),
 	// The in-page trace pane: the trace it shows and, optionally, the span it has
 	// focused. In the URL rather than component state so a pane the reader opened
 	// survives a reload and travels in a pasted link.
@@ -90,21 +97,27 @@ function AgentSessionDetailContent() {
 						<Skeleton className="h-9 w-80" />
 					</DashboardLayout.Sticky>
 					<DashboardLayout.Fill>
-						<div className="space-y-4 p-4">
-							<Skeleton className="h-8 w-44" />
-							<Skeleton className="h-1.5 w-full rounded-full" />
-							{/* The same container-query ladder `SessionHeader`'s stat band uses,
-							    so the page doesn't reflow on resolve. */}
-							<div className="@container grid grid-cols-1 gap-4 @2xl:grid-cols-2 @3xl:grid-cols-3 @4xl:grid-cols-5">
-								{Array.from({ length: 5 }).map((_, index) => (
-									<Skeleton key={index} className="h-20" />
+						{/* The Overview's own shape — switcher, verdict, vitals, time bar —
+						    so the page doesn't reflow on resolve. */}
+						<div className="space-y-6 p-4">
+							<Skeleton className="h-8 w-72" />
+							<div className="flex flex-wrap items-start justify-between gap-8">
+								<div className="space-y-3">
+									<Skeleton className="h-9 w-[26rem] max-w-full" />
+									<Skeleton className="h-4 w-80 max-w-full" />
+								</div>
+								<div className="flex gap-6">
+									{Array.from({ length: 3 }).map((_, index) => (
+										<Skeleton key={index} className="h-16 w-32" />
+									))}
+								</div>
+							</div>
+							<Skeleton className="h-4 w-full rounded-sm" />
+							<div className="space-y-2">
+								{Array.from({ length: 8 }).map((_, index) => (
+									<Skeleton key={index} className="h-12 w-full" />
 								))}
 							</div>
-						</div>
-						<div className="space-y-1 px-4">
-							{Array.from({ length: 12 }).map((_, index) => (
-								<Skeleton key={index} className="h-6 w-full" />
-							))}
 						</div>
 					</DashboardLayout.Fill>
 				</DashboardLayout.Content>
@@ -165,6 +178,19 @@ function SessionDetailBody({
 
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+
+	// An unknown or absent `?view=` reads as the default rather than as an error:
+	// the param is a hint from a link, and a mistyped one should still land the
+	// reader on a page.
+	const view: SessionView =
+		search.view !== undefined && isSessionView(search.view) ? search.view : "overview"
+
+	const changeView = useCallback(
+		(next: SessionView) => {
+			navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, view: next }) })
+		},
+		[navigate],
+	)
 
 	// A link that arrived without hints cost the warehouse a session lookup across
 	// retention; stamping the bounds it found into the URL means this link never
@@ -257,9 +283,8 @@ function SessionDetailBody({
 				    sticky control bar pins flush to the scroller's top — sticky offsets
 				    resolve against the padding edge. */}
 				<DashboardLayout.Scroll className="pt-0">
-					<div className="shrink-0 space-y-4 py-4">
-						<SessionHeader summary={summary} />
-						{truncated && (
+					{truncated && (
+						<div className="shrink-0 py-4">
 							<Alert variant="warning">
 								<AlertDescription>
 									This session has more spans than one response carries — everything after
@@ -267,8 +292,8 @@ function SessionDetailBody({
 									totals and the waterfall both stop early.
 								</AlertDescription>
 							</Alert>
-						)}
-					</div>
+						</div>
+					)}
 					{/* Content-driven height inside the scroller: `shrink-0` because a
 					    scroll container's flex items shrink to fit before they overflow,
 					    which would collapse the views instead of scrolling them; `grow`
@@ -276,6 +301,8 @@ function SessionDetailBody({
 					    the viewport; the floor keeps the empty states from a sliver. */}
 					<div className="flex min-h-64 shrink-0 grow flex-col">
 						<SessionViews
+							view={view}
+							onViewChange={changeView}
 							turns={turns}
 							summary={summary}
 							selection={selection}
@@ -351,13 +378,10 @@ function EmptySession({ sessionId, windowed }: { sessionId: string; windowed: bo
 	)
 }
 
-/** The identifying facts the list row carried and this page had dropped. */
+/** The identifying facts the list row carried and this page had dropped. The
+ *  trace count is not one of them — the views below count what they draw. */
 function sessionSubtitle(summary: SessionSummary): string {
-	return [
-		primaryVendorLabel(summary.vendorIds),
-		formatRelativeTimeOrDate(summary.startMs),
-		`${summary.traceCount.toLocaleString()} trace${summary.traceCount === 1 ? "" : "s"}`,
-	].join(" · ")
+	return [primaryVendorLabel(summary.vendorIds), formatRelativeTimeOrDate(summary.startMs)].join(" · ")
 }
 
 function primaryVendorLabel(vendorIds: readonly string[]): string {

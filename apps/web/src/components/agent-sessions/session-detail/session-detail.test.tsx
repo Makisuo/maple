@@ -5,6 +5,7 @@
 // navigates: trace and span clicks raise `onOpenTrace` for the page to handle,
 // so no router needs mounting.
 
+import { useState } from "react"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
@@ -14,8 +15,8 @@ import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/s
 import { buildSessionTurns, type SessionTurn } from "@/lib/agent-sessions/session-turns"
 import type { TraceSelection } from "@/lib/agent-sessions/span-filters"
 import { SessionFlow } from "./session-flow"
-import { SessionHeader } from "./session-header"
-import { SessionViews } from "./session-views"
+import { SessionOverview } from "./session-overview"
+import { SessionViews, type SessionView } from "./session-views"
 import { SessionWaterfall } from "./session-waterfall"
 
 beforeAll(() => {
@@ -101,9 +102,11 @@ const { turns, summary } = sessionOf(spans)
 
 // The other common shape: one agent span, no captured message, no usage
 // reported, and no human to wait on.
-const { summary: quiet } = sessionOf([agentSpan({ spanId: "a", startMs: 0, durationMs: SECOND })])
+const { turns: quietTurns, summary: quiet } = sessionOf([
+	agentSpan({ spanId: "a", startMs: 0, durationMs: SECOND }),
+])
 
-const { summary: gateway } = sessionOf([
+const { turns: gatewayTurns, summary: gateway } = sessionOf([
 	agentSpan({ spanId: "g-agent", startMs: 0, durationMs: 4 * SECOND }),
 	llmSpan({
 		spanId: "g-llm",
@@ -282,33 +285,63 @@ function Flow(props: {
 	)
 }
 
-describe("SessionHeader", () => {
-	it("states the session's duration and work", () => {
-		render(<SessionHeader summary={summary} />)
+describe("SessionOverview", () => {
+	// A turn whose root AI span errored, with the model call under it reporting
+	// the same failure — the shape every framework that copies a child's error
+	// onto its parent produces.
+	const { turns: failedTurns, summary: failedSummary } = sessionOf([
+		agentSpan({
+			spanId: "f-agent",
+			startMs: 0,
+			durationMs: 4 * SECOND,
+			statusCode: "Error",
+			statusMessage: "prompt is too long: 214832 tokens > 200000 maximum",
+			genAi: { errorType: "context_length_exceeded" },
+		}),
+		llmSpan({
+			spanId: "f-llm",
+			parentSpanId: "f-agent",
+			startMs: SECOND,
+			durationMs: 2 * SECOND,
+			model: "claude-opus-5",
+			statusCode: "Error",
+			statusMessage: "prompt is too long: 214832 tokens > 200000 maximum",
+			genAi: { errorType: "context_length_exceeded" },
+		}),
+	])
+
+	function Overview(props: { turns?: readonly SessionTurn[]; summary?: SessionSummary }) {
+		return <SessionOverview turns={props.turns ?? turns} summary={props.summary ?? summary} />
+	}
+
+	it("splits the wall clock into where the time actually went", () => {
+		render(<Overview />)
 
 		// 5m 12s wall clock, 4m 20s of it idle.
-		expect(screen.getByText("5m 12s")).toBeTruthy()
-		expect(screen.getByText("52s active · 83% idle")).toBeTruthy()
 		expect(screen.getByText("Idle")).toBeTruthy()
-		expect(screen.getByText("claude-sonnet-4-5")).toBeTruthy()
+		expect(screen.getByText(/4m 20s · 83%/)).toBeTruthy()
+	})
+
+	// Every figure here appears once. The totals a summary block used to restate
+	// above the page all live in the time bar, the digest header and the rail,
+	// and reading the same number twice is what made the view feel crowded.
+	it("restates no total the sections below it already carry", () => {
+		render(<Overview turns={failedTurns} summary={failedSummary} />)
+
+		expect(screen.queryByText(/wall clock/i)).toBeNull()
+		expect(screen.queryByText(/^Completed/)).toBeNull()
+		expect(screen.queryByText(/idle across/)).toBeNull()
 	})
 
 	it("says no cost was reported rather than pricing tokens itself", () => {
-		render(<SessionHeader summary={summary} />)
+		render(<Overview />)
 
-		expect(screen.getByText("no cost reported")).toBeTruthy()
+		expect(screen.getByText(/Maple does not price tokens itself/)).toBeTruthy()
 		expect(screen.queryByText(/^\$/)).toBeNull()
 	})
 
-	it("contrasts active against wall clock only when something waited", () => {
-		render(<SessionHeader summary={quiet} />)
-
-		expect(screen.getByText("wall clock")).toBeTruthy()
-		expect(screen.queryByText(/active/)).toBeNull()
-	})
-
 	it("says no usage was reported rather than pricing a session at zero", () => {
-		render(<SessionHeader summary={quiet} />)
+		render(<Overview turns={quietTurns} summary={quiet} />)
 
 		expect(screen.getByText("no token usage reported")).toBeTruthy()
 		expect(screen.queryByText("$0.00")).toBeNull()
@@ -328,53 +361,37 @@ describe("SessionHeader", () => {
 				genAi: { usageInputTokens: 100, usageOutputTokens: 10, usageCost: 0.0004 },
 			}),
 		])
-		render(<SessionHeader summary={tiny.summary} />)
+		render(<Overview turns={tiny.turns} summary={tiny.summary} />)
 
-		expect(screen.getByText("<$0.01")).toBeTruthy()
+		expect(screen.getAllByText("<$0.01").length).toBeGreaterThan(0)
 		expect(screen.queryByText("$0.00")).toBeNull()
 	})
 
-	// Regression: the column sliced to four models and said nothing about the
-	// rest, so a nine-model session lost five of them with no trace.
-	it("counts the models the column could not fit", () => {
-		const many = sessionOf([
-			agentSpan({ spanId: "m-agent", startMs: 0, durationMs: 10 * SECOND }),
-			...Array.from({ length: 6 }, (_, index) =>
-				llmSpan({
-					spanId: `m-llm-${index}`,
-					parentSpanId: "m-agent",
-					startMs: index * SECOND,
-					durationMs: SECOND,
-					model: `model-${index}`,
-					genAi: { usageInputTokens: 10, usageOutputTokens: 1 },
-				}),
-			),
-		])
-		render(<SessionHeader summary={many.summary} />)
-
-		expect(screen.getByText(/^\+\d+ more$/)).toBeTruthy()
-	})
-
-	// The turns below print no tokens in this shape, so the column has to say why
+	// The turns below print no tokens in this shape, so the rail has to say why
 	// rather than leave a reader to read the dashes as missing instrumentation.
 	it("says a session-level total was reported once for the whole session", () => {
-		render(<SessionHeader summary={aggregateSummary} />)
+		render(<Overview turns={aggregateTurns} summary={aggregateSummary} />)
 
 		expect(screen.getByText("5.5K")).toBeTruthy()
 		expect(screen.getByText("Reported once for the whole session")).toBeTruthy()
 	})
 
-	it("says nothing about the reporting shape when the calls reported for themselves", () => {
-		render(<SessionHeader summary={summary} />)
-
-		expect(screen.queryByText(/Reported once/)).toBeNull()
-	})
-
 	it("shows the last path segment of a gateway model id, full id in the title", () => {
-		render(<SessionHeader summary={gateway} />)
+		render(<Overview turns={gatewayTurns} summary={gateway} />)
 
 		const name = screen.getByText("gpt-4o-mini")
 		expect(name.getAttribute("title")).toBe("openrouter/openai/gpt-4o-mini")
+	})
+
+	// The digest exists to put the reader's own prompt back on the page — it is
+	// the one thing a span table cannot carry.
+	it("gives every turn its prompt, its work and what went wrong in it", () => {
+		render(<Overview />)
+
+		expect(screen.getByText("fix the webhook retry backoff")).toBeTruthy()
+		expect(screen.getAllByText(/read_file/).length).toBeGreaterThan(0)
+		// One failing tool call, named by what failed rather than by a bucket.
+		expect(screen.getAllByText(/error · run_tests/).length).toBeGreaterThan(0)
 	})
 })
 
@@ -684,15 +701,28 @@ describe("SessionFlow", () => {
 })
 
 describe("SessionViews", () => {
-	it("counts what is on screen, and narrows every count as the filter narrows it", () => {
-		render(
+	/** `view` is a search param on the real page; here it is local state. */
+	function Views(props: {
+		turns?: readonly SessionTurn[]
+		summary?: SessionSummary
+		view?: SessionView
+		onOpenTrace?: (target: TraceSelection) => void
+	}) {
+		const [view, setView] = useState<SessionView>(props.view ?? "trace")
+		return (
 			<SessionViews
-				turns={crossTurns}
-				summary={crossSummary}
+				view={view}
+				onViewChange={setView}
+				turns={props.turns ?? turns}
+				summary={props.summary ?? summary}
 				selection={undefined}
-				onOpenTrace={noop}
-			/>,
+				onOpenTrace={props.onOpenTrace ?? noop}
+			/>
 		)
+	}
+
+	it("counts what is on screen, and narrows every count as the filter narrows it", () => {
+		render(<Views turns={crossTurns} summary={crossSummary} />)
 
 		expect(screen.getByText(/^4 spans · 2 turns · 2 traces$/)).toBeTruthy()
 
@@ -707,15 +737,15 @@ describe("SessionViews", () => {
 	it("counts what the default span-kind filter leaves, not every span in the session", () => {
 		// Eight spans, one of them the app's own HTTP call, which "Agent spans only"
 		// hides before the first paint.
-		render(<SessionViews turns={turns} summary={summary} selection={undefined} onOpenTrace={noop} />)
+		render(<Views />)
 
 		expect(screen.getByText(/^7 of 8 spans · 2 turns · 1 trace$/)).toBeTruthy()
 	})
 
-	// Both views read the query and the span-kind toggle, so both controls stay
-	// mounted in both.
-	it("keeps the filter and the span-kind toggle reachable in both views", () => {
-		render(<SessionViews turns={turns} summary={summary} selection={undefined} onOpenTrace={noop} />)
+	// Both debug views read the query and the span-kind toggle, so both controls
+	// stay mounted in both.
+	it("keeps the filter and the span-kind toggle reachable in both debug views", () => {
+		render(<Views />)
 
 		fireEvent.click(screen.getByRole("tab", { name: /Flow/ }))
 
@@ -726,10 +756,20 @@ describe("SessionViews", () => {
 		expect(screen.queryByRole("button", { name: "Collapse idle" })).toBeNull()
 	})
 
+	// None of the span controls shape the Overview, and a row of controls that do
+	// nothing is what made the shared toolbar unreadable.
+	it("drops the span toolbar on the Overview", () => {
+		render(<Views view="overview" />)
+
+		expect(screen.queryByPlaceholderText("Filter spans")).toBeNull()
+		expect(screen.queryByRole("button", { name: "Agent spans only" })).toBeNull()
+		expect(screen.getByRole("tab", { name: /Overview/ })).toBeTruthy()
+	})
+
 	// Collapsing idle distorts the axis, so the toggle that undoes it is part of
 	// the design rather than a preference.
 	it("puts the idle back on the axis when Collapse idle is switched off", () => {
-		render(<SessionViews turns={turns} summary={summary} selection={undefined} onOpenTrace={noop} />)
+		render(<Views />)
 
 		expect(screen.getByText(/of idle removed across 1 gap/)).toBeTruthy()
 
@@ -740,14 +780,14 @@ describe("SessionViews", () => {
 
 	// The state lives in SessionViews rather than the views precisely so a look
 	// at Flow doesn't cost the reader the place they found in a long session.
-	it("survives a Timeline → Flow → Timeline round trip with the turn still collapsed", () => {
-		render(<SessionViews turns={turns} summary={summary} selection={undefined} onOpenTrace={noop} />)
+	it("survives a Trace → Flow → Trace round trip with the turn still collapsed", () => {
+		render(<Views />)
 
 		fireEvent.click(screen.getByRole("button", { name: /Turn 1/ }))
 		expect(screen.getByText(/spans$/)).toBeTruthy()
 
 		fireEvent.click(screen.getByRole("tab", { name: /Flow/ }))
-		fireEvent.click(screen.getByRole("tab", { name: /Timeline/ }))
+		fireEvent.click(screen.getByRole("tab", { name: /Trace/ }))
 
 		// Still collapsed: the collapsed turn shows its span count as a pill.
 		expect(screen.getByText(/spans$/)).toBeTruthy()
