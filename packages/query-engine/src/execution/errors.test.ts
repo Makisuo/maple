@@ -160,22 +160,43 @@ describe("mapWarehouseError", () => {
 	})
 
 	describe("config", () => {
-		it("classifies an unknown-database ClickHouse type", () => {
-			expect(mapWarehouseError("p", { message: "x", type: "UNKNOWN_DATABASE" })).toBeInstanceOf(
+		// Authorship decides who a missing table indicts. Maple-generated SQL can
+		// testify that the warehouse is pointed somewhere wrong; the same complaint
+		// about SQL the caller wrote is a typo in their query.
+		it("classifies an unknown-database ClickHouse type in Maple-authored SQL", () => {
+			expect(
+				mapWarehouseError("p", { message: "x", type: "UNKNOWN_DATABASE" }, "maple"),
+			).toBeInstanceOf(WarehouseConfigError)
+		})
+
+		it("classifies an unknown-database message in Maple-authored SQL", () => {
+			expect(mapWarehouseError("p", "Code: 81. unknown database 'foo'", "maple")).toBeInstanceOf(
 				WarehouseConfigError,
 			)
 		})
 
-		it("classifies an unknown-database message", () => {
-			expect(mapWarehouseError("p", "Code: 81. unknown database 'foo'")).toBeInstanceOf(
-				WarehouseConfigError,
-			)
+		it("blames the author, not the warehouse, for a table the caller invented", () => {
+			// `maple query "SELECT … FROM spans"` used to come back as a config
+			// error, telling someone who mistyped a table name that their warehouse
+			// was misconfigured.
+			expect(
+				mapWarehouseError("p", { message: "x", type: "UNKNOWN_TABLE" }, "caller"),
+			).toBeInstanceOf(WarehouseMalformedQueryError)
+			expect(
+				mapWarehouseError("p", "Code: 60. DB::Exception: Table default.spans does not exist."),
+			).toBeInstanceOf(WarehouseMalformedQueryError)
 		})
 
-		it("classifies the Tinybird gateway's missing-datasource message", () => {
+		it("still reads a missing datasource and a bad URL as configuration", () => {
+			// Neither names a table the caller chose, so both stay config errors
+			// regardless of who wrote the SQL.
 			expect(mapWarehouseError("p", "Resource 'product_events' not found")).toBeInstanceOf(
 				WarehouseConfigError,
 			)
+			expect(mapWarehouseError("p", "Invalid URL")).toBeInstanceOf(WarehouseConfigError)
+			expect(
+				mapWarehouseError("p", { message: "x", type: "UNKNOWN_SETTING" }),
+			).toBeInstanceOf(WarehouseConfigError)
 		})
 	})
 

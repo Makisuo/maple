@@ -639,14 +639,29 @@ function BenchDriver({
 		}
 		window.__smBench = harness
 
-		// Mark ready once edges have rendered (nodes measured → geometry exists).
+		// Mark ready once edges have rendered (nodes measured → geometry exists) AND
+		// ELK has published its final layout.
+		//
+		// Edges alone are not enough. `ServiceMapCanvas` publishes a synchronous
+		// fallback layout after a 2s grace and renders it, so nodes are measured and
+		// edges are in the DOM while ELK is still running. On a fast machine ELK
+		// lands before anyone looks; on a CI runner it landed AFTER the harness had
+		// declared ready, after `waitForQuiet` had seen its 750ms of silence, and
+		// INSIDE the 4s idle window — where its re-render (plus the render-phase
+		// `setLayoutHasEverSettled` it triggers, hence the nested update) was billed
+		// as 4 commits of a render loop that does not exist. Intermittent by nature:
+		// it depended on ELK straddling the measurement, so it passed and failed on
+		// identical code.
 		let raf = 0
 		const settleStart = performance.now()
 		const checkReady = () => {
 			const nodes = store.getState().nodes
 			const measured = nodes.length > 0 && nodes.every((n) => n.measured?.width)
 			const domEdges = document.querySelectorAll(".react-flow__edge").length
-			if ((measured && domEdges > 0) || performance.now() - settleStart > 8000) {
+			// "fallback" is NOT terminal — it is what is on screen while ELK works.
+			const elkSettled =
+				document.querySelector('[data-elk-status="ready"]') !== null
+			if ((measured && domEdges > 0 && elkSettled) || performance.now() - settleStart > 8000) {
 				harness.readyMs = Math.round(performance.now() - settleStart)
 				harness.ready = true
 				return

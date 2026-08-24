@@ -137,6 +137,22 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 		make: (base, upstreamStatus) => new WarehouseUpstreamError({ ...base, upstreamStatus }),
 	},
 	{
+		// A table the CALLER named that does not exist — `run_sql`, the raw_sql
+		// widget, `maple query`. The config rule below reads the identical
+		// complaint as "Maple is pointed at the wrong database", which told a user
+		// who mistyped `FROM spans` that their warehouse was misconfigured. Same
+		// caller-before-maple ordering as the malformed-query twin further down.
+		//
+		// Deliberately no `status` matcher: a bare 404 says nothing about whether a
+		// table was named, so `Invalid URL`, `UNKNOWN_SETTING` and Tinybird's
+		// "Resource '<name>' not found" (a missing datasource, genuinely config)
+		// stay with the rule below.
+		authoredBy: "caller",
+		types: new Set(["UNKNOWN_DATABASE", "UNKNOWN_TABLE", "TABLE_IS_DROPPED"]),
+		pattern: /unknown table|table .* does not exist|database .* does not exist/i,
+		make: (base) => new WarehouseMalformedQueryError(base),
+	},
+	{
 		status: (s) => s === 404,
 		types: new Set(["UNKNOWN_DATABASE", "UNKNOWN_TABLE", "TABLE_IS_DROPPED", "UNKNOWN_SETTING"]),
 		// "Resource '<name>' not found" is the Tinybird gateway's phrasing of

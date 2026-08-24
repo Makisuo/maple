@@ -7,9 +7,20 @@ import { MapleConfig } from "./config"
  * raised when a command actually needs a backend (i.e. touches the
  * WarehouseExecutor); `login`/`logout`/`whoami` never trigger it.
  */
-class ModeError extends Schema.TaggedError<ModeError>()("@maple/cli/ModeError", {
+export class ModeError extends Schema.TaggedError<ModeError>()("@maple/cli/ModeError", {
 	message: Schema.String,
 }) {}
+
+/**
+ * Is this warehouse failure really a mode-resolution failure wearing the
+ * executor's error type? `WarehouseExecutor`'s channel is the domain warehouse
+ * union, so `core/warehouse.ts` wraps a `ModeError` in a `WarehouseConfigError`
+ * and carries the original in `cause`. This is the check that unwraps it —
+ * bin.ts recovers these as expected outcomes, and it must not recover a genuine
+ * warehouse misconfiguration by mistake.
+ */
+export const isModeFailure = (error: { readonly cause?: unknown }): boolean =>
+	error.cause instanceof ModeError
 
 type ResolvedMode =
 	| { readonly _tag: "local"; readonly baseUrl: string }
