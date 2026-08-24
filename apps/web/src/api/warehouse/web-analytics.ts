@@ -7,6 +7,7 @@ import { Effect, Schema } from "effect"
 import {
 	WebAnalyticsBreakdownsRequest,
 	WebAnalyticsEventsRequest,
+	WebAnalyticsLiveRequest,
 	WebAnalyticsPagesRequest,
 	WebAnalyticsPageviewsRequest,
 	WebAnalyticsSummaryRequest,
@@ -43,6 +44,13 @@ const WebAnalyticsSummaryInputSchema = Schema.Struct({
 	...WebAnalyticsFilterFields,
 })
 
+// No time window: the server resolves "now" per request so the counter cannot
+// freeze at the moment the page mounted. Filters only, which also keeps the
+// atom key stable across polls.
+const WebAnalyticsLiveInputSchema = Schema.Struct({
+	...WebAnalyticsFilterFields,
+})
+
 const WebAnalyticsTimeseriesInputSchema = Schema.Struct({
 	...TimeWindowFields,
 	...WebAnalyticsFilterFields,
@@ -68,6 +76,7 @@ const WebAnalyticsBreakdownsInputSchema = Schema.Struct({
 })
 
 export type GetWebAnalyticsSummaryInput = (typeof WebAnalyticsSummaryInputSchema)["Encoded"]
+export type GetWebAnalyticsLiveInput = (typeof WebAnalyticsLiveInputSchema)["Encoded"]
 export type GetWebAnalyticsTimeseriesInput = (typeof WebAnalyticsTimeseriesInputSchema)["Encoded"]
 export type GetWebAnalyticsPagesInput = (typeof WebAnalyticsPagesInputSchema)["Encoded"]
 export type GetWebAnalyticsEventsInput = (typeof WebAnalyticsEventsInputSchema)["Encoded"]
@@ -93,6 +102,13 @@ export interface WebAnalyticsSummary {
 	 * views — the honest answer there is "unknown", not 0% and not 100%.
 	 */
 	bounceRate: number | null
+}
+
+/** Who is on the site right now, and over what window that was measured. */
+export interface WebAnalyticsLive {
+	visitors: number
+	sessions: number
+	windowSeconds: number
 }
 
 export interface WebAnalyticsTimeseriesPoint {
@@ -180,6 +196,29 @@ const getWebAnalyticsSummaryEffect = Effect.fn("QueryEngine.getWebAnalyticsSumma
 		coverage: ratio(row.identifiedSessions, row.sessions),
 		bounceRate: row.identifiedSessions > 0 ? row.bouncedSessions / row.identifiedSessions : null,
 	} satisfies WebAnalyticsSummary
+})
+
+export function getWebAnalyticsLive({ data }: { data: GetWebAnalyticsLiveInput }) {
+	return getWebAnalyticsLiveEffect({ data })
+}
+
+const getWebAnalyticsLiveEffect = Effect.fn("QueryEngine.getWebAnalyticsLive")(function* ({
+	data,
+}: {
+	data: GetWebAnalyticsLiveInput
+}) {
+	const input = yield* decodeInput(WebAnalyticsLiveInputSchema, data, "getWebAnalyticsLive")
+
+	const result = yield* runWarehouseQuery("webAnalyticsLive", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			return yield* client.queryEngine.webAnalyticsLive({
+				payload: new WebAnalyticsLiveRequest(input),
+			})
+		}),
+	)
+
+	return result.data satisfies WebAnalyticsLive
 })
 
 export function getWebAnalyticsTimeseries({ data }: { data: GetWebAnalyticsTimeseriesInput }) {

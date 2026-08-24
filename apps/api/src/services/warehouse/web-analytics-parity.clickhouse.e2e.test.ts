@@ -315,6 +315,12 @@ const QUERIES: ReadonlyArray<{
 		compile: (filters) => CH.compile(CH.webAnalyticsSummaryQuery(filters), window).sql,
 	},
 	{
+		// The recency test is relative to the `endTime` param, not `now()`, so the
+		// fixed fixture window pins it as firmly as every other query here.
+		name: "webAnalyticsLive",
+		compile: (filters) => CH.compile(CH.webAnalyticsLiveQuery(filters), window).sql,
+	},
+	{
 		name: "webAnalyticsTimeseries",
 		compile: (filters) =>
 			CH.compile(CH.webAnalyticsTimeseriesQuery({ ...filters, bucketSeconds: 3600 }), window).sql,

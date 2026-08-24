@@ -154,6 +154,7 @@ export {
 // Queries — Web Analytics (product analytics over the browser SDK's session data)
 export {
 	webAnalyticsSummaryQuery,
+	webAnalyticsLiveQuery,
 	webAnalyticsTimeseriesQuery,
 	webAnalyticsPageviewsTimeseriesQuery,
 	webAnalyticsPagesQuery,
@@ -162,6 +163,8 @@ export {
 	type WebAnalyticsFilters,
 	type WebAnalyticsFacetKey,
 	type WebAnalyticsSummaryOutput,
+	type WebAnalyticsLiveOpts,
+	type WebAnalyticsLiveOutput,
 	type WebAnalyticsTimeseriesOpts,
 	type WebAnalyticsTimeseriesOutput,
 	type WebAnalyticsPageviewsTimeseriesOpts,
