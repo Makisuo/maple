@@ -32,6 +32,7 @@ import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-r
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
+import { snapRangeForCache } from "@/lib/time-utils"
 const dashboardSearchSchema = Schema.Struct({
 	environment: Schema.optional(Schema.String),
 	...TimeRangeSearchFields,
@@ -106,13 +107,17 @@ function DashboardPage() {
 	// matches the old probe's range, so demo-detection behavior is unchanged.
 	// `TinybirdDateTime` requires `YYYY-MM-DD HH:mm:ss` (no `T`, no millis), so
 	// we strip the ISO suffix instead of passing `.toISOString()` raw.
+	//
+	// Snapped to the cache grid: at second precision a bare `new Date()` minted a
+	// fresh atom key per mount, so the atom's 5-minute `staleTime` never fired.
+	// Snapping also lets this share one entry with the service map's identical
+	// 24h probe instead of each route querying facets for itself.
 	const facetsRange = useMemo(() => {
-		const end = new Date()
-		const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
-		return {
-			startTime: formatWarehouseDateTime(start.getTime()),
-			endTime: formatWarehouseDateTime(end.getTime()),
-		}
+		const end = Date.now()
+		return snapRangeForCache({
+			startTime: formatWarehouseDateTime(end - 24 * 60 * 60 * 1000),
+			endTime: formatWarehouseDateTime(end),
+		})
 	}, [])
 
 	const facetsAtom = getServicesFacetsResultAtom({ data: facetsRange })

@@ -290,6 +290,36 @@ export interface ReactRenderReport {
 	topologyChanges: number
 }
 
+/**
+ * How far the drawn graph moved across an update — the "layout shifting" the
+ * frame-timing metrics are blind to. A run can hold a perfect 120fps while
+ * teleporting every node, so this is measured separately.
+ *
+ * Displacements are in flow coordinates and cover only node ids present both
+ * before and after (an added/removed node has no displacement to speak of).
+ * `viewportDelta` catches the other half of a shift: the camera reframing under
+ * a graph that itself held still.
+ */
+export interface LayoutStabilityReport {
+	/** False if layout was still moving when the measurement window expired. */
+	settled: boolean
+	/** Node ids present both before and after the update. */
+	sampled: number
+	/** Of those, how many moved more than half a pixel. */
+	moved: number
+	meanDisplacement: number
+	maxDisplacement: number
+	/** Euclidean change in camera x/y, in screen px. */
+	viewportDelta: number
+	/** Change in camera zoom, as a ratio (0 = unchanged). */
+	zoomDelta: number
+}
+
+export interface LayoutStabilityReportSet {
+	metricRefresh: LayoutStabilityReport
+	topologyChange: LayoutStabilityReport
+}
+
 interface ReactRecorder {
 	onRender: ProfilerOnRenderCallback
 	reset: () => void
@@ -303,6 +333,7 @@ interface SmBench {
 	last: BenchMetrics | null
 	run: (opts?: { durationMs?: number; pan?: boolean }) => Promise<BenchMetrics>
 	runReact: (opts?: { metricRefreshes?: number; topologyChanges?: number }) => Promise<ReactRenderReport>
+	runStability: (opts?: { settleMs?: number }) => Promise<LayoutStabilityReportSet>
 }
 
 declare global {
@@ -381,6 +412,73 @@ function BenchDriver({
 				await nextPaint()
 			}
 			return recorder.snapshot()
+		}
+
+		// Sample where every node currently sits, plus the camera. Positions come
+		// from the live ReactFlow store rather than the DOM so a transform-only
+		// camera move isn't mistaken for nodes moving.
+		const sampleLayout = () => {
+			const positions = new Map<string, { x: number; y: number }>()
+			for (const node of flow.getNodes()) {
+				positions.set(node.id, { x: node.position.x, y: node.position.y })
+			}
+			return { positions, viewport: flow.getViewport() }
+		}
+
+		// Wait until positions stop changing rather than for a fixed delay. Layout
+		// is asynchronous and its cost varies hugely by machine — a fixed delay
+		// silently samples an intermediate layout on a slow host and reports it as
+		// the settled one. Returns false if it never went quiet within `maxMs`.
+		const waitForQuiescence = async (maxMs: number, quietMs = 750) => {
+			const serialize = () =>
+				Array.from(sampleLayout().positions, ([id, p]) => `${id}:${p.x},${p.y}`)
+					.sort()
+					.join("|")
+			const start = performance.now()
+			let last = serialize()
+			let lastChange = performance.now()
+			while (performance.now() - start < maxMs) {
+				await new Promise((resolve) => setTimeout(resolve, 100))
+				const now = serialize()
+				if (now !== last) {
+					last = now
+					lastChange = performance.now()
+				} else if (performance.now() - lastChange >= quietMs) {
+					return true
+				}
+			}
+			return false
+		}
+
+		const measureStability = async (
+			update: () => void | Promise<void>,
+			settleMs: number,
+		): Promise<LayoutStabilityReport> => {
+			const before = sampleLayout()
+			await update()
+			const settled = await waitForQuiescence(settleMs)
+			await nextPaint()
+			const after = sampleLayout()
+
+			const displacements: number[] = []
+			for (const [id, from] of before.positions) {
+				const to = after.positions.get(id)
+				if (!to) continue
+				displacements.push(Math.hypot(to.x - from.x, to.y - from.y))
+			}
+			const total = displacements.reduce((sum, d) => sum + d, 0)
+			return {
+				settled,
+				sampled: displacements.length,
+				moved: displacements.filter((d) => d > 0.5).length,
+				meanDisplacement: displacements.length === 0 ? 0 : total / displacements.length,
+				maxDisplacement: displacements.length === 0 ? 0 : Math.max(...displacements),
+				viewportDelta: Math.hypot(
+					after.viewport.x - before.viewport.x,
+					after.viewport.y - before.viewport.y,
+				),
+				zoomDelta: Math.abs(after.viewport.zoom - before.viewport.zoom),
+			}
 		}
 
 		const harness: SmBench = {
@@ -495,6 +593,18 @@ function BenchDriver({
 					metricRefreshes,
 					topologyChanges,
 				}
+			},
+			runStability: async ({ settleMs = 45_000 } = {}) => {
+				await new Promise((resolve) => setTimeout(resolve, 500))
+				await nextPaint()
+				// A metric refresh changes only node DATA — same services, same edges.
+				// Nothing about it justifies moving a single node or the camera.
+				const metricRefresh = await measureStability(onMetricRefresh, settleMs)
+				// A topology change does justify a new layout, but the surviving nodes
+				// should still land near where they were.
+				// react-doctor-disable-next-line react-doctor/server-sequential-independent-await -- Both scenarios mutate the same graph; overlapping them would corrupt the measurement.
+				const topologyChange = await measureStability(onTopologyChange, settleMs)
+				return { metricRefresh, topologyChange }
 			},
 		}
 		window.__smBench = harness

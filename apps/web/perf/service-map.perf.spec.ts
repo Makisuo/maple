@@ -50,6 +50,21 @@ interface ReactRenderReport {
 	topologyChanges: number
 }
 
+interface LayoutStabilityReport {
+	settled: boolean
+	sampled: number
+	moved: number
+	meanDisplacement: number
+	maxDisplacement: number
+	viewportDelta: number
+	zoomDelta: number
+}
+
+interface LayoutStabilityReportSet {
+	metricRefresh: LayoutStabilityReport
+	topologyChange: LayoutStabilityReport
+}
+
 declare global {
 	interface Window {
 		__smBench?: {
@@ -60,6 +75,7 @@ declare global {
 				metricRefreshes?: number
 				topologyChanges?: number
 			}) => Promise<ReactRenderReport>
+			runStability: (opts?: { settleMs?: number }) => Promise<LayoutStabilityReportSet>
 		}
 	}
 }
@@ -219,4 +235,48 @@ test("low-traffic filter actually removes edges from the DOM", async ({ page }) 
 
 	expect(filteredEdges, "filtered graph has fewer edges").toBeLessThan(baselineEdges)
 	expect(filteredEdges, "filtered graph still has edges").toBeGreaterThan(0)
+})
+
+test("the graph holds still across refreshes and stays anchored across topology changes", async ({
+	page,
+}, testInfo) => {
+	await page.goto(BENCH_URL)
+	await page.waitForFunction(() => window.__smBench?.ready === true, undefined, { timeout: 60_000 })
+
+	// The harness waits for positions to go quiet rather than for a fixed delay:
+	// ELK's cost swings by more than an order of magnitude across machines (a
+	// two-node graph took 19s to lay out on one container here), and a fixed delay
+	// silently samples the intermediate layout and calls it settled.
+	const stability = await page.evaluate(() => window.__smBench!.runStability({ settleMs: 45_000 }))
+	console.log("[perf] stability:", JSON.stringify(stability))
+	testInfo.annotations.push({ type: "perf-stability", description: JSON.stringify(stability) })
+
+	// Guard the measurement itself: an empty or still-moving sample would pass
+	// every assertion below without testing anything.
+	expect(stability.metricRefresh.sampled, "nodes sampled across a metric refresh").toBeGreaterThan(50)
+	expect(stability.topologyChange.sampled, "nodes surviving a topology change").toBeGreaterThan(50)
+	expect(stability.metricRefresh.settled, "layout settled after a metric refresh").toBe(true)
+	expect(stability.topologyChange.settled, "layout settled after a topology change").toBe(true)
+
+	// A metric refresh changes node DATA only — same services, same edges. It has
+	// no business moving anything, so this is an exact-zero gate, not a threshold.
+	// This is the assertion the harness was missing: every frame-timing metric
+	// stayed green through the regressions that made the map visibly jump.
+	expect(stability.metricRefresh.moved, "nodes moved by a metric refresh").toBe(0)
+	expect(stability.metricRefresh.viewportDelta, "camera moved by a metric refresh").toBeLessThan(1)
+	expect(stability.metricRefresh.zoomDelta, "camera zoomed by a metric refresh").toBeLessThan(0.01)
+
+	// A topology change earns a fresh layout, but surviving nodes should land near
+	// where they were rather than being re-scattered.
+	//
+	// Read these as regression rails, not a target. The bench's topology change
+	// REGENERATES the graph at 121 services / 401 edges from the seeded RNG rather
+	// than adding one edge to the existing one, so nearly every edge is redrawn —
+	// a deliberate worst case, well beyond the single-edge delta a sliding time
+	// window produces in the product. Measured on this graph: mean 1615 / max 5108
+	// before layout anchoring, mean 928 / max 2784 after. The rails sit above the
+	// anchored numbers and well below the unanchored ones, so losing the anchor
+	// fails here even though every frame-timing metric would stay green.
+	expect(stability.topologyChange.meanDisplacement, "mean node displacement").toBeLessThan(1200)
+	expect(stability.topologyChange.maxDisplacement, "max node displacement").toBeLessThan(3500)
 })

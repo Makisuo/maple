@@ -572,6 +572,7 @@ function findConnectedComponents(nodes: Node<ServiceNodeData>[], edges: Edge<Ser
 function computeLayers(
 	nodes: Node<ServiceNodeData>[],
 	edges: Edge<ServiceEdgeData>[],
+	previous?: PreviousPositions,
 ): Map<string, { layer: number; indexInLayer: number; layerSize: number }> {
 	const adjacency = new Map<string, string[]>()
 	const reverseAdj = new Map<string, string[]>()
@@ -693,6 +694,37 @@ function computeLayers(
 		}
 	}
 
+	// Anchor in-layer order to the layout already on screen. Barycenter order is
+	// a function of the whole edge set, so adding or dropping one edge could
+	// reshuffle a column and move every node in it. Nodes the previous layout
+	// didn't have keep their barycenter position relative to the ones it did.
+	if (previous) {
+		for (const group of layerGroups.values()) {
+			const priorY = new Map<string, number>()
+			for (const id of group) {
+				const at = previous.get(id)
+				if (at) priorY.set(id, at.y)
+			}
+			if (priorY.size < 2) continue
+			const baryIndex = new Map(group.map((id, i) => [id, i]))
+			// Known nodes sort by where they were; unknown ones interpolate from
+			// their barycenter neighbours so they land in a sensible gap.
+			const sortKey = (id: string): number => {
+				const known = priorY.get(id)
+				if (known !== undefined) return known
+				const i = baryIndex.get(id) ?? 0
+				for (let step = 1; step < group.length; step++) {
+					const before = priorY.get(group[i - step] ?? "")
+					if (before !== undefined) return before + 0.5
+					const after = priorY.get(group[i + step] ?? "")
+					if (after !== undefined) return after - 0.5
+				}
+				return 0
+			}
+			group.sort((a, b) => sortKey(a) - sortKey(b) || (baryIndex.get(a) ?? 0) - (baryIndex.get(b) ?? 0))
+		}
+	}
+
 	const result = new Map<string, { layer: number; indexInLayer: number; layerSize: number }>()
 	for (const [layer, group] of layerGroups) {
 		for (let i = 0; i < group.length; i++) {
@@ -719,10 +751,26 @@ export function topologyKey(nodes: Node[], edges: Edge[]): string {
  * Compute node positions using pure hierarchical layout, ignoring namespaces.
  * Positions are deterministic: same input always produces same output.
  */
+/** A layout already on screen, used to keep a re-layout anchored to it. */
+export type PreviousPositions = ReadonlyMap<string, { x: number; y: number }>
+
+/** Median previous Y of the members a previous layout knew, or undefined. */
+function priorCentroidY(ids: string[], previous: PreviousPositions): number | undefined {
+	const ys: number[] = []
+	for (const id of ids) {
+		const at = previous.get(id)
+		if (at) ys.push(at.y)
+	}
+	if (ys.length === 0) return undefined
+	ys.sort((a, b) => a - b)
+	return ys[Math.floor(ys.length / 2)]
+}
+
 export function computeFlatPositions(
 	nodes: Node<ServiceNodeData>[],
 	edges: Edge<ServiceEdgeData>[],
 	config: LayoutConfig = DEFAULT_LAYOUT_CONFIG,
+	previous?: PreviousPositions,
 ): Map<string, { x: number; y: number }> {
 	if (nodes.length === 0) return new Map<string, { x: number; y: number }>()
 
@@ -756,6 +804,22 @@ export function computeFlatPositions(
 		}
 	}
 
+	// Stack components in the vertical order they already had. `findConnectedComponents`
+	// returns them in graph-traversal order, so a single added or dropped edge could
+	// merge, split or re-rank components and slide every one of them up or down the
+	// canvas. Components the previous layout didn't know keep their traversal order,
+	// after the ones it did.
+	if (previous) {
+		const rank = new Map<string[], number>()
+		for (const comp of connectedComponents) {
+			rank.set(comp, priorCentroidY(comp, previous) ?? Number.POSITIVE_INFINITY)
+		}
+		const traversalOrder = new Map(connectedComponents.map((c, i) => [c, i]))
+		connectedComponents.sort(
+			(a, b) => rank.get(a)! - rank.get(b)! || traversalOrder.get(a)! - traversalOrder.get(b)!,
+		)
+	}
+
 	let currentYOffset = 0
 	const nodeById = new Map(nodes.map((n) => [n.id, n]))
 
@@ -767,7 +831,7 @@ export function computeFlatPositions(
 		const componentSet = new Set(component)
 		const compEdges = edges.filter((e) => componentSet.has(e.source) && componentSet.has(e.target))
 
-		const layers = computeLayers(compNodes, compEdges)
+		const layers = computeLayers(compNodes, compEdges, previous)
 
 		let maxLayerSize = 0
 		for (const { layerSize } of layers.values()) {
@@ -829,18 +893,19 @@ export function computeNodePositions(
 	nodes: Node<ServiceNodeData>[],
 	edges: Edge<ServiceEdgeData>[],
 	config: LayoutConfig = DEFAULT_LAYOUT_CONFIG,
+	previous?: PreviousPositions,
 ): Map<string, { x: number; y: number }> {
 	if (nodes.length === 0) return new Map<string, { x: number; y: number }>()
 
 	const hasNamespaces = nodes.some((n) => nodeNamespace(n) !== undefined)
-	if (!hasNamespaces) return computeFlatPositions(nodes, edges, config)
+	if (!hasNamespaces) return computeFlatPositions(nodes, edges, config, previous)
 
 	const { nodeHeight, layerGapX, nodeGapY } = config
 	const cellHeight = nodeHeight + nodeGapY
 
 	// One global layering over the WHOLE graph → shared column (x) per node, plus a
 	// crossing-minimized within-column order (indexInLayer) we reuse inside lanes.
-	const layers = computeLayers(nodes, edges)
+	const layers = computeLayers(nodes, edges, previous)
 
 	// Partition into one lane per namespace + an ungrouped lane (db nodes and
 	// namespace-less services).
@@ -890,8 +955,26 @@ export function computeNodePositions(
 		return laneHeight
 	}
 
+	// Lanes are alphabetical by default; with a previous layout, keep them in the
+	// vertical order the user last saw so a renamed or newly-appearing namespace
+	// doesn't push every other lane down the canvas.
+	const laneOrder = Array.from(lanes.keys()).sort()
+	if (previous) {
+		const rank = new Map<string, number>()
+		for (const ns of laneOrder) {
+			rank.set(
+				ns,
+				priorCentroidY(
+					lanes.get(ns)!.map((n) => n.id),
+					previous,
+				) ?? Number.POSITIVE_INFINITY,
+			)
+		}
+		laneOrder.sort((a, b) => rank.get(a)! - rank.get(b)! || a.localeCompare(b))
+	}
+
 	let yOffset = 0
-	for (const ns of Array.from(lanes.keys()).sort()) {
+	for (const ns of laneOrder) {
 		const laneTop = yOffset + NS_LABEL_HEIGHT + NS_PADDING_Y
 		const laneHeight = placeLane(lanes.get(ns)!, laneTop)
 		yOffset = laneTop + laneHeight + NS_PADDING_Y + NS_CLUSTER_GAP

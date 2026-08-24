@@ -124,6 +124,16 @@ type QueryError = WarehouseApiError | BackendError
 type QueryEffect<Input, Output> = (input: Input) => Effect.Effect<Output, QueryError, never>
 
 interface QueryAtomOptions {
+	/**
+	 * Idle TTL in ms, applied via `Atom.setIdleTTL` — how long the atom's result
+	 * survives after the LAST unmount, so a back-navigation re-renders from cache
+	 * instead of refetching.
+	 *
+	 * NOT a freshness window despite the name: a mounted atom never refetches on
+	 * this timer, and lowering it does not make data fresher — it only shortens
+	 * the window in which returning to a page is free. Tune it to how long a
+	 * user's round trip away from the page tends to be.
+	 */
 	staleTime?: number
 }
 
@@ -528,22 +538,31 @@ export const getQueryBuilderBreakdownResultAtom = makeQueryAtomFamily(getQueryBu
 	staleTime: 30_000,
 })
 
+// The service-map family carries the page's heaviest queries — the bundle alone
+// fans out to five warehouse queries, over projections that prune poorly inside
+// a day partition. `staleTime` here is an IDLE TTL (see `Atom.setIdleTTL` above),
+// not a freshness window: a mounted atom never refetches on its own, so this only
+// governs how long a disposed atom survives for a back-navigation. At 15s,
+// stepping into a trace and returning re-ran the whole map. Service topology
+// moves slowly; 2 minutes covers a normal drill-down round trip.
+const SERVICE_MAP_IDLE_TTL = 120_000
+
 export const getServiceMapBundleResultAtom = makeQueryAtomFamily(getServiceMapBundle, {
-	staleTime: 15_000,
+	staleTime: SERVICE_MAP_IDLE_TTL,
 })
 
 // Service-detail Dependencies tab bundle: service edges + DB edges + external
 // edges in one fetch (replaces the three separate *ForService atoms).
 export const getServiceDependenciesBundleResultAtom = makeQueryAtomFamily(getServiceDependenciesBundle, {
-	staleTime: 15_000,
+	staleTime: SERVICE_MAP_IDLE_TTL,
 })
 
 export const getServiceMapCloudflareResultAtom = makeQueryAtomFamily(getServiceMapCloudflare, {
-	staleTime: 15_000,
+	staleTime: SERVICE_MAP_IDLE_TTL,
 })
 
 export const getServiceMapPlanetScaleResultAtom = makeQueryAtomFamily(getServiceMapPlanetScale, {
-	staleTime: 15_000,
+	staleTime: SERVICE_MAP_IDLE_TTL,
 })
 
 export const planetscaleInfraTimeseriesResultAtom = makeQueryAtomFamily(getPlanetScaleInfraTimeseries, {
