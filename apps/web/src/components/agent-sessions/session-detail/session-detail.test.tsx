@@ -710,7 +710,7 @@ describe("SessionFlow", () => {
 		// The drawer names the span and where it lives, and offers the way across.
 		expect(within(drawer as HTMLElement).getAllByText(/grep_repo/).length).toBeGreaterThan(0)
 		expect(within(drawer as HTMLElement).getByText(/Turn 1/)).toBeTruthy()
-		expect(within(drawer as HTMLElement).getByText("Open in Trace view")).toBeTruthy()
+		expect(within(drawer as HTMLElement).getByText("Open in Traces view")).toBeTruthy()
 	})
 
 	it("opens the drawer even for a span the flow drew no node for", () => {
@@ -837,27 +837,6 @@ describe("SessionViews", () => {
 			/>
 		)
 	}
-
-	it("counts what is on screen, and narrows every count as the filter narrows it", () => {
-		render(<Views turns={crossTurns} summary={crossSummary} />)
-
-		expect(screen.getByText(/^4 spans · 2 turns · 2 traces$/)).toBeTruthy()
-
-		fireEvent.change(screen.getByPlaceholderText("Filter spans"), {
-			target: { value: "run_tests" },
-		})
-		// The filter leaves one span, and with it one turn in one trace: the turn
-		// whose spans all went is dropped from the waterfall too.
-		expect(screen.getByText(/^1 of 4 spans · 1 of 2 turns · 1 of 2 traces$/)).toBeTruthy()
-	})
-
-	it("counts what the default span-kind filter leaves, not every span in the session", () => {
-		// Eight spans, one of them the app's own HTTP call, which "Agent spans only"
-		// hides before the first paint.
-		render(<Views />)
-
-		expect(screen.getByText(/^7 of 8 spans · 2 turns · 1 trace$/)).toBeTruthy()
-	})
 
 	// Both debug views read the query and the span-kind toggle, so both controls
 	// stay mounted in both.

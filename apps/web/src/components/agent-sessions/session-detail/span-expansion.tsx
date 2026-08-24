@@ -56,6 +56,7 @@ export function SpanExpansion({
 	tabsInHeader = false,
 	tab,
 	onTabChange,
+	toolResults,
 }: {
 	span: AiSessionSpan
 	/** Rendered above the tabs; receives the tab strip when `tabsInHeader`. */
@@ -66,9 +67,12 @@ export function SpanExpansion({
 	 *  spans and views; `undefined` means none made yet — pick by content. */
 	tab: SpanDetailTab | undefined
 	onTabChange: (tab: SpanDetailTab) => void
+	/** The session's captured tool results by call id (`sessionToolResults`),
+	 *  so each call shows its response even when another span reported it. */
+	toolResults?: ReadonlyMap<string, string>
 }) {
 	const messages = useMemo(() => spanMessages(span), [span])
-	const toolCalls = useMemo(() => spanToolCalls(span), [span])
+	const toolCalls = useMemo(() => spanToolCalls(span, toolResults), [span, toolResults])
 
 	// Until the reader picks a tab, each span opens on its own payload: an
 	// errored span on its error, a model call on its messages, a tool call on
@@ -131,22 +135,30 @@ export function SpanExpansion({
 	)
 }
 
-/** The inline form the Trace view mounts under the selected row. */
+/** The inline form the Traces view mounts under the selected row. */
 export function SpanInlineDetail({
 	span,
 	tab,
 	onTabChange,
+	toolResults,
 }: {
 	span: AiSessionSpan
 	tab: SpanDetailTab | undefined
 	onTabChange: (tab: SpanDetailTab) => void
+	toolResults?: ReadonlyMap<string, string>
 }) {
 	return (
 		<div
 			data-slot="span-inline-detail"
 			className="border-primary border-l-2 border-border border-b bg-card/40 py-2 pr-3 pl-6"
 		>
-			<SpanExpansion key={span.spanId} span={span} tab={tab} onTabChange={onTabChange} />
+			<SpanExpansion
+				key={span.spanId}
+				span={span}
+				tab={tab}
+				onTabChange={onTabChange}
+				toolResults={toolResults}
+			/>
 		</div>
 	)
 }
@@ -157,6 +169,7 @@ export function SpanDrawer({
 	turnOrdinal,
 	tab,
 	onTabChange,
+	toolResults,
 	onClose,
 	onOpenTraceView,
 }: {
@@ -165,8 +178,9 @@ export function SpanDrawer({
 	turnOrdinal: string | undefined
 	tab: SpanDetailTab | undefined
 	onTabChange: (tab: SpanDetailTab) => void
+	toolResults?: ReadonlyMap<string, string>
 	onClose: () => void
-	/** Switch to the Trace view with this span still selected. */
+	/** Switch to the Traces view with this span still selected. */
 	onOpenTraceView: () => void
 }) {
 	const category = classifyAiSpan(span)
@@ -185,6 +199,7 @@ export function SpanDrawer({
 				span={span}
 				tab={tab}
 				onTabChange={onTabChange}
+				toolResults={toolResults}
 				tabsInHeader
 				header={(tabs) => (
 					<div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 bg-background py-2">
@@ -206,7 +221,7 @@ export function SpanDrawer({
 								className="h-6.5 text-xs"
 								onClick={onOpenTraceView}
 							>
-								Open in Trace view
+								Open in Traces view
 							</Button>
 							<Button
 								variant="ghost"

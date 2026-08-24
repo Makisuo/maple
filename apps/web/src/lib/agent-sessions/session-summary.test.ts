@@ -312,7 +312,7 @@ describe("buildSessionSummary — cache accounting", () => {
 		expect(summary.tokens.total).toBe(2100)
 	})
 
-	it("leaves the cache out of the total for OpenAI, whose prompt count contains it", () => {
+	it("carves the cache out of the prompt for OpenAI, whose prompt count contains it", () => {
 		const summary = summarize([
 			llmSpan({
 				spanId: "a",
@@ -322,9 +322,12 @@ describe("buildSessionSummary — cache accounting", () => {
 			}),
 		])
 
-		// The buckets stay for the legend; only the total refuses to double them.
+		// `input` is the uncached prompt after normalisation, so the disjoint
+		// buckets sum to the billed total instead of double-counting the cache.
 		expect(summary.tokens.total).toBe(1100)
+		expect(summary.tokens.input).toBe(0)
 		expect(summary.tokens.cacheRead).toBe(900)
+		expect(summary.tokens.cacheWrite).toBe(100)
 	})
 
 	it("treats an unnamed provider as inclusive, the convention most of them follow", () => {
@@ -352,10 +355,12 @@ describe("buildSessionSummary — cache accounting", () => {
 		expect(summary.tokens.total).toBe(1100)
 	})
 
-	it("prices a roll-up's residual under the span that reported it", () => {
+	it("subtracts a roll-up's children bucket by bucket, in normalised buckets", () => {
 		const summary = summarize([
-			// The wrapper's own figures are Anthropic's, so the part of them no child
-			// claimed is Anthropic's too — 200 + 60 + 20, not 200 + 20.
+			// The wrapper reports exclusively (Anthropic), the child inclusively
+			// (unnamed). Both are normalised before the subtraction, so the child's
+			// uncached 60 comes off the wrapper's uncached 300 — and the session
+			// total equals the wrapper's own claim of 300 + 100 + 30.
 			agentSpan({
 				spanId: "agent",
 				startMs: 0,
@@ -376,7 +381,7 @@ describe("buildSessionSummary — cache accounting", () => {
 			}),
 		])
 
-		expect(summary.tokens.total).toBe(280 + 110)
+		expect(summary.tokens.total).toBe(430)
 		expect(summary.tokens.input).toBe(300)
 		expect(summary.tokens.cacheRead).toBe(100)
 	})

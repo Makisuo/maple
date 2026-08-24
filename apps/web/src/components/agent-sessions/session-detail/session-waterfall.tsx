@@ -50,7 +50,7 @@ const COL_SPAN = "w-[398px] max-w-[46%] min-w-0 shrink-0 flex items-center gap-1
 const COL_MODEL = "hidden w-[150px] shrink-0 truncate px-2 text-muted-foreground @3xl:block"
 /** Rows are fixed-height, so the cell truncates rather than wrapping into the row below. */
 const COL_TOKENS =
-	"hidden w-[104px] shrink-0 truncate px-2 text-right tabular-nums text-muted-foreground @3xl:block"
+	"hidden w-[132px] shrink-0 truncate px-2 text-right tabular-nums text-muted-foreground @3xl:block"
 /** A margin, not padding: the bars inside position in percent, which resolves
  *  against the padding box and would ignore padding entirely. */
 const COL_AXIS = "relative ml-3 min-w-0 flex-1 self-stretch"
@@ -86,6 +86,8 @@ interface SessionWaterfallProps {
 	/** The expansion's tab, shared with the Flow view's drawer. */
 	spanTab: SpanDetailTab | undefined
 	onSpanTabChange: (tab: SpanDetailTab) => void
+	/** The session's captured tool results by call id, for the expansion. */
+	toolResults?: ReadonlyMap<string, string>
 }
 
 export function SessionWaterfall({
@@ -100,6 +102,7 @@ export function SessionWaterfall({
 	onSelectSpan,
 	spanTab,
 	onSpanTabChange,
+	toolResults,
 }: SessionWaterfallProps) {
 	// The page scrolls as one, so the virtualizer rides the page's scroller.
 	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
@@ -182,7 +185,7 @@ export function SessionWaterfall({
 				<div className="flex h-7 items-center border-border border-b px-2.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
 					<span className={COL_SPAN}>Span</span>
 					<span className={COL_MODEL}>Model / target</span>
-					<span className={COL_TOKENS}>Tokens</span>
+					<span className={COL_TOKENS}>Tokens In / Out</span>
 					<span className={cn(COL_AXIS, "flex items-center")}>
 						{ticks.map((tick, index) => (
 							<span
@@ -279,6 +282,7 @@ export function SessionWaterfall({
 											span={row.span}
 											tab={spanTab}
 											onTabChange={onSpanTabChange}
+											toolResults={toolResults}
 										/>
 									)}
 									{row.kind === "gap" && <GapRow gap={row.gap} />}
@@ -707,11 +711,10 @@ function clipTarget(value: string): string | undefined {
 }
 
 /**
- * `prompt → completion`, taken from the same total the header sums, so a row and
- * the session total can never tell different stories. The prompt half is the
- * residual rather than a sum of the input buckets: whether the cache buckets
- * belong inside `input` or beside it is the provider's convention, and the total
- * is where that convention has already been applied.
+ * `in → out`, taken from the same buckets the header sums, so a row and the
+ * session total can never tell different stories. The in half is everything the
+ * model read — fresh input plus both cache buckets — and the out half is what
+ * it wrote, reasoning included.
  */
 function spanTokens(span: AiSessionSpan): string {
 	if (!isLlmCall(span)) return "—"
