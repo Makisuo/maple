@@ -38,6 +38,13 @@ export const MAPLE_NATIVE_TURN_ID_ATTR = "maple.turn.id"
  * it is visible in raw span attributes.
  */
 export const MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR = "maple.genai.input_messages_dropped"
+/**
+ * Wall-clock milliseconds from request start to the terminal stream event —
+ * the model's actual latency. The span's own duration cannot carry this: the
+ * span stays open while downstream consumers (SSE, durable writes) drain the
+ * stream, so it systematically overstates the model. Write-only diagnostics.
+ */
+export const MAPLE_GENAI_MODEL_DURATION_MS_ATTR = "maple.genai.model_duration_ms"
 
 export interface AiFieldDef {
 	/** Primary source attribute key (the semconv key where one exists). */

@@ -5,10 +5,15 @@
  * shape does not render truncated, it vanishes.
  */
 import { MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR } from "@maple/domain/gen-ai"
-import { Message, ToolResultPart, type Model } from "@maple/llm"
+import { LLMResponse, Message, SystemPart, ToolResultPart, Usage, type Model } from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import { assert, describe, it } from "vitest"
-import { modelCallAttributes, semconvFinishReason, toolCallJson } from "./genai"
+import {
+	modelCallAttributes,
+	modelResponseAttributes,
+	semconvFinishReason,
+	toolCallJson,
+} from "./genai"
 
 const MODEL: Model = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model("@cf/test/model")
 
@@ -101,6 +106,62 @@ describe("toolCallJson", () => {
 		const cyclic: Record<string, unknown> = {}
 		cyclic.self = cyclic
 		assert.isObject(JSON.parse(toolCallJson(cyclic)))
+	})
+})
+
+describe("modelCallAttributes system instructions", () => {
+	it("emits the system prompt as a decodable part array", () => {
+		const attributes = modelCallAttributes(MODEL, [], IDENTITY, SystemPart.content("You are Maple."))
+
+		assert.deepEqual(JSON.parse(attributes["gen_ai.system_instructions"] as string), [
+			{ type: "text", content: "You are Maple." },
+		])
+	})
+
+	it("omits the attribute when the request has no system prompt", () => {
+		assert.notProperty(modelCallAttributes(MODEL, [], IDENTITY, []), "gen_ai.system_instructions")
+		assert.notProperty(modelCallAttributes(MODEL, [], IDENTITY), "gen_ai.system_instructions")
+	})
+
+	it("bounds an oversized system prompt while keeping the array shape", () => {
+		const attributes = modelCallAttributes(MODEL, [], IDENTITY, SystemPart.content("s".repeat(50_000)))
+		const json = attributes["gen_ai.system_instructions"] as string
+
+		assert.isBelow(json.length, 10_000)
+		// SAFETY: the builder under test emits exactly this part shape; the array
+		// and content assertions below fail loudly if it ever does not.
+		const parsed = JSON.parse(json) as Array<{ content: string }>
+		assert.isArray(parsed)
+		assert.include(parsed[0]!.content, "…[truncated]")
+	})
+})
+
+describe("modelResponseAttributes", () => {
+	const response = (usage: Usage | undefined, finishReason = "stop" as const) =>
+		new LLMResponse({ message: Message.assistant("hi"), events: [], usage, finishReason })
+
+	it("emits the cost OpenRouter's usage accounting reported", () => {
+		const attributes = modelResponseAttributes(
+			response(new Usage({ inputTokens: 100, providerMetadata: { openai: { cost: 0.0042 } } })),
+		)
+
+		assert.equal(attributes["gen_ai.usage.cost"], 0.0042)
+		assert.equal(attributes["gen_ai.usage.input_tokens"], 100)
+	})
+
+	it("emits no cost when the provider reported none", () => {
+		assert.notProperty(
+			modelResponseAttributes(response(new Usage({ inputTokens: 100 }))),
+			"gen_ai.usage.cost",
+		)
+		assert.notProperty(modelResponseAttributes(response(undefined)), "gen_ai.usage.cost")
+	})
+
+	it("emits cache writes under the semconv cache_write key", () => {
+		const attributes = modelResponseAttributes(response(new Usage({ cacheWriteInputTokens: 512 })))
+
+		assert.equal(attributes["gen_ai.usage.cache_write.input_tokens"], 512)
+		assert.notProperty(attributes, "gen_ai.usage.cache_creation.input_tokens")
 	})
 })
 

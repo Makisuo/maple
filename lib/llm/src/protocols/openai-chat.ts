@@ -118,6 +118,9 @@ const OpenAIChatUsage = Schema.Struct({
   prompt_tokens: Schema.optional(Schema.Number),
   completion_tokens: Schema.optional(Schema.Number),
   total_tokens: Schema.optional(Schema.Number),
+  // OpenRouter accounting (`usage: {include: true}`): credits spent on the call.
+  // Plain OpenAI never sends it. Surfaces via `Usage.providerMetadata.openai`.
+  cost: Schema.optional(Schema.Number),
   prompt_tokens_details: optionalNull(
     Schema.Struct({
       cached_tokens: Schema.optional(Schema.Number),

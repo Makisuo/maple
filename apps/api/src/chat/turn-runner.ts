@@ -185,10 +185,12 @@ const compactIfNeeded = (
 				// the prompt as the trailing user message, and the span should record
 				// what the model was actually sent.
 				attributes: {
-					...modelCallAttributes(model, request.messages, {
-						sessionId: input.sessionId,
-						turnId: input.messageId,
-					}),
+					...modelCallAttributes(
+						model,
+						request.messages,
+						{ sessionId: input.sessionId, turnId: input.messageId },
+						request.system,
+					),
 					"gen_ai.conversation.compacted": true,
 				},
 			}),

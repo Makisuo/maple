@@ -29,11 +29,12 @@
  */
 import {
 	MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR,
+	MAPLE_GENAI_MODEL_DURATION_MS_ATTR,
 	MAPLE_NATIVE_SESSION_ID_ATTR,
 	MAPLE_NATIVE_TURN_ID_ATTR,
 } from "@maple/domain/gen-ai"
-import { LLMResponse, type LLMEvent, type Message, type Model } from "@maple/llm"
-import { Effect } from "effect"
+import { LLMResponse, type LLMEvent, type Message, type Model, type SystemPart } from "@maple/llm"
+import { Clock, Effect } from "effect"
 import type { ChatTurnInput } from "./types"
 
 /** The two grouping ids every gen-ai span carries. */
@@ -71,6 +72,7 @@ const identityAttributes = (identity: GenAiIdentity): Record<string, unknown> =>
 const INPUT_MESSAGES_BUDGET = 20_000
 const OUTPUT_MESSAGES_BUDGET = 8_000
 const TOOL_JSON_BUDGET = 8_000
+const SYSTEM_INSTRUCTIONS_BUDGET = 8_000
 
 type SerializedPart =
 	| { readonly type: "text"; readonly content: string }
@@ -214,11 +216,25 @@ export const invokeAgentAttributes = (
 
 export const modelCallSpanName = (model: Model): string => `chat ${String(model.id)}`
 
+/**
+ * Semconv-shaped `gen_ai.system_instructions`: an array of `{type, content}`
+ * parts, bounded like the message lists (an agent system prompt can run long,
+ * and a degraded string would vanish at the read side's json decoder).
+ */
+const systemInstructionsJson = (system: ReadonlyArray<SystemPart>): string => {
+	const parts = system.map((part) => ({ type: "text", content: part.text }))
+	const json = JSON.stringify(parts)
+	if (json.length <= SYSTEM_INSTRUCTIONS_BUDGET) return json
+	const cap = Math.max(256, Math.floor(SYSTEM_INSTRUCTIONS_BUDGET / parts.length))
+	return JSON.stringify(parts.map((part) => ({ ...part, content: truncated(part.content, cap) })))
+}
+
 /** Attributes known at request time; the response half arrives via {@link annotateModelResponse}. */
 export const modelCallAttributes = (
 	model: Model,
 	messages: ReadonlyArray<Message>,
 	identity: GenAiIdentity,
+	system: ReadonlyArray<SystemPart> = [],
 ): Record<string, unknown> => {
 	const input = messagesJson(messages, INPUT_MESSAGES_BUDGET)
 	return {
@@ -226,6 +242,7 @@ export const modelCallAttributes = (
 		"gen_ai.provider.name": String(model.provider),
 		"gen_ai.request.model": String(model.id),
 		"gen_ai.input.messages": input.json,
+		...(system.length > 0 ? { "gen_ai.system_instructions": systemInstructionsJson(system) } : undefined),
 		...(input.dropped > 0 ? { [MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR]: input.dropped } : undefined),
 		...identityAttributes(identity),
 	}
@@ -239,35 +256,61 @@ export const modelCallAttributes = (
 export const semconvFinishReason = (reason: string): string =>
 	reason === "tool-calls" ? "tool_calls" : reason === "content-filter" ? "content_filter" : reason
 
-/** The response half of a model-call span: finish reason, usage, output. */
+/**
+ * The dollar cost the provider itself reported for the call, or nothing.
+ *
+ * OpenRouter is the only provider that prices per call in-band: with usage
+ * accounting on (see `withUsageAccounting` in `platform/Llm.ts`) the final
+ * usage object carries `cost` in credits (USD), which the vendored protocol
+ * passes through `providerMetadata.openai`. Maple never prices tokens itself —
+ * a price table would drift from the provider's actual billing.
+ */
+const reportedCost = (usage: LLMResponse["usage"]): number | undefined => {
+	const openai = usage?.providerMetadata?.["openai"]
+	if (typeof openai !== "object" || openai === null) return undefined
+	const cost = (openai as { readonly cost?: unknown }).cost
+	return typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : undefined
+}
+
+/**
+ * The response half of a model-call span, as a plain record. Exported for
+ * tests; production callers go through {@link annotateModelResponse}.
+ */
+export const modelResponseAttributes = (response: LLMResponse): Record<string, unknown> => {
+	const usage = response.usage
+	const cost = reportedCost(usage)
+	return {
+		"gen_ai.response.finish_reasons": [semconvFinishReason(response.finishReason)],
+		// A provider failure surfaced as a stream *event* completes the stream,
+		// so the span exit stays green — this attribute is the record of it.
+		...(response.finishReason === "error" ? { "error.type": "provider_error" } : undefined),
+		"gen_ai.output.messages": messagesJson([response.message], OUTPUT_MESSAGES_BUDGET).json,
+		...(usage?.inputTokens === undefined
+			? undefined
+			: { "gen_ai.usage.input_tokens": usage.inputTokens }),
+		...(usage?.outputTokens === undefined
+			? undefined
+			: { "gen_ai.usage.output_tokens": usage.outputTokens }),
+		...(usage?.cacheReadInputTokens === undefined
+			? undefined
+			: { "gen_ai.usage.cache_read.input_tokens": usage.cacheReadInputTokens }),
+		// The semconv spelling. The read side's primary is the older
+		// `cache_creation` key and decodes both (see `GENAI_SEMCONV_ALIASES`).
+		...(usage?.cacheWriteInputTokens === undefined
+			? undefined
+			: { "gen_ai.usage.cache_write.input_tokens": usage.cacheWriteInputTokens }),
+		...(usage?.reasoningTokens === undefined
+			? undefined
+			: { "gen_ai.usage.reasoning.output_tokens": usage.reasoningTokens }),
+		...(cost === undefined ? undefined : { "gen_ai.usage.cost": cost }),
+	}
+}
+
+/** The response half of a model-call span: finish reason, usage, output, cost. */
 export const annotateModelResponse = (response: LLMResponse): Effect.Effect<void> =>
 	// Suspended so building the attribute record — which serializes the output
 	// message — happens inside the returned Effect, not at call-site evaluation.
-	Effect.suspend(() => {
-		const usage = response.usage
-		return Effect.annotateCurrentSpan({
-			"gen_ai.response.finish_reasons": [semconvFinishReason(response.finishReason)],
-			// A provider failure surfaced as a stream *event* completes the stream,
-			// so the span exit stays green — this attribute is the record of it.
-			...(response.finishReason === "error" ? { "error.type": "provider_error" } : undefined),
-			"gen_ai.output.messages": messagesJson([response.message], OUTPUT_MESSAGES_BUDGET).json,
-			...(usage?.inputTokens === undefined
-				? undefined
-				: { "gen_ai.usage.input_tokens": usage.inputTokens }),
-			...(usage?.outputTokens === undefined
-				? undefined
-				: { "gen_ai.usage.output_tokens": usage.outputTokens }),
-			...(usage?.cacheReadInputTokens === undefined
-				? undefined
-				: { "gen_ai.usage.cache_read.input_tokens": usage.cacheReadInputTokens }),
-			...(usage?.cacheWriteInputTokens === undefined
-				? undefined
-				: { "gen_ai.usage.cache_creation.input_tokens": usage.cacheWriteInputTokens }),
-			...(usage?.reasoningTokens === undefined
-				? undefined
-				: { "gen_ai.usage.reasoning.output_tokens": usage.reasoningTokens }),
-		})
-	})
+	Effect.suspend(() => Effect.annotateCurrentSpan(modelResponseAttributes(response)))
 
 /**
  * Annotate the current model-call span from the events collected so far.
@@ -279,6 +322,46 @@ export const annotateModelCallEnd = (events: ReadonlyArray<LLMEvent>): Effect.Ef
 	Effect.suspend(() => {
 		const response = LLMResponse.fromEvents(events)
 		return response ? annotateModelResponse(response) : Effect.void
+	})
+
+/**
+ * Per-attempt clock for the two timings the span itself cannot carry.
+ *
+ * The span's wall clock covers the whole stream lifetime — including the SSE
+ * frames and durable writes that *consume* the model's output — so it
+ * systematically overstates the model. These two attributes are the honest
+ * numbers: request start → first provider frame (`time_to_first_chunk`,
+ * seconds, the key the session view's occupancy bar reads), and request start
+ * → terminal event (model duration, milliseconds).
+ */
+export interface ModelCallTiming {
+	readonly startedMs: number
+	firstChunkMs: number | undefined
+}
+
+/**
+ * Annotate the current model-call span as events arrive: TTFT on the first
+ * provider frame (`step-start` is emitted while processing that frame, never
+ * before the network, so the first event of any type is the first byte), the
+ * model's own duration on the terminal event.
+ */
+export const annotateModelCallTiming = (
+	timing: ModelCallTiming,
+	event: LLMEvent,
+): Effect.Effect<void> =>
+	Effect.suspend(() => {
+		const first = timing.firstChunkMs === undefined
+		const terminal = event.type === "finish" || event.type === "provider-error"
+		if (!first && !terminal) return Effect.void
+		return Effect.flatMap(Clock.currentTimeMillis, (now) => {
+			if (first) timing.firstChunkMs = now
+			return Effect.annotateCurrentSpan({
+				...(first
+					? { "gen_ai.response.time_to_first_chunk": (now - timing.startedMs) / 1000 }
+					: undefined),
+				...(terminal ? { [MAPLE_GENAI_MODEL_DURATION_MS_ATTR]: now - timing.startedMs } : undefined),
+			})
+		})
 	})
 
 /**

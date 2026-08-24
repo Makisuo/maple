@@ -195,6 +195,9 @@ describe("legacy aliases", () => {
 		// `gen_ai.usage.reasoning_tokens`, which is not, and so is not mapped.
 		["gen_ai.usage.output_tokens.reasoning", "704", "usageReasoningOutputTokens", 704],
 		["gen_ai.usage.input_tokens.cached", "2048", "usageCacheReadInputTokens", 2048],
+		// The registry spelling, not a deprecation: semconv says `cache_write`
+		// where the catalog's primary keeps the Anthropic-era `cache_creation`.
+		["gen_ai.usage.cache_write.input_tokens", "512", "usageCacheCreationInputTokens", 512],
 	]
 
 	for (const [key, value, field, expected] of cases) {
