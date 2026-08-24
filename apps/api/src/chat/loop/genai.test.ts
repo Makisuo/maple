@@ -146,6 +146,19 @@ describe("modelCallAttributes request parameters", () => {
 		assert.isFalse(attributes["gen_ai.request.stream"])
 		assert.notProperty(attributes, "gen_ai.request.max_tokens")
 		assert.notProperty(attributes, "gen_ai.request.reasoning.level")
+		assert.notProperty(attributes, "gen_ai.workflow.name")
+	})
+
+	it("stamps the workflow name on model-call spans, not just the agent root", () => {
+		// Cost and token usage live on the chat spans, so a workflow filter in
+		// the warehouse must reach them, not only the invoke_agent span.
+		const attributes = modelCallAttributes(
+			requestOf(),
+			{ ...IDENTITY, workflowName: "investigation" },
+			{ stream: true },
+		)
+
+		assert.equal(attributes["gen_ai.workflow.name"], "investigation")
 	})
 })
 
@@ -264,8 +277,8 @@ describe("invokeAgentAttributes", () => {
 		const attributes = invokeAgentAttributes(
 			{ name: "planner", description: "Plans the investigation." },
 			MODEL,
-			IDENTITY,
-			{ tools: [definition("search_traces")], workflowName: "investigation" },
+			{ ...IDENTITY, workflowName: "investigation" },
+			{ tools: [definition("search_traces")] },
 		)
 
 		assert.equal(attributes["gen_ai.agent.description"], "Plans the investigation.")

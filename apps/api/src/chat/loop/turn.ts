@@ -269,9 +269,6 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 				Stream.withSpan(invokeAgentSpanName(agent.name), {
 					attributes: invokeAgentAttributes(agent, input.model, genAiIdentityOf(input), {
 						tools: request.tools,
-						...(input.genAiWorkflowName === undefined
-							? undefined
-							: { workflowName: input.genAiWorkflowName }),
 					}),
 				}),
 			)

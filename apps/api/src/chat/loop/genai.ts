@@ -45,10 +45,12 @@ import {
 import { Clock, Effect } from "effect"
 import type { ChatTurnInput } from "./types"
 
-/** The two grouping ids every gen-ai span carries. */
+/** The grouping ids every gen-ai span carries. */
 export interface GenAiIdentity {
 	readonly sessionId: string
 	readonly turnId: string
+	/** Names the workflow the turn runs inside (`investigation`); attended chat has none. */
+	readonly workflowName?: string
 }
 
 /**
@@ -61,11 +63,15 @@ export interface GenAiIdentity {
 export const genAiIdentityOf = (input: ChatTurnInput): GenAiIdentity => ({
 	sessionId: input.genAiSessionId ?? input.sessionId,
 	turnId: input.messageId,
+	...(input.genAiWorkflowName === undefined ? undefined : { workflowName: input.genAiWorkflowName }),
 })
 
 const identityAttributes = (identity: GenAiIdentity): Record<string, unknown> => ({
 	[MAPLE_NATIVE_SESSION_ID_ATTR]: identity.sessionId,
 	[MAPLE_NATIVE_TURN_ID_ATTR]: identity.turnId,
+	// On every span, not just the agent root: cost and token usage live on the
+	// `chat` spans, so a `gen_ai.workflow.name` filter must reach them too.
+	...(identity.workflowName === undefined ? undefined : { "gen_ai.workflow.name": identity.workflowName }),
 })
 
 /**
@@ -255,18 +261,15 @@ export const invokeAgentAttributes = (
 	identity: GenAiIdentity,
 	options: {
 		readonly tools?: ReadonlyArray<ToolDefinition>
-		/** Names the workflow the turn runs inside (`investigation`); attended chat has none. */
-		readonly workflowName?: string
 	} = {},
 ): Record<string, unknown> => ({
 	"gen_ai.operation.name": "invoke_agent",
 	"gen_ai.agent.name": agent.name,
-	// Bounded: hypothesis agents put planner-written text here, the one
+	// Bounded: hypothesis agents put planner-written text there, the one
 	// description with no length guarantee.
 	...(agent.description === undefined || agent.description === ""
 		? undefined
 		: { "gen_ai.agent.description": truncated(agent.description, AGENT_DESCRIPTION_BUDGET) }),
-	...(options.workflowName === undefined ? undefined : { "gen_ai.workflow.name": options.workflowName }),
 	"gen_ai.provider.name": String(model.provider),
 	"gen_ai.request.model": String(model.id),
 	...(options.tools === undefined || options.tools.length === 0
