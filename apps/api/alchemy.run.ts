@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Output from "alchemy/Output"
+import * as RemovalPolicy from "alchemy/RemovalPolicy"
 import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -86,20 +87,24 @@ export const createReplayBlobStore = ({ stage }: { stage: MapleStage }) =>
 		// the row must disappear before the object does. The other way round
 		// leaves a session that lists as recorded but plays back empty, which is
 		// the one failure mode with no good client-side handling.
+		// NO `locationHint`. It is tempting — the gateway runs in us-east-1 and the
+		// bucket sits in `wnam`, so every PUT takes a cross-continent hop on a
+		// synchronous write path. It was tried on 2026-08-24 and must not be tried
+		// again this way, for two independent reasons:
+		//
+		//  1. It did not work. R2 treats the hint as advisory; the bucket came back
+		//     `wnam` regardless, so the hop is still there and nothing was gained.
+		//  2. Changing it is a REPLACE, and `name` is pinned, so both generations
+		//     claim the same bucket. Alchemy replaces create-first and the R2
+		//     provider sets no `deleteFirst`, so garbage collection then deletes the
+		//     surviving bucket by name. It only failed safe because the gateway had
+		//     already written objects into it and R2 refused with `BucketNotEmpty` —
+		//     which took the prd deploy red instead of destroying recordings.
+		//
+		// If colocation is ever worth pursuing, do it as a NEW bucket under a new
+		// name with a dual-read window, never as a replace of this one.
 		const bucket = yield* Cloudflare.R2.Bucket("replay-blobs", {
 			name: bucketName,
-			// Colocated with the ingest gateway, which runs in us-east-1
-			// (`resolveAwsRegion` maps the `us` MapleRegion there). Left unset, R2
-			// picked `wnam` from wherever the creating API call originated, putting
-			// every PUT on a cross-continent hop — and the write path is synchronous
-			// on the ingest request (object first, row second), at ~60 objects per
-			// session and 267 for the largest org.
-			//
-			// This is a REPLACE, not an update: changing it destroys and recreates
-			// the bucket. Safe only while the bucket is empty, which it is until a
-			// stage first passes `stageEnablesReplayBlobs`. After that, changing
-			// this line deletes recordings.
-			locationHint: "enam",
 			// Deliberately unprefixed, so the rule covers whatever key scheme is
 			// current. `replay_object_key` is versioned (`v1/…`) precisely so a
 			// format change can write under a new prefix while the old one ages
@@ -113,7 +118,12 @@ export const createReplayBlobStore = ({ stage }: { stage: MapleStage }) =>
 					deleteObjectsTransition: { condition: { type: "Age", maxAge: 32 * 24 * 60 * 60 } },
 				},
 			],
-		})
+			// This bucket holds customer session recordings; no stack operation
+			// should ever be able to delete it. `retain` also drains the old
+			// generation of a replacement from state WITHOUT issuing the physical
+			// delete (`retainOldGeneration` in alchemy's `collectGarbage`), which is
+			// what unwedges a half-applied replace — see the note above.
+		}).pipe(RemovalPolicy.retain())
 
 		if (!stageEnablesReplayBlobs(stage)) {
 			// Bucket still exists and stays bound, so any objects written before the
