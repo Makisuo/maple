@@ -177,16 +177,28 @@ describe("initial checkpoint on start", () => {
 	// user typing `maple checkpoint`, so an unclean shutdown left `maple start`
 	// with only one honest remedy — wipe the store. That was the CLI's largest
 	// source of real errors, and every one was someone losing their telemetry.
-	it("takes one when the store has never been checkpointed", () => {
-		strictEqual(needsInitialCheckpoint({ available: false, reason: "none" }), true)
+	it("takes one when a store with data has never been checkpointed", () => {
+		strictEqual(needsInitialCheckpoint({ available: false, reason: "none" }, true), true)
+	})
+
+	// Backing up an empty store yields a checkpoint that restores to nothing —
+	// `maple start --reset` wearing a kinder word — at the cost of a BACKUP on
+	// every first run. It would also have broken the crash-recovery probe, which
+	// builds its fixture on a fresh store and asserts exactly one sealed
+	// checkpoint.
+	it("does not back up a store that holds nothing yet", () => {
+		strictEqual(needsInitialCheckpoint({ available: false, reason: "none" }, false), false)
 	})
 
 	it("never takes a second one", () => {
 		strictEqual(
-			needsInitialCheckpoint({
-				available: true,
-				checkpointId: parseCheckpointId("00000000-0000-4000-8000-000000000000"),
-			}),
+			needsInitialCheckpoint(
+				{
+					available: true,
+					checkpointId: parseCheckpointId("00000000-0000-4000-8000-000000000000"),
+				},
+				true,
+			),
 			false,
 		)
 	})
@@ -195,11 +207,10 @@ describe("initial checkpoint on start", () => {
 	// and `maple restore` reports that state deliberately.
 	it("leaves an unusable registry alone rather than papering over it", () => {
 		strictEqual(
-			needsInitialCheckpoint({
-				available: false,
-				reason: "unusable",
-				detail: "checkpoint backup size mismatch",
-			}),
+			needsInitialCheckpoint(
+				{ available: false, reason: "unusable", detail: "checkpoint backup size mismatch" },
+				true,
+			),
 			false,
 		)
 	})

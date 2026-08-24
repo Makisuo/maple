@@ -333,15 +333,39 @@ const BACKGROUND_READY_ATTEMPTS = 100
 const BACKGROUND_READY_TIMEOUT_MS = BACKGROUND_READY_POLL_MS * BACKGROUND_READY_ATTEMPTS
 
 /**
- * Should `maple start` take an opening checkpoint? Only ever the first one.
+ * Should `maple start` take an opening checkpoint? Only ever the first one, and
+ * only for a store that actually holds something.
  *
  * A store that already has a checkpoint — and one whose registry is present but
  * *unusable* — is one the user is already managing. Taking another on every
  * start would be a background BACKUP nobody asked for, and overwriting an
  * unusable registry would destroy the evidence of why it broke.
+ *
+ * `hasLiveData` is what keeps this honest. Backing up an empty store produces a
+ * checkpoint that restores to nothing, which is `maple start --reset` wearing a
+ * kinder word — it would cost a BACKUP on every first run and buy the user no
+ * data back. The case worth protecting is the store that already has telemetry
+ * and has never been checkpointed, which is every existing install on the first
+ * start after upgrading.
  */
-export const needsInitialCheckpoint = (availability: CheckpointAvailability): boolean =>
-	!availability.available && availability.reason === "none"
+export const needsInitialCheckpoint = (
+	availability: CheckpointAvailability,
+	hasLiveData: boolean,
+): boolean => hasLiveData && !availability.available && availability.reason === "none"
+
+/**
+ * Does the store hold live data, as opposed to just the preserved checkpoint
+ * registry? `backups` is skipped for the same reason it is skipped when the
+ * live store is reset — it is not part of the data being protected.
+ */
+const storeHasLiveData = (
+	fs: FileSystem,
+	dataDir: string,
+): Effect.Effect<boolean> =>
+	fs.readDirectory(dataDir).pipe(
+		Effect.map((entries) => entries.some((entry) => entry !== "backups")),
+		Effect.orElseSucceed(() => false),
+	)
 
 /**
  * Take the store's FIRST checkpoint, once the server is up, if it has none.
@@ -364,10 +388,11 @@ const ensureInitialCheckpoint = (
 	dataDir: string,
 	host: string,
 	port: number,
+	hadLiveData: boolean,
 ): Effect.Effect<void, never, HttpClient.HttpClient> =>
 	Effect.gen(function* () {
 		const availability = yield* Effect.promise(() => checkpointAvailability(dataDir))
-		if (!needsInitialCheckpoint(availability)) return
+		if (!needsInitialCheckpoint(availability, hadLiveData)) return
 
 		yield* Effect.sync(() =>
 			process.stderr.write(dim("◌ taking the store's first checkpoint (restore point)…\n")),
@@ -565,6 +590,12 @@ export const start = Command.make("start", {
 				yield* resetLiveStorePreservingCheckpoints(dataDir)
 			}
 
+			// Sampled HERE, not at the point of use: `ensureInitialCheckpoint` runs
+			// after `startServer`, and by then chDB has bootstrapped its schema into
+			// dataDir, so every store — including one created seconds ago — looks
+			// like it holds data.
+			const storeHadLiveData = yield* storeHasLiveData(fs, dataDir)
+
 			yield* fs.makeDirectory(dataDir, { recursive: true })
 
 			// Refuse to open a store written by an incompatible chDB build: re-loading
@@ -751,6 +782,7 @@ export const start = Command.make("start", {
 						dataDir,
 						connectionHostForBindHost(bindHost),
 						boundPort,
+						storeHadLiveData,
 					)
 
 					return yield* Effect.never
