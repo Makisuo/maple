@@ -334,6 +334,12 @@ interface SmBench {
 	run: (opts?: { durationMs?: number; pan?: boolean }) => Promise<BenchMetrics>
 	runReact: (opts?: { metricRefreshes?: number; topologyChanges?: number }) => Promise<ReactRenderReport>
 	runStability: (opts?: { settleMs?: number }) => Promise<LayoutStabilityReportSet>
+	/** Pin the camera so a frame-timing run measures a fixed amount of content. */
+	setCamera: (viewport: { x: number; y: number; zoom: number }) => void
+	/** Frame the whole graph, for measuring what a user sees at fit-all. */
+	fitCamera: () => void
+	/** The camera as it currently stands, for reporting what a run measured. */
+	getCamera: () => { x: number; y: number; zoom: number }
 }
 
 declare global {
@@ -606,6 +612,9 @@ function BenchDriver({
 				const topologyChange = await measureStability(onTopologyChange, settleMs)
 				return { metricRefresh, topologyChange }
 			},
+			setCamera: (viewport) => flow.setViewport(viewport),
+			fitCamera: () => flow.fitView(),
+			getCamera: () => flow.getViewport(),
 		}
 		window.__smBench = harness
 
