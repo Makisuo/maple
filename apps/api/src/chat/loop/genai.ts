@@ -394,9 +394,13 @@ export const modelResponseAttributes = (response: LLMResponse): Record<string, u
 		...(served.id === undefined ? undefined : { "gen_ai.response.id": served.id }),
 		...(served.model === undefined ? undefined : { "gen_ai.response.model": served.model }),
 		"gen_ai.response.finish_reasons": [semconvFinishReason(response.finishReason)],
-		// A provider failure surfaced as a stream *event* completes the stream,
-		// so the span exit stays green — this attribute is the record of it.
-		...(response.finishReason === "error" ? { "error.type": "provider_error" } : undefined),
+		// A provider failure surfaced as a stream *event* completes the stream, so
+		// the span exit stays green — these two attributes are the record of it,
+		// and what the session view's failure counting reads (`spanFailed`).
+		// `failed` is the semconv `gen_ai.response.status` enum's error state.
+		...(response.finishReason === "error"
+			? { "error.type": "provider_error", "gen_ai.response.status": "failed" }
+			: undefined),
 		"gen_ai.output.messages": messagesJson([response.message], OUTPUT_MESSAGES_BUDGET).json,
 		...(usage?.inputTokens === undefined
 			? undefined

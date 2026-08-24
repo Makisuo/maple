@@ -86,6 +86,31 @@ export function isLlmCall(span: AiSessionSpan): boolean {
 	return classifyAiSpan(span) === "inference"
 }
 
+/** `gen_ai.response.status` values that mean the generation failed. Semconv's
+ *  enum value is `failed`; `error` is kept for dialects that predate it. */
+const FAILED_RESPONSE_STATUSES = new Set(["failed", "error"])
+
+/**
+ * Whether the span reports a failure — by its own status, or by attribute.
+ *
+ * Frameworks routinely record a failed model or tool call as a *value* on a
+ * span whose status is `Ok`: the stream completed, the operation inside it did
+ * not. Reading only span status reports zero errors for exactly the failures
+ * an agent view exists to show — so an AI span carrying `error.type` (which
+ * semconv sets only when the operation errored) or a failed
+ * `gen_ai.response.status` counts too. Scoped to AI spans because HTTP
+ * instrumentation legitimately stamps `error.type` on expected 4xx requests
+ * whose span status is deliberately not `Error`.
+ */
+export function spanFailed(span: AiSessionSpan): boolean {
+	if (span.statusCode === "Error") return true
+	if (!span.isAiSpan) return false
+	const errorType = span.genAi.errorType
+	if (errorType !== undefined && errorType !== "") return true
+	const status = span.genAi.responseStatus
+	return status !== undefined && FAILED_RESPONSE_STATUSES.has(status.toLowerCase())
+}
+
 /** `gen_ai.response.time_to_first_chunk` is in SECONDS (see ai-vendors.ts). */
 export function spanTtftMs(span: AiSessionSpan): number | undefined {
 	const seconds = span.genAi.responseTimeToFirstChunk
@@ -197,7 +222,7 @@ export function buildSessionTurns(spans: readonly AiSessionSpan[]): readonly Ses
 				failed: turnSpans.some(
 					(span) =>
 						span.isAiSpan &&
-						span.statusCode === "Error" &&
+						spanFailed(span) &&
 						(span.parentSpanId === "" || !spanIds.has(span.parentSpanId)),
 				),
 				traceIds,
