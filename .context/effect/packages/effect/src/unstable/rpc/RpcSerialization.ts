@@ -260,7 +260,7 @@ function decodeJsonRpcRaw(
     for (let i = 0; i < decoded.length; i++) {
       const message = decodeJsonRpcMessage(decoded[i])
       messages.push(message)
-      if (message._tag === "Request") {
+      if (message._tag === "Request" && !message.isNotification) {
         batch.size++
         batches.set(message.id, batch)
       }
@@ -405,8 +405,9 @@ function encodeJsonRpcMessage(response: RpcMessage.FromServerEncoded | RpcMessag
         jsonrpc: "2.0",
         method: response.tag,
         params: response.payload,
-        id: response.id,
-        headers: response.headers,
+        // a JSON-RPC notification is a request without an id
+        ...(response.isNotification ? {} : { id: response.id }),
+        ...(response.headers?.length > 0 ? { headers: response.headers } : {}),
         traceId: response.traceId,
         spanId: response.spanId,
         sampled: response.sampled

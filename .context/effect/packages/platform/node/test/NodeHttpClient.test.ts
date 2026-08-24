@@ -45,7 +45,7 @@ const makeLocalServerClient = Effect.gen(function*() {
 })
 interface LocalServerClient extends Effect.Success<typeof makeLocalServerClient> {}
 const LocalServerClient = Context.Service<LocalServerClient>("test/LocalServerClient")
-const LocalServerClientLive = Layer.effect(LocalServerClient)(makeLocalServerClient)
+const LocalServerClientLayer = Layer.effect(LocalServerClient)(makeLocalServerClient)
 const LocalServerRoutes = HttpRouter.serve(HttpRouter.addAll([
   HttpRouter.route(
     "GET",
@@ -90,7 +90,7 @@ const LocalServerRoutes = HttpRouter.serve(HttpRouter.addAll([
     Layer.provide(layer),
     Layer.provideMerge(NodeHttpServer.layer(Http.createServer, { port: 0 }))
   )
-  const localServerTestLayer = Layer.merge(LocalServerClientLive, LocalServerRoutes).pipe(
+  const localServerTestLayer = Layer.merge(LocalServerClientLayer, LocalServerRoutes).pipe(
     Layer.provideMerge(layerTest)
   )
 
@@ -130,9 +130,12 @@ const LocalServerRoutes = HttpRouter.serve(HttpRouter.addAll([
       Effect.gen(function*() {
         const local = yield* LocalServerClient
         const response = yield* local.client.get("/todos/1").pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(Todo))
+          Effect.flatMap(HttpClientResponse.schemaBodyJson(Todo, {
+            reviver: (key, value) => key === "title" ? "revived" : value
+          }))
         )
         expect(response.id).toBe(1)
+        expect(response.title).toBe("revived")
       }).pipe(
         Effect.provide(localServerTestLayer)
       ))

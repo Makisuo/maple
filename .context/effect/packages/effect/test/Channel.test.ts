@@ -168,6 +168,43 @@ describe("Channel", () => {
         assert.isTrue(yield* Ref.get(acquired))
         assert.isTrue(yield* Ref.get(released))
       }))
+
+    it.effect("acquireUseRelease combines usage and release failures", () =>
+      Effect.gen(function*() {
+        const result = yield* Channel.acquireUseRelease(
+          Effect.void,
+          () => Channel.fail("usage failure"),
+          () => Effect.die("release failure")
+        ).pipe(Channel.runDrain, Effect.exit)
+        assert.deepStrictEqual(
+          result,
+          Exit.failCause(Cause.combine(Cause.fail("usage failure"), Cause.die("release failure")))
+        )
+      }))
+
+    it.effect("acquireUseRelease surfaces release failure after successful usage", () =>
+      Effect.gen(function*() {
+        const result = yield* Channel.acquireUseRelease(
+          Effect.void,
+          () => Channel.succeed(1),
+          () => Effect.die("release failure")
+        ).pipe(Channel.runDrain, Effect.exit)
+        assert.deepStrictEqual(result, Exit.die("release failure"))
+      }))
+  })
+
+  describe("destructors", () => {
+    it.effect("mkUint8Array", () =>
+      Effect.gen(function*() {
+        const bytes = yield* Channel.fromArray(
+          [
+            [new Uint8Array([1, 2])],
+            [new Uint8Array([3]), new Uint8Array([4, 5])]
+          ] as const
+        ).pipe(Channel.mkUint8Array)
+
+        assert.deepStrictEqual(bytes, new Uint8Array([1, 2, 3, 4, 5]))
+      }))
   })
 
   describe("destructors", () => {

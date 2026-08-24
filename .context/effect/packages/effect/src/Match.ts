@@ -21,12 +21,23 @@ import type { Unify } from "./Unify.ts"
 const TypeId = internal.TypeId
 
 /**
+ * Marker used by `Matcher` to distinguish matchers created with `Match.value`.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type ValueFlavor = "value"
+
+/**
  * Union type for matchers created by `Match.type` and `Match.value`.
  *
  * **Details**
  *
  * A `Matcher` carries the input type, accumulated filters, remaining cases,
- * result type, and, for value matchers, the provided value being matched.
+ * result type, and a flavor distinguishing the two matcher variants: `never`
+ * for matchers created with `Match.type` and `ValueFlavor` for matchers created
+ * with `Match.value`. Because the flavor never depends on the input type,
+ * terminal combinators resolve even when the input contains type parameters.
  *
  * **Example** (Matching string and number values)
  *
@@ -53,9 +64,17 @@ const TypeId = internal.TypeId
  * @category models
  * @since 4.0.0
  */
-export type Matcher<Input, Filters, RemainingApplied, Result, Provided, Return = any> =
-  | TypeMatcher<Input, Filters, RemainingApplied, Result, Return>
-  | ValueMatcher<Input, Filters, RemainingApplied, Result, Provided, Return>
+export type Matcher<
+  Input,
+  Filters,
+  RemainingApplied,
+  Result,
+  Flavor,
+  Return = any,
+  Args extends Array<any> = []
+> =
+  | TypeMatcher<Input, Filters, RemainingApplied, Result, Return, Args>
+  | ValueMatcher<Input, Filters, RemainingApplied, Result, Input, Return, Flavor>
 
 /**
  * Represents a pattern matcher that operates on types rather than specific values.
@@ -86,7 +105,14 @@ export type Matcher<Input, Filters, RemainingApplied, Result, Provided, Return =
  * @category models
  * @since 4.0.0
  */
-export interface TypeMatcher<in Input, out Filters, out Remaining, out Result, out Return = any> extends Pipeable {
+export interface TypeMatcher<
+  in Input,
+  out Filters,
+  out Remaining,
+  out Result,
+  out Return = any,
+  in Args extends Array<any> = []
+> extends Pipeable {
   readonly _tag: "TypeMatcher"
   readonly [TypeId]: {
     readonly _input: T.Contravariant<Input>
@@ -94,9 +120,11 @@ export interface TypeMatcher<in Input, out Filters, out Remaining, out Result, o
     readonly _remaining: T.Covariant<Remaining>
     readonly _result: T.Covariant<Result>
     readonly _return: T.Covariant<Return>
+    readonly _args: T.Contravariant<Args>
   }
   readonly cases: ReadonlyArray<Case>
-  add<I, R, RA, A>(_case: Case): TypeMatcher<I, R, RA, A>
+  readonly select: (...args: Array<any>) => unknown
+  add<I, R, RA, A>(_case: Case): TypeMatcher<I, R, RA, A, Return, Args>
 }
 
 /**
@@ -106,7 +134,8 @@ export interface TypeMatcher<in Input, out Filters, out Remaining, out Result, o
  *
  * A `ValueMatcher` is created when using `Match.value(someValue)` and contains
  * the actual value to be matched against. It tracks both the provided value
- * and the result of applying patterns to determine matches.
+ * and the result of applying patterns to determine matches. Its optional
+ * seventh type parameter is the matcher flavor and defaults to `ValueFlavor`.
  *
  * **Example** (Creating a value matcher)
  *
@@ -128,19 +157,26 @@ export interface TypeMatcher<in Input, out Filters, out Remaining, out Result, o
  * @category models
  * @since 4.0.0
  */
-export interface ValueMatcher<in Input, Filters, out Remaining, out Result, Provided, out Return = any>
-  extends Pipeable
-{
+export interface ValueMatcher<
+  in Input,
+  Filters,
+  out Remaining,
+  out Result,
+  Provided,
+  out Return = any,
+  out Flavor = ValueFlavor
+> extends Pipeable {
   readonly _tag: "ValueMatcher"
   readonly [TypeId]: {
     readonly _input: T.Contravariant<Input>
     readonly _filters: T.Covariant<Filters>
     readonly _result: T.Covariant<Result>
     readonly _return: T.Covariant<Return>
+    readonly _flavor: T.Covariant<Flavor>
   }
   readonly provided: Provided
   readonly value: Result.Result<Provided, Remaining>
-  add<I, R, RA, A, Pr>(_case: Case): ValueMatcher<I, R, RA, A, Pr>
+  add<I, R, RA, A, Provided>(_case: Case): ValueMatcher<I, R, RA, A, Provided>
 }
 
 /**
@@ -196,7 +232,7 @@ export type Case = When | Not
 export interface When {
   readonly _tag: "When"
   guard(u: unknown): boolean
-  evaluate(input: unknown): any
+  evaluate(input: unknown, ...args: Array<any>): any
 }
 
 /**
@@ -230,7 +266,7 @@ export interface When {
 export interface Not {
   readonly _tag: "Not"
   guard(u: unknown): boolean
-  evaluate(input: unknown): any
+  evaluate(input: unknown, ...args: Array<any>): any
 }
 
 /**
@@ -278,6 +314,32 @@ export interface Not {
 export const type: <I>() => Matcher<I, Types.Without<never>, I, never, never> = internal.type
 
 /**
+ * Creates a reusable matcher from a function that selects the value to match.
+ *
+ * The compiled matcher keeps the selector's original argument list. Case
+ * handlers receive the narrowed selected value followed by those arguments.
+ *
+ * @example
+ * ```ts import.meta.vitest
+ * import { Match } from "effect"
+ *
+ * const format = Match.fn((prefix: string, value: "a" | "b") => value).pipe(
+ *   Match.when("a", (_value, prefix) => `${prefix}: A`),
+ *   Match.when("b", (_value, prefix) => `${prefix}: B`),
+ *   Match.exhaustive
+ * )
+ *
+ * format("status", "a") // => "status: A"
+ * ```
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const fn: <Args extends Array<any>, I>(
+  select: (...args: Args) => I
+) => Matcher<I, Types.Without<never>, I, never, never, any, Args> = internal.fn
+
+/**
  * Creates a matcher from a specific value.
  *
  * **When to use**
@@ -322,7 +384,7 @@ export const type: <I>() => Matcher<I, Types.Without<never>, I, never, never> = 
  */
 export const value: <const I>(
   i: I
-) => Matcher<I, Types.Without<never>, I, never, I> = internal.value
+) => Matcher<I, Types.Without<never>, I, never, ValueFlavor> = internal.value
 
 /**
  * Creates a match function for a specific value with discriminated union handling.
@@ -464,9 +526,9 @@ export const typeTags: {
  * @category utility types
  * @since 4.0.0
  */
-export const withReturnType: <Ret>() => <I, F, R, A, Pr, _>(
-  self: Matcher<I, F, R, A, Pr, _>
-) => [Ret] extends [[A] extends [never] ? any : A] ? Matcher<I, F, R, A, Pr, Ret>
+export const withReturnType: <Ret>() => <I, F, R, A, Pr, _, Args extends Array<any>>(
+  self: Matcher<I, F, R, A, Pr, _, Args>
+) => [Ret] extends [[A] extends [never] ? any : A] ? Matcher<I, F, R, A, Pr, Ret, Args>
   : "withReturnType constraint does not extend Result type" = internal.withReturnType
 
 /**
@@ -521,19 +583,21 @@ export const when: <
   R,
   const P extends Types.PatternPrimitive<R> | Types.PatternBase<R>,
   Ret,
-  Fn extends (_: Types.WhenMatch<R, P>) => Ret
+  Args extends Array<any>,
+  Fn extends (_: Types.WhenMatch<R, P>, ...args: Args) => Ret
 >(
   pattern: P,
   f: Fn
 ) => <I, F, A, Pr>(
-  self: Matcher<I, F, R, A, Pr, Ret>
+  self: Matcher<I, F, R, A, Pr, Ret, Args>
 ) => Matcher<
   I,
   Types.AddWithout<F, Types.PForExclude<P>>,
   Types.ApplyFilters<I, Types.AddWithout<F, Types.PForExclude<P>>>,
   A | ReturnType<Fn>,
   Pr,
-  Ret
+  Ret,
+  Args
 > = internal.when
 
 /**
@@ -581,18 +645,20 @@ export const whenOr: <
   R,
   const P extends ReadonlyArray<Types.PatternPrimitive<R> | Types.PatternBase<R>>,
   Ret,
-  Fn extends (_: Types.WhenMatch<R, P[number]>) => Ret
+  Args extends Array<any>,
+  Fn extends (_: Types.WhenMatch<R, P[number]>, ...args: Args) => Ret
 >(
   ...args: [...patterns: P, f: Fn]
 ) => <I, F, A, Pr>(
-  self: Matcher<I, F, R, A, Pr, Ret>
+  self: Matcher<I, F, R, A, Pr, Ret, Args>
 ) => Matcher<
   I,
   Types.AddWithout<F, Types.PForExclude<P[number]>>,
   Types.ApplyFilters<I, Types.AddWithout<F, Types.PForExclude<P[number]>>>,
   A | ReturnType<Fn>,
   Pr,
-  Ret
+  Ret,
+  Args
 > = internal.whenOr
 
 /**
@@ -637,17 +703,20 @@ export const whenAnd: <
   R,
   const P extends ReadonlyArray<Types.PatternPrimitive<R> | Types.PatternBase<R>>,
   Ret,
-  Fn extends (_: Types.WhenMatch<R, T.UnionToIntersection<P[number]>>) => Ret
+  Args extends Array<any>,
+  Fn extends (_: Types.WhenMatch<R, T.UnionToIntersection<P[number]>>, ...args: Args) => Ret
 >(
   ...args: [...patterns: P, f: Fn]
 ) => <I, F, A, Pr>(
-  self: Matcher<I, F, R, A, Pr, Ret>
+  self: Matcher<I, F, R, A, Pr, Ret, Args>
 ) => Matcher<
   I,
   Types.AddWithout<F, Types.PForExclude<T.UnionToIntersection<P[number]>>>,
   Types.ApplyFilters<I, Types.AddWithout<F, Types.PForExclude<T.UnionToIntersection<P[number]>>>>,
   A | ReturnType<Fn>,
-  Pr
+  Pr,
+  Ret,
+  Args
 > = internal.whenAnd
 
 /**
@@ -929,18 +998,20 @@ export const tag: <
   R,
   P extends Types.Tags<"_tag", R> & string,
   Ret,
-  Fn extends (_: Extract<R, Record<"_tag", P>>) => Ret
+  Args extends Array<any>,
+  Fn extends (_: Extract<R, Record<"_tag", P>>, ...args: Args) => Ret
 >(
   ...pattern: [first: P, ...values: Array<P>, f: Fn]
 ) => <I, F, A, Pr>(
-  self: Matcher<I, F, R, A, Pr, Ret>
+  self: Matcher<I, F, R, A, Pr, Ret, Args>
 ) => Matcher<
   I,
   Types.AddWithout<F, Extract<R, Record<"_tag", P>>>,
   Types.ApplyFilters<I, Types.AddWithout<F, Extract<R, Record<"_tag", P>>>>,
   ReturnType<Fn> | A,
   Pr,
-  Ret
+  Ret,
+  Args
 > = internal.tag
 
 /**
@@ -1136,19 +1207,21 @@ export const not: <
   R,
   const P extends Types.PatternPrimitive<R> | Types.PatternBase<R>,
   Ret,
-  Fn extends (_: Types.NotMatch<R, P>) => Ret
+  Args extends Array<any>,
+  Fn extends (_: Types.NotMatch<R, P>, ...args: Args) => Ret
 >(
   pattern: P,
   f: Fn
 ) => <I, F, A, Pr>(
-  self: Matcher<I, F, R, A, Pr, Ret>
+  self: Matcher<I, F, R, A, Pr, Ret, Args>
 ) => Matcher<
   I,
   Types.AddOnly<F, Types.WhenMatch<R, P>>,
   Types.ApplyFilters<I, Types.AddOnly<F, Types.WhenMatch<R, P>>>,
   A | ReturnType<Fn>,
   Pr,
-  Ret
+  Ret,
+  Args
 > = internal.not
 
 /**
@@ -1792,11 +1865,13 @@ export const instanceOfUnsafe: <A extends abstract new(...args: any) => any>(
  * @category completion
  * @since 4.0.0
  */
-export const orElse: <RA, Ret, F extends (_: RA) => Ret>(
+export const orElse: <RA, Ret, Args extends Array<any>, F extends (_: RA, ...args: Args) => Ret>(
   f: F
 ) => <I, R, A, Pr>(
-  self: Matcher<I, R, RA, A, Pr, Ret>
-) => [Pr] extends [never] ? (input: I) => Unify<ReturnType<F> | A> : Unify<ReturnType<F> | A> = internal.orElse
+  self: Matcher<I, R, RA, A, Pr, Ret, Args>
+) => [Pr] extends [never] ? [Args] extends [[]] ? (input: I) => Unify<ReturnType<F> | A>
+  : (...args: Args) => Unify<ReturnType<F> | A>
+  : Unify<ReturnType<F> | A> = internal.orElse
 
 // TODO(4.0): Rename to "orThrow"? Like Result.getOrThrow
 /**
@@ -1842,9 +1917,10 @@ export const orElse: <RA, Ret, F extends (_: RA) => Ret>(
  * @category completion
  * @since 4.0.0
  */
-export const orElseAbsurd: <I, R, RA, A, Pr, Ret>(
-  self: Matcher<I, R, RA, A, Pr, Ret>
-) => [Pr] extends [never] ? (input: I) => Unify<A> : Unify<A> = internal.orElseAbsurd
+export const orElseAbsurd: <I, R, RA, A, Pr, Ret, Args extends Array<any>>(
+  self: Matcher<I, R, RA, A, Pr, Ret, Args>
+) => [Pr] extends [never] ? [Args] extends [[]] ? (input: I) => Unify<A> : (...args: Args) => Unify<A> : Unify<A> =
+  internal.orElseAbsurd
 
 /**
  * Wraps the match result in a `Result`, distinguishing matched and unmatched
@@ -1883,9 +1959,11 @@ export const orElseAbsurd: <I, R, RA, A, Pr, Ret>(
  * @category completion
  * @since 4.0.0
  */
-export const result: <I, F, R, A, Pr, Ret>(
-  self: Matcher<I, F, R, A, Pr, Ret>
-) => [Pr] extends [never] ? (input: I) => Result.Result<Unify<A>, R> : Result.Result<Unify<A>, R> = internal.result
+export const result: <I, F, R, A, Pr, Ret, Args extends Array<any>>(
+  self: Matcher<I, F, R, A, Pr, Ret, Args>
+) => [Pr] extends [never] ? [Args] extends [[]] ? (input: I) => Result.Result<Unify<A>, R>
+  : (...args: Args) => Result.Result<Unify<A>, R>
+  : Result.Result<Unify<A>, R> = internal.result
 
 /**
  * Wraps the match result in an `Option`, representing an optional match.
@@ -1930,9 +2008,11 @@ export const result: <I, F, R, A, Pr, Ret>(
  * @category completion
  * @since 4.0.0
  */
-export const option: <I, F, R, A, Pr, Ret>(
-  self: Matcher<I, F, R, A, Pr, Ret>
-) => [Pr] extends [never] ? (input: I) => Option.Option<Unify<A>> : Option.Option<Unify<A>> = internal.option
+export const option: <I, F, R, A, Pr, Ret, Args extends Array<any>>(
+  self: Matcher<I, F, R, A, Pr, Ret, Args>
+) => [Pr] extends [never] ? [Args] extends [[]] ? (input: I) => Option.Option<Unify<A>>
+  : (...args: Args) => Option.Option<Unify<A>>
+  : Option.Option<Unify<A>> = internal.option
 
 /**
  * Completes a matcher that handles every remaining input case.
@@ -1966,9 +2046,10 @@ export const option: <I, F, R, A, Pr, Ret>(
  * @category completion
  * @since 4.0.0
  */
-export const exhaustive: <I, F, A, Pr, Ret>(
-  self: Matcher<I, F, never, A, Pr, Ret>
-) => [Pr] extends [never] ? (u: I) => Unify<A> : Unify<A> = internal.exhaustive
+export const exhaustive: <I, F, A, Pr, Ret, Args extends Array<any>>(
+  self: Matcher<I, F, never, A, Pr, Ret, Args>
+) => [Pr] extends [never] ? [Args] extends [[]] ? (u: I) => Unify<A> : (...args: Args) => Unify<A> : Unify<A> =
+  internal.exhaustive
 
 const SafeRefinementId = "~effect/match/Match/SafeRefinement"
 

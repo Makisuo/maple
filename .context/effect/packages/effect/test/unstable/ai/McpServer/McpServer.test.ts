@@ -96,6 +96,15 @@ const pingBody = {
   id: 0
 }
 
+const directClient = McpSchema.McpServerClient.of({
+  clientId: 1,
+  protocolVersion: "2025-06-18",
+  clientCapabilities: {},
+  clientInfo: initializePayload.clientInfo,
+  initializePayload,
+  getClient: Effect.die("not used")
+})
+
 const makeTestClientWith = Effect.fnUntraced(function*<A, E>(
   serverLayer: Layer.Layer<A, E, HttpRouter.HttpRouter>,
   options?: {
@@ -154,6 +163,68 @@ const toolResultText = (result: McpSchema.CallToolResult): string => {
 }
 
 describe("McpServer", () => {
+  describe("direct service", () => {
+    it.effect("should fail when a resource URI is unknown", () =>
+      Effect.gen(function*() {
+        const server = yield* McpServer.McpServer.make
+
+        const error = yield* server.findResource("file:///unknown").pipe(
+          Effect.provideService(McpSchema.McpServerClient, directClient),
+          Effect.flip
+        )
+
+        assertTrue(error instanceof McpSchema.InvalidParams)
+        assert.strictEqual(error.message, "Resource 'file:///unknown' not found")
+      }))
+
+    it.effect("should preserve a registered resource handler's typed failure", () =>
+      Effect.gen(function*() {
+        const server = yield* McpServer.McpServer.make
+        const failure = new McpSchema.InternalError({ message: "resource failed" })
+        yield* server.addResource({
+          resource: new McpSchema.Resource({
+            uri: "file:///failure",
+            name: "failure"
+          }),
+          annotations: Context.empty(),
+          handle: Effect.fail(failure)
+        })
+
+        const error = yield* server.findResource("file:///failure").pipe(
+          Effect.provideService(McpSchema.McpServerClient, directClient),
+          Effect.flip
+        )
+
+        assert.strictEqual(error, failure)
+      }))
+
+    it.effect("should pass undefined to a low-level tool handler when arguments are omitted", () =>
+      Effect.gen(function*() {
+        const server = yield* McpServer.McpServer.make
+        let received: unknown = "not called"
+        yield* server.addTool({
+          tool: new McpSchema.Tool({
+            name: "arguments-omitted",
+            inputSchema: {
+              type: "object",
+              properties: {}
+            }
+          }),
+          annotations: Context.empty(),
+          handle: (payload) => {
+            received = payload
+            return Effect.succeed(new McpSchema.CallToolResult({ content: [] }))
+          }
+        })
+
+        yield* server.callTool({ name: "arguments-omitted" }).pipe(
+          Effect.provideService(McpSchema.McpServerClient, directClient)
+        )
+
+        assert.isUndefined(received)
+      }))
+  })
+
   it.effect("should reject browser Origins by default while accepting Origin-less clients", () =>
     Effect.gen(function*() {
       const harness = yield* makeHttpHarness(TestServerLayer)
@@ -251,7 +322,8 @@ describe("McpServer", () => {
         }).pipe(Effect.flip)
 
         assert.isFalse(handlerInvoked)
-        assert.instanceOf(error, McpSchema.InvalidParams)
+        assert.isTrue("code" in error)
+        if ("code" in error) assert.strictEqual(error.code, McpSchema.INVALID_PARAMS_ERROR_CODE)
         assert.match(error.message, /Invalid parameters for tool 'OptionalStringTool'/)
         assert.match(error.message, /Expected string \| undefined/)
         assert.match(error.message, /at \["signature"\]/)
@@ -352,9 +424,11 @@ describe("McpServer", () => {
           arguments: {}
         }).pipe(Effect.flip)
 
-        assert.instanceOf(error, McpSchema.InvalidParams)
-        assert.strictEqual(error.code, McpSchema.INVALID_PARAMS_ERROR_CODE)
-        assert.strictEqual(error.message, "Tool 'UnknownTool' not found")
+        assert.isTrue("code" in error)
+        if ("code" in error) {
+          assert.strictEqual(error.code, McpSchema.INVALID_PARAMS_ERROR_CODE)
+          assert.strictEqual(error.message, "Tool 'UnknownTool' not found")
+        }
       }))
   })
 
@@ -412,6 +486,54 @@ describe("McpServer", () => {
       strictEqual(pingResponse.status, 200)
       const pingResponseBody = yield* pingResponse.text
       strictEqual(pingResponseBody.length > 0, true)
+    }))
+
+  it.effect("drops server notifications from buffered JSON-RPC responses", () =>
+    Effect.gen(function*() {
+      const serverLayer = Layer.effectDiscard(Effect.gen(function*() {
+        const router = yield* HttpRouter.HttpRouter
+        const { httpEffect, protocol } = yield* RpcServer.makeProtocolWithHttpEffect()
+        yield* protocol.run((clientId, message) => {
+          if (message._tag !== "Request") {
+            return Effect.void
+          }
+          return Effect.gen(function*() {
+            yield* protocol.send(clientId, {
+              _tag: "Request",
+              id: "",
+              tag: "notifications/message",
+              payload: { level: "info" },
+              headers: [],
+              isNotification: true
+            })
+            yield* protocol.send(clientId, {
+              _tag: "Exit",
+              requestId: message.id,
+              exit: { _tag: "Success", value: { ok: true } }
+            })
+            yield* protocol.end(clientId)
+          })
+        }).pipe(Effect.forkScoped)
+        yield* router.add("POST", "/mcp", () => httpEffect)
+      })).pipe(
+        Layer.provideMerge(HttpRouter.layer),
+        Layer.provide(RpcSerialization.layerJsonRpc())
+      )
+      const harness = yield* makeHttpHarness(serverLayer)
+
+      const response = yield* harness.post({
+        jsonrpc: "2.0",
+        method: "ping",
+        params: {},
+        id: 1
+      })
+
+      assert.strictEqual(response.status, 200)
+      assert.deepStrictEqual(yield* Effect.promise(() => response.json()), {
+        jsonrpc: "2.0",
+        id: 1,
+        result: { ok: true }
+      })
     }))
 
   it.effect("validates supplied protocol versions on POST", () =>
@@ -487,12 +609,8 @@ describe("McpServer", () => {
     it.effect("should isolate resource update subscriptions between sessions", () =>
       Effect.gen(function*() {
         const clientIds = new Set([1, 2])
-        const client1Outbound = yield* Queue.unbounded<
-          RpcMessage.FromServerEncoded | RpcMessage.RequestEncoded
-        >()
-        const client2Outbound = yield* Queue.unbounded<
-          RpcMessage.FromServerEncoded | RpcMessage.RequestEncoded
-        >()
+        const client1Outbound = yield* Queue.unbounded<RpcMessage.FromServerEncoded>()
+        const client2Outbound = yield* Queue.unbounded<RpcMessage.FromServerEncoded>()
         const disconnects = yield* Queue.unbounded<number>()
         const writeRequest = yield* Deferred.make<
           (clientId: number, message: RpcMessage.FromClientEncoded) => Effect.Effect<void>
@@ -508,7 +626,8 @@ describe("McpServer", () => {
               initialMessage: Effect.succeedNone,
               supportsAck: false,
               supportsTransferables: false,
-              supportsSpanPropagation: false
+              supportsSpanPropagation: false,
+              supportsNotifications: true
             })
           )
         )
