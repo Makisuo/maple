@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import { ok, strictEqual } from "node:assert"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -9,6 +9,7 @@ import {
 	chdbConfigPath,
 	dirtyStoreRecoveryAdvice,
 	needsInitialCheckpoint,
+	parseCheckpointInterval,
 	resolveChdbConfigFile,
 } from "../src/commands/server"
 import { CheckpointPreconditionError, parseCheckpointId } from "../src/server/checkpoints"
@@ -213,5 +214,30 @@ describe("initial checkpoint on start", () => {
 			),
 			false,
 		)
+	})
+})
+
+describe("--checkpoint-interval", () => {
+	it("accepts seconds, minutes and hours", () => {
+		strictEqual(Duration.toSeconds(parseCheckpointInterval("45s") as Duration.Duration), 45)
+		strictEqual(Duration.toSeconds(parseCheckpointInterval("30m") as Duration.Duration), 1800)
+		strictEqual(Duration.toSeconds(parseCheckpointInterval("2h") as Duration.Duration), 7200)
+		// The flag text is what a user types, so tolerate the spacing and case.
+		strictEqual(Duration.toSeconds(parseCheckpointInterval(" 15 M ") as Duration.Duration), 900)
+	})
+
+	it("treats off, none and zero as disabled", () => {
+		for (const value of ["off", "none", "0", "OFF"]) {
+			strictEqual(parseCheckpointInterval(value), undefined, value)
+		}
+	})
+
+	// A typo that fell back to the default would be merely surprising; one that
+	// fell back to *off* would silently reintroduce the data loss the refresh
+	// loop exists to prevent. Neither is acceptable, so it is rejected.
+	it("rejects anything it cannot parse rather than guessing", () => {
+		for (const value of ["30", "later", "5d", "-10m", "m", "30 minutes", ""]) {
+			strictEqual(parseCheckpointInterval(value), "invalid", value)
+		}
 	})
 })

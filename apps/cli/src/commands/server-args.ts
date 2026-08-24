@@ -23,6 +23,9 @@ export interface DetachedChildArgs {
 	readonly chdbConfigFile: string | undefined
 	readonly onDirtyStore: DirtyStorePolicy
 	readonly minimumRawTelemetryRetentionDays: number | undefined
+	/** Raw `--checkpoint-interval` text, forwarded verbatim so the child parses
+	 *  and validates it exactly as the parent did. */
+	readonly checkpointInterval: string
 }
 
 /** Build the foreground child argv without forwarding compiled-Bun virtual
@@ -42,6 +45,11 @@ export const buildDetachedChildArgs = (options: DetachedChildArgs): string[] => 
 		options.dataDir,
 		"--on-dirty-store",
 		options.onDirtyStore,
+		// Forwarded explicitly: the child re-parses its own flags, so omitting this
+		// would silently drop the user's cadence — and `--checkpoint-interval off`
+		// would come back as the default — on every `--background` start.
+		"--checkpoint-interval",
+		options.checkpointInterval,
 		...(options.chdbConfigFile ? ["--chdb-config-file", options.chdbConfigFile] : []),
 		...(options.minimumRawTelemetryRetentionDays !== undefined
 			? ["--minimum-raw-telemetry-retention-days", String(options.minimumRawTelemetryRetentionDays)]
@@ -49,6 +57,35 @@ export const buildDetachedChildArgs = (options: DetachedChildArgs): string[] => 
 		...(options.offline ? ["--offline"] : []),
 	]
 }
+
+/**
+ * Argv for a `maple checkpoint` CHILD process.
+ *
+ * A checkpoint cannot be taken inside the running server: `createCheckpoint`
+ * opens its own chDB connection to drive `BACKUP DATABASE`, and chDB allows one
+ * connection per process — the server already holds it, so an in-process
+ * attempt gets `chdb_connect returned NULL` every time. `maple checkpoint` works
+ * precisely because it is a separate process, so the server spawns exactly that,
+ * which is also what a user running it by hand would do.
+ *
+ * `entry` follows the same rule as `buildDetachedChildArgs`: a Bun-compiled
+ * binary injects a virtual `/$bunfs/...` entrypoint that must not be forwarded.
+ */
+export const buildCheckpointChildArgs = (options: {
+	readonly entry: string | undefined
+	readonly host: string
+	readonly port: number
+	readonly dataDir: string
+}): string[] => [
+	...(options.entry && !options.entry.startsWith("/$bunfs") ? [options.entry] : []),
+	"checkpoint",
+	"--host",
+	options.host,
+	"--port",
+	String(options.port),
+	"--data-dir",
+	options.dataDir,
+]
 
 /** Liveness probe via signal 0 — a process primitive with no FileSystem
  *  equivalent. Never throws (errors mean "not alive").

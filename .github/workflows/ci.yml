@@ -167,6 +167,7 @@ jobs:
               run: >-
                   shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh
                   apps/cli/test/native-checkpoint-smoke.sh
+                  apps/cli/test/native-checkpoint-refresh-probe.sh
                   apps/cli/test/native-local-store-migration.sh
                   apps/cli/test/native-archive-smoke.sh
                   apps/cli/test/native-archive-crash-recovery-probe.sh
@@ -620,6 +621,19 @@ jobs:
               run: |
                   mkdir -p "$TMPDIR"
                   apps/cli/test/native-checkpoint-smoke.sh "$GITHUB_WORKSPACE/dist"
+
+            # The crash path the checkpoint smoke does not cover: a FRESH store
+            # that accumulates telemetry and then dies to a SIGKILL, which is the
+            # journey that stranded people with a dirty store and nothing to
+            # restore from.
+            - name: Run native checkpoint refresh and crash-recovery probe
+              timeout-minutes: 5
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-cp-refresh
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-checkpoint-refresh-probe.sh "$GITHUB_WORKSPACE/dist"
 
             - name: Run native local-store migration and reopen probe
               timeout-minutes: 4
