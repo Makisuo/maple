@@ -46,17 +46,21 @@ export function IssuePullRequestsPanel({
 	busy = false,
 }: {
 	pullRequests: ReadonlyArray<ErrorIssuePullRequestDocument>
-	onLink: (url: string) => void
+	onLink: (url: string) => Promise<boolean>
 	onUnlink: (id: ErrorIssuePullRequestDocument["id"]) => void
 	busy?: boolean
 }) {
 	const [open, setOpen] = useState(false)
 	const [url, setUrl] = useState("")
 
-	const submit = () => {
+	// Awaited before closing: clearing the field and dismissing the dialog up
+	// front means a failure toast arrives with the pasted URL already gone, and
+	// recovery is a trip back to GitHub to copy it again.
+	const submit = async () => {
 		const trimmed = url.trim()
-		if (trimmed.length === 0) return
-		onLink(trimmed)
+		if (trimmed.length === 0 || busy) return
+		const linked = await onLink(trimmed)
+		if (!linked) return
 		setUrl("")
 		setOpen(false)
 	}
@@ -147,7 +151,7 @@ export function IssuePullRequestsPanel({
 							placeholder="https://github.com/owner/repo/pull/123"
 							onChange={(event) => setUrl(event.target.value)}
 							onKeyDown={(event) => {
-								if (event.key === "Enter") submit()
+								if (event.key === "Enter") void submit()
 							}}
 						/>
 					</DialogPanel>
@@ -155,7 +159,7 @@ export function IssuePullRequestsPanel({
 						<Button variant="outline" onClick={() => setOpen(false)}>
 							Cancel
 						</Button>
-						<Button onClick={submit} disabled={url.trim().length === 0 || busy}>
+						<Button onClick={() => void submit()} disabled={url.trim().length === 0 || busy}>
 							Attach
 						</Button>
 					</DialogFooter>

@@ -325,6 +325,7 @@ const fixVerificationTick = makeTick(
 		investigationsStarted: result.investigationsStarted,
 		verdictsApplied: result.verdictsApplied,
 		skipped: result.skipped,
+		failedRows: result.failedRows,
 	}),
 )
 

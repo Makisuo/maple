@@ -37,8 +37,9 @@ import {
 	type ErrorIssueVerificationRow,
 } from "@maple/db"
 import { and, desc, eq, inArray, lte, ne } from "drizzle-orm"
-import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
+import { summarizeCause } from "@/platform/describe-cause"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 import { ErrorActorsService } from "./ErrorActorsService"
@@ -404,10 +405,15 @@ const make: Effect.Effect<
 			nowMs,
 		})
 		if (row === null) {
+			// Not an invalid URL — it parsed at `:388`. The insert-and-read-back found
+			// no row, which is a persistence anomaly: reporting it as a 400 would tell
+			// the caller their well-formed URL was unrecognizable, and because the
+			// invalid-URL tag is an anticipated error its span exception is suppressed,
+			// so the anomaly would vanish from error dashboards entirely.
 			return yield* Effect.fail(
-				new ErrorIssuePullRequestInvalidError({
+				new ErrorPersistenceError({
 					message: "Pull request link could not be stored",
-					rawUrl: url,
+					cause: `upsert returned no row for ${parsed.url}`,
 				}),
 			)
 		}
@@ -424,10 +430,11 @@ const make: Effect.Effect<
 		const response = yield* hydrateLinks(orgId, [row])
 		const document = response.pullRequests[0]
 		if (document === undefined) {
+			// Same reasoning as the store path above: the link exists, hydration lost it.
 			return yield* Effect.fail(
-				new ErrorIssuePullRequestInvalidError({
+				new ErrorPersistenceError({
 					message: "Pull request link could not be rendered",
-					rawUrl: url,
+					cause: `hydrate returned no document for pull request ${row.id}`,
 				}),
 			)
 		}
@@ -510,7 +517,11 @@ const make: Effect.Effect<
 		const verifyAfterMs = mergedAtMs + windowMs
 
 		const verificationId = newVerificationId()
-		yield* dbExecute((db) =>
+		// `onConflictDoNothing` against the unique partial index: the concurrent
+		// delivery that lost the race stops here rather than opening a second
+		// window, and `.returning()` is what says which one this was — a driver
+		// write-result shape would not.
+		const opened = yield* dbExecute((db) =>
 			db.insert(errorIssueVerifications).values({
 				id: verificationId,
 				orgId,
@@ -527,8 +538,11 @@ const make: Effect.Effect<
 				attempt: 0,
 				createdAt: msToDate(nowMs),
 				updatedAt: msToDate(nowMs),
-			}),
+			})
+				.onConflictDoNothing()
+				.returning({ id: errorIssueVerifications.id }),
 		)
+		if (opened.length === 0) return
 
 		yield* workflow.recordEvent(orgId, issue.id, systemActor.id, "verification_started", {
 			payload: {
@@ -677,7 +691,15 @@ const make: Effect.Effect<
 		const mergedAtMs = input.mergedAtMs ?? nowMs
 		const systemActor = yield* actors.ensureSystemActor(input.orgId)
 
-		for (const link of links) {
+		// One issue's problem must not cost the others. The API doc above and
+		// `openVerification`'s both promise a multi-issue delivery does not lose the
+		// rest when one issue fails, but only the transition/not-found cases were
+		// caught — every `dbExecute` in here fails outward as `ErrorPersistenceError`
+		// and aborted the remaining links, which the sink then swallowed, so those
+		// links were dropped with no retry and no trace of why.
+		const openForLink = Effect.fn("IssueFixVerification.openForLink")(function* (
+			link: (typeof links)[number],
+		) {
 			// One live verification per issue. A `synchronize` after a merge, or a
 			// redelivered webhook, must not open a second window.
 			const open = yield* dbExecute((db) =>
@@ -693,7 +715,7 @@ const make: Effect.Effect<
 					)
 					.limit(1),
 			)
-			if (open[0] !== undefined) continue
+			if (open[0] !== undefined) return false
 
 			const issueRows = yield* dbExecute((db) =>
 				db
@@ -703,7 +725,7 @@ const make: Effect.Effect<
 					.limit(1),
 			)
 			const issue = issueRows[0]
-			if (issue === undefined) continue
+			if (issue === undefined) return false
 
 			yield* workflow.recordEvent(input.orgId, link.issueId, systemActor.id, "pr_merged", {
 				payload: {
@@ -725,7 +747,26 @@ const make: Effect.Effect<
 				nowMs,
 				systemActor,
 			})
-			verificationsOpened += 1
+			return true
+		})
+
+		for (const link of links) {
+			const opened = yield* openForLink(link).pipe(
+				Effect.catchCause((cause) =>
+					Cause.hasInterruptsOnly(cause)
+						? Effect.interrupt
+						: Effect.logError("[IssueFixVerification] could not open a verification").pipe(
+								Effect.annotateLogs({
+									orgId: input.orgId,
+									issueId: link.issueId,
+									pullRequestId: link.id,
+									error: summarizeCause(cause),
+								}),
+								Effect.as(false),
+							),
+				),
+			)
+			if (opened) verificationsOpened += 1
 		}
 
 		return { linksAutoCreated, verificationsOpened, linksUpdated: links.length }

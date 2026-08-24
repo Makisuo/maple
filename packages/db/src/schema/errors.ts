@@ -471,8 +471,15 @@ export const errorIssueVerifications = pgTable(
 		index("error_issue_verifications_issue_idx").on(table.orgId, table.issueId),
 		// The error tick's short-circuit reads the live verification for an issue it
 		// finds in `verifying`; partial so the index holds only rows still in play.
-		index("error_issue_verifications_open_idx")
-			.on(table.orgId, table.issueId, table.status)
+		//
+		// UNIQUE on (org, issue) rather than including status: it is also the only
+		// real enforcement of "one live verification per issue". The webhook path
+		// checks for an open row and then inserts, and the queue consumer runs with
+		// `maxConcurrency: 2` with nothing serializing per installation, so two
+		// deliveries of the same merge could both pass the check and open two
+		// windows that then race to apply contradictory verdicts.
+		uniqueIndex("error_issue_verifications_open_idx")
+			.on(table.orgId, table.issueId)
 			.where(sql`${table.status} in ('waiting', 'running')`),
 	],
 )

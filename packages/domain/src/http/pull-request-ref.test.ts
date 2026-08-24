@@ -3,7 +3,7 @@ import { extractIssueIdsFromText, parsePullRequestUrl } from "./pull-request-ref
 
 const APP = "https://app.maple.dev"
 const ISSUE = "3f1c8a2e-9b4d-4f7a-8c1e-2d5b6a7c8e90"
-const OTHER_ISSUE = "aa11bb22-cc33-dd44-ee55-ff6677889900"
+const OTHER_ISSUE = "aa11bb22-cc33-4d44-8e55-ff6677889900"
 
 describe("parsePullRequestUrl", () => {
 	it("parses a canonical GitHub pull request URL", () => {

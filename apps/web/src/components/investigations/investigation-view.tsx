@@ -62,10 +62,17 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 	const signalType = factValue(investigation.snapshot.facts, "signal")
 	return {
 		kind,
+		// A fix-verification is presented as an error investigation, so its id must
+		// be the error issue's — everything downstream keys on it as one: the chat
+		// tab id, the preamble's `error_issue_id`, and the error tool hints. Using
+		// the investigation id there pointed all three at a resource that is not an
+		// error issue.
 		id:
-			subject.type === "freeform" || subject.type === "fix_verification"
+			subject.type === "freeform"
 				? investigation.id
-				: subject.incident_id,
+				: subject.type === "fix_verification"
+					? subject.issue_id
+					: subject.incident_id,
 		title: investigation.snapshot.title,
 		severity: investigation.severity ?? investigation.snapshot.severity ?? "unclassified",
 		status: investigation.status,
@@ -85,7 +92,14 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 							? { serviceName: investigation.snapshot.scope }
 							: undefined),
 					}
-				: undefined,
+				: subject.type === "fix_verification"
+					? {
+							issueId: subject.issue_id,
+							...(investigation.snapshot.scope
+								? { serviceName: investigation.snapshot.scope }
+								: undefined),
+						}
+					: undefined,
 		...(investigation.report
 			? {
 					aiSummary: investigation.report.summary,

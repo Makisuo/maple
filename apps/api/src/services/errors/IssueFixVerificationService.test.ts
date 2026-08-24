@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { afterEach, describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { afterEach, assert, describe, expect, it } from "@effect/vitest"
+import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { OrgId, type WorkflowState } from "@maple/domain/http"
 import { ErrorIssueId } from "@maple/domain/primitives"
 import { errorIssues, errorIssueEvents, errorIssueVerifications } from "@maple/db"
@@ -19,6 +19,7 @@ import {
 
 const APP_BASE_URL = "https://app.maple.test"
 const ORG = Schema.decodeSync(OrgId)("org_verification")
+const OTHER_ORG = Schema.decodeSync(OrgId)("org_verification_other")
 const REPO = "MapleTechLabs/maple"
 const PR_URL = `https://github.com/${REPO}/pull/612`
 
@@ -247,13 +248,60 @@ describe("linkPullRequest", () => {
 				const exit = yield* service
 					.linkPullRequest(ORG, null, issueId, "https://github.com/o/r/issues/7", "user")
 					.pipe(Effect.exit)
-				expect(exit._tag).toBe("Failure")
+				// Asserted by tag, not just "it failed": this endpoint fails three ways,
+				// and a bare Failure check passes just as happily when the issue lookup
+				// or persistence broke instead — which is a 5xx wearing a 400's clothes.
+				assert(Exit.isFailure(exit))
+				const error = Cause.findErrorOption(exit.cause)
+				assert(Option.isSome(error))
+				expect(error.value._tag).toBe("@maple/http/errors/ErrorIssuePullRequestInvalidError")
+				expect(error.value.rawUrl).toBe("https://github.com/o/r/issues/7")
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	it.effect("refuses to link a pull request onto another org's issue", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer()
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				// Same issue id, wrong tenant. A dropped `orgId` predicate here is a
+				// cross-tenant write, and both externally-driven callers (the MCP tool
+				// and POST /issues/:issueId/pull-requests) reach this path.
+				const exit = yield* service
+					.linkPullRequest(OTHER_ORG, null, issueId, PR_URL, "user")
+					.pipe(Effect.exit)
+				assert(Exit.isFailure(exit))
+				const error = Cause.findErrorOption(exit.cause)
+				assert(Option.isSome(error))
+				expect(error.value._tag).toBe("@maple/http/errors/ErrorIssueNotFoundError")
+				expect(yield* readAllVerifications(issueId)).toHaveLength(0)
 			}).pipe(Effect.provide(layer))
 		}),
 	)
 })
 
 describe("unlinkPullRequest", () => {
+	it.effect("refuses to unlink through another org", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer()
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				const link = yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "user")
+				const exit = yield* service
+					.unlinkPullRequest(OTHER_ORG, null, issueId, link.id)
+					.pipe(Effect.exit)
+				assert(Exit.isFailure(exit))
+				// The link must survive: deleting it would be a cross-tenant write.
+				const listed = yield* service.listPullRequests(ORG, issueId)
+				expect(listed.pullRequests).toHaveLength(1)
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+
 	it.effect("removes the link and abandons any verification riding on it", () =>
 		Effect.gen(function* () {
 			const layer = makeLayer()

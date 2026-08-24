@@ -43,4 +43,4 @@ CREATE INDEX "error_issue_pull_requests_repo_number_idx" ON "error_issue_pull_re
 CREATE INDEX "error_issue_pull_requests_issue_idx" ON "error_issue_pull_requests" USING btree ("org_id","issue_id");--> statement-breakpoint
 CREATE INDEX "error_issue_verifications_due_idx" ON "error_issue_verifications" USING btree ("status","verify_after");--> statement-breakpoint
 CREATE INDEX "error_issue_verifications_issue_idx" ON "error_issue_verifications" USING btree ("org_id","issue_id");--> statement-breakpoint
-CREATE INDEX "error_issue_verifications_open_idx" ON "error_issue_verifications" USING btree ("org_id","issue_id","status") WHERE "error_issue_verifications"."status" in ('waiting', 'running');
+CREATE UNIQUE INDEX "error_issue_verifications_open_idx" ON "error_issue_verifications" USING btree ("org_id","issue_id") WHERE "error_issue_verifications"."status" in ('waiting', 'running');

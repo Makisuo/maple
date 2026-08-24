@@ -86,8 +86,17 @@ describe("allowedTransitionsForAll", () => {
 		// it from a menu would be asserting that, and the next tick would overwrite
 		// the claim anyway.
 		expect(WORKFLOW_TRANSITIONS.done).toContain("regressed")
+		// Named literally rather than derived from MACHINE_OWNED_WORKFLOW_STATES: a
+		// test that filters by the same set the implementation filters by passes no
+		// matter what the set contains, so dropping a state from it would be
+		// invisible here — and the state would start appearing in the web state
+		// picker and the MCP transition tool.
+		const machineOwned = ["regressed", "verifying"] as const
+		expect([...MACHINE_OWNED_WORKFLOW_STATES].sort()).toEqual([...machineOwned].sort())
 		for (const state of ALL_STATES) {
-			expect(allowedTransitionsForAll([state]), state).not.toContain("regressed")
+			for (const target of machineOwned) {
+				expect(allowedTransitionsForAll([state]), state).not.toContain(target)
+			}
 		}
 	})
 

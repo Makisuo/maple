@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router"
 
 import type { ErrorIssueVerificationDocument } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
-import { formatRelativeTime } from "@maple/ui/lib/time-format"
+import { formatRelativeShort } from "@maple/ui/lib/time-format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { MagnifierCheckIcon } from "@/components/icons"
@@ -58,7 +58,15 @@ function headline(verification: ErrorIssueVerificationDocument): string {
 				verification.baselineRatePerHour > 0
 					? ` It was firing about ${formatRate(verification.baselineRatePerHour)} before the merge.`
 					: " It fires too rarely to judge quickly, so this takes a while."
-			return `Waiting until ${formatRelativeTime(verification.verifyAfter)} to see whether this error comes back.${rate}`
+			// `formatRelativeShort` rather than `formatRelativeTime`: the latter supplies
+			// its own preposition ("in 6h"), which reads as "Waiting until in 6h" here,
+			// and turns into "Waiting until 3h ago" once the window closes before the
+			// tick has run. The elapsed case gets its own sentence for the same reason.
+			const elapsed = Date.parse(verification.verifyAfter) <= Date.now()
+			if (elapsed) {
+				return `The verification window has closed; the next check records the result.${rate}`
+			}
+			return `Watching for another ${formatRelativeShort(verification.verifyAfter)} to see whether this error comes back.${rate}`
 		}
 		case "running":
 			return "An agent is checking whether the merged fix actually resolved this."

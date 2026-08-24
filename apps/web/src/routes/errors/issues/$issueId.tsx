@@ -297,7 +297,9 @@ function IssueDetailContent() {
 		else toastManager.add({ title: "Release failed", type: "error" })
 	}
 
-	const attachPullRequest = async (url: string) => {
+	// Resolves to whether the link landed, so the dialog can stay open — with the
+	// URL the user pasted still in it — when it did not.
+	const attachPullRequest = async (url: string): Promise<boolean> => {
 		setBusy("pull-request")
 		const result = await linkPullRequest({
 			params: { issueId },
@@ -307,12 +309,14 @@ function IssueDetailContent() {
 		setBusy(null)
 		if (Exit.isSuccess(result)) {
 			toastManager.add({ title: "Pull request attached", type: "success" })
-		} else {
-			toastManager.add({
-				title: "That does not look like a pull request URL",
-				type: "error",
-			})
+			return true
 		}
+		// The endpoint fails three ways; only one of them is a bad URL. Telling a
+		// user their valid URL is malformed because Postgres was down sends them
+		// off to re-check a link that was fine.
+		const { title, message } = displayError(result)
+		toastManager.add({ title, description: message, type: "error" })
+		return false
 	}
 
 	const detachPullRequest = async (pullRequestId: ErrorIssuePullRequestId) => {
@@ -693,18 +697,24 @@ function IssueDetailContent() {
 									onRelease={release}
 									onSetSeverity={changeSeverity}
 								/>
-								{/* Above the PR list: while a check is running it is the most
-								    load-bearing thing on the page — it explains why the issue is
-								    sitting in `verifying` and nobody needs to touch it. */}
-								{latestVerification ? (
-									<IssueVerificationCard verification={latestVerification} />
-								) : null}
-								<IssuePullRequestsPanel
-									pullRequests={pullRequests}
-									onLink={attachPullRequest}
-									onUnlink={detachPullRequest}
-									busy={busy === "pull-request"}
-								/>
+								{/* Inset here, not on the outer column: `IssueSidebar` is
+								    deliberately full-bleed against the rail's border, while these
+								    two are bordered cards — without the padding their own border
+								    doubles up against the rail's and runs into the viewport edge. */}
+								<div className="flex flex-col gap-4 px-4 pb-4">
+									{/* Above the PR list: while a check is running it is the most
+									    load-bearing thing on the page — it explains why the issue is
+									    sitting in `verifying` and nobody needs to touch it. */}
+									{latestVerification ? (
+										<IssueVerificationCard verification={latestVerification} />
+									) : null}
+									<IssuePullRequestsPanel
+										pullRequests={pullRequests}
+										onLink={attachPullRequest}
+										onUnlink={detachPullRequest}
+										busy={busy === "pull-request"}
+									/>
+								</div>
 							</div>
 						</DashboardLayout.RightPanel>
 					</DashboardLayout.Body>

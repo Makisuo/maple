@@ -102,7 +102,13 @@ export const enqueueFixVerification: (
 			.limit(1),
 	)
 	const issue = issueRows[0]
-	if (issue === undefined) return { enqueued: false, reason: "error" as const }
+	if (issue === undefined) {
+		yield* Effect.annotateCurrentSpan({
+			orgId,
+			"maple.investigation.start_result": "issue_missing",
+		})
+		return { enqueued: false, reason: "error" as const }
+	}
 
 	const mergedAtIso = decodeIso(verification.mergedAt.toISOString())
 	const subject = new InvestigationFixVerificationSubject({
@@ -184,7 +190,13 @@ export const enqueueFixVerification: (
 			.onConflictDoNothing()
 			.returning({ id: investigations.id }),
 	)
-	if (inserted.length === 0) return { enqueued: false, reason: "error" as const }
+	if (inserted.length === 0) {
+		yield* Effect.annotateCurrentSpan({
+			orgId,
+			"maple.investigation.start_result": "insert_conflict",
+		})
+		return { enqueued: false, reason: "error" as const }
+	}
 
 	const markFailed = (error: string) =>
 		database
@@ -199,6 +211,16 @@ export const enqueueFixVerification: (
 	const workflow = input.fanoutBinding
 	if (!isFanoutWorkflowBinding(workflow)) {
 		yield* markFailed("agent_unavailable: the investigation fan-out workflow is not configured; retry")
+		// Annotated because the tick reads this outcome as "no agent available" and
+		// can answer it with a terminal `verified` verdict that auto-closes the
+		// issue — without the attribute the trace of that close says nothing about
+		// no agent ever having run.
+		yield* Effect.annotateCurrentSpan({
+			orgId,
+			"maple.investigation.id": investigationId,
+			"maple.investigation.start_result": "no_binding",
+			"maple.verification.id": verification.id,
+		})
 		return { enqueued: false, investigationId, reason: "no_binding" as const }
 	}
 
@@ -228,6 +250,12 @@ export const enqueueFixVerification: (
 			}),
 		)
 		yield* markFailed("start_failed: the investigation fan-out could not be started; retry")
+		yield* Effect.annotateCurrentSpan({
+			orgId,
+			"maple.investigation.id": investigationId,
+			"maple.investigation.start_result": "start_failed",
+			"maple.verification.id": verification.id,
+		})
 		return { enqueued: false, investigationId, reason: "error" as const }
 	}
 

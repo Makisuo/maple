@@ -1463,6 +1463,75 @@ describe("VcsSyncService orchestrator", () => {
 		)
 	})
 
+	it.effect("forwards a pull-request event to the sink, resolved to the installation's org", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		const forwardedPullRequests: Array<{ orgId: string; job: PullRequestEventJob }> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_orch")
+			yield* seedInstallation(repo, orgId)
+			yield* upsertReposFor(repo, "42", oneRepo)
+
+			const job: VcsSyncJob = {
+				kind: "pull-request-event",
+				provider: "github",
+				externalInstallationId: "42",
+				externalRepoId: "7",
+				repoFullName: "octo/repo",
+				number: 612,
+				action: "closed",
+				url: "https://github.com/octo/repo/pull/612",
+				title: "Fix the thing",
+				body: "maple-issue:3f1c8a2e-9b4d-4f7a-8c1e-2d5b6a7c8e90",
+				authorLogin: "octocat",
+				merged: true,
+				mergeCommitSha: "abc123",
+				mergedAtMs: 1_700_000_000_000,
+				deliveryId: "delivery-1",
+			}
+			// Round-trips through the queue encoding like every other job kind: this
+			// is the one union member the encode sweep above does not cover, and
+			// `deliveryId` is an `optionalKey` that a wire-shape drift would drop.
+			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(job))
+
+			assert.strictEqual(forwardedPullRequests.length, 1)
+			const forwarded = forwardedPullRequests[0]
+			assert.strictEqual(forwarded?.orgId, orgId)
+			assert.deepStrictEqual(forwarded?.job, job)
+		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, forwardedPullRequests })))
+	})
+
+	it.effect("drops a pull-request event for an installation it does not know", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		const forwardedPullRequests: Array<{ orgId: string; job: PullRequestEventJob }> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const job: VcsSyncJob = {
+				kind: "pull-request-event",
+				provider: "github",
+				externalInstallationId: "does-not-exist",
+				externalRepoId: "7",
+				repoFullName: "octo/repo",
+				number: 613,
+				action: "closed",
+				url: "https://github.com/octo/repo/pull/613",
+				title: null,
+				body: null,
+				authorLogin: null,
+				merged: true,
+				mergeCommitSha: null,
+				mergedAtMs: null,
+			}
+			// No org to attribute it to, so forwarding it would mean guessing a
+			// tenant. Succeeds rather than failing so the queue does not retry.
+			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(job))
+			assert.strictEqual(forwardedPullRequests.length, 0)
+		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, forwardedPullRequests })))
+	})
+
 	it.effect("sync-branches keeps local branches when the provider listing was truncated", () => {
 		const testDb = createTestDb(trackedDbs)
 		const sent: Array<VcsSyncJob> = []
