@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import * as AWS from "alchemy/AWS"
+import * as Output from "alchemy/Output"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import type { MapleRegion } from "@maple/infra/aws"
@@ -18,6 +19,7 @@ import {
 	resolveIngestTaskSize,
 	stageDeploysCollector,
 } from "@maple/infra/aws"
+import type { ReplayBlobCredentials } from "../api/alchemy.run.ts"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { resolveDeploymentEnvironment } from "@maple/infra/cloudflare"
 // Only the primitives. The grouped helpers in that module return Worker-binding
@@ -76,6 +78,12 @@ export interface CreateMapleIngestOptions {
 	domains: MapleDomains
 	/** Geographic instance. Every AWS resource here is scoped to it. */
 	region: MapleRegion
+	/**
+	 * Stack-minted R2 credentials for the replay payload store, or `undefined`
+	 * on a stage that keeps payloads inline. See `createReplayBlobStore` in
+	 * `apps/api/alchemy.run.ts` — the gate is `stageEnablesReplayBlobs`.
+	 */
+	replayBlobs: ReplayBlobCredentials | undefined
 }
 
 /**
@@ -104,7 +112,7 @@ export interface CreateMapleIngestOptions {
  * has no load balancer: an internal ALB would bill the same bytes again for a
  * single private consumer, and Cloud Map costs a private hosted zone.
  */
-export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestOptions) =>
+export const createMapleIngest = ({ stage, domains, region, replayBlobs }: CreateMapleIngestOptions) =>
 	Effect.gen(function* () {
 		const taskSize = resolveIngestTaskSize(stage)
 		const scaling = resolveIngestScaling(stage)
@@ -190,6 +198,17 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				tags: { Service: "maple-ingest", Region: region },
 			})
 
+		/**
+		 * Same, for a value that does not exist until another resource does —
+		 * `secret` above takes a plan-time string, this takes an alchemy Output.
+		 */
+		const secretFrom = (id: string, value: Output.Output<Redacted.Redacted<string>>) =>
+			AWS.SecretsManager.Secret(id, {
+				name: `${name("ingest")}/${id}`,
+				secretString: value,
+				tags: { Service: "maple-ingest", Region: region },
+			})
+
 		const tinybirdToken = yield* secret("tinybird-token", yield* requiredPlain("TINYBIRD_TOKEN"))
 		// Deliberately NOT `MAPLE_PG_URL`. That one is the direct-5432 admin URL the
 		// deploy workflows use for DDL; the gateway must reach Postgres through
@@ -210,22 +229,21 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 		const autumnKey = process.env.AUTUMN_SECRET_KEY?.trim()
 		const autumnSecret = autumnKey ? yield* secret("autumn-secret-key", autumnKey) : undefined
 
-		// Replay blob storage keys off the ENDPOINT, matching the gateway's own
-		// switch (`Config::from_env` in `apps/ingest/src/main.rs` treats
-		// INGEST_REPLAY_R2_ENDPOINT as the enable flag and `required()`s the rest).
-		// Gating on any other variable inverts the contract: a deploy holding the
-		// endpoint, bucket and access key but missing the secret would drop the
-		// endpoint from the task env, and the gateway — seeing no R2 config at all —
-		// would silently fall back to storing replay payloads inline. That is the
-		// exact failure the Rust guard exists to prevent, so the check moves here:
-		// endpoint set means the deploy fails now rather than the tasks crash-loop
-		// later.
-		const replayR2Endpoint = process.env.INGEST_REPLAY_R2_ENDPOINT?.trim()
-		const replayR2Secret = replayR2Endpoint
-			? yield* secret(
-					"replay-r2-secret-access-key",
-					yield* requiredPlain("INGEST_REPLAY_R2_SECRET_ACCESS_KEY"),
-				)
+		// Replay blob storage. Both halves of the credential are stack-minted now
+		// (`createReplayBlobStore`), so there is no half-set configuration to guard
+		// against any more — the whole group arrives together or not at all, and
+		// `stageEnablesReplayBlobs` is what decides which.
+		//
+		// The ACCESS KEY ID goes through Secrets Manager alongside the secret, even
+		// though it is not sensitive: it is the API token's id, which does not exist
+		// until the token is created, and ECS task-definition `env` takes plan-time
+		// strings only. ECS injects `secrets` into the container as environment
+		// variables, so `AppConfig::from_env` reads it exactly as before.
+		const replayR2Secret = replayBlobs
+			? yield* secretFrom("replay-r2-secret-access-key", replayBlobs.secretAccessKey)
+			: undefined
+		const replayR2AccessKeyId = replayBlobs
+			? yield* secretFrom("replay-r2-access-key-id", Output.map(replayBlobs.accessKeyId, Redacted.make))
 			: undefined
 
 		// ── OTel collector ──────────────────────────────────────────────────
@@ -419,8 +437,11 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				MAPLE_INGEST_KEY_ENCRYPTION_KEY: keyEncryptionKey.secretArn,
 				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: keyLookupHmacKey.secretArn,
 				...(autumnSecret ? { AUTUMN_SECRET_KEY: autumnSecret.secretArn } : undefined),
-				...(replayR2Secret
-					? { INGEST_REPLAY_R2_SECRET_ACCESS_KEY: replayR2Secret.secretArn }
+				...(replayR2Secret && replayR2AccessKeyId
+					? {
+							INGEST_REPLAY_R2_SECRET_ACCESS_KEY: replayR2Secret.secretArn,
+							INGEST_REPLAY_R2_ACCESS_KEY_ID: replayR2AccessKeyId.secretArn,
+						}
 					: undefined),
 			},
 
@@ -443,20 +464,23 @@ export const createMapleIngest = ({ stage, domains, region }: CreateMapleIngestO
 				INGEST_QUEUE_MAX_BYTES: String(WAL_MAX_BYTES),
 				INGEST_WAL_SHARDS: String(WAL_SHARDS),
 
-				// Replay blobs stay on Cloudflare R2. The AWS egress this costs is
-				// single-digit dollars a month; moving them to S3 would save nothing
-				// and would require a SigV4 or presigned read path in the Worker
+				// Replay blobs stay on Cloudflare R2 rather than S3. Measured at
+				// $0.002/session, the two land within ~$0.0001 of each other: R2
+				// charges nothing for egress but pays AWS internet egress on the way
+				// in, while S3 writes free from this region and then bills $0.09/GB
+				// back out on every playback. What actually dominates either bill is
+				// per-object PUTs (~65%), because the SDK flushes a chunk every 100 KB
+				// — so the lever is `FLUSH_BYTES`, not the vendor. S3 would also need a
+				// SigV4 or presigned read path in the Worker, which does not exist
 				// (`apps/api/src/platform/ReplayBlobStore.ts` uses the native R2
-				// binding). `requiredPlain` on the companions rather than
-				// `optionalPlain`, so a half-set config fails the deploy instead of
-				// reaching a task that refuses to boot.
-				...(replayR2Endpoint
+				// binding).
+				//
+				// Endpoint and bucket are plan-time strings; the two credential halves
+				// arrive through `secrets` above. See `createReplayBlobStore`.
+				...(replayBlobs
 					? {
-							INGEST_REPLAY_R2_ENDPOINT: replayR2Endpoint,
-							INGEST_REPLAY_R2_BUCKET: yield* requiredPlain("INGEST_REPLAY_R2_BUCKET"),
-							INGEST_REPLAY_R2_ACCESS_KEY_ID: yield* requiredPlain(
-								"INGEST_REPLAY_R2_ACCESS_KEY_ID",
-							),
+							INGEST_REPLAY_R2_ENDPOINT: replayBlobs.endpoint,
+							INGEST_REPLAY_R2_BUCKET: replayBlobs.bucket,
 							...(yield* optionalPlain("INGEST_REPLAY_R2_REGION", "auto")),
 						}
 					: undefined),

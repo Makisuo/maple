@@ -12,6 +12,7 @@ import {
 	resolveIngestScaling,
 	stageDeploysCollector,
 	stageDeploysIngest,
+	stageEnablesReplayBlobs,
 } from "./stage.ts"
 
 describe("parseMapleRegion", () => {
@@ -77,6 +78,21 @@ describe("collector service discovery", () => {
 		expect(stageDeploysIngest(parseMapleStage("stg"))).toBe(true)
 		expect(stageDeploysIngest(parseMapleStage("pr-12"))).toBe(true)
 		expect(stageDeploysIngest(parseMapleStage("dev-alice"))).toBe(false)
+	})
+
+	it("writes replay blobs on stg and prd, and only where the gateway runs", () => {
+		expect(stageEnablesReplayBlobs(parseMapleStage("prd"))).toBe(true)
+		// stg deliberately included: production must not be the first place the
+		// R2 write path ever runs.
+		expect(stageEnablesReplayBlobs(parseMapleStage("stg"))).toBe(true)
+		expect(stageEnablesReplayBlobs(parseMapleStage("pr-12"))).toBe(false)
+		expect(stageEnablesReplayBlobs(parseMapleStage("dev-alice"))).toBe(false)
+		// A stage cannot write blobs without a gateway to write them.
+		for (const stage of ["prd", "stg", "pr-12", "dev-alice"]) {
+			if (stageEnablesReplayBlobs(parseMapleStage(stage))) {
+				expect(stageDeploysIngest(parseMapleStage(stage))).toBe(true)
+			}
+		}
 	})
 
 	it("deploys the collector to prd only for now, a subset of the gateway stages", () => {

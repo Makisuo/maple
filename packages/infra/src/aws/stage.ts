@@ -213,6 +213,27 @@ export function stageDeploysCollector(stage: MapleStage): boolean {
 }
 
 /**
+ * Whether this stage stores session-replay rrweb payloads as R2 objects
+ * instead of inline in the `session_replay_events.Events` column.
+ *
+ * This is an EXPLICIT gate rather than the older "is INGEST_REPLAY_R2_ENDPOINT
+ * set?" test. Once the stack mints the R2 credentials itself (a bucket-scoped
+ * `AccountApiToken`, see the root stack) the endpoint is always available, so
+ * config presence stops being able to express intent — and with it went the
+ * only rollback lever, which was "unset the secret and redeploy". Flipping this
+ * function is now that lever.
+ *
+ * stg + prd. Deliberately NOT prd-only like `stageDeploysCollector`: that gate
+ * is a cash-flow call and R2 costs pennies here, whereas gating this to prd
+ * would make production the first place the write path ever runs. Previews stay
+ * off — a PR preview writing real objects into its own bucket buys nothing and
+ * leaves more to reap.
+ */
+export function stageEnablesReplayBlobs(stage: MapleStage): boolean {
+	return stage.kind === "prd" || stage.kind === "stg"
+}
+
+/**
  * Fargate task size for the collector per stage.
  *
  * In `tinybird` write mode (prod) the collector only carries the gateway's own
