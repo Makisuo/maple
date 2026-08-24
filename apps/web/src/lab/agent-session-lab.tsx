@@ -4,7 +4,6 @@ import { SessionViews, type SessionView } from "@/components/agent-sessions/sess
 import { buildAgentSessionFixture } from "@/lab/agent-session-fixture"
 import { buildSessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns } from "@/lib/agent-sessions/session-turns"
-import type { TraceSelection } from "@/lib/agent-sessions/span-filters"
 
 /**
  * The session detail page's three views over a fixture — the fastest way to
@@ -20,7 +19,7 @@ export function AgentSessionLab({ initialView }: { initialView?: SessionView }) 
 	const summary = useMemo(() => buildSessionSummary({ spans, turns }), [spans, turns])
 
 	const [view, setView] = useState<SessionView>(initialView ?? "overview")
-	const [selection, setSelection] = useState<TraceSelection | undefined>(undefined)
+	const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(undefined)
 
 	return (
 		<div className="flex h-screen flex-col bg-background">
@@ -28,7 +27,7 @@ export function AgentSessionLab({ initialView }: { initialView?: SessionView }) 
 				<h1 className="font-semibold text-sm">{summary.title ?? "Agent session"}</h1>
 				<p className="text-muted-foreground text-xs">
 					{summary.spanCount} spans · {turns.length} turns
-					{selection !== undefined && ` · selected ${selection.spanId ?? selection.traceId}`}
+					{selectedSpanId !== undefined && ` · selected ${selectedSpanId}`}
 				</p>
 			</div>
 			{/* The same slot and the same classes `PageLayout.ScrollArea` carries:
@@ -42,8 +41,8 @@ export function AgentSessionLab({ initialView }: { initialView?: SessionView }) 
 						onViewChange={setView}
 						turns={turns}
 						summary={summary}
-						selection={selection}
-						onOpenTrace={setSelection}
+						selectedSpanId={selectedSpanId}
+						onSelectSpan={setSelectedSpanId}
 					/>
 				</div>
 			</div>

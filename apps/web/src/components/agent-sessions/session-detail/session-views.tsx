@@ -6,11 +6,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/u
 import { Toggle } from "@maple/ui/components/ui/toggle"
 import { cn } from "@maple/ui/lib/utils"
 
+import { useAppHotkey } from "@/hooks/use-app-hotkey"
 import type { SessionSummary } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { SessionFlow } from "./session-flow"
 import { SessionOverview } from "./session-overview"
-import { filterSpans, type TraceSelection } from "@/lib/agent-sessions/span-filters"
+import { filterSpans } from "@/lib/agent-sessions/span-filters"
 import { SessionWaterfall } from "./session-waterfall"
 
 export const SESSION_VIEWS = ["overview", "trace", "flow"] as const
@@ -36,16 +37,17 @@ export function SessionViews({
 	onViewChange,
 	turns,
 	summary,
-	selection,
-	onOpenTrace,
+	selectedSpanId,
+	onSelectSpan,
 }: {
 	view: SessionView
 	onViewChange: (view: SessionView) => void
 	turns: readonly SessionTurn[]
 	summary: SessionSummary
-	/** The trace/span open in the page's trace pane, for highlighting. */
-	selection: TraceSelection | undefined
-	onOpenTrace: (target: TraceSelection) => void
+	/** The span expanded inline / open in the flow drawer (`?span=`). */
+	selectedSpanId: string | undefined
+	/** Raised with a span id to expand it, `undefined` to collapse. */
+	onSelectSpan: (spanId: string | undefined) => void
 }) {
 	const [query, setQuery] = useState("")
 	const [agentSpansOnly, setAgentSpansOnly] = useState(true)
@@ -56,6 +58,12 @@ export function SessionViews({
 	// them the place they had found in a 600-span session.
 	const [collapsedTurns, setCollapsedTurns] = useState<ReadonlySet<string>>(() => new Set())
 	const [zoom, setZoom] = useState(1)
+
+	// 1/2/3 switch views from anywhere on the page — the switcher stays
+	// reachable without the mouse, which is the point of pinning it up here.
+	useAppHotkey("session.viewOverview", () => onViewChange("overview"))
+	useAppHotkey("session.viewTrace", () => onViewChange("trace"))
+	useAppHotkey("session.viewFlow", () => onViewChange("flow"))
 
 	// The sticky control bar wraps at narrow widths, so the views stack under its
 	// measured height rather than an assumed one.
@@ -168,8 +176,8 @@ export function SessionViews({
 					collapseIdle={collapseIdle}
 					collapsedTurns={collapsedTurns}
 					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
-					selection={selection}
-					onOpenTrace={onOpenTrace}
+					selectedSpanId={selectedSpanId}
+					onSelectSpan={onSelectSpan}
 				/>
 			</TabsContent>
 			<TabsContent value="flow" className="flex flex-[1_1_auto] flex-col">
@@ -180,8 +188,9 @@ export function SessionViews({
 					agentSpansOnly={agentSpansOnly}
 					zoom={zoom}
 					onZoomChange={setZoom}
-					selection={selection}
-					onOpenTrace={onOpenTrace}
+					selectedSpanId={selectedSpanId}
+					onSelectSpan={onSelectSpan}
+					onOpenTraceView={() => onViewChange("trace")}
 				/>
 			</TabsContent>
 		</Tabs>

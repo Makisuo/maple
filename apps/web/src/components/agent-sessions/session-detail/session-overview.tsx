@@ -521,8 +521,10 @@ function bucketSpan(
 	return buckets.reduce((total, bucket) => total + tokens[bucket.key], 0)
 }
 
-/** A $0.0004 session printed "$0.00" reads as "measured, and it was free". */
-function formatCost(usd: number): string {
+/** A $0.0004 session printed "$0.00" reads as "measured, and it was free".
+ *  Shared with the span expansion's meta strip, so a call and the rail it
+ *  rolls up into can never disagree about how a cost prints. */
+export function formatCost(usd: number): string {
 	return usd > 0 && usd < 0.01 ? "<$0.01" : formatCurrency(usd, "usd")
 }
 

@@ -1,4 +1,5 @@
-import { useMemo, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, type ReactNode } from "react"
+import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
@@ -7,6 +8,7 @@ import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
 
+import { useListNavigation } from "@/hooks/use-list-navigation"
 import { usePageScrollMargin } from "@/hooks/use-page-scroll-margin"
 import { buildSessionAxis, type AxisTick, type SessionAxis } from "@/lib/agent-sessions/session-axis"
 import {
@@ -25,17 +27,17 @@ import {
 	type SessionTurn,
 	type AiSpanCategory,
 } from "@/lib/agent-sessions/session-turns"
-import {
-	filterSpans,
-	isDelegation,
-	shortTarget,
-	type TraceSelection,
-} from "@/lib/agent-sessions/span-filters"
+import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
+import { SpanInlineDetail } from "./span-expansion"
 import { CATEGORY_FILL } from "./span-visuals"
 
-// Row heights are fixed and known, so the virtualizer never has to measure.
+// Row heights are fixed and known, so the virtualizer never has to measure —
+// except the one inline detail row, whose height is its payload's and is
+// measured (`measureElement`) instead.
 const TURN_ROW_HEIGHT = 30
 const ROW_HEIGHT = 26
+/** Starting guess for the detail row; the measurement replaces it on mount. */
+const DETAIL_ROW_ESTIMATE = 480
 /** Past this the indent eats the span name; deep agent trees are common. */
 const MAX_INDENT_DEPTH = 6
 const INDENT_PX = 14
@@ -63,6 +65,7 @@ type WaterfallRow =
 			readonly visibleCount: number
 	  }
 	| { readonly kind: "span"; readonly key: string; readonly span: AiSessionSpan; readonly depth: number }
+	| { readonly kind: "detail"; readonly key: string; readonly span: AiSessionSpan }
 	| { readonly kind: "gap"; readonly key: string; readonly gap: IdleGap }
 
 interface SessionWaterfallProps {
@@ -76,10 +79,10 @@ interface SessionWaterfallProps {
 	/** Expansion state lives in SessionViews so a Trace → Flow → Trace round-trip keeps it. */
 	collapsedTurns: ReadonlySet<string>
 	onToggleTurn: (turnId: string) => void
-	/** The trace (and span) the page's trace pane is showing, for highlighting. */
-	selection: TraceSelection | undefined
-	/** Raised by every trace and span click; the page decides what "open" means. */
-	onOpenTrace: (target: TraceSelection) => void
+	/** The one span expanded inline (`?span=`). */
+	selectedSpanId: string | undefined
+	/** Raised with a span id to expand it, `undefined` to collapse. */
+	onSelectSpan: (spanId: string | undefined) => void
 }
 
 export function SessionWaterfall({
@@ -90,8 +93,8 @@ export function SessionWaterfall({
 	collapseIdle,
 	collapsedTurns,
 	onToggleTurn,
-	selection,
-	onOpenTrace,
+	selectedSpanId,
+	onSelectSpan,
 }: SessionWaterfallProps) {
 	// The page scrolls as one, so the virtualizer rides the page's scroller.
 	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
@@ -109,18 +112,62 @@ export function SessionWaterfall({
 	const ticks = axis.ticks
 
 	const rows = useMemo(
-		() => buildRows({ turns, gaps: collapsedGaps, collapsedTurns, query, agentSpansOnly }),
-		[turns, collapsedGaps, collapsedTurns, query, agentSpansOnly],
+		() =>
+			buildRows({ turns, gaps: collapsedGaps, collapsedTurns, query, agentSpansOnly, selectedSpanId }),
+		[turns, collapsedGaps, collapsedTurns, query, agentSpansOnly, selectedSpanId],
 	)
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement,
-		estimateSize: (index) => (rows[index]!.kind === "turn" ? TURN_ROW_HEIGHT : ROW_HEIGHT),
+		estimateSize: (index) => {
+			const row = rows[index]!
+			if (row.kind === "turn") return TURN_ROW_HEIGHT
+			if (row.kind === "detail") return DETAIL_ROW_ESTIMATE
+			return ROW_HEIGHT
+		},
 		getItemKey: (index) => rows[index]!.key,
 		overscan: 16,
 		scrollMargin,
 	})
+
+	// The keyboard's span cursor: ↑/↓ walk the span rows the filter left
+	// visible, Enter expands the one under the cursor, Esc collapses.
+	const spanRowIndexById = useMemo(() => {
+		const byId = new Map<string, number>()
+		rows.forEach((row, index) => {
+			if (row.kind === "span") byId.set(row.span.spanId, index)
+		})
+		return byId
+	}, [rows])
+	const spanIds = useMemo(() => [...spanRowIndexById.keys()], [spanRowIndexById])
+
+	const { focusedId, setFocusedId } = useListNavigation({
+		ids: spanIds,
+		onOpen: (spanId) => onSelectSpan(spanId),
+		onEscape: () => {
+			if (selectedSpanId === undefined) return false
+			onSelectSpan(undefined)
+			return true
+		},
+		scrollTo: (spanId) => {
+			const index = spanRowIndexById.get(spanId)
+			if (index !== undefined) virtualizer.scrollToIndex(index)
+		},
+	})
+
+	// A pasted `?span=` link lands on the exact span it names: the cursor starts
+	// there and the row is scrolled into view. Once, on mount — after that the
+	// URL follows the reader rather than leading them.
+	const didInitialScroll = useRef(false)
+	useEffect(() => {
+		if (didInitialScroll.current) return
+		didInitialScroll.current = true
+		if (selectedSpanId === undefined) return
+		setFocusedId(selectedSpanId)
+		const index = spanRowIndexById.get(selectedSpanId)
+		if (index !== undefined) virtualizer.scrollToIndex(index, { align: "center" })
+	}, [selectedSpanId, spanRowIndexById, setFocusedId, virtualizer])
 
 	return (
 		<div className="@container flex grow flex-col">
@@ -179,13 +226,22 @@ export function SessionWaterfall({
 							return (
 								<div
 									key={item.key}
+									// Only the detail row is measured: its height is its
+									// payload's, and the fixed rows stay estimate-only.
+									ref={row.kind === "detail" ? virtualizer.measureElement : undefined}
+									data-index={item.index}
 									className="absolute inset-x-0 top-0"
-									style={{
-										height: item.size,
-										// `start` is in the page scroller's coordinates; the margin
-										// brings it back to this list's own.
-										transform: `translateY(${item.start - scrollMargin}px)`,
-									}}
+									// `start` is in the page scroller's coordinates; the margin
+									// brings it back to this list's own. The detail row takes its
+									// height from its payload instead of the estimate.
+									style={
+										row.kind === "detail"
+											? { transform: `translateY(${item.start - scrollMargin}px)` }
+											: {
+													height: item.size,
+													transform: `translateY(${item.start - scrollMargin}px)`,
+												}
+									}
 								>
 									{row.kind === "turn" && (
 										<TurnHeader
@@ -194,8 +250,6 @@ export function SessionWaterfall({
 											axis={axis}
 											collapsed={collapsedTurns.has(row.turn.id)}
 											onToggle={() => onToggleTurn(row.turn.id)}
-											selection={selection}
-											onOpenTrace={onOpenTrace}
 										/>
 									)}
 									{row.kind === "span" && (
@@ -203,13 +257,19 @@ export function SessionWaterfall({
 											row={row}
 											axis={axis}
 											spansById={spansById}
-											selected={
-												selection?.spanId === row.span.spanId &&
-												selection.traceId === row.span.traceId
-											}
-											onOpenTrace={onOpenTrace}
+											selected={selectedSpanId === row.span.spanId}
+											focused={focusedId === row.span.spanId}
+											onClick={() => {
+												setFocusedId(row.span.spanId)
+												onSelectSpan(
+													selectedSpanId === row.span.spanId
+														? undefined
+														: row.span.spanId,
+												)
+											}}
 										/>
 									)}
+									{row.kind === "detail" && <SpanInlineDetail span={row.span} />}
 									{row.kind === "gap" && <GapRow gap={row.gap} />}
 								</div>
 							)
@@ -239,6 +299,7 @@ function buildRows(input: {
 	collapsedTurns: ReadonlySet<string>
 	query: string
 	agentSpansOnly: boolean
+	selectedSpanId: string | undefined
 }): readonly WaterfallRow[] {
 	const surviving = input.turns.flatMap((turn) => {
 		const spans = filterSpans(turn.spans, input.query, input.agentSpansOnly)
@@ -272,6 +333,11 @@ function buildRows(input: {
 			// turn's own rows split cleanly at the first span that starts after it.
 			flushGaps(spanStartMs(span))
 			rows.push({ kind: "span", key: `${turn.id}:${span.spanId}`, span, depth })
+			// The selected span's payload expands inline, directly under its row —
+			// one at a time, which is why this is the selection and not a set.
+			if (span.spanId === input.selectedSpanId) {
+				rows.push({ kind: "detail", key: `detail:${span.spanId}`, span })
+			}
 		}
 		flushGaps(turn.endMs)
 	}
@@ -331,8 +397,6 @@ function TurnHeader({
 	axis,
 	collapsed,
 	onToggle,
-	selection,
-	onOpenTrace,
 }: {
 	row: Extract<WaterfallRow, { kind: "turn" }>
 	/** The whole session's turns: a reporter wider than this one belongs to none. */
@@ -340,8 +404,6 @@ function TurnHeader({
 	axis: SessionAxis
 	collapsed: boolean
 	onToggle: () => void
-	selection: TraceSelection | undefined
-	onOpenTrace: (target: TraceSelection) => void
 }) {
 	const { turn } = row
 	// Tokens and duration are facts about the turn, not about the rows on screen:
@@ -394,7 +456,7 @@ function TurnHeader({
 				</button>
 				{traceId !== undefined && (
 					<span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider">
-						<TraceButton traceId={traceId} selection={selection} onOpenTrace={onOpenTrace} />
+						<TraceLink traceId={traceId} timestamp={turn.anchor.timestamp} />
 						{turn.traceIds.length > 1 && <span>+{turn.traceIds.length - 1}</span>}
 					</span>
 				)}
@@ -415,27 +477,21 @@ function TurnHeader({
 	)
 }
 
-function TraceButton({
-	traceId,
-	selection,
-	onOpenTrace,
-}: {
-	traceId: string
-	selection: TraceSelection | undefined
-	onOpenTrace: (target: TraceSelection) => void
-}) {
+/** With no side panel there is no in-page trace pane: the turn's trace opens
+ *  as the full trace page, windowed by the turn's own anchor timestamp. */
+function TraceLink({ traceId, timestamp }: { traceId: string; timestamp: string }) {
 	return (
-		<button
-			type="button"
-			onClick={() => onOpenTrace({ traceId })}
+		<Link
+			to="/traces/$traceId"
+			params={{ traceId }}
+			search={{ t: timestamp }}
 			className={cn(
 				"shrink-0 cursor-pointer rounded-xs font-mono hover:text-foreground",
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-				selection?.traceId === traceId && "text-foreground",
 			)}
 		>
 			Trace {traceId.slice(0, 8)}
-		</button>
+		</Link>
 	)
 }
 
@@ -444,13 +500,16 @@ function SpanRow({
 	axis,
 	spansById,
 	selected,
-	onOpenTrace,
+	focused,
+	onClick,
 }: {
 	row: Extract<WaterfallRow, { kind: "span" }>
 	axis: SessionAxis
 	spansById: ReadonlyMap<string, AiSessionSpan>
 	selected: boolean
-	onOpenTrace: (target: TraceSelection) => void
+	/** Under the keyboard's span cursor — distinct from `selected`, which means expanded. */
+	focused: boolean
+	onClick: () => void
 }) {
 	const { span } = row
 	const category = classifyAiSpan(span)
@@ -463,12 +522,14 @@ function SpanRow({
 	return (
 		<button
 			type="button"
-			onClick={() => onOpenTrace({ traceId: span.traceId, spanId: span.spanId })}
+			onClick={onClick}
 			aria-current={selected || undefined}
+			aria-expanded={selected}
 			className={cn(
 				"flex h-full w-full cursor-pointer items-center px-2.5 text-left text-xs hover:bg-accent/40",
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 				errored && "bg-destructive/6",
+				focused && "bg-accent/60",
 				selected && "border-l-2 border-l-primary bg-primary/5",
 			)}
 		>

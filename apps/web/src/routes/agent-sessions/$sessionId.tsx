@@ -20,9 +20,6 @@ import {
 	SessionViews,
 	type SessionView,
 } from "@/components/agent-sessions/session-detail/session-views"
-import type { TraceSelection } from "@/lib/agent-sessions/span-filters"
-import { TraceSpanDetailPanel } from "@/components/traces/trace-span-detail-panel"
-import { useAppHotkey } from "@/hooks/use-app-hotkey"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import {
 	breadcrumbSessionId,
@@ -48,15 +45,9 @@ const agentSessionSearchSchema = Schema.Struct({
 	// segment on purpose: Back from the detail page returns to the list the
 	// reader came from, not to the view they looked at before this one.
 	view: Schema.optional(Schema.String),
-	// The in-page trace pane: the trace it shows and, optionally, the span it has
-	// focused. In the URL rather than component state so a pane the reader opened
-	// survives a reload and travels in a pasted link.
-	//
-	// Checked, not bare: the pane decodes this through the `TraceId` brand with
-	// `decodeSync`, so a hand-edited `?trace=` or `?trace=%20` would throw during
-	// render — past the pane's own error branch and into the router's error
-	// component. Rejecting it here drops the param instead.
-	trace: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())),
+	// The span expanded inline (Trace) or open in the docked drawer (Flow). In
+	// the URL rather than component state so a pasted link reopens the exact
+	// span someone was looking at, in either debug view.
 	span: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())),
 })
 
@@ -218,48 +209,17 @@ function SessionDetailBody({
 		})
 	}, [navigate, search.t, summary.startMs, summary.endMs])
 
-	// Memoized because `SessionViews` and the views below it key their own work on
-	// this object.
-	const selection: TraceSelection | undefined = useMemo(
-		() => (search.trace === undefined ? undefined : { traceId: search.trace, spanId: search.span }),
-		[search.trace, search.span],
-	)
-
-	const openTrace = useCallback(
-		(target: TraceSelection) => {
+	const selectSpan = useCallback(
+		(spanId: string | undefined) => {
 			navigate({
-				search: (prev: Record<string, unknown>) => ({
-					...prev,
-					trace: target.traceId,
-					span: target.spanId,
-				}),
-				// Opening the pane is a step the reader may want Back to undo;
-				// refocusing inside an open pane is not.
-				replace: search.trace === target.traceId,
+				search: (prev: Record<string, unknown>) => ({ ...prev, span: spanId }),
+				// Expanding a span is a step the reader may want Back to undo;
+				// moving the expansion, or collapsing it, is not.
+				replace: search.span !== undefined,
 			})
 		},
-		[navigate, search.trace],
+		[navigate, search.span],
 	)
-
-	const closeTrace = useCallback(() => {
-		navigate({
-			search: (prev: Record<string, unknown>) => ({ ...prev, trace: undefined, span: undefined }),
-			replace: true,
-		})
-	}, [navigate])
-
-	// Esc closes the pane. The dialog guard defers to any sheet the panel opened,
-	// so that closes first.
-	useAppHotkey("list.clear", closeTrace, { enabled: selection !== undefined })
-
-	// The pane's warehouse read needs a timestamp inside the trace to stay off the
-	// full partition scan. Deliberately the trace's first span here rather than the
-	// focused one: a per-span hint re-keys the pane's atom on every click inside
-	// the same trace, re-running the hierarchy query against a shifted window.
-	const paneTimestamp =
-		selection === undefined
-			? search.t
-			: (spans.find((span) => span.traceId === selection.traceId)?.timestamp ?? search.t)
 
 	// Message content is opt-in and off by default, so most sessions have no
 	// opening user message to title the page with.
@@ -305,31 +265,14 @@ function SessionDetailBody({
 							onViewChange={changeView}
 							turns={turns}
 							summary={summary}
-							selection={selection}
-							onOpenTrace={openTrace}
+							selectedSpanId={search.span}
+							onSelectSpan={selectSpan}
 						/>
 					</div>
 				</DashboardLayout.Scroll>
 			</DashboardLayout.Content>
-			{/* Inline beside the content above `lg`, a sheet below it that opens on
-			    selection. Empty children render no rail at all. */}
-			<DashboardLayout.RightPanel
-				title="Span detail"
-				width="w-[28rem]"
-				open={selection !== undefined}
-				onOpenChange={(open) => {
-					if (!open) closeTrace()
-				}}
-			>
-				{selection === undefined ? undefined : (
-					<TraceSpanDetailPanel
-						traceId={selection.traceId}
-						timestamp={paneTimestamp}
-						selectedSpanId={selection.spanId}
-						onClose={closeTrace}
-					/>
-				)}
-			</DashboardLayout.RightPanel>
+			{/* No side panel at any width: span detail expands inline under its
+			    waterfall row, or in the Flow view's docked drawer. */}
 		</SessionShell>
 	)
 }

@@ -130,14 +130,17 @@ const CONTEXT_ERROR = "prompt is too long: 214832 tokens > 200000 maximum"
 
 /**
  * One model call's attributes: usage that grows with the conversation the way a
- * real context window does, plus the two things only some calls carry — the
- * failure, and the prompt (captured once per turn, on its opening call).
+ * real context window does, plus the things only some calls carry — the
+ * failure, the prompt (captured once per turn, on its opening call), and the
+ * response the call produced, with a `tool_call` part when a tool follows it.
  */
 function callAttributes(input: {
 	turnIndex: number
 	callIndex: number
 	failed: boolean
 	prompt: string | undefined
+	/** Tool this call dispatches, as a `tool_call` part of its output message. */
+	tool: string | undefined
 }) {
 	const history = 6_000 + input.turnIndex * 14_000 + input.callIndex * 2_500
 	return {
@@ -149,7 +152,68 @@ function callAttributes(input: {
 		usageCost: 0.11 + input.turnIndex * 0.02 + input.callIndex * 0.04,
 		errorType: input.failed ? "context_length_exceeded" : undefined,
 		inputMessages: input.prompt === undefined ? undefined : userMessages(input.prompt),
+		outputMessages: input.failed
+			? undefined
+			: [
+					{
+						role: "assistant",
+						parts: [
+							{
+								type: "text",
+								content:
+									"I'll read the retry handler before changing anything — the fixed delay is only half the story, the idempotency key is what decides whether a duplicate delivery is charged twice.",
+							},
+							...(input.tool === undefined
+								? []
+								: [
+										{
+											type: "tool_call",
+											id: `toolu_${input.turnIndex}_${input.callIndex}`,
+											name: input.tool,
+											arguments: toolArguments(input.tool),
+										},
+									]),
+						],
+					},
+				],
+		responseFinishReasons: input.failed ? undefined : input.tool === undefined ? ["stop"] : ["tool_use"],
 	} satisfies AiSessionGenAiValues
+}
+
+/** Arguments shaped like the tool would really take, so the expansion's
+ *  payload cards render something worth eyeballing. */
+function toolArguments(tool: string): Record<string, unknown> {
+	switch (tool) {
+		case "read_file":
+			return { path: "src/webhooks/retry.ts", start_line: 1, end_line: 120 }
+		case "grep_repo":
+			return { pattern: "backoff", glob: "src/**/*.ts" }
+		case "write_file":
+			return { path: "src/webhooks/retry.ts", content: "…" }
+		case "run_tests":
+			return { suite: "webhooks", watch: false }
+		case "git_diff":
+			return { base: "main" }
+		default:
+			return { tool }
+	}
+}
+
+function toolResult(tool: string): string | undefined {
+	switch (tool) {
+		case "read_file":
+			return "export const RETRY_DELAY_MS = 30_000 // fixed, no jitter\n…120 lines…"
+		case "grep_repo":
+			return "41 matches in 12 files"
+		case "write_file":
+			return "wrote 132 lines"
+		case "run_tests":
+			return "412 passed · 0 failed"
+		case "git_diff":
+			return "2 files changed, +31 −14"
+		default:
+			return undefined
+	}
 }
 
 export function buildAgentSessionFixture(): readonly AiSessionSpan[] {
@@ -184,6 +248,7 @@ export function buildAgentSessionFixture(): readonly AiSessionSpan[] {
 						// Only the opening call of a turn carries it, exactly as a
 						// framework that captures messages once per turn emits them.
 						prompt: call === 0 ? plan.prompt : undefined,
+						tool: plan.tools[call],
 					}),
 				}),
 			)
@@ -191,6 +256,7 @@ export function buildAgentSessionFixture(): readonly AiSessionSpan[] {
 
 			const tool = plan.tools[call]
 			if (tool !== undefined) {
+				const failedTool = failing && tool === "run_tests" && call === 0
 				spans.push(
 					toolSpan({
 						spanId: `${agentId}-tool-${call}`,
@@ -199,12 +265,14 @@ export function buildAgentSessionFixture(): readonly AiSessionSpan[] {
 						startMs: turnStart + offset,
 						durationMs: tool === "run_tests" ? 9 * SECOND : 2 * SECOND,
 						toolName: tool,
-						statusCode: failing && tool === "run_tests" && call === 0 ? "Error" : undefined,
-						statusMessage: failing && tool === "run_tests" && call === 0 ? "exit 1" : undefined,
-						genAi:
-							failing && tool === "run_tests" && call === 0
-								? { errorType: "tool_error" }
-								: undefined,
+						statusCode: failedTool ? "Error" : undefined,
+						statusMessage: failedTool ? "exit 1" : undefined,
+						genAi: {
+							toolCallId: `toolu_${index}_${call}`,
+							toolCallArguments: toolArguments(tool),
+							toolCallResult: failedTool ? "exit 1 · 2 failing" : toolResult(tool),
+							errorType: failedTool ? "tool_error" : undefined,
+						},
 					}),
 				)
 				offset += (tool === "run_tests" ? 9 : 2) * SECOND + SECOND
