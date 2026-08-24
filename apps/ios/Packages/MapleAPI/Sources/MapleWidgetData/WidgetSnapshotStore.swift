@@ -70,17 +70,40 @@ public struct WidgetSnapshotStore<Value: Codable & Sendable>: Sendable {
 	private static var decoder: JSONDecoder { WidgetJSON.decoder }
 }
 
-// Keys are per organization, because a widget can be pinned to one. The `v1`
-// keys below are read-only leftovers: a widget placed before this shipped has a
-// snapshot under the old key and would otherwise render "Open Maple" until the
-// next publish. Delete them, and the fallbacks that read them, one release on.
+// Keys are per organization *and* environment, because a widget can be pinned
+// to either. One slot per organization was enough only while every widget
+// showed the whole organization: two widgets on the same organization, one
+// filtered to production and one to staging, would otherwise overwrite each
+// other on every publish — and each would render the other's numbers under its
+// own label, which looks exactly like working software.
+//
+// The unfiltered key is left as it was rather than versioned up. "All
+// environments" is precisely what the existing key already means, so widgets
+// placed before the environment picker keep reading the snapshot they always
+// read, with no migration and no fallback to delete later.
+//
+// The `v1` keys below are read-only leftovers from before per-organization
+// snapshots: a widget placed before that shipped would otherwise render "Open
+// Maple" until the next publish. Delete them, and their readers, one release on.
+
+/// The key segment identifying one environment, or nothing at all for the
+/// whole organization. Shared so the two surfaces cannot disagree about which
+/// slot a snapshot belongs in.
+private func environmentKeySuffix(_ environment: String?) -> String {
+	guard let environment, !environment.isEmpty else { return "" }
+	return ".env.\(environment)"
+}
 
 extension WidgetSnapshotStore where Value == IssuesSnapshot {
 	public static func issues(
 		organizationId: String,
+		environment: String? = nil,
 		appGroupIdentifier: String = WidgetAppGroup.identifier
 	) -> WidgetSnapshotStore<IssuesSnapshot> {
-		.init(key: "issues.snapshot.v2.\(organizationId)", appGroupIdentifier: appGroupIdentifier)
+		.init(
+			key: "issues.snapshot.v2.\(organizationId)\(environmentKeySuffix(environment))",
+			appGroupIdentifier: appGroupIdentifier
+		)
 	}
 
 	/// Read-only fallback for widgets placed before per-organization snapshots.
@@ -91,9 +114,13 @@ extension WidgetSnapshotStore where Value == IssuesSnapshot {
 extension WidgetSnapshotStore where Value == ThroughputSnapshot {
 	public static func throughput(
 		organizationId: String,
+		environment: String? = nil,
 		appGroupIdentifier: String = WidgetAppGroup.identifier
 	) -> WidgetSnapshotStore<ThroughputSnapshot> {
-		.init(key: "throughput.snapshot.v2.\(organizationId)", appGroupIdentifier: appGroupIdentifier)
+		.init(
+			key: "throughput.snapshot.v2.\(organizationId)\(environmentKeySuffix(environment))",
+			appGroupIdentifier: appGroupIdentifier
+		)
 	}
 
 	/// Read-only fallback for widgets placed before per-organization snapshots.

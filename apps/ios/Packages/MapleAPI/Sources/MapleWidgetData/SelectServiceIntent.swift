@@ -21,11 +21,21 @@ public struct SelectServiceIntent: WidgetConfigurationIntent {
 	@Parameter(title: "Organization")
 	public var organization: OrganizationEntity?
 
+	/// Which deployment environment's throughput, or all of it when unset.
+	/// Optional and additive for the same reason the organization above is.
+	@Parameter(title: "Environment")
+	public var environment: EnvironmentEntity?
+
 	public init() {}
 
-	public init(service: ServiceEntity?, organization: OrganizationEntity? = nil) {
+	public init(
+		service: ServiceEntity?,
+		organization: OrganizationEntity? = nil,
+		environment: EnvironmentEntity? = nil
+	) {
 		self.service = service
 		self.organization = organization
+		self.environment = environment
 	}
 }
 
@@ -64,6 +74,18 @@ public struct ServiceEntityQuery: EntityQuery {
 
 	/// Reads the organization parameter of the very intent being configured, so
 	/// the service list belongs to the organization the user just picked.
+	/// Reads the organization parameter of the very intent being configured, so
+	/// the service list belongs to the organization the user just picked.
+	///
+	/// The environment is deliberately *not* a second dependency here. A
+	/// multi-parameter dependency resolves only when **every** parameter in it
+	/// has a value, and the environment is legitimately unset — so adding it
+	/// would leave `configuration` nil for the common case and send the
+	/// organization lookup back to whichever one the app happens to be in. The
+	/// cost is that a staging widget's service picker lists the organization's
+	/// services rather than staging's; a service missing from the staging
+	/// snapshot already resolves as absent, which is the same handling a
+	/// service that went quiet gets.
 	@IntentParameterDependency<SelectServiceIntent>(\.$organization)
 	public var configuration
 

@@ -1239,6 +1239,77 @@
         "title": "Breakdown item",
         "type": "object"
       },
+      "Environment": {
+        "additionalProperties": false,
+        "description": "One deployment environment telemetry has been observed in.",
+        "examples": [
+          {
+            "name": "production",
+            "object": "environment"
+          }
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "object": {
+            "enum": [
+              "environment"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "name"
+        ],
+        "title": "Environment",
+        "type": "object"
+      },
+      "EnvironmentList": {
+        "additionalProperties": false,
+        "description": "Cursor-paginated list envelope wrapping a page of objects.",
+        "properties": {
+          "data": {
+            "description": "The page of objects, in the ordering documented by the endpoint.",
+            "items": {
+              "$ref": "#/components/schemas/Environment"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "description": "Whether more objects exist after this page. When `true`, use `next_cursor` to fetch them.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "description": "Cursor for the next page, or `null` on the last page. Pass it back as the `cursor` query param.",
+            "examples": [
+              "off_1k"
+            ],
+            "type": "string"
+          },
+          "object": {
+            "description": "Always `\"list\"` for a list response.",
+            "enum": [
+              "list"
+            ],
+            "examples": [
+              "list"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "title": "Environment list",
+        "type": "object"
+      },
       "ErrorIncident": {
         "additionalProperties": false,
         "properties": {
@@ -2755,6 +2826,7 @@
         "description": "Everything the Maple iOS Home Screen widgets draw, in one response: ongoing error issues over the last day, and per-service traffic over the last hour.",
         "examples": [
           {
+            "deployment_environment": "production",
             "generated_at": "2026-08-21T09:10:00.000Z",
             "issues": {
               "data": [
@@ -2802,6 +2874,9 @@
           }
         ],
         "properties": {
+          "deployment_environment": {
+            "type": "string"
+          },
           "generated_at": {
             "type": "string"
           },
@@ -4811,6 +4886,148 @@
         "summary": "Retrieve incident timeseries",
         "tags": [
           "Anomalies"
+        ]
+      }
+    },
+    "/v2/environments": {
+      "get": {
+        "description": "Lists the deployment environments observed in an explicit time window, in name order. The list is unpaginated — `has_more` is always false — because an organization has tens of environments, not thousands. Requires `environments:read`.",
+        "operationId": "listEnvironments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_time",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentList"
+                }
+              }
+            },
+            "description": "Cursor-paginated list envelope wrapping a page of objects."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InvalidCredentialsError failure. HTTP 401. | The @maple/http/errors/UnauthorizedError failure. HTTP 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/InsufficientScopeError failure. HTTP 403. | The @maple/http/v2/OrganizationAccessDeniedError failure. HTTP 403."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQuotaExceededError failure. HTTP 429. | The @maple/http/v2/RateLimitError failure. HTTP 429.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait or an HTTP-date indicating when the request may be retried.",
+                "example": 60,
+                "schema": {
+                  "oneOf": [
+                    {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseMalformedQueryError failure. HTTP 500. | The @maple/http/errors/WarehouseScopeError failure. HTTP 500. | The @maple/http/errors/OrgClickHouseSettingsEncryptionError failure. HTTP 500. | The @maple/http/v2/ResponseSchemaError failure. HTTP 500. | The @maple/http/v2/UnexpectedError failure. HTTP 500."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseQueryError failure. HTTP 502. | The @maple/http/errors/WarehouseAuthError failure. HTTP 502. | The @maple/http/errors/WarehouseConfigError failure. HTTP 502. | The @maple/http/errors/WarehouseClientError failure. HTTP 502. | The @maple/http/errors/WarehouseSchemaDriftError failure. HTTP 502. | The @maple/http/errors/WarehouseResultDecodeError failure. HTTP 502. | The @maple/http/errors/OrgClickHouseSettingsStoredConfigInvalidError failure. HTTP 502."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/errors/WarehouseUpstreamError failure. HTTP 503. | The @maple/http/errors/OrgClickHouseSettingsPersistenceError failure. HTTP 503. | The @maple/http/errors/ApiKeyLookupPersistenceError failure. HTTP 503. | The @maple/http/errors/AuthorizationUnavailableError failure. HTTP 503."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapleErrorEnvelope"
+                }
+              }
+            },
+            "description": "The @maple/http/v2/WorkerUnavailableError failure. HTTP 504."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List deployment environments",
+        "tags": [
+          "Environments"
         ]
       }
     },
@@ -6920,9 +7137,18 @@
     },
     "/v2/widget_summary": {
       "get": {
-        "description": "Returns ongoing error issues and per-service traffic in a single small payload sized for a Home Screen widget. The windows are fixed by the server. Requires the `widget_summary:read` scope.",
+        "description": "Returns ongoing error issues and per-service traffic in a single small payload sized for a Home Screen widget. The windows are fixed by the server; `deployment_environment` optionally narrows both halves to one environment and is echoed on the response. Requires the `widget_summary:read` scope.",
         "operationId": "getWidgetSummary",
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "deployment_environment",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7147,6 +7373,10 @@
     {
       "description": "Service-to-service topology.",
       "name": "Service Map"
+    },
+    {
+      "description": "The deployment environments telemetry has been observed in.",
+      "name": "Environments"
     },
     {
       "description": "Read a dashboard through a share link. The only unauthenticated group in this API: the token in the request body is the credential, so these operations resolve for a viewer with no Maple account.",

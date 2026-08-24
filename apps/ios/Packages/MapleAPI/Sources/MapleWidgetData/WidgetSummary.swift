@@ -26,6 +26,14 @@ public struct WidgetSummaryPayload: Codable, Sendable, Equatable {
 	/// membership index, and a second source could put one organization's name
 	/// over another's numbers.
 	public var organizationId: String
+	/// The deployment environment the payload was filtered to, or nil for all of
+	/// them.
+	///
+	/// Echoed for the same reason `organizationId` is, and it matters more here:
+	/// snapshots are stored per (organization, environment), so a response whose
+	/// filter the server ignored would overwrite a production widget's numbers
+	/// with organization-wide ones and look entirely plausible doing it.
+	public var deploymentEnvironment: String?
 	public var issues: Issues
 	public var throughput: Throughput
 
@@ -172,12 +180,14 @@ public struct WidgetSummaryPayload: Codable, Sendable, Equatable {
 		schemaVersion: Int,
 		generatedAt: Date,
 		organizationId: String,
+		deploymentEnvironment: String? = nil,
 		issues: Issues,
 		throughput: Throughput
 	) {
 		self.schemaVersion = schemaVersion
 		self.generatedAt = generatedAt
 		self.organizationId = organizationId
+		self.deploymentEnvironment = deploymentEnvironment
 		self.issues = issues
 		self.throughput = throughput
 	}
@@ -186,6 +196,7 @@ public struct WidgetSummaryPayload: Codable, Sendable, Equatable {
 		case schemaVersion = "schema_version"
 		case generatedAt = "generated_at"
 		case organizationId = "organization_id"
+		case deploymentEnvironment = "deployment_environment"
 		case issues
 		case throughput
 	}

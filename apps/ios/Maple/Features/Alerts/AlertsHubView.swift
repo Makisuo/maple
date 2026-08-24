@@ -7,7 +7,12 @@ import SwiftUI
 struct AlertsHubView: View {
 	@Environment(AppNavigation.self) private var navigation
 	@Environment(SessionController.self) private var session
+	@Environment(EnvironmentController.self) private var environments
 	@State private var models: AlertsHubModels?
+
+	private var scope: SessionController.DataScope {
+		.init(generation: session.dataGeneration, environment: environments.selected)
+	}
 
 	var body: some View {
 		@Bindable var navigation = navigation
@@ -39,14 +44,18 @@ struct AlertsHubView: View {
 				ToolbarItem(placement: .topBarLeading) {
 					OrganizationSwitcherButton()
 				}
+				ToolbarItem(placement: .topBarLeading) {
+					EnvironmentPickerView()
+				}
 			}
 			.mapleDestinations()
 		}
-		// Re-runs on org switch, replacing all three models at once so no
-		// segment shows one org's rows under the next org's title.
-		.task(id: session.dataGeneration) {
-			if models?.generation != session.dataGeneration {
-				models = AlertsHubModels(session: session)
+		// Re-runs on an org switch or an environment change, replacing all three
+		// models at once so no segment shows one scope's rows under the next
+		// scope's title.
+		.task(id: scope) {
+			if models?.scope != scope {
+				models = AlertsHubModels(session: session, scope: scope)
 			}
 		}
 	}
@@ -71,13 +80,19 @@ final class AlertsHubModels {
 	let incidents: IncidentsListModel
 	let issues: IssuesListModel
 	let anomalies: AnomaliesListModel
-	let generation: Int
+	let scope: SessionController.DataScope
 
-	init(session: SessionController) {
-		incidents = IncidentsListModel(api: session.api, session: session)
-		issues = IssuesListModel(api: session.api, session: session)
-		anomalies = AnomaliesListModel(api: session.api, session: session)
-		generation = session.dataGeneration
+	/// The scope's environment reaches issues and anomalies, whose endpoints
+	/// take the filter, and is ignored by incidents, whose endpoints do not —
+	/// the scoped client is still handed to all three so the day `/v2/alerts`
+	/// grows the parameter, this segment starts honouring it without another
+	/// change here.
+	init(session: SessionController, scope: SessionController.DataScope) {
+		let api = session.api.scoped(toEnvironment: scope.environment)
+		incidents = IncidentsListModel(api: api, session: session)
+		issues = IssuesListModel(api: api, session: session)
+		anomalies = AnomaliesListModel(api: api, session: session)
+		self.scope = scope
 	}
 }
 

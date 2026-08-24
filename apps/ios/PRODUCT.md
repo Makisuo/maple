@@ -122,6 +122,12 @@ Reads needed, all in v2 already:
 | Services | `listServices`, `getService`, `queryTraceTimeseries`, `queryTraceBreakdown`, `listAlertIncidents`, `listErrorIssues`                                                                                                     |
 | Alerts   | `listAlertIncidents`, `getAlertIncident`, `getAlertRule`, `listAlertRuleChecks`, `listAlertDeliveries`, `listErrorIssues`, `getErrorIssue`, `listAnomalyIncidents`, `getAnomalyIncident`, `getAnomalyIncidentTimeseries` |
 
+Every screen also calls `listEnvironments` once per organization, to populate
+the deployment-environment control that sits beside the organization switcher on
+all three tab roots. Both controls hide themselves when there is nothing to
+switch to. See "The environment axis" in the README for which reads the
+selection reaches and which it does not.
+
 Add these `operationId`s to `IOS_OPERATIONS` in `scripts/generate-ios-openapi.ts`.
 Sparkline queries: batch per screen, 1h/24 buckets, `p95_duration` and
 `error_rate` aggregations — cheap, and the API is already cost-profiled.

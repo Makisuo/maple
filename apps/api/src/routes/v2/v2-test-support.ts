@@ -47,6 +47,7 @@ import { HttpV2InstrumentationAuditLive } from "./setup-audit.http"
 import { HttpV2SharePublicLive } from "./share.http"
 import { DashboardWidgetDataService } from "@/services/dashboards/DashboardWidgetDataService"
 import {
+	HttpV2EnvironmentsLive,
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
 	HttpV2ServiceMapLive,
@@ -92,6 +93,7 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
+	HttpV2EnvironmentsLive,
 	HttpV2WidgetSummaryLive,
 	HttpV2WidgetCredentialsLive,
 	// The share group's own dependencies are satisfied here rather than by every
