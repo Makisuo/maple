@@ -5,7 +5,12 @@ import { ok, strictEqual } from "node:assert"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { chdbConfigPath, dirtyStoreRecoveryAdvice, resolveChdbConfigFile } from "../src/commands/server"
+import {
+	chdbConfigPath,
+	dirtyStoreRecoveryAdvice,
+	needsInitialCheckpoint,
+	resolveChdbConfigFile,
+} from "../src/commands/server"
 import { CheckpointPreconditionError, parseCheckpointId } from "../src/server/checkpoints"
 import { recoverExpected } from "../src/core/outcomes"
 import {
@@ -164,5 +169,38 @@ describe("default chDB backups config", () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true })
 		}
+	})
+})
+
+describe("initial checkpoint on start", () => {
+	// The dead end this exists to close: nothing created a checkpoint except a
+	// user typing `maple checkpoint`, so an unclean shutdown left `maple start`
+	// with only one honest remedy — wipe the store. That was the CLI's largest
+	// source of real errors, and every one was someone losing their telemetry.
+	it("takes one when the store has never been checkpointed", () => {
+		strictEqual(needsInitialCheckpoint({ available: false, reason: "none" }), true)
+	})
+
+	it("never takes a second one", () => {
+		strictEqual(
+			needsInitialCheckpoint({
+				available: true,
+				checkpointId: parseCheckpointId("00000000-0000-4000-8000-000000000000"),
+			}),
+			false,
+		)
+	})
+
+	// Overwriting a broken registry would destroy the evidence of why it broke,
+	// and `maple restore` reports that state deliberately.
+	it("leaves an unusable registry alone rather than papering over it", () => {
+		strictEqual(
+			needsInitialCheckpoint({
+				available: false,
+				reason: "unusable",
+				detail: "checkpoint backup size mismatch",
+			}),
+			false,
+		)
 	})
 })

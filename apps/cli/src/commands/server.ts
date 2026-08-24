@@ -332,6 +332,68 @@ const BACKGROUND_READY_POLL_MS = 100
 const BACKGROUND_READY_ATTEMPTS = 100
 const BACKGROUND_READY_TIMEOUT_MS = BACKGROUND_READY_POLL_MS * BACKGROUND_READY_ATTEMPTS
 
+/**
+ * Should `maple start` take an opening checkpoint? Only ever the first one.
+ *
+ * A store that already has a checkpoint — and one whose registry is present but
+ * *unusable* — is one the user is already managing. Taking another on every
+ * start would be a background BACKUP nobody asked for, and overwriting an
+ * unusable registry would destroy the evidence of why it broke.
+ */
+export const needsInitialCheckpoint = (availability: CheckpointAvailability): boolean =>
+	!availability.available && availability.reason === "none"
+
+/**
+ * Take the store's FIRST checkpoint, once the server is up, if it has none.
+ *
+ * Nothing used to create a checkpoint except someone typing `maple checkpoint`.
+ * So for almost every store `checkpointAvailability` was `{available: false,
+ * reason: "none"}`, and an unclean shutdown — a laptop sleeping, an OOM kill —
+ * left `maple start` with only one honest thing to say: wipe it and start over.
+ * That dead end is the CLI's single largest source of real errors, and every one
+ * of them is a user losing all of their local telemetry.
+ *
+ * One BACKUP per store lifetime, of a store that by definition has never had
+ * one, buys a restore point for exactly that case. It runs AFTER the banner, so
+ * it delays nothing the user is waiting on, and it is entirely non-fatal: a
+ * store that cannot be checkpointed (no `<backups>` stanza, a read-only volume)
+ * is still a store that should serve telemetry. Failure leaves the old
+ * behaviour, which is the behaviour we already had.
+ */
+const ensureInitialCheckpoint = (
+	dataDir: string,
+	host: string,
+	port: number,
+): Effect.Effect<void, never, HttpClient.HttpClient> =>
+	Effect.gen(function* () {
+		const availability = yield* Effect.promise(() => checkpointAvailability(dataDir))
+		if (!needsInitialCheckpoint(availability)) return
+
+		yield* Effect.sync(() =>
+			process.stderr.write(dim("◌ taking the store's first checkpoint (restore point)…\n")),
+		)
+		yield* createCheckpoint({ dataDir, host, port }).pipe(
+			Effect.matchEffect({
+				onSuccess: (result) =>
+					Effect.sync(() =>
+						process.stderr.write(
+							`${green("✓")} checkpoint ${dim(String(result.checkpointId))} — ` +
+								`recover an unclean shutdown with ${bold("maple restore --yes")}\n`,
+						),
+					),
+				// Deliberately quiet about the cause: the server is running and serving,
+				// and a failed opportunistic checkpoint is not the user's problem to
+				// solve right now. `maple checkpoint` reports it properly on demand.
+				onFailure: () =>
+					Effect.sync(() =>
+						process.stderr.write(
+							dim(`◌ could not take an initial checkpoint — run ${bold("maple checkpoint")} to retry\n`),
+						),
+					),
+			}),
+		)
+	})
+
 const startDetached = (
 	host: string,
 	advertiseHost: string,
@@ -681,6 +743,14 @@ export const start = Command.make("start", {
 						process.stdout.write(
 							startBanner(bindAddr, connectAddr, dataDir, dashboardUrl, a.offline),
 						),
+					)
+
+					// After the banner, never before it: the server is already listening
+					// and the user has their URL. See `ensureInitialCheckpoint`.
+					yield* ensureInitialCheckpoint(
+						dataDir,
+						connectionHostForBindHost(bindHost),
+						boundPort,
 					)
 
 					return yield* Effect.never
