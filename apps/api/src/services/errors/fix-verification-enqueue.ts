@@ -11,22 +11,13 @@ import { aiTriageSettings, errorIssues, investigations, type ErrorIssueVerificat
 import { and, eq } from "drizzle-orm"
 import { Clock, Effect, Exit, Schema } from "effect"
 import { Database, type DatabaseError } from "@/platform/DatabaseLive"
-import { FanoutStartError } from "@/services/errors/investigation-fanout-error"
+import { startInvestigationFanout } from "@/services/errors/investigation-fanout-start"
 import { evaluateInvestigationQuota, selectInvestigationUsage } from "@/services/errors/investigation-quota"
 import { FIX_VERIFICATION_MAX_WIDTH } from "@/services/errors/investigation-route"
 import { summarizeCause } from "@/platform/describe-cause"
 
 const decodeInvestigationId = Schema.decodeUnknownSync(InvestigationId)
 const decodeIso = Schema.decodeUnknownSync(IsoDateTimeString)
-
-interface FanoutWorkflowBinding {
-	readonly create: (options: { id: string; params: unknown }) => Promise<{ id: string }>
-}
-
-const isFanoutWorkflowBinding = (value: unknown): value is FanoutWorkflowBinding =>
-	typeof value === "object" &&
-	value !== null &&
-	typeof (value as { create?: unknown }).create === "function"
 
 export interface EnqueueFixVerificationInput {
 	readonly verification: ErrorIssueVerificationRow
@@ -198,72 +189,21 @@ export const enqueueFixVerification: (
 		return { enqueued: false, reason: "error" as const }
 	}
 
-	const markFailed = (error: string) =>
-		database
-			.execute((db) =>
-				db
-					.update(investigations)
-					.set({ status: "failed", error, updatedAt: new Date(nowMs) })
-					.where(eq(investigations.id, investigationId)),
-			)
-			.pipe(Effect.asVoid)
-
-	const workflow = input.fanoutBinding
-	if (!isFanoutWorkflowBinding(workflow)) {
-		yield* markFailed("agent_unavailable: the investigation fan-out workflow is not configured; retry")
-		// Annotated because the tick reads this outcome as "no agent available" and
-		// can answer it with a terminal `verified` verdict that auto-closes the
-		// issue — without the attribute the trace of that close says nothing about
-		// no agent ever having run.
-		yield* Effect.annotateCurrentSpan({
-			orgId,
-			"maple.investigation.id": investigationId,
-			"maple.investigation.start_result": "no_binding",
-			"maple.verification.id": verification.id,
-		})
-		return { enqueued: false, investigationId, reason: "no_binding" as const }
-	}
-
-	const created = yield* Effect.exit(
-		Effect.tryPromise({
-			try: () =>
-				workflow.create({
-					id: investigationId,
-					params: {
-						orgId,
-						investigationId,
-						maxWidth: FIX_VERIFICATION_MAX_WIDTH,
-						reservedPasses,
-						attempt: 0,
-					},
-				}),
-			catch: FanoutStartError.fromCause,
-		}),
-	)
-	if (Exit.isFailure(created)) {
-		yield* Effect.logWarning("Fix verification fan-out could not be started").pipe(
-			Effect.annotateLogs({
-				orgId,
-				investigationId,
-				verificationId: verification.id,
-				error: summarizeCause(created.cause),
-			}),
-		)
-		yield* markFailed("start_failed: the investigation fan-out could not be started; retry")
-		yield* Effect.annotateCurrentSpan({
-			orgId,
-			"maple.investigation.id": investigationId,
-			"maple.investigation.start_result": "start_failed",
-			"maple.verification.id": verification.id,
-		})
-		return { enqueued: false, investigationId, reason: "error" as const }
-	}
-
-	yield* Effect.annotateCurrentSpan({
+	const started = yield* startInvestigationFanout({
 		orgId,
-		"maple.investigation.id": investigationId,
-		"maple.investigation.start_result": "fanout_started",
-		"maple.verification.id": verification.id,
+		investigationId,
+		maxWidth: FIX_VERIFICATION_MAX_WIDTH,
+		reservedPasses,
+		nowMs,
+		fanoutBinding: input.fanoutBinding,
+		// The tick reads this outcome back and can answer `no_binding` with a
+		// terminal `verified` verdict that auto-closes the issue. Without the id,
+		// the trace of that close says nothing about which verification it closed,
+		// or that no agent ever ran.
+		annotations: { "maple.verification.id": verification.id },
 	})
+	if (!started.started) {
+		return { enqueued: false, investigationId, reason: started.reason }
+	}
 	return { enqueued: true, investigationId }
 })
