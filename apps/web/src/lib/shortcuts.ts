@@ -14,6 +14,7 @@ export const SHORTCUT_GROUPS = [
 	"Global",
 	"Search & Time",
 	"Lists & Tables",
+	"Agent Sessions",
 	"Session Replay",
 	"Chat",
 ] as const
@@ -103,6 +104,21 @@ const SHORTCUTS = {
 		group: "Lists & Tables",
 		ignoreInputs: true,
 		preventDefault: false,
+	},
+	"session.viewOverview": {
+		combo: "1",
+		label: "Overview view",
+		group: "Agent Sessions",
+	},
+	"session.viewTrace": {
+		combo: "2",
+		label: "Trace view",
+		group: "Agent Sessions",
+	},
+	"session.viewFlow": {
+		combo: "3",
+		label: "Flow view",
+		group: "Agent Sessions",
 	},
 	"replay.playPause": {
 		combo: "Space",

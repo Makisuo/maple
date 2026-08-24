@@ -720,3 +720,120 @@ describe("buildSessionSummary — identity", () => {
 		expect(buildSessionSummary({ spans: [late, early], turns: [] }).vendorIds).toEqual(["eve", "mastra"])
 	})
 })
+
+describe("per-model cost, tools and failure groups", () => {
+	// The rail prices each model row separately, and a model whose calls carried
+	// no cost has to read as unpriced rather than free while another model's
+	// figure sits above it.
+	it("prices a model only from its own calls, and says nothing about the rest", () => {
+		const summary = summarize([
+			agentSpan({ spanId: "a1", startMs: 0, durationMs: 10 * SECOND }),
+			llmSpan({
+				spanId: "priced",
+				parentSpanId: "a1",
+				startMs: 0,
+				durationMs: SECOND,
+				model: "claude-opus-5",
+				genAi: { usageCost: 0.5 },
+			}),
+			llmSpan({
+				spanId: "unpriced",
+				parentSpanId: "a1",
+				startMs: 2 * SECOND,
+				durationMs: SECOND,
+				model: "claude-haiku-4-5",
+			}),
+		])
+
+		expect(summary.cost).toBeCloseTo(0.5)
+		expect(summary.models.find((model) => model.model === "claude-opus-5")?.cost).toBeCloseTo(0.5)
+		expect(summary.models.find((model) => model.model === "claude-haiku-4-5")?.cost).toBeUndefined()
+	})
+
+	// Same deepest-reporter rule the tokens follow: a wrapper that sums its
+	// children's cost onto itself must not double the session's spend.
+	it("does not count a rolled-up cost twice", () => {
+		const summary = summarize([
+			agentSpan({
+				spanId: "root",
+				startMs: 0,
+				durationMs: 4 * SECOND,
+				genAi: { usageCost: 0.3 },
+			}),
+			llmSpan({
+				spanId: "child",
+				parentSpanId: "root",
+				startMs: 0,
+				durationMs: SECOND,
+				model: "gpt-5",
+				genAi: { usageCost: 0.3 },
+			}),
+		])
+
+		expect(summary.cost).toBeCloseTo(0.3)
+	})
+
+	it("counts tools by name, busiest first", () => {
+		const summary = summarize([
+			agentSpan({ spanId: "a1", startMs: 0, durationMs: 10 * SECOND }),
+			toolSpan({ spanId: "t1", parentSpanId: "a1", startMs: 0, durationMs: 100 }),
+			toolSpan({ spanId: "t2", parentSpanId: "a1", startMs: 200, durationMs: 100 }),
+			toolSpan({
+				spanId: "t3",
+				parentSpanId: "a1",
+				startMs: 400,
+				durationMs: 100,
+				toolName: "run_tests",
+			}),
+		])
+
+		expect(summary.tools).toEqual([
+			{ name: "read_file", calls: 2 },
+			{ name: "run_tests", calls: 1 },
+		])
+	})
+
+	// The counts and the breakdown are two readings of one list, so a failure
+	// classified as a rate limit must not also appear as a generic error.
+	it("groups failures under the same classification the counts use", () => {
+		const summary = summarize([
+			agentSpan({ spanId: "a1", startMs: 0, durationMs: 10 * SECOND }),
+			llmSpan({
+				spanId: "l1",
+				parentSpanId: "a1",
+				startMs: 0,
+				durationMs: SECOND,
+				statusCode: "Error",
+				statusMessage: "429 too many requests",
+			}),
+			llmSpan({
+				spanId: "l2",
+				parentSpanId: "a1",
+				startMs: 2 * SECOND,
+				durationMs: SECOND,
+				statusCode: "Error",
+				statusMessage: "429 too many requests",
+			}),
+			toolSpan({
+				spanId: "t1",
+				parentSpanId: "a1",
+				startMs: 4 * SECOND,
+				durationMs: SECOND,
+				toolName: "run_tests",
+				statusCode: "Error",
+				genAi: { errorType: "tool_error" },
+			}),
+		])
+
+		expect(summary.failures).toEqual({
+			errors: 1,
+			rateLimited: 2,
+			contextExceeded: 0,
+			refusals: 0,
+		})
+		expect(summary.failureGroups).toEqual([
+			{ kind: "rateLimited", label: "rate_limit", count: 2 },
+			{ kind: "error", label: "tool_error · run_tests", count: 1 },
+		])
+	})
+})

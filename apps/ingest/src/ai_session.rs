@@ -19,6 +19,15 @@
 //! instrumentation only emits run/user-scoped IDs, or nothing) get no
 //! `maple_ai.session.id`.
 //!
+//! One vendor is not a framework: `maple` matches any span carrying a
+//! `maple.session.id` attribute (note the dot — the gateway-owned namespace is
+//! `maple_ai.*` with an underscore). It is Maple's own native convention —
+//! `apps/api`'s chat and investigation agents emit it — and doubles as the
+//! documented opt-in for a generic OTel GenAI emitter that no framework
+//! predicate recognises, which would otherwise land in the unknown tier where
+//! no session is ever stamped. It sits first because it is the only predicate
+//! that expresses deliberate intent rather than a fingerprint.
+//!
 //! # Performance shape
 //!
 //! This runs on the per-span hot path (budget: ~50ns mean per span, see
@@ -43,6 +52,10 @@ pub const VENDOR_ID_ATTR: &str = "maple_ai.vendor.id";
 pub const VENDOR_VERSION_ATTR: &str = "maple_ai.vendor.version";
 pub const SESSION_ID_ATTR: &str = "maple_ai.session.id";
 pub const VENDOR_VERSION: &str = "0";
+/// Maple's native session key (dot, not the gateway-owned underscore namespace
+/// above) — must match `MAPLE_NATIVE_SESSION_ID_ATTR` in
+/// `packages/domain/src/gen-ai.ts`.
+const MAPLE_SESSION_KEY: &str = "maple.session.id";
 
 #[derive(Debug, PartialEq)]
 pub struct AiClassification {
@@ -363,6 +376,7 @@ struct SpanEvidence<'a> {
     llm: bool,
     traceloop: bool,
     // Exact-key presence bits.
+    maple_session: bool,
     task_key: bool,
     tool_result_as_answer: bool,
     tool_description_updated: bool,
@@ -411,6 +425,7 @@ const SCREEN_KEYS: &[&str] = &[
     "llamaindex.",
     "llm.",
     "logfire.json_schema",
+    MAPLE_SESSION_KEY,
     "mastra.",
     "message.",
     "model_request_parameters",
@@ -577,6 +592,8 @@ fn absorb_key<'a>(ev: &mut SpanEvidence<'a>, attr: &'a KeyValue, b0: u8) {
                 ev.message = true;
             } else if key == "model_request_parameters" {
                 ev.model_request_parameters = true;
+            } else if key == MAPLE_SESSION_KEY {
+                ev.maple_session = true;
             } else if key.starts_with(ATTR_NAMESPACE) {
                 ev.has_maple_ai = true;
                 return;
@@ -749,10 +766,16 @@ struct Vendor {
     session_keys: &'static [&'static str],
 }
 
-/// Ordered: first match wins. Vendors with a dedicated instrumentation scope
-/// come first; the three detected purely from span evidence (`effect_ai`,
-/// `spring_ai`, `vercel_ai_sdk`) come last.
+/// Ordered: first match wins. `maple` leads because its key is an explicit
+/// opt-in rather than a framework fingerprint (see the module doc). Then
+/// vendors with a dedicated instrumentation scope; the three detected purely
+/// from span evidence (`effect_ai`, `spring_ai`, `vercel_ai_sdk`) come last.
 static VENDORS: &[Vendor] = &[
+    Vendor {
+        id: "maple",
+        detect: detect_maple,
+        session_keys: &[MAPLE_SESSION_KEY],
+    },
     Vendor {
         id: "claude_agent_sdk",
         detect: detect_claude_agent_sdk,
@@ -938,6 +961,10 @@ fn session_value(span_attrs: &[KeyValue], key: &str) -> Option<String> {
         _ => return None,
     };
     (!text.is_empty()).then_some(text)
+}
+
+fn detect_maple(c: &Ctx) -> bool {
+    c.ev.maple_session
 }
 
 fn detect_claude_agent_sdk(c: &Ctx) -> bool {
@@ -1532,6 +1559,44 @@ mod tests {
             "spring_ai",
             Some("sp-1"),
         );
+    }
+
+    #[test]
+    fn maple_detected_from_its_session_key_alone() {
+        classified(
+            "",
+            "invoke_agent default",
+            &[("maple.session.id", "org_1:tab-1")],
+            &[],
+            "maple",
+            Some("org_1:tab-1"),
+        );
+    }
+
+    #[test]
+    fn maple_session_key_lifts_a_generic_genai_span_out_of_the_unknown_tier() {
+        // Without the key this exact span is `unknown:genai` with no session
+        // (see `unknown_tier_buckets`); the key is the opt-in that makes it
+        // groupable.
+        classified(
+            "",
+            "chat openai/gpt-5.6-luna",
+            &[
+                ("gen_ai.operation.name", "chat"),
+                ("gen_ai.usage.input_tokens", "123"),
+                ("maple.session.id", "org_1:inv-abc"),
+            ],
+            &[],
+            "maple",
+            Some("org_1:inv-abc"),
+        );
+    }
+
+    #[test]
+    fn maple_session_key_is_not_the_gateway_namespace() {
+        // `maple_ai.*` (underscore) is gateway-owned and stripped; a customer
+        // supplying it must not classify as the maple vendor through it.
+        assert!(classify("", "chat", &[("maple_ai.session.id", "forged")], &[]).is_none());
     }
 
     #[test]

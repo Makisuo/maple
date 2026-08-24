@@ -127,7 +127,16 @@ function LogEntry({ log, timeZone, onClick }: { log: Log; timeZone: string; onCl
 	)
 }
 
-function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: string; timeZone: string }) {
+/** Exported for the agent-session span expansion, which shows the same read. */
+export function SpanLogs({
+	traceId,
+	spanId,
+	timeZone,
+}: {
+	traceId: string
+	spanId: string
+	timeZone: string
+}) {
 	const [selectedLog, setSelectedLog] = useState<Log | null>(null)
 	const [sheetOpen, setSheetOpen] = useState(false)
 

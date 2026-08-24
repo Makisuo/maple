@@ -1,7 +1,7 @@
 // Per-vendor overrides, keyed by the `maple_ai.vendor.id` the ingest gateway
 // stamped on the span.
 //
-// Four entries cover three dialects: the default GenAI integration already
+// Five entries cover four dialects: the default GenAI integration already
 // reads canonical `gen_ai.*`, which is what most detected vendors emit, so an
 // override is only worth writing for a framework with a different dialect. Each
 // list holds that dialect's keys alone — the default's canonical and legacy
@@ -10,7 +10,7 @@
 // rather than guessed: a wrong key never matches, so it is invisible.
 
 import type { AiIntegration, AiRefineContext } from "./ai-integrations"
-import type { MutableAiGenAiValues } from "@maple/domain/gen-ai"
+import { MAPLE_NATIVE_TURN_ID_ATTR, type MutableAiGenAiValues } from "@maple/domain/gen-ai"
 
 /**
  * Vercel AI SDK — the `ai.*` dialect.
@@ -128,6 +128,23 @@ const eveIntegration: AiIntegration = {
 }
 
 /**
+ * maple — Maple's own native convention (`apps/api` chat + investigations), and
+ * the opt-in for any generic emitter that adopts `maple.session.id`. The spans
+ * carry canonical `gen_ai.*`, so the default integration decodes them; like eve,
+ * only the turn id needs lifting — `maple.turn.id` is the conversation-level
+ * grouping key inside a session, kept out of `gen_ai.conversation.id` on the
+ * wire because the semconv key names the whole conversation, not one turn.
+ */
+const mapleIntegration: AiIntegration = {
+	id: "maple",
+	refine: (values: MutableAiGenAiValues, ctx: AiRefineContext) => {
+		if (values.conversationId !== undefined) return
+		const turnId = ctx.attributes[MAPLE_NATIVE_TURN_ID_ATTR]
+		if (turnId !== undefined && turnId !== "") values.conversationId = turnId
+	},
+}
+
+/**
  * Vendor id → override. Every id the gateway can stamp that is NOT in here maps
  * through the default GenAI integration, which is the right answer for the
  * frameworks that emit canonical `gen_ai.*`.
@@ -137,4 +154,5 @@ export const AI_VENDOR_INTEGRATIONS = {
 	"openinference-openai": openInferenceIntegration,
 	"unknown:openinference": openInferenceIntegration,
 	eve: eveIntegration,
+	maple: mapleIntegration,
 } as const satisfies Record<string, AiIntegration>

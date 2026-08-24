@@ -2,21 +2,55 @@
 // TEST-SEAM: the virtualizer sizes its viewport from offsetWidth/offsetHeight,
 // which jsdom reports as 0 — leaving it convinced no row is on screen, so the
 // two layout globals below are stubbed for that reason alone. Nothing here
-// navigates: trace and span clicks raise `onOpenTrace` for the page to handle,
-// so no router needs mounting.
+// navigates: span clicks raise `onSelectSpan` for the page to handle, and the
+// trace links render through a mocked `Link` so no router needs mounting.
 
+import { useState, type ReactNode } from "react"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+
+vi.mock("@tanstack/react-router", () => ({
+	Link: ({
+		to,
+		params,
+		search,
+		children,
+		...rest
+	}: {
+		to: string
+		params?: Record<string, string>
+		search?: Record<string, unknown>
+		children?: ReactNode
+	} & Record<string, unknown>) => {
+		void search
+		let href = to
+		for (const [key, value] of Object.entries(params ?? {})) href = href.replace(`$${key}`, value)
+		return (
+			<a href={href} {...rest}>
+				{children}
+			</a>
+		)
+	},
+}))
+
+// The expansion's Details tab mounts the trace page's lazy spanDetail read;
+// the warehouse is no part of these tests, so the atom stays Initial forever
+// and the tab renders its identity rows over the loading skeletons.
+vi.mock("@/lib/services/atoms/warehouse-query-atoms", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/services/atoms/warehouse-query-atoms")>()
+	const { disabledResultAtom } = await import("@/lib/services/atoms/disabled-result-atom")
+	return { ...actual, getSpanDetailResultAtom: () => disabledResultAtom() }
+})
 
 import type { AiSessionSpan } from "@maple/domain/http"
 import { agentSpan, llmSpan, makeSpan, toolSpan, userMessages } from "@/lib/agent-sessions/span-test-support"
 import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns, type SessionTurn } from "@/lib/agent-sessions/session-turns"
-import type { TraceSelection } from "@/lib/agent-sessions/span-filters"
 import { SessionFlow } from "./session-flow"
-import { SessionHeader } from "./session-header"
-import { SessionViews } from "./session-views"
+import { SessionOverview } from "./session-overview"
+import { SessionViews, type SessionView } from "./session-views"
 import { SessionWaterfall } from "./session-waterfall"
+import type { SpanDetailTab } from "./span-expansion"
 
 beforeAll(() => {
 	Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, value: 1200 })
@@ -101,9 +135,11 @@ const { turns, summary } = sessionOf(spans)
 
 // The other common shape: one agent span, no captured message, no usage
 // reported, and no human to wait on.
-const { summary: quiet } = sessionOf([agentSpan({ spanId: "a", startMs: 0, durationMs: SECOND })])
+const { turns: quietTurns, summary: quiet } = sessionOf([
+	agentSpan({ spanId: "a", startMs: 0, durationMs: SECOND }),
+])
 
-const { summary: gateway } = sessionOf([
+const { turns: gatewayTurns, summary: gateway } = sessionOf([
 	agentSpan({ spanId: "g-agent", startMs: 0, durationMs: 4 * SECOND }),
 	llmSpan({
 		spanId: "g-llm",
@@ -243,8 +279,9 @@ function Waterfall(props: {
 	collapseIdle?: boolean
 	collapsedTurns?: ReadonlySet<string>
 	onToggleTurn?: (turnId: string) => void
-	selection?: TraceSelection
-	onOpenTrace?: (target: TraceSelection) => void
+	selectedSpanId?: string
+	onSelectSpan?: (spanId: string | undefined) => void
+	spanTab?: SpanDetailTab
 }) {
 	return (
 		<SessionWaterfall
@@ -255,8 +292,10 @@ function Waterfall(props: {
 			collapseIdle={props.collapseIdle ?? true}
 			collapsedTurns={props.collapsedTurns ?? EMPTY}
 			onToggleTurn={props.onToggleTurn ?? noop}
-			selection={props.selection}
-			onOpenTrace={props.onOpenTrace ?? noop}
+			selectedSpanId={props.selectedSpanId}
+			onSelectSpan={props.onSelectSpan ?? noop}
+			spanTab={props.spanTab}
+			onSpanTabChange={noop}
 		/>
 	)
 }
@@ -266,7 +305,8 @@ function Flow(props: {
 	mergeRepeats?: boolean
 	query?: string
 	agentSpansOnly?: boolean
-	onOpenTrace?: (target: TraceSelection) => void
+	selectedSpanId?: string
+	onSelectSpan?: (spanId: string | undefined) => void
 }) {
 	return (
 		<SessionFlow
@@ -276,39 +316,72 @@ function Flow(props: {
 			agentSpansOnly={props.agentSpansOnly ?? true}
 			zoom={1}
 			onZoomChange={noop}
-			selection={undefined}
-			onOpenTrace={props.onOpenTrace ?? noop}
+			selectedSpanId={props.selectedSpanId}
+			onSelectSpan={props.onSelectSpan ?? noop}
+			spanTab={undefined}
+			onSpanTabChange={noop}
+			onOpenTraceView={noop}
 		/>
 	)
 }
 
-describe("SessionHeader", () => {
-	it("states the session's duration and work", () => {
-		render(<SessionHeader summary={summary} />)
+describe("SessionOverview", () => {
+	// A turn whose root AI span errored, with the model call under it reporting
+	// the same failure — the shape every framework that copies a child's error
+	// onto its parent produces.
+	const { turns: failedTurns, summary: failedSummary } = sessionOf([
+		agentSpan({
+			spanId: "f-agent",
+			startMs: 0,
+			durationMs: 4 * SECOND,
+			statusCode: "Error",
+			statusMessage: "prompt is too long: 214832 tokens > 200000 maximum",
+			genAi: { errorType: "context_length_exceeded" },
+		}),
+		llmSpan({
+			spanId: "f-llm",
+			parentSpanId: "f-agent",
+			startMs: SECOND,
+			durationMs: 2 * SECOND,
+			model: "claude-opus-5",
+			statusCode: "Error",
+			statusMessage: "prompt is too long: 214832 tokens > 200000 maximum",
+			genAi: { errorType: "context_length_exceeded" },
+		}),
+	])
+
+	function Overview(props: { turns?: readonly SessionTurn[]; summary?: SessionSummary }) {
+		return <SessionOverview turns={props.turns ?? turns} summary={props.summary ?? summary} />
+	}
+
+	it("splits the wall clock into where the time actually went", () => {
+		render(<Overview />)
 
 		// 5m 12s wall clock, 4m 20s of it idle.
-		expect(screen.getByText("5m 12s")).toBeTruthy()
-		expect(screen.getByText("52s active · 83% idle")).toBeTruthy()
 		expect(screen.getByText("Idle")).toBeTruthy()
-		expect(screen.getByText("claude-sonnet-4-5")).toBeTruthy()
+		expect(screen.getByText(/4m 20s · 83%/)).toBeTruthy()
+	})
+
+	// Every figure here appears once. The totals a summary block used to restate
+	// above the page all live in the time bar, the digest header and the rail,
+	// and reading the same number twice is what made the view feel crowded.
+	it("restates no total the sections below it already carry", () => {
+		render(<Overview turns={failedTurns} summary={failedSummary} />)
+
+		expect(screen.queryByText(/wall clock/i)).toBeNull()
+		expect(screen.queryByText(/^Completed/)).toBeNull()
+		expect(screen.queryByText(/idle across/)).toBeNull()
 	})
 
 	it("says no cost was reported rather than pricing tokens itself", () => {
-		render(<SessionHeader summary={summary} />)
+		render(<Overview />)
 
-		expect(screen.getByText("no cost reported")).toBeTruthy()
+		expect(screen.getByText(/Maple does not price tokens itself/)).toBeTruthy()
 		expect(screen.queryByText(/^\$/)).toBeNull()
 	})
 
-	it("contrasts active against wall clock only when something waited", () => {
-		render(<SessionHeader summary={quiet} />)
-
-		expect(screen.getByText("wall clock")).toBeTruthy()
-		expect(screen.queryByText(/active/)).toBeNull()
-	})
-
 	it("says no usage was reported rather than pricing a session at zero", () => {
-		render(<SessionHeader summary={quiet} />)
+		render(<Overview turns={quietTurns} summary={quiet} />)
 
 		expect(screen.getByText("no token usage reported")).toBeTruthy()
 		expect(screen.queryByText("$0.00")).toBeNull()
@@ -328,53 +401,37 @@ describe("SessionHeader", () => {
 				genAi: { usageInputTokens: 100, usageOutputTokens: 10, usageCost: 0.0004 },
 			}),
 		])
-		render(<SessionHeader summary={tiny.summary} />)
+		render(<Overview turns={tiny.turns} summary={tiny.summary} />)
 
-		expect(screen.getByText("<$0.01")).toBeTruthy()
+		expect(screen.getAllByText("<$0.01").length).toBeGreaterThan(0)
 		expect(screen.queryByText("$0.00")).toBeNull()
 	})
 
-	// Regression: the column sliced to four models and said nothing about the
-	// rest, so a nine-model session lost five of them with no trace.
-	it("counts the models the column could not fit", () => {
-		const many = sessionOf([
-			agentSpan({ spanId: "m-agent", startMs: 0, durationMs: 10 * SECOND }),
-			...Array.from({ length: 6 }, (_, index) =>
-				llmSpan({
-					spanId: `m-llm-${index}`,
-					parentSpanId: "m-agent",
-					startMs: index * SECOND,
-					durationMs: SECOND,
-					model: `model-${index}`,
-					genAi: { usageInputTokens: 10, usageOutputTokens: 1 },
-				}),
-			),
-		])
-		render(<SessionHeader summary={many.summary} />)
-
-		expect(screen.getByText(/^\+\d+ more$/)).toBeTruthy()
-	})
-
-	// The turns below print no tokens in this shape, so the column has to say why
+	// The turns below print no tokens in this shape, so the rail has to say why
 	// rather than leave a reader to read the dashes as missing instrumentation.
 	it("says a session-level total was reported once for the whole session", () => {
-		render(<SessionHeader summary={aggregateSummary} />)
+		render(<Overview turns={aggregateTurns} summary={aggregateSummary} />)
 
 		expect(screen.getByText("5.5K")).toBeTruthy()
 		expect(screen.getByText("Reported once for the whole session")).toBeTruthy()
 	})
 
-	it("says nothing about the reporting shape when the calls reported for themselves", () => {
-		render(<SessionHeader summary={summary} />)
-
-		expect(screen.queryByText(/Reported once/)).toBeNull()
-	})
-
 	it("shows the last path segment of a gateway model id, full id in the title", () => {
-		render(<SessionHeader summary={gateway} />)
+		render(<Overview turns={gatewayTurns} summary={gateway} />)
 
 		const name = screen.getByText("gpt-4o-mini")
 		expect(name.getAttribute("title")).toBe("openrouter/openai/gpt-4o-mini")
+	})
+
+	// The digest exists to put the reader's own prompt back on the page — it is
+	// the one thing a span table cannot carry.
+	it("gives every turn its prompt, its work and what went wrong in it", () => {
+		render(<Overview />)
+
+		expect(screen.getByText("fix the webhook retry backoff")).toBeTruthy()
+		expect(screen.getAllByText(/read_file/).length).toBeGreaterThan(0)
+		// One failing tool call, named by what failed rather than by a bucket.
+		expect(screen.getAllByText(/error · run_tests/).length).toBeGreaterThan(0)
 	})
 })
 
@@ -411,27 +468,87 @@ describe("SessionWaterfall", () => {
 		expect(screen.queryByText(/^idle \d/)).toBeNull()
 	})
 
-	it("opens the trace pane, not the trace page, from a span click", () => {
-		const onOpenTrace = vi.fn()
-		render(<Waterfall onOpenTrace={onOpenTrace} />)
+	it("selects a span for inline expansion from a click, and collapses on the second", () => {
+		const onSelectSpan = vi.fn()
+		const view = render(<Waterfall onSelectSpan={onSelectSpan} />)
 
 		fireEvent.click(screen.getByText("grep_repo"))
-		expect(onOpenTrace).toHaveBeenCalledWith({ traceId: "trace-1", spanId: "tool-2" })
+		expect(onSelectSpan).toHaveBeenCalledWith("tool-2")
+
+		// Clicking the already-expanded row collapses it. The expansion repeats
+		// the tool's name in its payload card, so the row is the first match.
+		view.rerender(<Waterfall selectedSpanId="tool-2" onSelectSpan={onSelectSpan} />)
+		fireEvent.click(screen.getAllByText("grep_repo")[0]!)
+		expect(onSelectSpan).toHaveBeenLastCalledWith(undefined)
 	})
 
-	it("opens the trace pane on the whole trace from a turn's trace link", () => {
-		const onOpenTrace = vi.fn()
-		render(<Waterfall onOpenTrace={onOpenTrace} />)
+	it("links a turn's trace to the trace page — there is no side panel", () => {
+		render(<Waterfall />)
 
-		fireEvent.click(screen.getAllByText("Trace trace-1")[0]!)
-		expect(onOpenTrace).toHaveBeenCalledWith({ traceId: "trace-1" })
+		const link = screen.getAllByText("Trace trace-1")[0]!.closest("a")!
+		expect(link.getAttribute("href")).toBe("/traces/trace-1")
 	})
 
-	it("marks the row of the span the pane is showing", () => {
-		render(<Waterfall selection={{ traceId: "trace-1", spanId: "tool-2" }} />)
+	it("expands the selected span inline, directly under its row", () => {
+		const view = render(<Waterfall selectedSpanId="llm-1" />)
 
-		const row = screen.getByText("grep_repo").closest("button")!
+		const row = screen.getAllByText(/^chat$/)[0]!.closest("button")!
 		expect(row.getAttribute("aria-current")).toBe("true")
+
+		// The expansion carries the captured messages at full width — the user's
+		// prompt appears complete here, beyond the truncated turn label above it.
+		const detail = view.container.querySelector('[data-slot="span-inline-detail"]')!
+		expect(detail).toBeTruthy()
+		expect(within(detail as HTMLElement).getByText("fix the webhook retry backoff")).toBeTruthy()
+		expect(within(detail as HTMLElement).getByRole("button", { name: /Messages/ })).toBeTruthy()
+		expect(within(detail as HTMLElement).getByText("Open in Traces")).toBeTruthy()
+	})
+
+	it("leads the expansion's tabs with Details; Attributes and Timing are folded into it", () => {
+		const view = render(<Waterfall selectedSpanId="llm-1" />)
+
+		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
+		const labels = detail
+			.getAllByRole("button")
+			.filter((button) => button.hasAttribute("aria-pressed"))
+			.map((button) => button.textContent ?? "")
+		expect(labels[0]).toContain("Details")
+		expect(labels.some((label) => label.includes("Attributes"))).toBe(false)
+		expect(labels.some((label) => label.includes("Timing"))).toBe(false)
+	})
+
+	it("opens an errored span on Details, where the error and the ids are", () => {
+		const view = render(<Waterfall selectedSpanId="tool-3" />)
+
+		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
+		expect(detail.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
+		// The error banner and the identity rows render ahead of the lazily
+		// loaded attribute maps (held at Initial by the atom mock above).
+		expect(detail.getByText("exit 1")).toBeTruthy()
+		expect(detail.getByText("Trace ID")).toBeTruthy()
+	})
+
+	it("expands one span at a time — the selection, not a set", () => {
+		const view = render(<Waterfall selectedSpanId="tool-1" />)
+		expect(view.container.querySelectorAll('[data-slot="span-inline-detail"]')).toHaveLength(1)
+
+		view.rerender(<Waterfall selectedSpanId="tool-2" />)
+		expect(view.container.querySelectorAll('[data-slot="span-inline-detail"]')).toHaveLength(1)
+	})
+
+	it("moves the span cursor with the arrows, expands on Enter, collapses on Esc", () => {
+		const onSelectSpan = vi.fn()
+		const view = render(<Waterfall onSelectSpan={onSelectSpan} />)
+
+		// First ↓ lands on the first span row — turn 1's root agent span; Enter
+		// expands it.
+		fireEvent.keyDown(document.body, { key: "ArrowDown" })
+		fireEvent.keyDown(document.body, { key: "Enter" })
+		expect(onSelectSpan).toHaveBeenCalledWith("agent-1")
+
+		view.rerender(<Waterfall selectedSpanId="agent-1" onSelectSpan={onSelectSpan} />)
+		fireEvent.keyDown(document.body, { key: "Escape" })
+		expect(onSelectSpan).toHaveBeenLastCalledWith(undefined)
 	})
 
 	it("names the trace on every turn header", () => {
@@ -577,12 +694,33 @@ describe("SessionFlow", () => {
 		expect(screen.getByText("grep_repo")).toBeTruthy()
 	})
 
-	it("opens the trace pane from a node click", () => {
-		const onOpenTrace = vi.fn()
-		render(<Flow onOpenTrace={onOpenTrace} />)
+	it("selects a span for the docked drawer from a node click", () => {
+		const onSelectSpan = vi.fn()
+		render(<Flow onSelectSpan={onSelectSpan} />)
 
 		fireEvent.click(screen.getByText("grep_repo"))
-		expect(onOpenTrace).toHaveBeenCalledWith({ traceId: "trace-1", spanId: "tool-2" })
+		expect(onSelectSpan).toHaveBeenCalledWith("tool-2")
+	})
+
+	it("docks a full-width drawer under the canvas for the selected span", () => {
+		const view = render(<Flow selectedSpanId="tool-2" />)
+
+		const drawer = view.container.querySelector('[data-slot="span-drawer"]')!
+		expect(drawer).toBeTruthy()
+		// The drawer names the span and where it lives, and offers the way across.
+		expect(within(drawer as HTMLElement).getAllByText(/grep_repo/).length).toBeGreaterThan(0)
+		expect(within(drawer as HTMLElement).getByText(/Turn 1/)).toBeTruthy()
+		expect(within(drawer as HTMLElement).getByText("Open in Trace view")).toBeTruthy()
+	})
+
+	it("opens the drawer even for a span the flow drew no node for", () => {
+		// The app's own HTTP span earns no node, but selection addresses spans the
+		// same way in both views, so a span expanded in Trace still opens here.
+		const view = render(<Flow selectedSpanId="http-1" agentSpansOnly={false} />)
+
+		const drawer = view.container.querySelector('[data-slot="span-drawer"]')!
+		expect(drawer).toBeTruthy()
+		expect(within(drawer as HTMLElement).getByText("GET /repo/file")).toBeTruthy()
 	})
 
 	it("merges a run of identical calls into one counted node", () => {
@@ -684,15 +822,24 @@ describe("SessionFlow", () => {
 })
 
 describe("SessionViews", () => {
-	it("counts what is on screen, and narrows every count as the filter narrows it", () => {
-		render(
+	/** `view` is a search param on the real page; here it is local state. */
+	function Views(props: { turns?: readonly SessionTurn[]; summary?: SessionSummary; view?: SessionView }) {
+		const [view, setView] = useState<SessionView>(props.view ?? "trace")
+		const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(undefined)
+		return (
 			<SessionViews
-				turns={crossTurns}
-				summary={crossSummary}
-				selection={undefined}
-				onOpenTrace={noop}
-			/>,
+				view={view}
+				onViewChange={setView}
+				turns={props.turns ?? turns}
+				summary={props.summary ?? summary}
+				selectedSpanId={selectedSpanId}
+				onSelectSpan={setSelectedSpanId}
+			/>
 		)
+	}
+
+	it("counts what is on screen, and narrows every count as the filter narrows it", () => {
+		render(<Views turns={crossTurns} summary={crossSummary} />)
 
 		expect(screen.getByText(/^4 spans · 2 turns · 2 traces$/)).toBeTruthy()
 
@@ -707,15 +854,15 @@ describe("SessionViews", () => {
 	it("counts what the default span-kind filter leaves, not every span in the session", () => {
 		// Eight spans, one of them the app's own HTTP call, which "Agent spans only"
 		// hides before the first paint.
-		render(<SessionViews turns={turns} summary={summary} selection={undefined} onOpenTrace={noop} />)
+		render(<Views />)
 
 		expect(screen.getByText(/^7 of 8 spans · 2 turns · 1 trace$/)).toBeTruthy()
 	})
 
-	// Both views read the query and the span-kind toggle, so both controls stay
-	// mounted in both.
-	it("keeps the filter and the span-kind toggle reachable in both views", () => {
-		render(<SessionViews turns={turns} summary={summary} selection={undefined} onOpenTrace={noop} />)
+	// Both debug views read the query and the span-kind toggle, so both controls
+	// stay mounted in both.
+	it("keeps the filter and the span-kind toggle reachable in both debug views", () => {
+		render(<Views />)
 
 		fireEvent.click(screen.getByRole("tab", { name: /Flow/ }))
 
@@ -726,10 +873,20 @@ describe("SessionViews", () => {
 		expect(screen.queryByRole("button", { name: "Collapse idle" })).toBeNull()
 	})
 
+	// None of the span controls shape the Overview, and a row of controls that do
+	// nothing is what made the shared toolbar unreadable.
+	it("drops the span toolbar on the Overview", () => {
+		render(<Views view="overview" />)
+
+		expect(screen.queryByPlaceholderText("Filter spans")).toBeNull()
+		expect(screen.queryByRole("button", { name: "Agent spans only" })).toBeNull()
+		expect(screen.getByRole("tab", { name: /Overview/ })).toBeTruthy()
+	})
+
 	// Collapsing idle distorts the axis, so the toggle that undoes it is part of
 	// the design rather than a preference.
 	it("puts the idle back on the axis when Collapse idle is switched off", () => {
-		render(<SessionViews turns={turns} summary={summary} selection={undefined} onOpenTrace={noop} />)
+		render(<Views />)
 
 		expect(screen.getByText(/of idle removed across 1 gap/)).toBeTruthy()
 
@@ -740,17 +897,52 @@ describe("SessionViews", () => {
 
 	// The state lives in SessionViews rather than the views precisely so a look
 	// at Flow doesn't cost the reader the place they found in a long session.
-	it("survives a Timeline → Flow → Timeline round trip with the turn still collapsed", () => {
-		render(<SessionViews turns={turns} summary={summary} selection={undefined} onOpenTrace={noop} />)
+	it("survives a Trace → Flow → Trace round trip with the turn still collapsed", () => {
+		render(<Views />)
 
 		fireEvent.click(screen.getByRole("button", { name: /Turn 1/ }))
 		expect(screen.getByText(/spans$/)).toBeTruthy()
 
 		fireEvent.click(screen.getByRole("tab", { name: /Flow/ }))
-		fireEvent.click(screen.getByRole("tab", { name: /Timeline/ }))
+		fireEvent.click(screen.getByRole("tab", { name: /Trace/ }))
 
 		// Still collapsed: the collapsed turn shows its span count as a pill.
 		expect(screen.getByText(/spans$/)).toBeTruthy()
 		expect(screen.getByRole("button", { name: /Turn 1/ }).getAttribute("aria-expanded")).toBe("false")
+	})
+
+	// The spec's shared rules: 1/2/3 switch views, and the selection survives a
+	// Trace ↔ Flow switch because both views address spans the same way.
+	it("switches views on 2/3 and carries the expanded span across", () => {
+		const view = render(<Views />)
+
+		fireEvent.click(screen.getByText("grep_repo"))
+		expect(view.container.querySelector('[data-slot="span-inline-detail"]')).toBeTruthy()
+
+		fireEvent.keyDown(document.body, { key: "3" })
+		expect(view.container.querySelector('[data-slot="span-drawer"]')).toBeTruthy()
+
+		fireEvent.keyDown(document.body, { key: "2" })
+		expect(view.container.querySelector('[data-slot="span-inline-detail"]')).toBeTruthy()
+	})
+
+	// The tab choice lives beside the other cross-view state in SessionViews:
+	// moving the expansion to another span must not reset the reader's tab.
+	it("keeps the chosen detail tab open when the expansion moves to another span", () => {
+		const view = render(<Views />)
+
+		// The tool span opens on its own payload (Tool calls); choose Details.
+		fireEvent.click(screen.getByText("grep_repo"))
+		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+
+		// Move the expansion to a different span — the choice holds.
+		fireEvent.click(screen.getAllByText("read_file")[0]!)
+		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
+		expect(detail.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
+
+		// And it holds across the view switch into the Flow drawer too.
+		fireEvent.keyDown(document.body, { key: "3" })
+		const drawer = within(view.container.querySelector('[data-slot="span-drawer"]') as HTMLElement)
+		expect(drawer.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
 	})
 })

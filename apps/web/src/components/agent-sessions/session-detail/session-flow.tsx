@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, useRef } from "react"
 
 import type { AiSessionSpan } from "@maple/domain/http"
 import { MaximizeIcon, MinusIcon, PlusIcon } from "@/components/icons"
@@ -6,6 +6,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
+import { useListNavigation } from "@/hooks/use-list-navigation"
 import { spanTokenBuckets } from "@/lib/agent-sessions/session-summary"
 import {
 	classifyAiSpan,
@@ -16,12 +17,8 @@ import {
 	type SessionTurn,
 	type AiSpanCategory,
 } from "@/lib/agent-sessions/session-turns"
-import {
-	filterSpans,
-	isDelegation,
-	shortTarget,
-	type TraceSelection,
-} from "@/lib/agent-sessions/span-filters"
+import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
+import { SpanDrawer, type SpanDetailTab } from "./span-expansion"
 import { CATEGORY_FILL } from "./span-visuals"
 
 // One lane per turn, positioned by hand. (`investigations/flow` already wraps
@@ -81,10 +78,15 @@ interface SessionFlowProps {
 	agentSpansOnly: boolean
 	zoom: number
 	onZoomChange: (zoom: number) => void
-	/** The trace/span the page's trace pane is showing, for highlighting. */
-	selection: TraceSelection | undefined
-	/** Raised by every node click; the page decides what "open" means. */
-	onOpenTrace: (target: TraceSelection) => void
+	/** The one span open in the docked drawer (`?span=`). */
+	selectedSpanId: string | undefined
+	/** Raised with a span id to open the drawer, `undefined` to close it. */
+	onSelectSpan: (spanId: string | undefined) => void
+	/** The drawer's tab, shared with the Trace view's inline expansion. */
+	spanTab: SpanDetailTab | undefined
+	onSpanTabChange: (tab: SpanDetailTab) => void
+	/** The drawer's "Open in Trace view": same span, sibling view. */
+	onOpenTraceView: () => void
 }
 
 export function SessionFlow({
@@ -94,19 +96,58 @@ export function SessionFlow({
 	agentSpansOnly,
 	zoom,
 	onZoomChange,
-	selection,
-	onOpenTrace,
+	selectedSpanId,
+	onSelectSpan,
+	spanTab,
+	onSpanTabChange,
+	onOpenTraceView,
 }: SessionFlowProps) {
 	const { lanes, width, height } = useMemo(
 		() => layoutLanes(turns, { mergeRepeats, query, agentSpansOnly }),
 		[turns, mergeRepeats, query, agentSpansOnly],
 	)
+	const canvasRef = useRef<HTMLDivElement>(null)
+
+	// Selection addresses spans the same way in both views, so a span expanded
+	// in the Trace view opens here even when the flow drew no node for it (a
+	// wrapper, or a span the filter hides).
+	const selectedSpan = useMemo(() => {
+		if (selectedSpanId === undefined) return undefined
+		for (const turn of turns) {
+			const span = turn.spans.find((candidate) => candidate.spanId === selectedSpanId)
+			if (span !== undefined) return { span, turn }
+		}
+		return undefined
+	}, [turns, selectedSpanId])
+
+	// The keyboard's span cursor, over the nodes in reading order — lane by
+	// lane, column by column, exactly as they draw.
+	const nodeSpanIds = useMemo(
+		() => lanes.flatMap((lane) => lane.nodes.map((node) => node.span.spanId)),
+		[lanes],
+	)
+	const { focusedId, setFocusedId } = useListNavigation({
+		ids: nodeSpanIds,
+		onOpen: (spanId) => onSelectSpan(spanId),
+		onEscape: () => {
+			if (selectedSpanId === undefined) return false
+			onSelectSpan(undefined)
+			return true
+		},
+		scrollTo: (spanId) => {
+			canvasRef.current
+				?.querySelector(`[data-span-id="${spanId}"]`)
+				?.scrollIntoView({ block: "nearest", inline: "nearest" })
+		},
+	})
 
 	return (
 		// Vertical growth belongs to the page's own scroller; only the canvas's
-		// width overflows here, so a wide session pans sideways in place.
-		<div className="relative">
-			<div className="overflow-x-auto">
+		// width overflows here, so a wide session pans sideways in place. The
+		// column grows so the floor block below can pin to the viewport's bottom
+		// even under a short canvas.
+		<div className="relative flex grow flex-col">
+			<div ref={canvasRef} className="grow overflow-x-auto">
 				{lanes.length === 0 ? (
 					<p className="px-2.5 py-8 text-center text-muted-foreground text-sm">
 						No spans match this filter.
@@ -126,8 +167,12 @@ export function SessionFlow({
 								<Lane
 									key={lane.turn.id}
 									lane={lane}
-									selection={selection}
-									onOpenTrace={onOpenTrace}
+									selectedSpanId={selectedSpanId}
+									focusedSpanId={focusedId ?? undefined}
+									onSelectNode={(spanId) => {
+										setFocusedId(spanId)
+										onSelectSpan(selectedSpanId === spanId ? undefined : spanId)
+									}}
 								/>
 							))}
 						</div>
@@ -135,76 +180,96 @@ export function SessionFlow({
 				)}
 			</div>
 
-			{/* Sticky rather than absolute: the canvas is as tall as its content now,
-			    so pinning to its bottom would park the zoom controls off-screen.
-			    Guarded, because there is nothing to key and nothing to zoom when
-			    the filter emptied the canvas — the color key was previously drawn
-			    over the empty state. */}
+			{/* The view's floor, pinned to the viewport's bottom edge: the legend
+			    and zoom on top, and under them the docked drawer when a span is
+			    open. Sticky rather than absolute so a canvas taller than the
+			    viewport still keeps them on screen. Guarded, because there is
+			    nothing to key, zoom or open when the filter emptied the canvas. */}
 			{lanes.length > 0 && (
-				<div className="pointer-events-none sticky bottom-0 z-10 flex items-end justify-between gap-4 p-3">
-					<div className="pointer-events-auto flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-muted-foreground text-xs backdrop-blur-sm">
-						{(["agent", "inference", "tool"] as const).map((category) => (
-							<span key={category} className="flex items-center gap-1.5">
-								<span
-									aria-hidden
-									className={cn("size-1.5 rounded-xs", CATEGORY_FILL[category])}
-								/>
-								{category}
+				<div className="sticky bottom-0 z-10 mt-auto flex flex-col">
+					<div className="pointer-events-none flex items-end justify-between gap-4 p-3">
+						<div className="pointer-events-auto flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-background/80 px-2 py-1 text-muted-foreground text-xs backdrop-blur-sm">
+							{(["agent", "inference", "tool"] as const).map((category) => (
+								<span key={category} className="flex items-center gap-1.5">
+									<span
+										aria-hidden
+										className={cn("size-1.5 rounded-xs", CATEGORY_FILL[category])}
+									/>
+									{category}
+								</span>
+							))}
+							<span className="flex items-center gap-1.5">
+								<span aria-hidden className="size-1.5 rounded-xs bg-destructive" />
+								error
 							</span>
-						))}
-						<span className="flex items-center gap-1.5">
-							<span aria-hidden className="size-1.5 rounded-xs bg-destructive" />
-							error
-						</span>
-					</div>
-					<div className="pointer-events-auto flex items-center gap-1 rounded-md bg-background/80 p-0.5 backdrop-blur-sm">
-						{/* In, out, reset — the order and the reset glyph the repo's other
+						</div>
+						<div className="pointer-events-auto flex items-center gap-1 rounded-md bg-background/80 p-0.5 backdrop-blur-sm">
+							{/* In, out, reset — the order and the reset glyph the repo's other
 						    canvas already uses (`investigations/flow/provenance-canvas.tsx`).
 						    Disabled at the bounds, because clamping silently meant the third
 						    click at 1.5x did nothing with no way to tell that from a dead
 						    button. */}
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Zoom in"
-							disabled={zoom >= MAX_ZOOM}
-							onClick={() => onZoomChange(Math.min(MAX_ZOOM, zoom + ZOOM_STEP))}
-						>
-							<PlusIcon size={14} />
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Zoom out"
-							disabled={zoom <= MIN_ZOOM}
-							onClick={() => onZoomChange(Math.max(MIN_ZOOM, zoom - ZOOM_STEP))}
-						>
-							<MinusIcon size={14} />
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Reset zoom"
-							disabled={zoom === 1}
-							onClick={() => onZoomChange(1)}
-						>
-							<MaximizeIcon size={14} />
-						</Button>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label="Zoom in"
+								disabled={zoom >= MAX_ZOOM}
+								onClick={() => onZoomChange(Math.min(MAX_ZOOM, zoom + ZOOM_STEP))}
+							>
+								<PlusIcon size={14} />
+							</Button>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label="Zoom out"
+								disabled={zoom <= MIN_ZOOM}
+								onClick={() => onZoomChange(Math.max(MIN_ZOOM, zoom - ZOOM_STEP))}
+							>
+								<MinusIcon size={14} />
+							</Button>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label="Reset zoom"
+								disabled={zoom === 1}
+								onClick={() => onZoomChange(1)}
+							>
+								<MaximizeIcon size={14} />
+							</Button>
+						</div>
 					</div>
+
+					{selectedSpan !== undefined && (
+						<SpanDrawer
+							span={selectedSpan.span}
+							turnOrdinal={turnOrdinal(selectedSpan.turn)}
+							tab={spanTab}
+							onTabChange={onSpanTabChange}
+							onClose={() => onSelectSpan(undefined)}
+							onOpenTraceView={onOpenTraceView}
+						/>
+					)}
 				</div>
 			)}
 		</div>
 	)
 }
 
+/** The same wording the waterfall's headers use for the fallback partition. */
+function turnOrdinal(turn: SessionTurn): string {
+	return `${turn.anchorKind === "trace" ? "Segment" : "Turn"} ${turn.index}`
+}
+
 function Lane({
 	lane,
-	selection,
-	onOpenTrace,
+	selectedSpanId,
+	focusedSpanId,
+	onSelectNode,
 }: {
 	lane: FlowLane
-	selection: TraceSelection | undefined
-	onOpenTrace: (target: TraceSelection) => void
+	selectedSpanId: string | undefined
+	focusedSpanId: string | undefined
+	onSelectNode: (spanId: string) => void
 }) {
 	return (
 		<>
@@ -249,10 +314,9 @@ function Lane({
 				<FlowNodeCard
 					key={node.key}
 					node={node}
-					selected={
-						selection?.spanId === node.span.spanId && selection.traceId === node.span.traceId
-					}
-					onOpenTrace={onOpenTrace}
+					selected={selectedSpanId === node.span.spanId}
+					focused={focusedSpanId === node.span.spanId}
+					onClick={() => onSelectNode(node.span.spanId)}
 				/>
 			))}
 		</>
@@ -262,21 +326,26 @@ function Lane({
 function FlowNodeCard({
 	node,
 	selected,
-	onOpenTrace,
+	focused,
+	onClick,
 }: {
 	node: FlowNode
 	selected: boolean
-	onOpenTrace: (target: TraceSelection) => void
+	/** Under the keyboard's span cursor — distinct from `selected`, the open drawer. */
+	focused: boolean
+	onClick: () => void
 }) {
 	return (
 		<button
 			type="button"
-			onClick={() => onOpenTrace({ traceId: node.span.traceId, spanId: node.span.spanId })}
+			onClick={onClick}
+			data-span-id={node.span.spanId}
 			aria-current={selected || undefined}
 			className={cn(
 				"absolute flex cursor-pointer flex-col justify-center gap-1 rounded-md border bg-card px-2.5 py-2 text-left hover:border-ring",
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 				node.errored ? "border-destructive/60" : "border-border",
+				focused && "border-ring",
 				// Selection is a state and hover is a pointer, so they cannot share a
 				// token: the waterfall marks its selected row with primary, and the
 				// node card takes the same direction.
