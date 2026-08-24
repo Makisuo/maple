@@ -90,12 +90,18 @@ export async function executeLocalQuery<T = Record<string, unknown>>(
  * `Local query failed (400 …)` surfaced as three different tags depending on
  * which regex happened to fire.
  */
-const clickHouseErrorFields = (
-	detail: string,
-): { readonly code?: string; readonly type?: string } => {
+/** The chDB error identity, as `LocalQueryFailed` carries it. */
+type ChdbErrorIdentity = { code?: string; type?: string }
+
+const clickHouseErrorFields = (detail: string): ChdbErrorIdentity => {
+	// Assigned rather than spread conditionally: both are `optionalKey`, so an
+	// explicit `undefined` is not the same as an absent key.
+	const fields: ChdbErrorIdentity = {}
 	const code = detail.match(/\bCode:\s*(\d+)/)?.[1]
+	if (code !== undefined) fields.code = code
 	// The type is the trailing parenthesised SCREAMING_CASE token; chDB puts it
 	// last, after the human sentence.
 	const type = detail.match(/\(([A-Z][A-Z0-9_]{2,})\)\s*$/)?.[1]
-	return { ...(code === undefined ? {} : { code }), ...(type === undefined ? {} : { type }) }
+	if (type !== undefined) fields.type = type
+	return fields
 }
