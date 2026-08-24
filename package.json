@@ -54,9 +54,9 @@
 	"dependencies": {},
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260603.1",
-		"@effect/platform-node": "4.0.0-rc.108",
+		"@effect/platform-node": "4.0.0-rc.111",
 		"@effect/tsgo": "0.36.4",
-		"@effect/vitest": "4.0.0-rc.108",
+		"@effect/vitest": "catalog:effect",
 		"@maple/infra": "workspace:*",
 		"@oxlint/plugins": "1.77.0",
 		"@tinybirdco/sdk": "catalog:tinybird",
@@ -72,7 +72,7 @@
 		"typescript": "catalog:tooling"
 	},
 	"overrides": {
-		"@effect/sql-d1": "4.0.0-rc.108"
+		"@effect/sql-d1": "4.0.0-rc.111"
 	},
 	"packageManager": "bun@1.4.0",
 	"catalog": {
@@ -84,10 +84,11 @@
 			"@clickhouse/client-web": "^1.21.0"
 		},
 		"effect": {
-			"@effect/atom-react": "4.0.0-rc.108",
+			"@effect/atom-react": "4.0.0-rc.111",
 			"@effect/language-service": "^0.87.2",
-			"@effect/platform-bun": "4.0.0-rc.108",
-			"effect": "4.0.0-rc.108"
+			"@effect/platform-bun": "4.0.0-rc.111",
+			"@effect/vitest": "4.0.0-rc.111",
+			"effect": "4.0.0-rc.111"
 		},
 		"react": {
 			"@types/react": "^19.2.14",
@@ -116,7 +117,7 @@
 		}
 	},
 	"patchedDependencies": {
-		"@effect/vitest@4.0.0-rc.108": "patches/@effect%2Fvitest@4.0.0-rc.108.patch",
-		"effect@4.0.0-rc.108": "patches/effect@4.0.0-rc.108.patch"
+		"@effect/vitest@4.0.0-rc.111": "patches/@effect%2Fvitest@4.0.0-rc.111.patch",
+		"effect@4.0.0-rc.111": "patches/effect@4.0.0-rc.111.patch"
 	}
 }
