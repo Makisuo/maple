@@ -579,7 +579,7 @@ function mergeDuplicateComponents(doc: JsonObject): void {
 	const aliases = new Map<string, string>()
 
 	const docKeys = ["title", "description", "examples"]
-	const wireShape = (schema: JsonObject): string =>
+	const identity = (schema: JsonObject): string =>
 		JSON.stringify(
 			sortKeysDeep(Object.fromEntries(Object.entries(schema).filter(([key]) => !docKeys.includes(key)))),
 		)
@@ -600,7 +600,7 @@ function mergeDuplicateComponents(doc: JsonObject): void {
 			aliases.set(name, base)
 			continue
 		}
-		if (wireShape(baseSchema) !== wireShape(copy)) continue
+		if (identity(baseSchema) !== identity(copy)) continue
 		aliases.set(name, base)
 	}
 
