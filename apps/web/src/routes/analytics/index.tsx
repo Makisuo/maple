@@ -554,24 +554,30 @@ function AnalyticsContent({
 						/** Names the theme the tabs share; carried only as a stable key. */
 						id: string
 						dimensions: ReadonlyArray<BreakdownDimension>
+						/** Spans both columns — an odd card count leaves the last one alone. */
+						wide?: boolean
 					}> = [
 						{ id: "acquisition", dimensions: referrers },
 						{ id: "content", dimensions: pageDimensions },
 						{ id: "technology", dimensions: devices },
 						{ id: "audience", dimensions: geography },
-						{ id: "events", dimensions: eventDimensions },
+						{ id: "events", dimensions: eventDimensions, wide: true },
 					]
 
 					return (
 						<div className="grid items-start gap-4 @min-[880px]/page:grid-cols-2">
 							{cards.map((card) => (
-								<AnalyticsBreakdownPanel
+								<div
 									key={card.id}
-									dimensions={card.dimensions}
-									activeValue={(key) => filters[key]}
-									onToggleFilter={onToggleFilter}
-									waiting={result.waiting}
-								/>
+									className={card.wide ? "@min-[880px]/page:col-span-2" : undefined}
+								>
+									<AnalyticsBreakdownPanel
+										dimensions={card.dimensions}
+										activeValue={(key) => filters[key]}
+										onToggleFilter={onToggleFilter}
+										waiting={result.waiting}
+									/>
+								</div>
 							))}
 						</div>
 					)
