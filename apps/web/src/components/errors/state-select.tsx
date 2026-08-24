@@ -7,7 +7,7 @@ import {
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 
-import { WorkflowRingIcon } from "@/components/icons/workflow-ring"
+import { WORKFLOW_LABEL, WorkflowRingIcon } from "@/components/icons/workflow-ring"
 
 /**
  * `regressed` and `verifying` are set by the ticks, never chosen — each records
@@ -15,18 +15,6 @@ import { WorkflowRingIcon } from "@/components/icons/workflow-ring"
  * value when an issue is in one; they are only absent from the choices.
  */
 const OFFERED_STATES = WORKFLOW_STATE_ORDER.filter((state) => !MACHINE_OWNED_WORKFLOW_STATES.has(state))
-
-const LABEL: Record<WorkflowState, string> = {
-	triage: "Triage",
-	regressed: "Regressed",
-	todo: "Todo",
-	in_progress: "In progress",
-	in_review: "In review",
-	verifying: "Verifying",
-	done: "Done",
-	cancelled: "Cancelled",
-	wontfix: "Wontfix",
-} satisfies Record<WorkflowState, string>
 
 const isWorkflowState = (value: string | null): value is WorkflowState =>
 	value !== null && WORKFLOW_STATE_ORDER.some((state) => state === value)
@@ -58,7 +46,7 @@ export function StateSelect({
 						isWorkflowState(value) ? (
 							<span className="flex items-center gap-2">
 								<WorkflowRingIcon state={value} size={12} />
-								{LABEL[value]}
+								{WORKFLOW_LABEL[value]}
 							</span>
 						) : (
 							"State"
@@ -73,7 +61,7 @@ export function StateSelect({
 						<SelectItem key={state} value={state} disabled={!reachable}>
 							<span className="flex items-center gap-2">
 								<WorkflowRingIcon state={state} size={12} />
-								{LABEL[state]}
+								{WORKFLOW_LABEL[state]}
 								{state === current ? " (current)" : null}
 							</span>
 						</SelectItem>

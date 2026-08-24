@@ -706,7 +706,10 @@ function IssueDetailContent() {
 									    load-bearing thing on the page — it explains why the issue is
 									    sitting in `verifying` and nobody needs to touch it. */}
 									{latestVerification ? (
-										<IssueVerificationCard verification={latestVerification} />
+										<IssueVerificationCard
+											verification={latestVerification}
+											workflowState={issue.workflowState}
+										/>
 									) : null}
 									<IssuePullRequestsPanel
 										pullRequests={pullRequests}

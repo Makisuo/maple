@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router"
 
-import type { ErrorIssueVerificationDocument } from "@maple/domain/http"
+import type { ErrorIssueVerificationDocument, WorkflowState } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { formatRelativeShort } from "@maple/ui/lib/time-format"
 import { cn } from "@maple/ui/lib/utils"
@@ -81,7 +81,20 @@ function headline(verification: ErrorIssueVerificationDocument): string {
 	}
 }
 
-export function IssueVerificationCard({ verification }: { verification: ErrorIssueVerificationDocument }) {
+export function IssueVerificationCard({
+	verification,
+	workflowState,
+}: {
+	verification: ErrorIssueVerificationDocument
+	/** Where the issue actually sits, so the card can say whose move it is. */
+	workflowState: WorkflowState
+}) {
+	// A `verified` verdict closes a low/medium/untriaged issue on its own, but a
+	// high or critical one is left for a human — see `verificationVerdictAutoCloses`.
+	// Without this line the card reads "The fix holds" while the issue sits open,
+	// and nobody can tell whether Maple is still working or waiting on them.
+	const awaitingClose =
+		verification.status === "verified" && workflowState !== "done" && workflowState !== "cancelled"
 	const settled =
 		verification.status === "verified" ||
 		verification.status === "not_fixed" ||
@@ -100,6 +113,13 @@ export function IssueVerificationCard({ verification }: { verification: ErrorIss
 			</div>
 
 			<p className="mt-2 text-xs leading-relaxed text-muted-foreground">{headline(verification)}</p>
+
+			{awaitingClose ? (
+				<p className="mt-2 text-xs leading-relaxed text-foreground">
+					Maple leaves high and critical issues for a human to close — this one stays open until you
+					do.
+				</p>
+			) : null}
 
 			{verification.verdictNote && settled ? (
 				<p className="mt-2 border-l-2 border-border pl-3 text-xs leading-relaxed text-muted-foreground">
