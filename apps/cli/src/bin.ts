@@ -87,9 +87,16 @@ if (checkpointProbeDataDir !== undefined) {
 		// answers "how often do people hit this?" without the span being an error.
 		// Same rule `apps/ingest` applies to expected 4xx rejections.
 		//
-		// Genuine failures stay uncaught on purpose: `@maple/cli/ServerError` (bind
-		// failure, dirty store, incompatible store) and every other tag still close
-		// the span `Error` and are reported by `runMain`.
+		// Genuine failures stay uncaught on purpose and still close the span `Error`
+		// for `runMain` to report. Each now carries its own tag rather than one
+		// catch-all `ServerError`, so they group into separate issues:
+		// `ServerBindError`, `LocalStoreDirtyError`, `LocalStoreIncompatibleError`,
+		// `LocalStoreSchemaStaleError`, `LocalStoreMigrationError`,
+		// `CheckpointUnavailableError`, `BackgroundServerSpawnError`,
+		// `BackgroundServerTimeoutError`, `ServerStopTimeoutError` — plus the
+		// checkpoint tags (`CheckpointRecoveryError`, `CheckpointResetError`,
+		// `CheckpointRestoreError`, `CheckpointCreateError`) that the commands used
+		// to flatten on their way out. See `commands/server-errors.ts`.
 		Effect.catchTags({
 			"@maple/cli/ServerStateError": recoverExpected,
 			// `maple checkpoint` against a server whose chDB config has no
