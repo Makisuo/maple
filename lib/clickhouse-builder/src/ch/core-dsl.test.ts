@@ -106,6 +106,12 @@ describe("expression functions", () => {
 		expect(sql).toContain("Timestamp - INTERVAL 3600 SECOND AS ts")
 	})
 
+	it("compiles intervalAdd", () => {
+		const q = CH.from(TestTable).select(($) => ({ ts: CH.intervalAdd($.Timestamp, 3600) }))
+		const { sql } = compileCH(q, {})
+		expect(sql).toContain("Timestamp + INTERVAL 3600 SECOND AS ts")
+	})
+
 	it("compiles outerRef", () => {
 		const q = CH.from(TestTable)
 			.select(($) => ({ id: $.Id }))

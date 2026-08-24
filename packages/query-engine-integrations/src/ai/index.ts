@@ -14,11 +14,14 @@ export {
 	aiSessionListRowSchema,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
+	aiSessionWindowQuery,
+	aiSessionWindowRowSchema,
 	type AiSessionFacetsOutput,
 	type AiSessionListOpts,
 	type AiSessionListOutput,
 	type AiSessionSpansOpts,
 	type AiSessionSpansOutput,
+	type AiSessionWindowOutput,
 } from "./ai-sessions"
 
 export {
