@@ -52,6 +52,7 @@ import {
 } from "@/services/errors/apply-diagnosis"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
+import { Database, type DatabaseApi } from "@/platform/DatabaseLive"
 import { resolveDbConnectionSource } from "@/platform/pg-connection-source"
 import {
 	makePgConnectionScope,
@@ -645,6 +646,23 @@ async function runWithDb(
 			),
 		)
 
+	/**
+	 * Run a writer that owns its own database call on THIS run's connection.
+	 *
+	 * `PgConnectionScopeApi.run` has exactly `DatabaseApi.execute`'s signature, so
+	 * backing `Database` with it keeps every statement on the one connection this
+	 * workflow run opened and closes in its `finally` — the writer reaching for
+	 * `Database` must not dial a second socket per step.
+	 */
+	const runDbStep = <A, E>(program: Effect.Effect<A, E, Database>): Promise<A> =>
+		Effect.runPromise(
+			program.pipe(
+				Effect.provideService(Database, { execute: connection.run } satisfies DatabaseApi),
+				// oxlint-disable-next-line effecttsgo/strict-effect-provide
+				Effect.provide(fanoutTelemetry.layer),
+			),
+		)
+
 	const laneRows = () =>
 		dbStep((db) =>
 			db
@@ -1011,8 +1029,11 @@ async function runWithDb(
 					await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
 					return { status: "inconclusive" as const }
 				}
-				await dbStep(async (db) => {
-					await db
+				// Two calls on the one connection rather than one: `connection.run` is a
+				// span around a logical call, not a transaction, so these were never
+				// atomic with each other — splitting them costs nothing but a span.
+				await dbStep((db) =>
+					db
 						.update(investigationLensRuns)
 						.set({
 							verdict: "promoted",
@@ -1025,8 +1046,10 @@ async function runWithDb(
 								eq(investigationLensRuns.investigationId, idTyped),
 								eq(investigationLensRuns.attempt, attempt),
 							),
-						)
-					await applyDiagnosisWrites(db, {
+						),
+				)
+				await runDbStep(
+					applyDiagnosisWrites({
 						orgId: orgIdTyped,
 						investigationId: idTyped,
 						report: decodeReport(report),
@@ -1039,8 +1062,8 @@ async function runWithDb(
 						fanoutState: "ranked",
 						validatorNote: "Planning collapsed to one hypothesis; no ranking was needed.",
 						validatorElapsedMs: null,
-					})
-				})
+					}),
+				)
 				await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
 				return { status: "ranked" as const }
 			})
@@ -1269,8 +1292,8 @@ async function runWithDb(
 					{ note: verdict.note, report: partialReport },
 					snapshotOrNull(snapshot),
 				)
-				await dbStep((db) =>
-					applyInconclusiveWrites(db, {
+				await runDbStep(
+					applyInconclusiveWrites({
 						orgId: orgIdTyped,
 						investigationId: idTyped,
 						report,
@@ -1296,8 +1319,8 @@ async function runWithDb(
 					{ note: verdict.note, report: null },
 					snapshotOrNull(snapshot),
 				)
-				await dbStep((db) =>
-					applyInconclusiveWrites(db, {
+				await runDbStep(
+					applyInconclusiveWrites({
 						orgId: orgIdTyped,
 						investigationId: idTyped,
 						report,
@@ -1313,8 +1336,8 @@ async function runWithDb(
 				return { status: "inconclusive" as const }
 			}
 
-			await dbStep((db) =>
-				applyDiagnosisWrites(db, {
+			await runDbStep(
+				applyDiagnosisWrites({
 					orgId: orgIdTyped,
 					investigationId: idTyped,
 					report: decodeReport(verdict.report),

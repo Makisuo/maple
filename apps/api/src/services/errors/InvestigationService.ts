@@ -994,23 +994,26 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				// Shared with the fan-out workflow's `persist` step so a diagnosis means
 				// the same thing whichever path produced it — same status transition, same
 				// severity application, same deterministically-keyed timeline event.
-				yield* dbExecute((db) =>
-					applyDiagnosisWrites(db, {
-						orgId,
-						investigationId: id,
-						report: result,
-						issueId: row.issueId ?? null,
-						subjectType: subjectTypeOf(row.subjectJson),
-						model: request.model ?? row.model ?? null,
-						inputTokens: request.inputTokens ?? row.inputTokens ?? null,
-						outputTokens: request.outputTokens ?? row.outputTokens ?? null,
-						nowMs,
-						// A human follow-up that re-diagnoses a ranked fan-out orphans the lens
-						// verdicts: they explain a cause that is no longer on screen.
-						...(row.fanoutState === "ranked"
-							? { fanoutState: "superseded" as const }
-							: undefined),
-					}),
+				// `provideService(Database, database)`: the shared writer carries Database
+				// in R, while this service's API effects are R = never. `mapError` keeps
+				// this method's persistence-error channel — the writer stays neutral
+				// because the fan-out workflow maps it differently.
+				yield* applyDiagnosisWrites({
+					orgId,
+					investigationId: id,
+					report: result,
+					issueId: row.issueId ?? null,
+					subjectType: subjectTypeOf(row.subjectJson),
+					model: request.model ?? row.model ?? null,
+					inputTokens: request.inputTokens ?? row.inputTokens ?? null,
+					outputTokens: request.outputTokens ?? row.outputTokens ?? null,
+					nowMs,
+					// A human follow-up that re-diagnoses a ranked fan-out orphans the lens
+					// verdicts: they explain a cause that is no longer on screen.
+					...(row.fanoutState === "ranked" ? { fanoutState: "superseded" as const } : undefined),
+				}).pipe(
+					Effect.mapError(makePersistenceError),
+					Effect.provideService(Database, database),
 				)
 
 				const env = Option.getOrUndefined(workerEnv)
