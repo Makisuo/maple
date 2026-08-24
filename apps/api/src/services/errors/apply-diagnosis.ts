@@ -14,11 +14,17 @@
  */
 import { errorIssueEvents, investigations } from "@maple/db"
 import type { MaplePgClient } from "@maple/db/client"
-import type { AiTriageResult, InvestigationConfidence, OrgId } from "@maple/domain/http"
+import {
+	InvestigationSubjectDiscriminator,
+	type AiTriageResult,
+	type InvestigationConfidence,
+	type InvestigationSubjectType,
+	type OrgId,
+} from "@maple/domain/http"
 import { ErrorIssueEventId, ErrorIssueId, type InvestigationId } from "@maple/domain/primitives"
 import { createHash } from "node:crypto"
 import { and, eq } from "drizzle-orm"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { applyTriageSeverity } from "@/services/errors/issue-severity"
 
 const decodeIssueId = Schema.decodeUnknownSync(ErrorIssueId)
@@ -41,19 +47,24 @@ export const deterministicInvestigationEventId = (investigationId: string): stri
 	].join("-")
 }
 
+const decodeSubjectDiscriminator = Schema.decodeUnknownOption(InvestigationSubjectDiscriminator)
+
 /**
- * The `type` discriminator off a stored `subjectJson`, or undefined when the
- * column holds something unreadable.
+ * The `type` discriminator off a stored `subjectJson`.
  *
  * Tolerant by design: callers pass a `jsonb` value straight from the row, and a
- * subject that fails to parse must not break the diagnosis write — it just means
- * the caller cannot claim the run was a verification, which is the safe default.
+ * subject that fails to parse must not break the diagnosis write. `None` means
+ * the caller cannot claim the run was a verification.
+ *
+ * Note which way that tolerance cuts. `None` is NOT the safe answer — it is the
+ * answer that lets a verification run re-rank a human-triaged issue's severity
+ * (see `subjectType` on {@link ApplyDiagnosisInput}). That is why this decodes
+ * the discriminator alone rather than the whole `InvestigationSubject`: a
+ * subject whose other fields have drifted, or that was written by an older
+ * shape, must still be recognizable as the verification it plainly is.
  */
-export const subjectTypeOf = (subjectJson: unknown): string | undefined => {
-	if (typeof subjectJson !== "object" || subjectJson === null) return undefined
-	const type = (subjectJson as { type?: unknown }).type
-	return typeof type === "string" ? type : undefined
-}
+export const subjectTypeOf = (subjectJson: unknown): Option.Option<InvestigationSubjectType> =>
+	decodeSubjectDiscriminator(subjectJson).pipe(Option.map((subject) => subject.type))
 
 export interface ApplyDiagnosisInput {
 	readonly orgId: OrgId
@@ -79,7 +90,7 @@ export interface ApplyDiagnosisInput {
 	 * The verdict itself is applied by the verification tick, which owns that
 	 * lifecycle and can move the issue through the workflow state machine.
 	 */
-	readonly subjectType?: string
+	readonly subjectType: Option.Option<InvestigationSubjectType>
 	/**
 	 * Fan-out bookkeeping written in the same statement as the report, so the row
 	 * can never say `diagnosed` while still claiming the validator is running.
@@ -124,7 +135,7 @@ export const applyDiagnosisWrites = async (db: MaplePgClient, input: ApplyDiagno
 
 	if (!input.issueId) return
 	// See `subjectType` above: a verification's report must not re-rank the issue.
-	if (input.subjectType === "fix_verification") return
+	if (Option.contains(input.subjectType, "fix_verification")) return
 	const decodedIssueId = decodeIssueId(input.issueId)
 	await db.transaction(async (tx) => {
 		const applied = await applyTriageSeverity(tx, {

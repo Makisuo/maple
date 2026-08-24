@@ -396,6 +396,29 @@ export const InvestigationSubject = Schema.Union([
 export type InvestigationSubject = Schema.Schema.Type<typeof InvestigationSubject>
 
 /**
+ * Just the `type` discriminator of a subject.
+ *
+ * Derived from the union's own members rather than restated, so a fourth
+ * subject type cannot leave this list behind — the drift would be silent, and
+ * the one consumer that matters (`subjectTypeOf`, which decides whether a run
+ * may re-rank an issue's severity) fails open when it cannot read the type.
+ *
+ * Deliberately NOT the full subject: reading the discriminator must stay
+ * possible for a row whose other fields have drifted or were written by an
+ * older shape. A full decode would answer "unknown" for a subject that is
+ * plainly a verification, which is the dangerous direction.
+ */
+export const InvestigationSubjectType = Schema.Literals(
+	InvestigationSubject.members.map((member) => member.fields.type.literal),
+).annotate({ identifier: "@maple/InvestigationSubjectType", title: "Investigation Subject Type" })
+export type InvestigationSubjectType = Schema.Schema.Type<typeof InvestigationSubjectType>
+
+/** A stored subject, read for its discriminator alone. See {@link InvestigationSubjectType}. */
+export const InvestigationSubjectDiscriminator = Schema.Struct({
+	type: InvestigationSubjectType,
+}).annotate({ identifier: "@maple/InvestigationSubjectDiscriminator" })
+
+/**
  * Stable, normalized rendering context captured when an investigation is
  * opened. It deliberately contains display-ready strings instead of source
  * table identifiers so old investigations remain understandable after the
