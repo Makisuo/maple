@@ -152,7 +152,7 @@ function render(): { text: string; doc: JsonObject } {
 	prunePaths(doc)
 	collapseNullableUnions(doc)
 	collapseErrorResponses(doc)
-	mergeDuplicateEnums(doc)
+	mergeDuplicateComponents(doc)
 	sweepUnreachableSchemas(doc)
 
 	const sorted = sortKeysDeep(doc)
@@ -552,36 +552,55 @@ function errorEnvelopeSchema(): JsonObject {
 	}
 }
 
-/** Pass 4a — drop components no longer reachable from the pruned paths. */
 /**
- * Pass 3b — one Swift enum per domain enum.
+ * Pass 3b — one Swift type per domain schema.
  *
- * Effect registers a component per *annotation site*, so a domain enum such as
- * `AlertSignalType` that is re-annotated on the incident, the check, and the
- * rule arrives as `_maple_AlertSignalType`, `_maple_AlertSignalType_2`,
- * `_maple_AlertSignalType_3` — identical `enum` + `type`, differing only in
- * `description`/`examples`. Left alone, the generator emits three unrelated
- * Swift enums and every comparison across them needs a raw-value round trip.
- * When the numbered copy is the same string enum as its base, point every
- * `$ref` at the base and drop the copy.
+ * Effect registers a component per *annotation site*, so a domain schema that
+ * is re-annotated where it is used arrives numbered: `AlertSignalType` on the
+ * incident, the check and the rule as `_maple_AlertSignalType`,
+ * `_maple_AlertSignalType_2`, `_maple_AlertSignalType_3`; a branded id like
+ * `UserId` with per-field descriptions ("the rule's creator", "the last
+ * editor") as `_maple_UserId_1..3` — since rc.111 sometimes without ever
+ * claiming the bare name. The copies are one wire shape differing only in
+ * documentation, but the generator would emit an unrelated Swift type per
+ * copy, and every comparison across them needs a raw-value round trip.
+ *
+ * So: a numbered copy that matches its base modulo `title`/`description`/
+ * `examples` collapses into it, every `$ref` is redirected, and when no bare
+ * base exists the lowest-numbered copy is promoted to it. The per-site
+ * descriptions are deliberately dropped with the copies — a second Swift type
+ * is a far worse cost than a lost doc string. A numbered copy whose wire
+ * shape genuinely differs from its base is left alone, and the domain suite's
+ * "one component per domain enum" test then fails loudly, which is the
+ * correct signal for real divergence.
  */
-function mergeDuplicateEnums(doc: JsonObject): void {
+function mergeDuplicateComponents(doc: JsonObject): void {
 	const schemas = asObject(asObject(doc.components)?.schemas) ?? {}
 	const aliases = new Map<string, string>()
 
-	for (const name of Object.keys(schemas)) {
-		const match = /^(.+)_(\d+)$/.exec(name)
-		if (match === null) continue
-		const base = match[1]
-		const baseSchema = asObject(schemas[base])
+	const docKeys = ["title", "description", "examples"]
+	const wireShape = (schema: JsonObject): string =>
+		JSON.stringify(
+			sortKeysDeep(Object.fromEntries(Object.entries(schema).filter(([key]) => !docKeys.includes(key)))),
+		)
+
+	const numbered = Object.keys(schemas)
+		.map((name) => ({ name, match: /^(.+)_(\d+)$/.exec(name) }))
+		.filter((entry): entry is { name: string; match: RegExpExecArray } => entry.match !== null)
+		.sort((a, b) => Number(a.match[2]) - Number(b.match[2]))
+
+	for (const { name, match } of numbered) {
+		const base = match[1]!
 		const copy = asObject(schemas[name])
-		if (baseSchema === undefined || copy === undefined) continue
-		const baseEnum = asStringArray(baseSchema.enum)
-		const copyEnum = asStringArray(copy.enum)
-		if (baseEnum === undefined || copyEnum === undefined) continue
-		if (baseSchema.type !== "string" || copy.type !== "string") continue
-		if (baseEnum.length !== copyEnum.length || baseEnum.some((value, index) => value !== copyEnum[index]))
+		if (copy === undefined) continue
+		const baseSchema = asObject(schemas[base])
+		if (baseSchema === undefined) {
+			// No annotation site claimed the bare name: promote the lowest copy.
+			schemas[base] = copy
+			aliases.set(name, base)
 			continue
+		}
+		if (wireShape(baseSchema) !== wireShape(copy)) continue
 		aliases.set(name, base)
 	}
 
@@ -605,6 +624,7 @@ function mergeDuplicateEnums(doc: JsonObject): void {
 	for (const name of aliases.keys()) delete schemas[name]
 }
 
+/** Pass 4a — drop components no longer reachable from the pruned paths. */
 function sweepUnreachableSchemas(doc: JsonObject): void {
 	const schemas = asObject(asObject(doc.components)?.schemas) ?? {}
 	const reachable = new Set<string>()
