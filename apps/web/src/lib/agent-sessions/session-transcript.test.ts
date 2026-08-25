@@ -84,10 +84,16 @@ describe("buildTranscript — turn shape", () => {
 					genAi: {
 						systemInstructions: "you are the investigation planner",
 						inputMessages: [
-							{ role: "user", parts: [{ type: "text", content: "p95 tripled — find what changed" }] },
+							{
+								role: "user",
+								parts: [{ type: "text", content: "p95 tripled — find what changed" }],
+							},
 						],
 						outputMessages: [
-							{ role: "assistant", parts: [{ type: "text", content: "reading the traces first" }] },
+							{
+								role: "assistant",
+								parts: [{ type: "text", content: "reading the traces first" }],
+							},
 						],
 					},
 				}),
@@ -97,7 +103,11 @@ describe("buildTranscript — turn shape", () => {
 					startMs: 3 * SECOND,
 					durationMs: SECOND,
 					toolName: "run_sql",
-					genAi: { toolCallId: "toolu_1", toolCallArguments: { sql: "SELECT 1" }, toolCallResult: "1" },
+					genAi: {
+						toolCallId: "toolu_1",
+						toolCallArguments: { sql: "SELECT 1" },
+						toolCallResult: "1",
+					},
 				}),
 			],
 		})
@@ -158,7 +168,13 @@ describe("buildTranscript — turn shape", () => {
 				durationMs: 20 * SECOND,
 				agentName: "trace-lane",
 			}),
-			toolSpan({ spanId: "a1", parentSpanId: "lane-a", startMs: 3 * SECOND, durationMs: 500, toolName: "run_sql" }),
+			toolSpan({
+				spanId: "a1",
+				parentSpanId: "lane-a",
+				startMs: 3 * SECOND,
+				durationMs: 500,
+				toolName: "run_sql",
+			}),
 			toolSpan({
 				spanId: "b1",
 				parentSpanId: "lane-b",
@@ -166,7 +182,13 @@ describe("buildTranscript — turn shape", () => {
 				durationMs: 500,
 				toolName: "inspect_trace",
 			}),
-			toolSpan({ spanId: "a2", parentSpanId: "lane-a", startMs: 5 * SECOND, durationMs: 500, toolName: "run_sql" }),
+			toolSpan({
+				spanId: "a2",
+				parentSpanId: "lane-a",
+				startMs: 5 * SECOND,
+				durationMs: 500,
+				toolName: "run_sql",
+			}),
 			toolSpan({
 				spanId: "b2",
 				parentSpanId: "lane-b",
@@ -263,8 +285,20 @@ describe("buildTranscript — lanes and parallel markers", () => {
 			startMs: 0,
 			durationMs: 10 * SECOND,
 			children: [
-				toolSpan({ spanId: "t1", parentSpanId: "agent", startMs: 0, durationMs: 5 * SECOND, toolName: "a" }),
-				toolSpan({ spanId: "t2", parentSpanId: "agent", startMs: SECOND, durationMs: 5 * SECOND, toolName: "b" }),
+				toolSpan({
+					spanId: "t1",
+					parentSpanId: "agent",
+					startMs: 0,
+					durationMs: 5 * SECOND,
+					toolName: "a",
+				}),
+				toolSpan({
+					spanId: "t2",
+					parentSpanId: "agent",
+					startMs: SECOND,
+					durationMs: 5 * SECOND,
+					toolName: "b",
+				}),
 			],
 		})
 		expect(kinds(transcript(spans))).not.toContain("parallel")
@@ -321,8 +355,20 @@ describe("buildTranscript — lanes and parallel markers", () => {
 				agentName: "db-lane",
 			}),
 			llmSpan({ spanId: "l1", parentSpanId: "lane", startMs: SECOND, durationMs: SECOND, model: "m" }),
-			llmSpan({ spanId: "l2", parentSpanId: "lane", startMs: 3 * SECOND, durationMs: SECOND, model: "m" }),
-			toolSpan({ spanId: "t1", parentSpanId: "lane", startMs: 5 * SECOND, durationMs: SECOND, toolName: "run_sql" }),
+			llmSpan({
+				spanId: "l2",
+				parentSpanId: "lane",
+				startMs: 3 * SECOND,
+				durationMs: SECOND,
+				model: "m",
+			}),
+			toolSpan({
+				spanId: "t1",
+				parentSpanId: "lane",
+				startMs: 5 * SECOND,
+				durationMs: SECOND,
+				toolName: "run_sql",
+			}),
 		]
 
 		const rows = transcript(spans)
@@ -351,7 +397,10 @@ describe("buildTranscript — message extraction", () => {
 					parentSpanId: "agent",
 					startMs: 0,
 					durationMs: SECOND,
-					genAi: { inputMessages: history, outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "ok" }] }] },
+					genAi: {
+						inputMessages: history,
+						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "ok" }] }],
+					},
 				}),
 				llmSpan({
 					spanId: "l2",
@@ -359,7 +408,10 @@ describe("buildTranscript — message extraction", () => {
 					startMs: 2 * SECOND,
 					durationMs: SECOND,
 					genAi: {
-						inputMessages: [...history, { role: "user", parts: [{ type: "text", content: "re-sent" }] }],
+						inputMessages: [
+							...history,
+							{ role: "user", parts: [{ type: "text", content: "re-sent" }] },
+						],
 						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "done" }] }],
 					},
 				}),
@@ -464,7 +516,9 @@ describe("buildTranscript — message extraction", () => {
 					startMs: 0,
 					durationMs: SECOND,
 					genAi: {
-						inputMessages: [{ role: "user", parts: [{ type: "text", content: "the turn prompt" }] }],
+						inputMessages: [
+							{ role: "user", parts: [{ type: "text", content: "the turn prompt" }] },
+						],
 						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "reply" }] }],
 					},
 				}),
@@ -475,7 +529,9 @@ describe("buildTranscript — message extraction", () => {
 					durationMs: SECOND,
 					serviceName: "search-service",
 					genAi: {
-						inputMessages: [{ role: "user", parts: [{ type: "text", content: "summarise progress" }] }],
+						inputMessages: [
+							{ role: "user", parts: [{ type: "text", content: "summarise progress" }] },
+						],
 					},
 				}),
 			],
@@ -505,7 +561,9 @@ describe("buildTranscript — message extraction", () => {
 					startMs: 0,
 					durationMs: SECOND,
 					genAi: {
-						inputMessages: [{ role: "user", parts: [{ type: "text", content: "the only prompt" }] }],
+						inputMessages: [
+							{ role: "user", parts: [{ type: "text", content: "the only prompt" }] },
+						],
 					},
 				}),
 			],
@@ -618,7 +676,12 @@ describe("buildTranscript — tool calls", () => {
 								role: "assistant",
 								parts: [
 									{ type: "text", content: "calling out" },
-									{ type: "tool_call", id: "toolu_9", name: "web_search", arguments: { q: "x" } },
+									{
+										type: "tool_call",
+										id: "toolu_9",
+										name: "web_search",
+										arguments: { q: "x" },
+									},
 								],
 							},
 						],
@@ -810,8 +873,12 @@ describe("buildTranscript — structural fallback and notes", () => {
 						startMs: index * 60 * SECOND,
 						durationMs: SECOND,
 						genAi: {
-							inputMessages: [{ role: "user", parts: [{ type: "text", content: `q${index}` }] }],
-							outputMessages: [{ role: "assistant", parts: [{ type: "text", content: `a${index}` }] }],
+							inputMessages: [
+								{ role: "user", parts: [{ type: "text", content: `q${index}` }] },
+							],
+							outputMessages: [
+								{ role: "assistant", parts: [{ type: "text", content: `a${index}` }] },
+							],
 						},
 					}),
 				],
@@ -822,7 +889,12 @@ describe("buildTranscript — structural fallback and notes", () => {
 			startMs: 600 * SECOND,
 			durationMs: 10 * SECOND,
 			children: [
-				llmSpan({ spanId: "l-9", parentSpanId: "agent-9", startMs: 600 * SECOND, durationMs: SECOND }),
+				llmSpan({
+					spanId: "l-9",
+					parentSpanId: "agent-9",
+					startMs: 600 * SECOND,
+					durationMs: SECOND,
+				}),
 			],
 		})
 
@@ -862,7 +934,9 @@ describe("buildTranscript — session-level states", () => {
 	})
 
 	it("renders nothing at all for a session with no AI spans", () => {
-		const spans = [makeSpan({ spanId: "http", spanName: "GET /checkout", startMs: 0, durationMs: SECOND })]
+		const spans = [
+			makeSpan({ spanId: "http", spanName: "GET /checkout", startMs: 0, durationMs: SECOND }),
+		]
 		expect(transcript(spans)).toHaveLength(0)
 	})
 
@@ -876,7 +950,9 @@ describe("buildTranscript — session-level states", () => {
 					parentSpanId: "agent",
 					startMs: 0,
 					durationMs: SECOND,
-					genAi: { outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "a" }] }] },
+					genAi: {
+						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "a" }] }],
+					},
 				}),
 				llmSpan({
 					spanId: "l2",
@@ -918,7 +994,9 @@ describe("buildTranscript — session-level states", () => {
 					startMs: 3 * SECOND,
 					durationMs: SECOND,
 					genAi: {
-						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "retried fine" }] }],
+						outputMessages: [
+							{ role: "assistant", parts: [{ type: "text", content: "retried fine" }] },
+						],
 					},
 				}),
 			],
@@ -941,7 +1019,13 @@ describe("buildTranscript — session-level states", () => {
 		})
 		const spans = [
 			...turnSpans({ startMs: 0, durationMs: 5 * SECOND, children: [tool, tool] }),
-			makeSpan({ spanId: "http", parentSpanId: "agent", spanName: "SELECT carts", startMs: 0, durationMs: SECOND }),
+			makeSpan({
+				spanId: "http",
+				parentSpanId: "agent",
+				spanName: "SELECT carts",
+				startMs: 0,
+				durationMs: SECOND,
+			}),
 		]
 		expect(transcript(spans).filter((row) => row.kind === "tool")).toHaveLength(1)
 	})
@@ -959,7 +1043,10 @@ describe("buildTranscript — filter and collapse", () => {
 				durationMs: SECOND,
 				genAi: {
 					outputMessages: [
-						{ role: "assistant", parts: [{ type: "text", content: "the carts lookup is the outlier" }] },
+						{
+							role: "assistant",
+							parts: [{ type: "text", content: "the carts lookup is the outlier" }],
+						},
 					],
 				},
 			}),
@@ -1163,7 +1250,9 @@ describe("buildTranscript — what counts as a captured reply", () => {
 					statusMessage: "stream closed",
 					genAi: {
 						errorType: "stream_error",
-						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "reading the" }] }],
+						outputMessages: [
+							{ role: "assistant", parts: [{ type: "text", content: "reading the" }] },
+						],
 					},
 				}),
 			],
@@ -1293,7 +1382,9 @@ describe("buildTranscript — capture notes", () => {
 					startMs: index * 60 * SECOND,
 					durationMs: SECOND,
 					genAi: {
-						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: `a${index}` }] }],
+						outputMessages: [
+							{ role: "assistant", parts: [{ type: "text", content: `a${index}` }] },
+						],
 					},
 				}),
 			],
@@ -1365,9 +1456,7 @@ describe("buildTranscript — delegation payloads", () => {
 		]
 
 		const rows = transcript(spans)
-		expect(findRow(rows, "lane-open").args?.text).toBe(
-			'{"prompt":"verify the plan against the schema"}',
-		)
+		expect(findRow(rows, "lane-open").args?.text).toBe('{"prompt":"verify the plan against the schema"}')
 		expect(findRow(rows, "lane-close").result?.text).toBe("the plan checks out")
 	})
 })
@@ -1505,5 +1594,229 @@ describe("buildTranscript — row keys", () => {
 		})
 		expect(rows.length).toBeGreaterThan(20)
 		expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length)
+	})
+})
+
+describe("buildTranscript — parallel turns", () => {
+	/**
+	 * One turn per conversation id, the partition a Maple fan-out produces: the
+	 * parent and each sub-agent carry their own id, so they arrive as siblings
+	 * rather than as lanes inside one turn.
+	 */
+	function conversationTurn(input: {
+		readonly id: string
+		readonly agentName: string
+		readonly startMs: number
+		readonly durationMs: number
+		readonly text?: string
+	}): readonly AiSessionSpan[] {
+		const conversationId = `conv-${input.id}`
+		return [
+			agentSpan({
+				spanId: `${input.id}-agent`,
+				traceId: `trace-${input.id}`,
+				startMs: input.startMs,
+				durationMs: input.durationMs,
+				agentName: input.agentName,
+				genAi: { conversationId },
+			}),
+			llmSpan({
+				spanId: `${input.id}-l1`,
+				parentSpanId: `${input.id}-agent`,
+				traceId: `trace-${input.id}`,
+				startMs: input.startMs,
+				durationMs: SECOND,
+				genAi: {
+					conversationId,
+					outputMessages: [
+						{
+							role: "assistant",
+							parts: [{ type: "text", content: input.text ?? input.agentName }],
+						},
+					],
+				},
+			}),
+		]
+	}
+
+	/** Two turns open at once: B starts while A is still running. */
+	const twoTurns = [
+		...conversationTurn({ id: "a", agentName: "log-lane", startMs: 0, durationMs: 20 * SECOND }),
+		...conversationTurn({
+			id: "b",
+			agentName: "metric-lane",
+			startMs: 5 * SECOND,
+			durationMs: 20 * SECOND,
+		}),
+	]
+
+	it("splits a fan-out into sibling turns and marks the pair", () => {
+		const rows = transcript(twoTurns)
+		expect(kinds(rows).slice(0, 2)).toEqual(["parallel-turns", "turn"])
+
+		const marker = findRow(rows, "parallel-turns")
+		expect(marker.depth).toBe(0)
+		expect(marker.turns.map((ref) => ref.turn.agentName)).toEqual(["log-lane", "metric-lane"])
+		// The run's extent, and the window both turns really were open in.
+		expect(marker.startMs).toBe(T0)
+		expect(marker.endMs).toBe(T0 + 25 * SECOND)
+		expect(marker.overlapStartMs).toBe(T0 + 5 * SECOND)
+		expect(marker.overlapEndMs).toBe(T0 + 20 * SECOND)
+	})
+
+	it("gives each member turn header reciprocal jump data", () => {
+		const rows = transcript(twoTurns)
+		const headers = findRows(rows, "turn")
+		expect(headers.map((row) => row.turn.agentName)).toEqual(["log-lane", "metric-lane"])
+		expect(headers[0]!.parallelWith.map((ref) => ref.turn.agentName)).toEqual(["metric-lane"])
+		expect(headers[1]!.parallelWith.map((ref) => ref.turn.agentName)).toEqual(["log-lane"])
+		// The links point at the other turn's own header row key.
+		expect(headers[0]!.parallelWith[0]!.key).toBe(headers[1]!.key)
+		expect(headers[1]!.parallelWith[0]!.key).toBe(headers[0]!.key)
+	})
+
+	// The marker's jump targets have to be row keys, not turn-shaped lookalikes:
+	// a key that resolves to nothing scrolls nowhere and reports no error.
+	it("resolves every jump key to a row that is on the page", () => {
+		const rows = transcript(twoTurns)
+		const keys = new Set(rows.map((row) => row.key))
+		const marker = findRow(rows, "parallel-turns")
+		for (const ref of marker.turns) expect(keys.has(ref.key)).toBe(true)
+		for (const header of findRows(rows, "turn")) {
+			for (const ref of header.parallelWith) expect(keys.has(ref.key)).toBe(true)
+		}
+	})
+
+	it("keeps the marker and the chip data on a collapsed member", () => {
+		const rows = transcript(twoTurns, { collapsedTurns: new Set(["conversation:conv-a"]) })
+		// Collapse hides a turn's body, never its header — so the chapter-level
+		// concurrency survives it.
+		expect(kinds(rows)).toEqual(["parallel-turns", "turn", "turn", "assistant"])
+		const collapsed = findRows(rows, "turn")[0]!
+		expect(collapsed.parallelWith.map((ref) => ref.turn.agentName)).toEqual(["metric-lane"])
+	})
+
+	it("keeps a staggered run in one cluster and links only the pairs that overlapped", () => {
+		const staggered = [
+			...conversationTurn({ id: "a", agentName: "a-lane", startMs: 0, durationMs: 10 * SECOND }),
+			...conversationTurn({
+				id: "b",
+				agentName: "b-lane",
+				startMs: 5 * SECOND,
+				durationMs: 10 * SECOND,
+			}),
+			...conversationTurn({
+				id: "c",
+				agentName: "c-lane",
+				startMs: 12 * SECOND,
+				durationMs: 8 * SECOND,
+			}),
+		]
+		const rows = transcript(staggered)
+		expect(findRows(rows, "parallel-turns")).toHaveLength(1)
+
+		const marker = findRow(rows, "parallel-turns")
+		expect(marker.turns.map((ref) => ref.turn.agentName)).toEqual(["a-lane", "b-lane", "c-lane"])
+		expect(marker.startMs).toBe(T0)
+		expect(marker.endMs).toBe(T0 + 20 * SECOND)
+		// A chain has no window all three shared, and the marker says so rather
+		// than reporting one that runs backwards.
+		expect(marker.overlapStartMs).toBeUndefined()
+		expect(marker.overlapEndMs).toBeUndefined()
+
+		expect(
+			findRows(rows, "turn").map((row) => row.parallelWith.map((ref) => ref.turn.agentName)),
+		).toEqual([["b-lane"], ["a-lane", "c-lane"], ["b-lane"]])
+	})
+
+	// The turn that breaks the run under a "previous member" rule: it ends before
+	// the next one starts, while the long turn above it is still open.
+	it("clusters a short turn nested inside a long one", () => {
+		const nested = [
+			...conversationTurn({ id: "long", agentName: "long-lane", startMs: 0, durationMs: 30 * SECOND }),
+			...conversationTurn({
+				id: "x",
+				agentName: "x-lane",
+				startMs: 3 * SECOND,
+				durationMs: 3 * SECOND,
+			}),
+			...conversationTurn({
+				id: "y",
+				agentName: "y-lane",
+				startMs: 12 * SECOND,
+				durationMs: 4 * SECOND,
+			}),
+		]
+		const rows = transcript(nested)
+		expect(findRows(rows, "parallel-turns")).toHaveLength(1)
+
+		const marker = findRow(rows, "parallel-turns")
+		expect(marker.turns).toHaveLength(3)
+		expect(marker.startMs).toBeLessThan(marker.endMs)
+		// The two short turns never met each other, so only the long one is shared.
+		expect(marker.overlapStartMs).toBeUndefined()
+		expect(marker.overlapEndMs).toBeUndefined()
+
+		expect(
+			findRows(rows, "turn").map((row) => row.parallelWith.map((ref) => ref.turn.agentName)),
+		).toEqual([["x-lane", "y-lane"], ["long-lane"], ["long-lane"]])
+	})
+
+	it("says nothing about turns that ran one after the other", () => {
+		const sequential = [
+			...conversationTurn({ id: "a", agentName: "a-lane", startMs: 0, durationMs: 5 * SECOND }),
+			...conversationTurn({
+				id: "b",
+				agentName: "b-lane",
+				startMs: 10 * SECOND,
+				durationMs: 5 * SECOND,
+			}),
+		]
+		const rows = transcript(sequential)
+		expect(kinds(rows)).not.toContain("parallel-turns")
+		for (const header of findRows(rows, "turn")) expect(header.parallelWith).toStrictEqual([])
+	})
+
+	// An `empty-turn` stub is HTTP/DB work with no agent activity in it. Pairing
+	// one with a real turn would announce a concurrency the reader cannot see.
+	it("leaves turns with no AI activity out of a cluster", () => {
+		const spans = [
+			...conversationTurn({ id: "a", agentName: "a-lane", startMs: 0, durationMs: 20 * SECOND }),
+			makeSpan({
+				spanId: "http",
+				traceId: "trace-http",
+				spanName: "GET /checkout",
+				startMs: 5 * SECOND,
+				durationMs: 10 * SECOND,
+				genAi: { conversationId: "conv-http" },
+				isAiSpan: false,
+			}),
+		]
+		const rows = transcript(spans)
+		expect(kinds(rows)).toEqual(["turn", "assistant", "empty-turn"])
+		expect(findRow(rows, "turn").parallelWith).toStrictEqual([])
+	})
+
+	// Structural chrome, like the lane markers: the filtered view no longer has
+	// the ordering the marker describes.
+	it("drops the marker and the chips while a query is active", () => {
+		const rows = transcript(twoTurns, { query: "metric-lane" })
+		expect(kinds(rows)).toEqual(["turn", "assistant"])
+		expect(findRow(rows, "turn").parallelWith).toStrictEqual([])
+	})
+
+	it("marks the lab fixture's dispatched fan-out", () => {
+		const spans = buildAgentSessionFixture()
+		const rows = transcript(spans)
+		const marker = findRow(rows, "parallel-turns")
+		expect(marker.turns.map((ref) => ref.turn.agentName)).toEqual([
+			"release-triage",
+			"log-lane",
+			"metric-lane",
+		])
+		// All three really were open together, so the window is reported.
+		expect(marker.overlapStartMs).toBeDefined()
+		expect(marker.overlapEndMs).toBeDefined()
+		expect(marker.overlapStartMs!).toBeLessThan(marker.overlapEndMs!)
 	})
 })
