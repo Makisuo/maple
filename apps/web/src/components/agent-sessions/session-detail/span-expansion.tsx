@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { Schema } from "effect"
 
@@ -34,6 +34,7 @@ import {
 	type SpanToolCall,
 } from "@/lib/agent-sessions/span-detail"
 import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
+import { ClampedText } from "./clamped-text"
 import { CATEGORY_FILL } from "./span-visuals"
 import { formatCost } from "./session-overview"
 
@@ -45,10 +46,6 @@ import { formatCost } from "./session-overview"
  */
 
 export type SpanDetailTab = "details" | "messages" | "tools" | "logs"
-
-/** A message body clamps at ~12 lines with a "show full" control: prompts run
- *  to tens of thousands of tokens, and the list has to stay navigable. */
-const CLAMP_CLASS = "line-clamp-[12]"
 
 export function SpanExpansion({
 	span,
@@ -488,10 +485,32 @@ function outputMeta(span: AiSessionSpan): string {
 
 function MessagePart({ part }: { part: SpanMessagePart }) {
 	if (part.kind === "text") return <ClampedText text={part.text} />
+	if (part.kind === "reasoning") return <ReasoningPart part={part} />
 	if (part.kind === "tool_call") {
 		return <PayloadCard label="tool_call" name={part.name} meta={part.id} body={part.argumentsText} />
 	}
 	return <PayloadCard label="tool_result" meta={part.id} body={part.resultText} />
+}
+
+/** Reasoning is the model thinking, not the model answering, so it is set apart
+ *  rather than run in with the reply above it. */
+function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reasoning" }> }) {
+	return (
+		<div className="min-w-0 border-chart-5/50 border-l-2 pl-2.5">
+			<span className="font-medium font-mono text-[10px] text-chart-5 uppercase tracking-widest">
+				Reasoning
+			</span>
+			{part.redacted || part.text === undefined ? (
+				<p className="text-muted-foreground text-xs italic">
+					{part.redacted
+						? "Redacted by the provider — the reasoning was returned sealed."
+						: "No reasoning text was captured."}
+				</p>
+			) : (
+				<ClampedText text={part.text} />
+			)}
+		</div>
+	)
 }
 
 /* -------------------------------------------------------------------------- */
@@ -701,45 +720,3 @@ function firstLine(text: string): string {
 	return ""
 }
 
-/**
- * A body that clamps at ~12 lines with a "Show full" control. Overflow is
- * measured, not guessed from length: 12 short lines fit and never grow a
- * control, while one very long line wraps past the clamp and does.
- */
-function ClampedText({ text, mono = false }: { text: string; mono?: boolean }) {
-	const [expanded, setExpanded] = useState(false)
-	const [clamped, setClamped] = useState(false)
-	const bodyRef = useRef<HTMLDivElement>(null)
-
-	useLayoutEffect(() => {
-		const body = bodyRef.current
-		if (body === null || expanded) return
-		setClamped(body.scrollHeight > body.clientHeight + 1)
-	}, [text, expanded])
-
-	return (
-		<div className="min-w-0">
-			<div
-				ref={bodyRef}
-				className={cn(
-					"whitespace-pre-wrap break-words",
-					mono
-						? "font-mono text-muted-foreground text-xs leading-relaxed"
-						: "max-w-[70rem] text-foreground text-sm leading-relaxed",
-					!expanded && CLAMP_CLASS,
-				)}
-			>
-				{text}
-			</div>
-			{(clamped || expanded) && (
-				<button
-					type="button"
-					onClick={() => setExpanded((previous) => !previous)}
-					className="mt-1 cursor-pointer text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
-				>
-					{expanded ? "Show less" : "Show full"}
-				</button>
-			)}
-		</div>
-	)
-}

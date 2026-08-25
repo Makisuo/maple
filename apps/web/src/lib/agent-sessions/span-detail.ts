@@ -22,6 +22,10 @@ export type SpanMessagePart =
 			readonly argumentsText: string | undefined
 	  }
 	| { readonly kind: "tool_result"; readonly id: string | undefined; readonly resultText: string }
+	/** Model reasoning, which is not assistant speech and must never read as it.
+	 *  `text` is absent for a redacted block — the provider returned a sealed
+	 *  blob, so there is nothing to show. */
+	| { readonly kind: "reasoning"; readonly text: string | undefined; readonly redacted: boolean }
 
 export interface SpanMessage {
 	/** The captured role, verbatim — `user`, `assistant`, `system`, `tool`, … */
@@ -162,6 +166,14 @@ function jsonText(value: unknown): string {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Part types that carry model reasoning rather than assistant speech.
+ * `reasoning` is the semconv name; `thinking` / `redacted_thinking` are
+ * Anthropic's wire types, which several SDKs pass through verbatim. Without
+ * this, a thinking part renders as prose the model never said.
+ */
+const REASONING_TYPES = new Set(["reasoning", "thinking", "redacted_thinking"])
+
+/**
  * `gen_ai.system_instructions` is documented as an array of parts with no
  * role; vendors also emit a bare string or full role-carrying messages.
  */
@@ -240,7 +252,19 @@ function parsePart(part: unknown): SpanMessagePart {
 		return {
 			kind: "tool_result",
 			id: stringOrUndefined(part.id),
+			// Semconv names it `response`; Maple's own emitter writes `result`.
 			resultText: jsonText(part.response ?? part.result ?? ""),
+		}
+	}
+	if (type !== undefined && REASONING_TYPES.has(type)) {
+		// Anthropic seals a redacted block behind `data` with no readable text;
+		// labelling it is the whole of what can be said about it.
+		if (type === "redacted_thinking") return { kind: "reasoning", text: undefined, redacted: true }
+		const reasoning = part.text ?? part.content ?? part.thinking
+		return {
+			kind: "reasoning",
+			text: typeof reasoning === "string" && reasoning !== "" ? reasoning : undefined,
+			redacted: false,
 		}
 	}
 

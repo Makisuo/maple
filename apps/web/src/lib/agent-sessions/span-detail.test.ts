@@ -84,6 +84,53 @@ describe("spanMessages", () => {
 		const span = llmSpan({ spanId: "l1", startMs: 0, durationMs: 1000 })
 		expect(spanMessages(span)).toEqual([])
 	})
+
+	// Reasoning read as assistant prose is the worst kind of wrong: it puts words
+	// in the model's mouth that it never said to the user.
+	it("reads reasoning parts as reasoning, in all three vendor spellings", () => {
+		const span = llmSpan({
+			spanId: "l1",
+			startMs: 0,
+			durationMs: 1000,
+			genAi: {
+				outputMessages: [
+					{
+						role: "assistant",
+						parts: [
+							{ type: "reasoning", content: "semconv spelling" },
+							{ type: "thinking", thinking: "anthropic spelling" },
+							{ type: "reasoning", text: "the text key" },
+							{ type: "redacted_thinking", data: "AAAA…" },
+							{ type: "text", content: "the reply" },
+						],
+					},
+				],
+			},
+		})
+
+		expect(spanMessages(span)[0]!.parts).toEqual([
+			{ kind: "reasoning", text: "semconv spelling", redacted: false },
+			{ kind: "reasoning", text: "anthropic spelling", redacted: false },
+			{ kind: "reasoning", text: "the text key", redacted: false },
+			{ kind: "reasoning", text: undefined, redacted: true },
+			{ kind: "text", text: "the reply" },
+		])
+	})
+
+	it("keeps a reasoning part with no text as a labelled part, not raw JSON", () => {
+		const span = llmSpan({
+			spanId: "l1",
+			startMs: 0,
+			durationMs: 1000,
+			genAi: {
+				outputMessages: [{ role: "assistant", parts: [{ type: "reasoning", signature: "sig" }] }],
+			},
+		})
+
+		expect(spanMessages(span)[0]!.parts).toEqual([
+			{ kind: "reasoning", text: undefined, redacted: false },
+		])
+	})
 })
 
 describe("spanToolCalls", () => {
@@ -223,5 +270,22 @@ describe("spanToolCalls", () => {
 		})
 
 		expect(sessionToolResults([tool, next]).get("toolu_01")).toBe("first-hand")
+	})
+
+	// Semconv says `response`; Maple's own emitter writes `result`. Reading only
+	// the documented key loses every result this codebase produces.
+	it("reads an echoed response under the `result` key too", () => {
+		const next = llmSpan({
+			spanId: "l1",
+			startMs: 0,
+			durationMs: 1000,
+			genAi: {
+				inputMessages: [
+					{ role: "tool", parts: [{ type: "tool_call_response", id: "toolu_01", result: "42 rows" }] },
+				],
+			},
+		})
+
+		expect(sessionToolResults([next]).get("toolu_01")).toBe("42 rows")
 	})
 })

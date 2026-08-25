@@ -120,6 +120,11 @@ const SHORTCUTS = {
 		label: "Flow view",
 		group: "Agent Sessions",
 	},
+	"session.viewTranscript": {
+		combo: "4",
+		label: "Transcript view",
+		group: "Agent Sessions",
+	},
 	"replay.playPause": {
 		combo: "Space",
 		label: "Play / pause replay",
