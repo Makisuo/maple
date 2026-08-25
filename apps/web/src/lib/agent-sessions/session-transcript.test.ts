@@ -1820,3 +1820,159 @@ describe("buildTranscript — parallel turns", () => {
 		expect(marker.overlapStartMs!).toBeLessThan(marker.overlapEndMs!)
 	})
 })
+
+/**
+ * The two halves together: the turn partition files each concurrent lane's
+ * spans into its own chapter, and the chapter marker then announces that the
+ * chapters ran at once.
+ *
+ * Shaped like Maple's investigation fan-out — a planner pass, three hypothesis
+ * lanes launched together with their own `gen_ai.conversation.id`, a validator
+ * pass. Each lane ends on a final chat and an `execute_tool submit_candidate`
+ * long after the last lane anchored: the spans a time-ordered partition used to
+ * dump into whichever lane started last, where they rendered at depth 0 under a
+ * chapter that never ran them.
+ */
+describe("buildTranscript — investigation fan-out", () => {
+	const LANES = ["hypothesis-0", "hypothesis-1", "hypothesis-2"] as const
+
+	function fanout(): readonly AiSessionSpan[] {
+		const reply = (content: string) => [{ role: "assistant", parts: [{ type: "text", content }] }]
+		return [
+			agentSpan({
+				spanId: "planner-agent",
+				traceId: "trace-inv",
+				startMs: 0,
+				durationMs: 8 * SECOND,
+				agentName: "planner",
+				genAi: { conversationId: "inv_1_planner" },
+			}),
+			...LANES.flatMap((lane, index) => {
+				const conversationId = `inv_1_${lane}`
+				const opensAt = 10 * SECOND + index * 300
+				return [
+					agentSpan({
+						spanId: `${lane}-agent`,
+						traceId: "trace-inv",
+						startMs: opensAt,
+						durationMs: 120 * SECOND,
+						agentName: lane,
+						genAi: { conversationId },
+					}),
+					llmSpan({
+						spanId: `${lane}-chat-1`,
+						parentSpanId: `${lane}-agent`,
+						traceId: "trace-inv",
+						startMs: opensAt + SECOND,
+						durationMs: 3 * SECOND,
+						genAi: { conversationId, outputMessages: reply(`${lane} opening read`) },
+					}),
+					llmSpan({
+						spanId: `${lane}-chat-2`,
+						parentSpanId: `${lane}-agent`,
+						traceId: "trace-inv",
+						startMs: opensAt + 100 * SECOND,
+						durationMs: 4 * SECOND,
+						genAi: { conversationId, outputMessages: reply(`${lane} final answer`) },
+					}),
+					toolSpan({
+						spanId: `${lane}-submit`,
+						parentSpanId: `${lane}-agent`,
+						traceId: "trace-inv",
+						startMs: opensAt + 110 * SECOND,
+						durationMs: SECOND,
+						toolName: "submit_candidate",
+						genAi: {
+							conversationId,
+							toolCallId: `call-${lane}`,
+							toolCallResult: `${lane} filed`,
+						},
+					}),
+				]
+			}),
+			agentSpan({
+				spanId: "validator-agent",
+				traceId: "trace-inv",
+				startMs: 140 * SECOND,
+				durationMs: 10 * SECOND,
+				agentName: "validator",
+				genAi: { conversationId: "inv_1_validator" },
+			}),
+		]
+	}
+
+	it("announces the concurrent lanes as chapters that ran at once", () => {
+		const rows = transcript(fanout())
+		const marker = findRow(rows, "parallel-turns")
+
+		expect(marker.turns.map((ref) => ref.turn.agentName)).toEqual([...LANES])
+		// All three really were open together, so a window is reported — and it
+		// runs forwards.
+		expect(marker.overlapStartMs).toBeDefined()
+		expect(marker.overlapEndMs).toBeDefined()
+		expect(marker.overlapStartMs!).toBeLessThan(marker.overlapEndMs!)
+
+		// The marker opens the cluster: it sits directly before the first lane's
+		// header, and the planner's chapter is untouched ahead of it.
+		const markerAt = rows.indexOf(marker)
+		const next = rows[markerAt + 1]!
+		expect(next.kind).toBe("turn")
+		expect(next.kind === "turn" && next.turn.agentName).toBe("hypothesis-0")
+	})
+
+	// The heart of it: a lane's final chat and its submit call belong to the lane
+	// that ran them, not to whichever lane happened to anchor last.
+	it("keeps every lane's tail spans inside that lane's own chapter", () => {
+		const rows = transcript(fanout())
+
+		// Walk the flat row list, attributing each span-bearing row to the chapter
+		// heading it sits under.
+		let chapter: string | undefined
+		const byChapter = new Map<string, string[]>()
+		for (const row of rows) {
+			if (row.kind === "turn") {
+				chapter = row.turn.agentName
+				byChapter.set(chapter!, [])
+				continue
+			}
+			if (!("span" in row) || chapter === undefined) continue
+			byChapter.get(chapter)!.push(row.span.spanId)
+		}
+
+		for (const lane of LANES) {
+			// The anchor is absorbed into the header, so what renders is the work.
+			expect(byChapter.get(lane)).toStrictEqual([`${lane}-chat-1`, `${lane}-chat-2`, `${lane}-submit`])
+		}
+		// And nothing from a lane leaked into the planner's or validator's chapter.
+		expect(byChapter.get("planner")).toStrictEqual([])
+		expect(byChapter.get("validator")).toStrictEqual([])
+	})
+
+	// The failure mode the mis-partition produced: a tail span whose parent lives
+	// in another turn becomes a forest root and renders at depth 0, unattributed,
+	// under a chapter that never ran it.
+	it("leaves no span rendering under a chapter that did not run it", () => {
+		const rows = transcript(fanout())
+
+		let chapter: string | undefined
+		for (const row of rows) {
+			if (row.kind === "turn") {
+				chapter = row.turn.agentName
+				continue
+			}
+			if (!("span" in row)) continue
+			// Every lane span's id is prefixed with the lane that ran it.
+			const owner = LANES.find((lane) => row.span.spanId.startsWith(`${lane}-`))
+			if (owner !== undefined) expect(chapter).toBe(owner)
+		}
+	})
+
+	// Within-turn lane clustering is a different mechanism on a different shape;
+	// the fan-out must not start producing lane rows instead of chapters.
+	it("does not turn sibling chapters back into lanes inside one turn", () => {
+		const rows = transcript(fanout())
+		expect(kinds(rows)).not.toContain("lane-open")
+		expect(kinds(rows)).not.toContain("parallel")
+		expect(findRows(rows, "turn")).toHaveLength(5)
+	})
+})
