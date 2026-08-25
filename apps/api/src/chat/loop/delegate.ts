@@ -152,8 +152,12 @@ const runTask = (
 
 		yield* runTurn({
 			sessionId: input.sessionId,
-			// A sub-agent's spans belong to the same agent session as its parent's.
+			// A sub-agent's spans belong to the same agent session — and the same
+			// workflow — as its parent's.
 			...(input.genAiSessionId === undefined ? undefined : { genAiSessionId: input.genAiSessionId }),
+			...(input.genAiWorkflowName === undefined
+				? undefined
+				: { genAiWorkflowName: input.genAiWorkflowName }),
 			tenant: input.tenant,
 			toolExecutor: input.toolExecutor,
 			model: input.model,

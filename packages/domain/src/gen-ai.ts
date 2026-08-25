@@ -34,8 +34,9 @@ export const MAPLE_AI_SESSION_ID_ATTR = "maple_ai.session.id"
 // is Maple-internal (like `maple_org_id`), `maple.*` belongs to the SDKs.
 //
 // The gateway strips `maple_ai.*` on the way in and re-stamps its own verdict,
-// with two exceptions it does not own and lets through: the turn id and the
-// dropped-messages counter (`PRESERVED_ATTRS` in `apps/ingest/src/ai_session.rs`).
+// with the exceptions it does not own and lets through: the turn id, the
+// dropped-messages counter and the model-duration clock (`PRESERVED_ATTRS` in
+// `apps/ingest/src/ai_session.rs`).
 
 /**
  * Groups every span of one conversation/investigation into one agent session.
@@ -52,6 +53,15 @@ export const MAPLE_NATIVE_TURN_ID_ATTR = "maple_ai.turn.id"
  * it is visible in raw span attributes.
  */
 export const MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR = "maple_ai.input_messages_dropped"
+/**
+ * Wall-clock milliseconds from request start to the terminal stream event —
+ * the model's actual latency. The span's own duration cannot carry this: the
+ * span stays open while downstream consumers (SSE, durable writes) drain the
+ * stream, so it systematically overstates the model. Write-only diagnostics.
+ * Emitter-written like the two above, so it must appear in `PRESERVED_ATTRS`
+ * or the gateway's namespace strip drops it.
+ */
+export const MAPLE_GENAI_MODEL_DURATION_MS_ATTR = "maple_ai.model_duration_ms"
 
 export interface AiFieldDef {
 	/** Primary source attribute key (the semconv key where one exists). */

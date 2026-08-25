@@ -144,6 +144,11 @@ const GENAI_LEGACY_ALIASES = {
 	usageOutputTokens: ["gen_ai.usage.completion_tokens"],
 	usageReasoningOutputTokens: ["gen_ai.usage.output_tokens.reasoning"],
 	usageCacheReadInputTokens: ["gen_ai.usage.input_tokens.cached"],
+	// Not legacy but the *registry* spelling: semconv names the bucket
+	// `cache_write` while the catalog's primary key keeps the `cache_creation`
+	// spelling Anthropic-era emitters (and Maple's own rows before this alias)
+	// used. Both must decode; Maple's agents emit the semconv form.
+	usageCacheCreationInputTokens: ["gen_ai.usage.cache_write.input_tokens"],
 	inputMessages: ["gen_ai.prompt"],
 	outputMessages: ["gen_ai.completion"],
 	providerName: ["gen_ai.system"],

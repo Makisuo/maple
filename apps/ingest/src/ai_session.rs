@@ -10,7 +10,7 @@
 //! - `maple_ai.vendor.version` — identified vendor version, currently always `"0"`
 //! - `maple_ai.session.id` — the vendor's own session identifier, verbatim
 //!
-//! Any customer-supplied `maple_ai.*` key is stripped first, except the two
+//! Any customer-supplied `maple_ai.*` key is stripped first, except the few
 //! the gateway does not own (`PRESERVED_ATTRS`); the gateway is the authority
 //! for the rest of this namespace, like it is for `maple_org_id`.
 //!
@@ -70,9 +70,14 @@ pub const VENDOR_VERSION: &str = "0";
 const MAPLE_SESSION_KEY: &str = SESSION_ID_ATTR;
 /// Keys inside the namespace the gateway does *not* own: an emitter writes
 /// them and nothing here re-stamps them, so the strip must let them through.
-/// Must match `MAPLE_NATIVE_TURN_ID_ATTR` and
-/// `MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR` in `packages/domain/src/gen-ai.ts`.
-const PRESERVED_ATTRS: [&str; 2] = ["maple_ai.turn.id", "maple_ai.input_messages_dropped"];
+/// Must match `MAPLE_NATIVE_TURN_ID_ATTR`,
+/// `MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR` and
+/// `MAPLE_GENAI_MODEL_DURATION_MS_ATTR` in `packages/domain/src/gen-ai.ts`.
+const PRESERVED_ATTRS: [&str; 3] = [
+    "maple_ai.turn.id",
+    "maple_ai.input_messages_dropped",
+    "maple_ai.model_duration_ms",
+];
 
 #[derive(Debug, PartialEq)]
 pub struct AiClassification {

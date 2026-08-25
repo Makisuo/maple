@@ -516,13 +516,87 @@ describe("OpenAI Chat route", () => {
         { type: "text-delta", id: "text-0", text: "Hello" },
         { type: "text-delta", id: "text-0", text: "!" },
         { type: "text-end", id: "text-0" },
-        { type: "step-finish", index: 0, reason: "stop", usage, providerMetadata: undefined },
+        {
+          type: "step-finish",
+          index: 0,
+          reason: "stop",
+          usage,
+          providerMetadata: { openai: { id: "chatcmpl_fixture" } },
+        },
         {
           type: "finish",
           reason: "stop",
           usage,
+          providerMetadata: { openai: { id: "chatcmpl_fixture" } },
         },
       ])
+    }),
+  )
+
+  it.effect("surfaces cost and the served model through providerMetadata", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        { ...deltaChunk({ role: "assistant", content: "Hi" }), model: "gpt-4o-mini-served" },
+        { ...deltaChunk({}, "stop"), model: "gpt-4o-mini-served" },
+        usageChunk({ prompt_tokens: 5, completion_tokens: 2, total_tokens: 7, cost: 0.0042 }),
+      )
+      const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.usage?.providerMetadata).toEqual({
+        openai: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7, cost: 0.0042 },
+      })
+      expect(response.events.at(-1)).toMatchObject({
+        type: "finish",
+        providerMetadata: { openai: { id: "chatcmpl_fixture", model: "gpt-4o-mini-served" } },
+      })
+    }),
+  )
+
+  it.effect("tolerates off-type identity and cost fields instead of failing the stream", () =>
+    Effect.gen(function* () {
+      // These fields are observational: a gateway emitting `cost: null` or a
+      // numeric id must not fail a stream that worked before they were decoded.
+      const body = sseEvents(
+        { id: 12345, model: 42, choices: [{ delta: { role: "assistant", content: "Hi" } }], usage: null },
+        { id: 12345, model: 42, choices: [{ delta: {}, finish_reason: "stop" }], usage: null },
+        { id: 12345, model: 42, choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, cost: null } },
+      )
+      const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.text).toBe("Hi")
+      const finish = response.events.at(-1)!
+      expect(finish.type).toBe("finish")
+      // The off-type identity is dropped rather than surfaced.
+      expect((finish as { providerMetadata?: object }).providerMetadata).toBeUndefined()
+    }),
+  )
+
+  it.effect("emits no identity metadata when chunks carry none", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        { choices: [{ delta: { role: "assistant", content: "Hi" } }] },
+        { choices: [{ delta: {}, finish_reason: "stop" }] },
+      )
+      const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
+
+      const finish = response.events.at(-1)!
+      expect(finish.type).toBe("finish")
+      expect((finish as { providerMetadata?: object }).providerMetadata).toBeUndefined()
+    }),
+  )
+
+  it.effect("ignores empty-string chunk ids so a later real id still lands", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        { id: "", choices: [{ delta: { role: "assistant", content: "Hi" } }], usage: null },
+        { id: "chatcmpl_real", choices: [{ delta: {}, finish_reason: "stop" }], usage: null },
+      )
+      const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.events.at(-1)).toMatchObject({
+        type: "finish",
+        providerMetadata: { openai: { id: "chatcmpl_real" } },
+      })
     }),
   )
 
@@ -582,8 +656,19 @@ describe("OpenAI Chat route", () => {
           providerExecuted: undefined,
           providerMetadata: undefined,
         },
-        { type: "step-finish", index: 0, reason: "tool-calls", usage: undefined, providerMetadata: undefined },
-        { type: "finish", reason: "tool-calls", usage: undefined },
+        {
+          type: "step-finish",
+          index: 0,
+          reason: "tool-calls",
+          usage: undefined,
+          providerMetadata: { openai: { id: "chatcmpl_fixture" } },
+        },
+        {
+          type: "finish",
+          reason: "tool-calls",
+          usage: undefined,
+          providerMetadata: { openai: { id: "chatcmpl_fixture" } },
+        },
       ])
     }),
   )

@@ -118,6 +118,12 @@ const OpenAIChatUsage = Schema.Struct({
   prompt_tokens: Schema.optional(Schema.Number),
   completion_tokens: Schema.optional(Schema.Number),
   total_tokens: Schema.optional(Schema.Number),
+  // OpenRouter accounting (`usage: {include: true}`): credits spent on the call.
+  // Plain OpenAI never sends it. Surfaces via `Usage.providerMetadata.openai`.
+  // Unknown, not Number: the field is purely observational, and a gateway that
+  // emits `cost: null` (or a string) must not fail the whole stream over it —
+  // consumers narrow to a finite number before use.
+  cost: Schema.optional(Schema.Unknown),
   prompt_tokens_details: optionalNull(
     Schema.Struct({
       cached_tokens: Schema.optional(Schema.Number),
@@ -154,6 +160,13 @@ const OpenAIChatChoice = Schema.Struct({
 })
 
 const OpenAIChatEvent = Schema.Struct({
+  // Chunk-level response identity — constant across a response's chunks.
+  // Surfaced on the finish event's `providerMetadata.openai` for callers that
+  // record `gen_ai.response.id` / `gen_ai.response.model`. Unknown, not String:
+  // these are observational, decoded on every chunk of every compatible
+  // provider, and a non-string value must not fail the stream — `step` narrows.
+  id: Schema.optional(Schema.Unknown),
+  model: Schema.optional(Schema.Unknown),
   choices: Schema.Array(OpenAIChatChoice),
   usage: optionalNull(OpenAIChatUsage),
 })
@@ -166,6 +179,8 @@ interface ParserState {
   readonly usage?: Usage
   readonly finishReason?: FinishReason
   readonly lifecycle: Lifecycle.State
+  readonly responseId?: string
+  readonly responseModel?: string
 }
 
 const invalid = ProviderShared.invalidRequest
@@ -404,6 +419,11 @@ const mapUsage = (usage: OpenAIChatEvent["usage"]): Usage | undefined => {
   })
 }
 
+// Non-empty strings only: some gateways stamp `id: ""` on the opening chunk,
+// and latching that would block the real id on a later chunk for good.
+const chunkIdentity = (value: unknown): string | undefined =>
+  typeof value === "string" && value !== "" ? value : undefined
+
 const step = (state: ParserState, event: OpenAIChatEvent) =>
   Effect.gen(function* () {
     const events: LLMEvent[] = []
@@ -454,6 +474,8 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         usage,
         finishReason,
         lifecycle,
+        responseId: state.responseId ?? chunkIdentity(event.id),
+        responseModel: state.responseModel ?? chunkIdentity(event.model),
       },
       events,
     ] as const
@@ -465,7 +487,16 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
   const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason
   const lifecycle = state.toolCallEvents.length ? Lifecycle.stepStart(state.lifecycle, events) : state.lifecycle
   events.push(...state.toolCallEvents)
-  if (reason) Lifecycle.finish(lifecycle, events, { reason, usage: state.usage })
+  const identity = {
+    ...(state.responseId ? { id: state.responseId } : {}),
+    ...(state.responseModel ? { model: state.responseModel } : {}),
+  }
+  if (reason)
+    Lifecycle.finish(lifecycle, events, {
+      reason,
+      usage: state.usage,
+      ...(Object.keys(identity).length ? { providerMetadata: { openai: identity } } : {}),
+    })
   return events
 }
 

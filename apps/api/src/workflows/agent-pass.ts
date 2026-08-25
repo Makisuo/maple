@@ -42,6 +42,8 @@ export interface AgentPassInput<S extends Schema.Top> {
 	 * fragments into a session of its own under its correlation id.
 	 */
 	readonly sessionId?: string
+	/** Workflow this pass runs inside (`gen_ai.workflow.name`), e.g. `"investigation"`. */
+	readonly workflowName?: string
 	readonly agent: AgentDefinition
 	readonly tenant: TenantContext
 	readonly model: Model
@@ -109,6 +111,7 @@ export const runAgentPass = <S extends Schema.Top>(
 		yield* runChatTurn({
 			sessionId: input.id,
 			...(input.sessionId === undefined ? undefined : { genAiSessionId: input.sessionId }),
+			...(input.workflowName === undefined ? undefined : { genAiWorkflowName: input.workflowName }),
 			tenant: input.tenant,
 			toolExecutor,
 			// Separates workflow tool calls from interactive chat ones in telemetry;

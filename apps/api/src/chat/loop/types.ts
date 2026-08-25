@@ -68,6 +68,12 @@ export interface ChatTurnInput {
 	 * is right for attended chat.
 	 */
 	readonly genAiSessionId?: string
+	/**
+	 * Workflow the turn runs inside, for `gen_ai.workflow.name` on the turn's
+	 * `invoke_agent` span (`"investigation"` for the headless passes). Attended
+	 * chat has no workflow and leaves it unset.
+	 */
+	readonly genAiWorkflowName?: string
 	readonly tenant: TenantContext
 	/** Closed, tenant-mandatory MCP execution boundary captured by the caller's runtime. */
 	readonly toolExecutor: McpToolExecutorApi

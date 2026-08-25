@@ -24,6 +24,7 @@ import {
 	classifyAiSpan,
 	isLlmCall,
 	spanEndMs,
+	spanFailed,
 	spanModel,
 	spanStartMs,
 	type SessionTurn,
@@ -540,14 +541,14 @@ function layoutLanes(
 				// One member speaks for the group — the failure when there is one — so
 				// the red border, the red glyph and the error text all describe the same
 				// call, and clicking opens it.
-				const lead = group.spans.find((member) => member.statusCode === "Error") ?? group.spans[0]!
+				const lead = group.spans.find((member) => spanFailed(member)) ?? group.spans[0]!
 				const node: FlowNode = {
 					key: lead.spanId,
 					span: lead,
 					category: classifyAiSpan(lead),
 					title: nodeTitle(lead),
 					subtitle: nodeSubtitle(lead, group.spans),
-					errored: lead.statusCode === "Error",
+					errored: spanFailed(lead),
 					count: group.spans.length,
 					x:
 						LANE_LABEL_WIDTH +
@@ -726,7 +727,7 @@ function nodeTitle(span: AiSessionSpan): string {
 function nodeSubtitle(lead: AiSessionSpan, group: readonly AiSessionSpan[]): string {
 	const parts: string[] = []
 
-	if (lead.statusCode === "Error") {
+	if (spanFailed(lead)) {
 		const errorType = lead.genAi.errorType
 		if (errorType !== undefined && errorType !== "") parts.push(errorType)
 		else parts.push(lead.statusMessage === "" ? "error" : lead.statusMessage)
@@ -751,7 +752,7 @@ function nodeSubtitle(lead: AiSessionSpan, group: readonly AiSessionSpan[]): str
 	// reporting time that never elapsed.
 	parts.push(formatDuration(Math.max(...group.map(spanEndMs)) - Math.min(...group.map(spanStartMs))))
 
-	const failed = group.filter((member) => member.statusCode === "Error").length
+	const failed = group.filter((member) => spanFailed(member)).length
 	if (group.length > 1 && failed > 0) parts.push(`${failed} failed`)
 
 	return parts.join(" · ")

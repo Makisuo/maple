@@ -77,6 +77,13 @@ import { AI_SESSION_SPANS_MAX_SPANS } from "@maple/domain/http"
 const SESSION_ID_ATTR = "maple_ai.session.id"
 const VENDOR_ID_ATTR = "maple_ai.vendor.id"
 const VENDOR_VERSION_ATTR = "maple_ai.vendor.version"
+const ERROR_TYPE_ATTR = "error.type"
+const RESPONSE_STATUS_ATTR = "gen_ai.response.status"
+/** `gen_ai.response.status` values that mean the generation failed — semconv's
+ *  `failed` plus the pre-enum `error` dialect. Mirrors `spanFailed` in
+ *  `apps/web/src/lib/agent-sessions/session-turns.ts`; the list badge and the
+ *  detail's Failures panel must count the same spans. */
+const FAILED_RESPONSE_STATUSES = ["failed", "error"]
 
 /**
  * Sorts every span that is NOT session-bearing behind every one that is, so a
@@ -217,7 +224,20 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 				// session-bearing span rather than by their first span of any kind.
 				sessionStart: CH.min_(sessionOrder),
 				spanCount: CH.count(),
-				errorSpanCount: CH.countIf($.StatusCode.eq("Error")),
+				// Span status, or an attribute-declared failure on a vendor-stamped
+				// span: frameworks record failed model/tool calls as values on `Ok`
+				// spans, and the badge must agree with the detail page's counting.
+				errorSpanCount: CH.countIf(
+					$.StatusCode.eq("Error").or(
+						$.SpanAttributes.get(VENDOR_ID_ATTR)
+							.neq("")
+							.and(
+								$.SpanAttributes.get(ERROR_TYPE_ATTR)
+									.neq("")
+									.or(CH.inList($.SpanAttributes.get(RESPONSE_STATUS_ATTR), FAILED_RESPONSE_STATUSES)),
+							),
+					),
+				),
 				serviceNames: CH.groupUniqArray($.ServiceName),
 				// Named apart from the outer `startTime`/`endTime` on purpose: an
 				// outer alias shadows the derived table's column of the same name,

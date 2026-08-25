@@ -181,14 +181,15 @@ const compactIfNeeded = (
 			Effect.tap((generated) => annotateModelResponse(generated)),
 			Effect.withSpan(modelCallSpanName(model), {
 				kind: "client",
-				// `request.messages` rather than the local list: `LLM.request` appends
-				// the prompt as the trailing user message, and the span should record
-				// what the model was actually sent.
+				// The whole request, so the span records what the model was actually
+				// sent — including the prompt `LLM.request` appends as the trailing
+				// user message, and the system half.
 				attributes: {
-					...modelCallAttributes(model, request.messages, {
-						sessionId: input.sessionId,
-						turnId: input.messageId,
-					}),
+					...modelCallAttributes(
+						request,
+						{ sessionId: input.sessionId, turnId: input.messageId },
+						{ stream: false },
+					),
 					"gen_ai.conversation.compacted": true,
 				},
 			}),

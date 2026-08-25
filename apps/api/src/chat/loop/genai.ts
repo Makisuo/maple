@@ -29,17 +29,28 @@
  */
 import {
 	MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR,
+	MAPLE_GENAI_MODEL_DURATION_MS_ATTR,
 	MAPLE_NATIVE_SESSION_ID_ATTR,
 	MAPLE_NATIVE_TURN_ID_ATTR,
 } from "@maple/domain/gen-ai"
-import { LLMResponse, type LLMEvent, type Message, type Model } from "@maple/llm"
-import { Effect } from "effect"
+import {
+	LLMResponse,
+	type LLMEvent,
+	type LLMRequest,
+	type Message,
+	type Model,
+	type SystemPart,
+	type ToolDefinition,
+} from "@maple/llm"
+import { Clock, Effect } from "effect"
 import type { ChatTurnInput } from "./types"
 
-/** The two grouping ids every gen-ai span carries. */
+/** The grouping ids every gen-ai span carries. */
 export interface GenAiIdentity {
 	readonly sessionId: string
 	readonly turnId: string
+	/** Names the workflow the turn runs inside (`investigation`); attended chat has none. */
+	readonly workflowName?: string
 }
 
 /**
@@ -52,11 +63,15 @@ export interface GenAiIdentity {
 export const genAiIdentityOf = (input: ChatTurnInput): GenAiIdentity => ({
 	sessionId: input.genAiSessionId ?? input.sessionId,
 	turnId: input.messageId,
+	...(input.genAiWorkflowName === undefined ? undefined : { workflowName: input.genAiWorkflowName }),
 })
 
 const identityAttributes = (identity: GenAiIdentity): Record<string, unknown> => ({
 	[MAPLE_NATIVE_SESSION_ID_ATTR]: identity.sessionId,
 	[MAPLE_NATIVE_TURN_ID_ATTR]: identity.turnId,
+	// On every span, not just the agent root: cost and token usage live on the
+	// `chat` spans, so a `gen_ai.workflow.name` filter must reach them too.
+	...(identity.workflowName === undefined ? undefined : { "gen_ai.workflow.name": identity.workflowName }),
 })
 
 /**
@@ -71,6 +86,9 @@ const identityAttributes = (identity: GenAiIdentity): Record<string, unknown> =>
 const INPUT_MESSAGES_BUDGET = 20_000
 const OUTPUT_MESSAGES_BUDGET = 8_000
 const TOOL_JSON_BUDGET = 8_000
+const SYSTEM_INSTRUCTIONS_BUDGET = 8_000
+const TOOL_DEFINITIONS_BUDGET = 16_000
+const AGENT_DESCRIPTION_BUDGET = 1_024
 
 type SerializedPart =
 	| { readonly type: "text"; readonly content: string }
@@ -161,7 +179,9 @@ const messagesJson = (
 	if (encoded.slice(start).reduce((sum, json) => sum + json.length + 1, 1) > budget) {
 		const cap = Math.max(256, Math.floor(budget / 8))
 		rendered = rendered.map((message, index) =>
-			index < start ? message : { ...message, parts: message.parts.map((part) => boundPart(part, cap)) },
+			index < start
+				? message
+				: { ...message, parts: message.parts.map((part) => boundPart(part, cap)) },
 		)
 		encoded = rendered.map((message) => JSON.stringify(message))
 		start = fitFrom(encoded, budget)
@@ -200,32 +220,122 @@ export const toolCallJson = (value: unknown): string => {
 /** Semconv span name: `{operation} {target}`. */
 export const invokeAgentSpanName = (agentName: string): string => `invoke_agent ${agentName}`
 
+/**
+ * Semconv-shaped `gen_ai.tool.definitions`: `[{type, name, description,
+ * parameters}]`. Schemas are the bulk, so over budget they are the first thing
+ * dropped — names and truncated descriptions are what the session view needs.
+ * The compact form is a soft bound (many tools with long names can still
+ * exceed it), which beats degrading to a shape the read side cannot decode.
+ */
+const toolDefinitionsJson = (tools: ReadonlyArray<ToolDefinition>): string => {
+	const full = tools.map((tool) => ({
+		type: "function",
+		name: tool.name,
+		description: tool.description,
+		parameters: tool.inputSchema,
+	}))
+	// `inputSchema` is customer MCP-server data; a stringify throw here would be
+	// a turn-killing defect (evaluated inside `Effect.sync`), so it degrades to
+	// the compact form instead, like this file's other serializers.
+	let json: string | undefined
+	try {
+		json = JSON.stringify(full)
+	} catch {
+		json = undefined
+	}
+	if (json !== undefined && json.length <= TOOL_DEFINITIONS_BUDGET) return json
+	// 128 keeps the chat agent's real toolbox (~60 MCP tools) inside the budget;
+	// the first sentence of a tool description is the part that identifies it.
+	return JSON.stringify(
+		tools.map((tool) => ({
+			type: "function",
+			name: tool.name,
+			description: truncated(tool.description, 128),
+		})),
+	)
+}
+
 export const invokeAgentAttributes = (
-	agentName: string,
+	agent: { readonly name: string; readonly description?: string },
 	model: Model,
 	identity: GenAiIdentity,
+	options: {
+		readonly tools?: ReadonlyArray<ToolDefinition>
+	} = {},
 ): Record<string, unknown> => ({
 	"gen_ai.operation.name": "invoke_agent",
-	"gen_ai.agent.name": agentName,
+	"gen_ai.agent.name": agent.name,
+	// Bounded: hypothesis agents put planner-written text there, the one
+	// description with no length guarantee.
+	...(agent.description === undefined || agent.description === ""
+		? undefined
+		: { "gen_ai.agent.description": truncated(agent.description, AGENT_DESCRIPTION_BUDGET) }),
 	"gen_ai.provider.name": String(model.provider),
 	"gen_ai.request.model": String(model.id),
+	...(options.tools === undefined || options.tools.length === 0
+		? undefined
+		: { "gen_ai.tool.definitions": toolDefinitionsJson(options.tools) }),
 	...identityAttributes(identity),
 })
 
 export const modelCallSpanName = (model: Model): string => `chat ${String(model.id)}`
 
+/**
+ * Semconv-shaped `gen_ai.system_instructions`: an array of `{type, content}`
+ * parts, bounded like the message lists (an agent system prompt can run long,
+ * and a degraded string would vanish at the read side's json decoder).
+ */
+const systemInstructionsJson = (system: ReadonlyArray<SystemPart>): string => {
+	const parts = system.map((part) => ({ type: "text", content: part.text }))
+	const json = JSON.stringify(parts)
+	if (json.length <= SYSTEM_INSTRUCTIONS_BUDGET) return json
+	const cap = Math.max(256, Math.floor(SYSTEM_INSTRUCTIONS_BUDGET / parts.length))
+	return JSON.stringify(parts.map((part) => ({ ...part, content: truncated(part.content, cap) })))
+}
+
+/**
+ * The OpenRouter reasoning effort this call runs with — the request's own
+ * options first, then the model defaults the route client merges underneath
+ * them (`resolveRequestOptions`), which is where `withReasoning` puts the
+ * per-stage policy.
+ */
+const requestReasoningLevel = (request: LLMRequest): string | undefined => {
+	const effort = (options: unknown): string | undefined => {
+		if (typeof options !== "object" || options === null) return undefined
+		const reasoning = (options as { readonly reasoning?: unknown }).reasoning
+		if (typeof reasoning !== "object" || reasoning === null) return undefined
+		const level = (reasoning as { readonly effort?: unknown }).effort
+		return typeof level === "string" && level !== "" ? level : undefined
+	}
+	return (
+		effort(request.providerOptions?.["openrouter"]) ??
+		effort(request.model.defaults?.providerOptions?.["openrouter"])
+	)
+}
+
 /** Attributes known at request time; the response half arrives via {@link annotateModelResponse}. */
 export const modelCallAttributes = (
-	model: Model,
-	messages: ReadonlyArray<Message>,
+	request: LLMRequest,
 	identity: GenAiIdentity,
+	options: { readonly stream: boolean },
 ): Record<string, unknown> => {
-	const input = messagesJson(messages, INPUT_MESSAGES_BUDGET)
+	const input = messagesJson(request.messages, INPUT_MESSAGES_BUDGET)
+	const reasoning = requestReasoningLevel(request)
 	return {
 		"gen_ai.operation.name": "chat",
-		"gen_ai.provider.name": String(model.provider),
-		"gen_ai.request.model": String(model.id),
+		"gen_ai.provider.name": String(request.model.provider),
+		"gen_ai.request.model": String(request.model.id),
+		"gen_ai.request.stream": options.stream,
+		// Only what the request actually asks for — Maple sets no generation cap
+		// today, so this appears the day a call site does, not before.
+		...(request.generation?.maxTokens === undefined
+			? undefined
+			: { "gen_ai.request.max_tokens": request.generation.maxTokens }),
+		...(reasoning === undefined ? undefined : { "gen_ai.request.reasoning.level": reasoning }),
 		"gen_ai.input.messages": input.json,
+		...(request.system.length > 0
+			? { "gen_ai.system_instructions": systemInstructionsJson(request.system) }
+			: undefined),
 		...(input.dropped > 0 ? { [MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR]: input.dropped } : undefined),
 		...identityAttributes(identity),
 	}
@@ -239,35 +349,85 @@ export const modelCallAttributes = (
 export const semconvFinishReason = (reason: string): string =>
 	reason === "tool-calls" ? "tool_calls" : reason === "content-filter" ? "content_filter" : reason
 
-/** The response half of a model-call span: finish reason, usage, output. */
+/**
+ * The dollar cost the provider itself reported for the call, or nothing.
+ *
+ * OpenRouter is the only provider that prices per call in-band: with usage
+ * accounting on (see `withUsageAccounting` in `platform/Llm.ts`) the final
+ * usage object carries `cost` in credits (USD), which the vendored protocol
+ * passes through `providerMetadata.openai`. Maple never prices tokens itself —
+ * a price table would drift from the provider's actual billing.
+ */
+const reportedCost = (usage: LLMResponse["usage"]): number | undefined => {
+	const openai = usage?.providerMetadata?.["openai"]
+	if (typeof openai !== "object" || openai === null) return undefined
+	const cost = (openai as { readonly cost?: unknown }).cost
+	return typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : undefined
+}
+
+/**
+ * Response identity off the wire — every OpenAI-chat chunk carries the
+ * response id and the model that actually served it (OpenRouter routes, so it
+ * can differ from `gen_ai.request.model`); the vendored protocol surfaces both
+ * on the finish event's `providerMetadata.openai`.
+ */
+const responseIdentity = (response: LLMResponse): { readonly id?: string; readonly model?: string } => {
+	const finish = response.events.find((event) => event.type === "finish")
+	const openai = finish?.type === "finish" ? finish.providerMetadata?.["openai"] : undefined
+	if (typeof openai !== "object" || openai === null) return {}
+	const { id, model } = openai as { readonly id?: unknown; readonly model?: unknown }
+	return {
+		...(typeof id === "string" && id !== "" ? { id } : undefined),
+		...(typeof model === "string" && model !== "" ? { model } : undefined),
+	}
+}
+
+/**
+ * The response half of a model-call span, as a plain record. Exported for
+ * tests; production callers go through {@link annotateModelResponse}.
+ */
+export const modelResponseAttributes = (response: LLMResponse): Record<string, unknown> => {
+	const usage = response.usage
+	const cost = reportedCost(usage)
+	const served = responseIdentity(response)
+	return {
+		...(served.id === undefined ? undefined : { "gen_ai.response.id": served.id }),
+		...(served.model === undefined ? undefined : { "gen_ai.response.model": served.model }),
+		"gen_ai.response.finish_reasons": [semconvFinishReason(response.finishReason)],
+		// A provider failure surfaced as a stream *event* completes the stream, so
+		// the span exit stays green — these two attributes are the record of it,
+		// and what the session view's failure counting reads (`spanFailed`).
+		// `failed` is the semconv `gen_ai.response.status` enum's error state.
+		...(response.finishReason === "error"
+			? { "error.type": "provider_error", "gen_ai.response.status": "failed" }
+			: undefined),
+		"gen_ai.output.messages": messagesJson([response.message], OUTPUT_MESSAGES_BUDGET).json,
+		...(usage?.inputTokens === undefined
+			? undefined
+			: { "gen_ai.usage.input_tokens": usage.inputTokens }),
+		...(usage?.outputTokens === undefined
+			? undefined
+			: { "gen_ai.usage.output_tokens": usage.outputTokens }),
+		...(usage?.cacheReadInputTokens === undefined
+			? undefined
+			: { "gen_ai.usage.cache_read.input_tokens": usage.cacheReadInputTokens }),
+		// The semconv spelling. The read side's primary is the older
+		// `cache_creation` key and decodes both (see `GENAI_LEGACY_ALIASES`).
+		...(usage?.cacheWriteInputTokens === undefined
+			? undefined
+			: { "gen_ai.usage.cache_write.input_tokens": usage.cacheWriteInputTokens }),
+		...(usage?.reasoningTokens === undefined
+			? undefined
+			: { "gen_ai.usage.reasoning.output_tokens": usage.reasoningTokens }),
+		...(cost === undefined ? undefined : { "gen_ai.usage.cost": cost }),
+	}
+}
+
+/** The response half of a model-call span: finish reason, usage, output, cost. */
 export const annotateModelResponse = (response: LLMResponse): Effect.Effect<void> =>
 	// Suspended so building the attribute record — which serializes the output
 	// message — happens inside the returned Effect, not at call-site evaluation.
-	Effect.suspend(() => {
-		const usage = response.usage
-		return Effect.annotateCurrentSpan({
-			"gen_ai.response.finish_reasons": [semconvFinishReason(response.finishReason)],
-			// A provider failure surfaced as a stream *event* completes the stream,
-			// so the span exit stays green — this attribute is the record of it.
-			...(response.finishReason === "error" ? { "error.type": "provider_error" } : undefined),
-			"gen_ai.output.messages": messagesJson([response.message], OUTPUT_MESSAGES_BUDGET).json,
-			...(usage?.inputTokens === undefined
-				? undefined
-				: { "gen_ai.usage.input_tokens": usage.inputTokens }),
-			...(usage?.outputTokens === undefined
-				? undefined
-				: { "gen_ai.usage.output_tokens": usage.outputTokens }),
-			...(usage?.cacheReadInputTokens === undefined
-				? undefined
-				: { "gen_ai.usage.cache_read.input_tokens": usage.cacheReadInputTokens }),
-			...(usage?.cacheWriteInputTokens === undefined
-				? undefined
-				: { "gen_ai.usage.cache_creation.input_tokens": usage.cacheWriteInputTokens }),
-			...(usage?.reasoningTokens === undefined
-				? undefined
-				: { "gen_ai.usage.reasoning.output_tokens": usage.reasoningTokens }),
-		})
-	})
+	Effect.suspend(() => Effect.annotateCurrentSpan(modelResponseAttributes(response)))
 
 /**
  * Annotate the current model-call span from the events collected so far.
@@ -282,6 +442,43 @@ export const annotateModelCallEnd = (events: ReadonlyArray<LLMEvent>): Effect.Ef
 	})
 
 /**
+ * Per-attempt clock for the two timings the span itself cannot carry.
+ *
+ * The span's wall clock covers the whole stream lifetime — including the SSE
+ * frames and durable writes that *consume* the model's output — so it
+ * systematically overstates the model. These two attributes are the honest
+ * numbers: request start → first provider frame (`time_to_first_chunk`,
+ * seconds, the key the session view's occupancy bar reads), and request start
+ * → terminal event (model duration, milliseconds).
+ */
+export interface ModelCallTiming {
+	readonly startedMs: number
+	firstChunkMs: number | undefined
+}
+
+/**
+ * Annotate the current model-call span as events arrive: TTFT on the first
+ * provider frame (`step-start` is emitted while processing that frame, never
+ * before the network, so the first event of any type is the first byte), the
+ * model's own duration on the terminal event.
+ */
+export const annotateModelCallTiming = (timing: ModelCallTiming, event: LLMEvent): Effect.Effect<void> =>
+	Effect.suspend(() => {
+		const first = timing.firstChunkMs === undefined
+		const terminal = event.type === "finish" || event.type === "provider-error"
+		if (!first && !terminal) return Effect.void
+		return Effect.flatMap(Clock.currentTimeMillis, (now) => {
+			if (first) timing.firstChunkMs = now
+			return Effect.annotateCurrentSpan({
+				...(first
+					? { "gen_ai.response.time_to_first_chunk": (now - timing.startedMs) / 1000 }
+					: undefined),
+				...(terminal ? { [MAPLE_GENAI_MODEL_DURATION_MS_ATTR]: now - timing.startedMs } : undefined),
+			})
+		})
+	})
+
+/**
  * Wrap one tool dispatch in an `execute_tool` span. The result is annotated
  * before `Effect.withSpan` closes the span, so both halves land on it.
  */
@@ -293,6 +490,7 @@ export const withToolCallSpan = <
 	call: { readonly id: string; readonly name: string; readonly input: unknown },
 	identity: GenAiIdentity,
 	dispatch: Effect.Effect<A, E, R>,
+	description?: string,
 ): Effect.Effect<A, E, R> =>
 	dispatch.pipe(
 		Effect.tap((outcome) =>
@@ -305,6 +503,9 @@ export const withToolCallSpan = <
 			attributes: {
 				"gen_ai.operation.name": "execute_tool",
 				"gen_ai.tool.name": call.name,
+				...(description === undefined || description === ""
+					? undefined
+					: { "gen_ai.tool.description": description }),
 				"gen_ai.tool.call.id": call.id,
 				"gen_ai.tool.call.arguments": toolCallJson(call.input),
 				...identityAttributes(identity),
