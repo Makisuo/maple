@@ -65,6 +65,19 @@ export interface TranscriptLaneRef {
 	readonly agentName: string
 }
 
+/**
+ * One turn the reader can be sent to, for a chapter marker's jump link.
+ *
+ * The turn rides along rather than a formatted label: the ordinal the page
+ * prints ("Turn 4" / "Segment 2") is the view's wording, and re-deriving it here
+ * would put the same rule in two places.
+ */
+export interface TranscriptTurnRef {
+	/** The turn header row's own key, so a jump resolves against the row list. */
+	readonly key: string
+	readonly turn: SessionTurn
+}
+
 /** The payload of a tool call or its result, with what the emitter did to it. */
 export interface TranscriptPayload {
 	/** Empty where the emitter recorded that it truncated but kept no prefix. */
@@ -101,6 +114,8 @@ export type TranscriptRow =
 			/** AI spans the turn actually renders — deduped, app spans excluded. */
 			readonly aiSpanCount: number
 			readonly toolNames: readonly string[]
+			/** Sibling turns this one genuinely overlapped — see `markParallelTurns`. */
+			readonly parallelWith: readonly TranscriptTurnRef[]
 	  })
 	/** A turn the transcript has nothing to say about, holding its ordinal open. */
 	| (RowBase & { readonly kind: "empty-turn"; readonly turn: SessionTurn })
@@ -179,6 +194,18 @@ export type TranscriptRow =
 			readonly overlapEndMs: number | undefined
 			readonly lanes: readonly TranscriptLaneRef[]
 	  })
+	/** The same announcement one level up: turns that ran at the same time. */
+	| (RowBase & {
+			readonly kind: "parallel-turns"
+			/** The cluster: from the first turn starting to the last one ending. */
+			readonly startMs: number
+			readonly endMs: number
+			/** The window every turn in the cluster was open in, where there is one.
+			 *  A chain of pairwise overlaps has none. */
+			readonly overlapStartMs: number | undefined
+			readonly overlapEndMs: number | undefined
+			readonly turns: readonly TranscriptTurnRef[]
+	  })
 	/** A model call, or a tool call, that captured no content at all. */
 	| (SpanRowBase & {
 			readonly kind: "structure"
@@ -243,13 +270,15 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 
 	const filtering = input.query.trim() !== ""
 	const turnRows = input.turns.map((turn) => buildTurn(turn, input, categoryOf))
+	// Structural chrome, like the lane markers: a filtered view no longer has the
+	// ordering the marker describes, so it is not built at all.
+	const concurrent = filtering ? new Map<string, TurnMarking>() : markParallelTurns(turnRows)
 
 	// Capture coverage is a fact about the session, so it is counted over every
 	// turn before the first row is emitted.
 	const llmSpans = turnRows.flatMap((entry) => entry.llmSpans)
 	const capturedCalls = llmSpans.filter(hasCapturedContent).length
-	const bannerUp =
-		llmSpans.length > 0 && capturedCalls / llmSpans.length < CAPTURE_BANNER_THRESHOLD
+	const bannerUp = llmSpans.length > 0 && capturedCalls / llmSpans.length < CAPTURE_BANNER_THRESHOLD
 	// A session of pure HTTP/DB work has no transcript at all; only one that DOES
 	// have agent work keeps placeholders for the turns without it.
 	const anyAiActivity = turnRows.some((entry) => entry.aiSpanCount > 0)
@@ -270,7 +299,15 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 		// a header over nothing is worse than no header. Collapse does not change
 		// that: the filter judges both states by the same rows.
 		if (filtering && entry.rows.length === 0) continue
-		body.push(entry.header)
+		const marking = concurrent.get(entry.turn.id)
+		// The marker opens the cluster, so it is carried by its first member.
+		if (marking?.marker !== undefined) body.push(marking.marker)
+		// A cluster member's whole chapter shifts one lane right, the same move a
+		// lane makes inside a turn: the indentation is what says "these chapters
+		// hang off the fork above" without the reader having to parse the marker.
+		const indent = marking === undefined ? 0 : 1
+		const header = marking?.header ?? entry.header
+		body.push(indent === 0 ? header : { ...header, depth: header.depth + indent })
 		// Per-turn only where the session-level banner is not already up.
 		if (
 			!bannerUp &&
@@ -280,13 +317,19 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 			body.push({
 				kind: "note",
 				key: `note:${entry.turn.id}`,
-				depth: 0,
+				depth: indent,
 				noteKind: "capture-off",
 				scope: "turn",
 				anyCaptured: false,
 			})
 		}
-		if (!input.collapsedTurns.has(entry.turn.id)) body.push(...entry.rows)
+		if (!input.collapsedTurns.has(entry.turn.id)) {
+			body.push(
+				...(indent === 0
+					? entry.rows
+					: entry.rows.map((row) => ({ ...row, depth: row.depth + indent }))),
+			)
+		}
 	}
 
 	// Nothing survived. The empty state says which of the two reasons it was, and
@@ -326,7 +369,7 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 
 interface TurnRows {
 	readonly turn: SessionTurn
-	readonly header: TranscriptRow
+	readonly header: Extract<TranscriptRow, { kind: "turn" }>
 	readonly rows: readonly TranscriptRow[]
 	/** The turn's model calls, for the session's capture coverage. */
 	readonly llmSpans: readonly AiSessionSpan[]
@@ -345,7 +388,7 @@ function buildTurn(
 	const llmSpans = spans.filter(isLlmCall)
 	const toolSpans = spans.filter((span) => categoryOf(span) === "tool")
 
-	const header: TranscriptRow = {
+	const header: Extract<TranscriptRow, { kind: "turn" }> = {
 		kind: "turn",
 		key: turn.id,
 		depth: 0,
@@ -357,6 +400,9 @@ function buildTurn(
 		toolNames: distinct(
 			toolSpans.map((span) => span.genAi.toolName).filter((name): name is string => name !== undefined),
 		),
+		// Filled in by `markParallelTurns`, which needs every turn to be built
+		// before it can tell which of them overlapped.
+		parallelWith: [],
 	}
 
 	// A collapsed turn renders its header and nothing else, so none of the work
@@ -737,30 +783,13 @@ function markParallelLanes(
 	lanes: readonly LaneBlock[],
 	scope: LaneScope,
 ): readonly TranscriptRow[] {
-	if (lanes.length < 2) return rows
-
-	// Clustered against a RUNNING maximum end, never against the previous lane's
-	// own: two short lanes nested inside one long one are a single fork, and
-	// reading only the last member would break the run at the first lane that
-	// happened to finish early.
-	const clusters: LaneBlock[][] = []
-	let clusterEnd = Number.NEGATIVE_INFINITY
-	for (const lane of lanes) {
-		const cluster = clusters.at(-1)
-		if (cluster !== undefined && lane.startMs < clusterEnd) {
-			cluster.push(lane)
-			clusterEnd = Math.max(clusterEnd, lane.endMs)
-		} else {
-			clusters.push([lane])
-			clusterEnd = lane.endMs
-		}
-	}
+	const clusters = clusterByOverlap(lanes)
+	if (clusters.length === 0) return rows
 
 	const out = [...rows]
 	const markers: { at: number; row: TranscriptRow }[] = []
 	for (const cluster of clusters) {
-		if (cluster.length < 2) continue
-		for (const lane of cluster) {
+		for (const lane of cluster.members) {
 			// `at` is where the lane's rows were pushed and its opening row is the
 			// first of them — a search by key would find the same row more slowly.
 			const row = out[lane.at]
@@ -770,25 +799,24 @@ function markParallelLanes(
 			// same invention the marker exists to prevent.
 			out[lane.at] = {
 				...row,
-				parallelWith: cluster.filter((other) => overlaps(lane, other)).map((other) => other.ref),
+				parallelWith: cluster.members
+					.filter((other) => overlaps(lane, other))
+					.map((other) => other.ref),
 			}
 		}
-		// The window every lane in the cluster was open in, where there is one.
-		const sharedStart = Math.max(...cluster.map((lane) => lane.startMs))
-		const sharedEnd = Math.min(...cluster.map((lane) => lane.endMs))
-		const shared = sharedStart < sharedEnd
+		const first = cluster.members[0]!
 		markers.push({
-			at: cluster[0]!.at,
+			at: first.at,
 			row: {
 				kind: "parallel",
-				key: `${cluster[0]!.ref.key}:parallel`,
+				key: `${first.ref.key}:parallel`,
 				depth: scope.depth,
 				forkedBy: scope.agentName,
-				startMs: Math.min(...cluster.map((lane) => lane.startMs)),
-				endMs: Math.max(...cluster.map((lane) => lane.endMs)),
-				overlapStartMs: shared ? sharedStart : undefined,
-				overlapEndMs: shared ? sharedEnd : undefined,
-				lanes: cluster.map((lane) => lane.ref),
+				startMs: cluster.startMs,
+				endMs: cluster.endMs,
+				overlapStartMs: cluster.overlapStartMs,
+				overlapEndMs: cluster.overlapEndMs,
+				lanes: cluster.members.map((lane) => lane.ref),
 			},
 		})
 	}
@@ -798,9 +826,149 @@ function markParallelLanes(
 	return out
 }
 
-/** Two lanes open at the same moment. */
-function overlaps(a: LaneBlock, b: LaneBlock): boolean {
+/* -------------------------------------------------------------------------- */
+/* Overlap clustering                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** Anything the transcript can announce as concurrent: a lane, or a turn. */
+interface Interval {
+	readonly startMs: number
+	readonly endMs: number
+}
+
+interface OverlapCluster<T> {
+	/** Two or more, in start order. */
+	readonly members: readonly T[]
+	/** The run's extent: first member starting to last member ending. */
+	readonly startMs: number
+	readonly endMs: number
+	/**
+	 * The window every member was open in, where there is one. A chain of
+	 * pairwise overlaps has none, and claiming a window there would be the
+	 * invention the marker exists to prevent — so both ends are `undefined`
+	 * together rather than reported backwards.
+	 */
+	readonly overlapStartMs: number | undefined
+	readonly overlapEndMs: number | undefined
+}
+
+/**
+ * Group items that ran at the same time.
+ *
+ * Clustered against a RUNNING maximum end, never against the previous item's
+ * own: two short runs nested inside one long one are a single cluster, and
+ * reading only the last member would break the run at the first item that
+ * happened to finish early. A cluster of one is a sequence and is dropped.
+ *
+ * The input is sorted defensively. A thread's lanes arrive in start order
+ * already, but a turn is ordered by its ANCHOR while its own `startMs` is the
+ * minimum over every span the time partition gave it, and the two can disagree.
+ */
+function clusterByOverlap<T extends Interval>(items: readonly T[]): readonly OverlapCluster<T>[] {
+	if (items.length < 2) return []
+
+	const groups: T[][] = []
+	let clusterEnd = Number.NEGATIVE_INFINITY
+	for (const item of [...items].sort((a, b) => a.startMs - b.startMs)) {
+		const group = groups.at(-1)
+		if (group !== undefined && item.startMs < clusterEnd) {
+			group.push(item)
+			clusterEnd = Math.max(clusterEnd, item.endMs)
+		} else {
+			groups.push([item])
+			clusterEnd = item.endMs
+		}
+	}
+
+	return groups
+		.filter((group) => group.length > 1)
+		.map((members) => {
+			const sharedStart = Math.max(...members.map((item) => item.startMs))
+			const sharedEnd = Math.min(...members.map((item) => item.endMs))
+			const shared = sharedStart < sharedEnd
+			return {
+				members,
+				startMs: members[0]!.startMs,
+				endMs: Math.max(...members.map((item) => item.endMs)),
+				overlapStartMs: shared ? sharedStart : undefined,
+				overlapEndMs: shared ? sharedEnd : undefined,
+			}
+		})
+}
+
+/** Two intervals open at the same moment. Identity, not keys: the members are
+ *  the very objects handed to `clusterByOverlap`. */
+function overlaps<T extends Interval>(a: T, b: T): boolean {
 	return a !== b && a.startMs < b.endMs && b.startMs < a.endMs
+}
+
+/** What a cluster does to one of its member turns. */
+interface TurnMarking {
+	/** The header again, carrying the turns this one overlapped. */
+	readonly header: Extract<TranscriptRow, { kind: "turn" }>
+	/** The cluster's marker, on its first member only. */
+	readonly marker: TranscriptRow | undefined
+}
+
+/**
+ * Chapter-level parallelism: turns that ran at the same time.
+ *
+ * `buildSessionTurns` partitions on `gen_ai.conversation.id` where there is one,
+ * and a Maple sub-agent or workflow lane carries its own — so a fan-out the
+ * parent dispatched arrives here as SIBLING turns rather than as lanes inside
+ * one, and reads as "turn 3, then turn 4": the one thing the timestamps deny.
+ * A dispatched run whose queue hop lost the span link lands the same way,
+ * through the agent-root rule.
+ *
+ * Only turns the transcript actually renders take part. An `empty-turn` stub is
+ * a placeholder for HTTP/DB work with no agent activity in it, and pairing one
+ * with a real turn would announce a concurrency the reader cannot see.
+ */
+function markParallelTurns(entries: readonly TurnRows[]): ReadonlyMap<string, TurnMarking> {
+	const items = entries
+		.filter((entry) => entry.aiSpanCount > 0)
+		.map((entry, order) => ({
+			entry,
+			// Where this turn sits on the PAGE. Turns are ordered by their anchor and
+			// a turn's `startMs` is the minimum over its spans, so the two can
+			// disagree — and the marker has to open the cluster wherever it renders.
+			order,
+			startMs: entry.turn.startMs,
+			endMs: entry.turn.endMs,
+			ref: { key: entry.turn.id, turn: entry.turn } satisfies TranscriptTurnRef,
+		}))
+
+	const marked = new Map<string, TurnMarking>()
+	for (const cluster of clusterByOverlap(items)) {
+		for (const item of cluster.members) {
+			marked.set(item.entry.turn.id, {
+				header: {
+					...item.entry.header,
+					// Only the turns this one GENUINELY overlapped: a cluster can be a
+					// chain (A with B, B with C, A never with C).
+					parallelWith: cluster.members
+						.filter((other) => overlaps(item, other))
+						.map((other) => other.ref),
+				},
+				marker: undefined,
+			})
+		}
+		const first = cluster.members.reduce((a, b) => (a.order <= b.order ? a : b))
+		marked.set(first.entry.turn.id, {
+			...marked.get(first.entry.turn.id)!,
+			marker: {
+				kind: "parallel-turns",
+				key: `${first.ref.key}:parallel-turns`,
+				depth: 0,
+				startMs: cluster.startMs,
+				endMs: cluster.endMs,
+				overlapStartMs: cluster.overlapStartMs,
+				overlapEndMs: cluster.overlapEndMs,
+				turns: cluster.members.map((item) => item.ref),
+			},
+		})
+	}
+	return marked
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1040,7 +1208,13 @@ function outputRows(
 		// This call captured something — so the reply is missing, not merely
 		// unrecorded like every call in a capture-off session.
 		return [
-			{ ...base, kind: "assistant", key: rowKey(scope, span, "no-reply"), text: undefined, failed: false },
+			{
+				...base,
+				kind: "assistant",
+				key: rowKey(scope, span, "no-reply"),
+				text: undefined,
+				failed: false,
+			},
 		]
 	}
 	return [
@@ -1055,10 +1229,7 @@ function outputRows(
 }
 
 /** Does a tool span already account for this `tool_call` part? */
-function coveredBySpan(
-	part: Extract<SpanMessagePart, { kind: "tool_call" }>,
-	context: TurnContext,
-): boolean {
+function coveredBySpan(part: Extract<SpanMessagePart, { kind: "tool_call" }>, context: TurnContext): boolean {
 	// A tool span for the same call carries the duration, the service and the
 	// error; the message-only row exists only where there is no such span.
 	if (part.id !== undefined) return context.coveredCallIds.has(part.id)

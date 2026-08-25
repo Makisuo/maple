@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
-import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
+import { ChevronDownIcon, ChevronRightIcon, CircleXmarkIcon } from "@/components/icons"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
@@ -31,13 +31,15 @@ import {
 import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
 import { Pill } from "./pill"
 import { SpanInlineDetail, type SpanDetailTab } from "./span-expansion"
-import { CATEGORY_FILL } from "./span-visuals"
+import { CATEGORY_FILL, CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
 // Row heights are fixed and known, so the virtualizer never has to measure —
 // except the one inline detail row, whose height is its payload's and is
 // measured (`measureElement`) instead.
 const TURN_ROW_HEIGHT = 30
-const ROW_HEIGHT = 26
+/** Two above the old 26: the category glyphs need a touch more air than the
+ *  dots they replaced. */
+const ROW_HEIGHT = 28
 /** Starting guess for the detail row; the measurement replaces it on mount. */
 const DETAIL_ROW_ESTIMATE = 480
 /** Past this the indent eats the span name; deep agent trees are common. */
@@ -534,6 +536,9 @@ function SpanRow({
 	const { span } = row
 	const category = classifyAiSpan(span)
 	const errored = spanFailed(span)
+	// The same glyph vocabulary as the Flow view's nodes: the kind of work reads
+	// by shape, and a failure takes the glyph over outright.
+	const Glyph = errored ? CircleXmarkIcon : CATEGORY_ICON[category]
 	const target = spanTarget(span, category)
 	// Only a model id is a provider path — a tool's target is usually a file path,
 	// whose last segment is not the part worth keeping.
@@ -557,14 +562,12 @@ function SpanRow({
 				className={COL_SPAN}
 				style={{ paddingLeft: Math.min(row.depth, MAX_INDENT_DEPTH) * INDENT_PX }}
 			>
-				<span
+				<Glyph
 					aria-hidden
-					className={cn(
-						"size-1.5 shrink-0 rounded-xs",
-						errored ? "bg-destructive" : CATEGORY_FILL[category],
-					)}
+					size={13}
+					className={cn("shrink-0", errored ? "text-destructive" : CATEGORY_TEXT[category])}
 				/>
-				<span className="shrink-0 truncate font-medium">{span.spanName}</span>
+				<span className="truncate font-medium">{span.spanName}</span>
 				<span className="min-w-0 truncate text-muted-foreground">{spanMeta(span, category)}</span>
 				{errored && <Pill tone="error">{span.genAi.errorType ?? "Error"}</Pill>}
 				{isDelegation(span, spansById) && <Pill tone="outline">Subagent</Pill>}

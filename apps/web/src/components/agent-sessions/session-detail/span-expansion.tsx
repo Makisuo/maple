@@ -6,6 +6,7 @@ import { SpanId, TraceId } from "@maple/domain"
 import type { AiSessionSpan } from "@maple/domain/http"
 import { ErrorSection } from "@maple/ui/components/error-section"
 import { Button } from "@maple/ui/components/ui/button"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
@@ -14,10 +15,13 @@ import {
 	CheckIcon,
 	ChevronDownIcon,
 	ChevronRightIcon,
+	CircleWarningIcon,
+	CircleXmarkIcon,
 	CopyIcon,
 	ExternalLinkIcon,
 	XmarkIcon,
 } from "@/components/icons"
+import { MessageResponse } from "@/components/ai-elements/message-response"
 import { AttributesSection, CopyableValue, ResourceAttributesSection } from "@/components/attributes"
 import { SpanLogs } from "@/components/traces/span-detail-panel"
 import type { SpanDetailResult } from "@/api/warehouse/traces"
@@ -37,7 +41,9 @@ import {
 import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
 import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
 import { ClampedText, firstLine } from "./clamped-text"
-import { CATEGORY_FILL } from "./span-visuals"
+import { useJsonPayload, ViewSegment, ViewSwitch } from "./payload-view"
+import { Pill } from "./pill"
+import { CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
 /**
  * The payload of one span, expanded in place — under its waterfall row, or in
@@ -125,7 +131,7 @@ export function SpanExpansion({
 
 			<MetaStrip span={span} />
 
-			{active === "details" && <DetailsSection span={span} />}
+			{active === "details" && <DetailsSection span={span} toolCalls={toolCalls} />}
 			{active === "messages" && <MessagesSection messages={messages} span={span} />}
 			{active === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
 			{active === "logs" && <LogsSection span={span} />}
@@ -183,6 +189,9 @@ export function SpanDrawer({
 }) {
 	const category = classifyAiSpan(span)
 	const errored = spanFailed(span)
+	// The canvas the drawer docks under draws its nodes with these glyphs, so the
+	// drawer names its span in the same vocabulary.
+	const Glyph = errored ? CircleXmarkIcon : CATEGORY_ICON[category]
 	const subtitle = [turnOrdinal, spanModel(span), formatDuration(span.durationMs)]
 		.filter((part): part is string => part !== undefined)
 		.join(" · ")
@@ -201,12 +210,10 @@ export function SpanDrawer({
 				tabsInHeader
 				header={(tabs) => (
 					<div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 bg-background py-2">
-						<span
+						<Glyph
 							aria-hidden
-							className={cn(
-								"size-1.5 shrink-0 rounded-xs",
-								errored ? "bg-destructive" : CATEGORY_FILL[category],
-							)}
+							size={13}
+							className={cn("shrink-0", errored ? "text-destructive" : CATEGORY_TEXT[category])}
 						/>
 						<span className="font-medium font-mono text-sm">{span.spanName}</span>
 						{subtitle !== "" && <span className="text-muted-foreground text-xs">{subtitle}</span>}
@@ -409,6 +416,7 @@ function MessagesSection({ messages, span }: { messages: readonly SpanMessage[];
  *  rarely what the reader came for. */
 function SystemMessageRow({ message }: { message: SpanMessage }) {
 	const [open, setOpen] = useState(false)
+	const [raw, setRaw] = useState(false)
 	const text = collapsedText(message.parts)
 
 	return (
@@ -432,8 +440,16 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 				)}
 			</button>
 			{open && (
-				<div className="px-2.5 pb-2.5 pl-8">
-					<ClampedText text={text} />
+				<div className="flex items-start gap-1.5 px-2.5 pb-2.5 pl-8">
+					<div className="min-w-0 grow">
+						<ClampedText
+							text={text}
+							body={raw ? undefined : <MessageResponse className="text-sm">{text}</MessageResponse>}
+						/>
+					</div>
+					<ViewSwitch rendered="md" raw={raw} onRawChange={setRaw} />
+					{/* Copies the instructions as captured, not their rendering. */}
+					<CopyButton value={text} label="system message" className="-my-1 shrink-0" />
 				</div>
 			)}
 		</div>
@@ -441,6 +457,11 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 }
 
 function MessageBlock({ message, span }: { message: SpanMessage; span: AiSessionSpan }) {
+	// One rendered ↔ raw choice per message: its text parts are one body the
+	// reader flips together, while the payload cards keep their own json switch.
+	const [raw, setRaw] = useState(false)
+	const hasText = message.parts.some((part) => part.kind === "text")
+
 	return (
 		<div className="flex min-w-0 flex-col gap-1.5">
 			<div className="flex items-center gap-2.5">
@@ -460,18 +481,26 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 					</span>
 				)}
 				<span aria-hidden className="h-px min-w-4 flex-1 bg-border/60" />
+				{hasText && <ViewSwitch rendered="md" raw={raw} onRawChange={setRaw} />}
 			</div>
 			<div className="flex min-w-0 flex-col gap-2">
 				{message.parts.map((part, index) => (
-					<MessagePart key={index} part={part} />
+					<MessagePart key={index} part={part} raw={raw} />
 				))}
 			</div>
 		</div>
 	)
 }
 
-function MessagePart({ part }: { part: SpanMessagePart }) {
-	if (part.kind === "text") return <ClampedText text={part.text} />
+function MessagePart({ part, raw }: { part: SpanMessagePart; raw: boolean }) {
+	if (part.kind === "text") {
+		return (
+			<ClampedText
+				text={part.text}
+				body={raw ? undefined : <MessageResponse className="text-sm">{part.text}</MessageResponse>}
+			/>
+		)
+	}
 	if (part.kind === "reasoning") return <ReasoningPart part={part} />
 	if (part.kind === "tool_call") {
 		return <PayloadCard label="tool_call" name={part.name} meta={part.id} body={part.argumentsText} />
@@ -511,19 +540,67 @@ function ToolCallsSection({ toolCalls }: { toolCalls: readonly SpanToolCall[] })
 	return (
 		<div className="flex flex-col gap-3 pb-1">
 			{toolCalls.map((call, index) => (
-				<div key={index} className="flex flex-col gap-2">
-					<PayloadCard
-						label="tool_call"
-						name={call.name}
-						meta={call.id}
-						description={call.description}
-						body={call.argumentsText}
-					/>
-					{call.resultText !== undefined && (
-						<PayloadCard label="tool_result" body={call.resultText} />
-					)}
-				</div>
+				<ToolCallCard key={index} call={call} />
 			))}
+		</div>
+	)
+}
+
+/**
+ * One invocation as one card: the call and its result belong to the same event,
+ * and two stacked cards made the reader pair them by eye. A selector shows one
+ * half at a time — the other stays a click away, never a scroll.
+ */
+function ToolCallCard({ call }: { call: SpanToolCall }) {
+	const [side, setSide] = useState<"arguments" | "result">(
+		call.argumentsText === undefined && call.resultText !== undefined ? "result" : "arguments",
+	)
+	const body = side === "arguments" ? call.argumentsText : call.resultText
+
+	return (
+		<div className="min-w-0 overflow-hidden rounded-md border border-border/70">
+			<div className="flex items-center gap-2 bg-muted/40 px-2.5 py-1.5">
+				<span aria-hidden className="size-1.5 shrink-0 rounded-xs bg-chart-4" />
+				<span className="shrink-0 font-medium font-mono text-chart-4 text-xs">tool</span>
+				{call.name !== undefined && (
+					<span className="min-w-0 truncate font-mono text-foreground text-xs" title={call.name}>
+						{call.name}
+					</span>
+				)}
+				<span className="ml-auto flex shrink-0 items-center gap-2">
+					{call.id !== undefined && (
+						<span className="max-w-40 truncate font-mono text-[11px] text-muted-foreground/80" title={call.id}>
+							{call.id}
+						</span>
+					)}
+					<span
+						role="group"
+						aria-label="Tool payload"
+						className="flex shrink-0 items-center overflow-hidden rounded-sm border border-border"
+					>
+						<ViewSegment active={side === "arguments"} onSelect={() => setSide("arguments")}>
+							arguments
+						</ViewSegment>
+						<ViewSegment active={side === "result"} onSelect={() => setSide("result")}>
+							result
+						</ViewSegment>
+					</span>
+				</span>
+			</div>
+			{call.description !== undefined && (
+				<p className="border-border/60 border-t px-2.5 py-1.5 text-muted-foreground text-xs">
+					{call.description}
+				</p>
+			)}
+			{body === undefined ? (
+				<p className="border-border/60 border-t bg-background/50 px-2.5 py-2 text-muted-foreground text-xs italic">
+					{side === "arguments"
+						? "No arguments were captured for this call."
+						: "No result was captured — whether the call succeeded is unknown."}
+				</p>
+			) : (
+				<PayloadBody text={body} copyLabel={side} />
+			)}
 		</div>
 	)
 }
@@ -560,11 +637,29 @@ function PayloadCard({
 					{description}
 				</p>
 			)}
-			{body !== undefined && (
-				<div className="border-border/60 border-t bg-background/50 px-2.5 py-2">
-					<ClampedText text={body} mono />
-				</div>
+			{body !== undefined && <PayloadBody text={body} copyLabel={label} />}
+		</div>
+	)
+}
+
+/**
+ * A payload card's body: pretty-printed and highlighted where it parses as
+ * JSON, with the same json ↔ raw switch the transcript's cards carry — the
+ * captured bytes stay one click away, and the copy takes what is displayed.
+ */
+function PayloadBody({ text, copyLabel }: { text: string; copyLabel: string }) {
+	const { formatted, highlighted } = useJsonPayload(text)
+	const [raw, setRaw] = useState(false)
+
+	return (
+		<div className="flex items-start gap-1.5 border-border/60 border-t bg-background/50 px-2.5 py-2">
+			<div className="min-w-0 grow">
+				<ClampedText text={raw ? text : formatted} html={raw ? undefined : highlighted} mono />
+			</div>
+			{highlighted !== undefined && (
+				<ViewSwitch rendered="json" raw={raw} onRawChange={setRaw} className="self-start" />
 			)}
+			<CopyButton value={raw ? text : formatted} label={copyLabel} className="-my-1 shrink-0" />
 		</div>
 	)
 }
@@ -582,8 +677,19 @@ const toSpanId = Schema.decodeSync(SpanId)
  * through the shared attribute sections. The maps are fetched here — the
  * session endpoint drops them server-side, so this is the panel's own lazy
  * `spanDetail` read, made once the tab is open.
+ *
+ * A FAILED span leads with its failure, whatever form the span reported it in:
+ * the status message where there is one, otherwise the attributes the failure
+ * was read from — Details is where a reader looks first, and a failed call
+ * whose evidence is only on another tab reads as a call that did not fail.
  */
-function DetailsSection({ span }: { span: AiSessionSpan }) {
+function DetailsSection({
+	span,
+	toolCalls,
+}: {
+	span: AiSessionSpan
+	toolCalls: readonly SpanToolCall[]
+}) {
 	const detailResult = useAtomValue(
 		span.traceId !== "" && span.spanId !== ""
 			? getSpanDetailResultAtom({
@@ -597,18 +703,38 @@ function DetailsSection({ span }: { span: AiSessionSpan }) {
 	)
 	const detailAttrs = Result.isSuccess(detailResult) ? detailResult.value : undefined
 
+	const failed = spanFailed(span)
+	// A failed tool call's captured result is usually where the actual error
+	// text lives; surfacing it here saves the reader the trip to the Tool calls
+	// tab. Tool spans only — a model span's tool calls are its OUTPUT, and their
+	// results say nothing about why the model call itself failed. The own call
+	// is first in `spanToolCalls`' order.
+	const failedToolResult =
+		failed && classifyAiSpan(span) === "tool" ? toolCalls[0]?.resultText : undefined
+
 	return (
 		<div className="flex flex-col gap-3 pb-1">
-			{span.statusCode === "Error" && span.statusMessage !== "" && (
-				<ErrorSection
-					message={span.statusMessage}
-					badge={span.genAi.errorType}
-					prompt={{
-						serviceName: span.serviceName,
-						operation: span.spanName,
-						attributes: detailAttrs?.spanAttributes,
-					}}
-					className="mx-0 my-0"
+			{failed &&
+				(span.statusMessage !== "" ? (
+					<ErrorSection
+						message={span.statusMessage}
+						badge={span.genAi.errorType}
+						prompt={{
+							serviceName: span.serviceName,
+							operation: span.spanName,
+							attributes: detailAttrs?.spanAttributes,
+						}}
+						className="mx-0 my-0"
+					/>
+				) : (
+					<FailureBanner span={span} />
+				))}
+			{failedToolResult !== undefined && (
+				<PayloadCard
+					label="result"
+					name={toolCalls[0]?.name}
+					meta={span.statusCode === "Error" ? "span status Error" : undefined}
+					body={failedToolResult}
 				/>
 			)}
 			<IdentityRows span={span} />
@@ -629,6 +755,48 @@ function DetailsSection({ span }: { span: AiSessionSpan }) {
 					</>
 				))
 				.render()}
+		</div>
+	)
+}
+
+/**
+ * The failure of a span that recorded no status message. The pills name the
+ * attributes the failure was actually read from — the same evidence
+ * `spanFailed` reads — because with no message, saying WHERE the claim comes
+ * from is all the banner can honestly do.
+ */
+function FailureBanner({ span }: { span: AiSessionSpan }) {
+	const errorType = span.genAi.errorType
+	const responseStatus = span.genAi.responseStatus
+
+	return (
+		<div className="flex flex-col gap-1.5 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5">
+			<div className="flex flex-wrap items-center gap-2">
+				<CircleWarningIcon size={13} className="shrink-0 text-destructive" />
+				<span className="font-medium text-[13px] text-destructive">This call failed</span>
+				{span.statusCode === "Error" && (
+					<Pill tone="error" className="font-mono normal-case tracking-normal">
+						span status Error
+					</Pill>
+				)}
+				{errorType !== undefined && errorType !== "" && (
+					<Pill tone="error" className="font-mono normal-case tracking-normal">
+						error.type {errorType}
+					</Pill>
+				)}
+				{/* Only where it is the evidence: with a status or an error type above,
+				    restating the response status would just be noise beside them. */}
+				{span.statusCode !== "Error" &&
+					(errorType === undefined || errorType === "") &&
+					responseStatus !== undefined && (
+						<Pill tone="error" className="font-mono normal-case tracking-normal">
+							response.status {responseStatus}
+						</Pill>
+					)}
+			</div>
+			<p className="text-muted-foreground text-xs leading-relaxed">
+				The span reports the failure through the attributes above; it carries no status message.
+			</p>
 		</div>
 	)
 }

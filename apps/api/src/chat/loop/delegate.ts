@@ -33,8 +33,15 @@
  * just calling the tools inline.
  */
 import { Schema, Stream, Effect } from "effect"
-import { Tool, ToolFailure, type Tools } from "@maple/llm"
-import { Message } from "@maple/llm"
+import {
+	LLMClient,
+	Message,
+	Tool,
+	ToolFailure,
+	type LLMClientService,
+	type LLMClientShape as LlmClientApi,
+	type Tools,
+} from "@opencode-ai/ai"
 import { AGENTS, type AgentDefinition } from "../agents"
 import { hasStepBudget, SUBAGENT_MAX_DEPTH, TASK_BUDGET_PER_TURN, type TaskBudget } from "./budgets"
 import type { ChatTurnEvent, ChatTurnInput } from "./types"
@@ -63,12 +70,16 @@ const describeSpawnable = (spawnable: ReadonlyArray<AgentDefinition>): string =>
  *
  * `runTurn` is injected rather than imported so this module does not import `./turn.ts` while
  * `./turn.ts` imports it — the recursion stays visible at the one call site that wires it.
+ *
+ * The client comes in as a value because a tool handler's effect must require nothing: the
+ * sub-turn needs it, so it is provided here rather than escaping into the tool's type.
  */
 export const buildTaskTool = (
 	input: ChatTurnInput,
 	spawnable: ReadonlyArray<AgentDefinition>,
 	budget: TaskBudget,
-	runTurn: (child: ChatTurnInput) => Stream.Stream<ChatTurnEvent>,
+	runTurn: (child: ChatTurnInput) => Stream.Stream<ChatTurnEvent, never, LLMClientService>,
+	llm: LlmClientApi,
 ): Tools => {
 	if (spawnable.length === 0) return {}
 	if ((input.depth ?? 0) >= SUBAGENT_MAX_DEPTH) return {}
@@ -93,7 +104,9 @@ export const buildTaskTool = (
 			}),
 			success: Schema.String,
 			execute: (params, context) =>
-				budget.semaphore.withPermits(1)(runTask(input, params, context?.id, budget, runTurn)),
+				budget.semaphore
+					.withPermits(1)(runTask(input, params, context?.id, budget, runTurn))
+					.pipe(Effect.provideService(LLMClient.Service, llm)),
 		}),
 	}
 }
@@ -103,8 +116,8 @@ const runTask = (
 	params: { description: string; prompt: string; subagent_type: string },
 	callId: string | undefined,
 	budget: TaskBudget,
-	runTurn: (child: ChatTurnInput) => Stream.Stream<ChatTurnEvent>,
-): Effect.Effect<string, ToolFailure> =>
+	runTurn: (child: ChatTurnInput) => Stream.Stream<ChatTurnEvent, never, LLMClientService>,
+): Effect.Effect<string, ToolFailure, LLMClientService> =>
 	Effect.gen(function* () {
 		// Over budget is a `ToolFailure`, never a defect: the model is told to do the work inline
 		// rather than having the whole turn die because it delegated once too often.

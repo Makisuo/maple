@@ -1,4 +1,6 @@
 import type { ActorDocument } from "@maple/domain/http"
+import { internalAgentLabel } from "@maple/domain/system-agents"
+import { MapleMark } from "@maple/ui/components/icons/maple-mark"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { gradientFor } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
@@ -13,6 +15,8 @@ import { shortId, useActorDirectory, type ActorDirectory } from "@/hooks/use-act
  */
 export interface ActorIdentity {
 	readonly kind: "user" | "agent"
+	/** One of Maple's own subsystems (triage, alerts, …) — rendered with the Maple mark. */
+	readonly internal: boolean
 	readonly name: string
 	readonly detail: string | null
 	readonly imageUrl: string | null
@@ -23,11 +27,15 @@ export interface ActorIdentity {
 
 export function resolveActorIdentity(actor: ActorDocument, directory: ActorDirectory): ActorIdentity {
 	if (actor.type === "agent") {
-		const name = actor.agentName ?? "Agent"
+		const label = actor.agentName ? internalAgentLabel(actor.agentName) : null
+		const name = label ?? actor.agentName ?? "Agent"
 		return {
 			kind: "agent",
+			internal: label !== null,
 			name,
-			detail: actor.model,
+			// First-party agents show a friendly label, so surface the raw actor
+			// name where the model would otherwise go — the audit trail stays legible.
+			detail: actor.model ?? (label ? actor.agentName : null),
 			imageUrl: null,
 			initials: initialsFrom(name),
 			seed: actor.agentName ?? actor.id,
@@ -37,6 +45,7 @@ export function resolveActorIdentity(actor: ActorDocument, directory: ActorDirec
 	if (person) {
 		return {
 			kind: "user",
+			internal: false,
 			name: person.name,
 			// Don't repeat the email as the detail when it IS the display name.
 			detail: person.email === person.name ? null : person.email,
@@ -51,6 +60,7 @@ export function resolveActorIdentity(actor: ActorDocument, directory: ActorDirec
 	const raw = actor.userId ?? actor.id
 	return {
 		kind: "user",
+		internal: false,
 		name: shortId(raw),
 		detail: null,
 		imageUrl: null,
@@ -82,8 +92,9 @@ const SIZE_CLASS = {
 /**
  * Round avatar for an actor. People get their Clerk photo, or a per-user
  * gradient with initials — the same identity treatment the Sessions list uses,
- * so the same person looks the same across the product. Agents get a robot mark
- * in the violet that already means "not a human" everywhere in this timeline.
+ * so the same person looks the same across the product. Agents render in the
+ * violet that already means "not a human" everywhere in this timeline: Maple's
+ * own subsystems carry the Maple mark, third-party agents the robot.
  */
 export function ActorAvatar({
 	actor,
@@ -123,7 +134,13 @@ export function IdentityAvatar({
 					"bg-violet-500/15 text-violet-600 ring-1 ring-violet-500/25 dark:text-violet-300",
 				)}
 			>
-				<FaceRobotIcon className="size-[62%]" strokeWidth={2} />
+				{identity.internal ? (
+					// The mark's trunk runs to the viewBox edge, so nudge it up a
+					// touch to sit optically centred in the circle.
+					<MapleMark className="size-[54%] -translate-y-[4%]" />
+				) : (
+					<FaceRobotIcon className="size-[62%]" strokeWidth={2} />
+				)}
 			</span>
 		)
 	}

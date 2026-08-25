@@ -517,6 +517,39 @@ describe("SessionWaterfall", () => {
 		expect(labels.some((label) => label.includes("Timing"))).toBe(false)
 	})
 
+	// A failed tool call must show its failure on Details — the tab a reader
+	// opens first — even when the span carries no status message: the evidence
+	// attributes and the captured result are what there is to show.
+	it("shows a message-less tool failure on Details, captured result included", () => {
+		const { turns: failTurns, summary: failSummary } = sessionOf([
+			agentSpan({ spanId: "ft-agent", startMs: 0, durationMs: 4 * SECOND }),
+			toolSpan({
+				spanId: "ft-tool",
+				parentSpanId: "ft-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "run_sql",
+				genAi: {
+					errorType: "tool_error",
+					toolCallId: "call_f",
+					toolCallArguments: { sql: "select 1" },
+					toolCallResult: { error: "relation missing" },
+				},
+			}),
+		])
+		const view = render(<Waterfall turns={failTurns} summary={failSummary} selectedSpanId="ft-tool" />)
+
+		const detail = view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement
+		// A failed span opens on Details by default.
+		expect(within(detail).getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe(
+			"true",
+		)
+		expect(within(detail).getByText("This call failed")).toBeTruthy()
+		expect(within(detail).getByText(/tool_error/)).toBeTruthy()
+		// The captured result — where the actual error text lives — is on the tab.
+		expect(detail.textContent).toContain('"relation missing"')
+	})
+
 	it("opens an errored span on Details, where the error and the ids are", () => {
 		const view = render(<Waterfall selectedSpanId="tool-3" />)
 
@@ -534,6 +567,39 @@ describe("SessionWaterfall", () => {
 
 		view.rerender(<Waterfall selectedSpanId="tool-2" />)
 		expect(view.container.querySelectorAll('[data-slot="span-inline-detail"]')).toHaveLength(1)
+	})
+
+	// A call and its result are one event: the expansion shows them as one card
+	// whose selector flips between the halves, instead of two stacked cards the
+	// reader has to pair by eye.
+	it("groups a tool call and its result into one card behind a selector", () => {
+		const { turns: toolTurns, summary: toolSummary } = sessionOf([
+			agentSpan({ spanId: "tc-agent", startMs: 0, durationMs: 4 * SECOND }),
+			toolSpan({
+				spanId: "tc-tool",
+				parentSpanId: "tc-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "run_sql",
+				genAi: {
+					toolCallId: "call_9",
+					toolCallArguments: { sql: "select 1" },
+					toolCallResult: { rows: [1] },
+				},
+			}),
+		])
+		const view = render(
+			<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="tc-tool" spanTab="tools" />,
+		)
+
+		// Arguments first, pretty-printed; the result is a click away, not a scroll.
+		const detail = view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement
+		expect(detail.textContent).toContain('"sql"')
+		expect(detail.textContent).not.toContain('"rows"')
+
+		fireEvent.click(within(detail).getByRole("button", { name: "result" }))
+		expect(detail.textContent).toContain('"rows"')
+		expect(detail.textContent).not.toContain('"sql"')
 	})
 
 	it("moves the span cursor with the arrows, expands on Enter, collapses on Esc", () => {

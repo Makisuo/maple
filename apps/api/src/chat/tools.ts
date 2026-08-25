@@ -15,7 +15,7 @@ import {
 	SubmitDiagnosisRequest,
 } from "@maple/domain/http"
 import { InvestigationId, UserId } from "@maple/domain/primitives"
-import { Tool, ToolFailure, type Model, type Tools } from "@maple/llm"
+import { Tool, ToolFailure, type LanguageModel, type Tools } from "@opencode-ai/ai"
 import { Effect, Option, Schema } from "effect"
 import type { McpToolExecutorApi, McpToolSurface } from "@/mcp/dispatcher"
 import { buildMapleTools, summarizeToolFailure } from "@/mcp/tools/llm-tools"
@@ -62,7 +62,7 @@ export const buildDiagnosisCompletion = (
 	tenant: TenantContext,
 	submitDiagnosis: SubmitDiagnosis,
 	usage: TurnUsage,
-	model: Model,
+	model: LanguageModel,
 ): TurnCompletion | undefined => {
 	const rawId = investigationIdFromChatSessionId(sessionId)
 	if (!rawId) return undefined

@@ -1,9 +1,9 @@
 /**
- * Maple's seam onto `@maple/llm` — the vendored, Effect-native LLM core.
+ * Maple's seam onto `@opencode-ai/ai` — opencode's Effect-native LLM core.
  *
- * Everything Maple-specific about talking to a model lives here, never inside `lib/llm`
- * (see `lib/llm/MAPLE.md`): the layer wiring, the Workers AI binding shim, provider/model selection
- * from env, and the mapping from the vendored `LLMError` onto a Maple domain error.
+ * Everything Maple-specific about talking to a model lives here, never in a wrapper around the
+ * package: the layer wiring, the Workers AI binding shim, provider/model selection from env, and
+ * the mapping from the upstream `AIError` onto a Maple domain error.
  *
  * Two provider paths stay live at once — OpenRouter (default) and Cloudflare Workers AI — and
  * `MAPLE_LLM_PROVIDER` picks between them per deploy without a code change.
@@ -12,17 +12,18 @@
  * `RequestExecutor` already owns retry, backoff and secret redaction, so the HTTP layer underneath
  * is plain `FetchHttpClient.layer` — optionally wrapped by the Workers AI shim.
  *
- * Deliberately NOT imported here: `@maple/llm/providers/amazon-bedrock`. It is the only path that
- * reaches `aws4fetch` and `@smithy/*`; leaving it unimported keeps both out of the Worker bundle.
+ * Deliberately NOT imported here: `@opencode-ai/ai/providers/amazon-bedrock`. It is the only path
+ * that reaches `aws4fetch` and `@smithy/*`; leaving it unimported keeps both out of the Worker
+ * bundle. `providers/google-vertex` is out for the same reason — it pulls `google-auth-library`.
  * Providers are deep-imported for the same reason — never the `providers/index.ts` barrel.
  */
 import { LlmCallError } from "@maple/domain/llm"
-import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
-import * as OpenRouter from "@maple/llm/providers/openrouter"
-import { LLMClient, RequestExecutor } from "@maple/llm/route"
-import { isContextOverflowFailure, Model } from "@maple/llm"
-import type { LLMClientService, LLMError } from "@maple/llm"
-import { Layer } from "effect"
+import { CloudflareWorkersAI } from "@opencode-ai/ai/providers/cloudflare"
+import * as OpenRouter from "@opencode-ai/ai/providers/openrouter"
+import { LLMClient, RequestExecutor } from "@opencode-ai/ai/route"
+import { isContextOverflowFailure, LanguageModel } from "@opencode-ai/ai"
+import type { AIError, LLMClientService } from "@opencode-ai/ai"
+import { Layer, Predicate } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { layerWorkersAi } from "./WorkersAiHttpClient"
 
@@ -66,9 +67,9 @@ const openRouterTagBody = (tags: LlmCallTags) => ({
 })
 
 /**
- * Default triage/chat model on Workers AI. Carried over unchanged from the pre-`@maple/llm` chat
- * backend (`cloudflare/@cf/moonshotai/kimi-k2.6`, minus that runtime's `provider/` prefix), so the
- * backend swap did not silently change the model at the same time.
+ * Default triage/chat model on Workers AI. Carried over unchanged from the chat backend that
+ * preceded this one (`cloudflare/@cf/moonshotai/kimi-k2.6`, minus that runtime's `provider/`
+ * prefix), so the backend swap did not silently change the model at the same time.
  */
 export const DEFAULT_WORKERS_AI_MODEL = "@cf/moonshotai/kimi-k2.6"
 
@@ -82,7 +83,7 @@ export type LlmProvider = "openrouter" | "workers-ai"
 export const DEFAULT_LLM_PROVIDER: LlmProvider = "openrouter"
 
 /**
- * Workers AI has no per-request API key when reached through the `AI` binding, but the vendored
+ * Workers AI has no per-request API key when reached through the `AI` binding, but the upstream
  * provider still wants an account id for its base URL and a token for the `Authorization` header.
  * Both are inert once `layerWorkersAi` intercepts the request — the binding authenticates itself —
  * so a placeholder is correct rather than sloppy. If the binding is missing, the provider falls
@@ -136,27 +137,21 @@ const readReasoningEffort = (env: LlmEnv, key: keyof LlmEnv): ReasoningEffort | 
 /**
  * Bind the reasoning budget onto a model's defaults.
  *
- * `providerOptions` on `Model.defaults` is merged into every request by `resolveRequestOptions` in
- * `lib/llm`'s route client, under the *request's* own options — so this is a default a call site can
+ * `providerOptions` on `LanguageModel.defaults` is merged into every request by the route client's
+ * `resolveRequestOptions`, under the *request's* own options — so this is a default a call site can
  * still override, which is what makes it the right place for a per-stage policy.
  *
- * OpenRouter-only, and namespaced under `openrouter` because that is whose field it is: the Workers
- * AI protocol reads its own namespace and would ignore this, but sending Cloudflare a key addressed
- * to another provider is the kind of thing that reads as a bug six months from now.
+ * OpenRouter-only. `providerOptions` is already provider-scoped — one request goes to one provider,
+ * and that provider's adapter lowers the whole record into the body — so this must only ever be set
+ * on a model the OpenRouter branch resolved.
  */
-const withReasoning = (model: Model, effort: ReasoningEffort | undefined): Model =>
+const withReasoning = (model: LanguageModel, effort: ReasoningEffort | undefined): LanguageModel =>
 	effort === undefined || effort === "off"
 		? model
-		: Model.update(model, {
+		: LanguageModel.update(model, {
 				defaults: {
 					...model.defaults,
-					providerOptions: {
-						...model.defaults?.providerOptions,
-						openrouter: {
-							...model.defaults?.providerOptions?.openrouter,
-							reasoning: { effort },
-						},
-					},
+					providerOptions: { ...model.defaults?.providerOptions, reasoning: { effort } },
 				},
 			})
 
@@ -168,27 +163,20 @@ const withReasoning = (model: Model, effort: ReasoningEffort | undefined): Model
  * Maple ever reports spend: the provider's own bill, never a price table.
  * OpenRouter-only — Workers AI has no per-call price to report.
  */
-const withUsageAccounting = (model: Model): Model =>
-	Model.update(model, {
+const withUsageAccounting = (model: LanguageModel): LanguageModel =>
+	LanguageModel.update(model, {
 		defaults: {
 			...model.defaults,
-			providerOptions: {
-				...model.defaults?.providerOptions,
-				openrouter: {
-					...model.defaults?.providerOptions?.openrouter,
-					usage: true,
-				},
-			},
+			providerOptions: { ...model.defaults?.providerOptions, usage: true },
 		},
 	})
 
 /**
  * Context windows for the models Maple configures.
  *
- * `@maple/llm` has a `ModelLimits { context, output }` on `Model.defaults`, but **no provider
- * populates it** — it is `undefined` for every model the vendored package builds. Maple needs it to
- * know when a transcript is approaching the wall, so it is filled in here, at the Maple seam, via
- * `Model.update`. Nothing is added to `lib/llm` (see `lib/llm/MAPLE.md`).
+ * `@opencode-ai/ai` models carry no context window — the field it once declared was never populated
+ * by any provider and is gone. Maple needs it to know when a transcript is approaching the wall, so
+ * it is kept here, at the Maple seam, in a side table keyed by the resolved model.
  *
  * Conservative on purpose. A limit set too low compacts early, which costs a summarization call; a
  * limit set too high overflows, which costs the whole turn. When in doubt, go low.
@@ -214,13 +202,23 @@ const readPositiveInt = (env: LlmEnv, key: keyof LlmEnv): number | undefined => 
 }
 
 /**
+ * Limits for the models this module resolves, keyed by the model instance `withLimits` returned.
+ *
+ * A side table rather than a field on the model: `providerOptions` is the only extension point
+ * upstream leaves open, and everything in it is sent to the provider.
+ */
+const MODEL_LIMIT_TABLE = new WeakMap<LanguageModel, { readonly context: number; readonly output: number }>()
+
+/**
  * The context budget a turn should plan against, in tokens, or `undefined` if the model declares
  * none. Callers treat `undefined` as "don't compact" rather than guessing a number.
  */
-export const contextLimitOf = (model: Model): number | undefined => model.defaults?.limits?.context
+export const contextLimitOf = (model: LanguageModel): number | undefined =>
+	MODEL_LIMIT_TABLE.get(model)?.context
 
 /** Max completion tokens, used to reserve headroom when deciding whether the input still fits. */
-export const outputLimitOf = (model: Model): number | undefined => model.defaults?.limits?.output
+export const outputLimitOf = (model: LanguageModel): number | undefined =>
+	MODEL_LIMIT_TABLE.get(model)?.output
 
 const readString = (env: LlmEnv, key: keyof LlmEnv): string | undefined => {
 	const value = env[key]
@@ -228,7 +226,7 @@ const readString = (env: LlmEnv, key: keyof LlmEnv): string | undefined => {
 }
 
 /**
- * Which provider agents run on. Model overrides are deliberately provider-scoped: a model id is
+ * Which provider agents run on. LanguageModel overrides are deliberately provider-scoped: a model id is
  * only meaningful to one provider, so a single shared `MAPLE_TRIAGE_MODEL` would send `@cf/…` to
  * OpenRouter the moment someone flipped the switch. With one var per provider, both can stay set
  * and the flip is genuinely one variable.
@@ -247,7 +245,7 @@ export const resolveLlmProvider = (env: LlmEnv): LlmProvider =>
  * site having to thread them through. The Workers AI branch deliberately ignores `tags` — they are
  * OpenRouter's body fields and have no meaning to Cloudflare.
  */
-export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
+export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): LanguageModel =>
 	withLimits(
 		env,
 		resolveLlmProvider(env) === "workers-ai"
@@ -276,23 +274,18 @@ export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
 	)
 
 /**
- * Attach the model's context window, which the vendored providers leave unset.
+ * Record the model's context window, which upstream leaves unstated.
  *
- * Purely additive — `defaults.limits` was `undefined` before — so nothing that ignores it can
- * regress. `defaults` is spread rather than replaced so a provider that *does* set generation or
- * HTTP defaults keeps them.
+ * Every resolver ends here, so the instance a caller holds is the one the table is keyed by — a
+ * model that never passed through reports `undefined`, which callers read as "don't compact".
  */
-const withLimits = (env: LlmEnv, model: Model): Model => {
+const withLimits = (env: LlmEnv, model: LanguageModel): LanguageModel => {
 	const known = MODEL_LIMITS[String(model.id)] ?? DEFAULT_MODEL_LIMITS
-	return Model.update(model, {
-		defaults: {
-			...model.defaults,
-			limits: {
-				context: readPositiveInt(env, "MAPLE_TRIAGE_MODEL_CONTEXT") ?? known.context,
-				output: readPositiveInt(env, "MAPLE_TRIAGE_MODEL_OUTPUT") ?? known.output,
-			},
-		},
+	MODEL_LIMIT_TABLE.set(model, {
+		context: readPositiveInt(env, "MAPLE_TRIAGE_MODEL_CONTEXT") ?? known.context,
+		output: readPositiveInt(env, "MAPLE_TRIAGE_MODEL_OUTPUT") ?? known.output,
 	})
+	return model
 }
 
 /**
@@ -325,7 +318,7 @@ const withLimits = (env: LlmEnv, model: Model): Model => {
  * Acceptable — an override is set to describe a deployment, not a single model —
  * but it is the thing to fix first if the two stages ever diverge that far.
  */
-export const resolveLensModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
+export const resolveLensModel = (env: LlmEnv, tags?: LlmCallTags): LanguageModel =>
 	withLimits(
 		env,
 		resolveLlmProvider(env) === "workers-ai"
@@ -370,16 +363,16 @@ export const layerLlm = (env: LlmEnv): Layer.Layer<LLMClientService> =>
 	)
 
 /**
- * Map the vendored `LLMError` onto Maple's domain error, promoting context overflow to a
+ * Map the upstream `AIError` onto Maple's domain error, promoting context overflow to a
  * first-class, inspectable signal. Nothing in Maple had an equivalent before: a context-window
  * blow-up used to arrive as an opaque upstream failure, which is exactly the case a triage retry
  * should handle differently (shrink the transcript) from a transport blip (retry as-is).
  */
-export const toLlmCallError = (operation: string, error: LLMError): LlmCallError => {
+export const toLlmCallError = (operation: string, error: AIError): LlmCallError => {
 	// Provider output that fails to decode carries the offending frame on `reason.raw`. It is the
 	// only thing that makes provider drift diagnosable — without it the failure is just "invalid
 	// stream event" — but it is upstream text, so it goes to the log, never to the client error.
-	const raw = (error.reason as { raw?: unknown }).raw
+	const raw = Predicate.hasProperty(error.reason, "raw") ? error.reason.raw : undefined
 	if (typeof raw === "string" && raw !== "") {
 		console.error(`[llm] ${operation}: ${error.message}; frame=${raw.slice(0, 500)}`)
 	}
@@ -389,7 +382,14 @@ export const toLlmCallError = (operation: string, error: LLMError): LlmCallError
 		method: error.method,
 		reason: error.reason._tag,
 		message: error.message,
-		retryable: error.retryable,
+		retryable: RETRYABLE_REASONS.has(error.reason._tag),
 		contextOverflow: isContextOverflowFailure(error),
 	})
 }
+
+/**
+ * Failures worth sending again unchanged: a rate limit clears, and `ProviderInternal` is the 5xx
+ * bucket. Upstream used to carry this as a flag on the error and no longer does, so the judgement
+ * lives here — `chat/loop/retry.ts` widens it for the mid-stream failures neither side retries.
+ */
+const RETRYABLE_REASONS: ReadonlySet<string> = new Set(["RateLimit", "ProviderInternal"])

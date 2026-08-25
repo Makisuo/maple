@@ -7,7 +7,7 @@
  * old tool results in place. That works on token count and fails on everything else.
  *
  * The default chat route is OpenRouter `openai/gpt-5.6-luna`, whose route id is `"openrouter-chat"`
- * — not in `lib/llm`'s `RESPECTS_INLINE_HINTS` (`anthropic-messages`, `bedrock-converse`), so
+ * — not in `@opencode-ai/ai`'s `RESPECTS_INLINE_HINTS` (`anthropic-messages`, `bedrock-converse`), so
  * `applyCachePolicy` returns early and Maple emits no cache breakpoints at all. Caching on that path
  * is *implicit prefix* caching: the provider matches the longest identical prefix it has seen, and
  * there is no breakpoint to place. Prefix stability is the only lever there is.

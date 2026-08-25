@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react"
 
-import { ArrowRightIcon, ChevronDownIcon } from "@/components/icons"
+import { ArrowRightIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
@@ -11,6 +11,7 @@ import {
 	formatCost,
 	type SessionFailureKind,
 	type SessionSummary,
+	type SessionToolUsage,
 } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { shortTarget } from "@/lib/agent-sessions/span-filters"
@@ -442,15 +443,21 @@ function Rail({ summary }: { summary: SessionSummary }) {
 				<RailSection title="Agents">
 					<div className="flex flex-wrap items-center gap-2">
 						{summary.agentNames.map((name, index) => (
-							<span key={name} className="flex items-center gap-2">
-								{index > 0 && <ArrowRightIcon size={12} className="text-muted-foreground" />}
+							// `min-w-0 max-w-full` + truncate: an agent name is emitter
+							// input, and one long enough would otherwise push the whole
+							// page into a horizontal scroll.
+							<span key={name} className="flex min-w-0 max-w-full items-center gap-2">
+								{index > 0 && (
+									<ArrowRightIcon size={12} className="shrink-0 text-muted-foreground" />
+								)}
 								<span
 									className={cn(
-										"rounded-sm px-2 py-0.5 font-mono text-[11px]",
+										"min-w-0 truncate rounded-sm px-2 py-0.5 font-mono text-[11px]",
 										index === 0
 											? "bg-primary/12 text-primary"
 											: "bg-muted text-muted-foreground",
 									)}
+									title={name}
 								>
 									{name}
 								</span>
@@ -465,24 +472,67 @@ function Rail({ summary }: { summary: SessionSummary }) {
 					<p className="text-muted-foreground text-xs">no tool calls</p>
 				) : (
 					summary.tools.map((tool) => (
-						<div key={tool.name} className="flex items-center gap-2.5">
-							<span className="w-24 shrink-0 truncate font-mono text-xs" title={tool.name}>
-								{tool.name}
-							</span>
-							<span className="h-1 min-w-0 flex-1 overflow-hidden rounded-xs bg-muted">
-								<span
-									className="block h-full bg-chart-4"
-									style={{ width: `${sharePercent(tool.calls, topToolCalls)}%` }}
-								/>
-							</span>
-							<span className="w-6 shrink-0 text-right font-mono text-muted-foreground text-xs tabular-nums">
-								{tool.calls}
-							</span>
-						</div>
+						<ToolUsageRow key={tool.name} tool={tool} topToolCalls={topToolCalls} />
 					))
 				)}
 			</RailSection>
 		</aside>
+	)
+}
+
+/**
+ * One tool in the rail. Where the instrumentation stamped a
+ * `gen_ai.tool.description`, the row discloses it in place — the definition the
+ * model saw is a fact about the session, and the rail is where the tool is
+ * already named. A tool without one has nothing to open and stays a plain row.
+ */
+function ToolUsageRow({ tool, topToolCalls }: { tool: SessionToolUsage; topToolCalls: number }) {
+	const [open, setOpen] = useState(false)
+	const disclosable = tool.description !== undefined
+
+	const row = (
+		<>
+			<span className="flex w-24 shrink-0 items-center gap-1">
+				{disclosable && (
+					<ChevronRightIcon
+						size={10}
+						className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+					/>
+				)}
+				<span className="min-w-0 truncate font-mono text-xs" title={tool.name}>
+					{tool.name}
+				</span>
+			</span>
+			<span className="h-1 min-w-0 flex-1 overflow-hidden rounded-xs bg-muted">
+				<span
+					className="block h-full bg-chart-4"
+					style={{ width: `${sharePercent(tool.calls, topToolCalls)}%` }}
+				/>
+			</span>
+			<span className="w-6 shrink-0 text-right font-mono text-muted-foreground text-xs tabular-nums">
+				{tool.calls}
+			</span>
+		</>
+	)
+
+	if (!disclosable) return <div className="flex items-center gap-2.5">{row}</div>
+
+	return (
+		<div className="flex flex-col gap-1.5">
+			<button
+				type="button"
+				onClick={() => setOpen((previous) => !previous)}
+				aria-expanded={open}
+				className="-mx-1 flex cursor-pointer items-center gap-2.5 rounded-xs px-1 py-0.5 text-left hover:bg-accent/40"
+			>
+				{row}
+			</button>
+			{open && (
+				<p className="break-words pl-4 text-muted-foreground text-xs leading-relaxed">
+					{tool.description}
+				</p>
+			)}
+		</div>
 	)
 }
 

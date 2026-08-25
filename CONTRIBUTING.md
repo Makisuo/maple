@@ -266,7 +266,7 @@ Loads `../../.env.local` via `bun --env-file`.
 ### 5. AI chat and triage (in `apps/api`)
 
 `/chat` and `/investigations/*` are served by `apps/api` itself: the `ChatSession` Durable
-Object owns each transcript and the agent turn runs in-process on `@maple/llm` against the
+Object owns each transcript and the agent turn runs in-process on `@opencode-ai/ai` against the
 Workers AI `AI` binding. There is no second worker to start — but the chat routes only work
 when `apps/api` is running **under wrangler** (`cd apps/api && bun dev:app`), because a plain
 `bun` process has neither the Durable Object namespace nor the `AI` binding.

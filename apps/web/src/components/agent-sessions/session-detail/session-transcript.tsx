@@ -4,9 +4,11 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { formatBytes, formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
+import { MessageResponse } from "@/components/ai-elements/message-response"
 import {
 	AlertWarningIcon,
 	BranchForkIcon,
@@ -32,13 +34,13 @@ import { spanModel, type SessionTurn } from "@/lib/agent-sessions/session-turns"
 import {
 	buildTranscript,
 	type CaptureCoverage,
-	type TranscriptLaneRef,
 	type TranscriptPayload,
 	type TranscriptRow,
 } from "@/lib/agent-sessions/session-transcript"
 import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { formatClockInTimezone } from "@/lib/timezone-format"
 import { ClampedText, firstLine } from "./clamped-text"
+import { useJsonPayload, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
 
 /**
@@ -78,6 +80,7 @@ const ROW_ESTIMATE = {
 	"lane-open": 44,
 	"lane-close": 34,
 	parallel: 46,
+	"parallel-turns": 46,
 	structure: 30,
 	note: 86,
 	divider: 60,
@@ -273,6 +276,8 @@ function TranscriptBlock(props: BlockProps) {
 			return <LaneClose {...props} row={row} />
 		case "parallel":
 			return <ParallelMarker {...props} row={row} />
+		case "parallel-turns":
+			return <ParallelTurnsMarker {...props} row={row} />
 		case "structure":
 			return <StructureRow {...props} row={row} />
 		case "note":
@@ -311,11 +316,7 @@ function Row({
 	return (
 		<div className={cn("flex", className)}>
 			<span className={cn(GUTTER, timePadding)}>{time}</span>
-			{Array.from({ length: Math.min(depth, MAX_INDENT_DEPTH) }, (_, index) => (
-				<span key={index} aria-hidden className={INDENT}>
-					<span className="w-px bg-border" />
-				</span>
-			))}
+			<IndentLanes depth={depth} />
 			{rail !== undefined && (
 				<span
 					aria-hidden
@@ -324,6 +325,20 @@ function Row({
 			)}
 			<div className={flush ? "min-w-0 grow" : BODY}>{children}</div>
 		</div>
+	)
+}
+
+/** The nesting hairlines, one lane each — `self-stretch` so they still span the
+ *  row inside an `items-center` header like the turn chapter's. */
+function IndentLanes({ depth }: { depth: number }) {
+	return (
+		<>
+			{Array.from({ length: Math.min(depth, MAX_INDENT_DEPTH) }, (_, index) => (
+				<span key={index} aria-hidden className={cn(INDENT, "self-stretch")}>
+					<span className="w-px bg-border" />
+				</span>
+			))}
+		</>
 	)
 }
 
@@ -349,6 +364,7 @@ function TurnChapter({
 	return (
 		<h3 className="mt-5 flex items-center border-border border-b pb-2 font-normal text-base">
 			<span className={cn(GUTTER, "pt-0")}>{clockOf(turn.startMs, timeZone)}</span>
+			<IndentLanes depth={row.depth} />
 			<button
 				type="button"
 				onClick={() => onToggleTurn(turn.id)}
@@ -371,14 +387,29 @@ function TurnChapter({
 				</span>
 				{turn.agentName !== undefined && <AgentPill name={turn.agentName} />}
 				{turn.failed && <Pill tone="error">Failed</Pill>}
-				{collapsed && <span className={cn(META, "shrink-0")}>{summariseTurn(row)}</span>}
+				{/* The cluster's banner and the indentation carry the explanation; the
+				    pill is the glanceable trace of it that survives collapse. Bounded,
+				    unlike the old per-turn jump chips, whose row of unshrinkable
+				    buttons was one of the things pushing the page sideways. */}
+				{row.parallelWith.length > 0 && (
+					<span
+						className="flex shrink-0 items-center gap-1 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[10px] text-primary uppercase tracking-[0.08em]"
+						title={`ran in parallel with ${row.parallelWith.map((ref) => turnOrdinal(ref.turn)).join(", ")}`}
+					>
+						<BranchForkIcon size={10} className="shrink-0" />
+						parallel
+					</span>
+				)}
+				{/* Shrinkable, unlike its neighbours: the summary joins every tool
+				    name in the turn, so it truncates rather than widening the page. */}
+				{collapsed && <span className={META}>{summariseTurn(row)}</span>}
 				<span className="grow" />
 				{/* The AI spans the transcript actually renders, not the turn's raw
 				    time slice: that slice carries the app's own HTTP/DB spans too, and
 				    a count the page cannot account for is worse than no count. */}
 				<span className={cn(META, "shrink-0")}>
-					{turn.traceIds.length} trace{turn.traceIds.length === 1 ? "" : "s"} ·{" "}
-					{row.aiSpanCount} agent spans · {formatDuration(turn.durationMs)}
+					{turn.traceIds.length} trace{turn.traceIds.length === 1 ? "" : "s"} · {row.aiSpanCount}{" "}
+					agent spans · {formatDuration(turn.durationMs)}
 				</span>
 			</button>
 		</h3>
@@ -412,11 +443,16 @@ function summariseTurn(row: Extract<TranscriptRow, { kind: "turn" }>): string {
 	return parts.join(" · ")
 }
 
+/** Capped and truncating: the name is emitter input, and an unbounded one would
+ *  push its header row — and with it the page — into a horizontal scroll. */
 function AgentPill({ name }: { name: string }) {
 	return (
-		<span className="flex shrink-0 items-center gap-1.5 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[11px] text-primary">
-			<span aria-hidden className="size-1 rounded-full bg-primary" />
-			{name}
+		<span
+			className="flex max-w-56 shrink-0 items-center gap-1.5 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[11px] text-primary"
+			title={name}
+		>
+			<span aria-hidden className="size-1 shrink-0 rounded-full bg-primary" />
+			<span className="min-w-0 truncate">{name}</span>
 		</span>
 	)
 }
@@ -433,6 +469,9 @@ function UserBlock({
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "user" }> }) {
 	const historyKey = `${row.key}:history`
 	const showHistory = disclosed(openRows, historyKey, false)
+	const rawKey = `${row.key}:raw`
+	const raw = disclosed(openRows, rawKey, false)
+	const textKey = `${row.key}:text`
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-foreground" className="pt-5">
@@ -456,10 +495,26 @@ function UserBlock({
 							{showHistory ? "hide full history" : "show full history"}
 						</button>
 					)}
+					<ViewSwitch
+						rendered="md"
+						raw={raw}
+						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+					/>
 				</div>
-				<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
-					{row.text}
-				</p>
+				{/* Clamped like every other long body: a pasted 400-line prompt is one
+				    block of a conversation, not the page. "Show full" opens it. */}
+				<ClampedText
+					text={row.text}
+					body={
+						raw ? undefined : (
+							<MessageResponse className="text-foreground text-sm leading-relaxed">
+								{row.text}
+							</MessageResponse>
+						)
+					}
+					expanded={disclosed(openRows, textKey, false)}
+					onToggleExpanded={() => onToggleRow(textKey)}
+				/>
 				{showHistory && (
 					<div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2.5">
 						{/* The history verbatim, not a diff: dropped and truncated
@@ -475,7 +530,9 @@ function UserBlock({
 									<span className={cn(LABEL, "text-muted-foreground")}>{message.role}</span>
 									<ClampedText
 										text={message.parts
-											.map((part) => (part.kind === "text" ? part.text : `[${part.kind}]`))
+											.map((part) =>
+												part.kind === "text" ? part.text : `[${part.kind}]`,
+											)
 											.join("\n")}
 										clampClass="line-clamp-[6]"
 										expanded={disclosed(openRows, key, false)}
@@ -500,6 +557,8 @@ function SystemBlock({
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "system" }> }) {
 	const open = disclosed(openRows, row.key, false)
 	const textKey = `${row.key}:text`
+	const rawKey = `${row.key}:raw`
+	const raw = disclosed(openRows, rawKey, false)
 
 	return (
 		<Row depth={row.depth} rail="bg-muted-foreground/40" className="pt-3.5">
@@ -532,12 +591,22 @@ function SystemBlock({
 				)}
 			</button>
 			{open && (
-				<div className="pb-2 pl-6">
-					<ClampedText
-						text={row.text}
-						expanded={disclosed(openRows, textKey, false)}
-						onToggleExpanded={() => onToggleRow(textKey)}
+				<div className="flex items-start gap-1.5 pb-2 pl-6">
+					<div className="min-w-0 grow">
+						<ClampedText
+							text={row.text}
+							body={raw ? undefined : <MessageResponse className="text-sm">{row.text}</MessageResponse>}
+							expanded={disclosed(openRows, textKey, false)}
+							onToggleExpanded={() => onToggleRow(textKey)}
+						/>
+					</div>
+					<ViewSwitch
+						rendered="md"
+						raw={raw}
+						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
+					{/* Copies the prompt as captured, not its rendering. */}
+					<CopyButton value={row.text} label="system prompt" className="-my-1 shrink-0" />
 				</div>
 			)}
 		</Row>
@@ -547,12 +616,22 @@ function SystemBlock({
 function AssistantBlock({
 	row,
 	timeZone,
+	openRows,
+	onToggleRow,
 	selected,
 	onSelectSpan,
 	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "assistant" }> }) {
 	const tone = row.failed ? "text-destructive" : "text-chart-2"
 	const Glyph = row.failed ? CircleWarningIcon : PixelSparkleIcon
+	// The failure payload some providers put in the status message — often a
+	// whole JSON error envelope, so it gets the same JSON treatment as a tool
+	// payload. Empty where the call succeeded, and the hook is cheap on "".
+	const error = useJsonPayload(row.failed ? row.span.statusMessage : "")
+	const rawKey = `${row.key}:raw`
+	const raw = disclosed(openRows, rawKey, false)
+	const errorRawKey = `${row.key}:error-raw`
+	const errorRaw = disclosed(openRows, errorRawKey, false)
 
 	return (
 		<Row
@@ -581,19 +660,54 @@ function AssistantBlock({
 						error.type {row.span.genAi.errorType}
 					</Pill>
 				)}
+				{row.text !== undefined && (
+					<ViewSwitch
+						rendered="md"
+						raw={raw}
+						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+					/>
+				)}
 				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
-			{row.text !== undefined && (
-				<p className="whitespace-pre-wrap break-words pt-2.5 text-foreground text-sm leading-relaxed">
-					{row.text}
-				</p>
-			)}
+			{row.text !== undefined &&
+				(raw ? (
+					<p className="whitespace-pre-wrap break-words pt-2.5 text-foreground text-sm leading-relaxed">
+						{row.text}
+					</p>
+				) : (
+					<MessageResponse className="pt-2.5 text-foreground text-sm leading-relaxed">
+						{row.text}
+					</MessageResponse>
+				))}
 			{row.failed && (
 				<div className="flex flex-col gap-1.5 pt-2.5">
 					{row.span.statusMessage !== "" && (
-						<p className="whitespace-pre-wrap break-words font-mono text-[13px] text-destructive/90 leading-relaxed">
-							{row.span.statusMessage}
-						</p>
+						<div className="flex items-start gap-1.5">
+							<div className="min-w-0 grow">
+								<ClampedText
+									text={errorRaw ? row.span.statusMessage : error.formatted}
+									html={errorRaw ? undefined : error.highlighted}
+									mono
+									clampClass="line-clamp-[14]"
+									toneClass="text-[13px] text-destructive/90"
+									expanded={disclosed(openRows, `${row.key}:error-text`, false)}
+									onToggleExpanded={() => onToggleRow(`${row.key}:error-text`)}
+								/>
+							</div>
+							{error.highlighted !== undefined && (
+								<ViewSwitch
+									rendered="json"
+									raw={errorRaw}
+									onRawChange={(next) => next !== errorRaw && onToggleRow(errorRawKey)}
+									className="self-start"
+								/>
+							)}
+							<CopyButton
+								value={errorRaw ? row.span.statusMessage : error.formatted}
+								label="error message"
+								className="-my-1 shrink-0"
+							/>
+						</div>
 					)}
 					{/* Never "the agent gave up": what the span supports is that this
 					    call produced nothing. A retry, if there was one, is its own row. */}
@@ -603,8 +717,8 @@ function AssistantBlock({
 			{!row.failed && row.text === undefined && (
 				<InlineNote className="mt-2.5">
 					The reply isn't captured. This emitter recorded the request but not{" "}
-					<span className="font-mono">gen_ai.output.messages</span>, so the call's text is gone —
-					it did not fail.
+					<span className="font-mono">gen_ai.output.messages</span>, so the call's text is gone — it
+					did not fail.
 				</InlineNote>
 			)}
 		</Row>
@@ -615,7 +729,12 @@ function AssistantBlock({
 function PromptBlock({
 	row,
 	timeZone,
+	openRows,
+	onToggleRow,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "prompt" }> }) {
+	const rawKey = `${row.key}:raw`
+	const raw = disclosed(openRows, rawKey, false)
+
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-chart-2" className="pt-3">
 			<div className="flex flex-col gap-2.5">
@@ -625,10 +744,21 @@ function PromptBlock({
 					<span className={META}>{callMetaLine(row.span)}</span>
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{row.span.serviceName}</span>
+					<ViewSwitch
+						rendered="md"
+						raw={raw}
+						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+					/>
 				</div>
-				<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
-					{row.text}
-				</p>
+				{raw ? (
+					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
+						{row.text}
+					</p>
+				) : (
+					<MessageResponse className="text-foreground text-sm leading-relaxed">
+						{row.text}
+					</MessageResponse>
+				)}
 				<InlineNote>
 					The reply isn't captured. This emitter records{" "}
 					<span className="font-mono">gen_ai.input.messages</span> but not{" "}
@@ -741,7 +871,10 @@ function ToolBlock({
 					>
 						<GearIcon size={13} className={cn("shrink-0", tone)} />
 						<span className={cn(LABEL, tone)}>Tool</span>
-						<span className="shrink-0 font-medium font-mono text-foreground text-xs">
+						<span
+							className="min-w-0 truncate font-medium font-mono text-foreground text-xs"
+							title={row.toolName ?? row.span.spanName}
+						>
 							{row.toolName ?? row.span.spanName}
 						</span>
 						<span className={cn(META, "shrink-0")}>
@@ -840,6 +973,10 @@ function PayloadSection({
 	onToggleRow: (key: string) => void
 	textKey: string
 }) {
+	const { formatted, highlighted } = useJsonPayload(payload.text)
+	const rawKey = `${textKey}:raw`
+	const raw = disclosed(openRows, rawKey, false)
+
 	return (
 		<div className={cn("flex flex-col gap-2 px-3 pt-2.5 pb-3", bordered && "border-border/60 border-t")}>
 			<div className="flex flex-wrap items-center gap-2">
@@ -847,7 +984,11 @@ function PayloadSection({
 					{label}
 				</span>
 				<span className="font-mono text-[10px] text-muted-foreground">
-					{[meta, formatBytes(payload.byteLength), payload.lineCount > 1 && `${payload.lineCount} lines`]
+					{[
+						meta,
+						formatBytes(payload.byteLength),
+						payload.lineCount > 1 && `${payload.lineCount} lines`,
+					]
 						.filter((part): part is string => typeof part === "string")
 						.join(" · ")}
 				</span>
@@ -858,12 +999,28 @@ function PayloadSection({
 						truncated by the emitter
 					</Pill>
 				)}
+				{/* Copies what is displayed: the pretty-printed JSON, or the raw text.
+				    The switch only appears where the two differ. */}
+				{payload.text !== "" && (
+					<span className="-my-1 ml-auto flex items-center">
+						{highlighted !== undefined && (
+							<ViewSwitch
+								rendered="json"
+								raw={raw}
+								onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+								className="mr-1"
+							/>
+						)}
+						<CopyButton value={raw ? payload.text : formatted} label={label.toLowerCase()} />
+					</span>
+				)}
 			</div>
 			{/* An emitter that recorded the truncation but kept no prefix leaves
 			    nothing to show; an empty card would read as an empty payload. */}
 			{payload.text !== "" && (
 				<ClampedText
-					text={payload.text}
+					text={raw ? payload.text : formatted}
+					html={raw ? undefined : highlighted}
 					mono
 					clampClass="line-clamp-[14]"
 					toneClass={tone}
@@ -917,15 +1074,22 @@ function LaneOpen({
 			timePadding="pt-2"
 			className="pt-2.5"
 		>
-			<div className="flex items-center gap-2.5 py-1.5">
+			{/* Wraps: the parallel chips are one per sibling lane, and a fan-out wide
+			    enough to overflow the line belongs on a second one, not off-page. */}
+			<div className="flex flex-wrap items-center gap-2.5 py-1.5">
 				<FaceRobotIcon size={14} className="shrink-0 text-chart-1" />
 				<span className={cn(LABEL, "text-chart-1")}>
 					{row.laneKind === "subagent" ? "Subagent" : "Agent"}
 				</span>
-				<span className="shrink-0 font-medium font-mono text-foreground text-xs">
+				{/* Both carry agent names, which are emitter input: capped and
+				    truncating so a long one cannot widen the page. */}
+				<span
+					className="max-w-56 truncate font-medium font-mono text-foreground text-xs"
+					title={row.agentName}
+				>
 					{row.agentName}
 				</span>
-				<span className={cn(META, "shrink-0")}>
+				<span className={META}>
 					{row.laneKind === "subagent" && row.parentAgentName !== undefined
 						? `· invoked by ${row.parentAgentName}`
 						: `· trace ${row.span.traceId.slice(0, 8)}`}{" "}
@@ -937,7 +1101,12 @@ function LaneOpen({
 					<>
 						<span className="grow" />
 						{row.parallelWith.map((ref) => (
-							<ParallelJump key={ref.key} target={ref} onJump={onJump} />
+							<ParallelJump
+								key={ref.key}
+								targetKey={ref.key}
+								label={ref.agentName}
+								onJump={onJump}
+							/>
 						))}
 					</>
 				)}
@@ -962,20 +1131,26 @@ function LaneOpen({
 	)
 }
 
+/** The same chip on a lane header and on a turn header: one visual language for
+ *  concurrency, whichever level announced it. */
 function ParallelJump({
-	target,
+	targetKey,
+	label,
 	onJump,
 }: {
-	target: TranscriptLaneRef
+	targetKey: string
+	/** What the reader is being sent to — an agent's name, or a turn's ordinal. */
+	label: string
 	onJump: (key: string) => void
 }) {
 	return (
 		<button
 			type="button"
-			onClick={() => onJump(target.key)}
-			className="shrink-0 cursor-pointer rounded-sm bg-primary/12 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/20"
+			onClick={() => onJump(targetKey)}
+			title={label}
+			className="max-w-72 shrink-0 cursor-pointer truncate rounded-sm bg-primary/12 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/20"
 		>
-			ran in parallel with {target.agentName}
+			ran in parallel with {label}
 		</button>
 	)
 }
@@ -990,10 +1165,12 @@ function LaneClose({
 		<Row depth={row.depth} className="pt-2">
 			<div className="flex items-center gap-2.5 py-1">
 				<CornerDownLeftIcon size={12} className="shrink-0 text-muted-foreground" />
-				<span className="shrink-0 text-muted-foreground text-xs">
+				<span className="min-w-0 truncate text-muted-foreground text-xs">
 					{row.agentName}
-					{row.parentAgentName === undefined ? " finished" : ` returned to ${row.parentAgentName}`} ·{" "}
-					{formatDuration(row.durationMs)} · {row.llmCalls} LLM call
+					{row.parentAgentName === undefined
+						? " finished"
+						: ` returned to ${row.parentAgentName}`}{" "}
+					· {formatDuration(row.durationMs)} · {row.llmCalls} LLM call
 					{row.llmCalls === 1 ? "" : "s"} · {row.toolCalls} tool call
 					{row.toolCalls === 1 ? "" : "s"}
 				</span>
@@ -1018,6 +1195,67 @@ function LaneClose({
 }
 
 /**
+ * The fork banner both parallel markers share: a bordered, tinted block whose
+ * every line WRAPS. The old markers were one flex line of unshrinkable text and
+ * chips, which is exactly the shape that pushes a page into sideways clipping —
+ * a marker about concurrency must never cost the reader the right edge.
+ */
+function ParallelBanner({
+	title,
+	description,
+	refs,
+	onJump,
+}: {
+	title: string
+	description: string
+	/** The forked threads, as jump chips. */
+	refs: readonly { key: string; label: string }[]
+	onJump: (key: string) => void
+}) {
+	return (
+		<div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-primary/25 bg-primary/6 px-3 py-2.5">
+			<div className="flex items-center gap-2.5">
+				<BranchForkIcon size={14} className="shrink-0 text-primary" />
+				<span className={cn(LABEL, "text-primary")}>{title}</span>
+			</div>
+			<p className="min-w-0 break-words pl-6 text-muted-foreground text-xs leading-relaxed">
+				{description}
+			</p>
+			<div className="flex flex-wrap items-center gap-1.5 pl-6">
+				{refs.map((ref) => (
+					<button
+						key={ref.key}
+						type="button"
+						onClick={() => onJump(ref.key)}
+						title={ref.label}
+						className="max-w-72 cursor-pointer truncate rounded-sm bg-primary/12 px-2 py-0.5 font-mono text-[11px] text-primary hover:bg-primary/20"
+					>
+						{ref.label}
+					</button>
+				))}
+			</div>
+		</div>
+	)
+}
+
+/** Only a window every member shared is reported as an overlap. A chain of
+ *  pairwise overlaps has none, and the sentence then reports the run's extent
+ *  instead of inventing one. */
+function overlapSentence(
+	row: {
+		startMs: number
+		endMs: number
+		overlapStartMs: number | undefined
+		overlapEndMs: number | undefined
+	},
+	timeZone: string,
+): string {
+	return row.overlapStartMs !== undefined && row.overlapEndMs !== undefined
+		? `they overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
+		: `their runs interleave between ${clockOf(row.startMs, timeZone)} and ${clockOf(row.endMs, timeZone)}`
+}
+
+/**
  * Where a thread forked. Each lane below still reads whole and in order — the
  * marker is what stops "db-lane, then trace-lane" from reading as a sequence.
  */
@@ -1027,32 +1265,55 @@ function ParallelMarker({
 	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "parallel" }> }) {
 	return (
-		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} timePadding="pt-1.5" className="pt-5" flush>
-			<div className="flex items-center gap-2.5">
-				<BranchForkIcon size={14} className="shrink-0 text-primary" />
-				<span className={cn(LABEL, "text-primary")}>Parallel</span>
-				{/* Only a window every lane shared is reported as an overlap. A chain
-				    of pairwise overlaps has none, and the marker then reports the fork's
-				    extent instead of inventing one. */}
-				<span className="shrink-0 text-muted-foreground text-xs">
-					{row.forkedBy === undefined ? "This turn" : row.forkedBy} forked {row.lanes.length} lanes —{" "}
-					{row.overlapStartMs !== undefined && row.overlapEndMs !== undefined
-						? `they overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
-						: `their runs interleave between ${clockOf(row.startMs, timeZone)} and ${clockOf(row.endMs, timeZone)}`}
-					. Each lane is shown whole, in order:
-				</span>
-				{row.lanes.map((lane) => (
-					<button
-						key={lane.key}
-						type="button"
-						onClick={() => onJump(lane.key)}
-						className="shrink-0 cursor-pointer font-mono text-[11px] text-primary hover:underline"
-					>
-						{lane.agentName}
-					</button>
-				))}
-				<span aria-hidden className="h-px grow bg-border" />
-			</div>
+		<Row
+			time={clockOf(row.startMs, timeZone)}
+			depth={row.depth}
+			timePadding="pt-3"
+			className="pt-5"
+			flush
+		>
+			<ParallelBanner
+				title={`Parallel — ${row.forkedBy === undefined ? "this turn" : row.forkedBy} forked ${row.lanes.length} lanes`}
+				description={`${overlapSentence(row, timeZone)}. Each lane is shown whole and in order below:`}
+				refs={row.lanes.map((lane) => ({ key: lane.key, label: lane.agentName }))}
+				onJump={onJump}
+			/>
+		</Row>
+	)
+}
+
+/**
+ * Where two chapters ran at once — the lane marker one level up.
+ *
+ * A Maple fan-out gives each sub-agent its own conversation id, and a run
+ * dispatched over a queue roots its own trace, so either way the turn partition
+ * splits the fan-out into sibling chapters. They still read whole and in order;
+ * the marker is what stops "TURN 3, then TURN 4" from reading as a sequence the
+ * timestamps deny — and the member turns render indented one lane under it, so
+ * the fork is visible even from the middle of a long chapter.
+ */
+function ParallelTurnsMarker({
+	row,
+	timeZone,
+	onJump,
+}: BlockProps & { row: Extract<TranscriptRow, { kind: "parallel-turns" }> }) {
+	return (
+		<Row
+			time={clockOf(row.startMs, timeZone)}
+			depth={row.depth}
+			timePadding="pt-3"
+			className="pt-5"
+			flush
+		>
+			<ParallelBanner
+				title={`Parallel — ${row.turns.length} turns ran at the same time`}
+				description={`${overlapSentence(row, timeZone)}. Each turn is shown whole and in order, indented below:`}
+				refs={row.turns.map((ref) => ({
+					key: ref.key,
+					label: `${turnOrdinal(ref.turn).toUpperCase()}${ref.turn.agentName === undefined ? "" : ` ${ref.turn.agentName}`}`,
+				}))}
+				onJump={onJump}
+			/>
 		</Row>
 	)
 }
@@ -1107,7 +1368,12 @@ function StructureRow({
 					)}
 				>
 					<Glyph size={13} className={cn("shrink-0", tone)} />
-					<span className="shrink-0 font-medium font-mono text-foreground text-xs">{row.label}</span>
+					<span
+						className="min-w-0 truncate font-medium font-mono text-foreground text-xs"
+						title={row.label}
+					>
+						{row.label}
+					</span>
 					<span className={META}>{structureMeta(row.span, category)}</span>
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{formatDuration(row.span.durationMs)}</span>
@@ -1133,7 +1399,7 @@ function NoteBlock({ row }: { row: Extract<TranscriptRow, { kind: "note" }> }) {
 				<div className="flex items-center gap-2.5">
 					<CircleInfoIcon size={13} className="shrink-0 text-muted-foreground" />
 					<span className={cn(LABEL, "text-muted-foreground")}>Capture changes here</span>
-					<span className="shrink-0 text-muted-foreground text-xs">
+					<span className="min-w-0 text-muted-foreground text-xs">
 						spans below come from {row.serviceName} — it records {CAPTURES_LABEL[row.captures]}
 					</span>
 					<span aria-hidden className="h-px grow bg-border" />
@@ -1144,8 +1410,7 @@ function NoteBlock({ row }: { row: Extract<TranscriptRow, { kind: "note" }> }) {
 
 	// The same absence, said at the scope it was measured at: a session-wide
 	// banner must not read as a claim about one turn, or the other way round.
-	const scope =
-		row.scope === "session" ? `${row.anyCaptured ? "most of " : ""}this session` : "this turn"
+	const scope = row.scope === "session" ? `${row.anyCaptured ? "most of " : ""}this session` : "this turn"
 
 	return (
 		<div className="flex items-start gap-3 rounded-md border border-border bg-card px-4 py-3">
@@ -1163,10 +1428,7 @@ function NoteBlock({ row }: { row: Extract<TranscriptRow, { kind: "note" }> }) {
 	)
 }
 
-function DividerBlock({
-	row,
-	timeZone,
-}: BlockProps & { row: Extract<TranscriptRow, { kind: "divider" }> }) {
+function DividerBlock({ row, timeZone }: BlockProps & { row: Extract<TranscriptRow, { kind: "divider" }> }) {
 	if (row.dividerKind === "compaction") {
 		return (
 			<Row
@@ -1179,9 +1441,9 @@ function DividerBlock({
 				<div className="flex items-center gap-2.5">
 					<CompactLinesIcon size={14} className="shrink-0 text-chart-4" />
 					<span className={cn(LABEL, "text-chart-4")}>Context compacted</span>
-					<span className="shrink-0 text-muted-foreground text-xs">
-						the agent replaced its history with a summary — earlier messages above are still shown,
-						but the model no longer had them
+					<span className="min-w-0 text-muted-foreground text-xs">
+						the agent replaced its history with a summary — earlier messages above are still
+						shown, but the model no longer had them
 					</span>
 					<span aria-hidden className="h-px grow bg-chart-4/30" />
 				</div>

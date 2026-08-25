@@ -4732,10 +4732,10 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:errors_facets:default:baseline  [64eb8e74]
+-- pipe:errors_facets:default:baseline  [fe66f114]
 SELECT
           ServiceName AS name,
-          count() AS count,
+          uniq(FingerprintHash) AS count,
           'service' AS facetType
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'
@@ -4747,7 +4747,7 @@ SELECT
 UNION ALL
 SELECT
           DeploymentEnv AS name,
-          count() AS count,
+          uniq(FingerprintHash) AS count,
           'environment' AS facetType
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'
@@ -4760,7 +4760,7 @@ SELECT
 UNION ALL
 SELECT
           ErrorLabel AS name,
-          count() AS count,
+          uniq(FingerprintHash) AS count,
           'error_type' AS facetType
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'
@@ -4772,7 +4772,7 @@ SELECT
 UNION ALL
 SELECT
           ServiceVersion AS name,
-          count() AS count,
+          uniq(FingerprintHash) AS count,
           'version' AS facetType
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'
@@ -8030,10 +8030,10 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- spec:errors-facets:baseline  [64eb8e74]
+-- spec:errors-facets:baseline  [fe66f114]
 SELECT
           ServiceName AS name,
-          count() AS count,
+          uniq(FingerprintHash) AS count,
           'service' AS facetType
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'
@@ -8045,7 +8045,7 @@ SELECT
 UNION ALL
 SELECT
           DeploymentEnv AS name,
-          count() AS count,
+          uniq(FingerprintHash) AS count,
           'environment' AS facetType
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'
@@ -8058,7 +8058,7 @@ SELECT
 UNION ALL
 SELECT
           ErrorLabel AS name,
-          count() AS count,
+          uniq(FingerprintHash) AS count,
           'error_type' AS facetType
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'
@@ -8070,7 +8070,7 @@ SELECT
 UNION ALL
 SELECT
           ServiceVersion AS name,
-          count() AS count,
+          uniq(FingerprintHash) AS count,
           'version' AS facetType
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'

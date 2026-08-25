@@ -38,10 +38,10 @@ import {
 	type LLMEvent,
 	type LLMRequest,
 	type Message,
-	type Model,
+	type LanguageModel,
 	type SystemPart,
 	type ToolDefinition,
-} from "@maple/llm"
+} from "@opencode-ai/ai"
 import { Clock, Effect } from "effect"
 import type { ChatTurnInput } from "./types"
 
@@ -257,7 +257,7 @@ const toolDefinitionsJson = (tools: ReadonlyArray<ToolDefinition>): string => {
 
 export const invokeAgentAttributes = (
 	agent: { readonly name: string; readonly description?: string },
-	model: Model,
+	model: LanguageModel,
 	identity: GenAiIdentity,
 	options: {
 		readonly tools?: ReadonlyArray<ToolDefinition>
@@ -278,7 +278,7 @@ export const invokeAgentAttributes = (
 	...identityAttributes(identity),
 })
 
-export const modelCallSpanName = (model: Model): string => `chat ${String(model.id)}`
+export const modelCallSpanName = (model: LanguageModel): string => `chat ${String(model.id)}`
 
 /**
  * Semconv-shaped `gen_ai.system_instructions`: an array of `{type, content}`
@@ -342,7 +342,7 @@ export const modelCallAttributes = (
 }
 
 /**
- * `@maple/llm` finish reasons hyphenate; the read side's vocabulary is the
+ * `@opencode-ai/ai` finish reasons hyphenate; the read side's vocabulary is the
  * semconv underscore form (`REFUSAL_FINISH_REASONS` matches `content_filter`,
  * the default integration normalises `tool_calls`). Exported for tests.
  */
@@ -354,7 +354,7 @@ export const semconvFinishReason = (reason: string): string =>
  *
  * OpenRouter is the only provider that prices per call in-band: with usage
  * accounting on (see `withUsageAccounting` in `platform/Llm.ts`) the final
- * usage object carries `cost` in credits (USD), which the vendored protocol
+ * usage object carries `cost` in credits (USD), which the upstream protocol
  * passes through `providerMetadata.openai`. Maple never prices tokens itself —
  * a price table would drift from the provider's actual billing.
  */
@@ -368,7 +368,7 @@ const reportedCost = (usage: LLMResponse["usage"]): number | undefined => {
 /**
  * Response identity off the wire — every OpenAI-chat chunk carries the
  * response id and the model that actually served it (OpenRouter routes, so it
- * can differ from `gen_ai.request.model`); the vendored protocol surfaces both
+ * can differ from `gen_ai.request.model`); the upstream protocol surfaces both
  * on the finish event's `providerMetadata.openai`.
  */
 const responseIdentity = (response: LLMResponse): { readonly id?: string; readonly model?: string } => {
@@ -393,12 +393,14 @@ export const modelResponseAttributes = (response: LLMResponse): Record<string, u
 	return {
 		...(served.id === undefined ? undefined : { "gen_ai.response.id": served.id }),
 		...(served.model === undefined ? undefined : { "gen_ai.response.model": served.model }),
-		"gen_ai.response.finish_reasons": [semconvFinishReason(response.finishReason)],
+		"gen_ai.response.finish_reasons": [
+			semconvFinishReason(response.finishReason?.normalized ?? "unknown"),
+		],
 		// A provider failure surfaced as a stream *event* completes the stream, so
 		// the span exit stays green — these two attributes are the record of it,
 		// and what the session view's failure counting reads (`spanFailed`).
 		// `failed` is the semconv `gen_ai.response.status` enum's error state.
-		...(response.finishReason === "error"
+		...(response.finishReason?.normalized === "error"
 			? { "error.type": "provider_error", "gen_ai.response.status": "failed" }
 			: undefined),
 		"gen_ai.output.messages": messagesJson([response.message], OUTPUT_MESSAGES_BUDGET).json,

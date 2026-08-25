@@ -15,6 +15,13 @@ export interface ScraperEnvConfig {
 	readonly SCRAPER_CONCURRENCY: number
 	/** How often the target list is refreshed, in seconds. */
 	readonly SCRAPER_RECONCILE_INTERVAL_SECONDS: number
+	/**
+	 * Max OTLP data points per POST to the ingest gateway. A scrape larger than
+	 * this is split across several requests so none can trip the gateway's
+	 * `INGEST_MAX_REQUEST_BODY_BYTES` (20 MB), which rejects an oversized body
+	 * whole and loses the entire scrape.
+	 */
+	readonly SCRAPER_OTLP_MAX_DATA_POINTS: number
 	/** Port for the `/health` endpoint. */
 	readonly PORT: number
 }
@@ -33,6 +40,12 @@ const envConfig = Config.all({
 	SCRAPER_CONCURRENCY: Config.number("SCRAPER_CONCURRENCY").pipe(Config.withDefault(10)),
 	SCRAPER_RECONCILE_INTERVAL_SECONDS: Config.number("SCRAPER_RECONCILE_INTERVAL_SECONDS").pipe(
 		Config.withDefault(60),
+	),
+	// 10k points is ~2 MB of OTLP/JSON at the attribute density Prometheus
+	// exporters produce — a 10x margin under the gateway's 20 MB limit, so
+	// even an unusually attribute-heavy exporter stays inside it.
+	SCRAPER_OTLP_MAX_DATA_POINTS: Config.number("SCRAPER_OTLP_MAX_DATA_POINTS").pipe(
+		Config.withDefault(10_000),
 	),
 	PORT: Config.number("PORT").pipe(Config.withDefault(3475)),
 })

@@ -83,3 +83,12 @@ index 6a39d25b7eb76799ab266509b388e9158d9e3f24..e8132a86815bcc725598da508cf65dfc
 +function stripMapleUiContent(result){if(result===null||typeof result!==`object`||!Array.isArray(result.content))return result;const content=result.content.filter(entry=>{if(entry===null||typeof entry!==`object`||entry.type!==`text`||typeof entry.text!==`string`)return true;const text=entry.text;if(!text.startsWith(`{`)||!text.includes(`"__maple_ui"`))return true;try{const parsed=JSON.parse(text);return!(parsed!==null&&typeof parsed===`object`&&parsed.__maple_ui===true)}catch{return true}});return content.length===result.content.length?result:{...result,content}}
 +export{stripMapleUiContent,McpConnectionClient,isMcpAuthRequiredError,passesToolFilter,resolveHeaders};
 \ No newline at end of file
+diff --git a/dist/src/harness/otel-integration.js b/dist/src/harness/otel-integration.js
+index 4768fefb5d0d65ef4137c4f50f40e73ea91e339c..18f2bffe5793f45f854caeaf16699376f64e3d6d 100644
+--- a/dist/src/harness/otel-integration.js
++++ b/dist/src/harness/otel-integration.js
+@@ -1 +1 @@
+-import{registerTelemetry}from"ai";import{OpenTelemetry}from"#compiled/@ai-sdk/otel/index.js";let registered=!1;function ensureOtelIntegration(){registered||(registered=!0,registerTelemetry(new OpenTelemetry({runtimeContext:!0})))}export{ensureOtelIntegration};
+\ No newline at end of file
++import{registerTelemetry}from"ai";import{OpenTelemetry}from"#compiled/@ai-sdk/otel/index.js";let registered=!1;function ensureOtelIntegration(){registered||(registered=!0,registerTelemetry(new OpenTelemetry({runtimeContext:!0,providerMetadata:!0,usage:!0})))}export{ensureOtelIntegration};
+\ No newline at end of file

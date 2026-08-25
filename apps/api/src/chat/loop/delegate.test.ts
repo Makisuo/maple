@@ -5,8 +5,8 @@
  * (the parent must never see the child's tool payloads), the event tagging (a child's events must
  * land in the card, not the conversation), and the budgets (a `ToolFailure`, never a defect).
  */
-import { LLMClient, type LLMEvent, type LLMRequest, type Model } from "@maple/llm"
-import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
+import { LLMClient, type LLMEvent, type LLMRequest, type LanguageModel } from "@opencode-ai/ai"
+import { CloudflareWorkersAI } from "@opencode-ai/ai/providers/cloudflare"
 import { Effect, Layer, Stream } from "effect"
 import { describe, it } from "@effect/vitest"
 import { assert } from "vitest"
@@ -29,10 +29,12 @@ const TOOL_EXECUTOR = {
 		}),
 } satisfies McpToolExecutorApi
 
-const MODEL: Model = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model("@cf/test/model")
+const MODEL: LanguageModel = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model(
+	"@cf/test/model",
+)
 
 const textDelta = (text: string): LLMEvent => ({ type: "text-delta", id: "t1", text }) as LLMEvent
-const finish = (): LLMEvent => ({ type: "finish", reason: "stop" }) as LLMEvent
+const finish = (): LLMEvent => ({ type: "finish", reason: { normalized: "stop" } })
 const call = (id: string, name: string, input: unknown = {}): LLMEvent =>
 	({ type: "tool-call", id, name, input, providerExecuted: false }) as LLMEvent
 

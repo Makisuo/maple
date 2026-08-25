@@ -225,6 +225,69 @@ const seedPublishedOperation = async (
 	}
 }
 
+/**
+ * Reconcile must refuse to retire a complete operation's journal while any one of the durable
+ * invariants it implies is inexact — and each of these is a distinct way to be inexact.
+ *
+ * One `it` per scenario rather than a loop inside one: each case seeds a whole archive on disk, so
+ * a single test's wall time was the sum of all seven against one 5s budget, and it timed out on a
+ * loaded CI runner at 5002ms. Per-case tests also name the scenario that failed in the test name.
+ */
+const COMPLETE_JOURNAL_CASES: ReadonlyArray<{
+	name: string
+	mutate: (seeded: Awaited<ReturnType<typeof seedPublishedOperation>>) => void
+	error: RegExp
+}> = [
+	{
+		name: "manifest",
+		mutate: (s) => writeFileSync(s.finalManifestPath, "{}\n"),
+		error: /manifest SHA-256 mismatch/,
+	},
+	{
+		name: "shard",
+		mutate: (s) => writeFileSync(s.finalShardPath, "tampered"),
+		error: /shard 00\.parquet (byte size|SHA-256) mismatch/,
+	},
+	{
+		name: "pointer",
+		mutate: (s) => rmSync(activePointerPath(s.archiveDir, "traces", "2026-06-01")),
+		error: /pointer mismatch/,
+	},
+	{
+		name: "catalog",
+		mutate: (s) => writeFileSync(catalogPath(s.archiveDir, "traces"), "{}\n"),
+		error: /catalog does not exactly match/,
+	},
+	{
+		name: "pin",
+		mutate: (s) => {
+			const pinPath = join(checkpointPinsRoot(s.dataDir), s.checkpointId, `${s.pinId}.json`)
+			mkdirSync(join(pinPath, ".."), { recursive: true })
+			writeFileSync(
+				pinPath,
+				`${JSON.stringify({
+					formatVersion: 1,
+					pinId: s.pinId,
+					checkpointId: s.checkpointId,
+					purpose: `archive:${s.generationId}`,
+					createdAt: new Date().toISOString(),
+				})}\n`,
+			)
+		},
+		error: /requires its exact owned pin to be absent/,
+	},
+	{
+		name: "scratch",
+		mutate: (s) => mkdirSync(join(s.scratchRoot, `archive-${s.operationId}`), { recursive: true }),
+		error: /requires its exact owned scratch to be absent/,
+	},
+	{
+		name: "building",
+		mutate: (s) => mkdirSync(buildingGenerationRoot(s.archiveDir, s.generationId), { recursive: true }),
+		error: /both building and final generation state/,
+	},
+]
+
 describe("archive generation promotion", () => {
 	it("preflights archive and scratch independently on separate devices", () => {
 		assertArchiveScratchFreeSpace(
@@ -693,67 +756,10 @@ describe("archive generation promotion", () => {
 		})
 	})
 
-	it("retains a complete journal unless every implied durable invariant is exact", async () => {
-		await withArchive(async (outerArchiveDir) => {
-			const root = join(outerArchiveDir, "..")
-			const cases: ReadonlyArray<{
-				name: string
-				mutate: (seeded: Awaited<ReturnType<typeof seedPublishedOperation>>) => void
-				error: RegExp
-			}> = [
-				{
-					name: "manifest",
-					mutate: (s) => writeFileSync(s.finalManifestPath, "{}\n"),
-					error: /manifest SHA-256 mismatch/,
-				},
-				{
-					name: "shard",
-					mutate: (s) => writeFileSync(s.finalShardPath, "tampered"),
-					error: /shard 00\.parquet (byte size|SHA-256) mismatch/,
-				},
-				{
-					name: "pointer",
-					mutate: (s) => rmSync(activePointerPath(s.archiveDir, "traces", "2026-06-01")),
-					error: /pointer mismatch/,
-				},
-				{
-					name: "catalog",
-					mutate: (s) => writeFileSync(catalogPath(s.archiveDir, "traces"), "{}\n"),
-					error: /catalog does not exactly match/,
-				},
-				{
-					name: "pin",
-					mutate: (s) => {
-						const pinPath = join(checkpointPinsRoot(s.dataDir), s.checkpointId, `${s.pinId}.json`)
-						mkdirSync(join(pinPath, ".."), { recursive: true })
-						writeFileSync(
-							pinPath,
-							`${JSON.stringify({
-								formatVersion: 1,
-								pinId: s.pinId,
-								checkpointId: s.checkpointId,
-								purpose: `archive:${s.generationId}`,
-								createdAt: new Date().toISOString(),
-							})}\n`,
-						)
-					},
-					error: /requires its exact owned pin to be absent/,
-				},
-				{
-					name: "scratch",
-					mutate: (s) =>
-						mkdirSync(join(s.scratchRoot, `archive-${s.operationId}`), { recursive: true }),
-					error: /requires its exact owned scratch to be absent/,
-				},
-				{
-					name: "building",
-					mutate: (s) =>
-						mkdirSync(buildingGenerationRoot(s.archiveDir, s.generationId), { recursive: true }),
-					error: /both building and final generation state/,
-				},
-			]
-			for (const scenario of cases) {
-				const archiveDir = join(root, `complete-${scenario.name}`, "archive")
+	for (const scenario of COMPLETE_JOURNAL_CASES) {
+		it(`retains a complete journal when the ${scenario.name} invariant is inexact`, async () => {
+			await withArchive(async (outerArchiveDir) => {
+				const archiveDir = join(outerArchiveDir, "..", `complete-${scenario.name}`, "archive")
 				mkdirSync(archiveDir, { recursive: true })
 				const seeded = await seedPublishedOperation(archiveDir, "complete", {
 					pointer: true,
@@ -764,13 +770,10 @@ describe("archive generation promotion", () => {
 					reconcileArchiveGeneration(seeded.dataDir, archiveDir, seeded.scratchRoot),
 					scenario.error,
 				)
-				ok(
-					existsSync(operationDir(archiveDir, seeded.operationId)),
-					`${scenario.name}: active journal retained`,
-				)
-			}
+				ok(existsSync(operationDir(archiveDir, seeded.operationId)), "active journal retained")
+			})
 		})
-	})
+	}
 })
 
 describe("archive catalog append", () => {

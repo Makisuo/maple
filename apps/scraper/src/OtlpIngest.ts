@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
-import type { OtlpExportRequest } from "./prometheus/otlp"
+import { countDataPoints, splitExportRequest, type OtlpExportRequest } from "./prometheus/otlp"
 import { ScraperEnv } from "./Env"
 
 export class OtlpIngestError extends Schema.TaggedError<OtlpIngestError>()("@maple/scraper/OtlpIngestError", {
@@ -14,6 +14,11 @@ export interface OtlpIngestApi {
 	 * authenticated with the target org's public ingest key — so the data is
 	 * metered for billing and routed to the org's warehouse (Tinybird or
 	 * self-managed ClickHouse) like any customer OTLP traffic.
+	 *
+	 * An export larger than `SCRAPER_OTLP_MAX_DATA_POINTS` is split across
+	 * several POSTs. Delivery stops at the first rejected chunk and the
+	 * rejection is raised, so earlier chunks stay delivered rather than a whole
+	 * scrape being lost to one oversized body.
 	 */
 	readonly send: (ingestKey: string, request: OtlpExportRequest) => Effect.Effect<void, OtlpIngestError>
 }
@@ -70,8 +75,48 @@ export class OtlpIngest extends Context.Service<OtlpIngest, OtlpIngestApi>()("@m
 				return null
 			})
 
+		/**
+		 * Deliver every chunk in order, stopping at the first rejection and
+		 * carrying it out as a value — same reason as {@link attempt}: a 4xx must
+		 * annotate this span, not fail it. A 5xx still fails inside `attempt` and
+		 * propagates, so the span closes `Error` for a genuine gateway fault.
+		 */
+		const deliver = (ingestKey: string, chunks: ReadonlyArray<OtlpExportRequest>) =>
+			Effect.gen(function* () {
+				for (let index = 0; index < chunks.length; index++) {
+					const rejection = yield* attempt(ingestKey, chunks[index]!).pipe(
+						Effect.withSpan("OtlpIngest.send_chunk", {
+							attributes: {
+								"maple.otlp.chunk_index": index,
+								"maple.otlp.chunk_count": chunks.length,
+							},
+						}),
+					)
+					if (rejection !== null) {
+						yield* Effect.annotateCurrentSpan({
+							"maple.otlp.chunks_delivered": index,
+							"http.response.status_code": rejection.status,
+							"error.type":
+								rejection.status === 402
+									? "delivery_blocked"
+									: `ingest_http_${rejection.status}`,
+						})
+						return rejection
+					}
+				}
+				yield* Effect.annotateCurrentSpan("maple.otlp.chunks_delivered", chunks.length)
+				return null
+			})
+
 		const send = (ingestKey: string, request: OtlpExportRequest) =>
-			attempt(ingestKey, request).pipe(
+			Effect.gen(function* () {
+				const chunks = splitExportRequest(request, env.SCRAPER_OTLP_MAX_DATA_POINTS)
+				yield* Effect.annotateCurrentSpan({
+					"maple.otlp.data_points": countDataPoints(request),
+					"maple.otlp.chunk_count": chunks.length,
+				})
+				return yield* deliver(ingestKey, chunks)
+			}).pipe(
 				// One `withSpan` only — pairing it with `Effect.fn` of the same name
 				// would emit two spans per send.
 				Effect.withSpan("OtlpIngest.send"),

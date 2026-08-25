@@ -15,8 +15,8 @@
 import { describe, it } from "@effect/vitest"
 import { assert } from "vitest"
 import { Effect, Layer, Option, Schema, Stream } from "effect"
-import { LLMClient, LLMEvent, type LLMRequest, type Model } from "@maple/llm"
-import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
+import { LLMClient, LLMEvent, type LLMRequest, type LanguageModel } from "@opencode-ai/ai"
+import { CloudflareWorkersAI } from "@opencode-ai/ai/providers/cloudflare"
 import { PermissionRule } from "@maple/domain/permission"
 import { OrgId, UserId } from "@maple/domain"
 import type { AgentDefinition } from "@/chat/agents"
@@ -31,12 +31,12 @@ const TENANT: TenantContext = {
 	authMode: "self_hosted",
 }
 
-const MODEL: Model = CloudflareWorkersAI.configure({
+const MODEL: LanguageModel = CloudflareWorkersAI.configure({
 	accountId: "test",
 	apiKey: "test",
 }).model("@cf/test/model")
 
-const finish = (): LLMEvent => ({ type: "finish", reason: "stop" }) as LLMEvent
+const finish = (): LLMEvent => ({ type: "finish", reason: { normalized: "stop" } })
 const textDelta = (text: string): LLMEvent => ({ type: "text-delta", id: "t1", text }) as LLMEvent
 const toolCall = (id: string, name: string, input: unknown = {}): LLMEvent =>
 	({ type: "tool-call", id, name, input, providerExecuted: false }) as LLMEvent

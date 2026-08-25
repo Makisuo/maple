@@ -141,10 +141,11 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   it had diverged exactly where it mattered — it has `AWS/StageConfig.ts` where the real
   package has `AWS/Environment.ts` + `AWS/AuthProvider.ts` — and a code review cited its line
   numbers as fact for a bug in the live code.
-- **LLM core:** `lib/llm` (`@maple/llm`) is a vendored copy of `anomalyco/opencode`'s
-  `packages/llm`, pinned by SHA in `lib/llm/UPSTREAM.json` and re-synced with
-  `bun run llm:sync`. Don't reformat it and don't put Maple behaviour inside it — see
-  `lib/llm/MAPLE.md`.
+- **LLM core:** `@opencode-ai/ai` — opencode's Effect-native LLM core, on npm and pinned exactly
+  (`0.0.0-beta-18050`; the `dev`/`beta` channels carry no semver, so a bump is a read of the diff).
+  Only `apps/api` depends on it, and every piece of Maple behaviour — layer wiring, the Workers AI
+  binding shim, model/provider selection, error mapping — lives at the seam in
+  `apps/api/src/platform/Llm.ts`, never in a wrapper around the package.
 - **Span status codes:** Title case — `"Ok"`, `"Error"`, `"Unset"`.
 - **UI:** shadcn/Base UI + Tailwind 4 (`npx shadcn@latest add <component>`), Recharts, Nucleo icons.
   Find an icon in the local Nucleo DB, then port it into `apps/web/src/components/icons/` by copying

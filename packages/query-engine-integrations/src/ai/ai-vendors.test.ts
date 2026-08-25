@@ -80,6 +80,23 @@ describe("vercel_ai_sdk", () => {
 		).toBe("triage")
 	})
 
+	it("reads TTFT from the v7 client.operation key, in seconds", () => {
+		const mapped = mapAiSpan(
+			row("vercel_ai_sdk", { "gen_ai.client.operation.time_to_first_chunk": "1.84" }),
+		)
+
+		expect(mapped.genAi.responseTimeToFirstChunk).toBe(1.84)
+
+		// The canonical key still wins when both appear on one span.
+		const both = mapAiSpan(
+			row("vercel_ai_sdk", {
+				"gen_ai.response.time_to_first_chunk": "0.5",
+				"gen_ai.client.operation.time_to_first_chunk": "1.84",
+			}),
+		)
+		expect(both.genAi.responseTimeToFirstChunk).toBe(0.5)
+	})
+
 	it("leaves fields it does not mention on the default source list", () => {
 		// The merge is per field: `requestSeed` is not in the override, so it
 		// keeps the default's canonical key AND the default's legacy alias.

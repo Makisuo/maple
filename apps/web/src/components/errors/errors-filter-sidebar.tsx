@@ -28,12 +28,20 @@ export function ErrorsFilterSidebar() {
 		search.timePreset ?? "12h",
 	)
 
+	// Every active filter goes to the facets query, not just the time range: each
+	// section drops its own dimension server-side, so ticking `production` narrows
+	// the Service and Version counts while Environment still shows its
+	// alternatives. Without them the numbers never moved when a box was ticked.
 	const facetsAtom = getErrorsFacetsResultAtom({
 		data: {
 			startTime: effectiveStartTime,
 			endTime: effectiveEndTime,
 			showSpam: search.showSpam,
 			rootOnly: search.rootOnly !== false,
+			services: search.services ? [...search.services] : undefined,
+			deploymentEnvs: search.deploymentEnvs ? [...search.deploymentEnvs] : undefined,
+			errorLabels: search.errorTypes ? [...search.errorTypes] : undefined,
+			serviceVersions: search.serviceVersions ? [...search.serviceVersions] : undefined,
 		},
 	})
 	const facetsResult = useRefreshableAtomValue(facetsAtom)

@@ -89,7 +89,6 @@
 		".impeccable/**",
 		".superset/**",
 		"apps/web/src/routeTree.gen.ts",
-		"lib/llm/**",
 		"lib/thinking-orbs/**",
 		"scripts/oxlint-plugins/anti-slop/**"
 	]

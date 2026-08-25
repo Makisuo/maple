@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import type { AiSessionSpan } from "@maple/domain/http"
+
 import { agentSpan, llmSpan, makeSpan, toolSpan, userMessages } from "./span-test-support"
 import { buildSessionTurns, classifyAiSpan, isLlmCall, spanTtftMs } from "./session-turns"
 
@@ -449,5 +451,213 @@ describe("turn labels", () => {
 		expect(labelFor("a plain string")).toBeUndefined()
 		expect(labelFor([{ role: "assistant", content: "hi" }])).toBeUndefined()
 		expect(labelFor([{ role: "user", content: [{ type: "image" }] }])).toBeUndefined()
+	})
+})
+
+/**
+ * Maple's investigation fan-out: a planner pass, N hypothesis lanes launched
+ * together, then a validator pass. Every pass stamps its own
+ * `maple_ai.turn.id`, which the maple vendor integration lifts into
+ * `gen_ai.conversation.id`, so the lanes are concurrent CONVERSATION ids.
+ *
+ * Each lane opens on an `invoke_agent` root a few hundred ms after the one
+ * before it, runs for two minutes, and ends on a final chat plus an
+ * `execute_tool submit_candidate` — the tail spans a time-ordered partition
+ * files into whichever lane anchored last.
+ */
+function fanoutSpans(laneCount: number): readonly AiSessionSpan[] {
+	const lanes = Array.from({ length: laneCount }, (_, index) => index)
+	const laneOpensAt = (index: number) => 10 * SECOND + index * 300
+
+	return [
+		agentSpan({
+			spanId: "planner",
+			traceId: "trace-inv",
+			startMs: 0,
+			durationMs: 8 * SECOND,
+			agentName: "planner",
+			genAi: { conversationId: "inv_1_planner" },
+		}),
+		...lanes.flatMap((index) => {
+			const lane = `hypothesis-${index}`
+			const conversationId = `inv_1_${lane}`
+			const opensAt = laneOpensAt(index)
+			return [
+				agentSpan({
+					spanId: `${lane}-agent`,
+					traceId: "trace-inv",
+					startMs: opensAt,
+					durationMs: 120 * SECOND,
+					agentName: lane,
+					genAi: { conversationId },
+				}),
+				llmSpan({
+					spanId: `${lane}-chat-1`,
+					parentSpanId: `${lane}-agent`,
+					traceId: "trace-inv",
+					startMs: opensAt + SECOND,
+					durationMs: 3 * SECOND,
+					genAi: { conversationId },
+				}),
+				// The tail: both start long after the LAST lane's anchor.
+				llmSpan({
+					spanId: `${lane}-chat-2`,
+					parentSpanId: `${lane}-agent`,
+					traceId: "trace-inv",
+					startMs: opensAt + 100 * SECOND,
+					durationMs: 4 * SECOND,
+					genAi: { conversationId },
+				}),
+				toolSpan({
+					spanId: `${lane}-submit`,
+					parentSpanId: `${lane}-agent`,
+					traceId: "trace-inv",
+					startMs: opensAt + 110 * SECOND,
+					durationMs: SECOND,
+					toolName: "submit_candidate",
+					genAi: { conversationId },
+				}),
+			]
+		}),
+		agentSpan({
+			spanId: "validator",
+			traceId: "trace-inv",
+			startMs: 140 * SECOND,
+			durationMs: 10 * SECOND,
+			agentName: "validator",
+			genAi: { conversationId: "inv_1_validator" },
+		}),
+	]
+}
+
+describe("buildSessionTurns — concurrent conversation ids", () => {
+	// The regression: a time cursor gives each lane only the sliver before the
+	// next lane anchored, and dumps every lane's tail into the last one.
+	it("keeps each lane's own tail spans in its own turn", () => {
+		const turns = buildSessionTurns(fanoutSpans(4))
+
+		expect(turns.map((turn) => turn.anchorKind)).toEqual(Array(6).fill("conversation"))
+		expect(turns.map((turn) => turn.id)).toEqual([
+			"conversation:inv_1_planner",
+			"conversation:inv_1_hypothesis-0",
+			"conversation:inv_1_hypothesis-1",
+			"conversation:inv_1_hypothesis-2",
+			"conversation:inv_1_hypothesis-3",
+			"conversation:inv_1_validator",
+		])
+
+		for (const index of [0, 1, 2, 3]) {
+			const lane = `hypothesis-${index}`
+			const turn = turns.find((candidate) => candidate.id === `conversation:inv_1_${lane}`)!
+			expect(turn.spans.map((span) => span.spanId)).toEqual([
+				`${lane}-agent`,
+				`${lane}-chat-1`,
+				`${lane}-chat-2`,
+				`${lane}-submit`,
+			])
+		}
+	})
+
+	it("measures each lane over its own spans, so the lanes overlap", () => {
+		const turns = buildSessionTurns(fanoutSpans(3))
+		const lanes = turns.filter((turn) => turn.id.includes("hypothesis"))
+
+		expect(lanes).toHaveLength(3)
+		for (const lane of lanes) expect(lane.durationMs).toBeGreaterThan(100 * SECOND)
+		// Every lane is still open when the last one starts: concurrent, not serial.
+		const lastStart = Math.max(...lanes.map((lane) => lane.startMs))
+		for (const lane of lanes) expect(lane.endMs).toBeGreaterThan(lastStart)
+	})
+
+	// Two lanes dispatched inside one millisecond used to leave the earlier
+	// bucket empty, and the turn was dropped. Its anchor carries its own id, so
+	// it now keeps its turn.
+	it("keeps both turns when two anchors share a millisecond", () => {
+		const turns = buildSessionTurns([
+			llmSpan({ spanId: "a", startMs: 0, durationMs: 30 * SECOND, genAi: { conversationId: "t1" } }),
+			llmSpan({ spanId: "b", startMs: 0, durationMs: 30 * SECOND, genAi: { conversationId: "t2" } }),
+		])
+
+		expect(turns.map((turn) => turn.spans.map((span) => span.spanId))).toEqual([["a"], ["b"]])
+	})
+
+	// An untagged span is usually the app's own HTTP or database work sharing the
+	// agent's trace. Its parent names the turn, and following that beats the time
+	// cursor, which would file it into whichever lane anchored last.
+	it("follows parentage to place an untagged child in its parent's turn", () => {
+		const turns = buildSessionTurns([
+			agentSpan({
+				spanId: "lane-a",
+				startMs: 0,
+				durationMs: 60 * SECOND,
+				genAi: { conversationId: "t1" },
+			}),
+			agentSpan({
+				spanId: "lane-b",
+				startMs: SECOND,
+				durationMs: 60 * SECOND,
+				genAi: { conversationId: "t2" },
+			}),
+			// No conversation id: a database span the app emitted under lane A, long
+			// after lane B anchored.
+			makeSpan({
+				spanId: "db",
+				parentSpanId: "lane-a",
+				startMs: 30 * SECOND,
+				durationMs: SECOND,
+				spanName: "SELECT carts",
+				isAiSpan: false,
+			}),
+		])
+
+		expect(turns[0]!.spans.map((span) => span.spanId)).toEqual(["lane-a", "db"])
+		expect(turns[1]!.spans.map((span) => span.spanId)).toEqual(["lane-b"])
+	})
+
+	// Parentage only reaches so far: `parentSpanId` is intra-trace, and a span
+	// with no tagged ancestor has no link to any turn at all.
+	it("falls back to the time cursor for a span with no tagged ancestor", () => {
+		const turns = buildSessionTurns([
+			llmSpan({ spanId: "a", startMs: 0, durationMs: 10 * SECOND, genAi: { conversationId: "t1" } }),
+			llmSpan({
+				spanId: "b",
+				startMs: 30 * SECOND,
+				durationMs: 10 * SECOND,
+				genAi: { conversationId: "t2" },
+			}),
+			makeSpan({
+				spanId: "orphan",
+				traceId: "trace-other",
+				startMs: 35 * SECOND,
+				durationMs: SECOND,
+				isAiSpan: false,
+			}),
+		])
+
+		expect(turns[1]!.spans.map((span) => span.spanId)).toEqual(["b", "orphan"])
+	})
+
+	// The session-id exclusion has to survive the new path: for the six vendors
+	// that derive the session id from the conversation id, the id names the
+	// session and must not claim spans for turn 1.
+	it("still ignores a conversation id that only names the session", () => {
+		const turns = buildSessionTurns([
+			agentSpan({
+				spanId: "agent-1",
+				startMs: 0,
+				durationMs: 10 * SECOND,
+				sessionId: "sess-1",
+				genAi: { conversationId: "sess-1" },
+			}),
+			agentSpan({
+				spanId: "agent-2",
+				startMs: 60 * SECOND,
+				durationMs: 10 * SECOND,
+				sessionId: "sess-1",
+				genAi: { conversationId: "sess-1" },
+			}),
+		])
+
+		expect(turns.map((turn) => turn.anchorKind)).toEqual(["agent-root", "agent-root"])
 	})
 })

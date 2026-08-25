@@ -12,4 +12,13 @@ export interface TenantContext {
 	 * a synthetic user row.
 	 */
 	actorId?: ActorId
+	/**
+	 * Name the MCP client declared in its `initialize` handshake
+	 * (`clientInfo.name`, e.g. "claude-code"). When no explicit `actorId` is
+	 * pinned, issue-mutating MCP tools attribute writes to an agent actor
+	 * derived from this name instead of the authenticated user, so automation
+	 * driven through a human's session still reads as the agent in the
+	 * activity timeline.
+	 */
+	mcpClientName?: string
 }

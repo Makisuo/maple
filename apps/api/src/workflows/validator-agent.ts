@@ -17,7 +17,7 @@
 import { makeChatSessionId } from "@maple/domain/chat-session"
 import { ValidatorVerdict } from "@maple/domain/http"
 import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
-import type { Model } from "@maple/llm"
+import type { LanguageModel } from "@opencode-ai/ai"
 import { Effect, Option } from "effect"
 import { AGENTS } from "@/chat/agents"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -56,7 +56,7 @@ export interface ValidatorAgentInput {
 	readonly subject: InvestigationSubject
 	readonly snapshot: InvestigationSubjectSnapshot | null
 	readonly candidates: ReadonlyArray<ValidatorCandidateInput>
-	readonly model: Model
+	readonly model: LanguageModel
 	readonly tenant: TenantContext
 	/**
 	 * Wall clock after which the pass stops at its next step boundary.

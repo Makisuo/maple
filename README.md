@@ -13,7 +13,7 @@ Maple is now organized as a monorepo with a SPA frontend and an Effect-based bac
 ## Workspace Layout
 
 - `apps/web`: TanStack Router SPA (Vite)
-- `apps/api`: Effect HTTP API (Tinybird proxy + MCP server code + AI chat/triage on `@maple/llm`)
+- `apps/api`: Effect HTTP API (Tinybird proxy + MCP server code + AI chat/triage on `@opencode-ai/ai`)
 - `apps/ingest`: OTLP ingest gateway (key auth + org enrichment + collector forwarding)
 - `apps/landing`: Astro landing site
 - `apps/alerting`: Alert evaluation worker

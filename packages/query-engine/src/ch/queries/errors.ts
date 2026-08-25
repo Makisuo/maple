@@ -83,6 +83,8 @@ export interface ErrorsSharedFilters {
 	serviceVersions?: readonly string[]
 }
 
+type ErrorsFilterDimension = keyof ErrorsSharedFilters
+
 const sharedFilterConditions = (
 	$: {
 		ServiceName: CH.Expr<string>
@@ -91,11 +93,23 @@ const sharedFilterConditions = (
 		ServiceVersion: CH.Expr<string>
 	},
 	opts: ErrorsSharedFilters,
+	/**
+	 * The one dimension to leave unfiltered. A facet section conditions its
+	 * counts on every OTHER active filter but not its own, or ticking one option
+	 * would zero every alternative in the same section and leave no way back.
+	 */
+	except?: ErrorsFilterDimension,
 ): Array<CH.Condition | undefined> => [
-	opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-	opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
-	opts.errorLabels?.length ? CH.inList($.ErrorLabel, opts.errorLabels) : undefined,
-	opts.serviceVersions?.length ? CH.inList($.ServiceVersion, opts.serviceVersions) : undefined,
+	opts.services?.length && except !== "services" ? CH.inList($.ServiceName, opts.services) : undefined,
+	opts.deploymentEnvs?.length && except !== "deploymentEnvs"
+		? CH.inList($.DeploymentEnv, opts.deploymentEnvs)
+		: undefined,
+	opts.errorLabels?.length && except !== "errorLabels"
+		? CH.inList($.ErrorLabel, opts.errorLabels)
+		: undefined,
+	opts.serviceVersions?.length && except !== "serviceVersions"
+		? CH.inList($.ServiceVersion, opts.serviceVersions)
+		: undefined,
 ]
 
 // Errors by type
@@ -731,24 +745,36 @@ export type ErrorsFacetsOutput = FacetOutput
 
 export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFacetsOutput> {
 	const table = errorEventsTableForRecentScan(opts)
-	const baseWhere = ($: ColumnAccessor<typeof table.columns>): Array<CH.Condition | undefined> => [
-		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
-		CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
-		...sharedFilterConditions($, opts),
-		opts.fingerprintHashes?.length
-			? fingerprintHashIn($.FingerprintHash, opts.fingerprintHashes)
-			: undefined,
-	]
+	const baseWhere =
+		(except: ErrorsFilterDimension) =>
+		($: ColumnAccessor<typeof table.columns>): Array<CH.Condition | undefined> => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
+			...sharedFilterConditions($, opts, except),
+			opts.fingerprintHashes?.length
+				? fingerprintHashIn($.FingerprintHash, opts.fingerprintHashes)
+				: undefined,
+		]
+
+	/**
+	 * A facet counts ISSUES, not occurrences.
+	 *
+	 * The sidebar filters a list of issue rows, so the number beside an option
+	 * has to be the number of rows ticking it yields. `count()` reported
+	 * occurrences instead: one runaway dev CLI loop read 183.1K next to a list of
+	 * a dozen issues, and no two numbers on the page could be reconciled.
+	 */
+	const issueCount = ($: ColumnAccessor<typeof table.columns>) => CH.uniq($.FingerprintHash)
 
 	const serviceQuery = from(table)
 		.select(($) => ({
 			name: $.ServiceName,
-			count: CH.count(),
+			count: issueCount($),
 			facetType: CH.lit("service"),
 		}))
-		.where(baseWhere)
+		.where(baseWhere("services"))
 		.groupBy("name")
 		.orderBy(["count", "desc"])
 		.limit(100)
@@ -756,10 +782,10 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 	const envQuery = from(table)
 		.select(($) => ({
 			name: $.DeploymentEnv,
-			count: CH.count(),
+			count: issueCount($),
 			facetType: CH.lit("environment"),
 		}))
-		.where(($) => [...baseWhere($), $.DeploymentEnv.neq("")])
+		.where(($) => [...baseWhere("deploymentEnvs")($), $.DeploymentEnv.neq("")])
 		.groupBy("name")
 		.orderBy(["count", "desc"])
 		.limit(100)
@@ -768,10 +794,10 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 	const errorTypeQuery = from(table)
 		.select(($) => ({
 			name: $.ErrorLabel,
-			count: CH.count(),
+			count: issueCount($),
 			facetType: CH.lit("error_type"),
 		}))
-		.where(baseWhere)
+		.where(baseWhere("errorLabels"))
 		.groupBy("name")
 		.orderBy(["count", "desc"])
 		.limit(50)
@@ -782,10 +808,10 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 	const versionQuery = from(table)
 		.select(($) => ({
 			name: $.ServiceVersion,
-			count: CH.count(),
+			count: issueCount($),
 			facetType: CH.lit("version"),
 		}))
-		.where(($) => [...baseWhere($), $.ServiceVersion.neq("")])
+		.where(($) => [...baseWhere("serviceVersions")($), $.ServiceVersion.neq("")])
 		.groupBy("name")
 		.orderBy(["count", "desc"])
 		.limit(50)

@@ -42,7 +42,12 @@ const contextWindowTokens = Number(process.env.OPENROUTER_CONTEXT_WINDOW ?? 400_
 const workflowWorld = process.env.EVE_WORKFLOW_WORLD
 
 export default defineAgent({
-	model: openrouter(modelId),
+	// `usage.include` turns on OpenRouter usage accounting: every response then
+	// carries the actual amount charged (`usage.cost`, in USD credits), which the
+	// telemetry pipeline lifts into `gen_ai.usage.cost` (see
+	// `lib/genai-cost.ts`). Without it OpenRouter omits cost and per-session
+	// spend in Maple would have to be inferred from token prices.
+	model: openrouter(modelId, { usage: { include: true } }),
 	modelContextWindowTokens: contextWindowTokens,
 	...(workflowWorld ? { experimental: { workflow: { world: workflowWorld } } } : undefined),
 })

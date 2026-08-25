@@ -45,6 +45,7 @@ export function IssueCommentComposer({
 	const meIdentity: ActorIdentity | null = me
 		? {
 				kind: "user",
+				internal: false,
 				name: me.name,
 				detail: me.email,
 				imageUrl: me.imageUrl,

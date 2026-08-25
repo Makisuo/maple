@@ -9,27 +9,26 @@
  *
  * ## Why this cannot just read `LlmCallError.retryable`
  *
- * `lib/llm`'s `RequestExecutor` already retries — twice, capped at 10s — but it wraps
+ * `@opencode-ai/ai`'s `RequestExecutor` already retries — twice, capped at 10s — but it wraps
  * `executeOnce`, which resolves when *response headers* arrive. It cannot replay a stream that
  * died at token 400. That mid-stream case is the entire reason this module exists.
  *
- * And a mid-stream failure does not report itself as retryable. `route/client.ts`'s stream-level
+ * And a mid-stream failure is not retryable at the call level. The route client's stream-level
  * `Stream.catchCause` surfaces it as either `Transport` (the fetch body died) or
- * `InvalidProviderOutput` (framing or decoding blew up), and both of those reasons hardcode
- * `get retryable() { return false }` in `lib/llm/src/schema/errors.ts`. A classifier that trusted
- * the flag would retry only what the executor already retried — it would look correct, pass a
- * naive test, and do nothing.
+ * `InvalidProviderOutput` (framing or decoding blew up), and neither is in the `RETRYABLE_REASONS`
+ * set `platform/Llm.ts` classifies with. A classifier that stopped at `retryable` would retry only
+ * what the executor already retried — it would look correct, pass a naive test, and do nothing.
  */
 import type { LlmCallError } from "@maple/domain/llm"
 
 import { STEP_RETRY_BASE_MS, STEP_RETRY_FACTOR, STEP_RETRY_MAX_MS } from "./budgets"
 
 /**
- * Reasons the vendored executor cannot cover, because they arrive after response headers.
+ * Reasons the upstream executor cannot cover, because they arrive after response headers.
  *
  * `InvalidProviderOutput` is the debatable inclusion: genuinely malformed provider output will fail
  * identically on every attempt and burn the whole budget. It is here because an interrupted body
- * also lands on it — `route/client.ts`'s `streamError` only looks for a `Fail` reason and falls
+ * also lands on it — the route client's `streamError` only looks for a `Fail` reason and falls
  * through to `eventError` otherwise — and `MAX_STEP_ATTEMPTS` bounds the waste to a few seconds.
  * Narrow this to `Transport` alone if it proves noisy in practice.
  */
