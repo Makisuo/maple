@@ -42,7 +42,7 @@ const agentSessionSearchSchema = Schema.Struct({
 	// retention instead, which is why the page bothers to stamp them.
 	t: Schema.optional(Schema.String),
 	end: Schema.optional(Schema.String),
-	// Which of the three views is open. A search param rather than a route
+	// Which of the four views is open. A search param rather than a route
 	// segment on purpose: Back from the detail page returns to the list the
 	// reader came from, not to the view they looked at before this one.
 	view: Schema.optional(Schema.String),
@@ -287,6 +287,7 @@ function SessionDetailBody({
 							onViewChange={changeView}
 							turns={turns}
 							summary={summary}
+							truncated={truncated}
 							selectedSpanId={search.span}
 							onSelectSpan={selectSpan}
 						/>

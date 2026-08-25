@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
@@ -29,6 +29,7 @@ import {
 	type AiSpanCategory,
 } from "@/lib/agent-sessions/session-turns"
 import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
+import { Pill } from "./pill"
 import { SpanInlineDetail, type SpanDetailTab } from "./span-expansion"
 import { CATEGORY_FILL } from "./span-visuals"
 
@@ -170,13 +171,16 @@ export function SessionWaterfall({
 	// URL follows the reader rather than leading them.
 	const didInitialScroll = useRef(false)
 	useEffect(() => {
-		if (didInitialScroll.current) return
+		if (didInitialScroll.current || selectedSpanId === undefined) return
+		// Not before the scroller exists: the list element attaches in a layout
+		// effect, so on the render that mounts this view there is nothing to
+		// scroll and the link would silently land at the top.
+		if (getScrollElement() === null) return
 		didInitialScroll.current = true
-		if (selectedSpanId === undefined) return
 		setFocusedId(selectedSpanId)
 		const index = spanRowIndexById.get(selectedSpanId)
 		if (index !== undefined) virtualizer.scrollToIndex(index, { align: "center" })
-	}, [selectedSpanId, spanRowIndexById, setFocusedId, virtualizer])
+	}, [selectedSpanId, spanRowIndexById, setFocusedId, virtualizer, getScrollElement])
 
 	return (
 		<div className="@container flex grow flex-col">
@@ -634,25 +638,6 @@ function GapRow({ gap }: { gap: IdleGap }) {
 			<span className="shrink-0">idle {formatSessionDuration(gap.durationMs)}</span>
 			<span aria-hidden className="h-px flex-1 bg-border" />
 		</div>
-	)
-}
-
-const PILL_TONE = {
-	error: "bg-destructive/12 text-destructive",
-	warn: "bg-severity-warn/12 text-severity-warn",
-	outline: "border border-border text-muted-foreground",
-} satisfies Record<string, string>
-
-function Pill({ tone, children }: { tone: keyof typeof PILL_TONE; children: ReactNode }) {
-	return (
-		<span
-			className={cn(
-				"shrink-0 rounded-full px-1.5 py-px font-medium text-[10px] uppercase tracking-wide",
-				PILL_TONE[tone],
-			)}
-		>
-			{children}
-		</span>
 	)
 }
 

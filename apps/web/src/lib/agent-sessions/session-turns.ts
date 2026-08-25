@@ -315,7 +315,9 @@ function lastUserMessageText(value: unknown): string | undefined {
 	if (!Array.isArray(value)) return undefined
 	for (let i = value.length - 1; i >= 0; i--) {
 		const entry: unknown = value[i]
-		if (!isRecord(entry) || entry.role !== "user") continue
+		// Case-insensitively: vendors write "User" as readily as "user", and the
+		// transcript's own row builders already read the role that way.
+		if (!isRecord(entry) || String(entry.role).toLowerCase() !== "user") continue
 		const text = messageText(entry.parts) ?? messageText(entry.content)
 		if (text !== undefined) return text
 	}

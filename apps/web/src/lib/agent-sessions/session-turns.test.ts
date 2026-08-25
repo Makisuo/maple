@@ -436,6 +436,14 @@ describe("turn labels", () => {
 		expect(long?.endsWith("…")).toBe(true)
 	})
 
+	// Vendors write "User" as readily as "user", and the transcript's own row
+	// builders already read the role case-insensitively.
+	it("reads a capitalised role", () => {
+		expect(labelFor([{ role: "User", content: "restart the ingest worker" }])).toBe(
+			"restart the ingest worker",
+		)
+	})
+
 	it("gives up rather than guessing on a shape it does not recognize", () => {
 		expect(labelFor(undefined)).toBeUndefined()
 		expect(labelFor("a plain string")).toBeUndefined()

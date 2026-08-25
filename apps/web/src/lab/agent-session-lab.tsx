@@ -1,20 +1,33 @@
 import { useMemo, useState } from "react"
 
 import { SessionViews, type SessionView } from "@/components/agent-sessions/session-detail/session-views"
-import { buildAgentSessionFixture } from "@/lab/agent-session-fixture"
+import { Toggle } from "@maple/ui/components/ui/toggle"
+import { buildAgentSessionFixture, buildCaptureOffFixture } from "@/lab/agent-session-fixture"
 import { buildSessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns } from "@/lib/agent-sessions/session-turns"
 
 /**
- * The session detail page's three views over a fixture — the fastest way to
- * eyeball the Overview, the waterfall and the flow graph without a warehouse.
+ * The session detail page's views over a fixture — the fastest way to eyeball
+ * the Overview, the waterfall, the flow graph and the transcript without a
+ * warehouse.
+ *
+ * The two toggles are the session-level states no fixture can be in and out of
+ * at once: message capture off (the production default, which the transcript
+ * has to survive as pure structure) and a truncated response (the END of the
+ * session missing).
  *
  * The page's own scroller is a `PageLayout.ScrollArea`, which is where the
  * views' sticky control bar pins; the plain `overflow-auto` column here stands
  * in for it, so what scrolls and what sticks reads the same as on the page.
  */
 export function AgentSessionLab({ initialView }: { initialView?: SessionView }) {
-	const spans = useMemo(() => buildAgentSessionFixture(), [])
+	const [captureOff, setCaptureOff] = useState(false)
+	const [truncated, setTruncated] = useState(false)
+
+	const spans = useMemo(
+		() => (captureOff ? buildCaptureOffFixture() : buildAgentSessionFixture()),
+		[captureOff],
+	)
 	const turns = useMemo(() => buildSessionTurns(spans), [spans])
 	const summary = useMemo(() => buildSessionSummary({ spans, turns }), [spans, turns])
 
@@ -23,12 +36,34 @@ export function AgentSessionLab({ initialView }: { initialView?: SessionView }) 
 
 	return (
 		<div className="flex h-screen flex-col bg-background">
-			<div className="shrink-0 border-border border-b px-4 py-3">
-				<h1 className="font-semibold text-sm">{summary.title ?? "Agent session"}</h1>
-				<p className="text-muted-foreground text-xs">
-					{summary.spanCount} spans · {turns.length} turns
-					{selectedSpanId !== undefined && ` · selected ${selectedSpanId}`}
-				</p>
+			<div className="flex shrink-0 items-center gap-4 border-border border-b px-4 py-3">
+				<div className="min-w-0">
+					<h1 className="font-semibold text-sm">{summary.title ?? "Agent session"}</h1>
+					<p className="text-muted-foreground text-xs">
+						{summary.spanCount} spans · {turns.length} turns
+						{selectedSpanId !== undefined && ` · selected ${selectedSpanId}`}
+					</p>
+				</div>
+				<div className="ml-auto flex shrink-0 items-center gap-2">
+					<Toggle
+						variant="outline"
+						size="sm"
+						pressed={captureOff}
+						onPressedChange={setCaptureOff}
+						className="text-xs"
+					>
+						Capture off
+					</Toggle>
+					<Toggle
+						variant="outline"
+						size="sm"
+						pressed={truncated}
+						onPressedChange={setTruncated}
+						className="text-xs"
+					>
+						Truncated
+					</Toggle>
+				</div>
 			</div>
 			{/* The same slot and the same classes `PageLayout.ScrollArea` carries:
 			    the waterfall's virtualizer finds its scroller by that attribute, so
@@ -41,6 +76,7 @@ export function AgentSessionLab({ initialView }: { initialView?: SessionView }) 
 						onViewChange={setView}
 						turns={turns}
 						summary={summary}
+						truncated={truncated}
 						selectedSpanId={selectedSpanId}
 						onSelectSpan={setSelectedSpanId}
 					/>

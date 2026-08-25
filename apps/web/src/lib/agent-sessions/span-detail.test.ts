@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { sessionToolResults, spanMessages, spanToolCalls } from "./span-detail"
+import { sessionToolResults, spanMessages, spanToolCalls, toolResultFor } from "./span-detail"
 import { llmSpan, toolSpan } from "./span-test-support"
 
 describe("spanMessages", () => {
@@ -83,6 +83,53 @@ describe("spanMessages", () => {
 	it("captures nothing when nothing was captured — the ordinary case", () => {
 		const span = llmSpan({ spanId: "l1", startMs: 0, durationMs: 1000 })
 		expect(spanMessages(span)).toEqual([])
+	})
+
+	// Reasoning read as assistant prose is the worst kind of wrong: it puts words
+	// in the model's mouth that it never said to the user.
+	it("reads reasoning parts as reasoning, in all three vendor spellings", () => {
+		const span = llmSpan({
+			spanId: "l1",
+			startMs: 0,
+			durationMs: 1000,
+			genAi: {
+				outputMessages: [
+					{
+						role: "assistant",
+						parts: [
+							{ type: "reasoning", content: "semconv spelling" },
+							{ type: "thinking", thinking: "anthropic spelling" },
+							{ type: "reasoning", text: "the text key" },
+							{ type: "redacted_thinking", data: "AAAA…" },
+							{ type: "text", content: "the reply" },
+						],
+					},
+				],
+			},
+		})
+
+		expect(spanMessages(span)[0]!.parts).toEqual([
+			{ kind: "reasoning", text: "semconv spelling", redacted: false },
+			{ kind: "reasoning", text: "anthropic spelling", redacted: false },
+			{ kind: "reasoning", text: "the text key", redacted: false },
+			{ kind: "reasoning", text: undefined, redacted: true },
+			{ kind: "text", text: "the reply" },
+		])
+	})
+
+	it("keeps a reasoning part with no text as a labelled part, not raw JSON", () => {
+		const span = llmSpan({
+			spanId: "l1",
+			startMs: 0,
+			durationMs: 1000,
+			genAi: {
+				outputMessages: [{ role: "assistant", parts: [{ type: "reasoning", signature: "sig" }] }],
+			},
+		})
+
+		expect(spanMessages(span)[0]!.parts).toEqual([
+			{ kind: "reasoning", text: undefined, redacted: false },
+		])
 	})
 })
 
@@ -223,5 +270,128 @@ describe("spanToolCalls", () => {
 		})
 
 		expect(sessionToolResults([tool, next]).get("toolu_01")).toBe("first-hand")
+	})
+
+	// Semconv says `response`; Maple's own emitter writes `result`. Reading only
+	// the documented key loses every result this codebase produces.
+	it("reads an echoed response under the `result` key too", () => {
+		const next = llmSpan({
+			spanId: "l1",
+			startMs: 0,
+			durationMs: 1000,
+			genAi: {
+				inputMessages: [
+					{ role: "tool", parts: [{ type: "tool_call_response", id: "toolu_01", result: "42 rows" }] },
+				],
+			},
+		})
+
+		expect(sessionToolResults([next]).get("toolu_01")).toBe("42 rows")
+	})
+})
+
+describe("spanMessages — reasoning payloads", () => {
+	const reasoningPart = (part: Record<string, unknown>) =>
+		spanMessages(
+			llmSpan({
+				spanId: "l1",
+				startMs: 0,
+				durationMs: 1000,
+				genAi: { outputMessages: [{ role: "assistant", parts: [part] }] },
+			}),
+		)[0]!.parts[0]
+
+	// A payload the reader cannot see is worse than one that is ugly — and that
+	// holds for reasoning too, whatever shape the vendor wrapped it in.
+	it("walks a block-array reasoning content down to its text", () => {
+		expect(
+			reasoningPart({
+				type: "reasoning",
+				content: [
+					{ type: "text", content: "both lanes" },
+					{ type: "text", content: "point at carts" },
+				],
+			}),
+		).toStrictEqual({ kind: "reasoning", text: "both lanes\npoint at carts", redacted: false })
+	})
+
+	it("keeps an object reasoning payload as its own JSON rather than dropping it", () => {
+		expect(reasoningPart({ type: "thinking", thinking: { summary: "carts" } })).toStrictEqual({
+			kind: "reasoning",
+			text: '{"summary":"carts"}',
+			redacted: false,
+		})
+	})
+
+	it("prefers `text` over `thinking` when a vendor writes both", () => {
+		expect(reasoningPart({ type: "thinking", text: "the text key", thinking: "the other" })).toStrictEqual(
+			{ kind: "reasoning", text: "the text key", redacted: false },
+		)
+	})
+
+	it("reports no reasoning text for an empty string", () => {
+		expect(reasoningPart({ type: "thinking", thinking: "" })).toStrictEqual({
+			kind: "reasoning",
+			text: undefined,
+			redacted: false,
+		})
+	})
+})
+
+describe("sessionToolResults", () => {
+	// An echo carrying neither `response` nor `result` is an echo of the CALL,
+	// not of its answer. Registering it would claim the id and block the real one.
+	it("does not let an empty echo claim a call id", () => {
+		const spans = [
+			llmSpan({
+				spanId: "l1",
+				startMs: 0,
+				durationMs: 1000,
+				genAi: {
+					inputMessages: [
+						{ role: "tool", parts: [{ type: "tool_call_response", id: "toolu_1" }] },
+					],
+				},
+			}),
+			llmSpan({
+				spanId: "l2",
+				startMs: 2000,
+				durationMs: 1000,
+				genAi: {
+					inputMessages: [
+						{ role: "tool", parts: [{ type: "tool_call_response", id: "toolu_1", result: "62 rows" }] },
+					],
+				},
+			}),
+		]
+		expect(toolResultFor(sessionToolResults(spans), "trace-1", "toolu_1")).toBe("62 rows")
+	})
+
+	// Call ids are unique within a run, not within a session: two lanes both
+	// issue `toolu_1`, and each one's own trace has the answer it got.
+	it("prefers the calling span's own trace when two traces reuse a call id", () => {
+		const spans = [
+			toolSpan({
+				spanId: "t-a",
+				traceId: "trace-a",
+				startMs: 0,
+				durationMs: 500,
+				toolName: "run_sql",
+				genAi: { toolCallId: "toolu_1", toolCallResult: "the a answer" },
+			}),
+			toolSpan({
+				spanId: "t-b",
+				traceId: "trace-b",
+				startMs: 1000,
+				durationMs: 500,
+				toolName: "run_sql",
+				genAi: { toolCallId: "toolu_1", toolCallResult: "the b answer" },
+			}),
+		]
+		const results = sessionToolResults(spans)
+		expect(toolResultFor(results, "trace-a", "toolu_1")).toBe("the a answer")
+		expect(toolResultFor(results, "trace-b", "toolu_1")).toBe("the b answer")
+		// A caller from a third trace still gets the session-wide answer.
+		expect(toolResultFor(results, "trace-z", "toolu_1")).toBe("the a answer")
 	})
 })

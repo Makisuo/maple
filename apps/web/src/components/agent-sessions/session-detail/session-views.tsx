@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
 
-import { ChartBarHorizontalIcon, GridIcon, NetworkNodesIcon } from "@/components/icons"
+import { ChartBarHorizontalIcon, GridIcon, NetworkNodesIcon, TranscriptIcon } from "@/components/icons"
 import { SearchInput } from "@maple/ui/components/ui/search-input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { Toggle } from "@maple/ui/components/ui/toggle"
@@ -12,32 +12,40 @@ import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { SessionFlow } from "./session-flow"
 import { SessionOverview } from "./session-overview"
 import { sessionToolResults } from "@/lib/agent-sessions/span-detail"
+import { SessionTranscript } from "./session-transcript"
 import { SessionWaterfall } from "./session-waterfall"
 import type { SpanDetailTab } from "./span-expansion"
 
-export const SESSION_VIEWS = ["overview", "trace", "flow"] as const
+export const SESSION_VIEWS = ["overview", "trace", "flow", "transcript"] as const
 export type SessionView = (typeof SESSION_VIEWS)[number]
 
 export function isSessionView(value: string): value is SessionView {
 	return (SESSION_VIEWS as readonly string[]).includes(value)
 }
 
+/** Views whose toolbar is the debug pair's: filter, span-kind, and one view-own chip. */
+const DEBUG_VIEWS: readonly SessionView[] = ["trace", "flow"]
+
 /**
- * The three readings of one session, behind one switcher.
+ * The four readings of one session, behind one switcher.
  *
  * They are siblings rather than sections of a scroll because they answer
- * different questions: Overview is read once and left, while Trace and Flow are
- * lived in for minutes. Splitting them is what gives each the whole viewport —
- * and it is why nothing here is shared between Overview and the other two but
- * the switcher itself. The debug pair *does* share its toolbar: the filter and
- * the span-kind toggle mean the same thing in both, so a Trace ↔ Flow switch
- * keeps them, along with what the reader expanded and where they zoomed.
+ * different questions: Overview is read once and left, while Trace, Flow and
+ * Transcript are lived in for minutes. Splitting them is what gives each the
+ * whole viewport — and it is why nothing here is shared between Overview and
+ * the others but the switcher itself. The debug pair *does* share its toolbar:
+ * the filter and the span-kind toggle mean the same thing in both, so a Trace ↔
+ * Flow switch keeps them, along with what the reader expanded and where they
+ * zoomed. Transcript shares the filter — a query means the same thing there —
+ * but not the span-kind toggle, which it has no use for: it never shows the
+ * app's own HTTP spans at all.
  */
 export function SessionViews({
 	view,
 	onViewChange,
 	turns,
 	summary,
+	truncated,
 	selectedSpanId,
 	onSelectSpan,
 }: {
@@ -45,6 +53,8 @@ export function SessionViews({
 	onViewChange: (view: SessionView) => void
 	turns: readonly SessionTurn[]
 	summary: SessionSummary
+	/** The response dropped the END of the session — the transcript says so. */
+	truncated: boolean
 	/** The span expanded inline / open in the flow drawer (`?span=`). */
 	selectedSpanId: string | undefined
 	/** Raised with a span id to expand it, `undefined` to collapse. */
@@ -54,21 +64,28 @@ export function SessionViews({
 	const [agentSpansOnly, setAgentSpansOnly] = useState(true)
 	const [collapseIdle, setCollapseIdle] = useState(true)
 	const [mergeRepeats, setMergeRepeats] = useState(false)
+	const [showThinking, setShowThinking] = useState(true)
+	const [showPayloads, setShowPayloads] = useState(true)
 	// The views unmount when the view changes, so what the reader opened,
 	// collapsed or zoomed lives here — otherwise a look at Flow and back costs
 	// them the place they had found in a 600-span session.
 	const [collapsedTurns, setCollapsedTurns] = useState<ReadonlySet<string>>(() => new Set())
+	// Transcript rows virtualize, so a row scrolled out of view unmounts and its
+	// local state would go with it: what the reader opened lives here instead,
+	// keyed by row, and holds the rows flipped AWAY from their default.
+	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
 	const [zoom, setZoom] = useState(1)
 	// One tab choice for every span expansion, in both debug views: switching
 	// spans — or Trace ↔ Flow — keeps the reader on the tab they chose.
 	// `undefined` means no choice yet, and the expansion picks by content.
 	const [spanTab, setSpanTab] = useState<SpanDetailTab | undefined>(undefined)
 
-	// 1/2/3 switch views from anywhere on the page — the switcher stays
+	// 1/2/3/4 switch views from anywhere on the page — the switcher stays
 	// reachable without the mouse, which is the point of pinning it up here.
 	useAppHotkey("session.viewOverview", () => onViewChange("overview"))
 	useAppHotkey("session.viewTrace", () => onViewChange("trace"))
 	useAppHotkey("session.viewFlow", () => onViewChange("flow"))
+	useAppHotkey("session.viewTranscript", () => onViewChange("transcript"))
 
 	// The sticky control bar wraps at narrow widths, so the views stack under its
 	// measured height rather than an assumed one.
@@ -85,8 +102,8 @@ export function SessionViews({
 	}, [view])
 
 	// Results are reported on other spans than the calls that made them — tool
-	// spans, or the next call's input history — so both debug views resolve
-	// them through one session-wide index rather than per expanded span.
+	// spans, or the next call's input history — so every view resolves them
+	// through one session-wide index rather than per expanded span.
 	const toolResults = useMemo(() => sessionToolResults(turns.flatMap((turn) => turn.spans)), [turns])
 
 	return (
@@ -117,6 +134,10 @@ export function SessionViews({
 						<NetworkNodesIcon size={14} />
 						Flow
 					</TabsTrigger>
+					<TabsTrigger value="transcript">
+						<TranscriptIcon size={14} />
+						Transcript
+					</TabsTrigger>
 				</TabsList>
 
 				{/* Per view: none of these shape the Overview, and a row of controls
@@ -126,32 +147,53 @@ export function SessionViews({
 						<SearchInput
 							value={query}
 							onValueChange={setQuery}
-							placeholder="Filter spans"
+							placeholder={view === "transcript" ? "Filter transcript" : "Filter spans"}
 							className="w-56"
 						/>
-						<ViewChip
-							pressed={agentSpansOnly}
-							onPressedChange={setAgentSpansOnly}
-							title="Hides the app's own HTTP/DB spans"
-						>
-							Agent spans only
-						</ViewChip>
-						{view === "trace" ? (
-							<ViewChip pressed={collapseIdle} onPressedChange={setCollapseIdle}>
-								Collapse idle
-							</ViewChip>
+						{DEBUG_VIEWS.includes(view) ? (
+							<>
+								<ViewChip
+									pressed={agentSpansOnly}
+									onPressedChange={setAgentSpansOnly}
+									title="Hides the app's own HTTP/DB spans"
+								>
+									Agent spans only
+								</ViewChip>
+								{view === "trace" ? (
+									<ViewChip pressed={collapseIdle} onPressedChange={setCollapseIdle}>
+										Collapse idle
+									</ViewChip>
+								) : (
+									<ViewChip pressed={mergeRepeats} onPressedChange={setMergeRepeats}>
+										Merge repeat tools
+									</ViewChip>
+								)}
+							</>
 						) : (
-							<ViewChip pressed={mergeRepeats} onPressedChange={setMergeRepeats}>
-								Merge repeat tools
-							</ViewChip>
+							<>
+								<ViewChip
+									pressed={showThinking}
+									onPressedChange={setShowThinking}
+									title="Model reasoning blocks, collapsed by default"
+								>
+									Thinking
+								</ViewChip>
+								<ViewChip
+									pressed={showPayloads}
+									onPressedChange={setShowPayloads}
+									title="Tool arguments and results, open by default"
+								>
+									Tool payloads
+								</ViewChip>
+							</>
 						)}
 					</div>
 				)}
 			</div>
 
-			{/* Overview and Trace carry the bottom padding the page scroller gave
-			    up (`pb-0`, so the Flow floor can pin flush — see the route); the
-			    Flow view stays unpadded for the same reason. */}
+			{/* Overview, Trace and Transcript carry the bottom padding the page
+			    scroller gave up (`pb-0`, so the Flow floor can pin flush — see the
+			    route); the Flow view stays unpadded for the same reason. */}
 			<TabsContent value="overview" className="flex flex-[1_1_auto] flex-col pb-4">
 				<SessionOverview turns={turns} summary={summary} />
 			</TabsContent>
@@ -184,6 +226,23 @@ export function SessionViews({
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
 					toolResults={toolResults}
+					onOpenTraceView={() => onViewChange("trace")}
+				/>
+			</TabsContent>
+			<TabsContent value="transcript" className="flex flex-[1_1_auto] flex-col pb-4">
+				<SessionTranscript
+					turns={turns}
+					toolResults={toolResults}
+					query={query}
+					showThinking={showThinking}
+					showPayloads={showPayloads}
+					truncated={truncated}
+					collapsedTurns={collapsedTurns}
+					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
+					openRows={openRows}
+					onToggleRow={(key) => setOpenRows((previous) => toggled(previous, key))}
+					selectedSpanId={selectedSpanId}
+					onSelectSpan={onSelectSpan}
 					onOpenTraceView={() => onViewChange("trace")}
 				/>
 			</TabsContent>

@@ -832,6 +832,7 @@ describe("SessionViews", () => {
 				onViewChange={setView}
 				turns={props.turns ?? turns}
 				summary={props.summary ?? summary}
+				truncated={false}
 				selectedSpanId={selectedSpanId}
 				onSelectSpan={setSelectedSpanId}
 			/>

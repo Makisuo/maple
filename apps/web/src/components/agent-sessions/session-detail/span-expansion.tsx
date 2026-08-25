@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { Schema } from "effect"
 
@@ -29,13 +29,15 @@ import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import {
 	spanMessages,
 	spanToolCalls,
+	type SessionToolResults,
 	type SpanMessage,
 	type SpanMessagePart,
 	type SpanToolCall,
 } from "@/lib/agent-sessions/span-detail"
 import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
+import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
+import { ClampedText, firstLine } from "./clamped-text"
 import { CATEGORY_FILL } from "./span-visuals"
-import { formatCost } from "./session-overview"
 
 /**
  * The payload of one span, expanded in place — under its waterfall row, or in
@@ -45,10 +47,6 @@ import { formatCost } from "./session-overview"
  */
 
 export type SpanDetailTab = "details" | "messages" | "tools" | "logs"
-
-/** A message body clamps at ~12 lines with a "show full" control: prompts run
- *  to tens of thousands of tokens, and the list has to stay navigable. */
-const CLAMP_CLASS = "line-clamp-[12]"
 
 export function SpanExpansion({
 	span,
@@ -69,7 +67,7 @@ export function SpanExpansion({
 	onTabChange: (tab: SpanDetailTab) => void
 	/** The session's captured tool results by call id (`sessionToolResults`),
 	 *  so each call shows its response even when another span reported it. */
-	toolResults?: ReadonlyMap<string, string>
+	toolResults?: SessionToolResults
 }) {
 	const messages = useMemo(() => spanMessages(span), [span])
 	const toolCalls = useMemo(() => spanToolCalls(span, toolResults), [span, toolResults])
@@ -145,7 +143,7 @@ export function SpanInlineDetail({
 	span: AiSessionSpan
 	tab: SpanDetailTab | undefined
 	onTabChange: (tab: SpanDetailTab) => void
-	toolResults?: ReadonlyMap<string, string>
+	toolResults?: SessionToolResults
 }) {
 	return (
 		<div
@@ -178,7 +176,7 @@ export function SpanDrawer({
 	turnOrdinal: string | undefined
 	tab: SpanDetailTab | undefined
 	onTabChange: (tab: SpanDetailTab) => void
-	toolResults?: ReadonlyMap<string, string>
+	toolResults?: SessionToolResults
 	onClose: () => void
 	/** Switch to the Traces view with this span still selected. */
 	onOpenTraceView: () => void
@@ -411,10 +409,7 @@ function MessagesSection({ messages, span }: { messages: readonly SpanMessage[];
  *  rarely what the reader came for. */
 function SystemMessageRow({ message }: { message: SpanMessage }) {
 	const [open, setOpen] = useState(false)
-	const text = message.parts
-		.map((part) => (part.kind === "text" ? part.text : ""))
-		.join("\n")
-		.trim()
+	const text = collapsedText(message.parts)
 
 	return (
 		<div className="rounded-md border border-border/60 bg-muted/30">
@@ -461,7 +456,7 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 				    response facts belong on them and on nothing else. */}
 				{message.origin === "output" && (
 					<span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/80">
-						{outputMeta(span)}
+						{callMetaLine(span)}
 					</span>
 				)}
 				<span aria-hidden className="h-px min-w-4 flex-1 bg-border/60" />
@@ -475,23 +470,34 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 	)
 }
 
-function outputMeta(span: AiSessionSpan): string {
-	const parts: string[] = []
-	const model = spanModel(span)
-	if (model !== undefined) parts.push(model)
-	const ttftMs = spanTtftMs(span)
-	if (ttftMs !== undefined) parts.push(`first token ${formatDuration(ttftMs)}`)
-	const finish = span.genAi.responseFinishReasons
-	if (finish !== undefined && finish.length > 0) parts.push(`stop ${finish.join(", ")}`)
-	return parts.join(" · ")
-}
-
 function MessagePart({ part }: { part: SpanMessagePart }) {
 	if (part.kind === "text") return <ClampedText text={part.text} />
+	if (part.kind === "reasoning") return <ReasoningPart part={part} />
 	if (part.kind === "tool_call") {
 		return <PayloadCard label="tool_call" name={part.name} meta={part.id} body={part.argumentsText} />
 	}
 	return <PayloadCard label="tool_result" meta={part.id} body={part.resultText} />
+}
+
+/** Reasoning is the model thinking, not the model answering, so it is set apart
+ *  rather than run in with the reply above it. */
+function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reasoning" }> }) {
+	return (
+		<div className="min-w-0 border-chart-5/50 border-l-2 pl-2.5">
+			<span className="font-medium font-mono text-[10px] text-chart-5 uppercase tracking-widest">
+				Reasoning
+			</span>
+			{part.redacted || part.text === undefined ? (
+				<p className="text-muted-foreground text-xs italic">
+					{part.redacted
+						? "Redacted by the provider — the reasoning was returned sealed."
+						: "No reasoning text was captured."}
+				</p>
+			) : (
+				<ClampedText text={part.text} />
+			)}
+		</div>
+	)
 }
 
 /* -------------------------------------------------------------------------- */
@@ -693,53 +699,24 @@ function EmptyNote({ children }: { children: ReactNode }) {
 	return <p className="py-6 text-center text-muted-foreground text-sm">{children}</p>
 }
 
-function firstLine(text: string): string {
-	for (const rawLine of text.split("\n")) {
-		const line = rawLine.trim()
-		if (line !== "") return line
-	}
-	return ""
-}
-
 /**
- * A body that clamps at ~12 lines with a "Show full" control. Overflow is
- * measured, not guessed from length: 12 short lines fit and never grow a
- * control, while one very long line wraps past the clamp and does.
+ * A message's parts as one preview body.
+ *
+ * Reasoning is labelled rather than dropped: the module's contract is that
+ * everything captured stays visible, and a system message whose only content
+ * was a reasoning block would otherwise collapse to an empty row.
  */
-function ClampedText({ text, mono = false }: { text: string; mono?: boolean }) {
-	const [expanded, setExpanded] = useState(false)
-	const [clamped, setClamped] = useState(false)
-	const bodyRef = useRef<HTMLDivElement>(null)
-
-	useLayoutEffect(() => {
-		const body = bodyRef.current
-		if (body === null || expanded) return
-		setClamped(body.scrollHeight > body.clientHeight + 1)
-	}, [text, expanded])
-
-	return (
-		<div className="min-w-0">
-			<div
-				ref={bodyRef}
-				className={cn(
-					"whitespace-pre-wrap break-words",
-					mono
-						? "font-mono text-muted-foreground text-xs leading-relaxed"
-						: "max-w-[70rem] text-foreground text-sm leading-relaxed",
-					!expanded && CLAMP_CLASS,
-				)}
-			>
-				{text}
-			</div>
-			{(clamped || expanded) && (
-				<button
-					type="button"
-					onClick={() => setExpanded((previous) => !previous)}
-					className="mt-1 cursor-pointer text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
-				>
-					{expanded ? "Show less" : "Show full"}
-				</button>
-			)}
-		</div>
-	)
+function collapsedText(parts: readonly SpanMessagePart[]): string {
+	return parts
+		.map((part) => {
+			if (part.kind === "text") return part.text
+			if (part.kind === "reasoning") {
+				return part.text === undefined ? "[thinking — no text captured]" : `THINKING\n${part.text}`
+			}
+			return ""
+		})
+		.filter((text) => text !== "")
+		.join("\n")
+		.trim()
 }
+
