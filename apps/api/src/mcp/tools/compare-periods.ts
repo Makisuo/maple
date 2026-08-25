@@ -1,4 +1,4 @@
-import { McpQueryError, optionalStringParam, type McpToolRegistrar } from "./types"
+import { McpQueryError, optionalStringParam, optionalTimeParam, type McpToolRegistrar } from "./types"
 import { queryWarehouse } from "@/mcp/lib/query-warehouse"
 import { getSpamPatternsParam } from "@/services/errors/spam-patterns"
 import { resolveTimeRange } from "@/mcp/lib/time"
@@ -13,15 +13,15 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 		"compare_periods",
 		"Compare system health between two time periods to detect regressions. Flags regressions automatically: error_rate_up, latency_up, throughput_drop. Useful after deploys or incident reports. Use around_time to auto-generate a 30min before/after comparison.",
 		Schema.Struct({
-			current_start: optionalStringParam(
+			current_start: optionalTimeParam(
 				"Start of current period (YYYY-MM-DD HH:mm:ss). Defaults to 1 hour ago",
 			),
-			current_end: optionalStringParam("End of current period (YYYY-MM-DD HH:mm:ss). Defaults to now"),
-			previous_start: optionalStringParam(
+			current_end: optionalTimeParam("End of current period (YYYY-MM-DD HH:mm:ss). Defaults to now"),
+			previous_start: optionalTimeParam(
 				"Start of previous period. Defaults to 1 hour before current_start",
 			),
-			previous_end: optionalStringParam("End of previous period. Defaults to current_start"),
-			around_time: optionalStringParam(
+			previous_end: optionalTimeParam("End of previous period. Defaults to current_start"),
+			around_time: optionalTimeParam(
 				"Auto-generate 30min before/after comparison around this time (YYYY-MM-DD HH:mm:ss). Overrides current_start/end and previous_start/end",
 			),
 			service_name: optionalStringParam("Scope comparison to a specific service"),

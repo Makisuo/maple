@@ -2,6 +2,7 @@ import {
 	optionalBooleanParam,
 	optionalNumberParam,
 	optionalStringParam,
+	optionalTimeParam,
 	type McpToolRegistrar,
 } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
@@ -9,7 +10,6 @@ import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import {
 	resolveTimeRange,
 	rangeExceededResult,
-	timeRangeInvalidResult,
 	MCP_SEARCH_MAX_HOURS,
 } from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
@@ -24,8 +24,8 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 		"search_sessions",
 		"List and filter browser session replays. Filter by WHO (user_id — the app's end-user id; user_search — their name or email; group_name — their company/team), by client (browser, country, device_type), by whether the session errored (has_errors), by how long it lasted (duration/active bounds), and/or by WHAT HAPPENED inside it (event_type, level, http_status_min, url_contains, message_contains, trace_id). Returns each session's metadata including the end-user id. All filters are ANDed. Follow up with `get_session_transcript` to read a session's events or `get_session_traces` to see the backend traces it produced.",
 		Schema.Struct({
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			// Session metadata filters (who / where / how long)
 			user_id: optionalStringParam("Exact match on the session's end-user id (e.g. 4632)"),
 			user_search: optionalStringParam(
@@ -64,7 +64,6 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 				maxHours: MCP_SEARCH_MAX_HOURS,
 			})
 			const { st, et } = range
-			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "search_sessions")
 			if (range.exceeded) return rangeExceededResult(range, "search_sessions")
 			const lim = clampLimit(params.limit, { defaultValue: 25, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })

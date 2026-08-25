@@ -136,9 +136,14 @@ const parseWindow = (
 	},
 ) =>
 	Effect.gen(function* () {
+		// Both bounds are `Timestamp`, whose schema already rejected anything
+		// unparseable at the HTTP boundary — so `Date.parse` cannot be NaN here and
+		// ordering is the only thing left to check. Testing all three together used
+		// to report an unparseable `start_time` as "end_time must be later than
+		// start_time", blaming the wrong parameter.
 		const startMs = Date.parse(start)
 		const endMs = Date.parse(end)
-		if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+		if (endMs <= startMs) {
 			return yield* Effect.fail(
 				V2TimeRangeInvalid.make("end_time must be later than start_time.", {
 					param: "end_time",

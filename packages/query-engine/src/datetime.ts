@@ -9,6 +9,8 @@
 // DateTime string into an unambiguous UTC value. Already-zoned strings (with a
 // `Z` or numeric offset) and non-matching shapes are passed through untouched.
 
+import { Schema, SchemaGetter } from "effect"
+
 const WAREHOUSE_DATETIME_PATTERN = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?$/
 
 /**
@@ -65,6 +67,130 @@ export function formatWarehouseDateTime(epochMs: number): string {
  */
 export function formatWarehouseDateTimeMs(epochMs: number): string {
 	return new Date(epochMs).toISOString().replace("T", " ").replace(/Z$/, "")
+}
+
+// Warehouse time as a schema
+//
+// Everything above is string plumbing any caller may skip. What follows makes
+// a *validated* warehouse timestamp its own type, so the plumbing can't be
+// skipped by accident: a `WarehouseDateTime` exists only because something
+// decoded it, and the places that build SQL ask for that type by name.
+
+/**
+ * The accepted input grammar for an agent- or client-supplied timestamp:
+ * `YYYY-MM-DD[ T]HH:MM:SS` with an optional fractional part and an optional
+ * `Z`/±HH:MM offset, or a bare `YYYY-MM-DD` date.
+ *
+ * Deliberately narrower than `Date.parse`, which is the whole point. `Date.parse`
+ * accepts `"2026"`, `"Aug 25"` and other partials, so a NaN check alone lets a
+ * sheared timestamp through as a confidently-wrong window rather than an error.
+ */
+const TIME_INPUT_PATTERN =
+	/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?)?$/
+
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+const isLeapYear = (year: number) => (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+
+/**
+ * Structure is not enough: `2026-13-01` and `2026-02-30` both match the grammar
+ * and are both nonsense.
+ *
+ * The fields are checked as written rather than by parsing, because V8 does not
+ * reject day overflow — `Date.parse("2026-02-30T00:00:00Z")` silently rolls over
+ * to 2 March. Left to the parser, a typo becomes a confidently wrong window
+ * instead of an error. Timezone offsets legitimately shift the day, so the
+ * as-written fields are the only stable thing to validate.
+ */
+const hasRealCalendarFields = (value: string): boolean => {
+	const [, y, mo, d, h, mi, s] =
+		/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2}))?/.exec(value) ?? []
+	if (y === undefined || mo === undefined || d === undefined) return false
+
+	const month = Number(mo)
+	if (month < 1 || month > 12) return false
+
+	const maxDay = month === 2 && isLeapYear(Number(y)) ? 29 : (DAYS_IN_MONTH[month - 1] as number)
+	const day = Number(d)
+	if (day < 1 || day > maxDay) return false
+
+	// Absent for a bare date, in which case midnight is implied.
+	if (h === undefined || mi === undefined || s === undefined) return true
+	return Number(h) <= 23 && Number(mi) <= 59 && Number(s) <= 59
+}
+
+/**
+ * Grammar and calendar validity in one check, so one message can cover both.
+ *
+ * The message matters as much as the verdict: these failures are read by models
+ * mid-tool-call and are their only chance to self-correct. The default rendering
+ * for a pattern check is the raw regex source, which tells a caller nothing about
+ * what to send instead — so the offending value and the accepted shapes are
+ * spelled out here.
+ */
+const isWarehouseTimeInput = Schema.makeFilter(
+	(value: string) => {
+		if (!TIME_INPUT_PATTERN.test(value)) {
+			return `\`${value}\` is not a timestamp — expected \`YYYY-MM-DD HH:mm:ss\` (UTC) or an ISO-8601 timestamp`
+		}
+		if (!hasRealCalendarFields(value) || Number.isNaN(parseWarehouseDateTime(value))) {
+			return `\`${value}\` is not a real date and time`
+		}
+		return undefined
+	},
+	{ title: "warehouseTimeInput" },
+)
+
+/**
+ * A warehouse `DateTime` literal: canonical `YYYY-MM-DD HH:mm:ss`, UTC, no
+ * fractional part. Safe to interpolate into a `DateTime` comparison or wrap in
+ * `toDateTime()`.
+ *
+ * Branded so it cannot be produced by string manipulation — only by decoding
+ * through {@link WarehouseTimeInput} or by {@link warehouseDateTime}.
+ */
+export const WarehouseDateTime = Schema.String.pipe(
+	Schema.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/), isWarehouseTimeInput),
+	Schema.brand("@maple/WarehouseDateTime"),
+).annotate({
+	title: "WarehouseDateTime",
+	description: "UTC warehouse DateTime literal, `YYYY-MM-DD HH:mm:ss` (e.g. `2026-08-25 08:47:52`).",
+})
+export type WarehouseDateTime = Schema.Schema.Type<typeof WarehouseDateTime>
+
+/**
+ * Decodes any accepted timestamp input — ISO-8601 with `Z` or an offset, the
+ * warehouse shape with or without fractional seconds, a bare date — into a
+ * canonical {@link WarehouseDateTime}.
+ *
+ * Rejecting here rather than at the warehouse is the point: an unparseable bound
+ * used to reach ClickHouse verbatim and fail as `Cannot parse string … as
+ * DateTime`, an error the caller could neither predict nor act on.
+ */
+export const WarehouseTimeInput = Schema.String.pipe(
+	Schema.check(isWarehouseTimeInput),
+	Schema.decodeTo(WarehouseDateTime, {
+		// Total by construction: the checks above already proved this parses.
+		decode: SchemaGetter.transform((value: string) => warehouseDateTime(parseWarehouseDateTime(value))),
+		encode: SchemaGetter.passthrough(),
+	}),
+).annotate({
+	title: "WarehouseTimeInput",
+	// `examples` is typed against the decoded (branded) type while the published
+	// schema shows the encoded form, so the samples live in the description —
+	// which is the part a model reads anyway.
+	description:
+		"`YYYY-MM-DD HH:mm:ss` (UTC) or an ISO-8601 timestamp, e.g. `2026-08-25 08:47:52` or `2026-08-25T08:47:52Z`.",
+})
+
+/**
+ * Format epoch milliseconds as a {@link WarehouseDateTime}.
+ *
+ * The one sanctioned way to mint the brand without decoding, for values that are
+ * already numbers — `Date.now()`, a window offset — and so cannot be malformed.
+ */
+export function warehouseDateTime(epochMs: number): WarehouseDateTime {
+	return WarehouseDateTime.make(formatWarehouseDateTime(epochMs))
 }
 
 // Relative range shorthand — single source of truth

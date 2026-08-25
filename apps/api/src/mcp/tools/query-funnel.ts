@@ -1,6 +1,7 @@
 import {
 	optionalNumberParam,
 	optionalStringParam,
+	optionalTimeParam,
 	requiredStringParam,
 	validationError,
 	type McpToolRegistrar,
@@ -10,7 +11,6 @@ import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import {
 	resolveTimeRange,
 	rangeExceededResult,
-	timeRangeInvalidResult,
 	MCP_DISCOVERY_MAX_HOURS,
 } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
@@ -77,10 +77,10 @@ export function registerQueryFunnelTool(server: McpToolRegistrar) {
 			breakdown_limit: optionalNumberParam(
 				`Groups to keep when breaking down (default 10, max ${BREAKDOWN_MAX_GROUPS}).`,
 			),
-			start_time: optionalStringParam(
+			start_time: optionalTimeParam(
 				"Start of time range (YYYY-MM-DD HH:mm:ss). Default: last 7 days.",
 			),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)."),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)."),
 			host: optionalStringParam("Only persons with a session on this site host."),
 			page_path: optionalStringParam("Only persons with a session that viewed this page path."),
 			referrer_host: optionalStringParam("Only persons whose session was referred by this host."),
@@ -99,7 +99,6 @@ export function registerQueryFunnelTool(server: McpToolRegistrar) {
 				maxHours: MCP_DISCOVERY_MAX_HOURS,
 			})
 			const { st, et } = range
-			if (range.invalid.length > 0) return timeRangeInvalidResult(range, TOOL)
 			if (range.exceeded) return rangeExceededResult(range, TOOL)
 
 			const stepsResult = yield* Effect.result(decodeSteps(params.steps_json))

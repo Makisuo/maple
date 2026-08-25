@@ -1,11 +1,10 @@
-import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
+import { optionalNumberParam, optionalStringParam, optionalTimeParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { queryWarehouse } from "@/mcp/lib/query-warehouse"
 import {
 	resolveTimeRange,
 	rangeExceededResult,
-	timeRangeInvalidResult,
 	MCP_DISCOVERY_MAX_HOURS,
 } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
@@ -35,8 +34,8 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 				"When provided, returns values for this key instead of listing all keys",
 			),
 			service_name: optionalStringParam("Filter by service name"),
-			start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End time (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start time (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End time (YYYY-MM-DD HH:mm:ss)"),
 			limit: optionalNumberParam("Max results (default 50)"),
 		}),
 		Effect.fn("McpTool.exploreAttributes")(function* (params) {
@@ -44,7 +43,6 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 				maxHours: MCP_DISCOVERY_MAX_HOURS,
 			})
 			const { st, et } = range
-			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "explore_attributes")
 			if (range.exceeded) return rangeExceededResult(range, "explore_attributes")
 			const lim = clampLimit(params.limit, { defaultValue: 50, max: 500 })
 			const scope = (params.scope ?? "span") as "span" | "resource"

@@ -1,10 +1,9 @@
-import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
+import { optionalNumberParam, optionalStringParam, optionalTimeParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import {
 	resolveTimeRange,
 	rangeExceededResult,
-	timeRangeInvalidResult,
 	MCP_LOG_PATTERN_MAX_HOURS,
 } from "@/mcp/lib/time"
 import { truncate, formatNumber } from "@/mcp/lib/format"
@@ -19,8 +18,8 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 		"mine_log_patterns",
 		"Cluster log messages into templates (e.g. 'GET /api/users/<*> 200 in <*>ms') with counts. Use this when search_logs would return too many rows to be useful — pattern mining collapses N matched logs into K distinct templates plus a per-template severity/service breakdown. Pair with a tight time range and selective filters: this samples up to 10 000 recent logs from the matched set, so a wide range with no filters will scan a lot of data.",
 		Schema.Struct({
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			service: optionalStringParam("Filter by service name"),
 			severity: optionalStringParam(
 				"Filter by severity (TRACE/DEBUG/INFO/WARN/ERROR/FATAL — case-insensitive)",
@@ -44,7 +43,6 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 		}) {
 			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_LOG_PATTERN_MAX_HOURS })
 			const { st, et } = range
-			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "mine_log_patterns")
 			if (range.exceeded) return rangeExceededResult(range, "mine_log_patterns")
 			const sampleSize = Math.min(Math.max(Number(sample_size) || 10_000, 1), 50_000)
 			const lim = Math.min(Math.max(Number(limit) || 50, 1), 200)

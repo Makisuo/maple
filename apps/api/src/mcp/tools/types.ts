@@ -1,5 +1,6 @@
 import type { Effect } from "effect"
 import { Schema, SchemaTransformation } from "effect"
+import { WarehouseTimeInput } from "@maple/query-engine"
 import type { McpToolRequirements } from "./runtime-requirements"
 
 class McpTenantError extends Schema.TaggedError<McpTenantError>()("@maple/mcp/errors/McpTenantError", {
@@ -105,6 +106,30 @@ export const optionalNumberParam = (description: string) =>
 
 export const optionalBooleanParam = (description: string) =>
 	Schema.optional(Schema.Boolean).annotate({ description })
+
+/**
+ * Time-range parameters, validated at the decode boundary rather than by each
+ * tool.
+ *
+ * The same lesson as `optionalNumberParam` above, learned from the same caller:
+ * `investigation.hypothesis` sent `start_time: "2026-08-47:53"`, a real date
+ * sheared into nonsense. Declared as a plain string it was normalized on a
+ * best-effort basis, kept verbatim when that failed, and interpolated into SQL
+ * as `toDateTime('2026-08-47:53')` — so the first thing to notice was ClickHouse,
+ * which reported it as a query error the model could do nothing with.
+ *
+ * `WarehouseTimeInput` accepts every encoding a model plausibly reaches for
+ * (`YYYY-MM-DD HH:mm:ss`, ISO-8601 with `Z` or an offset, a bare date) and
+ * canonicalizes them to one shape, so this widens the accepted encodings while
+ * narrowing the accepted values. Anything else fails as a parameter error naming
+ * the offending value, which the model can act on and retry.
+ *
+ * The decoded type is branded, and `resolveTimeRange` accepts only the brand —
+ * so a tool that declares a time bound as `optionalStringParam` doesn't get a
+ * subtly-wrong window at runtime, it fails to compile.
+ */
+export const optionalTimeParam = (description: string) =>
+	Schema.optional(WarehouseTimeInput).annotate({ description })
 
 export const requiredBooleanParam = (description: string) => Schema.Boolean.annotate({ description })
 

@@ -1,10 +1,9 @@
-import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
+import { optionalNumberParam, optionalStringParam, optionalTimeParam, type McpToolRegistrar } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
 import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import {
 	resolveTimeRange,
 	rangeExceededResult,
-	timeRangeInvalidResult,
 	MCP_DISCOVERY_MAX_HOURS,
 } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
@@ -23,10 +22,10 @@ export function registerListProductEventsTool(server: McpToolRegistrar) {
 		TOOL,
 		"List the product event names an org has recorded — browser `track()` events, server-side events and page views — with how often each fired and how many sessions and persons it reached. Use it to discover the step names for `query_funnel` (an event step needs an exact `eventName`). `kind` tells them apart: `custom` is a `track()`/server event, `navigation` is a page view (`$pageview`), `screen` a mobile screen. Filters (`host`, `page_path`, `referrer_host`, `country`, `utm_*`) narrow to events from matching sessions.",
 		Schema.Struct({
-			start_time: optionalStringParam(
+			start_time: optionalTimeParam(
 				"Start of time range (YYYY-MM-DD HH:mm:ss). Default: last 7 days.",
 			),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)."),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)."),
 			kind: optionalStringParam(
 				"Only events of this kind: `custom`, `navigation` or `screen`. Default: all.",
 			),
@@ -46,7 +45,6 @@ export function registerListProductEventsTool(server: McpToolRegistrar) {
 				maxHours: MCP_DISCOVERY_MAX_HOURS,
 			})
 			const { st, et } = range
-			if (range.invalid.length > 0) return timeRangeInvalidResult(range, TOOL)
 			if (range.exceeded) return rangeExceededResult(range, TOOL)
 			const limit = clampLimit(params.limit, { defaultValue: 50, max: 200 })
 

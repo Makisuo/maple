@@ -2,6 +2,7 @@ import {
 	optionalBooleanParam,
 	optionalNumberParam,
 	optionalStringParam,
+	optionalTimeParam,
 	validationError,
 	type McpToolRegistrar,
 } from "./types"
@@ -10,7 +11,6 @@ import { withTenantExecutor } from "@/mcp/lib/query-warehouse"
 import {
 	resolveTimeRange,
 	rangeExceededResult,
-	timeRangeInvalidResult,
 	MCP_SEARCH_MAX_HOURS,
 } from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
@@ -26,8 +26,8 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 		"search_traces",
 		"Search traces by service, duration, error status, HTTP method, span name, or custom attributes. When span_name is provided, searches at the span level (not just root spans) for accurate results. Use inspect_trace on interesting trace_ids. Use explore_attributes to discover attribute keys.",
 		Schema.Struct({
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			service: optionalStringParam(
 				"Filter by service name (searches all spans in the trace, not just root)",
 			),
@@ -54,7 +54,6 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 				maxHours: MCP_SEARCH_MAX_HOURS,
 			})
 			const { st, et } = range
-			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "search_traces")
 			if (range.exceeded) return rangeExceededResult(range, "search_traces")
 			const lim = clampLimit(params.limit, { defaultValue: 20, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })

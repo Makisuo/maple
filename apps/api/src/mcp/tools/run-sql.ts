@@ -1,6 +1,7 @@
 import {
 	optionalNumberParam,
 	optionalStringParam,
+	optionalTimeParam,
 	requiredStringParam,
 	type McpToolRegistrar,
 	type McpToolResult,
@@ -47,8 +48,8 @@ const runSqlSchema = Schema.Struct({
 			"An outer 1,000-row result cap is always enforced. " +
 			"Use describe_warehouse_tables to discover table/column names.",
 	),
-	start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss UTC). Defaults to 1 hour ago."),
-	end_time: optionalStringParam("End time (YYYY-MM-DD HH:mm:ss UTC). Defaults to now."),
+	start_time: optionalTimeParam("Start time (YYYY-MM-DD HH:mm:ss UTC). Defaults to 1 hour ago."),
+	end_time: optionalTimeParam("End time (YYYY-MM-DD HH:mm:ss UTC). Defaults to now."),
 	granularity_seconds: optionalNumberParam(
 		"Value substituted for the `$__interval_s` macro. Auto-computed from the time range if omitted.",
 	),

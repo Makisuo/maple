@@ -1,4 +1,4 @@
-import { optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
+import { optionalStringParam, optionalTimeParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatDurationFromMs, formatPercent, formatNumber, truncate } from "@/mcp/lib/format"
@@ -15,8 +15,8 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
 		"Deep investigation of one service: health metrics, Apdex, top errors, recent traces and logs. Use after list_services identifies a problem service.",
 		Schema.Struct({
 			service_name: requiredStringParam("The service name to diagnose"),
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
 		}),
 		Effect.fn("McpTool.diagnoseService")(function* ({ service_name, start_time, end_time, environment }) {

@@ -3,6 +3,7 @@ import {
 	optionalBooleanParam,
 	optionalNumberParam,
 	optionalStringParam,
+	optionalTimeParam,
 	validationError,
 	type McpToolRegistrar,
 	type McpToolResult,
@@ -73,8 +74,8 @@ const queryDataSchema = Schema.Struct({
 			"'none' is additionally valid for kind=timeseries but not for kind=breakdown. " +
 			"Default: 'none' for timeseries, 'service' for breakdown.",
 	),
-	start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss UTC). Defaults to 1 hour ago"),
-	end_time: optionalStringParam("End time (YYYY-MM-DD HH:mm:ss UTC). Defaults to now"),
+	start_time: optionalTimeParam("Start time (YYYY-MM-DD HH:mm:ss UTC). Defaults to 1 hour ago"),
+	end_time: optionalTimeParam("End time (YYYY-MM-DD HH:mm:ss UTC). Defaults to now"),
 	service_name: optionalStringParam("Filter by service name (use list_services to discover)"),
 	// Traces-specific
 	span_name: optionalStringParam("Filter by span name (traces only)"),
