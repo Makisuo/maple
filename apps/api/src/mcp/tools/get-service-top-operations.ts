@@ -6,7 +6,12 @@ import {
 	type McpToolRegistrar,
 } from "./types"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import {
+	resolveTimeRange,
+	rangeExceededResult,
+	timeRangeInvalidResult,
+	MCP_SEARCH_MAX_HOURS,
+} from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatTable } from "@/mcp/lib/format"
 import { formatMetricValue } from "@/mcp/lib/format-query-result"
@@ -42,6 +47,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 		}) {
 			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_SEARCH_MAX_HOURS })
 			const { st, et } = range
+			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "get_service_top_operations")
 			if (range.exceeded) return rangeExceededResult(range, "get_service_top_operations")
 			const metricOption =
 				metric === undefined ? Option.some("count" as const) : decodeTracesMetric(metric)

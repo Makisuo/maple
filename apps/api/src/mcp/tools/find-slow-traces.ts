@@ -1,7 +1,12 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
 import { withTenantExecutor } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import {
+	resolveTimeRange,
+	rangeExceededResult,
+	timeRangeInvalidResult,
+	MCP_SEARCH_MAX_HOURS,
+} from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatDurationFromMs, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -29,6 +34,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
 		}) {
 			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_SEARCH_MAX_HOURS })
 			const { st, et } = range
+			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "find_slow_traces")
 			if (range.exceeded) return rangeExceededResult(range, "find_slow_traces")
 			const lim = clampLimit(limit, { defaultValue: 10, max: 100 })
 

@@ -2,7 +2,12 @@ import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from 
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { queryWarehouse } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
+import {
+	resolveTimeRange,
+	rangeExceededResult,
+	timeRangeInvalidResult,
+	MCP_DISCOVERY_MAX_HOURS,
+} from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatNumber, formatTable } from "@/mcp/lib/format"
 import { Array as Arr, Effect, Schema } from "effect"
@@ -39,6 +44,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 				maxHours: MCP_DISCOVERY_MAX_HOURS,
 			})
 			const { st, et } = range
+			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "explore_attributes")
 			if (range.exceeded) return rangeExceededResult(range, "explore_attributes")
 			const lim = clampLimit(params.limit, { defaultValue: 50, max: 500 })
 			const scope = (params.scope ?? "span") as "span" | "resource"

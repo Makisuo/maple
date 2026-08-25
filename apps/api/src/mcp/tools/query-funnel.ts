@@ -7,7 +7,12 @@ import {
 } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
 import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
+import {
+	resolveTimeRange,
+	rangeExceededResult,
+	timeRangeInvalidResult,
+	MCP_DISCOVERY_MAX_HOURS,
+} from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatTable, formatNumber, formatPercent, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -94,6 +99,7 @@ export function registerQueryFunnelTool(server: McpToolRegistrar) {
 				maxHours: MCP_DISCOVERY_MAX_HOURS,
 			})
 			const { st, et } = range
+			if (range.invalid.length > 0) return timeRangeInvalidResult(range, TOOL)
 			if (range.exceeded) return rangeExceededResult(range, TOOL)
 
 			const stepsResult = yield* Effect.result(decodeSteps(params.steps_json))
