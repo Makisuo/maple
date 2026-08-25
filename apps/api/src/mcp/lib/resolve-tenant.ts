@@ -12,6 +12,7 @@ import {
 	McpInvalidTenantError,
 } from "@/mcp/tools/types"
 import { recordExpectedMcpFailure } from "@/mcp/expected-failures"
+import { sessionStore } from "@/mcp/lib/session-store"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
@@ -34,6 +35,16 @@ const extractAgentActorIdFromMetadata = (metadataJson: string | null): string | 
 		// fall through
 	}
 	return null
+}
+
+// The negotiated `initialize` payload is keyed by session id in the in-memory
+// store (preloaded from KV in worker.ts before the handler runs), so any
+// tool call carrying `mcp-session-id` can recover which client is driving it.
+const resolveMcpClientName = (headers: Headers): string | undefined => {
+	const sessionId = headers.get("mcp-session-id")
+	if (!sessionId) return undefined
+	const name = sessionStore.get(sessionId)?.clientInfo.name.trim()
+	return name ? name : undefined
 }
 
 const toHeaderRecord = (headers: Headers): Record<string, string> => {
@@ -70,6 +81,7 @@ export const mcpResourceForRequest = (request: Request) => {
 export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(
 	function* (request: Request) {
 		const token = getBearerToken(request.headers)
+		const mcpClientName = resolveMcpClientName(request.headers)
 
 		// Internal service auth (e.g. chat agent)
 		if (token && token.startsWith(INTERNAL_SERVICE_PREFIX)) {
@@ -123,6 +135,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(
 					userId: validUserId,
 					roles: [],
 					authMode: "self_hosted",
+					...(mcpClientName ? { mcpClientName } : undefined),
 				} as McpTenantContext
 			}
 
@@ -204,6 +217,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(
 				roles: resolved.roles ?? apiKeyDefaultRoles,
 				authMode: "self_hosted",
 				...(actorId ? { actorId } : undefined),
+				...(mcpClientName ? { mcpClientName } : undefined),
 			} as McpTenantContext
 		}
 
@@ -224,6 +238,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(
 			userId: tenant.userId,
 			roles: [...tenant.roles],
 			authMode: tenant.authMode,
+			...(mcpClientName ? { mcpClientName } : undefined),
 		}
 	},
 	// Missing/invalid credentials are an expected 401, not a failure: annotate the
