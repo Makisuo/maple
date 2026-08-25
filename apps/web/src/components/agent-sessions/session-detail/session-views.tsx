@@ -11,7 +11,7 @@ import type { SessionSummary } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { SessionFlow } from "./session-flow"
 import { SessionOverview } from "./session-overview"
-import { filterSpans } from "@/lib/agent-sessions/span-filters"
+import { sessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { SessionWaterfall } from "./session-waterfall"
 import type { SpanDetailTab } from "./span-expansion"
 
@@ -84,27 +84,10 @@ export function SessionViews({
 		return () => observer.disconnect()
 	}, [view])
 
-	// Counted from what the views actually draw: both of them drop a span the
-	// filter hides, and the waterfall drops a turn once every span in it is gone.
-	const shown = useMemo(() => {
-		let spans = 0
-		let turnCount = 0
-		const traces = new Set<string>()
-		for (const turn of turns) {
-			const kept = filterSpans(turn.spans, query, agentSpansOnly)
-			if (kept.length === 0) continue
-			spans += kept.length
-			turnCount += 1
-			for (const span of kept) traces.add(span.traceId)
-		}
-		return { spans, turns: turnCount, traces: traces.size }
-	}, [turns, query, agentSpansOnly])
-
-	const counts = [
-		countOf(shown.spans, summary.spanCount, "span"),
-		countOf(shown.turns, turns.length, "turn"),
-		countOf(shown.traces, summary.traceCount, "trace"),
-	].join(" · ")
+	// Results are reported on other spans than the calls that made them — tool
+	// spans, or the next call's input history — so both debug views resolve
+	// them through one session-wide index rather than per expanded span.
+	const toolResults = useMemo(() => sessionToolResults(turns.flatMap((turn) => turn.spans)), [turns])
 
 	return (
 		<Tabs
@@ -128,7 +111,7 @@ export function SessionViews({
 					</TabsTrigger>
 					<TabsTrigger value="trace">
 						<ChartBarHorizontalIcon size={14} />
-						Trace
+						Traces
 					</TabsTrigger>
 					<TabsTrigger value="flow">
 						<NetworkNodesIcon size={14} />
@@ -162,9 +145,6 @@ export function SessionViews({
 								Merge repeat tools
 							</ViewChip>
 						)}
-						<span className="whitespace-nowrap text-muted-foreground text-xs tabular-nums">
-							{counts}
-						</span>
 					</div>
 				)}
 			</div>
@@ -188,6 +168,7 @@ export function SessionViews({
 					onSelectSpan={onSelectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
+					toolResults={toolResults}
 				/>
 			</TabsContent>
 			<TabsContent value="flow" className="flex flex-[1_1_auto] flex-col">
@@ -202,6 +183,7 @@ export function SessionViews({
 					onSelectSpan={onSelectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
+					toolResults={toolResults}
 					onOpenTraceView={() => onViewChange("trace")}
 				/>
 			</TabsContent>
@@ -213,13 +195,6 @@ function toggled(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
 	const next = new Set(set)
 	if (!next.delete(id)) next.add(id)
 	return next
-}
-
-function countOf(shown: number, total: number, noun: string): string {
-	const label = `${noun}${total === 1 ? "" : "s"}`
-	return shown === total
-		? `${total.toLocaleString()} ${label}`
-		: `${shown.toLocaleString()} of ${total.toLocaleString()} ${label}`
 }
 
 function ViewChip({

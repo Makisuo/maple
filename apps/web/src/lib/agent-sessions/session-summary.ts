@@ -4,10 +4,11 @@
 // clock, never as a sum of span durations — a session running four tools in
 // parallel would otherwise report 180% of itself. Tokens are counted at the
 // deepest span that reports them, because frameworks that also roll usage up to
-// the agent span would otherwise double the bill. And a token total is only ever
-// added up per the convention the reporting provider bills under: most of them
-// count cached tokens inside the prompt figure, and summing the buckets there
-// would bill the cache twice.
+// the agent span would otherwise double the bill. And token buckets are
+// normalised to be disjoint at the point they are read off a span: a provider
+// that counts cached tokens inside its prompt figure has them carved back out
+// (see `cacheInclusiveInput`), so `input` always means the uncached prompt and
+// a total is always the plain sum of the buckets.
 
 import type { AiSessionSpan } from "@maple/domain/http"
 import {
@@ -43,15 +44,14 @@ export interface OccupancySegment {
 }
 
 export interface SessionTokenTotals {
+	/** Uncached prompt tokens: providers whose prompt figure contains the cache
+	 *  buckets have them carved back out. See `cacheInclusiveInput`. */
 	readonly input: number
 	readonly cacheRead: number
 	readonly cacheWrite: number
 	readonly output: number
 	readonly reasoning: number
-	/**
-	 * What the buckets add up to under the reporting provider's convention —
-	 * which is not always their sum. See `cacheInclusiveInput`.
-	 */
+	/** The buckets are disjoint after normalisation, so this is their sum. */
 	readonly total: number
 }
 
@@ -402,8 +402,9 @@ const VENDOR_CACHE_CONVENTION = new Map<string, CacheConvention>([
 ])
 
 /**
- * True when the span's `input` bucket already covers its cache buckets, so
- * adding them to the total would count the same tokens twice.
+ * True when the span's reported `input` figure already covers its cache
+ * buckets, so `spanTokenBuckets` subtracts them back out — counting them both
+ * inside `input` and beside it would bill the same tokens twice.
  *
  * The vendor is asked first: a framework that re-added the buckets before
  * emitting them has overwritten whatever its provider's own API said.
@@ -415,10 +416,13 @@ function cacheInclusiveInput(span: AiSessionSpan): boolean {
 }
 
 /**
- * The five `gen_ai.usage.*` buckets a span reports and what they total under
- * its provider's convention, or nothing when it reports none. Exported so the
- * waterfall and the flow split a span's usage the same way the header does
- * rather than re-deriving the prompt/completion halves.
+ * The five `gen_ai.usage.*` buckets a span reports, normalised to disjoint
+ * buckets — or nothing when it reports none. A provider whose prompt figure
+ * already contains its cache buckets has them subtracted back out, so `input`
+ * is always the uncached prompt and the total is always the sum, whichever
+ * convention the reporter billed under. Exported so the waterfall and the flow
+ * split a span's usage the same way the header does rather than re-deriving
+ * the prompt/completion halves.
  */
 export function spanTokenBuckets(span: AiSessionSpan): SessionTokenTotals | undefined {
 	const { usageInputTokens, usageCacheReadInputTokens, usageCacheCreationInputTokens } = span.genAi
@@ -432,31 +436,29 @@ export function spanTokenBuckets(span: AiSessionSpan): SessionTokenTotals | unde
 	) {
 		return undefined
 	}
-	return tokenTotals(
-		{
-			input: usageInputTokens ?? 0,
-			cacheRead: usageCacheReadInputTokens ?? 0,
-			cacheWrite: usageCacheCreationInputTokens ?? 0,
-			output: usageOutputTokens ?? 0,
-			reasoning: usageReasoningOutputTokens ?? 0,
-		},
-		cacheInclusiveInput(span),
-	)
+	const cacheRead = usageCacheReadInputTokens ?? 0
+	const cacheWrite = usageCacheCreationInputTokens ?? 0
+	const reportedInput = usageInputTokens ?? 0
+	return tokenTotals({
+		// Clamped: a reporter whose cache figures exceed its own prompt figure is
+		// mis-stamped, and a negative bucket would be a worse lie than a zero.
+		input: cacheInclusiveInput(span)
+			? Math.max(0, reportedInput - cacheRead - cacheWrite)
+			: reportedInput,
+		cacheRead,
+		cacheWrite,
+		output: usageOutputTokens ?? 0,
+		reasoning: usageReasoningOutputTokens ?? 0,
+	})
 }
 
-/**
- * The five buckets plus what they come to.
- *
- * Under the exclusive convention that is their sum. Under the inclusive one the
- * cache buckets are a *breakdown* of `input`, not tokens beside it, so they
- * stay in the legend — a cache hit rate is worth seeing — and out of the total.
- */
-function tokenTotals(
-	buckets: Omit<SessionTokenTotals, "total">,
-	cacheInclusive: boolean,
-): SessionTokenTotals {
-	const cached = cacheInclusive ? 0 : buckets.cacheRead + buckets.cacheWrite
-	return { ...buckets, total: buckets.input + cached + buckets.output + buckets.reasoning }
+/** The five disjoint buckets plus their sum. */
+function tokenTotals(buckets: Omit<SessionTokenTotals, "total">): SessionTokenTotals {
+	return {
+		...buckets,
+		total:
+			buckets.input + buckets.cacheRead + buckets.cacheWrite + buckets.output + buckets.reasoning,
+	}
 }
 
 interface CountableUsage {
@@ -490,13 +492,7 @@ function countableUsageSpans(
 	let rolledUp = false
 	for (const [spanId, beneath] of chargeToNearestReporter(byId, reported)) {
 		if (beneath.length > 0) rolledUp = true
-		// The residual is priced under the PARENT's own convention: it is the
-		// parent's figure less its children's, and the parent is what reported it.
-		const tokens = excessTokens(
-			reported.get(spanId)!,
-			sumTokens(beneath),
-			cacheInclusiveInput(byId.get(spanId)!),
-		)
+		const tokens = excessTokens(reported.get(spanId)!, sumTokens(beneath))
 		if (tokens.total > 0) bySpan.set(spanId, tokens)
 	}
 	return { bySpan, rolledUp }
@@ -580,21 +576,14 @@ export function countTurnCost(turn: SessionTurn, turns: readonly SessionTurn[]):
 
 /** Per bucket, what `reported` claims over `counted`. Never negative: a wrapper
  *  that under-reports its own children adds nothing rather than subtracting. */
-function excessTokens(
-	reported: SessionTokenTotals,
-	counted: SessionTokenTotals,
-	cacheInclusive: boolean,
-): SessionTokenTotals {
-	return tokenTotals(
-		{
-			input: Math.max(0, reported.input - counted.input),
-			cacheRead: Math.max(0, reported.cacheRead - counted.cacheRead),
-			cacheWrite: Math.max(0, reported.cacheWrite - counted.cacheWrite),
-			output: Math.max(0, reported.output - counted.output),
-			reasoning: Math.max(0, reported.reasoning - counted.reasoning),
-		},
-		cacheInclusive,
-	)
+function excessTokens(reported: SessionTokenTotals, counted: SessionTokenTotals): SessionTokenTotals {
+	return tokenTotals({
+		input: Math.max(0, reported.input - counted.input),
+		cacheRead: Math.max(0, reported.cacheRead - counted.cacheRead),
+		cacheWrite: Math.max(0, reported.cacheWrite - counted.cacheWrite),
+		output: Math.max(0, reported.output - counted.output),
+		reasoning: Math.max(0, reported.reasoning - counted.reasoning),
+	})
 }
 
 /**

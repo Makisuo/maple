@@ -8,11 +8,7 @@ import { cn } from "@maple/ui/lib/utils"
 
 import { formatCurrency } from "@/lib/billing/currency"
 import { buildTurnDigest, type TurnDigest } from "@/lib/agent-sessions/session-overview"
-import type {
-	SessionFailureKind,
-	SessionSummary,
-	SessionTokenTotals,
-} from "@/lib/agent-sessions/session-summary"
+import type { SessionFailureKind, SessionSummary } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { shortTarget } from "@/lib/agent-sessions/span-filters"
 import { OCCUPANCY_DOT_FILL, OCCUPANCY_FILL, OCCUPANCY_LABEL } from "./span-visuals"
@@ -413,7 +409,7 @@ function Rail({ summary }: { summary: SessionSummary }) {
 									key={bucket.key}
 									className={bucket.fill}
 									style={{
-										width: `${sharePercent(summary.tokens[bucket.key], bucketSpan(summary.tokens, tokenBuckets))}%`,
+										width: `${sharePercent(summary.tokens[bucket.key], summary.tokens.total)}%`,
 									}}
 								/>
 							))}
@@ -421,15 +417,7 @@ function Rail({ summary }: { summary: SessionSummary }) {
 						{tokenBuckets.map((bucket) => (
 							<div key={bucket.key} className="flex items-center gap-2.5">
 								<span aria-hidden className={cn("size-1.5 rounded-xs", bucket.fill)} />
-								<span
-									className={cn(
-										"min-w-0 flex-1 truncate text-xs",
-										bucket.key === "cacheRead" && "text-muted-foreground",
-									)}
-								>
-									{bucket.label}
-									{bucket.key === "cacheRead" && " (subset of input)"}
-								</span>
+								<span className="min-w-0 flex-1 truncate text-xs">{bucket.label}</span>
 								<span className="font-mono text-muted-foreground text-xs tabular-nums">
 									{formatNumber(summary.tokens[bucket.key])}
 								</span>
@@ -444,8 +432,11 @@ function Rail({ summary }: { summary: SessionSummary }) {
 				)}
 			</RailSection>
 
-			<RailSection title="Agents & tools">
-				{summary.agentNames.length > 0 && (
+			{/* Two sections, not one: who ran and what they reached for are
+			    different questions, and a reader scanning for one should not have
+			    to read past the other. */}
+			{summary.agentNames.length > 0 && (
+				<RailSection title="Agents">
 					<div className="flex flex-wrap items-center gap-2">
 						{summary.agentNames.map((name, index) => (
 							<span key={name} className="flex items-center gap-2">
@@ -463,7 +454,10 @@ function Rail({ summary }: { summary: SessionSummary }) {
 							</span>
 						))}
 					</div>
-				)}
+				</RailSection>
+			)}
+
+			<RailSection title="Tools">
 				{summary.tools.length === 0 ? (
 					<p className="text-muted-foreground text-xs">no tool calls</p>
 				) : (
@@ -510,15 +504,6 @@ function RailSection({ title, aside, children }: { title: string; aside?: ReactN
 function sharePercent(value: number, total: number): number {
 	if (total <= 0) return 0
 	return (value / total) * 100
-}
-
-/** The bar draws every bucket, so it scales to what the buckets add up to —
- *  which under the inclusive cache convention is more than the total billed. */
-function bucketSpan(
-	tokens: SessionTokenTotals,
-	buckets: readonly { key: keyof SessionTokenTotals }[],
-): number {
-	return buckets.reduce((total, bucket) => total + tokens[bucket.key], 0)
 }
 
 /** A $0.0004 session printed "$0.00" reads as "measured, and it was free".

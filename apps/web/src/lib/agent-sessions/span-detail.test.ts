@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { spanMessages, spanToolCalls } from "./span-detail"
+import { sessionToolResults, spanMessages, spanToolCalls } from "./span-detail"
 import { llmSpan, toolSpan } from "./span-test-support"
 
 describe("spanMessages", () => {
@@ -143,5 +143,85 @@ describe("spanToolCalls", () => {
 		const calls = spanToolCalls(span)
 		expect(calls).toHaveLength(1)
 		expect(calls[0]!.id).toBe("toolu_01")
+	})
+
+	// A model span's output only makes its calls; the responses come back on
+	// other spans. Resolving them by id is what lets the Tool calls tab show a
+	// call and its result together instead of sending the reader to open each
+	// tool span one by one.
+	it("fills a call's result from the session index, matched by id", () => {
+		const model = llmSpan({
+			spanId: "l1",
+			startMs: 0,
+			durationMs: 1000,
+			genAi: {
+				outputMessages: [
+					{
+						role: "assistant",
+						parts: [
+							{ type: "tool_call", id: "toolu_01", name: "read_file", arguments: { path: "a" } },
+							{ type: "tool_call", id: "toolu_02", name: "run_tests", arguments: {} },
+							{ type: "tool_call", id: "toolu_03", name: "grep_repo", arguments: {} },
+						],
+					},
+				],
+			},
+		})
+		const tool = toolSpan({
+			spanId: "t1",
+			startMs: 1000,
+			durationMs: 500,
+			toolName: "read_file",
+			genAi: { toolCallId: "toolu_01", toolCallResult: "120 lines" },
+		})
+		// The second result was only echoed into the next call's input history.
+		const next = llmSpan({
+			spanId: "l2",
+			startMs: 2000,
+			durationMs: 1000,
+			genAi: {
+				inputMessages: [
+					{
+						role: "tool",
+						parts: [{ type: "tool_call_response", id: "toolu_02", response: "exit 0" }],
+					},
+				],
+			},
+		})
+
+		const results = sessionToolResults([model, tool, next])
+		const calls = spanToolCalls(model, results)
+
+		expect(calls.map((call) => [call.id, call.resultText])).toEqual([
+			["toolu_01", "120 lines"],
+			["toolu_02", "exit 0"],
+			// Nothing in the session carries this one's response, so none is shown.
+			["toolu_03", undefined],
+		])
+	})
+
+	it("prefers the tool span's first-hand result over the echoed history", () => {
+		const tool = toolSpan({
+			spanId: "t1",
+			startMs: 0,
+			durationMs: 500,
+			toolName: "read_file",
+			genAi: { toolCallId: "toolu_01", toolCallResult: "first-hand" },
+		})
+		const next = llmSpan({
+			spanId: "l2",
+			startMs: 1000,
+			durationMs: 1000,
+			genAi: {
+				inputMessages: [
+					{
+						role: "tool",
+						parts: [{ type: "tool_call_response", id: "toolu_01", response: "echoed" }],
+					},
+				],
+			},
+		})
+
+		expect(sessionToolResults([tool, next]).get("toolu_01")).toBe("first-hand")
 	})
 })

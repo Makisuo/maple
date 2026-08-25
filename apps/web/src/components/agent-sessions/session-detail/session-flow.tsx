@@ -94,10 +94,12 @@ interface SessionFlowProps {
 	selectedSpanId: string | undefined
 	/** Raised with a span id to open the drawer, `undefined` to close it. */
 	onSelectSpan: (spanId: string | undefined) => void
-	/** The drawer's tab, shared with the Trace view's inline expansion. */
+	/** The drawer's tab, shared with the Traces view's inline expansion. */
 	spanTab: SpanDetailTab | undefined
 	onSpanTabChange: (tab: SpanDetailTab) => void
-	/** The drawer's "Open in Trace view": same span, sibling view. */
+	/** The session's captured tool results by call id, for the drawer. */
+	toolResults?: ReadonlyMap<string, string>
+	/** The drawer's "Open in Traces view": same span, sibling view. */
 	onOpenTraceView: () => void
 }
 
@@ -112,6 +114,7 @@ export function SessionFlow({
 	onSelectSpan,
 	spanTab,
 	onSpanTabChange,
+	toolResults,
 	onOpenTraceView,
 }: SessionFlowProps) {
 	const lanes = useMemo(
@@ -327,6 +330,7 @@ export function SessionFlow({
 								turnOrdinal={turnOrdinal(selectedSpan.turn)}
 								tab={spanTab}
 								onTabChange={onSpanTabChange}
+								toolResults={toolResults}
 								onClose={() => onSelectSpan(undefined)}
 								onOpenTraceView={onOpenTraceView}
 							/>
@@ -734,9 +738,8 @@ function nodeSubtitle(lead: AiSessionSpan, group: readonly AiSessionSpan[]): str
 	} else if (isLlmCall(lead)) {
 		const tokens = spanTokenBuckets(lead)
 		if (tokens !== undefined && tokens.total > 0) {
-			// The prompt half is the residual of the total, not a sum of the input
-			// buckets: whether the cache counts inside `input` or beside it is the
-			// provider's convention, and the total already applied it.
+			// In → out, same split as the waterfall's Tokens In / Out column: the in
+			// half is everything the model read, cache buckets included.
 			const completion = tokens.output + tokens.reasoning
 			parts.push(`${formatNumber(tokens.total - completion)} → ${formatNumber(completion)}`)
 		} else {

@@ -58,27 +58,76 @@ export interface SpanToolCall {
  * call produced. Input-history tool calls are deliberately left out — they
  * belong to the earlier span that made them, and repeating them here would
  * count one call once per following request.
+ *
+ * A model span's output only ever *makes* its calls; what each returned is
+ * captured elsewhere in the session. `results` (see `sessionToolResults`)
+ * fills those in by call id, so a call and its response read together instead
+ * of sending the reader off to open the tool spans one by one.
  */
-export function spanToolCalls(span: AiSessionSpan): readonly SpanToolCall[] {
+export function spanToolCalls(
+	span: AiSessionSpan,
+	results?: ReadonlyMap<string, string>,
+): readonly SpanToolCall[] {
 	const calls: SpanToolCall[] = []
 	const own = ownToolCall(span)
-	if (own !== undefined) calls.push(own)
+	if (own !== undefined) calls.push(withResolvedResult(own, results))
 
 	for (const message of parseMessages(span.genAi.outputMessages, "output")) {
 		for (const part of message.parts) {
 			if (part.kind !== "tool_call") continue
 			// The span's own attributes already describe this call.
 			if (own !== undefined && part.id !== undefined && part.id === own.id) continue
-			calls.push({
-				name: part.name,
-				id: part.id,
-				description: undefined,
-				argumentsText: part.argumentsText,
-				resultText: undefined,
-			})
+			calls.push(
+				withResolvedResult(
+					{
+						name: part.name,
+						id: part.id,
+						description: undefined,
+						argumentsText: part.argumentsText,
+						resultText: undefined,
+					},
+					results,
+				),
+			)
 		}
 	}
 	return calls
+}
+
+/** The span's own evidence wins; the session index only fills an absence. */
+function withResolvedResult(
+	call: SpanToolCall,
+	results: ReadonlyMap<string, string> | undefined,
+): SpanToolCall {
+	if (call.resultText !== undefined || call.id === undefined) return call
+	const resultText = results?.get(call.id)
+	return resultText === undefined ? call : { ...call, resultText }
+}
+
+/**
+ * Every captured tool result in the session, by tool call id.
+ *
+ * Results come back as evidence on other spans than the calls that made them:
+ * the tool-execution span's own `gen_ai.tool.call.result`, or a
+ * `tool_call_response` part echoed into the input history of a later call.
+ * Both are collected — the tool span's first-hand attribute wins over the
+ * echo — and calls are matched strictly by id: nothing is paired by guesswork.
+ */
+export function sessionToolResults(spans: readonly AiSessionSpan[]): ReadonlyMap<string, string> {
+	const results = new Map<string, string>()
+	for (const span of spans) {
+		const own = ownToolCall(span)
+		if (own?.id !== undefined && own.resultText !== undefined) results.set(own.id, own.resultText)
+	}
+	for (const span of spans) {
+		for (const message of parseMessages(span.genAi.inputMessages, "input")) {
+			for (const part of message.parts) {
+				if (part.kind !== "tool_result" || part.id === undefined) continue
+				if (!results.has(part.id)) results.set(part.id, part.resultText)
+			}
+		}
+	}
+	return results
 }
 
 function ownToolCall(span: AiSessionSpan): SpanToolCall | undefined {

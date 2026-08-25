@@ -112,7 +112,7 @@ const SHORTCUTS = {
 	},
 	"session.viewTrace": {
 		combo: "2",
-		label: "Trace view",
+		label: "Traces view",
 		group: "Agent Sessions",
 	},
 	"session.viewFlow": {
