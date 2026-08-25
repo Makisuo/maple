@@ -302,7 +302,12 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 		const marking = concurrent.get(entry.turn.id)
 		// The marker opens the cluster, so it is carried by its first member.
 		if (marking?.marker !== undefined) body.push(marking.marker)
-		body.push(marking?.header ?? entry.header)
+		// A cluster member's whole chapter shifts one lane right, the same move a
+		// lane makes inside a turn: the indentation is what says "these chapters
+		// hang off the fork above" without the reader having to parse the marker.
+		const indent = marking === undefined ? 0 : 1
+		const header = marking?.header ?? entry.header
+		body.push(indent === 0 ? header : { ...header, depth: header.depth + indent })
 		// Per-turn only where the session-level banner is not already up.
 		if (
 			!bannerUp &&
@@ -312,13 +317,19 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 			body.push({
 				kind: "note",
 				key: `note:${entry.turn.id}`,
-				depth: 0,
+				depth: indent,
 				noteKind: "capture-off",
 				scope: "turn",
 				anyCaptured: false,
 			})
 		}
-		if (!input.collapsedTurns.has(entry.turn.id)) body.push(...entry.rows)
+		if (!input.collapsedTurns.has(entry.turn.id)) {
+			body.push(
+				...(indent === 0
+					? entry.rows
+					: entry.rows.map((row) => ({ ...row, depth: row.depth + indent }))),
+			)
+		}
 	}
 
 	// Nothing survived. The empty state says which of the two reasons it was, and
