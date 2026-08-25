@@ -35,7 +35,6 @@ import { spanModel, type SessionTurn } from "@/lib/agent-sessions/session-turns"
 import {
 	buildTranscript,
 	type CaptureCoverage,
-	type TranscriptLaneRef,
 	type TranscriptPayload,
 	type TranscriptRow,
 } from "@/lib/agent-sessions/session-transcript"
@@ -82,6 +81,7 @@ const ROW_ESTIMATE = {
 	"lane-open": 44,
 	"lane-close": 34,
 	parallel: 46,
+	"parallel-turns": 46,
 	structure: 30,
 	note: 86,
 	divider: 60,
@@ -277,6 +277,8 @@ function TranscriptBlock(props: BlockProps) {
 			return <LaneClose {...props} row={row} />
 		case "parallel":
 			return <ParallelMarker {...props} row={row} />
+		case "parallel-turns":
+			return <ParallelTurnsMarker {...props} row={row} />
 		case "structure":
 			return <StructureRow {...props} row={row} />
 		case "note":
@@ -347,6 +349,7 @@ function TurnChapter({
 	timeZone,
 	collapsed,
 	onToggleTurn,
+	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "turn" }> }) {
 	const { turn } = row
 
@@ -381,10 +384,26 @@ function TurnChapter({
 				    time slice: that slice carries the app's own HTTP/DB spans too, and
 				    a count the page cannot account for is worse than no count. */}
 				<span className={cn(META, "shrink-0")}>
-					{turn.traceIds.length} trace{turn.traceIds.length === 1 ? "" : "s"} ·{" "}
-					{row.aiSpanCount} agent spans · {formatDuration(turn.durationMs)}
+					{turn.traceIds.length} trace{turn.traceIds.length === 1 ? "" : "s"} · {row.aiSpanCount}{" "}
+					agent spans · {formatDuration(turn.durationMs)}
 				</span>
 			</button>
+			{/* Outside the toggle, because a chip is a button and buttons do not
+			    nest. It survives collapse for the same reason the header does: a
+			    collapsed chapter still has to say it was not a step in a sequence. */}
+			{row.parallelWith.length > 0 && (
+				<span className="flex shrink-0 items-center gap-2.5 pl-2.5">
+					{row.parallelWith.map((ref) => (
+						<ParallelJump
+							key={ref.key}
+							targetKey={ref.key}
+							// Turns render in index order, so the ordinal is the direction too.
+							label={`${turnOrdinal(ref.turn).toUpperCase()} ${ref.turn.index > turn.index ? "↓" : "↑"}`}
+							onJump={onJump}
+						/>
+					))}
+				</span>
+			)}
 		</h3>
 	)
 }
@@ -492,7 +511,9 @@ function UserBlock({
 									<span className={cn(LABEL, "text-muted-foreground")}>{message.role}</span>
 									<ClampedText
 										text={message.parts
-											.map((part) => (part.kind === "text" ? part.text : `[${part.kind}]`))
+											.map((part) =>
+												part.kind === "text" ? part.text : `[${part.kind}]`,
+											)
 											.join("\n")}
 										clampClass="line-clamp-[6]"
 										expanded={disclosed(openRows, key, false)}
@@ -677,8 +698,8 @@ function AssistantBlock({
 			{!row.failed && row.text === undefined && (
 				<InlineNote className="mt-2.5">
 					The reply isn't captured. This emitter recorded the request but not{" "}
-					<span className="font-mono">gen_ai.output.messages</span>, so the call's text is gone —
-					it did not fail.
+					<span className="font-mono">gen_ai.output.messages</span>, so the call's text is gone — it
+					did not fail.
 				</InlineNote>
 			)}
 		</Row>
@@ -1026,7 +1047,11 @@ function PayloadSection({
 					{label}
 				</span>
 				<span className="font-mono text-[10px] text-muted-foreground">
-					{[meta, formatBytes(payload.byteLength), payload.lineCount > 1 && `${payload.lineCount} lines`]
+					{[
+						meta,
+						formatBytes(payload.byteLength),
+						payload.lineCount > 1 && `${payload.lineCount} lines`,
+					]
 						.filter((part): part is string => typeof part === "string")
 						.join(" · ")}
 				</span>
@@ -1132,7 +1157,12 @@ function LaneOpen({
 					<>
 						<span className="grow" />
 						{row.parallelWith.map((ref) => (
-							<ParallelJump key={ref.key} target={ref} onJump={onJump} />
+							<ParallelJump
+								key={ref.key}
+								targetKey={ref.key}
+								label={ref.agentName}
+								onJump={onJump}
+							/>
 						))}
 					</>
 				)}
@@ -1157,20 +1187,25 @@ function LaneOpen({
 	)
 }
 
+/** The same chip on a lane header and on a turn header: one visual language for
+ *  concurrency, whichever level announced it. */
 function ParallelJump({
-	target,
+	targetKey,
+	label,
 	onJump,
 }: {
-	target: TranscriptLaneRef
+	targetKey: string
+	/** What the reader is being sent to — an agent's name, or a turn's ordinal. */
+	label: string
 	onJump: (key: string) => void
 }) {
 	return (
 		<button
 			type="button"
-			onClick={() => onJump(target.key)}
+			onClick={() => onJump(targetKey)}
 			className="shrink-0 cursor-pointer rounded-sm bg-primary/12 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/20"
 		>
-			ran in parallel with {target.agentName}
+			ran in parallel with {label}
 		</button>
 	)
 }
@@ -1187,8 +1222,10 @@ function LaneClose({
 				<CornerDownLeftIcon size={12} className="shrink-0 text-muted-foreground" />
 				<span className="shrink-0 text-muted-foreground text-xs">
 					{row.agentName}
-					{row.parentAgentName === undefined ? " finished" : ` returned to ${row.parentAgentName}`} ·{" "}
-					{formatDuration(row.durationMs)} · {row.llmCalls} LLM call
+					{row.parentAgentName === undefined
+						? " finished"
+						: ` returned to ${row.parentAgentName}`}{" "}
+					· {formatDuration(row.durationMs)} · {row.llmCalls} LLM call
 					{row.llmCalls === 1 ? "" : "s"} · {row.toolCalls} tool call
 					{row.toolCalls === 1 ? "" : "s"}
 				</span>
@@ -1222,7 +1259,13 @@ function ParallelMarker({
 	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "parallel" }> }) {
 	return (
-		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} timePadding="pt-1.5" className="pt-5" flush>
+		<Row
+			time={clockOf(row.startMs, timeZone)}
+			depth={row.depth}
+			timePadding="pt-1.5"
+			className="pt-5"
+			flush
+		>
 			<div className="flex items-center gap-2.5">
 				<BranchForkIcon size={14} className="shrink-0 text-primary" />
 				<span className={cn(LABEL, "text-primary")}>Parallel</span>
@@ -1230,7 +1273,8 @@ function ParallelMarker({
 				    of pairwise overlaps has none, and the marker then reports the fork's
 				    extent instead of inventing one. */}
 				<span className="shrink-0 text-muted-foreground text-xs">
-					{row.forkedBy === undefined ? "This turn" : row.forkedBy} forked {row.lanes.length} lanes —{" "}
+					{row.forkedBy === undefined ? "This turn" : row.forkedBy} forked {row.lanes.length} lanes
+					—{" "}
 					{row.overlapStartMs !== undefined && row.overlapEndMs !== undefined
 						? `they overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
 						: `their runs interleave between ${clockOf(row.startMs, timeZone)} and ${clockOf(row.endMs, timeZone)}`}
@@ -1244,6 +1288,58 @@ function ParallelMarker({
 						className="shrink-0 cursor-pointer font-mono text-[11px] text-primary hover:underline"
 					>
 						{lane.agentName}
+					</button>
+				))}
+				<span aria-hidden className="h-px grow bg-border" />
+			</div>
+		</Row>
+	)
+}
+
+/**
+ * Where two chapters ran at once — the lane marker one level up.
+ *
+ * A Maple fan-out gives each sub-agent its own conversation id, and a run
+ * dispatched over a queue roots its own trace, so either way the turn partition
+ * splits the fan-out into sibling chapters. They still read whole and in order;
+ * the marker is what stops "TURN 3, then TURN 4" from reading as a sequence the
+ * timestamps deny.
+ */
+function ParallelTurnsMarker({
+	row,
+	timeZone,
+	onJump,
+}: BlockProps & { row: Extract<TranscriptRow, { kind: "parallel-turns" }> }) {
+	return (
+		<Row
+			time={clockOf(row.startMs, timeZone)}
+			depth={row.depth}
+			timePadding="pt-1.5"
+			className="pt-5"
+			flush
+		>
+			<div className="flex items-center gap-2.5">
+				<BranchForkIcon size={14} className="shrink-0 text-primary" />
+				<span className={cn(LABEL, "text-primary")}>Parallel</span>
+				{/* Only a window every turn shared is reported as an overlap. A chain of
+				    pairwise overlaps has none, and the marker then reports the run's
+				    extent instead of inventing one. */}
+				<span className="shrink-0 text-muted-foreground text-xs">
+					{row.turns.length} turns ran at the same time —{" "}
+					{row.overlapStartMs !== undefined && row.overlapEndMs !== undefined
+						? `they overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
+						: `their runs interleave between ${clockOf(row.startMs, timeZone)} and ${clockOf(row.endMs, timeZone)}`}
+					. Each turn is shown whole, in order:
+				</span>
+				{row.turns.map((ref) => (
+					<button
+						key={ref.key}
+						type="button"
+						onClick={() => onJump(ref.key)}
+						className="shrink-0 cursor-pointer font-mono text-[11px] text-primary hover:underline"
+					>
+						{turnOrdinal(ref.turn).toUpperCase()}
+						{ref.turn.agentName !== undefined && ` ${ref.turn.agentName}`}
 					</button>
 				))}
 				<span aria-hidden className="h-px grow bg-border" />
@@ -1302,7 +1398,9 @@ function StructureRow({
 					)}
 				>
 					<Glyph size={13} className={cn("shrink-0", tone)} />
-					<span className="shrink-0 font-medium font-mono text-foreground text-xs">{row.label}</span>
+					<span className="shrink-0 font-medium font-mono text-foreground text-xs">
+						{row.label}
+					</span>
 					<span className={META}>{structureMeta(row.span, category)}</span>
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{formatDuration(row.span.durationMs)}</span>
@@ -1339,8 +1437,7 @@ function NoteBlock({ row }: { row: Extract<TranscriptRow, { kind: "note" }> }) {
 
 	// The same absence, said at the scope it was measured at: a session-wide
 	// banner must not read as a claim about one turn, or the other way round.
-	const scope =
-		row.scope === "session" ? `${row.anyCaptured ? "most of " : ""}this session` : "this turn"
+	const scope = row.scope === "session" ? `${row.anyCaptured ? "most of " : ""}this session` : "this turn"
 
 	return (
 		<div className="flex items-start gap-3 rounded-md border border-border bg-card px-4 py-3">
@@ -1358,10 +1455,7 @@ function NoteBlock({ row }: { row: Extract<TranscriptRow, { kind: "note" }> }) {
 	)
 }
 
-function DividerBlock({
-	row,
-	timeZone,
-}: BlockProps & { row: Extract<TranscriptRow, { kind: "divider" }> }) {
+function DividerBlock({ row, timeZone }: BlockProps & { row: Extract<TranscriptRow, { kind: "divider" }> }) {
 	if (row.dividerKind === "compaction") {
 		return (
 			<Row
@@ -1375,8 +1469,8 @@ function DividerBlock({
 					<CompactLinesIcon size={14} className="shrink-0 text-chart-4" />
 					<span className={cn(LABEL, "text-chart-4")}>Context compacted</span>
 					<span className="shrink-0 text-muted-foreground text-xs">
-						the agent replaced its history with a summary — earlier messages above are still shown,
-						but the model no longer had them
+						the agent replaced its history with a summary — earlier messages above are still
+						shown, but the model no longer had them
 					</span>
 					<span aria-hidden className="h-px grow bg-chart-4/30" />
 				</div>
