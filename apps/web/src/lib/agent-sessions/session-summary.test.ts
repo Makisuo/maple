@@ -100,6 +100,55 @@ describe("buildSessionSummary — time", () => {
 		expect(segment(summary.occupancy, "ttft")).toBeUndefined()
 	})
 
+	it("orders the timeline by the wall clock, not by class", () => {
+		const summary = summarize([
+			// Work, then a mid-session stall, then more work: the stall must sit
+			// between the two inference stretches, not get pinned to the front.
+			llmSpan({ spanId: "a", startMs: 0, durationMs: 10 * SECOND, ttftSeconds: 4 }),
+			llmSpan({ spanId: "b", startMs: 70 * SECOND, durationMs: 10 * SECOND }),
+		])
+
+		expect(summary.occupancyTimeline.map((interval) => interval.kind)).toEqual([
+			"ttft",
+			"inference",
+			"idle",
+			"inference",
+		])
+		expect(summary.occupancyTimeline[2]).toMatchObject({
+			startMs: summary.startMs + 10 * SECOND,
+			endMs: summary.startMs + 70 * SECOND,
+		})
+	})
+
+	it("tiles the wall clock exactly, filling holes as unaccounted", () => {
+		const summary = summarize([
+			agentSpan({ spanId: "agent", startMs: 0, durationMs: 12 * SECOND }),
+			llmSpan({ spanId: "llm", parentSpanId: "agent", startMs: 2 * SECOND, durationMs: 3 * SECOND }),
+			toolSpan({ spanId: "tool", parentSpanId: "agent", startMs: 6 * SECOND, durationMs: 4 * SECOND }),
+		])
+
+		expect(
+			summary.occupancyTimeline.map((interval) => [
+				interval.kind,
+				interval.startMs - summary.startMs,
+				interval.endMs - summary.startMs,
+			]),
+		).toEqual([
+			["unaccounted", 0, 2 * SECOND],
+			["inference", 2 * SECOND, 5 * SECOND],
+			["unaccounted", 5 * SECOND, 6 * SECOND],
+			["tool", 6 * SECOND, 10 * SECOND],
+			["unaccounted", 10 * SECOND, 12 * SECOND],
+		])
+		// The legend sums the same intervals, so bar and legend cannot disagree.
+		const timelineTotal = summary.occupancyTimeline.reduce(
+			(total, interval) => total + (interval.endMs - interval.startMs),
+			0,
+		)
+		expect(timelineTotal).toBe(summary.wallClockMs)
+		expect(summary.occupancy.reduce((total, entry) => total + entry.ms, 0)).toBe(summary.wallClockMs)
+	})
+
 	it("leaves the time no gen_ai span accounts for as the framework's own", () => {
 		const summary = summarize([
 			agentSpan({ spanId: "agent", startMs: 0, durationMs: 10 * SECOND }),

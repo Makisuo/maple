@@ -59,16 +59,15 @@ export function SessionOverview({
 	const report = useMemo(() => buildSessionFindings(turns, summary), [turns, summary])
 
 	return (
-		<div className="@container flex grow flex-col gap-7 pt-5 pb-10">
-			<Verdict
-				verdict={report.verdict}
-				findingCount={report.findings.length}
-				turns={turns}
-				onOpenSpan={onOpenSpan}
-			/>
-
+		<div className="@container flex grow flex-col pt-5 pb-10">
 			<div className="flex flex-col gap-8 @4xl:flex-row @4xl:gap-8">
 				<div className="flex min-w-0 grow flex-col gap-7">
+					<Verdict
+						verdict={report.verdict}
+						findingCount={report.findings.length}
+						turns={turns}
+						onOpenSpan={onOpenSpan}
+					/>
 					<Findings findings={report.findings} onOpenSpan={onOpenSpan} />
 					<TurnHealthStrip
 						turns={turns}
@@ -271,12 +270,15 @@ function TurnHealthStrip({
 	summary: SessionSummary
 	onOpenSpan: (spanId: string) => void
 }) {
-	const failed = health.filter((status) => status === "failure").length
+	// "with errors", not "failed": a red cell marks a turn something went wrong
+	// INSIDE — the turn itself may have closed cleanly, and calling it failed
+	// would contradict a Completed verdict two sections up.
+	const errored = health.filter((status) => status === "failure").length
 	const flagged = health.filter((status) => status === "anomaly").length
 	const caption = [
-		failed > 0 ? `${failed} failed` : undefined,
+		errored > 0 ? `${errored} with errors` : undefined,
 		flagged > 0 ? `${flagged} flagged` : undefined,
-		failed === 0 && flagged === 0 ? "none flagged" : undefined,
+		errored === 0 && flagged === 0 ? "none flagged" : undefined,
 		`${formatSessionDuration(summary.wallClockMs)} wall clock`,
 	]
 		.filter((part) => part !== undefined)
@@ -322,11 +324,15 @@ function TimeComposition({
 	summary: SessionSummary
 	turns: readonly SessionTurn[]
 }) {
-	// Under half a percent a segment is a sub-pixel sliver beside a legend row
-	// reading "0%"; the muted track behind the bar covers what it drops.
-	const segments = summary.occupancy
+	// Under half a percent a legend row reads "0%" and says nothing; the bar
+	// still draws the sliver in place, so nothing disappears from the timeline.
+	const legend = summary.occupancy
 		.map((segment) => ({ ...segment, percent: sharePercent(segment.ms, summary.wallClockMs) }))
 		.filter((segment) => segment.percent >= 0.5)
+	// The bar is chronological — each interval sits where it happened on the
+	// wall clock, so a mid-session stall reads as a hole in the middle, not as
+	// an idle block pinned to the left.
+	const wallClockMs = Math.max(summary.wallClockMs, 1)
 	const caption = longestGapText(summary.idleGaps, turns)
 
 	return (
@@ -340,18 +346,21 @@ function TimeComposition({
 				)}
 			</div>
 
-			<div className="mt-3.5 flex h-4 w-full gap-0.5 overflow-hidden rounded-sm bg-muted">
-				{segments.map((segment) => (
+			<div className="relative mt-3.5 h-4 w-full overflow-hidden rounded-sm bg-muted">
+				{summary.occupancyTimeline.map((interval) => (
 					<div
-						key={segment.kind}
-						className={OCCUPANCY_FILL[segment.kind]}
-						style={{ width: `${segment.percent}%` }}
+						key={interval.startMs}
+						className={cn("absolute inset-y-0", OCCUPANCY_FILL[interval.kind])}
+						style={{
+							left: `${((interval.startMs - summary.startMs) / wallClockMs) * 100}%`,
+							width: `${((interval.endMs - interval.startMs) / wallClockMs) * 100}%`,
+						}}
 					/>
 				))}
 			</div>
 
 			<div className="mt-3.5 flex flex-wrap gap-x-6 gap-y-2">
-				{segments.map((segment) => (
+				{legend.map((segment) => (
 					<span key={segment.kind} className="flex items-center gap-2 text-[13px]">
 						<span
 							aria-hidden
