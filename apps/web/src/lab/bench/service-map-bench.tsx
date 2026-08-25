@@ -437,6 +437,16 @@ function BenchDriver({
 		// is asynchronous and its cost varies hugely by machine — a fixed delay
 		// silently samples an intermediate layout on a slow host and reports it as
 		// the settled one. Returns false if it never went quiet within `maxMs`.
+		//
+		// Stillness alone is not quiescence. A change that invalidates the layout
+		// leaves the graph sitting on its old positions while ELK re-runs — the
+		// canvas does not even reveal a fallback for the first 2s — so a quiet
+		// window measured from the update landed inside that gap and reported the
+		// PREVIOUS layout as the settled one. On a fast host that made the
+		// topology-change measurement vacuous (every node "moved" 0px because
+		// nothing had moved yet); on a slow one the same code measured the real
+		// thing. Wait for ELK to republish as well as for positions to hold.
+		const elkIsReady = () => document.querySelector('[data-elk-status="ready"]') !== null
 		const waitForQuiescence = async (maxMs: number, quietMs = 750) => {
 			const serialize = () =>
 				Array.from(sampleLayout().positions, ([id, p]) => `${id}:${p.x},${p.y}`)
@@ -450,6 +460,8 @@ function BenchDriver({
 				const now = serialize()
 				if (now !== last) {
 					last = now
+					lastChange = performance.now()
+				} else if (!elkIsReady()) {
 					lastChange = performance.now()
 				} else if (performance.now() - lastChange >= quietMs) {
 					return true
