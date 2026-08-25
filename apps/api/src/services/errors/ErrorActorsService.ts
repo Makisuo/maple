@@ -66,6 +66,20 @@ export interface ErrorActorsServiceApi extends ErrorActorsPublicApi {
 	readonly actorExists: (orgId: OrgId, actorId: ActorId) => Effect.Effect<boolean, ErrorPersistenceError>
 	/** Compatibility-facade support for the scheduled error workflow. */
 	readonly ensureSystemActor: (orgId: OrgId) => Effect.Effect<ActorDocument, ErrorPersistenceError>
+	/**
+	 * Idempotent get-or-create of an agent actor by name. Unlike
+	 * `registerAgent` this reuses an existing row instead of failing, and it
+	 * does NOT guard reserved names — callers passing externally supplied
+	 * names must validate with `isReservedAgentName` first.
+	 */
+	readonly ensureAgentActor: (
+		orgId: OrgId,
+		agentName: string,
+		opts?: {
+			readonly createdBy?: UserId
+			readonly capabilities?: ReadonlyArray<string>
+		},
+	) => Effect.Effect<ActorDocument, ErrorPersistenceError>
 	/** Best-effort activity bookkeeping for issue mutations. */
 	readonly touchActor: (orgId: OrgId, actorId: ActorId, timestamp: number) => Effect.Effect<void>
 	/** Batch hydration used by issue and event response mapping. */
@@ -167,22 +181,19 @@ const make: Effect.Effect<ErrorActorsServiceApi, never, Database> = Effect.gen(f
 		return actorRowToDocument(row)
 	})
 
-	const ensureSystemActor: ErrorActorsServiceApi["ensureSystemActor"] = Effect.fn(
-		"ErrorsService.ensureSystemActor",
-	)(function* (orgId) {
-		const existing = yield* dbExecute((db) =>
+	const ensureAgentActor: ErrorActorsServiceApi["ensureAgentActor"] = Effect.fn(
+		"ErrorsService.ensureAgentActor",
+	)(function* (orgId, agentName, opts) {
+		const selectByName = dbExecute((db) =>
 			db
 				.select()
 				.from(actors)
 				.where(
-					and(
-						eq(actors.orgId, orgId),
-						eq(actors.type, "agent"),
-						eq(actors.agentName, SYSTEM_ERRORS_AGENT_NAME),
-					),
+					and(eq(actors.orgId, orgId), eq(actors.type, "agent"), eq(actors.agentName, agentName)),
 				)
 				.limit(1),
 		)
+		const existing = yield* selectByName
 		if (existing[0]) return actorRowToDocument(existing[0])
 
 		const timestamp = yield* Clock.currentTimeMillis
@@ -192,35 +203,26 @@ const make: Effect.Effect<ErrorActorsServiceApi, never, Database> = Effect.gen(f
 			orgId,
 			type: "agent",
 			userId: null,
-			agentName: SYSTEM_ERRORS_AGENT_NAME,
+			agentName,
 			model: null,
-			capabilitiesJson: ["system", "auto-triage"],
-			createdBy: null,
+			capabilitiesJson: opts?.capabilities ?? [],
+			createdBy: opts?.createdBy ?? null,
 			createdAt: msToDate(timestamp),
 			lastActiveAt: msToDate(timestamp),
 		}
 		yield* dbExecute((db) => db.insert(actors).values(insert).onConflictDoNothing())
-		const after = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(actors)
-				.where(
-					and(
-						eq(actors.orgId, orgId),
-						eq(actors.type, "agent"),
-						eq(actors.agentName, SYSTEM_ERRORS_AGENT_NAME),
-					),
-				)
-				.limit(1),
-		)
+		const after = yield* selectByName
 		const row = after[0]
 		if (!row) {
 			return yield* Effect.fail(
-				new ErrorPersistenceError({ message: "Failed to ensure system actor row" }),
+				new ErrorPersistenceError({ message: `Failed to ensure agent actor row '${agentName}'` }),
 			)
 		}
 		return actorRowToDocument(row)
 	})
+
+	const ensureSystemActor: ErrorActorsServiceApi["ensureSystemActor"] = (orgId) =>
+		ensureAgentActor(orgId, SYSTEM_ERRORS_AGENT_NAME, { capabilities: ["system", "auto-triage"] })
 
 	const registerAgent: ErrorActorsServiceApi["registerAgent"] = Effect.fn("ErrorsService.registerAgent")(
 		function* (orgId, byUserId, request) {
@@ -319,6 +321,7 @@ const make: Effect.Effect<ErrorActorsServiceApi, never, Database> = Effect.gen(f
 		actorExists,
 		ensureUserActor,
 		ensureSystemActor,
+		ensureAgentActor,
 		touchActor,
 		collectActorDocs,
 	})

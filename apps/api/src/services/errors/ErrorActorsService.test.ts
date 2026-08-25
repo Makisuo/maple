@@ -83,6 +83,24 @@ describe("ErrorActorsService", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
+	it.effect("ensures one stable agent actor per name and reuses it for the system actor", () =>
+		Effect.gen(function* () {
+			const actors = yield* ErrorActorsService
+			const first = yield* actors.ensureAgentActor(ORG, "claude-code", { createdBy: USER })
+			const second = yield* actors.ensureAgentActor(ORG, "claude-code", { createdBy: USER })
+
+			assert.strictEqual(first.id, second.id)
+			assert.strictEqual(first.type, "agent")
+			assert.strictEqual(first.agentName, "claude-code")
+
+			const system = yield* actors.ensureSystemActor(ORG)
+			const systemAgain = yield* actors.ensureSystemActor(ORG)
+			assert.strictEqual(system.id, systemAgain.id)
+			assert.strictEqual(system.agentName, "system-errors-tick")
+			assert.deepStrictEqual(system.capabilities, ["system", "auto-triage"])
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
 	it.effect("preserves duplicate-name and missing-actor errors", () =>
 		Effect.gen(function* () {
 			const actors = yield* ErrorActorsService

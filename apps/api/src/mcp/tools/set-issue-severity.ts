@@ -8,7 +8,7 @@ import {
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { resolveActorId } from "@/mcp/lib/resolve-actor"
+import { resolveActor } from "@/mcp/lib/resolve-actor"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
 import { ErrorIssueId, IssueSeverity } from "@maple/domain/http"
 
@@ -45,11 +45,12 @@ export function registerSetIssueSeverityTool(server: McpToolRegistrar) {
 			}
 			const target = decodedSeverity.value
 
-			const actorId = yield* resolveActorId(tenant)
-			// API-key-backed agent identities write with "ai" precedence so they
-			// never clobber a human's manual override; interactive user sessions
-			// write the sticky manual override itself.
-			const source = tenant.actorId ? ("ai" as const) : ("manual" as const)
+			const { actorId, isAgent } = yield* resolveActor(tenant)
+			// Agent identities (pinned via API key/header or derived from the MCP
+			// client name) write with "ai" precedence so they never clobber a
+			// human's manual override; interactive user sessions write the sticky
+			// manual override itself.
+			const source = isAgent ? ("ai" as const) : ("manual" as const)
 			const workflow = yield* ErrorIssueWorkflowService
 			const issue = yield* workflow
 				.setSeverity(tenant.orgId, actorId, decodedIssueId.value, target, { note, source })
