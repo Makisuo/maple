@@ -179,22 +179,77 @@ function failureFindings(
 			turnText: turnListText(turnIndices, turns, terminal),
 			detail:
 				(group.kind === "contextExceeded" ? promptGrowth(spans) : undefined) ??
-				statusDetail(group.members.map((member) => member.span), label),
+				failureDetail(group.members.map((member) => member.span), label),
 			spanId: linked.span.spanId,
 			atMs: spanStartMs(group.members[0]!.span),
 		}
 	})
 }
 
-/** The first status message the group's spans carry, when it says more than the
- *  label already does. */
-function statusDetail(spans: readonly AiSessionSpan[], label: string): string | undefined {
+/**
+ * The group's evidence line: the first status message a member carries, and
+ * where every member is silent, the failed tool call's own recorded result.
+ *
+ * The fallback exists because frameworks record a failed tool call as a value
+ * on an `Ok` span — Maple's own agent stamps `error.type: tool_error` and puts
+ * the error message in `gen_ai.tool.call.result`, with no status message at
+ * all. For those spans the result payload IS the error.
+ */
+function failureDetail(spans: readonly AiSessionSpan[], label: string): string | undefined {
 	for (const span of spans) {
 		const message = span.statusMessage.trim()
 		if (message === "" || message === label) continue
-		return message.length > 140 ? `${message.slice(0, 139)}…` : message
+		return clipDetail(message)
+	}
+	for (const span of spans) {
+		const result = span.genAi.toolCallResult ?? undefined
+		if (result === undefined) continue
+		const prose = firstProse(result)
+		if (prose !== undefined) return clipDetail(prose)
 	}
 	return undefined
+}
+
+function clipDetail(text: string): string {
+	return text.length > 140 ? `${text.slice(0, 139)}…` : text
+}
+
+/** Keys an error payload's human message hides under, tried before anything
+ *  else so a structured result yields its message rather than its first field. */
+const PROSE_KEYS = ["error", "message", "error_message", "errorMessage", "reason", "detail", "text"]
+
+/**
+ * The first human-readable line inside a captured payload. Maple's own tool
+ * errors are plain strings; other vendors wrap the message in an object or an
+ * MCP-style content array, so this walks tolerantly and gives up rather than
+ * serialising structure into the row.
+ */
+function firstProse(value: unknown, depth = 0): string | undefined {
+	if (depth > 4) return undefined
+	if (typeof value === "string") {
+		const line = value
+			.split("\n")
+			.map((raw) => raw.trim())
+			.find((raw) => raw.length > 0)
+		return line
+	}
+	if (Array.isArray(value)) {
+		for (const entry of value) {
+			const prose = firstProse(entry, depth + 1)
+			if (prose !== undefined) return prose
+		}
+		return undefined
+	}
+	if (typeof value !== "object" || value === null) return undefined
+	const record = value as Record<string, unknown>
+	for (const key of PROSE_KEYS) {
+		if (key in record) {
+			const prose = firstProse(record[key], depth + 1)
+			if (prose !== undefined) return prose
+		}
+	}
+	// `content` last and on its own: MCP results nest their text parts there.
+	return "content" in record ? firstProse(record.content, depth + 1) : undefined
 }
 
 /**

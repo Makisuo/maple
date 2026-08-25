@@ -161,6 +161,58 @@ describe("buildSessionFindings", () => {
 		expect(finding.spanId).toBe("t-1")
 	})
 
+	// The shape Maple's own agent emits: a failed tool call is a VALUE on an Ok
+	// span — `error.type: tool_error`, the message in `gen_ai.tool.call.result`,
+	// and no status message at all.
+	it("reads the error from the tool call's recorded result when status says nothing", () => {
+		const result = report(
+			twoTurns([
+				agentSpan({
+					spanId: "a2",
+					startMs: 5 * MINUTE,
+					durationMs: 10 * SECOND,
+					genAi: { conversationId: "t2" },
+				}),
+				toolSpan({
+					spanId: "t-silent",
+					parentSpanId: "a2",
+					startMs: 5 * MINUTE + SECOND,
+					durationMs: SECOND,
+					toolName: "query_data",
+					genAi: {
+						conversationId: "t2",
+						errorType: "tool_error",
+						toolCallResult: "Query failed: unknown table trace_spans",
+					},
+				}),
+			]),
+		)
+
+		const finding = result.findings.find((entry) => entry.label === "tool_error · query_data")!
+		expect(finding.detail).toBe("Query failed: unknown table trace_spans")
+	})
+
+	it("digs a wrapped error message out of a structured tool result", () => {
+		const result = report(
+			twoTurns([
+				toolSpan({
+					spanId: "t-wrapped",
+					startMs: 5 * MINUTE,
+					durationMs: SECOND,
+					toolName: "query_data",
+					genAi: {
+						conversationId: "t2",
+						errorType: "tool_error",
+						toolCallResult: { isError: true, content: [{ type: "text", text: "shard 3 is locked" }] },
+					},
+				}),
+			]),
+		)
+
+		const finding = result.findings.find((entry) => entry.label === "tool_error · query_data")!
+		expect(finding.detail).toBe("shard 3 is locked")
+	})
+
 	it("marks a recovered rate limit as an anomaly, not a failure", () => {
 		const result = report(
 			twoTurns([
