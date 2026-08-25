@@ -203,7 +203,11 @@ describe("runChatTurn", () => {
 		}),
 	)
 
-	it.live("coalesces adjacent text deltas into one event without losing any text", () =>
+	// The test clock, not `it.live`: these five deltas arrive within one 16ms window on a quiet
+	// machine but can straddle two on a loaded runner, and "how many batches" is the assertion. Under
+	// virtual time no wall clock advances between them, so the window never fires mid-stream and the
+	// group flushes once, at stream end.
+	it.effect("coalesces adjacent text deltas into one event without losing any text", () =>
 		Effect.gen(function* () {
 			const chunks = ["Check", "ing ", "the ", "traces", "."]
 			const events = yield* collectEvents([[...chunks.map(textDelta), finish()]])
