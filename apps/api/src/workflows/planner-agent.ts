@@ -11,7 +11,7 @@
 import { makeChatSessionId } from "@maple/domain/chat-session"
 import { InvestigationPlan } from "@maple/domain/http"
 import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
-import type { Model } from "@maple/llm"
+import type { LanguageModel } from "@opencode-ai/ai"
 import { Effect, Option } from "effect"
 import { plannerAgent } from "@/chat/agents"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -23,7 +23,7 @@ export interface PlannerAgentInput {
 	readonly investigationId: string
 	readonly subject: InvestigationSubject
 	readonly snapshot: InvestigationSubjectSnapshot | null
-	readonly model: Model
+	readonly model: LanguageModel
 	readonly tenant: TenantContext
 	readonly deadlineAtMs: number
 }

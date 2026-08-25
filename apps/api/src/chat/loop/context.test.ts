@@ -8,12 +8,14 @@
  * What it must *not* do is edit a message. That is the whole reason it replaced the in-turn pruner —
  * see the module header — so "never rewrites a surviving message" is load-bearing, not incidental.
  */
-import { LLM, Message, ToolResultPart, type LLMRequest, type Model } from "@maple/llm"
-import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
+import { LLM, Message, ToolResultPart, type LLMRequest, type LanguageModel } from "@opencode-ai/ai"
+import { CloudflareWorkersAI } from "@opencode-ai/ai/providers/cloudflare"
 import { assert, describe, it } from "vitest"
 import { dropOldestToolStep, isNearContextLimit } from "./context"
 
-const MODEL: Model = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model("@cf/test/model")
+const MODEL: LanguageModel = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model(
+	"@cf/test/model",
+)
 
 /** One step: an assistant turn plus the tool result it produced. */
 const step = (marker: string): ReadonlyArray<Message> => [

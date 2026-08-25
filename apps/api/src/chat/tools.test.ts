@@ -7,7 +7,7 @@
  * tool-less closing step and filed no diagnosis at all. These pin both halves to the same value.
  */
 import { OrgId, UserId } from "@maple/domain/primitives"
-import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
+import { CloudflareWorkersAI } from "@opencode-ai/ai/providers/cloudflare"
 import { Effect, Schema } from "effect"
 import { assert, describe, it } from "vitest"
 import { buildDiagnosisCompletion, type SubmitDiagnosis } from "./tools"

@@ -10,7 +10,7 @@
  *     construction rather than by reconnect heuristics.
  *   - `ChatMessage` — the materialized transcript a cold client reads before it starts streaming.
  *
- * The event names are deliberately Maple's, not `@maple/llm`'s: `LLMEvent` is a provider-neutral
+ * The event names are deliberately Maple's, not `@opencode-ai/ai`'s: `LLMEvent` is a provider-neutral
  * *model* stream, while this is a *session* stream that also carries user turns, approval gates and
  * turn lifecycle. `apps/api/src/chat/events.ts` is the only place the two are mapped.
  */

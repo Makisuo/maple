@@ -15,7 +15,7 @@
  *
  * This module used to truncate old tool results *in place*, mid-turn. That is the one shape the
  * default route cannot afford: OpenRouter `openai/gpt-5.6-luna` gets no cache breakpoints from
- * `lib/llm` (its route id is not in `RESPECTS_INLINE_HINTS`), so caching there is implicit-prefix and
+ * `@opencode-ai/ai` (its route id is not in `RESPECTS_INLINE_HINTS`), so caching there is implicit-prefix and
  * prefix stability is the only lever. Rewriting a step-3 result diverges the prefix near the front of
  * the turn and voids everything after it — at exactly the moment the transcript is longest.
  *
@@ -26,7 +26,7 @@
  * run. An assistant turn leaves with its own tool results, so the transcript never ends up with an
  * orphaned result or a tool call whose answer vanished.
  */
-import { LLM, type LLMRequest, type Message } from "@maple/llm"
+import { LLMRequest, type Message } from "@opencode-ai/ai"
 
 /**
  * How many of the most recent steps are never dropped.
@@ -102,7 +102,7 @@ export const dropOldestToolStep = (request: LLMRequest): LLMRequest => {
 		if (end === i + 1) continue
 		// Never cut into the protected window, even if this step straddles it.
 		if (end > boundary) return request
-		return LLM.updateRequest(request, { messages: [...messages.slice(0, i), ...messages.slice(end)] })
+		return LLMRequest.update(request, { messages: [...messages.slice(0, i), ...messages.slice(end)] })
 	}
 	return request
 }

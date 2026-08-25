@@ -1,5 +1,5 @@
 /**
- * Maple's MCP registry, wrapped as `@maple/llm` tools.
+ * Maple's MCP registry, wrapped as `@opencode-ai/ai` tools.
  *
  * The streaming chat turn and investigation agents share this wrapper so tool
  * dispatch, runtime provisioning, and safe failure summaries cannot drift.
@@ -12,7 +12,7 @@
  * The tenant is provided per call rather than ambiently so a loop can never widen its own scope:
  * every tool executes under exactly the org the turn was started for.
  */
-import { Tool, ToolFailure, type Tools } from "@maple/llm"
+import { Tool, ToolFailure, type Tools } from "@opencode-ai/ai"
 import { Cause, Effect } from "effect"
 import type { McpToolExecutorApi, McpToolSurface } from "@/mcp/dispatcher"
 import { mapleToolCatalog, toInputSchema } from "@/mcp/tools/registry"
@@ -89,7 +89,7 @@ export interface BuildMapleToolsOptions {
 	readonly surface?: McpToolSurface
 }
 
-/** Wrap the Maple MCP registry as `@maple/llm` tools. */
+/** Wrap the Maple MCP registry as `@opencode-ai/ai` tools. */
 export const buildMapleTools = (
 	executor: McpToolExecutorApi,
 	tenant: TenantContext,

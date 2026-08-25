@@ -2,7 +2,7 @@
  * Running one chat turn, inside the `ChatSession` Durable Object.
  *
  * This module is the heavy half of the DO: the Effect runtime, the app service graph and
- * `@maple/llm`. `ChatSession.ts` reaches it through a dynamic import for the same reason
+ * `@opencode-ai/ai`. `ChatSession.ts` reaches it through a dynamic import for the same reason
  * `worker.ts` dynamic-imports its route graph — the static graph builds hundreds of Schema ASTs at
  * module scope, which would blow Cloudflare's ~1s startup-CPU budget (error 10021) on a class that
  * is exported from the worker entry.
@@ -27,7 +27,7 @@ import {
 	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
 import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
-import { LLM, Message, type Model } from "@maple/llm"
+import { LLM, Message, type LanguageModel, type LLMClientService } from "@opencode-ai/ai"
 import { Cause, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -83,7 +83,7 @@ const COMPACTION_PREAMBLE =
 	"Summary of the earlier part of this conversation, which is no longer shown in full:\n\n"
 
 /**
- * Project the durable transcript into `@maple/llm` messages, most recent first-limited.
+ * Project the durable transcript into `@opencode-ai/ai` messages, most recent first-limited.
  *
  * Tool calls are deliberately NOT replayed as tool messages: a rehydrated conversation needs the
  * *conclusions*, not a second copy of every tool payload, and replaying tool results without their
@@ -144,9 +144,9 @@ export const toLlmMessages = (
  */
 const compactIfNeeded = (
 	input: RunChatSessionTurnInput,
-	model: Model,
+	model: LanguageModel,
 	usage: { readonly input: number },
-): Effect.Effect<void> =>
+): Effect.Effect<void, never, LLMClientService> =>
 	Effect.gen(function* () {
 		const { contextLimitOf, outputLimitOf } = yield* Effect.promise(() => import("../platform/Llm"))
 		const { isNearContextLimit, annotateModelResponse, modelCallAttributes, modelCallSpanName } =

@@ -12,7 +12,7 @@
 import { makeChatSessionId } from "@maple/domain/chat-session"
 import { AiTriageResult, LensCandidate } from "@maple/domain/http"
 import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
-import type { Model } from "@maple/llm"
+import type { LanguageModel } from "@opencode-ai/ai"
 import { Effect, Option } from "effect"
 import { hypothesisAgent } from "@/chat/agents"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -27,7 +27,7 @@ export interface HypothesisAgentInput {
 	readonly scopeSummary: string
 	readonly subject: InvestigationSubject
 	readonly snapshot: InvestigationSubjectSnapshot | null
-	readonly model: Model
+	readonly model: LanguageModel
 	readonly tenant: TenantContext
 	/** Wall-clock budget; the turn spends one last step submitting past it. */
 	readonly deadlineAtMs: number

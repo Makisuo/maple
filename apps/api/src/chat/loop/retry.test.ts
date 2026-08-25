@@ -29,7 +29,7 @@ describe("isRetryableStepFailure", () => {
 
 	it("retries stream-level failures despite retryable being false", () => {
 		// `TransportReason` and `InvalidProviderOutputReason` both hardcode `retryable = false` in
-		// `lib/llm/src/schema/errors.ts`, and both are how a body that dies mid-stream surfaces.
+		// `@opencode-ai/ai`'s error taxonomy, and both are how a body that dies mid-stream surfaces.
 		assert.isTrue(isRetryableStepFailure(error({ reason: "Transport" })))
 		assert.isTrue(isRetryableStepFailure(error({ reason: "InvalidProviderOutput" })))
 	})

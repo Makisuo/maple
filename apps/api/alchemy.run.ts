@@ -355,7 +355,7 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
 				// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
-				// `@maple/llm`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
+				// `@opencode-ai/ai`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
 				// resource, which also fronts model calls with caching/rate-limits/logging.
 				// NOTE: the deploy token needs the account-level "AI Gateway: Edit" permission
 				// for this resource.
