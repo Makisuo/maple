@@ -131,6 +131,21 @@ const TURNS: readonly TurnPlan[] = [
 
 const CONTEXT_ERROR = "prompt is too long: 214832 tokens > 200000 maximum"
 
+/** A turn's closing reply, in markdown — the transcript renders assistant text
+ *  through the markdown pipeline, so the lab has to show it some. */
+const CLOSING_REPLY = [
+	"The backoff is fixed at 30s with **no jitter** — that window is exactly where the duplicate charges land. Two changes:",
+	"",
+	"1. Exponential backoff with full jitter",
+	"2. An idempotency key on the charge call itself",
+	"",
+	"```ts",
+	"const delay = Math.random() * Math.min(cap, base * 2 ** attempt)",
+	"```",
+	"",
+	"The `webhooks` suite passes with the regression test included.",
+].join("\n")
+
 /**
  * One model call's attributes: usage that grows with the conversation the way a
  * real context window does, plus the things only some calls carry — the
@@ -163,8 +178,12 @@ function callAttributes(input: {
 						parts: [
 							{
 								type: "text",
+								// The closing call answers in markdown; the ones that go on
+								// to dispatch a tool stay one plain sentence.
 								content:
-									"I'll read the retry handler before changing anything — the fixed delay is only half the story, the idempotency key is what decides whether a duplicate delivery is charged twice.",
+									input.tool === undefined
+										? CLOSING_REPLY
+										: "I'll read the retry handler before changing anything — the fixed delay is only half the story, the idempotency key is what decides whether a duplicate delivery is charged twice.",
 							},
 							...(input.tool === undefined
 								? []
@@ -384,8 +403,17 @@ function buildBaseTurns(): readonly AiSessionSpan[] {
 // through a later call's history, a turn with no captured content at all, a
 // turn whose capture changes emitter mid-way, and a compaction.
 
-const INVESTIGATION_SYSTEM =
-	"You are the Maple investigation planner. You have read-only access to this org's traces, logs and metrics. Prefer evidence from spans over inference from code. Never state a cause you cannot point at a query for."
+// Markdown on purpose: system prompts are usually authored as it, and the
+// transcript's expanded System block renders them through the markdown pipeline.
+const INVESTIGATION_SYSTEM = [
+	"You are the **Maple investigation planner**. You have read-only access to this org's traces, logs and metrics.",
+	"",
+	"## Rules",
+	"",
+	"- Prefer evidence from spans over inference from code.",
+	"- Never state a cause you cannot point at a query for.",
+	"- Quote span attributes verbatim, e.g. `db.query.fingerprint`.",
+].join("\n")
 
 const INVESTIGATION_PROMPT =
 	"p95 checkout latency tripled after the 14:20 deploy — find what changed. Don't guess from the deploy diff, read the traces."

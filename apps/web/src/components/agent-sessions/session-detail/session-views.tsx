@@ -65,7 +65,7 @@ export function SessionViews({
 	const [collapseIdle, setCollapseIdle] = useState(true)
 	const [mergeRepeats, setMergeRepeats] = useState(false)
 	const [showThinking, setShowThinking] = useState(true)
-	const [showPayloads, setShowPayloads] = useState(true)
+	const [showPayloads, setShowPayloads] = useState(false)
 	// The views unmount when the view changes, so what the reader opened,
 	// collapsed or zoomed lives here — otherwise a look at Flow and back costs
 	// them the place they had found in a 600-span session.
