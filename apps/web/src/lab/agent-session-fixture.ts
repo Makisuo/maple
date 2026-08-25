@@ -221,6 +221,24 @@ function toolArguments(tool: string): Record<string, unknown> {
 	}
 }
 
+/** `gen_ai.tool.description`, on the tools that stamp one — the Overview's
+ *  Tools rail discloses it. run_sql and friends deliberately carry none, so
+ *  the rail also shows the plain, undisclosable row. */
+function toolDescription(tool: string): string | undefined {
+	switch (tool) {
+		case "read_file":
+			return "Read a file from the repository. Returns up to 2000 lines from the given offset."
+		case "grep_repo":
+			return "Search file contents with a regular expression, scoped by a glob."
+		case "run_tests":
+			return "Run a test suite and report per-test pass/fail with captured output for failures."
+		case "write_file":
+			return "Write a file to the repository, overwriting whatever is there."
+		default:
+			return undefined
+	}
+}
+
 function toolResult(tool: string): string | undefined {
 	switch (tool) {
 		case "read_file":
@@ -326,6 +344,7 @@ function buildBaseTurns(): readonly AiSessionSpan[] {
 							toolCallId: `toolu_${index}_${call}`,
 							toolCallArguments: toolArguments(tool),
 							toolCallResult: failedTool ? "exit 1 · 2 failing" : toolResult(tool),
+							toolDescription: toolDescription(tool),
 							errorType: failedTool ? "tool_error" : undefined,
 						},
 					}),

@@ -378,7 +378,9 @@ function TurnChapter({
 				</span>
 				{turn.agentName !== undefined && <AgentPill name={turn.agentName} />}
 				{turn.failed && <Pill tone="error">Failed</Pill>}
-				{collapsed && <span className={cn(META, "shrink-0")}>{summariseTurn(row)}</span>}
+				{/* Shrinkable, unlike its neighbours: the summary joins every tool
+				    name in the turn, so it truncates rather than widening the page. */}
+				{collapsed && <span className={META}>{summariseTurn(row)}</span>}
 				<span className="grow" />
 				{/* The AI spans the transcript actually renders, not the turn's raw
 				    time slice: that slice carries the app's own HTTP/DB spans too, and
@@ -435,11 +437,16 @@ function summariseTurn(row: Extract<TranscriptRow, { kind: "turn" }>): string {
 	return parts.join(" · ")
 }
 
+/** Capped and truncating: the name is emitter input, and an unbounded one would
+ *  push its header row — and with it the page — into a horizontal scroll. */
 function AgentPill({ name }: { name: string }) {
 	return (
-		<span className="flex shrink-0 items-center gap-1.5 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[11px] text-primary">
-			<span aria-hidden className="size-1 rounded-full bg-primary" />
-			{name}
+		<span
+			className="flex max-w-56 shrink-0 items-center gap-1.5 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[11px] text-primary"
+			title={name}
+		>
+			<span aria-hidden className="size-1 shrink-0 rounded-full bg-primary" />
+			<span className="min-w-0 truncate">{name}</span>
 		</span>
 	)
 }
@@ -458,6 +465,7 @@ function UserBlock({
 	const showHistory = disclosed(openRows, historyKey, false)
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
+	const textKey = `${row.key}:text`
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-foreground" className="pt-5">
@@ -487,15 +495,20 @@ function UserBlock({
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
 				</div>
-				{raw ? (
-					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
-						{row.text}
-					</p>
-				) : (
-					<MessageResponse className="text-foreground text-sm leading-relaxed">
-						{row.text}
-					</MessageResponse>
-				)}
+				{/* Clamped like every other long body: a pasted 400-line prompt is one
+				    block of a conversation, not the page. "Show full" opens it. */}
+				<ClampedText
+					text={row.text}
+					body={
+						raw ? undefined : (
+							<MessageResponse className="text-foreground text-sm leading-relaxed">
+								{row.text}
+							</MessageResponse>
+						)
+					}
+					expanded={disclosed(openRows, textKey, false)}
+					onToggleExpanded={() => onToggleRow(textKey)}
+				/>
 				{showHistory && (
 					<div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2.5">
 						{/* The history verbatim, not a diff: dropped and truncated
@@ -852,7 +865,10 @@ function ToolBlock({
 					>
 						<GearIcon size={13} className={cn("shrink-0", tone)} />
 						<span className={cn(LABEL, tone)}>Tool</span>
-						<span className="shrink-0 font-medium font-mono text-foreground text-xs">
+						<span
+							className="min-w-0 truncate font-medium font-mono text-foreground text-xs"
+							title={row.toolName ?? row.span.spanName}
+						>
 							{row.toolName ?? row.span.spanName}
 						</span>
 						<span className={cn(META, "shrink-0")}>
@@ -1142,10 +1158,15 @@ function LaneOpen({
 				<span className={cn(LABEL, "text-chart-1")}>
 					{row.laneKind === "subagent" ? "Subagent" : "Agent"}
 				</span>
-				<span className="shrink-0 font-medium font-mono text-foreground text-xs">
+				{/* Both carry agent names, which are emitter input: capped and
+				    truncating so a long one cannot widen the page. */}
+				<span
+					className="max-w-56 truncate font-medium font-mono text-foreground text-xs"
+					title={row.agentName}
+				>
 					{row.agentName}
 				</span>
-				<span className={cn(META, "shrink-0")}>
+				<span className={META}>
 					{row.laneKind === "subagent" && row.parentAgentName !== undefined
 						? `· invoked by ${row.parentAgentName}`
 						: `· trace ${row.span.traceId.slice(0, 8)}`}{" "}
@@ -1203,7 +1224,8 @@ function ParallelJump({
 		<button
 			type="button"
 			onClick={() => onJump(targetKey)}
-			className="shrink-0 cursor-pointer rounded-sm bg-primary/12 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/20"
+			title={label}
+			className="max-w-72 shrink-0 cursor-pointer truncate rounded-sm bg-primary/12 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/20"
 		>
 			ran in parallel with {label}
 		</button>
@@ -1220,7 +1242,7 @@ function LaneClose({
 		<Row depth={row.depth} className="pt-2">
 			<div className="flex items-center gap-2.5 py-1">
 				<CornerDownLeftIcon size={12} className="shrink-0 text-muted-foreground" />
-				<span className="shrink-0 text-muted-foreground text-xs">
+				<span className="min-w-0 truncate text-muted-foreground text-xs">
 					{row.agentName}
 					{row.parentAgentName === undefined
 						? " finished"
@@ -1272,7 +1294,7 @@ function ParallelMarker({
 				{/* Only a window every lane shared is reported as an overlap. A chain
 				    of pairwise overlaps has none, and the marker then reports the fork's
 				    extent instead of inventing one. */}
-				<span className="shrink-0 text-muted-foreground text-xs">
+				<span className="min-w-0 truncate text-muted-foreground text-xs">
 					{row.forkedBy === undefined ? "This turn" : row.forkedBy} forked {row.lanes.length} lanes
 					—{" "}
 					{row.overlapStartMs !== undefined && row.overlapEndMs !== undefined
@@ -1285,7 +1307,8 @@ function ParallelMarker({
 						key={lane.key}
 						type="button"
 						onClick={() => onJump(lane.key)}
-						className="shrink-0 cursor-pointer font-mono text-[11px] text-primary hover:underline"
+						title={lane.agentName}
+						className="max-w-48 shrink-0 cursor-pointer truncate font-mono text-[11px] text-primary hover:underline"
 					>
 						{lane.agentName}
 					</button>
@@ -1336,7 +1359,8 @@ function ParallelTurnsMarker({
 						key={ref.key}
 						type="button"
 						onClick={() => onJump(ref.key)}
-						className="shrink-0 cursor-pointer font-mono text-[11px] text-primary hover:underline"
+						title={ref.turn.agentName}
+						className="max-w-48 shrink-0 cursor-pointer truncate font-mono text-[11px] text-primary hover:underline"
 					>
 						{turnOrdinal(ref.turn).toUpperCase()}
 						{ref.turn.agentName !== undefined && ` ${ref.turn.agentName}`}
@@ -1398,7 +1422,10 @@ function StructureRow({
 					)}
 				>
 					<Glyph size={13} className={cn("shrink-0", tone)} />
-					<span className="shrink-0 font-medium font-mono text-foreground text-xs">
+					<span
+						className="min-w-0 truncate font-medium font-mono text-foreground text-xs"
+						title={row.label}
+					>
 						{row.label}
 					</span>
 					<span className={META}>{structureMeta(row.span, category)}</span>

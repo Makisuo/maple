@@ -14,6 +14,7 @@ import {
 	CheckIcon,
 	ChevronDownIcon,
 	ChevronRightIcon,
+	CircleXmarkIcon,
 	CopyIcon,
 	ExternalLinkIcon,
 	XmarkIcon,
@@ -37,7 +38,7 @@ import {
 import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
 import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
 import { ClampedText, firstLine } from "./clamped-text"
-import { CATEGORY_FILL } from "./span-visuals"
+import { CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
 /**
  * The payload of one span, expanded in place — under its waterfall row, or in
@@ -183,6 +184,9 @@ export function SpanDrawer({
 }) {
 	const category = classifyAiSpan(span)
 	const errored = spanFailed(span)
+	// The canvas the drawer docks under draws its nodes with these glyphs, so the
+	// drawer names its span in the same vocabulary.
+	const Glyph = errored ? CircleXmarkIcon : CATEGORY_ICON[category]
 	const subtitle = [turnOrdinal, spanModel(span), formatDuration(span.durationMs)]
 		.filter((part): part is string => part !== undefined)
 		.join(" · ")
@@ -201,12 +205,10 @@ export function SpanDrawer({
 				tabsInHeader
 				header={(tabs) => (
 					<div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 bg-background py-2">
-						<span
+						<Glyph
 							aria-hidden
-							className={cn(
-								"size-1.5 shrink-0 rounded-xs",
-								errored ? "bg-destructive" : CATEGORY_FILL[category],
-							)}
+							size={13}
+							className={cn("shrink-0", errored ? "text-destructive" : CATEGORY_TEXT[category])}
 						/>
 						<span className="font-medium font-mono text-sm">{span.spanName}</span>
 						{subtitle !== "" && <span className="text-muted-foreground text-xs">{subtitle}</span>}

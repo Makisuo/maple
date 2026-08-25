@@ -854,6 +854,25 @@ describe("per-model cost, tools and failure groups", () => {
 		])
 	})
 
+	// The Overview's rail discloses the description, so it rides the usage row.
+	it("keeps the first stamped tool description for the tool's usage row", () => {
+		const summary = summarize([
+			agentSpan({ spanId: "a1", startMs: 0, durationMs: 10 * SECOND }),
+			toolSpan({ spanId: "t1", parentSpanId: "a1", startMs: 0, durationMs: 100 }),
+			toolSpan({
+				spanId: "t2",
+				parentSpanId: "a1",
+				startMs: 200,
+				durationMs: 100,
+				genAi: { toolDescription: "Read a file from the repository." },
+			}),
+		])
+
+		expect(summary.tools).toEqual([
+			{ name: "read_file", calls: 2, description: "Read a file from the repository." },
+		])
+	})
+
 	// The counts and the breakdown are two readings of one list, so a failure
 	// classified as a rate limit must not also appear as a generic error.
 	it("groups failures under the same classification the counts use", () => {
