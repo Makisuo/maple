@@ -259,6 +259,31 @@ describe("errorsFacetsQuery", () => {
 		expect(sql).toContain("DeploymentEnv IN ('prod')")
 		expect(sql).toContain("FingerprintHash IN (toUInt64('123'))")
 	})
+
+	it("counts issues, not occurrences", () => {
+		// The sidebar filters a list of issue rows, so its counts have to be in
+		// issues. count() reported occurrences: one runaway dev loop read 183.1K
+		// beside a list of a dozen issues.
+		const q = errorsFacetsQuery({})
+		const { sql } = compileUnion(q, baseParams)
+		expect(sql).toContain("uniq(FingerprintHash) AS count")
+		expect(sql).not.toContain("count() AS count")
+	})
+
+	it("leaves each section's own dimension unfiltered", () => {
+		// Ticking `api` must not zero every other service in the Service section,
+		// or there is no way to widen the selection again.
+		const q = errorsFacetsQuery({ services: ["api"], deploymentEnvs: ["prod"] })
+		const { sql } = compileUnion(q, baseParams)
+		const branches = sql.split("UNION ALL")
+		const serviceBranch = branches.find((b) => b.includes("'service' AS facetType"))
+		const envBranch = branches.find((b) => b.includes("'environment' AS facetType"))
+
+		expect(serviceBranch).not.toContain("ServiceName IN ('api')")
+		expect(serviceBranch).toContain("DeploymentEnv IN ('prod')")
+		expect(envBranch).toContain("ServiceName IN ('api')")
+		expect(envBranch).not.toContain("DeploymentEnv IN ('prod')")
+	})
 })
 
 // errorIssuesQuery
