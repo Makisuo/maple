@@ -350,8 +350,18 @@ describe("SessionOverview", () => {
 		}),
 	])
 
-	function Overview(props: { turns?: readonly SessionTurn[]; summary?: SessionSummary }) {
-		return <SessionOverview turns={props.turns ?? turns} summary={props.summary ?? summary} />
+	function Overview(props: {
+		turns?: readonly SessionTurn[]
+		summary?: SessionSummary
+		onOpenSpan?: (spanId: string) => void
+	}) {
+		return (
+			<SessionOverview
+				turns={props.turns ?? turns}
+				summary={props.summary ?? summary}
+				onOpenSpan={props.onOpenSpan ?? noop}
+			/>
+		)
 	}
 
 	it("splits the wall clock into where the time actually went", () => {
@@ -362,15 +372,48 @@ describe("SessionOverview", () => {
 		expect(screen.getByText(/4m 20s · 83%/)).toBeTruthy()
 	})
 
-	// Every figure here appears once. The totals a summary block used to restate
-	// above the page all live in the time bar, the digest header and the rail,
-	// and reading the same number twice is what made the view feel crowded.
-	it("restates no total the sections below it already carry", () => {
-		render(<Overview turns={failedTurns} summary={failedSummary} />)
+	// The five-second answer: the verdict names what killed the final turn and
+	// links the span that is its evidence — the one link the v2 page lost.
+	it("says a failed session failed, names the cause, and opens the failing span", () => {
+		const onOpenSpan = vi.fn()
+		render(<Overview turns={failedTurns} summary={failedSummary} onOpenSpan={onOpenSpan} />)
 
-		expect(screen.queryByText(/wall clock/i)).toBeNull()
-		expect(screen.queryByText(/^Completed/)).toBeNull()
-		expect(screen.queryByText(/idle across/)).toBeNull()
+		expect(screen.getByText("Failed")).toBeTruthy()
+		expect(screen.getAllByText("context_length_exceeded").length).toBeGreaterThan(0)
+
+		fireEvent.click(screen.getByRole("button", { name: /Open failing span/ }))
+		// The deepest span carrying the failure, not the wrapper that copied it.
+		expect(onOpenSpan).toHaveBeenCalledWith("f-llm")
+	})
+
+	// A mid-session failure the session recovered from is not a failed session —
+	// but it is exactly what the findings list exists to surface.
+	it("completes-with-findings when something failed mid-session, and links it", () => {
+		const onOpenSpan = vi.fn()
+		render(<Overview onOpenSpan={onOpenSpan} />)
+
+		expect(screen.getByText(/Completed, with 1 finding/)).toBeTruthy()
+		fireEvent.click(screen.getByText("error · run_tests"))
+		expect(onOpenSpan).toHaveBeenCalledWith("tool-3")
+	})
+
+	it("says a clean session completed cleanly, and what that claim covers", () => {
+		render(<Overview turns={quietTurns} summary={quiet} />)
+
+		expect(screen.getByText("Completed cleanly")).toBeTruthy()
+		expect(screen.getByText(/No errors, refusals, truncated replies/)).toBeTruthy()
+		expect(screen.getByText("No findings.")).toBeTruthy()
+	})
+
+	// The shape strip replaces the turn digest: one cell per turn, colored by
+	// what the findings attribute to it, each a door into the Traces view.
+	it("draws one cell per turn and opens the turn's anchor from a click", () => {
+		const onOpenSpan = vi.fn()
+		render(<Overview onOpenSpan={onOpenSpan} />)
+
+		const cellTwo = screen.getByRole("button", { name: "2" })
+		fireEvent.click(cellTwo)
+		expect(onOpenSpan).toHaveBeenCalledWith("agent-2")
 	})
 
 	it("says no cost was reported rather than pricing tokens itself", () => {
@@ -423,16 +466,6 @@ describe("SessionOverview", () => {
 		expect(name.getAttribute("title")).toBe("openrouter/openai/gpt-4o-mini")
 	})
 
-	// The digest exists to put the reader's own prompt back on the page — it is
-	// the one thing a span table cannot carry.
-	it("gives every turn its prompt, its work and what went wrong in it", () => {
-		render(<Overview />)
-
-		expect(screen.getByText("fix the webhook retry backoff")).toBeTruthy()
-		expect(screen.getAllByText(/read_file/).length).toBeGreaterThan(0)
-		// One failing tool call, named by what failed rather than by a bucket.
-		expect(screen.getAllByText(/error · run_tests/).length).toBeGreaterThan(0)
-	})
 })
 
 describe("SessionWaterfall", () => {

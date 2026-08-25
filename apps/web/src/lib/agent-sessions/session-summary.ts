@@ -746,8 +746,11 @@ function refusalSignal(span: AiSessionSpan): string | undefined {
  * Frameworks stamp the model call's error and its finish reasons on the agent
  * span wrapping it as well. Counted at both levels, one refusal is two and one
  * failure is two — so only the deepest span carrying a given signal counts.
+ *
+ * Exported for `session-findings.ts`, whose truncation detector reads finish
+ * reasons under the same copied-onto-the-wrapper convention refusals follow.
  */
-function shadowedAncestorIds(
+export function shadowedAncestorIds(
 	spans: readonly AiSessionSpan[],
 	signalOf: (span: AiSessionSpan) => string | undefined,
 ): ReadonlySet<string> {

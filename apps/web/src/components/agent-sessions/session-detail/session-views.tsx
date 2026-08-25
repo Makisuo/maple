@@ -195,7 +195,16 @@ export function SessionViews({
 			    scroller gave up (`pb-0`, so the Flow floor can pin flush — see the
 			    route); the Flow view stays unpadded for the same reason. */}
 			<TabsContent value="overview" className="flex flex-[1_1_auto] flex-col pb-4">
-				<SessionOverview turns={turns} summary={summary} />
+				<SessionOverview
+					turns={turns}
+					summary={summary}
+					// A finding's evidence lives in the Traces view: select the span and
+					// go — the waterfall scrolls to and expands the selection on mount.
+					onOpenSpan={(spanId) => {
+						onSelectSpan(spanId)
+						onViewChange("trace")
+					}}
+				/>
 			</TabsContent>
 			<TabsContent value="trace" className="flex flex-[1_1_auto] flex-col pb-4">
 				<SessionWaterfall
