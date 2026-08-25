@@ -7,7 +7,12 @@ import {
 } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
 import { withTenantExecutor } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import {
+	resolveTimeRange,
+	rangeExceededResult,
+	timeRangeInvalidResult,
+	MCP_SEARCH_MAX_HOURS,
+} from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
 import { formatDurationFromMs, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -49,6 +54,7 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 				maxHours: MCP_SEARCH_MAX_HOURS,
 			})
 			const { st, et } = range
+			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "search_traces")
 			if (range.exceeded) return rangeExceededResult(range, "search_traces")
 			const lim = clampLimit(params.limit, { defaultValue: 20, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })

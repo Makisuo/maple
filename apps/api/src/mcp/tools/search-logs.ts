@@ -1,7 +1,12 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import {
+	resolveTimeRange,
+	rangeExceededResult,
+	timeRangeInvalidResult,
+	MCP_SEARCH_MAX_HOURS,
+} from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
 import { truncate, formatNumber } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -42,6 +47,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 		}) {
 			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_SEARCH_MAX_HOURS })
 			const { st, et } = range
+			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "search_logs")
 			if (range.exceeded) return rangeExceededResult(range, "search_logs")
 			const lim = clampLimit(limit, { defaultValue: 30, max: 200 })
 			const off = clampOffset(offset, { max: 10_000 })

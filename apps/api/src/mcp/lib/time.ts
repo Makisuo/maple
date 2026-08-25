@@ -23,12 +23,16 @@ export const MCP_LOG_PATTERN_MAX_HOURS = MAX_LOG_PATTERN_RANGE_SECONDS / 3600
  *
  * Handles ISO 8601 (with T, Z, timezone offsets, milliseconds) and the
  * already-correct `YYYY-MM-DD HH:mm:ss` format — which the shared parser reads
- * as UTC rather than local. Returns the input trimmed if it can't be parsed.
+ * as UTC rather than local.
+ *
+ * Returns `null` when the input isn't a timestamp at all. It used to return the
+ * input verbatim, which meant an agent-supplied `'2026-08-47:53'` was spliced
+ * into a `DateTime` literal and only failed at ClickHouse, as an unhandled
+ * `Cannot parse string … as DateTime`.
  */
-export function normalizeTime(input: string): string {
-	const trimmed = input.trim()
-	const ms = parseWarehouseDateTime(trimmed)
-	return Number.isNaN(ms) ? trimmed : formatWarehouseDateTime(ms)
+export function normalizeTime(input: string): string | null {
+	const ms = parseWarehouseDateTime(input.trim())
+	return Number.isNaN(ms) ? null : formatWarehouseDateTime(ms)
 }
 
 const DEFAULT_HOURS = 6
@@ -48,6 +52,12 @@ export interface ResolveTimeRangeOptions {
 	readonly maxHours?: number
 }
 
+/** An agent-supplied bound that wasn't a timestamp, kept for the error message. */
+export interface InvalidTimeBound {
+	readonly param: "start_time" | "end_time"
+	readonly value: string
+}
+
 export interface ResolvedTimeRange {
 	readonly st: string
 	readonly et: string
@@ -57,6 +67,8 @@ export interface ResolvedTimeRange {
 	readonly maxHours: number | undefined
 	/** Width of the agent-supplied window in hours, when both bounds parsed. */
 	readonly requestedHours: number | undefined
+	/** Agent-supplied bounds that weren't timestamps. Empty when the range is sound. */
+	readonly invalid: ReadonlyArray<InvalidTimeBound>
 }
 
 /**
@@ -67,6 +79,11 @@ export interface ResolvedTimeRange {
  * *unchanged* with `exceeded: true` — callers must reject it. This used to clamp
  * `st` forward silently, which meant an agent asking for 30 days got 7 and had no
  * way to tell that its answer was computed from a fraction of the window.
+ *
+ * A bound that isn't a timestamp is reported in `invalid` and replaced by the
+ * default window's bound, so `st`/`et` are always a well-formed warehouse
+ * DateTime even for a caller that doesn't check. Callers that do check return
+ * `timeRangeInvalidResult`, which tells the agent the expected format.
  *
  * Back-compat: the third arg also accepts a bare number (treated as `defaultHours`).
  */
@@ -79,17 +96,37 @@ export function resolveTimeRange(
 		typeof opts === "number" ? { defaultHours: opts, maxHours: undefined } : opts
 
 	const defaults = defaultTimeRange(defaultHours)
-	const st = startTime ? normalizeTime(startTime) : defaults.startTime
-	const et = endTime ? normalizeTime(endTime) : defaults.endTime
+	const invalid: InvalidTimeBound[] = []
+
+	const resolveBound = (
+		supplied: string | undefined,
+		param: InvalidTimeBound["param"],
+		fallback: string,
+	): string => {
+		if (supplied === undefined) return fallback
+		const normalized = normalizeTime(supplied)
+		if (normalized === null) {
+			invalid.push({ param, value: supplied })
+			return fallback
+		}
+		return normalized
+	}
+
+	const st = resolveBound(startTime, "start_time", defaults.startTime)
+	const et = resolveBound(endTime, "end_time", defaults.endTime)
 
 	const stMs = parseWarehouseDateTime(st)
 	const etMs = parseWarehouseDateTime(et)
 	const requestedHours = Number.isNaN(stMs) || Number.isNaN(etMs) ? undefined : (etMs - stMs) / 3_600_000
 
 	const exceeded =
-		maxHours !== undefined && maxHours > 0 && requestedHours !== undefined && requestedHours > maxHours
+		invalid.length === 0 &&
+		maxHours !== undefined &&
+		maxHours > 0 &&
+		requestedHours !== undefined &&
+		requestedHours > maxHours
 
-	return { st, et, exceeded, maxHours, requestedHours }
+	return { st, et, exceeded, maxHours, requestedHours, invalid }
 }
 
 const formatHours = (hours: number): string => {
@@ -130,6 +167,30 @@ export function rangeExceededResult(
 ) {
 	return {
 		content: [{ type: "text" as const, text: rangeExceededMessage(range, toolName) }],
+		isError: true as const,
+	}
+}
+
+/**
+ * Builds the message for bounds that aren't timestamps. Names each bad value so
+ * the agent can see what it actually sent, and states the accepted formats.
+ */
+export function timeRangeInvalidMessage(range: Pick<ResolvedTimeRange, "invalid">, toolName: string): string {
+	const bounds = range.invalid.map((b) => `${b.param}="${b.value}"`).join(" and ")
+	return [
+		`Invalid time value for \`${toolName}\`: ${bounds}.`,
+		`Use \`YYYY-MM-DD HH:mm:ss\` (UTC) or an ISO-8601 timestamp, or omit the bound to use the default window.`,
+	].join(" ")
+}
+
+/**
+ * Standard MCP error result for unparseable bounds. Returned directly by tools,
+ * so a malformed timestamp fails as a retryable tool error rather than as a
+ * ClickHouse parse error the agent can't act on.
+ */
+export function timeRangeInvalidResult(range: Pick<ResolvedTimeRange, "invalid">, toolName: string) {
+	return {
+		content: [{ type: "text" as const, text: timeRangeInvalidMessage(range, toolName) }],
 		isError: true as const,
 	}
 }

@@ -1,6 +1,11 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { queryWarehouse, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
+import {
+	resolveTimeRange,
+	rangeExceededResult,
+	timeRangeInvalidResult,
+	MCP_DISCOVERY_MAX_HOURS,
+} from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
 import { formatNumber, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -33,6 +38,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
 		}) {
 			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_DISCOVERY_MAX_HOURS })
 			const { st, et } = range
+			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "list_metrics")
 			if (range.exceeded) return rangeExceededResult(range, "list_metrics")
 			const lim = clampLimit(limit, { defaultValue: 50, max: 500 })
 			const off = clampOffset(offset, { max: 10_000 })

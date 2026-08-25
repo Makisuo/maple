@@ -1,7 +1,12 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
 import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
+import {
+	resolveTimeRange,
+	rangeExceededResult,
+	timeRangeInvalidResult,
+	MCP_DISCOVERY_MAX_HOURS,
+} from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatTable, formatNumber, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -41,6 +46,7 @@ export function registerListProductEventsTool(server: McpToolRegistrar) {
 				maxHours: MCP_DISCOVERY_MAX_HOURS,
 			})
 			const { st, et } = range
+			if (range.invalid.length > 0) return timeRangeInvalidResult(range, TOOL)
 			if (range.exceeded) return rangeExceededResult(range, TOOL)
 			const limit = clampLimit(params.limit, { defaultValue: 50, max: 200 })
 
