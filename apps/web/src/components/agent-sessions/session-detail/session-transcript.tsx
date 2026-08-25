@@ -24,7 +24,6 @@ import {
 	ExternalLinkIcon,
 	FaceRobotIcon,
 	GearIcon,
-	PixelBracketsCurlyIcon,
 	PixelSparkleIcon,
 	UserIcon,
 	type IconComponent,
@@ -463,7 +462,11 @@ function UserBlock({
 							{showHistory ? "hide full history" : "show full history"}
 						</button>
 					)}
-					<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} className="-my-1" />
+					<ViewSwitch
+						rendered="md"
+						raw={raw}
+						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+					/>
 				</div>
 				{raw ? (
 					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
@@ -557,7 +560,11 @@ function SystemBlock({
 							onToggleExpanded={() => onToggleRow(textKey)}
 						/>
 					</div>
-					<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} className="-my-1" />
+					<ViewSwitch
+						rendered="md"
+						raw={raw}
+						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+					/>
 					{/* Copies the prompt as captured, not its rendering. */}
 					<CopyButton value={row.text} label="system prompt" className="-my-1 shrink-0" />
 				</div>
@@ -614,7 +621,11 @@ function AssistantBlock({
 					</Pill>
 				)}
 				{row.text !== undefined && (
-					<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} className="-my-1" />
+					<ViewSwitch
+						rendered="md"
+						raw={raw}
+						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+					/>
 				)}
 				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
@@ -644,10 +655,11 @@ function AssistantBlock({
 								/>
 							</div>
 							{error.highlighted !== undefined && (
-								<RawToggle
+								<ViewSwitch
+									rendered="json"
 									raw={errorRaw}
-									onToggle={() => onToggleRow(errorRawKey)}
-									className="-my-1"
+									onRawChange={(next) => next !== errorRaw && onToggleRow(errorRawKey)}
+									className="self-start"
 								/>
 							)}
 							<CopyButton
@@ -692,7 +704,11 @@ function PromptBlock({
 					<span className={META}>{callMetaLine(row.span)}</span>
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{row.span.serviceName}</span>
-					<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} className="-my-1" />
+					<ViewSwitch
+						rendered="md"
+						raw={raw}
+						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+					/>
 				</div>
 				{raw ? (
 					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
@@ -911,40 +927,72 @@ function useJsonPayload(text: string): { formatted: string; highlighted: string 
 }
 
 /**
- * The rendered ↔ raw switch. Markdown layout and pretty-printed JSON are
+ * The rendered ↔ raw selector. Markdown layout and pretty-printed JSON are
  * readings of the capture, and a reading can hide things — whitespace, key
  * order, a literal `**` — so every rendered body keeps a way back to the
- * captured bytes. Held in `openRows` like every other flipped default, so the
- * choice survives the row scrolling out of the virtualizer.
+ * captured bytes. Two labelled segments where the selected one is the view the
+ * reader is IN: a lone pressed icon named either the current view or the one a
+ * click would bring, depending on who read it. Held in `openRows` like every
+ * other flipped default, so the choice survives the row scrolling out of the
+ * virtualizer.
  */
-function RawToggle({
+function ViewSwitch({
+	rendered,
 	raw,
-	onToggle,
+	onRawChange,
 	className,
 }: {
+	/** The rendered segment's label — what the rendering IS: "md" or "json". */
+	rendered: string
 	raw: boolean
-	onToggle: () => void
+	onRawChange: (raw: boolean) => void
 	className?: string
 }) {
 	return (
-		<Button
-			variant="ghost"
-			size="icon-xs"
-			aria-pressed={raw}
-			aria-label={raw ? "Show rendered" : "Show raw text"}
-			title={raw ? "Show rendered" : "Show raw text"}
-			onClick={(event) => {
-				event.stopPropagation()
-				onToggle()
-			}}
+		<span
+			role="group"
+			aria-label="Body view"
 			className={cn(
-				"shrink-0 text-muted-foreground hover:text-foreground",
-				raw && "bg-accent text-foreground",
+				"flex shrink-0 items-center self-center overflow-hidden rounded-sm border border-border",
 				className,
 			)}
 		>
-			<PixelBracketsCurlyIcon />
-		</Button>
+			<ViewSegment active={!raw} onSelect={() => onRawChange(false)}>
+				{rendered}
+			</ViewSegment>
+			<ViewSegment active={raw} onSelect={() => onRawChange(true)}>
+				raw
+			</ViewSegment>
+		</span>
+	)
+}
+
+function ViewSegment({
+	active,
+	onSelect,
+	children,
+}: {
+	active: boolean
+	onSelect: () => void
+	children: string
+}) {
+	return (
+		<button
+			type="button"
+			aria-pressed={active}
+			onClick={(event) => {
+				event.stopPropagation()
+				onSelect()
+			}}
+			className={cn(
+				"cursor-pointer px-1.5 py-px font-mono text-[10px] uppercase tracking-[0.08em]",
+				active
+					? "bg-accent text-foreground"
+					: "text-muted-foreground hover:text-foreground",
+			)}
+		>
+			{children}
+		</button>
 	)
 }
 
@@ -994,7 +1042,12 @@ function PayloadSection({
 				{payload.text !== "" && (
 					<span className="-my-1 ml-auto flex items-center">
 						{highlighted !== undefined && (
-							<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} />
+							<ViewSwitch
+								rendered="json"
+								raw={raw}
+								onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
+								className="mr-1"
+							/>
 						)}
 						<CopyButton value={raw ? payload.text : formatted} label={label.toLowerCase()} />
 					</span>
