@@ -150,6 +150,9 @@ interface TurnAnchor {
 	readonly span: AiSessionSpan
 	readonly kind: TurnAnchorKind
 	readonly id: string
+	/** The `gen_ai.conversation.id` this anchor owns, on the conversation rule
+	 *  only. It is also how member spans find their way to this turn. */
+	readonly conversationId: string | undefined
 }
 
 /**
@@ -161,17 +164,21 @@ interface TurnAnchor {
  * 1. `gen_ai.conversation.id` — the only turn key the convention has, and the
  *    one eve stamps with its turn id. One id, one turn. `findAnchors` requires
  *    more than one distinct id, and ignores vendors that derive the session id
- *    from it; it does not check that the ids are non-interleaved in time, so a
- *    vendor stamping one per concurrent sub-agent would mis-partition here.
+ *    from it. The ids may INTERLEAVE in time: Maple's investigation fan-out
+ *    stamps one per hypothesis lane and launches the lanes together.
  * 2. Agent invocations with no agent above them — a session with no usable
  *    conversation id still opens each turn by invoking the agent.
  * 3. One turn per trace — the floor. Wrong for a trace holding several turns,
  *    but it never merges two traces into one turn, and it always renders.
  *
- * Assignment is by time, not by parentage: a turn owns every span that started
- * before the next turn did, whatever trace or service it came from. Spans that
- * start before the first anchor (a gateway span that opens the trace, say) join
- * turn 1 rather than becoming a turn of their own.
+ * Assignment then depends on which rule fired. On rule 1 the id a span CARRIES
+ * decides, because concurrent turns make time meaningless as an owner: a pure
+ * time cursor gives each lane only the sliver before the next lane anchored and
+ * dumps every lane's tail into whichever anchored last. On rules 2 and 3 — and
+ * for any span carrying no id — a turn owns every span that started before the
+ * next turn did, whatever trace or service it came from. Spans that start before
+ * the first anchor (a gateway span that opens the trace, say) join turn 1 rather
+ * than becoming a turn of their own.
  */
 export function buildSessionTurns(spans: readonly AiSessionSpan[]): readonly SessionTurn[] {
 	if (spans.length === 0) return []
@@ -184,16 +191,21 @@ export function buildSessionTurns(spans: readonly AiSessionSpan[]): readonly Ses
 	const anchors = findAnchors(ordered.map((entry) => entry.span))
 	const anchorStarts = anchors.map((anchor) => spanStartMs(anchor.span))
 	const buckets: AiSessionSpan[][] = anchors.map(() => [])
+	const turnOf = conversationTurnResolver(spans, anchors)
 
-	// Both lists are in start order, so one forward cursor assigns every span.
+	// Both lists are in start order, so one forward cursor assigns every span that
+	// names no turn of its own.
 	let cursor = 0
 	for (const { span, startMs } of ordered) {
 		while (cursor + 1 < anchors.length && anchorStarts[cursor + 1]! <= startMs) cursor++
-		buckets[cursor]!.push(span)
+		buckets[turnOf(span) ?? cursor]!.push(span)
 	}
 
-	// Two anchors starting in the same millisecond leave the earlier one's bucket
-	// empty, and a turn with no spans has no start, no end and nothing to draw.
+	// A turn with no spans has no start, no end and nothing to draw. Rule 1 can no
+	// longer produce one — an anchor always carries its own id, so it lands in its
+	// own bucket even when another anchor shares its millisecond — but two
+	// agent-root or trace anchors in one millisecond still leave the earlier bucket
+	// empty.
 	return anchors
 		.map((anchor, index) => ({ anchor, turnSpans: buckets[index]! }))
 		.filter((entry) => entry.turnSpans.length > 0)
@@ -230,6 +242,55 @@ export function buildSessionTurns(spans: readonly AiSessionSpan[]): readonly Ses
 		})
 }
 
+/**
+ * Which turn a span names, by the conversation id it carries or its nearest
+ * tagged ancestor's — or `undefined`, leaving it to the caller's time cursor.
+ *
+ * Only the conversation rule assigns this way, so on rules 2 and 3 this is
+ * `undefined` for every span and the partition keeps its existing behaviour.
+ *
+ * Parentage is followed because a lane's own children are often untagged: the
+ * app's HTTP and database spans share the agent's trace and carry no
+ * `gen_ai.conversation.id`, and the time cursor would file them into whichever
+ * concurrent lane anchored last — the very mis-assignment this exists to stop.
+ * `parentSpanId` is intra-trace, so the walk ends at the trace root and the time
+ * cursor takes the spans it could not place, which is the best available guess
+ * for a span with no link to any turn.
+ */
+function conversationTurnResolver(
+	spans: readonly AiSessionSpan[],
+	anchors: readonly TurnAnchor[],
+): (span: AiSessionSpan) => number | undefined {
+	const turnByConversation = new Map<string, number>()
+	anchors.forEach((anchor, turn) => {
+		if (anchor.conversationId !== undefined) turnByConversation.set(anchor.conversationId, turn)
+	})
+	if (turnByConversation.size === 0) return () => undefined
+
+	const byId = new Map(spans.map((span) => [span.spanId, span]))
+	const memo = new Map<string, number | undefined>()
+
+	const resolve = (span: AiSessionSpan): number | undefined => {
+		if (memo.has(span.spanId)) return memo.get(span.spanId)
+		// Seeded before the walk so a malformed parent cycle ends here instead of
+		// recursing forever — the same guard `findAnchors` makes when it walks up.
+		memo.set(span.spanId, undefined)
+
+		// The same exclusion `findAnchors` makes: six vendors derive the session id
+		// FROM the conversation id, and for them the id names the session, not a
+		// turn — so it must not claim the span for turn 1.
+		const own = span.genAi.conversationId
+		let turn = own !== undefined && own !== span.sessionId ? turnByConversation.get(own) : undefined
+		if (turn === undefined) {
+			const parent = byId.get(span.parentSpanId)
+			if (parent !== undefined) turn = resolve(parent)
+		}
+		memo.set(span.spanId, turn)
+		return turn
+	}
+	return resolve
+}
+
 function findAnchors(ordered: readonly AiSessionSpan[]): readonly TurnAnchor[] {
 	const byConversation = new Map<string, AiSessionSpan>()
 	for (const span of ordered) {
@@ -246,6 +307,7 @@ function findAnchors(ordered: readonly AiSessionSpan[]): readonly TurnAnchor[] {
 			span,
 			kind: "conversation" as const,
 			id: `conversation:${conversationId}`,
+			conversationId,
 		}))
 	}
 
@@ -271,12 +333,22 @@ function findAnchors(ordered: readonly AiSessionSpan[]): readonly TurnAnchor[] {
 		(span) => span.isAiSpan && classifyAiSpan(span) === "agent" && !underAiSpan(span),
 	)
 	if (agentRoots.length > 0) {
-		return agentRoots.map((span) => ({ span, kind: "agent-root" as const, id: `span:${span.spanId}` }))
+		return agentRoots.map((span) => ({
+			span,
+			kind: "agent-root" as const,
+			id: `span:${span.spanId}`,
+			conversationId: undefined,
+		}))
 	}
 
 	const byTrace = new Map<string, AiSessionSpan>()
 	for (const span of ordered) if (!byTrace.has(span.traceId)) byTrace.set(span.traceId, span)
-	return [...byTrace].map(([traceId, span]) => ({ span, kind: "trace" as const, id: `trace:${traceId}` }))
+	return [...byTrace].map(([traceId, span]) => ({
+		span,
+		kind: "trace" as const,
+		id: `trace:${traceId}`,
+		conversationId: undefined,
+	}))
 }
 
 /**

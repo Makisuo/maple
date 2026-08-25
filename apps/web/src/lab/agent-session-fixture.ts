@@ -4,9 +4,10 @@
 // tidy: fourteen turns so the Overview's digest elides its middle, idle gaps of
 // wildly different lengths, two models, five tools, per-call usage and cost, a
 // sub-agent handoff, and a final turn that dies on a context-window error
-// reported at two levels — the roll-up the counting rules exist for. Three more
+// reported at two levels — the roll-up the counting rules exist for. Six more
 // turns after those carry what the Transcript view needs and the fourteen do
-// not produce (see `buildTranscriptTurns`).
+// not produce (see `buildTranscriptTurns`) — the last three a dispatched
+// fan-out that overlaps in time and so lands as concurrent CHAPTERS.
 
 import type { AiSessionGenAiValues, AiSessionSpan } from "@maple/domain/http"
 
@@ -430,6 +431,7 @@ function buildTranscriptTurns(startMs: number): readonly AiSessionSpan[] {
 		...richTurn(startMs),
 		...captureOffTurn(startMs + 3 * MINUTE),
 		...mixedCaptureTurn(startMs + 5 * MINUTE),
+		...parallelTurns(startMs + 7 * MINUTE),
 	]
 }
 
@@ -873,6 +875,218 @@ function mixedCaptureTurn(t: number): readonly AiSessionSpan[] {
 				conversationCompacted: true,
 				outputMessages: assistantText(
 					"Shard 3 is at 61% with the raised timeout and no lock contention since the retry. I've replaced the earlier tool dumps with this summary to keep the window open.",
+				),
+				responseFinishReasons: ["end_turn"],
+			},
+		}),
+	]
+}
+
+/**
+ * A fan-out that the turn partition splits into SIBLING turns, not lanes.
+ *
+ * `release-triage` dispatches two checks onto a queue and waits. The queue hop
+ * loses the span link, so each dispatched run roots its own trace and
+ * `buildSessionTurns` reads all three as agent roots — one chapter each. The
+ * dispatcher is still open while both run, so the three genuinely overlap and
+ * the transcript's chapter marker has something true to report.
+ *
+ * Deliberately NOT keyed on `gen_ai.conversation.id`, which is the other way
+ * Maple produces this shape: `findAnchors` prefers conversation ids over agent
+ * roots for the WHOLE session as soon as two distinct ids exist, so stamping
+ * them here would repartition the other seventeen turns into three and gut the
+ * rest of the lab.
+ *
+ * The timings are staggered so each turn's spans all START before the next
+ * turn's anchor. Turn assignment is by time, and truly interleaved emission
+ * would scatter one run's later spans into its neighbour's chapter — a real
+ * property of the partition, but not the one this fixture is here to show.
+ */
+function parallelTurns(t: number): readonly AiSessionSpan[] {
+	return [
+		// The dispatcher, open across both dispatched runs — it is waiting on them.
+		agentSpan({
+			spanId: "fan-agent",
+			traceId: "trace-fan",
+			startMs: t,
+			durationMs: 46 * SECOND,
+			agentName: "release-triage",
+		}),
+		llmSpan({
+			spanId: "fan-l1",
+			parentSpanId: "fan-agent",
+			traceId: "trace-fan",
+			startMs: t,
+			durationMs: 3 * SECOND,
+			spanName: "chat claude-opus-5",
+			model: "claude-opus-5",
+			ttftSeconds: 0.71,
+			genAi: {
+				...usage(8_200, 410, 0.13),
+				inputMessages: userMessages(
+					"the 14:20 release is still suspect — check the logs and the metrics at the same time, don't serialise them",
+				),
+				outputMessages: assistantText(
+					"Neither check needs the other's answer, so I'll dispatch both now and read them together: log-lane takes the error stream either side of 14:20, metric-lane takes the saturation counters. Whichever comes back first, I wait for both before concluding.",
+				),
+				responseFinishReasons: ["tool_use"],
+			},
+		}),
+		toolSpan({
+			spanId: "fan-t1",
+			parentSpanId: "fan-agent",
+			traceId: "trace-fan",
+			startMs: t + 4 * SECOND,
+			durationMs: 380,
+			serviceName: "agent-dispatch",
+			toolName: "dispatch_agent",
+			genAi: {
+				toolCallId: "toolu_01Fan1",
+				toolCallArguments: { agent: "log-lane", question: "error-rate shape either side of 14:20" },
+				toolCallResult: '{"queued":true,"run_id":"run_9f21"}',
+			},
+		}),
+		toolSpan({
+			spanId: "fan-t2",
+			parentSpanId: "fan-agent",
+			traceId: "trace-fan",
+			startMs: t + 4_600,
+			durationMs: 340,
+			serviceName: "agent-dispatch",
+			toolName: "dispatch_agent",
+			genAi: {
+				toolCallId: "toolu_01Fan2",
+				toolCallArguments: { agent: "metric-lane", question: "connection-pool saturation at 14:20" },
+				toolCallResult: '{"queued":true,"run_id":"run_9f22"}',
+			},
+		}),
+
+		// Dispatched run 1 — its own trace, no parent span: the queue hop lost it.
+		agentSpan({
+			spanId: "log-agent",
+			traceId: "trace-log",
+			startMs: t + 6 * SECOND,
+			durationMs: 22 * SECOND,
+			agentName: "log-lane",
+			serviceName: "log-worker",
+		}),
+		llmSpan({
+			spanId: "log-l1",
+			parentSpanId: "log-agent",
+			traceId: "trace-log",
+			startMs: t + 6_500,
+			durationMs: 2 * SECOND,
+			spanName: "chat claude-haiku-4-5",
+			model: "claude-haiku-4-5",
+			ttftSeconds: 0.31,
+			serviceName: "log-worker",
+			genAi: {
+				...usage(2_900, 240, 0.01),
+				outputMessages: assistantText(
+					"Counting ERROR-level lines per minute for checkout-api across 13:50–14:50, grouped by logger, so a new message type shows up as its own series instead of vanishing into the total.",
+				),
+				responseFinishReasons: ["tool_use"],
+			},
+		}),
+		toolSpan({
+			spanId: "log-t1",
+			parentSpanId: "log-agent",
+			traceId: "trace-log",
+			startMs: t + 9 * SECOND,
+			durationMs: 6 * SECOND,
+			serviceName: "maple-mcp",
+			toolName: "search_logs",
+			genAi: {
+				toolCallId: "toolu_01Log1",
+				toolCallArguments: {
+					query: "service:checkout-api level:ERROR",
+					from: "2026-08-25T13:50:00Z",
+					to: "2026-08-25T14:50:00Z",
+					group_by: "logger",
+				},
+				toolCallResult:
+					"logger                          before  after\ncarts.pool.ConnectionPool           0    1841\ncheckout.api.RequestHandler        12      14",
+			},
+		}),
+		llmSpan({
+			spanId: "log-l2",
+			parentSpanId: "log-agent",
+			traceId: "trace-log",
+			startMs: t + 16 * SECOND,
+			durationMs: 2 * SECOND,
+			spanName: "chat claude-haiku-4-5",
+			model: "claude-haiku-4-5",
+			ttftSeconds: 0.28,
+			serviceName: "log-worker",
+			genAi: {
+				...usage(4_100, 198, 0.02),
+				outputMessages: assistantText(
+					"1,841 ConnectionPool errors after 14:20 against none before, while the request handler's own error count barely moves. The failure is in getting a connection, not in the request.",
+				),
+				responseFinishReasons: ["end_turn"],
+			},
+		}),
+
+		// Dispatched run 2 — starts while run 1 is still open, and outlives it.
+		agentSpan({
+			spanId: "met-agent",
+			traceId: "trace-met",
+			startMs: t + 17 * SECOND,
+			durationMs: 20 * SECOND,
+			agentName: "metric-lane",
+			serviceName: "metric-worker",
+		}),
+		llmSpan({
+			spanId: "met-l1",
+			parentSpanId: "met-agent",
+			traceId: "trace-met",
+			startMs: t + 17_500,
+			durationMs: 2 * SECOND,
+			spanName: "chat claude-haiku-4-5",
+			model: "claude-haiku-4-5",
+			ttftSeconds: 0.33,
+			serviceName: "metric-worker",
+			genAi: {
+				...usage(3_300, 216, 0.01),
+				outputMessages: assistantText(
+					"Reading pool utilisation and wait time for the carts datasource on either side of the boundary. If utilisation pins at 1.0 the pool is the ceiling; if it doesn't, the slowness is downstream of it.",
+				),
+				responseFinishReasons: ["tool_use"],
+			},
+		}),
+		toolSpan({
+			spanId: "met-t1",
+			parentSpanId: "met-agent",
+			traceId: "trace-met",
+			startMs: t + 21 * SECOND,
+			durationMs: 7 * SECOND,
+			serviceName: "maple-mcp",
+			toolName: "query_data",
+			genAi: {
+				toolCallId: "toolu_01Met1",
+				toolCallArguments: {
+					metric: "db.client.connection.pool.utilization",
+					filters: { "pool.name": "carts" },
+					step: "1m",
+				},
+				toolCallResult:
+					"t       utilization  wait_ms_p95\n14:18          0.41          2\n14:22          1.00        780\n14:40          1.00        812",
+			},
+		}),
+		llmSpan({
+			spanId: "met-l2",
+			parentSpanId: "met-agent",
+			traceId: "trace-met",
+			startMs: t + 30 * SECOND,
+			durationMs: 2_400,
+			spanName: "chat claude-haiku-4-5",
+			model: "claude-haiku-4-5",
+			ttftSeconds: 0.3,
+			serviceName: "metric-worker",
+			genAi: {
+				...usage(5_600, 262, 0.02),
+				outputMessages: assistantText(
+					"Pool utilisation goes to 1.00 at 14:22 and stays there, with p95 wait climbing from 2ms to 780ms. The carts pool is saturated from the release onward.",
 				),
 				responseFinishReasons: ["end_turn"],
 			},
