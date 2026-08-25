@@ -64,7 +64,7 @@ diff --git a/dist/unstable/ai/McpServer.js b/dist/unstable/ai/McpServer.js
 index d8525be5cc4e5463300abaaec001f5c228130d36..2edd4f3d8a7d99c9e0171f8970143f9f08ec81ed 100644
 --- a/dist/unstable/ai/McpServer.js
 +++ b/dist/unstable/ai/McpServer.js
-@@ -406,19 +406,60 @@ const MCP_INVALID_BATCH_METHOD = "invalid/json-rpc-batch";
+@@ -406,19 +406,68 @@ const MCP_INVALID_BATCH_METHOD = "invalid/json-rpc-batch";
  const requestKey = requestId => `${typeof requestId}:${requestId}`;
  class McpClientKey extends Data.Class {}
  class McpProtocolState extends /*#__PURE__*/Context.Service()("effect/ai/McpServer/McpProtocolState") {}
@@ -84,9 +84,17 @@ index d8525be5cc4e5463300abaaec001f5c228130d36..2edd4f3d8a7d99c9e0171f8970143f9f
 +    if (initializePayload === undefined) {
 +      return undefined;
 +    }
++    const protocol = this.protocolRegistry.select(getOfferedProtocolVersion(initializePayload));
 +    const session = {
 +      initializePayload,
-+      protocol: this.protocolRegistry.select(getOfferedProtocolVersion(initializePayload)),
++      protocol,
++      // Required since rc.111: every non-initialize read does
++      // `session?.negotiatedProfile.protocolVersion`, which guards the session but not the profile.
++      negotiatedProfile: {
++        protocolVersion: protocol.protocolVersion,
++        clientCapabilities: initializePayload.capabilities,
++        clientInfo: initializePayload.clientInfo
++      },
 +      resourceSubscriptions: undefined,
 +      logLevel: {
 +        _tag: "Effect",
@@ -129,7 +137,7 @@ index d8525be5cc4e5463300abaaec001f5c228130d36..2edd4f3d8a7d99c9e0171f8970143f9f
  /**
   * Runs an MCP server over the current `RpcServer.Protocol`.
   *
-@@ -433,7 +474,7 @@ const layerMcpProtocolState = protocols => Layer.effect(McpProtocolState)(makeMc
+@@ -433,7 +482,7 @@ const layerMcpProtocolState = protocols => Layer.effect(McpProtocolState)(makeMc
   */
  export const run = /*#__PURE__*/Effect.fnUntraced(function* (options) {
    const protocolStateOption = yield* Effect.serviceOption(McpProtocolState);
@@ -138,7 +146,7 @@ index d8525be5cc4e5463300abaaec001f5c228130d36..2edd4f3d8a7d99c9e0171f8970143f9f
    return yield* runWithProtocolState(options, protocolState);
  });
  const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options, protocolState) {
-@@ -819,7 +860,7 @@ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options,
+@@ -819,7 +868,7 @@ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options,
   * @category layers
   * @since 4.0.0
   */
@@ -147,7 +155,7 @@ index d8525be5cc4e5463300abaaec001f5c228130d36..2edd4f3d8a7d99c9e0171f8970143f9f
  const layerWithProtocolState = options => Layer.effectDiscard(Effect.gen(function* () {
    const protocolState = yield* McpProtocolState;
    yield* Effect.forkScoped(runWithProtocolState(options, protocolState));
-@@ -930,7 +971,7 @@ const mcpStdioSerialization = protocols => {
+@@ -930,7 +979,7 @@ const mcpStdioSerialization = protocols => {
   * @since 4.0.0
   */
  export const layerHttp = options => {
