@@ -672,6 +672,62 @@ describe("buildSessionSummary — work and failures", () => {
 		expect(summary.failures.errors).toBe(1)
 	})
 
+	it("counts a failure the span status never records — an error attribute on an Ok span", () => {
+		// A tool failure returned as a value: the dispatch succeeded, the tool did
+		// not. The span is `Ok`; `error.type` is the only record.
+		const summary = summarize([
+			agentSpan({ spanId: "agent", startMs: 0, durationMs: 10 * SECOND }),
+			toolSpan({
+				spanId: "tool",
+				parentSpanId: "agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				genAi: { errorType: "tool_error", toolName: "run_sql" },
+			}),
+		])
+
+		expect(summary.failures.errors).toBe(1)
+		expect(summary.failureGroups).toEqual([
+			{ kind: "error", label: "tool_error · run_sql", count: 1 },
+		])
+	})
+
+	it("counts a failed gen_ai.response.status on an Ok span, classified by its signal", () => {
+		const summary = summarize([
+			llmSpan({
+				spanId: "llm",
+				startMs: 0,
+				durationMs: SECOND,
+				genAi: { responseStatus: "failed", errorType: "429" },
+			}),
+		])
+
+		expect(summary.failures.rateLimited).toBe(1)
+	})
+
+	it("reads neither a completed response status nor a non-AI span's error.type as a failure", () => {
+		// HTTP instrumentation stamps `error.type` on expected 4xx spans whose
+		// status is deliberately not `Error`; only AI spans get attribute counting.
+		const summary = summarize([
+			llmSpan({
+				spanId: "llm",
+				startMs: 0,
+				durationMs: SECOND,
+				genAi: { responseStatus: "completed" },
+			}),
+			makeSpan({
+				spanId: "http",
+				spanName: "GET /health",
+				startMs: 2 * SECOND,
+				durationMs: SECOND,
+				isAiSpan: false,
+				genAi: { errorType: "404" },
+			}),
+		])
+
+		expect(summary.failures.errors).toBe(0)
+	})
+
 	it("does not read a max_tokens finish as a failure", () => {
 		const summary = summarize([
 			llmSpan({

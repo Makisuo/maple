@@ -23,21 +23,45 @@ export const MAPLE_AI_VENDOR_VERSION_ATTR = "maple_ai.vendor.version"
 export const MAPLE_AI_SESSION_ID_ATTR = "maple_ai.session.id"
 
 // Maple's native convention — the one dialect an app opts into deliberately
-// rather than inheriting from a framework. Distinct from the gateway-owned
-// `maple_ai.*` namespace above: these are ordinary span attributes an emitter
-// writes itself (the gateway strips `maple_ai.*` but honours `maple.*`), and
-// Maple's own agents (`apps/api` chat + investigations) are the first emitter.
+// rather than inheriting from a framework. These are ordinary span attributes
+// an emitter writes itself, and Maple's own agents (`apps/api` chat +
+// investigations) are the first emitter.
+//
+// The whole AI surface sits under `maple_ai.`, these included. The session id
+// used to be a bare `maple.session.id` — the browser-session/replay SDK's own
+// key, which the replay read routes annotate their spans with, so every replay
+// read surfaced as an agent session. The rule that avoids a repeat: `maple_*`
+// is Maple-internal (like `maple_org_id`), `maple.*` belongs to the SDKs.
+//
+// The gateway strips `maple_ai.*` on the way in and re-stamps its own verdict,
+// with the exceptions it does not own and lets through: the turn id, the
+// dropped-messages counter and the model-duration clock (`PRESERVED_ATTRS` in
+// `apps/ingest/src/ai_session.rs`).
 
-/** Groups every span of one conversation/investigation into one agent session. */
-export const MAPLE_NATIVE_SESSION_ID_ATTR = "maple.session.id"
+/**
+ * Groups every span of one conversation/investigation into one agent session.
+ * The one key an emitter both writes and reads back: the gateway strips it with
+ * the rest of the namespace, then re-stamps it verbatim as
+ * {@link MAPLE_AI_SESSION_ID_ATTR}, which is why they are the same string.
+ */
+export const MAPLE_NATIVE_SESSION_ID_ATTR = "maple_ai.session.id"
 /** Groups one turn's spans inside a session; lifted into `conversationId` read-side. */
-export const MAPLE_NATIVE_TURN_ID_ATTR = "maple.turn.id"
+export const MAPLE_NATIVE_TURN_ID_ATTR = "maple_ai.turn.id"
 /**
  * Count of whole oldest messages dropped from `gen_ai.input.messages` to fit
  * the emitter's attribute budget. Write-only diagnostics: nothing decodes it,
  * it is visible in raw span attributes.
  */
-export const MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR = "maple.genai.input_messages_dropped"
+export const MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR = "maple_ai.input_messages_dropped"
+/**
+ * Wall-clock milliseconds from request start to the terminal stream event —
+ * the model's actual latency. The span's own duration cannot carry this: the
+ * span stays open while downstream consumers (SSE, durable writes) drain the
+ * stream, so it systematically overstates the model. Write-only diagnostics.
+ * Emitter-written like the two above, so it must appear in `PRESERVED_ATTRS`
+ * or the gateway's namespace strip drops it.
+ */
+export const MAPLE_GENAI_MODEL_DURATION_MS_ATTR = "maple_ai.model_duration_ms"
 
 export interface AiFieldDef {
 	/** Primary source attribute key (the semconv key where one exists). */

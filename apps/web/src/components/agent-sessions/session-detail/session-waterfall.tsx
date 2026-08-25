@@ -21,6 +21,7 @@ import {
 	classifyAiSpan,
 	isLlmCall,
 	spanEndMs,
+	spanFailed,
 	spanModel,
 	spanStartMs,
 	spanTtftMs,
@@ -528,7 +529,7 @@ function SpanRow({
 }) {
 	const { span } = row
 	const category = classifyAiSpan(span)
-	const errored = span.statusCode === "Error"
+	const errored = spanFailed(span)
 	const target = spanTarget(span, category)
 	// Only a model id is a provider path — a tool's target is usually a file path,
 	// whose last segment is not the part worth keeping.

@@ -33,7 +33,7 @@ import {
 	type SpanMessagePart,
 	type SpanToolCall,
 } from "@/lib/agent-sessions/span-detail"
-import { classifyAiSpan, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
+import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
 import { CATEGORY_FILL } from "./span-visuals"
 import { formatCost } from "./session-overview"
 
@@ -79,7 +79,7 @@ export function SpanExpansion({
 	// its arguments. An explicit choice then holds across spans and views.
 	const active: SpanDetailTab =
 		tab ??
-		(span.statusCode === "Error"
+		(spanFailed(span)
 			? "details"
 			: messages.length > 0
 				? "messages"
@@ -184,7 +184,7 @@ export function SpanDrawer({
 	onOpenTraceView: () => void
 }) {
 	const category = classifyAiSpan(span)
-	const errored = span.statusCode === "Error"
+	const errored = spanFailed(span)
 	const subtitle = [turnOrdinal, spanModel(span), formatDuration(span.durationMs)]
 		.filter((part): part is string => part !== undefined)
 		.join(" · ")

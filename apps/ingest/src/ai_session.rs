@@ -10,8 +10,17 @@
 //! - `maple_ai.vendor.version` — identified vendor version, currently always `"0"`
 //! - `maple_ai.session.id` — the vendor's own session identifier, verbatim
 //!
-//! Any customer-supplied `maple_ai.*` keys are stripped first; the gateway is
-//! the authority for this namespace, like it is for `maple_org_id`.
+//! Any customer-supplied `maple_ai.*` key is stripped first, except the few
+//! the gateway does not own (`PRESERVED_ATTRS`); the gateway is the authority
+//! for the rest of this namespace, like it is for `maple_org_id`.
+//!
+//! The whole AI surface lives under `maple_ai.`, including the keys an emitter
+//! writes itself. The native opt-in used to be a bare `maple.session.id`, which
+//! is the browser-session/replay SDK's own key — the replay read routes
+//! annotate their spans with the session they are reading, so every replay read
+//! surfaced as an agent session. `maple_*` is now uniformly Maple-internal
+//! (like `maple_org_id`) and `maple.*` belongs to the SDKs, so the two can
+//! never collide again.
 //!
 //! Detection is ordered first-match over the vendor predicates below; the
 //! session ID is the first non-empty session-granularity attribute for the
@@ -20,9 +29,10 @@
 //! `maple_ai.session.id`.
 //!
 //! One vendor is not a framework: `maple` matches any span carrying a
-//! `maple.session.id` attribute (note the dot — the gateway-owned namespace is
-//! `maple_ai.*` with an underscore). It is Maple's own native convention —
-//! `apps/api`'s chat and investigation agents emit it — and doubles as the
+//! `maple_ai.session.id` attribute. That is the one key an emitter both writes
+//! and reads back — the gateway strips it and re-stamps it verbatim. It is
+//! Maple's own native convention — `apps/api`'s chat and investigation agents
+//! emit it — and doubles as the
 //! documented opt-in for a generic OTel GenAI emitter that no framework
 //! predicate recognises, which would otherwise land in the unknown tier where
 //! no session is ever stamped. It sits first because it is the only predicate
@@ -52,10 +62,22 @@ pub const VENDOR_ID_ATTR: &str = "maple_ai.vendor.id";
 pub const VENDOR_VERSION_ATTR: &str = "maple_ai.vendor.version";
 pub const SESSION_ID_ATTR: &str = "maple_ai.session.id";
 pub const VENDOR_VERSION: &str = "0";
-/// Maple's native session key (dot, not the gateway-owned underscore namespace
-/// above) — must match `MAPLE_NATIVE_SESSION_ID_ATTR` in
+/// Maple's native session key. Since the whole AI surface moved under
+/// `maple_ai.`, this *is* [`SESSION_ID_ATTR`]: an emitter writes it as the
+/// deliberate opt-in, the gateway strips it with the rest of the namespace and
+/// re-stamps it verbatim. Must match `MAPLE_NATIVE_SESSION_ID_ATTR` in
 /// `packages/domain/src/gen-ai.ts`.
-const MAPLE_SESSION_KEY: &str = "maple.session.id";
+const MAPLE_SESSION_KEY: &str = SESSION_ID_ATTR;
+/// Keys inside the namespace the gateway does *not* own: an emitter writes
+/// them and nothing here re-stamps them, so the strip must let them through.
+/// Must match `MAPLE_NATIVE_TURN_ID_ATTR`,
+/// `MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR` and
+/// `MAPLE_GENAI_MODEL_DURATION_MS_ATTR` in `packages/domain/src/gen-ai.ts`.
+const PRESERVED_ATTRS: [&str; 3] = [
+    "maple_ai.turn.id",
+    "maple_ai.input_messages_dropped",
+    "maple_ai.model_duration_ms",
+];
 
 #[derive(Debug, PartialEq)]
 pub struct AiClassification {
@@ -105,7 +127,7 @@ pub fn stamp_trace_request(request: &mut ExportTraceServiceRequest) {
                 {
                     continue;
                 }
-                let (classification, has_maple_ai) = {
+                let (classification, has_ai_namespace) = {
                     let mut ev = SpanEvidence::default();
                     collect_evidence(&mut ev, &span.attributes, &span.events);
                     let classification =
@@ -114,11 +136,13 @@ pub fn stamp_trace_request(request: &mut ExportTraceServiceRequest) {
                         } else {
                             None
                         };
-                    (classification, ev.has_maple_ai)
+                    (classification, ev.has_ai_namespace)
                 };
-                if has_maple_ai {
-                    span.attributes
-                        .retain(|attr| !attr.key.starts_with(ATTR_NAMESPACE));
+                if has_ai_namespace {
+                    span.attributes.retain(|attr| {
+                        !attr.key.starts_with(ATTR_NAMESPACE)
+                            || PRESERVED_ATTRS.contains(&attr.key.as_str())
+                    });
                 }
                 let Some(classification) = classification else {
                     continue;
@@ -341,9 +365,14 @@ fn scope_facts(scope_name: &str, resource: &ResourceFacts) -> ScopeFacts {
 )]
 #[derive(Default)]
 struct SpanEvidence<'a> {
-    /// Any field below (except `has_maple_ai`) is set.
+    /// Any field below (except `has_ai_namespace`) is set.
     any: bool,
-    has_maple_ai: bool,
+    has_ai_namespace: bool,
+    /// A gateway-owned `maple_ai.vendor.id` was present on the way in, i.e.
+    /// this payload has already been stamped once. Clears `maple_session` so a
+    /// re-ingest re-derives its original vendor instead of collapsing to
+    /// `maple` off the session id the previous pass wrote.
+    has_vendor_stamp: bool,
     // Value slots.
     span_type: &'a str,
     has_span_type: bool,
@@ -425,7 +454,6 @@ const SCREEN_KEYS: &[&str] = &[
     "llamaindex.",
     "llm.",
     "logfire.json_schema",
-    MAPLE_SESSION_KEY,
     "mastra.",
     "message.",
     "model_request_parameters",
@@ -593,9 +621,15 @@ fn absorb_key<'a>(ev: &mut SpanEvidence<'a>, attr: &'a KeyValue, b0: u8) {
             } else if key == "model_request_parameters" {
                 ev.model_request_parameters = true;
             } else if key == MAPLE_SESSION_KEY {
+                // Also arms the strip: this key is re-stamped verbatim below,
+                // and without the strip the span would carry it twice.
                 ev.maple_session = true;
+                ev.has_ai_namespace = true;
             } else if key.starts_with(ATTR_NAMESPACE) {
-                ev.has_maple_ai = true;
+                ev.has_ai_namespace = true;
+                if key == VENDOR_ID_ATTR {
+                    ev.has_vendor_stamp = true;
+                }
                 return;
             } else {
                 return;
@@ -670,6 +704,11 @@ fn collect_evidence<'a>(
         if ev.llamaindex_event {
             break;
         }
+    }
+    if ev.has_vendor_stamp {
+        // Re-ingest: the session key on this span is the previous pass's
+        // stamp, not a deliberate opt-in. Both get stripped and re-derived.
+        ev.maple_session = false;
     }
 }
 
@@ -1566,7 +1605,7 @@ mod tests {
         classified(
             "",
             "invoke_agent default",
-            &[("maple.session.id", "org_1:tab-1")],
+            &[("maple_ai.session.id", "org_1:tab-1")],
             &[],
             "maple",
             Some("org_1:tab-1"),
@@ -1584,7 +1623,7 @@ mod tests {
             &[
                 ("gen_ai.operation.name", "chat"),
                 ("gen_ai.usage.input_tokens", "123"),
-                ("maple.session.id", "org_1:inv-abc"),
+                ("maple_ai.session.id", "org_1:inv-abc"),
             ],
             &[],
             "maple",
@@ -1593,10 +1632,22 @@ mod tests {
     }
 
     #[test]
-    fn maple_session_key_is_not_the_gateway_namespace() {
-        // `maple_ai.*` (underscore) is gateway-owned and stripped; a customer
-        // supplying it must not classify as the maple vendor through it.
-        assert!(classify("", "chat", &[("maple_ai.session.id", "forged")], &[]).is_none());
+    fn a_gateway_vendor_stamp_disarms_the_maple_session_key() {
+        // Re-ingest: a payload that already carries our stamps must re-derive
+        // its original vendor, not collapse to `maple` off the session id the
+        // previous pass wrote. The forged vendor id is stripped either way.
+        classified(
+            "@mastra/otel-exporter",
+            "agent.generate",
+            &[
+                ("gen_ai.conversation.id", "conv-42"),
+                ("maple_ai.vendor.id", "mastra"),
+                ("maple_ai.session.id", "conv-42"),
+            ],
+            &[],
+            "mastra",
+            Some("conv-42"),
+        );
     }
 
     #[test]
@@ -1670,6 +1721,58 @@ mod tests {
                 other => panic!("expected string value for {key}, got {other:?}"),
             }
         })
+    }
+
+    #[test]
+    fn the_strip_preserves_the_keys_the_gateway_does_not_own() {
+        let mut request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource::default()),
+                scope_spans: vec![ScopeSpans {
+                    scope: Some(InstrumentationScope::default()),
+                    spans: vec![Span {
+                        name: "invoke_agent default".to_owned(),
+                        attributes: attrs(&[
+                            ("maple_ai.session.id", "org_1:tab-1"),
+                            ("maple_ai.turn.id", "msg_1"),
+                            ("maple_ai.input_messages_dropped", "2"),
+                        ]),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+
+        stamp_trace_request(&mut request);
+
+        let span = &request.resource_spans[0].scope_spans[0].spans[0];
+        assert_eq!(
+            attr_value(&span.attributes, VENDOR_ID_ATTR).as_deref(),
+            Some("maple")
+        );
+        // Stripped and re-stamped verbatim - once, not twice.
+        assert_eq!(
+            span.attributes
+                .iter()
+                .filter(|kv| kv.key == SESSION_ID_ATTR)
+                .count(),
+            1
+        );
+        assert_eq!(
+            attr_value(&span.attributes, SESSION_ID_ATTR).as_deref(),
+            Some("org_1:tab-1")
+        );
+        // Emitter-owned: never stripped, never re-stamped.
+        assert_eq!(
+            attr_value(&span.attributes, "maple_ai.turn.id").as_deref(),
+            Some("msg_1")
+        );
+        assert_eq!(
+            attr_value(&span.attributes, "maple_ai.input_messages_dropped").as_deref(),
+            Some("2")
+        );
     }
 
     #[test]

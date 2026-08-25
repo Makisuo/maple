@@ -15,6 +15,7 @@ import {
 	classifyAiSpan,
 	isLlmCall,
 	spanEndMs,
+	spanFailed,
 	spanModel,
 	spanStartMs,
 	spanTtftMs,
@@ -717,7 +718,7 @@ function errorSignal(span: AiSessionSpan): string {
 /** The error a span reports, or nothing — for a span that did not fail, or one
  *  that failed without saying anything an ancestor could be matched against. */
 function failureSignal(span: AiSessionSpan): string | undefined {
-	if (span.statusCode !== "Error") return undefined
+	if (!spanFailed(span)) return undefined
 	const signal = errorSignal(span)
 	return signal === "" ? undefined : signal
 }
@@ -760,7 +761,12 @@ function shadowedAncestorIds(
  * Everything that went wrong, one event per span that went wrong, in start
  * order. First match wins — a tool call that failed with a 429 is one event, a
  * rate limit, because that is the cause worth acting on — and `error` is the
- * catch-all, so every errored span produces an event.
+ * catch-all, so every failed span produces an event.
+ *
+ * "Failed" is {@link spanFailed}, not span status alone: a framework that
+ * records a failed model or tool call as a value on an `Ok` span (a
+ * `provider-error` event that completes the stream, a tool error returned as a
+ * result) still counts, off `error.type` / `gen_ai.response.status`.
  *
  * Refusals are the exception: they are a finish reason on a span that
  * succeeded, so they are read independently of span status.
@@ -781,7 +787,7 @@ export function failureEvents(spans: readonly AiSessionSpan[]): readonly Session
 		if (refusalSignal(span) !== undefined && !shadowedRefusals.has(span.spanId)) {
 			events.push({ kind: "refusal", label: "refusal", span })
 		}
-		if (span.statusCode !== "Error" || shadowedFailures.has(span.spanId)) continue
+		if (!spanFailed(span) || shadowedFailures.has(span.spanId)) continue
 		events.push({ ...classifyFailure(span), span })
 	}
 

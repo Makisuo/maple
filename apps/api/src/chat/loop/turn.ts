@@ -43,7 +43,7 @@ import {
 	type LLMRequest,
 	type Tools,
 } from "@maple/llm"
-import { Duration, Effect, Stream } from "effect"
+import { Clock, Duration, Effect, Stream } from "effect"
 import { contextLimitOf, outputLimitOf, toLlmCallError } from "@/platform/Llm"
 import { agentForSession, buildSystemPrompt, spawnableFor } from "../agents"
 import { buildChatTools } from "../tools"
@@ -60,12 +60,14 @@ import { dropOldestToolStep, isNearContextLimit } from "./context"
 import { buildTaskTool } from "./delegate"
 import {
 	annotateModelCallEnd,
+	annotateModelCallTiming,
 	genAiIdentityOf,
 	invokeAgentAttributes,
 	invokeAgentSpanName,
 	modelCallAttributes,
 	modelCallSpanName,
 	withToolCallSpan,
+	type ModelCallTiming,
 } from "./genai"
 import { isRetryableStepFailure, stepRetryDelayMs } from "./retry"
 import { initialDoomLoopState, observeToolCallBatch } from "./stop"
@@ -265,7 +267,9 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 			// here so every caller gets it without repeating it.
 			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, state)).pipe(
 				Stream.withSpan(invokeAgentSpanName(agent.name), {
-					attributes: invokeAgentAttributes(agent.name, input.model, genAiIdentityOf(input)),
+					attributes: invokeAgentAttributes(agent, input.model, genAiIdentityOf(input), {
+						tools: request.tools,
+					}),
 				}),
 			)
 		}),
@@ -308,25 +312,40 @@ const runStep = (
 		let emitted = 0
 
 		const identity = genAiIdentityOf(input)
+		// For `gen_ai.tool.description` on the execute_tool spans; keyed off the
+		// definitions the model itself was offered, so span and prompt agree.
+		const toolDescriptions = new Map(request.tools.map((tool) => [tool.name, tool.description]))
 
-		const live: Stream.Stream<ChatTurnEvent> = LLM.stream(request).pipe(
-			Stream.tap((event) => Effect.sync(() => collected.push(event))),
-			// The response half of the model-call span, written while the span is
-			// still open: `collected` holds every event up to and including the
-			// terminal one, so it folds into a completed response right here.
-			Stream.tap((event) =>
-				event.type === "finish" || event.type === "provider-error"
-					? annotateModelCallEnd(collected)
-					: Effect.void,
-			),
-			// One span per model call — an attempt, not a logical step, because a
-			// retry costs the same money and wall clock and deserves its own record.
-			// The catch below sits outside, so a failed call ends this span with the
-			// error exit and the retry opens a fresh one.
-			Stream.withSpan(modelCallSpanName(input.model), {
-				kind: "client",
-				attributes: modelCallAttributes(input.model, request.messages, identity),
+		// `unwrap` runs the clock read at subscription, the moment before the span
+		// opens and the request goes out — the zero every timing is measured from.
+		const live: Stream.Stream<ChatTurnEvent> = Stream.unwrap(
+			Effect.map(Clock.currentTimeMillis, (startedMs) => {
+				const timing: ModelCallTiming = { startedMs, firstChunkMs: undefined }
+				return LLM.stream(request).pipe(
+					Stream.tap((event) => Effect.sync(() => collected.push(event))),
+					// TTFT on the first provider frame, model duration on the terminal
+					// event — the two numbers the span's own wall clock cannot carry,
+					// since it stays open while downstream consumers drain the stream.
+					Stream.tap((event) => annotateModelCallTiming(timing, event)),
+					// The response half of the model-call span, written while the span is
+					// still open: `collected` holds every event up to and including the
+					// terminal one, so it folds into a completed response right here.
+					Stream.tap((event) =>
+						event.type === "finish" || event.type === "provider-error"
+							? annotateModelCallEnd(collected)
+							: Effect.void,
+					),
+					// One span per model call — an attempt, not a logical step, because a
+					// retry costs the same money and wall clock and deserves its own record.
+					// The catch below sits outside, so a failed call ends this span with the
+					// error exit and the retry opens a fresh one.
+					Stream.withSpan(modelCallSpanName(input.model), {
+						kind: "client",
+						attributes: modelCallAttributes(request, identity, { stream: true }),
+					}),
+				)
 			}),
+		).pipe(
 			Stream.filter((event) => event.type === "text-delta" && event.text !== ""),
 			// One durable row, one SSE frame and one React commit per *token* is more fidelity than
 			// a screen can show. Coalescing into roughly one frame's worth of deltas is invisible
@@ -662,9 +681,12 @@ const runStep = (
 							const dispatched = yield* Effect.forEach(
 								forced,
 								(call) =>
-									withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call)).pipe(
-										Effect.map((result) => [call, result] as const),
-									),
+									withToolCallSpan(
+										call,
+										identity,
+										ToolRuntime.dispatch(tools, call),
+										toolDescriptions.get(call.name),
+									).pipe(Effect.map((result) => [call, result] as const)),
 								{ concurrency: 1 },
 							)
 							return Stream.concat(
@@ -740,9 +762,12 @@ const runStep = (
 						const dispatched = yield* Effect.forEach(
 							calls,
 							(call) =>
-								withToolCallSpan(call, identity, ToolRuntime.dispatch(tools, call)).pipe(
-									Effect.map((result) => [call, result] as const),
-								),
+								withToolCallSpan(
+									call,
+									identity,
+									ToolRuntime.dispatch(tools, call),
+									toolDescriptions.get(call.name),
+								).pipe(Effect.map((result) => [call, result] as const)),
 							{ concurrency: TOOL_CONCURRENCY },
 						)
 

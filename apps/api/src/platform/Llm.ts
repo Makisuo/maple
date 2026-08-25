@@ -161,6 +161,28 @@ const withReasoning = (model: Model, effort: ReasoningEffort | undefined): Model
 			})
 
 /**
+ * OpenRouter usage accounting: `usage: {include: true}` makes the final usage
+ * object of every response carry `cost` — the credits (USD) OpenRouter actually
+ * charged for the call. The gen-ai spans emit it as `gen_ai.usage.cost`
+ * (`modelResponseAttributes` in `chat/loop/genai.ts`), which is the only way
+ * Maple ever reports spend: the provider's own bill, never a price table.
+ * OpenRouter-only — Workers AI has no per-call price to report.
+ */
+const withUsageAccounting = (model: Model): Model =>
+	Model.update(model, {
+		defaults: {
+			...model.defaults,
+			providerOptions: {
+				...model.defaults?.providerOptions,
+				openrouter: {
+					...model.defaults?.providerOptions?.openrouter,
+					usage: true,
+				},
+			},
+		},
+	})
+
+/**
  * Context windows for the models Maple configures.
  *
  * `@maple/llm` has a `ModelLimits { context, output }` on `Model.defaults`, but **no provider
@@ -233,17 +255,23 @@ export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
 					accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
 					apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
 				}).model(readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ?? DEFAULT_WORKERS_AI_MODEL)
-			: withReasoning(
-					OpenRouter.configure({
-						apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
-						headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-						...(!(tags === undefined) ? { http: { body: openRouterTagBody(tags) } } : undefined),
-					}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL),
-					// No default. This resolver serves chat, AI triage *and* the validator, so a
-					// number picked here would silently retune three stages with different shapes at
-					// once — worth doing per stage, with measurement, not as a side effect of adding
-					// the knob.
-					readReasoningEffort(env, "MAPLE_TRIAGE_REASONING_EFFORT"),
+			: withUsageAccounting(
+					withReasoning(
+						OpenRouter.configure({
+							apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+							headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
+							...(!(tags === undefined)
+								? { http: { body: openRouterTagBody(tags) } }
+								: undefined),
+						}).model(
+							readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL,
+						),
+						// No default. This resolver serves chat, AI triage *and* the validator, so a
+						// number picked here would silently retune three stages with different shapes at
+						// once — worth doing per stage, with measurement, not as a side effect of adding
+						// the knob.
+						readReasoningEffort(env, "MAPLE_TRIAGE_REASONING_EFFORT"),
+					),
 				),
 	)
 
@@ -309,17 +337,21 @@ export const resolveLensModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
 						readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ??
 						DEFAULT_WORKERS_AI_MODEL,
 				)
-			: withReasoning(
-					OpenRouter.configure({
-						apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
-						headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-						...(!(tags === undefined) ? { http: { body: openRouterTagBody(tags) } } : undefined),
-					}).model(
-						readString(env, "MAPLE_LENS_MODEL_OPENROUTER") ??
-							readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ??
-							DEFAULT_OPENROUTER_MODEL,
+			: withUsageAccounting(
+					withReasoning(
+						OpenRouter.configure({
+							apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+							headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
+							...(!(tags === undefined)
+								? { http: { body: openRouterTagBody(tags) } }
+								: undefined),
+						}).model(
+							readString(env, "MAPLE_LENS_MODEL_OPENROUTER") ??
+								readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ??
+								DEFAULT_OPENROUTER_MODEL,
+						),
+						readReasoningEffort(env, "MAPLE_LENS_REASONING_EFFORT") ?? "low",
 					),
-					readReasoningEffort(env, "MAPLE_LENS_REASONING_EFFORT") ?? "low",
 				),
 	)
 

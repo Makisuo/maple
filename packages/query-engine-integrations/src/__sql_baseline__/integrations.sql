@@ -47,7 +47,7 @@ SELECT
           argMin(SpanAttributes['maple_ai.vendor.version'], if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS vendorVersion,
           min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
           count() AS spanCount,
-          countIf(StatusCode = 'Error') AS errorSpanCount,
+          countIf((StatusCode = 'Error' OR (SpanAttributes['maple_ai.vendor.id'] != '' AND (SpanAttributes['error.type'] != '' OR SpanAttributes['gen_ai.response.status'] IN ('failed', 'error'))))) AS errorSpanCount,
           groupUniqArray(ServiceName) AS serviceNames,
           min(Timestamp) AS traceStart,
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
@@ -88,7 +88,7 @@ SELECT
           argMin(SpanAttributes['maple_ai.vendor.version'], if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS vendorVersion,
           min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
           count() AS spanCount,
-          countIf(StatusCode = 'Error') AS errorSpanCount,
+          countIf((StatusCode = 'Error' OR (SpanAttributes['maple_ai.vendor.id'] != '' AND (SpanAttributes['error.type'] != '' OR SpanAttributes['gen_ai.response.status'] IN ('failed', 'error'))))) AS errorSpanCount,
           groupUniqArray(ServiceName) AS serviceNames,
           min(Timestamp) AS traceStart,
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos

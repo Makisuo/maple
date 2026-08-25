@@ -52,6 +52,7 @@ export const runPlannerAgent = Effect.fn("investigation.plan")(function* (input:
 		// The seeded transcript's chat session id, so the workflow's passes and any
 		// attended follow-up land in one agent session.
 		sessionId: makeChatSessionId(input.tenant.orgId, `inv-${input.investigationId}`),
+		workflowName: "investigation",
 		agent: plannerAgent(),
 		tenant: input.tenant,
 		model: input.model,

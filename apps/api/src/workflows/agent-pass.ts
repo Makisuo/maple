@@ -37,11 +37,13 @@ export interface AgentPassInput<S extends Schema.Top> {
 	/** Correlation id; becomes the turn's `messageId`. */
 	readonly id: string
 	/**
-	 * Gen-ai session this pass's spans group under (`maple.session.id`), so every
+	 * Gen-ai session this pass's spans group under (`maple_ai.session.id`), so every
 	 * pass of one investigation lands in one agent session. Omitted, each pass
 	 * fragments into a session of its own under its correlation id.
 	 */
 	readonly sessionId?: string
+	/** Workflow this pass runs inside (`gen_ai.workflow.name`), e.g. `"investigation"`. */
+	readonly workflowName?: string
 	readonly agent: AgentDefinition
 	readonly tenant: TenantContext
 	readonly model: Model
@@ -109,6 +111,7 @@ export const runAgentPass = <S extends Schema.Top>(
 		yield* runChatTurn({
 			sessionId: input.id,
 			...(input.sessionId === undefined ? undefined : { genAiSessionId: input.sessionId }),
+			...(input.workflowName === undefined ? undefined : { genAiWorkflowName: input.workflowName }),
 			tenant: input.tenant,
 			toolExecutor,
 			// Separates workflow tool calls from interactive chat ones in telemetry;

@@ -152,7 +152,7 @@ function render(): { text: string; doc: JsonObject } {
 	prunePaths(doc)
 	collapseNullableUnions(doc)
 	collapseErrorResponses(doc)
-	mergeDuplicateEnums(doc)
+	mergeDuplicateComponents(doc)
 	sweepUnreachableSchemas(doc)
 
 	const sorted = sortKeysDeep(doc)
@@ -554,35 +554,78 @@ function errorEnvelopeSchema(): JsonObject {
 
 /** Pass 4a — drop components no longer reachable from the pruned paths. */
 /**
- * Pass 3b — one Swift enum per domain enum.
+ * Pass 3b — one Swift type per domain schema.
  *
- * Effect registers a component per *annotation site*, so a domain enum such as
- * `AlertSignalType` that is re-annotated on the incident, the check, and the
+ * Effect registers a component per *annotation site*, so a domain schema such
+ * as `AlertSignalType` that is re-annotated on the incident, the check, and the
  * rule arrives as `_maple_AlertSignalType`, `_maple_AlertSignalType_2`,
- * `_maple_AlertSignalType_3` — identical `enum` + `type`, differing only in
- * `description`/`examples`. Left alone, the generator emits three unrelated
- * Swift enums and every comparison across them needs a raw-value round trip.
- * When the numbered copy is the same string enum as its base, point every
- * `$ref` at the base and drop the copy.
+ * `_maple_AlertSignalType_3` — identical but for `description`/`examples`.
+ * Left alone, the generator emits three unrelated Swift types and every
+ * comparison across them needs a raw-value round trip.
+ *
+ * This used to compare `enum` arrays only, which was enough while Effect
+ * reused one component for a plain branded string. As of 4.0.0-rc.111 it
+ * numbers those too — and sometimes emits *only* numbered copies, with no
+ * unsuffixed base to merge into — so the comparison is now structural
+ * (everything but `description`/`examples`) and the canonical name is promoted
+ * out of the lowest-numbered copy when no base exists.
+ *
+ * A group whose members genuinely differ is left alone; the `_\d+` suffix
+ * would then survive into the spec and `openapi-ios.test.ts` fails, which is
+ * the right outcome — two different schemas sharing a base name is a domain
+ * problem, not something to paper over here.
  */
-function mergeDuplicateEnums(doc: JsonObject): void {
+function mergeDuplicateComponents(doc: JsonObject): void {
 	const schemas = asObject(asObject(doc.components)?.schemas) ?? {}
-	const aliases = new Map<string, string>()
 
+	/**
+	 * Structural identity: what makes two annotation sites the same Swift type.
+	 *
+	 * `title` is documentation, not structure — `_maple_OrgId` titled
+	 * "Organization ID" on one endpoint and "Org ID" on another is one brand
+	 * described twice, and giving the app two types for it helps nobody. The
+	 * canonical copy keeps its own title.
+	 */
+	const identity = (schema: JsonObject): string => {
+		const { description: _description, examples: _examples, title: _title, ...rest } = schema
+		return JSON.stringify(sortKeysDeep(rest))
+	}
+
+	const groups = new Map<string, Array<{ readonly name: string; readonly index: number }>>()
 	for (const name of Object.keys(schemas)) {
 		const match = /^(.+)_(\d+)$/.exec(name)
 		if (match === null) continue
 		const base = match[1]
+		const index = Number(match[2])
+		if (base === undefined || !Number.isFinite(index)) continue
+		const group = groups.get(base) ?? []
+		group.push({ name, index })
+		groups.set(base, group)
+	}
+
+	const aliases = new Map<string, string>()
+	const renames = new Map<string, string>()
+
+	for (const [base, numbered] of groups) {
+		const members = [...numbered].sort((a, b) => a.index - b.index).map((entry) => entry.name)
 		const baseSchema = asObject(schemas[base])
-		const copy = asObject(schemas[name])
-		if (baseSchema === undefined || copy === undefined) continue
-		const baseEnum = asStringArray(baseSchema.enum)
-		const copyEnum = asStringArray(copy.enum)
-		if (baseEnum === undefined || copyEnum === undefined) continue
-		if (baseSchema.type !== "string" || copy.type !== "string") continue
-		if (baseEnum.length !== copyEnum.length || baseEnum.some((value, index) => value !== copyEnum[index]))
-			continue
-		aliases.set(name, base)
+		const all = baseSchema === undefined ? members : [base, ...members]
+		const candidates = all.map((name) => asObject(schemas[name]))
+		const first = candidates[0]
+		if (first === undefined || candidates.some((candidate) => candidate === undefined)) continue
+		const canonicalIdentity = identity(first)
+		if (candidates.some((candidate) => identity(candidate as JsonObject) !== canonicalIdentity)) continue
+
+		// The base wins when it exists; otherwise the lowest-numbered copy is
+		// promoted into the unsuffixed name so the Swift type reads as the domain
+		// type rather than as a numbered accident.
+		const canonical = baseSchema === undefined ? members[0] : base
+		if (canonical === undefined) continue
+		if (baseSchema === undefined) renames.set(canonical, base)
+		for (const name of all) {
+			if (name === canonical) continue
+			aliases.set(name, base)
+		}
 	}
 
 	const rewrite = (node: JsonValue | undefined): void => {
@@ -595,13 +638,19 @@ function mergeDuplicateEnums(doc: JsonObject): void {
 		const ref = asString(object.$ref)
 		if (ref !== undefined) {
 			const name = componentNameFromRef(ref)
-			const target = name === undefined ? undefined : aliases.get(name)
+			const target = name === undefined ? undefined : (aliases.get(name) ?? renames.get(name))
 			if (target !== undefined) object.$ref = `#/components/schemas/${target}`
 		}
 		for (const value of Object.values(object)) rewrite(value)
 	}
 
 	rewrite(doc)
+	for (const [from, to] of renames) {
+		const schema = schemas[from]
+		if (schema === undefined) continue
+		schemas[to] = schema
+		delete schemas[from]
+	}
 	for (const name of aliases.keys()) delete schemas[name]
 }
 
