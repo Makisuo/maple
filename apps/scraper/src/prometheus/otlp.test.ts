@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { convertFamiliesToOtlp, toUnixNano, type OtlpMetric, type ScrapeOtlpContext } from "./otlp"
+import {
+	convertFamiliesToOtlp,
+	countDataPoints,
+	splitExportRequest,
+	toUnixNano,
+	type OtlpExportRequest,
+	type OtlpMetric,
+	type ScrapeOtlpContext,
+} from "./otlp"
 import { parsePrometheusText } from "./parser"
 
 const ctx: ScrapeOtlpContext = {
@@ -234,5 +242,123 @@ describe("gateway contract fixture", () => {
 		// apps/ingest — the Rust side deserializes this exact file with the
 		// gateway's real serde types.
 		expect(request).toEqual(fixture)
+	})
+})
+
+describe("splitExportRequest", () => {
+	const numberPoints = (count: number, offset = 0) =>
+		Array.from({ length: count }, (_, index) => ({
+			attributes: [{ key: "shard", value: { stringValue: String(offset + index) } }],
+			startTimeUnixNano: "0",
+			timeUnixNano: "1750000000000000000",
+			asDouble: offset + index,
+		}))
+
+	const gaugeMetric = (name: string, count: number): OtlpMetric => ({
+		name,
+		description: "",
+		unit: "",
+		gauge: { dataPoints: numberPoints(count) },
+	})
+
+	const requestOf = (metrics: ReadonlyArray<OtlpMetric>) => ({
+		resourceMetrics: [
+			{
+				resource: { attributes: [{ key: "service.name", value: { stringValue: "scylla" } }] },
+				scopeMetrics: [{ scope: { name: "maple-prometheus-scraper" }, metrics }],
+			},
+		],
+	})
+
+	const metricsIn = (request: OtlpExportRequest) => request.resourceMetrics[0]!.scopeMetrics[0]!.metrics
+
+	it("returns the request untouched when it fits the budget", () => {
+		const request = requestOf([gaugeMetric("up", 10)])
+		const chunks = splitExportRequest(request, 100)
+		expect(chunks).toHaveLength(1)
+		expect(chunks[0]).toBe(request)
+	})
+
+	it("splits a single oversized metric across chunks, preserving every data point", () => {
+		// The case that took Scylla down: one family fans out to a series per
+		// shard per table, so metric-level splitting would not have helped.
+		const request = requestOf([gaugeMetric("scylla_reactor_utilization", 25)])
+		const chunks = splitExportRequest(request, 10)
+
+		expect(chunks).toHaveLength(3)
+		expect(chunks.map((chunk) => countDataPoints(chunk))).toEqual([10, 10, 5])
+		expect(chunks.flatMap((chunk) => metricsIn(chunk).flatMap((m) => m.gauge!.dataPoints))).toEqual(
+			metricsIn(request).flatMap((m) => m.gauge!.dataPoints),
+		)
+	})
+
+	it("packs several metrics per chunk and repeats resource and scope in each", () => {
+		const request = requestOf([gaugeMetric("a", 4), gaugeMetric("b", 4), gaugeMetric("c", 4)])
+		const chunks = splitExportRequest(request, 5)
+
+		expect(chunks.map((chunk) => countDataPoints(chunk))).toEqual([5, 5, 2])
+		for (const chunk of chunks) {
+			expect(chunk.resourceMetrics[0]!.resource).toEqual(request.resourceMetrics[0]!.resource)
+			expect(chunk.resourceMetrics[0]!.scopeMetrics[0]!.scope.name).toBe("maple-prometheus-scraper")
+		}
+		// `b` straddles the first two chunks: 4 of `a` + 1 of `b`, then the rest.
+		expect(metricsIn(chunks[0]!).map((m) => m.name)).toEqual(["a", "b"])
+		expect(metricsIn(chunks[1]!).map((m) => m.name)).toEqual(["b", "c"])
+	})
+
+	it("keeps a sum's temporality and monotonicity on every slice", () => {
+		const request = requestOf([
+			{
+				name: "scylla_transport_requests_served",
+				description: "",
+				unit: "",
+				sum: { dataPoints: numberPoints(6), aggregationTemporality: 2, isMonotonic: true },
+			},
+		])
+		const chunks = splitExportRequest(request, 4)
+
+		expect(chunks).toHaveLength(2)
+		for (const chunk of chunks) {
+			const sum = metricsIn(chunk)[0]!.sum!
+			expect(sum.aggregationTemporality).toBe(2)
+			expect(sum.isMonotonic).toBe(true)
+		}
+	})
+
+	it("splits histogram data points without losing buckets", () => {
+		const histogramPoint = (index: number) => ({
+			attributes: [{ key: "shard", value: { stringValue: String(index) } }],
+			startTimeUnixNano: "0",
+			timeUnixNano: "1750000000000000000",
+			count: 10,
+			sum: 42.5,
+			bucketCounts: [1, 9],
+			explicitBounds: [0.1],
+		})
+		const request = requestOf([
+			{
+				name: "scylla_storage_proxy_write_latency",
+				description: "",
+				unit: "",
+				histogram: {
+					dataPoints: [histogramPoint(0), histogramPoint(1), histogramPoint(2)],
+					aggregationTemporality: 2,
+				},
+			},
+		])
+		const chunks = splitExportRequest(request, 2)
+
+		expect(chunks.map((chunk) => countDataPoints(chunk))).toEqual([2, 1])
+		for (const chunk of chunks) {
+			const histogram = metricsIn(chunk)[0]!.histogram!
+			expect(histogram.aggregationTemporality).toBe(2)
+			expect(histogram.dataPoints[0]!.bucketCounts).toEqual([1, 9])
+		}
+	})
+
+	it("treats a non-positive budget as no splitting rather than looping forever", () => {
+		const request = requestOf([gaugeMetric("up", 5)])
+		expect(splitExportRequest(request, 0)).toEqual([request])
+		expect(splitExportRequest(request, -1)).toEqual([request])
 	})
 })
