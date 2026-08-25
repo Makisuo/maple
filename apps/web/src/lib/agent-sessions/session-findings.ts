@@ -214,9 +214,23 @@ function clipDetail(text: string): string {
 	return text.length > 140 ? `${text.slice(0, 139)}…` : text
 }
 
-/** Keys an error payload's human message hides under, tried before anything
- *  else so a structured result yields its message rather than its first field. */
-const PROSE_KEYS = ["error", "message", "error_message", "errorMessage", "reason", "detail", "text"]
+/**
+ * Keys an error payload's human message hides under, tried before anything
+ * else so a structured result yields its message rather than its first field.
+ * `result` and `prefix` are Maple's own `toolCallJson` wrappers — a bare error
+ * string is recorded as `{result}`, an over-budget one as `{truncated, prefix}`.
+ */
+const PROSE_KEYS = [
+	"error",
+	"message",
+	"error_message",
+	"errorMessage",
+	"reason",
+	"detail",
+	"result",
+	"prefix",
+	"text",
+]
 
 /**
  * The first human-readable line inside a captured payload. Maple's own tool

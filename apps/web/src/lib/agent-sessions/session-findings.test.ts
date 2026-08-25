@@ -192,6 +192,34 @@ describe("buildSessionFindings", () => {
 		expect(finding.detail).toBe("Query failed: unknown table trace_spans")
 	})
 
+	// The exact shape Maple's `toolCallJson` records for a failing tool: the
+	// error string wrapped as `{result}`.
+	it("unwraps the {result} envelope Maple's own agent records", () => {
+		const result = report(
+			twoTurns([
+				toolSpan({
+					spanId: "t-envelope",
+					startMs: 5 * MINUTE,
+					durationMs: SECOND,
+					toolName: "query_data",
+					genAi: {
+						conversationId: "t2",
+						errorType: "tool_error",
+						toolCallResult: {
+							result:
+								'Tool failed: Invalid parameters: SchemaError(Expected a number, or omit the parameter (an empty string is not a number)\n  at ["apdex_threshold_ms"])',
+						},
+					},
+				}),
+			]),
+		)
+
+		const finding = result.findings.find((entry) => entry.label === "tool_error · query_data")!
+		expect(finding.detail).toBe(
+			"Tool failed: Invalid parameters: SchemaError(Expected a number, or omit the parameter (an empty string is not a number)",
+		)
+	})
+
 	it("digs a wrapped error message out of a structured tool result", () => {
 		const result = report(
 			twoTurns([
