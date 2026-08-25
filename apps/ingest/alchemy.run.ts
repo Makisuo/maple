@@ -63,12 +63,16 @@ const INGEST_PORT = 3474
  * sit exactly on the line. 8 GiB still buys hours of buffering at current
  * volume; raising it means paying for ephemeral storage beyond the free tier.
  *
- * Note the per-lane budget is `INGEST_QUEUE_MAX_BYTES / (WAL_SHARDS * lanes)`,
- * so enabling the Tinybird mirror (a third lane) cuts every lane's share by a
- * third at the same moment Tinybird-bound traffic doubles. Raise this — within
- * the ephemeral ceiling — for the duration of a mirrored window.
+ * The per-lane budget is `INGEST_QUEUE_MAX_BYTES / (WAL_SHARDS * lanes)`, so
+ * the Tinybird mirror's third lane would have cut every lane's share from 1 GiB
+ * to 683 MiB at exactly the moment Tinybird-bound traffic doubled. 12 GiB over
+ * 12 lanes restores the 1 GiB per lane that 8 GiB gave across 8, and still
+ * leaves ~8 GB of the ephemeral allowance for the image and the OS.
+ *
+ * Drop back to 8 GiB once the mirror is removed, or every lane silently gains
+ * headroom nobody sized for.
  */
-const WAL_MAX_BYTES = 8 * 1024 * 1024 * 1024
+const WAL_MAX_BYTES = 12 * 1024 * 1024 * 1024
 
 /**
  * Pinned rather than derived. The gateway defaults to `num_cpus * 2`, which
