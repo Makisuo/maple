@@ -1664,6 +1664,31 @@ describe("buildTranscript — parallel turns", () => {
 		expect(marker.overlapEndMs).toBe(T0 + 20 * SECOND)
 	})
 
+	// The indentation is what makes the fork legible from the middle of a long
+	// chapter, where the marker has long scrolled away.
+	it("indents every cluster member one lane under the marker", () => {
+		const rows = transcript(twoTurns)
+		expect(findRow(rows, "parallel-turns").depth).toBe(0)
+		for (const header of findRows(rows, "turn")) expect(header.depth).toBe(1)
+		// The members' own rows shift with their headers.
+		for (const row of findRows(rows, "assistant")) expect(row.depth).toBe(1)
+	})
+
+	it("keeps sequential turns on the margin", () => {
+		const sequential = [
+			...conversationTurn({ id: "a", agentName: "a-lane", startMs: 0, durationMs: 5 * SECOND }),
+			...conversationTurn({
+				id: "b",
+				agentName: "b-lane",
+				startMs: 10 * SECOND,
+				durationMs: 5 * SECOND,
+			}),
+		]
+		const rows = transcript(sequential)
+		for (const header of findRows(rows, "turn")) expect(header.depth).toBe(0)
+		for (const row of findRows(rows, "assistant")) expect(row.depth).toBe(0)
+	})
+
 	it("gives each member turn header reciprocal jump data", () => {
 		const rows = transcript(twoTurns)
 		const headers = findRows(rows, "turn")

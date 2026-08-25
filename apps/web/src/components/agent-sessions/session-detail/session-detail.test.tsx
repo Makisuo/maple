@@ -536,6 +536,39 @@ describe("SessionWaterfall", () => {
 		expect(view.container.querySelectorAll('[data-slot="span-inline-detail"]')).toHaveLength(1)
 	})
 
+	// A call and its result are one event: the expansion shows them as one card
+	// whose selector flips between the halves, instead of two stacked cards the
+	// reader has to pair by eye.
+	it("groups a tool call and its result into one card behind a selector", () => {
+		const { turns: toolTurns, summary: toolSummary } = sessionOf([
+			agentSpan({ spanId: "tc-agent", startMs: 0, durationMs: 4 * SECOND }),
+			toolSpan({
+				spanId: "tc-tool",
+				parentSpanId: "tc-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "run_sql",
+				genAi: {
+					toolCallId: "call_9",
+					toolCallArguments: { sql: "select 1" },
+					toolCallResult: { rows: [1] },
+				},
+			}),
+		])
+		const view = render(
+			<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="tc-tool" spanTab="tools" />,
+		)
+
+		// Arguments first, pretty-printed; the result is a click away, not a scroll.
+		const detail = view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement
+		expect(detail.textContent).toContain('"sql"')
+		expect(detail.textContent).not.toContain('"rows"')
+
+		fireEvent.click(within(detail).getByRole("button", { name: "result" }))
+		expect(detail.textContent).toContain('"rows"')
+		expect(detail.textContent).not.toContain('"sql"')
+	})
+
 	it("moves the span cursor with the arrows, expands on Enter, collapses on Esc", () => {
 		const onSelectSpan = vi.fn()
 		const view = render(<Waterfall onSelectSpan={onSelectSpan} />)

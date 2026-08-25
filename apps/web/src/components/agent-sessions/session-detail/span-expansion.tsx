@@ -6,6 +6,7 @@ import { SpanId, TraceId } from "@maple/domain"
 import type { AiSessionSpan } from "@maple/domain/http"
 import { ErrorSection } from "@maple/ui/components/error-section"
 import { Button } from "@maple/ui/components/ui/button"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
@@ -19,6 +20,7 @@ import {
 	ExternalLinkIcon,
 	XmarkIcon,
 } from "@/components/icons"
+import { MessageResponse } from "@/components/ai-elements/message-response"
 import { AttributesSection, CopyableValue, ResourceAttributesSection } from "@/components/attributes"
 import { SpanLogs } from "@/components/traces/span-detail-panel"
 import type { SpanDetailResult } from "@/api/warehouse/traces"
@@ -38,6 +40,7 @@ import {
 import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
 import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
 import { ClampedText, firstLine } from "./clamped-text"
+import { useJsonPayload, ViewSegment, ViewSwitch } from "./payload-view"
 import { CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
 /**
@@ -411,6 +414,7 @@ function MessagesSection({ messages, span }: { messages: readonly SpanMessage[];
  *  rarely what the reader came for. */
 function SystemMessageRow({ message }: { message: SpanMessage }) {
 	const [open, setOpen] = useState(false)
+	const [raw, setRaw] = useState(false)
 	const text = collapsedText(message.parts)
 
 	return (
@@ -434,8 +438,16 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 				)}
 			</button>
 			{open && (
-				<div className="px-2.5 pb-2.5 pl-8">
-					<ClampedText text={text} />
+				<div className="flex items-start gap-1.5 px-2.5 pb-2.5 pl-8">
+					<div className="min-w-0 grow">
+						<ClampedText
+							text={text}
+							body={raw ? undefined : <MessageResponse className="text-sm">{text}</MessageResponse>}
+						/>
+					</div>
+					<ViewSwitch rendered="md" raw={raw} onRawChange={setRaw} />
+					{/* Copies the instructions as captured, not their rendering. */}
+					<CopyButton value={text} label="system message" className="-my-1 shrink-0" />
 				</div>
 			)}
 		</div>
@@ -443,6 +455,11 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 }
 
 function MessageBlock({ message, span }: { message: SpanMessage; span: AiSessionSpan }) {
+	// One rendered ↔ raw choice per message: its text parts are one body the
+	// reader flips together, while the payload cards keep their own json switch.
+	const [raw, setRaw] = useState(false)
+	const hasText = message.parts.some((part) => part.kind === "text")
+
 	return (
 		<div className="flex min-w-0 flex-col gap-1.5">
 			<div className="flex items-center gap-2.5">
@@ -462,18 +479,26 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 					</span>
 				)}
 				<span aria-hidden className="h-px min-w-4 flex-1 bg-border/60" />
+				{hasText && <ViewSwitch rendered="md" raw={raw} onRawChange={setRaw} />}
 			</div>
 			<div className="flex min-w-0 flex-col gap-2">
 				{message.parts.map((part, index) => (
-					<MessagePart key={index} part={part} />
+					<MessagePart key={index} part={part} raw={raw} />
 				))}
 			</div>
 		</div>
 	)
 }
 
-function MessagePart({ part }: { part: SpanMessagePart }) {
-	if (part.kind === "text") return <ClampedText text={part.text} />
+function MessagePart({ part, raw }: { part: SpanMessagePart; raw: boolean }) {
+	if (part.kind === "text") {
+		return (
+			<ClampedText
+				text={part.text}
+				body={raw ? undefined : <MessageResponse className="text-sm">{part.text}</MessageResponse>}
+			/>
+		)
+	}
 	if (part.kind === "reasoning") return <ReasoningPart part={part} />
 	if (part.kind === "tool_call") {
 		return <PayloadCard label="tool_call" name={part.name} meta={part.id} body={part.argumentsText} />
@@ -513,19 +538,67 @@ function ToolCallsSection({ toolCalls }: { toolCalls: readonly SpanToolCall[] })
 	return (
 		<div className="flex flex-col gap-3 pb-1">
 			{toolCalls.map((call, index) => (
-				<div key={index} className="flex flex-col gap-2">
-					<PayloadCard
-						label="tool_call"
-						name={call.name}
-						meta={call.id}
-						description={call.description}
-						body={call.argumentsText}
-					/>
-					{call.resultText !== undefined && (
-						<PayloadCard label="tool_result" body={call.resultText} />
-					)}
-				</div>
+				<ToolCallCard key={index} call={call} />
 			))}
+		</div>
+	)
+}
+
+/**
+ * One invocation as one card: the call and its result belong to the same event,
+ * and two stacked cards made the reader pair them by eye. A selector shows one
+ * half at a time — the other stays a click away, never a scroll.
+ */
+function ToolCallCard({ call }: { call: SpanToolCall }) {
+	const [side, setSide] = useState<"arguments" | "result">(
+		call.argumentsText === undefined && call.resultText !== undefined ? "result" : "arguments",
+	)
+	const body = side === "arguments" ? call.argumentsText : call.resultText
+
+	return (
+		<div className="min-w-0 overflow-hidden rounded-md border border-border/70">
+			<div className="flex items-center gap-2 bg-muted/40 px-2.5 py-1.5">
+				<span aria-hidden className="size-1.5 shrink-0 rounded-xs bg-chart-4" />
+				<span className="shrink-0 font-medium font-mono text-chart-4 text-xs">tool</span>
+				{call.name !== undefined && (
+					<span className="min-w-0 truncate font-mono text-foreground text-xs" title={call.name}>
+						{call.name}
+					</span>
+				)}
+				<span className="ml-auto flex shrink-0 items-center gap-2">
+					{call.id !== undefined && (
+						<span className="max-w-40 truncate font-mono text-[11px] text-muted-foreground/80" title={call.id}>
+							{call.id}
+						</span>
+					)}
+					<span
+						role="group"
+						aria-label="Tool payload"
+						className="flex shrink-0 items-center overflow-hidden rounded-sm border border-border"
+					>
+						<ViewSegment active={side === "arguments"} onSelect={() => setSide("arguments")}>
+							arguments
+						</ViewSegment>
+						<ViewSegment active={side === "result"} onSelect={() => setSide("result")}>
+							result
+						</ViewSegment>
+					</span>
+				</span>
+			</div>
+			{call.description !== undefined && (
+				<p className="border-border/60 border-t px-2.5 py-1.5 text-muted-foreground text-xs">
+					{call.description}
+				</p>
+			)}
+			{body === undefined ? (
+				<p className="border-border/60 border-t bg-background/50 px-2.5 py-2 text-muted-foreground text-xs italic">
+					{side === "arguments"
+						? "No arguments were captured for this call."
+						: "No result was captured — whether the call succeeded is unknown."}
+				</p>
+			) : (
+				<PayloadBody text={body} copyLabel={side} />
+			)}
 		</div>
 	)
 }
@@ -562,11 +635,29 @@ function PayloadCard({
 					{description}
 				</p>
 			)}
-			{body !== undefined && (
-				<div className="border-border/60 border-t bg-background/50 px-2.5 py-2">
-					<ClampedText text={body} mono />
-				</div>
+			{body !== undefined && <PayloadBody text={body} copyLabel={label} />}
+		</div>
+	)
+}
+
+/**
+ * A payload card's body: pretty-printed and highlighted where it parses as
+ * JSON, with the same json ↔ raw switch the transcript's cards carry — the
+ * captured bytes stay one click away, and the copy takes what is displayed.
+ */
+function PayloadBody({ text, copyLabel }: { text: string; copyLabel: string }) {
+	const { formatted, highlighted } = useJsonPayload(text)
+	const [raw, setRaw] = useState(false)
+
+	return (
+		<div className="flex items-start gap-1.5 border-border/60 border-t bg-background/50 px-2.5 py-2">
+			<div className="min-w-0 grow">
+				<ClampedText text={raw ? text : formatted} html={raw ? undefined : highlighted} mono />
+			</div>
+			{highlighted !== undefined && (
+				<ViewSwitch rendered="json" raw={raw} onRawChange={setRaw} className="self-start" />
 			)}
+			<CopyButton value={raw ? text : formatted} label={copyLabel} className="-my-1 shrink-0" />
 		</div>
 	)
 }
