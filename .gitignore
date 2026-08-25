@@ -1,4 +1,7 @@
 .tinyb
+# Written by the Tinybird CD job to point `deploy` at a specific workspace host
+# (the CLI has no --host flag); takes priority over the committed tinybird.json.
+tinybird.config.json
 .tinybird-generated
 .tinybird-entities-*.mjs
 # D1→Postgres migration dumps — contain prod data, never commit

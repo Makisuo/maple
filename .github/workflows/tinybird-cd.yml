@@ -64,12 +64,18 @@ jobs:
                     echo "::notice::TINYBIRD_TOKEN not set for the '${{ matrix.target.environment }}' environment; skipping Tinybird deploy."
                     exit 0
                   fi
-                  HOST_FLAG=()
+                  # `tinybird deploy` has NO --host flag (verified against the pinned
+                  # @tinybirdco/sdk 0.0.78: it exits `unknown option '--host'`). The
+                  # host comes from the config file's `baseUrl`, and the CLI resolves
+                  # config files in priority order, `tinybird.config.json` ahead of
+                  # `tinybird.json` — so writing one here overrides the repo default
+                  # without making TINYBIRD_HOST mandatory for `tb build` locally.
                   if [ -n "${TINYBIRD_HOST:-}" ]; then
-                    HOST_FLAG=(--host "$TINYBIRD_HOST")
+                    jq --arg host "$TINYBIRD_HOST" '.baseUrl = $host' tinybird.json > tinybird.config.json
+                    echo "::notice::Deploying to $TINYBIRD_HOST"
                   fi
                   if [ "$ALLOW_DESTRUCTIVE" = "true" ]; then
-                    bunx tinybird deploy "${HOST_FLAG[@]}" --allow-destructive-operations
+                    bunx tinybird deploy --allow-destructive-operations
                   else
-                    bunx tinybird deploy "${HOST_FLAG[@]}"
+                    bunx tinybird deploy
                   fi
