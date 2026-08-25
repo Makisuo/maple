@@ -1,4 +1,4 @@
-import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
+import { optionalNumberParam, optionalStringParam, optionalTimeParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
@@ -18,8 +18,8 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
 		// error_detail failure.
 		"Find and categorize errors by type with counts and affected services. Each error has a stable `fingerprint` (a decimal UInt64) — pass it to error_detail for sample traces. The error-issue tools take an `issue_id` UUID from list_error_issues instead, which is a separate identity.",
 		Schema.Struct({
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			service: optionalStringParam("Filter to a specific service"),
 			environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
 			limit: optionalNumberParam("Max results (default 20)"),

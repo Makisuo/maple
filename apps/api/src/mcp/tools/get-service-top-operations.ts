@@ -1,6 +1,7 @@
 import {
 	optionalNumberParam,
 	optionalStringParam,
+	optionalTimeParam,
 	requiredStringParam,
 	validationError,
 	type McpToolRegistrar,
@@ -9,7 +10,6 @@ import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import {
 	resolveTimeRange,
 	rangeExceededResult,
-	timeRangeInvalidResult,
 	MCP_SEARCH_MAX_HOURS,
 } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
@@ -34,8 +34,8 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 			metric: optionalStringParam(
 				"Metric to sort by: count (request volume), error_rate, avg_duration, p95_duration (default: count)",
 			),
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss UTC)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss UTC)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss UTC)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss UTC)"),
 			limit: optionalNumberParam("Max operations to return (default 20)"),
 		}),
 		Effect.fn("McpTool.getServiceTopOperations")(function* ({
@@ -47,7 +47,6 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 		}) {
 			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_SEARCH_MAX_HOURS })
 			const { st, et } = range
-			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "get_service_top_operations")
 			if (range.exceeded) return rangeExceededResult(range, "get_service_top_operations")
 			const metricOption =
 				metric === undefined ? Option.some("count" as const) : decodeTracesMetric(metric)

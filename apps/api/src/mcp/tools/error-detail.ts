@@ -2,6 +2,7 @@ import {
 	optionalBooleanParam,
 	optionalNumberParam,
 	optionalStringParam,
+	optionalTimeParam,
 	requiredStringParam,
 	validationError,
 	type McpToolRegistrar,
@@ -51,8 +52,8 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 			fingerprint: requiredStringParam(
 				'The error FingerprintHash from find_errors — a decimal UInt64 string, e.g. "11640295108927840024". Not a list_error_issues issue id (those are UUIDs).',
 			),
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			service: optionalStringParam("Filter by service name"),
 			include_timeseries: optionalBooleanParam(
 				"Include error count over time to see if the error is trending up or down",

@@ -1,4 +1,4 @@
-import { optionalStringParam, McpQueryError, type McpToolRegistrar } from "./types"
+import { optionalStringParam, optionalTimeParam, McpQueryError, type McpToolRegistrar } from "./types"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatNumber, formatDurationFromMs, formatPercent, formatTable } from "@/mcp/lib/format"
@@ -13,8 +13,8 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 		"service_map",
 		"Show service-to-service dependencies with call counts, error rates, and latency per edge. Use to understand system architecture and identify problematic inter-service calls.",
 		Schema.Struct({
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			service_name: optionalStringParam("Filter to edges involving this service (as source or target)"),
 			environment: optionalStringParam("Filter by deployment environment"),
 		}),

@@ -1,10 +1,9 @@
-import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
+import { optionalNumberParam, optionalStringParam, optionalTimeParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import {
 	resolveTimeRange,
 	rangeExceededResult,
-	timeRangeInvalidResult,
 	MCP_SEARCH_MAX_HOURS,
 } from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
@@ -20,8 +19,8 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 		"search_logs",
 		"Search and filter logs by service, severity, keyword, or trace_id. Supports pagination — check hasMore in the response for additional results. Use inspect_trace to see the full trace for a log entry.",
 		Schema.Struct({
-			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
-			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
+			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			service: optionalStringParam("Filter by service name"),
 			severity: optionalStringParam(
 				"Filter by log severity level. Valid values: TRACE, DEBUG, INFO, WARN, ERROR, FATAL. Case-insensitive.",
@@ -47,7 +46,6 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 		}) {
 			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_SEARCH_MAX_HOURS })
 			const { st, et } = range
-			if (range.invalid.length > 0) return timeRangeInvalidResult(range, "search_logs")
 			if (range.exceeded) return rangeExceededResult(range, "search_logs")
 			const lim = clampLimit(limit, { defaultValue: 30, max: 200 })
 			const off = clampOffset(offset, { max: 10_000 })

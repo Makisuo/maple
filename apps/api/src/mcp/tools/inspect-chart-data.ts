@@ -1,6 +1,7 @@
 import {
 	McpQueryError,
 	optionalStringParam,
+	optionalTimeParam,
 	requiredStringParam,
 	type McpToolRegistrar,
 	type McpToolResult,
@@ -197,10 +198,10 @@ export function registerInspectChartDataTool(server: McpToolRegistrar) {
 		Schema.Struct({
 			dashboard_id: requiredStringParam("Dashboard ID containing the widget"),
 			widget_id: requiredStringParam("Widget ID to inspect"),
-			start_time: optionalStringParam(
+			start_time: optionalTimeParam(
 				"Override start time (YYYY-MM-DD HH:mm:ss UTC or ISO 8601). Defaults to the dashboard's configured timeRange.",
 			),
-			end_time: optionalStringParam(
+			end_time: optionalTimeParam(
 				"Override end time (YYYY-MM-DD HH:mm:ss UTC or ISO 8601). Defaults to the dashboard's configured timeRange.",
 			),
 		}),
