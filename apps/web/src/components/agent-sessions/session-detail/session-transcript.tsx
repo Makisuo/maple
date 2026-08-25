@@ -121,6 +121,10 @@ export function SessionTranscript({
 		getItemKey: (index) => rows[index]!.key,
 		overscan: 12,
 		scrollMargin,
+		// Measured rows can resize while React is already rendering (a fixture or
+		// data swap re-fills mounted rows); without this the ResizeObserver path
+		// calls flushSync mid-lifecycle and React logs an error for every batch.
+		useAnimationFrameWithResizeObserver: true,
 	})
 
 	const indexByKey = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows])
