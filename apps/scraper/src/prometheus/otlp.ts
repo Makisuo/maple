@@ -403,3 +403,129 @@ export const convertFamiliesToOtlp = (
 
 	return { request, dataPointCounts: state.counts, droppedSeriesCount: state.dropped }
 }
+
+/**
+ * Data points carried by one metric. Exactly one aggregation is ever set by
+ * {@link convertFamiliesToOtlp}, but summing is cheaper than proving it.
+ */
+const metricDataPointCount = (metric: OtlpMetric): number =>
+	(metric.gauge?.dataPoints.length ?? 0) +
+	(metric.sum?.dataPoints.length ?? 0) +
+	(metric.histogram?.dataPoints.length ?? 0)
+
+/** Total data points in an export request, across every resource and scope. */
+export const countDataPoints = (request: OtlpExportRequest): number =>
+	request.resourceMetrics.reduce(
+		(total, resourceMetrics) =>
+			total +
+			resourceMetrics.scopeMetrics.reduce(
+				(scopeTotal, scopeMetrics) =>
+					scopeTotal +
+					scopeMetrics.metrics.reduce((sum, metric) => sum + metricDataPointCount(metric), 0),
+				0,
+			),
+		0,
+	)
+
+/**
+ * A metric's data points plus a way to rebuild the metric around a slice of
+ * them, keeping the aggregation shape (and a sum's `isMonotonic` /
+ * temporality) intact. Going through this instead of casting a shared point
+ * array is what keeps the three aggregations type-checked.
+ */
+interface MetricSlicer {
+	readonly count: number
+	/** The metric carrying only data points `[from, to)`. */
+	readonly slice: (from: number, to: number) => OtlpMetric
+}
+
+const slicerFor = (metric: OtlpMetric): MetricSlicer => {
+	const head = { name: metric.name, description: metric.description, unit: metric.unit }
+	if (metric.gauge !== undefined) {
+		const { dataPoints } = metric.gauge
+		return {
+			count: dataPoints.length,
+			slice: (from, to) => ({ ...head, gauge: { dataPoints: dataPoints.slice(from, to) } }),
+		}
+	}
+	if (metric.sum !== undefined) {
+		const { dataPoints, ...rest } = metric.sum
+		return {
+			count: dataPoints.length,
+			slice: (from, to) => ({ ...head, sum: { ...rest, dataPoints: dataPoints.slice(from, to) } }),
+		}
+	}
+	if (metric.histogram !== undefined) {
+		const { dataPoints, ...rest } = metric.histogram
+		return {
+			count: dataPoints.length,
+			slice: (from, to) => ({
+				...head,
+				histogram: { ...rest, dataPoints: dataPoints.slice(from, to) },
+			}),
+		}
+	}
+	return { count: 0, slice: () => metric }
+}
+
+/**
+ * Split an export request into requests of at most `maxDataPoints` data points
+ * each, so no single POST can exceed the ingest gateway's body limit
+ * (`INGEST_MAX_REQUEST_BODY_BYTES`). The gateway rejects an oversized body
+ * whole with HTTP 413, which loses the entire scrape — a large ScyllaDB
+ * cluster crossed 20 MB in one export and went blind rather than degrading.
+ *
+ * Splitting happens at the data-point level, not the metric level: one
+ * Prometheus family fans out to a series per shard per table, so a single
+ * metric can exceed the budget on its own. A metric may therefore appear in
+ * several chunks carrying disjoint data points, which is valid OTLP — each
+ * chunk repeats the resource and scope so it stands alone.
+ *
+ * The budget is a data-point count rather than bytes because serializing to
+ * measure would mean encoding the payload twice; the default leaves enough
+ * headroom that even attribute-heavy points stay well under the limit.
+ */
+export const splitExportRequest = (
+	request: OtlpExportRequest,
+	maxDataPoints: number,
+): ReadonlyArray<OtlpExportRequest> => {
+	if (!Number.isFinite(maxDataPoints) || maxDataPoints <= 0) return [request]
+	if (countDataPoints(request) <= maxDataPoints) return [request]
+
+	const chunks: Array<OtlpExportRequest> = []
+	for (const resourceMetrics of request.resourceMetrics) {
+		for (const scopeMetrics of resourceMetrics.scopeMetrics) {
+			let batch: Array<OtlpMetric> = []
+			let batched = 0
+			const flush = () => {
+				if (batch.length === 0) return
+				chunks.push({
+					resourceMetrics: [
+						{
+							resource: resourceMetrics.resource,
+							scopeMetrics: [{ scope: scopeMetrics.scope, metrics: batch }],
+						},
+					],
+				})
+				batch = []
+				batched = 0
+			}
+
+			for (const metric of scopeMetrics.metrics) {
+				const slicer = slicerFor(metric)
+				let offset = 0
+				while (offset < slicer.count) {
+					const take = Math.min(maxDataPoints - batched, slicer.count - offset)
+					if (take > 0) {
+						batch.push(slicer.slice(offset, offset + take))
+						batched += take
+						offset += take
+					}
+					if (batched >= maxDataPoints) flush()
+				}
+			}
+			flush()
+		}
+	}
+	return chunks
+}
