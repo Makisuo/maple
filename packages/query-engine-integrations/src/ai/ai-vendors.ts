@@ -27,6 +27,10 @@ import { MAPLE_NATIVE_TURN_ID_ATTR, type MutableAiGenAiValues } from "@maple/dom
  * `ai.response.msToFirstChunk` (milliseconds, where
  * `gen_ai.response.time_to_first_chunk` is seconds — silently mixing units is
  * worse than not having the field).
+ *
+ * `gen_ai.client.operation.time_to_first_chunk` is where AI SDK v7 puts TTFT
+ * — already in seconds, so unlike `msToFirstChunk` it aliases cleanly onto
+ * the catalog's `responseTimeToFirstChunk`.
  */
 const vercelAiSdkIntegration: AiIntegration = {
 	id: "vercel_ai_sdk",
@@ -47,6 +51,7 @@ const vercelAiSdkIntegration: AiIntegration = {
 			"ai.usage.reasoningTokens",
 			"ai.usage.outputTokenDetails.reasoningTokens",
 		],
+		responseTimeToFirstChunk: ["gen_ai.client.operation.time_to_first_chunk"],
 		inputMessages: ["ai.prompt.messages", "ai.prompt"],
 		toolName: ["ai.toolCall.name"],
 		toolCallId: ["ai.toolCall.id"],

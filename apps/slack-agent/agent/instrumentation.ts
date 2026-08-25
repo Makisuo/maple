@@ -5,9 +5,11 @@ import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici"
 import { resourceFromAttributes } from "@opentelemetry/resources"
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs"
 import { NodeSDK } from "@opentelemetry/sdk-node"
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
 import { defineInstrumentation, isChannel } from "eve/instrumentation"
 import slackChannel from "#channels/slack.js"
+import { GenAiCostSpanProcessor } from "#lib/genai-cost.js"
 import { markAgentTelemetryActive } from "#lib/telemetry-log.js"
 
 /**
@@ -97,10 +99,19 @@ function setupTelemetry(): void {
 		// recurse into the exporters below: the Node OTLP exporters use
 		// `node:http`, not fetch.
 		instrumentations: [new UndiciInstrumentation()],
-		traceExporter: new OTLPTraceExporter({
-			url: `${endpoint}/v1/traces`,
-			headers,
-		}),
+		// Explicit processor list instead of `traceExporter` (which would build
+		// just the batch processor): the cost processor must see each span before
+		// the batch processor serializes it, so it can lift OpenRouter's charged
+		// cost from `ai.response.providerMetadata` into `gen_ai.usage.cost`.
+		spanProcessors: [
+			new GenAiCostSpanProcessor(),
+			new BatchSpanProcessor(
+				new OTLPTraceExporter({
+					url: `${endpoint}/v1/traces`,
+					headers,
+				}),
+			),
+		],
 		// Logs, not just spans: agent/hooks/outcome-log.ts is the primary signal
 		// for the "agent did nothing" failure mode, and without a log pipeline it
 		// never leaves the container. NodeSDK builds the LoggerProvider from these
