@@ -83,6 +83,8 @@ export interface SessionModelUsage {
 export interface SessionToolUsage {
 	readonly name: string
 	readonly calls: number
+	/** `gen_ai.tool.description`, from the first span that stamped one. */
+	readonly description: string | undefined
 }
 
 /** How a failure is named on the page — the bucket it counts in, and the label
@@ -697,14 +699,19 @@ function modelUsage(
  * disappearing from a column whose total says 63.
  */
 function toolUsage(spans: readonly AiSessionSpan[]): readonly SessionToolUsage[] {
-	const calls = new Map<string, number>()
+	const calls = new Map<string, { count: number; description: string | undefined }>()
 	for (const span of spans) {
 		if (classifyAiSpan(span) !== "tool") continue
 		const name = span.genAi.toolName ?? span.spanName
-		calls.set(name, (calls.get(name) ?? 0) + 1)
+		const entry = calls.get(name) ?? { count: 0, description: undefined }
+		entry.count += 1
+		// The first stamped description speaks for the tool: emitters send the
+		// same definition on every call, so later ones only repeat it.
+		entry.description ??= span.genAi.toolDescription
+		calls.set(name, entry)
 	}
 	return [...calls]
-		.map(([name, count]) => ({ name, calls: count }))
+		.map(([name, entry]) => ({ name, calls: entry.count, description: entry.description }))
 		.sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name))
 }
 

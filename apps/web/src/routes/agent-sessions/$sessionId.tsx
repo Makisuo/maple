@@ -263,8 +263,11 @@ function SessionDetailBody({
 				    resolve against the padding edge. The top edge is the control bar;
 				    the bottom is the Flow view's floor, whose docked span drawer
 				    otherwise floats a padding's height short of the viewport with the
-				    canvas scrolling visibly beneath it. */}
-				<DashboardLayout.Scroll className="py-0">
+				    canvas scrolling visibly beneath it. `pr-6` keeps the overlay
+				    scrollbar off the right-aligned duration/cost columns, and
+				    `overflow-x-hidden` means a span that escapes its truncation can
+				    never make the whole page scroll sideways. */}
+				<DashboardLayout.Scroll className="overflow-x-hidden py-0 pr-6">
 					{truncated && (
 						<div className="shrink-0 py-4">
 							<Alert variant="warning">

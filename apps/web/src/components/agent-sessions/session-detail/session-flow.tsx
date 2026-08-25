@@ -5,6 +5,7 @@ import {
 	ReactFlow,
 	ReactFlowProvider,
 	useReactFlow,
+	type CoordinateExtent,
 	type Edge,
 	type Node,
 	type NodeProps,
@@ -51,6 +52,10 @@ const WRAP_GAP = 24
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 1.5
+/** How far past the graph the canvas can be panned. Roughly half a viewport:
+ *  enough to pull any node clear of the floor's legend and drawer, while a
+ *  fling can never strand the reader on empty canvas with no node in sight. */
+const PAN_MARGIN = 400
 
 /** Where the hidden ports sit on every card, mirrored by `Ports` below. */
 const STEP_HANDLES: NonNullable<Node["handles"]> = [
@@ -140,6 +145,24 @@ export function SessionFlow({
 		const byId = new Map<string, FlowNode>()
 		for (const lane of lanes) for (const node of lane.nodes) byId.set(node.span.spanId, node)
 		return byId
+	}, [lanes])
+
+	// Panning stays within a margin of the graph itself — the default extent is
+	// infinite, and a stray fling could park the reader on blank canvas with no
+	// way to tell which direction the session went.
+	const translateExtent = useMemo<CoordinateExtent>(() => {
+		let maxX = 0
+		let maxY = 0
+		for (const lane of lanes) {
+			for (const node of lane.nodes) {
+				maxX = Math.max(maxX, node.x + NODE_WIDTH)
+				maxY = Math.max(maxY, node.y + NODE_HEIGHT)
+			}
+		}
+		return [
+			[-PAN_MARGIN, -PAN_MARGIN],
+			[maxX + PAN_MARGIN, maxY + PAN_MARGIN],
+		]
 	}, [lanes])
 
 	// The keyboard's span cursor, over the nodes in reading order — lane by
@@ -279,6 +302,7 @@ export function SessionFlow({
 							}}
 							minZoom={MIN_ZOOM}
 							maxZoom={MAX_ZOOM}
+							translateExtent={translateExtent}
 							nodesDraggable={false}
 							nodesConnectable={false}
 							nodesFocusable={false}

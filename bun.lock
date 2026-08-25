@@ -402,22 +402,6 @@
         "react": ">=19.0.0",
       },
     },
-    "lib/llm": {
-      "name": "@maple/llm",
-      "dependencies": {
-        "@smithy/eventstream-codec": "4.2.14",
-        "@smithy/util-utf8": "4.2.2",
-        "aws4fetch": "1.0.20",
-        "effect": "catalog:effect",
-      },
-      "devDependencies": {
-        "@effect/language-service": "catalog:effect",
-        "@types/node": "catalog:tooling",
-        "typescript": "catalog:tooling",
-        "vite": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
     "lib/otel-helpers": {
       "name": "@maple/otel-helpers",
       "version": "0.1.0",
@@ -1344,8 +1328,6 @@
     "@maple/ingest": ["@maple/ingest@workspace:apps/ingest"],
 
     "@maple/landing": ["@maple/landing@workspace:apps/landing"],
-
-    "@maple/llm": ["@maple/llm@workspace:lib/llm"],
 
     "@maple/local-ui": ["@maple/local-ui@workspace:apps/local-ui"],
 
