@@ -4,9 +4,12 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { formatBytes, formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
+import { MessageResponse } from "@/components/ai-elements/message-response"
+import { tryParseJson } from "@/components/attributes"
 import {
 	AlertWarningIcon,
 	BranchForkIcon,
@@ -21,6 +24,7 @@ import {
 	ExternalLinkIcon,
 	FaceRobotIcon,
 	GearIcon,
+	PixelBracketsCurlyIcon,
 	PixelSparkleIcon,
 	UserIcon,
 	type IconComponent,
@@ -37,6 +41,7 @@ import {
 	type TranscriptRow,
 } from "@/lib/agent-sessions/session-transcript"
 import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
+import { highlightCode } from "@/lib/sugar-high"
 import { formatClockInTimezone } from "@/lib/timezone-format"
 import { ClampedText, firstLine } from "./clamped-text"
 import { Pill } from "./pill"
@@ -433,6 +438,8 @@ function UserBlock({
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "user" }> }) {
 	const historyKey = `${row.key}:history`
 	const showHistory = disclosed(openRows, historyKey, false)
+	const rawKey = `${row.key}:raw`
+	const raw = disclosed(openRows, rawKey, false)
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-foreground" className="pt-5">
@@ -456,10 +463,17 @@ function UserBlock({
 							{showHistory ? "hide full history" : "show full history"}
 						</button>
 					)}
+					<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} className="-my-1" />
 				</div>
-				<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
-					{row.text}
-				</p>
+				{raw ? (
+					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
+						{row.text}
+					</p>
+				) : (
+					<MessageResponse className="text-foreground text-sm leading-relaxed">
+						{row.text}
+					</MessageResponse>
+				)}
 				{showHistory && (
 					<div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2.5">
 						{/* The history verbatim, not a diff: dropped and truncated
@@ -500,6 +514,8 @@ function SystemBlock({
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "system" }> }) {
 	const open = disclosed(openRows, row.key, false)
 	const textKey = `${row.key}:text`
+	const rawKey = `${row.key}:raw`
+	const raw = disclosed(openRows, rawKey, false)
 
 	return (
 		<Row depth={row.depth} rail="bg-muted-foreground/40" className="pt-3.5">
@@ -532,12 +548,18 @@ function SystemBlock({
 				)}
 			</button>
 			{open && (
-				<div className="pb-2 pl-6">
-					<ClampedText
-						text={row.text}
-						expanded={disclosed(openRows, textKey, false)}
-						onToggleExpanded={() => onToggleRow(textKey)}
-					/>
+				<div className="flex items-start gap-1.5 pb-2 pl-6">
+					<div className="min-w-0 grow">
+						<ClampedText
+							text={row.text}
+							body={raw ? undefined : <MessageResponse className="text-sm">{row.text}</MessageResponse>}
+							expanded={disclosed(openRows, textKey, false)}
+							onToggleExpanded={() => onToggleRow(textKey)}
+						/>
+					</div>
+					<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} className="-my-1" />
+					{/* Copies the prompt as captured, not its rendering. */}
+					<CopyButton value={row.text} label="system prompt" className="-my-1 shrink-0" />
 				</div>
 			)}
 		</Row>
@@ -547,12 +569,22 @@ function SystemBlock({
 function AssistantBlock({
 	row,
 	timeZone,
+	openRows,
+	onToggleRow,
 	selected,
 	onSelectSpan,
 	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "assistant" }> }) {
 	const tone = row.failed ? "text-destructive" : "text-chart-2"
 	const Glyph = row.failed ? CircleWarningIcon : PixelSparkleIcon
+	// The failure payload some providers put in the status message — often a
+	// whole JSON error envelope, so it gets the same JSON treatment as a tool
+	// payload. Empty where the call succeeded, and the hook is cheap on "".
+	const error = useJsonPayload(row.failed ? row.span.statusMessage : "")
+	const rawKey = `${row.key}:raw`
+	const raw = disclosed(openRows, rawKey, false)
+	const errorRawKey = `${row.key}:error-raw`
+	const errorRaw = disclosed(openRows, errorRawKey, false)
 
 	return (
 		<Row
@@ -581,19 +613,49 @@ function AssistantBlock({
 						error.type {row.span.genAi.errorType}
 					</Pill>
 				)}
+				{row.text !== undefined && (
+					<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} className="-my-1" />
+				)}
 				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
-			{row.text !== undefined && (
-				<p className="whitespace-pre-wrap break-words pt-2.5 text-foreground text-sm leading-relaxed">
-					{row.text}
-				</p>
-			)}
+			{row.text !== undefined &&
+				(raw ? (
+					<p className="whitespace-pre-wrap break-words pt-2.5 text-foreground text-sm leading-relaxed">
+						{row.text}
+					</p>
+				) : (
+					<MessageResponse className="pt-2.5 text-foreground text-sm leading-relaxed">
+						{row.text}
+					</MessageResponse>
+				))}
 			{row.failed && (
 				<div className="flex flex-col gap-1.5 pt-2.5">
 					{row.span.statusMessage !== "" && (
-						<p className="whitespace-pre-wrap break-words font-mono text-[13px] text-destructive/90 leading-relaxed">
-							{row.span.statusMessage}
-						</p>
+						<div className="flex items-start gap-1.5">
+							<div className="min-w-0 grow">
+								<ClampedText
+									text={errorRaw ? row.span.statusMessage : error.formatted}
+									html={errorRaw ? undefined : error.highlighted}
+									mono
+									clampClass="line-clamp-[14]"
+									toneClass="text-[13px] text-destructive/90"
+									expanded={disclosed(openRows, `${row.key}:error-text`, false)}
+									onToggleExpanded={() => onToggleRow(`${row.key}:error-text`)}
+								/>
+							</div>
+							{error.highlighted !== undefined && (
+								<RawToggle
+									raw={errorRaw}
+									onToggle={() => onToggleRow(errorRawKey)}
+									className="-my-1"
+								/>
+							)}
+							<CopyButton
+								value={errorRaw ? row.span.statusMessage : error.formatted}
+								label="error message"
+								className="-my-1 shrink-0"
+							/>
+						</div>
 					)}
 					{/* Never "the agent gave up": what the span supports is that this
 					    call produced nothing. A retry, if there was one, is its own row. */}
@@ -615,7 +677,12 @@ function AssistantBlock({
 function PromptBlock({
 	row,
 	timeZone,
+	openRows,
+	onToggleRow,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "prompt" }> }) {
+	const rawKey = `${row.key}:raw`
+	const raw = disclosed(openRows, rawKey, false)
+
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-chart-2" className="pt-3">
 			<div className="flex flex-col gap-2.5">
@@ -625,10 +692,17 @@ function PromptBlock({
 					<span className={META}>{callMetaLine(row.span)}</span>
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{row.span.serviceName}</span>
+					<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} className="-my-1" />
 				</div>
-				<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
-					{row.text}
-				</p>
+				{raw ? (
+					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
+						{row.text}
+					</p>
+				) : (
+					<MessageResponse className="text-foreground text-sm leading-relaxed">
+						{row.text}
+					</MessageResponse>
+				)}
 				<InlineNote>
 					The reply isn't captured. This emitter records{" "}
 					<span className="font-mono">gen_ai.input.messages</span> but not{" "}
@@ -821,6 +895,59 @@ function payloadSummary(row: Extract<TranscriptRow, { kind: "tool" }>): string {
 	return ` · ${parts.join(" · ")}`
 }
 
+/**
+ * A payload body, pretty-printed and highlighted where it parses as JSON
+ * (object or array — same test as the log body), verbatim otherwise. An
+ * emitter-truncated prefix fails the parse and stays verbatim, which is right:
+ * pretty-printing a fragment would dress it up as a whole document.
+ */
+function useJsonPayload(text: string): { formatted: string; highlighted: string | undefined } {
+	return useMemo(() => {
+		const parsed = tryParseJson(text)
+		if (parsed === null) return { formatted: text, highlighted: undefined }
+		const formatted = JSON.stringify(parsed, null, 2)
+		return { formatted, highlighted: highlightCode(formatted) }
+	}, [text])
+}
+
+/**
+ * The rendered ↔ raw switch. Markdown layout and pretty-printed JSON are
+ * readings of the capture, and a reading can hide things — whitespace, key
+ * order, a literal `**` — so every rendered body keeps a way back to the
+ * captured bytes. Held in `openRows` like every other flipped default, so the
+ * choice survives the row scrolling out of the virtualizer.
+ */
+function RawToggle({
+	raw,
+	onToggle,
+	className,
+}: {
+	raw: boolean
+	onToggle: () => void
+	className?: string
+}) {
+	return (
+		<Button
+			variant="ghost"
+			size="icon-xs"
+			aria-pressed={raw}
+			aria-label={raw ? "Show rendered" : "Show raw text"}
+			title={raw ? "Show rendered" : "Show raw text"}
+			onClick={(event) => {
+				event.stopPropagation()
+				onToggle()
+			}}
+			className={cn(
+				"shrink-0 text-muted-foreground hover:text-foreground",
+				raw && "bg-accent text-foreground",
+				className,
+			)}
+		>
+			<PixelBracketsCurlyIcon />
+		</Button>
+	)
+}
+
 function PayloadSection({
 	label,
 	payload,
@@ -840,6 +967,10 @@ function PayloadSection({
 	onToggleRow: (key: string) => void
 	textKey: string
 }) {
+	const { formatted, highlighted } = useJsonPayload(payload.text)
+	const rawKey = `${textKey}:raw`
+	const raw = disclosed(openRows, rawKey, false)
+
 	return (
 		<div className={cn("flex flex-col gap-2 px-3 pt-2.5 pb-3", bordered && "border-border/60 border-t")}>
 			<div className="flex flex-wrap items-center gap-2">
@@ -858,12 +989,23 @@ function PayloadSection({
 						truncated by the emitter
 					</Pill>
 				)}
+				{/* Copies what is displayed: the pretty-printed JSON, or the raw text.
+				    The switch only appears where the two differ. */}
+				{payload.text !== "" && (
+					<span className="-my-1 ml-auto flex items-center">
+						{highlighted !== undefined && (
+							<RawToggle raw={raw} onToggle={() => onToggleRow(rawKey)} />
+						)}
+						<CopyButton value={raw ? payload.text : formatted} label={label.toLowerCase()} />
+					</span>
+				)}
 			</div>
 			{/* An emitter that recorded the truncation but kept no prefix leaves
 			    nothing to show; an empty card would read as an empty payload. */}
 			{payload.text !== "" && (
 				<ClampedText
-					text={payload.text}
+					text={raw ? payload.text : formatted}
+					html={raw ? undefined : highlighted}
 					mono
 					clampClass="line-clamp-[14]"
 					toneClass={tone}

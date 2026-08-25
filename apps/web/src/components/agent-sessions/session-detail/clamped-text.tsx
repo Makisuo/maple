@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
 
 import { cn } from "@maple/ui/lib/utils"
 
@@ -19,6 +19,12 @@ const CLAMP_CLASS = "line-clamp-[12]"
  */
 export function ClampedText({
 	text,
+	/** Pre-highlighted markup for the body (sugar-high output). `text` stays the
+	 *  source of truth — it is what overflows measurement and copies see. */
+	html,
+	/** A rendered body (markdown, say) that clamps in place of the raw text.
+	 *  Wins over `html`; the clamp still measures whatever actually rendered. */
+	body,
 	mono = false,
 	/** Lines before clamping; the default is the expansion's twelve. */
 	clampClass = CLAMP_CLASS,
@@ -28,6 +34,8 @@ export function ClampedText({
 	onToggleExpanded,
 }: {
 	text: string
+	html?: string
+	body?: ReactNode
 	mono?: boolean
 	clampClass?: string
 	toneClass?: string
@@ -51,16 +59,21 @@ export function ClampedText({
 			<div
 				ref={bodyRef}
 				className={cn(
-					"whitespace-pre-wrap break-words",
+					// A rendered body lays out its own blocks; pre-wrap is for raw text.
+					body === undefined && "whitespace-pre-wrap",
+					"break-words",
 					mono
 						? "font-mono text-muted-foreground text-xs leading-relaxed"
 						: "max-w-[70rem] text-foreground text-sm leading-relaxed",
 					toneClass,
 					!expanded && clampClass,
 				)}
-			>
-				{text}
-			</div>
+				{...(body !== undefined
+					? { children: body }
+					: html === undefined
+						? { children: text }
+						: { dangerouslySetInnerHTML: { __html: html } })}
+			/>
 			{(clamped || expanded) && (
 				<button
 					type="button"
