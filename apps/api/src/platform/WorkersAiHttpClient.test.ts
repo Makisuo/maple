@@ -3,7 +3,7 @@
  * (`env.AI.run`) or a REST request against `api.cloudflare.com` with an API token.
  *
  * That distinction is invisible in types and silent at runtime: when the binding isn't recognised
- * the vendored provider just falls through to REST with `BINDING_PLACEHOLDER` credentials and 401s
+ * the upstream provider just falls through to REST with `BINDING_PLACEHOLDER` credentials and 401s
  * at the *end* of a turn. Worth pinning, especially since prod attaches an AI Gateway resource
  * while local dev declares a plain `ai` binding.
  */
@@ -114,7 +114,7 @@ describe("workersAiHttpClient", () => {
 	it.live("strips Workers AI's native accounting trailer but keeps every OpenAI chunk", () =>
 		Effect.gen(function* () {
 			// Found end-to-end, not by types: `env.AI.run` streams OpenAI-shaped deltas and then appends
-			// one frame of its OWN native accounting, which the vendored provider rejects with
+			// one frame of its OWN native accounting, which the upstream provider rejects with
 			// "Invalid ... stream event". Because it arrives last, the whole reply streams fine and then
 			// the turn dies on the final frame — every chat turn ended in `reason: "error"`.
 			const chunk = (payload: string) => `data: ${payload}\n\n`

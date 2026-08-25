@@ -85,7 +85,6 @@
 		// the `slack-agent` CI job instead, which installs its dependencies.
 		"apps/slack-agent/**",
 		"apps/web/src/routeTree.gen.ts",
-		"lib/llm/**",
 		"lib/thinking-orbs/**"
 	]
 }

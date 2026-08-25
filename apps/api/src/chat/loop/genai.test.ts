@@ -12,10 +12,11 @@ import {
 	ToolDefinition,
 	ToolResultPart,
 	Usage,
+	type FinishReason,
 	type LLMRequest,
-	type Model,
-} from "@maple/llm"
-import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
+	type LanguageModel,
+} from "@opencode-ai/ai"
+import { CloudflareWorkersAI } from "@opencode-ai/ai/providers/cloudflare"
 import { assert, describe, it } from "vitest"
 import {
 	invokeAgentAttributes,
@@ -25,7 +26,9 @@ import {
 	toolCallJson,
 } from "./genai"
 
-const MODEL: Model = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model("@cf/test/model")
+const MODEL: LanguageModel = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model(
+	"@cf/test/model",
+)
 
 const IDENTITY = { sessionId: "org_1:tab-1", turnId: "msg_1" }
 
@@ -196,8 +199,13 @@ describe("modelCallAttributes system instructions", () => {
 })
 
 describe("modelResponseAttributes", () => {
-	const response = (usage: Usage | undefined, finishReason = "stop" as const) =>
-		new LLMResponse({ message: Message.assistant("hi"), events: [], usage, finishReason })
+	const response = (usage: Usage | undefined, finishReason: FinishReason = "stop") =>
+		new LLMResponse({
+			message: Message.assistant("hi"),
+			events: [],
+			usage,
+			finishReason: { normalized: finishReason },
+		})
 
 	it("emits the cost OpenRouter's usage accounting reported", () => {
 		const attributes = modelResponseAttributes(
@@ -243,14 +251,14 @@ describe("modelResponseAttributes", () => {
 				events: [
 					{
 						type: "finish",
-						reason: "stop",
+						reason: { normalized: "stop" },
 						providerMetadata: {
 							openai: { id: "gen-abc123", model: "openai/gpt-5.6-luna-served" },
 						},
 					},
 				],
 				usage: undefined,
-				finishReason: "stop",
+				finishReason: { normalized: "stop" },
 			}),
 		)
 
@@ -318,7 +326,7 @@ describe("invokeAgentAttributes", () => {
 })
 
 describe("semconvFinishReason", () => {
-	it("maps @maple/llm's hyphenated vocabulary to the semconv underscores", () => {
+	it("maps @opencode-ai/ai's hyphenated vocabulary to the semconv underscores", () => {
 		assert.equal(semconvFinishReason("tool-calls"), "tool_calls")
 		assert.equal(semconvFinishReason("content-filter"), "content_filter")
 		assert.equal(semconvFinishReason("stop"), "stop")

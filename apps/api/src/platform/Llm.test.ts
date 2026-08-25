@@ -7,10 +7,10 @@
  * and the attribution headers exist together is the outgoing HTTP request — so the test swaps
  * `FetchHttpClient.Fetch` for a capture and reads what would have gone over the wire.
  *
- * The fake responds 400, which `@maple/llm` classifies as non-retryable. That keeps the run to a
+ * The fake responds 400, which `@opencode-ai/ai` classifies as non-retryable. That keeps the run to a
  * single request with no backoff; the resulting failure is expected and ignored.
  */
-import { LLM, type Model } from "@maple/llm"
+import { LLM, type LanguageModel } from "@opencode-ai/ai"
 import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { describe, it } from "@effect/vitest"
@@ -40,7 +40,7 @@ interface CapturedRequest {
 const captureRequest = (
 	env: LlmEnv,
 	tags?: LlmCallTags,
-	resolve: (env: LlmEnv, tags?: LlmCallTags) => Model = resolveTriageModel,
+	resolve: (env: LlmEnv, tags?: LlmCallTags) => LanguageModel = resolveTriageModel,
 ): Effect.Effect<CapturedRequest> =>
 	Effect.gen(function* () {
 		let captured: CapturedRequest | undefined
@@ -223,8 +223,8 @@ describe("reasoning effort", () => {
 })
 
 describe("resolveTriageModel — context limits", () => {
-	it("attaches the configured model's window, which the vendored provider leaves unset", () => {
-		// `@maple/llm` declares `ModelLimits` but no provider populates it, so before this every
+	it("attaches the configured model's window, which upstream leaves unstated", () => {
+		// `@opencode-ai/ai` declares `ModelLimits` but no provider populates it, so before this every
 		// model reported `undefined` and nothing could tell when a transcript was near the wall.
 		const model = resolveTriageModel(openRouterEnv)
 

@@ -5,7 +5,7 @@
  * plus two small stamping helpers; nothing here decides anything.
  */
 import type { ChatEvent, ChatTaskRef } from "@maple/domain/chat-session"
-import type { AnyTool, FinishReason, Message, Model, Usage } from "@maple/llm"
+import type { AnyTool, FinishReason, Message, LanguageModel, Usage } from "@opencode-ai/ai"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import type { McpToolExecutorApi, McpToolSurface } from "@/mcp/dispatcher"
 import type { AgentDefinition } from "../agents"
@@ -85,7 +85,7 @@ export interface ChatTurnInput {
 	 * one identical caller for both. Defaults to `"chat"`, the interactive case.
 	 */
 	readonly surface?: McpToolSurface
-	readonly model: Model
+	readonly model: LanguageModel
 	/** The full transcript so far, oldest first, already including the new user message. */
 	readonly messages: ReadonlyArray<Message>
 	readonly messageId: string
@@ -186,7 +186,7 @@ export interface StepState {
  * bar the final assistant message. Before this, `SubmitDiagnosisRequest` was built with no usage at
  * all, so `InvestigationService`'s `if (env && (inputTokens || outputTokens))` was always false:
  * `investigations.model` stayed null and Autumn was never metered for autonomous investigations,
- * which the pre-`@maple/llm` workflow path did meter.
+ * which the pre-`@opencode-ai/ai` workflow path did meter.
  */
 export interface TurnUsage {
 	input: number

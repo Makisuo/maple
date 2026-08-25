@@ -5,7 +5,7 @@
 		"target": "ES2022",
 		"module": "ESNext",
 		"jsx": "react-jsx",
-		// ES2023: `@maple/llm` (vendored) uses findLast/findLastIndex/toSorted.
+		// ES2023: `@opencode-ai/ai` uses findLast/findLastIndex/toSorted.
 		"lib": ["ES2023", "DOM", "DOM.Iterable"],
 		"types": ["node", "@cloudflare/workers-types"],
 		"moduleResolution": "bundler",

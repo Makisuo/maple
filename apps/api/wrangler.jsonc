@@ -8,7 +8,7 @@
 		"port": 3472,
 	},
 	// Workers AI binding — the keyless, neuron-billed path the AI-triage agent runs on
-	// (`@/lib/WorkersAiHttpClient` shims `@maple/llm`'s Cloudflare provider onto `env.AI.run`).
+	// (`@/lib/WorkersAiHttpClient` shims `@opencode-ai/ai`'s Cloudflare provider onto `env.AI.run`).
 	"ai": {
 		"binding": "AI",
 	},

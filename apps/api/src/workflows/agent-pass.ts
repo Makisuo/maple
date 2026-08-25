@@ -25,8 +25,8 @@
  * call.
  */
 import { Cause, Schema, Stream, Effect, Option } from "effect"
-import { Tool, type Model } from "@maple/llm"
-import { Message } from "@maple/llm"
+import { Tool, type LanguageModel, type LLMClientService } from "@opencode-ai/ai"
+import { Message } from "@opencode-ai/ai"
 import { runChatTurn, makeTurnUsage, type TurnCompletion, type TurnUsage } from "@/chat/loop"
 import type { AgentDefinition } from "@/chat/agents"
 import { McpToolExecutor } from "@/mcp/dispatcher"
@@ -46,7 +46,7 @@ export interface AgentPassInput<S extends Schema.Top> {
 	readonly workflowName?: string
 	readonly agent: AgentDefinition
 	readonly tenant: TenantContext
-	readonly model: Model
+	readonly model: LanguageModel
 	/** The single user turn. A sub-agent sees nothing else — its prompt must stand alone. */
 	readonly prompt: string
 	/** Name of the tool the agent calls to answer, e.g. `submit_candidate`. */
@@ -81,7 +81,7 @@ export interface AgentPassOutput<A> {
  */
 export const runAgentPass = <S extends Schema.Top>(
 	input: AgentPassInput<S>,
-): Effect.Effect<AgentPassOutput<S["Type"]>, never, McpToolExecutor> =>
+): Effect.Effect<AgentPassOutput<S["Type"]>, never, LLMClientService | McpToolExecutor> =>
 	Effect.gen(function* () {
 		type A = S["Type"]
 		const toolExecutor = yield* McpToolExecutor
