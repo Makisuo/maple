@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import type { AiSessionSpan } from "@maple/domain/http"
 
+import { buildAgentSessionFixture } from "@/lab/agent-session-fixture"
+
 import { buildSessionTurns } from "./session-turns"
 import { buildTranscript, payload, type TranscriptInput, type TranscriptRow } from "./session-transcript"
 import { sessionToolResults } from "./span-detail"
-import { agentSpan, llmSpan, toolSpan } from "./span-test-support"
+import { agentSpan, llmSpan, makeSpan, toolSpan, T0 } from "./span-test-support"
 
 const SECOND = 1000
 
@@ -22,6 +24,29 @@ function transcript(spans: readonly AiSessionSpan[], overrides: Partial<Transcri
 }
 
 const kinds = (rows: readonly TranscriptRow[]) => rows.map((row) => row.kind)
+
+/**
+ * The one row of a kind, or a failure.
+ *
+ * `rows.find(...)?.kind === "tool" && row.failed` is happy either way — it
+ * passes when the row is missing, which is exactly the regression a test of the
+ * row's contents is meant to catch.
+ */
+function findRow<K extends TranscriptRow["kind"]>(
+	rows: readonly TranscriptRow[],
+	kind: K,
+): Extract<TranscriptRow, { kind: K }> {
+	const row = rows.find((candidate) => candidate.kind === kind)
+	if (row === undefined) throw new Error(`no ${kind} row in [${kinds(rows).join(", ")}]`)
+	return row as Extract<TranscriptRow, { kind: K }>
+}
+
+function findRows<K extends TranscriptRow["kind"]>(
+	rows: readonly TranscriptRow[],
+	kind: K,
+): readonly Extract<TranscriptRow, { kind: K }>[] {
+	return rows.filter((row): row is Extract<TranscriptRow, { kind: K }> => row.kind === kind)
+}
 
 /** One agent-rooted turn: an agent span plus whatever ran under it. */
 function turnSpans(input: {
@@ -199,9 +224,15 @@ describe("buildTranscript — lanes and parallel markers", () => {
 		// The links point at the other lane's own row key.
 		expect(opens[0]!.parallelWith[0]!.key).toBe(opens[1]!.key)
 
-		const marker = rows.find((row) => row.kind === "parallel")
-		expect(marker?.kind === "parallel" && marker.forkedBy).toBe("planner-agent")
-		expect(marker?.kind === "parallel" && marker.lanes).toHaveLength(2)
+		const marker = findRow(rows, "parallel")
+		expect(marker.forkedBy).toBe("planner-agent")
+		expect(marker.lanes).toHaveLength(2)
+		// The fork runs forwards, and both lanes really were open together.
+		expect(marker.startMs).toBeLessThan(marker.endMs)
+		expect(marker.overlapStartMs).toBe(T0 + 2 * SECOND)
+		expect(marker.overlapEndMs).toBe(T0 + 21 * SECOND)
+		// The marker sits in the thread that forked, not inside either lane.
+		expect(marker.depth).toBe(0)
 	})
 
 	it("leaves sequential lanes unmarked", () => {
@@ -270,10 +301,13 @@ describe("buildTranscript — lanes and parallel markers", () => {
 		const rows = transcript(spans)
 		// No tool card for `task`: it and the invocation are the same delegation.
 		expect(kinds(rows)).toEqual(["turn", "lane-open", "tool", "lane-close"])
-		const open = rows.find((row) => row.kind === "lane-open")
-		expect(open?.kind === "lane-open" && open.laneKind).toBe("subagent")
-		expect(open?.kind === "lane-open" && open.parentAgentName).toBe("db-lane")
-		expect(rows.find((row) => row.kind === "tool")?.depth).toBe(1)
+		const open = findRow(rows, "lane-open")
+		expect(open.laneKind).toBe("subagent")
+		expect(open.parentAgentName).toBe("db-lane")
+		// A lane opens one level in from the thread that forked it, and its rows
+		// sit alongside it.
+		expect(open.depth).toBe(1)
+		expect(findRow(rows, "tool").depth).toBe(1)
 	})
 
 	it("counts a lane's own work on its closing row", () => {
@@ -291,10 +325,12 @@ describe("buildTranscript — lanes and parallel markers", () => {
 			toolSpan({ spanId: "t1", parentSpanId: "lane", startMs: 5 * SECOND, durationMs: SECOND, toolName: "run_sql" }),
 		]
 
-		const close = transcript(spans).find((row) => row.kind === "lane-close")
-		expect(close?.kind === "lane-close" && close.llmCalls).toBe(2)
-		expect(close?.kind === "lane-close" && close.toolCalls).toBe(1)
-		expect(close?.kind === "lane-close" && close.durationMs).toBe(12 * SECOND)
+		const rows = transcript(spans)
+		const close = findRow(rows, "lane-close")
+		expect(close.llmCalls).toBe(2)
+		expect(close.toolCalls).toBe(1)
+		expect(close.durationMs).toBe(12 * SECOND)
+		expect(findRow(rows, "lane-open").spanCount).toBe(3)
 	})
 })
 
@@ -411,9 +447,9 @@ describe("buildTranscript — message extraction", () => {
 			],
 		})
 
-		const thinking = transcript(spans).find((row) => row.kind === "thinking")
-		expect(thinking?.kind === "thinking" && thinking.redacted).toBe(true)
-		expect(thinking?.kind === "thinking" && thinking.text).toBeUndefined()
+		const thinking = findRow(transcript(spans), "thinking")
+		expect(thinking.redacted).toBe(true)
+		expect(thinking.text).toBeUndefined()
 	})
 
 	// The Vercel AI SDK records the request but not the reply.
@@ -446,14 +482,14 @@ describe("buildTranscript — message extraction", () => {
 		})
 
 		const rows = transcript(spans)
-		const prompt = rows.find((row) => row.kind === "prompt")
-		expect(prompt?.kind === "prompt" && prompt.text).toBe("summarise progress")
+		expect(findRow(rows, "prompt").text).toBe("summarise progress")
 		// The seam is named once, where the emitter changed.
-		const boundary = rows.find((row) => row.kind === "note" && row.noteKind === "capture-boundary")
-		expect(boundary?.kind === "note" && boundary.serviceName).toBe("search-service")
+		const boundary = findRow(rows, "note")
+		if (boundary.noteKind !== "capture-boundary") throw new Error("expected a boundary note")
+		expect(boundary.serviceName).toBe("search-service")
 		// This emitter records the request and not the reply — say which, rather
 		// than "some content is missing".
-		expect(boundary?.kind === "note" && boundary.captures).toBe("input")
+		expect(boundary.captures).toBe("input")
 	})
 
 	// The user row already printed those words; a prompt block would repeat them.
@@ -477,9 +513,9 @@ describe("buildTranscript — message extraction", () => {
 
 		const rows = transcript(spans)
 		expect(kinds(rows)).toEqual(["turn", "user", "assistant"])
-		const assistant = rows.find((row) => row.kind === "assistant")
-		expect(assistant?.kind === "assistant" && assistant.text).toBeUndefined()
-		expect(assistant?.kind === "assistant" && assistant.failed).toBe(false)
+		const assistant = findRow(rows, "assistant")
+		expect(assistant.text).toBeUndefined()
+		expect(assistant.failed).toBe(false)
 	})
 })
 
@@ -504,10 +540,10 @@ describe("buildTranscript — tool calls", () => {
 			],
 		})
 
-		const tool = transcript(spans).find((row) => row.kind === "tool")
-		expect(tool?.kind === "tool" && tool.toolName).toBe("run_sql")
-		expect(tool?.kind === "tool" && tool.args?.text).toBe('{"sql":"SELECT 1"}')
-		expect(tool?.kind === "tool" && tool.result?.text).toBe("1 row")
+		const tool = findRow(transcript(spans), "tool")
+		expect(tool.toolName).toBe("run_sql")
+		expect(tool.args?.text).toBe('{"sql":"SELECT 1"}')
+		expect(tool.result?.text).toBe("1 row")
 	})
 
 	// A missing result is not a successful one.
@@ -527,9 +563,9 @@ describe("buildTranscript — tool calls", () => {
 			],
 		})
 
-		const tool = transcript(spans).find((row) => row.kind === "tool")
-		expect(tool?.kind === "tool" && tool.result).toBeUndefined()
-		expect(tool?.kind === "tool" && tool.failed).toBe(false)
+		const tool = findRow(transcript(spans), "tool")
+		expect(tool.result).toBeUndefined()
+		expect(tool.failed).toBe(false)
 	})
 
 	it("resolves a result echoed into a later call's input history", () => {
@@ -563,8 +599,7 @@ describe("buildTranscript — tool calls", () => {
 			],
 		})
 
-		const tool = transcript(spans).find((row) => row.kind === "tool")
-		expect(tool?.kind === "tool" && tool.result?.text).toBe("62 rows")
+		expect(findRow(transcript(spans), "tool").result?.text).toBe("62 rows")
 	})
 
 	it("renders a tool call known only from an output message, once", () => {
@@ -651,8 +686,7 @@ describe("buildTranscript — tool calls", () => {
 			],
 		})
 
-		const tool = transcript(spans).find((row) => row.kind === "tool")
-		expect(tool?.kind === "tool" && tool.failed).toBe(true)
+		expect(findRow(transcript(spans), "tool").failed).toBe(true)
 	})
 })
 
@@ -689,6 +723,34 @@ describe("payload", () => {
 		expect(result?.text).toBe('{"truncated":false,"rows":3}')
 	})
 
+	it("unwraps the `value` and `content` spellings of the same envelope", () => {
+		expect(payload(JSON.stringify({ truncated: true, value: "first rows" }))?.text).toBe("first rows")
+		expect(payload(JSON.stringify({ truncated: true, content: "first rows" }))?.text).toBe("first rows")
+	})
+
+	// `{ rows: [...], truncated: true }` is a RESULT reporting its own truncation,
+	// not a wrapper around a prefix: unwrapping it would throw the rows away.
+	it("renders a data-bearing object that reports its own truncation in full", () => {
+		const text = JSON.stringify({ rows: [1, 2, 3], truncated: true })
+		expect(payload(text)).toStrictEqual({
+			text,
+			byteLength: text.length,
+			lineCount: 1,
+			truncatedByEmitter: false,
+		})
+	})
+
+	// The emitter recorded that it cut the payload and kept none of it. There is
+	// nothing to show, and saying so is not the same as showing an empty payload.
+	it("keeps the truncation flag on an envelope with no prefix", () => {
+		expect(payload(JSON.stringify({ truncated: true }))).toStrictEqual({
+			text: "",
+			byteLength: 0,
+			lineCount: 0,
+			truncatedByEmitter: true,
+		})
+	})
+
 	it("reports nothing for nothing", () => {
 		expect(payload(undefined)).toBeUndefined()
 		expect(payload("")).toBeUndefined()
@@ -722,16 +784,16 @@ describe("buildTranscript — structural fallback and notes", () => {
 	it("falls back to structure rows when nothing was captured", () => {
 		const rows = transcript(structural)
 		expect(kinds(rows)).toEqual(["note", "turn", "structure", "tool"])
-		const structure = rows.find((row) => row.kind === "structure")
-		expect(structure?.kind === "structure" && structure.label).toBe("chat gpt-5")
+		expect(findRow(rows, "structure").label).toBe("chat gpt-5")
 	})
 
 	// One note for the session, not one per silent span.
 	it("says content is missing once, at the top, rather than per span", () => {
 		const notes = transcript(structural).filter((row) => row.kind === "note")
 		expect(notes).toHaveLength(1)
-		expect(notes[0]!.noteKind).toBe("capture-off")
-		expect(notes[0]!.anyCaptured).toBe(false)
+		const note = notes[0]!
+		expect(note.noteKind).toBe("capture-off")
+		expect(note.noteKind === "capture-off" && note.anyCaptured).toBe(false)
 	})
 
 	it("moves the note into the turn when the rest of the session does capture", () => {
@@ -791,7 +853,8 @@ describe("buildTranscript — session-level states", () => {
 	it("closes a truncated session on a terminal divider", () => {
 		const rows = transcript(simple, { truncated: true })
 		const last = rows.at(-1)
-		expect(last?.kind === "divider" && last.dividerKind).toBe("truncated")
+		if (last?.kind !== "divider") throw new Error("expected a terminal divider")
+		expect(last.dividerKind).toBe("truncated")
 	})
 
 	it("adds no divider to a whole session", () => {
@@ -799,9 +862,7 @@ describe("buildTranscript — session-level states", () => {
 	})
 
 	it("renders nothing at all for a session with no AI spans", () => {
-		const spans = [
-			llmSpan({ spanId: "http", startMs: 0, durationMs: SECOND, isAiSpan: false, genAi: {} }),
-		]
+		const spans = [makeSpan({ spanId: "http", spanName: "GET /checkout", startMs: 0, durationMs: SECOND })]
 		expect(transcript(spans)).toHaveLength(0)
 	})
 
@@ -832,8 +893,7 @@ describe("buildTranscript — session-level states", () => {
 
 		const rows = transcript(spans)
 		expect(kinds(rows)).toEqual(["turn", "assistant", "divider", "assistant"])
-		const divider = rows.find((row) => row.kind === "divider")
-		expect(divider?.kind === "divider" && divider.dividerKind).toBe("compaction")
+		expect(findRow(rows, "divider").dividerKind).toBe("compaction")
 	})
 
 	// A retry is an errored call followed by a successful one — never one merged
@@ -881,7 +941,7 @@ describe("buildTranscript — session-level states", () => {
 		})
 		const spans = [
 			...turnSpans({ startMs: 0, durationMs: 5 * SECOND, children: [tool, tool] }),
-			{ ...tool, spanId: "http", isAiSpan: false, genAi: {} },
+			makeSpan({ spanId: "http", parentSpanId: "agent", spanName: "SELECT carts", startMs: 0, durationMs: SECOND }),
 		]
 		expect(transcript(spans).filter((row) => row.kind === "tool")).toHaveLength(1)
 	})
@@ -926,9 +986,524 @@ describe("buildTranscript — filter and collapse", () => {
 	it("keeps a collapsed turn's header and reports what it holds", () => {
 		const rows = transcript(spans, { collapsedTurns: new Set(["span:agent"]) })
 		expect(kinds(rows)).toEqual(["turn"])
-		const header = rows[0]
-		expect(header?.kind === "turn" && header.llmCalls).toBe(1)
-		expect(header?.kind === "turn" && header.toolCalls).toBe(1)
-		expect(header?.kind === "turn" && header.toolNames).toEqual(["inspect_trace"])
+		const header = findRow(rows, "turn")
+		expect(header.llmCalls).toBe(1)
+		expect(header.toolCalls).toBe(1)
+		expect(header.aiSpanCount).toBe(3)
+		expect(header.toolNames).toEqual(["inspect_trace"])
+	})
+})
+
+describe("buildTranscript — parallel clustering", () => {
+	/** Three lanes under one parent, each overlapping only its neighbour. */
+	const chain = [
+		agentSpan({ spanId: "agent", startMs: 0, durationMs: 40 * SECOND, agentName: "planner-agent" }),
+		agentSpan({
+			spanId: "lane-a",
+			parentSpanId: "agent",
+			startMs: SECOND,
+			durationMs: 10 * SECOND,
+			agentName: "a-lane",
+		}),
+		agentSpan({
+			spanId: "lane-b",
+			parentSpanId: "agent",
+			startMs: 5 * SECOND,
+			durationMs: 10 * SECOND,
+			agentName: "b-lane",
+		}),
+		agentSpan({
+			spanId: "lane-c",
+			parentSpanId: "agent",
+			startMs: 12 * SECOND,
+			durationMs: 8 * SECOND,
+			agentName: "c-lane",
+		}),
+	]
+
+	it("keeps a staggered run in one cluster and links only the pairs that overlapped", () => {
+		const rows = transcript(chain)
+		const marker = findRow(rows, "parallel")
+		expect(marker.lanes.map((lane) => lane.agentName)).toEqual(["a-lane", "b-lane", "c-lane"])
+		// The window runs forwards, whatever the stagger does.
+		expect(marker.startMs).toBe(T0 + SECOND)
+		expect(marker.endMs).toBe(T0 + 20 * SECOND)
+		// A chain has no window all three shared, and the marker says so rather
+		// than reporting one that runs backwards.
+		expect(marker.overlapStartMs).toBeUndefined()
+		expect(marker.overlapEndMs).toBeUndefined()
+
+		const opens = findRows(rows, "lane-open")
+		expect(opens.map((row) => row.parallelWith.map((ref) => ref.agentName))).toEqual([
+			["b-lane"],
+			["a-lane", "c-lane"],
+			["b-lane"],
+		])
+	})
+
+	// The lane that breaks the run under a "previous member" rule: it ends before
+	// the next one starts, while the long lane above it is still open.
+	it("clusters two short lanes nested inside one long one", () => {
+		const nested = [
+			agentSpan({ spanId: "agent", startMs: 0, durationMs: 40 * SECOND, agentName: "planner-agent" }),
+			agentSpan({
+				spanId: "lane-long",
+				parentSpanId: "agent",
+				startMs: SECOND,
+				durationMs: 29 * SECOND,
+				agentName: "long-lane",
+			}),
+			agentSpan({
+				spanId: "lane-x",
+				parentSpanId: "agent",
+				startMs: 3 * SECOND,
+				durationMs: 3 * SECOND,
+				agentName: "x-lane",
+			}),
+			agentSpan({
+				spanId: "lane-y",
+				parentSpanId: "agent",
+				startMs: 10 * SECOND,
+				durationMs: 4 * SECOND,
+				agentName: "y-lane",
+			}),
+		]
+
+		const rows = transcript(nested)
+		expect(findRows(rows, "parallel")).toHaveLength(1)
+		const marker = findRow(rows, "parallel")
+		expect(marker.lanes).toHaveLength(3)
+		expect(marker.startMs).toBeLessThan(marker.endMs)
+
+		const opens = findRows(rows, "lane-open")
+		expect(opens.map((row) => row.parallelWith.map((ref) => ref.agentName))).toEqual([
+			["x-lane", "y-lane"],
+			["long-lane"],
+			["long-lane"],
+		])
+	})
+})
+
+describe("buildTranscript — what counts as a captured reply", () => {
+	const outputOnly = (parts: readonly unknown[], extra: readonly AiSessionSpan[] = []) =>
+		turnSpans({
+			startMs: 0,
+			durationMs: 5 * SECOND,
+			children: [
+				llmSpan({
+					spanId: "l1",
+					parentSpanId: "agent",
+					startMs: 0,
+					durationMs: SECOND,
+					genAi: { outputMessages: [{ role: "assistant", parts }] },
+				}),
+				...extra,
+			],
+		})
+
+	// A call that produced a tool call produced output; the span that ran the
+	// tool is the row, and there is no missing reply to report.
+	it("does not claim a missing reply when the output was a tool call a span covers", () => {
+		const spans = outputOnly(
+			[{ type: "tool_call", id: "toolu_1", name: "run_sql", arguments: { sql: "SELECT 1" } }],
+			[
+				toolSpan({
+					spanId: "t1",
+					parentSpanId: "agent",
+					startMs: 2 * SECOND,
+					durationMs: SECOND,
+					toolName: "run_sql",
+					genAi: { toolCallId: "toolu_1", toolCallResult: "1 row" },
+				}),
+			],
+		)
+		expect(kinds(transcript(spans))).toEqual(["turn", "tool"])
+	})
+
+	// The Thinking chip is a view choice. It cannot turn a call that reasoned and
+	// then went to work into one whose reply was never recorded.
+	it("keeps the capture claim the same with Thinking on and off", () => {
+		const spans = outputOnly([{ type: "thinking", thinking: "the carts read is the outlier" }])
+		expect(kinds(transcript(spans))).toEqual(["turn", "thinking"])
+		expect(kinds(transcript(spans, { showThinking: false }))).toEqual(["turn"])
+	})
+
+	it("still reports a missing reply when the call captured no output at all", () => {
+		const spans = turnSpans({
+			startMs: 0,
+			durationMs: 5 * SECOND,
+			children: [
+				llmSpan({
+					spanId: "l1",
+					parentSpanId: "agent",
+					startMs: 0,
+					durationMs: SECOND,
+					genAi: { systemInstructions: "be terse" },
+				}),
+			],
+		})
+		const assistant = findRow(transcript(spans), "assistant")
+		expect(assistant.text).toBeUndefined()
+		expect(assistant.failed).toBe(false)
+	})
+
+	// A failed call that still captured text: the text is what it managed to say
+	// before it errored, and dropping it would lose the only evidence there is.
+	it("keeps a failed call's captured text on its row", () => {
+		const spans = turnSpans({
+			startMs: 0,
+			durationMs: 5 * SECOND,
+			children: [
+				llmSpan({
+					spanId: "l1",
+					parentSpanId: "agent",
+					startMs: 0,
+					durationMs: SECOND,
+					statusCode: "Error",
+					statusMessage: "stream closed",
+					genAi: {
+						errorType: "stream_error",
+						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "reading the" }] }],
+					},
+				}),
+			],
+		})
+		const assistant = findRow(transcript(spans), "assistant")
+		expect(assistant.text).toBe("reading the")
+		expect(assistant.failed).toBe(true)
+	})
+
+	// An emitter that omits ids in its messages usually omits them on its spans
+	// too, and then the call has nowhere to be matched but its name.
+	it("drops an id-less message-only tool call the tool span already reports", () => {
+		const spans = outputOnly(
+			[{ type: "tool_call", name: "run_sql", arguments: { sql: "SELECT 1" } }],
+			[
+				toolSpan({
+					spanId: "t1",
+					parentSpanId: "agent",
+					startMs: 2 * SECOND,
+					durationMs: SECOND,
+					toolName: "run_sql",
+				}),
+			],
+		)
+		const tools = findRows(transcript(spans), "tool")
+		expect(tools).toHaveLength(1)
+		expect(tools[0]!.fromMessageOnly).toBe(false)
+	})
+
+	it("keeps the message-only row when no span could be the same call", () => {
+		const spans = outputOnly([{ type: "tool_call", name: "web_search", arguments: { q: "x" } }])
+		const tools = findRows(transcript(spans), "tool")
+		expect(tools).toHaveLength(1)
+		expect(tools[0]!.fromMessageOnly).toBe(true)
+	})
+})
+
+describe("buildTranscript — capture notes", () => {
+	const call = (index: number, serviceName: string, genAi: Record<string, unknown>) =>
+		llmSpan({
+			spanId: `l${index}`,
+			parentSpanId: "agent",
+			startMs: index * SECOND,
+			durationMs: 500,
+			serviceName,
+			genAi,
+		})
+
+	// The note names what the NEW emitter records, and the first call after the
+	// seam is exactly the one most likely to have errored before recording.
+	it("reads a boundary's coverage from every call the new service made", () => {
+		const spans = turnSpans({
+			startMs: 0,
+			durationMs: 10 * SECOND,
+			children: [
+				call(1, "planner", {
+					inputMessages: [{ role: "user", parts: [{ type: "text", content: "go" }] }],
+					outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "on it" }] }],
+				}),
+				call(2, "search-service", { errorType: "rate_limited" }),
+				call(3, "search-service", {
+					inputMessages: [{ role: "user", parts: [{ type: "text", content: "again" }] }],
+					outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "found it" }] }],
+				}),
+			],
+		})
+
+		const boundary = findRow(transcript(spans), "note")
+		if (boundary.noteKind !== "capture-boundary") throw new Error("expected a boundary note")
+		expect(boundary.serviceName).toBe("search-service")
+		expect(boundary.captures).toBe("both")
+	})
+
+	// The same service capturing nothing on one call is a per-call absence, and
+	// that call's own row already says so.
+	it("says nothing at a seam that is not a change of emitter", () => {
+		const spans = turnSpans({
+			startMs: 0,
+			durationMs: 10 * SECOND,
+			children: [
+				call(1, "planner", {
+					outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "on it" }] }],
+				}),
+				call(2, "planner", {}),
+			],
+		})
+		expect(kinds(transcript(spans))).not.toContain("note")
+	})
+
+	// System instructions are not the conversation: a session that captured only
+	// those has captured nothing the reader came for.
+	it("raises the banner for a session that captured system prompts and nothing else", () => {
+		const spans = turnSpans({
+			startMs: 0,
+			durationMs: 5 * SECOND,
+			children: [
+				llmSpan({
+					spanId: "l1",
+					parentSpanId: "agent",
+					startMs: 0,
+					durationMs: SECOND,
+					genAi: { systemInstructions: "you are the planner" },
+				}),
+			],
+		})
+
+		const rows = transcript(spans)
+		const note = findRow(rows, "note")
+		if (note.noteKind !== "capture-off") throw new Error("expected a capture-off note")
+		expect(rows[0]).toBe(note)
+		expect(note.scope).toBe("session")
+		expect(note.anyCaptured).toBe(false)
+		// The instructions still render where they were captured.
+		expect(findRow(rows, "system").text).toBe("you are the planner")
+	})
+
+	const captured = (index: number) =>
+		turnSpans({
+			agentId: `agent-${index}`,
+			traceId: `trace-${index}`,
+			startMs: index * 60 * SECOND,
+			durationMs: 10 * SECOND,
+			children: [
+				llmSpan({
+					spanId: `l-${index}`,
+					parentSpanId: `agent-${index}`,
+					startMs: index * 60 * SECOND,
+					durationMs: SECOND,
+					genAi: {
+						outputMessages: [{ role: "assistant", parts: [{ type: "text", content: `a${index}` }] }],
+					},
+				}),
+			],
+		})
+	const silent = (index: number) =>
+		turnSpans({
+			agentId: `agent-${index}`,
+			traceId: `trace-${index}`,
+			startMs: index * 60 * SECOND,
+			durationMs: 10 * SECOND,
+			children: [
+				llmSpan({
+					spanId: `l-${index}`,
+					parentSpanId: `agent-${index}`,
+					startMs: index * 60 * SECOND,
+					durationMs: SECOND,
+				}),
+			],
+		})
+
+	// Exactly half is not "below half": the banner is for sessions where silence
+	// is the norm, and a even split is not one.
+	it("holds the banner at exactly half the calls captured", () => {
+		const rows = transcript([...captured(0), ...silent(1)])
+		expect(rows[0]!.kind).toBe("turn")
+	})
+
+	it("raises it once capture is the exception", () => {
+		const rows = transcript([...captured(0), ...silent(1), ...silent(2)])
+		const note = findRow(rows, "note")
+		if (note.noteKind !== "capture-off") throw new Error("expected a capture-off note")
+		expect(rows[0]).toBe(note)
+		expect(note.anyCaptured).toBe(true)
+	})
+
+	// A turn-scope note must not read as a claim about the whole session.
+	it("scopes a per-turn note to the turn", () => {
+		const rows = transcript([...captured(0), ...captured(1), ...captured(2), ...silent(9)])
+		const note = findRow(rows, "note")
+		if (note.noteKind !== "capture-off") throw new Error("expected a capture-off note")
+		expect(note.scope).toBe("turn")
+		expect(note.anyCaptured).toBe(false)
+	})
+})
+
+describe("buildTranscript — delegation payloads", () => {
+	it("renders the task prompt on the lane it opened and the answer on its close", () => {
+		const spans = [
+			agentSpan({ spanId: "agent", startMs: 0, durationMs: 30 * SECOND, agentName: "db-lane" }),
+			toolSpan({
+				spanId: "task",
+				parentSpanId: "agent",
+				startMs: SECOND,
+				durationMs: 12 * SECOND,
+				toolName: "task",
+				genAi: {
+					toolCallId: "toolu_task",
+					toolCallArguments: { prompt: "verify the plan against the schema" },
+					toolCallResult: "the plan checks out",
+				},
+			}),
+			agentSpan({
+				spanId: "sub",
+				parentSpanId: "task",
+				startMs: SECOND,
+				durationMs: 12 * SECOND,
+				agentName: "sql-verifier",
+			}),
+		]
+
+		const rows = transcript(spans)
+		expect(findRow(rows, "lane-open").args?.text).toBe(
+			'{"prompt":"verify the plan against the schema"}',
+		)
+		expect(findRow(rows, "lane-close").result?.text).toBe("the plan checks out")
+	})
+})
+
+describe("buildTranscript — structure labels", () => {
+	// An embedding is inference time, but it is not a model turn: labelling it
+	// "chat" would claim an exchange that never happened.
+	it("labels a retrieval op by the operation it ran", () => {
+		const spans = turnSpans({
+			startMs: 0,
+			durationMs: 5 * SECOND,
+			children: [
+				llmSpan({
+					spanId: "e1",
+					parentSpanId: "agent",
+					startMs: 0,
+					durationMs: SECOND,
+					model: "text-embedding-3-large",
+					genAi: { operationName: "embeddings" },
+				}),
+			],
+		})
+		expect(findRow(transcript(spans), "structure").label).toBe("embeddings text-embedding-3-large")
+	})
+})
+
+describe("buildTranscript — absent payloads", () => {
+	// Captured attributes decode through `Schema.Unknown`, so `null` is what an
+	// emitter that wrote JSON null looks like from here. It is not a payload.
+	it("treats a null argument or result as not captured, never as the text 'null'", () => {
+		const spans = turnSpans({
+			startMs: 0,
+			durationMs: 5 * SECOND,
+			children: [
+				toolSpan({
+					spanId: "t1",
+					parentSpanId: "agent",
+					startMs: 0,
+					durationMs: SECOND,
+					toolName: "run_sql",
+					genAi: { toolCallId: "toolu_1", toolCallArguments: null, toolCallResult: null },
+				}),
+			],
+		})
+		const tool = findRow(transcript(spans), "tool")
+		expect(tool.args).toBeUndefined()
+		expect(tool.result).toBeUndefined()
+	})
+})
+
+describe("buildTranscript — turns with no agent work", () => {
+	it("holds a no-AI turn's ordinal open rather than renumbering the page", () => {
+		const spans = [
+			llmSpan({
+				spanId: "l1",
+				traceId: "trace-1",
+				startMs: 0,
+				durationMs: SECOND,
+				genAi: { outputMessages: [{ role: "assistant", parts: [{ type: "text", content: "hi" }] }] },
+			}),
+			makeSpan({
+				spanId: "http",
+				traceId: "trace-2",
+				spanName: "GET /health",
+				startMs: 60 * SECOND,
+				durationMs: SECOND,
+			}),
+		]
+
+		const rows = transcript(spans)
+		expect(kinds(rows)).toEqual(["turn", "assistant", "empty-turn"])
+		const empty = findRow(rows, "empty-turn")
+		expect(empty.turn.index).toBe(2)
+	})
+})
+
+describe("buildTranscript — filtering", () => {
+	const laneSpans = [
+		agentSpan({ spanId: "agent", startMs: 0, durationMs: 30 * SECOND, agentName: "planner-agent" }),
+		agentSpan({
+			spanId: "lane",
+			parentSpanId: "agent",
+			startMs: SECOND,
+			durationMs: 10 * SECOND,
+			agentName: "db-lane",
+		}),
+		toolSpan({
+			spanId: "t1",
+			parentSpanId: "lane",
+			startMs: 2 * SECOND,
+			durationMs: SECOND,
+			toolName: "run_sql",
+			genAi: { toolCallId: "toolu_1", toolCallArguments: { table: "carts" } },
+		}),
+	]
+
+	// The chrome that gave a row its indentation is gone with the filter on, so
+	// the indentation would point at nothing.
+	it("flattens the rows a filter leaves behind", () => {
+		const rows = transcript(laneSpans, { query: "carts" })
+		expect(kinds(rows)).toEqual(["turn", "tool"])
+		expect(findRow(rows, "tool").depth).toBe(0)
+	})
+
+	it("drops a collapsed turn on a filter exactly as it drops an open one", () => {
+		const collapsedTurns = new Set(["span:agent"])
+		expect(transcript(laneSpans, { collapsedTurns, query: "nothing matches" })).toHaveLength(0)
+		expect(kinds(transcript(laneSpans, { collapsedTurns, query: "carts" }))).toEqual(["turn"])
+	})
+
+	// The empty state says what happened; a banner and a divider over nothing
+	// would read as facts about a session the reader cannot see.
+	it("renders nothing at all — no note, no divider — when the filter empties the session", () => {
+		const silent = turnSpans({
+			startMs: 0,
+			durationMs: 5 * SECOND,
+			children: [llmSpan({ spanId: "l1", parentSpanId: "agent", startMs: 0, durationMs: SECOND })],
+		})
+		expect(transcript(silent, { query: "zzz", truncated: true })).toHaveLength(0)
+	})
+})
+
+describe("buildTranscript — row keys", () => {
+	// Row keys are the virtualizer's identity AND the disclosure set's, so a
+	// collision makes two blocks open and close together.
+	it("gives every row of the richest fixture a unique key", () => {
+		const spans = buildAgentSessionFixture()
+		const rows = buildTranscript({
+			turns: buildSessionTurns(spans),
+			toolResults: sessionToolResults(spans),
+			query: "",
+			showThinking: true,
+			truncated: true,
+			collapsedTurns: new Set(),
+		})
+		expect(rows.length).toBeGreaterThan(20)
+		expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length)
 	})
 })

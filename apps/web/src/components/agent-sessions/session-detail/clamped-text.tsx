@@ -12,7 +12,10 @@ const CLAMP_CLASS = "line-clamp-[12]"
  * very long line wraps past the clamp and does.
  *
  * Shared by the span expansion and the transcript so a payload reads the same
- * wherever it was opened.
+ * wherever it was opened. Expansion is local by default and CONTROLLED where
+ * the caller passes `expanded`: the transcript virtualizes its rows, so a row
+ * scrolled out of view unmounts, and local state would take what the reader
+ * opened with it.
  */
 export function ClampedText({
 	text,
@@ -21,13 +24,19 @@ export function ClampedText({
 	clampClass = CLAMP_CLASS,
 	/** Overrides the body's text color — an errored payload reads as one. */
 	toneClass,
+	expanded: controlledExpanded,
+	onToggleExpanded,
 }: {
 	text: string
 	mono?: boolean
 	clampClass?: string
 	toneClass?: string
+	/** Controlled expansion; omit to keep the state in this component. */
+	expanded?: boolean
+	onToggleExpanded?: () => void
 }) {
-	const [expanded, setExpanded] = useState(false)
+	const [localExpanded, setLocalExpanded] = useState(false)
+	const expanded = controlledExpanded ?? localExpanded
 	const [clamped, setClamped] = useState(false)
 	const bodyRef = useRef<HTMLDivElement>(null)
 
@@ -55,7 +64,12 @@ export function ClampedText({
 			{(clamped || expanded) && (
 				<button
 					type="button"
-					onClick={() => setExpanded((previous) => !previous)}
+					onClick={() =>
+						onToggleExpanded === undefined
+							? setLocalExpanded((previous) => !previous)
+							: onToggleExpanded()
+					}
+					aria-expanded={expanded}
 					className="mt-1 cursor-pointer text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
 				>
 					{expanded ? "Show less" : "Show full"}
@@ -63,4 +77,14 @@ export function ClampedText({
 			)}
 		</div>
 	)
+}
+
+/** The first line worth showing of a body — a collapsed disclosure's preview.
+ *  Shared so the transcript and the span expansion elide identically. */
+export function firstLine(text: string): string {
+	for (const rawLine of text.split("\n")) {
+		const line = rawLine.trim()
+		if (line !== "") return line
+	}
+	return ""
 }

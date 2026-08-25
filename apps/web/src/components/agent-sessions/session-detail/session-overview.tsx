@@ -6,9 +6,12 @@ import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
 
-import { formatCurrency } from "@/lib/billing/currency"
 import { buildTurnDigest, type TurnDigest } from "@/lib/agent-sessions/session-overview"
-import type { SessionFailureKind, SessionSummary } from "@/lib/agent-sessions/session-summary"
+import {
+	formatCost,
+	type SessionFailureKind,
+	type SessionSummary,
+} from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { shortTarget } from "@/lib/agent-sessions/span-filters"
 import { OCCUPANCY_DOT_FILL, OCCUPANCY_FILL, OCCUPANCY_LABEL } from "./span-visuals"
@@ -504,13 +507,6 @@ function RailSection({ title, aside, children }: { title: string; aside?: ReactN
 function sharePercent(value: number, total: number): number {
 	if (total <= 0) return 0
 	return (value / total) * 100
-}
-
-/** A $0.0004 session printed "$0.00" reads as "measured, and it was free".
- *  Shared with the span expansion's meta strip, so a call and the rail it
- *  rolls up into can never disagree about how a cost prints. */
-export function formatCost(usd: number): string {
-	return usd > 0 && usd < 0.01 ? "<$0.01" : formatCurrency(usd, "usd")
 }
 
 function labelWithCount(label: string, count: number): string {

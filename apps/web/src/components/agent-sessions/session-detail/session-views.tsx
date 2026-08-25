@@ -45,7 +45,7 @@ export function SessionViews({
 	onViewChange,
 	turns,
 	summary,
-	truncated = false,
+	truncated,
 	selectedSpanId,
 	onSelectSpan,
 }: {
@@ -54,7 +54,7 @@ export function SessionViews({
 	turns: readonly SessionTurn[]
 	summary: SessionSummary
 	/** The response dropped the END of the session — the transcript says so. */
-	truncated?: boolean
+	truncated: boolean
 	/** The span expanded inline / open in the flow drawer (`?span=`). */
 	selectedSpanId: string | undefined
 	/** Raised with a span id to expand it, `undefined` to collapse. */
@@ -70,6 +70,10 @@ export function SessionViews({
 	// collapsed or zoomed lives here — otherwise a look at Flow and back costs
 	// them the place they had found in a 600-span session.
 	const [collapsedTurns, setCollapsedTurns] = useState<ReadonlySet<string>>(() => new Set())
+	// Transcript rows virtualize, so a row scrolled out of view unmounts and its
+	// local state would go with it: what the reader opened lives here instead,
+	// keyed by row, and holds the rows flipped AWAY from their default.
+	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
 	const [zoom, setZoom] = useState(1)
 	// One tab choice for every span expansion, in both debug views: switching
 	// spans — or Trace ↔ Flow — keeps the reader on the tab they chose.
@@ -235,6 +239,8 @@ export function SessionViews({
 					truncated={truncated}
 					collapsedTurns={collapsedTurns}
 					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
+					openRows={openRows}
+					onToggleRow={(key) => setOpenRows((previous) => toggled(previous, key))}
 					selectedSpanId={selectedSpanId}
 					onSelectSpan={onSelectSpan}
 					onOpenTraceView={() => onViewChange("trace")}

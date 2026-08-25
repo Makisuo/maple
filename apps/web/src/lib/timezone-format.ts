@@ -76,6 +76,33 @@ export function formatTimeInTimezone(
 	return formatter.format(date)
 }
 
+const clockFormatters = new Map<string, Intl.DateTimeFormat>()
+
+/** `14:21:58` — the transcript's clock gutter, where the millisecond
+ *  `formatCompactTimeInTimezone` adds is noise down a thousand rows. */
+export function formatClockInTimezone(
+	input: TimezoneFormatInput,
+	options: { timeZone: string },
+): string {
+	const date = toValidDate(input)
+	if (!date) return "-"
+
+	const tz = resolveTimeZone(options.timeZone)
+	let formatter = clockFormatters.get(tz)
+	if (!formatter) {
+		formatter = new Intl.DateTimeFormat("en-GB", {
+			timeZone: tz,
+			hour: "2-digit",
+			minute: "2-digit",
+			second: "2-digit",
+			hour12: false,
+		})
+		clockFormatters.set(tz, formatter)
+	}
+
+	return formatter.format(date)
+}
+
 export function formatCompactTimeInTimezone(
 	input: TimezoneFormatInput,
 	options: { timeZone: string },

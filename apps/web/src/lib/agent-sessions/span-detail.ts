@@ -70,11 +70,11 @@ export interface SpanToolCall {
  */
 export function spanToolCalls(
 	span: AiSessionSpan,
-	results?: ReadonlyMap<string, string>,
+	results?: SessionToolResults,
 ): readonly SpanToolCall[] {
 	const calls: SpanToolCall[] = []
 	const own = ownToolCall(span)
-	if (own !== undefined) calls.push(withResolvedResult(own, results))
+	if (own !== undefined) calls.push(withResolvedResult(own, span, results))
 
 	for (const message of parseMessages(span.genAi.outputMessages, "output")) {
 		for (const part of message.parts) {
@@ -90,6 +90,7 @@ export function spanToolCalls(
 						argumentsText: part.argumentsText,
 						resultText: undefined,
 					},
+					span,
 					results,
 				),
 			)
@@ -101,41 +102,81 @@ export function spanToolCalls(
 /** The span's own evidence wins; the session index only fills an absence. */
 function withResolvedResult(
 	call: SpanToolCall,
-	results: ReadonlyMap<string, string> | undefined,
+	span: AiSessionSpan,
+	results: SessionToolResults | undefined,
 ): SpanToolCall {
 	if (call.resultText !== undefined || call.id === undefined) return call
-	const resultText = results?.get(call.id)
+	const resultText = toolResultFor(results, span.traceId, call.id)
 	return resultText === undefined ? call : { ...call, resultText }
 }
 
 /**
- * Every captured tool result in the session, by tool call id.
+ * Every captured tool result in the session, under two keys.
  *
  * Results come back as evidence on other spans than the calls that made them:
  * the tool-execution span's own `gen_ai.tool.call.result`, or a
  * `tool_call_response` part echoed into the input history of a later call.
  * Both are collected — the tool span's first-hand attribute wins over the
  * echo — and calls are matched strictly by id: nothing is paired by guesswork.
+ *
+ * Call ids are only unique within the run that issued them: two parallel lanes,
+ * or a retry in a second trace, reuse `toolu_1` for different work. So every
+ * result is indexed twice — once under `traceId\0callId` and once under the
+ * bare id — and `toolResultFor` prefers the caller's own trace before falling
+ * back to the session-wide answer.
  */
-export function sessionToolResults(spans: readonly AiSessionSpan[]): ReadonlyMap<string, string> {
+export function sessionToolResults(spans: readonly AiSessionSpan[]): SessionToolResults {
 	const results = new Map<string, string>()
+	const put = (traceId: string, id: string, text: string) => {
+		const scoped = scopedResultKey(traceId, id)
+		if (!results.has(scoped)) results.set(scoped, text)
+		if (!results.has(id)) results.set(id, text)
+	}
 	for (const span of spans) {
 		const own = ownToolCall(span)
-		if (own?.id !== undefined && own.resultText !== undefined) results.set(own.id, own.resultText)
+		if (own?.id !== undefined && own.resultText !== undefined) put(span.traceId, own.id, own.resultText)
 	}
 	for (const span of spans) {
 		for (const message of parseMessages(span.genAi.inputMessages, "input")) {
 			for (const part of message.parts) {
 				if (part.kind !== "tool_result" || part.id === undefined) continue
-				if (!results.has(part.id)) results.set(part.id, part.resultText)
+				// A `tool_call_response` carrying neither `response` nor `result` is an
+				// echo of the call, not of its answer. Registering its empty text would
+				// claim the id and block the real echo that follows.
+				if (part.resultText === "") continue
+				put(span.traceId, part.id, part.resultText)
 			}
 		}
 	}
 	return results
 }
 
+/** The index `sessionToolResults` builds — read it through `toolResultFor`. */
+export type SessionToolResults = ReadonlyMap<string, string>
+
+function scopedResultKey(traceId: string, id: string): string {
+	// A separator no call id can contain, so a scoped key can never collide with
+	// a bare one.
+	return `${traceId}\u0000${id}`
+}
+
+/** The result for one call: the same trace's answer first, the session-wide one
+ *  only where that trace never reported it. */
+export function toolResultFor(
+	results: SessionToolResults | undefined,
+	traceId: string,
+	id: string,
+): string | undefined {
+	return results?.get(scopedResultKey(traceId, id)) ?? results?.get(id)
+}
+
 function ownToolCall(span: AiSessionSpan): SpanToolCall | undefined {
-	const { toolName, toolCallId, toolDescription, toolCallArguments, toolCallResult } = span.genAi
+	const { toolName, toolCallId, toolDescription } = span.genAi
+	// Captured attributes decode through `Schema.Unknown`, so an emitter that
+	// wrote JSON `null` lands here as `null` rather than as a missing key. Both
+	// mean "not captured", and rendering the string "null" would invent a payload.
+	const toolCallArguments = span.genAi.toolCallArguments ?? undefined
+	const toolCallResult = span.genAi.toolCallResult ?? undefined
 	if (
 		toolName === undefined &&
 		toolCallId === undefined &&
@@ -155,7 +196,7 @@ function ownToolCall(span: AiSessionSpan): SpanToolCall | undefined {
 
 /** Captured values are decoded JSON by the time they reach the client, so a
  *  display string re-serialises; the raw string case is already the payload. */
-function jsonText(value: unknown): string {
+export function jsonText(value: unknown): string {
 	if (typeof value === "string") return value
 	const text = JSON.stringify(value)
 	return text === undefined ? String(value) : text
@@ -260,18 +301,40 @@ function parsePart(part: unknown): SpanMessagePart {
 		// Anthropic seals a redacted block behind `data` with no readable text;
 		// labelling it is the whole of what can be said about it.
 		if (type === "redacted_thinking") return { kind: "reasoning", text: undefined, redacted: true }
-		const reasoning = part.text ?? part.content ?? part.thinking
-		return {
-			kind: "reasoning",
-			text: typeof reasoning === "string" && reasoning !== "" ? reasoning : undefined,
-			redacted: false,
-		}
+		return { kind: "reasoning", text: reasoningText(part), redacted: false }
 	}
 
 	// `{type: "text", content}` per the semconv, plus the `text` key vendors use.
 	const text = part.content ?? part.text
 	if (typeof text === "string") return { kind: "text", text }
 	return rawPart(part)
+}
+
+/**
+ * A reasoning block's readable text.
+ *
+ * `text` is the semconv key, `thinking` Anthropic's, and `content` is what
+ * SDKs that reuse the message shape write — which means it can also be a BLOCK
+ * ARRAY rather than a string. The module's contract is that nothing captured is
+ * ever dropped, so a non-string payload is walked when it is plainly
+ * text-bearing and kept as its own JSON when it is not; only a genuinely absent
+ * or empty value yields `undefined`.
+ */
+function reasoningText(part: Record<string, unknown>): string | undefined {
+	const value = part.text ?? part.content ?? part.thinking
+	if (value === undefined || value === null) return undefined
+	const text = typeof value === "string" ? value : blockText(value)
+	return text === "" ? undefined : text
+}
+
+function blockText(value: unknown): string {
+	if (!Array.isArray(value)) return jsonText(value)
+	return value
+		.map((block) => {
+			const part = parsePart(block)
+			return part.kind === "text" ? part.text : jsonText(block)
+		})
+		.join("\n")
 }
 
 /** A shape this walker does not know stays visible as its own JSON. */
@@ -283,6 +346,6 @@ function stringOrUndefined(value: unknown): string | undefined {
 	return typeof value === "string" && value !== "" ? value : undefined
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 }

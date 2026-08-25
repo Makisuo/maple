@@ -232,18 +232,24 @@ export function buildAgentSessionFixture(): readonly AiSessionSpan[] {
  * has to stay readable as pure structure, so the lab can switch to it.
  */
 export function buildCaptureOffFixture(): readonly AiSessionSpan[] {
+	// Keys are REMOVED, not set to `undefined`: an emitter that never captured
+	// content has no such attribute, and a present-but-undefined key is a shape
+	// the wire cannot produce — the fixture has to be the real absence.
 	return buildAgentSessionFixture().map((span) => ({
 		...span,
-		genAi: {
-			...span.genAi,
-			systemInstructions: undefined,
-			inputMessages: undefined,
-			outputMessages: undefined,
-			toolCallArguments: undefined,
-			toolCallResult: undefined,
-		},
+		genAi: Object.fromEntries(
+			Object.entries(span.genAi).filter(([key]) => !CAPTURED_CONTENT_KEYS.has(key)),
+		),
 	}))
 }
+
+const CAPTURED_CONTENT_KEYS = new Set([
+	"systemInstructions",
+	"inputMessages",
+	"outputMessages",
+	"toolCallArguments",
+	"toolCallResult",
+])
 
 function buildBaseTurns(): readonly AiSessionSpan[] {
 	const spans: AiSessionSpan[] = []
@@ -389,7 +395,7 @@ function p95Rows(): string {
 	const rows = Array.from({ length: 62 }, (_, index) => {
 		const minute = String(index % 60).padStart(2, "0")
 		const p95 = index < 20 ? 410 + index * 2 : 1180 + index * 3
-		return `2026-08-25 14:${minute}:00${String(p95.toFixed(1)).padStart(11)}${String(18_000 + index * 7).padStart(9)}`
+		return `2026-08-25 14:${minute}:00${p95.toFixed(1).padStart(11)}${String(18_000 + index * 7).padStart(9)}`
 	})
 	return [header, ...rows].join("\n")
 }

@@ -11,6 +11,9 @@
 // a total is always the plain sum of the buckets.
 
 import type { AiSessionSpan } from "@maple/domain/http"
+import { formatDuration, formatNumber } from "@maple/ui/lib/format"
+
+import { formatCurrency } from "@/lib/billing/currency"
 import {
 	classifyAiSpan,
 	isLlmCall,
@@ -830,6 +833,49 @@ export function groupFailures(events: readonly SessionFailureEvent[]): readonly 
 		})
 	}
 	return [...groups.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+}
+
+/* -------------------------------------------------------------------------- */
+/* How one call reads                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** A $0.0004 session printed "$0.00" reads as "measured, and it was free".
+ *  Shared by the overview's rails, the span expansion's meta strip and the
+ *  transcript, so a call and the rail it rolls up into can never disagree. */
+export function formatCost(usd: number): string {
+	return usd > 0 && usd < 0.01 ? "<$0.01" : formatCurrency(usd, "usd")
+}
+
+/**
+ * One model call's facts, in reading order: `claude-opus-5`, `6.4K → 512 tok`,
+ * `$0.11`, `ttft 780ms`, `stop tool_use`. Every part is omitted where the span
+ * did not report it, and the model is always first when there is one — the
+ * transcript's structure row leans on that to print the rest without it.
+ *
+ * Returned as parts rather than as one string so a caller that wants a subset
+ * can take one, instead of slicing the joined line back apart.
+ */
+export function callMetaParts(span: AiSessionSpan): readonly string[] {
+	const parts: string[] = []
+	const model = spanModel(span)
+	if (model !== undefined) parts.push(model)
+
+	const buckets = spanTokenBuckets(span)
+	if (buckets !== undefined && buckets.total > 0) {
+		const completion = buckets.output + buckets.reasoning
+		parts.push(`${formatNumber(buckets.total - completion)} → ${formatNumber(completion)} tok`)
+	}
+	const cost = span.genAi.usageCost
+	if (cost !== undefined) parts.push(formatCost(cost))
+	const ttftMs = spanTtftMs(span)
+	if (ttftMs !== undefined) parts.push(`ttft ${formatDuration(ttftMs)}`)
+	const finish = span.genAi.responseFinishReasons
+	if (finish !== undefined && finish.length > 0) parts.push(`stop ${finish.join(", ")}`)
+	return parts
+}
+
+export function callMetaLine(span: AiSessionSpan): string {
+	return callMetaParts(span).join(" · ")
 }
 
 /* -------------------------------------------------------------------------- */

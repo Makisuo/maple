@@ -13,12 +13,12 @@ function CompactLinesIcon({ size = 24, className, ...props }: IconProps) {
 			aria-hidden="true"
 			{...props}
 		>
-			<path d="M4 8h16M4 16h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+			<path d="M4 8h16M4 16h16" stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
 			<path
 				d="M9 11.5l3 2.5 3-2.5"
 				stroke="currentColor"
 				strokeWidth="2"
-				strokeLinecap="round"
+				strokeLinecap="square"
 				strokeLinejoin="round"
 			/>
 		</svg>

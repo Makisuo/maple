@@ -29,14 +29,15 @@ import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import {
 	spanMessages,
 	spanToolCalls,
+	type SessionToolResults,
 	type SpanMessage,
 	type SpanMessagePart,
 	type SpanToolCall,
 } from "@/lib/agent-sessions/span-detail"
 import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
-import { ClampedText } from "./clamped-text"
+import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
+import { ClampedText, firstLine } from "./clamped-text"
 import { CATEGORY_FILL } from "./span-visuals"
-import { formatCost } from "./session-overview"
 
 /**
  * The payload of one span, expanded in place — under its waterfall row, or in
@@ -66,7 +67,7 @@ export function SpanExpansion({
 	onTabChange: (tab: SpanDetailTab) => void
 	/** The session's captured tool results by call id (`sessionToolResults`),
 	 *  so each call shows its response even when another span reported it. */
-	toolResults?: ReadonlyMap<string, string>
+	toolResults?: SessionToolResults
 }) {
 	const messages = useMemo(() => spanMessages(span), [span])
 	const toolCalls = useMemo(() => spanToolCalls(span, toolResults), [span, toolResults])
@@ -142,7 +143,7 @@ export function SpanInlineDetail({
 	span: AiSessionSpan
 	tab: SpanDetailTab | undefined
 	onTabChange: (tab: SpanDetailTab) => void
-	toolResults?: ReadonlyMap<string, string>
+	toolResults?: SessionToolResults
 }) {
 	return (
 		<div
@@ -175,7 +176,7 @@ export function SpanDrawer({
 	turnOrdinal: string | undefined
 	tab: SpanDetailTab | undefined
 	onTabChange: (tab: SpanDetailTab) => void
-	toolResults?: ReadonlyMap<string, string>
+	toolResults?: SessionToolResults
 	onClose: () => void
 	/** Switch to the Traces view with this span still selected. */
 	onOpenTraceView: () => void
@@ -408,10 +409,7 @@ function MessagesSection({ messages, span }: { messages: readonly SpanMessage[];
  *  rarely what the reader came for. */
 function SystemMessageRow({ message }: { message: SpanMessage }) {
 	const [open, setOpen] = useState(false)
-	const text = message.parts
-		.map((part) => (part.kind === "text" ? part.text : ""))
-		.join("\n")
-		.trim()
+	const text = collapsedText(message.parts)
 
 	return (
 		<div className="rounded-md border border-border/60 bg-muted/30">
@@ -458,7 +456,7 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 				    response facts belong on them and on nothing else. */}
 				{message.origin === "output" && (
 					<span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/80">
-						{outputMeta(span)}
+						{callMetaLine(span)}
 					</span>
 				)}
 				<span aria-hidden className="h-px min-w-4 flex-1 bg-border/60" />
@@ -470,17 +468,6 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 			</div>
 		</div>
 	)
-}
-
-function outputMeta(span: AiSessionSpan): string {
-	const parts: string[] = []
-	const model = spanModel(span)
-	if (model !== undefined) parts.push(model)
-	const ttftMs = spanTtftMs(span)
-	if (ttftMs !== undefined) parts.push(`first token ${formatDuration(ttftMs)}`)
-	const finish = span.genAi.responseFinishReasons
-	if (finish !== undefined && finish.length > 0) parts.push(`stop ${finish.join(", ")}`)
-	return parts.join(" · ")
 }
 
 function MessagePart({ part }: { part: SpanMessagePart }) {
@@ -712,11 +699,24 @@ function EmptyNote({ children }: { children: ReactNode }) {
 	return <p className="py-6 text-center text-muted-foreground text-sm">{children}</p>
 }
 
-function firstLine(text: string): string {
-	for (const rawLine of text.split("\n")) {
-		const line = rawLine.trim()
-		if (line !== "") return line
-	}
-	return ""
+/**
+ * A message's parts as one preview body.
+ *
+ * Reasoning is labelled rather than dropped: the module's contract is that
+ * everything captured stays visible, and a system message whose only content
+ * was a reasoning block would otherwise collapse to an empty row.
+ */
+function collapsedText(parts: readonly SpanMessagePart[]): string {
+	return parts
+		.map((part) => {
+			if (part.kind === "text") return part.text
+			if (part.kind === "reasoning") {
+				return part.text === undefined ? "[thinking — no text captured]" : `THINKING\n${part.text}`
+			}
+			return ""
+		})
+		.filter((text) => text !== "")
+		.join("\n")
+		.trim()
 }
 

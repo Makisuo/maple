@@ -17,9 +17,9 @@ function BranchForkIcon({ size = 24, className, ...props }: IconProps) {
 				d="M7 21V13c0-2.2 1.8-4 4-4h6"
 				stroke="currentColor"
 				strokeWidth="2"
-				strokeLinecap="round"
+				strokeLinecap="square"
 			/>
-			<path d="M7 11V3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+			<path d="M7 11V3" stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
 			<circle cx="7" cy="21" r="2" stroke="currentColor" strokeWidth="2" />
 			<circle cx="19" cy="9" r="2" stroke="currentColor" strokeWidth="2" />
 			<circle cx="7" cy="3" r="2" stroke="currentColor" strokeWidth="2" />

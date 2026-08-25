@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
@@ -17,6 +17,7 @@ import {
 	CircleWarningIcon,
 	CompactLinesIcon,
 	CornerDownLeftIcon,
+	DotsIcon,
 	ExternalLinkIcon,
 	FaceRobotIcon,
 	GearIcon,
@@ -26,8 +27,8 @@ import {
 } from "@/components/icons"
 import { usePageScrollMargin } from "@/hooks/use-page-scroll-margin"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
-import { spanTokenBuckets } from "@/lib/agent-sessions/session-summary"
-import { spanModel, spanTtftMs, type SessionTurn } from "@/lib/agent-sessions/session-turns"
+import { callMetaLine, callMetaParts } from "@/lib/agent-sessions/session-summary"
+import { spanModel, type SessionTurn } from "@/lib/agent-sessions/session-turns"
 import {
 	buildTranscript,
 	type CaptureCoverage,
@@ -35,8 +36,10 @@ import {
 	type TranscriptPayload,
 	type TranscriptRow,
 } from "@/lib/agent-sessions/session-transcript"
-import { ClampedText } from "./clamped-text"
-import { formatCost } from "./session-overview"
+import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
+import { formatClockInTimezone } from "@/lib/timezone-format"
+import { ClampedText, firstLine } from "./clamped-text"
+import { Pill } from "./pill"
 
 /**
  * The session as a conversation.
@@ -55,10 +58,17 @@ const LABEL = "shrink-0 font-mono font-semibold text-[11px] uppercase tracking-[
 const META = "min-w-0 truncate font-mono text-[11px] text-muted-foreground"
 /** One lane of nesting; the hairline is what makes a lane's extent visible. */
 const INDENT = "flex w-6 shrink-0 justify-center"
+/** Past this the prose column is narrower than the gutters framing it, and a
+ *  deeper lane says nothing the lane header did not. Matches the waterfall. */
+const MAX_INDENT_DEPTH = 6
+
+/** A raw attribute value in a pill: upper-casing a wire string reads as shouting. */
+const WIRE_PILL = "font-mono text-[11px] normal-case tracking-normal"
 
 /** Starting guesses only — `measureElement` replaces each on mount. */
 const ROW_ESTIMATE = {
 	turn: 38,
+	"empty-turn": 30,
 	user: 92,
 	system: 42,
 	assistant: 100,
@@ -71,7 +81,7 @@ const ROW_ESTIMATE = {
 	structure: 30,
 	note: 86,
 	divider: 60,
-} satisfies Partial<Record<TranscriptRow["kind"], number>>
+} satisfies Record<TranscriptRow["kind"], number>
 
 export function SessionTranscript({
 	turns,
@@ -82,13 +92,15 @@ export function SessionTranscript({
 	truncated,
 	collapsedTurns,
 	onToggleTurn,
+	openRows,
+	onToggleRow,
 	selectedSpanId,
 	onSelectSpan,
 	onOpenTraceView,
 }: {
 	turns: readonly SessionTurn[]
 	/** The session's captured tool results by call id (`sessionToolResults`). */
-	toolResults: ReadonlyMap<string, string>
+	toolResults: SessionToolResults
 	query: string
 	/** The toolbar's "Thinking" chip. */
 	showThinking: boolean
@@ -98,6 +110,10 @@ export function SessionTranscript({
 	truncated: boolean
 	collapsedTurns: ReadonlySet<string>
 	onToggleTurn: (turnId: string) => void
+	/** Rows whose disclosure the reader has flipped away from its default — held
+	 *  outside the list because virtualization unmounts a row that scrolls out. */
+	openRows: ReadonlySet<string>
+	onToggleRow: (key: string) => void
 	selectedSpanId: string | undefined
 	onSelectSpan: (spanId: string | undefined) => void
 	/** Switch to the Traces view with this span still selected. */
@@ -106,10 +122,20 @@ export function SessionTranscript({
 	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
 	const { effectiveTimezone } = useTimezonePreference()
 
+	// The build parses every captured payload the query has to search, so it
+	// trails the input by a frame rather than running on the keystroke.
+	const deferredQuery = useDeferredValue(query)
 	const rows = useMemo(
 		() =>
-			buildTranscript({ turns, toolResults, query, showThinking, truncated, collapsedTurns }),
-		[turns, toolResults, query, showThinking, truncated, collapsedTurns],
+			buildTranscript({
+				turns,
+				toolResults,
+				query: deferredQuery,
+				showThinking,
+				truncated,
+				collapsedTurns,
+			}),
+		[turns, toolResults, deferredQuery, showThinking, truncated, collapsedTurns],
 	)
 
 	const virtualizer = useVirtualizer({
@@ -117,7 +143,7 @@ export function SessionTranscript({
 		getScrollElement,
 		// Every row's height is its content's, so the estimate only has to be in
 		// the right order of magnitude before the measurement lands.
-		estimateSize: (index) => ROW_ESTIMATE[rows[index]!.kind] ?? 40,
+		estimateSize: (index) => ROW_ESTIMATE[rows[index]!.kind],
 		getItemKey: (index) => rows[index]!.key,
 		overscan: 12,
 		scrollMargin,
@@ -134,15 +160,17 @@ export function SessionTranscript({
 	}
 
 	// A pasted `?span=` link lands on the block it names. Once, on mount — after
-	// that the URL follows the reader rather than leading them.
+	// that the URL follows the reader rather than leading them. Not before the
+	// scroller exists, though: the list element attaches in a layout effect, so
+	// on the render that mounts this view `scrollToIndex` has nothing to scroll.
 	const didInitialScroll = useRef(false)
 	useEffect(() => {
-		if (didInitialScroll.current) return
+		if (didInitialScroll.current || selectedSpanId === undefined) return
+		if (getScrollElement() === null) return
 		didInitialScroll.current = true
-		if (selectedSpanId === undefined) return
 		const index = rows.findIndex((row) => "span" in row && row.span.spanId === selectedSpanId)
 		if (index !== -1) virtualizer.scrollToIndex(index, { align: "center" })
-	}, [selectedSpanId, rows, virtualizer])
+	}, [selectedSpanId, rows, virtualizer, getScrollElement])
 
 	if (rows.length === 0) {
 		return (
@@ -155,34 +183,41 @@ export function SessionTranscript({
 	}
 
 	return (
-		<div ref={listRef} className="pt-2">
-			<div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-				{virtualizer.getVirtualItems().map((item) => {
-					const row = rows[item.index]!
-					return (
-						<div
-							key={item.key}
-							ref={virtualizer.measureElement}
-							data-index={item.index}
-							className="absolute inset-x-0 top-0"
-							// `start` is in the page scroller's coordinates; the margin
-							// brings it back to this list's own.
-							style={{ transform: `translateY(${item.start - scrollMargin}px)` }}
-						>
-							<TranscriptBlock
-								row={row}
-								timeZone={effectiveTimezone}
-								showPayloads={showPayloads}
-								collapsed={row.kind === "turn" && collapsedTurns.has(row.turn.id)}
-								onToggleTurn={onToggleTurn}
-								selected={"span" in row && row.span.spanId === selectedSpanId}
-								onSelectSpan={onSelectSpan}
-								onOpenTraceView={onOpenTraceView}
-								onJump={jumpTo}
-							/>
-						</div>
-					)
-				})}
+		// The padding sits OUTSIDE the measured element: the virtualizer positions
+		// rows against this list's own top edge, and padding on it would offset
+		// every row by its height.
+		<div className="pt-2">
+			<div ref={listRef}>
+				<div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+					{virtualizer.getVirtualItems().map((item) => {
+						const row = rows[item.index]!
+						return (
+							<div
+								key={item.key}
+								ref={virtualizer.measureElement}
+								data-index={item.index}
+								className="absolute inset-x-0 top-0"
+								// `start` is in the page scroller's coordinates; the margin
+								// brings it back to this list's own.
+								style={{ transform: `translateY(${item.start - scrollMargin}px)` }}
+							>
+								<TranscriptBlock
+									row={row}
+									timeZone={effectiveTimezone}
+									showPayloads={showPayloads}
+									collapsed={row.kind === "turn" && collapsedTurns.has(row.turn.id)}
+									onToggleTurn={onToggleTurn}
+									openRows={openRows}
+									onToggleRow={onToggleRow}
+									selected={"span" in row && row.span.spanId === selectedSpanId}
+									onSelectSpan={onSelectSpan}
+									onOpenTraceView={onOpenTraceView}
+									onJump={jumpTo}
+								/>
+							</div>
+						)
+					})}
+				</div>
 			</div>
 		</div>
 	)
@@ -194,10 +229,23 @@ interface BlockProps {
 	showPayloads: boolean
 	collapsed: boolean
 	onToggleTurn: (turnId: string) => void
+	openRows: ReadonlySet<string>
+	onToggleRow: (key: string) => void
 	selected: boolean
 	onSelectSpan: (spanId: string | undefined) => void
 	onOpenTraceView: () => void
 	onJump: (key: string) => void
+}
+
+/**
+ * Is this disclosure open?
+ *
+ * The set holds the rows the reader has flipped AWAY from their default, so the
+ * "Tool payloads" chip still moves every card they have not touched, and a card
+ * they opened by hand stays open when the chip goes off.
+ */
+function disclosed(openRows: ReadonlySet<string>, key: string, byDefault: boolean): boolean {
+	return openRows.has(key) ? !byDefault : byDefault
 }
 
 function TranscriptBlock(props: BlockProps) {
@@ -205,6 +253,8 @@ function TranscriptBlock(props: BlockProps) {
 	switch (row.kind) {
 		case "turn":
 			return <TurnChapter {...props} row={row} />
+		case "empty-turn":
+			return <EmptyTurnRow row={row} />
 		case "user":
 			return <UserBlock {...props} row={row} />
 		case "system":
@@ -220,7 +270,7 @@ function TranscriptBlock(props: BlockProps) {
 		case "lane-open":
 			return <LaneOpen {...props} row={row} />
 		case "lane-close":
-			return <LaneClose row={row} />
+			return <LaneClose {...props} row={row} />
 		case "parallel":
 			return <ParallelMarker {...props} row={row} />
 		case "structure":
@@ -261,7 +311,7 @@ function Row({
 	return (
 		<div className={cn("flex", className)}>
 			<span className={cn(GUTTER, timePadding)}>{time}</span>
-			{Array.from({ length: depth }, (_, index) => (
+			{Array.from({ length: Math.min(depth, MAX_INDENT_DEPTH) }, (_, index) => (
 				<span key={index} aria-hidden className={INDENT}>
 					<span className="w-px bg-border" />
 				</span>
@@ -281,6 +331,13 @@ function Row({
 /* Turn chapter                                                               */
 /* -------------------------------------------------------------------------- */
 
+/** "Turn 3" / "Segment 2" — a trace-anchored turn is the fallback partition,
+ *  one turn per trace, so it is a segment of the session rather than an
+ *  established exchange with the user. */
+function turnOrdinal(turn: SessionTurn): string {
+	return `${turn.anchorKind === "trace" ? "Segment" : "Turn"} ${turn.index}`
+}
+
 function TurnChapter({
 	row,
 	timeZone,
@@ -288,12 +345,9 @@ function TurnChapter({
 	onToggleTurn,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "turn" }> }) {
 	const { turn } = row
-	// A trace-anchored turn is the fallback partition — one turn per trace — so
-	// it is a segment of the session, not an established exchange with the user.
-	const ordinal = `${turn.anchorKind === "trace" ? "Segment" : "Turn"} ${turn.index}`
 
 	return (
-		<div className="mt-5 flex items-center border-border border-b pb-2">
+		<h3 className="mt-5 flex items-center border-border border-b pb-2 font-normal text-base">
 			<span className={cn(GUTTER, "pt-0")}>{clockOf(turn.startMs, timeZone)}</span>
 			<button
 				type="button"
@@ -309,30 +363,44 @@ function TurnChapter({
 				) : (
 					<ChevronDownIcon size={12} className="shrink-0 text-muted-foreground" />
 				)}
-				<span className={cn(LABEL, "text-primary")}>{ordinal.toUpperCase()}</span>
+				<span className={cn(LABEL, "text-primary")}>{turnOrdinal(turn).toUpperCase()}</span>
 				{/* The label is the first prose line of a captured message, not a
 				    verbatim quote, so it is set as text rather than quoted. */}
 				<span className="min-w-0 truncate font-medium text-[13px]">
 					{turn.label ?? <span className="text-muted-foreground italic">no prompt captured</span>}
 				</span>
 				{turn.agentName !== undefined && <AgentPill name={turn.agentName} />}
-				{turn.failed && (
-					<span className="shrink-0 rounded-sm bg-destructive/12 px-1.5 py-px font-mono text-[11px] text-destructive">
-						failed
-					</span>
-				)}
-				{collapsed && (
-					<span className={cn(META, "shrink-0")}>
-						{summariseTurn(row)}
-					</span>
-				)}
+				{turn.failed && <Pill tone="error">Failed</Pill>}
+				{collapsed && <span className={cn(META, "shrink-0")}>{summariseTurn(row)}</span>}
 				<span className="grow" />
+				{/* The AI spans the transcript actually renders, not the turn's raw
+				    time slice: that slice carries the app's own HTTP/DB spans too, and
+				    a count the page cannot account for is worse than no count. */}
 				<span className={cn(META, "shrink-0")}>
 					{turn.traceIds.length} trace{turn.traceIds.length === 1 ? "" : "s"} ·{" "}
-					{turn.spans.length} spans · {formatDuration(turn.durationMs)}
+					{row.aiSpanCount} agent spans · {formatDuration(turn.durationMs)}
 				</span>
 			</button>
-		</div>
+		</h3>
+	)
+}
+
+/** A turn with no agent work at all. Rendered rather than dropped so the
+ *  ordinals here line up with the ones Traces and Flow print. */
+function EmptyTurnRow({ row }: { row: Extract<TranscriptRow, { kind: "empty-turn" }> }) {
+	return (
+		<Row depth={row.depth} timePadding="pt-1" className="pt-2">
+			<div className="flex items-center gap-2.5 text-muted-foreground">
+				<DotsIcon size={13} className="shrink-0" />
+				<span className={cn(LABEL, "text-muted-foreground")}>
+					{turnOrdinal(row.turn).toUpperCase()}
+				</span>
+				<span className="min-w-0 truncate text-xs">
+					no agent activity — HTTP/DB work only, see Traces
+				</span>
+				<span aria-hidden className="h-px grow bg-border" />
+			</div>
+		</Row>
 	)
 }
 
@@ -360,8 +428,11 @@ function AgentPill({ name }: { name: string }) {
 function UserBlock({
 	row,
 	timeZone,
+	openRows,
+	onToggleRow,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "user" }> }) {
-	const [showHistory, setShowHistory] = useState(false)
+	const historyKey = `${row.key}:history`
+	const showHistory = disclosed(openRows, historyKey, false)
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-foreground" className="pt-5">
@@ -378,7 +449,8 @@ function UserBlock({
 					{row.earlierCount > 0 && (
 						<button
 							type="button"
-							onClick={() => setShowHistory((previous) => !previous)}
+							onClick={() => onToggleRow(historyKey)}
+							aria-expanded={showHistory}
 							className="shrink-0 cursor-pointer text-[11px] text-chart-2 hover:underline"
 						>
 							{showHistory ? "hide full history" : "show full history"}
@@ -396,17 +468,22 @@ function UserBlock({
 						<p className="text-[11px] text-muted-foreground">
 							The whole history this call re-sent, as captured.
 						</p>
-						{row.history.map((message, index) => (
-							<div key={index} className="flex flex-col gap-1">
-								<span className={cn(LABEL, "text-muted-foreground")}>{message.role}</span>
-								<ClampedText
-									text={message.parts
-										.map((part) => (part.kind === "text" ? part.text : `[${part.kind}]`))
-										.join("\n")}
-									clampClass="line-clamp-[6]"
-								/>
-							</div>
-						))}
+						{row.history.map((message, index) => {
+							const key = `${row.key}:history-${index}`
+							return (
+								<div key={index} className="flex flex-col gap-1">
+									<span className={cn(LABEL, "text-muted-foreground")}>{message.role}</span>
+									<ClampedText
+										text={message.parts
+											.map((part) => (part.kind === "text" ? part.text : `[${part.kind}]`))
+											.join("\n")}
+										clampClass="line-clamp-[6]"
+										expanded={disclosed(openRows, key, false)}
+										onToggleExpanded={() => onToggleRow(key)}
+									/>
+								</div>
+							)
+						})}
 					</div>
 				)}
 			</div>
@@ -418,14 +495,17 @@ function UserBlock({
  *  call and they are rarely what the reader came for. */
 function SystemBlock({
 	row,
+	openRows,
+	onToggleRow,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "system" }> }) {
-	const [open, setOpen] = useState(false)
+	const open = disclosed(openRows, row.key, false)
+	const textKey = `${row.key}:text`
 
 	return (
 		<Row depth={row.depth} rail="bg-muted-foreground/40" className="pt-3.5">
 			<button
 				type="button"
-				onClick={() => setOpen((previous) => !previous)}
+				onClick={() => onToggleRow(row.key)}
 				aria-expanded={open}
 				className="flex w-full cursor-pointer items-center gap-2.5 py-1 text-left"
 			>
@@ -441,15 +521,23 @@ function SystemBlock({
 					</span>
 				)}
 				<span className="grow" />
+				{/* "all N" only when every call carried it — an emitter that sends the
+				    instructions on some calls and not others is a fact about the run. */}
 				{row.callCount > 1 && (
 					<span className={cn(META, "shrink-0")}>
-						identical across all {row.callCount} calls this turn
+						{row.callCount >= row.turnCallCount
+							? `identical across all ${row.callCount} calls this turn`
+							: `identical across ${row.callCount} of ${row.turnCallCount} calls this turn`}
 					</span>
 				)}
 			</button>
 			{open && (
 				<div className="pb-2 pl-6">
-					<ClampedText text={row.text} />
+					<ClampedText
+						text={row.text}
+						expanded={disclosed(openRows, textKey, false)}
+						onToggleExpanded={() => onToggleRow(textKey)}
+					/>
 				</div>
 			)}
 		</Row>
@@ -480,7 +568,7 @@ function AssistantBlock({
 				<button
 					type="button"
 					onClick={() => onSelectSpan(selected ? undefined : row.span.spanId)}
-					aria-current={selected || undefined}
+					aria-pressed={selected}
 					className="flex min-w-0 grow cursor-pointer items-center gap-2.5 text-left"
 				>
 					<Glyph size={13} className={cn("shrink-0", tone)} />
@@ -489,9 +577,9 @@ function AssistantBlock({
 					<span className={META}>{callMetaLine(row.span)}</span>
 				</button>
 				{row.span.genAi.errorType !== undefined && (
-					<span className="shrink-0 rounded-sm bg-destructive/12 px-1.5 py-px font-mono text-[11px] text-destructive">
+					<Pill tone="error" className={WIRE_PILL}>
 						error.type {row.span.genAi.errorType}
-					</span>
+					</Pill>
 				)}
 				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
@@ -557,15 +645,18 @@ function PromptBlock({
 function ThinkingBlock({
 	row,
 	timeZone,
+	openRows,
+	onToggleRow,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "thinking" }> }) {
-	const [open, setOpen] = useState(false)
+	const open = disclosed(openRows, row.key, false)
+	const textKey = `${row.key}:text`
 	const reasoningTokens = row.span.genAi.usageReasoningOutputTokens
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-chart-5" className="pt-3.5">
 			<button
 				type="button"
-				onClick={() => setOpen((previous) => !previous)}
+				onClick={() => onToggleRow(row.key)}
 				aria-expanded={open}
 				disabled={row.text === undefined}
 				className="flex w-full items-center gap-2.5 py-1 text-left enabled:cursor-pointer"
@@ -578,9 +669,7 @@ function ThinkingBlock({
 					))}
 				<span className={cn(LABEL, "text-chart-5")}>Thinking</span>
 				{row.redacted ? (
-					<span className="shrink-0 text-muted-foreground text-xs">
-						redacted by the provider
-					</span>
+					<span className="shrink-0 text-muted-foreground text-xs">redacted by the provider</span>
 				) : (
 					<span className="shrink-0 text-muted-foreground text-xs">
 						{row.text === undefined ? "no reasoning text captured" : "reasoning"}
@@ -599,7 +688,11 @@ function ThinkingBlock({
 			</button>
 			{open && row.text !== undefined && (
 				<div className="mb-1 rounded-md bg-chart-5/6 px-3 py-2.5">
-					<ClampedText text={row.text} />
+					<ClampedText
+						text={row.text}
+						expanded={disclosed(openRows, textKey, false)}
+						onToggleExpanded={() => onToggleRow(textKey)}
+					/>
 				</div>
 			)}
 		</Row>
@@ -614,11 +707,14 @@ function ToolBlock({
 	row,
 	timeZone,
 	showPayloads,
+	openRows,
+	onToggleRow,
 	selected,
 	onSelectSpan,
+	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "tool" }> }) {
-	const [openOverride, setOpenOverride] = useState<boolean | undefined>(undefined)
-	const open = openOverride ?? showPayloads
+	const payloadsKey = `${row.key}:payloads`
+	const open = disclosed(openRows, payloadsKey, showPayloads)
 	const tone = row.failed ? "text-destructive" : "text-chart-4"
 
 	return (
@@ -636,36 +732,45 @@ function ToolBlock({
 					selected && "ring-1 ring-primary",
 				)}
 			>
-				<button
-					type="button"
-					onClick={() => onSelectSpan(selected ? undefined : row.span.spanId)}
-					className="flex h-9 cursor-pointer items-center gap-2.5 px-3 text-left"
-				>
-					<GearIcon size={13} className={cn("shrink-0", tone)} />
-					<span className={cn(LABEL, tone)}>Tool</span>
-					<span className="shrink-0 font-medium font-mono text-foreground text-xs">
-						{row.toolName ?? row.span.spanName}
-					</span>
-					<span className={cn(META, "shrink-0")}>
-						· {row.span.serviceName}
-						{!row.fromMessageOnly && ` · ${formatDuration(row.span.durationMs)}`}
-						{!open && payloadSummary(row)}
-					</span>
-					<span className="grow" />
-					{row.failed && row.span.genAi.errorType !== undefined && (
-						<span className="shrink-0 rounded-sm bg-destructive/12 px-1.5 py-px font-mono text-[11px] text-destructive">
-							error.type {row.span.genAi.errorType}
+				<div className="flex h-9 items-center gap-2.5 px-3">
+					<button
+						type="button"
+						onClick={() => onSelectSpan(selected ? undefined : row.span.spanId)}
+						aria-pressed={selected}
+						className="flex min-w-0 grow cursor-pointer items-center gap-2.5 text-left"
+					>
+						<GearIcon size={13} className={cn("shrink-0", tone)} />
+						<span className={cn(LABEL, tone)}>Tool</span>
+						<span className="shrink-0 font-medium font-mono text-foreground text-xs">
+							{row.toolName ?? row.span.spanName}
 						</span>
+						<span className={cn(META, "shrink-0")}>
+							· {row.span.serviceName}
+							{!row.fromMessageOnly && ` · ${formatDuration(row.span.durationMs)}`}
+							{!open && payloadSummary(row)}
+						</span>
+					</button>
+					{row.failed && row.span.genAi.errorType !== undefined && (
+						<Pill tone="error" className={WIRE_PILL}>
+							error.type {row.span.genAi.errorType}
+						</Pill>
 					)}
-					{!row.failed && row.callId !== undefined && (
+					{!row.failed && row.callId !== undefined && !selected && (
 						<span className={cn(META, "shrink-0")}>{row.callId}</span>
 					)}
-				</button>
+					{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
+				</div>
 
 				{open ? (
 					<>
 						{row.args !== undefined && (
-							<PayloadSection label="Arguments" payload={row.args} />
+							<PayloadSection
+								label="Arguments"
+								payload={row.args}
+								openRows={openRows}
+								onToggleRow={onToggleRow}
+								textKey={`${row.key}:args-text`}
+							/>
 						)}
 						{row.result !== undefined ? (
 							<PayloadSection
@@ -674,15 +779,28 @@ function ToolBlock({
 								meta={row.failed ? `span status ${row.span.statusCode}` : undefined}
 								tone={row.failed ? "text-destructive/90" : undefined}
 								bordered={row.args !== undefined}
+								openRows={openRows}
+								onToggleRow={onToggleRow}
+								textKey={`${row.key}:result-text`}
 							/>
 						) : (
 							<MissingResult fromMessageOnly={row.fromMessageOnly} />
 						)}
+						<button
+							type="button"
+							onClick={() => onToggleRow(payloadsKey)}
+							aria-expanded
+							className="flex cursor-pointer items-center gap-2 border-border/60 border-t px-3 py-1.5 text-chart-2 text-xs"
+						>
+							<ChevronDownIcon size={11} />
+							collapse payloads
+						</button>
 					</>
 				) : (
 					<button
 						type="button"
-						onClick={() => setOpenOverride(true)}
+						onClick={() => onToggleRow(payloadsKey)}
+						aria-expanded={false}
 						className="flex cursor-pointer items-center gap-2 border-border/60 border-t px-3 py-1.5 text-chart-2 text-xs"
 					>
 						<ChevronRightIcon size={11} />
@@ -709,12 +827,18 @@ function PayloadSection({
 	meta,
 	tone,
 	bordered = true,
+	openRows,
+	onToggleRow,
+	textKey,
 }: {
 	label: string
 	payload: TranscriptPayload
 	meta?: string
 	tone?: string
 	bordered?: boolean
+	openRows: ReadonlySet<string>
+	onToggleRow: (key: string) => void
+	textKey: string
 }) {
 	return (
 		<div className={cn("flex flex-col gap-2 px-3 pt-2.5 pb-3", bordered && "border-border/60 border-t")}>
@@ -730,12 +854,23 @@ function PayloadSection({
 				{/* Emitter truncation, not the view's clamping — there is no "show
 				    full" that can recover what was never recorded. */}
 				{payload.truncatedByEmitter && (
-					<span className="rounded-sm bg-severity-warn/12 px-1.5 py-px font-mono text-[10px] text-severity-warn">
+					<Pill tone="warn" className="rounded-sm font-mono normal-case tracking-normal">
 						truncated by the emitter
-					</span>
+					</Pill>
 				)}
 			</div>
-			<ClampedText text={payload.text} mono clampClass="line-clamp-[14]" toneClass={tone} />
+			{/* An emitter that recorded the truncation but kept no prefix leaves
+			    nothing to show; an empty card would read as an empty payload. */}
+			{payload.text !== "" && (
+				<ClampedText
+					text={payload.text}
+					mono
+					clampClass="line-clamp-[14]"
+					toneClass={tone}
+					expanded={disclosed(openRows, textKey, false)}
+					onToggleExpanded={() => onToggleRow(textKey)}
+				/>
+			)}
 			{payload.truncatedByEmitter && (
 				<p className="text-[11px] text-muted-foreground italic">
 					Cut off here by the instrumentation, not by Maple — the tail was never recorded.
@@ -769,6 +904,9 @@ function MissingResult({ fromMessageOnly }: { fromMessageOnly: boolean }) {
 function LaneOpen({
 	row,
 	timeZone,
+	showPayloads,
+	openRows,
+	onToggleRow,
 	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "lane-open" }> }) {
 	return (
@@ -804,6 +942,22 @@ function LaneOpen({
 					</>
 				)}
 			</div>
+			{/* The handoff's own payload: the `execute_tool task` span this block
+			    swallowed is where the task prompt lives, and losing it would leave
+			    the sub-agent's work with no record of what was asked for. Behind the
+			    same chip as a tool card's payloads — it is one. */}
+			{showPayloads && row.args !== undefined && (
+				<div className="overflow-hidden rounded-md border border-border bg-card">
+					<PayloadSection
+						label="Task prompt"
+						payload={row.args}
+						bordered={false}
+						openRows={openRows}
+						onToggleRow={onToggleRow}
+						textKey={`${row.key}:args-text`}
+					/>
+				</div>
+			)}
 		</Row>
 	)
 }
@@ -826,7 +980,12 @@ function ParallelJump({
 	)
 }
 
-function LaneClose({ row }: { row: Extract<TranscriptRow, { kind: "lane-close" }> }) {
+function LaneClose({
+	row,
+	showPayloads,
+	openRows,
+	onToggleRow,
+}: BlockProps & { row: Extract<TranscriptRow, { kind: "lane-close" }> }) {
 	return (
 		<Row depth={row.depth} className="pt-2">
 			<div className="flex items-center gap-2.5 py-1">
@@ -840,6 +999,20 @@ function LaneClose({ row }: { row: Extract<TranscriptRow, { kind: "lane-close" }
 				</span>
 				<span aria-hidden className="h-px grow bg-border" />
 			</div>
+			{/* What the sub-agent handed back, read off the delegating tool call's
+			    result — the only place the answer is recorded. */}
+			{showPayloads && row.result !== undefined && (
+				<div className="overflow-hidden rounded-md border border-border bg-card">
+					<PayloadSection
+						label="Returned"
+						payload={row.result}
+						bordered={false}
+						openRows={openRows}
+						onToggleRow={onToggleRow}
+						textKey={`${row.key}:result-text`}
+					/>
+				</div>
+			)}
 		</Row>
 	)
 }
@@ -858,10 +1031,15 @@ function ParallelMarker({
 			<div className="flex items-center gap-2.5">
 				<BranchForkIcon size={14} className="shrink-0 text-primary" />
 				<span className={cn(LABEL, "text-primary")}>Parallel</span>
+				{/* Only a window every lane shared is reported as an overlap. A chain
+				    of pairwise overlaps has none, and the marker then reports the fork's
+				    extent instead of inventing one. */}
 				<span className="shrink-0 text-muted-foreground text-xs">
-					{row.forkedBy === undefined ? "This turn" : row.forkedBy} forked {row.lanes.length} lanes —
-					they overlap {clockOf(row.startMs, timeZone)} → {clockOf(row.endMs, timeZone)}. Each lane is
-					shown whole, in order:
+					{row.forkedBy === undefined ? "This turn" : row.forkedBy} forked {row.lanes.length} lanes —{" "}
+					{row.overlapStartMs !== undefined && row.overlapEndMs !== undefined
+						? `they overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
+						: `their runs interleave between ${clockOf(row.startMs, timeZone)} and ${clockOf(row.endMs, timeZone)}`}
+					. Each lane is shown whole, in order:
 				</span>
 				{row.lanes.map((lane) => (
 					<button
@@ -886,6 +1064,7 @@ function StructureRow({
 	timeZone,
 	selected,
 	onSelectSpan,
+	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "structure" }> }) {
 	const category = row.label.startsWith("tool ")
 		? "tool"
@@ -917,20 +1096,24 @@ function StructureRow({
 			timePadding="pt-1.5"
 			className="pt-1"
 		>
-			<button
-				type="button"
-				onClick={() => onSelectSpan(selected ? undefined : row.span.spanId)}
-				className={cn(
-					"flex w-full cursor-pointer items-center gap-2.5 rounded-sm py-1 text-left hover:bg-accent/30",
-					selected && "bg-primary/6",
-				)}
-			>
-				<Glyph size={13} className={cn("shrink-0", tone)} />
-				<span className="shrink-0 font-medium font-mono text-foreground text-xs">{row.label}</span>
-				<span className={META}>{structureMeta(row.span, category)}</span>
-				<span className="grow" />
-				<span className={cn(META, "shrink-0")}>{formatDuration(row.span.durationMs)}</span>
-			</button>
+			<div className="flex items-center gap-2.5">
+				<button
+					type="button"
+					onClick={() => onSelectSpan(selected ? undefined : row.span.spanId)}
+					aria-pressed={selected}
+					className={cn(
+						"flex min-w-0 grow cursor-pointer items-center gap-2.5 rounded-sm py-1 text-left hover:bg-accent/30",
+						selected && "bg-primary/6",
+					)}
+				>
+					<Glyph size={13} className={cn("shrink-0", tone)} />
+					<span className="shrink-0 font-medium font-mono text-foreground text-xs">{row.label}</span>
+					<span className={META}>{structureMeta(row.span, category)}</span>
+					<span className="grow" />
+					<span className={cn(META, "shrink-0")}>{formatDuration(row.span.durationMs)}</span>
+				</button>
+				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
+			</div>
 		</Row>
 	)
 }
@@ -959,12 +1142,17 @@ function NoteBlock({ row }: { row: Extract<TranscriptRow, { kind: "note" }> }) {
 		)
 	}
 
+	// The same absence, said at the scope it was measured at: a session-wide
+	// banner must not read as a claim about one turn, or the other way round.
+	const scope =
+		row.scope === "session" ? `${row.anyCaptured ? "most of " : ""}this session` : "this turn"
+
 	return (
 		<div className="flex items-start gap-3 rounded-md border border-border bg-card px-4 py-3">
 			<CircleInfoIcon size={15} className="mt-0.5 shrink-0 text-muted-foreground" />
 			<div className="flex min-w-0 grow flex-col gap-1">
 				<p className="font-medium text-[13px] text-foreground">
-					Message content isn't captured for {row.anyCaptured ? "most of " : ""}this session
+					Message content isn't captured for {scope}
 				</p>
 				<p className="text-muted-foreground text-xs leading-relaxed">
 					Prompts, replies and tool payloads are opt-in — the spans carry timing, models, tokens and
@@ -1002,7 +1190,9 @@ function DividerBlock({
 	}
 
 	// Truncation drops the END of the session. Never a synthetic conclusion: the
-	// divider says the reading stops here, not that the agent did.
+	// divider says the reading stops here, not that the agent did. The wording
+	// matches the page's own banner, so the two read as one fact stated twice
+	// rather than as two different problems.
 	return (
 		<div className="mt-8 flex flex-col items-center gap-3 border-input border-t border-dashed pt-6 pb-2">
 			<div className="flex items-center gap-2">
@@ -1010,12 +1200,10 @@ function DividerBlock({
 				<span className={cn(LABEL, "text-severity-warn")}>Session truncated</span>
 			</div>
 			<p className="text-center text-[13px] text-muted-foreground">
-				This session has more spans than one response carries. Later activity is not shown, and this
+				This session has more spans than one response carries — later activity is not shown, and this
 				is not where the session ended.
 			</p>
-			<p className="text-muted-foreground text-xs">
-				Narrow the time range to see the rest.
-			</p>
+			<p className="text-muted-foreground text-xs">Narrow the time range to see the rest.</p>
 		</div>
 	)
 }
@@ -1071,66 +1259,19 @@ function OpenInTraces({ span, onOpenTraceView }: { span: AiSessionSpan; onOpenTr
 	)
 }
 
-/** `claude-opus-5 · 6.4K → 512 tok · $0.11 · ttft 780ms · stop tool_use` — every
- *  part omitted where the span did not report it. */
-function callMetaLine(span: AiSessionSpan): string {
-	const parts: string[] = []
-	const model = spanModel(span)
-	if (model !== undefined) parts.push(model)
-
-	const buckets = spanTokenBuckets(span)
-	if (buckets !== undefined && buckets.total > 0) {
-		const completion = buckets.output + buckets.reasoning
-		parts.push(`${formatNumber(buckets.total - completion)} → ${formatNumber(completion)} tok`)
-	}
-	const cost = span.genAi.usageCost
-	if (cost !== undefined) parts.push(formatCost(cost))
-	const ttftMs = spanTtftMs(span)
-	if (ttftMs !== undefined) parts.push(`ttft ${formatDuration(ttftMs)}`)
-	const finish = span.genAi.responseFinishReasons
-	if (finish !== undefined && finish.length > 0) parts.push(`stop ${finish.join(", ")}`)
-	return parts.join(" · ")
-}
-
 /** The structure row's second half: what the span reports about itself, with
  *  the absences named rather than left blank. */
 function structureMeta(span: AiSessionSpan, category: string): string {
-	if (category === "tool") {
-		return `· ${span.serviceName} · payloads not captured`
-	}
-	if (category === "agent") {
-		return `· trace ${span.traceId.slice(0, 8)}`
-	}
-	const meta = callMetaLine(span)
-	// The model already leads the label; the rest of the call's facts follow.
-	const model = spanModel(span)
-	const rest = model === undefined ? meta : meta.slice(model.length).replace(/^ · /, "")
-	return rest === "" ? "" : `· ${rest}`
+	if (category === "tool") return `· ${span.serviceName} · payloads not captured`
+	if (category === "agent") return `· trace ${span.traceId.slice(0, 8)}`
+	// The model already leads the label; the rest of the call's facts follow, so
+	// the parts are taken as parts rather than sliced back out of a joined line.
+	const parts = callMetaParts(span)
+	const rest = spanModel(span) === undefined ? parts : parts.slice(1)
+	return rest.length === 0 ? "" : `· ${rest.join(" · ")}`
 }
 
-const CLOCK_FORMATTERS = new Map<string, Intl.DateTimeFormat>()
-
-/** `14:21:58` in the reader's chosen timezone. Formatters are cached: a long
- *  session renders thousands of these. */
+/** `14:21:58` in the reader's chosen timezone. */
 function clockOf(epochMs: number, timeZone: string): string {
-	let formatter = CLOCK_FORMATTERS.get(timeZone)
-	if (formatter === undefined) {
-		formatter = new Intl.DateTimeFormat("en-GB", {
-			timeZone,
-			hour12: false,
-			hour: "2-digit",
-			minute: "2-digit",
-			second: "2-digit",
-		})
-		CLOCK_FORMATTERS.set(timeZone, formatter)
-	}
-	return formatter.format(epochMs)
-}
-
-function firstLine(text: string): string {
-	for (const rawLine of text.split("\n")) {
-		const line = rawLine.trim()
-		if (line !== "") return line
-	}
-	return ""
+	return formatClockInTimezone(epochMs, { timeZone })
 }
