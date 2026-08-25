@@ -15,6 +15,7 @@ import {
 	CheckIcon,
 	ChevronDownIcon,
 	ChevronRightIcon,
+	CircleWarningIcon,
 	CircleXmarkIcon,
 	CopyIcon,
 	ExternalLinkIcon,
@@ -41,6 +42,7 @@ import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-s
 import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
 import { ClampedText, firstLine } from "./clamped-text"
 import { useJsonPayload, ViewSegment, ViewSwitch } from "./payload-view"
+import { Pill } from "./pill"
 import { CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
 /**
@@ -129,7 +131,7 @@ export function SpanExpansion({
 
 			<MetaStrip span={span} />
 
-			{active === "details" && <DetailsSection span={span} />}
+			{active === "details" && <DetailsSection span={span} toolCalls={toolCalls} />}
 			{active === "messages" && <MessagesSection messages={messages} span={span} />}
 			{active === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
 			{active === "logs" && <LogsSection span={span} />}
@@ -675,8 +677,19 @@ const toSpanId = Schema.decodeSync(SpanId)
  * through the shared attribute sections. The maps are fetched here — the
  * session endpoint drops them server-side, so this is the panel's own lazy
  * `spanDetail` read, made once the tab is open.
+ *
+ * A FAILED span leads with its failure, whatever form the span reported it in:
+ * the status message where there is one, otherwise the attributes the failure
+ * was read from — Details is where a reader looks first, and a failed call
+ * whose evidence is only on another tab reads as a call that did not fail.
  */
-function DetailsSection({ span }: { span: AiSessionSpan }) {
+function DetailsSection({
+	span,
+	toolCalls,
+}: {
+	span: AiSessionSpan
+	toolCalls: readonly SpanToolCall[]
+}) {
 	const detailResult = useAtomValue(
 		span.traceId !== "" && span.spanId !== ""
 			? getSpanDetailResultAtom({
@@ -690,18 +703,38 @@ function DetailsSection({ span }: { span: AiSessionSpan }) {
 	)
 	const detailAttrs = Result.isSuccess(detailResult) ? detailResult.value : undefined
 
+	const failed = spanFailed(span)
+	// A failed tool call's captured result is usually where the actual error
+	// text lives; surfacing it here saves the reader the trip to the Tool calls
+	// tab. Tool spans only — a model span's tool calls are its OUTPUT, and their
+	// results say nothing about why the model call itself failed. The own call
+	// is first in `spanToolCalls`' order.
+	const failedToolResult =
+		failed && classifyAiSpan(span) === "tool" ? toolCalls[0]?.resultText : undefined
+
 	return (
 		<div className="flex flex-col gap-3 pb-1">
-			{span.statusCode === "Error" && span.statusMessage !== "" && (
-				<ErrorSection
-					message={span.statusMessage}
-					badge={span.genAi.errorType}
-					prompt={{
-						serviceName: span.serviceName,
-						operation: span.spanName,
-						attributes: detailAttrs?.spanAttributes,
-					}}
-					className="mx-0 my-0"
+			{failed &&
+				(span.statusMessage !== "" ? (
+					<ErrorSection
+						message={span.statusMessage}
+						badge={span.genAi.errorType}
+						prompt={{
+							serviceName: span.serviceName,
+							operation: span.spanName,
+							attributes: detailAttrs?.spanAttributes,
+						}}
+						className="mx-0 my-0"
+					/>
+				) : (
+					<FailureBanner span={span} />
+				))}
+			{failedToolResult !== undefined && (
+				<PayloadCard
+					label="result"
+					name={toolCalls[0]?.name}
+					meta={span.statusCode === "Error" ? "span status Error" : undefined}
+					body={failedToolResult}
 				/>
 			)}
 			<IdentityRows span={span} />
@@ -722,6 +755,48 @@ function DetailsSection({ span }: { span: AiSessionSpan }) {
 					</>
 				))
 				.render()}
+		</div>
+	)
+}
+
+/**
+ * The failure of a span that recorded no status message. The pills name the
+ * attributes the failure was actually read from — the same evidence
+ * `spanFailed` reads — because with no message, saying WHERE the claim comes
+ * from is all the banner can honestly do.
+ */
+function FailureBanner({ span }: { span: AiSessionSpan }) {
+	const errorType = span.genAi.errorType
+	const responseStatus = span.genAi.responseStatus
+
+	return (
+		<div className="flex flex-col gap-1.5 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5">
+			<div className="flex flex-wrap items-center gap-2">
+				<CircleWarningIcon size={13} className="shrink-0 text-destructive" />
+				<span className="font-medium text-[13px] text-destructive">This call failed</span>
+				{span.statusCode === "Error" && (
+					<Pill tone="error" className="font-mono normal-case tracking-normal">
+						span status Error
+					</Pill>
+				)}
+				{errorType !== undefined && errorType !== "" && (
+					<Pill tone="error" className="font-mono normal-case tracking-normal">
+						error.type {errorType}
+					</Pill>
+				)}
+				{/* Only where it is the evidence: with a status or an error type above,
+				    restating the response status would just be noise beside them. */}
+				{span.statusCode !== "Error" &&
+					(errorType === undefined || errorType === "") &&
+					responseStatus !== undefined && (
+						<Pill tone="error" className="font-mono normal-case tracking-normal">
+							response.status {responseStatus}
+						</Pill>
+					)}
+			</div>
+			<p className="text-muted-foreground text-xs leading-relaxed">
+				The span reports the failure through the attributes above; it carries no status message.
+			</p>
 		</div>
 	)
 }
