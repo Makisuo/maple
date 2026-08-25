@@ -682,8 +682,9 @@ pub fn tinybird_export_retry(destination: &str, datasource: &str, status: &str) 
 /// (`reason` is `lane_full`, `org_quota`, `wal_error`, or `no_target`).
 ///
 /// The mirror is best-effort, so these drops are invisible to clients and to
-/// every other counter. This is the only signal that a mirrored workspace has a
-/// gap, and therefore the only thing that tells you a backfill window is needed.
+/// every other counter — and nothing backfills the mirrored workspace, so a
+/// non-zero value here is permanent loss, not a gap to be repaired later. It is
+/// the one number that has to stay at zero for the whole migration window.
 pub fn tinybird_mirror_dropped(datasource: &str, reason: &str, rows: u64) {
     TINYBIRD_MIRROR_DROPPED_TOTAL.add(
         rows,
