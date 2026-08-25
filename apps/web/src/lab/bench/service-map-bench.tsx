@@ -652,6 +652,13 @@ function BenchDriver({
 		// as 4 commits of a render loop that does not exist. Intermittent by nature:
 		// it depended on ELK straddling the measurement, so it passed and failed on
 		// identical code.
+		// The escape hatch is a deadlock guard, not a budget: it exists so a
+		// genuinely broken ELK fails on an assertion instead of hanging, and it
+		// must sit well above the slowest honest layout. 8s was under it — this
+		// graph takes ~5s of worker ELK on a warm dev server and a fast laptop,
+		// so a two-core CI runner blew straight through the cap and every run
+		// declared ready while the map was still showing the fallback.
+		const ELK_SETTLE_DEADLINE_MS = 45_000
 		let raf = 0
 		const settleStart = performance.now()
 		const checkReady = () => {
@@ -661,7 +668,10 @@ function BenchDriver({
 			// "fallback" is NOT terminal — it is what is on screen while ELK works.
 			const elkSettled =
 				document.querySelector('[data-elk-status="ready"]') !== null
-			if ((measured && domEdges > 0 && elkSettled) || performance.now() - settleStart > 8000) {
+			if (
+				(measured && domEdges > 0 && elkSettled) ||
+				performance.now() - settleStart > ELK_SETTLE_DEADLINE_MS
+			) {
 				harness.readyMs = Math.round(performance.now() - settleStart)
 				harness.ready = true
 				return
