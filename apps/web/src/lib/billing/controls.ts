@@ -1,10 +1,6 @@
-import type {
-	BillingCustomer,
-	BillingSpendLimit,
-	BillingUsageAlert,
-	UpdateBillingControlsRequest,
-} from "@maple/domain/http"
+import type { BillingCustomer, BillingSpendLimit, BillingUsageAlert } from "@maple/domain/http"
 import {
+	UpdateBillingControlsRequest,
 	UpdateBillingSpendLimit as UpdateBillingSpendLimitClass,
 	UpdateBillingUsageAlert as UpdateBillingUsageAlertClass,
 } from "@maple/domain/http"
@@ -43,7 +39,7 @@ export const updateFeatureControls = ({
 	readonly alertPercent: number | null
 }): UpdateBillingControlsRequest => {
 	const currentAlert = usageAlertFor(customer, featureId)
-	return {
+	return new UpdateBillingControlsRequest({
 		spendLimits: [
 			new UpdateBillingSpendLimitClass({
 				featureId,
@@ -60,7 +56,7 @@ export const updateFeatureControls = ({
 				name: MAPLE_USAGE_ALERT_NAME,
 			}),
 		],
-	}
+	})
 }
 
 /** Maximum invoice when every paid feature has a cap; null means unbounded. */

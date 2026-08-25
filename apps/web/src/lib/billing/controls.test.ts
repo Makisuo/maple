@@ -1,6 +1,8 @@
+import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 
 import type { BillingCustomer } from "@maple/domain/http"
+import { UpdateBillingControlsRequest } from "@maple/domain/http"
 
 import { maximumInvoiceCents, updateFeatureControls } from "./controls"
 import type { SpendModel } from "./spend"
@@ -29,6 +31,20 @@ const customer = {
 } as BillingCustomer
 
 describe("updateFeatureControls", () => {
+	// The endpoint payload is a Schema.Class, so the HttpApi client encoder checks
+	// class identity: a plain literal dies with "Expected UpdateBillingControlsRequest"
+	// before any request goes out, and tsc can't see it.
+	it("returns a payload the endpoint encoder accepts", () => {
+		const next = updateFeatureControls({
+			customer,
+			featureId: "logs",
+			overageLimit: 250,
+			alertPercent: 80,
+		})
+
+		expect(() => Schema.encodeUnknownSync(UpdateBillingControlsRequest)(next)).not.toThrow()
+	})
+
 	it("upserts only the selected feature so unrelated Autumn controls stay untouched", () => {
 		const next = updateFeatureControls({
 			customer,
