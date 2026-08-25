@@ -732,6 +732,16 @@ struct PipelineInner {
     /// co-sharded Tinybird lane.
     lane_senders: Vec<mpsc::Sender<QueuedFrame>>,
     org_queue_bytes: Arc<DashMap<String, Arc<AtomicU64>>>,
+    /// Per-org queued bytes for the Tinybird MIRROR lane, deliberately a
+    /// SEPARATE counter from `org_queue_bytes`.
+    ///
+    /// Sharing one counter breaks the isolation the lanes exist to provide.
+    /// Bytes are only released once a frame exports, so a stalled mirror lane
+    /// holds an org's bytes for as long as it is stuck — and once that reaches
+    /// `org_queue_max_bytes`, the org's PRIMARY commits start failing to reserve
+    /// and the org gets 429s even though its primary lane is perfectly healthy.
+    /// A best-effort destination must not be able to do that.
+    mirror_org_queue_bytes: Arc<DashMap<String, Arc<AtomicU64>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -798,6 +808,7 @@ impl TelemetryPipeline {
         // the new per-destination lanes before workers start draining them.
         wal.migrate_legacy_shards(&cfg).await;
         let org_queue_bytes = Arc::new(DashMap::new());
+        let mirror_org_queue_bytes = Arc::new(DashMap::new());
         let clickhouse_breakers = Arc::new(ClickHouseBreakerRegistry::new(cfg.clickhouse_breaker));
         let mut lane_senders = Vec::with_capacity(cfg.wal_shards * LANES_PER_SHARD);
 
@@ -815,7 +826,13 @@ impl TelemetryPipeline {
                     destination,
                     cfg: Arc::clone(&cfg),
                     wal: Arc::clone(&wal),
-                    org_queue_bytes: Arc::clone(&org_queue_bytes),
+                    // The worker releases into whichever counter its lane
+                    // reserved from, so the mirror lane gets the mirror map.
+                    org_queue_bytes: if destination == ExportDestination::TinybirdMirror {
+                        Arc::clone(&mirror_org_queue_bytes)
+                    } else {
+                        Arc::clone(&org_queue_bytes)
+                    },
                     clickhouse_breakers: Arc::clone(&clickhouse_breakers),
                     clickhouse_targets: clickhouse_targets.clone(),
                     http: http.clone(),
@@ -831,6 +848,7 @@ impl TelemetryPipeline {
                 wal,
                 lane_senders,
                 org_queue_bytes,
+                mirror_org_queue_bytes,
             }),
         };
         pipeline.replay_committed_frames().await;
@@ -1067,7 +1085,11 @@ impl TelemetryPipeline {
                 };
                 let queued_bytes = frame.payload.len() as u64;
                 if self
-                    .reserve_org_queue_bytes(&frame.org_id, queued_bytes)
+                    .reserve_org_bytes_in(
+                        &self.inner.mirror_org_queue_bytes,
+                        &frame.org_id,
+                        queued_bytes,
+                    )
                     .is_err()
                 {
                     metrics::tinybird_mirror_dropped(&frame.datasource, "org_quota", frame.row_count as u64);
@@ -1076,7 +1098,11 @@ impl TelemetryPipeline {
                 let (start, end) = match self.inner.wal.append(lane, &frame).await {
                     Ok(offsets) => offsets,
                     Err(error) => {
-                        self.release_org_queue_bytes(&frame.org_id, queued_bytes);
+                        release_org_queue_bytes(
+                            &self.inner.mirror_org_queue_bytes,
+                            &frame.org_id,
+                            queued_bytes,
+                        );
                         metrics::tinybird_mirror_dropped(&frame.datasource, "wal_error", frame.row_count as u64);
                         warn!(error = %error, "Dropping mirror frame after WAL append failure");
                         continue;
@@ -1201,13 +1227,20 @@ impl TelemetryPipeline {
     }
 
     fn reserve_org_queue_bytes(&self, org_id: &str, bytes: u64) -> Result<(), PipelineError> {
+        self.reserve_org_bytes_in(&self.inner.org_queue_bytes, org_id, bytes)
+    }
+
+    fn reserve_org_bytes_in(
+        &self,
+        counters: &Arc<DashMap<String, Arc<AtomicU64>>>,
+        org_id: &str,
+        bytes: u64,
+    ) -> Result<(), PipelineError> {
         if org_id.is_empty() || bytes == 0 {
             return Ok(());
         }
 
-        let counter = self
-            .inner
-            .org_queue_bytes
+        let counter = counters
             .entry(org_id.to_owned())
             .or_insert_with(|| Arc::new(AtomicU64::new(0)))
             .clone();
@@ -4823,6 +4856,60 @@ mod tests {
             mirror_bytes, 0,
             "nothing should have been committed to the mirror lane"
         );
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn a_stalled_mirror_cannot_exhaust_the_org_byte_budget() {
+        // Regression: the mirror used to share `org_queue_bytes` with the primary.
+        // Bytes are only released once a frame exports, so a stalled mirror lane
+        // held an org's bytes indefinitely, and once they reached
+        // `org_queue_max_bytes` the org's PRIMARY commits failed to reserve —
+        // 429s for an org whose primary lane was perfectly healthy. Separate
+        // counters are what make the lane isolation actually hold.
+        let (primary_url, mut primary_rx) = spawn_fake_tinybird().await;
+
+        let queue_dir = unique_test_dir("mirror-org-budget");
+        let mut cfg = test_cfg();
+        cfg.endpoint = primary_url;
+        cfg.mirror = Some(test_mirror_cfg("http://127.0.0.1:1", 100));
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        cfg.batch_max_wait = Duration::from_millis(1);
+        // Sized against the frame this request encodes to: a handful of stuck
+        // mirror frames must exceed the budget, while the primary — which
+        // exports and releases within milliseconds — never holds more than one.
+        cfg.org_queue_max_bytes = 4_096;
+        // Room for the mirror lane to accumulate rather than shedding at the
+        // channel before it ever reserves any bytes.
+        cfg.queue_channel_capacity = 64;
+
+        let pipeline = TelemetryPipeline::new(
+            cfg,
+            Client::builder()
+                .timeout(Duration::from_millis(100))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        for _ in 0..40u32 {
+            pipeline
+                .accept_logs("org_budget", &populated_log_request())
+                .await
+                .expect("mirror bytes must never consume the primary's org budget");
+            sleep(Duration::from_millis(10)).await;
+        }
+
+        // The primary kept exporting throughout, which is what proves its
+        // reservations were never starved by the stuck mirror lane.
+        let primary = tokio::time::timeout(Duration::from_secs(2), primary_rx.recv())
+            .await
+            .expect("primary should keep exporting while the mirror lane is stuck")
+            .unwrap();
+        assert_eq!(primary.datasource, "logs");
 
         drop(std::fs::remove_dir_all(queue_dir));
     }
