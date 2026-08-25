@@ -56,6 +56,7 @@ use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
     DatasourceNames, ExportDestination, HttpClient, MappingOperation, MappingSourceContext,
     PipelineError, SamplingPolicy, TelemetryPipeline, TelemetrySignal, TinybirdConfig,
+    TinybirdMirrorConfig,
 };
 use maple_ingest::usage_metrics::{billable_gb, usage_cardinality_view, UsageMetrics};
 use moka::future::Cache;
@@ -262,6 +263,51 @@ impl AppConfig {
             10_000,
         )?;
 
+        // A second Tinybird workspace to mirror writes into during a workspace
+        // migration. Present only when both halves are set, so the feature is
+        // off everywhere that does not opt in; setting exactly one half is a
+        // deploy mistake and `validate_for_pipeline` rejects it rather than
+        // letting the lane 401 in silence.
+        let mirror_host = std::env::var("TINYBIRD_MIRROR_HOST")
+            .unwrap_or_default()
+            .trim()
+            .trim_end_matches('/')
+            .to_owned();
+        let mirror_token = std::env::var("TINYBIRD_MIRROR_TOKEN")
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let mirror = if mirror_host.is_empty() && mirror_token.is_empty() {
+            None
+        } else {
+            Some(TinybirdMirrorConfig {
+                endpoint: mirror_host,
+                token: mirror_token,
+                // Deliberately far below the primary's 20: the mirror holds a
+                // lane worker for the whole budget, and losing a mirror batch is
+                // cheaper than stalling the lane behind a sick workspace.
+                max_attempts: parse_u32(
+                    "INGEST_TINYBIRD_MIRROR_MAX_ATTEMPTS",
+                    std::env::var("INGEST_TINYBIRD_MIRROR_MAX_ATTEMPTS").ok(),
+                    5,
+                )?,
+                export_timeout: Duration::from_millis(parse_u64(
+                    "INGEST_TINYBIRD_MIRROR_TIMEOUT_MS",
+                    std::env::var("INGEST_TINYBIRD_MIRROR_TIMEOUT_MS").ok(),
+                    3_000,
+                )?),
+                // The ramp knob: start at 1, confirm rows land and nothing is
+                // shed, then climb. Sampling is by org hash, so an org is
+                // consistently in or out and its stream is never half-mirrored.
+                sample_percent: u8::try_from(parse_u32(
+                    "INGEST_TINYBIRD_MIRROR_SAMPLE_PERCENT",
+                    std::env::var("INGEST_TINYBIRD_MIRROR_SAMPLE_PERCENT").ok(),
+                    100,
+                )?)
+                .map_err(|_| "INGEST_TINYBIRD_MIRROR_SAMPLE_PERCENT must be 0..=100".to_owned())?,
+            })
+        };
+
         let tinybird = TinybirdConfig {
             endpoint: std::env::var("TINYBIRD_HOST")
                 .unwrap_or_default()
@@ -272,6 +318,7 @@ impl AppConfig {
                 .unwrap_or_default()
                 .trim()
                 .to_owned(),
+            mirror,
             queue_dir: PathBuf::from(
                 std::env::var("INGEST_QUEUE_DIR")
                     .unwrap_or_else(|_| "/var/lib/maple-ingest/wal".to_owned()),
@@ -353,6 +400,10 @@ impl AppConfig {
         };
         if write_mode.uses_tinybird() {
             tinybird.validate()?;
+        } else {
+            // The mirror is a Tinybird destination, so a half-configured one is
+            // still a deploy mistake in forward-only mode.
+            tinybird.validate_for_pipeline(false)?;
         }
 
         let max_request_body_bytes = parse_usize(
@@ -7022,6 +7073,7 @@ mod tests {
         TinybirdConfig {
             endpoint: String::new(),
             token: String::new(),
+            mirror: None,
             queue_dir,
             queue_max_bytes: 1024 * 1024,
             org_queue_max_bytes: 1024 * 1024,

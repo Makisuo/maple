@@ -175,6 +175,13 @@ static TINYBIRD_EXPORT_RETRIES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| 
         .build()
 });
 
+static TINYBIRD_MIRROR_DROPPED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_tinybird_mirror_dropped_total")
+        .with_description("Rows dropped before reaching the Tinybird mirror lane")
+        .build()
+});
+
 static CLICKHOUSE_EXPORT_ROWS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_clickhouse_export_rows_total")
@@ -553,14 +560,30 @@ pub fn org_queue_bytes(org_id: &str, bytes: u64) {
 }
 
 /// Latency and exported-byte size of a completed WAL export batch.
-pub fn export_batch_completed(shard: usize, signal: &str, duration_secs: f64, exported_bytes: u64) {
-    EXPORT_BATCH_DURATION_SECONDS
-        .record(duration_secs, &[KeyValue::new("shard", shard.to_string())]);
+///
+/// `destination` matters here: without it a mirror lane's drain is
+/// indistinguishable from the primary's in the same shard, which is exactly the
+/// comparison a workspace migration needs.
+pub fn export_batch_completed(
+    shard: usize,
+    destination: &str,
+    signal: &str,
+    duration_secs: f64,
+    exported_bytes: u64,
+) {
+    EXPORT_BATCH_DURATION_SECONDS.record(
+        duration_secs,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+        ],
+    );
     WAL_EXPORTED_BYTES.record(
         exported_bytes,
         &[
             KeyValue::new("signal", signal.to_owned()),
             KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
         ],
     );
 }
@@ -605,22 +628,38 @@ pub fn native_sampled_dropped(signal: &str, count: u64) {
 }
 
 /// A successful Tinybird export: latency and exported row count.
-pub fn tinybird_export_succeeded(datasource: &str, duration_secs: f64, rows: u64) {
+///
+/// `destination` is `tinybird` or `tinybird_mirror`. Comparing the two row
+/// counters per datasource is how a mirrored workspace is proved complete.
+pub fn tinybird_export_succeeded(
+    destination: &str,
+    datasource: &str,
+    duration_secs: f64,
+    rows: u64,
+) {
     TINYBIRD_EXPORT_DURATION_SECONDS.record(
         duration_secs,
         &[
+            KeyValue::new("destination", destination.to_owned()),
             KeyValue::new("datasource", datasource.to_owned()),
             KeyValue::new("status", "2xx"),
         ],
     );
-    TINYBIRD_EXPORT_ROWS_TOTAL.add(rows, &[KeyValue::new("datasource", datasource.to_owned())]);
+    TINYBIRD_EXPORT_ROWS_TOTAL.add(
+        rows,
+        &[
+            KeyValue::new("destination", destination.to_owned()),
+            KeyValue::new("datasource", datasource.to_owned()),
+        ],
+    );
 }
 
 /// Rows dropped while exporting to Tinybird (`status` is an HTTP code or `retries_exhausted`).
-pub fn tinybird_export_dropped(datasource: &str, status: &str, rows: u64) {
+pub fn tinybird_export_dropped(destination: &str, datasource: &str, status: &str, rows: u64) {
     TINYBIRD_EXPORT_DROPPED_TOTAL.add(
         rows,
         &[
+            KeyValue::new("destination", destination.to_owned()),
             KeyValue::new("datasource", datasource.to_owned()),
             KeyValue::new("status", status.to_owned()),
         ],
@@ -628,12 +667,30 @@ pub fn tinybird_export_dropped(datasource: &str, status: &str, rows: u64) {
 }
 
 /// A Tinybird export attempt was retried (`status` is an HTTP code or `transport`).
-pub fn tinybird_export_retry(datasource: &str, status: &str) {
+pub fn tinybird_export_retry(destination: &str, datasource: &str, status: &str) {
     TINYBIRD_EXPORT_RETRIES_TOTAL.add(
         1,
         &[
+            KeyValue::new("destination", destination.to_owned()),
             KeyValue::new("datasource", datasource.to_owned()),
             KeyValue::new("status", status.to_owned()),
+        ],
+    );
+}
+
+/// Rows shed on the commit path before they ever reached the mirror lane
+/// (`reason` is `lane_full`, `org_quota`, `wal_error`, or `no_target`).
+///
+/// The mirror is best-effort, so these drops are invisible to clients and to
+/// every other counter — and nothing backfills the mirrored workspace, so a
+/// non-zero value here is permanent loss, not a gap to be repaired later. It is
+/// the one number that has to stay at zero for the whole migration window.
+pub fn tinybird_mirror_dropped(datasource: &str, reason: &str, rows: u64) {
+    TINYBIRD_MIRROR_DROPPED_TOTAL.add(
+        rows,
+        &[
+            KeyValue::new("datasource", datasource.to_owned()),
+            KeyValue::new("reason", reason.to_owned()),
         ],
     );
 }

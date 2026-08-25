@@ -238,6 +238,7 @@ port and keep `VITE_*` / `MAPLE_INGEST_PUBLIC_URL` consistent.
 | `MAPLE_ORG_ID_OVERRIDE`            | with static    | Must match `MAPLE_DEFAULT_ORG_ID`                                       |
 | `MAPLE_PG_URL`                     | postgres store | `postgres://maple:maple@localhost:5499/maple` if not using static store |
 | `TINYBIRD_HOST` / `TINYBIRD_TOKEN` | tinybird mode  | When `INGEST_WRITE_MODE=tinybird` or `dual`                             |
+| `TINYBIRD_MIRROR_HOST` / `_TOKEN`  | migration only | Mirrors writes into a second workspace; best-effort, set both or neither |
 | `INGEST_PORT`                      | optional       | Default from port / env                                                 |
 | `INGEST_REQUIRE_TLS`               | optional       | `false` locally                                                         |
 
