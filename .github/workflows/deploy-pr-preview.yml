@@ -105,7 +105,7 @@ jobs:
               uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
             - name: Setup mise (toolchain)
-              uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+              uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
             - name: Load deployment secrets from Infisical
               uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
@@ -125,7 +125,7 @@ jobs:
             # AccessDenied until it is widened.
             - name: Configure AWS credentials (OIDC)
               id: aws
-              uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+              uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
                   aws-region: us-east-1
@@ -145,13 +145,13 @@ jobs:
             # nothing heavy is emulated here, just one apt-get layer.
             - name: Register arm64 binfmt handlers (QEMU)
               if: ${{ env.TEARDOWN != 'true' }}
-              uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+              uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
               with:
                   platforms: arm64
 
             - name: Download ingest binary
               if: ${{ env.TEARDOWN != 'true' }}
-              uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
               with:
                   name: maple-ingest
                   path: apps/ingest/dist
