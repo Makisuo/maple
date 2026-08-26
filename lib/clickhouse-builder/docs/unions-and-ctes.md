@@ -65,7 +65,7 @@ const query = CH.from(Recent)
 	.withCTE("recent", cte)
 	.select(($) => ({ name: $.Name }))
 
-const compiled = CH.compile(query, {})
+const compiled = yield * CH.compile(query, {})
 // WITH recent AS ( SELECT Name AS Name FROM events WHERE OrgId = 'org_123' )
 // SELECT Name AS name FROM recent
 compiled.tenantScope // "tenant" — read off the CTE, not declared

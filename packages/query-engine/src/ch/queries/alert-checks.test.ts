@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
 import { alertCheckGroupTotalsQuery, alertChecksSummaryQuery, listRuleChecksQuery } from "./alert-checks"
 
 const baseParams = {
@@ -10,7 +10,7 @@ const baseParams = {
 describe("listRuleChecksQuery", () => {
 	it("compiles the minimal query with OrgId + RuleId", () => {
 		const q = listRuleChecksQuery({ limit: 500 })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain("FROM alert_checks")
 		expect(sql).toContain("formatDateTime(Timestamp, '%Y-%m-%dT%H:%i:%S.%fZ') AS timestamp")
 		expect(sql).toContain("formatDateTime(WindowStart, '%Y-%m-%dT%H:%i:%S.%fZ') AS windowStart")
@@ -28,13 +28,13 @@ describe("listRuleChecksQuery", () => {
 
 	it("applies groupKey filter when provided", () => {
 		const q = listRuleChecksQuery({ limit: 100, groupKey: "svc=api" })
-		const { sql } = compileCH(q, { ...baseParams, groupKey: "svc=api" })
+		const { sql } = compileCHUnsafe(q, { ...baseParams, groupKey: "svc=api" })
 		expect(sql).toContain("GroupKey = 'svc=api'")
 	})
 
 	it("omits groupKey filter when empty string", () => {
 		const q = listRuleChecksQuery({ limit: 100, groupKey: "" })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).not.toContain("GroupKey =")
 	})
 
@@ -44,7 +44,7 @@ describe("listRuleChecksQuery", () => {
 			since: "2024-01-01 00:00:00.000",
 			until: "2024-01-02 00:00:00.000",
 		})
-		const { sql } = compileCH(q, {
+		const { sql } = compileCHUnsafe(q, {
 			...baseParams,
 			since: "2024-01-01 00:00:00.000",
 			until: "2024-01-02 00:00:00.000",
@@ -55,7 +55,7 @@ describe("listRuleChecksQuery", () => {
 
 	it("escapes single quotes in orgId", () => {
 		const q = listRuleChecksQuery({ limit: 10 })
-		const { sql } = compileCH(q, { orgId: "org'evil", ruleId: "rule_1" })
+		const { sql } = compileCHUnsafe(q, { orgId: "org'evil", ruleId: "rule_1" })
 		expect(sql).toContain("OrgId = 'org\\'evil'")
 	})
 
@@ -66,7 +66,7 @@ describe("listRuleChecksQuery", () => {
 			beforeTimestamp: "2024-01-02 03:04:05.000",
 			beforeGroupKey: "svc=worker",
 		})
-		const { sql } = compileCH(q, {
+		const { sql } = compileCHUnsafe(q, {
 			...baseParams,
 			status: "breached",
 			beforeTimestamp: "2024-01-02 03:04:05.000",
@@ -82,7 +82,7 @@ describe("listRuleChecksQuery", () => {
 
 describe("alert history summaries", () => {
 	it("limits the group-ranking query", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			alertCheckGroupTotalsQuery({
 				since: "2024-01-01 00:00:00",
 				until: "2024-12-31 23:59:59",
@@ -100,7 +100,7 @@ describe("alert history summaries", () => {
 	})
 
 	it("buckets top groups and folds the remainder into other", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			alertChecksSummaryQuery({
 				topGroupKeys: ["svc=api", "svc=worker"],
 			}),

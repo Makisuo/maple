@@ -155,7 +155,9 @@ function makeWarehouseStub(state: {
 		compiledQueryWithCapabilities: (_tenant, compile) =>
 			sqlQueryStub().pipe(
 				Effect.flatMap((rows) =>
-					compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie),
+					Effect.runSync(compile(baselineWarehouseCapabilities()))
+						.decodeRows(rows)
+						.pipe(Effect.orDie),
 				),
 			),
 		compiledQueryFirst: (_tenant, compiled) =>
@@ -3279,7 +3281,9 @@ describe("AlertsService", () => {
 			sqlQuery: () => Effect.succeed(alertRows),
 			compiledQuery: (_tenant, compiled) => compiled.decodeRows(alertRows).pipe(Effect.orDie),
 			compiledQueryWithCapabilities: (_tenant, compile) =>
-				compile(baselineWarehouseCapabilities()).decodeRows(alertRows).pipe(Effect.orDie),
+				Effect.runSync(compile(baselineWarehouseCapabilities()))
+					.decodeRows(alertRows)
+					.pipe(Effect.orDie),
 			compiledQueryFirst: (_tenant, compiled) => compiled.decodeFirstRow(alertRows).pipe(Effect.orDie),
 		}
 
@@ -3347,7 +3351,9 @@ describe("AlertsService evaluation error persistence", () => {
 			compiledQueryWithCapabilities: (_tenant, compile) =>
 				sqlQueryStub().pipe(
 					Effect.flatMap((rows) =>
-						compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie),
+						Effect.runSync(compile(baselineWarehouseCapabilities()))
+							.decodeRows(rows)
+							.pipe(Effect.orDie),
 					),
 				),
 			compiledQueryFirst: (_tenant, compiled) =>

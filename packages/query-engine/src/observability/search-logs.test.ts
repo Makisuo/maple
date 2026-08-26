@@ -4,7 +4,13 @@ import { OrgId } from "@maple/domain/http"
 import { searchLogs } from "./search-logs"
 import { WarehouseExecutor } from "./WarehouseExecutor"
 import type { WarehouseExecutorApi } from "./WarehouseExecutor"
-import { compilePipeQuery } from "../ch/pipe-dispatch"
+import { compilePipeQuery as lowerPipeQuery } from "../ch/pipe-dispatch"
+
+/** Lower and compile in one step; a fixture that will not compile should fail. */
+const compilePipeQuery = (...args: Parameters<typeof lowerPipeQuery>) => {
+	const lowered = lowerPipeQuery(...args)
+	return lowered === undefined ? undefined : Effect.runSync(lowered)
+}
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 

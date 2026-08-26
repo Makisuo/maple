@@ -8,7 +8,7 @@
 // apps/api (`sql-catalog.clickhouse.e2e.test.ts`) analyzes these fixtures
 // against the real migrations alongside the core catalog.
 
-import { compile, compileUnion, type CompiledQuery } from "@maple/query-engine/ch"
+import { compileUnionUnsafe, compileUnsafe, type CompiledQuery } from "@maple/query-engine/ch"
 import * as CH from "./index"
 
 export interface IntegrationFixture {
@@ -35,7 +35,8 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		// Row schemas are attached here, not just in the unit tests: the ClickHouse
 		// e2e sweep only runs its quoted/unquoted 64-bit decode assertion for
 		// fixtures whose compiled query carries one.
-		compile: () => compile(CH.aiSessionListQuery(), window, { rowSchema: CH.aiSessionListRowSchema }),
+		compile: () =>
+			compileUnsafe(CH.aiSessionListQuery(), window, { rowSchema: CH.aiSessionListRowSchema }),
 	},
 	{
 		// The vendor/service filters the AI sessions list page sends.
@@ -43,7 +44,7 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		name: "aiSessionListQuery",
 		label: "filtered",
 		compile: () =>
-			compile(
+			compileUnsafe(
 				CH.aiSessionListQuery({
 					limit: 25,
 					vendorIds: ["eve"],
@@ -58,14 +59,14 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		name: "aiSessionFacetsQuery",
 		label: "default",
 		compile: () =>
-			compileUnion(CH.aiSessionFacetsQuery(), window, { rowSchema: CH.aiSessionFacetsRowSchema }),
+			compileUnionUnsafe(CH.aiSessionFacetsQuery(), window, { rowSchema: CH.aiSessionFacetsRowSchema }),
 	},
 	{
 		module: "ai-sessions",
 		name: "aiSessionSpansQuery",
 		label: "default",
 		compile: () =>
-			compile(
+			compileUnsafe(
 				CH.aiSessionSpansQuery(),
 				{ ...window, sessionId: "wrun_sql_catalog" },
 				{ rowSchema: CH.aiSessionSpansRowSchema },
@@ -80,7 +81,7 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		name: "aiSessionWindowQuery",
 		label: "default",
 		compile: () =>
-			compile(
+			compileUnsafe(
 				CH.aiSessionWindowQuery(),
 				{ orgId: ORG_ID, sessionId: "wrun_sql_catalog" },
 				{ rowSchema: CH.aiSessionWindowRowSchema },
@@ -90,13 +91,13 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		module: "cloudflare-infra",
 		name: "cloudflareZoneLatencySQL",
 		label: "default",
-		compile: () => compile(CH.cloudflareZoneLatencySQL(), window),
+		compile: () => compileUnsafe(CH.cloudflareZoneLatencySQL(), window),
 	},
 	{
 		module: "cloudflare-infra",
 		name: "cloudflareZoneTimeseriesSQL",
 		label: "default",
-		compile: () => compile(CH.cloudflareZoneTimeseriesSQL(), { ...window, bucketSeconds: 300 }),
+		compile: () => compileUnsafe(CH.cloudflareZoneTimeseriesSQL(), { ...window, bucketSeconds: 300 }),
 	},
 	{
 		// Filters exercise the zone-slice predicates the /infra/cloudflare page sends.
@@ -104,7 +105,7 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		name: "cloudflareZoneTimeseriesSQL",
 		label: "filtered",
 		compile: () =>
-			compile(
+			compileUnsafe(
 				CH.cloudflareZoneTimeseriesSQL({
 					hosts: ["example.com"],
 					statusClasses: ["5xx"],
@@ -117,14 +118,14 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		module: "cloudflare-infra-extended",
 		name: "cloudflareQueueGaugesSQL",
 		label: "default",
-		compile: () => compile(CH.cloudflareQueueGaugesSQL(), window),
+		compile: () => compileUnsafe(CH.cloudflareQueueGaugesSQL(), window),
 	},
 	{
 		module: "cloudflare-infra-breakdowns",
 		name: "cloudflareZoneBreakdownTimeseriesSQL",
 		label: "default",
 		compile: () =>
-			compile(CH.cloudflareZoneBreakdownTimeseriesSQL("path", {}, ["/api/v2/traces"]), {
+			compileUnsafe(CH.cloudflareZoneBreakdownTimeseriesSQL("path", {}, ["/api/v2/traces"]), {
 				...window,
 				serviceName: "cloudflare-zone-example-com",
 				bucketSeconds: 300,
@@ -134,19 +135,19 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		module: "cloudflare-usage",
 		name: "cloudflareUsageQuery",
 		label: "default",
-		compile: () => compile(CH.cloudflareUsageQuery(), { ...window, bucketSeconds: 3600 }),
+		compile: () => compileUnsafe(CH.cloudflareUsageQuery(), { ...window, bucketSeconds: 3600 }),
 	},
 	{
 		module: "cloudflare-map",
 		name: "cloudflareServiceLatencySQL",
 		label: "default",
-		compile: () => compile(CH.cloudflareServiceLatencySQL(), window),
+		compile: () => compileUnsafe(CH.cloudflareServiceLatencySQL(), window),
 	},
 	{
 		module: "planetscale-map",
 		name: "planetscaleGaugesSQL",
 		label: "default",
-		compile: () => compile(CH.planetscaleGaugesSQL(), window),
+		compile: () => compileUnsafe(CH.planetscaleGaugesSQL(), window),
 	},
 ]
 

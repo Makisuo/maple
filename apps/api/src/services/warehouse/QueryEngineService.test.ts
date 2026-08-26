@@ -90,7 +90,7 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
 		compiledQueryWithCapabilities:
 			overrides.compiledQueryWithCapabilities ??
 			((tenant, compile, options) => {
-				const compiled = compile(baselineWarehouseCapabilities())
+				const compiled = Effect.runSync(compile(baselineWarehouseCapabilities()))
 				return sqlQuery(tenant, compiled.sql, options).pipe(
 					Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
 				)
@@ -120,15 +120,20 @@ describe("makeQueryEngineExecute", () => {
 						_tenant: unknown,
 						compile: (
 							capabilities: ReturnType<typeof baselineWarehouseCapabilities>,
-						) => CompiledQuery<Output>,
+						) => Effect.Effect<CompiledQuery<Output>, QueryBuilderError>,
 						options?: SqlQueryOptions,
-					) => {
-						const compiled = compile(baselineWarehouseCapabilities())
-						receivedSql = compiled.sql
-						context = options?.context
-						profile = options?.profile
-						return compiled.decodeRows([makeTraceTimeseriesRow({ count: 7 })]).pipe(Effect.orDie)
-					},
+					) =>
+						compile(baselineWarehouseCapabilities()).pipe(
+							Effect.orDie,
+							Effect.flatMap((compiled) => {
+								receivedSql = compiled.sql
+								context = options?.context
+								profile = options?.profile
+								return compiled
+									.decodeRows([makeTraceTimeseriesRow({ count: 7 })])
+									.pipe(Effect.orDie)
+							}),
+						),
 				}),
 			)
 
@@ -169,15 +174,18 @@ describe("makeQueryEngineExecute", () => {
 						_tenant: unknown,
 						compile: (
 							capabilities: ReturnType<typeof baselineWarehouseCapabilities>,
-						) => CompiledQuery<Output>,
+						) => Effect.Effect<CompiledQuery<Output>, QueryBuilderError>,
 						options?: SqlQueryOptions,
-					) => {
-						const compiled = compile(baselineWarehouseCapabilities())
-						context = options?.context
-						profile = options?.profile
-						maxBlockSize = options?.settings?.maxBlockSize
-						return compiled.decodeRows([{ total: 42 }]).pipe(Effect.orDie)
-					},
+					) =>
+						compile(baselineWarehouseCapabilities()).pipe(
+							Effect.orDie,
+							Effect.flatMap((compiled) => {
+								context = options?.context
+								profile = options?.profile
+								maxBlockSize = options?.settings?.maxBlockSize
+								return compiled.decodeRows([{ total: 42 }]).pipe(Effect.orDie)
+							}),
+						),
 				}),
 			)
 

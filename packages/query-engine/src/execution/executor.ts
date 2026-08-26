@@ -32,6 +32,7 @@ import { BackendDialect, warehouseTargetAttributes } from "./backend"
 import { managedWarehouseCapabilities } from "./managed-capabilities"
 import { findIngestPinnedTable } from "./datasource-routing"
 import type {
+	CapabilityCompile,
 	ExecutionTenant,
 	ResolvedWarehouseConfig,
 	RoutePurpose,
@@ -762,7 +763,7 @@ WHERE name = 'enable_full_text_index'`,
 			? yield* resolveCapabilities(tenant, options)
 			: undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
-		const compiled = compilePipeQuery(
+		const lowered = compilePipeQuery(
 			payload.pipeName,
 			{
 				...payload.params,
@@ -771,12 +772,25 @@ WHERE name = 'enable_full_text_index'`,
 			capabilities ?? baselineWarehouseCapabilities(),
 		)
 
-		if (!compiled) {
+		if (!lowered) {
 			return yield* new WarehouseValidationError({
 				message: `Unsupported pipe: ${payload.pipeName}`,
 				pipeName: payload.pipeName,
 			})
 		}
+
+		// The pipe params come off the wire, so a value the query cannot encode is
+		// the caller's problem to hear about — the one compile path in the product
+		// where that is true, and the reason it reports rather than crashes.
+		const compiled = yield* lowered.pipe(
+			Effect.mapError(
+				(error) =>
+					new WarehouseValidationError({
+						message: `Could not compile pipe ${payload.pipeName}: ${error.message}`,
+						pipeName: payload.pipeName,
+					}),
+			),
+		)
 
 		// The pipe path used to call `executeTrustedSql` directly, with no scope
 		// assertion of any kind — it relied on `compilePipeQuery` always threading
@@ -892,14 +906,19 @@ WHERE name = 'enable_full_text_index'`,
 
 	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		compiled: CompiledQuery<T> | CapabilityCompile<T>,
 		rawOptions?: SqlQueryOptions,
 	) {
 		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
-		const selected = typeof compiled === "function" ? compiled(capabilities!) : compiled
+		// `orDie`, not a failure in this port's channel: see `CapabilityCompile`.
+		// Every query reaching here is built from Maple's own definitions, so a
+		// compile failure is a bug in the definition rather than a condition a
+		// route could report.
+		const selected =
+			typeof compiled === "function" ? yield* Effect.orDie(compiled(capabilities!)) : compiled
 		const executionOptions = withCapabilitySettings(capabilities, options)
 		yield* Effect.annotateCurrentSpan(
 			"query.optimization.capabilityAware",
@@ -926,7 +945,7 @@ WHERE name = 'enable_full_text_index'`,
 
 	const compiledQuery = (<T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		compiled: CompiledQuery<T> | CapabilityCompile<T>,
 		options?: SqlQueryOptions,
 	) => executeCompiledQuery(tenant, compiled, options)) as WarehouseQueryServiceApi["compiledQuery"]
 
@@ -970,7 +989,7 @@ WHERE name = 'enable_full_text_index'`,
 
 	const compiledQueryWithCapabilities = <T>(
 		tenant: ExecutionTenant,
-		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
+		compile: CapabilityCompile<T>,
 		options?: SqlQueryOptions,
 	) => executeCompiledQuery(tenant, compile, options)
 
@@ -1022,14 +1041,16 @@ WHERE name = 'enable_full_text_index'`,
 
 	const compiledQueryFirst = Effect.fn("WarehouseQueryService.compiledQueryFirst")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		compiled: CompiledQuery<T> | CapabilityCompile<T>,
 		rawOptions?: SqlQueryOptions,
 	) {
 		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
-		const selected = typeof compiled === "function" ? compiled(capabilities!) : compiled
+		// `orDie` for the same reason as `executeCompiledQuery` — see `CapabilityCompile`.
+		const selected =
+			typeof compiled === "function" ? yield* Effect.orDie(compiled(capabilities!)) : compiled
 		const executionOptions = withCapabilitySettings(capabilities, options)
 		yield* Effect.annotateCurrentSpan(
 			"query.optimization.capabilityAware",

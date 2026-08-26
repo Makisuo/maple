@@ -104,6 +104,12 @@ expression has no type to read — an `untypedExpr`, a `defineUntypedFn` —
 nothing is derived, `rowSchemaSource` is `"none"`, and `decodeRows` degrades to
 a pass-through rather than pretending.
 
+Compilation itself is Effect-returning: a param with no value, or a value the
+column cannot hold, is a `QueryBuilderError` in the error channel rather than a
+throw, so a route can `catchTag` it instead of crashing. `compileUnsafe` is the
+throwing variant, for a fixture or a catalog sweep where a query that will not
+compile should fail loudly. A bug inside a callback stays a defect either way.
+
 `decodeFirstRow` is the point-lookup variant, returning `Option<Output>` so you
 don't hand-roll `rows[0] ?? null`. Both fail with `CompiledQueryDecodeError`,
 which carries the offending `rowIndex`. When a query does derive nothing,

@@ -15,7 +15,7 @@
 // reading 5.5B directly above a status donut totalling 26.6M.
 
 import { describe, expect, it } from "vitest"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
 import { tracesBreakdownQuery, tracesTimeseriesQuery } from "./traces"
 import type { TracesBaseWhereOpts } from "./query-helpers"
 
@@ -130,7 +130,7 @@ const TIMESERIES_ROUTES: ReadonlyArray<{
 describe("traces count is sample-weighted on every route", () => {
 	for (const route of TIMESERIES_ROUTES) {
 		it(`weights count on the ${route.name} timeseries path`, () => {
-			const { sql } = compileCH(tracesTimeseriesQuery(route.opts), baseParams)
+			const { sql } = compileCHUnsafe(tracesTimeseriesQuery(route.opts), baseParams)
 			expect(sourceTable(sql)).toBe(route.table)
 			expectWeighted(sql)
 		})
@@ -155,7 +155,10 @@ describe("traces count is sample-weighted on every route", () => {
 				bucketSeconds: 300,
 			},
 		] as const) {
-			const { sql } = compileCH(tracesTimeseriesQuery(opts), { ...baseParams, bucketSeconds: 300 })
+			const { sql } = compileCHUnsafe(tracesTimeseriesQuery(opts), {
+				...baseParams,
+				bucketSeconds: 300,
+			})
 			const spanCount = spanCountExpr(sql)
 			expect(
 				/SampleRate|Estimated|Weighted/.test(spanCount),
@@ -166,7 +169,7 @@ describe("traces count is sample-weighted on every route", () => {
 	})
 
 	it("weights count on the raw breakdown path", () => {
-		const { sql } = compileCH(tracesBreakdownQuery({ metric: "count", groupBy: "span_name" }), {
+		const { sql } = compileCHUnsafe(tracesBreakdownQuery({ metric: "count", groupBy: "span_name" }), {
 			orgId: "org_123",
 			startTime: baseParams.startTime,
 			endTime: baseParams.endTime,
@@ -176,7 +179,7 @@ describe("traces count is sample-weighted on every route", () => {
 	})
 
 	it("weights count on the MV breakdown path", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			tracesBreakdownQuery({ metric: "count", groupBy: "service", rootOnly: true }),
 			{ orgId: "org_123", startTime: baseParams.startTime, endTime: baseParams.endTime },
 		)
@@ -202,7 +205,7 @@ describe("a breakdown totals the same regardless of the dimension", () => {
 		it(`uses one count definition and one population across dimensions (${label})`, () => {
 			const compiled = BREAKDOWN_DIMENSIONS.map(
 				(dim) =>
-					compileCH(tracesBreakdownQuery({ metric: "count", ...dim, ...filters }), {
+					compileCHUnsafe(tracesBreakdownQuery({ metric: "count", ...dim, ...filters }), {
 						orgId: "org_123",
 						startTime: baseParams.startTime,
 						endTime: baseParams.endTime,
@@ -236,14 +239,14 @@ describe("timeseries and breakdown agree for the same query", () => {
 	]
 
 	const breakdownSql = (groupBy: string, opts: TracesBaseWhereOpts) =>
-		compileCH(tracesBreakdownQuery({ metric: "count", groupBy, ...opts }), {
+		compileCHUnsafe(tracesBreakdownQuery({ metric: "count", groupBy, ...opts }), {
 			orgId: "org_123",
 			startTime: baseParams.startTime,
 			endTime: baseParams.endTime,
 		}).sql
 
 	const timeseriesSql = (groupBy: string, opts: TracesBaseWhereOpts, bucketSeconds: number) =>
-		compileCH(
+		compileCHUnsafe(
 			tracesTimeseriesQuery({
 				metric: "count",
 				needsSampling: false,
@@ -318,7 +321,7 @@ describe("timeseries and breakdown agree for the same query", () => {
 	// Quantile state must be the same aggregate type on both branches: the raw
 	// side builds it, the rollup side re-emits its stored state via -MergeState.
 	it("emits matching quantile aggregate states across the union", () => {
-		const sql = compileCH(
+		const sql = compileCHUnsafe(
 			tracesTimeseriesQuery({
 				metric: "p95_duration",
 				needsSampling: false,

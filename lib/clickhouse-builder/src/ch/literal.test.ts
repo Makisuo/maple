@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { DateTime, Effect, Schema } from "effect"
 import * as CH from "./index"
 import * as T from "./types"
-import { compileCH } from "./compile"
+import { compileCHUnsafe } from "./compile"
 import { encodeLiteral, sqlLiteral } from "./literal"
 
 // A column type is a codec, so the value that comes back out of a row and the
@@ -24,7 +24,7 @@ const Events = CH.table("events", {
 const whereSql = (
 	build: Parameters<ReturnType<typeof CH.from<"events", typeof Events.columns>>["where"]>[0],
 ) =>
-	compileCH(
+	compileCHUnsafe(
 		CH.from(Events)
 			.select(($) => ({ id: $.OrgId }))
 			.where(build),
@@ -132,6 +132,6 @@ describe("param.of", () => {
 			.select(($) => ({ id: $.OrgId }))
 			.where(($) => [$.OrgId.eq(CH.param.of(Level, "level"))])
 
-		expect(compileCH(query, { level: "warn" }).sql).toContain("OrgId = 'warn'")
+		expect(compileCHUnsafe(query, { level: "warn" }).sql).toContain("OrgId = 'warn'")
 	})
 })

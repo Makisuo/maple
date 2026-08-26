@@ -1,4 +1,4 @@
-import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
+import type { CompiledQuery, QueryBuilderError } from "@maple-dev/clickhouse-builder"
 import { Effect, type Option } from "effect"
 import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "../capabilities"
 import type { SqlQueryOptions } from "../profiles"
@@ -16,7 +16,9 @@ export interface QueryDefinitionWarehouse<Tenant extends QueryDefinitionTenant, 
 	) => Effect.Effect<ReadonlyArray<Row>, Error>
 	readonly compiledQueryWithCapabilities: <Row>(
 		tenant: Tenant,
-		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<Row>,
+		compile: (
+			capabilities: WarehouseCapabilities,
+		) => Effect.Effect<CompiledQuery<Row>, QueryBuilderError>,
 		options: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Row>, Error>
 }
@@ -24,7 +26,9 @@ export interface QueryDefinitionWarehouse<Tenant extends QueryDefinitionTenant, 
 export interface QueryDefinitionFirstWarehouse<Tenant extends QueryDefinitionTenant, Error> {
 	readonly compiledQueryFirst: <Row>(
 		tenant: Tenant,
-		compiled: CompiledQuery<Row> | ((capabilities: WarehouseCapabilities) => CompiledQuery<Row>),
+		compiled:
+			| CompiledQuery<Row>
+			| ((capabilities: WarehouseCapabilities) => Effect.Effect<CompiledQuery<Row>, QueryBuilderError>),
 		options: SqlQueryOptions,
 	) => Effect.Effect<Option.Option<Row>, Error>
 }
@@ -51,16 +55,19 @@ export const runQueryDefinition = <Payload, Row, Tenant extends QueryDefinitionT
 ): Effect.Effect<ReadonlyArray<Row>, Error> => {
 	const options = queryDefinitionOptions(definition, payload)
 
+	// The capability-aware branch hands the compile to the warehouse, which
+	// resolves capabilities first; the plain branch compiles here. Both treat a
+	// compile failure as a defect — a definition that cannot compile its own
+	// payload is a bug in the definition, not a condition a route reports.
 	return definition.capabilityAware
 		? warehouse.compiledQueryWithCapabilities(
 				tenant,
 				(capabilities) => definition.compile(payload, tenant.orgId, capabilities),
 				options,
 			)
-		: warehouse.compiledQuery(
-				tenant,
-				definition.compile(payload, tenant.orgId, baselineWarehouseCapabilities()),
-				options,
+		: definition.compile(payload, tenant.orgId, baselineWarehouseCapabilities()).pipe(
+				Effect.orDie,
+				Effect.flatMap((compiled) => warehouse.compiledQuery(tenant, compiled, options)),
 			)
 }
 
@@ -70,10 +77,19 @@ export const runQueryDefinitionFirst = <Payload, Row, Tenant extends QueryDefini
 	tenant: Tenant,
 	payload: Payload,
 ): Effect.Effect<Option.Option<Row>, Error> =>
-	warehouse.compiledQueryFirst(
-		tenant,
-		definition.capabilityAware
-			? (capabilities) => definition.compile(payload, tenant.orgId, capabilities)
-			: definition.compile(payload, tenant.orgId, baselineWarehouseCapabilities()),
-		queryDefinitionOptions(definition, payload),
-	)
+	definition.capabilityAware
+		? warehouse.compiledQueryFirst(
+				tenant,
+				(capabilities) => definition.compile(payload, tenant.orgId, capabilities),
+				queryDefinitionOptions(definition, payload),
+			)
+		: definition.compile(payload, tenant.orgId, baselineWarehouseCapabilities()).pipe(
+				Effect.orDie,
+				Effect.flatMap((compiled) =>
+					warehouse.compiledQueryFirst(
+						tenant,
+						compiled,
+						queryDefinitionOptions(definition, payload),
+					),
+				),
+			)

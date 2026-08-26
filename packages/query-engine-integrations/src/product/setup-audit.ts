@@ -23,7 +23,7 @@ import {
 	type CompiledQuery,
 	type CompiledQueryRowSchema,
 } from "@maple-dev/clickhouse-builder"
-import { Schema } from "effect"
+import { Schema, Effect } from "effect"
 import {
 	AttributeKeysHourly,
 	AttributeValuesHourly,
@@ -39,6 +39,7 @@ import {
 import { CHNumber } from "@maple/query-engine/ch/schema"
 import { hourFloor } from "@maple/query-engine/ch/query-helpers"
 import * as T from "@maple-dev/clickhouse-builder/types"
+import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 
 /** Snaps a window bound to its hour floor so any overlapping hour of an hourly MV contributes. */
 
@@ -504,7 +505,9 @@ export interface AuditTraceWindowParams {
  * `sampledOrphanCount` splits out orphans inside sampling-marked traces, where a dropped parent is
  * expected rather than a defect; the caller reports those as a sampling observation instead.
  */
-export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQuery<AuditOrphanSpanRow> {
+export function auditOrphanSpansSQL(
+	params: AuditTraceWindowParams,
+): Effect.Effect<CompiledQuery<AuditOrphanSpanRow>, QueryBuilderError> {
 	const modulus = normalizeModulus(params.traceSampleModulus)
 
 	const children = from(ServiceMapChildren)
@@ -591,7 +594,9 @@ export const auditRootlessTraceRowSchema: CompiledQueryRowSchema<AuditRootlessTr
  * `traceparent` without exporting spans — shows up as a near-total, uniform rootless rate, and the
  * caller collapses it into one finding rather than one per service.
  */
-export function auditRootlessTracesSQL(params: AuditTraceWindowParams): CompiledQuery<AuditRootlessTraceRow> {
+export function auditRootlessTracesSQL(
+	params: AuditTraceWindowParams,
+): Effect.Effect<CompiledQuery<AuditRootlessTraceRow>, QueryBuilderError> {
 	const modulus = normalizeModulus(params.traceSampleModulus)
 
 	const traces = from(ServiceMapChildren)

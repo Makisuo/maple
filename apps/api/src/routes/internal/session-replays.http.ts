@@ -31,19 +31,25 @@ export const HttpSessionReplaysInternalLive = HttpApiBuilder.group(
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const compiled = CH.compileUnion(
-							CH.sessionReplaysFacetsQuery({
-								serviceName: payload.serviceName,
-								browser: payload.browser,
-								country: payload.country,
-								deviceType: payload.deviceType,
-								userId: payload.userId,
-								userSearch: payload.userSearch,
-								groupName: payload.groupName,
-								hasErrors: payload.hasErrors,
-								search: payload.search,
-							}),
-							{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+						const compiled = yield* Effect.orDie(
+							CH.compileUnion(
+								CH.sessionReplaysFacetsQuery({
+									serviceName: payload.serviceName,
+									browser: payload.browser,
+									country: payload.country,
+									deviceType: payload.deviceType,
+									userId: payload.userId,
+									userSearch: payload.userSearch,
+									groupName: payload.groupName,
+									hasErrors: payload.hasErrors,
+									search: payload.search,
+								}),
+								{
+									orgId: tenant.orgId,
+									startTime: payload.startTime,
+									endTime: payload.endTime,
+								},
+							),
 						)
 						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 							profile: "list",
@@ -88,13 +94,15 @@ export const HttpSessionReplaysInternalLive = HttpApiBuilder.group(
 						if (payload.traceIds.length === 0) {
 							return new SessionTraceSummariesResponse({ data: [] })
 						}
-						const compiled = CH.compile(
-							CH.sessionTraceSummariesQuery({
-								traceIds: payload.traceIds,
-								startTime: payload.windowStart,
-								endTime: payload.windowEnd,
-							}),
-							{ orgId: tenant.orgId },
+						const compiled = yield* Effect.orDie(
+							CH.compile(
+								CH.sessionTraceSummariesQuery({
+									traceIds: payload.traceIds,
+									startTime: payload.windowStart,
+									endTime: payload.windowEnd,
+								}),
+								{ orgId: tenant.orgId },
+							),
 						)
 						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 							profile: "list",

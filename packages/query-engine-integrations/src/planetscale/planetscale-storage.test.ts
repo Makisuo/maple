@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	planetscaleBranchStorageRowSchema,
 	planetscaleBranchStorageSQL,
@@ -16,7 +16,7 @@ const params = {
 
 describe("planetscaleStorageSQL", () => {
 	it("derives the used ratio per branch before rolling up to the database", () => {
-		const { sql } = compileCH(planetscaleStorageSQL(), params)
+		const { sql } = compileCHUnsafe(planetscaleStorageSQL(), params)
 		// The inner grouping must carry `branch`, otherwise a database's max capacity
 		// and min free space can come from two different branches and produce a
 		// percentage neither branch ever had.
@@ -28,13 +28,13 @@ describe("planetscaleStorageSQL", () => {
 	})
 
 	it("guards the ratio against zero capacity and an absent free-space series", () => {
-		const { sql } = compileCH(planetscaleStorageSQL(), params)
+		const { sql } = compileCHUnsafe(planetscaleStorageSQL(), params)
 		expect(sql).toContain("capacityBytes > 0")
 		expect(sql).toContain("samples > 0")
 	})
 
 	it("phrases the ratio so SQL precedence yields used-percent", () => {
-		const { sql } = compileCH(planetscaleStorageSQL(), params)
+		const { sql } = compileCHUnsafe(planetscaleStorageSQL(), params)
 		// The builder's arithmetic helpers don't parenthesize, so the intuitive
 		// `(capacity - available) / capacity * 100` would compile to
 		// `capacity - available / capacity * 100` — a byte count, not a percentage.
@@ -44,12 +44,12 @@ describe("planetscaleStorageSQL", () => {
 	})
 
 	it("scopes to the org", () => {
-		const { sql } = compileCH(planetscaleStorageSQL(), params)
+		const { sql } = compileCHUnsafe(planetscaleStorageSQL(), params)
 		expect(sql).toContain("OrgId = 'org_1'")
 	})
 
 	it("decodes 64-bit byte counts arriving as strings", () => {
-		const compiled = compileCH(planetscaleStorageSQL(), params, {
+		const compiled = compileCHUnsafe(planetscaleStorageSQL(), params, {
 			rowSchema: planetscaleStorageRowSchema,
 		})
 		expect(
@@ -64,7 +64,7 @@ describe("planetscaleStorageSQL", () => {
 
 describe("planetscaleBranchStorageSQL", () => {
 	it("filters to one database and keeps the raw byte counts", () => {
-		const { sql } = compileCH(planetscaleBranchStorageSQL(), { ...params, database: "maple" })
+		const { sql } = compileCHUnsafe(planetscaleBranchStorageSQL(), { ...params, database: "maple" })
 		expect(sql).toContain(
 			"coalesce(nullIf(Attributes['planetscale_database_name'], ''), Attributes['planetscale_database']) = 'maple'",
 		)
@@ -73,7 +73,7 @@ describe("planetscaleBranchStorageSQL", () => {
 	})
 
 	it("decodes a branch row", () => {
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			planetscaleBranchStorageSQL(),
 			{ ...params, database: "maple" },
 			{ rowSchema: planetscaleBranchStorageRowSchema },

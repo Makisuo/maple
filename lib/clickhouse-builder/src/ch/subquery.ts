@@ -6,7 +6,7 @@
 // today only because everything crossing it is a hoisted `function` declaration
 // — one top-level `const` away from a TDZ crash in the bundle.
 
-import { compileCH } from "./compile"
+import { compileCHUnsafe } from "./compile"
 import { type Condition, type Expr, makeCond } from "./expr"
 import type { CHQuery } from "./query"
 import { compile, raw } from "../sql/sql-fragment"
@@ -31,7 +31,7 @@ export type Subquery = string | CHQuery<any, any, any>
 const toSql = (subquery: Subquery): string =>
 	typeof subquery === "string"
 		? subquery
-		: compileCH(subquery, {}, { skipFormat: true, deferParams: true }).sql
+		: compileCHUnsafe(subquery, {}, { skipFormat: true, deferParams: true }).sql
 
 // A note that applies to all three of these:
 //

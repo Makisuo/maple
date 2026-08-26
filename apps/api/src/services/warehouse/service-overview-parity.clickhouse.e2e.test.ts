@@ -227,7 +227,7 @@ const groundTruthSql = (bucketSeconds: number, groupByService: boolean): string 
 `
 
 const splicedSql = (bucketSeconds: number, groupByService: boolean): string =>
-	CH.compile(
+	CH.compileUnsafe(
 		CH.tracesTimeseriesQuery({
 			metric: "count",
 			allMetrics: true,
@@ -367,7 +367,7 @@ describe.skipIf(!clickhouseE2eEnabled)("service overview raw-vs-rollup parity", 
 
 		const threeTier = await sumOf(splicedSql(3600, false))
 		const twoTier = await sumOf(
-			CH.compile(
+			CH.compileUnsafe(
 				CH.tracesTimeseriesQuery({
 					metric: "count",
 					allMetrics: true,
@@ -394,7 +394,7 @@ describe.skipIf(!clickhouseE2eEnabled)("service overview raw-vs-rollup parity", 
 	})
 
 	it("merges tDigest states rather than averaging namespace quantiles", async () => {
-		const rows = await runJson(CH.compile(CH.serviceOverviewQuery({}), window).sql)
+		const rows = await runJson(CH.compileUnsafe(CH.serviceOverviewQuery({}), window).sql)
 		const skewed = rows.find((row) => String(row.serviceName) === "skewed")
 		assert.isDefined(skewed, "the skewed-namespace seed did not reach serviceOverviewQuery")
 		if (!skewed) return
@@ -443,7 +443,7 @@ describe.skipIf(!clickhouseE2eEnabled)("service overview raw-vs-rollup parity", 
 	})
 
 	it("collapses namespace variants into one row per service and environment", async () => {
-		const rows = await runJson(CH.compile(CH.serviceOverviewQuery({}), window).sql)
+		const rows = await runJson(CH.compileUnsafe(CH.serviceOverviewQuery({}), window).sql)
 		const skewed = rows.filter((row) => String(row.serviceName) === "skewed")
 		assert.lengthOf(skewed, 1, "namespace variants must not surface as separate rows")
 		// argMax on estimated span count — `slow` carries 200 spans to `fast`'s 20.

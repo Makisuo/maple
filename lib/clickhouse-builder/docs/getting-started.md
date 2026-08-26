@@ -61,15 +61,21 @@ of the object returned from `select` become both the SQL aliases and the keys of
 type — here `{ name: string; p95: number; count: number }`.
 
 > `orderBy` takes `[column, direction]` **tuples**. `.orderBy("count", "desc")` is a type
-> error, and throws at compile time if you reach it from untyped code.
+> error, and fails compilation if you reach it from untyped code.
 
 ## Compile it
 
+Compilation returns an `Effect` — a missing param or a value the column cannot hold is a typed
+`QueryBuilderError` rather than a throw. The snippets below `yield*` it; reach for
+`CH.compileUnsafe` where a throw is what you want.
+
 ```ts
-const compiled = CH.compile(query, {
-	orgId: "org_123",
-	startTime: "2026-01-01 00:00:00",
-})
+const compiled =
+	yield *
+	CH.compile(query, {
+		orgId: "org_123",
+		startTime: "2026-01-01 00:00:00",
+	})
 
 compiled.sql
 // SELECT Name AS name, quantile(0.95)(DurationMs) AS p95, count() AS count
@@ -92,12 +98,14 @@ use, then hand the rows back for decoding:
 ```ts
 import { Effect, Schema } from "effect"
 
-const compiled = CH.compile(query, params, {
-	rowSchema: Schema.Struct({
-		name: Schema.String,
-		count: Schema.Number,
-	}),
-})
+const compiled =
+	yield *
+	CH.compile(query, params, {
+		rowSchema: Schema.Struct({
+			name: Schema.String,
+			count: Schema.Number,
+		}),
+	})
 
 const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))
 ```

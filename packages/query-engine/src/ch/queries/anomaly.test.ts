@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	anomalyErrorSpikeBaselineQuery,
 	anomalyErrorSpikeCurrentQuery,
@@ -31,7 +31,7 @@ describe("matchedHoursOfDay", () => {
 describe("anomalyTraceSignalsQuery", () => {
 	it("reads the hourly MV with entry-point + matched-hour filters", () => {
 		const q = anomalyTraceSignalsQuery({ hoursOfDay: matchedHoursOfDay(14) })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain("FROM traces_aggregates_hourly")
 		expect(sql).toContain("IsEntryPoint = 1")
 		expect(sql).toContain("toHour(Hour) IN (13, 14, 15)")
@@ -47,7 +47,7 @@ describe("anomalyTraceSignalsQuery", () => {
 describe("anomalyLogVolumeQuery", () => {
 	it("reads logs_aggregates_hourly with severity-class sums", () => {
 		const q = anomalyLogVolumeQuery({ hoursOfDay: matchedHoursOfDay(0) })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain("FROM logs_aggregates_hourly")
 		expect(sql).toContain("toHour(Hour) IN (23, 0, 1)")
 		expect(sql).toContain("sumIf(Count, lower(SeverityText) IN ('error', 'fatal', 'critical'))")
@@ -59,7 +59,7 @@ describe("anomalyLogVolumeQuery", () => {
 describe("anomalyErrorSpikeCurrentQuery", () => {
 	it("reads the time-ordered error events sibling grouped by fingerprint", () => {
 		const q = anomalyErrorSpikeCurrentQuery({})
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain("FROM error_events_by_time")
 		expect(sql).toContain("toString(FingerprintHash) AS fingerprintHash")
 		expect(sql).toContain("GROUP BY fingerprintHash, deploymentEnv")
@@ -72,7 +72,7 @@ describe("anomalyErrorSpikeCurrentQuery", () => {
 describe("anomalyErrorSpikeBaselineQuery", () => {
 	it("compiles a two-level hourly aggregate", () => {
 		const q = anomalyErrorSpikeBaselineQuery({})
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain("FROM error_events_by_time")
 		expect(sql).toContain("toStartOfHour(Timestamp)")
 		expect(sql).toContain("count() AS hourCount")
@@ -94,7 +94,7 @@ const seriesParams = {
 describe("anomalyTraceSignalTimeseriesQuery", () => {
 	it("returns a continuous hourly window for one service/env series", () => {
 		const q = anomalyTraceSignalTimeseriesQuery()
-		const { sql } = compileCH(q, seriesParams)
+		const { sql } = compileCHUnsafe(q, seriesParams)
 		expect(sql).toContain("FROM traces_aggregates_hourly")
 		expect(sql).toContain("IsEntryPoint = 1")
 		expect(sql).toContain("ServiceName = 'checkout'")
@@ -113,7 +113,7 @@ describe("anomalyTraceSignalTimeseriesQuery", () => {
 describe("anomalyLogVolumeTimeseriesQuery", () => {
 	it("returns hourly error-log volume for one service/env series", () => {
 		const q = anomalyLogVolumeTimeseriesQuery()
-		const { sql } = compileCH(q, seriesParams)
+		const { sql } = compileCHUnsafe(q, seriesParams)
 		expect(sql).toContain("FROM logs_aggregates_hourly")
 		expect(sql).toContain("sumIf(Count, lower(SeverityText) IN ('error', 'fatal', 'critical'))")
 		expect(sql).toContain("ServiceName = 'checkout'")
@@ -127,7 +127,7 @@ describe("anomalyLogVolumeTimeseriesQuery", () => {
 describe("anomalyErrorSpikeTimeseriesQuery", () => {
 	it("buckets one fingerprint/env series by interval", () => {
 		const q = anomalyErrorSpikeTimeseriesQuery()
-		const { sql } = compileCH(q, {
+		const { sql } = compileCHUnsafe(q, {
 			...baseParams,
 			fingerprintHash: "12345",
 			deploymentEnv: "prod",

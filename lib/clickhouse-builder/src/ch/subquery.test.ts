@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { compileCH } from "./compile"
+import { compileCHUnsafe } from "./compile"
 import * as CH from "./index"
 import { param } from "./param"
 
@@ -23,7 +23,7 @@ const excludedTraces = CH.from(Excluded)
 
 describe("subquery conditions", () => {
 	it("splices a CHQuery as the IN subquery", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [$.OrgId.eq(param.string("orgId")), CH.inSubquery($.TraceId, excludedTraces)]),
@@ -35,7 +35,7 @@ describe("subquery conditions", () => {
 	})
 
 	it("resolves the inner query's params from the outer param set", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [$.OrgId.eq(param.string("orgId")), CH.inSubquery($.TraceId, excludedTraces)]),
@@ -49,7 +49,7 @@ describe("subquery conditions", () => {
 	})
 
 	it("emits NOT IN for notInSubquery", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [
@@ -63,7 +63,7 @@ describe("subquery conditions", () => {
 	})
 
 	it("still accepts pre-compiled SQL", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [
@@ -79,7 +79,7 @@ describe("subquery conditions", () => {
 	it("does NOT let a scoped subquery scope the outer query", () => {
 		// `x IN (SELECT y FROM t WHERE OrgId = 'a')` does not confine the outer
 		// read to org 'a' — another org can hold the same `y`.
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [CH.inSubquery($.TraceId, excludedTraces)]),
@@ -97,7 +97,7 @@ describe("withCTE with a query", () => {
 			.where(($) => [$.OrgId.eq(param.string("orgId"))])
 			.groupBy("TraceId")
 
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(CH.table("hot", { TraceId: CH.string, total: CH.uint64 }))
 				.select(($) => ({ TraceId: $.TraceId }))
 				.withCTE("hot", scopedCte),
@@ -114,7 +114,7 @@ describe("withCTE with a query", () => {
 			.select(($) => ({ TraceId: $.TraceId }))
 			.groupBy("TraceId")
 
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(CH.table("hot", { TraceId: CH.string }))
 				.select(($) => ({ TraceId: $.TraceId }))
 				.withCTE("hot", unscopedCte),
@@ -127,7 +127,7 @@ describe("withCTE with a query", () => {
 
 describe("having", () => {
 	it("emits HAVING after GROUP BY and before ORDER BY", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ serviceName: $.ServiceName, total: CH.sum($.Count) }))
 				.where(($) => [$.OrgId.eq(param.string("orgId"))])
@@ -144,7 +144,7 @@ describe("having", () => {
 
 	it("drops undefined entries like where does", () => {
 		const build = (filterEmpty: boolean) =>
-			compileCH(
+			compileCHUnsafe(
 				CH.from(Events)
 					.select(($) => ({ serviceName: $.ServiceName, total: CH.sum($.Count) }))
 					.where(($) => [$.OrgId.eq(param.string("orgId"))])
@@ -162,7 +162,7 @@ describe("having", () => {
 	it("does NOT scope a query via the tenant column", () => {
 		// By HAVING time the rows are aggregated — the scan that produced them
 		// already crossed tenants.
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ orgId: $.OrgId, total: CH.sum($.Count) }))
 				.groupBy("orgId")
@@ -177,7 +177,7 @@ describe("having", () => {
 
 describe("Expr.mod", () => {
 	it("emits an infix modulo", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [$.OrgId.eq(param.string("orgId")), CH.cityHash64($.TraceId).mod(16).eq(0)]),
@@ -203,6 +203,6 @@ describe("deferred params", () => {
 			.select(($) => ({ traceId: $.TraceId }))
 			.where(($) => [$.OrgId.eq(param.string("orgId")), CH.inSubquery($.TraceId, spliced)])
 
-		expect(compileCH(outer, { orgId: "org_1" }).sql).not.toContain("__PARAM_")
+		expect(compileCHUnsafe(outer, { orgId: "org_1" }).sql).not.toContain("__PARAM_")
 	})
 })

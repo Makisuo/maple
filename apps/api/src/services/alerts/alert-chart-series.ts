@@ -187,24 +187,26 @@ export const loadChartSeries = (
 	options: LoadChartSeriesOptions,
 ): Effect.Effect<AlertChartSeries | null> =>
 	Effect.gen(function* () {
-		const compiled = CH.compile(
-			CH.listRuleChecksQuery({
-				limit: MAX_CHECK_ROWS,
-				...(options.groupKey != null && options.groupKey !== ""
-					? { groupKey: options.groupKey }
-					: undefined),
-				since: toWarehouseDateTime(options.fromMs),
-				until: toWarehouseDateTime(options.toMs),
-			}),
-			{
-				orgId: options.orgId,
-				ruleId: options.ruleId,
-				...(options.groupKey != null && options.groupKey !== ""
-					? { groupKey: options.groupKey }
-					: undefined),
-				since: toWarehouseDateTime(options.fromMs),
-				until: toWarehouseDateTime(options.toMs),
-			},
+		const compiled = yield* Effect.orDie(
+			CH.compile(
+				CH.listRuleChecksQuery({
+					limit: MAX_CHECK_ROWS,
+					...(options.groupKey != null && options.groupKey !== ""
+						? { groupKey: options.groupKey }
+						: undefined),
+					since: toWarehouseDateTime(options.fromMs),
+					until: toWarehouseDateTime(options.toMs),
+				}),
+				{
+					orgId: options.orgId,
+					ruleId: options.ruleId,
+					...(options.groupKey != null && options.groupKey !== ""
+						? { groupKey: options.groupKey }
+						: undefined),
+					since: toWarehouseDateTime(options.fromMs),
+					until: toWarehouseDateTime(options.toMs),
+				},
+			),
 		)
 
 		const rows = yield* warehouse.compiledQuery(tenant, compiled, {

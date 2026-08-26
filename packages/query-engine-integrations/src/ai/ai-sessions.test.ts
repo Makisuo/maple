@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCH, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe, compileUnionUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
 	aiSessionFacetsQuery,
 	aiSessionFacetsRowSchema,
@@ -28,7 +28,7 @@ const orgPredicateCount = (sql: string) => sql.split("OrgId = 'org_1'").length -
 
 describe("aiSessionListQuery", () => {
 	it("detects sessions on traces, then fans out over trace_detail_spans", () => {
-		const { sql } = compileCH(aiSessionListQuery(), params)
+		const { sql } = compileCHUnsafe(aiSessionListQuery(), params)
 
 		// The detection level is the one the SpanAttributes bloom index serves;
 		// the fan-out reads the MV whose sort key starts (OrgId, TraceId).
@@ -42,17 +42,17 @@ describe("aiSessionListQuery", () => {
 	})
 
 	it("repeats the org predicate on every level that reads a table", () => {
-		const { sql } = compileCH(aiSessionListQuery(), params)
+		const { sql } = compileCHUnsafe(aiSessionListQuery(), params)
 
 		expect(orgPredicateCount(sql)).toBe(2)
 	})
 
 	it("is org-scoped", () => {
-		expect(compileCH(aiSessionListQuery(), params).tenantScope).toBe("tenant")
+		expect(compileCHUnsafe(aiSessionListQuery(), params).tenantScope).toBe("tenant")
 	})
 
 	it("tests session-id presence with mapContains AND a non-empty value", () => {
-		const { sql } = compileCH(aiSessionListQuery(), params)
+		const { sql } = compileCHUnsafe(aiSessionListQuery(), params)
 
 		// ClickHouse yields '' for a missing Map key, so mapContains alone would
 		// admit spans carrying an empty session id.
@@ -62,7 +62,7 @@ describe("aiSessionListQuery", () => {
 	})
 
 	it("resolves the vendor from the earliest session-bearing span, not max()", () => {
-		const { sql } = compileCH(aiSessionListQuery(), params)
+		const { sql } = compileCHUnsafe(aiSessionListQuery(), params)
 
 		// max(vendorId) picked `vercel_ai_sdk` alphabetically over the `eve` that
 		// actually ran the turn — see the builder's doc comment.
@@ -76,20 +76,20 @@ describe("aiSessionListQuery", () => {
 	})
 
 	it("escapes an org id carrying a quote", () => {
-		const { sql } = compileCH(aiSessionListQuery(), { ...params, orgId: "org'evil" })
+		const { sql } = compileCHUnsafe(aiSessionListQuery(), { ...params, orgId: "org'evil" })
 
 		expect(sql).toContain("OrgId = 'org\\'evil'")
 	})
 
 	it("omits the optional filters when none are given", () => {
-		const { sql } = compileCH(aiSessionListQuery(), params)
+		const { sql } = compileCHUnsafe(aiSessionListQuery(), params)
 
 		expect(sql).not.toContain("SpanAttributes['maple_ai.vendor.id'] IN")
 		expect(sql).not.toContain("ServiceName IN")
 	})
 
 	it("puts both optional filters on the detection level only", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			aiSessionListQuery({ limit: 25, vendorIds: ["eve"], serviceNames: ["maple-slack-agent"] }),
 			params,
 		)
@@ -103,7 +103,7 @@ describe("aiSessionListQuery", () => {
 	})
 
 	it("pads the fan-out window rather than dropping it", () => {
-		const { sql } = compileCH(aiSessionListQuery(), params)
+		const { sql } = compileCHUnsafe(aiSessionListQuery(), params)
 		const [fanOut, detection] = sql.split("TraceId IN (SELECT")
 
 		// `trace_detail_spans` is PARTITION BY toDate(Timestamp), so this predicate
@@ -119,11 +119,11 @@ describe("aiSessionListQuery", () => {
 	})
 
 	it("leaves no unresolved param placeholder", () => {
-		expect(compileCH(aiSessionListQuery(), params).sql).not.toContain("__PARAM_")
+		expect(compileCHUnsafe(aiSessionListQuery(), params).sql).not.toContain("__PARAM_")
 	})
 
 	it("decodes quoted 64-bit aggregates and the service-name array", () => {
-		const compiled = compileCH(aiSessionListQuery(), params, { rowSchema: aiSessionListRowSchema })
+		const compiled = compileCHUnsafe(aiSessionListQuery(), params, { rowSchema: aiSessionListRowSchema })
 
 		const [row] = decodeRows(compiled, [
 			{
@@ -157,7 +157,7 @@ describe("aiSessionListQuery", () => {
 
 describe("aiSessionFacetsQuery", () => {
 	it("groups the detection scan only — no fan-out over trace_detail_spans", () => {
-		const { sql } = compileUnion(aiSessionFacetsQuery(), params)
+		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
 		expect(sql).toContain("FROM traces")
 		expect(sql).not.toContain("trace_detail_spans")
@@ -166,7 +166,7 @@ describe("aiSessionFacetsQuery", () => {
 	})
 
 	it("counts distinct sessions per vendor and per service", () => {
-		const { sql } = compileUnion(aiSessionFacetsQuery(), params)
+		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
 		expect(sql).toContain("SpanAttributes['maple_ai.vendor.id'] AS name")
 		expect(sql).toContain("ServiceName AS name")
@@ -178,7 +178,7 @@ describe("aiSessionFacetsQuery", () => {
 	})
 
 	it("repeats the org and window predicates on every union branch", () => {
-		const { sql } = compileUnion(aiSessionFacetsQuery(), params)
+		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
 		expect(orgPredicateCount(sql)).toBe(2)
 		expect(sql.split(`Timestamp >= '${params.startTime}'`).length - 1).toBe(2)
@@ -186,11 +186,11 @@ describe("aiSessionFacetsQuery", () => {
 	})
 
 	it("is org-scoped", () => {
-		expect(compileUnion(aiSessionFacetsQuery(), params).tenantScope).toBe("tenant")
+		expect(compileUnionUnsafe(aiSessionFacetsQuery(), params).tenantScope).toBe("tenant")
 	})
 
 	it("counts only session-bearing spans, and drops the blank option", () => {
-		const { sql } = compileUnion(aiSessionFacetsQuery(), params)
+		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
 		expect(
 			sql.split(
@@ -202,11 +202,11 @@ describe("aiSessionFacetsQuery", () => {
 	})
 
 	it("leaves no unresolved param placeholder", () => {
-		expect(compileUnion(aiSessionFacetsQuery(), params).sql).not.toContain("__PARAM_")
+		expect(compileUnionUnsafe(aiSessionFacetsQuery(), params).sql).not.toContain("__PARAM_")
 	})
 
 	it("decodes the quoted 64-bit uniqExact count", () => {
-		const compiled = compileUnion(aiSessionFacetsQuery(), params, {
+		const compiled = compileUnionUnsafe(aiSessionFacetsQuery(), params, {
 			rowSchema: aiSessionFacetsRowSchema,
 		})
 
@@ -224,7 +224,7 @@ describe("aiSessionFacetsQuery", () => {
 
 describe("aiSessionSpansQuery", () => {
 	it("returns every span of every trace in the session, oldest first", () => {
-		const { sql } = compileCH(aiSessionSpansQuery(), spanParams)
+		const { sql } = compileCHUnsafe(aiSessionSpansQuery(), spanParams)
 
 		expect(sql).toContain("FROM trace_detail_spans")
 		expect(sql).toContain("TraceId IN (SELECT")
@@ -237,25 +237,25 @@ describe("aiSessionSpansQuery", () => {
 	})
 
 	it("repeats the org predicate on every level that reads a table", () => {
-		const { sql } = compileCH(aiSessionSpansQuery(), spanParams)
+		const { sql } = compileCHUnsafe(aiSessionSpansQuery(), spanParams)
 
 		expect(orgPredicateCount(sql)).toBe(2)
 	})
 
 	it("is org-scoped", () => {
-		expect(compileCH(aiSessionSpansQuery(), spanParams).tenantScope).toBe("tenant")
+		expect(compileCHUnsafe(aiSessionSpansQuery(), spanParams).tenantScope).toBe("tenant")
 	})
 
 	it("substitutes and escapes the sessionId param", () => {
-		const { sql } = compileCH(aiSessionSpansQuery(), spanParams)
+		const { sql } = compileCHUnsafe(aiSessionSpansQuery(), spanParams)
 		expect(sql).toContain("SpanAttributes['maple_ai.session.id'] = 'wrun_01M0CSAEW96BH2W9185XZPRPKH'")
 
-		const escaped = compileCH(aiSessionSpansQuery(), { ...spanParams, sessionId: "sess'evil" })
+		const escaped = compileCHUnsafe(aiSessionSpansQuery(), { ...spanParams, sessionId: "sess'evil" })
 		expect(escaped.sql).toContain("SpanAttributes['maple_ai.session.id'] = 'sess\\'evil'")
 	})
 
 	it("bounds both levels by the window", () => {
-		const { sql } = compileCH(aiSessionSpansQuery(), spanParams)
+		const { sql } = compileCHUnsafe(aiSessionSpansQuery(), spanParams)
 
 		// Both, not one: the fan-out's copy is what prunes partitions, and the
 		// caller is responsible for bounds that contain the whole session.
@@ -264,15 +264,15 @@ describe("aiSessionSpansQuery", () => {
 	})
 
 	it("honours a caller-supplied limit", () => {
-		expect(compileCH(aiSessionSpansQuery({ limit: 100 }), spanParams).sql).toContain("LIMIT 100")
+		expect(compileCHUnsafe(aiSessionSpansQuery({ limit: 100 }), spanParams).sql).toContain("LIMIT 100")
 	})
 
 	it("leaves no unresolved param placeholder", () => {
-		expect(compileCH(aiSessionSpansQuery(), spanParams).sql).not.toContain("__PARAM_")
+		expect(compileCHUnsafe(aiSessionSpansQuery(), spanParams).sql).not.toContain("__PARAM_")
 	})
 
 	it("decodes the raw Map columns as plain objects", () => {
-		const compiled = compileCH(aiSessionSpansQuery(), spanParams, {
+		const compiled = compileCHUnsafe(aiSessionSpansQuery(), spanParams, {
 			rowSchema: aiSessionSpansRowSchema,
 		})
 
@@ -309,7 +309,7 @@ describe("aiSessionWindowQuery", () => {
 	const windowParams = { orgId: params.orgId, sessionId: spanParams.sessionId }
 
 	it("resolves the bounds from the id alone, without a time predicate", () => {
-		const { sql } = compileCH(aiSessionWindowQuery(), windowParams)
+		const { sql } = compileCHUnsafe(aiSessionWindowQuery(), windowParams)
 
 		// The one read in this file that runs unbounded, and the only one that can:
 		// `traces` has the mapValues bloom index for the id and a 30-day TTL. The
@@ -321,7 +321,7 @@ describe("aiSessionWindowQuery", () => {
 	})
 
 	it("reports bounds already padded for the fan-out", () => {
-		const { sql } = compileCH(aiSessionWindowQuery(), windowParams)
+		const { sql } = compileCHUnsafe(aiSessionWindowQuery(), windowParams)
 
 		// The bounds are measured over session-BEARING spans; the read they bound
 		// returns every span of those spans' traces.
@@ -330,25 +330,25 @@ describe("aiSessionWindowQuery", () => {
 	})
 
 	it("guards session-id presence, and escapes the id", () => {
-		const { sql } = compileCH(aiSessionWindowQuery(), windowParams)
+		const { sql } = compileCHUnsafe(aiSessionWindowQuery(), windowParams)
 		expect(sql).toContain(
 			"(mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')",
 		)
 
-		const escaped = compileCH(aiSessionWindowQuery(), { ...windowParams, sessionId: "sess'evil" })
+		const escaped = compileCHUnsafe(aiSessionWindowQuery(), { ...windowParams, sessionId: "sess'evil" })
 		expect(escaped.sql).toContain("SpanAttributes['maple_ai.session.id'] = 'sess\\'evil'")
 	})
 
 	it("is org-scoped", () => {
-		expect(compileCH(aiSessionWindowQuery(), windowParams).tenantScope).toBe("tenant")
+		expect(compileCHUnsafe(aiSessionWindowQuery(), windowParams).tenantScope).toBe("tenant")
 	})
 
 	it("leaves no unresolved param placeholder", () => {
-		expect(compileCH(aiSessionWindowQuery(), windowParams).sql).not.toContain("__PARAM_")
+		expect(compileCHUnsafe(aiSessionWindowQuery(), windowParams).sql).not.toContain("__PARAM_")
 	})
 
 	it("decodes the quoted 64-bit count", () => {
-		const compiled = compileCH(aiSessionWindowQuery(), windowParams, {
+		const compiled = compileCHUnsafe(aiSessionWindowQuery(), windowParams, {
 			rowSchema: aiSessionWindowRowSchema,
 		})
 

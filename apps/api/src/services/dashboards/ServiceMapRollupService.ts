@@ -92,11 +92,13 @@ export class ServiceMapRollupService extends Context.Service<
 			const candidates: number[] = []
 			for (let h = oldestHourMs; h < currentHourMs; h += HOUR_MS) candidates.push(h)
 
-			const existingCompiled = CH.serviceMapEdgesExistingHoursSQL({
-				orgId,
-				startTime: formatWarehouseDateTime(oldestHourMs),
-				endTime: formatWarehouseDateTime(currentHourMs),
-			})
+			const existingCompiled = yield* Effect.orDie(
+				CH.serviceMapEdgesExistingHoursSQL({
+					orgId,
+					startTime: formatWarehouseDateTime(oldestHourMs),
+					endTime: formatWarehouseDateTime(currentHourMs),
+				}),
+			)
 			const existingRows = yield* warehouse.compiledQuery(tenant, existingCompiled, {
 				context: "serviceMapRollupExistingHours",
 			})
@@ -116,7 +118,9 @@ export class ServiceMapRollupService extends Context.Service<
 						const hourStart = formatWarehouseDateTime(hourMs)
 						const hourEnd = formatWarehouseDateTime(hourMs + HOUR_MS)
 
-						const rollup = CH.serviceMapEdgesRollupSQL({ orgId, hourStart, hourEnd })
+						const rollup = yield* Effect.orDie(
+							CH.serviceMapEdgesRollupSQL({ orgId, hourStart, hourEnd }),
+						)
 						const rows = yield* warehouse.compiledQuery(tenant, rollup, {
 							context: "serviceMapRollup",
 						})
@@ -136,11 +140,13 @@ export class ServiceMapRollupService extends Context.Service<
 						// A bounded repair pass below re-evaluates this companion stream
 						// for already-sealed edge hours, so a transient ingest failure does
 						// not leave a permanent address-resolution gap.
-						const resolutionsRollup = CH.serviceMapResolutionsRollupSQL({
-							orgId,
-							hourStart,
-							hourEnd,
-						})
+						const resolutionsRollup = yield* Effect.orDie(
+							CH.serviceMapResolutionsRollupSQL({
+								orgId,
+								hourStart,
+								hourEnd,
+							}),
+						)
 						const resolutionsRows = yield* warehouse.compiledQuery(tenant, resolutionsRollup, {
 							context: "serviceMapResolutionsRollup",
 						})
@@ -170,11 +176,13 @@ export class ServiceMapRollupService extends Context.Service<
 			// tick was the single most expensive thing this service did.
 			const resolvedRows = yield* warehouse.compiledQuery(
 				tenant,
-				CH.serviceMapResolutionsExistingHoursSQL({
-					orgId,
-					startTime: formatWarehouseDateTime(oldestHourMs),
-					endTime: formatWarehouseDateTime(currentHourMs),
-				}),
+				yield* Effect.orDie(
+					CH.serviceMapResolutionsExistingHoursSQL({
+						orgId,
+						startTime: formatWarehouseDateTime(oldestHourMs),
+						endTime: formatWarehouseDateTime(currentHourMs),
+					}),
+				),
 				{ context: "serviceMapResolutionsExistingHours" },
 			)
 			const resolved = new Set(resolvedRows.map((row) => Number(row.hourTs)))
@@ -188,11 +196,13 @@ export class ServiceMapRollupService extends Context.Service<
 					Effect.gen(function* () {
 						const resolutionsRows = yield* warehouse.compiledQuery(
 							tenant,
-							CH.serviceMapResolutionsRollupSQL({
-								orgId,
-								hourStart: formatWarehouseDateTime(hourMs),
-								hourEnd: formatWarehouseDateTime(hourMs + HOUR_MS),
-							}),
+							yield* Effect.orDie(
+								CH.serviceMapResolutionsRollupSQL({
+									orgId,
+									hourStart: formatWarehouseDateTime(hourMs),
+									hourEnd: formatWarehouseDateTime(hourMs + HOUR_MS),
+								}),
+							),
 							{ context: "serviceMapResolutionsRepair" },
 						)
 						resolutionHoursChecked += 1
@@ -249,10 +259,12 @@ export class ServiceMapRollupService extends Context.Service<
 			return yield* warehouse
 				.crossOrgQuery(
 					systemTenant(knownOrgs[0]!),
-					CH.compile(
-						CH.activeOrgsByTracesQuery(),
-						{ startTime },
-						{ rowSchema: CH.ActiveOrgsOutputSchema },
+					yield* Effect.orDie(
+						CH.compile(
+							CH.activeOrgsByTracesQuery(),
+							{ startTime },
+							{ rowSchema: CH.ActiveOrgsOutputSchema },
+						),
 					),
 					{
 						profile: "discovery",

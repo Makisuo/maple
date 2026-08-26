@@ -16,7 +16,8 @@ import type { TracesMetric, AttributeFilter, MetricType } from "@maple/domain/qu
 import type { OrgId } from "@maple/domain"
 import { compile, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import { unsafeCompiledQuery } from "./raw-sql"
-import { Array as A, Match, Result, Schema } from "effect"
+import { Array as A, Effect, Match, Result, Schema } from "effect"
+import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 import {
 	attributeIndexMode,
 	baselineWarehouseCapabilities,
@@ -76,10 +77,18 @@ export type PipeCompiledQuery = CompiledQuery<unknown>
 
 type PipeParams = Record<string, unknown> & { org_id: OrgId }
 
-/** Erase the specific output type for the generic pipe dispatcher. */
-function eraseType<T>(compiled: CompiledQuery<T>): PipeCompiledQuery {
-	return compiled as CompiledQuery<unknown>
+/**
+ * Erase the specific output type for the generic pipe dispatcher.
+ *
+ * Compilation is Effect-returning now, so this carries the effect rather than
+ * the value — which is what lets every `Match.when` arm below stay a
+ * one-expression `eraseType(compile(...))`.
+ */
+function eraseType<T>(compiled: Effect.Effect<CompiledQuery<T>, QueryBuilderError>): PipeCompiled {
+	return compiled as PipeCompiled
 }
+
+type PipeCompiled = Effect.Effect<PipeCompiledQuery, QueryBuilderError>
 
 const METRIC_TYPES: ReadonlySet<string> = new Set(["sum", "gauge", "histogram", "exponential_histogram"])
 
@@ -91,11 +100,19 @@ function parseMetricType(value: string | undefined): MetricType | undefined {
  * Compiles a named pipe + params into a SQL string.
  * Returns undefined for unknown pipes (caller should handle gracefully).
  */
+/**
+ * Lower a named pipe + wire params to SQL.
+ *
+ * Effect-returning: the params come off the wire, so a value the query cannot
+ * encode is a condition the caller can report rather than a crash. This is the
+ * path where the typed failure earns its keep — every other compile in the
+ * product is built from Maple's own definitions.
+ */
 export function compilePipeQuery(
 	pipe: string,
 	params: PipeParams,
 	capabilities: WarehouseCapabilities = baselineWarehouseCapabilities(),
-): PipeCompiledQuery | undefined {
+): PipeCompiled | undefined {
 	const orgId = String(params.org_id)
 	const startTime = String(params.start_time ?? "2023-01-01 00:00:00")
 	const endTime = String(params.end_time ?? "2099-12-31 23:59:59")
@@ -119,41 +136,44 @@ export function compilePipeQuery(
 		 * count came back as a string. See ../schema.ts.
 		 */
 		rowSchema?: Schema.Struct<Fields>,
-	): PipeCompiledQuery => {
-		const current = compile(
-			query,
-			{ orgId, startTime: ranges.currentStart, endTime: ranges.currentEnd },
-			{ skipFormat: true },
-		)
-		const previous = compile(
-			query,
-			{ orgId, startTime: ranges.previousStart, endTime: ranges.previousEnd },
-			{ skipFormat: true },
-		)
-		return unsafeCompiledQuery({
-			sql:
-				`SELECT 'current' AS period, * FROM (\n${current.sql}\n)\n` +
-				`UNION ALL\n` +
-				`SELECT 'previous' AS period, * FROM (\n${previous.sql}\n)\n` +
-				`FORMAT JSON`,
-			reason: "param-varied-union",
-			note: "One builder over a current and a previous window; params are substituted once per compile, so a single CHQuery cannot carry both.",
-			// Both branches are the same builder over different windows, so the
-			// union is scoped exactly when the branch is.
-			tenantScope:
-				current.tenantScope === "tenant" && previous.tenantScope === "tenant"
-					? "tenant"
-					: "cross-tenant",
-			// `period` is typed as a plain String, not a `"current" | "previous"`
-			// literal union. The value is produced by our own SELECT so it is
-			// always one of the two at runtime — but the row schema describes the
-			// WIRE type, and ClickHouse reports the column as String. The SQL
-			// catalog's analyzer sweep decodes a synthetic zero-value row built
-			// from DESCRIBE output, where a String column is `""`; a literal union
-			// rejects that and fails the gate.
-			rowSchema: rowSchema ? Schema.Struct({ period: Schema.String, ...rowSchema.fields }) : undefined,
+	): PipeCompiled =>
+		Effect.gen(function* () {
+			const current = yield* compile(
+				query,
+				{ orgId, startTime: ranges.currentStart, endTime: ranges.currentEnd },
+				{ skipFormat: true },
+			)
+			const previous = yield* compile(
+				query,
+				{ orgId, startTime: ranges.previousStart, endTime: ranges.previousEnd },
+				{ skipFormat: true },
+			)
+			return unsafeCompiledQuery({
+				sql:
+					`SELECT 'current' AS period, * FROM (\n${current.sql}\n)\n` +
+					`UNION ALL\n` +
+					`SELECT 'previous' AS period, * FROM (\n${previous.sql}\n)\n` +
+					`FORMAT JSON`,
+				reason: "param-varied-union",
+				note: "One builder over a current and a previous window; params are substituted once per compile, so a single CHQuery cannot carry both.",
+				// Both branches are the same builder over different windows, so the
+				// union is scoped exactly when the branch is.
+				tenantScope:
+					current.tenantScope === "tenant" && previous.tenantScope === "tenant"
+						? "tenant"
+						: "cross-tenant",
+				// `period` is typed as a plain String, not a `"current" | "previous"`
+				// literal union. The value is produced by our own SELECT so it is
+				// always one of the two at runtime — but the row schema describes the
+				// WIRE type, and ClickHouse reports the column as String. The SQL
+				// catalog's analyzer sweep decodes a synthetic zero-value row built
+				// from DESCRIBE output, where a String column is `""`; a literal union
+				// rejects that and fails the gate.
+				rowSchema: rowSchema
+					? Schema.Struct({ period: Schema.String, ...rowSchema.fields })
+					: undefined,
+			})
 		})
-	}
 
 	// Kept in four groups because Pipeable.pipe's typed overloads stop at 20 transformations.
 	// oxlint-disable-next-line effecttsgo/unnecessary-pipe-chain

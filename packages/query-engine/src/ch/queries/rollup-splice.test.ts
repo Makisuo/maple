@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compile } from "../index"
+import { compileUnsafe } from "../index"
 import { compile as compileFragment } from "@maple-dev/clickhouse-builder/sql"
 import * as CH from "../index"
 import { edgeCondition, hourGrain, interiorBounds, interiorConditions, minuteGrain } from "./rollup-splice"
@@ -22,7 +22,7 @@ const sqlOf = (cond: CH.Condition) => compileFragment(cond.toFragment())
 /** Compile a trivial query carrying `conds` so the WHERE text can be inspected. */
 const whereSql = (conds: ReadonlyArray<CH.Condition>) => {
 	const t = CH.table("t", { OrgId: CH.string, Hour: CH.dateTime, Minute: CH.dateTime })
-	return compile(
+	return compileUnsafe(
 		CH.from(t)
 			.select(($) => ({ c: $.OrgId }))
 			.where(($) => [$.OrgId.eq("org"), ...conds]),

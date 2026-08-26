@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
 import { sessionActivityQuery, IDLE_GAP_THRESHOLD_MS } from "./session-events"
 
 const sessionParams = { orgId: "org_1", sessionId: "sess_1" }
@@ -13,7 +13,7 @@ const WINDOW = { startTime: "2026-06-24 04:00:00", endTime: "2026-06-25 06:00:00
 
 describe("sessionActivityQuery", () => {
 	it("computes per-event gaps with a lagInFrame window ordered by Timestamp, Seq", () => {
-		const { sql } = compileCH(sessionActivityQuery(), sessionParams)
+		const { sql } = compileCHUnsafe(sessionActivityQuery(), sessionParams)
 		expect(sql).toContain("FROM session_events")
 		expect(sql).toContain(
 			"lagInFrame(Timestamp, 1, Timestamp) OVER (PARTITION BY SessionId ORDER BY Timestamp ASC, Seq ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)",
@@ -24,7 +24,7 @@ describe("sessionActivityQuery", () => {
 	})
 
 	it("splits gaps into active / idle at the idle threshold", () => {
-		const { sql } = compileCH(sessionActivityQuery(), sessionParams)
+		const { sql } = compileCHUnsafe(sessionActivityQuery(), sessionParams)
 		expect(sql).toContain(
 			`sumIf(gapMs, (gapMs > 0 AND gapMs <= ${IDLE_GAP_THRESHOLD_MS})) AS activeTimeMs`,
 		)
@@ -33,7 +33,7 @@ describe("sessionActivityQuery", () => {
 	})
 
 	it("scopes to the org + session and returns a single row", () => {
-		const { sql } = compileCH(sessionActivityQuery(), sessionParams)
+		const { sql } = compileCHUnsafe(sessionActivityQuery(), sessionParams)
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("SessionId = 'sess_1'")
 		expect(sql).toContain("LIMIT 1")
@@ -41,13 +41,13 @@ describe("sessionActivityQuery", () => {
 	})
 
 	it("adds the session time window as a partition-pruning predicate when provided", () => {
-		const { sql } = compileCH(sessionActivityQuery(WINDOW), sessionParams)
+		const { sql } = compileCHUnsafe(sessionActivityQuery(WINDOW), sessionParams)
 		expect(sql).toContain("Timestamp >= '2026-06-24 04:00:00'")
 		expect(sql).toContain("Timestamp <= '2026-06-25 06:00:00'")
 	})
 
 	it("omits the time window when absent (deep-link path, full scan)", () => {
-		const { sql } = compileCH(sessionActivityQuery(), sessionParams)
+		const { sql } = compileCHUnsafe(sessionActivityQuery(), sessionParams)
 		expect(sql).not.toContain("Timestamp >=")
 		expect(sql).not.toContain("Timestamp <=")
 	})

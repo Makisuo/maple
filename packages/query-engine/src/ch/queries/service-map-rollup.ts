@@ -12,7 +12,7 @@
 // test in `service-map.test.ts` asserts the alias set — so rows flow straight
 // into `ingest` with no reshaping.
 
-import { Schema } from "effect"
+import { Schema, Effect } from "effect"
 import type { CompiledQuery, CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { compileCH } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -22,6 +22,7 @@ import { ServiceAddressResolutionsHourly, ServiceMapEdgesHourly, Traces } from "
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { serviceMapEdgeJoinQuery } from "./service-map"
 import { CHNumber } from "../schema"
+import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 
 /** One pre-aggregated service-to-service edge bucket — mirrors the columns of
  * the `service_map_edges_hourly` ClickHouse table. */
@@ -82,7 +83,7 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 	orgId: string
 	startTime: string
 	endTime: string
-}): CompiledQuery<ServiceMapEdgesExistingHour> {
+}): Effect.Effect<CompiledQuery<ServiceMapEdgesExistingHour>, QueryBuilderError> {
 	// `GROUP BY hourTs` collapses identical hour values across edge rows — the
 	// rollup only cares about which hour starts have been sealed, not which
 	// edges live in them. Same semantics as SELECT DISTINCT, with the DSL.
@@ -122,7 +123,7 @@ export function serviceMapResolutionsExistingHoursSQL(params: {
 	orgId: string
 	startTime: string
 	endTime: string
-}): CompiledQuery<ServiceMapEdgesExistingHour> {
+}): Effect.Effect<CompiledQuery<ServiceMapEdgesExistingHour>, QueryBuilderError> {
 	const query = from(ServiceAddressResolutionsHourly)
 		.select(($) => ({ hourTs: CH.toUnixTimestamp($.Hour) }))
 		.where(($) => [
@@ -151,7 +152,7 @@ export function serviceMapResolutionsExistingHoursSQL(params: {
  */
 export function serviceMapEdgesRollupSQL(
 	params: ServiceMapEdgesRollupParams,
-): CompiledQuery<ServiceMapEdgesHourlyOutput> {
+): Effect.Effect<CompiledQuery<ServiceMapEdgesHourlyOutput>, QueryBuilderError> {
 	const query = serviceMapEdgeJoinQuery({
 		rangeStart: CH.toDateTime(param.dateTimeString("hourStart")),
 		rangeEnd: CH.toDateTime(param.dateTimeString("hourEnd")),
@@ -204,7 +205,7 @@ const ServiceAddressResolutionsHourlyOutputSchema: CompiledQueryRowSchema<Servic
 
 export function serviceMapResolutionsRollupSQL(
 	params: ServiceMapEdgesRollupParams,
-): CompiledQuery<ServiceAddressResolutionsHourlyOutput> {
+): Effect.Effect<CompiledQuery<ServiceAddressResolutionsHourlyOutput>, QueryBuilderError> {
 	// Parent side: Client/Producer spans, projecting just what the join + outer
 	// SELECT needs. The map lookups (`server.address`, `deployment.environment`)
 	// happen here so the outer query reads them as plain columns instead of

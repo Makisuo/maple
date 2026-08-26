@@ -111,15 +111,17 @@ const probeServiceWindow = (
 	endMs: number,
 ): Effect.Effect<ServiceWindowTotals | null, never> =>
 	Effect.gen(function* () {
-		const compiled = CH.compile(
-			CH.serviceLivenessQuery(),
-			{
-				orgId: tenant.orgId,
-				serviceName,
-				startTime: formatWarehouseDateTime(startMs),
-				endTime: formatWarehouseDateTime(endMs),
-			},
-			{ rowSchema: CH.serviceLivenessRowSchema },
+		const compiled = yield* Effect.orDie(
+			CH.compile(
+				CH.serviceLivenessQuery(),
+				{
+					orgId: tenant.orgId,
+					serviceName,
+					startTime: formatWarehouseDateTime(startMs),
+					endTime: formatWarehouseDateTime(endMs),
+				},
+				{ rowSchema: CH.serviceLivenessRowSchema },
+			),
 		)
 		const row = yield* warehouse.compiledQueryFirst(tenant, compiled, {
 			profile: "list",
@@ -140,14 +142,16 @@ const probeOrgWindow = (
 	endMs: number,
 ): Effect.Effect<number | null, never> =>
 	Effect.gen(function* () {
-		const compiled = CH.compileUnion(
-			CH.orgTelemetryPulseQuery(),
-			{
-				orgId: tenant.orgId,
-				startTime: formatWarehouseDateTime(startMs),
-				endTime: formatWarehouseDateTime(endMs),
-			},
-			{ rowSchema: CH.telemetryPulseRowSchema },
+		const compiled = yield* Effect.orDie(
+			CH.compileUnion(
+				CH.orgTelemetryPulseQuery(),
+				{
+					orgId: tenant.orgId,
+					startTime: formatWarehouseDateTime(startMs),
+					endTime: formatWarehouseDateTime(endMs),
+				},
+				{ rowSchema: CH.telemetryPulseRowSchema },
+			),
 		)
 		const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 			profile: "list",

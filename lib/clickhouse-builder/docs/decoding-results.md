@@ -16,13 +16,15 @@ it", not a phantom tag. So a query built from typed pieces already knows how its
 `compile` folds those schemas into one:
 
 ```ts
-const compiled = CH.compile(
-	CH.from(Events)
-		.select(($) => ({ name: $.Name, calls: CH.count() }))
-		.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
-		.groupBy("name"),
-	{ orgId: "org_123" },
-)
+const compiled =
+	yield *
+	CH.compile(
+		CH.from(Events)
+			.select(($) => ({ name: $.Name, calls: CH.count() }))
+			.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
+			.groupBy("name"),
+		{ orgId: "org_123" },
+	)
 
 compiled.rowSchemaSource // "derived"
 await Effect.runPromise(compiled.decodeRows([{ name: "checkout", calls: "42" }]))
@@ -41,10 +43,12 @@ Derivation is all-or-nothing per query. One selected expression the builder cann
 all:
 
 ```ts
-const compiled = CH.compile(
-	CH.from(Events).select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") })),
-	params,
-)
+const compiled =
+	yield *
+	CH.compile(
+		CH.from(Events).select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") })),
+		params,
+	)
 
 compiled.rowSchemaSource // "none"
 compiled.untypedColumns // ["odd"] — the aliases responsible
@@ -79,12 +83,14 @@ A declared `rowSchema` wins over the derived one, and it can do something deriva
 **narrow**.
 
 ```ts
-const compiled = CH.compile(query, params, {
-	rowSchema: Schema.Struct({
-		name: Schema.String,
-		status: Schema.Literals(["ok", "error"]), // narrower than the String column
-	}),
-})
+const compiled =
+	yield *
+	CH.compile(query, params, {
+		rowSchema: Schema.Struct({
+			name: Schema.String,
+			status: Schema.Literals(["ok", "error"]), // narrower than the String column
+		}),
+	})
 
 compiled.rowSchemaSource // "declared"
 ```

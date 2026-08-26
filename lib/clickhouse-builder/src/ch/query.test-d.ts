@@ -289,7 +289,7 @@ const compileTarget = CH.from(Users).select(($) => ({
 	age: $.Age,
 }))
 
-const compiled = CH.compile(compileTarget, {})
+const compiled = CH.compileUnsafe(compileTarget, {})
 
 expectTypeOf(compiled).toMatchTypeOf<CompiledQuery<{ readonly id: string; readonly age: number }>>()
 

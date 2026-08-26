@@ -1,7 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { OrgId } from "@maple/domain/http"
-import { compilePipeQuery } from "./pipe-dispatch"
+import { compilePipeQuery as lowerPipeQuery } from "./pipe-dispatch"
+
+/** Lower and compile in one step — the tests want a value, and a fixture that
+ *  will not compile should fail the test loudly. */
+const compilePipeQuery = (...args: Parameters<typeof lowerPipeQuery>) => {
+	const lowered = lowerPipeQuery(...args)
+	return lowered === undefined ? undefined : Effect.runSync(lowered)
+}
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 

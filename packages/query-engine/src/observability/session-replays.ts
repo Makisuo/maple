@@ -65,14 +65,18 @@ export const getSessionTraces = Effect.fn("Observability.getSessionTraces")(func
 	// from a second pass over session_events. Both are single-session sort-key
 	// seeks (`(OrgId, SessionId)` prefix) and independent, so run them
 	// concurrently — one round-trip of latency, not two.
-	const detailCompiled = CH.compile(CH.getSessionReplayQuery(), {
-		orgId: executor.orgId,
-		sessionId: input.sessionId,
-	})
-	const activityCompiled = CH.compile(CH.sessionActivityQuery(), {
-		orgId: executor.orgId,
-		sessionId: input.sessionId,
-	})
+	const detailCompiled = yield* Effect.orDie(
+		CH.compile(CH.getSessionReplayQuery(), {
+			orgId: executor.orgId,
+			sessionId: input.sessionId,
+		}),
+	)
+	const activityCompiled = yield* Effect.orDie(
+		CH.compile(CH.sessionActivityQuery(), {
+			orgId: executor.orgId,
+			sessionId: input.sessionId,
+		}),
+	)
 	const [maybeSession, maybeActivity] = yield* Effect.all(
 		[
 			executor.compiledQueryFirst(detailCompiled, {
@@ -109,9 +113,11 @@ export const getSessionTraces = Effect.fn("Observability.getSessionTraces")(func
 	}
 
 	// 2) Per-trace summaries (root span name/service, duration, error, span count).
-	const summariesCompiled = CH.compile(CH.sessionTraceSummariesQuery({ traceIds }), {
-		orgId: executor.orgId,
-	})
+	const summariesCompiled = yield* Effect.orDie(
+		CH.compile(CH.sessionTraceSummariesQuery({ traceIds }), {
+			orgId: executor.orgId,
+		}),
+	)
 	const traces = yield* executor.compiledQuery(summariesCompiled, {
 		profile: "list",
 		context: "sessionTraceSummaries",

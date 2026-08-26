@@ -337,13 +337,16 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 				...fixture.params,
 			} as Record<string, unknown> & { org_id: string }
 
-			const compiled = compilePipeQuery(fixture.pipe, params as never, variant.capabilities)
-			if (compiled === undefined) {
+			const lowered = compilePipeQuery(fixture.pipe, params as never, variant.capabilities)
+			if (lowered === undefined) {
 				throw new Error(
 					`SQL catalog: compilePipeQuery returned undefined for "${fixture.pipe}" (${fixture.label}). ` +
 						`The pipe is in warehouseQueries but has no dispatch arm.`,
 				)
 			}
+			// The catalog wants a throw: a fixture that will not compile must fail
+			// its test rather than drop silently out of the sweep.
+			const compiled = Effect.runSync(lowered)
 			entries.push({
 				id: `pipe:${fixture.pipe}:${fixture.label}:${variant.label}`,
 				source: "pipe",
@@ -827,7 +830,7 @@ function makeCapturingWarehouse(capabilities: WarehouseCapabilities): {
 			return empty
 		},
 		compiledQueryWithCapabilities: (_tenant, compile) => {
-			const compiled = compile(capabilities)
+			const compiled = Effect.runSync(compile(capabilities))
 			captured.push({ sql: compiled.sql, compiled: compiled as CompiledQuery<unknown> })
 			return empty
 		},

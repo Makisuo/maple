@@ -296,7 +296,7 @@ const make = Effect.gen(function* () {
 			[
 				warehouse.crossOrgQuery(
 					routingTenant,
-					CH.compile(CH.activeOrgsByTracesQuery(), { startTime }),
+					yield* Effect.orDie(CH.compile(CH.activeOrgsByTracesQuery(), { startTime })),
 					{
 						profile: "discovery",
 						context: "anomalyActiveOrgsTraces",
@@ -306,7 +306,7 @@ const make = Effect.gen(function* () {
 				),
 				warehouse.crossOrgQuery(
 					routingTenant,
-					CH.compile(CH.activeOrgsByLogsQuery(), { startTime }),
+					yield* Effect.orDie(CH.compile(CH.activeOrgsByLogsQuery(), { startTime })),
 					{
 						profile: "discovery",
 						context: "anomalyActiveOrgsLogs",
@@ -735,15 +735,17 @@ const make = Effect.gen(function* () {
 			// The incident threshold belongs to the primary fingerprint. Charting
 			// all service errors against that one threshold is mathematically
 			// invalid for consolidated incidents, so keep this series exact.
-			const compiled = CH.compile(CH.anomalyErrorSpikeTimeseriesQuery(), {
-				...queryWindow,
-				// Include the preceding window so the first displayed point has
-				// a complete rolling 30-minute value.
-				startTime: formatWarehouseDateTime(startMs - SPIKE_WINDOW_MS),
-				fingerprintHash: row.fingerprintHash ?? "0",
-				deploymentEnv: row.deploymentEnv,
-				bucketSeconds,
-			})
+			const compiled = yield* Effect.orDie(
+				CH.compile(CH.anomalyErrorSpikeTimeseriesQuery(), {
+					...queryWindow,
+					// Include the preceding window so the first displayed point has
+					// a complete rolling 30-minute value.
+					startTime: formatWarehouseDateTime(startMs - SPIKE_WINDOW_MS),
+					fingerprintHash: row.fingerprintHash ?? "0",
+					deploymentEnv: row.deploymentEnv,
+					bucketSeconds,
+				}),
+			)
 			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 				profile: "list",
 				context: "anomalyIncidentTimeseries",
@@ -770,11 +772,13 @@ const make = Effect.gen(function* () {
 		} else if (row.signalType === "log_volume") {
 			unit = "per_minute"
 			bucketSeconds = 3600
-			const compiled = CH.compile(CH.anomalyLogVolumeTimeseriesQuery(), {
-				...queryWindow,
-				serviceName: row.serviceName,
-				deploymentEnv: row.deploymentEnv,
-			})
+			const compiled = yield* Effect.orDie(
+				CH.compile(CH.anomalyLogVolumeTimeseriesQuery(), {
+					...queryWindow,
+					serviceName: row.serviceName,
+					deploymentEnv: row.deploymentEnv,
+				}),
+			)
 			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 				profile: "list",
 				context: "anomalyIncidentTimeseries",
@@ -790,11 +794,13 @@ const make = Effect.gen(function* () {
 			})
 		} else {
 			bucketSeconds = 3600
-			const compiled = CH.compile(CH.anomalyTraceSignalTimeseriesQuery(), {
-				...queryWindow,
-				serviceName: row.serviceName,
-				deploymentEnv: row.deploymentEnv,
-			})
+			const compiled = yield* Effect.orDie(
+				CH.compile(CH.anomalyTraceSignalTimeseriesQuery(), {
+					...queryWindow,
+					serviceName: row.serviceName,
+					deploymentEnv: row.deploymentEnv,
+				}),
+			)
 			const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 				profile: "list",
 				context: "anomalyIncidentTimeseries",
@@ -881,11 +887,13 @@ const make = Effect.gen(function* () {
 				ttlSeconds: 3600,
 			},
 			Effect.gen(function* () {
-				const compiled = CH.compile(CH.anomalyTraceSignalsQuery({ hoursOfDay }), {
-					orgId: tenant.orgId,
-					startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
-					endTime: formatWarehouseDateTime(currentHourStartMs),
-				})
+				const compiled = yield* Effect.orDie(
+					CH.compile(CH.anomalyTraceSignalsQuery({ hoursOfDay }), {
+						orgId: tenant.orgId,
+						startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
+						endTime: formatWarehouseDateTime(currentHourStartMs),
+					}),
+				)
 				const rows = yield* warehouse
 					.compiledQuery(tenant, compiled, {
 						profile: "list",
@@ -907,11 +915,13 @@ const make = Effect.gen(function* () {
 			}),
 		)
 
-		const currentCompiled = CH.compile(CH.anomalyTraceSignalsQuery({ hoursOfDay }), {
-			orgId: tenant.orgId,
-			startTime: formatWarehouseDateTime(currentHourStartMs),
-			endTime: formatWarehouseDateTime(nowMs),
-		})
+		const currentCompiled = yield* Effect.orDie(
+			CH.compile(CH.anomalyTraceSignalsQuery({ hoursOfDay }), {
+				orgId: tenant.orgId,
+				startTime: formatWarehouseDateTime(currentHourStartMs),
+				endTime: formatWarehouseDateTime(nowMs),
+			}),
+		)
 		const currentRows = yield* warehouse
 			.compiledQuery(tenant, currentCompiled, {
 				profile: "list",
@@ -972,11 +982,13 @@ const make = Effect.gen(function* () {
 				ttlSeconds: 3600,
 			},
 			Effect.gen(function* () {
-				const compiled = CH.compile(CH.anomalyLogVolumeQuery({ hoursOfDay }), {
-					orgId: tenant.orgId,
-					startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
-					endTime: formatWarehouseDateTime(currentHourStartMs),
-				})
+				const compiled = yield* Effect.orDie(
+					CH.compile(CH.anomalyLogVolumeQuery({ hoursOfDay }), {
+						orgId: tenant.orgId,
+						startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
+						endTime: formatWarehouseDateTime(currentHourStartMs),
+					}),
+				)
 				const rows = yield* warehouse
 					.compiledQuery(tenant, compiled, {
 						profile: "list",
@@ -994,11 +1006,13 @@ const make = Effect.gen(function* () {
 			}),
 		)
 
-		const currentCompiled = CH.compile(CH.anomalyLogVolumeQuery({ hoursOfDay }), {
-			orgId: tenant.orgId,
-			startTime: formatWarehouseDateTime(currentHourStartMs),
-			endTime: formatWarehouseDateTime(nowMs),
-		})
+		const currentCompiled = yield* Effect.orDie(
+			CH.compile(CH.anomalyLogVolumeQuery({ hoursOfDay }), {
+				orgId: tenant.orgId,
+				startTime: formatWarehouseDateTime(currentHourStartMs),
+				endTime: formatWarehouseDateTime(nowMs),
+			}),
+		)
 		const currentRows = yield* warehouse
 			.compiledQuery(tenant, currentCompiled, {
 				profile: "list",
@@ -1031,11 +1045,13 @@ const make = Effect.gen(function* () {
 		tenant: TenantContext,
 		nowMs: number,
 	) {
-		const currentCompiled = CH.compile(CH.anomalyErrorSpikeCurrentQuery({}), {
-			orgId: tenant.orgId,
-			startTime: formatWarehouseDateTime(nowMs - SPIKE_WINDOW_MS),
-			endTime: formatWarehouseDateTime(nowMs),
-		})
+		const currentCompiled = yield* Effect.orDie(
+			CH.compile(CH.anomalyErrorSpikeCurrentQuery({}), {
+				orgId: tenant.orgId,
+				startTime: formatWarehouseDateTime(nowMs - SPIKE_WINDOW_MS),
+				endTime: formatWarehouseDateTime(nowMs),
+			}),
+		)
 		const currentRows = yield* warehouse
 			.compiledQuery(tenant, currentCompiled, {
 				profile: "list",
@@ -1065,11 +1081,13 @@ const make = Effect.gen(function* () {
 				ttlSeconds: 3600,
 			},
 			Effect.gen(function* () {
-				const baselineCompiled = CH.compile(CH.anomalyErrorSpikeBaselineQuery({}), {
-					orgId: tenant.orgId,
-					startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
-					endTime: formatWarehouseDateTime(Math.floor(nowMs / HOUR_MS) * HOUR_MS),
-				})
+				const baselineCompiled = yield* Effect.orDie(
+					CH.compile(CH.anomalyErrorSpikeBaselineQuery({}), {
+						orgId: tenant.orgId,
+						startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
+						endTime: formatWarehouseDateTime(Math.floor(nowMs / HOUR_MS) * HOUR_MS),
+					}),
+				)
 				const rows = yield* warehouse
 					.compiledQuery(tenant, baselineCompiled, {
 						profile: "list",

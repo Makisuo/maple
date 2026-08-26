@@ -1,5 +1,6 @@
 // BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
-import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
+import type { Effect } from "effect"
+import type { CompiledQuery, QueryBuilderError } from "@maple-dev/clickhouse-builder"
 import type { WarehouseCapabilities } from "../capabilities"
 import type { QueryProfileName, WarehouseQuerySettings } from "../profiles/query-profile"
 import {
@@ -33,11 +34,17 @@ export interface QueryDefinition<Payload, Row> {
 	readonly cache: QueryCachePolicy<Payload>
 	/** Resolve live skip-index capabilities only when the compiled plan can use them. */
 	readonly capabilityAware?: boolean
+	/**
+	 * Effect-returning, because `CH.compile` is: a missing param or a value the
+	 * column cannot hold is a typed `QueryBuilderError` rather than a throw.
+	 * Nearly every definition is a one-expression pass-through, so the change is
+	 * invisible at the call sites and visible where it matters — the runner.
+	 */
 	readonly compile: (
 		payload: Payload,
 		orgId: string,
 		capabilities: WarehouseCapabilities,
-	) => CompiledQuery<Row>
+	) => Effect.Effect<CompiledQuery<Row>, QueryBuilderError>
 }
 
 type QueryDefinitionInput<Payload, Row> = Omit<QueryDefinition<Payload, Row>, "revision"> & {

@@ -128,7 +128,9 @@ const makeStub = (counter: { n: number }): WarehouseQueryServiceApi =>
 			) => CompiledQuery<Output>,
 		) => {
 			counter.n += 1
-			return compile(baselineWarehouseCapabilities()).decodeRows(ROWS).pipe(Effect.orDie)
+			return Effect.runSync(compile(baselineWarehouseCapabilities()))
+				.decodeRows(ROWS)
+				.pipe(Effect.orDie)
 		},
 		compiledQueryFirst: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1

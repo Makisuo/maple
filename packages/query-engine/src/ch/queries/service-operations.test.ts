@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
 import { NORMALIZED_SPAN_NAME_SQL } from "@maple/domain/tinybird/span-display-name"
 import {
 	serviceOperationsSummaryQuery,
@@ -19,8 +19,8 @@ const baseParams = {
 
 describe("serviceOperationsSummaryQuery", () => {
 	it("retains the previous raw implementations as rollout rollback paths", () => {
-		const summary = compileCH(serviceOperationsSummaryRawQuery({ serviceName: "api" }), baseParams)
-		const timeseries = compileCH(
+		const summary = compileCHUnsafe(serviceOperationsSummaryRawQuery({ serviceName: "api" }), baseParams)
+		const timeseries = compileCHUnsafe(
 			serviceOperationsTimeseriesRawQuery({ serviceName: "api", spanNames: ["GET /users"] }),
 			{ ...baseParams, bucketSeconds: 300 },
 		)
@@ -32,7 +32,7 @@ describe("serviceOperationsSummaryQuery", () => {
 
 	it("combines raw edges, minutely boundary hours, and complete hourly interiors", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api" })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("UNION ALL")
 		expect(sql).toContain("FROM service_operations_minutely")
@@ -51,7 +51,7 @@ describe("serviceOperationsSummaryQuery", () => {
 
 	it("keys operations on the HTTP display span name", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api" })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		// httpDisplaySpanName rewrites "http.server GET" + route → "GET /api/users"
 		expect(sql).toContain("http.route")
 		expect(sql).toContain("url.path")
@@ -61,7 +61,7 @@ describe("serviceOperationsSummaryQuery", () => {
 
 	it("merges exact, sampling-weighted, error, duration, and t-digest state", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api" })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain("sum(SampleRate) AS bEstimatedSpanCount")
 		expect(sql).toContain("sumIf(SampleRate, StatusCode = 'Error') AS bEstimatedErrorCount")
 		expect(sql).toContain("countIf(StatusCode = 'Error') AS bErrorCount")
@@ -76,7 +76,7 @@ describe("serviceOperationsSummaryQuery", () => {
 
 	it("applies environment filter via ResourceAttributes", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api", environments: ["production"] })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain(
 			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')",
 		)
@@ -85,19 +85,19 @@ describe("serviceOperationsSummaryQuery", () => {
 
 	it("preserves internal operations by applying no SpanKind filter", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api" })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).not.toContain("SpanKind IN")
 	})
 
 	it("respects a custom limit", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api", limit: 5 })
-		const { sql } = compileCH(q, baseParams)
+		const { sql } = compileCHUnsafe(q, baseParams)
 		expect(sql).toContain("LIMIT 5")
 	})
 
 	it("uses disjoint raw and rollup boundaries for partial edge minutes", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api" })
-		const { sql } = compileCH(q, {
+		const { sql } = compileCHUnsafe(q, {
 			orgId: "org_1",
 			startTime: "2024-01-01 00:00:30",
 			endTime: "2024-01-01 00:02:15",
@@ -113,7 +113,7 @@ describe("serviceOperationsSummaryQuery", () => {
 			["2024-01-01 00:00:10", "2024-01-01 00:00:40"],
 			["2024-01-01 00:00:10", "2024-01-01 00:00:10"],
 		] as const) {
-			const { sql } = compileCH(serviceOperationsSummaryQuery({ serviceName: "api" }), {
+			const { sql } = compileCHUnsafe(serviceOperationsSummaryQuery({ serviceName: "api" }), {
 				orgId: "org_1",
 				startTime,
 				endTime,
@@ -128,7 +128,7 @@ describe("serviceOperationsSummaryQuery", () => {
 describe("serviceOperationsTimeseriesQuery", () => {
 	it("buckets sampling-weighted counts per operation", () => {
 		const q = serviceOperationsTimeseriesQuery({ serviceName: "api", spanNames: ["GET /users"] })
-		const { sql } = compileCH(q, { ...baseParams, bucketSeconds: 300 })
+		const { sql } = compileCHUnsafe(q, { ...baseParams, bucketSeconds: 300 })
 		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("FROM service_operations_minutely")
 		expect(sql).toContain("UNION ALL")
@@ -147,7 +147,7 @@ describe("serviceOperationsTimeseriesQuery", () => {
 			spanNames: ["GET /users"],
 			bucketSeconds: 3600,
 		})
-		const { sql } = compileCH(q, { ...baseParams, bucketSeconds: 3600 })
+		const { sql } = compileCHUnsafe(q, { ...baseParams, bucketSeconds: 3600 })
 		expect(sql).toContain("FROM service_operations_hourly")
 		expect(sql).toContain("FROM service_operations_minutely")
 		expect(sql).toContain("FROM traces")
@@ -157,7 +157,7 @@ describe("serviceOperationsTimeseriesQuery", () => {
 
 	it("matches rollup rows directly on normalized SpanName", () => {
 		const q = serviceOperationsTimeseriesQuery({ serviceName: "api", spanNames: ["GET /users"] })
-		const { sql } = compileCH(q, { ...baseParams, bucketSeconds: 300 })
+		const { sql } = compileCHUnsafe(q, { ...baseParams, bucketSeconds: 300 })
 		expect(sql).toContain("SpanName IN ('GET /users')")
 		expect(sql).not.toContain("SpanName IN ('GET /users') OR")
 		// The display-name rewrite remains only for the two raw edge fragments.

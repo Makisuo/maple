@@ -3,7 +3,7 @@ import { Duration, Effect, Exit, Fiber, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { OrgId, UserId } from "@maple/domain"
 import { RawSqlValidationError } from "@maple/domain/http"
-import { compile, listRuleChecksQuery, unsafeCompiledQuery } from "../ch"
+import { compileUnsafe, listRuleChecksQuery, unsafeCompiledQuery } from "../ch"
 import { logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeWarehouseExecutor } from "./executor"
 import { WarehouseResponseLimitError } from "./response-limits"
@@ -58,7 +58,7 @@ const chdbConfig: ResolvedWarehouseConfig = {
 
 // listRuleChecksQuery declares .routing("ingest") at its definition —
 // alert_checks only exists in the managed ingest pipeline.
-const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
+const compiled = compileUnsafe(listRuleChecksQuery({ limit: 1 }), {
 	orgId: "org_test",
 	ruleId: "rule_test",
 })
@@ -219,12 +219,14 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 				.compiledQuery(
 					tenant,
 					() =>
-						unsafeCompiledQuery<{ readonly c: number }>({
-							reason: "test-fixture",
-							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
-							tenantScope: "tenant",
-						}),
+						Effect.succeed(
+							unsafeCompiledQuery<{ readonly c: number }>({
+								reason: "test-fixture",
+								note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+								sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+								tenantScope: "tenant",
+							}),
+						),
 					{ context: "capabilitySpan" },
 				)
 				.pipe(Effect.withTracer(tracer))
@@ -554,12 +556,14 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			})
 
 			const factory = (capabilities: WarehouseCapabilities) =>
-				unsafeCompiledQuery<{ readonly c: number }>({
-					reason: "test-fixture",
-					note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-					sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
-					tenantScope: "tenant",
-				})
+				Effect.succeed(
+					unsafeCompiledQuery<{ readonly c: number }>({
+						reason: "test-fixture",
+						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
+						tenantScope: "tenant",
+					}),
+				)
 
 			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
 			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
@@ -611,12 +615,14 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				executor.compiledQueryWithCapabilities(
 					tenant,
 					() =>
-						unsafeCompiledQuery<{ readonly c: number }>({
-							reason: "test-fixture",
-							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
-							tenantScope: "tenant",
-						}),
+						Effect.succeed(
+							unsafeCompiledQuery<{ readonly c: number }>({
+								reason: "test-fixture",
+								note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+								sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+								tenantScope: "tenant",
+							}),
+						),
 					{ context: "capability-request-local" },
 				)
 
@@ -678,12 +684,14 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			yield* executor.compiledQuery(
 				tenant,
 				(capabilities) =>
-					unsafeCompiledQuery<{ readonly c: number }>({
-						reason: "test-fixture",
-						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
-						tenantScope: "tenant",
-					}),
+					Effect.succeed(
+						unsafeCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+							sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+							tenantScope: "tenant",
+						}),
+					),
 				{ context: "capability-fallback-test" },
 			)
 
@@ -719,12 +727,14 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			yield* executor.compiledQuery(
 				tenant,
 				(capabilities) =>
-					unsafeCompiledQuery<{ readonly c: number }>({
-						reason: "test-fixture",
-						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'tokenbf' FORMAT JSON`,
-						tenantScope: "tenant",
-					}),
+					Effect.succeed(
+						unsafeCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+							sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'tokenbf' FORMAT JSON`,
+							tenantScope: "tenant",
+						}),
+					),
 				{ context: "tinybird-gateway-capabilities" },
 			)
 
@@ -768,12 +778,14 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 					.compiledQuery(
 						tenant,
 						(capabilities) =>
-							unsafeCompiledQuery<{ readonly c: number }>({
-								reason: "test-fixture",
-								note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-								sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
-								tenantScope: "tenant",
-							}),
+							Effect.succeed(
+								unsafeCompiledQuery<{ readonly c: number }>({
+									reason: "test-fixture",
+									note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+									sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+									tenantScope: "tenant",
+								}),
+							),
 						{ context: "hung-capability-probe" },
 					)
 					.pipe(

@@ -24,7 +24,7 @@
 // Built with the ClickHouse query-builder DSL (a `fromQuery(...).leftJoinQuery`
 // over two grouped subqueries), then compiled to SQL — no hand-written SQL.
 
-import { Schema } from "effect"
+import { Schema, Effect } from "effect"
 import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { unsafeCompiledQuery } from "../raw-sql"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -32,6 +32,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, ServicePlatformsHourly } from "../tables"
 import { CHNumber } from "../schema"
+import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 
 export interface ServiceWorkloadsOpts {
 	services: ReadonlyArray<string>
@@ -72,17 +73,19 @@ FORMAT JSON`
 export function serviceWorkloadsSQL(
 	opts: ServiceWorkloadsOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServiceWorkloadsOutput> {
+): Effect.Effect<CompiledQuery<ServiceWorkloadsOutput>, QueryBuilderError> {
 	if (opts.services.length === 0) {
 		// Reads no table at all (`WHERE 0`), so it cannot cross tenants; it stands
 		// in for a scoped call whose service list was empty.
-		return unsafeCompiledQuery({
-			sql: EMPTY_WORKLOADS_SQL,
-			reason: "empty-result-stub",
-			note: "SELECT of literals with WHERE 0 and no FROM; the builder always emits a FROM, and naming a table this reads no rows from would be worse.",
-			tenantScope: "tenant",
-			rowSchema: ServiceWorkloadsOutputSchema,
-		})
+		return Effect.succeed(
+			unsafeCompiledQuery({
+				sql: EMPTY_WORKLOADS_SQL,
+				reason: "empty-result-stub",
+				note: "SELECT of literals with WHERE 0 and no FROM; the builder always emits a FROM, and naming a table this reads no rows from would be worse.",
+				tenantScope: "tenant",
+				rowSchema: ServiceWorkloadsOutputSchema,
+			}),
+		)
 	}
 
 	// Per-service workload identity from the pre-aggregated MV. `max()` over the

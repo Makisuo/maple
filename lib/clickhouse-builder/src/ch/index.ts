@@ -214,7 +214,10 @@ export {
 export {
 	compileCH,
 	compileCH as compile,
+	compileCHUnsafe,
+	compileCHUnsafe as compileUnsafe,
 	compileUnion,
+	compileUnionUnsafe,
 	unsafeCompiledQuery,
 	type RawSqlReason,
 	type CompiledQuery,

@@ -74,9 +74,11 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				const signalRows = yield* warehouse
 					.compiledQuery(
 						tenant,
-						CH.compile(Integrations.dailySignalVolumeQuery(), params, {
-							rowSchema: Integrations.dailySignalVolumeRowSchema,
-						}),
+						yield* Effect.orDie(
+							CH.compile(Integrations.dailySignalVolumeQuery(), params, {
+								rowSchema: Integrations.dailySignalVolumeRowSchema,
+							}),
+						),
 						{ profile: "list", context: "billingDailySignalVolume" },
 					)
 					.pipe(Effect.mapError(toQueryError))
@@ -84,9 +86,11 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				const sessionRows = yield* warehouse
 					.compiledQuery(
 						tenant,
-						CH.compile(Integrations.dailySessionCountQuery(), params, {
-							rowSchema: Integrations.dailySessionCountRowSchema,
-						}),
+						yield* Effect.orDie(
+							CH.compile(Integrations.dailySessionCountQuery(), params, {
+								rowSchema: Integrations.dailySessionCountRowSchema,
+							}),
+						),
 						{ profile: "list", context: "billingDailySessionCount" },
 					)
 					.pipe(Effect.mapError(toQueryError))
@@ -105,9 +109,11 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				const eventRows = yield* warehouse
 					.compiledQuery(
 						tenant,
-						CH.compile(Integrations.dailyProductEventCountQuery(), params, {
-							rowSchema: Integrations.dailyProductEventCountRowSchema,
-						}),
+						yield* Effect.orDie(
+							CH.compile(Integrations.dailyProductEventCountQuery(), params, {
+								rowSchema: Integrations.dailyProductEventCountRowSchema,
+							}),
+						),
 						{ profile: "list", context: "billingDailyProductEventCount" },
 					)
 					.pipe(

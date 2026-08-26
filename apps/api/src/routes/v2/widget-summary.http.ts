@@ -113,17 +113,19 @@ export const HttpV2WidgetSummaryLive = HttpApiBuilder.group(MapleApiV2, "widgetS
 
 				// Whole seconds: the catalog reads the hourly rollups, whose
 				// Timestamp is a plain `DateTime` and rejects a fractional literal.
-				const compiled = CH.compile(
-					CH.serviceCatalogQuery({
-						limit: WIDGET_SUMMARY_SERVICE_LIMIT,
-						deploymentEnvironment: deploymentEnv,
-					}),
-					{
-						orgId: tenant.orgId,
-						startTime: formatWarehouseDateTime(throughputStartMs),
-						endTime: formatWarehouseDateTime(nowMs),
-					},
-					{ rowSchema: serviceCatalogRowSchema },
+				const compiled = yield* Effect.orDie(
+					CH.compile(
+						CH.serviceCatalogQuery({
+							limit: WIDGET_SUMMARY_SERVICE_LIMIT,
+							deploymentEnvironment: deploymentEnv,
+						}),
+						{
+							orgId: tenant.orgId,
+							startTime: formatWarehouseDateTime(throughputStartMs),
+							endTime: formatWarehouseDateTime(nowMs),
+						},
+						{ rowSchema: serviceCatalogRowSchema },
+					),
 				)
 				const serviceRows = yield* warehouse.compiledQuery(tenant, compiled, {
 					profile: "aggregation",

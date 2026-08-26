@@ -30,6 +30,12 @@ First public release.
   value the column cannot hold fails while the SQL is being built. Params
   resolve through the same path, and `param.of(type, name)` accepts any column
   type — including one declared with `T.custom(sql, schema)`.
+- Compilation is Effect-returning. `compile` / `compileUnion` fail with a typed
+  `QueryBuilderError` — a missing param value, a value the column cannot encode —
+  instead of throwing, so a caller can handle one rather than crash. A throw that
+  is not a `QueryBuilderError` stays a defect: it is a bug, not a condition.
+  `compileUnsafe` / `compileUnionUnsafe` keep the throwing behaviour for fixtures
+  and catalogs, where failing loudly is the contract.
 - Schema-checked row decoding (`decodeRows` / `decodeFirstRow`). No `castRows`.
   When nothing could be derived, `untypedColumns` names the selected aliases
   responsible, so "this query decodes nothing" is not a dead end.

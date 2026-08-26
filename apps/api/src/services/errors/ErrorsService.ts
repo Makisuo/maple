@@ -302,10 +302,12 @@ const make: Effect.Effect<
 			return byo as ReadonlySet<OrgId>
 		}
 
-		const compiled = CH.compile(
-			CH.activeOrgsByErrorEventsQuery(),
-			{ startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS) },
-			{ rowSchema: CH.ActiveOrgsOutputSchema },
+		const compiled = yield* Effect.orDie(
+			CH.compile(
+				CH.activeOrgsByErrorEventsQuery(),
+				{ startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS) },
+				{ rowSchema: CH.ActiveOrgsOutputSchema },
+			),
 		)
 		return yield* warehouse
 			.crossOrgQuery(systemTenant(knownOrgs[0]!), compiled, {
@@ -1182,25 +1184,26 @@ const make: Effect.Effect<
 		).pipe(Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)))
 		const issuesReopened = wakeCandidates.length
 
-		const scanWindow = (endMs: number) => {
-			const tickParams = {
-				orgId,
-				startTime: formatWarehouseDateTime(windowStartMs),
-				endTime: formatWarehouseDateTime(endMs),
-			}
-			const issuesCompiled = tickWindow.isBootstrap
-				? CH.compile(CH.errorTickBootstrapIssuesQuery(), tickParams)
-				: CH.compile(CH.errorTickIssuesQuery(), tickParams)
-			return warehouse
-				.compiledQuery(tenant, issuesCompiled, {
-					profile: "aggregation",
-					context: "errorIssuesScan",
-				})
-				.pipe(
-					Effect.mapError(makePersistenceError),
-					Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
-				)
-		}
+		const scanWindow = (endMs: number) =>
+			Effect.gen(function* () {
+				const tickParams = {
+					orgId,
+					startTime: formatWarehouseDateTime(windowStartMs),
+					endTime: formatWarehouseDateTime(endMs),
+				}
+				const issuesCompiled = tickWindow.isBootstrap
+					? yield* Effect.orDie(CH.compile(CH.errorTickBootstrapIssuesQuery(), tickParams))
+					: yield* Effect.orDie(CH.compile(CH.errorTickIssuesQuery(), tickParams))
+				return yield* warehouse
+					.compiledQuery(tenant, issuesCompiled, {
+						profile: "aggregation",
+						context: "errorIssuesScan",
+					})
+					.pipe(
+						Effect.mapError(makePersistenceError),
+						Effect.tapError(() => releaseTickClaim(orgId, tickWindow.claimToken, nowMs)),
+					)
+			})
 
 		// Shed rows before the transaction rather than after it fails. A catch-up
 		// window, or one minute of a fingerprint-cardinality explosion, can carry

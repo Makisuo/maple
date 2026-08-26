@@ -38,7 +38,8 @@ const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceApi =>
 	rawSqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),
 	crossOrgQuery: () => Effect.die(new Error("unexpected cross-org query")),
 	compiledQuery: (_tenant, compile, options) => {
-		const compiled = typeof compile === "function" ? compile(baselineWarehouseCapabilities()) : compile
+		const compiled =
+			typeof compile === "function" ? Effect.runSync(compile(baselineWarehouseCapabilities())) : compile
 		return Effect.sync(() => contexts.push(options?.context ?? "")).pipe(
 			Effect.andThen(
 				compiled

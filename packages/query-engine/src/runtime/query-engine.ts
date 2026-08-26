@@ -116,7 +116,9 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 	/** Capability-aware execution; adapters may deliberately compile the baseline plan. */
 	readonly compiledQueryWithCapabilities: <Output>(
 		tenant: T,
-		compile: (capabilities: WarehouseCapabilities) => CH.CompiledQuery<Output>,
+		compile: (
+			capabilities: WarehouseCapabilities,
+		) => Effect.Effect<CH.CompiledQuery<Output>, CH.QueryBuilderError>,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Output>, WarehouseReadError>
 }
@@ -900,7 +902,9 @@ const executeCHQuery = Effect.fnUntraced(function* <
 		)
 	}
 
-	const compiled = CH.compile(query, params)
+	// `orDie`: the params here come from a lowered `QuerySpec`, already validated
+	// against the request schema, so a compile failure is a bug in the lowering.
+	const compiled = yield* Effect.orDie(CH.compile(query, params))
 	return yield* annotateWarehouseError(warehouse.compiledQuery(tenant, compiled, options), context)
 })
 
@@ -977,7 +981,7 @@ const executeCHUnionQuery = Effect.fnUntraced(function* <
 	context: string,
 	profile: QueryProfileName = "aggregation",
 ) {
-	const compiled = CH.compileUnion(query, params)
+	const compiled = yield* Effect.orDie(CH.compileUnion(query, params))
 	return yield* annotateWarehouseError(
 		warehouse.compiledQuery(tenant, compiled, { profile, context }),
 		context,

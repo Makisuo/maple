@@ -310,7 +310,63 @@ export const unsafeCompiledQuery = <
 		args.routing,
 	)
 
-export function compileCH<
+/**
+ * A thrown `QueryBuilderError` as a typed failure.
+ *
+ * Compilation reads values it cannot check earlier — the params bag, whatever a
+ * caller compared a column against — so a missing param or an unencodable value
+ * is an expected failure, not a bug. Anything else that escapes is a bug and
+ * stays a defect: catching it would turn a real crash into a value someone
+ * pattern-matches on.
+ */
+interface UnexpectedCompileFailure {
+	readonly _tag: "UnexpectedCompileFailure"
+	readonly cause: unknown
+}
+
+const asEffect = <A>(compile: () => A): Effect.Effect<A, QueryBuilderError> =>
+	Effect.try({
+		try: compile,
+		catch: (cause): QueryBuilderError | UnexpectedCompileFailure =>
+			cause instanceof QueryBuilderError ? cause : { _tag: "UnexpectedCompileFailure" as const, cause },
+	}).pipe(Effect.catchTag("UnexpectedCompileFailure", ({ cause }) => Effect.die(cause)))
+
+/**
+ * Compile a query, with failures in the error channel.
+ *
+ * The compile step used to throw. `QueryBuilderError` was already a
+ * `Schema.TaggedError`, but a thrown one is a defect: a route could not
+ * `catchTag` it, and a missing param reached production as an unhandled crash
+ * rather than a typed 400. Use {@link compileCHUnsafe} where a throw is what you
+ * want — a fixture that fails to compile should fail its test loudly.
+ */
+export const compileCH = <
+	Cols extends ColumnDefs,
+	Output extends Record<string, any>,
+	Joins extends Record<string, ColumnDefs>,
+	Routing extends string | undefined,
+	Params extends Record<string, any>,
+	Decoded extends Output = Output,
+>(
+	query: CHQuery<Cols, Output, Joins, Routing>,
+	params: Params,
+	options?: {
+		skipFormat?: boolean
+		rowSchema?: CompiledQueryRowSchema<Decoded>
+		deferParams?: boolean
+	},
+): Effect.Effect<CompiledQuery<Decoded, Routing>, QueryBuilderError> =>
+	asEffect(() => compileCHUnsafe(query, params, options))
+
+/** {@link compileCH} for a `UNION ALL`. */
+export const compileUnion = <Output extends Record<string, any>, Params extends Record<string, any>>(
+	union: CHUnionQuery<Output>,
+	params: Params,
+	options?: { rowSchema?: CompiledQueryRowSchema<Output>; deferParams?: boolean },
+): Effect.Effect<CompiledQuery<Output, undefined>, QueryBuilderError> =>
+	asEffect(() => compileUnionUnsafe(union, params, options))
+
+export function compileCHUnsafe<
 	Cols extends ColumnDefs,
 	Output extends Record<string, any>,
 	Joins extends Record<string, ColumnDefs>,
@@ -370,7 +426,7 @@ export function compileCH<
 	// carries whatever scope the caller declared.
 	const resolvedCtes = state.ctes.map((c) => {
 		if (c.query) {
-			const compiled = compileCH(c.query, params, { skipFormat: true, deferParams })
+			const compiled = compileCHUnsafe(c.query, params, { skipFormat: true, deferParams })
 			return { name: c.name, sql: compiled.sql, tenantScope: compiled.tenantScope }
 		}
 		return { name: c.name, sql: c.sql ?? "", tenantScope: c.tenantScope }
@@ -384,13 +440,13 @@ export function compileCH<
 	let fromSourceScope: TenantScope = "cross-tenant"
 	if (state.fromQuery) {
 		// Compile the inner query lazily
-		const innerCompiled = compileCH(state.fromQuery, params, { skipFormat: true, deferParams })
+		const innerCompiled = compileCHUnsafe(state.fromQuery, params, { skipFormat: true, deferParams })
 		fromSourceScope = innerCompiled.tenantScope
 		fromFragment = raw(`(${innerCompiled.sql}) AS ${state.fromQueryAlias}`)
 	} else if (state.fromUnion) {
 		// Compile the inner union without an outer FORMAT — the outer query
 		// owns formatting. Strips a trailing `\nFORMAT <fmt>` defensively.
-		const innerCompiled = compileUnion(state.fromUnion, params, { deferParams })
+		const innerCompiled = compileUnionUnsafe(state.fromUnion, params, { deferParams })
 		fromSourceScope = innerCompiled.tenantScope
 		const innerSql = splitTerminalClauses(innerCompiled.sql).body
 		fromFragment = raw(`(\n${innerSql}\n) AS ${state.fromQueryAlias}`)
@@ -417,7 +473,10 @@ export function compileCH<
 			? state.typedJoins.map((j) => {
 					let tableSql: string
 					if (j.innerQuery) {
-						const compiled = compileCH(j.innerQuery, params, { skipFormat: true, deferParams })
+						const compiled = compileCHUnsafe(j.innerQuery, params, {
+							skipFormat: true,
+							deferParams,
+						})
 						if (compiled.tenantScope !== "tenant") allJoinSourcesScoped = false
 						tableSql = `(${compiled.sql})`
 					} else if (j.tableName) {
@@ -590,7 +649,7 @@ const deriveRowSchema = (
 
 // UNION ALL compilation
 
-export function compileUnion<Output extends Record<string, any>, Params extends Record<string, any>>(
+export function compileUnionUnsafe<Output extends Record<string, any>, Params extends Record<string, any>>(
 	union: CHUnionQuery<Output>,
 	params: Params,
 	options?: { rowSchema?: CompiledQueryRowSchema<Output>; deferParams?: boolean },
@@ -599,7 +658,7 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 	const deferParams = options?.deferParams === true
 
 	// Compile each sub-query without FORMAT
-	const subQueries = state.queries.map((q) => compileCH(q, params, { skipFormat: true, deferParams }))
+	const subQueries = state.queries.map((q) => compileCHUnsafe(q, params, { skipFormat: true, deferParams }))
 
 	// UNION ALL is a disjunction: one unscoped branch leaks every tenant into the
 	// result regardless of how tightly the others are filtered.

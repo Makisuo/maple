@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCH, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe, compileUnionUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
 	CLOUDFLARE_BREAKDOWN_DIMENSIONS,
 	CLOUDFLARE_BREAKDOWN_OTHER_KEY,
@@ -24,7 +24,7 @@ const timeseriesParams = { ...zoneParams, bucketSeconds: 300 }
 
 describe("cloudflareZoneBreakdownTotalsSQL", () => {
 	it("reads the path family and ranks by requests", () => {
-		const { sql } = compileCH(cloudflareZoneBreakdownTotalsSQL("path"), zoneParams)
+		const { sql } = compileCHUnsafe(cloudflareZoneBreakdownTotalsSQL("path"), zoneParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain("ServiceName = 'cloudflare/example.com'")
 		expect(sql).toContain(
@@ -38,15 +38,15 @@ describe("cloudflareZoneBreakdownTotalsSQL", () => {
 
 	it("derives 5xx from the status class when a family has no dedicated errors metric", () => {
 		// The main cube carries http.status_class on the same rows; by_country does not carry it at all.
-		const host = compileCH(cloudflareZoneBreakdownTotalsSQL("host"), zoneParams).sql
+		const host = compileCHUnsafe(cloudflareZoneBreakdownTotalsSQL("host"), zoneParams).sql
 		expect(host).toContain("http.status_class'] = '5xx'")
-		const country = compileCH(cloudflareZoneBreakdownTotalsSQL("country"), zoneParams).sql
+		const country = compileCHUnsafe(cloudflareZoneBreakdownTotalsSQL("country"), zoneParams).sql
 		expect(country).not.toContain("http.status_class")
 	})
 
 	it("keeps the row shape uniform by emitting literal zeros for absent measures", () => {
 		// `by_client` has neither an errors nor a bytes metric, so both columns must still exist.
-		const { sql } = compileCH(cloudflareZoneBreakdownTotalsSQL("method"), zoneParams).valueOf() as {
+		const { sql } = compileCHUnsafe(cloudflareZoneBreakdownTotalsSQL("method"), zoneParams).valueOf() as {
 			sql: string
 		}
 		expect(sql).toContain("AS errors5xx")
@@ -60,21 +60,21 @@ describe("cloudflareZoneBreakdownTotalsSQL", () => {
 			["protocol", "network.protocol.version"],
 			["deviceType", "cloudflare.device.type"],
 		] as const) {
-			const { sql } = compileCH(cloudflareZoneBreakdownTotalsSQL(dimension), zoneParams)
+			const { sql } = compileCHUnsafe(cloudflareZoneBreakdownTotalsSQL(dimension), zoneParams)
 			expect(sql).toContain(`${attr}']`)
 			expect(sql).toContain("cloudflare.http.requests.by_client")
 		}
 	})
 
 	it("groups hosts through the transitional coalesce", () => {
-		const { sql } = compileCH(cloudflareZoneBreakdownTotalsSQL("host"), zoneParams)
+		const { sql } = compileCHUnsafe(cloudflareZoneBreakdownTotalsSQL("host"), zoneParams)
 		expect(sql).toContain("server.address']")
 		expect(sql).toContain("http.host']")
 	})
 
 	it("compiles every registered dimension", () => {
 		for (const dimension of CLOUDFLARE_BREAKDOWN_DIMENSIONS) {
-			const { sql } = compileCH(cloudflareZoneBreakdownTotalsSQL(dimension), zoneParams)
+			const { sql } = compileCHUnsafe(cloudflareZoneBreakdownTotalsSQL(dimension), zoneParams)
 			expect(sql).toContain("GROUP BY key")
 			expect(cloudflareBreakdownMetrics(dimension).length).toBeGreaterThan(0)
 		}
@@ -83,7 +83,7 @@ describe("cloudflareZoneBreakdownTotalsSQL", () => {
 
 describe("cloudflareZoneBreakdownTimeseriesSQL", () => {
 	it("buckets a single requests metric per dimension value", () => {
-		const { sql } = compileCH(cloudflareZoneBreakdownTimeseriesSQL("country"), timeseriesParams)
+		const { sql } = compileCHUnsafe(cloudflareZoneBreakdownTimeseriesSQL("country"), timeseriesParams)
 		expect(sql).toContain("toStartOfInterval")
 		expect(sql).toContain("MetricName = 'cloudflare.http.requests.by_country'")
 		expect(sql).toContain("geo.country_iso_code']")
@@ -94,7 +94,7 @@ describe("cloudflareZoneBreakdownTimeseriesSQL", () => {
 	it("folds every key outside topKeys into the shared `other` bucket", () => {
 		// Without this the grouping is unbounded: a zone taking scanner traffic emits a distinct
 		// path per probe, and the chart gets one <Area> and one legend chip per key.
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			cloudflareZoneBreakdownTimeseriesSQL("path", {}, ["/api/users", "/health"]),
 			timeseriesParams,
 		)
@@ -106,7 +106,7 @@ describe("cloudflareZoneBreakdownTimeseriesSQL", () => {
 	})
 
 	it("escapes topKeys rather than interpolating them raw", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			cloudflareZoneBreakdownTimeseriesSQL("path", {}, ["/a'b"]),
 			timeseriesParams,
 		)
@@ -114,7 +114,7 @@ describe("cloudflareZoneBreakdownTimeseriesSQL", () => {
 	})
 
 	it("leaves the grouping alone when no topKeys are given", () => {
-		const { sql } = compileCH(cloudflareZoneBreakdownTimeseriesSQL("statusClass"), timeseriesParams)
+		const { sql } = compileCHUnsafe(cloudflareZoneBreakdownTimeseriesSQL("statusClass"), timeseriesParams)
 		expect(sql).not.toContain("if(")
 		expect(sql).not.toContain(`'${CLOUDFLARE_BREAKDOWN_OTHER_KEY}'`)
 	})
@@ -122,7 +122,7 @@ describe("cloudflareZoneBreakdownTimeseriesSQL", () => {
 
 describe("cloudflareZoneBreakdownCoverageSQL", () => {
 	it("reports when collection started, ignoring the caller's dimension filters", () => {
-		const { sql } = compileCH(cloudflareZoneBreakdownCoverageSQL("path"), zoneParams)
+		const { sql } = compileCHUnsafe(cloudflareZoneBreakdownCoverageSQL("path"), zoneParams)
 		expect(sql).toContain("min(TimeUnix)")
 		expect(sql).toContain("MetricName = 'cloudflare.http.requests.by_path'")
 		// Coverage is a property of what the poller collected, not of the current selection.
@@ -132,7 +132,7 @@ describe("cloudflareZoneBreakdownCoverageSQL", () => {
 
 describe("cloudflareZoneFacetsQuery", () => {
 	it("unions one branch per facet, each tagged with its type", () => {
-		const { sql } = compileUnion(cloudflareZoneFacetsQuery(), zoneParams)
+		const { sql } = compileUnionUnsafe(cloudflareZoneFacetsQuery(), zoneParams)
 		expect(sql.match(/UNION ALL/g)?.length).toBe(7)
 		for (const facetType of [
 			"host",
@@ -151,7 +151,7 @@ describe("cloudflareZoneFacetsQuery", () => {
 	})
 
 	it("self-excludes each facet so a selection does not hide its siblings", () => {
-		const { sql } = compileUnion(
+		const { sql } = compileUnionUnsafe(
 			cloudflareZoneFacetsQuery({ paths: ["/api"], hosts: ["a.example"] }),
 			zoneParams,
 		)
@@ -178,7 +178,7 @@ describe("row schemas coerce ClickHouse string-encoded aggregates", () => {
 		Effect.runSync(compiled.decodeRows(rows))
 
 	it("totals", () => {
-		const compiled = compileCH(cloudflareZoneBreakdownTotalsSQL("path"), zoneParams, {
+		const compiled = compileCHUnsafe(cloudflareZoneBreakdownTotalsSQL("path"), zoneParams, {
 			rowSchema: cloudflareZoneBreakdownTotalsRowSchema,
 		})
 		const [row] = decode(compiled, [
@@ -188,7 +188,7 @@ describe("row schemas coerce ClickHouse string-encoded aggregates", () => {
 	})
 
 	it("timeseries", () => {
-		const compiled = compileCH(cloudflareZoneBreakdownTimeseriesSQL("path"), timeseriesParams, {
+		const compiled = compileCHUnsafe(cloudflareZoneBreakdownTimeseriesSQL("path"), timeseriesParams, {
 			rowSchema: cloudflareZoneBreakdownTimeseriesRowSchema,
 		})
 		const [row] = decode(compiled, [{ bucket: "2026-07-02T00:00:00.000Z", key: "/api", requests: "42" }])
@@ -196,7 +196,7 @@ describe("row schemas coerce ClickHouse string-encoded aggregates", () => {
 	})
 
 	it("coverage", () => {
-		const compiled = compileCH(cloudflareZoneBreakdownCoverageSQL("path"), zoneParams, {
+		const compiled = compileCHUnsafe(cloudflareZoneBreakdownCoverageSQL("path"), zoneParams, {
 			rowSchema: cloudflareZoneBreakdownCoverageRowSchema,
 		})
 		const [row] = decode(compiled, [

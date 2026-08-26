@@ -29,13 +29,13 @@ ambiguous. A name that cannot round-trip is rejected at declaration.
 The declared kind is checked when the value arrives, so a value of the wrong shape is a
 compilation failure rather than SQL text that happens to contain it:
 
-| Kind       | Accepts                                                 | Emits                           |
-| ---------- | ------------------------------------------------------- | ------------------------------- |
-| `string`   | a string                                                | an escaped literal, `'org_123'` |
-| `int`      | a safe integer                                          | `50`                            |
-| `float`    | any finite number                                       | `0.95`                          |
-| `bool`     | a boolean                                               | `1` / `0`                       |
-| `dateTime` | `'YYYY-MM-DD hh:mm:ss'`, a `Date`, or a `DateTime.Utc`  | `'2026-01-01 00:00:00'`         |
+| Kind       | Accepts                                                | Emits                           |
+| ---------- | ------------------------------------------------------ | ------------------------------- |
+| `string`   | a string                                               | an escaped literal, `'org_123'` |
+| `int`      | a safe integer                                         | `50`                            |
+| `float`    | any finite number                                      | `0.95`                          |
+| `bool`     | a boolean                                              | `1` / `0`                       |
+| `dateTime` | `'YYYY-MM-DD hh:mm:ss'`, a `Date`, or a `DateTime.Utc` | `'2026-01-01 00:00:00'`         |
 
 Each kind names a column type, and the value is encoded through that type's
 schema — the same schema a column of that type decodes rows with, read backwards. The two
@@ -51,20 +51,33 @@ CH.from(Events)
 	.select(($) => ({ n: CH.count() }))
 	.where(($) => [$.Level.eq(CH.param.of(Level, "level"))])
 
-CH.compile(query, { level: "warn" })   // … WHERE Level = 'warn'
-CH.compile(query, { level: "banana" }) // throws — the schema rejected it
+CH.compile(query, { level: "warn" }) // … WHERE Level = 'warn'
+CH.compile(query, { level: "banana" }) // fails — the schema rejected it
 ```
+
+Compilation returns an `Effect`, so a value the query cannot accept is a typed failure rather
+than a throw. That matters because these are runtime values: a param bag comes from a request
+as often as from your own code, and a route that can `catchTag` a bad one can answer with a
+400 instead of crashing.
 
 ```ts
-CH.compile(query, { startTime: new Date("2026-01-01T00:00:00Z") })
+yield * CH.compile(query, { startTime: new Date("2026-01-01T00:00:00Z") })
 // … WHERE Timestamp >= '2026-01-01 00:00:00'
 
-CH.compile(query, { limit: 10.5 })
-// throws QueryBuilderError { code: "InvalidParamValue" } — use param.float for fractions
+yield * CH.compile(query, { limit: 10.5 })
+// fails with QueryBuilderError { code: "InvalidParamValue" } — use param.float for fractions
 
-CH.compile(query, {})
-// throws QueryBuilderError { code: "UnresolvedParam" }: no value given for param 'orgId'
+yield * CH.compile(query, {})
+// fails with QueryBuilderError { code: "UnresolvedParam" }: no value given for param 'orgId'
 ```
+
+A throw that is _not_ a `QueryBuilderError` — a bug inside one of your callbacks — stays a
+defect. Turning it into a typed failure would hand you a value to pattern-match on where the
+honest answer is that something is broken.
+
+`compileUnsafe` (and `compileUnionUnsafe`) throw instead, for the places where that is the
+contract: a fixture or a catalog sweep should fail loudly rather than produce an entry nobody
+notices is missing.
 
 Params the query never mentions are ignored, so one bag of params can serve a family of
 queries.
@@ -109,12 +122,12 @@ _(Backed by `docs/params-and-compilation.md > Params are resolved at compile tim
 CH.compile(query, params, options?)
 ```
 
-| Argument             | Meaning                                                          |
-| -------------------- | ---------------------------------------------------------------- |
-| `query`              | The `CHQuery` to compile                                         |
-| `params`             | Record resolving every `param.*` placeholder by name             |
-| `options.rowSchema`  | Effect `Schema` used by `decodeRows` / `decodeFirstRow`          |
-| `options.skipFormat` | Omit a trailing `FORMAT` clause (used internally for subqueries) |
+| Argument              | Meaning                                                              |
+| --------------------- | -------------------------------------------------------------------- |
+| `query`               | The `CHQuery` to compile                                             |
+| `params`              | Record resolving every `param.*` placeholder by name                 |
+| `options.rowSchema`   | Effect `Schema` used by `decodeRows` / `decodeFirstRow`              |
+| `options.skipFormat`  | Omit a trailing `FORMAT` clause (used internally for subqueries)     |
 | `options.deferParams` | Leave placeholders unresolved, for SQL spliced into an outer compile |
 
 `compile` and `compileCH` are the same function. Unions use `compileUnion(union, params)`.
@@ -155,11 +168,11 @@ because it cannot be inferred from a string. See [Extending the DSL](./extending
 
 | Code                 | Cause                                                        |
 | -------------------- | ------------------------------------------------------------ |
-| `SelectRequired`     | Compiling a query with no `select()`                             |
-| `UnresolvedParam`    | A param with no value, or compared on before it was resolved     |
-| `InvalidParamValue`  | A param value that is not what its kind accepts                  |
-| `InvalidParamName`   | A param name that cannot round-trip through its placeholder      |
-| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple     |
+| `SelectRequired`     | Compiling a query with no `select()`                         |
+| `UnresolvedParam`    | A param with no value, or compared on before it was resolved |
+| `InvalidParamValue`  | A param value that is not what its kind accepts              |
+| `InvalidParamName`   | A param name that cannot round-trip through its placeholder  |
+| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple |
 
 It is an Effect `Schema.TaggedError`, catchable by the tag
 `"@maple-dev/clickhouse-builder/QueryBuilderError"`.

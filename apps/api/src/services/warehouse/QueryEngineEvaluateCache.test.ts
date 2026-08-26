@@ -87,7 +87,7 @@ const evalStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 		rawSqlQuery: () => Effect.die(new Error("rawSqlQuery is not used by evaluate cache tests")),
 		compiledQuery: (_tenant, compiled) => compiled.decodeRows(rows).pipe(Effect.orDie),
 		compiledQueryWithCapabilities: (_tenant, compile) =>
-			compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie),
+			Effect.runSync(compile(baselineWarehouseCapabilities())).decodeRows(rows).pipe(Effect.orDie),
 	}) satisfies Parameters<typeof makeQueryEngineEvaluate>[0]
 
 describe("makeQueryEngineEvaluate (shared alert-lowering core)", () => {
@@ -279,7 +279,9 @@ const makeFullStub = (
 			) => CompiledQuery<Output>,
 		) => {
 			counter.n += 1
-			return compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie)
+			return Effect.runSync(compile(baselineWarehouseCapabilities()))
+				.decodeRows(rows)
+				.pipe(Effect.orDie)
 		},
 		compiledQueryFirst: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1

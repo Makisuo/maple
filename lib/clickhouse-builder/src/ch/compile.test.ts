@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DateTime, Effect, Exit, Option, Schema } from "effect"
-import { CompiledQueryDecodeError, compileCH, unsafeCompiledQuery } from "./compile"
+import { CompiledQueryDecodeError, compileCHUnsafe, unsafeCompiledQuery } from "./compile"
 import * as CH from "./index"
 import * as T from "./types"
 
@@ -17,7 +17,7 @@ describe("CompiledQuery.decodeRows", () => {
 				{ OrgId: CH.string, Count: CH.uint64 },
 				{ tenantColumn: "OrgId" },
 			)
-			const compiled = compileCH(
+			const compiled = compileCHUnsafe(
 				CH.from(table)
 					.select(($) => ({ count: $.Count }))
 					.where(($) => [$.OrgId.eq("org")]),
@@ -33,7 +33,7 @@ describe("CompiledQuery.decodeRows", () => {
 	it.effect("has no schema when a selected expression has no type to read", () =>
 		Effect.gen(function* () {
 			const table = CH.table("events", { OrgId: CH.string, Count: CH.uint64 })
-			const compiled = compileCH(
+			const compiled = compileCHUnsafe(
 				CH.from(table).select(($) => ({
 					count: $.Count,
 					whatever: CH.untypedExpr("anyLast(Something)"),
@@ -52,7 +52,7 @@ describe("CompiledQuery.decodeRows", () => {
 	it.effect("takes a declared schema over the derived one", () =>
 		Effect.gen(function* () {
 			const table = CH.table("events", { OrgId: CH.string, Status: CH.string })
-			const compiled = compileCH(
+			const compiled = compileCHUnsafe(
 				CH.from(table).select(($) => ({ status: $.Status })),
 				{},
 				{ rowSchema: Schema.Struct({ status: Schema.Literals(["ok", "error"]) }) },
@@ -194,7 +194,7 @@ describe("CompiledQuery.tenantScope", () => {
 	const events = CH.table("events", { OrgId: CH.string, Count: CH.uint64 }, { tenantColumn: "OrgId" })
 	const other = CH.table("other", { OrgId: CH.string, Count: CH.uint64 }, { tenantColumn: "OrgId" })
 
-	const scopeOf = (build: (q: typeof events) => any) => compileCH(build(events), {}).tenantScope
+	const scopeOf = (build: (q: typeof events) => any) => compileCHUnsafe(build(events), {}).tenantScope
 
 	it("is 'tenant' for a top-level equality on the tenant column", () => {
 		expect(
@@ -239,7 +239,7 @@ describe("CompiledQuery.tenantScope", () => {
 
 	it("is 'cross-tenant' when only the SELECT mentions the tenant column", () => {
 		// The shape that satisfied the old `sql.includes("OrgId")` guard.
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(events)
 				.select(($) => ({ OrgId: $.OrgId, count: $.Count }))
 				.groupBy("OrgId"),
@@ -258,7 +258,7 @@ describe("CompiledQuery.tenantScope", () => {
 			.select(($) => ({ OrgId: $.OrgId, count: $.Count }))
 			.where(($) => [$.OrgId.eq("org")])
 		expect(
-			compileCH(
+			compileCHUnsafe(
 				CH.fromQuery(inner, "i")
 					.select(($) => ({ total: CH.sum($.count) }))
 					.where(($) => [$.count.gt(0)]),
@@ -270,7 +270,7 @@ describe("CompiledQuery.tenantScope", () => {
 	it("is 'cross-tenant' when the FROM source is unscoped", () => {
 		const inner = CH.from(events).select(($) => ({ OrgId: $.OrgId, count: $.Count }))
 		expect(
-			compileCH(
+			compileCHUnsafe(
 				CH.fromQuery(inner, "i").select(($) => ({ total: CH.sum($.count) })),
 				{},
 			).tenantScope,
@@ -284,7 +284,7 @@ describe("CompiledQuery.tenantScope", () => {
 			.select(($) => ({ OrgId: $.OrgId, count: $.Count }))
 			.where(($) => [$.OrgId.eq("org")])
 		expect(
-			compileCH(
+			compileCHUnsafe(
 				CH.fromQuery(inner, "i")
 					.leftJoin(other, "o", (main, o) => main.OrgId.eq(o.OrgId))
 					.select(($) => ({ total: CH.sum($.count) })),
@@ -295,7 +295,7 @@ describe("CompiledQuery.tenantScope", () => {
 
 	it("is 'tenant' for a tenant predicate on a joined alias", () => {
 		expect(
-			compileCH(
+			compileCHUnsafe(
 				CH.from(events)
 					.leftJoin(other, "o", (main, o) => main.OrgId.eq(o.OrgId))
 					.select(($) => ({ count: $.Count }))
@@ -311,8 +311,8 @@ describe("CompiledQuery.tenantScope", () => {
 			.where(($) => [$.OrgId.eq("org")])
 		const unscoped = CH.from(other).select(($) => ({ count: $.Count }))
 
-		expect(CH.compileUnion(CH.unionAll(scoped, scoped), {}).tenantScope).toBe("tenant")
-		expect(CH.compileUnion(CH.unionAll(scoped, unscoped), {}).tenantScope).toBe("cross-tenant")
+		expect(CH.compileUnionUnsafe(CH.unionAll(scoped, scoped), {}).tenantScope).toBe("tenant")
+		expect(CH.compileUnionUnsafe(CH.unionAll(scoped, unscoped), {}).tenantScope).toBe("cross-tenant")
 	})
 
 	it("is 'cross-tenant' when .crossTenant() overrides a tenant predicate", () => {
@@ -352,7 +352,7 @@ describe("CompiledQuery.encodeRows", () => {
 	// Re-encoding through the same codec gives back exactly what came in.
 	it.effect("returns a decoded row to the wire shape ClickHouse sent", () =>
 		Effect.gen(function* () {
-			const compiled = compileCH(
+			const compiled = compileCHUnsafe(
 				CH.from(Events)
 					.select(($) => ({ at: $.Timestamp, name: $.Name, count: $.Count }))
 					.where(($) => [$.OrgId.eq("org_1")]),
@@ -371,7 +371,7 @@ describe("CompiledQuery.encodeRows", () => {
 
 	it.effect("fails on a row the schema cannot represent", () =>
 		Effect.gen(function* () {
-			const compiled = compileCH(
+			const compiled = compileCHUnsafe(
 				CH.from(Events)
 					.select(($) => ({ at: $.Timestamp }))
 					.where(($) => [$.OrgId.eq("org_1")]),
@@ -387,7 +387,7 @@ describe("CompiledQuery.encodeRows", () => {
 	// through rather than the call becoming an error nobody can act on.
 	it.effect("passes rows through when the query has no row schema", () =>
 		Effect.gen(function* () {
-			const compiled = compileCH(
+			const compiled = compileCHUnsafe(
 				CH.from(Events)
 					.select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") }))
 					.where(($) => [$.OrgId.eq("org_1")]),
@@ -397,6 +397,64 @@ describe("CompiledQuery.encodeRows", () => {
 
 			const rows = [{ name: "checkout", odd: 1 }]
 			expect(yield* compiled.encodeRows(rows)).toEqual(rows)
+		}),
+	)
+})
+
+describe("compile puts failures in the error channel", () => {
+	const Events = CH.table(
+		"events",
+		{ OrgId: T.string, Name: T.string, Count: T.uint64 },
+		{ tenantColumn: "OrgId" },
+	)
+
+	const query = CH.from(Events)
+		.select(($) => ({ name: $.Name }))
+		.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
+
+	// The whole point of the change: a route can `catchTag` this. Thrown, it was
+	// a defect — a missing param reached production as an unhandled crash rather
+	// than a typed failure anyone could map to a 400.
+	it.effect("a missing param value is a typed failure", () =>
+		Effect.gen(function* () {
+			const error = yield* Effect.flip(CH.compile(query, {}))
+			expect(error._tag).toBe("@maple-dev/clickhouse-builder/QueryBuilderError")
+			expect(error.code).toBe("UnresolvedParam")
+			expect(error.message).toContain("orgId")
+		}),
+	)
+
+	it.effect("a value the column cannot hold is a typed failure", () =>
+		Effect.gen(function* () {
+			const bad = CH.from(Events)
+				.select(($) => ({ name: $.Name }))
+				.where(($) => [$.OrgId.eq("org"), $.Count.eq("lots" as never)])
+
+			const error = yield* Effect.flip(CH.compile(bad, {}))
+			expect(error.code).toBe("InvalidLiteral")
+		}),
+	)
+
+	it.effect("a success carries the same compiled query the unsafe path returns", () =>
+		Effect.gen(function* () {
+			const compiled = yield* CH.compile(query, { orgId: "org_1" })
+			expect(compiled.sql).toBe(CH.compileUnsafe(query, { orgId: "org_1" }).sql)
+			expect(compiled.tenantScope).toBe("tenant")
+		}),
+	)
+
+	// A bug inside a callback is not an expected failure and must stay a defect:
+	// making it a `QueryBuilderError` would hand callers a value to pattern-match
+	// on where the honest answer is that the process is broken.
+	it.effect("an unexpected throw stays a defect", () =>
+		Effect.gen(function* () {
+			const exploding = CH.from(Events).select(() => {
+				throw new TypeError("boom")
+			})
+
+			const exit = yield* Effect.exit(CH.compile(exploding, {}))
+			expect(Exit.isFailure(exit)).toBe(true)
+			expect(String(exit)).toContain("boom")
 		}),
 	)
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCH, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
 	dailyProductEventCountQuery,
 	dailyProductEventCountRowSchema,
@@ -21,7 +21,7 @@ const decodeRows = <T>(compiled: CompiledQuery<T>, rows: ReadonlyArray<Record<st
 
 describe("dailySignalVolumeQuery", () => {
 	it("buckets the hourly usage MV into UTC days, scoped to one org", () => {
-		const { sql } = compileCH(dailySignalVolumeQuery(), params)
+		const { sql } = compileCHUnsafe(dailySignalVolumeQuery(), params)
 
 		expect(sql).toContain("FROM service_usage")
 		expect(sql).toContain("OrgId = 'org_123'")
@@ -31,7 +31,7 @@ describe("dailySignalVolumeQuery", () => {
 	})
 
 	it("snaps both bounds to the hour, because the MV is keyed on top-of-hour", () => {
-		const { sql } = compileCH(dailySignalVolumeQuery(), params)
+		const { sql } = compileCHUnsafe(dailySignalVolumeQuery(), params)
 
 		// Without the snap, an end bound of 23:59:59 excludes the final hour of
 		// the cycle and the last day of the chart reads low.
@@ -40,7 +40,7 @@ describe("dailySignalVolumeQuery", () => {
 	})
 
 	it("sums all four metric-type columns into the one billed metrics feature", () => {
-		const { sql } = compileCH(dailySignalVolumeQuery(), params)
+		const { sql } = compileCHUnsafe(dailySignalVolumeQuery(), params)
 
 		expect(sql).toContain("sum(LogSizeBytes) AS logBytes")
 		expect(sql).toContain("sum(TraceSizeBytes) AS traceBytes")
@@ -51,7 +51,7 @@ describe("dailySignalVolumeQuery", () => {
 	})
 
 	it("decodes UInt64 byte sums that arrive as strings on BYO-ClickHouse", () => {
-		const compiled = compileCH(dailySignalVolumeQuery(), params, {
+		const compiled = compileCHUnsafe(dailySignalVolumeQuery(), params, {
 			rowSchema: dailySignalVolumeRowSchema,
 		})
 
@@ -75,7 +75,7 @@ describe("dailySignalVolumeQuery", () => {
 
 describe("dailySessionCountQuery", () => {
 	it("counts sessions per UTC day from the replay table, scoped to one org", () => {
-		const { sql } = compileCH(dailySessionCountQuery(), params)
+		const { sql } = compileCHUnsafe(dailySessionCountQuery(), params)
 
 		expect(sql).toContain("FROM session_replays")
 		expect(sql).toContain("OrgId = 'org_123'")
@@ -85,14 +85,14 @@ describe("dailySessionCountQuery", () => {
 	})
 
 	it("filters on StartTime so the partition key prunes", () => {
-		const { sql } = compileCH(dailySessionCountQuery(), params)
+		const { sql } = compileCHUnsafe(dailySessionCountQuery(), params)
 
 		expect(sql).toContain("StartTime >= toDateTime('2026-07-01 00:00:00')")
 		expect(sql).toContain("StartTime <= toDateTime('2026-07-31 23:59:59')")
 	})
 
 	it("decodes a string session count", () => {
-		const compiled = compileCH(dailySessionCountQuery(), params, {
+		const compiled = compileCHUnsafe(dailySessionCountQuery(), params, {
 			rowSchema: dailySessionCountRowSchema,
 		})
 
@@ -104,7 +104,7 @@ describe("dailySessionCountQuery", () => {
 
 describe("dailyProductEventCountQuery", () => {
 	it("counts billable product events per UTC day, excluding page views", () => {
-		const { sql } = compileCH(dailyProductEventCountQuery(), params)
+		const { sql } = compileCHUnsafe(dailyProductEventCountQuery(), params)
 
 		expect(sql).toContain("FROM product_events")
 		expect(sql).toContain("OrgId = 'org_123'")
@@ -116,7 +116,7 @@ describe("dailyProductEventCountQuery", () => {
 	})
 
 	it("decodes a string event count", () => {
-		const compiled = compileCH(dailyProductEventCountQuery(), params, {
+		const compiled = compileCHUnsafe(dailyProductEventCountQuery(), params, {
 			rowSchema: dailyProductEventCountRowSchema,
 		})
 

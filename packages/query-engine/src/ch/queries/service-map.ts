@@ -15,7 +15,7 @@ import {
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
 import { deploymentEnvExpr, messagingDestinationExpr } from "@maple/domain/tinybird/semconv-renames"
-import { Schema } from "effect"
+import { Schema, Effect } from "effect"
 import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { defineCondFn, defineFn } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
@@ -39,6 +39,7 @@ import {
 import { unionAll } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import * as T from "@maple-dev/clickhouse-builder/types"
+import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 
 // Local CH function declarations used by the live topology-join branch's
 // sample-weighting math. Kept here (not promoted to ch/functions/) because
@@ -221,7 +222,7 @@ export function serviceMapEdgeJoinQuery(opts: {
 export function serviceDependenciesSQL(
 	opts: ServiceDependenciesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServiceDependenciesOutput> {
+): Effect.Effect<CompiledQuery<ServiceDependenciesOutput>, QueryBuilderError> {
 	return compileCH(
 		serviceDependenciesQueryBase({ deploymentEnv: opts.deploymentEnv }),
 		{
@@ -415,7 +416,7 @@ const ServiceDbEdgesOutputSchema: CompiledQueryRowSchema<ServiceDbEdgesOutput> =
 export function serviceDbEdgesSQL(
 	opts: ServiceDbEdgesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServiceDbEdgesOutput> {
+): Effect.Effect<CompiledQuery<ServiceDbEdgesOutput>, QueryBuilderError> {
 	return compileCH(serviceDbEdgesQueryBase(opts), params, {
 		rowSchema: ServiceDbEdgesOutputSchema,
 	})
@@ -760,7 +761,7 @@ const mergedQuantileExpr = (index: 1 | 2) =>
 
 export function serviceDbQuerySummarySQL(
 	params: ServiceDbQuerySummaryParams,
-): CompiledQuery<ServiceDbQuerySummaryOutput> {
+): Effect.Effect<CompiledQuery<ServiceDbQuerySummaryOutput>, QueryBuilderError> {
 	// Sealed hours from the rollup; ServiceName/DurationQuantiles re-aggregated at
 	// read time (the table is queried without FINAL).
 	const sealed = from(ServiceMapDbQuerySignaturesHourly)
@@ -805,7 +806,7 @@ export function serviceDbQuerySummarySQL(
 
 export function serviceDbQueryTimeseriesSQL(
 	params: ServiceDbQuerySummaryParams,
-): CompiledQuery<ServiceDbQueryTimeseriesOutput> {
+): Effect.Effect<CompiledQuery<ServiceDbQueryTimeseriesOutput>, QueryBuilderError> {
 	const bucketSeconds = clampBucketSeconds(params.bucketSeconds)
 
 	// Sub-hour buckets (short windows — pickDbSummaryBucketSeconds gives 5/15 min
@@ -893,7 +894,7 @@ export function serviceDbQueryTimeseriesSQL(
 
 export function serviceDbTopQueriesSQL(
 	params: ServiceDbQuerySummaryParams,
-): CompiledQuery<ServiceDbTopQueryOutput> {
+): Effect.Effect<CompiledQuery<ServiceDbTopQueryOutput>, QueryBuilderError> {
 	const topN = clampTopN(params.topN)
 
 	// Sealed rollup shapes — pre-computed QueryKey/QueryLabel, so no per-row
@@ -1030,7 +1031,7 @@ const ServiceExternalEdgesOutputSchema: CompiledQueryRowSchema<ServiceExternalEd
 export function serviceExternalEdgesSQL(
 	opts: ServiceExternalEdgesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServiceExternalEdgesOutput> {
+): Effect.Effect<CompiledQuery<ServiceExternalEdgesOutput>, QueryBuilderError> {
 	const startHour = CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))
 	const endHour = CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))
 
@@ -1221,7 +1222,7 @@ const ServicePlatformsOutputSchema: CompiledQueryRowSchema<ServicePlatformsOutpu
 export function servicePlatformsSQL(
 	opts: ServicePlatformsOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServicePlatformsOutput> {
+): Effect.Effect<CompiledQuery<ServicePlatformsOutput>, QueryBuilderError> {
 	const query = from(ServicePlatformsHourly)
 		.select(($) => ({
 			serviceName: $.ServiceName,

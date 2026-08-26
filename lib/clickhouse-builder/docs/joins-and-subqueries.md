@@ -95,7 +95,7 @@ const query = CH.from(Services, "s")
 	.select(($) => ({ team: $.Team }))
 	.where(($) => [$.OrgId.eq(param.string("orgId")), CH.notInSubquery($.Team, excluded)])
 
-const compiled = CH.compile(query, { orgId: "org_123" })
+const compiled = yield * CH.compile(query, { orgId: "org_123" })
 // … WHERE OrgId = 'org_123' AND Team NOT IN (SELECT Name AS n FROM events WHERE OrgId = 'org_123')
 ```
 

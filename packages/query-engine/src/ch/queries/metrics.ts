@@ -10,7 +10,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, type CHQuery } from "@maple-dev/clickhouse-builder"
 import { table } from "@maple-dev/clickhouse-builder"
 import { MetricsSum, MetricCatalog, SpanMetricsCallsHourly } from "../tables"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
 import { resolveMetricTable, metricsSelectExprs } from "./query-helpers"
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition } from "../../traces-shared"
@@ -202,7 +202,7 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 		param.int("bucketSeconds"),
 	)
 
-	const hourlyCompiled = compileCH(
+	const hourlyCompiled = compileCHUnsafe(
 		from(SpanMetricsCallsHourly)
 			.select(($) => ({
 				Hour: $.Hour,
@@ -249,7 +249,7 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 		Value: T.float64,
 	})
 
-	const deltasSql = compileCH(
+	const deltasSql = compileCHUnsafe(
 		from(hourlyValues)
 			.select(($) => {
 				const onePrecedingFrame = CH.windowSpec({
@@ -332,7 +332,7 @@ export function metricsTimeseriesRateQuery(
 	// row dominates the query cost (raw `metrics_sum` scans of span.metrics.calls
 	// ran ~7s p95). Hashing keeps per-series identity — points of one series share
 	// one exporter, so map key order is stable — at a ~2^-64 collision risk.
-	const cteSql = compileCH(
+	const cteSql = compileCHUnsafe(
 		from(MetricsSum)
 			.select(($) => {
 				const onePrecedingFrame = CH.windowSpec({

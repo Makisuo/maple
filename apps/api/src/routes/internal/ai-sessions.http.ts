@@ -33,14 +33,20 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const compiled = CH.compile(
-							Integrations.aiSessionListQuery({
-								limit: payload.limit,
-								vendorIds: payload.vendorIds,
-								serviceNames: payload.serviceNames,
-							}),
-							{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-							{ rowSchema: Integrations.aiSessionListRowSchema },
+						const compiled = yield* Effect.orDie(
+							CH.compile(
+								Integrations.aiSessionListQuery({
+									limit: payload.limit,
+									vendorIds: payload.vendorIds,
+									serviceNames: payload.serviceNames,
+								}),
+								{
+									orgId: tenant.orgId,
+									startTime: payload.startTime,
+									endTime: payload.endTime,
+								},
+								{ rowSchema: Integrations.aiSessionListRowSchema },
+							),
 						)
 						// The row schema already coerces the UInt64 aggregates and decodes
 						// exactly the response's fields, so rows pass through unmapped.
@@ -55,10 +61,16 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const compiled = CH.compileUnion(
-							Integrations.aiSessionFacetsQuery(),
-							{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-							{ rowSchema: Integrations.aiSessionFacetsRowSchema },
+						const compiled = yield* Effect.orDie(
+							CH.compileUnion(
+								Integrations.aiSessionFacetsQuery(),
+								{
+									orgId: tenant.orgId,
+									startTime: payload.startTime,
+									endTime: payload.endTime,
+								},
+								{ rowSchema: Integrations.aiSessionFacetsRowSchema },
+							),
 						)
 						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 							profile: "list",
@@ -100,10 +112,12 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							hint === undefined
 								? yield* warehouse.compiledQuery(
 										tenant,
-										CH.compile(
-											Integrations.aiSessionWindowQuery(),
-											{ orgId: tenant.orgId, sessionId: payload.sessionId },
-											{ rowSchema: Integrations.aiSessionWindowRowSchema },
+										yield* Effect.orDie(
+											CH.compile(
+												Integrations.aiSessionWindowQuery(),
+												{ orgId: tenant.orgId, sessionId: payload.sessionId },
+												{ rowSchema: Integrations.aiSessionWindowRowSchema },
+											),
 										),
 										{ profile: "list", context: "aiSessionWindow" },
 									)
@@ -121,10 +135,12 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 						}
 						// One row past the cap: the extra row is what distinguishes a
 						// session that exactly fills the cap from one whose tail was cut.
-						const compiled = CH.compile(
-							Integrations.aiSessionSpansQuery({ limit: AI_SESSION_SPANS_MAX_SPANS + 1 }),
-							{ orgId: tenant.orgId, sessionId: payload.sessionId, ...window },
-							{ rowSchema: Integrations.aiSessionSpansRowSchema },
+						const compiled = yield* Effect.orDie(
+							CH.compile(
+								Integrations.aiSessionSpansQuery({ limit: AI_SESSION_SPANS_MAX_SPANS + 1 }),
+								{ orgId: tenant.orgId, sessionId: payload.sessionId, ...window },
+								{ rowSchema: Integrations.aiSessionSpansRowSchema },
+							),
 						)
 						const rows = yield* warehouse
 							.compiledQueryBounded(tenant, compiled, {

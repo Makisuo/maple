@@ -49,7 +49,7 @@ export const productEventsFunnel = Effect.fn("Observability.productEventsFunnel"
 	})
 	const { startTime, endTime, ...opts } = input
 	const query = yield* build(() => CH.productEventsFunnelQuery(opts))
-	const compiled = CH.compile(query, { orgId: executor.orgId, startTime, endTime })
+	const compiled = yield* Effect.orDie(CH.compile(query, { orgId: executor.orgId, startTime, endTime }))
 	return yield* executor.compiledQuery(compiled, { profile: "aggregation", context: "productEventsFunnel" })
 })
 
@@ -65,7 +65,7 @@ export const productEventsFunnelBreakdown = Effect.fn("Observability.productEven
 		})
 		const { startTime, endTime, ...opts } = input
 		const query = yield* build(() => CH.productEventsFunnelBreakdownQuery(opts))
-		const compiled = CH.compile(query, { orgId: executor.orgId, startTime, endTime })
+		const compiled = yield* Effect.orDie(CH.compile(query, { orgId: executor.orgId, startTime, endTime }))
 		return yield* executor.compiledQuery(compiled, {
 			profile: "aggregation",
 			context: "productEventsFunnelBreakdown",
@@ -80,10 +80,12 @@ export const productEventNames = Effect.fn("Observability.productEventNames")(fu
 	const executor = yield* WarehouseExecutor
 	yield* Effect.annotateCurrentSpan("orgId", executor.orgId)
 	const { startTime, endTime, ...opts } = input
-	const compiled = CH.compile(CH.productEventNamesQuery(opts), {
-		orgId: executor.orgId,
-		startTime,
-		endTime,
-	})
+	const compiled = yield* Effect.orDie(
+		CH.compile(CH.productEventNamesQuery(opts), {
+			orgId: executor.orgId,
+			startTime,
+			endTime,
+		}),
+	)
 	return yield* executor.compiledQuery(compiled, { profile: "aggregation", context: "productEventNames" })
 })
