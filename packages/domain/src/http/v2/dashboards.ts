@@ -1,3 +1,4 @@
+import { RawSqlText } from "../../raw-sql"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema, SchemaGetter } from "effect"
 import {
@@ -219,7 +220,10 @@ const V2QueryDataSource = Schema.Struct({
 
 const V2RawSqlDataSource = Schema.Struct({
 	kind: Schema.Literal("raw_sql"),
-	sql: Schema.String,
+	// Validated here because this is the write boundary: nothing else on the v2
+	// dashboard path checked the SQL, so a widget with a deny-listed statement or
+	// a SETTINGS clause saved fine and failed when the board was opened.
+	sql: RawSqlText,
 	displayType: optional(Schema.String),
 	granularitySeconds: optional(Schema.Number),
 	transform: optional(V2WidgetTransform),

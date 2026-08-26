@@ -20,7 +20,7 @@ import {
 	withDashboardMutation,
 	type DashboardWidget,
 } from "@/mcp/lib/dashboard-mutations"
-import { buildRawSqlDataSource, validateRawSqlMacro, withScalarReduction } from "@/mcp/lib/raw-sql-widget"
+import { buildRawSqlDataSource, validateRawSql, withScalarReduction } from "@/mcp/lib/raw-sql-widget"
 import { makeProductEventsFunnelDataSource } from "@maple/widgets/dashboard"
 import { PANEL_TYPE_LIST_MD, resolvePanelType } from "@/mcp/lib/panel-type"
 import { formatRenderIssues, validateWidgetRenderability } from "@/mcp/lib/validate-widget-renderability"
@@ -157,10 +157,10 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 						'{ "panel_type": "table", "sql": "SELECT ..." }',
 					)
 				}
-				const macroError = validateRawSqlMacro(sql)
-				if (macroError) {
+				const sqlError = validateRawSql(sql)
+				if (sqlError) {
 					return validationError(
-						macroError,
+						sqlError,
 						"SELECT count() FROM logs WHERE $__orgFilter AND $__timeFilter(Timestamp)",
 					)
 				}

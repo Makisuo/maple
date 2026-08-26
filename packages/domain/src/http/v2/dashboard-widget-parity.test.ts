@@ -247,7 +247,9 @@ describe("the v2 data source covers every stored kind", () => {
 	it.each(WIDGET_DATA_SOURCE_KINDS)("declares an arm for kind %s", (kind) => {
 		const fixture: Record<string, unknown> = {
 			query: { kind: "query", result_shape: "timeseries", queries: [] },
-			raw_sql: { kind: "raw_sql", sql: "SELECT 1" },
+			// The arm validates its SQL now, so the fixture has to be a query the
+			// engine would accept — this asserts arm coverage, not SQL leniency.
+			raw_sql: { kind: "raw_sql", sql: "SELECT count() FROM logs WHERE $__orgFilter" },
 			route: { kind: "route", endpoint: "list_traces" },
 			static: { kind: "static" },
 		}[kind]!
