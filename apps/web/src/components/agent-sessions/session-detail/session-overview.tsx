@@ -1,26 +1,28 @@
 import { useMemo, useState, type ReactNode } from "react"
 
-import { ArrowRightIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
+import { ArrowRightIcon, ChevronRightIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
 
-import { buildTurnDigest, type TurnDigest } from "@/lib/agent-sessions/session-overview"
+import {
+	buildSessionFindings,
+	turnOrdinal,
+	type FindingSeverity,
+	type SessionFinding,
+	type SessionVerdict,
+	type TurnHealth,
+} from "@/lib/agent-sessions/session-findings"
 import {
 	formatCost,
-	type SessionFailureKind,
+	type IdleGap,
 	type SessionSummary,
 	type SessionToolUsage,
 } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { shortTarget } from "@/lib/agent-sessions/span-filters"
 import { OCCUPANCY_DOT_FILL, OCCUPANCY_FILL, OCCUPANCY_LABEL } from "./span-visuals"
-
-/** Rows shown before the digest elides its middle, and how many survive it. */
-const DIGEST_COLLAPSE_ABOVE = 8
-const DIGEST_HEAD_ROWS = 5
-const DIGEST_TAIL_ROWS = 1
 
 const TOKEN_BUCKETS = [
 	{ key: "input", label: "Input", fill: "bg-chart-2" },
@@ -30,38 +32,51 @@ const TOKEN_BUCKETS = [
 	{ key: "reasoning", label: "Reasoning", fill: "bg-chart-3" },
 ] as const
 
-const FAILURE_DOT = {
-	error: "bg-destructive",
-	contextExceeded: "bg-destructive",
-	rateLimited: "bg-severity-warn",
-	refusal: "bg-severity-warn",
-} satisfies Record<SessionFailureKind, string>
+const SEVERITY_DOT = {
+	failure: "bg-destructive",
+	anomaly: "bg-severity-warn",
+} satisfies Record<FindingSeverity, string>
 
 /**
- * What happened, what it cost, what broke — the view a reader opens once and
- * leaves. It carries its own numbers rather than sharing a stat band with the
- * debug views, which is what buys the waterfall and the flow graph the whole
- * viewport next door.
+ * The triage view: did the session work, and if not, what exactly went wrong.
  *
- * Every figure appears exactly once. The wall clock is the time bar, the spend
- * is the rail's per-model rows, the work is the digest's own header — a summary
- * block restating all three above them was three numbers to read twice.
+ * The page leads with a verdict and a findings list rather than another way to
+ * browse the turns — Traces, Flow and Transcript already do that three ways.
+ * Every finding links the span that is its evidence, so the Overview is the
+ * door into the debug views instead of a fourth sibling of them. The facts —
+ * time bar, cost, tokens, tools — stay, each figure appearing exactly once.
  */
 export function SessionOverview({
 	turns,
 	summary,
+	onOpenSpan,
 }: {
 	turns: readonly SessionTurn[]
 	summary: SessionSummary
+	/** Raised with a span id to open it in the Traces view. */
+	onOpenSpan: (spanId: string) => void
 }) {
-	const digest = useMemo(() => buildTurnDigest(turns), [turns])
+	const report = useMemo(() => buildSessionFindings(turns, summary), [turns, summary])
 
 	return (
-		<div className="@container flex grow flex-col gap-7 pt-5 pb-10">
-			<TimeComposition summary={summary} />
-
+		<div className="@container flex grow flex-col pt-5 pb-10">
 			<div className="flex flex-col gap-8 @4xl:flex-row @4xl:gap-8">
-				<TurnByTurn digest={digest} summary={summary} />
+				<div className="flex min-w-0 grow flex-col gap-7">
+					<Verdict
+						verdict={report.verdict}
+						findingCount={report.findings.length}
+						turns={turns}
+						onOpenSpan={onOpenSpan}
+					/>
+					<Findings findings={report.findings} onOpenSpan={onOpenSpan} />
+					<TurnHealthStrip
+						turns={turns}
+						health={report.turnHealth}
+						summary={summary}
+						onOpenSpan={onOpenSpan}
+					/>
+					<TimeComposition summary={summary} turns={turns} />
+				</div>
 				<Rail summary={summary} />
 			</div>
 		</div>
@@ -69,34 +84,283 @@ export function SessionOverview({
 }
 
 /* -------------------------------------------------------------------------- */
-/* Where the time went                                                        */
+/* Verdict                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function TimeComposition({ summary }: { summary: SessionSummary }) {
-	// Under half a percent a segment is a sub-pixel sliver beside a legend row
-	// reading "0%"; the muted track behind the bar covers what it drops.
-	const segments = summary.occupancy
-		.map((segment) => ({ ...segment, percent: sharePercent(segment.ms, summary.wallClockMs) }))
-		.filter((segment) => segment.percent >= 0.5)
+function Verdict({
+	verdict,
+	findingCount,
+	turns,
+	onOpenSpan,
+}: {
+	verdict: SessionVerdict
+	findingCount: number
+	turns: readonly SessionTurn[]
+	onOpenSpan: (spanId: string) => void
+}) {
+	const turnWord = turns[0]?.anchorKind === "trace" ? "segment" : "turn"
+	const turnsText = `${turns.length} ${turnWord}${turns.length === 1 ? "" : "s"}`
+
+	return (
+		<section className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+			<div className="flex min-w-0 flex-col gap-1.5">
+				{verdict.status === "failed" ? (
+					<>
+						<p className="flex min-w-0 flex-wrap items-baseline gap-x-2 font-semibold text-lg">
+							<VerdictDot className="bg-destructive" />
+							<span className="text-destructive">Failed</span>
+							{verdict.label !== undefined && (
+								<>
+									<span aria-hidden className="text-muted-foreground">
+										—
+									</span>
+									<span className="min-w-0 truncate font-mono text-[0.95em]">{verdict.label}</span>
+									<span>on the final {turnWord}</span>
+								</>
+							)}
+						</p>
+						<p className="pl-[1.375rem] text-muted-foreground text-sm">
+							The final {turnWord} did not close cleanly.
+						</p>
+					</>
+				) : verdict.status === "attention" ? (
+					<>
+						<p className="flex items-baseline gap-x-2 font-semibold text-lg">
+							<VerdictDot className="bg-severity-warn" />
+							<span>
+								Completed, with {findingCount} {findingCount === 1 ? "finding" : "findings"}
+							</span>
+						</p>
+						<p className="pl-[1.375rem] text-muted-foreground text-sm">
+							The final {turnWord} closed cleanly; what looked off is listed below.
+						</p>
+					</>
+				) : (
+					<>
+						<p className="flex items-baseline gap-x-2 font-semibold text-lg">
+							<VerdictDot className="bg-severity-info" />
+							<span className="text-severity-info">Completed cleanly</span>
+						</p>
+						<p className="pl-[1.375rem] text-muted-foreground text-sm">
+							No errors, refusals, truncated replies, stalls, or repetition across {turnsText}.
+						</p>
+					</>
+				)}
+			</div>
+			{verdict.spanId !== undefined && (
+				<Button variant="outline" size="sm" onClick={() => onOpenSpan(verdict.spanId!)}>
+					Open failing span
+					<ArrowRightIcon size={14} />
+				</Button>
+			)}
+		</section>
+	)
+}
+
+function VerdictDot({ className }: { className: string }) {
+	return <span aria-hidden className={cn("size-2.5 shrink-0 self-center rounded-full", className)} />
+}
+
+/* -------------------------------------------------------------------------- */
+/* Findings                                                                   */
+/* -------------------------------------------------------------------------- */
+
+function Findings({
+	findings,
+	onOpenSpan,
+}: {
+	findings: readonly SessionFinding[]
+	onOpenSpan: (spanId: string) => void
+}) {
+	return (
+		<section>
+			<div className="flex items-baseline justify-between gap-2 pb-3.5">
+				<h3 className="font-semibold text-[11px] text-muted-foreground uppercase tracking-[0.09em]">
+					Findings
+				</h3>
+				{findings.length > 0 && (
+					<span
+						className={cn(
+							"font-mono text-xs tabular-nums",
+							findings.some((finding) => finding.severity === "failure")
+								? "text-destructive"
+								: "text-severity-warn",
+						)}
+					>
+						{findings.length}
+					</span>
+				)}
+			</div>
+
+			{findings.length === 0 ? (
+				<p className="border-border border-t py-6 text-muted-foreground text-sm">No findings.</p>
+			) : (
+				findings.map((finding) => (
+					<FindingRow key={finding.id} finding={finding} onOpenSpan={onOpenSpan} />
+				))
+			)}
+		</section>
+	)
+}
+
+function FindingRow({
+	finding,
+	onOpenSpan,
+}: {
+	finding: SessionFinding
+	onOpenSpan: (spanId: string) => void
+}) {
+	return (
+		<button
+			type="button"
+			onClick={() => onOpenSpan(finding.spanId)}
+			className={cn(
+				"group flex w-full items-start gap-3 border-border border-t px-3 py-3.5 text-left hover:bg-accent/40",
+				finding.severity === "failure" &&
+					"border-l-2 border-l-destructive bg-destructive/[0.06] pl-2.5",
+			)}
+		>
+			<span
+				aria-hidden
+				className={cn("mt-[0.4rem] size-1.5 shrink-0 rounded-full", SEVERITY_DOT[finding.severity])}
+			/>
+			<span className="flex min-w-0 grow flex-col gap-1">
+				<span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+					<span
+						className={cn(
+							"min-w-0 truncate font-medium font-mono text-[13px]",
+							finding.severity === "failure" && "text-destructive",
+						)}
+					>
+						{finding.label}
+						{finding.count > 1 && ` ×${finding.count}`}
+					</span>
+					<span className="shrink-0 text-muted-foreground text-xs">{finding.turnText}</span>
+				</span>
+				{finding.detail !== undefined && (
+					<span className="text-muted-foreground text-xs leading-relaxed">{finding.detail}</span>
+				)}
+			</span>
+			<span className="mt-0.5 flex shrink-0 items-center gap-1 text-muted-foreground text-xs opacity-0 transition-opacity group-hover:opacity-100">
+				trace
+				<ArrowRightIcon size={12} />
+			</span>
+		</button>
+	)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Session shape                                                              */
+/* -------------------------------------------------------------------------- */
+
+const HEALTH_CELL = {
+	clean: "border-border bg-muted/40 text-muted-foreground hover:bg-accent",
+	anomaly: "border-severity-warn/40 bg-severity-warn/10 text-severity-warn hover:bg-severity-warn/20",
+	failure: "border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20",
+} satisfies Record<TurnHealth, string>
+
+function TurnHealthStrip({
+	turns,
+	health,
+	summary,
+	onOpenSpan,
+}: {
+	turns: readonly SessionTurn[]
+	health: readonly TurnHealth[]
+	summary: SessionSummary
+	onOpenSpan: (spanId: string) => void
+}) {
+	// "with errors", not "failed": a red cell marks a turn something went wrong
+	// INSIDE — the turn itself may have closed cleanly, and calling it failed
+	// would contradict a Completed verdict two sections up.
+	const errored = health.filter((status) => status === "failure").length
+	const flagged = health.filter((status) => status === "anomaly").length
+	const caption = [
+		errored > 0 ? `${errored} with errors` : undefined,
+		flagged > 0 ? `${flagged} flagged` : undefined,
+		errored === 0 && flagged === 0 ? "none flagged" : undefined,
+		`${formatSessionDuration(summary.wallClockMs)} wall clock`,
+	]
+		.filter((part) => part !== undefined)
+		.join(" · ")
 
 	return (
 		<section>
-			<h3 className="font-semibold text-[11px] text-muted-foreground uppercase tracking-[0.09em]">
-				Where the time went
-			</h3>
+			<div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pb-3.5">
+				<h3 className="font-semibold text-[11px] text-muted-foreground uppercase tracking-[0.09em]">
+					Session shape
+				</h3>
+				<span className="font-mono text-muted-foreground text-xs tabular-nums">{caption}</span>
+			</div>
 
-			<div className="mt-3.5 flex h-4 w-full gap-0.5 overflow-hidden rounded-sm bg-muted">
-				{segments.map((segment) => (
+			<div className="flex flex-wrap gap-1.5">
+				{turns.map((turn, index) => (
+					<button
+						key={turn.id}
+						type="button"
+						onClick={() => onOpenSpan(turn.anchor.spanId)}
+						title={`${turnOrdinal(turn)}${turn.label === undefined ? "" : ` — ${turn.label}`}`}
+						className={cn(
+							"flex size-8 items-center justify-center rounded-sm border font-mono text-[11px] tabular-nums",
+							HEALTH_CELL[health[index] ?? "clean"],
+						)}
+					>
+						{turn.index}
+					</button>
+				))}
+			</div>
+		</section>
+	)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Where the time went                                                        */
+/* -------------------------------------------------------------------------- */
+
+function TimeComposition({
+	summary,
+	turns,
+}: {
+	summary: SessionSummary
+	turns: readonly SessionTurn[]
+}) {
+	// Under half a percent a legend row reads "0%" and says nothing; the bar
+	// still draws the sliver in place, so nothing disappears from the timeline.
+	const legend = summary.occupancy
+		.map((segment) => ({ ...segment, percent: sharePercent(segment.ms, summary.wallClockMs) }))
+		.filter((segment) => segment.percent >= 0.5)
+	// The bar is chronological — each interval sits where it happened on the
+	// wall clock, so a mid-session stall reads as a hole in the middle, not as
+	// an idle block pinned to the left.
+	const wallClockMs = Math.max(summary.wallClockMs, 1)
+	const caption = longestGapText(summary.idleGaps, turns)
+
+	return (
+		<section>
+			<div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+				<h3 className="font-semibold text-[11px] text-muted-foreground uppercase tracking-[0.09em]">
+					Where the time went
+				</h3>
+				{caption !== undefined && (
+					<span className="font-mono text-muted-foreground text-xs tabular-nums">{caption}</span>
+				)}
+			</div>
+
+			<div className="relative mt-3.5 h-4 w-full overflow-hidden rounded-sm bg-muted">
+				{summary.occupancyTimeline.map((interval) => (
 					<div
-						key={segment.kind}
-						className={OCCUPANCY_FILL[segment.kind]}
-						style={{ width: `${segment.percent}%` }}
+						key={interval.startMs}
+						className={cn("absolute inset-y-0", OCCUPANCY_FILL[interval.kind])}
+						style={{
+							left: `${((interval.startMs - summary.startMs) / wallClockMs) * 100}%`,
+							width: `${((interval.endMs - interval.startMs) / wallClockMs) * 100}%`,
+						}}
 					/>
 				))}
 			</div>
 
 			<div className="mt-3.5 flex flex-wrap gap-x-6 gap-y-2">
-				{segments.map((segment) => (
+				{legend.map((segment) => (
 					<span key={segment.kind} className="flex items-center gap-2 text-[13px]">
 						<span
 							aria-hidden
@@ -113,208 +377,22 @@ function TimeComposition({ summary }: { summary: SessionSummary }) {
 	)
 }
 
-/* -------------------------------------------------------------------------- */
-/* Turn by turn                                                               */
-/* -------------------------------------------------------------------------- */
+/** Where the session's longest hole sits — inside a turn it is a stall, between
+ *  turns it is the user thinking, and the caption says which. */
+function longestGapText(gaps: readonly IdleGap[], turns: readonly SessionTurn[]): string | undefined {
+	const longest = [...gaps].sort((a, b) => b.durationMs - a.durationMs)[0]
+	if (longest === undefined) return undefined
+	const duration = formatSessionDuration(longest.durationMs)
 
-function TurnByTurn({ digest, summary }: { digest: readonly TurnDigest[]; summary: SessionSummary }) {
-	const [failedOnly, setFailedOnly] = useState(false)
-	const [expanded, setExpanded] = useState(false)
+	const inside = turns.find((turn) => longest.startMs >= turn.startMs && longest.endMs <= turn.endMs)
+	if (inside !== undefined) return `longest stall ${duration}, inside ${turnOrdinal(inside).toLowerCase()}`
 
-	const failedCount = digest.filter((row) => row.turn.failed).length
-	const rows = failedOnly ? digest.filter((row) => row.turn.failed || row.failures.length > 0) : digest
-	// The middle of a long session is where a reader learns least, so it folds
-	// away — but only ever the middle: the opening turns and the one the session
-	// ended on stay put.
-	const elided =
-		expanded || rows.length <= DIGEST_COLLAPSE_ABOVE
-			? 0
-			: rows.length - DIGEST_HEAD_ROWS - DIGEST_TAIL_ROWS
-	const head = elided === 0 ? rows : rows.slice(0, DIGEST_HEAD_ROWS)
-	const tail = elided === 0 ? [] : rows.slice(-DIGEST_TAIL_ROWS)
-	const gapBeforeTail = idleBefore(summary, tail[0])
-	// Every turn's bar is drawn against the longest turn rather than against
-	// itself, so the column reads as durations side by side instead of as
-	// fourteen identical bars with different labels.
-	const longestMs = Math.max(...digest.map((row) => row.turn.durationMs), 1)
-
-	return (
-		<section className="flex min-w-0 grow flex-col">
-			<div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 pb-3.5">
-				<div className="flex items-baseline gap-2.5">
-					<h3 className="font-semibold text-[11px] text-muted-foreground uppercase tracking-[0.09em]">
-						Turn by turn
-					</h3>
-					<p className="text-muted-foreground text-xs">
-						{digest.length} {digest.length === 1 ? "turn" : "turns"}
-						{failedCount > 0 && ` · ${failedCount} failed`}
-					</p>
-				</div>
-				{failedCount > 0 && (
-					<div className="flex items-center gap-1.5">
-						<DigestFilter pressed={!failedOnly} onClick={() => setFailedOnly(false)}>
-							All turns
-						</DigestFilter>
-						<DigestFilter pressed={failedOnly} onClick={() => setFailedOnly(true)}>
-							Failed only
-						</DigestFilter>
-					</div>
-				)}
-			</div>
-
-			{rows.length === 0 ? (
-				<p className="border-border border-t py-8 text-center text-muted-foreground text-sm">
-					No failed turns in this session.
-				</p>
-			) : (
-				<>
-					{head.map((row) => (
-						<TurnRow key={row.turn.id} row={row} longestMs={longestMs} />
-					))}
-					{elided > 0 && (
-						<button
-							type="button"
-							onClick={() => setExpanded(true)}
-							className="flex w-full items-center gap-3 border-border border-t px-3 py-2.5 text-left hover:bg-accent/40"
-						>
-							<span className="flex w-14 shrink-0 justify-center">
-								<ChevronDownIcon size={14} className="text-muted-foreground" />
-							</span>
-							<span className="text-[13px] text-muted-foreground">
-								{elided} {elided === 1 ? "turn" : "turns"} hidden
-							</span>
-							<span aria-hidden className="h-px grow bg-border" />
-							{gapBeforeTail !== undefined && (
-								<span className="font-mono text-muted-foreground text-xs tabular-nums">
-									{formatSessionDuration(gapBeforeTail)} idle before{" "}
-									{tail[0]!.ordinal.toLowerCase()}
-								</span>
-							)}
-						</button>
-					)}
-					{tail.map((row) => (
-						<TurnRow key={row.turn.id} row={row} longestMs={longestMs} />
-					))}
-				</>
-			)}
-		</section>
-	)
-}
-
-function DigestFilter({
-	pressed,
-	onClick,
-	children,
-}: {
-	pressed: boolean
-	onClick: () => void
-	children: string
-}) {
-	return (
-		<Button variant={pressed ? "outline" : "ghost"} size="xs" onClick={onClick}>
-			<span className={pressed ? undefined : "text-muted-foreground"}>{children}</span>
-		</Button>
-	)
-}
-
-function TurnRow({ row, longestMs }: { row: TurnDigest; longestMs: number }) {
-	const { turn } = row
-	const failed = turn.failed || row.failures.length > 0
-
-	return (
-		<div
-			className={cn(
-				"flex items-start gap-4 border-border border-t py-4 pr-3 pl-3",
-				failed && "border-l-2 border-l-destructive bg-destructive/[0.06] pl-2.5",
-			)}
-		>
-			<div className="w-14 shrink-0">
-				<p
-					className={cn(
-						"font-medium font-mono text-[11px] uppercase tracking-wider",
-						turn.failed ? "text-destructive" : "text-muted-foreground",
-					)}
-				>
-					{row.ordinal}
-				</p>
-				<p className="mt-1 font-mono text-[11px] text-muted-foreground/70 tabular-nums">
-					{clockOf(turn.startMs)}
-				</p>
-			</div>
-
-			<div className="flex min-w-0 grow flex-col gap-1.5">
-				{/* One line of the reader's own prompt: the digest's whole reason for
-				    existing, and the reason the row is not a table cell. */}
-				<p className="truncate font-medium text-sm">
-					{turn.label ?? <span className="text-muted-foreground italic">no captured message</span>}
-				</p>
-				<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
-					<span>
-						{turn.spans.length} {turn.spans.length === 1 ? "span" : "spans"}
-					</span>
-					{row.models.length > 0 && <Dot />}
-					{row.models.length > 0 && (
-						<span className="truncate" title={row.models.map((m) => m.model).join(" · ")}>
-							{row.models
-								.map((model) => `${shortTarget(model.model)} ×${model.calls}`)
-								.join(" · ")}
-						</span>
-					)}
-					{row.tools.length > 0 && <Dot />}
-					{row.tools.length > 0 && (
-						<span className="truncate font-mono text-[11px] text-chart-4">
-							{row.tools.map((tool) => labelWithCount(tool.name, tool.calls)).join("  ")}
-						</span>
-					)}
-					{row.failures.length > 0 && <Dot />}
-					{row.failures.length > 0 && (
-						<span className="truncate font-mono text-[11px] text-destructive">
-							{row.failures
-								.map((failure) => labelWithCount(failure.label, failure.count))
-								.join("  ")}
-						</span>
-					)}
-				</div>
-			</div>
-
-			<div className="flex w-[11.5rem] shrink-0 flex-col items-end gap-1.5 pt-0.5">
-				<div
-					className="flex h-1 gap-px"
-					// A floor, so the shortest turn in a session with one very long one
-					// is still a mark rather than nothing.
-					style={{ width: `${Math.max(6, sharePercent(turn.durationMs, longestMs))}%` }}
-				>
-					{row.occupancy.map((segment) => (
-						<div
-							key={segment.kind}
-							className={OCCUPANCY_FILL[segment.kind]}
-							style={{ width: `${sharePercent(segment.ms, turn.durationMs)}%` }}
-						/>
-					))}
-				</div>
-				{/* Fixed lanes: three ragged columns of numbers down fourteen rows are
-				    three facts you have to re-find on every row. */}
-				<div className="flex items-baseline font-mono text-xs tabular-nums">
-					<span className="w-16 text-right">{formatSessionDuration(turn.durationMs)}</span>
-					<span className="w-16 text-right text-muted-foreground">
-						{row.tokens.total > 0 ? formatNumber(row.tokens.total) : "—"}
-					</span>
-					<span
-						className={cn(
-							"w-14 text-right",
-							row.cost === undefined ? "text-muted-foreground" : "text-primary",
-						)}
-					>
-						{row.cost === undefined ? "—" : formatCost(row.cost)}
-					</span>
-				</div>
-			</div>
-		</div>
-	)
-}
-
-function Dot() {
-	return <span aria-hidden className="size-[3px] shrink-0 rounded-full bg-muted-foreground/50" />
+	const before = [...turns].reverse().find((turn) => turn.endMs <= longest.startMs)
+	const after = turns.find((turn) => turn.startMs >= longest.endMs)
+	if (before !== undefined && after !== undefined) {
+		return `longest gap ${duration}, between ${turnOrdinal(before).toLowerCase()} and ${after.index}`
+	}
+	return `longest gap ${duration}`
 }
 
 /* -------------------------------------------------------------------------- */
@@ -328,30 +406,6 @@ function Rail({ summary }: { summary: SessionSummary }) {
 
 	return (
 		<aside className="flex shrink-0 flex-col gap-6 @4xl:w-[21rem] @4xl:border-border @4xl:border-l @4xl:pl-8">
-			{summary.failureGroups.length > 0 && (
-				<RailSection
-					title="Failures"
-					aside={
-						<span className="font-mono text-destructive text-xs">
-							{summary.failureGroups.reduce((total, group) => total + group.count, 0)} events
-						</span>
-					}
-				>
-					{summary.failureGroups.map((group) => (
-						<div key={group.label} className="flex items-center gap-2.5">
-							<span
-								aria-hidden
-								className={cn("size-1.5 shrink-0 rounded-full", FAILURE_DOT[group.kind])}
-							/>
-							<span className="min-w-0 flex-1 truncate font-mono text-xs">{group.label}</span>
-							<span className="font-mono text-muted-foreground text-xs tabular-nums">
-								{group.count}
-							</span>
-						</div>
-					))}
-				</RailSection>
-			)}
-
 			<RailSection
 				title="Cost by model"
 				aside={
@@ -557,19 +611,4 @@ function RailSection({ title, aside, children }: { title: string; aside?: ReactN
 function sharePercent(value: number, total: number): number {
 	if (total <= 0) return 0
 	return (value / total) * 100
-}
-
-function labelWithCount(label: string, count: number): string {
-	return count === 1 ? label : `${label} ×${count}`
-}
-
-function clockOf(epochMs: number): string {
-	return new Date(epochMs).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-}
-
-/** The idle gap immediately before a turn, when the digest elided it. */
-function idleBefore(summary: SessionSummary, row: TurnDigest | undefined): number | undefined {
-	if (row === undefined) return undefined
-	const gaps = summary.idleGaps.filter((gap) => gap.endMs <= row.turn.startMs)
-	return gaps[gaps.length - 1]?.durationMs
 }
