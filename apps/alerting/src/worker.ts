@@ -29,10 +29,12 @@ import {
 	OrgIngestKeysService,
 	OrgMembersService,
 	PlanetScaleOAuthService,
+	PullRequestLookupLive,
 	PlanetScaleService,
 	QueryEngineService,
 	ServiceMapRollupService,
 	TinybirdOrgTokenService,
+	VcsSourceServiceLayer,
 	WarehouseQueryService,
 	summarizeCause,
 	withPgConnectionScope,
@@ -149,8 +151,21 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 		Layer.provide(Layer.mergeAll(DatabaseLive, WarehouseQueryServiceLive, ErrorIssueWorkflowServiceLive)),
 	)
 
+	// Only reachable from here through an investigation agent's `propose_fix`, but
+	// wired all the same: which worker served the call should not decide whether a
+	// pull-request link arrives with its title and state, or whether attaching an
+	// already-merged PR opens a verification window.
+	const VcsSourceServiceLive = VcsSourceServiceLayer.pipe(Layer.provide(BaseLive))
+
 	const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, ErrorActorsServiceLive, ErrorIssueWorkflowServiceLive)),
+		Layer.provide(
+			Layer.mergeAll(
+				BaseLive,
+				ErrorActorsServiceLive,
+				ErrorIssueWorkflowServiceLive,
+				PullRequestLookupLive.pipe(Layer.provide(VcsSourceServiceLive)),
+			),
+		),
 	)
 
 	// WorkerEnvironment is merged in so incident-open investigations can see the

@@ -21,6 +21,7 @@ import { VcsSyncService } from "./services/integrations/vcs/VcsSyncService"
 import { ErrorActorsService } from "./services/errors/ErrorActorsService"
 import { ErrorIssueWorkflowService } from "./services/errors/ErrorIssueWorkflowService"
 import { IssueFixVerificationService } from "./services/errors/IssueFixVerificationService"
+import { PullRequestLookup } from "./services/errors/PullRequestLookup"
 import { PullRequestEventSinkLive } from "./services/errors/pull-request-sink-live"
 import { summarizeCause } from "@/platform/describe-cause"
 
@@ -58,7 +59,19 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(Base, ErrorActorsServiceLive)),
 	)
 	const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
-		Layer.provide(Layer.mergeAll(Base, ErrorActorsServiceLive, ErrorIssueWorkflowServiceLive)),
+		Layer.provide(
+			Layer.mergeAll(
+				Base,
+				ErrorActorsServiceLive,
+				ErrorIssueWorkflowServiceLive,
+				// This runtime only ever handles webhook deliveries, which arrive with
+				// the PR's title, state and merge already in the payload — nothing here
+				// reaches the link path that asks a provider what a PR is. Binding the
+				// real lookup would pull the whole VCS read surface in to answer a
+				// question that is never asked.
+				PullRequestLookup.none,
+			),
+		),
 	)
 	const PullRequestSinkLive = PullRequestEventSinkLive.pipe(Layer.provide(IssueFixVerificationServiceLive))
 

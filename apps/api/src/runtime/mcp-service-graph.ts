@@ -24,6 +24,7 @@ import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgToke
 import { VcsProviderRegistry } from "@/services/integrations/vcs/VcsProviderRegistry"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import { VcsSourceService } from "@/services/integrations/vcs/VcsSourceService"
+import { PullRequestLookupLive } from "@/services/errors/pull-request-lookup-live"
 import { GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
 import { GithubHttp } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { GithubProvider } from "@/services/integrations/vcs/vendor/github/GithubProvider"
@@ -110,8 +111,29 @@ const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
 	Layer.provide(Layer.mergeAll(WarehouseQueryServiceLive, ErrorIssueWorkflowServiceLive)),
 )
 
+const GithubAppClientLive = GithubAppClient.layer.pipe(Layer.provide(GithubHttp.layer))
+const GithubProviderLive = GithubProvider.layer.pipe(Layer.provide(GithubAppClientLive))
+const VcsProviderRegistryLive = VcsProviderRegistry.layer.pipe(Layer.provide(GithubProviderLive))
+
+const VcsSourceServiceLive = VcsSourceService.layer.pipe(
+	Layer.provide(
+		Layer.mergeAll(VcsRepository.layer, VcsProviderRegistryLive).pipe(Layer.provideMerge(InfraLive)),
+	),
+)
+
+// Lets `propose_fix` and `link_pull_request` attach a PR with its real title
+// and state, and open a verification window for one that already merged.
+const PullRequestLookupServiceLive = PullRequestLookupLive.pipe(Layer.provide(VcsSourceServiceLive))
+
 const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
-	Layer.provide(Layer.mergeAll(InfraLive, ErrorActorsServiceLive, ErrorIssueWorkflowServiceLive)),
+	Layer.provide(
+		Layer.mergeAll(
+			InfraLive,
+			ErrorActorsServiceLive,
+			ErrorIssueWorkflowServiceLive,
+			PullRequestLookupServiceLive,
+		),
+	),
 )
 
 const ErrorsServiceLive = ErrorsService.layer.pipe(
@@ -138,16 +160,6 @@ const RecommendationIssueServiceLive = RecommendationIssueService.layer.pipe(
 )
 
 const SetupAuditServiceLive = SetupAuditService.layer.pipe(Layer.provide(WarehouseQueryServiceLive))
-
-const GithubAppClientLive = GithubAppClient.layer.pipe(Layer.provide(GithubHttp.layer))
-const GithubProviderLive = GithubProvider.layer.pipe(Layer.provide(GithubAppClientLive))
-const VcsProviderRegistryLive = VcsProviderRegistry.layer.pipe(Layer.provide(GithubProviderLive))
-
-const VcsSourceServiceLive = VcsSourceService.layer.pipe(
-	Layer.provide(
-		Layer.mergeAll(VcsRepository.layer, VcsProviderRegistryLive).pipe(Layer.provideMerge(InfraLive)),
-	),
-)
 
 const McpRuntimeServicesLive = Layer.mergeAll(
 	AlertReadModelsServiceLive,

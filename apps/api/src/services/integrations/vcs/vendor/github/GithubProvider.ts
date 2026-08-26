@@ -2,6 +2,7 @@ import {
 	type BranchUpsertInput,
 	type CommitUpsertInput,
 	GitCommitSha,
+	type PullRequestSummary,
 	type RepoUpsertInput,
 	type VcsInstallation,
 	VcsInstallationGoneError,
@@ -20,7 +21,12 @@ import { Clock, Context, Effect, Layer, Match, Option, Redacted, Schema } from "
 import { Env } from "@/platform/Env"
 import type { VcsProviderClient, VcsWebhookRequest } from "@/services/integrations/vcs/VcsProviderClient"
 import { QUEUE_MESSAGE_LIMIT_BYTES } from "@/services/integrations/vcs/VcsSyncQueue"
-import { type GithubApiCommit, GithubAppClient, GithubAppError } from "./GithubAppClient"
+import {
+	type GithubApiCommit,
+	type GithubApiPullRequest,
+	GithubAppClient,
+	GithubAppError,
+} from "./GithubAppClient"
 
 const PROVIDER: VcsProviderId = "github"
 
@@ -723,6 +729,59 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 					Effect.mapError(toVcsError),
 				)
 
+			// GitHub reports open/closed in `state` and merged-ness separately in
+			// `merged_at`, so a merged PR arrives as `state: "closed"`. Collapsing the
+			// two here is the same rule `mapPullRequest` applies to a webhook payload —
+			// the port only ever speaks the three-way `PullRequestLinkState`.
+			const normalizePullRequest = (pr: GithubApiPullRequest): PullRequestSummary => {
+				const mergedAtMs = pr.merged_at === null ? null : Date.parse(pr.merged_at)
+				const merged = mergedAtMs !== null && Number.isFinite(mergedAtMs)
+				const updatedAtMs = Date.parse(pr.updated_at)
+				return {
+					number: pr.number,
+					title: pr.title,
+					url: pr.html_url,
+					authorLogin: pr.user?.login ?? null,
+					state: merged ? "merged" : pr.state === "closed" ? "closed" : "open",
+					headRef: pr.head.ref,
+					baseRef: pr.base.ref,
+					isDraft: pr.draft ?? false,
+					updatedAtMs: Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+					mergedAtMs: merged ? mergedAtMs : null,
+					mergeCommitSha: pr.merge_commit_sha,
+				}
+			}
+
+			const fetchPullRequests: VcsProviderClient["fetchPullRequests"] = (
+				installation,
+				repo,
+				opts,
+			) =>
+				client
+					.listPullRequests(
+						installation.externalInstallationId,
+						repo.owner,
+						repo.name,
+						opts.limit,
+					)
+					.pipe(Effect.map((prs) => prs.map(normalizePullRequest)), Effect.mapError(toVcsError))
+
+			const fetchPullRequest: VcsProviderClient["fetchPullRequest"] = (
+				installation,
+				repo,
+				number,
+			) =>
+				client
+					.getPullRequest(installation.externalInstallationId, repo.owner, repo.name, number)
+					.pipe(
+						// The client already turns a 404 into `null` — no such PR in this
+						// repo is an expected answer, not a failure.
+						Effect.map((pr) =>
+							pr === null ? Option.none<PullRequestSummary>() : Option.some(normalizePullRequest(pr)),
+						),
+						Effect.mapError(toVcsError),
+					)
+
 			const searchCode: VcsProviderClient["searchCode"] = (installation, repo, query, opts) =>
 				client
 					.searchCode(
@@ -777,6 +836,8 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 				fetchCommits,
 				fetchBranches,
 				fetchCommit,
+				fetchPullRequests,
+				fetchPullRequest,
 				searchCode,
 				fetchSourceFile,
 			} satisfies VcsProviderClient

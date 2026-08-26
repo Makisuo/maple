@@ -60,6 +60,7 @@
 				"apps/api/src/vcs-sync-runtime.ts",
 				"apps/api/src/runtime/mcp-service-graph.ts",
 				"apps/api/src/runtime/service-graph.ts",
+				"apps/api/src/runtime/vcs-source-layer.ts",
 				"apps/api/src/services/integrations/vcs/VcsProviderRegistry.ts",
 				"apps/api/src/routes/v1/integrations.http.ts",
 				"apps/api/src/services/integrations/vcs/vendor/**",

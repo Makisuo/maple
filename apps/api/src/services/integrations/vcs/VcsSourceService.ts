@@ -4,6 +4,7 @@ import {
 	IntegrationsUpstreamError,
 	isInstallationProcessable,
 	type OrgId,
+	type PullRequestSummary,
 	type VcsInstallation,
 	type VcsRepo,
 } from "@maple/domain/http"
@@ -22,12 +23,20 @@ export class VcsSourceFileNotFoundError extends Schema.TaggedError<VcsSourceFile
 	{ repository: Schema.String, path: Schema.String, ref: Schema.String, message: Schema.String },
 ) {}
 
-type VcsSourceError =
+/**
+ * Everything that can go wrong resolving *which* repository to talk to, before
+ * a path is involved. Split out from `VcsSourceError` so the pull-request reads
+ * do not advertise a file-not-found failure they cannot raise — a caller that
+ * had to catch a dead tag to satisfy the compiler would be handling a case that
+ * never happens.
+ */
+type VcsRepositoryScopedError =
 	| IntegrationsNotConnectedError
 	| IntegrationsPersistenceError
 	| IntegrationsUpstreamError
 	| VcsSourceRepositoryNotFoundError
-	| VcsSourceFileNotFoundError
+
+type VcsSourceError = VcsRepositoryScopedError | VcsSourceFileNotFoundError
 
 export interface ConnectedSourceRepository {
 	readonly provider: VcsRepo["provider"]
@@ -42,13 +51,29 @@ export interface ConnectedSourceRepository {
 export interface VcsSourceServiceApi {
 	readonly listRepositories: (
 		orgId: OrgId,
-	) => Effect.Effect<ReadonlyArray<ConnectedSourceRepository>, VcsSourceError>
+	) => Effect.Effect<ReadonlyArray<ConnectedSourceRepository>, VcsRepositoryScopedError>
+	/** Recent pull requests in one connected repository — the attach-a-PR picker's options. */
+	readonly listPullRequests: (
+		orgId: OrgId,
+		repository: string,
+		opts: { readonly limit: number },
+	) => Effect.Effect<ReadonlyArray<PullRequestSummary>, VcsRepositoryScopedError>
+	/**
+	 * One pull request by number. `Option.none` covers both "no such PR" and — via
+	 * the caller catching `VcsSourceRepositoryNotFoundError` — a repo this org has
+	 * never connected, which is a routine case for a pasted link.
+	 */
+	readonly fetchPullRequest: (
+		orgId: OrgId,
+		repository: string,
+		number: number,
+	) => Effect.Effect<Option.Option<PullRequestSummary>, VcsRepositoryScopedError>
 	readonly searchCode: (
 		orgId: OrgId,
 		repository: string,
 		query: string,
 		opts: { readonly path?: string; readonly limit: number },
-	) => Effect.Effect<ReadonlyArray<VcsCodeSearchMatch>, VcsSourceError>
+	) => Effect.Effect<ReadonlyArray<VcsCodeSearchMatch>, VcsRepositoryScopedError>
 	readonly readFile: (
 		orgId: OrgId,
 		repository: string,
@@ -140,6 +165,53 @@ export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourc
 					.sort((a, b) => a.fullName.localeCompare(b.fullName))
 			})
 
+			const listPullRequests: VcsSourceServiceApi["listPullRequests"] = Effect.fn(
+				"VcsSourceService.listPullRequests",
+			)(function* (orgId, repositoryName, opts) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					"vcs.repository.full_name": repositoryName,
+				})
+				const { installation, repository } = yield* resolveRepository(orgId, repositoryName)
+				const provider = yield* asUpstream(providers.resolve(repository.provider))
+				const pullRequests = yield* asUpstream(
+					provider.fetchPullRequests(
+						installation,
+						{
+							externalRepoId: repository.externalRepoId,
+							owner: repository.owner,
+							name: repository.name,
+						},
+						opts,
+					),
+				)
+				yield* Effect.annotateCurrentSpan({ "result.rowCount": pullRequests.length })
+				return pullRequests
+			})
+
+			const fetchPullRequest: VcsSourceServiceApi["fetchPullRequest"] = Effect.fn(
+				"VcsSourceService.fetchPullRequest",
+			)(function* (orgId, repositoryName, number) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					"vcs.repository.full_name": repositoryName,
+					"vcs.pull_request.number": number,
+				})
+				const { installation, repository } = yield* resolveRepository(orgId, repositoryName)
+				const provider = yield* asUpstream(providers.resolve(repository.provider))
+				return yield* asUpstream(
+					provider.fetchPullRequest(
+						installation,
+						{
+							externalRepoId: repository.externalRepoId,
+							owner: repository.owner,
+							name: repository.name,
+						},
+						number,
+					),
+				)
+			})
+
 			const searchCode: VcsSourceServiceApi["searchCode"] = Effect.fn("VcsSourceService.searchCode")(
 				function* (orgId, repositoryName, query, opts) {
 					yield* Effect.annotateCurrentSpan({
@@ -198,7 +270,13 @@ export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourc
 				},
 			)
 
-			return { listRepositories, searchCode, readFile } satisfies VcsSourceServiceApi
+			return {
+				listRepositories,
+				listPullRequests,
+				fetchPullRequest,
+				searchCode,
+				readFile,
+			} satisfies VcsSourceServiceApi
 		}),
 	},
 ) {

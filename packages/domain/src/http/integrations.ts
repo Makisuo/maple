@@ -5,6 +5,7 @@ import { Authorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 import {
 	GitCommitSha,
+	PullRequestSummary,
 	VcsAccountType,
 	VcsCommitNotFoundError,
 	VcsCommitShaInvalidError,
@@ -664,6 +665,23 @@ export class GithubSetTrackedBranchResponse extends Schema.Class<GithubSetTracke
  * distinguishes a DB hit ("stored") from an on-the-fly provider fetch ("fetched")
  * — purely diagnostic.
  */
+/** Ceiling on `vcsPullRequests`, matching one provider page. */
+export const VCS_PULL_REQUESTS_MAX_LIMIT = 100
+/** What the picker asks for when it does not say. */
+export const VCS_PULL_REQUESTS_DEFAULT_LIMIT = 50
+
+/**
+ * Recent pull requests in one connected repository — the options the attach-a-PR
+ * picker lists. Read straight from the provider, never persisted: a stale PR
+ * state in a picker is worse than a slightly slower one.
+ */
+export class VcsPullRequestsResponse extends Schema.Class<VcsPullRequestsResponse>(
+	"VcsPullRequestsResponse",
+)({
+	repository: Schema.String,
+	pullRequests: Schema.Array(PullRequestSummary),
+}) {}
+
 export class VcsCommitDetailResponse extends Schema.Class<VcsCommitDetailResponse>("VcsCommitDetailResponse")(
 	{
 		provider: VcsProviderId,
@@ -1005,6 +1023,27 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			}),
 			success: VcsCommitDetailsResponse,
 			error: [IntegrationsNotConnectedError, IntegrationsUpstreamError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		// Scoped to one repository the org has connected, so the picker's options can
+		// never come from a repo this tenant cannot see. `limit` is bounded because
+		// the provider call behind it fetches a single page — this lists the PRs
+		// somebody might be about to attach, not a repository's history.
+		HttpApiEndpoint.get("vcsPullRequests", "/vcs/pull-requests", {
+			query: Schema.Struct({
+				repository: Schema.String.check(Schema.isMinLength(1)),
+				limit: Schema.optional(
+					Schema.FiniteFromString.check(Schema.isBetween({ minimum: 1, maximum: VCS_PULL_REQUESTS_MAX_LIMIT })),
+				),
+			}),
+			success: VcsPullRequestsResponse,
+			error: [
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
 		}),
 	)
 	.prefix("/api/integrations")
