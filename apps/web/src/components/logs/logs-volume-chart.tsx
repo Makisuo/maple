@@ -251,10 +251,22 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 				endTime: effectiveEndTime,
 				bucketSeconds,
 				filters: {
-					serviceName: filters?.services?.[0],
-					severity: filters?.severities?.[0],
+					serviceNames: filters?.services ? [...filters.services] : undefined,
+					severities: filters?.severities ? [...filters.severities] : undefined,
 					environments: filters?.deploymentEnvs ? [...filters.deploymentEnvs] : undefined,
 					namespaces: filters?.namespaces ? [...filters.namespaces] : undefined,
+					excludedServiceNames: filters?.excludedServices
+						? [...filters.excludedServices]
+						: undefined,
+					excludedSeverities: filters?.excludedSeverities
+						? [...filters.excludedSeverities]
+						: undefined,
+					excludedEnvironments: filters?.excludedDeploymentEnvs
+						? [...filters.excludedDeploymentEnvs]
+						: undefined,
+					excludedNamespaces: filters?.excludedNamespaces
+						? [...filters.excludedNamespaces]
+						: undefined,
 				},
 			},
 		}),

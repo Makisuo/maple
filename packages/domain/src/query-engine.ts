@@ -90,6 +90,13 @@ export type TracesFilters = Schema.Schema.Type<typeof TracesFilters>
 export const LogsFilters = Schema.Struct({
 	serviceName: Schema.optional(ServiceName),
 	severity: Schema.optional(Schema.String),
+	/**
+	 * Multi-value spellings of `serviceName` / `severity`, compiled to `IN (...)`. The scalar fields
+	 * stay for the dashboard DSL, MCP tools and alert rules that only ever select one; the array
+	 * wins when present. Same contract as `TracesFilters.serviceNames`.
+	 */
+	serviceNames: Schema.optional(Schema.Array(ServiceName)),
+	severities: Schema.optional(Schema.Array(Schema.String)),
 	minSeverity: Schema.optional(Schema.Number),
 	traceId: Schema.optional(TraceId),
 	spanId: Schema.optional(Schema.String),
@@ -100,6 +107,10 @@ export const LogsFilters = Schema.Struct({
 	namespaceMatchMode: Schema.optional(Schema.Literal("contains")),
 	attributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
 	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
+	excludedServiceNames: Schema.optional(Schema.Array(ServiceName)),
+	excludedSeverities: Schema.optional(Schema.Array(Schema.String)),
+	excludedEnvironments: Schema.optional(Schema.Array(DeploymentEnvironment)),
+	excludedNamespaces: Schema.optional(Schema.Array(ServiceNamespace)),
 })
 export type LogsFilters = Schema.Schema.Type<typeof LogsFilters>
 

@@ -18,6 +18,8 @@ import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-r
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { AutocompleteValuesProvider } from "@/hooks/use-autocomplete-values"
+import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
+import { traceFilterChips } from "@/lib/traces/trace-filter-chips"
 
 const ContainsMatchMode = Schema.optional(Schema.Literals(["contains"]))
 
@@ -99,6 +101,27 @@ function TracesPage() {
 		},
 		[navigate],
 	)
+
+	const activeFilterChips = React.useMemo(
+		() =>
+			traceFilterChips(search).map((chip) => ({
+				id: chip.param,
+				label: chip.label,
+				values: chip.values,
+				negated: chip.negated,
+				onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
+			})),
+		[search, navigate],
+	)
+
+	const clearFacetFilters = React.useCallback(() => {
+		navigate({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(traceFilterChips(prev).map((chip) => [chip.param, undefined])),
+			}),
+		})
+	}, [navigate])
 
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
@@ -186,6 +209,7 @@ function TracesPage() {
 										</Button>
 									</div>
 								)}
+								<ActiveFilterChips chips={activeFilterChips} onClearAll={clearFacetFilters} />
 								<TracesTable filters={search} />
 							</DashboardLayout.Scroll>
 						</DashboardLayout.Content>

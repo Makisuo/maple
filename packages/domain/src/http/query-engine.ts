@@ -925,6 +925,19 @@ export class ListLogsRequest extends Schema.Class<ListLogsRequest>("ListLogsRequ
 	endTime: TinybirdDateTime,
 	service: Schema.optional(ServiceName),
 	severity: Schema.optional(Schema.String),
+	/**
+	 * Multi-value spellings of `service` / `severity`, and the values each facet filters *out*.
+	 *
+	 * The scalars came first and stay for the dashboard read-model plans that select exactly one.
+	 * The arrays exist because the logs sidebar has always rendered multi-select checkboxes: before
+	 * these, it sent `services[0]` and silently dropped every other ticked value.
+	 */
+	services: Schema.optional(Schema.Array(ServiceName)),
+	severities: Schema.optional(Schema.Array(Schema.String)),
+	excludedServices: Schema.optional(Schema.Array(ServiceName)),
+	excludedSeverities: Schema.optional(Schema.Array(Schema.String)),
+	excludedDeploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
+	excludedNamespaces: Schema.optional(Schema.Array(ServiceNamespace)),
 	minSeverity: Schema.optional(Schema.Number),
 	traceId: Schema.optional(Schema.String),
 	spanId: Schema.optional(Schema.String),
@@ -939,8 +952,10 @@ export class ListLogsRequest extends Schema.Class<ListLogsRequest>("ListLogsRequ
 	search: Schema.optional(Schema.String),
 	deploymentEnv: Schema.optional(DeploymentEnvironment),
 	deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
+	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	namespace: Schema.optional(ServiceNamespace),
 	namespaceMatchMode: Schema.optional(Schema.Literal("contains")),
+	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
 	limit: Schema.optional(Schema.Number),
 }) {}
 

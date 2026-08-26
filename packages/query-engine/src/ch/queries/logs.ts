@@ -16,12 +16,23 @@ import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition } from "../../traces-shared"
 import type { AttributeIndexMode, LogBodySearchMode } from "../../capabilities"
 import { edgeCondition, interiorConditions } from "./rollup-splice"
+import { inclusionCondition, inclusionValues } from "./query-helpers"
 
 // Shared options
 
 interface LogsQueryOpts {
 	serviceName?: string
 	severity?: string
+	/**
+	 * Multi-value spellings, compiled to `IN (...)`. The scalar fields are the original spelling and
+	 * are still what the dashboard DSL, MCP tools and alert rules emit; the array wins when non-empty.
+	 */
+	serviceNames?: readonly string[]
+	severities?: readonly string[]
+	excludedServiceNames?: readonly string[]
+	excludedSeverities?: readonly string[]
+	excludedEnvironments?: readonly string[]
+	excludedNamespaces?: readonly string[]
 	minSeverity?: number
 	traceId?: string
 	spanId?: string
@@ -131,6 +142,71 @@ function namespaceCondition(
 		return CH.positionCaseInsensitive(nsAttr, CH.lit(opts.namespaces[0]!)).gt(0)
 	}
 	return CH.inList(nsAttr, opts.namespaces)
+}
+
+/**
+ * Service and severity, in both polarities, against whichever table carries them as plain columns —
+ * `logs` and `logs_aggregates_hourly` spell both identically, so one helper serves both paths.
+ */
+function serviceSeverityConditions(
+	$: { ServiceName: CH.Expr<string>; SeverityText: CH.Expr<string> },
+	opts: LogsQueryOpts,
+): Array<CH.Condition | undefined> {
+	const services = inclusionValues(opts.serviceName, opts.serviceNames)
+	const severities = inclusionValues(opts.severity, opts.severities)
+	return [
+		services ? inclusionCondition($.ServiceName, services) : undefined,
+		severities ? inclusionCondition($.SeverityText, severities) : undefined,
+		opts.excludedServiceNames?.length
+			? CH.notInList($.ServiceName, opts.excludedServiceNames)
+			: undefined,
+		opts.excludedSeverities?.length ? CH.notInList($.SeverityText, opts.excludedSeverities) : undefined,
+	]
+}
+
+/**
+ * Environment and namespace, in both polarities, against the raw `logs` table's resource map.
+ *
+ * Kept separate from `serviceSeverityConditions` rather than folded into one facet helper because
+ * the two sit at different points in every WHERE list, and merging them would reorder the emitted
+ * clauses — which changes `db.query.fingerprint` and invalidates caches for no semantic gain.
+ */
+function rawEnvNamespaceConditions(
+	$: ColumnAccessor<typeof Logs.columns>,
+	opts: LogsQueryOpts,
+): Array<CH.Condition | undefined> {
+	return [
+		environmentCondition($, opts),
+		namespaceCondition($, opts),
+		opts.excludedEnvironments?.length
+			? CH.notInList(deploymentEnvExpr($.ResourceAttributes), opts.excludedEnvironments)
+			: undefined,
+		opts.excludedNamespaces?.length
+			? CH.notInList($.ResourceAttributes.get("service.namespace"), opts.excludedNamespaces)
+			: undefined,
+	]
+}
+
+/**
+ * The same set against `logs_aggregates_hourly`, which carries DeploymentEnv and ServiceNamespace as
+ * top-level columns. Every dimension exists there, so an exclusion costs the MV fast path nothing —
+ * unlike a `contains` match, which is why `canUseLogsAggregatesHourly` bails on that and not on this.
+ */
+function mvFacetConditions(
+	$: ColumnAccessor<typeof LogsAggregatesHourly.columns>,
+	opts: LogsQueryOpts,
+): Array<CH.Condition | undefined> {
+	return [
+		...serviceSeverityConditions($, opts),
+		mvEnvironmentCondition($, opts),
+		mvNamespaceCondition($, opts),
+		opts.excludedEnvironments?.length
+			? CH.notInList($.DeploymentEnv, opts.excludedEnvironments)
+			: undefined,
+		opts.excludedNamespaces?.length
+			? CH.notInList($.ServiceNamespace, opts.excludedNamespaces)
+			: undefined,
+	]
 }
 
 function rawLogsTimeRange($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> {
@@ -260,10 +336,7 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 				// `param.dateTimeString("endTime")` substitutes as a quoted string literal;
 				// `toStartOfHour` only accepts Date/DateTime, so wrap with `toDateTime`.
 				$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
-				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-				CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
-				mvEnvironmentCondition($, opts),
-				mvNamespaceCondition($, opts),
+				...mvFacetConditions($, opts),
 			])
 			.groupBy("bucket", "groupName")
 			.orderBy(["bucket", "asc"], ["groupName", "asc"])
@@ -288,14 +361,12 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 			$.TimestampTime.lte(param.dateTimeString("endTime")),
 			$.Timestamp.gte(param.dateTimeString("startTime")),
 			$.Timestamp.lte(param.dateTimeString("endTime")),
-			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-			CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+			...serviceSeverityConditions($, opts),
 			opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 			CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
 			logBodySearchCondition($.Body, opts),
-			environmentCondition($, opts),
-			namespaceCondition($, opts),
+			...rawEnvNamespaceConditions($, opts),
 			...logAttributeConditions(opts),
 		])
 		.groupBy("bucket", "groupName")
@@ -361,14 +432,12 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
 				...rawLogsTimeRange($),
-				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-				CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+				...serviceSeverityConditions($, opts),
 				opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 				CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 				CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
 				logBodySearchCondition($.Body, opts),
-				environmentCondition($, opts),
-				namespaceCondition($, opts),
+				...rawEnvNamespaceConditions($, opts),
 				...logAttributeConditions(opts),
 			])
 			.groupBy("name")
@@ -386,14 +455,12 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 			$.OrgId.eq(param.string("orgId")),
 			...rawLogsTimeRange($),
 			rawLogEdgeCondition(),
-			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-			CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+			...serviceSeverityConditions($, opts),
 			opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 			CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
 			logBodySearchCondition($.Body, opts),
-			environmentCondition($, opts),
-			namespaceCondition($, opts),
+			...rawEnvNamespaceConditions($, opts),
 			...logAttributeConditions(opts),
 		])
 		.groupBy("name")
@@ -406,10 +473,7 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			...interiorConditions($.Hour),
-			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-			CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
-			mvEnvironmentCondition($, opts),
-			mvNamespaceCondition($, opts),
+			...mvFacetConditions($, opts),
 		])
 		.groupBy("name")
 
@@ -440,14 +504,12 @@ export function logsCountQuery(opts: LogsQueryOpts): CHQuery<ColumnDefs, LogsCou
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
 				...rawLogsTimeRange($),
-				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-				CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+				...serviceSeverityConditions($, opts),
 				opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 				CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 				CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
 				logBodySearchCondition($.Body, opts),
-				environmentCondition($, opts),
-				namespaceCondition($, opts),
+				...rawEnvNamespaceConditions($, opts),
 				...logAttributeConditions(opts),
 			])
 			.format("JSON")
@@ -462,10 +524,8 @@ export function logsCountQuery(opts: LogsQueryOpts): CHQuery<ColumnDefs, LogsCou
 			$.OrgId.eq(param.string("orgId")),
 			...rawLogsTimeRange($),
 			rawLogEdgeCondition(),
-			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-			CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
-			environmentCondition($, opts),
-			namespaceCondition($, opts),
+			...serviceSeverityConditions($, opts),
+			...rawEnvNamespaceConditions($, opts),
 		])
 
 	const mvInterior = from(LogsAggregatesHourly)
@@ -475,10 +535,7 @@ export function logsCountQuery(opts: LogsQueryOpts): CHQuery<ColumnDefs, LogsCou
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			...interiorConditions($.Hour),
-			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-			CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
-			mvEnvironmentCondition($, opts),
-			mvNamespaceCondition($, opts),
+			...mvFacetConditions($, opts),
 		])
 
 	const combined = fromUnion(unionAll(rawEdges, mvInterior), "counts")
@@ -542,8 +599,7 @@ export function logsListQuery(opts: LogsListOpts) {
 		$.TimestampTime.lte(param.dateTimeString("endTime")),
 		$.Timestamp.gte(param.dateTimeString("startTime")),
 		$.Timestamp.lte(param.dateTimeString("endTime")),
-		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-		CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+		...serviceSeverityConditions($, opts),
 		opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 		CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 		CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
@@ -568,8 +624,7 @@ export function logsListQuery(opts: LogsListOpts) {
 				)
 			: undefined,
 		logBodySearchCondition($.Body, opts),
-		environmentCondition($, opts),
-		namespaceCondition($, opts),
+		...rawEnvNamespaceConditions($, opts),
 		...logAttributeConditions(opts),
 	]
 

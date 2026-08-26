@@ -201,6 +201,18 @@ describe("parseWhereClause", () => {
 		expect(filters.spanName).toBeUndefined()
 	})
 
+	it("round-trips service.namespace in both polarities", () => {
+		// The excludedNamespaces search param and its API mapping shipped before the clause knew the
+		// key, so a namespace filter used to survive the sidebar and vanish through the dialog.
+		const { filters } = parseWhereClause('service.namespace != "internal"')
+		expect(filters.excludedNamespaces).toEqual(["internal"])
+		expect(toWhereClause(filters)).toBe('service.namespace != "internal"')
+
+		const positive = parseWhereClause('service.namespace = "checkout"').filters
+		expect(positive.namespace).toBe("checkout")
+		expect(toWhereClause(positive)).toBe('service.namespace = "checkout"')
+	})
+
 	it("marks attr.* filters as negated for !=", () => {
 		const { filters } = parseWhereClause('attr.env != "prod"')
 		expect(filters.attributeFilters).toEqual([

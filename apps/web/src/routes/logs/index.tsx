@@ -9,6 +9,8 @@ import { LogsFilterSidebar } from "@/components/logs/logs-filter-sidebar"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
+import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
+import { logFilterChips } from "@/lib/logs/log-filter-chips"
 
 const logsSearchSchema = Schema.Struct({
 	services: OptionalStringArrayParam,
@@ -17,6 +19,10 @@ const logsSearchSchema = Schema.Struct({
 	deploymentEnvMatchMode: Schema.optional(Schema.Literals(["contains"])),
 	namespaces: OptionalStringArrayParam,
 	namespaceMatchMode: Schema.optional(Schema.Literals(["contains"])),
+	excludedServices: OptionalStringArrayParam,
+	excludedSeverities: OptionalStringArrayParam,
+	excludedDeploymentEnvs: OptionalStringArrayParam,
+	excludedNamespaces: OptionalStringArrayParam,
 	// Attribute keys pinned as columns in the logs stream. Shareable via URL.
 	columns: OptionalStringArrayParam,
 	search: Schema.optional(Schema.String),
@@ -45,6 +51,23 @@ function LogsPage() {
 		navigate({
 			replace: options?.replace,
 			search: (prev) => applyTimeRangeSearch(prev, range),
+		})
+	}
+
+	const activeFilterChips = logFilterChips(search).map((chip) => ({
+		id: chip.param,
+		label: chip.label,
+		values: chip.values,
+		negated: chip.negated,
+		onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
+	}))
+
+	const clearFacetFilters = () => {
+		navigate({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(logFilterChips(prev).map((chip) => [chip.param, undefined])),
+			}),
 		})
 	}
 
@@ -81,6 +104,7 @@ function LogsPage() {
 						    scrollbar for the wheel to chain into at the ends. */}
 						<DashboardLayout.Fill>
 							<div className="flex min-h-0 flex-1 flex-col p-4">
+								<ActiveFilterChips chips={activeFilterChips} onClearAll={clearFacetFilters} />
 								<LogsTable filters={search} />
 							</div>
 						</DashboardLayout.Fill>

@@ -28,12 +28,18 @@ function buildQueryParams(
 	return {
 		startTime: range.startTime,
 		endTime: range.endTime,
-		service: filters?.services?.[0],
-		severity: filters?.severities?.[0],
-		deploymentEnv: filters?.deploymentEnvs?.[0],
+		// Every ticked value, not just the first. The sidebar has rendered multi-select checkboxes
+		// since it shipped; `services?.[0]` quietly threw the rest away.
+		services: filters?.services,
+		severities: filters?.severities,
+		deploymentEnvs: filters?.deploymentEnvs,
 		deploymentEnvMatchMode: filters?.deploymentEnvMatchMode,
-		namespace: filters?.namespaces?.[0],
+		namespaces: filters?.namespaces,
 		namespaceMatchMode: filters?.namespaceMatchMode,
+		excludedServices: filters?.excludedServices,
+		excludedSeverities: filters?.excludedSeverities,
+		excludedDeploymentEnvs: filters?.excludedDeploymentEnvs,
+		excludedNamespaces: filters?.excludedNamespaces,
 		search: filters?.search,
 	}
 }

@@ -19,6 +19,59 @@ const baseParams = {
 	bucketSeconds: 3600,
 }
 
+// Facet filters, in both polarities
+
+describe("logs facet filters", () => {
+	it("compiles a multi-value service selection to IN, not just its first value", () => {
+		// The logs sidebar has rendered multi-select checkboxes since it shipped, but the list only
+		// ever received `services[0]` — every other ticked service was silently dropped.
+		const { sql } = compileUnsafe(logsListQuery({ serviceNames: ["api", "web"] }), baseParams)
+		expect(sql).toContain("ServiceName IN ('api', 'web')")
+	})
+
+	it("keeps `=` for a single value, so the query fingerprint does not move", () => {
+		const { sql } = compileUnsafe(logsListQuery({ serviceNames: ["api"] }), baseParams)
+		expect(sql).toContain("ServiceName = 'api'")
+		expect(sql).not.toContain("ServiceName IN")
+	})
+
+	it("lets the array spelling win over the scalar", () => {
+		const { sql } = compileUnsafe(
+			logsListQuery({ serviceName: "api", serviceNames: ["web", "worker"] }),
+			baseParams,
+		)
+		expect(sql).toContain("ServiceName IN ('web', 'worker')")
+		expect(sql).not.toContain("ServiceName = 'api'")
+	})
+
+	it("emits NOT IN for every excluded dimension on the raw table", () => {
+		const { sql } = compileUnsafe(
+			logsListQuery({
+				excludedServiceNames: ["noisy"],
+				excludedSeverities: ["DEBUG"],
+				excludedEnvironments: ["staging"],
+				excludedNamespaces: ["internal"],
+			}),
+			baseParams,
+		)
+		expect(sql).toContain("ServiceName NOT IN ('noisy')")
+		expect(sql).toContain("SeverityText NOT IN ('DEBUG')")
+		expect(sql).toContain("NOT IN ('staging')")
+		expect(sql).toContain("NOT IN ('internal')")
+	})
+
+	it("excludes on the hourly MV too, so exclusion costs no fast path", () => {
+		// Every excluded dimension is a top-level column on logs_aggregates_hourly. A `contains`
+		// match is what forces the raw scan; an exclusion is not.
+		const opts = { excludedServiceNames: ["noisy"], excludedEnvironments: ["staging"] }
+		expect(canUseLogsAggregatesHourly(opts, 3600)).toBe(true)
+		const { sql } = compileUnsafe(logsTimeseriesQuery({ ...opts, bucketSeconds: 3600 }), baseParams)
+		expect(sql).toContain("FROM logs_aggregates_hourly")
+		expect(sql).toContain("ServiceName NOT IN ('noisy')")
+		expect(sql).toContain("DeploymentEnv NOT IN ('staging')")
+	})
+})
+
 // logsTimeseriesQuery
 
 describe("logsTimeseriesQuery", () => {

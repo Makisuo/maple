@@ -292,13 +292,29 @@ export const listLogs = defineQuery({
 				bodySearchMode: logBodySearchMode(capabilities),
 				serviceName: payload.service,
 				severity: payload.severity,
+				serviceNames: payload.services,
+				severities: payload.severities,
+				excludedServiceNames: payload.excludedServices,
+				excludedSeverities: payload.excludedSeverities,
+				excludedEnvironments: payload.excludedDeploymentEnvs,
+				excludedNamespaces: payload.excludedNamespaces,
 				minSeverity: payload.minSeverity,
 				traceId: payload.traceId,
 				spanId: payload.spanId,
 				cursor: payload.cursor,
 				search: payload.search,
-				environments: payload.deploymentEnv ? [payload.deploymentEnv] : undefined,
-				namespaces: payload.namespace ? [payload.namespace] : undefined,
+				// The array spelling wins when present; the scalar stays for the dashboard
+				// read-model plans, which select exactly one.
+				environments: payload.deploymentEnvs?.length
+					? payload.deploymentEnvs
+					: payload.deploymentEnv
+						? [payload.deploymentEnv]
+						: undefined,
+				namespaces: payload.namespaces?.length
+					? payload.namespaces
+					: payload.namespace
+						? [payload.namespace]
+						: undefined,
 				matchModes: Match.value([
 					payload.deploymentEnvMatchMode,
 					payload.namespaceMatchMode,

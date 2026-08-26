@@ -22,6 +22,7 @@ export interface TracesSearchLike {
 	httpMethods?: string[]
 	httpStatusCodes?: string[]
 	deploymentEnvs?: string[]
+	namespaces?: string[]
 	startTime?: string
 	endTime?: string
 	rootOnly?: boolean
@@ -31,9 +32,11 @@ export interface TracesSearchLike {
 	serviceMatchMode?: FilterMatchMode
 	spanNameMatchMode?: FilterMatchMode
 	deploymentEnvMatchMode?: FilterMatchMode
+	namespaceMatchMode?: FilterMatchMode
 	excludedServices?: string[]
 	excludedSpanNames?: string[]
 	excludedDeploymentEnvs?: string[]
+	excludedNamespaces?: string[]
 	excludedHttpMethods?: string[]
 	excludedHttpStatusCodes?: string[]
 }
@@ -44,6 +47,7 @@ export interface ParsedWhereClauseFilters {
 	service?: string
 	spanName?: string
 	deploymentEnv?: string
+	namespace?: string
 	httpMethod?: string
 	httpStatusCode?: string
 	hasError?: true
@@ -56,6 +60,7 @@ export interface ParsedWhereClauseFilters {
 	excludedServices?: string[]
 	excludedSpanNames?: string[]
 	excludedDeploymentEnvs?: string[]
+	excludedNamespaces?: string[]
 	excludedHttpMethods?: string[]
 	excludedHttpStatusCodes?: string[]
 }
@@ -152,6 +157,14 @@ export function parseWhereClause(whereClause: string | undefined): {
 				setMatchMode("deploymentEnv")
 				return { ...parsed, deploymentEnv: clause.value }
 			}),
+			Match.when("service.namespace", () => {
+				if (isNegated) {
+					const current = parsed.excludedNamespaces ?? []
+					return { ...parsed, excludedNamespaces: [...current, clause.value] }
+				}
+				setMatchMode("namespace")
+				return { ...parsed, namespace: clause.value }
+			}),
 			Match.when("http.method", () => {
 				if (isNegated) {
 					const current = parsed.excludedHttpMethods ?? []
@@ -230,6 +243,10 @@ export function toWhereClause(filters: ParsedWhereClauseFilters): string | undef
 		clauses.push(`deployment.environment ${op("deploymentEnv")} ${quoteValue(filters.deploymentEnv)}`)
 	}
 
+	if (filters.namespace) {
+		clauses.push(`service.namespace ${op("namespace")} ${quoteValue(filters.namespace)}`)
+	}
+
 	if (filters.httpMethod) {
 		clauses.push(`http.method ${op("httpMethod")} ${quoteValue(filters.httpMethod)}`)
 	}
@@ -275,6 +292,9 @@ export function toWhereClause(filters: ParsedWhereClauseFilters): string | undef
 	for (const v of filters.excludedDeploymentEnvs ?? []) {
 		clauses.push(`deployment.environment != ${quoteValue(v)}`)
 	}
+	for (const v of filters.excludedNamespaces ?? []) {
+		clauses.push(`service.namespace != ${quoteValue(v)}`)
+	}
 	for (const v of filters.excludedHttpMethods ?? []) {
 		clauses.push(`http.method != ${quoteValue(v)}`)
 	}
@@ -312,6 +332,10 @@ function clauseFields(filters: ParsedWhereClauseFilters): ClauseFields {
 		fields.deploymentEnvs = [filters.deploymentEnv]
 		fields.deploymentEnvMatchMode = modes.deploymentEnv
 	}
+	if (filters.namespace) {
+		fields.namespaces = [filters.namespace]
+		fields.namespaceMatchMode = modes.namespace
+	}
 	if (filters.httpMethod) fields.httpMethods = [filters.httpMethod]
 	if (filters.httpStatusCode) fields.httpStatusCodes = [filters.httpStatusCode]
 	if (filters.hasError !== undefined) fields.hasError = filters.hasError
@@ -327,6 +351,7 @@ function clauseFields(filters: ParsedWhereClauseFilters): ClauseFields {
 	if (filters.excludedDeploymentEnvs?.length) {
 		fields.excludedDeploymentEnvs = filters.excludedDeploymentEnvs
 	}
+	if (filters.excludedNamespaces?.length) fields.excludedNamespaces = filters.excludedNamespaces
 	if (filters.excludedHttpMethods?.length) fields.excludedHttpMethods = filters.excludedHttpMethods
 	if (filters.excludedHttpStatusCodes?.length) {
 		fields.excludedHttpStatusCodes = filters.excludedHttpStatusCodes
@@ -359,15 +384,18 @@ export function applyWhereClause(search: TracesSearchLike, whereClause: string):
 			httpMethods: undefined,
 			httpStatusCodes: undefined,
 			deploymentEnvs: undefined,
+			namespaces: undefined,
 			rootOnly: undefined,
 			attributeFilters: undefined,
 			resourceAttributeFilters: undefined,
 			serviceMatchMode: undefined,
 			spanNameMatchMode: undefined,
 			deploymentEnvMatchMode: undefined,
+			namespaceMatchMode: undefined,
 			excludedServices: undefined,
 			excludedSpanNames: undefined,
 			excludedDeploymentEnvs: undefined,
+			excludedNamespaces: undefined,
 			excludedHttpMethods: undefined,
 			excludedHttpStatusCodes: undefined,
 		}
