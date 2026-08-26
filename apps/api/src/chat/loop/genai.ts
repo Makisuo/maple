@@ -449,7 +449,7 @@ export const annotateModelCallEnd = (events: ReadonlyArray<LLMEvent>): Effect.Ef
  * The span's wall clock covers the whole stream lifetime — including the SSE
  * frames and durable writes that *consume* the model's output — so it
  * systematically overstates the model. These two attributes are the honest
- * numbers: request start → first provider frame (`time_to_first_chunk`,
+ * numbers: request start → first token-bearing event (`time_to_first_chunk`,
  * seconds, the key the session view's occupancy bar reads), and request start
  * → terminal event (model duration, milliseconds).
  */
@@ -460,9 +460,14 @@ export interface ModelCallTiming {
 
 /**
  * Annotate the current model-call span as events arrive: TTFT on the first
- * provider frame (`step-start` is emitted while processing that frame, never
- * before the network, so the first event of any type is the first byte), the
- * model's own duration on the terminal event.
+ * event, the model's own duration on the terminal event.
+ *
+ * The first event is the first *token-bearing* frame, not the first byte: the
+ * openai-chat protocol emits no `step-start`, and role-only chunks, keep-alive
+ * comments and hidden reasoning produce no events at all. So on a reasoning
+ * model TTFT spans the whole silent reasoning phase — deliberately, since that
+ * is when the first token actually reached this side of the wire. On
+ * tool-call-only steps this puts TTFT near the span's full duration.
  */
 export const annotateModelCallTiming = (timing: ModelCallTiming, event: LLMEvent): Effect.Effect<void> =>
 	Effect.suspend(() => {
