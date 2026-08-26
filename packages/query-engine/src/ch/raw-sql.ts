@@ -50,23 +50,54 @@ export type RawSqlReason =
 	| "test-fixture"
 
 /**
+ * The reasons whose SQL has a shape known when it is written, and which
+ * therefore have no excuse for handing back rows nothing validates.
+ *
+ * A stub SELECT of literals and a union of two compiled branches both know
+ * every column they emit — the first because it wrote them, the second because
+ * each branch carries its own derived row schema. `user-authored-sql` does not
+ * (the shape arrives with the user's string) and `test-fixture` is often
+ * asserting the undecoded path itself, so both keep `rowSchema` optional.
+ */
+type ShapeKnownReason = Exclude<RawSqlReason, "user-authored-sql" | "test-fixture">
+
+interface RawSqlArgs<Route extends string | undefined> {
+	readonly sql: string
+	readonly tenantScope: TenantScope
+	/** One sentence, at the call site, on why this instance qualifies. */
+	readonly justification: string
+	readonly route?: Route
+}
+
+/**
  * Explicit constructor for SQL that cannot be expressed through the typed DSL.
  *
  * Prefer `compile(CH.from(...))`. `tenantScope` here is taken at face value —
  * there is no query AST to inspect, only a string — which is exactly why this
  * is the one place tenant scope can be *asserted* rather than derived, and why
  * every use has to name a `reason` from the closed union above and justify
- * itself in a `note`.
+ * itself in a `justification`.
+ *
+ * `rowSchema` is required for every reason whose shape is known up front — see
+ * {@link ShapeKnownReason}. There is no AST here for the builder to derive one
+ * from, so a forgotten schema is a silent identity cast: `decodeRows` hands the
+ * wire values straight through, and a 64-bit count arriving quoted reaches a
+ * consumer as a string. The catalog gates only see queries a fixture compiles;
+ * this sees every call site.
  *
  * DDL, migrations, and another engine's file formats don't reach this function
  * at all; they never produce a `CompiledQuery`.
  */
-export const rawCompiledQuery = <Output, Route extends string | undefined = undefined>(args: {
-	readonly sql: string
-	readonly tenantScope: TenantScope
-	readonly reason: RawSqlReason
-	/** One sentence, at the call site, on why this instance qualifies. */
-	readonly justification: string
-	readonly rowSchema?: CompiledQueryRowSchema<Output>
-	readonly route?: Route
-}): CompiledQuery<Output, Route> => rawCompiledQueryUntyped<Output, Route, RawSqlReason>(args)
+export const rawCompiledQuery = <Output, Route extends string | undefined = undefined>(
+	args: RawSqlArgs<Route> &
+		(
+			| {
+					readonly reason: ShapeKnownReason
+					readonly rowSchema: CompiledQueryRowSchema<Output>
+			  }
+			| {
+					readonly reason: "user-authored-sql" | "test-fixture"
+					readonly rowSchema?: CompiledQueryRowSchema<Output>
+			  }
+		),
+): CompiledQuery<Output, Route> => rawCompiledQueryUntyped<Output, Route, RawSqlReason>(args)

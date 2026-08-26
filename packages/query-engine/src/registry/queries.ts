@@ -124,7 +124,6 @@ export const errorsSpark = defineQuery({
 				// Optional buckets default to one hour, as errorsTimeseries does.
 				bucketSeconds: payload.bucketSeconds ?? 3600,
 			},
-			{ rowSchema: CH.ErrorsSparkOutputSchema },
 		),
 })
 
@@ -384,7 +383,6 @@ export const podsSummary = defineQuery({
 				environments: payload.environments,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
-			{ rowSchema: CH.ListPodsSummaryOutputSchema },
 		),
 })
 
@@ -914,11 +912,11 @@ export const listPodsCount = defineQuery({
 	profile: "aggregation",
 	cache: timeRangeCache,
 	compile: (payload: ListPodsRequest, orgId: string) =>
-		CH.compile(
-			CH.listPodsSummaryQuery(listPodsFilters(payload)),
-			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
-			{ rowSchema: CH.ListPodsSummaryOutputSchema },
-		),
+		CH.compile(CH.listPodsSummaryQuery(listPodsFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
 })
 
 // Probes resolve a time bound so hierarchy reads avoid ~30 daily partitions.
@@ -1032,11 +1030,10 @@ export const serviceOperationsTimeseries = defineQuery({
 	profile: "aggregation",
 	cache: undefined,
 	compile: (payload: ServiceOperationsTimeseriesInput, orgId: string) =>
-		CH.compile(
-			CH.serviceOperationsTimeseriesQuery(serviceOperationsTimeseriesOptions(payload)),
-			{ ...serviceOperationsParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
-		),
+		CH.compile(CH.serviceOperationsTimeseriesQuery(serviceOperationsTimeseriesOptions(payload)), {
+			...serviceOperationsParams(payload, orgId),
+			bucketSeconds: payload.bucketSeconds,
+		}),
 })
 
 export const serviceOperationsTimeseriesRaw = defineQuery({
@@ -1045,9 +1042,8 @@ export const serviceOperationsTimeseriesRaw = defineQuery({
 	settings: SERVICE_OPERATIONS_RAW_SETTINGS,
 	cache: undefined,
 	compile: (payload: ServiceOperationsTimeseriesInput, orgId: string) =>
-		CH.compile(
-			CH.serviceOperationsTimeseriesRawQuery(serviceOperationsTimeseriesOptions(payload)),
-			{ ...serviceOperationsParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
-		),
+		CH.compile(CH.serviceOperationsTimeseriesRawQuery(serviceOperationsTimeseriesOptions(payload)), {
+			...serviceOperationsParams(payload, orgId),
+			bucketSeconds: payload.bucketSeconds,
+		}),
 })

@@ -51,9 +51,7 @@ const cloudflareInfraZoneCounters = defineQuery({
 		// concurrently, then merge by ServiceName — same shape as
 		// serviceCloudflareStats above.
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneCountersSQL(filters), params, {
-			rowSchema: Integrations.cloudflareZoneCountersRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareZoneCountersSQL(filters), params)
 	},
 })
 
@@ -71,9 +69,7 @@ const cloudflareInfraZoneLatency = defineQuery({
 		// concurrently, then merge by ServiceName — same shape as
 		// serviceCloudflareStats above.
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneLatencySQL(), params, {
-			rowSchema: Integrations.cloudflareZoneLatencyRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareZoneLatencySQL(), params)
 	},
 })
 
@@ -157,9 +153,7 @@ const cloudflareInfraWorkerCounters = defineQuery({
 			startTime: payload.startTime,
 			endTime: payload.endTime,
 		}
-		return CH.compile(Integrations.cloudflareWorkerCountersSQL(), params, {
-			rowSchema: Integrations.cloudflareWorkerCountersRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareWorkerCountersSQL(), params)
 	},
 })
 
@@ -173,9 +167,7 @@ const cloudflareInfraWorkerLatency = defineQuery({
 			startTime: payload.startTime,
 			endTime: payload.endTime,
 		}
-		return CH.compile(Integrations.cloudflareWorkerLatencySQL(), params, {
-			rowSchema: Integrations.cloudflareWorkerLatencyRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareWorkerLatencySQL(), params)
 	},
 })
 
@@ -221,9 +213,7 @@ const cloudflareServiceCounters = defineQuery({
 		// concurrently, then merge by ServiceName. Routed through the org's
 		// configured warehouse exactly like the metric explorer reads these
 		// same `cloudflare.*` metrics — no special ingest pin needed.
-		return CH.compile(Integrations.cloudflareServiceCountersSQL(), params, {
-			rowSchema: Integrations.cloudflareServiceCountersRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareServiceCountersSQL(), params)
 	},
 })
 
@@ -241,9 +231,7 @@ const cloudflareServiceLatency = defineQuery({
 		// concurrently, then merge by ServiceName. Routed through the org's
 		// configured warehouse exactly like the metric explorer reads these
 		// same `cloudflare.*` metrics — no special ingest pin needed.
-		return CH.compile(Integrations.cloudflareServiceLatencySQL(), params, {
-			rowSchema: Integrations.cloudflareServiceLatencyRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareServiceLatencySQL(), params)
 	},
 })
 
@@ -284,7 +272,6 @@ const cloudflareInfraZoneDetailStatus = defineQuery({
 		CH.compile(
 			Integrations.cloudflareZoneStatusTimeseriesSQL(toCloudflareFilters(payload)),
 			zoneDetailParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneStatusTimeseriesRowSchema },
 		),
 })
 
@@ -296,7 +283,6 @@ const cloudflareInfraZoneDetailCache = defineQuery({
 		CH.compile(
 			Integrations.cloudflareZoneCacheTimeseriesSQL(toCloudflareFilters(payload)),
 			zoneDetailParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneCacheTimeseriesRowSchema },
 		),
 })
 
@@ -306,9 +292,7 @@ const cloudflareInfraZoneDetailLatency = defineQuery({
 	profile: "aggregation",
 	cache: 15,
 	compile: (payload: CloudflareInfraZoneDetailRequest, orgId: string) =>
-		CH.compile(Integrations.cloudflareZoneLatencyTimeseriesSQL(), zoneDetailParams(payload, orgId), {
-			rowSchema: Integrations.cloudflareZoneLatencyTimeseriesRowSchema,
-		}),
+		CH.compile(Integrations.cloudflareZoneLatencyTimeseriesSQL(), zoneDetailParams(payload, orgId)),
 })
 
 // Each reads either the database-level or the branch-level rollup depending on
@@ -469,7 +453,6 @@ const cloudflareInfraZoneBreakdownZoneTotal = defineQuery({
 		CH.compile(
 			Integrations.cloudflareZoneCountersSQL(toCloudflareFilters(payload)),
 			zoneBreakdownParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneCountersRowSchema },
 		),
 })
 
@@ -630,16 +613,12 @@ export const Queries = {
 		profile: "aggregation",
 		cache: 15,
 		compile: (payload: CloudflareInfraZoneTimeseriesRequest, orgId: string) =>
-			CH.compile(
-				Integrations.cloudflareZoneTimeseriesSQL(toCloudflareFilters(payload)),
-				{
-					orgId,
-					startTime: payload.startTime,
-					endTime: payload.endTime,
-					bucketSeconds: payload.bucketSeconds,
-				},
-				{ rowSchema: Integrations.cloudflareZoneTimeseriesRowSchema },
-			),
+			CH.compile(Integrations.cloudflareZoneTimeseriesSQL(toCloudflareFilters(payload)), {
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds: payload.bucketSeconds,
+			}),
 	}),
 
 	// Integration queries, declared above.

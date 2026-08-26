@@ -2,21 +2,13 @@
 // firewall/WAF, DNS, and the breakdown dimensions behind /infra/cloudflare.
 
 export {
-	cloudflareZoneCountersRowSchema,
 	cloudflareZoneCountersSQL,
-	cloudflareZoneLatencyRowSchema,
 	cloudflareZoneLatencySQL,
-	cloudflareZoneTimeseriesRowSchema,
 	cloudflareZoneTimeseriesSQL,
-	cloudflareZoneStatusTimeseriesRowSchema,
 	cloudflareZoneStatusTimeseriesSQL,
-	cloudflareZoneCacheTimeseriesRowSchema,
 	cloudflareZoneCacheTimeseriesSQL,
-	cloudflareZoneLatencyTimeseriesRowSchema,
 	cloudflareZoneLatencyTimeseriesSQL,
-	cloudflareWorkerCountersRowSchema,
 	cloudflareWorkerCountersSQL,
-	cloudflareWorkerLatencyRowSchema,
 	cloudflareWorkerLatencySQL,
 	type CloudflareZoneCountersOutput,
 	type CloudflareZoneLatencyOutput,
@@ -72,9 +64,7 @@ export {
 } from "./cloudflare-infra-breakdowns"
 
 export {
-	cloudflareServiceCountersRowSchema,
 	cloudflareServiceCountersSQL,
-	cloudflareServiceLatencyRowSchema,
 	cloudflareServiceLatencySQL,
 	type CloudflareServiceCountersOutput,
 	type CloudflareServiceLatencyOutput,

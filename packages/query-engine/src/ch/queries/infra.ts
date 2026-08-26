@@ -13,11 +13,9 @@
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
-import { Schema } from "effect"
 import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
-import { unionAll, type CHUnionQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
+import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
-import { CHNumber } from "../schema"
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import type { FacetOutput } from "./query-helpers"
 
@@ -536,15 +534,6 @@ export interface ListPodsSummaryOutput {
 	/** Last scrape older than ten collection intervals (5 min at the 30s default). */
 	readonly stalePods: number
 }
-
-/** Counts arrive as strings on BYO-ClickHouse, so decode rather than trust JSON. */
-export const ListPodsSummaryOutputSchema: CompiledQueryRowSchema<ListPodsSummaryOutput> = Schema.Struct({
-	totalPods: CHNumber,
-	saturatedPods: CHNumber,
-	elevatedPods: CHNumber,
-	unboundedPods: CHNumber,
-	stalePods: CHNumber,
-})
 
 /**
  * One row of fleet-shape counts for the browse summary band.

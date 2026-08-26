@@ -132,13 +132,14 @@ export function compilePipeQuery(
 			previousEnd: string
 		},
 		/**
-		 * The branch query's row schema. Taking a `Schema.Struct` rather than a
-		 * bare `Schema` is what makes the `period` field spreadable below — and
-		 * every `*RowSchema` export already is one. Without this the union
-		 * decoded nothing, so on a backend that quotes 64-bit integers every
-		 * count came back as a string. See ../schema.ts.
+		 * The branch query's row schema, required rather than optional: the union
+		 * is handwritten SQL, so nothing derives a schema for it, and without one
+		 * it decoded nothing — on a backend that quotes 64-bit integers every
+		 * count came back as a string. Taking a `Schema.Struct` rather than a bare
+		 * `Schema` is what makes the `period` field spreadable below, and every
+		 * `*RowSchema` export already is one. See ../schema.ts.
 		 */
-		rowSchema?: Schema.Struct<Fields>,
+		rowSchema: Schema.Struct<Fields>,
 	): PipeCompiled =>
 		Effect.gen(function* () {
 			const current = yield* compile(
@@ -173,9 +174,7 @@ export function compilePipeQuery(
 				// catalog's analyzer sweep decodes a synthetic zero-value row built
 				// from DESCRIBE output, where a String column is `""`; a literal union
 				// rejects that and fails the gate.
-				rowSchema: rowSchema
-					? Schema.Struct({ period: Schema.String, ...rowSchema.fields })
-					: undefined,
+				rowSchema: Schema.Struct({ period: Schema.String, ...rowSchema.fields }),
 			})
 		})
 

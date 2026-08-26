@@ -448,7 +448,6 @@ export {
 	fleetUtilizationTimeseriesQuery,
 	listPodsQuery,
 	listPodsSummaryQuery,
-	ListPodsSummaryOutputSchema,
 	podDetailSummaryQuery,
 	podGaugeTimeseriesQuery,
 	podFacetsQuery,
