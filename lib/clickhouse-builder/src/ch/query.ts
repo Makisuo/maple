@@ -574,9 +574,9 @@ export function from<Name extends string, Cols extends ColumnDefs>(
  * and throws when compiled.
  *
  * Usage:
- *   const inner = CH.from(Traces).select($ => ({ traceId: $.TraceId }))
+ *   const inner = CH.from(Events).select($ => ({ id: $.Id }))
  *   const outer = CH.fromQuery(inner, "sub")
- *     .select($ => ({ id: $.traceId })) // fully typed!
+ *     .select($ => ({ id: $.id })) // fully typed!
  */
 export function fromQuery<
 	InnerCols extends ColumnDefs,

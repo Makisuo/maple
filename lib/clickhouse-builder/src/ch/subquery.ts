@@ -92,6 +92,12 @@ export function notInSubquery<T>(expr: Expr<T>, subquery: Subquery): Condition {
  *
  * Params are deferred: placeholders inside the spliced SQL are resolved by the
  * outer query's substitution pass, with the outer params.
+ *
+ * Use the result inside a `select`/`where`/`having` callback, which is where the
+ * deferral pays off. Comparison and arithmetic methods render their operand
+ * eagerly, so combining one of these into a `Condition` at module scope —
+ * `const c = $.Ts.gte(subqueryExpr(inner, T.dateTime))` outside a callback —
+ * compiles the inner query there, which is the throw this exists to avoid.
  */
 export function subqueryExpr<T>(
 	subquery: Subquery,

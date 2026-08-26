@@ -52,7 +52,8 @@ The constructors are values, not calls (except the parameterised ones):
 
 Two of those deserve a note.
 
-**64-bit integers.** ClickHouse's `FORMAT JSON` quotes them, Tinybird does not, and a gateway
+**64-bit integers.** ClickHouse's `FORMAT JSON` quotes them, a client that sets
+`output_format_json_quote_64bit_integers=0` gets them bare, and a gateway
 that refuses `output_format_json_quote_64bit_integers=0` quotes them regardless. Every integer
 type accepts both and decodes to a `number` — which also means a `UInt64` above `2^53` cannot
 survive: emit those as `toString(...)` in the SELECT and declare the column `T.string`.

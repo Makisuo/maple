@@ -311,3 +311,44 @@ describe("CTE chains", () => {
 		expect(chained.tenantScope).toBe("tenant")
 	})
 })
+
+describe("CTE shadowing", () => {
+	// SQL scopes CTEs innermost-first: an inner `WITH x AS (…)` shadows an
+	// enclosing one. Verified against a server —
+	// `WITH x AS (SELECT 1 AS v), y AS (WITH x AS (SELECT 2 AS v) SELECT v FROM x)
+	//  SELECT v FROM y` returns 2, not 1.
+	//
+	// Reading the scope off the enclosing CTE instead certified a query that
+	// scans every tenant as `"tenant"`, which is the one direction that matters.
+	it("an inner CTE shadows an enclosing one of the same name", () => {
+		const scoped = CH.from(Events)
+			.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+			.where(($) => [$.OrgId.eq(param.string("orgId"))])
+
+		const shared = CH.table("shared", { TraceId: CH.string, Count: CH.uint64 })
+		const outerSource = CH.table("outer_source", { TraceId: CH.string, Count: CH.uint64 })
+
+		// The inner `shared` reads a bare table and scopes nothing. The outer
+		// `shared` is tenant-scoped, and must NOT be what `outer_source` inherits.
+		const compiled = compileCHUnsafe(
+			CH.from(outerSource)
+				.withCTE("shared", scoped)
+				.withCTE(
+					"outer_source",
+					CH.from(shared)
+						.withCTE(
+							"shared",
+							CH.from(Excluded)
+								.select(($) => ({ TraceId: $.TraceId, Count: CH.lit(1) }))
+								.where(() => []),
+						)
+						.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+						.where(() => []),
+				)
+				.select(($) => ({ total: CH.sum($.Count) })),
+			{ orgId: "org_1" },
+		)
+
+		expect(compiled.tenantScope).toBe("cross-tenant")
+	})
+})

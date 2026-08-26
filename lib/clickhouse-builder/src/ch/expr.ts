@@ -68,7 +68,7 @@ export interface ColumnRef<Name extends string, ColType extends CHType<string, a
 > {
 	readonly columnName: Name
 	/**
-	 * Access a key in a Map column: `$.SpanAttributes.get("http.method")`.
+	 * Access a key in a Map column: `$.Attrs.get("http.method")`.
 	 *
 	 * The result decodes as the map's *value* type, read off the column's
 	 * `element`. A `Map(String, String)` subscript is an `Expr<string>` that
@@ -342,7 +342,7 @@ export function lit(value: string | number): Expr<string> | Expr<number> {
 
 /**
  * Reference an outer query's column in a correlated subquery.
- * Usage: `outerRef("t.TraceId")` or `outerRef("TraceId")`
+ * Usage: `outerRef("t.Id")` or `outerRef("Id")`
  */
 export function outerRef<T = string>(name: string): Expr<T> {
 	return makeUntypedExpr<T>(raw(name))

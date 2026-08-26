@@ -3,15 +3,16 @@
 ## Install
 
 ```bash
-bun add @maple-dev/clickhouse-builder effect@beta
-# or: npm i @maple-dev/clickhouse-builder effect@beta
+bun add @maple-dev/clickhouse-builder effect@rc
+# or: npm i @maple-dev/clickhouse-builder effect@rc
 ```
 
 `effect` is a peer dependency — bring your own.
 
-> **Note the `@beta` tag.** This package requires **Effect 4** (`>=4.0.0-beta.33`), which is
-> not yet published under npm's `latest` tag. A bare `npm i effect` installs 3.x, and the
-> package then throws `Schema.TaggedError is not a function` on import.
+> **Note the `@rc` tag.** This package requires **Effect 4** (`>=4.0.0-rc.111`), which is not on
+> npm's `latest` tag — and not on `beta` either, which still points at a 4.0.0-beta. A bare
+> `npm i effect` installs 3.x, and the package then throws `Schema.TaggedError is not a function`
+> on import.
 
 The package is ESM-only and ships its own type declarations.
 

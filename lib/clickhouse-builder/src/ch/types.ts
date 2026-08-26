@@ -7,7 +7,8 @@
 //
 // That is why the schemas describe the WIRE representation rather than the
 // storage type. `UInt64` is the case that matters: ClickHouse's `FORMAT JSON`
-// quotes 64-bit integers, Tinybird does not, and a gateway that refuses
+// quotes 64-bit integers, a client setting output_format_json_quote_64bit_integers=0
+// gets them bare, and a gateway that refuses
 // `output_format_json_quote_64bit_integers=0` quotes them whatever the client
 // asked for. Modelling that once here is what stops every consumer from
 // rediscovering it as a `ParseError` in production.

@@ -632,7 +632,8 @@ describe("docs/decoding-results.md", () => {
 			)
 
 			expect(derived.rowSchemaSource).toBe("derived")
-			// `count()` is a UInt64: quoted by ClickHouse, bare from Tinybird, and
+			// `count()` is a UInt64: quoted by ClickHouse, bare when the client sets
+			// output_format_json_quote_64bit_integers=0, and
 			// the column type knows it either way.
 			expect(yield* derived.decodeRows([{ name: "checkout", calls: "42" }])).toEqual([
 				{ name: "checkout", calls: 42 },

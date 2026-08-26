@@ -158,16 +158,20 @@ export function windowFunnel(window: number, mode?: WindowFunnelMode) {
  * user input, so only quote-free literals are accepted.
  */
 export function sequenceMatch(pattern: string) {
-	// An injection guard, so it reports rather than crashes: the pattern is
-	// embedded verbatim, and "not user input" is a claim about the caller that
-	// the caller is exactly who might get wrong.
-	if (pattern.includes("'") || pattern.includes("\\")) {
-		throw new QueryBuilderError({
-			code: "InvalidArguments",
-			message: "sequenceMatch pattern must not contain quotes or backslashes",
-		})
-	}
 	return (timestamp: Expr<any>, ...conditions: ReadonlyArray<Condition>): Expr<number> => {
+		// An injection guard, so it reports rather than crashes: the pattern is
+		// embedded verbatim, and "not user input" is a claim about the caller that
+		// the caller is exactly who might get wrong.
+		//
+		// Checked here rather than when the factory is called, so that a hoisted
+		// `const matcher = sequenceMatch(pattern)` fails inside the compile that
+		// uses it rather than throwing at module scope, where nothing can catch it.
+		if (pattern.includes("'") || pattern.includes("\\")) {
+			throw new QueryBuilderError({
+				code: "InvalidArguments",
+				message: "sequenceMatch pattern must not contain quotes or backslashes",
+			})
+		}
 		if (conditions.length === 0) {
 			throw new QueryBuilderError({
 				code: "InvalidArguments",

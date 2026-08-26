@@ -1626,57 +1626,61 @@ export function traceListQuery(opts: TraceListOpts) {
 	const sortBy = opts.sortBy ?? "timestamp"
 	const sortDir = opts.sortDir ?? "desc"
 
-	let pageQuery: CHQuery<any, any, any>
-	if (canUseTraceListMvStage1(opts)) {
-		// `trace_list_mv` is sorted `(OrgId, Timestamp, TraceId)`, so this pages
-		// read-in-order instead of scanning the window. Its Timestamp is
-		// second-granularity (`toDateTime`): the ns cursor from stage-2
-		// `startTime` must be truncated to match, and the `(ts, traceId)` tuple
-		// ordering is what keeps pages disjoint despite the truncation ties.
-		const secCursor = cursor
-			? { timestamp: cursor.timestamp.slice(0, 19), traceId: cursor.traceId }
-			: undefined
-		const mvBase = from(TraceListMv)
-			.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
-			.where(($) => [
-				...traceListMvWhereConditions($, opts),
-				secCursor
-					? $.Timestamp.lt(secCursor.timestamp).or(
-							$.Timestamp.eq(secCursor.timestamp).and($.TraceId.lt(secCursor.traceId)),
-						)
-					: undefined,
-			])
-		let page = (
-			sortBy === "durationMs"
-				? mvBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
-				: mvBase.orderBy(["ts", sortDir], ["traceId", "desc"])
-		).limit(limit)
-		if (offset > 0) {
-			page = page.offset(offset)
-		}
-		pageQuery = page
-	} else {
-		const pageBase = from(Traces)
-			.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
-			.where(($) => [
-				...buildWhereConditions($, opts),
-				$.ParentSpanId.eq(""),
-				cursor
-					? $.Timestamp.lt(cursor.timestamp).or(
-							$.Timestamp.eq(cursor.timestamp).and($.TraceId.lt(cursor.traceId)),
-						)
-					: undefined,
-			])
-		let page = (
-			sortBy === "durationMs"
-				? pageBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
-				: pageBase.orderBy(["ts", sortDir], ["traceId", "desc"])
-		).limit(limit)
-		if (offset > 0) {
-			page = page.offset(offset)
-		}
-		pageQuery = page
-	}
+	// An IIFE per arm rather than a `let` widened to `CHQuery<any, any, any>`:
+	// the two stage-1 pages read different tables but the same three columns, and
+	// inferring their union keeps the splice below typed.
+	const pageQuery = canUseTraceListMvStage1(opts)
+		? (() => {
+				// `trace_list_mv` is sorted `(OrgId, Timestamp, TraceId)`, so this pages
+				// read-in-order instead of scanning the window. Its Timestamp is
+				// second-granularity (`toDateTime`): the ns cursor from stage-2
+				// `startTime` must be truncated to match, and the `(ts, traceId)` tuple
+				// ordering is what keeps pages disjoint despite the truncation ties.
+				const secCursor = cursor
+					? { timestamp: cursor.timestamp.slice(0, 19), traceId: cursor.traceId }
+					: undefined
+				const mvBase = from(TraceListMv)
+					.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
+					.where(($) => [
+						...traceListMvWhereConditions($, opts),
+						secCursor
+							? $.Timestamp.lt(secCursor.timestamp).or(
+									$.Timestamp.eq(secCursor.timestamp).and($.TraceId.lt(secCursor.traceId)),
+								)
+							: undefined,
+					])
+				let page = (
+					sortBy === "durationMs"
+						? mvBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
+						: mvBase.orderBy(["ts", sortDir], ["traceId", "desc"])
+				).limit(limit)
+				if (offset > 0) {
+					page = page.offset(offset)
+				}
+				return page
+			})()
+		: (() => {
+				const pageBase = from(Traces)
+					.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
+					.where(($) => [
+						...buildWhereConditions($, opts),
+						$.ParentSpanId.eq(""),
+						cursor
+							? $.Timestamp.lt(cursor.timestamp).or(
+									$.Timestamp.eq(cursor.timestamp).and($.TraceId.lt(cursor.traceId)),
+								)
+							: undefined,
+					])
+				let page = (
+					sortBy === "durationMs"
+						? pageBase.orderBy(["d", sortDir], ["ts", sortDir], ["traceId", "desc"])
+						: pageBase.orderBy(["ts", sortDir], ["traceId", "desc"])
+				).limit(limit)
+				if (offset > 0) {
+					page = page.offset(offset)
+				}
+				return page
+			})()
 
 	// Lexicographic tuple ordering: true root first, earliest span as the
 	// tiebreaker for the (malformed) traces that ship no root at all.

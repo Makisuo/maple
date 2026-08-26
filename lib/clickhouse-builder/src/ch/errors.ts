@@ -34,7 +34,6 @@ export class QueryBuilderError extends Schema.TaggedError<QueryBuilderError>()(
 			"SelectRequired",
 			"UnresolvedParam",
 			"InvalidOrderBySpec",
-			"InvalidParamName",
 			"InvalidParamValue",
 			"InvalidLiteral",
 			"InvalidArguments",

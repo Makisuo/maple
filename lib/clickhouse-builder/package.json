@@ -64,6 +64,6 @@
 		"vitest": "catalog:"
 	},
 	"peerDependencies": {
-		"effect": ">=4.0.0-rc.111"
+		"effect": ">=4.0.0-rc.111 <5"
 	}
 }

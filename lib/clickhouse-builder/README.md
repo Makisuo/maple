@@ -98,7 +98,8 @@ const rows = await Effect.runPromise(compiled.decodeRows(await result.json()))
 [Running a query](./docs/running-queries.md) has the full loop and the wire settings that go
 with it.
 
-`count()` is a `UInt64`, which ClickHouse quotes and Tinybird does not — the
+`count()` is a `UInt64`, which ClickHouse's `FORMAT JSON` quotes and a gateway with
+`output_format_json_quote_64bit_integers=0` does not — the
 column type accepts either, so the same code works against both backends. That
 is the class of drift a bare cast used to hide, which is why there is no
 `castRows`.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { Effect } from "effect"
 import * as CH from "./index"
 import { compileCHUnsafe } from "./compile"
 
@@ -241,8 +242,18 @@ describe("parametric aggregates", () => {
 		)
 	})
 
+	// Checked when the aggregate is applied, not when the factory is called, so a
+	// hoisted `const matcher = sequenceMatch(p)` fails inside the compile that
+	// uses it rather than at module scope where nothing can catch it.
 	it("sequenceMatch refuses a pattern that could break out of the literal", () => {
-		expect(() => CH.sequenceMatch("(?1)'; DROP")).toThrow(/quotes/)
+		const matcher = CH.sequenceMatch("(?1)'; DROP")
+		expect(() => matcher(CH.dynamicColumn("Timestamp"), CH.rawCond("1"))).toThrow(/quotes/)
+
+		const query = CH.from(TestTable)
+			.select(($) => ({ matched: CH.sequenceMatch("(?1)'; DROP")($.Timestamp, $.Name.eq("a")) }))
+			.where(($) => [$.Id.eq("id_1")])
+		const error = Effect.runSync(Effect.flip(CH.compile(query, {})))
+		expect(error.code).toBe("InvalidArguments")
 	})
 })
 

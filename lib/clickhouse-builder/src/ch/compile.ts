@@ -416,6 +416,9 @@ export function compileCHUnsafe<
 		 * reads an earlier sibling — the usual `WITH a AS (…), b AS (SELECT … FROM a)`
 		 * chain — inherits that sibling's scope instead of reading as
 		 * `"cross-tenant"` because it names a table this compilation cannot see.
+		 * A CTE's own FROM-subquery or join is not threaded, so one reaching a
+		 * sibling from there still derives `"cross-tenant"` — the safe direction,
+		 * and the reason this is a scope hint rather than a resolver.
 		 * There is no reason to pass it by hand.
 		 */
 		enclosingCtes?: ReadonlyArray<ResolvedCte>
@@ -499,8 +502,16 @@ export function compileCHUnsafe<
 
 	// A FROM that names a CTE inherits the CTE's scope — derived when the CTE was
 	// given as a query, declared by the caller when it arrived as a string.
+	//
+	// This query's OWN CTEs are searched first, because that is how SQL scopes
+	// them: an inner `WITH x AS (…)` shadows an enclosing one of the same name,
+	// verified against a server (`WITH x AS (SELECT 1), y AS (WITH x AS (SELECT 2)
+	// SELECT v FROM x) SELECT v FROM y` returns 2). Searching the enclosing list
+	// first read the scope off a CTE the query does not execute — and in the
+	// direction that matters, since it could certify a scan of every tenant as
+	// `"tenant"`.
 	if (!state.fromQuery && !state.fromUnion) {
-		const cte = [...(options?.enclosingCtes ?? []), ...resolvedCtes].find(
+		const cte = [...resolvedCtes, ...(options?.enclosingCtes ?? [])].find(
 			(c) => c.name === state.tableName,
 		)
 		if (cte?.tenantScope === "tenant") fromSourceScope = "tenant"
