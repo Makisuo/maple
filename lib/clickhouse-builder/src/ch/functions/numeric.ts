@@ -25,11 +25,17 @@ export function round_(expr: Expr<number>, decimals?: number): Expr<number> {
 // Variadic numeric functions
 
 export function least_(...exprs: Expr<number>[]): Expr<number> {
-	return compileTypedFnCall<number>("least", schemaOfAny<number>(...exprs) ?? T.float64.schema, ...exprs)
+	return defineFn<Expr<number>[], number>(
+		"least",
+		(...args) => schemaOfAny<number>(...args) ?? T.float64.schema,
+	)(...exprs)
 }
 
 export function greatest_(...exprs: Expr<number>[]): Expr<number> {
-	return compileTypedFnCall<number>("greatest", schemaOfAny<number>(...exprs) ?? T.float64.schema, ...exprs)
+	return defineFn<Expr<number>[], number>(
+		"greatest",
+		(...args) => schemaOfAny<number>(...args) ?? T.float64.schema,
+	)(...exprs)
 }
 
 export function cityHash64(...exprs: Expr<any>[]): Expr<number> {

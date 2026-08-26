@@ -69,14 +69,20 @@ export { type Subquery, exists, inSubquery, notInSubquery } from "./subquery"
 
 // Function factories (for extensibility by package consumers)
 export {
+	arrayOfArg,
 	compileFnCall,
 	compileFnCallCond,
 	compileTypedFnCall,
 	defineCondFn,
 	defineFn,
+	defineUntypedFn,
+	elementOf,
 	elementSchema,
+	firstTyped,
+	type FnResult,
 	makeCond,
 	makeExpr,
+	sameAs,
 	schemaOf,
 	schemaOfAny,
 } from "./define-fn"

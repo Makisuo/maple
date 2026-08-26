@@ -43,11 +43,11 @@ import * as T from "@maple-dev/clickhouse-builder/types"
 // Local CH function declarations used by the live topology-join branch's
 // sample-weighting math. Kept here (not promoted to ch/functions/) because
 // they're niche and only this builder uses them; promote later if reused.
-const _toFloat64 = defineFn<[CH.Expr<unknown>], number>("toFloat64")
+const _toFloat64 = defineFn<[CH.Expr<unknown>], number>("toFloat64", T.float64)
 const _matchRegex = defineCondFn<[CH.Expr<string>, string]>("match")
-const _leastDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("least")
-const _greatestDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("greatest")
-const _addHours = defineFn<[CH.Expr<string>, CH.Expr<number>], string>("addHours")
+const _leastDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("least", T.dateTimeString)
+const _greatestDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("greatest", T.dateTimeString)
+const _addHours = defineFn<[CH.Expr<string>, CH.Expr<number>], string>("addHours", T.dateTimeString)
 
 // Service dependencies
 

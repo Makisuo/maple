@@ -5,12 +5,13 @@ import type { Expr, Condition } from "../expr"
 import { Schema } from "effect"
 import * as T from "../types"
 
-/** `groupUniqArray(x)` collects `x`s, so it decodes as an array of whatever `x` is. */
+import { arrayOfArg, sameAs, schemaOf } from "../define-fn"
+
+/** `groupUniqArrayIf(x, cond)` collects `x`s, so it decodes as an array of `x`. */
 const arraySchemaOf = <T>(expr: unknown) => {
 	const element = schemaOf<T>(expr)
 	return element ? Schema.Array(element) : undefined
 }
-import { compileTypedFnCall, schemaOf } from "../define-fn"
 
 // Standard aggregates (defineFn one-liners)
 
@@ -28,25 +29,21 @@ export const minIf = defineFn<[Expr<number>, Condition], number>("minIf", T.floa
 
 // Generic aggregates (compileFnCall for type preservation)
 
-export function min_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
-	return compileTypedFnCall<NonNullable<T>>("min", schemaOf(expr), expr)
-}
+// These hand back one of their arguments unchanged, so they decode as it does.
+// `sameAs(0)` is that rule by name — each of them used to carry its own copy.
 
-export function max_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
-	return compileTypedFnCall<NonNullable<T>>("max", schemaOf(expr), expr)
-}
+export const min_ = <T>(expr: Expr<T>): Expr<NonNullable<T>> =>
+	defineFn<[Expr<T>], NonNullable<T>>("min", sameAs(0))(expr)
 
-export function any_<T>(expr: Expr<T>): Expr<T> {
-	return compileTypedFnCall<T>("any", schemaOf<T>(expr), expr)
-}
+export const max_ = <T>(expr: Expr<T>): Expr<NonNullable<T>> =>
+	defineFn<[Expr<T>], NonNullable<T>>("max", sameAs(0))(expr)
 
-export function anyIf<T>(expr: Expr<T>, cond: Condition): Expr<T> {
-	return compileTypedFnCall<T>("anyIf", schemaOf<T>(expr), expr, cond)
-}
+export const any_ = <T>(expr: Expr<T>): Expr<T> => defineFn<[Expr<T>], T>("any", sameAs(0))(expr)
 
-export function uniq<T>(expr: Expr<T>): Expr<number> {
-	return compileTypedFnCall<number>("uniq", T.uint64.schema, expr)
-}
+export const anyIf = <T>(expr: Expr<T>, cond: Condition): Expr<T> =>
+	defineFn<[Expr<T>, Condition], T>("anyIf", sameAs(0))(expr, cond)
+
+export const uniq = <T>(expr: Expr<T>): Expr<number> => defineFn<[Expr<T>], number>("uniq", T.uint64)(expr)
 
 /**
  * `uniqIf(value, condition)` — distinct `value`s among the rows matching
@@ -56,13 +53,11 @@ export function uniq<T>(expr: Expr<T>): Expr<number> {
  * `countIf` on a `ReplacingMergeTree`: un-merged duplicate rows for the same
  * key would inflate a `countIf` but not a `uniqIf` on that key.
  */
-export function uniqIf<T>(expr: Expr<T>, cond: Condition): Expr<number> {
-	return compileTypedFnCall<number>("uniqIf", T.uint64.schema, expr, cond)
-}
+export const uniqIf = <T>(expr: Expr<T>, cond: Condition): Expr<number> =>
+	defineFn<[Expr<T>, Condition], number>("uniqIf", T.uint64)(expr, cond)
 
-export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
-	return compileTypedFnCall<ReadonlyArray<T>>("groupUniqArray", arraySchemaOf<T>(expr), expr)
-}
+export const groupUniqArray = <T>(expr: Expr<T>): Expr<ReadonlyArray<T>> =>
+	defineFn<[Expr<T>], ReadonlyArray<T>>("groupUniqArray", arrayOfArg(0))(expr)
 
 /**
  * `groupUniqArrayArray(arrayColumn)` — flatten arrays across rows into one
@@ -73,23 +68,19 @@ export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
  * `SimpleAggregateFunction(groupUniqArrayArray, Array(T))` column is declared
  * with, so reading such a column back uses the same name.
  */
-export function groupUniqArrayArray<T>(expr: Expr<ReadonlyArray<T>>): Expr<ReadonlyArray<T>> {
-	return compileTypedFnCall<ReadonlyArray<T>>("groupUniqArrayArray", schemaOf<ReadonlyArray<T>>(expr), expr)
-}
+export const groupUniqArrayArray = <T>(expr: Expr<ReadonlyArray<T>>): Expr<ReadonlyArray<T>> =>
+	defineFn<[Expr<ReadonlyArray<T>>], ReadonlyArray<T>>("groupUniqArrayArray", sameAs(0))(expr)
 
 /** `argMin(value, orderBy)` — the `value` from the row with the smallest `orderBy`. */
-export function argMin<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
-	return compileTypedFnCall<T>("argMin", schemaOf<T>(value), value, orderBy)
-}
+export const argMin = <T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> =>
+	defineFn<[Expr<T>, Expr<any>], T>("argMin", sameAs(0))(value, orderBy)
 
 /** `argMax(value, orderBy)` — the `value` from the row with the largest `orderBy`. */
-export function argMax<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
-	return compileTypedFnCall<T>("argMax", schemaOf<T>(value), value, orderBy)
-}
+export const argMax = <T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> =>
+	defineFn<[Expr<T>, Expr<any>], T>("argMax", sameAs(0))(value, orderBy)
 
-export function argMaxMerge<T>(expr: Expr<T>): Expr<T> {
-	return compileTypedFnCall<T>("argMaxMerge", schemaOf<T>(expr), expr)
-}
+export const argMaxMerge = <T>(expr: Expr<T>): Expr<T> =>
+	defineFn<[Expr<T>], T>("argMaxMerge", sameAs(0))(expr)
 
 // Curried / parametric aggregates (handwritten — custom SQL syntax)
 

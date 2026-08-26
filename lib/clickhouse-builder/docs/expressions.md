@@ -7,7 +7,7 @@ column, a literal, a function call. A **`Condition`** is a boolean predicate, wh
 ## How a value becomes a literal
 
 Comparing a column against a plain value encodes that value through the column's own type, so
-the literal is whatever ClickHouse expects for *that* column rather than whatever the JavaScript
+the literal is whatever ClickHouse expects for _that_ column rather than whatever the JavaScript
 value looks like:
 
 ```ts
@@ -25,8 +25,9 @@ $.Count.eq("lots")
 // QueryBuilderError { code: "InvalidLiteral" }: column Count: string "lots" is not a valid value
 ```
 
-Expressions with no type to read — `rawExpr`, `dynamicColumn` — fall back to guessing from the
-JavaScript value, which handles strings, numbers, booleans and dates but nothing structured.
+Expressions with no type to read — `untypedExpr`, an untyped `dynamicColumn` — fall back to
+guessing from the JavaScript value, which handles strings, numbers, booleans and dates but
+nothing structured.
 
 _(Backed by `src/ch/literal.test.ts`.)_
 
@@ -112,7 +113,9 @@ _(Backed by `docs/expressions.md > Arithmetic does not parenthesise`.)_
 
 - `lit(value)` — an explicit `Expr` from a `string` or `number`. You rarely need it, since
   comparison methods accept raw values directly.
-- `rawExpr<T>(sql)` — an `Expr<T>` from a SQL string.
+- `rawExpr(sql, type)` — an `Expr` from a SQL string, with the column type it produces.
+- `untypedExpr<T>(sql)` — the same with no type declared; selecting one costs the query its
+  row schema, so it is a separate name rather than an omitted argument.
 - `rawCond(sql)` — a `Condition` from a SQL string.
 
 Raw helpers interpolate nothing and escape nothing. Never build one from user input. See

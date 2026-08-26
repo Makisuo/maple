@@ -50,14 +50,14 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 ### Query construction
 
-| Export      | Signature                      |
-| ----------- | ------------------------------ |
-| `table`     | `(name, columns, options?) => Table` |
+| Export      | Signature                                 |
+| ----------- | ----------------------------------------- |
+| `table`     | `(name, columns, options?) => Table`      |
 | `custom`    | `(sql, schema, literalSchema?) => CHType` |
-| `from`      | `(table, alias?) => CHQuery`   |
-| `fromQuery` | `(query, alias) => CHQuery`    |
-| `fromUnion` | `(union, alias) => CHQuery`    |
-| `unionAll`  | `(...queries) => CHUnionQuery` |
+| `from`      | `(table, alias?) => CHQuery`              |
+| `fromQuery` | `(query, alias) => CHQuery`               |
+| `fromUnion` | `(union, alias) => CHQuery`               |
+| `unionAll`  | `(...queries) => CHUnionQuery`            |
 
 ### `CHQuery` methods
 
@@ -73,7 +73,7 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 | `innerJoinQuery` / `leftJoinQuery` / `crossJoinQuery` | `(query, alias, on?)`                               |
 | `withCTE(name, sql, options?)`                        | `options.tenantScope`                               |
 | `routing("ingest")`                                   | Metadata only                                       |
-| `crossTenant()`                                          | Forces `tenantScope: "cross-tenant"`                   |
+| `crossTenant()`                                       | Forces `tenantScope: "cross-tenant"`                |
 
 `CHUnionQuery` offers only `orderBy`, `limit`, `offset`, `format`.
 
@@ -99,7 +99,8 @@ time; see [Params and compilation](./params-and-compilation.md#what-each-kind-ac
 | Export                    | Purpose                                                    |
 | ------------------------- | ---------------------------------------------------------- |
 | `lit(value)`              | Literal `Expr` from a `string` or `number`                 |
-| `rawExpr<T>(sql)`         | Unescaped `Expr` from SQL text                             |
+| `rawExpr(sql, type)`      | Unescaped `Expr` from SQL text, with a declared type       |
+| `untypedExpr<T>(sql)`     | Unescaped `Expr` with no type — costs the row schema       |
 | `rawCond(sql)`            | Unescaped `Condition` from SQL text                        |
 | `when(value, fn)`         | `Condition \| undefined`; skips `undefined`/`null`/`false` |
 | `whenTrue(flag, fn)`      | Boolean-gated variant                                      |
@@ -114,18 +115,24 @@ time; see [Params and compilation](./params-and-compilation.md#what-each-kind-ac
 
 `Condition` methods: `and`, `or` (both parenthesise; both drop the tenant marker).
 
-`ColumnRef` adds `.get(key)` for `Map` columns.
+`ColumnRef` adds `.get(key)` for `Map` columns; the result decodes as the map's value type.
 
 ## Extensibility
 
-| Export                             | Purpose                                            |
-| ---------------------------------- | -------------------------------------------------- |
-| `defineFn<Args, R>(name)`          | Declare a standard `fn(args…)` returning `Expr<R>` |
-| `defineCondFn<Args>(name)`         | Same, returning `Condition`                        |
-| `compileFnCall<R>(name, ...args)`  | Variadic/generic wrapper                           |
-| `compileFnCallCond(name, ...args)` | Same, returning `Condition`                        |
-| `makeExpr<T>(fragment)`            | Build an `Expr` from a fragment                    |
-| `makeCond(fragment)`               | Build a `Condition` from a fragment                |
+| Export                                 | Purpose                                            |
+| -------------------------------------- | -------------------------------------------------- |
+| `defineFn<Args, R>(name, result)`      | Declare a standard `fn(args…)` returning `Expr<R>` |
+| `defineUntypedFn<Args, R>(name)`       | Same, for a result with no type to declare         |
+| `defineCondFn<Args>(name)`             | Same, returning `Condition`                        |
+| `sameAs(i)`                            | Result rule: decodes as argument `i`               |
+| `firstTyped()`                         | Result rule: the first argument that has a type    |
+| `elementOf(i)`                         | Result rule: one element of argument `i`'s array   |
+| `arrayOfArg(i)`                        | Result rule: an array of argument `i`              |
+| `compileFnCall<R>(name, ...args)`      | Variadic/generic wrapper (untyped result)          |
+| `compileTypedFnCall<R>(name, schema,)` | Same, with the result codec                        |
+| `compileFnCallCond(name, ...args)`     | Same, returning `Condition`                        |
+| `makeExpr<T>(fragment, schema?)`       | Build an `Expr` from a fragment                    |
+| `makeCond(fragment)`                   | Build a `Condition` from a fragment                |
 
 ---
 

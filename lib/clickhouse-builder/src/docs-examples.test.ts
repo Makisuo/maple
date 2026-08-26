@@ -571,8 +571,26 @@ describe("docs/decoding-results.md", () => {
 			)
 
 			expect(noSchema.rowSchemaSource).toBe("none")
+			// And it names the alias responsible, so the fix is one column away.
+			expect(noSchema.untypedColumns).toEqual(["odd"])
 			// Nothing is validated — the wrong-typed value passes straight through.
 			expect(yield* noSchema.decodeRows([{ name: 42, odd: 1 }])).toEqual([{ name: 42, odd: 1 }])
+		}),
+	)
+
+	// docs/decoding-results.md > "Going back to the wire"
+	it.effect("Rows go back to the wire through the same schema", () =>
+		Effect.gen(function* () {
+			const compiled = CH.compile(
+				CH.from(Events)
+					.select(($) => ({ at: $.Timestamp, name: $.Name }))
+					.where(($) => [$.OrgId.eq("org_123")]),
+				{},
+			)
+
+			const wire = [{ at: "2026-05-24 14:30:00", name: "checkout" }]
+			const rows = yield* compiled.decodeRows(wire)
+			expect(yield* compiled.encodeRows(rows)).toEqual(wire)
 		}),
 	)
 })
@@ -695,6 +713,23 @@ describe("docs/extending.md", () => {
 			.where(($) => [$.OrgId.eq("org_123")])
 
 		expect(oneLine(compileCH(query, {}).sql)).toContain("toStartOfFiveMinute(Timestamp) AS bucket")
+	})
+
+	// docs/extending.md > "Results that depend on the arguments"
+	it("a result rule reads the type off an argument", () => {
+		const anyLast = CH.defineFn<[CH.Expr<string>], string>("anyLast", CH.sameAs(0))
+
+		const compiled = compileCH(
+			CH.from(Events)
+				.select(($) => ({ last: anyLast($.Name) }))
+				.where(($) => [$.OrgId.eq("org_123")]),
+			{},
+		)
+
+		// `anyLast` declared no type of its own, and the query still decodes:
+		// the rule says the result is whatever `Name` is.
+		expect(compiled.rowSchemaSource).toBe("derived")
+		expect(oneLine(compiled.sql)).toContain("anyLast(Name) AS last")
 	})
 
 	it("defineCondFn declares a predicate", () => {

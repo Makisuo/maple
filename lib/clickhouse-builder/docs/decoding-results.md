@@ -11,7 +11,7 @@ const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(c
 
 ## The row schema is derived from the SELECT
 
-Column types *are* Effect schemas — `T.uint64` is "a 64-bit integer as ClickHouse actually sends
+Column types _are_ Effect schemas — `T.uint64` is "a 64-bit integer as ClickHouse actually sends
 it", not a phantom tag. So a query built from typed pieces already knows how its rows decode, and
 `compile` folds those schemas into one:
 
@@ -36,25 +36,42 @@ exact class of drift a plain cast used to hide, which is why there is no `castRo
 
 ## When there is nothing to derive from
 
-Derivation is all-or-nothing per query. One selected expression the builder cannot type — a
-`rawExpr`, a `dynamicColumn`, a `defineFn` that never declared its result — and there is no row
-schema at all:
+Derivation is all-or-nothing per query. One selected expression the builder cannot type — an
+`untypedExpr`, an untyped `dynamicColumn`, a `defineUntypedFn` — and there is no row schema at
+all:
 
 ```ts
 const compiled = CH.compile(
-	CH.from(Events).select(($) => ({ name: $.Name, odd: CH.rawExpr("anyLast(Whatever)") })),
+	CH.from(Events).select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") })),
 	params,
 )
 
 compiled.rowSchemaSource // "none"
+compiled.untypedColumns // ["odd"] — the aliases responsible
 await Effect.runPromise(compiled.decodeRows([{ name: 42, odd: 1 }]))
 // [{ name: 42, odd: 1 }] — passes straight through
 ```
 
-Inventing a permissive schema for that one field would hand back something that *looks* validated
-and is not, so the query keeps its honest answer instead. Close the gap by typing the escape
-hatch — `CH.rawExpr("anyLast(Whatever)", T.string)`, `CH.defineFn("myFn", T.uint64)` — or by
-declaring the whole schema yourself.
+Inventing a permissive schema for that one field would hand back something that _looks_ validated
+and is not, so the query keeps its honest answer instead. `untypedColumns` names what to fix;
+close the gap by typing the escape hatch — `CH.rawExpr("anyLast(Whatever)", T.string)`,
+`CH.defineFn("myFn", T.uint64)` — or by declaring the whole schema yourself.
+
+## Going back to the wire
+
+`encodeRows` runs the row schema in the other direction, turning decoded rows into the shape
+ClickHouse sent them in:
+
+```ts
+const rows = await Effect.runPromise(compiled.decodeRows(wire))
+const backToWire = await Effect.runPromise(compiled.encodeRows(rows))
+// a `DateTime.Utc` becomes '2026-05-24 14:30:00' again — not ISO-8601
+```
+
+That matters for a service that forwards warehouse rows onto a wire of its own: it can decode to
+the value worth computing with and still emit the exact bytes its clients already parse, instead
+of choosing between them. A query with no row schema passes the rows through, the same contract
+`decodeRows` has. Failures are `CompiledQueryEncodeError`, carrying the offending `rowIndex`.
 
 ## Declaring one anyway
 

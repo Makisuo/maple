@@ -2,7 +2,7 @@
 
 A type-safe, immutable ClickHouse SQL query builder for TypeScript.
 
-- **Schema-first** — a column type *is* an Effect `Schema`, so a query compiles
+- **Schema-first** — a column type _is_ an Effect `Schema`, so a query compiles
   to its own row schema. `decodeRows` validates without you writing one, and the
   wire quirks (64-bit ints arriving quoted, tz-less DateTimes) are modelled once
   in the types rather than rediscovered per consumer.
@@ -100,13 +100,20 @@ is the class of drift a bare cast used to hide, which is why there is no
 
 Pass a `rowSchema` explicitly to **narrow** what the builder inferred (a `String`
 column as a literal union, say); it wins over the derived one. If any selected
-expression has no type to read — a `rawExpr`, an un-annotated `defineFn` —
+expression has no type to read — an `untypedExpr`, a `defineUntypedFn` —
 nothing is derived, `rowSchemaSource` is `"none"`, and `decodeRows` degrades to
 a pass-through rather than pretending.
 
 `decodeFirstRow` is the point-lookup variant, returning `Option<Output>` so you
 don't hand-roll `rows[0] ?? null`. Both fail with `CompiledQueryDecodeError`,
-which carries the offending `rowIndex`.
+which carries the offending `rowIndex`. When a query does derive nothing,
+`untypedColumns` names the selected aliases responsible.
+
+`encodeRows` runs the same schema backwards, turning decoded rows into the wire
+shape ClickHouse sent. That is what lets a service hold the good value in memory
+and still emit the bytes its own clients parse: a `DateTime` column decoded to a
+`DateTime.Utc` re-encodes to `'YYYY-MM-DD hh:mm:ss'`, not to ISO-8601, because
+the column's codec is the authority on both directions.
 
 ## Documentation
 
@@ -142,15 +149,17 @@ query and asserts the emitted SQL.
 ## Extending with custom functions
 
 ```ts
-import { defineFn } from "@maple-dev/clickhouse-builder"
+import { defineFn, sameAs } from "@maple-dev/clickhouse-builder"
 
-// Declare any ClickHouse function not already wrapped.
-// The second argument is the ClickHouse type it returns — that is what lets a
-// query using it still derive its row schema.
-const toStartOfFiveMinute = defineFn<[CH.Expr<DateTime.Utc>], DateTime.Utc>(
-	"toStartOfFiveMinute",
-	T.dateTime,
-)
+// Declare any ClickHouse function not already wrapped. The second argument is
+// the ClickHouse type it returns — required, because that is what lets a query
+// using it still derive its row schema.
+const toStartOfFiveMinute = defineFn<[CH.Expr<DateTime.Utc>], DateTime.Utc>("toStartOfFiveMinute", T.dateTime)
+
+// When the result type depends on the arguments — `min`, `argMax`, `coalesce`,
+// `arrayJoin` all hand back one of their inputs — pass a rule instead:
+// `sameAs(i)`, `firstTyped()`, `elementOf(i)`, `arrayOfArg(i)`.
+const anyLast = defineFn<[CH.Expr<string>], string>("anyLast", sameAs(0))
 ```
 
 ## License

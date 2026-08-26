@@ -69,17 +69,85 @@ export function compileFnCallCond(name: string, ...args: unknown[]): Condition {
 // defineFn — declare a standard ClickHouse function in one line
 //
 // Usage:
-//   export const avg = defineFn<[Expr<number>], number>("avg")
-//   export const lower = defineFn<[Expr<string>], string>("lower")
+//   export const avg = defineFn<[Expr<number>], number>("avg", T.float64)
+//   export const min_ = defineFn<[Expr<T>], T>("min", sameAs(0))
 
+/**
+ * What a function call returns: a fixed ClickHouse type, or a rule for reading
+ * it off the arguments.
+ *
+ * The second form is the one that used to be hand-rolled per function —
+ * `min`/`argMax`/`coalesce` hand back one of their inputs unchanged, `arrayJoin`
+ * hands back an element of one — each with its own copy of "look at the
+ * argument's schema". {@link sameAs}, {@link firstTyped} and {@link elementOf}
+ * are those rules, named.
+ */
+export type FnResult<Args extends unknown[], R> =
+	| CHType<string, R, any>
+	| ((...args: Args) => Schema.Codec<R, any> | undefined)
+
+const resultSchema = <Args extends unknown[], R>(
+	result: FnResult<Args, R>,
+	args: Args,
+): Schema.Codec<R, any> | undefined =>
+	typeof result === "function" ? result(...args) : (result.schema as Schema.Codec<R, any>)
+
+/**
+ * Declare a ClickHouse function.
+ *
+ * The result type is required. It was optional, and optional is how two thirds
+ * of this package's own functions ended up untyped — which costs every query
+ * selecting one its whole row schema, since derivation is all-or-nothing.
+ * {@link defineUntypedFn} is the explicit way to say a result has no type.
+ */
 export function defineFn<Args extends unknown[], R>(
 	name: string,
-	/** The ClickHouse type the call returns. Supply it and every query using this
-	 *  function can derive its row schema; omit it and they cannot. */
-	result?: CHType<string, R, any>,
+	result: FnResult<Args, R>,
 ): (...args: Args) => Expr<R> {
-	return (...args: Args): Expr<R> => compileTypedFnCall<R>(name, result?.schema, ...args)
+	return (...args: Args): Expr<R> => compileTypedFnCall<R>(name, resultSchema(result, args), ...args)
 }
+
+/**
+ * A function whose result has no type to declare.
+ *
+ * Deliberately separate and deliberately awkward: selecting one costs the query
+ * its derived row schema. Reach for it only where the value never becomes a row.
+ */
+export function defineUntypedFn<Args extends unknown[], R = unknown>(
+	name: string,
+): (...args: Args) => Expr<R> {
+	return (...args: Args): Expr<R> => compileFnCall<R>(name, ...args)
+}
+
+// Result rules
+
+/** The result decodes as argument `index` does — `min`, `argMax`, a window. */
+export const sameAs =
+	<Args extends unknown[], R>(index: number) =>
+	(...args: Args): Schema.Codec<R, any> | undefined =>
+		schemaOf<R>(args[index])
+
+/** The result decodes as the first argument that knows how it decodes —
+ *  `coalesce`, `if`, `least`, where any arm describes the whole. */
+export const firstTyped =
+	<Args extends unknown[], R>() =>
+	(...args: Args): Schema.Codec<R, any> | undefined =>
+		schemaOfAny<R>(...args)
+
+/** The result is one element of argument `index`'s array — `arrayJoin`,
+ *  `arrayElement`. */
+export const elementOf =
+	<Args extends unknown[], R>(index: number) =>
+	(...args: Args): Schema.Codec<R, any> | undefined =>
+		elementSchema<R>(schemaOf<ReadonlyArray<R>>(args[index]))
+
+/** The result is an array of argument `index` — `groupArray`, `groupUniqArray`. */
+export const arrayOfArg =
+	<Args extends unknown[], R>(index: number) =>
+	(...args: Args): Schema.Codec<ReadonlyArray<R>, any> | undefined => {
+		const element = schemaOf<R>(args[index])
+		return element ? Schema.Array(element) : undefined
+	}
 
 // defineCondFn — same as defineFn but returns Condition
 //

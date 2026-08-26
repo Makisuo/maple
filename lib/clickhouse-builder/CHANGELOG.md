@@ -31,4 +31,25 @@ First public release.
   resolve through the same path, and `param.of(type, name)` accepts any column
   type — including one declared with `T.custom(sql, schema)`.
 - Schema-checked row decoding (`decodeRows` / `decodeFirstRow`). No `castRows`.
+  When nothing could be derived, `untypedColumns` names the selected aliases
+  responsible, so "this query decodes nothing" is not a dead end.
+- `encodeRows` runs the row schema backwards, turning decoded rows into the wire
+  shape ClickHouse sent. A service can hold the value worth computing with and
+  still emit the exact bytes its own clients parse, rather than choosing.
+- Every expression the package produces carries its type. Literals, the
+  arithmetic operators, `Map` subscripts (`$.Attrs.get(k)` decodes as the map's
+  value type), and every wrapped function declare what they return, so a query
+  built from typed pieces derives a schema for the whole row rather than losing
+  it to one untyped field.
+- The escape hatches say so in their names. `rawExpr(sql, type)` requires the
+  column type its SQL produces; `untypedExpr(sql)` is the version with no type,
+  and `defineUntypedFn` the same for functions. `defineFn`'s result type is
+  required, and may be a rule reading the type off the arguments — `sameAs(i)`,
+  `firstTyped()`, `elementOf(i)`, `arrayOfArg(i)` — for the many ClickHouse
+  functions that hand back one of their inputs.
+- `T.aggregateState(fn, …args)` names an `AggregateFunction` state column: an
+  opaque value an outer `-Merge` reads, never a row anyone decodes. Declaring
+  one no longer costs its query the rest of its row schema.
+- `T.int64`, and `arraySort` / `arrayReverseSort` / `arrayDistinct` /
+  `arrayPushFront` / `arrayElement` / `hex` join the wrapped catalog.
 - Requires Effect 4 (`effect@rc`) as a peer dependency.
