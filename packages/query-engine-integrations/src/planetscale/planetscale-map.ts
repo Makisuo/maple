@@ -114,23 +114,6 @@ export interface PlanetScaleBranchConnectionsOutput extends PlanetScaleConnectio
 	readonly branch: string
 }
 
-export const planetscaleDatabaseStatsRowSchema: CompiledQueryRowSchema<PlanetScaleDatabaseStatsOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		cpuMaxPercent: CHNumber,
-		memMaxPercent: CHNumber,
-		replicaLagMaxSeconds: CHNumber,
-	})
-
-export const planetscaleBranchStatsRowSchema: CompiledQueryRowSchema<PlanetScaleBranchStatsOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		branch: Schema.String,
-		cpuMaxPercent: CHNumber,
-		memMaxPercent: CHNumber,
-		replicaLagMaxSeconds: CHNumber,
-	})
-
 export const planetscaleStorageRowSchema: CompiledQueryRowSchema<PlanetScaleStorageOutput> = Schema.Struct({
 	database: Schema.String,
 	storageUsedPercent: CHNumber,
@@ -145,21 +128,6 @@ export const planetscaleBranchStorageRowSchema: CompiledQueryRowSchema<PlanetSca
 		storageCapacityBytes: CHNumber,
 		storageAvailableBytes: CHNumber,
 		storageSamples: CHNumber,
-	})
-
-export const planetscaleConnectionsRowSchema: CompiledQueryRowSchema<PlanetScaleConnectionsOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		connectionsAvg: CHNumber,
-		connectionsMax: CHNumber,
-	})
-
-export const planetscaleBranchConnectionsRowSchema: CompiledQueryRowSchema<PlanetScaleBranchConnectionsOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		branch: Schema.String,
-		connectionsAvg: CHNumber,
-		connectionsMax: CHNumber,
 	})
 
 /**
