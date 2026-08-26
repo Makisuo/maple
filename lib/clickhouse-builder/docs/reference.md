@@ -225,14 +225,24 @@ Both are Effect `Schema.TaggedError`s, catchable by tag.
 
 ### `QueryBuilderError`
 
-Tag `"@maple-dev/clickhouse-builder/QueryBuilderError"`. Thrown **synchronously** during
-compilation.
+Tag `"@maple-dev/clickhouse-builder/QueryBuilderError"`. Raised while compiling, and surfaced in
+`compile`'s error channel (thrown by `compileUnsafe`).
 
-| `code`               | Cause                                                          |
-| -------------------- | -------------------------------------------------------------- |
-| `SelectRequired`     | Compiling a query with no `select()`                           |
-| `UnresolvedParam`    | Calling a comparison on a param before compilation resolved it |
-| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple   |
+| `code`               | Cause                                                                    |
+| -------------------- | ------------------------------------------------------------------------ |
+| `SelectRequired`     | Compiling a query with no `select()`                                     |
+| `UnresolvedParam`    | A param the params bag has no value for                                  |
+| `InvalidParamValue`  | A param value that is not what its kind accepts                          |
+| `InvalidLiteral`     | A comparison operand the column's codec rejects                          |
+| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple             |
+| `InvalidArguments`   | Arguments a function cannot use — an empty condition list, a bad pattern |
+
+### `QueryBuilderDefect`
+
+Tag `"@maple-dev/clickhouse-builder/QueryBuilderDefect"`. A DSL misuse no runtime value can cause
+— a bad param name, a comparison called on a param marker, two column types claiming one
+ClickHouse type name. Always a defect: `compile` maps only `QueryBuilderError` into the error
+channel. See [Failures and defects](./params-and-compilation.md#failures-and-defects).
 
 ### `CompiledQueryDecodeError`
 

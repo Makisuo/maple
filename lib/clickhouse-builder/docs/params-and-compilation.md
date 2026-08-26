@@ -18,11 +18,13 @@ is — most often on the right of a comparison:
 ```
 
 Calling a comparison method **on** an unresolved param (rather than passing it as an argument)
-throws `QueryBuilderError` with code `UnresolvedParam`, since there is nothing to compare yet.
+throws `QueryBuilderDefect`: there is nothing to compare yet, and which side of the comparison the
+param sits on is written in the source, so no input can cause or avoid it. See
+[Failures and defects](#failures-and-defects).
 
 Param names must be alphanumeric, optionally separated by single underscores — the name travels
 through the placeholder that `compile` later matches, and `__` would make its boundary
-ambiguous. A name that cannot round-trip is rejected at declaration.
+ambiguous. A name that cannot round-trip is a `QueryBuilderDefect` at declaration.
 
 ## What each kind accepts
 
@@ -139,7 +141,7 @@ CH.compileUnsafe(query, params, options?)  // CompiledQuery, throws
 interface CompiledQuery<Output> {
 	readonly sql: string
 	readonly tenantScope: "tenant" | "cross-tenant"
-	readonly rowSchemaDeclared: boolean
+	readonly rowSchemaSource: "declared" | "derived" | "none"
 	readonly routing?: string
 	readonly decodeRows: (rows) => Effect<ReadonlyArray<Output>, CompiledQueryDecodeError>
 	readonly decodeFirstRow: (rows) => Effect<Option<Output>, CompiledQueryDecodeError>
@@ -150,7 +152,7 @@ interface CompiledQuery<Output> {
 | ------------------------------- | -------------------------------------------------------------------------------------------- |
 | `sql`                           | The statement to execute. The builder never runs it.                                         |
 | `tenantScope`                   | Whether the query pins a single tenant — see [Tenant scoping](./tenant-scoping.md)           |
-| `rowSchemaDeclared`             | Whether a `rowSchema` was supplied, so a caller can tell real validation from a pass-through |
+| `rowSchemaSource`               | Where the row schema came from, so a caller can tell real validation from a pass-through    |
 | `routing`                       | Set by `.routing(tag)`; opaque metadata for your executor                                    |
 | `decodeRows` / `decodeFirstRow` | See [Decoding results](./decoding-results.md)                                                |
 
@@ -163,17 +165,26 @@ When you need SQL the builder cannot express, `unsafeCompiledQuery` wraps a stri
 `CompiledQuery` interface so downstream code is uniform. `tenantScope` is required there,
 because it cannot be inferred from a string. See [Extending the DSL](./extending.md).
 
-## Errors
+## Failures and defects
 
-`QueryBuilderError` is thrown synchronously during compilation, with a `code`:
+Two classes, and the line between them is what a runtime value can reach.
 
-| Code                 | Cause                                                        |
-| -------------------- | ------------------------------------------------------------ |
-| `SelectRequired`     | Compiling a query with no `select()`                         |
-| `UnresolvedParam`    | A param with no value, or compared on before it was resolved |
-| `InvalidParamValue`  | A param value that is not what its kind accepts              |
-| `InvalidParamName`   | A param name that cannot round-trip through its placeholder  |
-| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple |
+`QueryBuilderError` describes a **value** the builder was handed and cannot turn into SQL. Code
+that assembles a query from a request body can hit every one of these with correct code and bad
+input, so `compile` puts them in the Effect error channel, catchable by the tag
+`"@maple-dev/clickhouse-builder/QueryBuilderError"`:
 
-It is an Effect `Schema.TaggedError`, catchable by the tag
-`"@maple-dev/clickhouse-builder/QueryBuilderError"`.
+| Code                 | Cause                                                                    |
+| -------------------- | ------------------------------------------------------------------------ |
+| `SelectRequired`     | Compiling a query with no `select()`                                     |
+| `UnresolvedParam`    | A param the params bag has no value for                                  |
+| `InvalidParamValue`  | A param value that is not what its kind accepts                          |
+| `InvalidLiteral`     | A comparison operand the column's codec rejects                          |
+| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple             |
+| `InvalidArguments`   | Arguments a function cannot use — an empty condition list, a bad pattern |
+
+`QueryBuilderDefect` describes a **call** that could not be right for any value: a param name
+that is not an identifier, a placeholder compared as if it were resolved, two column types
+claiming one ClickHouse type name. No input reaches these; only a rewrite does. `compile` maps
+only `QueryBuilderError` into the error channel and dies on everything else, so a defect arrives
+as a defect in the `Cause` — where a bug belongs, and where no `catchTag` can swallow it.

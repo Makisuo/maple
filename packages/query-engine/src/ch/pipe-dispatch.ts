@@ -120,7 +120,12 @@ export function compilePipeQuery(
 	const int = (key: string, def?: number) => (params[key] != null ? Number(params[key]) : def)
 	const bool = (key: string) => params[key] === true || params[key] === "1" || params[key] === "true"
 
-	const compileCompare = <Fields extends Schema.Struct.Fields>(
+	// The service-free constraint is `CompiledQueryRowSchema`'s, pushed one level
+	// up: a row schema decodes bytes off a socket, so it cannot ask for a service,
+	// and a struct is service-free exactly when its fields are.
+	const compileCompare = <
+		Fields extends Schema.Struct.Fields & Record<PropertyKey, Schema.Codec<any, any, never, never>>,
+	>(
 		query: CompileTarget,
 		ranges: {
 			currentStart: string

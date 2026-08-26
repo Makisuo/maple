@@ -142,6 +142,16 @@ const acceptsNull = (schema: Schema.Codec<any, any> | undefined): boolean =>
  * — the standard "average, or nothing when the denominator is zero" — is exactly
  * this shape, and a flat `CHNumber` here rejected the NULL it was written to
  * produce.
+ *
+ * Division and modulo decode nullably whatever their operands are, because they
+ * can *manufacture* a NULL from two perfectly good numbers: `1/0` is `inf` and
+ * `0/0` is `nan` in ClickHouse, and both render as JSON `null`. `CHNumber` is
+ * `Schema.Finite`-based and would reject that null, so an unguarded division
+ * that happens to hit a zero denominator in production fails to decode — a 500
+ * for a query that ran fine. Nullable decoding costs nothing at the type level
+ * (`Expr<number>` either way, as it already is for a nullable operand) and
+ * turns that 500 into the `null` the wire actually carried. Reach for
+ * {@link ifNotFinite} where a number, not a null, is what the caller needs.
  */
 const arith = (
 	lhs: SqlFragment,
@@ -150,16 +160,27 @@ const arith = (
 	lhsSchema?: Schema.Codec<any, any>,
 ): Expr<number> => {
 	const rhsSchema = typeof rhs === "number" ? undefined : rhs.schema
-	const nullable = acceptsNull(lhsSchema) || acceptsNull(rhsSchema)
+	const nullable = op === "/" || op === "%" || acceptsNull(lhsSchema) || acceptsNull(rhsSchema)
 	return makeExpr<number>(
 		raw(`${compile(lhs)} ${op} ${compile(toFragment(rhs))}`),
 		(nullable ? Schema.NullOr(CHNumber) : CHNumber) as Schema.Codec<number, any>,
 	)
 }
 
+/**
+ * An expression from a fragment and the codec its wire value decodes with.
+ *
+ * The schema is a required argument that accepts `undefined`, rather than an
+ * optional one. Omitting it entirely was the last silent way to cost a query
+ * its whole row schema — derivation is all-or-nothing, so one unschema'd field
+ * makes the query decode nothing — and `undefined` is what a wrapper *forwards*
+ * when its own argument was untyped (`schemaOf(arg)`), not what it means to
+ * write. For an expression that genuinely has no type, use
+ * {@link makeUntypedExpr}, which says so.
+ */
 export function makeExpr<T>(
 	fragment: SqlFragment,
-	schema?: Schema.Codec<T, any>,
+	schema: Schema.Codec<T, any> | undefined,
 	/**
 	 * How a plain value compared against this expression becomes a literal.
 	 *
@@ -215,6 +236,21 @@ export function makeExpr<T>(
 		mod: (n: number | Expr<number>) => arith(fragment, "%", n, schema),
 	}
 	return self
+}
+
+/**
+ * An expression with no declared result type — {@link untypedExpr}'s
+ * counterpart for a caller assembling its own fragment.
+ *
+ * Selecting one costs the whole query its derived row schema, which
+ * `CompiledQuery.rowSchemaSource` reports as `"none"`. The legitimate use is a
+ * value that never becomes a row.
+ */
+export function makeUntypedExpr<T = unknown>(
+	fragment: SqlFragment,
+	literal?: (value: unknown) => SqlFragment,
+): Expr<T> {
+	return makeExpr<T>(fragment, undefined, literal)
 }
 
 // ColumnRef implementation
@@ -309,7 +345,7 @@ export function lit(value: string | number): Expr<string> | Expr<number> {
  * Usage: `outerRef("t.TraceId")` or `outerRef("TraceId")`
  */
 export function outerRef<T = string>(name: string): Expr<T> {
-	return makeExpr<T>(raw(name))
+	return makeUntypedExpr<T>(raw(name))
 }
 
 export function inList(expr: Expr<string>, values: readonly string[]): Condition {
@@ -364,7 +400,7 @@ export function rawExpr<T>(sql: string, type: CHType<string, T, any>): Expr<T> {
  * `argMin` tiebreaker, a tuple compared against another tuple.
  */
 export function untypedExpr<T = unknown>(sql: string): Expr<T> {
-	return makeExpr<T>(raw(sql))
+	return makeUntypedExpr<T>(raw(sql))
 }
 
 export function rawCond(sql: string): Condition {

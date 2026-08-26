@@ -89,9 +89,10 @@ const quantileExact = (q: number) => (expr: CH.Expr<number>) =>
 	makeExpr<number>(raw(`quantileExact(${q})(${compile(expr.toFragment())})`), T.float64.schema)
 ```
 
-This is how the bundled `quantile` is built. Note the second argument: `makeExpr`'s schema is
-optional for the rare expression that has no type, and leaving it off is the last remaining way
-to silently cost a query its row schema. Pass it.
+This is how the bundled `quantile` is built. Note the second argument: `makeExpr` requires a
+schema — passing `undefined` is how a wrapper *forwards* the untypedness of its own argument
+(`schemaOf(arg)`), not something to write. For an expression that genuinely has no type, use
+`makeUntypedExpr`, which says so and costs the query its row schema knowingly.
 
 You are now assembling SQL text: interpolate only values you control, and route anything
 user-supplied through `str()` from the `/sql` subpath so it gets escaped.

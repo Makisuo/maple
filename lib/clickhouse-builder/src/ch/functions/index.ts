@@ -73,7 +73,7 @@ export {
 	toDateTime,
 } from "./date-time"
 
-export { if_, multiIf, coalesce, nullIf } from "./conditional"
+export { if_, multiIf, coalesce, nullIf, ifNotFinite } from "./conditional"
 
 export {
 	arrayDistinct,

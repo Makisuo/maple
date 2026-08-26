@@ -95,8 +95,8 @@ the row but never contradict it.
 _(Backed by `docs/decoding-results.md > The row schema is derived from the SELECT`,
 `> An untyped expression leaves the query undecoded`.)_
 
-`rowSchemaDeclared` remains as the cheap "does this decode anything at all" check —
-`rowSchemaSource !== "none"` — for a lint over your query catalog.
+`rowSchemaSource !== "none"` is the cheap "does this decode anything at all" check for a lint
+over your query catalog.
 
 Declare a schema for anything whose shape you do not fully control.
 

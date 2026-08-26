@@ -89,7 +89,7 @@ describe("README.md", () => {
 				{ rowSchema: Schema.Struct({ name: Schema.String, count: Schema.Number }) },
 			)
 
-			expect(compiled.rowSchemaDeclared).toBe(true)
+			expect(compiled.rowSchemaSource).toBe("declared")
 			expect(yield* compiled.decodeRows([{ name: "checkout", count: 3 }])).toEqual([
 				{ name: "checkout", count: 3 },
 			])
@@ -160,7 +160,7 @@ describe("docs/getting-started.md", () => {
 			const rows = yield* compiled.decodeRows([{ name: "checkout", count: 3 }])
 
 			expect(rows).toEqual([{ name: "checkout", count: 3 }])
-			expect(compiled.rowSchemaDeclared).toBe(true)
+			expect(compiled.rowSchemaSource).toBe("declared")
 		}),
 	)
 })
@@ -765,7 +765,10 @@ describe("docs/extending.md", () => {
 
 	it("makeExpr builds custom call syntax", () => {
 		const quantileExact = (q: number) => (expr: CH.Expr<number>) =>
-			CH.makeExpr<number>(rawFragment(`quantileExact(${q})(${compileFragment(expr.toFragment())})`))
+			CH.makeExpr<number>(
+				rawFragment(`quantileExact(${q})(${compileFragment(expr.toFragment())})`),
+				T.float64.schema,
+			)
 
 		const query = CH.from(Events)
 			.select(($) => ({ p99: quantileExact(0.99)($.DurationMs) }))

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
 import { compileCHUnsafe } from "./compile"
 import * as CH from "./index"
 import { param } from "./param"
@@ -204,5 +205,67 @@ describe("deferred params", () => {
 			.where(($) => [$.OrgId.eq(param.string("orgId")), CH.inSubquery($.TraceId, spliced)])
 
 		expect(compileCHUnsafe(outer, { orgId: "org_1" }).sql).not.toContain("__PARAM_")
+	})
+})
+
+describe("spliced sub-SELECTs", () => {
+	const cheapScan = CH.from(Events)
+		.select(($) => ({ ts: $.TraceId }))
+		.where(($) => [$.OrgId.eq(param.string("orgId"))])
+		.limit(100)
+
+	it("splices the inner SQL through the wrapper", () => {
+		const cutoff = CH.subqueryExpr(cheapScan, CH.string, (sql) => `(SELECT min(ts) FROM (${sql}))`)
+		const { sql } = compileCHUnsafe(
+			CH.from(Events)
+				.select(($) => ({ count: CH.count() }))
+				.where(($) => [$.OrgId.eq(param.string("orgId")), $.TraceId.gte(cutoff)]),
+			{ orgId: "org_1" },
+		)
+
+		expect(sql).toContain("TraceId >= (SELECT min(ts) FROM (")
+		// The inner query's placeholder was resolved by the OUTER substitution
+		// pass, with the outer params — the whole reason the splice defers.
+		expect(sql).not.toContain("__PARAM_")
+		expect(sql.match(/OrgId = 'org_1'/g)).toHaveLength(2)
+	})
+
+	// The point of the whole construct: an unencodable value inside the inner
+	// query used to throw from whatever function *built* the expression, outside
+	// any Effect. Now it throws from the outer compile, which `compile` catches.
+	it.effect("defers the inner compile so its failure lands in the outer one", () =>
+		Effect.gen(function* () {
+			const badInner = CH.from(Events)
+				.select(($) => ({ ts: $.TraceId }))
+				.where(($) => [$.Count.eq("lots" as never)])
+
+			// Building the expression compiles nothing.
+			const cutoff = CH.subqueryExpr(badInner, CH.string)
+
+			const outer = CH.from(Events)
+				.select(($) => ({ count: CH.count() }))
+				.where(($) => [$.OrgId.eq(param.string("orgId")), $.TraceId.gte(cutoff)])
+
+			const error = yield* Effect.flip(CH.compile(outer, { orgId: "org_1" }))
+			expect(error._tag).toBe("@maple-dev/clickhouse-builder/QueryBuilderError")
+			expect(error.code).toBe("InvalidLiteral")
+		}),
+	)
+
+	it("splices as a condition and as an untyped expression", () => {
+		const { sql } = compileCHUnsafe(
+			CH.from(Events)
+				.select(($) => ({
+					key: CH.untypedSubqueryExpr(cheapScan, (s) => `(SELECT any(ts) FROM (${s}))`),
+				}))
+				.where(($) => [
+					$.OrgId.eq(param.string("orgId")),
+					CH.subqueryCond(cheapScan, (s) => `TraceId IN (SELECT ts FROM (${s}))`),
+				]),
+			{ orgId: "org_1" },
+		)
+
+		expect(sql).toContain("TraceId IN (SELECT ts FROM (")
+		expect(sql).toContain("(SELECT any(ts) FROM (")
 	})
 })

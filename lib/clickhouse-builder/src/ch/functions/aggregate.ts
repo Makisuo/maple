@@ -1,4 +1,5 @@
 import { defineFn } from "../define-fn"
+import { QueryBuilderError } from "../errors"
 import { makeExpr } from "../expr"
 import { raw, compile } from "../../sql/sql-fragment"
 import type { Expr, Condition } from "../expr"
@@ -132,8 +133,13 @@ export type WindowFunnelMode = "strict_order" | "strict_deduplication" | "strict
 export function windowFunnel(window: number, mode?: WindowFunnelMode) {
 	const params = mode === undefined ? `${Math.round(window)}` : `${Math.round(window)}, '${mode}'`
 	return (timestamp: Expr<any>, ...conditions: ReadonlyArray<Condition>): Expr<number> => {
+		// Reported, not thrown: the number of conditions is the number of steps a
+		// funnel has, and that count comes from data as often as from source.
 		if (conditions.length === 0) {
-			throw new Error("windowFunnel requires at least one condition")
+			throw new QueryBuilderError({
+				code: "InvalidArguments",
+				message: "windowFunnel requires at least one condition",
+			})
 		}
 		const args = [timestamp.toFragment(), ...conditions.map((c) => c.toFragment())]
 			.map(compile)
@@ -152,12 +158,21 @@ export function windowFunnel(window: number, mode?: WindowFunnelMode) {
  * user input, so only quote-free literals are accepted.
  */
 export function sequenceMatch(pattern: string) {
+	// An injection guard, so it reports rather than crashes: the pattern is
+	// embedded verbatim, and "not user input" is a claim about the caller that
+	// the caller is exactly who might get wrong.
 	if (pattern.includes("'") || pattern.includes("\\")) {
-		throw new Error("sequenceMatch pattern must not contain quotes or backslashes")
+		throw new QueryBuilderError({
+			code: "InvalidArguments",
+			message: "sequenceMatch pattern must not contain quotes or backslashes",
+		})
 	}
 	return (timestamp: Expr<any>, ...conditions: ReadonlyArray<Condition>): Expr<number> => {
 		if (conditions.length === 0) {
-			throw new Error("sequenceMatch requires at least one condition")
+			throw new QueryBuilderError({
+				code: "InvalidArguments",
+				message: "sequenceMatch requires at least one condition",
+			})
 		}
 		const args = [timestamp.toFragment(), ...conditions.map((c) => c.toFragment())]
 			.map(compile)

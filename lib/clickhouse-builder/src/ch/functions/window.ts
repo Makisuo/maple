@@ -2,6 +2,7 @@ import { makeExpr, toFragment } from "../expr"
 import { compile, raw } from "../../sql/sql-fragment"
 import type { Expr } from "../expr"
 import { schemaOf } from "../define-fn"
+import { QueryBuilderError } from "../errors"
 
 export type WindowOrderDirection = "asc" | "desc"
 
@@ -61,7 +62,14 @@ export function windowSpec(spec: WindowSpec): CompiledWindowSpec {
 
 	if (spec.frame) parts.push(compileRowsFrame(spec.frame))
 
-	if (parts.length === 0) throw new Error("windowSpec requires at least one clause")
+	// Same class as `windowFunnel`'s empty condition list: `partitionBy` is
+	// routinely built from a grouping key list, so an empty spec can be data.
+	if (parts.length === 0) {
+		throw new QueryBuilderError({
+			code: "InvalidArguments",
+			message: "windowSpec requires at least one of partitionBy, orderBy or frame",
+		})
+	}
 
 	return { _brand: "WindowSpec", sql: parts.join(" ") }
 }

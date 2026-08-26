@@ -85,12 +85,12 @@ export type TenantScope = "tenant" | "cross-tenant"
 interface CompiledQueryBase<Output> {
 	readonly sql: string
 	readonly tenantScope: TenantScope
-	/** Whether the query has a row schema at all, declared or derived. Lets a
-	 *  catalog sweep see the queries that decode nothing — a missing schema is
-	 *  otherwise invisible, because `decodeRows` degrades to an identity cast. */
-	readonly rowSchemaDeclared: boolean
 	/**
-	 * Where that schema came from.
+	 * Where the query's row schema came from, or `"none"` if it has none.
+	 *
+	 * Lets a catalog sweep see the queries that decode nothing — a missing
+	 * schema is otherwise invisible, because `decodeRows` degrades to an
+	 * identity cast.
 	 *
 	 * `"derived"` is the normal case: every selected expression knew its own
 	 * column type, so the row schema is the SELECT. `"declared"` means a caller
@@ -172,12 +172,14 @@ export type CompiledQuery<
 /**
  * A query's row codec.
  *
- * `Schema.Schema<Output>` leaves `DecodingServices` open, which is why decoding
- * below still casts it to `never`. Pinning it here would be more honest, but
- * a caller building one from generic `Schema.Struct.Fields` cannot prove the
- * fields are service-free, so the constraint has to be pushed onto them first.
+ * Pinned to a service-free codec, not left as `Schema.Schema<Output>`: rows
+ * arrive from a socket with nothing to provide, so a schema that needs a
+ * service to decode could never run here. Saying so is what lets `decodeRows`
+ * and `encodeRows` build their decoders without casting the services away —
+ * the cost is that a caller assembling one out of generic `Schema.Struct.Fields`
+ * has to carry the same constraint on its own type parameter.
  */
-export type CompiledQueryRowSchema<Output> = Schema.Schema<Output>
+export type CompiledQueryRowSchema<Output> = Schema.Codec<Output, any, never, never>
 
 const makeCompiledQuery = <Output, Routing extends string | undefined>(
 	sql: string,
@@ -195,11 +197,7 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 		if (!decoderBuilt) {
 			decoderBuilt = true
 			const rowSchema = getRowSchema?.()
-			cachedDecodeRow = rowSchema
-				? (Schema.decodeUnknownEffect(rowSchema) as (
-						row: unknown,
-					) => Effect.Effect<Output, unknown, never>)
-				: undefined
+			cachedDecodeRow = rowSchema ? Schema.decodeUnknownEffect(rowSchema) : undefined
 		}
 		return cachedDecodeRow
 	}
@@ -228,11 +226,7 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 		if (!encoderBuilt) {
 			encoderBuilt = true
 			const rowSchema = getRowSchema?.()
-			cachedEncodeRow = rowSchema
-				? (Schema.encodeUnknownEffect(rowSchema) as (
-						row: Output,
-					) => Effect.Effect<unknown, unknown, never>)
-				: undefined
+			cachedEncodeRow = rowSchema ? Schema.encodeUnknownEffect(rowSchema) : undefined
 		}
 		return cachedEncodeRow
 	}
@@ -263,7 +257,6 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 		get rowSchema() {
 			return getRowSchema?.()
 		},
-		rowSchemaDeclared: rowSchemaSource !== "none",
 		rowSchemaSource,
 		untypedColumns: rowSchemaSource === "none" ? untypedColumns : [],
 		...(!(routing === undefined) ? { routing } : undefined),

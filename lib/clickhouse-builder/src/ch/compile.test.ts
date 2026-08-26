@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { DateTime, Effect, Exit, Option, Schema } from "effect"
+import { Cause, DateTime, Effect, Exit, Option, Result, Schema } from "effect"
 import { CompiledQueryDecodeError, compileCHUnsafe, unsafeCompiledQuery } from "./compile"
 import * as CH from "./index"
 import * as T from "./types"
@@ -493,6 +493,116 @@ describe("CompiledQuery.rowSchema", () => {
 				{},
 			)
 			expect(compiled.rowSchema).toBeUndefined()
+		}),
+	)
+})
+
+// Failures vs defects — the rule is on `QueryBuilderError` in ./errors.
+describe("what reports and what dies", () => {
+	const Events = CH.table(
+		"events",
+		{ OrgId: T.string, Name: T.string, Count: T.uint64 },
+		{ tenantColumn: "OrgId" },
+	)
+
+	// The argument *count* is the number of steps a funnel has, and that comes
+	// from data as often as from source — so it reports.
+	it.effect("an empty condition list is a typed failure", () =>
+		Effect.gen(function* () {
+			const steps: ReadonlyArray<CH.Condition> = []
+			const query = CH.from(Events)
+				.select(($) => ({ level: CH.windowFunnel(60)($.Count, ...steps) }))
+				.where(($) => [$.OrgId.eq("org")])
+
+			const error = yield* Effect.flip(CH.compile(query, {}))
+			expect(error.code).toBe("InvalidArguments")
+		}),
+	)
+
+	it.effect("a pattern that would break out of its quotes is a typed failure", () =>
+		Effect.gen(function* () {
+			const query = CH.from(Events)
+				.select(($) => ({ matched: CH.sequenceMatch("(?1)' OR 1=1 --")($.Count, $.Count.gt(0)) }))
+				.where(($) => [$.OrgId.eq("org")])
+
+			const error = yield* Effect.flip(CH.compile(query, {}))
+			expect(error.code).toBe("InvalidArguments")
+		}),
+	)
+
+	// Which side of the comparison a param sits on is written in the source, so
+	// no input can cause or avoid it: a defect, in the Cause, not the channel.
+	it.effect("comparing on a param marker dies rather than failing", () =>
+		Effect.gen(function* () {
+			const query = CH.from(Events)
+				.select(($) => ({ name: $.Name }))
+				.where(() => [CH.param.string("orgId").eq("org")])
+
+			const exit = yield* Effect.exit(CH.compile(query, { orgId: "org" }))
+			expect(Exit.isFailure(exit)).toBe(true)
+			const defect = Exit.isFailure(exit) ? Cause.findDefect(exit.cause) : undefined
+			expect(
+				defect && Result.isSuccess(defect)
+					? (defect.success as CH.QueryBuilderDefect)._tag
+					: undefined,
+			).toBe("@maple-dev/clickhouse-builder/QueryBuilderDefect")
+		}),
+	)
+})
+
+describe("arithmetic decoding", () => {
+	const Events = CH.table(
+		"events",
+		{ OrgId: T.string, Total: T.uint64, Hits: T.uint64 },
+		{ tenantColumn: "OrgId" },
+	)
+
+	// ClickHouse renders `1/0` and `0/0` as JSON null, and `CHNumber` is
+	// `Schema.Finite`-based. A division that decoded strictly turned a query that
+	// ran fine into a 500 the first time a denominator was zero.
+	it.effect("a division decodes the null a zero denominator produces", () =>
+		Effect.gen(function* () {
+			const compiled = compileCHUnsafe(
+				CH.from(Events)
+					.select(($) => ({ rate: CH.sum($.Hits).div(CH.sum($.Total)) }))
+					.where(($) => [$.OrgId.eq("org")]),
+				{},
+			)
+
+			expect(yield* compiled.decodeRows([{ rate: null }])).toEqual([{ rate: null }])
+			expect(yield* compiled.decodeRows([{ rate: 0.5 }])).toEqual([{ rate: 0.5 }])
+		}),
+	)
+
+	// The SQL-side guard, for callers that need a number rather than a null.
+	it.effect("ifNotFinite keeps the column non-null", () =>
+		Effect.gen(function* () {
+			const compiled = compileCHUnsafe(
+				CH.from(Events)
+					.select(($) => ({ rate: CH.ifNotFinite(CH.sum($.Hits).div(CH.sum($.Total)), 0) }))
+					.where(($) => [$.OrgId.eq("org")]),
+				{},
+			)
+
+			expect(compiled.sql).toContain("ifNotFinite(sum(Hits) / sum(Total), 0) AS rate")
+			const exit = yield* Effect.exit(compiled.decodeRows([{ rate: null }]))
+			expect(Exit.isFailure(exit)).toBe(true)
+		}),
+	)
+
+	// Addition cannot manufacture a null out of two finite operands, so it stays
+	// strict — the looseness is bought only where it is paid for.
+	it.effect("addition stays strict", () =>
+		Effect.gen(function* () {
+			const compiled = compileCHUnsafe(
+				CH.from(Events)
+					.select(($) => ({ total: CH.sum($.Hits).add(CH.sum($.Total)) }))
+					.where(($) => [$.OrgId.eq("org")]),
+				{},
+			)
+
+			const exit = yield* Effect.exit(compiled.decodeRows([{ total: null }]))
+			expect(Exit.isFailure(exit)).toBe(true)
 		}),
 	)
 })

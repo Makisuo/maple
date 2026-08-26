@@ -112,8 +112,8 @@ const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(c
 ```
 
 Passing a `rowSchema` gets you real validation of what came back off the wire. Without one,
-`decodeRows` degrades to a pass-through cast and validates nothing — `compiled.rowSchemaDeclared`
-tells you which you got. There is deliberately no `castRows`; see
+`decodeRows` degrades to a pass-through cast and validates nothing — `compiled.rowSchemaSource`
+tells you which you got (`"declared"`, `"derived"`, or `"none"`). There is deliberately no `castRows`; see
 [Decoding results](./decoding-results.md).
 
 _(Backed by `docs/getting-started.md > Decoding the results`.)_

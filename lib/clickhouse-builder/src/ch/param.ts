@@ -8,7 +8,7 @@ import { type DateTime, Schema } from "effect"
 import type { SqlFragment } from "../sql/sql-fragment"
 import { raw } from "../sql/sql-fragment"
 import type { Expr } from "./expr"
-import { QueryBuilderError } from "./errors"
+import { QueryBuilderDefect } from "./errors"
 import * as T from "./types"
 import type { CHType } from "./types"
 
@@ -38,12 +38,16 @@ export const paramPlaceholder = (kind: ParamKind, name: string): string => {
 
 export const PARAM_PLACEHOLDER_PATTERN = /__PARAM_([A-Za-z][A-Za-z0-9]*)_(.+?)__/g
 
-/** Names travel through the placeholder, so they have to survive the round trip:
- *  `__` would make the boundary ambiguous and an empty name unmatchable. */
+/**
+ * Names travel through the placeholder, so they have to survive the round trip:
+ * `__` would make the boundary ambiguous and an empty name unmatchable.
+ *
+ * A defect, not a failure: a param name is written in the query definition, so
+ * no runtime value can produce a bad one. See the rule on `QueryBuilderError`.
+ */
 function assertValidParamName(name: string): void {
 	if (!/^[A-Za-z0-9$]+(?:_[A-Za-z0-9$]+)*$/.test(name)) {
-		throw new QueryBuilderError({
-			code: "InvalidParamName",
+		throw new QueryBuilderDefect({
 			message: `param name ${JSON.stringify(name)} must be alphanumeric, optionally separated by single underscores`,
 		})
 	}
@@ -56,62 +60,42 @@ export interface ParamMarker<N extends string, T> extends Expr<T> {
 	readonly _paramType?: T
 }
 
+/**
+ * Every comparison on a marker is the same mistake: a placeholder is not a
+ * value, so `param.string("x").eq(y)` has nothing to compare. Compare the
+ * *column* against the param instead — `$.OrgId.eq(param.string("orgId"))`.
+ *
+ * A defect rather than a failure for the same reason `assertValidParamName` is:
+ * which side of the comparison the param sits on is written in the source.
+ */
+const unresolved = (name: string) => (): never => {
+	throw new QueryBuilderDefect({
+		message: `param '${name}' is a placeholder, not a value — compare a column against it (\`$.Col.eq(param.string('${name}'))\`) rather than comparing on the param`,
+	})
+}
+
 function makeParamMarker<N extends string, T>(name: N, fragment: SqlFragment): ParamMarker<N, T> {
+	const raise = unresolved(name)
 	return {
 		_brand: "Expr" as const,
 		_paramName: name,
 		toFragment: () => fragment,
-		eq: () => {
-			throw new QueryBuilderError({
-				code: "UnresolvedParam",
-				message: `Param '${name}' not resolved — compile the query first`,
-			})
-		},
-		neq: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		gt: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		gte: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		lt: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		lte: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		like: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		notLike: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		ilike: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		div: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		mul: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		add: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		sub: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		mod: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		in_: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
-		notIn: () => {
-			throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` })
-		},
+		eq: raise,
+		neq: raise,
+		gt: raise,
+		gte: raise,
+		lt: raise,
+		lte: raise,
+		like: raise,
+		notLike: raise,
+		ilike: raise,
+		div: raise,
+		mul: raise,
+		add: raise,
+		sub: raise,
+		mod: raise,
+		in_: raise,
+		notIn: raise,
 	} as ParamMarker<N, T>
 }
 
@@ -202,8 +186,9 @@ export const param = {
 		const registered = paramTypes.get(kind)
 		if (registered === undefined) paramTypes.set(kind, type.literalSchema)
 		else if (registered !== type.literalSchema) {
-			throw new QueryBuilderError({
-				code: "InvalidParamName",
+			// A defect: both types are declared in the source, so no input can
+			// cause or avoid the collision.
+			throw new QueryBuilderDefect({
 				message: `param.of: two different types both compile to '${type.sql}' — give one of them a distinct ClickHouse type name`,
 			})
 		}

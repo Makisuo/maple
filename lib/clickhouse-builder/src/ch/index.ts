@@ -65,7 +65,17 @@ export {
 // Subquery conditions. These accept a `CHQuery` as well as raw SQL, so they
 // supersede the string-only `exists`/`inSubquery` still exported from `./expr`
 // for direct subpath importers.
-export { type Subquery, exists, inSubquery, notInSubquery } from "./subquery"
+export {
+	type Subquery,
+	exists,
+	inSubquery,
+	notInSubquery,
+	// Splice an inner query's SQL where the builder has no syntax — compiled by
+	// the outer `compile`, so its failures land in the outer error channel.
+	subqueryExpr,
+	subqueryCond,
+	untypedSubqueryExpr,
+} from "./subquery"
 
 // Function factories (for extensibility by package consumers)
 export {
@@ -82,6 +92,7 @@ export {
 	type FnResult,
 	makeCond,
 	makeExpr,
+	makeUntypedExpr,
 	sameAs,
 	schemaOf,
 	schemaOfAny,
@@ -158,6 +169,7 @@ export {
 	multiIf,
 	coalesce,
 	nullIf,
+	ifNotFinite,
 	// Array
 	arrayOf,
 	arrayStringConcat,
@@ -223,10 +235,12 @@ export {
 	type CompiledQuery,
 	type CompiledQueryRowSchema,
 	type TenantScope,
-	QueryBuilderError,
 	CompiledQueryDecodeError,
 	CompiledQueryEncodeError,
 } from "./compile"
+
+// Failures vs defects — the rule the two classes encode is on `QueryBuilderError`.
+export { QueryBuilderError, QueryBuilderDefect } from "./errors"
 
 // Union
 export { unionAll, type CHUnionQuery, type InferUnionOutput } from "./union"

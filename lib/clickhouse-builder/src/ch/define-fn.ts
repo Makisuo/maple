@@ -8,7 +8,7 @@
 import { Schema } from "effect"
 import { raw, compile } from "../sql/sql-fragment"
 import type { Expr, Condition } from "./expr"
-import { makeExpr, makeCond, toFragment } from "./expr"
+import { makeExpr, makeUntypedExpr, makeCond, toFragment } from "./expr"
 import type { CHType } from "./types"
 
 /** The schema an expression decodes with, when it has one. */
@@ -42,13 +42,13 @@ export const schemaOfAny = <T>(...exprs: ReadonlyArray<unknown>): Schema.Codec<T
 }
 
 // Re-export for consumer convenience
-export { makeExpr, makeCond }
+export { makeExpr, makeUntypedExpr, makeCond }
 
 // compileFnCall — low-level helper for handwritten generic/special functions
 
 export function compileFnCall<R>(name: string, ...args: unknown[]): Expr<R> {
 	const compiled = args.map((a) => compile(toFragment(a))).join(", ")
-	return makeExpr<R>(raw(`${name}(${compiled})`))
+	return makeUntypedExpr<R>(raw(`${name}(${compiled})`))
 }
 
 /** `compileFnCall` for a function whose result type is known. */

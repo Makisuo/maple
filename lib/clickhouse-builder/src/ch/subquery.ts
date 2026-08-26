@@ -7,9 +7,10 @@
 // — one top-level `const` away from a TDZ crash in the bundle.
 
 import { compileCHUnsafe } from "./compile"
-import { type Condition, type Expr, makeCond } from "./expr"
+import { type Condition, type Expr, makeCond, makeExpr, makeUntypedExpr } from "./expr"
 import type { CHQuery } from "./query"
-import { compile, raw } from "../sql/sql-fragment"
+import type { CHType } from "./types"
+import { compile, lazy, raw } from "../sql/sql-fragment"
 
 /**
  * A subquery, either as a builder query or as SQL someone compiled elsewhere.
@@ -61,4 +62,60 @@ export function inSubquery<T>(expr: Expr<T>, subquery: Subquery): Condition {
  */
 export function notInSubquery<T>(expr: Expr<T>, subquery: Subquery): Condition {
 	return makeCond(raw(`${compile(expr.toFragment())} NOT IN (${toSql(subquery)})`))
+}
+
+// Spliced sub-SELECTs
+//
+// The three conditions above put a subquery where SQL expects a subquery. These
+// put its *SQL text* somewhere the builder has no syntax for — inside an
+// aggregate, a CTE reference, a tuple comparison — which is a real need and the
+// reason `compileCHUnsafe` used to be called from query-definition code.
+//
+// Doing that eagerly is the problem: a query definition that compiles an inner
+// query is running the compiler outside the `Effect` its own `compile` will run
+// in, so an unencodable value handed to the inner query throws synchronously
+// from the *builder*. Both constructors below defer the inner compile to the
+// outer one, which is what puts the failure back in the error channel.
+
+/**
+ * An inner query's SQL spliced into an expression, compiled with the outer
+ * query.
+ *
+ * `wrap` receives the inner SQL and returns the expression text — it is where
+ * the aggregate or subquery syntax the builder cannot express goes. It runs
+ * during the outer `compile`, so a `QueryBuilderError` raised by the inner
+ * query surfaces as the outer compilation's typed failure.
+ *
+ * ```ts
+ * const cutoff = subqueryExpr(cheapScan, T.dateTimeString, (sql) => `(SELECT min(ts) FROM (${sql}))`)
+ * ```
+ *
+ * Params are deferred: placeholders inside the spliced SQL are resolved by the
+ * outer query's substitution pass, with the outer params.
+ */
+export function subqueryExpr<T>(
+	subquery: Subquery,
+	type: CHType<string, T, any>,
+	wrap: (sql: string) => string = (sql) => `(${sql})`,
+): Expr<T> {
+	return makeExpr<T>(
+		lazy(() => wrap(toSql(subquery))),
+		type.schema,
+	)
+}
+
+/** {@link subqueryExpr} for a spliced value with no declared result type — a
+ *  sort tuple, an `argMin` tiebreaker. Selecting one costs the query its row
+ *  schema, the same as `untypedExpr`. */
+export function untypedSubqueryExpr<T = unknown>(
+	subquery: Subquery,
+	wrap: (sql: string) => string = (sql) => `(${sql})`,
+): Expr<T> {
+	return makeUntypedExpr<T>(lazy(() => wrap(toSql(subquery))))
+}
+
+/** {@link subqueryExpr} as a predicate — for the `IN`/`EXISTS` shapes the three
+ *  conditions above do not cover, such as `x IN (SELECT k FROM (<inner>))`. */
+export function subqueryCond(subquery: Subquery, wrap: (sql: string) => string): Condition {
+	return makeCond(lazy(() => wrap(toSql(subquery))))
 }
