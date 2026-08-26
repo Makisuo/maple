@@ -3,6 +3,7 @@ import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { clickHouseVersionAtLeast } from "@maple/domain/clickhouse"
 import { OrgId, RawSqlValidationError, UserId } from "@maple/domain/http"
 import { prepareRawSql } from "@maple/query-engine/runtime"
+import { parseStatement } from "@maple-dev/clickhouse-builder/sql"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
@@ -292,9 +293,16 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 			password: clickhousePassword,
 			database,
 		})
+		// A parsed statement, not SQL text: the driver port takes a
+		// `ClickHouseStatement` so the executor owns the terminal clauses. Passing
+		// a bare string reached the client as `query: undefined`, and apps/api's
+		// tsconfig excludes `*.test.ts`, so only this job saw it.
+		//
 		// No trailing FORMAT: the client owns the output format (the executor's
 		// normalizeSqlForClient strips it on the real path).
-		const result = await client.sql("SELECT toUInt64(42) AS wide, count() AS c FROM system.one")
+		const result = await client.sql(
+			parseStatement("SELECT toUInt64(42) AS wide, count() AS c FROM system.one"),
+		)
 		const row = result.data[0]
 		assert.isDefined(row)
 		assert.strictEqual(typeof row!.wide, "number", "UInt64 arrived as a string — the quote pin is gone")
