@@ -30,6 +30,17 @@ export interface CHType<Tag extends string, A, I = A> {
 	 * `'YYYY-MM-DD hh:mm:ss'`.
 	 */
 	readonly literalSchema: Schema.Codec<any, any>
+	/**
+	 * The type this one wraps: an `Array`'s element, a `Map`'s value, a
+	 * `Nullable`'s inner type. Absent for scalars.
+	 *
+	 * Kept as a `CHType` rather than recovered from `schema`'s AST because the
+	 * wrapper's schema is lossy in the direction that matters: `Map(String, V)`
+	 * becomes `Schema.Record(String, V.schema)`, and reading `V` back out of a
+	 * record AST is a different shape per Effect version. Subscripting a Map
+	 * (`$.Attrs.get(k)`) needs `V` to know how the result decodes.
+	 */
+	readonly element?: CHType<string, any, any>
 	readonly _phantom?: A
 }
 
@@ -38,7 +49,14 @@ const chType = <const Tag extends string, A, I>(
 	sql: string,
 	schema: Schema.Codec<A, I>,
 	literalSchema: Schema.Codec<any, any> = schema,
-): CHType<Tag, A, I> => ({ _tag, sql, schema, literalSchema })
+	element?: CHType<string, any, any>,
+): CHType<Tag, A, I> => ({
+	_tag,
+	sql,
+	schema,
+	literalSchema,
+	...(element !== undefined ? { element } : undefined),
+})
 
 // Wire codecs
 
@@ -133,6 +151,7 @@ export type CHUInt16 = CHType<"UInt16", number, number | string>
 export type CHUInt32 = CHType<"UInt32", number, number | string>
 export type CHUInt64 = CHType<"UInt64", number, number | string>
 export type CHInt32 = CHType<"Int32", number, number | string>
+export type CHInt64 = CHType<"Int64", number, number | string>
 export type CHFloat64 = CHType<"Float64", number, number | string>
 export type CHDateTime = CHType<"DateTime", DateTime.Utc, string>
 export type CHDateTime64 = CHType<"DateTime64", DateTime.Utc, string>
@@ -199,6 +218,7 @@ export const uint16: CHUInt16 = chType("UInt16", "UInt16", CHNumber)
 export const uint32: CHUInt32 = chType("UInt32", "UInt32", CHNumber)
 export const uint64: CHUInt64 = chType("UInt64", "UInt64", CHNumber)
 export const int32: CHInt32 = chType("Int32", "Int32", CHNumber)
+export const int64: CHInt64 = chType("Int64", "Int64", CHNumber)
 export const float64: CHFloat64 = chType("Float64", "Float64", CHNumber)
 export const dateTime: CHDateTime = chType("DateTime", "DateTime", CHDateTimeUtc, CHDateTimeLiteral)
 export const dateTime64: CHDateTime64 = chType("DateTime64", "DateTime64", CHDateTimeUtc, CHDateTimeLiteral)
@@ -220,13 +240,16 @@ export const map = <K extends CHType<string, string, any>, V extends CHType<stri
 	k: K,
 	v: V,
 ): CHMap<K, V> =>
-	chType("Map", `Map(${k.sql}, ${v.sql})`, Schema.Record(Schema.String, v.schema)) as CHMap<K, V>
+	chType("Map", `Map(${k.sql}, ${v.sql})`, Schema.Record(Schema.String, v.schema), undefined, v) as CHMap<
+		K,
+		V
+	>
 
 export const array = <E extends CHType<string, any, any>>(e: E): CHArray<E> =>
-	chType("Array", `Array(${e.sql})`, Schema.Array(e.schema)) as CHArray<E>
+	chType("Array", `Array(${e.sql})`, Schema.Array(e.schema), undefined, e) as CHArray<E>
 
 export const nullable = <T extends CHType<string, any, any>>(t: T): CHNullable<T> =>
-	chType("Nullable", `Nullable(${t.sql})`, Schema.NullOr(t.schema)) as CHNullable<T>
+	chType("Nullable", `Nullable(${t.sql})`, Schema.NullOr(t.schema), undefined, t) as CHNullable<T>
 
 /**
  * A column type of your own: a ClickHouse type name and the schema its wire
@@ -244,6 +267,21 @@ export const custom = <const Sql extends string, A, I>(
 	/** Only when comparisons accept more than the column decodes to. */
 	literalSchema?: Schema.Codec<any, any>,
 ): CHType<Sql, A, I> => chType(sql, sql, schema, literalSchema)
+
+/**
+ * An `AggregateFunction(fn, args…)` state column.
+ *
+ * The value is ClickHouse's opaque binary state, only ever consumed by a
+ * matching `-Merge` in an outer query — it is never a row the client decodes.
+ * `Schema.Unknown` says exactly that, and saying it is the point: an aggregate
+ * state selected in an inner subquery used to be a `rawExpr` with no type,
+ * which stopped that subquery's *other* columns from deriving a row schema too.
+ */
+export const aggregateState = (
+	fn: string,
+	...args: ReadonlyArray<string>
+): CHType<"AggregateFunction", unknown, unknown> =>
+	chType("AggregateFunction", `AggregateFunction(${[fn, ...args].join(", ")})`, Schema.Unknown)
 
 /**
  * A column whose wire value is passed through unvalidated.

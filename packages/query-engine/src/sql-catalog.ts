@@ -938,6 +938,50 @@ export function dedupeByFingerprint(entries: ReadonlyArray<CatalogEntry>): Reado
 
 // Anti-rot assertions
 
+/**
+ * Catalog entries whose rows nothing validates.
+ *
+ * `rowSchemaSource: "none"` means at least one selected expression had no type
+ * to read — a `rawExpr` without a column type, a `dynamicColumn`, an
+ * un-annotated custom function — so `decodeRows` degrades to an identity cast
+ * and a warehouse that changes a column's wire format is invisible until the
+ * value reaches a `Schema.Class` constructor several layers away.
+ *
+ * The allowlist below is asserted *exactly*, in both directions: a query that
+ * stops deriving fails, and so does one still listed here after it starts. That
+ * is the point — the list is meant to shrink and never silently grow.
+ */
+export const UNDECODED_QUERIES: ReadonlySet<string> = new Set([
+	// Funnel steps come from `arrayJoin([1, 2, …])` and `windowFunnel` output
+	// columns the builder assembles as raw SQL.
+	"builder:productEventsFunnelBreakdownQuery",
+	"builder:productEventsFunnelQuery",
+	// `-State`/`-Merge` combinator expressions on the service rollups, plus the
+	// `hex(MD5(tuple(…)))` record identity. Typing these means giving the DSL
+	// aggregate-state combinators — see `T.aggregateState`.
+	"builder:serviceCatalogQuery",
+	"builder:serviceOperationsSummaryQuery",
+	"builder:sessionActivityQuery",
+	"builder:sessionReplaysListQuery",
+	"builder:sessionsForTraceQuery",
+	"builder:traceServicesByTraceIdsQuery",
+	"pipe:list_logs",
+	"pipe:traces_facets",
+	"query-spec:logs.timeseries",
+	"query-spec:traces.facets",
+	"query-spec:traces.list",
+	"query-spec:traces.timeseries",
+])
+
+/** `source:name` for every catalog entry that decodes nothing. */
+export function undecodedQueries(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<string> {
+	const undecoded = new Set<string>()
+	for (const entry of entries) {
+		if (entry.compiled?.rowSchemaSource === "none") undecoded.add(`${entry.source}:${entry.name}`)
+	}
+	return [...undecoded].sort()
+}
+
 /** Pipe names in `warehouseQueries` that no fixture covers. */
 export function uncoveredPipes(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<WarehouseQueryName> {
 	const covered = new Set(entries.map((entry) => entry.name))

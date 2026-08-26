@@ -259,22 +259,13 @@ export function compileCH<
 	const state = query._state
 	const deferParams = options?.deferParams === true
 
-	// Build column accessor — joined or simple depending on joins
-	const joinAliases = state.typedJoins.map((j) => j.alias)
-	const hasJoins = joinAliases.length > 0
-	const mainAlias = hasJoins ? (state.tableAlias ?? state.fromQueryAlias ?? state.tableName) : undefined
-
-	const joinTenantColumns = Object.fromEntries(state.typedJoins.map((j) => [j.alias, j.tenantColumn]))
-
-	const $ = hasJoins
-		? createJoinedColumnAccessor(
-				state.columns,
-				joinAliases,
-				mainAlias,
-				state.tenantColumn,
-				joinTenantColumns,
-			)
-		: createColumnAccessor(state.columns, state.tenantColumn)
+	// The one accessor factory — shared with `selectExprsOf`, which reads a
+	// query's output schemas without compiling it. Building a second one here is
+	// what silently dropped every joined and subquery column's type: this path
+	// passed `state.columns` (empty for a `fromQuery`/`fromUnion`) and no join
+	// columns at all, so `$.p.ServiceName` and `$.bucket` compiled to correct SQL
+	// with no schema, and the query derived nothing.
+	const $ = makeAccessor(state)
 
 	// SELECT
 	const selectExprs = state.selectFn ? state.selectFn($) : {}
@@ -408,13 +399,13 @@ export function compileCH<
 				? "tenant"
 				: "cross-tenant"
 
+	const derived = deriveRowSchema(selectExprs)
+
 	return makeCompiledQuery<Decoded, Routing>(
 		sql,
 		tenantScope,
-		options?.rowSchema !== undefined ? "declared" : deriveRowSchema(selectExprs) ? "derived" : "none",
-		() =>
-			options?.rowSchema ??
-			(deriveRowSchema(selectExprs) as CompiledQueryRowSchema<Decoded> | undefined),
+		options?.rowSchema !== undefined ? "declared" : derived ? "derived" : "none",
+		() => options?.rowSchema ?? (derived as CompiledQueryRowSchema<Decoded> | undefined),
 		state.routingValue as Routing,
 	)
 }
@@ -437,8 +428,25 @@ function makeAccessor(state: CHQueryState): any {
 		mainAlias,
 		state.tenantColumn,
 		Object.fromEntries(state.typedJoins.map((j) => [j.alias, j.tenantColumn])),
-		Object.fromEntries(state.typedJoins.map((j) => [j.alias, j.columns])),
+		Object.fromEntries(state.typedJoins.map((j) => [j.alias, joinColumnsOf(j)])),
 	)
+}
+
+/**
+ * A join's columns: its table's, or — for a joined subquery — the schemas of
+ * the SELECT it will compile to.
+ *
+ * `innerJoinQuery` records no columns (there is no table to read them from), so
+ * without this every `$.alias.field` off a joined subquery is untyped.
+ */
+function joinColumnsOf(join: {
+	readonly columns?: ColumnDefs
+	readonly innerQuery?: CHQuery<any, any, any>
+}): ColumnDefs | undefined {
+	if (join.columns !== undefined) return join.columns
+	if (join.innerQuery === undefined) return undefined
+	const exprs = selectExprsOf(join.innerQuery)
+	return exprs === undefined ? undefined : synthesizeColumns(exprs)
 }
 
 /**
@@ -453,8 +461,17 @@ function columnsOf(state: CHQueryState): ColumnDefs {
 	const innerExprs = inner ? selectExprsOf(inner) : undefined
 	if (innerExprs === undefined) return state.columns
 
+	return synthesizeColumns(innerExprs)
+}
+
+/**
+ * Column definitions for a derived source, from the expressions its SELECT
+ * produced. An expression with no schema of its own contributes no column, so
+ * the outer query's reference to it stays untyped rather than being invented.
+ */
+function synthesizeColumns(exprs: Record<string, unknown>): ColumnDefs {
 	const synthesized: Record<string, CHType<"Inferred", any, any>> = {}
-	for (const [alias, expr] of Object.entries(innerExprs)) {
+	for (const [alias, expr] of Object.entries(exprs)) {
 		const schema = (expr as { readonly schema?: Schema.Codec<any, any> } | null)?.schema
 		if (schema === undefined) continue
 		synthesized[alias] = { _tag: "Inferred", sql: "", schema, literalSchema: schema }

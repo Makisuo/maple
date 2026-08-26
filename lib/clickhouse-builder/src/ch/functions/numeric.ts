@@ -1,4 +1,4 @@
-import { defineFn, compileFnCall } from "../define-fn"
+import { compileTypedFnCall, defineFn, schemaOfAny } from "../define-fn"
 import type { Expr } from "../expr"
 import * as T from "../types"
 
@@ -8,30 +8,30 @@ export const toFloat64OrZero = defineFn<[Expr<string>], number>("toFloat64OrZero
 export const toFloat64 = defineFn<[Expr<number>], number>("toFloat64", T.float64)
 export const toUInt16OrZero = defineFn<[Expr<string>], number>("toUInt16OrZero", T.uint16)
 export const toUInt64 = defineFn<[Expr<number> | Expr<string>], number>("toUInt64", T.uint64)
-export const toInt64 = defineFn<[Expr<number>], number>("toInt64", T.uint64)
+export const toInt64 = defineFn<[Expr<number>], number>("toInt64", T.int64)
 
 // Arithmetic (compileFnCall wrappers for mixed arg types)
 
 export function intDiv(a: Expr<number>, b: number | Expr<number>): Expr<number> {
-	return compileFnCall<number>("intDiv", a, b)
+	return compileTypedFnCall<number>("intDiv", T.int64.schema, a, b)
 }
 
 export function round_(expr: Expr<number>, decimals?: number): Expr<number> {
 	return decimals != null
-		? compileFnCall<number>("round", expr, decimals)
-		: compileFnCall<number>("round", expr)
+		? compileTypedFnCall<number>("round", T.float64.schema, expr, decimals)
+		: compileTypedFnCall<number>("round", T.float64.schema, expr)
 }
 
 // Variadic numeric functions
 
 export function least_(...exprs: Expr<number>[]): Expr<number> {
-	return compileFnCall<number>("least", ...exprs)
+	return compileTypedFnCall<number>("least", schemaOfAny<number>(...exprs) ?? T.float64.schema, ...exprs)
 }
 
 export function greatest_(...exprs: Expr<number>[]): Expr<number> {
-	return compileFnCall<number>("greatest", ...exprs)
+	return compileTypedFnCall<number>("greatest", schemaOfAny<number>(...exprs) ?? T.float64.schema, ...exprs)
 }
 
 export function cityHash64(...exprs: Expr<any>[]): Expr<number> {
-	return compileFnCall<number>("cityHash64", ...exprs)
+	return compileTypedFnCall<number>("cityHash64", T.uint64.schema, ...exprs)
 }

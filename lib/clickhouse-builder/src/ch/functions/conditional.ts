@@ -1,4 +1,3 @@
-import { compileFnCall } from "../define-fn"
 import { makeExpr } from "../expr"
 import { raw, compile } from "../../sql/sql-fragment"
 import type { Expr, Condition } from "../expr"

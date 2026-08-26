@@ -21,6 +21,17 @@ const dateTime = T.dateTimeString
 const dateTime64 = T.dateTime64String
 
 /**
+ * The type every attribute column in the warehouse has.
+ *
+ * Named so helpers that work across tables — anything taking "a table with a
+ * `SpanAttributes` column" — can say so structurally without falling back to
+ * `ColumnRef<"SpanAttributes", any>`. An `any` there erases the map's value
+ * type, and `$.SpanAttributes.get(k)` then decodes as `unknown`, which costs
+ * the query its derived row schema.
+ */
+export type StringMap = T.CHMap<T.CHString, T.CHString>
+
+/**
  * Every Maple warehouse table is keyed by `OrgId`, so tenancy is declared once
  * here rather than at 37 call sites. Requiring the column in the signature is
  * the point: a new table without one is a type error, not a table that silently

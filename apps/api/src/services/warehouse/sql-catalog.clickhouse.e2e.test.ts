@@ -124,12 +124,17 @@ describe.skipIf(!clickhouseE2eEnabled)("SQL catalog analyzer sweep", () => {
 					`Wrap them in toString(...) in the SELECT so the value survives JSON as a string.`,
 			)
 
-			// Second class, same round trip: if the query declares a row schema, it
-			// has to accept BOTH 64-bit wire shapes — unquoted is what the pinned
-			// production clients receive, quoted is what a gateway/readonly cluster
-			// that refuses the setting still sends. `CH.CHNumber` accepts both;
-			// `Schema.Number` rejects the quoted shape.
-			if (wideColumns.length > 0 && entry.compiled) {
+			// Second class, same round trip: a query's row schema has to accept the
+			// JSON its own SQL produces, for BOTH 64-bit wire shapes — unquoted is
+			// what the pinned production clients receive, quoted is what a
+			// gateway/readonly cluster that refuses the setting still sends.
+			// `CH.CHNumber` accepts both; `Schema.Number` rejects the quoted shape.
+			//
+			// Run for every query that has a schema at all, not just the ones with
+			// 64-bit columns: the schema is now usually DERIVED from the SELECT, so
+			// this is what checks the builder's own idea of a column's wire type
+			// against the type the analyzer resolved.
+			if (entry.compiled && entry.compiled.rowSchemaSource !== "none") {
 				for (const quote64Bit of [false, true]) {
 					// `sampleValues` covers columns whose schema narrows what the
 					// ClickHouse type allows — the synthetic row is built from column

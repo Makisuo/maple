@@ -174,11 +174,15 @@ describe("compilePipeQuery", () => {
 		expect(result!.sql).toContain("2024-01-02 00:00:00")
 	})
 
-	it.effect("decodeRows passes through rows for DSL-backed pipes without row schemas", () =>
+	// `list_traces` derives its row schema from the SELECT, so `decodeRows`
+	// validates rather than casting: a row missing a selected column is a decode
+	// failure here instead of an `undefined` read three layers downstream.
+	it.effect("decodeRows rejects a row missing a selected column", () =>
 		Effect.gen(function* () {
 			const result = compilePipeQuery("list_traces", baseParams())
-			const rows = [{ traceId: "abc" }]
-			expect(yield* result!.decodeRows(rows)).toEqual(rows)
+			expect(result!.rowSchemaSource).not.toBe("none")
+			const failure = yield* Effect.flip(result!.decodeRows([{ traceId: "abc" }]))
+			expect(failure.rowIndex).toBe(0)
 		}),
 	)
 

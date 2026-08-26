@@ -142,11 +142,14 @@ describe("orgTelemetryPulseQuery", () => {
 		expect(rows.map((row) => row.count)).toEqual([0, 42])
 	})
 
-	// The coercion is the row schema's doing, not the union's — compiling without
-	// one still hands back whatever the backend sent.
-	it("leaves rows untouched when compiled without a row schema", () => {
+	// The explicit `telemetryPulseRowSchema` above is now a *narrowing* of what
+	// the builder already derives from the SELECT, not the thing that makes
+	// decoding happen at all: `count()` is a `UInt64`, so a quoted count coerces
+	// with no row schema passed.
+	it("coerces a quoted count with no row schema passed", () => {
 		const compiled = compileUnion(orgTelemetryPulseQuery(), pulseParams)
+		expect(compiled.rowSchemaSource).toBe("derived")
 		const [row] = decodeRows(compiled, [{ signal: "spans", count: "7", lastSeen: "2024-01-01 00:09:00" }])
-		expect(typeof row?.count).toBe("string")
+		expect(row?.count).toBe(7)
 	})
 })

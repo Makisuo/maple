@@ -33,6 +33,7 @@ import {
 	ServiceMapEdgesHourly,
 	ServiceMapSpans,
 	ServicePlatformsHourly,
+	type StringMap,
 	Traces,
 } from "../tables"
 import { unionAll } from "@maple-dev/clickhouse-builder"
@@ -421,9 +422,9 @@ export function serviceDbEdgesSQL(
 // Shared DSL expressions for identifying the database a Client/Producer span
 // talks to, mirroring the write-side `DB_SYSTEM_ATTR_SQL` /
 // `DB_NAMESPACE_ATTR_SQL` fragments so raw-branch keys merge with the MV's.
-const dbSystemExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+const dbSystemExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", StringMap> }) =>
 	CH.coalesce(CH.nullIf($.SpanAttributes.get("db.system.name"), ""), $.SpanAttributes.get("db.system"))
-const dbNamespaceCoalesce = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+const dbNamespaceCoalesce = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", StringMap> }) =>
 	CH.coalesce(
 		CH.nullIf($.SpanAttributes.get("db.namespace"), ""),
 		CH.nullIf($.SpanAttributes.get("db.name"), ""),
@@ -440,7 +441,7 @@ const dbNamespaceCoalesce = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes",
 const collapseHyperdriveNs = (ns: CH.Expr<string>): CH.Expr<string> =>
 	CH.if_(_matchRegex(ns, OPAQUE_DB_NAMESPACE_RE), CH.lit(HYPERDRIVE_DB_NAMESPACE), ns)
 
-const dbNamespaceExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+const dbNamespaceExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", StringMap> }) =>
 	collapseHyperdriveNs(dbNamespaceCoalesce($))
 
 /**
@@ -718,8 +719,8 @@ const serviceDbRawFilters = (
 		Timestamp: CH.Expr<string>
 		SpanKind: CH.Expr<string>
 		ServiceName: CH.Expr<string>
-		SpanAttributes: CH.ColumnRef<"SpanAttributes", any>
-		ResourceAttributes: CH.ColumnRef<"ResourceAttributes", any>
+		SpanAttributes: CH.ColumnRef<"SpanAttributes", StringMap>
+		ResourceAttributes: CH.ColumnRef<"ResourceAttributes", StringMap>
 	},
 	params: ServiceDbQuerySummaryParams,
 	scope: "currentHour" | "fullWindow",

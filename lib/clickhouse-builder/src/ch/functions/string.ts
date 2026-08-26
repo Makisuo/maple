@@ -1,4 +1,4 @@
-import { defineFn, compileFnCall } from "../define-fn"
+import { compileFnCall, compileTypedFnCall, defineFn } from "../define-fn"
 import { makeCond } from "../expr"
 import { compile, raw, str } from "../../sql/sql-fragment"
 import type { Condition, Expr } from "../expr"
@@ -11,6 +11,7 @@ export const length_ = defineFn<[Expr<string>], number>("length", T.uint64)
 export const lower_ = defineFn<[Expr<string>], string>("lower", T.string)
 export const positionCaseInsensitive = defineFn<[Expr<string>, Expr<string>], number>(
 	"positionCaseInsensitive",
+	T.uint64,
 )
 export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left", T.string)
 
@@ -30,15 +31,15 @@ export const cutQueryString = defineFn<[Expr<string>], string>("cutQueryString",
 // Mixed Expr + literal args (compileFnCall wrappers)
 
 export function position_(haystack: Expr<string>, needle: string): Expr<number> {
-	return compileFnCall<number>("position", haystack, needle)
+	return compileTypedFnCall<number>("position", T.uint64.schema, haystack, needle)
 }
 
 export function extract_(expr: Expr<string>, pattern: string): Expr<string> {
-	return compileFnCall<string>("extract", expr, pattern)
+	return compileTypedFnCall<string>("extract", T.string.schema, expr, pattern)
 }
 
 export function replaceOne(haystack: Expr<string>, pattern: string, replacement: string): Expr<string> {
-	return compileFnCall<string>("replaceOne", haystack, pattern, replacement)
+	return compileTypedFnCall<string>("replaceOne", T.string.schema, haystack, pattern, replacement)
 }
 
 /**
@@ -50,7 +51,7 @@ export function replaceOne(haystack: Expr<string>, pattern: string, replacement:
  * `match(…) = 1`.
  */
 export function match_(haystack: Expr<string>, pattern: string): Expr<number> {
-	return compileFnCall<number>("match", haystack, pattern)
+	return compileTypedFnCall<number>("match", T.uint8.schema, haystack, pattern)
 }
 
 /** `match(haystack, pattern)` as a predicate — see {@link match_}. */
@@ -61,7 +62,7 @@ export function matchCond(haystack: Expr<string>, pattern: string): Condition {
 // Variadic string functions
 
 export function concat(...exprs: Array<Expr<string> | string>): Expr<string> {
-	return compileFnCall<string>("concat", ...exprs)
+	return compileTypedFnCall<string>("concat", T.string.schema, ...exprs)
 }
 
 export function hasToken(haystack: Expr<string>, token: Expr<string> | string): Condition {

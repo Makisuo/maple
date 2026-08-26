@@ -12,6 +12,8 @@ import {
 	querySpecFixtures,
 	routeCoverage,
 	uncoveredPipes,
+	UNDECODED_QUERIES,
+	undecodedQueries,
 } from "./sql-catalog"
 import { builderFixtures } from "./ch/builder-fixtures"
 import * as activityQueries from "./ch/queries/activity"
@@ -56,6 +58,14 @@ describe("sql catalog", () => {
 	// executed until a fixture exists for it.
 	it("covers every name in warehouseQueries", () => {
 		expect(uncoveredPipes(pipeEntries)).toEqual([])
+	})
+
+	// Asserted exactly, not as a ceiling: a query that stops deriving a row
+	// schema fails here, and so does one still listed after it starts. The
+	// `decodeRows` identity cast is invisible at runtime, so this list is the
+	// only place the product can see which of its queries validate nothing.
+	it("decodes every query except the declared exceptions", () => {
+		expect(undecodedQueries(entries)).toEqual([...UNDECODED_QUERIES].sort())
 	})
 
 	// Builders that read across every tenant on purpose. Each must declare

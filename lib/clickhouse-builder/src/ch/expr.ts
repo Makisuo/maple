@@ -9,7 +9,7 @@
 import { DateTime, type Schema } from "effect"
 import type { SqlFragment } from "../sql/sql-fragment"
 import { raw, str, compile, as_ as sqlAs } from "../sql/sql-fragment"
-import { chDateTimeLiteral, type CHType, type InferTS } from "./types"
+import { chDateTimeLiteral, CHNumber, string as chString, type CHType, type InferTS } from "./types"
 import { encodeColumnLiteral } from "./literal"
 
 // Core interfaces
@@ -67,9 +67,25 @@ export interface ColumnRef<Name extends string, ColType extends CHType<string, a
 	InferTS<ColType>
 > {
 	readonly columnName: Name
-	/** Access a key in a Map column: `$.SpanAttributes.get("http.method")` */
-	get(this: ColumnRef<Name, CHType<"Map", Record<string, string>>>, key: string): Expr<string>
+	/**
+	 * Access a key in a Map column: `$.SpanAttributes.get("http.method")`.
+	 *
+	 * The result decodes as the map's *value* type, read off the column's
+	 * `element`. A `Map(String, String)` subscript is an `Expr<string>` that
+	 * knows it is one, so selecting it no longer costs the query its row schema.
+	 */
+	get(this: ColumnRef<Name, CHType<"Map", any, any>>, key: string): Expr<MapValueOf<ColType>>
 }
+
+/**
+ * A Map column's value type, defaulting to `string`.
+ *
+ * Wrapped in tuples so an `any` column type — `ColumnRef<"Attrs", any>`, which
+ * is how a helper shared across two tables usually types its accessor — takes
+ * the `infer` branch and yields `any`, rather than distributing into `unknown`
+ * and failing to assign anywhere.
+ */
+export type MapValueOf<ColType> = [ColType] extends [CHType<"Map", Record<string, infer V>, any>] ? V : string
 
 export interface Condition {
 	readonly _brand: "Condition"
@@ -112,6 +128,13 @@ export function toFragment(value: unknown): SqlFragment {
 }
 
 // Expr implementation
+
+/** `lhs <op> rhs` as a numeric expression — see the note on `div` below. */
+const arith = (lhs: SqlFragment, op: string, rhs: number | Expr<number>): Expr<number> =>
+	makeExpr<number>(
+		raw(`${compile(lhs)} ${op} ${compile(toFragment(rhs))}`),
+		CHNumber as Schema.Codec<number, any>,
+	)
 
 export function makeExpr<T>(
 	fragment: SqlFragment,
@@ -159,16 +182,16 @@ export function makeExpr<T>(
 		// operator precedence rather than call order — `a.sub(b).div(c)` compiles
 		// to `a - b / c`, i.e. `a - (b / c)`. Order the calls so precedence works
 		// in your favour, or bind an intermediate alias in a sub-query.
-		div: (n: number | Expr<number>) =>
-			makeExpr<number>(raw(`${compile(fragment)} / ${compile(toFragment(n))}`)),
-		mul: (n: number | Expr<number>) =>
-			makeExpr<number>(raw(`${compile(fragment)} * ${compile(toFragment(n))}`)),
-		add: (n: number | Expr<number>) =>
-			makeExpr<number>(raw(`${compile(fragment)} + ${compile(toFragment(n))}`)),
-		sub: (n: number | Expr<number>) =>
-			makeExpr<number>(raw(`${compile(fragment)} - ${compile(toFragment(n))}`)),
-		mod: (n: number | Expr<number>) =>
-			makeExpr<number>(raw(`${compile(fragment)} % ${compile(toFragment(n))}`)),
+		//
+		// The result is always `CHNumber` rather than the operand's own type:
+		// ClickHouse promotes across the arithmetic operators (`UInt64 / UInt64`
+		// is a Float64), and `CHNumber` is the one codec that reads every numeric
+		// wire form either backend can send.
+		div: (n: number | Expr<number>) => arith(fragment, "/", n),
+		mul: (n: number | Expr<number>) => arith(fragment, "*", n),
+		add: (n: number | Expr<number>) => arith(fragment, "+", n),
+		sub: (n: number | Expr<number>) => arith(fragment, "-", n),
+		mod: (n: number | Expr<number>) => arith(fragment, "%", n),
 	}
 	return self
 }
@@ -222,8 +245,8 @@ export function makeColumnRef<Name extends string, ColType extends CHType<string
 			: {},
 		{
 			columnName: name as Name,
-			get(key: string): Expr<string> {
-				return makeExpr<string>(raw(`${name}[${compile(str(key))}]`))
+			get(key: string): Expr<any> {
+				return makeExpr<any>(raw(`${name}[${compile(str(key))}]`), columnType?.element?.schema)
 			},
 		},
 	) as ColumnRef<Name, ColType>
@@ -247,8 +270,11 @@ export function makeCond(fragment: SqlFragment, scopesTenant?: boolean): Conditi
 export function lit(value: string): Expr<string>
 export function lit(value: number): Expr<number>
 export function lit(value: string | number): Expr<string> | Expr<number> {
-	if (typeof value === "string") return makeExpr<string>(str(value))
-	return makeExpr<number>(raw(String(value)))
+	// A literal knows its own type, so it carries the matching codec. Without one
+	// a single `CH.lit("all")` in a SELECT cost the whole query its row schema —
+	// which is what it did across 200 selected expressions in Maple.
+	if (typeof value === "string") return makeExpr<string>(str(value), chString.schema)
+	return makeExpr<number>(raw(String(value)), CHNumber as Schema.Codec<number, any>)
 }
 
 // Subquery expressions
@@ -302,9 +328,15 @@ export function rawCond(sql: string): Condition {
 	return makeCond(raw(sql))
 }
 
-/** Create an Expr from a runtime column name (for dynamic column access). */
-export function dynamicColumn<T = string>(name: string): Expr<T> {
-	return makeExpr<T>(raw(name))
+/**
+ * An expression from a runtime column name — a `GROUP BY` alias referenced in
+ * `HAVING`, or a column of a source the builder cannot see.
+ *
+ * Pass the column type where you know it: without one the expression has no
+ * schema, and one unschema'd field stops the whole query deriving a row schema.
+ */
+export function dynamicColumn<T = string>(name: string, type?: CHType<string, T, any>): Expr<T> {
+	return makeExpr<T>(raw(name), type?.schema)
 }
 
 // Aliased expression — used by query compilation
