@@ -86,9 +86,16 @@ function useRetainedResult<A>(value: A): A {
 		next = null
 	}
 	if (AsyncResult.isAsyncResult(value) && AsyncResult.isSuccess(value)) {
-		// Compared by identity so a steady success does not queue a state write
-		// on every render.
-		if (next === null || next.result !== value) {
+		// Compared by identity, then by payload. Identity keeps a steady success
+		// from queueing a state write on every render; the payload check is the
+		// backstop for an atom rebuilt per render, whose fallback wraps the same
+		// retained payload in a fresh Success each time — writing state for those
+		// re-renders in a loop until React throws "Too many re-renders" (#301).
+		if (
+			next === null ||
+			(next.result !== value &&
+				(next.result.value !== value.value || next.result.timestamp !== value.timestamp))
+		) {
 			next = { orgId, result: value }
 		}
 	}
