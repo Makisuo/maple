@@ -1,5 +1,6 @@
 import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Tinybird } from "@tinybirdco/sdk"
+import { splitTerminalClauses } from "@maple-dev/clickhouse-builder/sql"
 import { Context, Effect, Layer, Option, Redacted } from "effect"
 import { WarehouseConfigError, type WarehouseQueryRequest } from "@maple/domain/http"
 import {
@@ -180,11 +181,14 @@ const createTinybirdSdkSqlClient = (
 				// queries already end with `FORMAT JSON` (profile SETTINGS are inserted
 				// before it by appendSettings) — appending a second FORMAT clause is a
 				// ClickHouse syntax error, so only add one when the query doesn't carry
-				// its own. The trailing-SETTINGS alternative covers SQL from callers that
-				// still emit the legacy `FORMAT JSON SETTINGS …` order.
-				const trimmed = sql.trimEnd().replace(/;$/, "")
-				const hasFormat = /\bFORMAT\s+\w+(\s+SETTINGS\s[^\n]*)?$/i.test(trimmed)
-				const jsonSql = hasFormat ? trimmed : `${trimmed}\nFORMAT JSON`
+				// its own.
+				const terminal = splitTerminalClauses(sql)
+				const jsonSql =
+					terminal.format !== undefined
+						? sql.trimEnd().replace(/;\s*$/, "")
+						: [terminal.body, terminal.settings, "FORMAT JSON"]
+								.filter((part) => part !== undefined)
+								.join("\n")
 				const limits = options?.responseLimits
 				// The SDK normally buffers through response.json(). Raw execution gets
 				// a fetch adapter that aborts before constructing an oversized Response.

@@ -843,6 +843,22 @@ describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
 		const sent = await captureSql("SELECT 1;")
 		assert.strictEqual(sent, "SELECT 1\nFORMAT JSON")
 	})
+
+	it("keeps the SETTINGS clause when appending FORMAT JSON", async () => {
+		const sent = await captureSql("SELECT 1\nSETTINGS max_threads=2")
+		assert.strictEqual(sent, "SELECT 1\nSETTINGS max_threads=2\nFORMAT JSON")
+	})
+
+	it("ignores a FORMAT that is only a column reference", async () => {
+		const sent = await captureSql("SELECT format FROM t")
+		assert.strictEqual(sent, "SELECT format FROM t\nFORMAT JSON")
+	})
+
+	it("ignores a FORMAT nested in a subquery", async () => {
+		const sent = await captureSql("SELECT * FROM (SELECT 1 FORMAT JSON) AS x")
+		assert.strictEqual(countFormats(sent), 2)
+		assert.match(sent, /FORMAT JSON$/)
+	})
 })
 
 describe("ingest routes writes to the managed pipeline, not a per-org read override", () => {

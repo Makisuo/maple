@@ -13,6 +13,7 @@ import type { CHUnionQuery } from "./union"
 import { createColumnAccessor, createJoinedColumnAccessor } from "./query"
 import { aliased } from "./expr"
 import { raw, ident, escapeClickHouseString, compile as compileSqlFragment } from "../sql/sql-fragment"
+import { splitTerminalClauses } from "../sql/terminal-clauses"
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
 import { Effect, Option, Schema } from "effect"
 
@@ -301,7 +302,7 @@ export function compileCH<
 		// owns formatting. Strips a trailing `\nFORMAT <fmt>` defensively.
 		const innerCompiled = compileUnion(state.fromUnion, params)
 		fromSourceScope = innerCompiled.tenantScope
-		const innerSql = innerCompiled.sql.replace(/\nFORMAT \w+$/, "")
+		const innerSql = splitTerminalClauses(innerCompiled.sql).body
 		fromFragment = raw(`(\n${innerSql}\n) AS ${state.fromQueryAlias}`)
 	} else if (state.tableAlias) {
 		fromFragment = raw(`${state.tableName} AS ${state.tableAlias}`)
