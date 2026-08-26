@@ -33,6 +33,15 @@ export class CompiledQueryDecodeError extends Schema.TaggedError<CompiledQueryDe
 	},
 ) {}
 
+export class CompiledQueryEncodeError extends Schema.TaggedError<CompiledQueryEncodeError>()(
+	"@maple-dev/clickhouse-builder/CompiledQueryEncodeError",
+	{
+		message: Schema.String,
+		rowIndex: Schema.Number,
+		cause: Schema.optional(Schema.Unknown),
+	},
+) {}
+
 /** `orderBy` takes `[column, direction]` tuples. A bare string is the natural
  *  mistake (`.orderBy("count", "desc")`), and it is invisible without types:
  *  destructuring a string yields its first two characters, so `"count"` used to
@@ -115,6 +124,29 @@ interface CompiledQueryBase<Output> {
 	readonly decodeFirstRow: (
 		rows: ReadonlyArray<Record<string, unknown>>,
 	) => Effect.Effect<Option.Option<Output>, CompiledQueryDecodeError>
+	/**
+	 * The other direction: decoded rows back to the wire shape ClickHouse sent.
+	 *
+	 * The row schema is a codec, so it runs backwards for free — and running it
+	 * backwards is what lets a surface hold the *good* value in memory and still
+	 * emit the byte-for-byte shape its own clients parse. A `DateTime` column
+	 * decoded to a `DateTime.Utc` re-encodes to `'YYYY-MM-DD hh:mm:ss'`, not to
+	 * ISO-8601, because that is what the column's codec says the wire form is.
+	 *
+	 * Without this the only way to keep a wire stable was to never parse it,
+	 * which is why Maple's warehouse tables declare `T.dateTimeString`: the
+	 * strings survive only because nothing decodes them. A query whose row
+	 * schema is `"none"` has no codec to reverse, so this returns the rows
+	 * unchanged — the same contract `decodeRows` has.
+	 */
+	// Method syntax, not a property with a function type, and deliberately:
+	// `Output` in a parameter position would make `CompiledQuery<Output>`
+	// invariant, and a builder that returns one of two row shapes for the same
+	// logical query — the usage query and its compare variant — could no longer
+	// be assigned to the wider of them. Method parameters stay bivariant.
+	encodeRows(
+		rows: ReadonlyArray<Output>,
+	): Effect.Effect<ReadonlyArray<Record<string, unknown>>, CompiledQueryEncodeError>
 }
 
 /**
@@ -173,6 +205,39 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 		).pipe(Effect.map((decodedRows) => decodedRows as ReadonlyArray<Output>))
 	}
 
+	let cachedEncodeRow: ((row: Output) => Effect.Effect<unknown, unknown, never>) | undefined
+	let encoderBuilt = false
+	const encodeRow = () => {
+		if (!encoderBuilt) {
+			encoderBuilt = true
+			const rowSchema = getRowSchema?.()
+			cachedEncodeRow = rowSchema
+				? (Schema.encodeUnknownEffect(rowSchema) as (
+						row: Output,
+					) => Effect.Effect<unknown, unknown, never>)
+				: undefined
+		}
+		return cachedEncodeRow
+	}
+
+	const encodeRows: CompiledQueryBase<Output>["encodeRows"] = (rows) => {
+		const encode = encodeRow()
+		if (!encode) return Effect.succeed(rows as ReadonlyArray<Record<string, unknown>>)
+
+		return Effect.forEach(rows, (row, index) =>
+			encode(row).pipe(
+				Effect.mapError(
+					(cause) =>
+						new CompiledQueryEncodeError({
+							message: `Compiled query row ${index} could not be encoded to its wire shape`,
+							rowIndex: index,
+							cause,
+						}),
+				),
+			),
+		).pipe(Effect.map((encoded) => encoded as ReadonlyArray<Record<string, unknown>>))
+	}
+
 	return {
 		sql,
 		tenantScope,
@@ -181,6 +246,7 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 		untypedColumns: rowSchemaSource === "none" ? untypedColumns : [],
 		...(!(routing === undefined) ? { routing } : undefined),
 		decodeRows,
+		encodeRows,
 		decodeFirstRow: (rows) => {
 			const row = rows[0]
 			if (row == null) return Effect.succeed(Option.none<Output>())

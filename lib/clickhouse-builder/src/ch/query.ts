@@ -271,8 +271,20 @@ export interface CHQuery<
 
 // Type utilities for extracting output types from queries
 
-/** Extract the Output type from a CHQuery. */
-export type InferQueryOutput<Q> = Q extends CHQuery<any, infer O, any> ? O : never
+/**
+ * Extract the Output type from a `CHQuery` or a `CHUnionQuery`.
+ *
+ * The union arm matters as much as the query arm: a builder returning
+ * `CHUnionQuery<Row>` used to infer `never` here, which reads as "this query
+ * has no output" rather than as the error it is, and quietly passed any
+ * type-level assertion made about it.
+ */
+export type InferQueryOutput<Q> =
+	Q extends CHQuery<any, infer O, any>
+		? O
+		: Q extends import("./union").CHUnionQuery<infer U extends Record<string, any>>
+			? U
+			: never
 
 // ColumnAccessor factory (Proxy-based)
 

@@ -216,6 +216,7 @@ export {
 	type TenantScope,
 	QueryBuilderError,
 	CompiledQueryDecodeError,
+	CompiledQueryEncodeError,
 } from "./compile"
 
 // Union

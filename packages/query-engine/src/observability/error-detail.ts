@@ -26,7 +26,7 @@ export interface ErrorDetailTrace {
 	readonly rootSpanName: string
 	readonly durationMs: number
 	readonly spanCount: number
-	readonly services: string[]
+	readonly services: readonly string[]
 	readonly startTime: string
 	readonly errorMessage: string
 	readonly logs: ReadonlyArray<{ timestamp: string; severityText: string; body: string }>
@@ -122,10 +122,12 @@ export const errorDetail = Effect.fn("Observability.errorDetail")(function* (inp
 				(t, i): ErrorDetailTrace => ({
 					traceId: t.traceId,
 					rootSpanName: t.rootSpanName,
-					durationMs: Number(t.durationMicros) / 1000,
-					spanCount: Number(t.spanCount),
-					services: t.services ?? [],
-					startTime: String(t.startTime),
+					// No `Number(...)` / `String(...)`: the row already decoded through
+					// the compiled query's schema, which is what coerces the wire form.
+					durationMs: t.durationMicros / 1000,
+					spanCount: t.spanCount,
+					services: t.services,
+					startTime: t.startTime,
 					errorMessage: t.errorMessage ?? "",
 					logs: pipe(
 						i < logsResults.length ? logsResults[i]!.data : [],

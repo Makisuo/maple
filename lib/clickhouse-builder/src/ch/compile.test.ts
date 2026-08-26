@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Option, Schema } from "effect"
+import { DateTime, Effect, Exit, Option, Schema } from "effect"
 import { CompiledQueryDecodeError, compileCH, unsafeCompiledQuery } from "./compile"
 import * as CH from "./index"
+import * as T from "./types"
 
 const RowNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
 
@@ -335,4 +336,67 @@ describe("CompiledQuery.tenantScope", () => {
 			}).tenantScope,
 		).toBe("cross-tenant")
 	})
+})
+
+describe("CompiledQuery.encodeRows", () => {
+	const Events = CH.table("events", {
+		OrgId: T.string,
+		Timestamp: T.dateTime64,
+		Name: T.string,
+		Count: T.uint64,
+	})
+
+	// The reason the round trip matters: a `DateTime` column is worth decoding —
+	// a `DateTime.Utc` is what you compute with — but a surface forwarding these
+	// rows onto its own wire has to emit ClickHouse's spelling, not ISO-8601.
+	// Re-encoding through the same codec gives back exactly what came in.
+	it.effect("returns a decoded row to the wire shape ClickHouse sent", () =>
+		Effect.gen(function* () {
+			const compiled = compileCH(
+				CH.from(Events)
+					.select(($) => ({ at: $.Timestamp, name: $.Name, count: $.Count }))
+					.where(($) => [$.OrgId.eq("org_1")]),
+				{},
+			)
+
+			const wire = [{ at: "2026-05-24 14:30:00", name: "checkout", count: "9007199254740993" }]
+			const decoded = yield* compiled.decodeRows(wire)
+			expect(DateTime.isDateTime(decoded[0]!.at)).toBe(true)
+
+			const reencoded = yield* compiled.encodeRows(decoded)
+			expect(reencoded[0]!.at).toBe("2026-05-24 14:30:00")
+			expect(reencoded[0]!.name).toBe("checkout")
+		}),
+	)
+
+	it.effect("fails on a row the schema cannot represent", () =>
+		Effect.gen(function* () {
+			const compiled = compileCH(
+				CH.from(Events)
+					.select(($) => ({ at: $.Timestamp }))
+					.where(($) => [$.OrgId.eq("org_1")]),
+				{},
+			)
+
+			const exit = yield* Effect.exit(compiled.encodeRows([{ at: "not a DateTime" } as never]))
+			expect(Exit.isFailure(exit)).toBe(true)
+		}),
+	)
+
+	// Same contract as `decodeRows`: with nothing to reverse, the rows pass
+	// through rather than the call becoming an error nobody can act on.
+	it.effect("passes rows through when the query has no row schema", () =>
+		Effect.gen(function* () {
+			const compiled = compileCH(
+				CH.from(Events)
+					.select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") }))
+					.where(($) => [$.OrgId.eq("org_1")]),
+				{},
+			)
+			expect(compiled.rowSchemaSource).toBe("none")
+
+			const rows = [{ name: "checkout", odd: 1 }]
+			expect(yield* compiled.encodeRows(rows)).toEqual(rows)
+		}),
+	)
 })
