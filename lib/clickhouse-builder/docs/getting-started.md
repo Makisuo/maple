@@ -108,8 +108,11 @@ const compiled = CH.compileUnsafe(query, params, {
 		}),
 	})
 
-const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))
+const result = await client.query({ query: compiled.sql, format: "JSONEachRow" })
+const rows = await Effect.runPromise(compiled.decodeRows(await result.json()))
 ```
+
+`client` is your own — see [Running a query](./running-queries.md) for the full example.
 
 Passing a `rowSchema` gets you real validation of what came back off the wire. Without one,
 `decodeRows` degrades to a pass-through cast and validates nothing — `compiled.rowSchemaSource`

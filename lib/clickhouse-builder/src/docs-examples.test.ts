@@ -17,6 +17,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Option, Schema } from "effect"
 import * as CH from "./ch/index"
 import * as T from "./ch/types"
+import { parseStatement, renderStatement, withSettings } from "./sql/statement"
 import { compileCHUnsafe, compileUnionUnsafe } from "./ch/compile"
 import { raw as rawFragment, compile as compileFragment } from "./sql/sql-fragment"
 
@@ -792,4 +793,27 @@ describe("docs/extending.md", () => {
 			expect(compiled.tenantScope).toBe("tenant")
 		}),
 	)
+})
+
+describe("docs/running-queries.md", () => {
+	const Events = CH.table("events", { OrgId: T.string, Name: T.string }, { tenantColumn: "OrgId" })
+
+	// The reason the guide tells you not to append `SETTINGS …` by hand: a query
+	// that already carries a FORMAT clause ends up with the two in the order
+	// ClickHouse rejects.
+	it("SETTINGS precede FORMAT whatever order you add them in", () => {
+		const compiled = compileCHUnsafe(
+			CH.from(Events)
+				.select(($) => ({ name: $.Name }))
+				.where(($) => [$.OrgId.eq("org_123")])
+				.format("JSON"),
+			{},
+		)
+
+		const statement = withSettings(parseStatement(compiled.sql), "SETTINGS max_execution_time = 30")
+
+		expect(statement.text.endsWith("SETTINGS max_execution_time = 30\nFORMAT JSON")).toBe(true)
+		// Total: a statement with no terminal clauses round-trips unchanged.
+		expect(renderStatement(parseStatement("SELECT 1")).trim()).toBe("SELECT 1")
+	})
 })

@@ -89,9 +89,14 @@ import { Effect } from "effect"
 const compiled = CH.compileUnsafe(query, { orgId: "org_123", startTime: "2026-01-01 00:00:00" })
 
 compiled.rowSchemaSource // "derived"
-const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))
+const result = await client.query({ query: compiled.sql, format: "JSONEachRow" })
+const rows = await Effect.runPromise(compiled.decodeRows(await result.json()))
 // -> ReadonlyArray<{ name: string; p95: number; count: number }>
 ```
+
+`client` is your own ClickHouse client — the builder brings none.
+[Running a query](./docs/running-queries.md) has the full loop and the wire settings that go
+with it.
 
 `count()` is a `UInt64`, which ClickHouse quotes and Tinybird does not — the
 column type accepts either, so the same code works against both backends. That
@@ -135,6 +140,7 @@ Full guides live in [`docs/`](./docs/README.md):
 | [Unions and CTEs](./docs/unions-and-ctes.md)               | `unionAll`, `fromUnion`, `withCTE`                             |
 | [Params and compilation](./docs/params-and-compilation.md) | `param.*`, how values reach the SQL, `CompiledQuery`           |
 | [Decoding results](./docs/decoding-results.md)             | `rowSchema`, `decodeRows`, decode errors                       |
+| [Running a query](./docs/running-queries.md)               | Executing the SQL with a real client, wire settings, `SETTINGS` |
 | [Tenant scoping](./docs/tenant-scoping.md)                 | `tenantColumn`, what marks a query scoped, `crossTenant()`     |
 | [Extending the DSL](./docs/extending.md)                   | `defineFn`, raw escape hatches, handwritten SQL                |
 | [API reference](./docs/reference.md)                       | Full export catalog by module, plus error types                |

@@ -24,6 +24,7 @@ Roughly in reading order.
 | [Unions and CTEs](./unions-and-ctes.md)               | `unionAll`, `fromUnion`, `withCTE`                                       |
 | [Params and compilation](./params-and-compilation.md) | `param.*`, how values reach the SQL, `CompiledQuery`                     |
 | [Decoding results](./decoding-results.md)             | `rowSchema`, `decodeRows`, `decodeFirstRow`, decode errors               |
+| [Running a query](./running-queries.md)               | Executing the SQL with a real client, wire settings, `SETTINGS`          |
 | [Tenant scoping](./tenant-scoping.md)                 | `tenantScope`, what marks a query scoped, `crossTenant()`                   |
 | [Extending the DSL](./extending.md)                   | `defineFn`, raw escape hatches, handwritten SQL                          |
 

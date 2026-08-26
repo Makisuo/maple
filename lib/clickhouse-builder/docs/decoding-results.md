@@ -6,8 +6,12 @@ rows back:
 ```ts
 import { Effect } from "effect"
 
-const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))
+const result = await client.query({ query: compiled.sql, format: "JSONEachRow" })
+const rows = await Effect.runPromise(compiled.decodeRows(await result.json()))
 ```
+
+[Running a query](./running-queries.md) has the whole loop, including the two ClickHouse wire
+settings the column types assume.
 
 ## The row schema is derived from the SELECT
 
