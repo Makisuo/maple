@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, DateTime, Effect, Exit, Option, Result, Schema } from "effect"
-import { CompiledQueryDecodeError, compileCHUnsafe, rawCompiledQuery } from "./compile"
+import {
+	CompiledQueryDecodeError,
+	compileCHUnsafe,
+	compileUnionUnsafe,
+	rawCompiledQuery,
+} from "./compile"
 import * as CH from "./index"
 import * as T from "./types"
 
@@ -65,6 +70,72 @@ describe("CompiledQuery.decodeRows", () => {
 			expect(Exit.isFailure(failure)).toBe(true)
 		}),
 	)
+
+	// The `Decoded extends Output` constraint already refuses a drifted schema
+	// wherever the SELECT's type is visible at the call site. What it cannot see
+	// is a schema whose own type has been erased — assembled from generic
+	// `Schema.Struct.Fields`, or exported as a `CompiledQueryRowSchema<any>` and
+	// handed to a builder typed `CHQuery<any, any, any>`. That is where drift
+	// survives to runtime, so that is the shape these tests declare.
+	const erased = <
+		Fields extends Schema.Struct.Fields & Record<PropertyKey, Schema.Codec<any, any, never, never>>,
+	>(
+		fields: Fields,
+	): Schema.Codec<any, any, never, never> => Schema.Struct(fields)
+
+	it("reports a declared schema that has drifted from the SELECT", () => {
+		const table = CH.table("events", { OrgId: CH.string, Status: CH.string, Count: CH.uint64 })
+		const compiled = compileCHUnsafe(
+			CH.from(table).select(($) => ({ status: $.Status, count: $.Count })),
+			{},
+			// A schema left behind by a SELECT that gained `count` and lost `name`.
+			{ rowSchema: erased({ status: Schema.String, name: Schema.String }) },
+		)
+
+		expect(compiled.rowSchemaSource).toBe("declared")
+		expect(compiled.rowSchemaMismatch).toEqual({ undeclared: ["count"], unselected: ["name"] })
+	})
+
+	it("stays silent when a declared schema only narrows", () => {
+		const table = CH.table("events", { OrgId: CH.string, Status: CH.string })
+		const compiled = compileCHUnsafe(
+			CH.from(table).select(($) => ({ status: $.Status })),
+			{},
+			{ rowSchema: Schema.Struct({ status: Schema.Literals(["ok", "error"]) }) },
+		)
+
+		// Same field, narrower type — the legitimate reason to declare one.
+		expect(compiled.rowSchemaMismatch).toBeUndefined()
+	})
+
+	it("has nothing to compare against an untyped SELECT", () => {
+		const table = CH.table("events", { OrgId: CH.string, Status: CH.string })
+		const compiled = compileCHUnsafe(
+			CH.from(table).select(($) => ({
+				status: $.Status,
+				whatever: CH.untypedExpr("anyLast(Something)"),
+			})),
+			{},
+			{ rowSchema: erased({ status: Schema.String, whatever: Schema.Number }) },
+		)
+
+		// Derivation is all-or-nothing, so there is no derived shape to disagree
+		// with — reporting every field as undeclared here would be noise.
+		expect(compiled.rowSchemaMismatch).toBeUndefined()
+	})
+
+	it("compares a union's declared schema against the branches", () => {
+		const table = CH.table("events", { OrgId: CH.string, Status: CH.string })
+		const branch = (status: string) =>
+			CH.from(table)
+				.select(($) => ({ status: $.Status }))
+				.where(($) => [$.OrgId.eq("org"), $.Status.eq(status)])
+		const compiled = compileUnionUnsafe(CH.unionAll(branch("ok"), branch("error")), {}, {
+			rowSchema: erased({ status: Schema.String, missing: Schema.String }),
+		})
+
+		expect(compiled.rowSchemaMismatch).toEqual({ undeclared: [], unselected: ["missing"] })
+	})
 
 	it.effect("decodes rows with the declared schema for handwritten SQL", () =>
 		Effect.gen(function* () {

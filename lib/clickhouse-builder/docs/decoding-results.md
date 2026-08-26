@@ -97,6 +97,23 @@ compiled.rowSchemaSource // "declared"
 The declared type must still be assignable to what the builder inferred, so a schema can sharpen
 the row but never contradict it.
 
+Replacing the derived schema is also how a declared one goes stale: the SELECT gains a column, or
+loses one, and the schema that no longer describes it keeps decoding — silently dropping the new
+value, or failing on the first row for a field the query stopped emitting. The builder holds both
+shapes at compile time, so it compares their field names and says so:
+
+```ts
+compiled.rowSchemaMismatch
+// { undeclared: ["count"], unselected: ["name"] }
+//   undeclared — the SELECT emits it, the declared schema does not describe it
+//   unselected — the declared schema demands it, the SELECT does not emit it
+```
+
+`undefined` means there is nothing to report: the names agree, no schema was declared, or the
+SELECT has an untyped expression and there is no derived shape to compare against. Only names are
+compared — narrowing a column's type is the point of declaring one, not drift. Assert it is
+`undefined` across your query catalog and a schema cannot fall behind its query unnoticed.
+
 _(Backed by `docs/decoding-results.md > The row schema is derived from the SELECT`,
 `> An untyped expression leaves the query undecoded`.)_
 

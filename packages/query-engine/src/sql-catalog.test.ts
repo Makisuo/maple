@@ -75,6 +75,26 @@ describe("sql catalog", () => {
 		)
 	})
 
+	// A declared schema replaces the derived one wholesale, so one that has
+	// fallen behind its SELECT keeps decoding — silently dropping a column it
+	// forgot, or failing on the first row for a field the query no longer emits.
+	// That is how a duplicate `serviceUsageRowSchema` sat seven columns behind
+	// the canonical export. The builder holds both shapes and compares their
+	// field names; this asserts the comparison is clean.
+	it("keeps every declared row schema in step with its SELECT", () => {
+		const drifted = entries
+			.filter((entry) => entry.compiled?.rowSchemaMismatch !== undefined)
+			.map((entry) => {
+				const mismatch = entry.compiled!.rowSchemaMismatch!
+				return `  ${entry.source}:${entry.name} — undeclared: [${mismatch.undeclared.join(", ")}] unselected: [${mismatch.unselected.join(", ")}]`
+			})
+
+		expect(
+			drifted,
+			`declared row schemas that no longer match their query:\n${drifted.join("\n")}`,
+		).toEqual([])
+	})
+
 	// Builders that read across every tenant on purpose. Each must declare
 	// `.crossTenant()` and run through `WarehouseQueryService.crossOrgQuery`, which
 	// records a justification on the span. This list should stay tiny — it is the

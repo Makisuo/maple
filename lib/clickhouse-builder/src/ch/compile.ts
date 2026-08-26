@@ -123,6 +123,22 @@ interface CompiledQueryBase<Output> {
 	 */
 	readonly untypedColumns: ReadonlyArray<string>
 	/**
+	 * How a *declared* row schema disagrees with the SELECT, when it does.
+	 *
+	 * A declared schema replaces the derived one wholesale, which is what makes
+	 * narrowing possible — and what makes drift invisible: a schema that has
+	 * fallen behind the query it describes still decodes, silently dropping the
+	 * columns it forgot and demanding ones the SELECT no longer emits. The
+	 * builder knows both shapes at compile time, so it says so here rather than
+	 * discarding the one it inferred.
+	 *
+	 * `undefined` when there is nothing to compare — no declared schema, or a
+	 * SELECT with an untyped expression, where derivation is all-or-nothing —
+	 * and when the two agree. Only field *names* are compared: a declared schema
+	 * narrowing a column's type is the legitimate use, not drift.
+	 */
+	readonly rowSchemaMismatch: RowSchemaMismatch | undefined
+	/**
 	 * Why this query is handwritten SQL, when it is — set only by
 	 * {@link rawCompiledQuery}, absent for a query the builder produced.
 	 *
@@ -215,6 +231,50 @@ export type CompiledQueryInput<Output, Routing extends string | undefined = stri
 	| CompiledQuery<Output, Routing>
 	| Effect.Effect<CompiledQuery<Output, Routing>, QueryBuilderError>
 
+/**
+ * A declared row schema's field names against the ones the SELECT emits.
+ *
+ * Both directions matter and they fail differently: an `undeclared` column is a
+ * value the query produces and nothing validates, while an `unselected` field
+ * is one the declared schema insists on and the query cannot supply — the
+ * second decodes as a hard `ParseError` the first time it runs.
+ */
+export interface RowSchemaMismatch {
+	/** Selected aliases the declared schema does not describe. */
+	readonly undeclared: ReadonlyArray<string>
+	/** Declared fields the SELECT does not emit. */
+	readonly unselected: ReadonlyArray<string>
+}
+
+/** The field names of a struct codec, or `undefined` if it is not one. */
+const structFieldNames = (schema: unknown): ReadonlyArray<string> | undefined => {
+	const ast = (schema as { readonly ast?: { readonly _tag?: string } } | undefined)?.ast
+	if (ast?._tag !== "Objects") return undefined
+	const signatures = (ast as { readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey }> })
+		.propertySignatures
+	return signatures?.map((signature) => String(signature.name))
+}
+
+/**
+ * Compare a declared schema against the derived one by field name.
+ *
+ * Silent — `undefined` — unless both are structs and the names differ. A
+ * declared schema that is not a struct (a codec wrapping one, a union) has no
+ * field list to read, and inventing a complaint from that would make the gate
+ * built on this untrustworthy.
+ */
+const compareRowSchemas = (declared: unknown, derived: unknown): RowSchemaMismatch | undefined => {
+	const declaredNames = structFieldNames(declared)
+	const derivedNames = structFieldNames(derived)
+	if (declaredNames === undefined || derivedNames === undefined) return undefined
+
+	const declaredSet = new Set(declaredNames)
+	const derivedSet = new Set(derivedNames)
+	const undeclared = derivedNames.filter((name) => !declaredSet.has(name))
+	const unselected = declaredNames.filter((name) => !derivedSet.has(name))
+	return undeclared.length === 0 && unselected.length === 0 ? undefined : { undeclared, unselected }
+}
+
 const makeCompiledQuery = <Output, Route extends string | undefined>(
 	sql: string,
 	tenantScope: TenantScope,
@@ -225,6 +285,7 @@ const makeCompiledQuery = <Output, Route extends string | undefined>(
 	route?: Route,
 	untypedColumns: ReadonlyArray<string> = [],
 	rawSql?: { readonly reason: string; readonly justification: string },
+	rowSchemaMismatch?: RowSchemaMismatch,
 ): CompiledQuery<Output, Route> => {
 	let cachedDecodeRow: ((row: unknown) => Effect.Effect<Output, unknown, never>) | undefined
 	let decoderBuilt = false
@@ -294,6 +355,7 @@ const makeCompiledQuery = <Output, Route extends string | undefined>(
 		},
 		rowSchemaSource,
 		untypedColumns: rowSchemaSource === "none" ? untypedColumns : [],
+		rowSchemaMismatch,
 		...(rawSql !== undefined ? { rawSql } : undefined),
 		...(!(route === undefined) ? { route } : undefined),
 		decodeRows,
@@ -666,6 +728,8 @@ function compileInner<
 		() => options?.rowSchema ?? (derivedSchema as CompiledQueryRowSchema<Decoded> | undefined),
 		state.routeValue as Route,
 		"untyped" in derived ? derived.untyped : [],
+		undefined,
+		options?.rowSchema === undefined ? undefined : compareRowSchemas(options.rowSchema, derivedSchema),
 	)
 }
 
@@ -869,6 +933,8 @@ export function compileUnionUnsafe<Output extends Record<string, any>, Params ex
 		() => options?.rowSchema ?? (derivedSchema as CompiledQueryRowSchema<Output> | undefined),
 		undefined,
 		derived && "untyped" in derived ? derived.untyped : [],
+		undefined,
+		options?.rowSchema === undefined ? undefined : compareRowSchemas(options.rowSchema, derivedSchema),
 	)
 }
 

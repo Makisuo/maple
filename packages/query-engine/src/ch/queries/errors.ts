@@ -82,9 +82,18 @@ export interface ErrorsSharedFilters {
 	deploymentEnvs?: readonly string[]
 	errorLabels?: readonly string[]
 	serviceVersions?: readonly string[]
+	excludedServices?: readonly string[]
+	excludedDeploymentEnvs?: readonly string[]
+	excludedErrorLabels?: readonly string[]
+	excludedServiceVersions?: readonly string[]
 }
 
-type ErrorsFilterDimension = keyof ErrorsSharedFilters
+/**
+ * A facet dimension, named by its *inclusion* field. Both polarities of one dimension share a name
+ * here on purpose: `except` has to drop a section's exclusions along with its inclusions, or the
+ * value you just excluded would count zero in the very section you excluded it from.
+ */
+type ErrorsFilterDimension = "services" | "deploymentEnvs" | "errorLabels" | "serviceVersions"
 
 const sharedFilterConditions = (
 	$: {
@@ -110,6 +119,18 @@ const sharedFilterConditions = (
 		: undefined,
 	opts.serviceVersions?.length && except !== "serviceVersions"
 		? CH.inList($.ServiceVersion, opts.serviceVersions)
+		: undefined,
+	opts.excludedServices?.length && except !== "services"
+		? CH.notInList($.ServiceName, opts.excludedServices)
+		: undefined,
+	opts.excludedDeploymentEnvs?.length && except !== "deploymentEnvs"
+		? CH.notInList($.DeploymentEnv, opts.excludedDeploymentEnvs)
+		: undefined,
+	opts.excludedErrorLabels?.length && except !== "errorLabels"
+		? CH.notInList($.ErrorLabel, opts.excludedErrorLabels)
+		: undefined,
+	opts.excludedServiceVersions?.length && except !== "serviceVersions"
+		? CH.notInList($.ServiceVersion, opts.excludedServiceVersions)
 		: undefined,
 ]
 

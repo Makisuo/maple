@@ -250,6 +250,7 @@ export {
 	type CompiledQuery,
 	type CompiledQueryInput,
 	type CompiledQueryRowSchema,
+	type RowSchemaMismatch,
 	type TenantScope,
 	CompiledQueryDecodeError,
 	CompiledQueryEncodeError,
