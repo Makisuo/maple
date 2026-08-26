@@ -55,7 +55,7 @@ import {
 } from "./queries/services"
 
 /** The output a query builder produces, for a function returning one. */
-type OutputOf<F extends (...args: never) => unknown> = InferQueryOutput<ReturnType<F>>
+type OutputOf<F extends (...args: never) => object> = InferQueryOutput<ReturnType<F>>
 
 /**
  * `true` only when two objects have exactly the same keys.
