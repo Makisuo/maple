@@ -1,3 +1,4 @@
+import { rawSqlIssue } from "@maple/domain/raw-sql"
 import { useId, useRef, useState } from "react"
 
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -43,7 +44,9 @@ export function RawSqlEditorPanel({
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	const editorId = useId()
 	const bucketInputId = `${editorId}-bucket`
-	const missingOrgFilter = !draft.sql.includes("$__orgFilter")
+	// The same static validation the server runs, so the inline hint matches the
+	// error a run would return instead of covering only the $__orgFilter rule.
+	const sqlIssue = rawSqlIssue(draft.sql)
 
 	const variablesContext = useDashboardVariablesOptional()
 	const variableNames = variablesContext?.variables.map((variable) => variable.name) ?? []
@@ -92,8 +95,10 @@ export function RawSqlEditorPanel({
 
 					<div className="flex-1" />
 
-					{missingOrgFilter && !collapsed && (
-						<span className="text-[11px] text-destructive">Missing $__orgFilter</span>
+					{sqlIssue !== null && !collapsed && (
+						<span className="text-[11px] text-destructive" title={sqlIssue.message}>
+							{sqlIssue.code === "MissingOrgFilter" ? "Missing $__orgFilter" : sqlIssue.message}
+						</span>
 					)}
 				</div>
 
@@ -192,7 +197,7 @@ export function RawSqlEditorPanel({
 			{(onRunPreview || targetLabel || widget) && (
 				<div className="flex items-center gap-3">
 					{onRunPreview && (
-						<Button size="sm" onClick={onRunPreview} disabled={missingOrgFilter}>
+						<Button size="sm" onClick={onRunPreview} disabled={sqlIssue !== null}>
 							Run Preview
 						</Button>
 					)}

@@ -1,3 +1,4 @@
+import { rawSqlIssue } from "@maple/domain/raw-sql"
 import { rawSqlDisplayTypeFor, widgetTypeByVisualization } from "@maple/domain/http"
 import type { RawSqlDisplayType, WidgetDataSourceSchema } from "@maple/domain/http"
 import { dataSourceQuerySet, dataSourceTransform, makeRawSqlDataSource } from "@maple/widgets/dashboard"
@@ -63,9 +64,18 @@ export function withScalarReduction(dataSource: WidgetDataSource, isScalar: bool
 	} as WidgetDataSource
 }
 
-export function validateRawSqlMacro(sql: string): string | null {
-	if (!sql.includes("$__orgFilter")) {
-		return "Raw SQL must reference $__orgFilter so the query is scoped to your org. Add `WHERE $__orgFilter` (or `AND $__orgFilter`) to the query."
-	}
-	return null
+/**
+ * Static raw-SQL validation for the widget tools.
+ *
+ * Delegates to the shared `rawSqlIssue` — this used to check `$__orgFilter` and
+ * nothing else, so an agent could save a widget whose SQL was deny-listed, held
+ * a SETTINGS clause, or was several statements, and it failed only when someone
+ * opened the dashboard.
+ */
+export function validateRawSql(sql: string): string | null {
+	const issue = rawSqlIssue(sql)
+	if (issue === null) return null
+	return issue.code === "MissingOrgFilter"
+		? `${issue.message} Add \`WHERE $__orgFilter\` (or \`AND $__orgFilter\`) to the query.`
+		: issue.message
 }

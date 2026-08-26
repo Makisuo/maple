@@ -1,3 +1,5 @@
+import { RAW_SQL_ENDPOINT } from "@maple/widgets/dashboard"
+import { RawSqlText } from "../../raw-sql"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema, SchemaGetter } from "effect"
 import {
@@ -219,18 +221,41 @@ const V2QueryDataSource = Schema.Struct({
 
 const V2RawSqlDataSource = Schema.Struct({
 	kind: Schema.Literal("raw_sql"),
-	sql: Schema.String,
+	// Validated here because this is the write boundary: nothing else on the v2
+	// dashboard path checked the SQL, so a widget with a deny-listed statement or
+	// a SETTINGS clause saved fine and failed when the board was opened.
+	sql: RawSqlText,
 	displayType: optional(Schema.String),
 	granularitySeconds: optional(Schema.Number),
 	transform: optional(V2WidgetTransform),
 }).pipe(Schema.encodeKeys({ displayType: "display_type", granularitySeconds: "granularity_seconds" }))
 
+// Raw SQL has one door: the `raw_sql` arm. The route arm could carry it too —
+// `dataSourceRawSql` still reads `params.sql` under the pre-v3 `raw_sql_chart`
+// endpoint — which meant a second, unvalidated way to store a query. Refused
+// here rather than validated, because an audit of production found 193 raw-SQL
+// widgets and not one using this form: nothing has ever come through it, so
+// closing it breaks no client and no stored document.
+//
+// `endpoint` stays `Schema.String` otherwise. Closing it to a literal set would
+// make a document naming a route this build does not know fail to decode, and
+// `parsePayload` turns that into a hard error on the writable path — one stale
+// route name would lock a whole dashboard out of editing.
 const V2RouteDataSource = Schema.Struct({
 	kind: Schema.Literal("route"),
 	endpoint: Schema.String,
 	params: optional(UnknownRecord),
 	transform: optional(V2WidgetTransform),
-})
+}).check(
+	// Returns the message rather than `false`: a filter's `description` is not
+	// what surfaces on failure, the returned string is.
+	Schema.makeFilter(
+		(value) =>
+			value.endpoint !== RAW_SQL_ENDPOINT ||
+			`Raw SQL is not a route endpoint. Use { "kind": "raw_sql", "sql": … } instead of endpoint "${RAW_SQL_ENDPOINT}".`,
+		{ description: "a route endpoint that is not raw SQL" },
+	),
+)
 
 const V2StaticDataSource = Schema.Struct({
 	kind: Schema.Literal("static"),

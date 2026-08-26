@@ -19,6 +19,7 @@
 		"./permission": "./src/permission.ts",
 		"./primitives": "./src/primitives.ts",
 		"./query-engine": "./src/query-engine.ts",
+		"./raw-sql": "./src/raw-sql.ts",
 		"./recommendations": "./src/recommendations.ts",
 		"./setup-audit": "./src/setup-audit.ts",
 		"./system-agents": "./src/system-agents.ts",

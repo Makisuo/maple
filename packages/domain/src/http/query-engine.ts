@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import { MAX_RAW_SQL_LENGTH } from "../raw-sql"
 import { RawSqlDisplayType } from "@maple/widgets"
 import {
 	CommitSha,
@@ -1747,12 +1748,16 @@ export {
 // re-exported here so `@maple/domain/http` keeps its existing surface.
 export { RawSqlDisplayType }
 
-export const MAX_RAW_SQL_LENGTH = 32_768
-export const MAX_RAW_SQL_RESULT_ROWS = 1_000
-export const MAX_RAW_SQL_RESULT_BYTES = 5_000_000
-export const MAX_RAW_SQL_CELL_LENGTH = 64_000
-export const MAX_RAW_SQL_ALERT_GROUPS = 100
-export const MAX_RAW_SQL_GROUP_KEY_LENGTH = 256
+// Defined alongside the static validator that enforces them; re-exported here
+// so `@maple/domain/http` keeps its existing surface.
+export {
+	MAX_RAW_SQL_ALERT_GROUPS,
+	MAX_RAW_SQL_CELL_LENGTH,
+	MAX_RAW_SQL_GROUP_KEY_LENGTH,
+	MAX_RAW_SQL_LENGTH,
+	MAX_RAW_SQL_RESULT_BYTES,
+	MAX_RAW_SQL_RESULT_ROWS,
+} from "../raw-sql"
 
 export class RawSqlExecuteRequest extends Schema.Class<RawSqlExecuteRequest>("RawSqlExecuteRequest")({
 	sql: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_RAW_SQL_LENGTH)),
