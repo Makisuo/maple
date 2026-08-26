@@ -124,17 +124,14 @@ function Verdict({
 						</p>
 					</>
 				) : verdict.status === "attention" ? (
-					<>
-						<p className="flex items-baseline gap-x-2 font-semibold text-lg">
-							<VerdictDot className="bg-severity-warn" />
-							<span>
-								Completed, with {findingCount} {findingCount === 1 ? "finding" : "findings"}
-							</span>
-						</p>
-						<p className="pl-[1.375rem] text-muted-foreground text-sm">
-							The final {turnWord} closed cleanly; what looked off is listed below.
-						</p>
-					</>
+					// No subline: the findings right below are the explanation, and a
+					// sentence pointing at them said nothing the layout doesn't.
+					<p className="flex items-baseline gap-x-2 font-semibold text-lg">
+						<VerdictDot className="bg-severity-warn" />
+						<span>
+							Completed, with {findingCount} {findingCount === 1 ? "finding" : "findings"}
+						</span>
+					</p>
 				) : (
 					<>
 						<p className="flex items-baseline gap-x-2 font-semibold text-lg">
