@@ -45,6 +45,56 @@ const makeLayer = (executor: WarehouseExecutorApi) => Layer.succeed(WarehouseExe
 
 const traceIds = (n: number) => Array.from({ length: n }, (_, i) => `trace-${i}`)
 
+/**
+ * A complete `session_replays` detail row.
+ *
+ * Complete because the compiled query now derives a row schema from its SELECT
+ * and decodes against it, so a partial fixture fails the same way a warehouse
+ * that stopped returning a column would — which is the point. These tests are
+ * about control flow, so they override only the fields they steer on.
+ */
+const sessionRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+	version: 2,
+	sessionId: "s1",
+	startTime: "2026-01-01 00:00:00",
+	endTime: "2026-01-01 00:05:00",
+	durationMs: 300_000,
+	status: "completed",
+	userId: "u1",
+	urlInitial: "https://app.example.com/",
+	userAgent: "Mozilla/5.0",
+	browserName: "Chrome",
+	osName: "macOS",
+	deviceType: "desktop",
+	country: "DE",
+	serviceName: "web",
+	pageViews: 3,
+	clickCount: 7,
+	errorCount: 0,
+	traceIds: [],
+	resourceAttributes: "{}",
+	visitorId: "v1",
+	visitorIsNew: 0,
+	userEmail: "",
+	userName: "",
+	groupId: "",
+	groupName: "",
+	userTraits: "{}",
+	referrer: "",
+	referrerHost: "",
+	utmSource: "",
+	utmMedium: "",
+	utmCampaign: "",
+	utmTerm: "",
+	utmContent: "",
+	host: "app.example.com",
+	entryPath: "/",
+	exitPath: "/pricing",
+	language: "en",
+	lastActivityAt: "2026-01-01 00:05:00",
+	...overrides,
+})
+
 /** The recorded SQL for the query that reads `table`, if it ran. */
 const sqlFor = (captured: Captured, table: string) => captured.sqls.find((s) => s.includes(table))
 
@@ -69,7 +119,9 @@ describe("getSessionTraces", () => {
 			const captured: Captured = { sqls: [] }
 			const out = yield* getSessionTraces({ sessionId: "s1" }).pipe(
 				Effect.provide(
-					makeLayer(makeExecutor(captured, { detail: [{ sessionId: "s1", traceIds: [] }] })),
+					makeLayer(
+						makeExecutor(captured, { detail: [sessionRow({ sessionId: "s1", traceIds: [] })] }),
+					),
 				),
 			)
 
@@ -88,7 +140,7 @@ describe("getSessionTraces", () => {
 				Effect.provide(
 					makeLayer(
 						makeExecutor(captured, {
-							detail: [{ sessionId: "s1", traceIds: [] }],
+							detail: [sessionRow({ sessionId: "s1", traceIds: [] })],
 							activity: [{ sessionId: "s1", activeTimeMs: 21500, idleTimeMs: 8500 }],
 						}),
 					),
@@ -107,7 +159,9 @@ describe("getSessionTraces", () => {
 			const out = yield* getSessionTraces({ sessionId: "s1" }).pipe(
 				Effect.provide(
 					makeLayer(
-						makeExecutor(captured, { detail: [{ sessionId: "s1", traceIds: traceIds(150) }] }),
+						makeExecutor(captured, {
+							detail: [sessionRow({ sessionId: "s1", traceIds: traceIds(150) })],
+						}),
 					),
 				),
 			)
@@ -125,7 +179,9 @@ describe("getSessionTraces", () => {
 			yield* getSessionTraces({ sessionId: "s1", limit: 999 }).pipe(
 				Effect.provide(
 					makeLayer(
-						makeExecutor(captured, { detail: [{ sessionId: "s1", traceIds: traceIds(150) }] }),
+						makeExecutor(captured, {
+							detail: [sessionRow({ sessionId: "s1", traceIds: traceIds(150) })],
+						}),
 					),
 				),
 			)

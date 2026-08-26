@@ -34,7 +34,7 @@ export type { ResolvedWarehouseConfig } from "./backend"
  * An ingest-routed compiled query skips tenant route resolution entirely, so
  * its type excludes the configuration failures that only that lookup can emit.
  */
-export type CompiledQueryError<Routing extends "ingest" | undefined> = Routing extends "ingest"
+export type CompiledQueryError<Routing extends string | undefined> = Routing extends "ingest"
 	? ManagedWarehouseError
 	: WarehouseCompiledQueryError
 
@@ -154,7 +154,7 @@ export interface WarehouseQueryServiceApi {
 	) => Effect.Effect<WarehouseQueryResponse, WarehouseCompiledQueryError | WarehouseValidationError>
 	/**
 	 * Execute a query that deliberately spans every tenant. The compiled query
-	 * must declare `.crossOrg()`, and `justification` is recorded on the span so
+	 * must declare `.crossTenant()`, and `justification` is recorded on the span so
 	 * cross-tenant reads are auditable from the traces.
 	 *
 	 * There is deliberately no general `sqlQuery(tenant, sql)` on this shape:
@@ -176,7 +176,7 @@ export interface WarehouseQueryServiceApi {
 		WarehouseExecutionError | RawSqlValidationError
 	>
 	readonly compiledQuery: {
-		<T, Routing extends "ingest" | undefined>(
+		<T, Routing extends string | undefined>(
 			tenant: ExecutionTenant,
 			compiled: CompiledQuery<T, Routing>,
 			options?: SqlQueryOptions,

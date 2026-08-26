@@ -49,7 +49,7 @@ describe("serviceExternalEdgesSQL", () => {
 		// The outer query carries no OrgId predicate of its own — both branches do.
 		// The `NOT IN (…)` subquery is scoped too, but a subquery never confines
 		// its outer scan, so it must not be what makes this pass.
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("tenant")
 	})
 
 	it("suppresses internal-service overlap only for http targets", () => {
@@ -318,7 +318,7 @@ describe("serviceDependenciesSQL", () => {
 
 	it("derives tenant scope from its branches rather than asserting it", () => {
 		// The outer query has no OrgId predicate — every union branch carries one.
-		expect(serviceDependenciesSQL({}, baseParams).tenantScope).toBe("org")
+		expect(serviceDependenciesSQL({}, baseParams).tenantScope).toBe("tenant")
 	})
 })
 
@@ -344,14 +344,14 @@ describe("serviceMapEdgeJoinQuery", () => {
 	it("filters OrgId on both join sides, so the scope is derived", () => {
 		const compiled = compiledRollup()
 		expect(compiled.sql.match(/OrgId = 'org_1'/g)).toHaveLength(2)
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("tenant")
 	})
 
 	it("pushes a source-service filter into the parent subquery, not the outer WHERE", () => {
 		const { sql } = compileCH(
 			serviceMapEdgeJoinQuery({
-				rangeStart: toDateTime(param.dateTime("hourStart")),
-				rangeEnd: toDateTime(param.dateTime("hourEnd")),
+				rangeStart: toDateTime(param.dateTimeString("hourStart")),
+				rangeEnd: toDateTime(param.dateTimeString("hourEnd")),
 				parentServiceName: "web",
 			}),
 			{ orgId: "org_1", hourStart: "2024-01-01 10:00:00", hourEnd: "2024-01-01 11:00:00" },

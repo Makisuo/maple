@@ -24,13 +24,18 @@ flow from here into the select callback, the output row shape, and join accessor
 import * as CH from "@maple-dev/clickhouse-builder"
 import * as T from "@maple-dev/clickhouse-builder/types"
 
-const Events = CH.table("events", {
-	OrgId: T.string,
-	Name: T.string,
-	Timestamp: T.dateTime,
-	DurationMs: T.uint64,
-	Attributes: T.map(T.string, T.string),
-})
+const Events = CH.table(
+	"events",
+	{
+		OrgId: T.string,
+		Name: T.string,
+		Timestamp: T.dateTime,
+		DurationMs: T.uint64,
+		Attributes: T.map(T.string, T.string),
+	},
+	// `OrgId` carries row-level tenancy, so filtering on it marks a query scoped.
+	{ tenantColumn: "OrgId" },
+)
 ```
 
 This declares the shape you intend to query; it does not create or validate anything against a

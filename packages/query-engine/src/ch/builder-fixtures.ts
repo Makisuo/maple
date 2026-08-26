@@ -717,8 +717,8 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		compile: () =>
 			CH.compile(
 				CH.serviceMapEdgeJoinQuery({
-					rangeStart: CH.toDateTime(CH.param.dateTime("hourStart")),
-					rangeEnd: CH.toDateTime(CH.param.dateTime("hourEnd")),
+					rangeStart: CH.toDateTime(CH.param.dateTimeString("hourStart")),
+					rangeEnd: CH.toDateTime(CH.param.dateTimeString("hourEnd")),
 				}).format("JSON"),
 				{ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME },
 			),
@@ -731,8 +731,8 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		compile: () =>
 			CH.compile(
 				CH.serviceMapEdgeJoinQuery({
-					rangeStart: CH.toDateTime(CH.param.dateTime("hourStart")),
-					rangeEnd: CH.toDateTime(CH.param.dateTime("hourEnd")),
+					rangeStart: CH.toDateTime(CH.param.dateTimeString("hourStart")),
+					rangeEnd: CH.toDateTime(CH.param.dateTimeString("hourEnd")),
 					deploymentEnv: "production",
 					parentServiceName: "web",
 				}).format("JSON"),

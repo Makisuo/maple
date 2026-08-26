@@ -3,6 +3,7 @@ import { compile } from "../index"
 import { compile as compileFragment } from "@maple-dev/clickhouse-builder/sql"
 import * as CH from "../index"
 import { edgeCondition, hourGrain, interiorBounds, interiorConditions, minuteGrain } from "./rollup-splice"
+import { paramPlaceholder } from "@maple-dev/clickhouse-builder"
 
 // These pin the tiling invariant: the raw edge and the aggregate interior must
 // cover the window exactly once. Getting it wrong does not raise — it inflates
@@ -84,9 +85,9 @@ describe("rollup splice boundaries", () => {
 	})
 
 	it("emits placeholders that survive to compile time", () => {
-		// The fragments embed __PARAM_*__ rather than literals, so a compiled
-		// query resolves them once at the outer compile() call.
-		expect(hourGrain.startDt).toContain("__PARAM_startTime__")
+		// The fragments embed param placeholders rather than literals, so a
+		// compiled query resolves them once at the outer compile() call.
+		expect(hourGrain.startDt).toContain(paramPlaceholder("dateTime", "startTime"))
 		const sql = whereSql([edgeCondition("Hour")])
 		expect(sql).not.toContain("__PARAM_")
 		expect(sql).toContain("2026-01-01 10:30:00")

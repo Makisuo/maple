@@ -4,6 +4,32 @@ Two brands flow through the DSL. An **`Expr<T>`** is anything that evaluates to 
 column, a literal, a function call. A **`Condition`** is a boolean predicate, which is what
 `where` collects. Comparison methods turn an `Expr` into a `Condition`.
 
+## How a value becomes a literal
+
+Comparing a column against a plain value encodes that value through the column's own type, so
+the literal is whatever ClickHouse expects for *that* column rather than whatever the JavaScript
+value looks like:
+
+```ts
+$.Attributes.eq({ "http.method": "GET" }) // Attributes = map('http.method', 'GET')
+$.Tags.eq(["a", "b"])                     // Tags = ['a', 'b']
+$.Live.eq(true)                           // Live = 1
+$.Note.eq(null)                           // Note = NULL
+$.Timestamp.gte(new Date(...))            // Timestamp >= '2026-01-01 00:00:00'
+```
+
+A value the column cannot hold fails while the SQL is being built:
+
+```ts
+$.Count.eq("lots")
+// QueryBuilderError { code: "InvalidLiteral" }: column Count: string "lots" is not a valid value
+```
+
+Expressions with no type to read — `rawExpr`, `dynamicColumn` — fall back to guessing from the
+JavaScript value, which handles strings, numbers, booleans and dates but nothing structured.
+
+_(Backed by `src/ch/literal.test.ts`.)_
+
 ## Comparisons
 
 Every `Expr<T>` carries:

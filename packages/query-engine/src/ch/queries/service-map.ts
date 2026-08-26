@@ -102,7 +102,7 @@ const sampleWeightExpr = (traceState: CH.Expr<string>) =>
  *
  * Returns the joined query with `p` as the main source and `c` as the joined
  * alias, before any SELECT — callers pick the output shape. Both sides filter
- * `OrgId`, so anything built on this derives `tenantScope: "org"` without the
+ * `OrgId`, so anything built on this derives `tenantScope: "tenant"` without the
  * outer query having to repeat the predicate.
  *
  * `parentServiceName` is pushed into the parent subquery rather than the outer
@@ -178,7 +178,7 @@ function serviceMapEdgeJoinSource(opts: {
  *
  * This used to be a SQL-string builder taking an optional `orgId` that degraded
  * to an empty filter for a backfill script — i.e. a join across every tenant's
- * spans, wrapped by both callers in `unsafeCompiledQuery({ tenantScope: "org" })`
+ * spans, wrapped by both callers in `unsafeCompiledQuery({ tenantScope: "tenant" })`
  * so an omitted org id would have been positively ASSERTED as scoped and sailed
  * through the executor's gate. The org filter is now structural: it comes from
  * `param.string("orgId")` inside the join source, and the scope is derived. A
@@ -281,8 +281,8 @@ export function serviceDependenciesQueryBase(opts: { serviceName?: string; deplo
 	const envFilterMv = (deploymentEnv: CH.Expr<string>) =>
 		opts.deploymentEnv ? deploymentEnv.eq(opts.deploymentEnv) : undefined
 
-	const startDateTime = CH.toDateTime(param.dateTime("startTime"))
-	const endDateTime = CH.toDateTime(param.dateTime("endTime"))
+	const startDateTime = CH.toDateTime(param.dateTimeString("startTime"))
+	const endDateTime = CH.toDateTime(param.dateTimeString("endTime"))
 	const startHour = CH.toStartOfHour(startDateTime)
 	const endHour = CH.toStartOfHour(endDateTime)
 	const firstHourBoundary = CH.if_(
@@ -476,8 +476,8 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
-			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-			$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
+			$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
 			$.DbSystem.neq(""),
 			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
 		])
@@ -505,8 +505,8 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 			// time, so this keeps the raw in-progress-hour branch consistent and
 			// avoids phantom edges from unnamed spans.
 			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : $.ServiceName.neq(""),
-			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			$.SpanKind.in_("Client", "Producer"),
 			dbSystemExpr($).neq(""),
 			opts.deploymentEnv ? deploymentEnvExpr($.ResourceAttributes).eq(opts.deploymentEnv) : undefined,
@@ -694,8 +694,8 @@ const signaturesHourlyFilters = (
 	params: ServiceDbQuerySummaryParams,
 ) => [
 	$.OrgId.eq(param.string("orgId")),
-	$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-	$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+	$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
+	$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
 	$.DbSystem.eq(params.dbSystem),
 	// `undefined` = unscoped; `''` is a real value (the legacy/unknown node).
 	// Collapse sealed hex → sentinel so a `dbNamespace: "hyperdrive"` filter also
@@ -726,9 +726,9 @@ const serviceDbRawFilters = (
 ) => [
 	$.OrgId.eq(param.string("orgId")),
 	scope === "currentHour"
-		? $.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime"))))
-		: $.Timestamp.gte(CH.toDateTime(param.dateTime("startTime"))),
-	$.Timestamp.lte(CH.toDateTime(param.dateTime("endTime"))),
+		? $.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime"))))
+		: $.Timestamp.gte(CH.toDateTime(param.dateTimeString("startTime"))),
+	$.Timestamp.lte(CH.toDateTime(param.dateTimeString("endTime"))),
 	$.SpanKind.in_("Client", "Producer"),
 	$.ServiceName.neq(""),
 	dbSystemExpr($).eq(params.dbSystem),
@@ -1019,8 +1019,8 @@ export function serviceExternalEdgesSQL(
 	opts: ServiceExternalEdgesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
 ): CompiledQuery<ServiceExternalEdgesOutput> {
-	const startHour = CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))
-	const endHour = CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))
+	const startHour = CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))
+	const endHour = CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))
 
 	// Hourly branch: sealed buckets from the MV-fed table. Carries `bucket*`
 	// aliases so the outer aggregate can't collide with inner ones (same
@@ -1098,7 +1098,7 @@ export function serviceExternalEdgesSQL(
 				$.OrgId.eq(param.string("orgId")),
 				$.ServiceName.eq(opts.serviceName),
 				$.Timestamp.gte(endHour),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 				CH.inList($.SpanKind, ["Client", "Producer"]),
 				attr("db.system.name").eq(""),
 				attr("server.address")
@@ -1228,8 +1228,8 @@ export function servicePlatformsSQL(
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.ServiceName.neq(""),
 			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
 		])

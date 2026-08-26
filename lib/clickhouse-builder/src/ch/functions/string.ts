@@ -2,16 +2,17 @@ import { defineFn, compileFnCall } from "../define-fn"
 import { makeCond } from "../expr"
 import { compile, raw, str } from "../../sql/sql-fragment"
 import type { Condition, Expr } from "../expr"
+import * as T from "../types"
 
 // Standard string functions (defineFn one-liners)
 
-export const toString_ = defineFn<[Expr<any>], string>("toString")
-export const length_ = defineFn<[Expr<string>], number>("length")
-export const lower_ = defineFn<[Expr<string>], string>("lower")
+export const toString_ = defineFn<[Expr<any>], string>("toString", T.string)
+export const length_ = defineFn<[Expr<string>], number>("length", T.uint64)
+export const lower_ = defineFn<[Expr<string>], string>("lower", T.string)
 export const positionCaseInsensitive = defineFn<[Expr<string>, Expr<string>], number>(
 	"positionCaseInsensitive",
 )
-export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left")
+export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left", T.string)
 
 // URL functions
 //
@@ -22,9 +23,9 @@ export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left")
 // query-parameter PII. `cutQueryString` is the variant that keeps scheme and
 // host, for when the full URL minus its query is wanted.
 
-export const domain_ = defineFn<[Expr<string>], string>("domain")
-export const path_ = defineFn<[Expr<string>], string>("path")
-export const cutQueryString = defineFn<[Expr<string>], string>("cutQueryString")
+export const domain_ = defineFn<[Expr<string>], string>("domain", T.string)
+export const path_ = defineFn<[Expr<string>], string>("path", T.string)
+export const cutQueryString = defineFn<[Expr<string>], string>("cutQueryString", T.string)
 
 // Mixed Expr + literal args (compileFnCall wrappers)
 

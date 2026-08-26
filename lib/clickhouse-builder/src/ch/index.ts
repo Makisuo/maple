@@ -5,9 +5,12 @@ export {
 	type CHType,
 	type CHString,
 	type CHUInt8,
+	type CHBool,
 	type CHUInt64,
 	type CHFloat64,
 	type CHDateTime,
+	type CHDateTimeString,
+	type CHDateTime64String,
 	type CHDateTime64,
 	type CHMap,
 	type CHArray,
@@ -18,17 +21,21 @@ export {
 	type NullableColumnDefs,
 	string,
 	uint8,
+	bool,
 	uint64,
 	float64,
 	dateTime,
 	dateTime64,
+	dateTimeString,
+	dateTime64String,
 	map,
 	array,
 	nullable,
+	custom,
 } from "./types"
 
 // Table
-export { type Table, table } from "./table"
+export { type Table, type TableOptions, table } from "./table"
 
 // Core expression primitives
 export {
@@ -158,7 +165,7 @@ export {
 } from "./functions"
 
 // Params
-export { param, type ParamMarker } from "./param"
+export { param, paramPlaceholder, type ParamKind, type ParamMarker } from "./param"
 
 // Query builder
 export {

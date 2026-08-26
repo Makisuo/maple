@@ -887,6 +887,11 @@ const scanRow = (overrides: Record<string, unknown> = {}): Record<string, unknow
 	topFrame: "checkout/handler.ts:42",
 	count: 3,
 	affectedServicesCount: 1,
+	// The compiled query derives its row schema from the SELECT now, so a fixture
+	// missing a column fails the same way a warehouse that stopped returning one
+	// would. Empty by default: most of these tests are not about build sets, and
+	// a version here would put them on the pre-fix-build path.
+	serviceVersions: [],
 	firstSeen: formatWarehouseDateTime(TICK_MS - 120_000),
 	lastSeen: formatWarehouseDateTime(TICK_MS - 60_000 - 1_000),
 	...overrides,

@@ -79,8 +79,8 @@ export function auditAttributeKeyInventoryQuery(opts: { limit?: number } = {}) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			CH.inList($.AttributeScope, ["span", "resource", "log", "metric"]),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("scope", "attributeKey")
 		.orderBy(["usageCount", "desc"])
@@ -267,8 +267,8 @@ export function auditMetricLabelCardinalityQuery(opts: { limit?: number } = {}) 
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.AttributeScope.eq("metric"),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("attributeKey")
 		.orderBy(["valueCardinality", "desc"])
@@ -315,8 +315,8 @@ export function auditPeerValueInventoryQuery(opts: { limit?: number } = {}) {
 			$.OrgId.eq(param.string("orgId")),
 			$.AttributeScope.eq("span"),
 			CH.inList($.AttributeKey, [...AUDIT_PEER_KEYS]),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.AttributeValue.neq(""),
 		])
 		.groupBy("attributeKey", "attributeValue")
@@ -407,10 +407,10 @@ export function auditLogCorrelationQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimestampTime.gte(param.dateTime("startTime")),
-			$.TimestampTime.lte(param.dateTime("endTime")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.TimestampTime.gte(param.dateTimeString("startTime")),
+			$.TimestampTime.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.orderBy(["logCount", "desc"])
@@ -513,8 +513,8 @@ export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQue
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("childStart")),
-			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.Timestamp.gte(param.dateTimeString("childStart")),
+			$.Timestamp.lt(param.dateTimeString("childEnd")),
 			$.ParentSpanId.neq(""),
 			modulusFilter($.TraceId, modulus),
 		])
@@ -523,8 +523,8 @@ export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQue
 		.select(($) => ({ TraceId: $.TraceId, SpanId: $.SpanId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("parentStart")),
-			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.Timestamp.gte(param.dateTimeString("parentStart")),
+			$.Timestamp.lt(param.dateTimeString("childEnd")),
 			modulusFilter($.TraceId, modulus),
 		])
 
@@ -601,8 +601,8 @@ export function auditRootlessTracesSQL(params: AuditTraceWindowParams): Compiled
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("childStart")),
-			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.Timestamp.gte(param.dateTimeString("childStart")),
+			$.Timestamp.lt(param.dateTimeString("childEnd")),
 			modulusFilter($.TraceId, modulus),
 		])
 		.groupBy("TraceId")
@@ -611,8 +611,8 @@ export function auditRootlessTracesSQL(params: AuditTraceWindowParams): Compiled
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("parentStart")),
-			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.Timestamp.gte(param.dateTimeString("parentStart")),
+			$.Timestamp.lt(param.dateTimeString("childEnd")),
 			modulusFilter($.TraceId, modulus),
 		])
 		.groupBy("TraceId")

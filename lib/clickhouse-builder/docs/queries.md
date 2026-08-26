@@ -109,7 +109,7 @@ See [Unions and CTEs](./unions-and-ctes.md#ctes).
 
 ## Routing and scope declarations
 
-`.routing("ingest")` and `.crossOrg()` attach metadata to the compiled result rather than
+`.routing("ingest")` and `.crossTenant()` attach metadata to the compiled result rather than
 changing the SQL. Both are covered in [Tenant scoping](./tenant-scoping.md).
 
 ## Compiling

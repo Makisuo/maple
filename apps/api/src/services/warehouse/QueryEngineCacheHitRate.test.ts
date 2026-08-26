@@ -93,6 +93,10 @@ const traceRow = (bucket: string, count: number) => ({
 	p95Duration: 0,
 	p99Duration: 0,
 	errorRate: 0,
+	// The count query selects a single `total`. Rows decode against the compiled
+	// query's derived schema now, so the one fixture has to satisfy every shape
+	// it is fed to.
+	total: count,
 	apdexScore: 0,
 	estimatedSpanCount: 0,
 })

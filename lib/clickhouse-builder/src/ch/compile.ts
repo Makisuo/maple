@@ -7,26 +7,22 @@
 // 3. Evaluating the whereFn (with params resolved) to get Conditions
 // 4. Assembling into SqlQuery and calling the existing compileQuery()
 
-import type { ColumnDefs } from "./types"
-import type { CHQuery } from "./query"
+import type { CHType, ColumnDefs } from "./types"
+import type { CHQuery, CHQueryState } from "./query"
 import type { CHUnionQuery } from "./union"
 import { createColumnAccessor, createJoinedColumnAccessor } from "./query"
 import { aliased } from "./expr"
 import { raw, ident, escapeClickHouseString, compile as compileSqlFragment } from "../sql/sql-fragment"
 import { splitTerminalClauses } from "../sql/terminal-clauses"
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
+import { PARAM_PLACEHOLDER_PATTERN, paramSchema, type ParamKind } from "./param"
+import { encodeLiteral } from "./literal"
 import { Effect, Option, Schema } from "effect"
+import { QueryBuilderError } from "./errors"
 
-// QueryBuilderError — tagged error for invariant violations in the DSL.
-// Catchable via `Effect.catchTag("@maple-dev/clickhouse-builder/QueryBuilderError")` at the service layer.
-
-export class QueryBuilderError extends Schema.TaggedError<QueryBuilderError>()(
-	"@maple-dev/clickhouse-builder/QueryBuilderError",
-	{
-		code: Schema.Literals(["SelectRequired", "UnresolvedParam", "InvalidOrderBySpec"]),
-		message: Schema.String,
-	},
-) {}
+// `QueryBuilderError` moved to ./errors so `expr.ts` can raise it too; still
+// exported from here, which is where every caller imports it from.
+export { QueryBuilderError } from "./errors"
 
 export class CompiledQueryDecodeError extends Schema.TaggedError<CompiledQueryDecodeError>()(
 	"@maple-dev/clickhouse-builder/CompiledQueryDecodeError",
@@ -65,25 +61,38 @@ const orderByClause = (specs: ReadonlyArray<[string, "asc" | "desc"]>): Array<st
 /**
  * Whether a compiled query is confined to one tenant.
  *
- * `"org"` means a top-level `WHERE` predicate pins the tenant column; anything
- * else is `"cross-org"` and reads every tenant the credentials can see.
- * Executors are expected to refuse `"cross-org"` on their normal read path and
- * require an explicit privileged entry point instead — which is why this is a
- * derived fact on the compiled query rather than a convention in a doc comment.
+ * `"tenant"` means a top-level `WHERE` predicate pins the table's declared
+ * tenant column; anything else is `"cross-tenant"` and reads every tenant the
+ * credentials can see. Executors are expected to refuse `"cross-tenant"` on
+ * their normal read path and require an explicit privileged entry point
+ * instead — which is why this is a derived fact on the compiled query rather
+ * than a convention in a doc comment.
+ *
+ * A table that declares no `tenantColumn` has no row-level tenancy to pin, so
+ * everything it compiles to is `"cross-tenant"`.
  */
-export type TenantScope = "org" | "cross-org"
+export type TenantScope = "tenant" | "cross-tenant"
 
 interface CompiledQueryBase<Output> {
 	readonly sql: string
 	readonly tenantScope: TenantScope
-	/** Whether a `rowSchema` was supplied. Lets a catalog sweep see the queries
-	 *  that decode nothing — a missing schema is otherwise invisible, because
-	 *  `decodeRows` silently degrades to an identity cast. */
+	/** Whether the query has a row schema at all, declared or derived. Lets a
+	 *  catalog sweep see the queries that decode nothing — a missing schema is
+	 *  otherwise invisible, because `decodeRows` degrades to an identity cast. */
 	readonly rowSchemaDeclared: boolean
-	/** Execution-routing metadata: `"ingest"` marks a query whose datasource only
-	 *  exists in the managed ingest pipeline (declared via `.routing("ingest")` at
-	 *  the query definition), so executors read it there instead of a per-org
-	 *  warehouse override. */
+	/**
+	 * Where that schema came from.
+	 *
+	 * `"derived"` is the normal case: every selected expression knew its own
+	 * column type, so the row schema is the SELECT. `"declared"` means a caller
+	 * passed one, which also lets it *narrow* what the builder inferred.
+	 * `"none"` means at least one selected expression had no type to read —
+	 * a `rawExpr`, a `dynamicColumn`, or an un-annotated custom function — and
+	 * nothing validates the rows.
+	 */
+	readonly rowSchemaSource: "declared" | "derived" | "none"
+	/** Execution-routing metadata, set by `.routing(tag)` at the query
+	 *  definition. The tag is opaque to the builder — executors give it meaning. */
 	/** Runtime decode of raw query results. Queries built from handwritten SQL
 	 *  should provide a row schema so schema drift is caught before consumers
 	 *  read fields from `Record<string, unknown>`. Without a schema this is an
@@ -100,34 +109,48 @@ interface CompiledQueryBase<Output> {
 }
 
 /**
- * Routing is a type-level fact as well as runtime metadata. An ingest-routed
- * query therefore cannot be passed accidentally to an API that may consult a
- * per-org read configuration.
+ * Routing is a type-level fact as well as runtime metadata, so a query tagged
+ * for one backend cannot be passed accidentally to an API that reads from
+ * another.
  */
 export type CompiledQuery<
 	Output,
-	Routing extends "ingest" | undefined = "ingest" | undefined,
+	Routing extends string | undefined = string | undefined,
 > = CompiledQueryBase<Output> &
-	(Routing extends "ingest" ? { readonly routing: "ingest" } : { readonly routing?: undefined })
+	(Routing extends string ? { readonly routing: Routing } : { readonly routing?: undefined })
 
 export type CompiledQueryRowSchema<Output> = Schema.Schema<Output>
 
-const makeCompiledQuery = <Output, Routing extends "ingest" | undefined>(
+const makeCompiledQuery = <Output, Routing extends string | undefined>(
 	sql: string,
 	tenantScope: TenantScope,
-	rowSchema?: CompiledQueryRowSchema<Output>,
+	rowSchemaSource: "declared" | "derived" | "none",
+	/** Built on first decode: a derived schema costs a `Schema.Struct` per
+	 *  compile otherwise, and most compiled queries are never decoded. */
+	getRowSchema: (() => CompiledQueryRowSchema<Output> | undefined) | undefined,
 	routing?: Routing,
 ): CompiledQuery<Output, Routing> => {
-	const decodeRow = rowSchema
-		? (Schema.decodeUnknownEffect(rowSchema) as (row: unknown) => Effect.Effect<Output, unknown, never>)
-		: undefined
+	let cachedDecodeRow: ((row: unknown) => Effect.Effect<Output, unknown, never>) | undefined
+	let decoderBuilt = false
+	const decodeRow = () => {
+		if (!decoderBuilt) {
+			decoderBuilt = true
+			const rowSchema = getRowSchema?.()
+			cachedDecodeRow = rowSchema
+				? (Schema.decodeUnknownEffect(rowSchema) as (
+						row: unknown,
+					) => Effect.Effect<Output, unknown, never>)
+				: undefined
+		}
+		return cachedDecodeRow
+	}
 
 	const decodeRows: CompiledQueryBase<Output>["decodeRows"] = (rows) => {
-		if (!rowSchema) return Effect.succeed(rows as ReadonlyArray<Output>)
-		if (!decodeRow) return Effect.succeed(rows as ReadonlyArray<Output>)
+		const decode = decodeRow()
+		if (!decode) return Effect.succeed(rows as ReadonlyArray<Output>)
 
 		return Effect.forEach(rows, (row, index) =>
-			decodeRow(row).pipe(
+			decode(row).pipe(
 				Effect.mapError(
 					(cause) =>
 						new CompiledQueryDecodeError({
@@ -143,15 +166,17 @@ const makeCompiledQuery = <Output, Routing extends "ingest" | undefined>(
 	return {
 		sql,
 		tenantScope,
-		rowSchemaDeclared: rowSchema !== undefined,
+		rowSchemaDeclared: rowSchemaSource !== "none",
+		rowSchemaSource,
 		...(!(routing === undefined) ? { routing } : undefined),
 		decodeRows,
 		decodeFirstRow: (rows) => {
 			const row = rows[0]
 			if (row == null) return Effect.succeed(Option.none<Output>())
-			if (!decodeRow) return Effect.succeed(Option.some(row as Output))
+			const decode = decodeRow()
+			if (!decode) return Effect.succeed(Option.some(row as Output))
 
-			return decodeRow(row).pipe(
+			return decode(row).pipe(
 				Effect.map(Option.some),
 				Effect.mapError(
 					(cause) =>
@@ -169,41 +194,12 @@ const makeCompiledQuery = <Output, Routing extends "ingest" | undefined>(
 /**
  * Why a query is handwritten SQL rather than a builder query.
  *
- * This union is the boundary between legitimate raw SQL and raw SQL nobody got
- * round to converting — and adding a member is the review gate. It is a one-line
- * diff in this file that a reviewer cannot miss, and it travels with the
- * definition, so it survives file moves and copy-paste into new packages in a
- * way a checked-in call-site list or a lint rule with an allowlist of paths
- * does not.
- *
- * There is deliberately no `"legacy"` or `"todo"` member. With one, the gate is
- * decorative.
+ * The builder does not enumerate the legitimate reasons — that is a policy of
+ * the codebase using it. Declare a string-literal union of your own and pass it
+ * as `Reason` (or wrap `unsafeCompiledQuery` in a function that pins it) to make
+ * adding a reason a reviewable one-line diff.
  */
-export type RawSqlReason =
-	/**
-	 * The SQL came from a user, so there is no AST to build. Isolation comes
-	 * from the credential layer and a separate validation pass, not from the
-	 * derived `tenantScope`.
-	 */
-	| "user-authored-sql"
-	/**
-	 * A constant zero-row result that reads no table (`SELECT … WHERE 0`). The
-	 * builder always emits a FROM, and naming a real table for a query designed
-	 * to touch none would be strictly worse.
-	 */
-	| "empty-result-stub"
-	/**
-	 * A `UNION ALL` of one builder compiled over two different parameter sets
-	 * (a current and a previous window, say). Params are substituted once,
-	 * across the whole query, at the end of `compileCH` — so a single `CHQuery`
-	 * cannot carry two of them, and `unionAll` cannot express this.
-	 *
-	 * Scope must still be *derived* from the compiled branches rather than
-	 * asserted; the branches are real compiled queries and each knows its own.
-	 */
-	| "param-varied-union"
-	/** A test asserting executor behaviour on synthetic SQL. */
-	| "test-fixture"
+export type RawSqlReason = string
 
 /**
  * Explicit constructor for SQL that cannot be expressed through the typed DSL.
@@ -216,22 +212,32 @@ export type RawSqlReason =
  * DDL, migrations, and another engine's file formats don't reach this function
  * at all; they never produce a `CompiledQuery`.
  */
-export const unsafeCompiledQuery = <Output, Routing extends "ingest" | undefined = undefined>(args: {
+export const unsafeCompiledQuery = <
+	Output,
+	Routing extends string | undefined = undefined,
+	Reason extends string = string,
+>(args: {
 	readonly sql: string
 	readonly tenantScope: TenantScope
-	readonly reason: RawSqlReason
+	readonly reason: Reason
 	/** One sentence, at the call site, on why this instance qualifies. */
 	readonly note: string
 	readonly rowSchema?: CompiledQueryRowSchema<Output>
 	readonly routing?: Routing
 }): CompiledQuery<Output, Routing> =>
-	makeCompiledQuery(args.sql, args.tenantScope, args.rowSchema, args.routing)
+	makeCompiledQuery(
+		args.sql,
+		args.tenantScope,
+		args.rowSchema === undefined ? "none" : "declared",
+		() => args.rowSchema,
+		args.routing,
+	)
 
 export function compileCH<
 	Cols extends ColumnDefs,
 	Output extends Record<string, any>,
 	Joins extends Record<string, ColumnDefs>,
-	Routing extends "ingest" | undefined,
+	Routing extends string | undefined,
 	Params extends Record<string, any>,
 	// The row schema, not the SELECT inference, is what actually produces values
 	// at runtime, so it decides the compiled query's output type. `extends Output`
@@ -241,18 +247,34 @@ export function compileCH<
 >(
 	query: CHQuery<Cols, Output, Joins, Routing>,
 	params: Params,
-	options?: { skipFormat?: boolean; rowSchema?: CompiledQueryRowSchema<Decoded> },
+	options?: {
+		skipFormat?: boolean
+		rowSchema?: CompiledQueryRowSchema<Decoded>
+		/** Leave `__PARAM_…__` placeholders in the SQL instead of resolving them.
+		 *  For fragments spliced into a larger query — a subquery condition — whose
+		 *  params are resolved by the outer compilation pass. */
+		deferParams?: boolean
+	},
 ): CompiledQuery<Decoded, Routing> {
 	const state = query._state
+	const deferParams = options?.deferParams === true
 
 	// Build column accessor — joined or simple depending on joins
 	const joinAliases = state.typedJoins.map((j) => j.alias)
 	const hasJoins = joinAliases.length > 0
 	const mainAlias = hasJoins ? (state.tableAlias ?? state.fromQueryAlias ?? state.tableName) : undefined
 
+	const joinTenantColumns = Object.fromEntries(state.typedJoins.map((j) => [j.alias, j.tenantColumn]))
+
 	const $ = hasJoins
-		? createJoinedColumnAccessor(state.columns, joinAliases, mainAlias)
-		: createColumnAccessor(state.columns)
+		? createJoinedColumnAccessor(
+				state.columns,
+				joinAliases,
+				mainAlias,
+				state.tenantColumn,
+				joinTenantColumns,
+			)
+		: createColumnAccessor(state.columns, state.tenantColumn)
 
 	// SELECT
 	const selectExprs = state.selectFn ? state.selectFn($) : {}
@@ -280,7 +302,7 @@ export function compileCH<
 	// carries whatever scope the caller declared.
 	const resolvedCtes = state.ctes.map((c) => {
 		if (c.query) {
-			const compiled = compileCH(c.query, params, { skipFormat: true })
+			const compiled = compileCH(c.query, params, { skipFormat: true, deferParams })
 			return { name: c.name, sql: compiled.sql, tenantScope: compiled.tenantScope }
 		}
 		return { name: c.name, sql: c.sql ?? "", tenantScope: c.tenantScope }
@@ -291,16 +313,16 @@ export function compileCH<
 	// Whether the row source is itself tenant-confined. A query reading only from
 	// a scoped subquery cannot see another tenant's rows even with no WHERE of
 	// its own — that is the `SELECT sum(total) FROM (scoped UNION scoped)` shape.
-	let fromSourceScope: TenantScope = "cross-org"
+	let fromSourceScope: TenantScope = "cross-tenant"
 	if (state.fromQuery) {
 		// Compile the inner query lazily
-		const innerCompiled = compileCH(state.fromQuery, params, { skipFormat: true })
+		const innerCompiled = compileCH(state.fromQuery, params, { skipFormat: true, deferParams })
 		fromSourceScope = innerCompiled.tenantScope
 		fromFragment = raw(`(${innerCompiled.sql}) AS ${state.fromQueryAlias}`)
 	} else if (state.fromUnion) {
 		// Compile the inner union without an outer FORMAT — the outer query
 		// owns formatting. Strips a trailing `\nFORMAT <fmt>` defensively.
-		const innerCompiled = compileUnion(state.fromUnion, params)
+		const innerCompiled = compileUnion(state.fromUnion, params, { deferParams })
 		fromSourceScope = innerCompiled.tenantScope
 		const innerSql = splitTerminalClauses(innerCompiled.sql).body
 		fromFragment = raw(`(\n${innerSql}\n) AS ${state.fromQueryAlias}`)
@@ -314,7 +336,7 @@ export function compileCH<
 	// given as a query, declared by the caller when it arrived as a string.
 	if (!state.fromQuery && !state.fromUnion) {
 		const cte = resolvedCtes.find((c) => c.name === state.tableName)
-		if (cte?.tenantScope === "org") fromSourceScope = "org"
+		if (cte?.tenantScope === "tenant") fromSourceScope = "tenant"
 	}
 
 	// JOINs
@@ -327,8 +349,8 @@ export function compileCH<
 			? state.typedJoins.map((j) => {
 					let tableSql: string
 					if (j.innerQuery) {
-						const compiled = compileCH(j.innerQuery, params, { skipFormat: true })
-						if (compiled.tenantScope !== "org") allJoinSourcesScoped = false
+						const compiled = compileCH(j.innerQuery, params, { skipFormat: true, deferParams })
+						if (compiled.tenantScope !== "tenant") allJoinSourcesScoped = false
 						tableSql = `(${compiled.sql})`
 					} else if (j.tableName) {
 						allJoinSourcesScoped = false
@@ -375,28 +397,93 @@ export function compileCH<
 		sql = `WITH ${cteDefs}\n${sql}`
 	}
 
-	// Replace param placeholders with resolved values
-	for (const [name, value] of Object.entries(params)) {
-		const placeholder = `__PARAM_${name}__`
-		const resolved = resolveParam(value)
-		sql = sql.replaceAll(placeholder, resolved)
-	}
+	if (!deferParams) sql = resolveParams(sql, params)
 
 	// Scoped when this query pins the tenant itself, or when every row source it
 	// reads from — the FROM and each join — is already confined to one tenant.
 	const tenantScope: TenantScope =
-		state.crossOrg === true
-			? "cross-org"
-			: hasOwnTenantPredicate || (fromSourceScope === "org" && allJoinSourcesScoped)
-				? "org"
-				: "cross-org"
+		state.crossTenant === true
+			? "cross-tenant"
+			: hasOwnTenantPredicate || (fromSourceScope === "tenant" && allJoinSourcesScoped)
+				? "tenant"
+				: "cross-tenant"
 
 	return makeCompiledQuery<Decoded, Routing>(
 		sql,
 		tenantScope,
-		options?.rowSchema,
+		options?.rowSchema !== undefined ? "declared" : deriveRowSchema(selectExprs) ? "derived" : "none",
+		() =>
+			options?.rowSchema ??
+			(deriveRowSchema(selectExprs) as CompiledQueryRowSchema<Decoded> | undefined),
 		state.routingValue as Routing,
 	)
+}
+
+/**
+ * The column accessor a query's callbacks see.
+ *
+ * Shared with `selectExprsOf` below, which needs the same accessor to read a
+ * query's output schemas without compiling it.
+ */
+function makeAccessor(state: CHQueryState): any {
+	const joinAliases = state.typedJoins.map((j) => j.alias)
+	const hasJoins = joinAliases.length > 0
+	if (!hasJoins) return createColumnAccessor(columnsOf(state), state.tenantColumn)
+
+	const mainAlias = state.tableAlias ?? state.fromQueryAlias ?? state.tableName
+	return createJoinedColumnAccessor(
+		columnsOf(state),
+		joinAliases,
+		mainAlias,
+		state.tenantColumn,
+		Object.fromEntries(state.typedJoins.map((j) => [j.alias, j.tenantColumn])),
+		Object.fromEntries(state.typedJoins.map((j) => [j.alias, j.columns])),
+	)
+}
+
+/**
+ * A FROM-subquery's columns are its inner SELECT, which only exists as
+ * expressions. Reading their schemas back out is what lets a query built on a
+ * subquery still derive a row schema instead of falling off at the boundary.
+ */
+function columnsOf(state: CHQueryState): ColumnDefs {
+	if (Object.keys(state.columns).length > 0) return state.columns
+
+	const inner = state.fromQuery ?? state.fromUnion?._state.queries[0]
+	const innerExprs = inner ? selectExprsOf(inner) : undefined
+	if (innerExprs === undefined) return state.columns
+
+	const synthesized: Record<string, CHType<"Inferred", any, any>> = {}
+	for (const [alias, expr] of Object.entries(innerExprs)) {
+		const schema = (expr as { readonly schema?: Schema.Codec<any, any> } | null)?.schema
+		if (schema === undefined) continue
+		synthesized[alias] = { _tag: "Inferred", sql: "", schema, literalSchema: schema }
+	}
+	return synthesized
+}
+
+/** Evaluate a query's SELECT callback without compiling it. */
+function selectExprsOf(query: CHQuery<any, any, any>): Record<string, unknown> | undefined {
+	const state = query._state
+	return state.selectFn ? state.selectFn(makeAccessor(state)) : undefined
+}
+
+/**
+ * Fold the selected expressions' own schemas into the query's row schema.
+ *
+ * All or nothing on purpose: one field without a schema — a `rawExpr`, a
+ * `dynamicColumn`, a custom function that never declared its result type —
+ * means the builder cannot describe the row, and inventing a permissive schema
+ * for that field would hand back something that looks validated and is not.
+ */
+const deriveRowSchema = (selectExprs: Record<string, unknown>): Schema.Codec<any, any> | undefined => {
+	const fields: Record<string, Schema.Codec<any, any>> = {}
+	for (const [alias, expr] of Object.entries(selectExprs)) {
+		const schema = (expr as { readonly schema?: Schema.Codec<any, any> } | null)?.schema
+		if (schema === undefined) return undefined
+		fields[alias] = schema
+	}
+	return Schema.Struct(fields)
 }
 
 // UNION ALL compilation
@@ -404,17 +491,20 @@ export function compileCH<
 export function compileUnion<Output extends Record<string, any>, Params extends Record<string, any>>(
 	union: CHUnionQuery<Output>,
 	params: Params,
-	options?: { rowSchema?: CompiledQueryRowSchema<Output> },
+	options?: { rowSchema?: CompiledQueryRowSchema<Output>; deferParams?: boolean },
 ): CompiledQuery<Output, undefined> {
 	const state = union._state
+	const deferParams = options?.deferParams === true
 
 	// Compile each sub-query without FORMAT
-	const subQueries = state.queries.map((q) => compileCH(q, params, { skipFormat: true }))
+	const subQueries = state.queries.map((q) => compileCH(q, params, { skipFormat: true, deferParams }))
 
 	// UNION ALL is a disjunction: one unscoped branch leaks every tenant into the
 	// result regardless of how tightly the others are filtered.
 	const tenantScope: TenantScope =
-		subQueries.length > 0 && subQueries.every((q) => q.tenantScope === "org") ? "org" : "cross-org"
+		subQueries.length > 0 && subQueries.every((q) => q.tenantScope === "tenant")
+			? "tenant"
+			: "cross-tenant"
 
 	let sql = subQueries.map((q) => q.sql).join("\nUNION ALL\n")
 
@@ -439,12 +529,71 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 		sql += `\nFORMAT ${state.formatValue}`
 	}
 
-	return makeCompiledQuery<Output, undefined>(sql, tenantScope, options?.rowSchema)
+	// A union decodes as its branches do — every branch shares one Output shape,
+	// so the first branch speaks for the rest.
+	const firstBranch = state.queries[0]
+	const branchExprs = firstBranch ? selectExprsOf(firstBranch) : undefined
+	const derived = branchExprs ? deriveRowSchema(branchExprs) : undefined
+
+	return makeCompiledQuery<Output, undefined>(
+		sql,
+		tenantScope,
+		options?.rowSchema !== undefined ? "declared" : derived ? "derived" : "none",
+		() => options?.rowSchema ?? (derived as CompiledQueryRowSchema<Output> | undefined),
+	)
 }
 
-function resolveParam(value: unknown): string {
-	if (typeof value === "string") return `'${escapeClickHouseString(value)}'`
-	if (typeof value === "number") return String(Math.round(value))
-	if (typeof value === "boolean") return value ? "1" : "0"
-	return String(value)
+/**
+ * Substitute every `__PARAM_<kind>_<name>__` placeholder with its value.
+ *
+ * Params are resolved here rather than sent as ClickHouse query parameters, so
+ * a value that never arrives, or arrives as the wrong type, would otherwise
+ * become part of the SQL text: a missing param used to ship the placeholder
+ * itself to the server, and a `Date` handed to a dateTime param used to
+ * stringify as `Thu Jan 01 2026 …`. Both are now compile-time failures.
+ *
+ * Params the query doesn't mention are ignored — one bag of params is commonly
+ * shared across a family of queries.
+ */
+function resolveParams(sql: string, params: Record<string, unknown>): string {
+	const missing: Array<string> = []
+
+	const resolved = sql.replace(PARAM_PLACEHOLDER_PATTERN, (placeholder, kind: string, name: string) => {
+		if (!(name in params)) {
+			missing.push(name)
+			return placeholder
+		}
+		return resolveParam(kind as ParamKind, name, params[name])
+	})
+
+	if (missing.length > 0) {
+		throw new QueryBuilderError({
+			code: "UnresolvedParam",
+			message: `compile: no value given for param${missing.length > 1 ? "s" : ""} ${missing
+				.map((n) => `'${n}'`)
+				.join(", ")}`,
+		})
+	}
+
+	return resolved
+}
+
+/**
+ * A param value as a ClickHouse literal, through its declared type's codec.
+ *
+ * The same schema that decodes a column of that type runs backwards here, so
+ * the two directions cannot drift: a `DateTime` param and a `DateTime` column
+ * agree on the literal by construction, not by two functions being kept in sync.
+ */
+function resolveParam(kind: ParamKind, name: string, value: unknown): string {
+	const schema = paramSchema(kind)
+	if (schema === undefined) {
+		// Only reachable from a hand-written placeholder naming a kind nothing
+		// declared: `param.of` registers its type before it can reach any SQL.
+		throw new QueryBuilderError({
+			code: "InvalidParamValue",
+			message: `compile: param '${name}' has an unknown type '${kind}'`,
+		})
+	}
+	return encodeLiteral(schema, value, `param '${name}' (${kind})`)
 }

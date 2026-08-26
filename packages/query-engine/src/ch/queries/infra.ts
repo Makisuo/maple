@@ -72,8 +72,8 @@ export function listHostsQuery(opts: ListHostsOpts = {}) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("host.name").neq(""),
 			$.MetricName.in_(...HOSTMETRIC_NAMES),
 			CH.when(opts.search, (v: string) =>
@@ -133,8 +133,8 @@ export function hostDetailSummaryQuery(opts: HostDetailSummaryOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("host.name").eq(opts.hostName),
 			$.MetricName.in_(...HOSTMETRIC_NAMES),
 		])
@@ -168,8 +168,8 @@ export function hostGaugeTimeseriesQuery(opts: HostGaugeTimeseriesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("host.name").eq(opts.hostName),
 			$.MetricName.eq(opts.metricName),
 		])
@@ -222,8 +222,8 @@ export function fleetUtilizationTimeseriesQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("host.name").neq(""),
 			$.MetricName.in_("system.cpu.utilization", "system.memory.utilization"),
 		])
@@ -241,8 +241,8 @@ export function hostNetworkTimeseriesQuery(opts: HostNetworkTimeseriesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("host.name").eq(opts.hostName),
 			$.MetricName.eq("system.network.io"),
 		])
@@ -374,8 +374,8 @@ const podBaseConditions = (
 	metricNames: ReadonlyArray<string> = POD_METRIC_NAMES,
 ): Array<CH.Condition | undefined> => [
 	$.OrgId.eq(param.string("orgId")),
-	$.TimeUnix.gte(param.dateTime("startTime")),
-	$.TimeUnix.lte(param.dateTime("endTime")),
+	$.TimeUnix.gte(param.dateTimeString("startTime")),
+	$.TimeUnix.lte(param.dateTimeString("endTime")),
 	$.ResourceAttributes.get("k8s.pod.name").neq(""),
 	$.MetricName.in_(...metricNames),
 ]
@@ -515,7 +515,7 @@ function podScopeCondition(
 		case "unbounded":
 			return $.saturation.eq(0).and($.cpuUsagePeak.gt(0))
 		case "stale":
-			return $.lastSeen.lt(CH.intervalSub(param.dateTime("endTime"), STALE_POD_SECONDS))
+			return $.lastSeen.lt(CH.intervalSub(param.dateTimeString("endTime"), STALE_POD_SECONDS))
 	}
 }
 
@@ -578,7 +578,7 @@ export function listPodsSummaryQuery(opts: ListPodsOpts = {}) {
 			elevatedPods: CH.countIf($.saturation.gte(0.6).and($.saturation.lt(0.9))),
 			unboundedPods: CH.countIf($.limitSamples.eq(0).and($.cpuUsagePeak.gt(0))),
 			stalePods: CH.countIf(
-				$.lastSeen.lt(CH.intervalSub(param.dateTime("endTime"), STALE_POD_SECONDS)),
+				$.lastSeen.lt(CH.intervalSub(param.dateTimeString("endTime"), STALE_POD_SECONDS)),
 			),
 		}))
 		.format("JSON")
@@ -632,8 +632,8 @@ export function podDetailSummaryQuery(opts: PodDetailSummaryOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("k8s.pod.name").eq(opts.podName),
 			CH.when(opts.namespace, (v: string) => $.ResourceAttributes.get("k8s.namespace.name").eq(v)),
 			$.MetricName.in_(...POD_METRIC_NAMES),
@@ -663,8 +663,8 @@ export function podGaugeTimeseriesQuery(opts: PodGaugeTimeseriesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("k8s.pod.name").eq(opts.podName),
 			CH.when(opts.namespace, (v: string) => $.ResourceAttributes.get("k8s.namespace.name").eq(v)),
 			$.MetricName.eq(opts.metricName),
@@ -710,8 +710,8 @@ const nodeBaseConditions = (
 	metricNames: ReadonlyArray<string> = NODE_METRIC_NAMES,
 ): Array<CH.Condition | undefined> => [
 	$.OrgId.eq(param.string("orgId")),
-	$.TimeUnix.gte(param.dateTime("startTime")),
-	$.TimeUnix.lte(param.dateTime("endTime")),
+	$.TimeUnix.gte(param.dateTimeString("startTime")),
+	$.TimeUnix.lte(param.dateTimeString("endTime")),
 	$.ResourceAttributes.get("k8s.node.name").neq(""),
 	$.ResourceAttributes.get("k8s.pod.name").eq(""),
 	$.MetricName.in_(...metricNames),
@@ -782,8 +782,8 @@ export function nodeDetailSummaryQuery(opts: NodeDetailSummaryOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("k8s.node.name").eq(opts.nodeName),
 			$.ResourceAttributes.get("k8s.pod.name").eq(""),
 			$.MetricName.in_(...NODE_METRIC_NAMES),
@@ -806,8 +806,8 @@ export function nodeGaugeTimeseriesQuery(opts: NodeGaugeTimeseriesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get("k8s.node.name").eq(opts.nodeName),
 			$.ResourceAttributes.get("k8s.pod.name").eq(""),
 			$.MetricName.eq(opts.metricName),
@@ -885,8 +885,8 @@ export function listWorkloadsQuery(opts: ListWorkloadsOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get(attrKey).neq(""),
 			$.MetricName.in_(...POD_METRIC_NAMES),
 			...workloadFilterConditions($, opts, attrKey),
@@ -931,8 +931,8 @@ export function workloadDetailSummaryQuery(opts: WorkloadDetailSummaryOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get(attrKey).eq(opts.workloadName),
 			CH.when(opts.namespace, (v: string) => $.ResourceAttributes.get("k8s.namespace.name").eq(v)),
 			$.MetricName.in_(...POD_METRIC_NAMES),
@@ -959,8 +959,8 @@ export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) 
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get(attrKey).eq(opts.workloadName),
 			CH.when(opts.namespace, (v: string) => $.ResourceAttributes.get("k8s.namespace.name").eq(v)),
 			$.MetricName.eq(opts.metricName),
@@ -1069,8 +1069,8 @@ const makeWorkloadFacet = (
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.ResourceAttributes.get(ownerKey).neq(""),
 			$.MetricName.in_(POD_FACET_PROBE_METRIC),
 			...workloadFilterConditions($, opts, ownerKey),

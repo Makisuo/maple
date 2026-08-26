@@ -7,7 +7,7 @@
 //
 // They are deliberately CROSS-ORG: there is no `OrgId.eq(...)` predicate, so a
 // single cheap scan of the small recent window / hourly MVs enumerates active
-// orgs at once. Each declares `.crossOrg()`, which is what lets them through
+// orgs at once. Each declares `.crossTenant()`, which is what lets them through
 // `WarehouseQueryService.crossOrgQuery` — the ordinary read path rejects a
 // query with no top-level tenant predicate. `.routing("ingest")` routes them to
 // the managed Tinybird workspace (where all managed orgs' data lives);
@@ -29,31 +29,31 @@ export type ActiveOrgsOutput = Schema.Schema.Type<typeof ActiveOrgsOutputSchema>
 export function activeOrgsByErrorEventsQuery() {
 	return from(ErrorEventsByTime)
 		.select(($) => ({ orgId: $.OrgId }))
-		.where(($) => [$.Timestamp.gte(param.dateTime("startTime"))])
+		.where(($) => [$.Timestamp.gte(param.dateTimeString("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
 		.routing("ingest")
-		.crossOrg()
+		.crossTenant()
 }
 
 /** Orgs with any span aggregates since `startTime` (gates the anomaly detector). */
 export function activeOrgsByTracesQuery() {
 	return from(TracesAggregatesHourly)
 		.select(($) => ({ orgId: $.OrgId }))
-		.where(($) => [$.Hour.gte(param.dateTime("startTime"))])
+		.where(($) => [$.Hour.gte(param.dateTimeString("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
 		.routing("ingest")
-		.crossOrg()
+		.crossTenant()
 }
 
 /** Orgs with any log aggregates since `startTime` (gates the anomaly detector). */
 export function activeOrgsByLogsQuery() {
 	return from(LogsAggregatesHourly)
 		.select(($) => ({ orgId: $.OrgId }))
-		.where(($) => [$.Hour.gte(param.dateTime("startTime"))])
+		.where(($) => [$.Hour.gte(param.dateTimeString("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
 		.routing("ingest")
-		.crossOrg()
+		.crossTenant()
 }

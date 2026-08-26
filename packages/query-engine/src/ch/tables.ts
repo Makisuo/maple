@@ -3,12 +3,37 @@
 // Derived from packages/domain/src/tinybird/datasources.ts
 // These define the ClickHouse table schemas used by the query DSL.
 
-import { table } from "@maple-dev/clickhouse-builder"
+import { type ColumnDefs, type Table, table as chTable } from "@maple-dev/clickhouse-builder"
+import type { CHString } from "@maple-dev/clickhouse-builder/types"
 import * as T from "@maple-dev/clickhouse-builder/types"
+
+/**
+ * Maple's warehouse timestamps stay the strings ClickHouse sends.
+ *
+ * The builder's `T.dateTime` decodes to a `DateTime.Utc`, which is the better
+ * value to compute with — but these rows are forwarded onto Maple's own HTTP
+ * wire, where every timestamp is the `YYYY-MM-DD hh:mm:ss` string that web and
+ * the iOS app already parse. Re-serializing them as ISO would be a silent
+ * client-visible change, so the string flavour is declared here and a migration
+ * to `DateTime.Utc` can happen per surface.
+ */
+const dateTime = T.dateTimeString
+const dateTime64 = T.dateTime64String
+
+/**
+ * Every Maple warehouse table is keyed by `OrgId`, so tenancy is declared once
+ * here rather than at 37 call sites. Requiring the column in the signature is
+ * the point: a new table without one is a type error, not a table that silently
+ * compiles every query as `cross-tenant`.
+ */
+const table = <const Name extends string, const Columns extends ColumnDefs & { OrgId: CHString }>(
+	name: Name,
+	columns: Columns,
+): Table<Name, Columns> => chTable(name, columns, { tenantColumn: "OrgId" })
 
 export const Traces = table("traces", {
 	OrgId: T.string,
-	Timestamp: T.dateTime64,
+	Timestamp: dateTime64,
 	TraceId: T.string,
 	SpanId: T.string,
 	ParentSpanId: T.string,
@@ -26,7 +51,7 @@ export const Traces = table("traces", {
 	StatusCode: T.string,
 	StatusMessage: T.string,
 	SpanAttributes: T.map(T.string, T.string),
-	EventsTimestamp: T.array(T.dateTime64),
+	EventsTimestamp: T.array(dateTime64),
 	EventsName: T.array(T.string),
 	EventsAttributes: T.array(T.map(T.string, T.string)),
 	LinksTraceId: T.array(T.string),
@@ -42,7 +67,7 @@ export const Traces = table("traces", {
 
 export const TraceDetailSpans = table("trace_detail_spans", {
 	OrgId: T.string,
-	Timestamp: T.dateTime64,
+	Timestamp: dateTime64,
 	TraceId: T.string,
 	SpanId: T.string,
 	ParentSpanId: T.string,
@@ -59,7 +84,7 @@ export const TraceDetailSpans = table("trace_detail_spans", {
 export const TraceListMv = table("trace_list_mv", {
 	OrgId: T.string,
 	TraceId: T.string,
-	Timestamp: T.dateTime,
+	Timestamp: dateTime,
 	ServiceName: T.string,
 	SpanName: T.string,
 	SpanKind: T.string,
@@ -76,8 +101,8 @@ export const TraceListMv = table("trace_list_mv", {
 
 export const Logs = table("logs", {
 	OrgId: T.string,
-	Timestamp: T.dateTime64,
-	TimestampTime: T.dateTime,
+	Timestamp: dateTime64,
+	TimestampTime: dateTime,
 	TraceId: T.string,
 	SpanId: T.string,
 	TraceFlags: T.uint8,
@@ -99,7 +124,7 @@ export const Logs = table("logs", {
 
 export const ServiceOverviewSpans = table("service_overview_spans", {
 	OrgId: T.string,
-	Timestamp: T.dateTime,
+	Timestamp: dateTime,
 	ServiceName: T.string,
 	Duration: T.uint64,
 	StatusCode: T.string,
@@ -112,7 +137,7 @@ export const ServiceOverviewSpans = table("service_overview_spans", {
 
 export const ServiceOverviewHourly = table("service_overview_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
 	ServiceNamespace: T.string,
@@ -123,7 +148,7 @@ export const ServiceOverviewHourly = table("service_overview_hourly", {
 	EstimatedErrorCount: T.float64,
 	DurationSum: T.float64,
 	DurationQuantiles: T.string,
-	FirstSeen: T.dateTime,
+	FirstSeen: dateTime,
 	ApdexSatisfiedCount: T.uint64,
 	ApdexToleratingCount: T.uint64,
 })
@@ -135,7 +160,7 @@ export const ServiceOverviewHourly = table("service_overview_hourly", {
  */
 export const ServiceOverviewMinutely = table("service_overview_minutely", {
 	OrgId: T.string,
-	Minute: T.dateTime,
+	Minute: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
 	ServiceNamespace: T.string,
@@ -146,14 +171,14 @@ export const ServiceOverviewMinutely = table("service_overview_minutely", {
 	EstimatedErrorCount: T.float64,
 	DurationSum: T.float64,
 	DurationQuantiles: T.string,
-	FirstSeen: T.dateTime,
+	FirstSeen: dateTime,
 	ApdexSatisfiedCount: T.uint64,
 	ApdexToleratingCount: T.uint64,
 })
 
 export const ErrorEvents = table("error_events", {
 	OrgId: T.string,
-	Timestamp: T.dateTime,
+	Timestamp: dateTime,
 	TraceId: T.string,
 	SpanId: T.string,
 	ParentSpanId: T.string,
@@ -179,7 +204,7 @@ export const ErrorEvents = table("error_events", {
  */
 export const ErrorEventsByTime = table("error_events_by_time", {
 	OrgId: T.string,
-	Timestamp: T.dateTime,
+	Timestamp: dateTime,
 	TraceId: T.string,
 	SpanId: T.string,
 	ParentSpanId: T.string,
@@ -199,7 +224,7 @@ export const ErrorEventsByTime = table("error_events_by_time", {
 /** Minute-grain per-fingerprint rollup consumed by the error issue tick. */
 export const ErrorFingerprintsMinutely = table("error_fingerprints_minutely", {
 	OrgId: T.string,
-	Minute: T.dateTime,
+	Minute: dateTime,
 	FingerprintHash: T.uint64,
 	ServiceName: T.string,
 	ExceptionType: T.string,
@@ -207,8 +232,8 @@ export const ErrorFingerprintsMinutely = table("error_fingerprints_minutely", {
 	ErrorLabel: T.string,
 	TopFrame: T.string,
 	OccurrenceCount: T.uint64,
-	FirstSeen: T.dateTime,
-	LastSeen: T.dateTime,
+	FirstSeen: dateTime,
+	LastSeen: dateTime,
 	ServiceVersions: T.array(T.string),
 })
 
@@ -220,8 +245,8 @@ export const MetricsSum = table("metrics_sum", {
 	MetricDescription: T.string,
 	MetricUnit: T.string,
 	Attributes: T.map(T.string, T.string),
-	StartTimeUnix: T.dateTime64,
-	TimeUnix: T.dateTime64,
+	StartTimeUnix: dateTime64,
+	TimeUnix: dateTime64,
 	Value: T.float64,
 	Flags: T.uint32,
 	AggregationTemporality: T.int32,
@@ -236,8 +261,8 @@ export const MetricsGauge = table("metrics_gauge", {
 	MetricDescription: T.string,
 	MetricUnit: T.string,
 	Attributes: T.map(T.string, T.string),
-	StartTimeUnix: T.dateTime64,
-	TimeUnix: T.dateTime64,
+	StartTimeUnix: dateTime64,
+	TimeUnix: dateTime64,
 	Value: T.float64,
 	Flags: T.uint32,
 })
@@ -250,8 +275,8 @@ export const MetricsHistogram = table("metrics_histogram", {
 	MetricDescription: T.string,
 	MetricUnit: T.string,
 	Attributes: T.map(T.string, T.string),
-	StartTimeUnix: T.dateTime64,
-	TimeUnix: T.dateTime64,
+	StartTimeUnix: dateTime64,
+	TimeUnix: dateTime64,
 	Count: T.uint64,
 	Sum: T.float64,
 	BucketCounts: T.array(T.uint64),
@@ -264,7 +289,7 @@ export const MetricsHistogram = table("metrics_histogram", {
 
 export const MetricCatalog = table("metric_catalog", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	MetricType: T.string,
 	ServiceName: T.string,
 	MetricName: T.string,
@@ -272,26 +297,26 @@ export const MetricCatalog = table("metric_catalog", {
 	MetricUnit: T.string,
 	IsMonotonic: T.uint8,
 	DataPointCount: T.uint64,
-	FirstSeen: T.dateTime,
-	LastSeen: T.dateTime,
+	FirstSeen: dateTime,
+	LastSeen: dateTime,
 })
 
 export const SpanMetricsCallsHourly = table("span_metrics_calls_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	MetricName: T.string,
 	SpanKind: T.string,
 	AttrFingerprint: T.uint64,
 	ResourceFingerprint: T.uint64,
-	StartTimeUnix: T.dateTime64,
+	StartTimeUnix: dateTime64,
 	// The aggregate state column is typed by its finalized scalar value.
 	LastValue: T.float64,
 })
 
 export const AttributeKeysHourly = table("attribute_keys_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	AttributeKey: T.string,
 	AttributeScope: T.string,
 	UsageCount: T.uint64,
@@ -299,7 +324,7 @@ export const AttributeKeysHourly = table("attribute_keys_hourly", {
 
 export const AttributeValuesHourly = table("attribute_values_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	AttributeKey: T.string,
 	AttributeValue: T.string,
 	AttributeScope: T.string,
@@ -309,7 +334,7 @@ export const AttributeValuesHourly = table("attribute_values_hourly", {
 export const ServiceUsage = table("service_usage", {
 	OrgId: T.string,
 	ServiceName: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	LogCount: T.uint64,
 	LogSizeBytes: T.uint64,
 	TraceCount: T.uint64,
@@ -326,7 +351,7 @@ export const ServiceUsage = table("service_usage", {
 
 export const ServiceMapSpans = table("service_map_spans", {
 	OrgId: T.string,
-	Timestamp: T.dateTime,
+	Timestamp: dateTime,
 	TraceId: T.string,
 	SpanId: T.string,
 	ParentSpanId: T.string,
@@ -340,7 +365,7 @@ export const ServiceMapSpans = table("service_map_spans", {
 
 export const ServiceMapChildren = table("service_map_children", {
 	OrgId: T.string,
-	Timestamp: T.dateTime,
+	Timestamp: dateTime,
 	TraceId: T.string,
 	ParentSpanId: T.string,
 	ServiceName: T.string,
@@ -353,7 +378,7 @@ export const ServiceMapChildren = table("service_map_children", {
 
 export const TracesAggregatesHourly = table("traces_aggregates_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	SpanName: T.string,
 	SpanKind: T.string,
@@ -372,7 +397,7 @@ export const TracesAggregatesHourly = table("traces_aggregates_hourly", {
 
 export const ServiceOperationsMinutely = table("service_operations_minutely", {
 	OrgId: T.string,
-	Minute: T.dateTime,
+	Minute: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
 	SpanName: T.string,
@@ -387,7 +412,7 @@ export const ServiceOperationsMinutely = table("service_operations_minutely", {
 
 export const LogsAggregatesHourly = table("logs_aggregates_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	SeverityText: T.string,
 	DeploymentEnv: T.string,
@@ -398,7 +423,7 @@ export const LogsAggregatesHourly = table("logs_aggregates_hourly", {
 
 export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	SourceService: T.string,
 	TargetService: T.string,
 	DeploymentEnv: T.string,
@@ -417,7 +442,7 @@ export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
 // tables.test.ts drift-checks the columns those builders read.
 export const ServiceExternalEdgesHourly = table("service_external_edges_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	TargetType: T.string,
 	TargetSystem: T.string,
@@ -432,7 +457,7 @@ export const ServiceExternalEdgesHourly = table("service_external_edges_hourly",
 
 export const ServiceAddressResolutionsHourly = table("service_address_resolutions_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	SourceService: T.string,
 	ParentServerAddress: T.string,
 	ResolvedTargetService: T.string,
@@ -441,7 +466,7 @@ export const ServiceAddressResolutionsHourly = table("service_address_resolution
 
 export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	DbSystem: T.string,
 	DbNamespace: T.string,
@@ -457,7 +482,7 @@ export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 
 export const ServiceMapDbQuerySignaturesHourly = table("service_map_db_query_shapes_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	DbSystem: T.string,
 	DbNamespace: T.string,
@@ -477,7 +502,7 @@ export const ServiceMapDbQuerySignaturesHourly = table("service_map_db_query_sha
 
 export const ServicePlatformsHourly = table("service_platforms_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
 	K8sCluster: T.string,
@@ -496,7 +521,7 @@ export const ServicePlatformsHourly = table("service_platforms_hourly", {
 
 export const ServiceOperationsHourly = table("service_operations_hourly", {
 	OrgId: T.string,
-	Hour: T.dateTime,
+	Hour: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
 	SpanName: T.string,
@@ -512,7 +537,7 @@ export const AlertChecks = table("alert_checks", {
 	OrgId: T.string,
 	RuleId: T.string,
 	GroupKey: T.string,
-	Timestamp: T.dateTime64,
+	Timestamp: dateTime64,
 	Status: T.string,
 	SignalType: T.string,
 	Comparator: T.string,
@@ -520,8 +545,8 @@ export const AlertChecks = table("alert_checks", {
 	ObservedValue: T.nullable(T.float64),
 	SampleCount: T.uint32,
 	WindowMinutes: T.uint16,
-	WindowStart: T.dateTime64,
-	WindowEnd: T.dateTime64,
+	WindowStart: dateTime64,
+	WindowEnd: dateTime64,
 	ConsecutiveBreaches: T.uint16,
 	ConsecutiveHealthy: T.uint16,
 	IncidentId: T.nullable(T.string),
@@ -534,8 +559,8 @@ export const AlertChecks = table("alert_checks", {
 export const SessionReplays = table("session_replays", {
 	OrgId: T.string,
 	SessionId: T.string,
-	StartTime: T.dateTime64,
-	EndTime: T.nullable(T.dateTime64),
+	StartTime: dateTime64,
+	EndTime: T.nullable(dateTime64),
 	DurationMs: T.nullable(T.uint32),
 	Status: T.string,
 	UserId: T.string,
@@ -587,7 +612,7 @@ export const SessionReplays = table("session_replays", {
 	Language: T.string,
 	// Heartbeat-refreshed. Recovers duration for sessions killed without an
 	// unload beacon, where EndTime is null.
-	LastActivityAt: T.nullable(T.dateTime64),
+	LastActivityAt: T.nullable(dateTime64),
 })
 
 export const SessionReplayEvents = table("session_replay_events", {
@@ -596,7 +621,7 @@ export const SessionReplayEvents = table("session_replay_events", {
 	ChunkSeq: T.uint32,
 	// Gateway receipt time — partitioning, TTL, and the anchor the chunk index
 	// resolves a seek target against.
-	Timestamp: T.dateTime64,
+	Timestamp: dateTime64,
 	DurationMs: T.uint32,
 	EventCount: T.uint32,
 	ByteSize: T.uint32,
@@ -615,7 +640,7 @@ export const SessionReplayEvents = table("session_replay_events", {
 export const SessionEvents = table("session_events", {
 	OrgId: T.string,
 	SessionId: T.string,
-	Timestamp: T.dateTime64,
+	Timestamp: dateTime64,
 	// Monotonic per-session ordering tiebreaker (events can share a ms timestamp).
 	Seq: T.uint32,
 	// "navigation" | "click" | "input" | "console" | "network" | "error" | "custom"
@@ -663,7 +688,7 @@ export const SessionEvents = table("session_events", {
 // person's rows are contiguous inside a time range.
 export const ProductEvents = table("product_events", {
 	OrgId: T.string,
-	Timestamp: T.dateTime64,
+	Timestamp: dateTime64,
 	// "browser" | "server" | "mobile".
 	Source: T.string,
 	// '' on server rows.
@@ -703,7 +728,7 @@ export const IdentityLinks = table("identity_links", {
 	OrgId: T.string,
 	VisitorId: T.string,
 	UserId: T.string,
-	FirstSeen: T.dateTime64,
+	FirstSeen: dateTime64,
 })
 export const MetricsExpHistogram = table("metrics_exponential_histogram", {
 	OrgId: T.string,
@@ -713,8 +738,8 @@ export const MetricsExpHistogram = table("metrics_exponential_histogram", {
 	MetricDescription: T.string,
 	MetricUnit: T.string,
 	Attributes: T.map(T.string, T.string),
-	StartTimeUnix: T.dateTime64,
-	TimeUnix: T.dateTime64,
+	StartTimeUnix: dateTime64,
+	TimeUnix: dateTime64,
 	Count: T.uint64,
 	Sum: T.float64,
 	Scale: T.int32,

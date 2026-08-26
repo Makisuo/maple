@@ -959,7 +959,7 @@ export function tracesListQuery(opts: TracesListOpts) {
 				.where(baseWhere)
 				.orderBy(["d", sortDir], ["ts", sortDir])
 				.limit(limit + offset)
-			const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
+			const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
 			// Descending reads from the largest tuple down, so the cutoff is the
 			// smallest tuple in the slice — and vice versa.
 			const agg = sortDir === "desc" ? "min" : "max"
@@ -973,7 +973,7 @@ export function tracesListQuery(opts: TracesListOpts) {
 			.where(baseWhere)
 			.orderBy(["ts", sortDir])
 			.limit(limit + offset)
-		const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
+		const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
 		const agg = sortDir === "desc" ? "min" : "max"
 		const cutoff = CH.rawExpr<string>(`(SELECT ${agg}(ts) FROM (${cutoffSql}))`)
 		return sortDir === "desc" ? $.Timestamp.gte(cutoff) : $.Timestamp.lte(cutoff)
@@ -1047,8 +1047,8 @@ export function slowTracesQuery(opts: SlowTracesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.when(opts.service, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.environment, (v: string) => $.DeploymentEnv.eq(v)),
 		])
@@ -1161,7 +1161,7 @@ export function spanSearchQuery(opts: SpanSearchOpts) {
 		])
 		.orderBy(["ts", "desc"])
 		.limit(limit + offset)
-	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
+	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
 	const cutoff = CH.rawExpr<string>(`(SELECT min(ts) FROM (${cutoffSql}))`)
 
 	return spanSearchFrom(Traces, opts, limit, offset, cutoff)
@@ -1275,7 +1275,7 @@ export function traceSummariesQuery(opts: TraceSummariesOpts) {
 				.groupBy("traceId")
 		: undefined
 	const matchingTraceIdsSql = matchingTraceIds
-		? compileCH(matchingTraceIds, {}, { skipFormat: true }).sql
+		? compileCH(matchingTraceIds, {}, { skipFormat: true, deferParams: true }).sql
 		: undefined
 
 	return from(TraceListMv)
@@ -1296,8 +1296,8 @@ export function traceSummariesQuery(opts: TraceSummariesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			matchingTraceIdsSql ? CH.rawCond(`TraceId IN (${matchingTraceIdsSql})`) : undefined,
 			opts.cursor
 				? $.Timestamp.lt(opts.cursor.timestamp).or(
@@ -1364,7 +1364,7 @@ export function tracesRootListQuery(opts: TracesRootListOpts) {
 		.where(baseWhere)
 		.orderBy(["ts", "desc"])
 		.limit(limit + offset)
-	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
+	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
 	const cutoff = CH.rawExpr<string>(`(SELECT min(ts) FROM (${cutoffSql}))`)
 
 	// Stage 2: heavy SpanAttributes lookups read only for rows at/after the cutoff.
@@ -1513,8 +1513,8 @@ function traceListMvWhereConditions(
 	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
@@ -1632,7 +1632,7 @@ export function traceListQuery(opts: TraceListOpts) {
 		if (offset > 0) {
 			page = page.offset(offset)
 		}
-		pageSql = compileCH(page, {}, { skipFormat: true }).sql
+		pageSql = compileCH(page, {}, { skipFormat: true, deferParams: true }).sql
 	} else {
 		const pageBase = from(Traces)
 			.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
@@ -1653,7 +1653,7 @@ export function traceListQuery(opts: TraceListOpts) {
 		if (offset > 0) {
 			page = page.offset(offset)
 		}
-		pageSql = compileCH(page, {}, { skipFormat: true }).sql
+		pageSql = compileCH(page, {}, { skipFormat: true, deferParams: true }).sql
 	}
 
 	// Lexicographic tuple ordering: true root first, earliest span as the
@@ -1701,8 +1701,8 @@ export function traceListQuery(opts: TraceListOpts) {
 			// (`computeTraceTimeWindow`). Without any bound this scans every
 			// retained partition for the PK analysis and times out on prod
 			// (measured: 12h window, unbounded >10s; bounded <10s).
-			$.Timestamp.gte(subtractHours(CH.toDateTime(param.dateTime("startTime")), CH.lit(1))),
-			$.Timestamp.lte(addHours(CH.toDateTime(param.dateTime("endTime")), CH.lit(1))),
+			$.Timestamp.gte(subtractHours(CH.toDateTime(param.dateTimeString("startTime")), CH.lit(1))),
+			$.Timestamp.lte(addHours(CH.toDateTime(param.dateTimeString("endTime")), CH.lit(1))),
 			CH.rawCond(`TraceId IN (SELECT traceId FROM (${pageSql}))`),
 		])
 		.groupBy("traceId")
@@ -1757,8 +1757,8 @@ export function traceServicesByTraceIdsQuery(opts: TraceServicesByTraceIdsOpts) 
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.TraceId.in_(...opts.traceIds),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("traceId")
 		.limit(opts.traceIds.length)

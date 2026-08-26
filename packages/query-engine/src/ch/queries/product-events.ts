@@ -402,8 +402,8 @@ function eventsBranch(plan: FunnelPlan): FunnelBranch {
 				}))
 				.where(($) => [
 					$.OrgId.eq(param.string("orgId")),
-					$.StartTime.gte(param.dateTime("startTime")),
-					$.StartTime.lte(param.dateTime("endTime")),
+					$.StartTime.gte(param.dateTimeString("startTime")),
+					$.StartTime.lte(param.dateTimeString("endTime")),
 				])
 				.groupBy("SessionId")
 		: undefined
@@ -450,8 +450,8 @@ function eventsBranch(plan: FunnelPlan): FunnelBranch {
 			)
 			return [
 				$.OrgId.eq(param.string("orgId")),
-				$.Timestamp.gte(param.dateTime("startTime")),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.gte(param.dateTimeString("startTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 				anyStep,
 				key.neq(""),
 				hasPopulationFilter(filters)
@@ -498,8 +498,8 @@ function sessionEntryBranch(plan: FunnelPlan, step: Extract<FunnelStep, { kind: 
 			const key = personKey(keyBy, $, keyBy === "person" ? $[LINK_ALIAS] : undefined)
 			return [
 				$.OrgId.eq(param.string("orgId")),
-				$.StartTime.gte(param.dateTime("startTime")),
-				$.StartTime.lte(param.dateTime("endTime")),
+				$.StartTime.gte(param.dateTimeString("startTime")),
+				$.StartTime.lte(param.dateTimeString("endTime")),
 				sessionDimensionColumn($, step.dimension).eq(step.value),
 				key.neq(""),
 				hasPopulationFilter(filters)
@@ -673,8 +673,8 @@ export function productEventNamesQuery(
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.when(filters.host, (v: string) => $.Host.eq(v)),
 			needsSessionSemiJoin(filters) || filters.pagePath !== undefined
 				? inSubquery(

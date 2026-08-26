@@ -1,5 +1,6 @@
 // Type-level tests: Expression type safety
 
+import type { DateTime } from "effect"
 import { expectTypeOf } from "expect-type"
 import * as CH from "./index"
 import type { Expr, Condition } from "./expr"
@@ -38,7 +39,7 @@ expectTypeOf(CH.quantile(0.95)(CH.lit(1))).toMatchTypeOf<Expr<number>>()
 
 // ClickHouse functions — return types
 
-expectTypeOf(CH.toStartOfInterval(CH.lit("ts"), 60)).toMatchTypeOf<Expr<string>>()
+expectTypeOf(CH.toStartOfInterval(CH.param.dateTime("ts"), 60)).toMatchTypeOf<Expr<DateTime.Utc>>()
 expectTypeOf(CH.if_(CH.lit(1).gt(0), CH.lit("yes"), CH.lit("no"))).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.coalesce(CH.lit("a"), CH.lit("b"))).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.concat(CH.lit("a"), CH.lit("b"))).toMatchTypeOf<Expr<string>>()
@@ -148,8 +149,8 @@ expectTypeOf(CH.param.string("orgId")).toMatchTypeOf<ParamMarker<"orgId", string
 expectTypeOf(CH.param.int("limit")).toMatchTypeOf<Expr<number>>()
 expectTypeOf(CH.param.int("limit")).toMatchTypeOf<ParamMarker<"limit", number>>()
 
-expectTypeOf(CH.param.dateTime("start")).toMatchTypeOf<Expr<string>>()
-expectTypeOf(CH.param.dateTime("start")).toMatchTypeOf<ParamMarker<"start", string>>()
+expectTypeOf(CH.param.dateTime("start")).toMatchTypeOf<Expr<DateTime.Utc>>()
+expectTypeOf(CH.param.dateTime("start")).toMatchTypeOf<ParamMarker<"start", DateTime.Utc>>()
 
 // Param name is captured as a literal type
 expectTypeOf(CH.param.string("orgId")._paramName).toEqualTypeOf<"orgId">()

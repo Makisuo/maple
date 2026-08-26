@@ -59,7 +59,7 @@ describe("sql catalog", () => {
 	})
 
 	// Builders that read across every tenant on purpose. Each must declare
-	// `.crossOrg()` and run through `WarehouseQueryService.crossOrgQuery`, which
+	// `.crossTenant()` and run through `WarehouseQueryService.crossOrgQuery`, which
 	// records a justification on the span. This list should stay tiny — it is the
 	// complete inventory of cross-tenant reads in the product.
 	const CROSS_ORG_BUILDERS: ReadonlySet<string> = new Set([
@@ -75,7 +75,7 @@ describe("sql catalog", () => {
 	it("scopes every query to an org", () => {
 		for (const entry of entries) {
 			if (entry.compiled === undefined) continue
-			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-org" : "org"
+			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-tenant" : "tenant"
 			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe(expected)
 		}
 	})

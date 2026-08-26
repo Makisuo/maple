@@ -70,11 +70,11 @@ export function listRuleChecksQuery(opts: ListRuleChecksOpts) {
 					? $.GroupKey.eq(param.string("groupKey"))
 					: undefined,
 				opts.status != null ? $.Status.eq(param.string("status")) : undefined,
-				opts.since != null ? $.Timestamp.gte(param.dateTime("since")) : undefined,
-				opts.until != null ? $.Timestamp.lte(param.dateTime("until")) : undefined,
+				opts.since != null ? $.Timestamp.gte(param.dateTimeString("since")) : undefined,
+				opts.until != null ? $.Timestamp.lte(param.dateTimeString("until")) : undefined,
 				opts.beforeTimestamp != null
-					? $.Timestamp.lt(param.dateTime("beforeTimestamp")).or(
-							$.Timestamp.eq(param.dateTime("beforeTimestamp")).and(
+					? $.Timestamp.lt(param.dateTimeString("beforeTimestamp")).or(
+							$.Timestamp.eq(param.dateTimeString("beforeTimestamp")).and(
 								$.GroupKey.gt(param.string("beforeGroupKey")),
 							),
 						)
@@ -110,8 +110,8 @@ export function alertCheckGroupTotalsQuery(opts: AlertCheckGroupTotalsOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.RuleId.eq(param.string("ruleId")),
-			$.Timestamp.gte(param.dateTime("since")),
-			$.Timestamp.lte(param.dateTime("until")),
+			$.Timestamp.gte(param.dateTimeString("since")),
+			$.Timestamp.lte(param.dateTimeString("until")),
 		])
 		.groupBy("groupKey")
 		.orderBy(["totalCount", "desc"], ["groupKey", "asc"])
@@ -157,8 +157,8 @@ export function alertChecksSummaryQuery(opts: AlertChecksSummaryOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.RuleId.eq(param.string("ruleId")),
-			$.Timestamp.gte(param.dateTime("since")),
-			$.Timestamp.lte(param.dateTime("until")),
+			$.Timestamp.gte(param.dateTimeString("since")),
+			$.Timestamp.lte(param.dateTimeString("until")),
 		])
 		.groupBy("bucket", "groupKey")
 		.orderBy(["bucket", "asc"], ["groupKey", "asc"])

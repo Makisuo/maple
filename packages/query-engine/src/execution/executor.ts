@@ -387,13 +387,16 @@ WHERE name = 'enable_full_text_index'`,
 		yield* Effect.annotateCurrentSpan("query.context", options?.context ?? pipe)
 		if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 
-		const leftoverParam = sql.match(/__PARAM_(\w+)__/)
+		// `compile()` now refuses to leave a placeholder behind, so this only fires
+		// for SQL that reached the executor without going through it — a raw
+		// template, or a splice compiled with `deferParams` that nothing resolved.
+		const leftoverParam = sql.match(/__PARAM_[A-Za-z]+_(\w+)__/)
 		if (leftoverParam) {
 			// An unresolved param is a compile-time bug in Maple's query construction,
 			// not a recoverable runtime failure — surface it as a defect.
 			return yield* Effect.die(
 				new Error(
-					`Compiled SQL contains unresolved param '${leftoverParam[1]}' — query was built with param.${leftoverParam[1]}() but '${leftoverParam[1]}' was not provided in the runtime params object`,
+					`Compiled SQL contains unresolved param '${leftoverParam[1]}' — the query declared it but the runtime params object did not provide it`,
 				),
 			)
 		}
@@ -821,12 +824,12 @@ WHERE name = 'enable_full_text_index'`,
 				message: `org_id must not be empty (${context})`,
 			})
 		}
-		if (tenantScope !== "org") {
+		if (tenantScope !== "tenant") {
 			return yield* new WarehouseScopeError({
 				pipeName: context,
 				message:
 					`compiled query is not tenant-scoped: no top-level OrgId predicate (${context}). ` +
-					`Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.`,
+					`Deliberate cross-tenant reads must declare .crossTenant() and run through crossOrgQuery.`,
 			})
 		}
 	})
@@ -976,7 +979,7 @@ WHERE name = 'enable_full_text_index'`,
 	 *
 	 * A separate method rather than a flag on `compiledQuery`, so that grepping
 	 * for cross-tenant reads returns a finite, reviewable list. The compiled
-	 * query must have declared `.crossOrg()`; a scoped query arriving here is
+	 * query must have declared `.crossTenant()`; a scoped query arriving here is
 	 * just as much a bug as an unscoped one on the normal path, so both
 	 * directions are rejected.
 	 */
@@ -987,7 +990,7 @@ WHERE name = 'enable_full_text_index'`,
 	) {
 		const options = withDefaultProfile(rawOptions)
 		const context = options.context ?? "crossOrgQuery"
-		if (compiled.tenantScope !== "cross-org") {
+		if (compiled.tenantScope !== "cross-tenant") {
 			return yield* new WarehouseScopeError({
 				pipeName: context,
 				message:

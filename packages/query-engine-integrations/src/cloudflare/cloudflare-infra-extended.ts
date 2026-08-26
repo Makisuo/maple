@@ -72,8 +72,8 @@ export function cloudflareZoneFirewallTimeseriesSQL(opts: CloudflareFilterOpts =
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.MetricName.eq("cloudflare.firewall.events"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			...cloudflareFilterConditions($, opts, CF_FILTERABLE[CF_METRIC.firewallEvents] ?? []),
 		])
 		.groupBy("bucket", "action")
@@ -95,8 +95,8 @@ export function cloudflareZoneFirewallTopSQL(opts: CloudflareFilterOpts = {}) {
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.MetricName.eq("cloudflare.firewall.events"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			...cloudflareFilterConditions($, opts, CF_FILTERABLE[CF_METRIC.firewallEvents] ?? []),
 		])
 		.groupBy("source", "action", "ruleId", "host")
@@ -147,8 +147,8 @@ export function cloudflareZoneDnsTimeseriesSQL(opts: CloudflareFilterOpts = {}) 
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.MetricName.eq("cloudflare.dns.queries"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			...cloudflareFilterConditions($, opts, CF_FILTERABLE[CF_METRIC.dnsQueries] ?? []),
 		])
 		.groupBy("bucket", "responseCode")
@@ -168,8 +168,8 @@ export function cloudflareZoneDnsBreakdownSQL(opts: CloudflareFilterOpts = {}) {
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.MetricName.eq("cloudflare.dns.queries"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			...cloudflareFilterConditions($, opts, CF_FILTERABLE[CF_METRIC.dnsQueries] ?? []),
 		])
 		.groupBy("queryName")
@@ -238,8 +238,8 @@ export function cloudflareQueueGaugesSQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...QUEUE_GAUGE_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.orderBy(["backlogMessagesMax", "desc"])
@@ -258,8 +258,8 @@ export function cloudflareDurableObjectCountersSQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_("cloudflare.durable_object.requests", "cloudflare.durable_object.errors"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.orderBy(["requests", "desc"])

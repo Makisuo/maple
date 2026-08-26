@@ -194,8 +194,8 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			hasSessionId($.SpanAttributes, $.SpanAttributes.get(SESSION_ID_ATTR)),
 			opts.vendorIds?.length
 				? CH.inList($.SpanAttributes.get(VENDOR_ID_ATTR), opts.vendorIds)
@@ -234,7 +234,12 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 							.and(
 								$.SpanAttributes.get(ERROR_TYPE_ATTR)
 									.neq("")
-									.or(CH.inList($.SpanAttributes.get(RESPONSE_STATUS_ATTR), FAILED_RESPONSE_STATUSES)),
+									.or(
+										CH.inList(
+											$.SpanAttributes.get(RESPONSE_STATUS_ATTR),
+											FAILED_RESPONSE_STATUSES,
+										),
+									),
 							),
 					),
 				),
@@ -257,8 +262,8 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 		})
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(CH.intervalSub(param.dateTime("startTime"), FAN_OUT_PAD_SECONDS)),
-			$.Timestamp.lte(CH.intervalAdd(param.dateTime("endTime"), FAN_OUT_PAD_SECONDS)),
+			$.Timestamp.gte(CH.intervalSub(param.dateTimeString("startTime"), FAN_OUT_PAD_SECONDS)),
+			$.Timestamp.lte(CH.intervalAdd(param.dateTimeString("endTime"), FAN_OUT_PAD_SECONDS)),
 			inSubquery($.TraceId, sessionTraceIds),
 		])
 		.groupBy("traceId")
@@ -342,8 +347,8 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 				// Every UNION ALL branch reads a table, so every branch carries the org
 				// predicate itself — see this file's header.
 				$.OrgId.eq(param.string("orgId")),
-				$.Timestamp.gte(param.dateTime("startTime")),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.gte(param.dateTimeString("startTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 				hasSessionId($.SpanAttributes, $.SpanAttributes.get(SESSION_ID_ATTR)),
 				// A span can be session-bearing without a vendor stamp; a blank option
 				// filters nothing and is not offered.
@@ -488,8 +493,8 @@ export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			// The presence guard is what stops an empty `sessionId` param from
 			// matching every span that simply LACKS the key — ClickHouse reads a
 			// missing Map key back as `''`, so equality alone would turn a blank
@@ -516,8 +521,8 @@ export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.Timestamp.gte(param.dateTime("startTime")),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.gte(param.dateTimeString("startTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 				inSubquery($.TraceId, sessionTraceIds),
 			])
 			// `spanId` breaks ties: agent spans routinely share a millisecond, and

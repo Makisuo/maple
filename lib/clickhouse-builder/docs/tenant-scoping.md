@@ -3,53 +3,64 @@
 Every compiled query carries a `tenantScope`:
 
 ```ts
-compiled.tenantScope // "org" | "cross-org"
+compiled.tenantScope // "tenant" | "cross-tenant"
 ```
 
-`"org"` means the query pins itself to a single tenant. `"cross-org"` means it reads whatever
+`"tenant"` means the query pins itself to a single tenant. `"cross-tenant"` means it reads whatever
 the credentials can see. The builder only _computes and reports_ this — it never blocks a
-query. The intended use is that your executor refuses `"cross-org"` on its ordinary read path,
+query. The intended use is that your executor refuses `"cross-tenant"` on its ordinary read path,
 so a forgotten tenant filter fails loudly instead of quietly returning another tenant's rows.
 
 > **Read this page before relying on the field.** It answers a narrow question precisely, and
-> silently answers `"cross-org"` for everything outside that narrowness.
+> silently answers `"cross-tenant"` for everything outside that narrowness.
+
+## Declare the tenant column
+
+Row-per-tenant is the usual ClickHouse multi-tenancy shape, but whether a table has one — and
+what the column is called — is a schema decision, so it is declared on the table:
+
+```ts
+const Events = CH.table(
+	"events",
+	{ OrgId: T.string, Name: T.string },
+	{ tenantColumn: "OrgId" },
+)
+```
+
+The option is checked against the column names you just declared, so a typo is a type error
+rather than a query that silently never scopes. A table with **no** `tenantColumn` has nothing to
+pin, so everything it compiles is `"cross-tenant"`:
+
+```ts
+const Untenanted = CH.table("untenanted", { tenant_id: T.string, Name: T.string })
+
+CH.from(Untenanted)
+	.select(($) => ({ name: $.Name }))
+	.where(($) => [$.tenant_id.eq("org_123")])
+// tenantScope: "cross-tenant"  ← despite being perfectly well filtered
+```
+
+_(Backed by `docs/tenant-scoping.md > A table without a declared tenant column never scopes`.)_
 
 ## What marks a query scoped
 
-A query is `"org"` when either:
+A query is `"tenant"` when either:
 
-1. Its **top-level `where` list** contains an `eq` or `in_` on the tenant column, or
+1. Its **top-level `where` list** contains an `eq` or `in_` on the declared tenant column, or
 2. Every row source it reads — the `FROM` and each join — is already scoped.
 
 ```ts
 CH.from(Events)
 	.select(($) => ({ name: $.Name }))
 	.where(($) => [$.OrgId.eq("org_123")])
-// tenantScope: "org"
+// tenantScope: "tenant"
 ```
 
 _(Backed by `docs/tenant-scoping.md > An OrgId equality scopes the query`.)_
 
-## The tenant column is `OrgId`, and that is hardcoded
-
-The marker is set only for a column named exactly **`OrgId`** (`TENANT_COLUMN` in
-`src/ch/expr.ts`). There is currently no way to configure it.
-
-```ts
-const Tenanted = CH.table("tenanted", { tenant_id: T.string, Name: T.string })
-
-CH.from(Tenanted)
-	.select(($) => ({ name: $.Name }))
-	.where(($) => [$.tenant_id.eq("org_123")])
-// tenantScope: "cross-org"  ← despite being perfectly well filtered
-```
-
-So if your schema names the column anything else, **every** query reports `"cross-org"` and the
-field carries no signal for you. Conversely, a column named `OrgId` that is not actually a
-tenant key will mark queries as scoped when they are not. Know which case you are in before
-building an authorization decision on top of this.
-
-_(Backed by `docs/tenant-scoping.md > A column named anything else does not scope`.)_
+Declaring a column that is not actually a tenant key will mark queries as scoped when they are
+not — the builder takes the declaration at face value. Know which case you are in before building
+an authorization decision on top of this.
 
 ## Only `eq` and `in_` count
 
@@ -69,7 +80,7 @@ _(Backed by `docs/tenant-scoping.md > in_ also scopes; neq does not`.)\_
 
 ```ts
 .where(($) => [$.OrgId.eq("org_123").or($.Name.eq("checkout"))])
-// tenantScope: "cross-org"
+// tenantScope: "cross-tenant"
 ```
 
 This is the bug the marker exists to catch: `OrgId = x OR anything` matches rows from other
@@ -89,40 +100,42 @@ const inner = CH.from(Events)
 	.where(($) => [$.OrgId.eq("org_123")])
 
 CH.fromQuery(inner, "sub").select(($) => ({ name: $.name }))
-// tenantScope: "org"
+// tenantScope: "tenant"
 ```
 
 For joins, **every** joined source must be scoped — one unscoped table drags the result to
-`"cross-org"`. A CTE contributes only if the query's `FROM` names it _and_ it was declared with
-`{ tenantScope: "org" }`; see [Unions and CTEs](./unions-and-ctes.md#declare-the-ctes-scope).
+`"cross-tenant"`. A CTE contributes only if the query's `FROM` names it _and_ it was declared with
+`{ tenantScope: "tenant" }`; see [Unions and CTEs](./unions-and-ctes.md#declare-the-ctes-scope).
 
-## `crossOrg()` — the explicit opt-out
+## `crossTenant()` — the explicit opt-out
 
 ```ts
 CH.from(Events)
 	.select(($) => ({ name: $.Name }))
 	.where(($) => [$.OrgId.eq("org_123")])
-	.crossOrg()
-// tenantScope: "cross-org"
+	.crossTenant()
+// tenantScope: "cross-tenant"
 ```
 
-`crossOrg()` forces `"cross-org"` regardless of the predicates, and it wins over everything
+`crossTenant()` forces `"cross-tenant"` regardless of the predicates, and it wins over everything
 else. The point is to distinguish "this query deliberately spans tenants" from "someone forgot
 the filter" — two states that are otherwise identical from the outside. Use it for admin and
 internal-rollup queries so that reviewers, and your executor, can tell them apart.
 
-_(Backed by `docs/tenant-scoping.md > crossOrg() is the explicit opt-out`.)_
+_(Backed by `docs/tenant-scoping.md > crossTenant() is the explicit opt-out`.)_
 
-## `routing("ingest")`
+## `routing(tag)`
 
 ```ts
-compiled.routing // "ingest" | undefined
+const compiled = CH.compile(CH.from(Events).select(…).routing("archive"), params)
+compiled.routing // "archive"
 ```
 
-`.routing("ingest")` is unrelated metadata that rides along on the compiled query. It changes
-no SQL and means nothing on its own — it exists so a query definition can declare which
-backend it must be read from, and an executor that understands the convention can honour it.
-If you have no such executor, ignore it.
+`.routing(tag)` is unrelated metadata that rides along on the compiled query, as a type-level
+fact as well as a runtime one. The tag is any string you like: it changes no SQL and means
+nothing on its own — it exists so a query definition can declare which backend it must be read
+from, and an executor that understands your vocabulary can honour it. If you have no such
+executor, ignore it.
 
 _(Backed by `docs/tenant-scoping.md > routing is carried onto the compiled query`.)_
 
@@ -130,5 +143,5 @@ _(Backed by `docs/tenant-scoping.md > routing is carried onto the compiled query
 
 `unsafeCompiledQuery` requires `tenantScope` explicitly, since a raw string cannot be
 inspected. Whatever you pass is taken at face value — which is why it also requires a
-`reason` naming why the query isn't a builder query at all. See
+`reason` and a `note` naming why the query isn't a builder query at all. See
 [Extending](./extending.md#handwritten-queries-unsafecompiledquery).

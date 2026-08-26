@@ -2,41 +2,50 @@ import { defineFn, compileFnCall } from "../define-fn"
 import { makeExpr } from "../expr"
 import { raw, compile } from "../../sql/sql-fragment"
 import type { Expr, Condition } from "../expr"
+import { Schema } from "effect"
+import * as T from "../types"
+
+/** `groupUniqArray(x)` collects `x`s, so it decodes as an array of whatever `x` is. */
+const arraySchemaOf = <T>(expr: unknown) => {
+	const element = schemaOf<T>(expr)
+	return element ? Schema.Array(element) : undefined
+}
+import { compileTypedFnCall, schemaOf } from "../define-fn"
 
 // Standard aggregates (defineFn one-liners)
 
-export const count = defineFn<[], number>("count")
-export const avg = defineFn<[Expr<number>], number>("avg")
-export const sum = defineFn<[Expr<number>], number>("sum")
+export const count = defineFn<[], number>("count", T.uint64)
+export const avg = defineFn<[Expr<number>], number>("avg", T.float64)
+export const sum = defineFn<[Expr<number>], number>("sum", T.float64)
 
 // Condition-taking aggregates
 
-export const countIf = defineFn<[Condition], number>("countIf")
-export const sumIf = defineFn<[Expr<number>, Condition], number>("sumIf")
-export const avgIf = defineFn<[Expr<number>, Condition], number>("avgIf")
-export const maxIf = defineFn<[Expr<number>, Condition], number>("maxIf")
-export const minIf = defineFn<[Expr<number>, Condition], number>("minIf")
+export const countIf = defineFn<[Condition], number>("countIf", T.uint64)
+export const sumIf = defineFn<[Expr<number>, Condition], number>("sumIf", T.float64)
+export const avgIf = defineFn<[Expr<number>, Condition], number>("avgIf", T.float64)
+export const maxIf = defineFn<[Expr<number>, Condition], number>("maxIf", T.float64)
+export const minIf = defineFn<[Expr<number>, Condition], number>("minIf", T.float64)
 
 // Generic aggregates (compileFnCall for type preservation)
 
 export function min_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
-	return compileFnCall<NonNullable<T>>("min", expr)
+	return compileTypedFnCall<NonNullable<T>>("min", schemaOf(expr), expr)
 }
 
 export function max_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
-	return compileFnCall<NonNullable<T>>("max", expr)
+	return compileTypedFnCall<NonNullable<T>>("max", schemaOf(expr), expr)
 }
 
 export function any_<T>(expr: Expr<T>): Expr<T> {
-	return compileFnCall<T>("any", expr)
+	return compileTypedFnCall<T>("any", schemaOf<T>(expr), expr)
 }
 
 export function anyIf<T>(expr: Expr<T>, cond: Condition): Expr<T> {
-	return compileFnCall<T>("anyIf", expr, cond)
+	return compileTypedFnCall<T>("anyIf", schemaOf<T>(expr), expr, cond)
 }
 
 export function uniq<T>(expr: Expr<T>): Expr<number> {
-	return compileFnCall<number>("uniq", expr)
+	return compileTypedFnCall<number>("uniq", T.uint64.schema, expr)
 }
 
 /**
@@ -48,11 +57,11 @@ export function uniq<T>(expr: Expr<T>): Expr<number> {
  * key would inflate a `countIf` but not a `uniqIf` on that key.
  */
 export function uniqIf<T>(expr: Expr<T>, cond: Condition): Expr<number> {
-	return compileFnCall<number>("uniqIf", expr, cond)
+	return compileTypedFnCall<number>("uniqIf", T.uint64.schema, expr, cond)
 }
 
 export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
-	return compileFnCall<ReadonlyArray<T>>("groupUniqArray", expr)
+	return compileTypedFnCall<ReadonlyArray<T>>("groupUniqArray", arraySchemaOf<T>(expr), expr)
 }
 
 /**
@@ -65,28 +74,28 @@ export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
  * with, so reading such a column back uses the same name.
  */
 export function groupUniqArrayArray<T>(expr: Expr<ReadonlyArray<T>>): Expr<ReadonlyArray<T>> {
-	return compileFnCall<ReadonlyArray<T>>("groupUniqArrayArray", expr)
+	return compileTypedFnCall<ReadonlyArray<T>>("groupUniqArrayArray", schemaOf<ReadonlyArray<T>>(expr), expr)
 }
 
 /** `argMin(value, orderBy)` — the `value` from the row with the smallest `orderBy`. */
 export function argMin<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
-	return compileFnCall<T>("argMin", value, orderBy)
+	return compileTypedFnCall<T>("argMin", schemaOf<T>(value), value, orderBy)
 }
 
 /** `argMax(value, orderBy)` — the `value` from the row with the largest `orderBy`. */
 export function argMax<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
-	return compileFnCall<T>("argMax", value, orderBy)
+	return compileTypedFnCall<T>("argMax", schemaOf<T>(value), value, orderBy)
 }
 
 export function argMaxMerge<T>(expr: Expr<T>): Expr<T> {
-	return compileFnCall<T>("argMaxMerge", expr)
+	return compileTypedFnCall<T>("argMaxMerge", schemaOf<T>(expr), expr)
 }
 
 // Curried / parametric aggregates (handwritten — custom SQL syntax)
 
 export function quantile(q: number) {
 	return (expr: Expr<number>): Expr<number> =>
-		makeExpr<number>(raw(`quantile(${q})(${compile(expr.toFragment())})`))
+		makeExpr(raw(`quantile(${q})(${compile(expr.toFragment())})`), T.float64.schema)
 }
 
 /**
@@ -98,11 +107,12 @@ export function quantile(q: number) {
  */
 export function groupUniqArrayIf(maxSize: number) {
 	return <T>(expr: Expr<T>, cond: Condition): Expr<ReadonlyArray<T>> =>
-		makeExpr<ReadonlyArray<T>>(
+		makeExpr(
 			raw(
 				`groupUniqArrayIf(${Math.round(maxSize)})(` +
 					`${compile(expr.toFragment())}, ${compile(cond.toFragment())})`,
 			),
+			arraySchemaOf<T>(expr),
 		)
 }
 
@@ -137,7 +147,7 @@ export function windowFunnel(window: number, mode?: WindowFunnelMode) {
 		const args = [timestamp.toFragment(), ...conditions.map((c) => c.toFragment())]
 			.map(compile)
 			.join(", ")
-		return makeExpr<number>(raw(`windowFunnel(${params})(${args})`))
+		return makeExpr(raw(`windowFunnel(${params})(${args})`), T.uint8.schema)
 	}
 }
 
@@ -161,6 +171,6 @@ export function sequenceMatch(pattern: string) {
 		const args = [timestamp.toFragment(), ...conditions.map((c) => c.toFragment())]
 			.map(compile)
 			.join(", ")
-		return makeExpr<number>(raw(`sequenceMatch('${pattern}')(${args})`))
+		return makeExpr(raw(`sequenceMatch('${pattern}')(${args})`), T.uint8.schema)
 	}
 }

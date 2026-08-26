@@ -14,7 +14,8 @@
 
 import type { TracesMetric, AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import type { OrgId } from "@maple/domain"
-import { compile, compileUnion, unsafeCompiledQuery, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { compile, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { unsafeCompiledQuery } from "./raw-sql"
 import { Array as A, Match, Result, Schema } from "effect"
 import {
 	attributeIndexMode,
@@ -140,7 +141,9 @@ export function compilePipeQuery(
 			// Both branches are the same builder over different windows, so the
 			// union is scoped exactly when the branch is.
 			tenantScope:
-				current.tenantScope === "org" && previous.tenantScope === "org" ? "org" : "cross-org",
+				current.tenantScope === "tenant" && previous.tenantScope === "tenant"
+					? "tenant"
+					: "cross-tenant",
 			// `period` is typed as a plain String, not a `"current" | "previous"`
 			// literal union. The value is produced by our own SELECT so it is
 			// always one of the two at runtime — but the row schema describes the

@@ -1,6 +1,7 @@
 import { makeExpr, toFragment } from "../expr"
 import { compile, raw } from "../../sql/sql-fragment"
 import type { Expr } from "../expr"
+import { schemaOf } from "../define-fn"
 
 export type WindowOrderDirection = "asc" | "desc"
 
@@ -66,7 +67,8 @@ export function windowSpec(spec: WindowSpec): CompiledWindowSpec {
 }
 
 export function over<T>(expr: Expr<T>, spec: CompiledWindowSpec): Expr<T> {
-	return makeExpr<T>(raw(`${compile(expr.toFragment())} OVER (${spec.sql})`))
+	// A window changes which rows feed the value, never how the value decodes.
+	return makeExpr(raw(`${compile(expr.toFragment())} OVER (${spec.sql})`), schemaOf<T>(expr))
 }
 
 export function lagInFrame<T>(
@@ -74,10 +76,11 @@ export function lagInFrame<T>(
 	offset: number | Expr<number>,
 	defaultValue: T | Expr<T>,
 ): Expr<T> {
-	return makeExpr<T>(
+	return makeExpr(
 		raw(
 			`lagInFrame(${compile(expr.toFragment())}, ${compile(toFragment(offset))}, ${compile(toFragment(defaultValue))})`,
 		),
+		schemaOf<T>(expr),
 	)
 }
 

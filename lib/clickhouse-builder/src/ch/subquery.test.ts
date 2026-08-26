@@ -3,17 +3,18 @@ import { compileCH } from "./compile"
 import * as CH from "./index"
 import { param } from "./param"
 
-const Events = CH.table("events", {
-	OrgId: CH.string,
-	TraceId: CH.string,
-	ServiceName: CH.string,
-	Count: CH.uint64,
-})
+const Events = CH.table(
+	"events",
+	{
+		OrgId: CH.string,
+		TraceId: CH.string,
+		ServiceName: CH.string,
+		Count: CH.uint64,
+	},
+	{ tenantColumn: "OrgId" },
+)
 
-const Excluded = CH.table("excluded", {
-	OrgId: CH.string,
-	TraceId: CH.string,
-})
+const Excluded = CH.table("excluded", { OrgId: CH.string, TraceId: CH.string }, { tenantColumn: "OrgId" })
 
 const excludedTraces = CH.from(Excluded)
 	.select(($) => ({ TraceId: $.TraceId }))
@@ -85,7 +86,7 @@ describe("subquery conditions", () => {
 			{ orgId: "org_1" },
 		)
 
-		expect(compiled.tenantScope).toBe("cross-org")
+		expect(compiled.tenantScope).toBe("cross-tenant")
 	})
 })
 
@@ -105,10 +106,10 @@ describe("withCTE with a query", () => {
 
 		expect(compiled.sql.startsWith("WITH hot AS (")).toBe(true)
 		// No OrgId predicate on the outer query — the scope comes from the CTE.
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("tenant")
 	})
 
-	it("reads as cross-org when the CTE query is itself unscoped", () => {
+	it("reads as cross-tenant when the CTE query is itself unscoped", () => {
 		const unscopedCte = CH.from(Events)
 			.select(($) => ({ TraceId: $.TraceId }))
 			.groupBy("TraceId")
@@ -120,7 +121,7 @@ describe("withCTE with a query", () => {
 			{},
 		)
 
-		expect(compiled.tenantScope).toBe("cross-org")
+		expect(compiled.tenantScope).toBe("cross-tenant")
 	})
 })
 
@@ -170,7 +171,7 @@ describe("having", () => {
 		)
 
 		expect(compiled.sql).toContain("HAVING OrgId = 'org_1'")
-		expect(compiled.tenantScope).toBe("cross-org")
+		expect(compiled.tenantScope).toBe("cross-tenant")
 	})
 })
 
@@ -184,5 +185,24 @@ describe("Expr.mod", () => {
 		)
 
 		expect(sql).toContain("cityHash64(TraceId) % 16 = 0")
+	})
+})
+
+describe("deferred params", () => {
+	// A spliced subquery compiles with no params so the outer pass resolves them.
+	// Nested compilations (CTEs, FROM-subqueries, joins) are part of the same
+	// string, so they have to inherit the deferral rather than demand values.
+	it("defers a nested FROM-subquery's params to the outer compile", () => {
+		const inner = CH.from(Events)
+			.select(($) => ({ TraceId: $.TraceId }))
+			.where(($) => [$.OrgId.eq(param.string("orgId"))])
+
+		const spliced = CH.fromQuery(inner, "sub").select(($) => ({ traceId: $.TraceId }))
+
+		const outer = CH.from(Events)
+			.select(($) => ({ traceId: $.TraceId }))
+			.where(($) => [$.OrgId.eq(param.string("orgId")), CH.inSubquery($.TraceId, spliced)])
+
+		expect(compileCH(outer, { orgId: "org_1" }).sql).not.toContain("__PARAM_")
 	})
 })

@@ -37,7 +37,7 @@ The root barrel is curated. These are exported by the package but not from it:
 | ---------------------------------------------------------------------------------------- | -------- |
 | `uint16`, `uint32`, `int32`, `bool`                                                      | `/types` |
 | `not`, `notInList`, `dynamicColumn`                                                      | `/expr`  |
-| `TENANT_COLUMN`, `makeColumnRef`, `aliased`, `toFragment`                                | `/expr`  |
+| `makeColumnRef`, `aliased`, `toFragment`                                                 | `/expr`  |
 | `raw`, `str`, `ident`, `int`, `join`, `as_`, `when`, `compile`, `escapeClickHouseString` | `/sql`   |
 | `SqlQuery`, `compileQuery`                                                               | `/sql`   |
 
@@ -52,7 +52,8 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 | Export      | Signature                      |
 | ----------- | ------------------------------ |
-| `table`     | `(name, columns) => Table`     |
+| `table`     | `(name, columns, options?) => Table` |
+| `custom`    | `(sql, schema, literalSchema?) => CHType` |
 | `from`      | `(table, alias?) => CHQuery`   |
 | `fromQuery` | `(query, alias) => CHQuery`    |
 | `fromUnion` | `(union, alias) => CHQuery`    |
@@ -72,7 +73,7 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 | `innerJoinQuery` / `leftJoinQuery` / `crossJoinQuery` | `(query, alias, on?)`                               |
 | `withCTE(name, sql, options?)`                        | `options.tenantScope`                               |
 | `routing("ingest")`                                   | Metadata only                                       |
-| `crossOrg()`                                          | Forces `tenantScope: "cross-org"`                   |
+| `crossTenant()`                                          | Forces `tenantScope: "cross-tenant"`                   |
 
 `CHUnionQuery` offers only `orderBy`, `limit`, `offset`, `format`.
 
@@ -86,7 +87,10 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 ### Params
 
-`param.string(name)`, `param.int(name)`, `param.dateTime(name)` — that is the full set.
+`param.string(name)`, `param.int(name)`, `param.float(name)`, `param.bool(name)`,
+`param.dateTime(name)`, `param.dateTimeString(name)`, and `param.of(type, name)` for any column
+type. Each checks the value it is handed at compile
+time; see [Params and compilation](./params-and-compilation.md#what-each-kind-accepts).
 
 ---
 

@@ -12,6 +12,7 @@
 // When changing an example here, change the matching docs block in the same
 // commit — the pairing is the whole point.
 
+import type { DateTime } from "effect"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Option, Schema } from "effect"
 import * as CH from "./ch/index"
@@ -25,18 +26,88 @@ const oneLine = (sql: string) => sql.replace(/\s+/g, " ").trim()
 
 // Shared fixtures — the tables every docs page builds on.
 
-const Events = CH.table("events", {
-	OrgId: T.string,
-	Name: T.string,
-	Timestamp: T.dateTime,
-	DurationMs: T.uint64,
-	Attributes: T.map(T.string, T.string),
-})
+const Events = CH.table(
+	"events",
+	{
+		OrgId: T.string,
+		Name: T.string,
+		Timestamp: T.dateTime,
+		DurationMs: T.uint64,
+		Attributes: T.map(T.string, T.string),
+	},
+	{ tenantColumn: "OrgId" },
+)
 
-const Services = CH.table("services", {
-	OrgId: T.string,
-	Name: T.string,
-	Team: T.string,
+const Services = CH.table(
+	"services",
+	{ OrgId: T.string, Name: T.string, Team: T.string },
+	{ tenantColumn: "OrgId" },
+)
+
+// README.md
+//
+// The README once documented a deleted API (see the header comment); its
+// snippets are executable here for the same reason the docs pages are.
+
+describe("README.md", () => {
+	it("Quick start", () => {
+		const query = CH.from(Events)
+			.select(($) => ({
+				name: $.Name,
+				p95: CH.quantile(0.95)($.DurationMs),
+				count: CH.count(),
+			}))
+			.where(($) => [
+				$.OrgId.eq(CH.param.string("orgId")),
+				$.Timestamp.gte(CH.param.dateTime("startTime")),
+				CH.when(true, () => $.Name.like("checkout%")),
+			])
+			.groupBy("name")
+			.orderBy(["count", "desc"])
+			.limit(50)
+
+		const compiled = compileCH(query, { orgId: "org_123", startTime: "2026-01-01 00:00:00" })
+
+		expect(oneLine(compiled.sql)).toBe(
+			"SELECT Name AS name, quantile(0.95)(DurationMs) AS p95, count() AS count " +
+				"FROM events WHERE OrgId = 'org_123' AND Timestamp >= '2026-01-01 00:00:00' " +
+				"AND Name LIKE 'checkout%' GROUP BY name ORDER BY count DESC LIMIT 50",
+		)
+		expect(compiled.tenantScope).toBe("tenant")
+	})
+
+	it.effect("Decoding results", () =>
+		Effect.gen(function* () {
+			const query = CH.from(Events)
+				.select(($) => ({ name: $.Name, count: CH.count() }))
+				.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
+				.groupBy("name")
+
+			const compiled = compileCH(
+				query,
+				{ orgId: "org_123" },
+				{ rowSchema: Schema.Struct({ name: Schema.String, count: Schema.Number }) },
+			)
+
+			expect(compiled.rowSchemaDeclared).toBe(true)
+			expect(yield* compiled.decodeRows([{ name: "checkout", count: 3 }])).toEqual([
+				{ name: "checkout", count: 3 },
+			])
+		}),
+	)
+
+	it("Extending with custom functions", () => {
+		const toStartOfFiveMinute = CH.defineFn<[CH.Expr<DateTime.Utc>], DateTime.Utc>(
+			"toStartOfFiveMinute",
+			T.dateTime,
+		)
+
+		const query = CH.from(Events)
+			.select(($) => ({ bucket: toStartOfFiveMinute($.Timestamp) }))
+			.where(($) => [$.OrgId.eq("org_123")])
+
+		expect(oneLine(compileCH(query, {}).sql)).toContain("toStartOfFiveMinute(Timestamp) AS bucket")
+	})
 })
 
 // getting-started.md
@@ -67,7 +138,7 @@ describe("docs/getting-started.md", () => {
 				"FROM events WHERE OrgId = 'org_123' AND Timestamp >= '2026-01-01 00:00:00' " +
 				"GROUP BY name ORDER BY count DESC LIMIT 50",
 		)
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("tenant")
 	})
 
 	it.effect("Decoding the results", () =>
@@ -110,7 +181,11 @@ describe("docs/tables-and-types.md", () => {
 	it("Types outside the curated barrel come from /types", () => {
 		// `uint16`/`uint32`/`int32`/`bool` are not re-exported from the root
 		// entry point — the docs say to reach for `/types` for these.
-		const Counters = CH.table("counters", { OrgId: T.string, Hits: T.uint16, Live: T.bool })
+		const Counters = CH.table(
+			"counters",
+			{ OrgId: T.string, Hits: T.uint16, Live: T.bool },
+			{ tenantColumn: "OrgId" },
+		)
 
 		const query = CH.from(Counters)
 			.select(($) => ({ hits: $.Hits }))
@@ -300,7 +375,7 @@ describe("docs/joins-and-subqueries.md", () => {
 			.where(($) => [CH.inSubquery($.Team, scopedInner)])
 
 		// The inner filter confines the subquery, not the outer scan.
-		expect(compileCH(query, {}).tenantScope).toBe("cross-org")
+		expect(compileCH(query, {}).tenantScope).toBe("cross-tenant")
 	})
 
 	it("A scoped subquery keeps the outer query scoped", () => {
@@ -310,7 +385,7 @@ describe("docs/joins-and-subqueries.md", () => {
 
 		const outer = CH.fromQuery(inner, "sub").select(($) => ({ name: $.name }))
 
-		expect(compileCH(outer, {}).tenantScope).toBe("org")
+		expect(compileCH(outer, {}).tenantScope).toBe("tenant")
 	})
 })
 
@@ -347,7 +422,7 @@ describe("docs/unions-and-ctes.md", () => {
 		const compiled = compileCH(outer, {})
 		expect(oneLine(compiled.sql)).toContain(") AS branches GROUP BY name")
 		// A union of scoped branches keeps the outer query scoped.
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("tenant")
 	})
 
 	it("Selecting from a CTE", () => {
@@ -368,7 +443,7 @@ describe("docs/unions-and-ctes.md", () => {
 				"SELECT Name AS name FROM recent",
 		)
 		// Derived off the CTE — the outer query has no OrgId predicate of its own.
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("tenant")
 	})
 
 	it("A CTE needs its tenantScope declared", () => {
@@ -376,7 +451,7 @@ describe("docs/unions-and-ctes.md", () => {
 		const cteSql = "SELECT Name FROM events WHERE OrgId = 'org_123'"
 
 		const declared = CH.from(Recent)
-			.withCTE("recent", cteSql, { tenantScope: "org" })
+			.withCTE("recent", cteSql, { tenantScope: "tenant" })
 			.select(($) => ({ name: $.Name }))
 
 		const undeclared = CH.from(Recent)
@@ -384,10 +459,10 @@ describe("docs/unions-and-ctes.md", () => {
 			.select(($) => ({ name: $.Name }))
 
 		// The CTE body is an opaque string, so the declaration is the only thing
-		// that can carry its scope. Omit it and the query reads as cross-org even
+		// that can carry its scope. Omit it and the query reads as cross-tenant even
 		// though the SQL filters OrgId.
-		expect(compileCH(declared, {}).tenantScope).toBe("org")
-		expect(compileCH(undeclared, {}).tenantScope).toBe("cross-org")
+		expect(compileCH(declared, {}).tenantScope).toBe("tenant")
+		expect(compileCH(undeclared, {}).tenantScope).toBe("cross-tenant")
 	})
 })
 
@@ -467,18 +542,37 @@ describe("docs/decoding-results.md", () => {
 		}),
 	)
 
-	it.effect("Without a rowSchema decoding is a pass-through", () =>
+	it.effect("The row schema is derived from the SELECT", () =>
+		Effect.gen(function* () {
+			const derived = CH.compile(
+				CH.from(Events)
+					.select(($) => ({ name: $.Name, calls: CH.count() }))
+					.where(($) => [$.OrgId.eq("org_123")])
+					.groupBy("name"),
+				{},
+			)
+
+			expect(derived.rowSchemaSource).toBe("derived")
+			// `count()` is a UInt64: quoted by ClickHouse, bare from Tinybird, and
+			// the column type knows it either way.
+			expect(yield* derived.decodeRows([{ name: "checkout", calls: "42" }])).toEqual([
+				{ name: "checkout", calls: 42 },
+			])
+		}),
+	)
+
+	it.effect("An untyped expression leaves the query undecoded", () =>
 		Effect.gen(function* () {
 			const noSchema = CH.compile(
 				CH.from(Events)
-					.select(($) => ({ name: $.Name }))
+					.select(($) => ({ name: $.Name, odd: CH.rawExpr("anyLast(Whatever)") }))
 					.where(($) => [$.OrgId.eq("org_123")]),
 				{},
 			)
 
-			expect(noSchema.rowSchemaDeclared).toBe(false)
+			expect(noSchema.rowSchemaSource).toBe("none")
 			// Nothing is validated — the wrong-typed value passes straight through.
-			expect(yield* noSchema.decodeRows([{ name: 42 }])).toEqual([{ name: 42 }])
+			expect(yield* noSchema.decodeRows([{ name: 42, odd: 1 }])).toEqual([{ name: 42, odd: 1 }])
 		}),
 	)
 })
@@ -491,7 +585,7 @@ describe("docs/tenant-scoping.md", () => {
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.OrgId.eq("org_123")])
 
-		expect(compileCH(query, {}).tenantScope).toBe("org")
+		expect(compileCH(query, {}).tenantScope).toBe("tenant")
 	})
 
 	it("in_ also scopes; neq does not", () => {
@@ -503,9 +597,9 @@ describe("docs/tenant-scoping.md", () => {
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.OrgId.neq("org_123")])
 
-		expect(compileCH(scoped, {}).tenantScope).toBe("org")
+		expect(compileCH(scoped, {}).tenantScope).toBe("tenant")
 		// `OrgId != 'x'` narrows nothing, so it must not read as scoped.
-		expect(compileCH(unscoped, {}).tenantScope).toBe("cross-org")
+		expect(compileCH(unscoped, {}).tenantScope).toBe("cross-tenant")
 	})
 
 	it("The marker does not survive or()", () => {
@@ -514,37 +608,51 @@ describe("docs/tenant-scoping.md", () => {
 			.where(($) => [$.OrgId.eq("org_123").or($.Name.eq("checkout"))])
 
 		// `OrgId = x OR anything` can match other tenants' rows.
-		expect(compileCH(query, {}).tenantScope).toBe("cross-org")
+		expect(compileCH(query, {}).tenantScope).toBe("cross-tenant")
 	})
 
-	it("A column named anything else does not scope", () => {
-		const Tenanted = CH.table("tenanted", { tenant_id: T.string, Name: T.string })
+	it("A table without a declared tenant column never scopes", () => {
+		const Untenanted = CH.table("untenanted", { tenant_id: T.string, Name: T.string })
+
+		const query = CH.from(Untenanted)
+			.select(($) => ({ name: $.Name }))
+			.where(($) => [$.tenant_id.eq("org_123")])
+
+		// Nothing declared row-level tenancy, so there is nothing to pin.
+		expect(compileCH(query, {}).tenantScope).toBe("cross-tenant")
+	})
+
+	it("Declare the tenant column", () => {
+		const Tenanted = CH.table(
+			"tenanted",
+			{ tenant_id: T.string, Name: T.string },
+			{ tenantColumn: "tenant_id" },
+		)
 
 		const query = CH.from(Tenanted)
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.tenant_id.eq("org_123")])
 
-		// The tenant column name is currently hardcoded to `OrgId`.
-		expect(compileCH(query, {}).tenantScope).toBe("cross-org")
+		expect(compileCH(query, {}).tenantScope).toBe("tenant")
 	})
 
-	it("crossOrg() is the explicit opt-out", () => {
+	it("crossTenant() is the explicit opt-out", () => {
 		const query = CH.from(Events)
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.OrgId.eq("org_123")])
-			.crossOrg()
+			.crossTenant()
 
 		// Explicit intent wins over the inferred scope.
-		expect(compileCH(query, {}).tenantScope).toBe("cross-org")
+		expect(compileCH(query, {}).tenantScope).toBe("cross-tenant")
 	})
 
 	it("routing is carried onto the compiled query", () => {
 		const query = CH.from(Events)
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.OrgId.eq("org_123")])
-			.routing("ingest")
+			.routing("archive")
 
-		expect(compileCH(query, {}).routing).toBe("ingest")
+		expect(compileCH(query, {}).routing).toBe("archive")
 	})
 })
 
@@ -577,7 +685,10 @@ describe("docs/reference.md", () => {
 
 describe("docs/extending.md", () => {
 	it("defineFn declares a missing function", () => {
-		const toStartOfFiveMinute = CH.defineFn<[CH.Expr<string>], string>("toStartOfFiveMinute")
+		const toStartOfFiveMinute = CH.defineFn<[CH.Expr<DateTime.Utc>], DateTime.Utc>(
+			"toStartOfFiveMinute",
+			T.dateTime,
+		)
 
 		const query = CH.from(Events)
 			.select(($) => ({ bucket: toStartOfFiveMinute($.Timestamp) }))
@@ -634,12 +745,12 @@ describe("docs/extending.md", () => {
 				reason: "user-authored-sql",
 				note: "The SQL came from a user; there is no AST to build.",
 				// Cannot be inferred from a raw string — the caller must assert it.
-				tenantScope: "org",
+				tenantScope: "tenant",
 				rowSchema: Schema.Struct({ name: Schema.String }),
 			})
 
 			expect(yield* compiled.decodeRows([{ name: "checkout" }])).toEqual([{ name: "checkout" }])
-			expect(compiled.tenantScope).toBe("org")
+			expect(compiled.tenantScope).toBe("tenant")
 		}),
 	)
 })

@@ -150,8 +150,8 @@ function eventConditionsRaw(
 ): Array<CH.Condition | undefined> {
 	return [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		$.Type.eq(kind),
 		only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => CH.domain_($.Url).eq(v)),
 		only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => CH.path_($.Url).eq(v)),
@@ -185,8 +185,8 @@ function eventConditionsRollup(
 ): Array<CH.Condition | undefined> {
 	return [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		$.Kind.eq(kind),
 		only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => $.Host.eq(v)),
 		only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => $.PagePath.eq(v)),
@@ -310,8 +310,8 @@ export function replaysWhere(
 
 	return [
 		$.OrgId.eq(param.string("orgId")),
-		$.StartTime.gte(param.dateTime("startTime")),
-		$.StartTime.lte(param.dateTime("endTime")),
+		$.StartTime.gte(param.dateTimeString("startTime")),
+		$.StartTime.lte(param.dateTimeString("endTime")),
 		navigationFilter,
 		exclude === "referrerHost"
 			? undefined
@@ -517,7 +517,7 @@ export function webAnalyticsLiveQuery(
 		.where(($) => [
 			...replaysWhere($, opts),
 			CH.coalesce($.LastActivityAt, $.StartTime).gte(
-				CH.intervalSub(CH.toDateTime(param.dateTime("endTime")), windowSeconds),
+				CH.intervalSub(CH.toDateTime(param.dateTimeString("endTime")), windowSeconds),
 			),
 		])
 		.format("JSON")

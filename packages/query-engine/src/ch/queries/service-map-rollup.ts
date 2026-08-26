@@ -90,8 +90,8 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 		.select(($) => ({ hourTs: CH.toUnixTimestamp($.Hour) }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lt(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lt(param.dateTimeString("endTime")),
 		])
 		.groupBy("hourTs")
 		.format("JSON")
@@ -127,8 +127,8 @@ export function serviceMapResolutionsExistingHoursSQL(params: {
 		.select(($) => ({ hourTs: CH.toUnixTimestamp($.Hour) }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lt(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lt(param.dateTimeString("endTime")),
 		])
 		.groupBy("hourTs")
 		.format("JSON")
@@ -153,8 +153,8 @@ export function serviceMapEdgesRollupSQL(
 	params: ServiceMapEdgesRollupParams,
 ): CompiledQuery<ServiceMapEdgesHourlyOutput> {
 	const query = serviceMapEdgeJoinQuery({
-		rangeStart: CH.toDateTime(param.dateTime("hourStart")),
-		rangeEnd: CH.toDateTime(param.dateTime("hourEnd")),
+		rangeStart: CH.toDateTime(param.dateTimeString("hourStart")),
+		rangeEnd: CH.toDateTime(param.dateTimeString("hourEnd")),
 	}).format("JSON")
 
 	// Scope is derived from both join sources filtering OrgId — see
@@ -221,8 +221,8 @@ export function serviceMapResolutionsRollupSQL(
 		}))
 		.where(($) => [
 			CH.inList($.SpanKind, ["Client", "Producer"]),
-			$.Timestamp.gte(param.dateTime("hourStart")),
-			$.Timestamp.lt(param.dateTime("hourEnd")),
+			$.Timestamp.gte(param.dateTimeString("hourStart")),
+			$.Timestamp.lt(param.dateTimeString("hourEnd")),
 			$.OrgId.eq(param.string("orgId")),
 			$.SpanAttributes.get("server.address").neq(""),
 		])
@@ -237,8 +237,8 @@ export function serviceMapResolutionsRollupSQL(
 		}))
 		.where(($) => [
 			CH.inList($.SpanKind, ["Server", "Consumer"]),
-			$.Timestamp.gte(param.dateTime("hourStart")),
-			$.Timestamp.lt(param.dateTime("hourEnd")),
+			$.Timestamp.gte(param.dateTimeString("hourStart")),
+			$.Timestamp.lt(param.dateTimeString("hourEnd")),
 			$.OrgId.eq(param.string("orgId")),
 		])
 

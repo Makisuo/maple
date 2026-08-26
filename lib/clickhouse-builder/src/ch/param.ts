@@ -4,10 +4,50 @@
 // time (not at SQL execution time). They carry their name and type as
 // phantom types so the query's Params type can be inferred.
 
+import { type DateTime, Schema } from "effect"
 import type { SqlFragment } from "../sql/sql-fragment"
 import { raw } from "../sql/sql-fragment"
 import type { Expr } from "./expr"
-import { QueryBuilderError } from "./compile"
+import { QueryBuilderError } from "./errors"
+import * as T from "./types"
+import type { CHType } from "./types"
+
+/**
+ * What a param's value must be, carried in the placeholder so `compile` can
+ * check the value it is handed instead of stringifying whatever arrives.
+ *
+ * A kind names a *codec*, not a special case: `paramType` below maps each to
+ * the column type whose schema encodes it, which is the same schema a column of
+ * that type decodes rows with. `param.of` registers further ones at runtime, so
+ * a custom column type works as a param without touching this union.
+ */
+export type ParamKind = string
+
+/**
+ * The placeholder text a param compiles to: `__PARAM_<kind>_<name>__`.
+ *
+ * Exported for handwritten SQL fragments that are spliced into a builder query
+ * and resolved by its `compile` — building the string by hand would couple your
+ * code to this format, and a malformed one is indistinguishable from a param
+ * nobody supplied.
+ */
+export const paramPlaceholder = (kind: ParamKind, name: string): string => {
+	assertValidParamName(name)
+	return `__PARAM_${kind}_${name}__`
+}
+
+export const PARAM_PLACEHOLDER_PATTERN = /__PARAM_([A-Za-z][A-Za-z0-9]*)_(.+?)__/g
+
+/** Names travel through the placeholder, so they have to survive the round trip:
+ *  `__` would make the boundary ambiguous and an empty name unmatchable. */
+function assertValidParamName(name: string): void {
+	if (!/^[A-Za-z0-9$]+(?:_[A-Za-z0-9$]+)*$/.test(name)) {
+		throw new QueryBuilderError({
+			code: "InvalidParamName",
+			message: `param name ${JSON.stringify(name)} must be alphanumeric, optionally separated by single underscores`,
+		})
+	}
+}
 
 // Param marker — used during query definition (before compilation)
 
@@ -77,13 +117,96 @@ function makeParamMarker<N extends string, T>(name: N, fragment: SqlFragment): P
 
 // Param constructors (used in query definitions)
 
+/**
+ * The codec behind each param kind.
+ *
+ * `int` and `float` are the two shapes of a number that ClickHouse tells apart:
+ * a fractional value in an integer position is a silent `Math.round` at best,
+ * so the integer kind refuses one and points at the other.
+ */
+const CHSafeInteger = Schema.Number.pipe(
+	Schema.check(
+		Schema.makeFilter(
+			(value: number) =>
+				Number.isSafeInteger(value)
+					? undefined
+					: `${value} is not a safe integer (use param.float for fractions)`,
+			{ title: "safeInteger" },
+		),
+	),
+)
+
+const paramTypes = new Map<ParamKind, Schema.Codec<any, any>>([
+	["string", T.string.literalSchema],
+	["int", CHSafeInteger],
+	["float", T.float64.literalSchema],
+	["bool", T.bool.literalSchema],
+	["dateTime", T.dateTime.literalSchema],
+])
+
+/** The codec a placeholder's kind names, or `undefined` for an unknown kind. */
+export const paramSchema = (kind: ParamKind): Schema.Codec<any, any> | undefined => paramTypes.get(kind)
+
+const makeParam =
+	<T>(kind: ParamKind) =>
+	<N extends string>(name: N): ParamMarker<N, T> => {
+		assertValidParamName(name)
+		return makeParamMarker<N, T>(name, raw(paramPlaceholder(kind, name)))
+	}
+
+/** A kind slug for a custom column type: its ClickHouse type name, made safe
+ *  for the placeholder grammar (`Map(String, String)` → `MapStringString`). */
+const kindFor = (type: CHType<string, any, any>): ParamKind => type.sql.replace(/[^A-Za-z0-9]/g, "")
+
 export const param = {
-	string: <N extends string>(name: N): ParamMarker<N, string> =>
-		makeParamMarker(name, raw(`__PARAM_${name}__`)),
+	/** Resolved from a string; emitted as an escaped SQL literal. */
+	string: makeParam<string>("string"),
 
-	int: <N extends string>(name: N): ParamMarker<N, number> =>
-		makeParamMarker(name, raw(`__PARAM_${name}__`)),
+	/** Resolved from an integer (or bigint). A fractional value is rejected
+	 *  rather than silently rounded — reach for `param.float` when you mean one. */
+	int: makeParam<number>("int"),
 
-	dateTime: <N extends string>(name: N): ParamMarker<N, string> =>
-		makeParamMarker(name, raw(`__PARAM_${name}__`)),
+	/** Resolved from any finite number. */
+	float: makeParam<number>("float"),
+
+	/** Resolved from a boolean; emitted as ClickHouse's `1` / `0`. */
+	bool: makeParam<boolean>("bool"),
+
+	/**
+	 * Resolved from a `'YYYY-MM-DD hh:mm:ss'` string, a `Date`, or a
+	 * `DateTime.Utc`.
+	 *
+	 * Typed as a `DateTime.Utc` expression so it compares against DateTime
+	 * columns and not against everything. For a column declared as
+	 * `dateTimeString`, use {@link param.dateTimeString}.
+	 */
+	dateTime: makeParam<DateTime.Utc>("dateTime"),
+
+	/**
+	 * The same bound, typed for a column declared as `dateTimeString`.
+	 *
+	 * Identical at runtime — the flavours differ only in what the row decodes to,
+	 * and a param has to agree with the column it bounds.
+	 */
+	dateTimeString: makeParam<string>("dateTime"),
+
+	/**
+	 * A param of any column type, resolved through that type's own codec.
+	 *
+	 * The five above are the common cases; this is how a type you declared
+	 * yourself — an enum, a decimal, a branded id — becomes a param without the
+	 * builder needing to know about it.
+	 */
+	of: <T, N extends string>(type: CHType<string, T, any>, name: N): ParamMarker<N, T> => {
+		const kind = kindFor(type)
+		const registered = paramTypes.get(kind)
+		if (registered === undefined) paramTypes.set(kind, type.literalSchema)
+		else if (registered !== type.literalSchema) {
+			throw new QueryBuilderError({
+				code: "InvalidParamName",
+				message: `param.of: two different types both compile to '${type.sql}' — give one of them a distinct ClickHouse type name`,
+			})
+		}
+		return makeParam<T>(kind)(name)
+	},
 }

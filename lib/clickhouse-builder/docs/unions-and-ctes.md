@@ -68,7 +68,7 @@ const query = CH.from(Recent)
 const compiled = CH.compile(query, {})
 // WITH recent AS ( SELECT Name AS Name FROM events WHERE OrgId = 'org_123' )
 // SELECT Name AS name FROM recent
-compiled.tenantScope // "org" — read off the CTE, not declared
+compiled.tenantScope // "tenant" — read off the CTE, not declared
 ```
 
 To _read_ a CTE, declare a table whose name matches it and start the query there. That is what
@@ -85,18 +85,18 @@ all you have:
 const cteSql = "SELECT Name FROM events WHERE OrgId = 'org_123'"
 
 CH.from(CH.table("recent", { Name: T.string }))
-	.withCTE("recent", cteSql, { tenantScope: "org" })
+	.withCTE("recent", cteSql, { tenantScope: "tenant" })
 	.select(($) => ({ name: $.Name }))
 ```
 
 The body is opaque here, so the builder cannot see the `OrgId` filter inside it. If the CTE is
-the query's row source and you omit `tenantScope`, the compiled query reads as `"cross-org"`
+the query's row source and you omit `tenantScope`, the compiled query reads as `"cross-tenant"`
 even though its SQL is perfectly well filtered.
 
 Two caveats worth internalising:
 
 - The declaration is an **assertion you are making**, not something that gets verified. Passing
-  `tenantScope: "org"` for a CTE that does not filter by tenant defeats the mechanism. This is
+  `tenantScope: "tenant"` for a CTE that does not filter by tenant defeats the mechanism. This is
   the reason to prefer the query form.
 - It only takes effect when the query's `FROM` **names that CTE**. A CTE attached to a query
   that reads from a different table contributes nothing to the scope.

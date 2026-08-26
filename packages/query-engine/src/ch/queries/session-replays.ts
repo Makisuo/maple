@@ -230,8 +230,8 @@ export function sessionReplaysListQuery(
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.StartTime.gte(param.dateTime("startTime")),
-			$.StartTime.lte(param.dateTime("endTime")),
+			$.StartTime.gte(param.dateTimeString("startTime")),
+			$.StartTime.lte(param.dateTimeString("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.browser, (v: string) => $.BrowserName.eq(v)),
 			CH.when(opts.country, (v: string) => $.Country.eq(v)),
@@ -474,8 +474,8 @@ export function sessionReplaysFacetsQuery(
 		exclude?: SessionFacetKey,
 	): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
-		$.StartTime.gte(param.dateTime("startTime")),
-		$.StartTime.lte(param.dateTime("endTime")),
+		$.StartTime.gte(param.dateTimeString("startTime")),
+		$.StartTime.lte(param.dateTimeString("endTime")),
 		exclude === "service" ? undefined : CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		exclude === "browser" ? undefined : CH.when(opts.browser, (v: string) => $.BrowserName.eq(v)),
 		exclude === "country" ? undefined : CH.when(opts.country, (v: string) => $.Country.eq(v)),
@@ -571,8 +571,8 @@ export function sessionReplaysFacetsQuery(
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.StartTime.gte(param.dateTime("startTime")),
-				$.StartTime.lte(param.dateTime("endTime")),
+				$.StartTime.gte(param.dateTimeString("startTime")),
+				$.StartTime.lte(param.dateTimeString("endTime")),
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.browser, (v: string) => $.BrowserName.eq(v)),
 				CH.when(opts.country, (v: string) => $.Country.eq(v)),
@@ -828,8 +828,8 @@ export function sessionsForTraceQuery(opts: SessionsForTraceOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.StartTime.gte(param.dateTime("startTime")),
-			$.StartTime.lte(param.dateTime("endTime")),
+			$.StartTime.gte(param.dateTimeString("startTime")),
+			$.StartTime.lte(param.dateTimeString("endTime")),
 			has($.TraceIds, CH.lit(opts.traceId)),
 		])
 		.groupBy("sessionId")

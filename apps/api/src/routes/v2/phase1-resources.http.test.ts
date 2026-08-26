@@ -1184,6 +1184,10 @@ describe("v2 session_replays over HTTP", () => {
 			netStatus: seq % 2 === 0 ? 0 : 200,
 			netDurationMs: seq % 2 === 0 ? 0 : 12,
 			errorStack: "",
+			// The transcript query also selects the custom-event props. Rows decode
+			// against the compiled query's derived schema, so the fixture carries
+			// every column the SELECT names.
+			attributes: "{}",
 		}))
 		const transcriptWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,

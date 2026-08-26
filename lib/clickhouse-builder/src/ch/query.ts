@@ -69,9 +69,13 @@ interface TypedJoinClause {
 	readonly alias: string
 	/** ON condition. Omitted for CROSS JOIN. */
 	readonly on?: Condition
+	/** The joined table's tenant column, if it declared one. */
+	readonly tenantColumn?: string
+	/** The joined table's column definitions, for decoding joined selections. */
+	readonly columns?: ColumnDefs
 }
 
-interface CHQueryState {
+export interface CHQueryState {
 	readonly tableName: string
 	readonly tableAlias?: string
 	readonly columns: ColumnDefs
@@ -86,9 +90,12 @@ interface CHQueryState {
 	readonly offsetValue?: number
 	readonly formatValue?: string
 	/** Execution-routing metadata carried onto the CompiledQuery (see compile.ts). */
-	readonly routingValue?: "ingest"
-	/** Set by `.crossOrg()`. Forces `tenantScope: "cross-org"` (see compile.ts). */
-	readonly crossOrg?: boolean
+	readonly routingValue?: string
+	/** Set by `.crossTenant()`. Forces `tenantScope: "cross-tenant"` (see compile.ts). */
+	readonly crossTenant?: boolean
+	/** The FROM table's declared tenant column, if any. Propagated to the column
+	 *  accessors so an `eq`/`in_` on it marks the query scoped. */
+	readonly tenantColumn?: string
 	/** Typed FROM subquery. Compiled lazily at compileCH time. */
 	readonly fromQuery?: CHQuery<any, any, any>
 	readonly fromQueryAlias?: string
@@ -113,7 +120,7 @@ export interface CHQuery<
 	Cols extends ColumnDefs = ColumnDefs,
 	Output extends Record<string, any> = {},
 	Joins extends Record<string, ColumnDefs> = {},
-	Routing extends "ingest" | undefined = "ingest" | undefined,
+	Routing extends string | undefined = string | undefined,
 > {
 	/** @internal — runtime query state */
 	readonly _state: CHQueryState
@@ -160,23 +167,22 @@ export interface CHQuery<
 	format(fmt: "JSON" | "JSONEachRow"): CHQuery<Cols, Output, Joins, Routing>
 
 	/**
-	 * Declare that this query reads a datasource that only exists in the managed
-	 * ingest pipeline (an MV-less `ingest`-written table like `alert_checks`, or
-	 * a deliberately cross-org managed scan). The executor routes it to the
-	 * ingest backend instead of a per-org read override.
+	 * Tag this query with an execution route, carried through to the compiled
+	 * query as a type-level fact. The tag is opaque to the builder: what routes
+	 * exist, and what an executor does with one, is the caller's vocabulary.
 	 */
-	routing(route: "ingest"): CHQuery<Cols, Output, Joins, "ingest">
+	routing<Route extends string>(route: Route): CHQuery<Cols, Output, Joins, Route>
 
 	/**
 	 * Declare that this query deliberately reads across every tenant, forcing
-	 * `tenantScope: "cross-org"` on the compiled result.
+	 * `tenantScope: "cross-tenant"` on the compiled result.
 	 *
 	 * Opting in explicitly rather than relying on the absence of a tenant
-	 * predicate is the whole point: "no `OrgId` filter" is indistinguishable
-	 * from "someone forgot the `OrgId` filter" until an author says which.
-	 * Executors are expected to refuse these on the ordinary read path.
+	 * predicate is the whole point: "no tenant filter" is indistinguishable from
+	 * "someone forgot the tenant filter" until an author says which. Executors
+	 * are expected to refuse these on the ordinary read path.
 	 */
-	crossOrg(): CHQuery<Cols, Output, Joins, Routing>
+	crossTenant(): CHQuery<Cols, Output, Joins, Routing>
 
 	// Type-safe joins with Table
 
@@ -253,7 +259,7 @@ export interface CHQuery<
 	 * `tenantScope` describes the SQL being passed in. It cannot be inferred —
 	 * the CTE arrives as an opaque string — so a caller splicing in a query it
 	 * compiled itself should pass the scope through, otherwise a query whose only
-	 * row source is a scoped CTE reads as cross-org. Pass the query itself
+	 * row source is a scoped CTE reads as cross-tenant. Pass the query itself
 	 * instead where you can, and this problem goes away.
 	 */
 	withCTE(
@@ -270,7 +276,10 @@ export type InferQueryOutput<Q> = Q extends CHQuery<any, infer O, any> ? O : nev
 
 // ColumnAccessor factory (Proxy-based)
 
-export function createColumnAccessor<Cols extends ColumnDefs>(_columns: Cols): ColumnAccessor<Cols> {
+export function createColumnAccessor<Cols extends ColumnDefs>(
+	columns: Cols,
+	tenantColumn?: string,
+): ColumnAccessor<Cols> {
 	const cache = new Map<string, ColumnRef<string, CHType<string, any>>>()
 
 	return new Proxy({} as ColumnAccessor<Cols>, {
@@ -278,7 +287,7 @@ export function createColumnAccessor<Cols extends ColumnDefs>(_columns: Cols): C
 			if (typeof prop !== "string") return undefined
 			let ref = cache.get(prop)
 			if (!ref) {
-				ref = makeColumnRef(prop)
+				ref = makeColumnRef(prop, undefined, tenantColumn, columns[prop])
 				cache.set(prop, ref)
 			}
 			return ref
@@ -288,7 +297,11 @@ export function createColumnAccessor<Cols extends ColumnDefs>(_columns: Cols): C
 
 // Qualified ColumnAccessor for joined tables (generates alias.Column SQL)
 
-function createQualifiedColumnAccessor(alias: string): ColumnAccessor<any> {
+function createQualifiedColumnAccessor(
+	alias: string,
+	tenantColumn?: string,
+	columns?: ColumnDefs,
+): ColumnAccessor<any> {
 	const cache = new Map<string, ColumnRef<string, CHType<string, any>>>()
 
 	return new Proxy({} as ColumnAccessor<any>, {
@@ -296,7 +309,7 @@ function createQualifiedColumnAccessor(alias: string): ColumnAccessor<any> {
 			if (typeof prop !== "string") return undefined
 			let ref = cache.get(prop)
 			if (!ref) {
-				ref = makeColumnRef(`${alias}.${prop}`, prop)
+				ref = makeColumnRef(`${alias}.${prop}`, prop, tenantColumn, columns?.[prop])
 				cache.set(prop, ref)
 			}
 			return ref
@@ -307,9 +320,17 @@ function createQualifiedColumnAccessor(alias: string): ColumnAccessor<any> {
 // Joined ColumnAccessor — main columns + nested alias accessors
 
 export function createJoinedColumnAccessor<Cols extends ColumnDefs, Joins extends Record<string, ColumnDefs>>(
-	_columns: Cols,
+	columns: Cols,
 	joinAliases: readonly string[],
 	mainAlias?: string,
+	/** The FROM table's tenant column. */
+	tenantColumn?: string,
+	/** Per-join-alias tenant columns, so `$.p.TenantId.eq(…)` scopes when the
+	 *  joined table declares one of its own. */
+	joinTenantColumns?: Readonly<Record<string, string | undefined>>,
+	/** Per-join-alias column definitions, so joined refs decode like their own
+	 *  table's columns rather than losing their schema at the alias boundary. */
+	joinColumns?: Readonly<Record<string, ColumnDefs | undefined>>,
 ): JoinedColumnAccessor<Cols, Joins> {
 	const cache = new Map<string, any>()
 	const aliasSet = new Set(joinAliases)
@@ -322,14 +343,18 @@ export function createJoinedColumnAccessor<Cols extends ColumnDefs, Joins extend
 
 			if (aliasSet.has(prop)) {
 				// Return a nested proxy for the joined table's columns
-				cached = createQualifiedColumnAccessor(prop)
+				cached = createQualifiedColumnAccessor(
+					prop,
+					joinTenantColumns?.[prop] ?? tenantColumn,
+					joinColumns?.[prop],
+				)
 				cache.set(prop, cached)
 				return cached
 			}
 
 			// Main table column — qualify with alias when joins are present
 			const qualifiedName = mainAlias ? `${mainAlias}.${prop}` : prop
-			cached = makeColumnRef(qualifiedName, prop)
+			cached = makeColumnRef(qualifiedName, prop, tenantColumn, columns[prop])
 			cache.set(prop, cached)
 			return cached
 		},
@@ -342,7 +367,7 @@ function makeQuery<
 	Cols extends ColumnDefs,
 	Output extends Record<string, any>,
 	Joins extends Record<string, ColumnDefs>,
-	Routing extends "ingest" | undefined,
+	Routing extends string | undefined,
 >(state: CHQueryState): CHQuery<Cols, Output, Joins, Routing> {
 	return {
 		_state: state,
@@ -396,38 +421,52 @@ function makeQuery<
 			return makeQuery({ ...state, routingValue: route })
 		},
 
-		crossOrg() {
-			return makeQuery({ ...state, crossOrg: true })
+		crossTenant() {
+			return makeQuery({ ...state, crossTenant: true })
 		},
 
 		// Type-safe joins with Table
 
 		innerJoin(table, alias, onFn) {
 			const mainAlias = state.tableAlias ?? state.tableName
-			const mainAccessor = createQualifiedColumnAccessor(mainAlias)
-			const joinedAccessor = createQualifiedColumnAccessor(alias)
+			const mainAccessor = createQualifiedColumnAccessor(mainAlias, state.tenantColumn, state.columns)
+			const joinedAccessor = createQualifiedColumnAccessor(alias, table.tenantColumn, table.columns)
 			const condition = onFn(mainAccessor, joinedAccessor)
 
 			return makeQuery({
 				...state,
 				typedJoins: [
 					...state.typedJoins,
-					{ type: "INNER", tableName: table.name, alias, on: condition },
+					{
+						type: "INNER",
+						tableName: table.name,
+						alias,
+						on: condition,
+						tenantColumn: table.tenantColumn,
+						columns: table.columns,
+					},
 				],
 			}) as any
 		},
 
 		leftJoin(table, alias, onFn) {
 			const mainAlias = state.tableAlias ?? state.tableName
-			const mainAccessor = createQualifiedColumnAccessor(mainAlias)
-			const joinedAccessor = createQualifiedColumnAccessor(alias)
+			const mainAccessor = createQualifiedColumnAccessor(mainAlias, state.tenantColumn, state.columns)
+			const joinedAccessor = createQualifiedColumnAccessor(alias, table.tenantColumn, table.columns)
 			const condition = onFn(mainAccessor, joinedAccessor)
 
 			return makeQuery({
 				...state,
 				typedJoins: [
 					...state.typedJoins,
-					{ type: "LEFT", tableName: table.name, alias, on: condition },
+					{
+						type: "LEFT",
+						tableName: table.name,
+						alias,
+						on: condition,
+						tenantColumn: table.tenantColumn,
+						columns: table.columns,
+					},
 				],
 			}) as any
 		},
@@ -435,7 +474,16 @@ function makeQuery<
 		crossJoin(table, alias) {
 			return makeQuery({
 				...state,
-				typedJoins: [...state.typedJoins, { type: "CROSS", tableName: table.name, alias }],
+				typedJoins: [
+					...state.typedJoins,
+					{
+						type: "CROSS",
+						tableName: table.name,
+						alias,
+						tenantColumn: table.tenantColumn,
+						columns: table.columns,
+					},
+				],
 			}) as any
 		},
 
@@ -443,8 +491,8 @@ function makeQuery<
 
 		innerJoinQuery(query, alias, onFn) {
 			const mainAlias = state.tableAlias ?? state.fromQueryAlias ?? state.tableName
-			const mainAccessor = createQualifiedColumnAccessor(mainAlias)
-			const joinedAccessor = createQualifiedColumnAccessor(alias)
+			const mainAccessor = createQualifiedColumnAccessor(mainAlias, state.tenantColumn)
+			const joinedAccessor = createQualifiedColumnAccessor(alias, state.tenantColumn)
 			const condition = onFn(mainAccessor, joinedAccessor)
 
 			return makeQuery({
@@ -455,8 +503,8 @@ function makeQuery<
 
 		leftJoinQuery(query, alias, onFn) {
 			const mainAlias = state.tableAlias ?? state.fromQueryAlias ?? state.tableName
-			const mainAccessor = createQualifiedColumnAccessor(mainAlias)
-			const joinedAccessor = createQualifiedColumnAccessor(alias)
+			const mainAccessor = createQualifiedColumnAccessor(mainAlias, state.tenantColumn)
+			const joinedAccessor = createQualifiedColumnAccessor(alias, state.tenantColumn)
 			const condition = onFn(mainAccessor, joinedAccessor)
 
 			return makeQuery({
@@ -498,6 +546,7 @@ export function from<Name extends string, Cols extends ColumnDefs>(
 		tableName: table.name,
 		tableAlias: alias,
 		columns: table.columns,
+		tenantColumn: table.tenantColumn,
 		groupByKeys: [],
 		orderBySpecs: [],
 		typedJoins: [],
@@ -533,6 +582,9 @@ export function fromQuery<
 		orderBySpecs: [],
 		typedJoins: [],
 		ctes: [],
+		// An outer re-filter on the same column name is still a tenant predicate;
+		// if the inner SELECT renamed it, no such column exists to filter on.
+		tenantColumn: query._state.tenantColumn,
 		fromQuery: query,
 		fromQueryAlias: alias,
 	})

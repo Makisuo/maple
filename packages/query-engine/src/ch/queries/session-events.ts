@@ -133,8 +133,8 @@ export function sessionEventMatchQuery(opts: SessionEventMatchOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.when(opts.type, (v: string) => $.Type.eq(v)),
 			CH.when(opts.level, (v: string) => $.Level.eq(v)),
 			CH.when(opts.minStatus, (v: number) => $.NetStatus.gte(v)),
@@ -229,8 +229,8 @@ function sessionActivityGaps(opts: { single: boolean } & SessionActivityOpts) {
 					]
 				: [
 						$.OrgId.eq(param.string("orgId")),
-						$.Timestamp.gte(param.dateTime("startTime")),
-						$.Timestamp.lte(param.dateTime("endTime")),
+						$.Timestamp.gte(param.dateTimeString("startTime")),
+						$.Timestamp.lte(param.dateTimeString("endTime")),
 					],
 		)
 }

@@ -40,7 +40,7 @@ describe("makeLocalWarehouseExecutorApi", () => {
 			const compiled = unsafeCompiledQuery<{ readonly c: number }>({
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "org",
+				tenantScope: "tenant",
 				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'local'\nFORMAT JSON",
 			})
 
@@ -69,7 +69,7 @@ describe("makeLocalWarehouseExecutorApi", () => {
 						reason: "test-fixture",
 						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 						sql: "SELECT 1",
-						tenantScope: "cross-org",
+						tenantScope: "cross-tenant",
 					}),
 				)
 				.pipe(Effect.exit)
@@ -93,7 +93,7 @@ describe("makeLocalWarehouseExecutorApi", () => {
 						reason: "test-fixture",
 						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 						sql: "SELECT nope FROM traces WHERE OrgId = 'local'",
-						tenantScope: "org",
+						tenantScope: "tenant",
 					}),
 				)
 				.pipe(Effect.exit)

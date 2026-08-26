@@ -168,8 +168,8 @@ export function cloudflareZoneCountersSQL(opts: CloudflareFilterOpts = {}) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...ZONE_COUNTER_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			...httpCubeFilters($, opts),
 		])
 		.groupBy("serviceName")
@@ -205,8 +205,8 @@ export function cloudflareZoneLatencySQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...ZONE_GAUGE_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.limit(500)
@@ -224,8 +224,8 @@ export function cloudflareZoneTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...ZONE_COUNTER_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			...httpCubeFilters($, opts),
 		])
 		.groupBy("serviceName", "bucket")
@@ -304,8 +304,8 @@ export function cloudflareZoneStatusTimeseriesSQL(opts: CloudflareFilterOpts = {
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.MetricName.eq("cloudflare.http.requests"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			...httpCubeFilters($, opts),
 		])
 		.groupBy("bucket", "statusClass")
@@ -325,8 +325,8 @@ export function cloudflareZoneCacheTimeseriesSQL(opts: CloudflareFilterOpts = {}
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.MetricName.eq("cloudflare.http.requests"),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			...httpCubeFilters($, opts),
 		])
 		.groupBy("bucket", "cacheStatus")
@@ -358,8 +358,8 @@ export function cloudflareZoneLatencyTimeseriesSQL() {
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.MetricName.in_(...ZONE_GAUGE_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("bucket")
 		.orderBy(["bucket", "asc"])
@@ -417,8 +417,8 @@ export function cloudflareWorkerCountersSQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...WORKER_COUNTER_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.orderBy(["requests", "desc"])
@@ -455,8 +455,8 @@ export function cloudflareWorkerLatencySQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...WORKER_GAUGE_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.limit(500)

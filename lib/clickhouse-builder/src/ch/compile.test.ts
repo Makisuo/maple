@@ -6,9 +6,16 @@ import * as CH from "./index"
 const RowNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
 
 describe("CompiledQuery.decodeRows", () => {
-	it.effect("preserves cast-only behavior for DSL-compiled queries without a row schema", () =>
+	// A `UInt64` reaches the client quoted or bare depending on the backend, and
+	// that is modelled in the column type — so this decodes without anyone
+	// writing a schema, which is the whole reason the column types are schemas.
+	it.effect("derives the row schema from the selected columns", () =>
 		Effect.gen(function* () {
-			const table = CH.table("events", { OrgId: CH.string, Count: CH.uint64 })
+			const table = CH.table(
+				"events",
+				{ OrgId: CH.string, Count: CH.uint64 },
+				{ tenantColumn: "OrgId" },
+			)
 			const compiled = compileCH(
 				CH.from(table)
 					.select(($) => ({ count: $.Count }))
@@ -16,9 +23,45 @@ describe("CompiledQuery.decodeRows", () => {
 				{},
 			)
 
-			const rows = yield* compiled.decodeRows([{ count: "42" }])
+			expect(compiled.rowSchemaSource).toBe("derived")
+			expect(yield* compiled.decodeRows([{ count: "42" }])).toEqual([{ count: 42 }])
+			expect(yield* compiled.decodeRows([{ count: 42 }])).toEqual([{ count: 42 }])
+		}),
+	)
 
-			expect(rows).toEqual([{ count: "42" }])
+	it.effect("has no schema when a selected expression has no type to read", () =>
+		Effect.gen(function* () {
+			const table = CH.table("events", { OrgId: CH.string, Count: CH.uint64 })
+			const compiled = compileCH(
+				CH.from(table).select(($) => ({
+					count: $.Count,
+					whatever: CH.rawExpr("anyLast(Something)"),
+				})),
+				{},
+			)
+
+			expect(compiled.rowSchemaSource).toBe("none")
+			// One untyped field is enough: nothing in the row is validated.
+			expect(yield* compiled.decodeRows([{ count: "42", whatever: 1 }])).toEqual([
+				{ count: "42", whatever: 1 },
+			])
+		}),
+	)
+
+	it.effect("takes a declared schema over the derived one", () =>
+		Effect.gen(function* () {
+			const table = CH.table("events", { OrgId: CH.string, Status: CH.string })
+			const compiled = compileCH(
+				CH.from(table).select(($) => ({ status: $.Status })),
+				{},
+				{ rowSchema: Schema.Struct({ status: Schema.Literals(["ok", "error"]) }) },
+			)
+
+			expect(compiled.rowSchemaSource).toBe("declared")
+			// The declared schema narrows what the builder inferred, so it rejects
+			// a String the derived schema would have accepted.
+			const failure = yield* Effect.exit(compiled.decodeRows([{ status: "banana" }]))
+			expect(Exit.isFailure(failure)).toBe(true)
 		}),
 	)
 
@@ -27,7 +70,7 @@ describe("CompiledQuery.decodeRows", () => {
 			const compiled = unsafeCompiledQuery<{ readonly name: string; readonly count: number }>({
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "org",
+				tenantScope: "tenant",
 				sql: "SELECT name, count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ name: Schema.String, count: RowNumber }),
 			})
@@ -43,7 +86,7 @@ describe("CompiledQuery.decodeRows", () => {
 			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "org",
+				tenantScope: "tenant",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
 			})
@@ -66,7 +109,7 @@ describe("CompiledQuery.decodeFirstRow", () => {
 			const compiled = unsafeCompiledQuery<{ readonly name: string; readonly count: number }>({
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "org",
+				tenantScope: "tenant",
 				sql: "SELECT name, count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ name: Schema.String, count: RowNumber }),
 			})
@@ -88,7 +131,7 @@ describe("CompiledQuery.decodeFirstRow", () => {
 			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "org",
+				tenantScope: "tenant",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
 			})
@@ -104,7 +147,7 @@ describe("CompiledQuery.decodeFirstRow", () => {
 			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "org",
+				tenantScope: "tenant",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
 			})
@@ -125,7 +168,7 @@ describe("CompiledQuery.decodeFirstRow", () => {
 			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "org",
+				tenantScope: "tenant",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
 			})
@@ -147,32 +190,32 @@ describe("CompiledQuery.decodeFirstRow", () => {
 // tenant column — which is why a substring check can't tell them apart.
 
 describe("CompiledQuery.tenantScope", () => {
-	const events = CH.table("events", { OrgId: CH.string, Count: CH.uint64 })
-	const other = CH.table("other", { OrgId: CH.string, Count: CH.uint64 })
+	const events = CH.table("events", { OrgId: CH.string, Count: CH.uint64 }, { tenantColumn: "OrgId" })
+	const other = CH.table("other", { OrgId: CH.string, Count: CH.uint64 }, { tenantColumn: "OrgId" })
 
 	const scopeOf = (build: (q: typeof events) => any) => compileCH(build(events), {}).tenantScope
 
-	it("is 'org' for a top-level equality on the tenant column", () => {
+	it("is 'tenant' for a top-level equality on the tenant column", () => {
 		expect(
 			scopeOf((t) =>
 				CH.from(t)
 					.select(($) => ({ count: $.Count }))
 					.where(($) => [$.OrgId.eq("org")]),
 			),
-		).toBe("org")
+		).toBe("tenant")
 	})
 
-	it("is 'org' for a top-level membership test", () => {
+	it("is 'tenant' for a top-level membership test", () => {
 		expect(
 			scopeOf((t) =>
 				CH.from(t)
 					.select(($) => ({ count: $.Count }))
 					.where(($) => [$.OrgId.in_("a", "b")]),
 			),
-		).toBe("org")
+		).toBe("tenant")
 	})
 
-	it("is 'cross-org' when the tenant predicate is disjoined away", () => {
+	it("is 'cross-tenant' when the tenant predicate is disjoined away", () => {
 		// `OrgId = 'x' OR Count > 0` matches every tenant's rows.
 		expect(
 			scopeOf((t) =>
@@ -180,20 +223,20 @@ describe("CompiledQuery.tenantScope", () => {
 					.select(($) => ({ count: $.Count }))
 					.where(($) => [$.OrgId.eq("org").or($.Count.gt(0))]),
 			),
-		).toBe("cross-org")
+		).toBe("cross-tenant")
 	})
 
-	it("is 'cross-org' for a negated tenant predicate", () => {
+	it("is 'cross-tenant' for a negated tenant predicate", () => {
 		expect(
 			scopeOf((t) =>
 				CH.from(t)
 					.select(($) => ({ count: $.Count }))
 					.where(($) => [$.OrgId.neq("org")]),
 			),
-		).toBe("cross-org")
+		).toBe("cross-tenant")
 	})
 
-	it("is 'cross-org' when only the SELECT mentions the tenant column", () => {
+	it("is 'cross-tenant' when only the SELECT mentions the tenant column", () => {
 		// The shape that satisfied the old `sql.includes("OrgId")` guard.
 		const compiled = compileCH(
 			CH.from(events)
@@ -202,14 +245,14 @@ describe("CompiledQuery.tenantScope", () => {
 			{},
 		)
 		expect(compiled.sql).toContain("OrgId")
-		expect(compiled.tenantScope).toBe("cross-org")
+		expect(compiled.tenantScope).toBe("cross-tenant")
 	})
 
 	// A query reading only from a scoped source is itself confined to that
 	// tenant, even with no WHERE of its own — this is the
 	// `SELECT sum(total) FROM (scoped UNION scoped)` shape that rollup-splice
 	// queries compile to.
-	it("is 'org' when the FROM source is already scoped", () => {
+	it("is 'tenant' when the FROM source is already scoped", () => {
 		const inner = CH.from(events)
 			.select(($) => ({ OrgId: $.OrgId, count: $.Count }))
 			.where(($) => [$.OrgId.eq("org")])
@@ -220,22 +263,22 @@ describe("CompiledQuery.tenantScope", () => {
 					.where(($) => [$.count.gt(0)]),
 				{},
 			).tenantScope,
-		).toBe("org")
+		).toBe("tenant")
 	})
 
-	it("is 'cross-org' when the FROM source is unscoped", () => {
+	it("is 'cross-tenant' when the FROM source is unscoped", () => {
 		const inner = CH.from(events).select(($) => ({ OrgId: $.OrgId, count: $.Count }))
 		expect(
 			compileCH(
 				CH.fromQuery(inner, "i").select(($) => ({ total: CH.sum($.count) })),
 				{},
 			).tenantScope,
-		).toBe("cross-org")
+		).toBe("cross-tenant")
 	})
 
 	// Joins add row sources the FROM scope says nothing about, so a joined query
 	// has to pin the tenant at its own level.
-	it("is 'cross-org' when a scoped source is joined to an unscoped table", () => {
+	it("is 'cross-tenant' when a scoped source is joined to an unscoped table", () => {
 		const inner = CH.from(events)
 			.select(($) => ({ OrgId: $.OrgId, count: $.Count }))
 			.where(($) => [$.OrgId.eq("org")])
@@ -246,10 +289,10 @@ describe("CompiledQuery.tenantScope", () => {
 					.select(($) => ({ total: CH.sum($.count) })),
 				{},
 			).tenantScope,
-		).toBe("cross-org")
+		).toBe("cross-tenant")
 	})
 
-	it("is 'org' for a tenant predicate on a joined alias", () => {
+	it("is 'tenant' for a tenant predicate on a joined alias", () => {
 		expect(
 			compileCH(
 				CH.from(events)
@@ -258,28 +301,28 @@ describe("CompiledQuery.tenantScope", () => {
 					.where(($) => [$.o.OrgId.eq("org")]),
 				{},
 			).tenantScope,
-		).toBe("org")
+		).toBe("tenant")
 	})
 
-	it("is 'cross-org' for a union with one unscoped branch", () => {
+	it("is 'cross-tenant' for a union with one unscoped branch", () => {
 		const scoped = CH.from(events)
 			.select(($) => ({ count: $.Count }))
 			.where(($) => [$.OrgId.eq("org")])
 		const unscoped = CH.from(other).select(($) => ({ count: $.Count }))
 
-		expect(CH.compileUnion(CH.unionAll(scoped, scoped), {}).tenantScope).toBe("org")
-		expect(CH.compileUnion(CH.unionAll(scoped, unscoped), {}).tenantScope).toBe("cross-org")
+		expect(CH.compileUnion(CH.unionAll(scoped, scoped), {}).tenantScope).toBe("tenant")
+		expect(CH.compileUnion(CH.unionAll(scoped, unscoped), {}).tenantScope).toBe("cross-tenant")
 	})
 
-	it("is 'cross-org' when .crossOrg() overrides a tenant predicate", () => {
+	it("is 'cross-tenant' when .crossTenant() overrides a tenant predicate", () => {
 		expect(
 			scopeOf((t) =>
 				CH.from(t)
 					.select(($) => ({ count: $.Count }))
 					.where(($) => [$.OrgId.eq("org")])
-					.crossOrg(),
+					.crossTenant(),
 			),
-		).toBe("cross-org")
+		).toBe("cross-tenant")
 	})
 
 	it("requires handwritten SQL to state its scope", () => {
@@ -288,8 +331,8 @@ describe("CompiledQuery.tenantScope", () => {
 				reason: "test-fixture",
 				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				sql: "SELECT 1",
-				tenantScope: "cross-org",
+				tenantScope: "cross-tenant",
 			}).tenantScope,
-		).toBe("cross-org")
+		).toBe("cross-tenant")
 	})
 })

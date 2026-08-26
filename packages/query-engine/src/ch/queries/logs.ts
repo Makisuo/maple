@@ -137,10 +137,10 @@ function rawLogsTimeRange($: ColumnAccessor<typeof Logs.columns>): Array<CH.Cond
 	return [
 		// TimestampTime is the partition/index key; this filter unlocks
 		// partition pruning. Timestamp filter retained for sub-second accuracy.
-		$.TimestampTime.gte(param.dateTime("startTime")),
-		$.TimestampTime.lte(param.dateTime("endTime")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.TimestampTime.gte(param.dateTimeString("startTime")),
+		$.TimestampTime.lte(param.dateTimeString("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 	]
 }
 
@@ -256,10 +256,10 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.Hour.gte(param.dateTime("startTime")),
-				// `param.dateTime("endTime")` substitutes as a quoted string literal;
+				$.Hour.gte(param.dateTimeString("startTime")),
+				// `param.dateTimeString("endTime")` substitutes as a quoted string literal;
 				// `toStartOfHour` only accepts Date/DateTime, so wrap with `toDateTime`.
-				$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+				$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
 				mvEnvironmentCondition($, opts),
@@ -284,10 +284,10 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 			$.OrgId.eq(param.string("orgId")),
 			// TimestampTime is the partition/index key; this filter unlocks
 			// partition pruning. Timestamp filter retained for sub-second accuracy.
-			$.TimestampTime.gte(param.dateTime("startTime")),
-			$.TimestampTime.lte(param.dateTime("endTime")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.TimestampTime.gte(param.dateTimeString("startTime")),
+			$.TimestampTime.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
 			opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
@@ -538,10 +538,10 @@ export function logsListQuery(opts: LogsListOpts) {
 
 	const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
-		$.TimestampTime.gte(param.dateTime("startTime")),
-		$.TimestampTime.lte(param.dateTime("endTime")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.TimestampTime.gte(param.dateTimeString("startTime")),
+		$.TimestampTime.lte(param.dateTimeString("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
 		opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
@@ -580,7 +580,7 @@ export function logsListQuery(opts: LogsListOpts) {
 		.where(baseWhere)
 		.orderBy(["ts", "desc"])
 		.limit(limit + offset)
-	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
+	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
 	const cutoff = CH.rawExpr<string>(`(SELECT min(ts) FROM (${cutoffSql}))`)
 
 	// Stage 2: heavy columns read only for rows at/after the cutoff timestamp.
@@ -643,9 +643,9 @@ export function getLogByKeyQuery(opts: LogByKeyOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			// TimestampTime is the partition/index key; bounding it unlocks
 			// partition pruning. Timestamp.eq pins the exact sub-second row.
-			$.TimestampTime.gte(param.dateTime("startTime")),
-			$.TimestampTime.lte(param.dateTime("endTime")),
-			$.Timestamp.eq(param.dateTime("timestamp")),
+			$.TimestampTime.gte(param.dateTimeString("startTime")),
+			$.TimestampTime.lte(param.dateTimeString("endTime")),
+			$.Timestamp.eq(param.dateTimeString("timestamp")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 			CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
@@ -734,8 +734,8 @@ function logsFacetsQueryFromMv(
 		$: ColumnAccessor<typeof LogsAggregatesHourly.columns>,
 	): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
-		$.Hour.gte(param.dateTime("startTime")),
-		$.Hour.lte(param.dateTime("endTime")),
+		$.Hour.gte(param.dateTimeString("startTime")),
+		$.Hour.lte(param.dateTimeString("endTime")),
 		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
 		opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
@@ -809,10 +809,10 @@ function logsFacetsQueryFromRaw(
 ): CHUnionQuery<LogsFacetsOutput> {
 	const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
-		$.TimestampTime.gte(param.dateTime("startTime")),
-		$.TimestampTime.lte(param.dateTime("endTime")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.TimestampTime.gte(param.dateTimeString("startTime")),
+		$.TimestampTime.lte(param.dateTimeString("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
 		environmentCondition($, opts),

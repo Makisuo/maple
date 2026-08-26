@@ -1,5 +1,6 @@
 // Type-level tests: Phantom type inference
 
+import type { DateTime } from "effect"
 import { expectTypeOf } from "expect-type"
 import type {
 	CHString,
@@ -29,8 +30,8 @@ expectTypeOf<InferTS<CHUInt32>>().toEqualTypeOf<number>()
 expectTypeOf<InferTS<CHUInt64>>().toEqualTypeOf<number>()
 expectTypeOf<InferTS<CHInt32>>().toEqualTypeOf<number>()
 expectTypeOf<InferTS<CHFloat64>>().toEqualTypeOf<number>()
-expectTypeOf<InferTS<CHDateTime>>().toEqualTypeOf<string>()
-expectTypeOf<InferTS<CHDateTime64>>().toEqualTypeOf<string>()
+expectTypeOf<InferTS<CHDateTime>>().toEqualTypeOf<DateTime.Utc>()
+expectTypeOf<InferTS<CHDateTime64>>().toEqualTypeOf<DateTime.Utc>()
 expectTypeOf<InferTS<CHBool>>().toEqualTypeOf<boolean>()
 
 // Compound type inference

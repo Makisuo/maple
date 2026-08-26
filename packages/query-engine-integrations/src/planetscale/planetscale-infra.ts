@@ -112,8 +112,8 @@ export function planetscaleInfraTimeseriesSQL() {
 				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
 				$.Attributes.get("planetscale_database"),
 			).eq(param.string("database")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("t")
 
@@ -134,8 +134,8 @@ export function planetscaleBranchInfraTimeseriesSQL() {
 				CH.nullIf($.Attributes.get("planetscale_branch_name"), ""),
 				$.Attributes.get("planetscale_branch"),
 			).eq(param.string("branch")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("t")
 

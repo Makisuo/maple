@@ -9,6 +9,11 @@
 // compilation, and unions — re-exported from the standalone library.
 export * from "@maple-dev/clickhouse-builder"
 
+// Handwritten SQL. Shadows the builder's `unsafeCompiledQuery`, whose `reason`
+// is any string, with one that pins Maple's closed `RawSqlReason` union — the
+// explicit export wins over the star re-export above.
+export { type RawSqlReason, unsafeCompiledQuery } from "./raw-sql"
+
 // Pipe dispatch — maps Tinybird-style pipe names + params to compiled CH SQL.
 // Shared by the cloud WarehouseQueryService and the local CLI executor so both
 // resolve a pipe name to identical SQL.

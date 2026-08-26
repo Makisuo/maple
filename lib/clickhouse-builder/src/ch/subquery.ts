@@ -23,20 +23,23 @@ export type Subquery = string | CHQuery<any, any, any>
 /**
  * Compile a subquery to bare SQL.
  *
- * Compiling with no params is deliberate, not a shortcut. `compileCH`
- * substitutes `__PARAM_x__` placeholders across the whole assembled string as
- * its last step, so placeholders inside a spliced subquery survive to the outer
- * query's substitution pass and are resolved there with the outer params.
+ * Deferring the params is deliberate, not a shortcut. `compileCH` substitutes
+ * placeholders across the whole assembled string as its last step, so
+ * placeholders inside a spliced subquery survive to the outer query's
+ * substitution pass and are resolved there with the outer params.
  */
 const toSql = (subquery: Subquery): string =>
-	typeof subquery === "string" ? subquery : compileCH(subquery, {}, { skipFormat: true }).sql
+	typeof subquery === "string"
+		? subquery
+		: compileCH(subquery, {}, { skipFormat: true, deferParams: true }).sql
 
 // A note that applies to all three of these:
 //
 // A subquery condition contributes NOTHING to the outer query's tenant scope,
-// even when the subquery itself filters `OrgId`. `WHERE x IN (SELECT y FROM t
-// WHERE OrgId = 'a')` does not confine the outer read to org `a` — nothing stops
-// org `b` from having the same `y`. The outer query must still carry its own
+// even when the subquery itself filters the tenant column. `WHERE x IN (SELECT
+// y FROM t WHERE TenantId = 'a')` does not confine the outer read to tenant
+// `a` — nothing stops tenant `b` from having the same `y`. The outer query must
+// still carry its own
 // tenant predicate, or read only from sources that are themselves scoped.
 // `makeCond` without the `scopesTenant` flag is what encodes that.
 

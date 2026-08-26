@@ -99,7 +99,7 @@ const makeTenant = (): TenantContext => ({
 const scopedSql = (sql: string) =>
 	unsafeCompiledQuery<Record<string, unknown>>({
 		sql,
-		tenantScope: "org",
+		tenantScope: "tenant",
 		reason: "test-fixture",
 		note: "Synthetic SQL asserting executor behaviour, not a product query.",
 	})
@@ -454,7 +454,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		const compiled = unsafeCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
 			reason: "test-fixture",
 			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			tenantScope: "tenant",
 			sql: "SELECT ServiceName AS serviceName, count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ serviceName: Schema.String, count: RowNumber }),
 		})
@@ -479,7 +479,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
 			reason: "test-fixture",
 			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			tenantScope: "tenant",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
@@ -510,7 +510,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 			reason: "test-fixture",
 			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 			sql: "SELECT count() AS count, 'x' AS OrgId FROM traces",
-			tenantScope: "cross-org",
+			tenantScope: "cross-tenant",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
 
@@ -525,7 +525,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 			assert.strictEqual(
 				(failure as { message?: string } | undefined)?.message,
 				"compiled query is not tenant-scoped: no top-level OrgId predicate (compiledQuery). " +
-					"Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.",
+					"Deliberate cross-tenant reads must declare .crossTenant() and run through crossOrgQuery.",
 			)
 		}).pipe(Effect.provide(layer))
 	})
@@ -550,7 +550,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const compiled = unsafeCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
 			reason: "test-fixture",
 			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			tenantScope: "tenant",
 			sql: "SELECT ServiceName AS serviceName, count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ serviceName: Schema.String, count: RowNumber }),
 		})
@@ -578,7 +578,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
 			reason: "test-fixture",
 			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			tenantScope: "tenant",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
@@ -603,7 +603,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
 			reason: "test-fixture",
 			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			tenantScope: "tenant",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})

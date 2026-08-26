@@ -25,12 +25,8 @@
 // over two grouped subqueries), then compiled to SQL — no hand-written SQL.
 
 import { Schema } from "effect"
-import {
-	compileCH,
-	unsafeCompiledQuery,
-	type CompiledQuery,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
+import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
+import { unsafeCompiledQuery } from "../raw-sql"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
@@ -84,7 +80,7 @@ export function serviceWorkloadsSQL(
 			sql: EMPTY_WORKLOADS_SQL,
 			reason: "empty-result-stub",
 			note: "SELECT of literals with WHERE 0 and no FROM; the builder always emits a FROM, and naming a table this reads no rows from would be worse.",
-			tenantScope: "org",
+			tenantScope: "tenant",
 			rowSchema: ServiceWorkloadsOutputSchema,
 		})
 	}
@@ -126,8 +122,8 @@ export function serviceWorkloadsSQL(
 		})
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			CH.inList($.ServiceName, opts.services),
 		])
 		.groupBy("serviceName")
@@ -173,8 +169,8 @@ export function serviceWorkloadsSQL(
 		})
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			CH.inList($.MetricName, [
 				"k8s.pod.cpu.usage",
 				"k8s.pod.cpu_limit_utilization",

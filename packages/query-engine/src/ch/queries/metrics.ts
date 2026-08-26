@@ -60,7 +60,7 @@ export interface MetricsTimeseriesOutput {
 }
 
 const metricsTimeseriesColumns = {
-	bucket: T.dateTime,
+	bucket: T.dateTimeString,
 	serviceName: T.string,
 	attributeValue: T.string,
 	groupName: T.string,
@@ -99,8 +99,8 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 		.where(($) => [
 			$.MetricName.eq(param.string("metricName")),
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
 			opts.environments?.length
@@ -151,7 +151,7 @@ export interface MetricsRateTimeseriesOutput {
 }
 
 const metricsRateTimeseriesColumns = {
-	bucket: T.dateTime,
+	bucket: T.dateTimeString,
 	serviceName: T.string,
 	attributeValue: T.string,
 	groupName: T.string,
@@ -193,12 +193,12 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 	opts: MetricsRateTimeseriesOpts,
 ): CHQuery<any, MetricsRateTimeseriesOutput, {}> {
 	const bucket = CH.toStartOfInterval(
-		CH.toDateTime(param.dateTime("startTime")),
+		CH.toDateTime(param.dateTimeString("startTime")),
 		param.int("bucketSeconds"),
 	)
 	const previousBucket = CH.intervalSub(bucket, param.int("bucketSeconds"))
 	const endBucket = CH.toStartOfInterval(
-		CH.toDateTime(param.dateTime("endTime")),
+		CH.toDateTime(param.dateTimeString("endTime")),
 		param.int("bucketSeconds"),
 	)
 
@@ -234,18 +234,18 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 				"StartTimeUnix",
 			),
 		{},
-		{ skipFormat: true },
+		{ skipFormat: true, deferParams: true },
 	)
 	const hourlySql = hourlyCompiled.sql
 
 	const hourlyValues = table("hourly_values", {
-		Hour: T.dateTime,
+		Hour: T.dateTimeString,
 		ServiceName: T.string,
 		MetricName: T.string,
 		SpanKind: T.string,
 		AttrFingerprint: T.uint64,
 		ResourceFingerprint: T.uint64,
-		StartTimeUnix: T.dateTime64,
+		StartTimeUnix: T.dateTime64String,
 		Value: T.float64,
 	})
 
@@ -274,11 +274,11 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 			})
 			.where(($) => [$.Hour.gte(bucket)]),
 		{},
-		{ skipFormat: true },
+		{ skipFormat: true, deferParams: true },
 	).sql
 
 	const deltas = table("with_deltas", {
-		Hour: T.dateTime,
+		Hour: T.dateTimeString,
 		ServiceName: T.string,
 		SpanKind: T.string,
 		delta: T.float64,
@@ -372,8 +372,8 @@ export function metricsTimeseriesRateQuery(
 					: $.MetricName.eq(param.string("metricName")),
 				$.OrgId.eq(param.string("orgId")),
 				CH.dynamicColumn<number>("IsMonotonic").eq(1),
-				$.TimeUnix.gte(CH.intervalSub(param.dateTime("startTime"), param.int("bucketSeconds"))),
-				$.TimeUnix.lte(param.dateTime("endTime")),
+				$.TimeUnix.gte(CH.intervalSub(param.dateTimeString("startTime"), param.int("bucketSeconds"))),
+				$.TimeUnix.lte(param.dateTimeString("endTime")),
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
 				opts.environments?.length
@@ -382,12 +382,12 @@ export function metricsTimeseriesRateQuery(
 				...resourceFilterConditions(opts.resourceAttributeFilters),
 			]),
 		{},
-		{ skipFormat: true },
+		{ skipFormat: true, deferParams: true },
 	)
 
 	// Outer query: aggregate deltas into rate/increase per bucket
 	const cteTable = table("with_deltas", {
-		TimeUnix: T.dateTime64,
+		TimeUnix: T.dateTime64String,
 		ServiceName: T.string,
 		Attributes: T.map(T.string, T.string),
 		resourceAttributeValue: T.string,
@@ -416,7 +416,7 @@ export function metricsTimeseriesRateQuery(
 			increaseValue: CH.sumIf($.delta, $.delta.gte(0)),
 			dataPointCount: CH.count(),
 		}))
-		.where(($) => [$.TimeUnix.gte(param.dateTime("startTime"))])
+		.where(($) => [$.TimeUnix.gte(param.dateTimeString("startTime"))])
 
 	const inner = (
 		opts.groupByAttributeKey || opts.groupByResourceAttributeKey
@@ -460,8 +460,8 @@ export function metricsSparklinesQuery(opts: MetricsSparklinesOpts) {
 		.where(($) => [
 			$.MetricName.in_(...opts.metricNames),
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("bucket", "metricName")
 		.orderBy(["bucket", "asc"])
@@ -511,8 +511,8 @@ export function metricsBreakdownQuery(opts: MetricsBreakdownOpts) {
 		.where(($) => [
 			$.MetricName.eq(param.string("metricName")),
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			// Drop datapoints missing the label so an empty bucket doesn't dominate.
 			CH.when(groupKey, (k: string) => $.Attributes.get(k).neq("")),
 			CH.when(resourceGroupKey, (k: string) => $.ResourceAttributes.get(k).neq("")),
@@ -563,8 +563,8 @@ export function listMetricsQuery(opts: ListMetricsOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			// Floor the start bound to the hour so the oldest catalog bucket
 			// (Hour is already hour-truncated) isn't dropped for mid-hour ranges.
-			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTime("startTime")), 3600)),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTimeString("startTime")), 3600)),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.metricType, (v: string) => $.MetricType.eq(v)),
 			CH.when(opts.search, (v: string) => $.MetricName.ilike(`%${v}%`)),
@@ -597,8 +597,8 @@ export function metricsSummaryQuery(opts?: MetricsSummaryOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTime("startTime")), 3600)),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTimeString("startTime")), 3600)),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			CH.when(opts?.serviceName, (v: string) => $.ServiceName.eq(v)),
 		])
 		.groupBy("metricType")

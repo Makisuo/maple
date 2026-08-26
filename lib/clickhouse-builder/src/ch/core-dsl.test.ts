@@ -9,6 +9,7 @@ const TestTable = CH.table("test_table", {
 	Attrs: CH.map(CH.string, CH.string),
 	Timestamp: CH.dateTime64,
 	Active: CH.uint8,
+	Live: CH.bool,
 })
 
 // Untested expression functions
@@ -372,16 +373,67 @@ describe("param resolution", () => {
 	it("resolves boolean param", () => {
 		const q = CH.from(TestTable)
 			.select(($) => ({ id: $.Id }))
-			.where(($) => [$.Active.eq(CH.param.int("isActive"))])
+			.where(($) => [$.Live.eq(CH.param.bool("isActive"))])
 		const { sql } = compileCH(q, { isActive: true })
-		expect(sql).toContain("Active = 1")
+		expect(sql).toContain("Live = 1")
 	})
 
-	it("leaves unresolved param placeholders", () => {
+	it("resolves a fractional param", () => {
+		const q = CH.from(TestTable)
+			.select(($) => ({ id: $.Id }))
+			.where(($) => [$.Value.gt(CH.param.float("threshold"))])
+		const { sql } = compileCH(q, { threshold: 0.95 })
+		expect(sql).toContain("Value > 0.95")
+	})
+
+	it("formats a Date passed to a dateTime param", () => {
+		const q = CH.from(TestTable)
+			.select(($) => ({ id: $.Id }))
+			.where(($) => [$.Timestamp.gte(CH.param.dateTime("since"))])
+		const { sql } = compileCH(q, { since: new Date("2026-01-01T00:00:00Z") })
+		expect(sql).toContain("Timestamp >= '2026-01-01 00:00:00'")
+	})
+
+	it("ignores params the query never mentions", () => {
+		const q = CH.from(TestTable)
+			.select(($) => ({ id: $.Id }))
+			.where(($) => [$.Id.eq(CH.param.string("id"))])
+		const { sql } = compileCH(q, { id: "a", unrelated: "b" })
+		expect(sql).toContain("Id = 'a'")
+	})
+
+	// A param that never arrives used to ship `__PARAM_x__` to the server, and a
+	// wrongly-typed one used to stringify into the SQL text. Both fail loudly now.
+
+	it("rejects a param with no value", () => {
 		const q = CH.from(TestTable)
 			.select(($) => ({ id: $.Id }))
 			.where(($) => [$.Id.eq(CH.param.string("orgId"))])
-		const { sql } = compileCH(q, {})
-		expect(sql).toContain("__PARAM_orgId__")
+		expect(() => compileCH(q, {})).toThrow(/no value given for param 'orgId'/)
+	})
+
+	it("rejects a value of the wrong type", () => {
+		const q = CH.from(TestTable)
+			.select(($) => ({ id: $.Id }))
+			.where(($) => [$.Id.eq(CH.param.string("orgId"))])
+		expect(() => compileCH(q, { orgId: 42 })).toThrow(/param 'orgId' \(string\).*Expected string/)
+	})
+
+	it("rejects a fraction where an integer was declared", () => {
+		const q = CH.from(TestTable)
+			.select(($) => ({ id: $.Id }))
+			.where(($) => [$.Value.eq(CH.param.int("bucketSeconds"))])
+		expect(() => compileCH(q, { bucketSeconds: 1.5 })).toThrow(/param.float/)
+	})
+
+	it("rejects an undefined value", () => {
+		const q = CH.from(TestTable)
+			.select(($) => ({ id: $.Id }))
+			.where(($) => [$.Id.eq(CH.param.string("orgId"))])
+		expect(() => compileCH(q, { orgId: undefined })).toThrow(/undefined is not a valid value/)
+	})
+
+	it("rejects a param name that cannot round-trip through the placeholder", () => {
+		expect(() => CH.param.string("org__id")).toThrow(/alphanumeric/)
 	})
 })

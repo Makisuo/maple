@@ -24,29 +24,47 @@ query time. Treat the declaration as a contract you keep in sync with your migra
 
 ## Column types
 
-The type constructors are values, not calls (except the parameterised ones):
+A column type is an Effect `Schema` plus the ClickHouse type name it stands for. That schema is
+the single source of truth: the TypeScript column type is read off it, and `compile` folds the
+selected columns' schemas into the row schema `decodeRows` validates against — see
+[Decoding results](./decoding-results.md).
 
-| Constructor     | ClickHouse type | TypeScript type     |
-| --------------- | --------------- | ------------------- |
-| `T.string`      | `String`        | `string`            |
-| `T.uint8`       | `UInt8`         | `number`            |
-| `T.uint16`      | `UInt16`        | `number`            |
-| `T.uint32`      | `UInt32`        | `number`            |
-| `T.uint64`      | `UInt64`        | `number`            |
-| `T.int32`       | `Int32`         | `number`            |
-| `T.float64`     | `Float64`       | `number`            |
-| `T.bool`        | `Bool`          | `boolean`           |
-| `T.dateTime`    | `DateTime`      | `string`            |
-| `T.dateTime64`  | `DateTime64`    | `string`            |
-| `T.map(k, v)`   | `Map(K, V)`     | `Record<string, V>` |
-| `T.array(e)`    | `Array(E)`      | `ReadonlyArray<E>`  |
-| `T.nullable(t)` | `Nullable(T)`   | `T \| null`         |
+The constructors are values, not calls (except the parameterised ones):
 
-Date/time columns are typed as `string` on purpose: ClickHouse returns them as strings over
-JSON, and the builder does not parse them for you.
+| Constructor           | ClickHouse type | Decodes to     | From the wire            |
+| --------------------- | --------------- | -------------- | ------------------------ |
+| `T.string`            | `String`        | `string`       | `string`                 |
+| `T.uint8`             | `UInt8`         | `number`       | number or quoted number  |
+| `T.uint16`            | `UInt16`        | `number`       | number or quoted number  |
+| `T.uint32`            | `UInt32`        | `number`       | number or quoted number  |
+| `T.uint64`            | `UInt64`        | `number`       | number or quoted number  |
+| `T.int32`             | `Int32`         | `number`       | number or quoted number  |
+| `T.float64`           | `Float64`       | `number`       | number or quoted number  |
+| `T.bool`              | `Bool`          | `boolean`      | `true`/`false` or `1`/`0` |
+| `T.dateTime`          | `DateTime`      | `DateTime.Utc` | `YYYY-MM-DD hh:mm:ss`    |
+| `T.dateTime64`        | `DateTime64`    | `DateTime.Utc` | with a fractional part   |
+| `T.dateTimeString`    | `DateTime`      | `string`       | unparsed, as sent        |
+| `T.dateTime64String`  | `DateTime64`    | `string`       | unparsed, as sent        |
+| `T.map(k, v)`         | `Map(K, V)`     | `Record<string, V>` | object              |
+| `T.array(e)`          | `Array(E)`      | `ReadonlyArray<E>`  | array               |
+| `T.nullable(t)`       | `Nullable(T)`   | `T \| null`    | value or `null`          |
+| `T.unknown(sql)`      | whatever you name | `unknown`    | unvalidated              |
+
+Two of those deserve a note.
+
+**64-bit integers.** ClickHouse's `FORMAT JSON` quotes them, Tinybird does not, and a gateway
+that refuses `output_format_json_quote_64bit_integers=0` quotes them regardless. Every integer
+type accepts both and decodes to a `number` — which also means a `UInt64` above `2^53` cannot
+survive: emit those as `toString(...)` in the SELECT and declare the column `T.string`.
+
+**DateTimes.** ClickHouse sends `2026-05-24 14:30:00` — UTC, but with no zone marker, which
+`new Date(…)` reads as *local* time and shifts by the runtime's offset. `T.dateTime` parses it
+correctly to a `DateTime.Utc`. Use `T.dateTimeString` when the row is being forwarded onto a wire
+of its own and re-serializing the timestamp would change what your clients receive; the date
+functions preserve whichever flavour they are given.
 
 > **Not every constructor is on the root barrel.** `T.uint16`, `T.uint32`, `T.int32`, and
-> `T.bool` are reachable only through `@maple-dev/clickhouse-builder/types`. Importing the
+> `T.unknown` are reachable only through `@maple-dev/clickhouse-builder/types`. Importing the
 > whole namespace as `T` — as above — is the simplest way to avoid the distinction entirely.
 
 _(Backed by `docs/tables-and-types.md > Types outside the curated barrel come from /types`.)_
@@ -61,6 +79,8 @@ import type { InferTS } from "@maple-dev/clickhouse-builder"
 
 type Ms = InferTS<typeof T.uint64> // number
 ```
+
+`InferEncoded<ColType>` is its counterpart — the wire type the schema decodes *from*.
 
 Related utilities: `ColumnDefs` (the shape of a `columns` record), `OutputToColumnDefs`
 (converts a query's output row back into column defs, used by `fromQuery`), and

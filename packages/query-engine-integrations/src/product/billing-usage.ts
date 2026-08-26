@@ -100,8 +100,8 @@ export function dailySessionCountQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.StartTime.gte(CH.toDateTime(param.dateTime("startTime"))),
-			$.StartTime.lte(CH.toDateTime(param.dateTime("endTime"))),
+			$.StartTime.gte(CH.toDateTime(param.dateTimeString("startTime"))),
+			$.StartTime.lte(CH.toDateTime(param.dateTimeString("endTime"))),
 		])
 		.groupBy("day")
 		.orderBy(["day", "asc"])
@@ -137,8 +137,8 @@ export function dailyProductEventCountQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(CH.toDateTime(param.dateTime("startTime"))),
-			$.Timestamp.lte(CH.toDateTime(param.dateTime("endTime"))),
+			$.Timestamp.gte(CH.toDateTime(param.dateTimeString("startTime"))),
+			$.Timestamp.lte(CH.toDateTime(param.dateTimeString("endTime"))),
 			$.Kind.neq("navigation"),
 		])
 		.groupBy("day")

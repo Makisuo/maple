@@ -63,6 +63,26 @@ This is how the bundled `quantile` is built. You are now assembling SQL text: in
 values you control, and route anything user-supplied through `str()` from the `/sql` subpath so
 it gets escaped.
 
+## A column type of your own
+
+`T.custom(sql, schema)` is the extension point the built-in types are built from — `T.uint64` is
+`custom("UInt64", CHNumber)`. Declare one for a ClickHouse type this package does not model and
+it works everywhere a built-in does: rows decode through it, literals encode through it, and
+`param.of(type, name)` takes it as a param.
+
+```ts
+const Level = T.custom("Enum8", Schema.Literals(["warn", "error"]))
+const Decimal = T.custom("Decimal(18, 4)", Schema.FiniteFromString)
+
+const Logs = CH.table("logs", { OrgId: T.string, Level, Amount: Decimal })
+```
+
+Pass a third argument when comparisons should accept more than the column decodes to — that is
+how a `DateTime` column takes a `DateTime.Utc`, a `Date`, or the string form and writes the same
+literal for all three.
+
+_(Backed by `src/ch/literal.test.ts > param.of`.)_
+
 ## Raw escape hatches
 
 `rawExpr` and `rawCond` take a SQL string as-is:
@@ -89,7 +109,7 @@ sees a uniform `CompiledQuery`:
 ```ts
 const compiled = CH.unsafeCompiledQuery<{ readonly name: string }>({
 	sql: "SELECT Name AS name FROM events WHERE OrgId = 'org_123'",
-	tenantScope: "org",
+	tenantScope: "tenant",
 	reason: "user-authored-sql",
 	note: "The SQL came from a user; there is no AST to build.",
 	rowSchema: Schema.Struct({ name: Schema.String }),
@@ -101,18 +121,28 @@ taken at face value. That is the whole hazard: this is the one place tenant scop
 rather than derived, so a query that forgot its tenant predicate would be positively _claimed_
 as scoped and sail through an executor's gate.
 
-`reason` is therefore required too, and its type — `RawSqlReason` — **is** the boundary between
-legitimate raw SQL and raw SQL nobody got round to converting:
+`reason` and `note` are therefore required too. What counts as a legitimate reason is a policy
+of your codebase, not of this package, so `reason` is any string — pin it to a union of your own
+to turn it into a review gate:
 
-| reason                 | when                                                                                                                                                                       |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `"user-authored-sql"`  | The SQL came from a user. There is no AST to build; isolation comes from the credential layer.                                                                             |
-| `"empty-result-stub"`  | A constant zero-row result reading no table (`SELECT … WHERE 0`). The builder always emits a FROM.                                                                         |
-| `"param-varied-union"` | A `UNION ALL` of one builder over two parameter sets. Params substitute once per compile, so one `CHQuery` cannot carry both. Derive the scope from the compiled branches. |
-| `"test-fixture"`       | A test asserting executor behaviour on synthetic SQL.                                                                                                                      |
+```ts
+type RawSqlReason =
+	| "user-authored-sql" // the SQL came from a user; there is no AST to build
+	| "empty-result-stub" // a constant zero-row result reading no table
+	| "test-fixture" // a test asserting executor behaviour on synthetic SQL
 
-Adding a member is the review gate — a one-line diff in `compile.ts` that a reviewer cannot
-miss. There is deliberately no `"legacy"` or `"todo"` member: with one, the gate is decorative.
+const rawQuery = <Output>(args: {
+	sql: string
+	tenantScope: CH.TenantScope
+	reason: RawSqlReason
+	note: string
+	rowSchema?: Schema.Schema<Output>
+}) => CH.unsafeCompiledQuery<Output>(args)
+```
+
+Adding a member to that union is then the review gate — a one-line diff in one file that a
+reviewer cannot miss. Leave out a `"legacy"` or `"todo"` member: with one, the gate is
+decorative.
 If your query doesn't fit a member, the answer is almost always to express it in the builder.
 
 Supply a `rowSchema` too: handwritten SQL is exactly where schema drift goes unnoticed, and
