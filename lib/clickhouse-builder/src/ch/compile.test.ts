@@ -35,7 +35,7 @@ describe("CompiledQuery.decodeRows", () => {
 			const compiled = compileCH(
 				CH.from(table).select(($) => ({
 					count: $.Count,
-					whatever: CH.rawExpr("anyLast(Something)"),
+					whatever: CH.untypedExpr("anyLast(Something)"),
 				})),
 				{},
 			)

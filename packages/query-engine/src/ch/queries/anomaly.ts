@@ -15,6 +15,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
 import { ErrorEventsByTime, LogsAggregatesHourly, TracesAggregatesHourly } from "../tables"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 /** Hour-of-day values matching the current hour ±1, wrapping at midnight. */
 export function matchedHoursOfDay(currentHourOfDay: number): readonly number[] {
@@ -43,12 +44,13 @@ export function anomalyTraceSignalsQuery(opts: AnomalyTraceSignalsOpts) {
 			serviceName: $.ServiceName,
 			deploymentEnv: $.DeploymentEnv,
 			hour: $.Hour,
-			requestCount: CH.rawExpr<number>("sum(WeightedCount)"),
-			errorCount: CH.rawExpr<number>("sum(WeightedErrorCount)"),
+			requestCount: CH.rawExpr("sum(WeightedCount)", T.float64),
+			errorCount: CH.rawExpr("sum(WeightedErrorCount)", T.float64),
 			// Sample-weighted t-digest merge — the same expression
 			// tracesTimeseriesQuery uses; never average p95s across hours.
-			p95Ms: CH.rawExpr<number>(
+			p95Ms: CH.rawExpr(
 				"arrayElement(quantilesTDigestWeightedMerge(0.95)(DurationQuantiles), 1) / 1000000",
+				T.float64,
 			),
 		}))
 		.where(($) => [
@@ -185,10 +187,11 @@ export function anomalyTraceSignalTimeseriesQuery() {
 	return from(TracesAggregatesHourly)
 		.select(($) => ({
 			hour: $.Hour,
-			requestCount: CH.rawExpr<number>("sum(WeightedCount)"),
-			errorCount: CH.rawExpr<number>("sum(WeightedErrorCount)"),
-			p95Ms: CH.rawExpr<number>(
+			requestCount: CH.rawExpr("sum(WeightedCount)", T.float64),
+			errorCount: CH.rawExpr("sum(WeightedErrorCount)", T.float64),
+			p95Ms: CH.rawExpr(
 				"arrayElement(quantilesTDigestWeightedMerge(0.95)(DurationQuantiles), 1) / 1000000",
+				T.float64,
 			),
 		}))
 		.where(($) => [

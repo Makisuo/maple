@@ -25,19 +25,18 @@ import { Schema } from "effect"
 import { ProductEvents, IdentityLinks, SessionReplays } from "../tables"
 import { CHNumber } from "../schema"
 import { replaysWhere, needsSessionSemiJoin, type ProductEventsFilters } from "./web-analytics"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 export type { ProductEventsFilters } from "./web-analytics"
 
 // Local function helpers (generic per call site, so not `defineFn`)
 
-// arrayElement(arr, i) — 1-based, like ClickHouse.
-function arrayElement<T>(arr: CH.Expr<ReadonlyArray<T>>, index: CH.Expr<number>): CH.Expr<T> {
-	return compileFnCall<T>("arrayElement", arr, index)
-}
+// `arrayElement` comes from the builder — it reads the array's element type, so
+// a funnel step decodes as the count it is.
 
 // toUInt8(cond) — a condition as a projectable 0/1 column.
 function flag(cond: CH.Condition): CH.Expr<number> {
-	return compileFnCall<number>("toUInt8", cond)
+	return CH.compileTypedFnCall<number>("toUInt8", T.uint8.schema, cond)
 }
 
 // toUInt64(toUnixTimestamp64Milli(ts)) — `windowFunnel` accepts Date, DateTime
@@ -49,9 +48,10 @@ function epochMs(ts: CH.Expr<string>): CH.Expr<number> {
 	return CH.toUInt64(compileFnCall<number>("toUnixTimestamp64Milli", ts))
 }
 
-// argMinIf(value, orderBy, cond) — the `value` on the earliest row matching `cond`.
+// argMinIf(value, orderBy, cond) — the `value` on the earliest row matching
+// `cond`. Returns one of its inputs unchanged, so it decodes as that input does.
 function argMinIf<T>(value: CH.Expr<T>, orderBy: CH.Expr<unknown>, cond: CH.Condition): CH.Expr<T> {
-	return compileFnCall<T>("argMinIf", value, orderBy, cond)
+	return CH.compileTypedFnCall<T>("argMinIf", CH.schemaOf<T>(value), value, orderBy, cond)
 }
 
 // Every UNION ALL branch below is built from a different table, and the shape
@@ -588,7 +588,7 @@ export function productEventsFunnelQuery(
 	return fromQuery(totals, "totals")
 		.select(($) => ({
 			step: stepIndex(n),
-			count: arrayElement($.counts, CH.dynamicColumn<number>("step")),
+			count: CH.arrayElement($.counts, CH.dynamicColumn<number>("step")),
 		}))
 		.orderBy(["step", "asc"])
 		.format("JSON")
@@ -631,7 +631,10 @@ export function productEventsFunnelBreakdownQuery(
 
 	const perGroup = fromQuery(levelsQuery(plan), "levels")
 		.select(() => ({
-			group: CH.dynamicColumn<string>("group"),
+			// Not `$.group`: the inner SELECT's shape is a union — the breakdown
+			// branch has this column and the plain branch does not — so it is not
+			// on the accessor's type even though this code path always emits it.
+			group: CH.dynamicColumn<string>("group", T.string),
 			counts: stepCounts(n),
 			entered: CH.countIf(CH.dynamicColumn<number>("level").gte(1)),
 		}))
@@ -643,7 +646,7 @@ export function productEventsFunnelBreakdownQuery(
 		.select(($) => ({
 			group: $.group,
 			step: stepIndex(n),
-			count: arrayElement($.counts, CH.dynamicColumn<number>("step")),
+			count: CH.arrayElement($.counts, CH.dynamicColumn<number>("step")),
 		}))
 		.orderBy(["group", "asc"], ["step", "asc"])
 		.format("JSON")

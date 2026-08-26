@@ -8,6 +8,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from } from "@maple-dev/clickhouse-builder"
 import { AlertChecks } from "../tables"
 import { ISO_Z_FORMAT } from "./format"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 export interface ListRuleChecksOpts {
 	readonly groupKey?: string
@@ -151,7 +152,7 @@ export function alertChecksSummaryQuery(opts: AlertChecksSummaryOpts) {
 			skippedCount: CH.countIf($.Status.eq("skipped")),
 			errorCount: CH.countIf($.Status.eq("error")),
 			transitionCount: CH.countIf($.IncidentTransition.neq("none")),
-			observedValue: CH.rawExpr<number | null>("avg(ObservedValue)"),
+			observedValue: CH.rawExpr("avg(ObservedValue)", T.nullable(T.float64)),
 			threshold: CH.avg($.Threshold),
 		}))
 		.where(($) => [

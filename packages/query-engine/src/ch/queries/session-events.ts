@@ -8,14 +8,13 @@
 // Plain MergeTree, immutable append; no ReplacingMergeTree dedup needed.
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { compileFnCall } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import { SessionEvents } from "../tables"
 
-function count(): CH.Expr<number> {
-	return compileFnCall<number>("count")
-}
+// The builder's `count`, which knows the result is a `UInt64` — a local
+// `compileFnCall` copy shadowed it and decoded nothing.
+const count = CH.count
 
 // Transcript: every event for one session, in order
 //

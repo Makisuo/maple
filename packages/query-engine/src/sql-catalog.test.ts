@@ -13,6 +13,7 @@ import {
 	routeCoverage,
 	uncoveredPipes,
 	UNDECODED_QUERIES,
+	undecodedColumns,
 	undecodedQueries,
 } from "./sql-catalog"
 import { builderFixtures } from "./ch/builder-fixtures"
@@ -65,7 +66,13 @@ describe("sql catalog", () => {
 	// `decodeRows` identity cast is invisible at runtime, so this list is the
 	// only place the product can see which of its queries validate nothing.
 	it("decodes every query except the declared exceptions", () => {
-		expect(undecodedQueries(entries)).toEqual([...UNDECODED_QUERIES].sort())
+		const columns = undecodedColumns(entries)
+		const detail = [...columns]
+			.map(([name, cols]) => `  ${name} — untyped: ${cols.join(", ")}`)
+			.join("\n")
+		expect(undecodedQueries(entries), `undecoded queries and the columns to type:\n${detail}`).toEqual(
+			[...UNDECODED_QUERIES].sort(),
+		)
 	})
 
 	// Builders that read across every tenant on purpose. Each must declare

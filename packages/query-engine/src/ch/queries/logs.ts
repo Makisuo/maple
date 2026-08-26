@@ -106,7 +106,7 @@ const logRecordIdentity = ($: ColumnAccessor<typeof Logs.columns>): CH.Expr<stri
 		$.ScopeAttributes,
 		$.LogAttributes,
 	)
-	return compileFnCall<string>("hex", compileFnCall<unknown>("MD5", CH.toJSONString(record)))
+	return CH.hex(compileFnCall<unknown>("MD5", CH.toJSONString(record)))
 }
 
 function environmentCondition(
@@ -581,7 +581,7 @@ export function logsListQuery(opts: LogsListOpts) {
 		.orderBy(["ts", "desc"])
 		.limit(limit + offset)
 	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
-	const cutoff = CH.rawExpr<string>(`(SELECT min(ts) FROM (${cutoffSql}))`)
+	const cutoff = CH.rawExpr(`(SELECT min(ts) FROM (${cutoffSql}))`, T.dateTimeString)
 
 	// Stage 2: heavy columns read only for rows at/after the cutoff timestamp.
 	let query = from(Logs)

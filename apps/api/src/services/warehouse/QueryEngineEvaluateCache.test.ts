@@ -40,19 +40,25 @@ const traceRow = (
 		p99Duration: number
 		errorRate: number
 		apdexScore: number
+		spanCount: number
 		estimatedSpanCount: number
 	}> = {},
 ) => ({
 	bucket: "2026-01-01 00:00:00",
 	groupName: "all",
 	count: 0,
+	// The sample-count columns follow `count` unless overridden — the reducers
+	// read them, so leaving them at 0 makes every fixture "no data".
+	spanCount: overrides.count ?? 0,
+	estimatedSpanCount: overrides.count ?? 0,
 	avgDuration: 0,
 	p50Duration: 0,
 	p95Duration: 0,
 	p99Duration: 0,
 	errorRate: 0,
+	satisfiedCount: 0,
+	toleratingCount: 0,
 	apdexScore: 0,
-	estimatedSpanCount: 0,
 	...overrides,
 })
 

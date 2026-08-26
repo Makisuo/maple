@@ -91,6 +91,40 @@ const makeConfig = () =>
 
 const emptyWarehouseRows: ReadonlyArray<Record<string, unknown>> = []
 
+/**
+ * A complete `traces.timeseries` row.
+ *
+ * The queries derive their row schema from the SELECT now, so `decodeRows`
+ * rejects a partial fixture instead of handing it through — which is the point:
+ * every one of these fixtures was missing `bucket`, `groupName`, `spanCount`
+ * and `estimatedSpanCount`, and none of them would have noticed the warehouse
+ * dropping one.
+ */
+const tracesRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
+	// The sample-count columns follow `count` unless a caller says otherwise:
+	// `minimumSampleCount` reads them, so leaving them at 0 makes every rule
+	// evaluate as "not enough data" no matter what the metric says.
+	const count = overrides.count ?? 0
+	return {
+		// At the test clock, not a fixed calendar date: the evaluation window ends
+		// at "now", so a bucket outside it reduces to no data and nothing fires.
+		bucket: new Date(DEFAULT_CLOCK_EPOCH_MS).toISOString().replace("T", " ").slice(0, 19),
+		groupName: "all",
+		count: 0,
+		spanCount: count,
+		estimatedSpanCount: count,
+		avgDuration: 0,
+		p50Duration: 0,
+		p95Duration: 0,
+		p99Duration: 0,
+		errorRate: 0,
+		satisfiedCount: 0,
+		toleratingCount: 0,
+		apdexScore: 1,
+		...overrides,
+	}
+}
+
 function makeWarehouseStub(state: {
 	tracesAggregateRows?: ReadonlyArray<Record<string, unknown>>
 	metricsAggregateRows?: ReadonlyArray<Record<string, unknown>>
@@ -460,7 +494,7 @@ describe("AlertsService", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {
 			tracesAggregateRows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -470,7 +504,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			],
 		}
 		const requests: Array<{ url: string; headers: Headers }> = []
@@ -529,7 +563,7 @@ describe("AlertsService", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {
 			tracesAggregateRows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -539,7 +573,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			],
 		}
 		const bodies: string[] = []
@@ -945,7 +979,7 @@ describe("AlertsService", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {
 			tracesAggregateRows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -955,7 +989,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			] as ReadonlyArray<Record<string, unknown>>,
 		}
 
@@ -972,7 +1006,7 @@ describe("AlertsService", () => {
 			yield* alerts.runSchedulerTick()
 
 			state.tracesAggregateRows = [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 20,
 					p50Duration: 10,
@@ -982,7 +1016,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 195,
 					toleratingCount: 3,
 					apdexScore: 0.9825,
-				},
+				}),
 			]
 
 			yield* TestClock.adjust(Duration.minutes(1))
@@ -1005,7 +1039,7 @@ describe("AlertsService", () => {
 	it.effect("suppresses trigger and resolve notifications while an incident flaps", () => {
 		const testDb = createTestDb(trackedDbs)
 		const breachedRows = [
-			{
+			tracesRow({
 				count: 200,
 				avgDuration: 40,
 				p50Duration: 20,
@@ -1015,10 +1049,10 @@ describe("AlertsService", () => {
 				satisfiedCount: 180,
 				toleratingCount: 10,
 				apdexScore: 0.925,
-			},
+			}),
 		] as ReadonlyArray<Record<string, unknown>>
 		const healthyRows = [
-			{
+			tracesRow({
 				count: 200,
 				avgDuration: 20,
 				p50Duration: 10,
@@ -1028,7 +1062,7 @@ describe("AlertsService", () => {
 				satisfiedCount: 195,
 				toleratingCount: 3,
 				apdexScore: 0.9825,
-			},
+			}),
 		] as ReadonlyArray<Record<string, unknown>>
 		const state = { tracesAggregateRows: breachedRows }
 
@@ -1078,7 +1112,7 @@ describe("AlertsService", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {
 			tracesAggregateRows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -1088,7 +1122,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			] as ReadonlyArray<Record<string, unknown>>,
 		}
 		const failingFetch: typeof fetch = (async () => new Response("boom", { status: 500 })) as typeof fetch
@@ -1161,7 +1195,7 @@ describe("AlertsService", () => {
 		// Healthy from the start: errorRate 1 stays below the threshold of 5.
 		const state = {
 			tracesAggregateRows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 20,
 					p50Duration: 10,
@@ -1171,7 +1205,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 195,
 					toleratingCount: 3,
 					apdexScore: 0.9825,
-				},
+				}),
 			] as ReadonlyArray<Record<string, unknown>>,
 		}
 
@@ -1233,7 +1267,7 @@ describe("AlertsService", () => {
 			// A transition writes immediately, even right after a heartbeat write:
 			// flip the warehouse to breaching and tick at T+7m.
 			state.tracesAggregateRows = [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -1243,7 +1277,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			]
 			yield* TestClock.adjust(Duration.minutes(1))
 			yield* alerts.runSchedulerTick()
@@ -1259,7 +1293,7 @@ describe("AlertsService", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {
 			tracesAggregateRows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -1269,7 +1303,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			] as ReadonlyArray<Record<string, unknown>>,
 		}
 
@@ -1694,7 +1728,7 @@ describe("AlertsService", () => {
 
 		const state = {
 			tracesAggregateRows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -1704,7 +1738,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			],
 		}
 		const overrides = {
@@ -2110,7 +2144,16 @@ describe("AlertsService", () => {
 					makeLayer(
 						testDb,
 						makeWarehouseStub({
-							logsAggregateRows: [{ count: 42 }],
+							logsAggregateRows: [
+								{
+									bucket: new Date(DEFAULT_CLOCK_EPOCH_MS)
+										.toISOString()
+										.replace("T", " ")
+										.slice(0, 19),
+									groupName: "all",
+									count: 42,
+								},
+							],
 						}),
 					),
 				),
@@ -2792,7 +2835,7 @@ describe("AlertsService", () => {
 					testDb,
 					makeWarehouseStub({
 						tracesAggregateRows: [
-							{
+							tracesRow({
 								count: 200,
 								avgDuration: 20,
 								p50Duration: 10,
@@ -2802,7 +2845,7 @@ describe("AlertsService", () => {
 								satisfiedCount: 195,
 								toleratingCount: 3,
 								apdexScore: 0.9825,
-							},
+							}),
 						],
 					}),
 					{ fetch: okFetch },
@@ -3146,7 +3189,7 @@ describe("AlertsService", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {
 			tracesAggregateRows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -3156,7 +3199,7 @@ describe("AlertsService", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			],
 		}
 
@@ -3203,8 +3246,7 @@ describe("AlertsService", () => {
 	it.effect("opens per-service incidents for groupBy=service rules", () => {
 		const testDb = createTestDb(trackedDbs)
 
-		const breachingRow = {
-			bucket: "2026-01-01 00:00:00",
+		const breachingRow = tracesRow({
 			groupName: "svc-breach",
 			count: 200,
 			avgDuration: 40,
@@ -3216,9 +3258,8 @@ describe("AlertsService", () => {
 			toleratingCount: 10,
 			apdexScore: 0.925,
 			estimatedSpanCount: 200,
-		}
-		const healthyRow = {
-			bucket: "2026-01-01 00:00:00",
+		})
+		const healthyRow = tracesRow({
 			groupName: "svc-healthy",
 			count: 200,
 			avgDuration: 20,
@@ -3230,7 +3271,7 @@ describe("AlertsService", () => {
 			toleratingCount: 3,
 			apdexScore: 0.9825,
 			estimatedSpanCount: 200,
-		}
+		})
 
 		const alertRows: ReadonlyArray<Record<string, unknown>> = [breachingRow, healthyRow]
 		const stub: WarehouseQueryServiceApi = {
@@ -3328,7 +3369,7 @@ describe("AlertsService evaluation error persistence", () => {
 		const state = {
 			failing: true,
 			rows: [
-				{
+				tracesRow({
 					count: 200,
 					avgDuration: 40,
 					p50Duration: 20,
@@ -3338,7 +3379,7 @@ describe("AlertsService evaluation error persistence", () => {
 					satisfiedCount: 180,
 					toleratingCount: 10,
 					apdexScore: 0.925,
-				},
+				}),
 			],
 			ingested: [] as Array<Record<string, unknown>>,
 		}
@@ -3404,19 +3445,19 @@ describe("AlertsService evaluation error persistence", () => {
 describe("AlertsService.previewRule", () => {
 	const decodePreviewRequest = Schema.decodeUnknownSync(AlertRulePreviewRequest)
 
-	const bucketRow = (bucket: string, errorRate: number) => ({
-		bucket,
-		groupName: "all",
-		count: 200,
-		avgDuration: 40,
-		p50Duration: 20,
-		p95Duration: 120,
-		p99Duration: 240,
-		errorRate,
-		satisfiedCount: 180,
-		toleratingCount: 10,
-		apdexScore: 0.925,
-	})
+	const bucketRow = (bucket: string, errorRate: number) =>
+		tracesRow({
+			bucket,
+			count: 200,
+			avgDuration: 40,
+			p50Duration: 20,
+			p95Duration: 120,
+			p99Duration: 240,
+			errorRate,
+			satisfiedCount: 180,
+			toleratingCount: 10,
+			apdexScore: 0.925,
+		})
 
 	it.effect("returns evaluator-bucketed points and would-fire spans for a spec rule", () => {
 		const testDb = createTestDb(trackedDbs)
@@ -3787,10 +3828,13 @@ describe("AlertsService.previewRule", () => {
 		// regression guard for that snapshot going stale: neither group is orphaned,
 		// so `resolveOrphanedGroupIncidents` must leave both incidents open rather
 		// than firing an all-clear for the one it saw before this tick's writes.
+		// Rows in the shape the `error_rate` timeseries actually returns. They used
+		// to be `{ groupKey, value, sampleCount }` — a shape from an older
+		// evaluation path that nothing decoded, so nothing noticed.
 		const breachedGroups = {
-			rawQueryRows: [
-				{ groupKey: "checkout", value: 42, sampleCount: 500 },
-				{ groupKey: "payments", value: 37, sampleCount: 500 },
+			tracesAggregateRows: [
+				tracesRow({ groupName: "checkout", count: 500, errorRate: 42 }),
+				tracesRow({ groupName: "payments", count: 500, errorRate: 37 }),
 			],
 		}
 

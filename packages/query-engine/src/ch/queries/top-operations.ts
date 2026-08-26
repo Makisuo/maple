@@ -15,6 +15,7 @@ import { round_ } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from } from "@maple-dev/clickhouse-builder"
 import { Traces } from "../tables"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 /**
  * Wrap an expression in parentheses. The DSL's arithmetic combinators
@@ -22,7 +23,7 @@ import { Traces } from "../tables"
  * grouping is required when a sum must bind before a division.
  */
 const paren = (expr: CH.Expr<number>): CH.Expr<number> =>
-	CH.rawExpr<number>(`(${compile(expr.toFragment())})`)
+	CH.rawExpr(`(${compile(expr.toFragment())})`, T.float64)
 
 export type TopOperationsMetric = TracesMetric
 

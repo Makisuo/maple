@@ -24,6 +24,7 @@
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { paramPlaceholder } from "@maple-dev/clickhouse-builder"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 /**
  * One tier boundary of a splice. `unit` names the bucket size; the rest are
@@ -99,7 +100,7 @@ export function interiorConditions(
 	grain: SpliceGrain = hourGrain,
 ): readonly [CH.Condition, CH.Condition] {
 	return [
-		bucketColumn.gte(CH.rawExpr<string>(grain.firstFullBucket)),
-		bucketColumn.lt(CH.rawExpr<string>(grain.endFloor)),
+		bucketColumn.gte(CH.rawExpr(grain.firstFullBucket, T.dateTimeString)),
+		bucketColumn.lt(CH.rawExpr(grain.endFloor, T.dateTimeString)),
 	]
 }

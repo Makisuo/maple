@@ -948,30 +948,13 @@ export function dedupeByFingerprint(entries: ReadonlyArray<CatalogEntry>): Reado
  * value reaches a `Schema.Class` constructor several layers away.
  *
  * The allowlist below is asserted *exactly*, in both directions: a query that
- * stops deriving fails, and so does one still listed here after it starts. That
- * is the point — the list is meant to shrink and never silently grow.
+ * stops deriving fails, and so does one still listed here after it starts.
+ *
+ * It is empty, and that is the invariant worth keeping: every SQL shape the
+ * product can emit validates the rows it gets back. Adding an entry is how you
+ * say a query cannot — and it needs a sentence here saying why.
  */
-export const UNDECODED_QUERIES: ReadonlySet<string> = new Set([
-	// Funnel steps come from `arrayJoin([1, 2, …])` and `windowFunnel` output
-	// columns the builder assembles as raw SQL.
-	"builder:productEventsFunnelBreakdownQuery",
-	"builder:productEventsFunnelQuery",
-	// `-State`/`-Merge` combinator expressions on the service rollups, plus the
-	// `hex(MD5(tuple(…)))` record identity. Typing these means giving the DSL
-	// aggregate-state combinators — see `T.aggregateState`.
-	"builder:serviceCatalogQuery",
-	"builder:serviceOperationsSummaryQuery",
-	"builder:sessionActivityQuery",
-	"builder:sessionReplaysListQuery",
-	"builder:sessionsForTraceQuery",
-	"builder:traceServicesByTraceIdsQuery",
-	"pipe:list_logs",
-	"pipe:traces_facets",
-	"query-spec:logs.timeseries",
-	"query-spec:traces.facets",
-	"query-spec:traces.list",
-	"query-spec:traces.timeseries",
-])
+export const UNDECODED_QUERIES: ReadonlySet<string> = new Set([])
 
 /** `source:name` for every catalog entry that decodes nothing. */
 export function undecodedQueries(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<string> {
@@ -980,6 +963,23 @@ export function undecodedQueries(entries: ReadonlyArray<CatalogEntry>): Readonly
 		if (entry.compiled?.rowSchemaSource === "none") undecoded.add(`${entry.source}:${entry.name}`)
 	}
 	return [...undecoded].sort()
+}
+
+/**
+ * The same list with the columns responsible, for the assertion's failure
+ * message. Derivation is all-or-nothing, so "this query decodes nothing" is
+ * useless on its own — these are the aliases to give a type.
+ */
+export function undecodedColumns(
+	entries: ReadonlyArray<CatalogEntry>,
+): ReadonlyMap<string, ReadonlyArray<string>> {
+	const columns = new Map<string, ReadonlyArray<string>>()
+	for (const entry of entries) {
+		if (entry.compiled?.rowSchemaSource !== "none") continue
+		const key = `${entry.source}:${entry.name}`
+		if (!columns.has(key)) columns.set(key, entry.compiled.untypedColumns)
+	}
+	return columns
 }
 
 /** Pipe names in `warehouseQueries` that no fixture covers. */

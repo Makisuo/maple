@@ -21,9 +21,15 @@ export {
 	type NullableColumnDefs,
 	string,
 	uint8,
+	uint16,
+	uint32,
 	bool,
 	uint64,
+	int32,
+	int64,
 	float64,
+	aggregateState,
+	unknown,
 	dateTime,
 	dateTime64,
 	dateTimeString,
@@ -44,6 +50,7 @@ export {
 	type Condition,
 	lit,
 	rawExpr,
+	untypedExpr,
 	rawCond,
 	when,
 	whenTrue,
@@ -61,7 +68,18 @@ export {
 export { type Subquery, exists, inSubquery, notInSubquery } from "./subquery"
 
 // Function factories (for extensibility by package consumers)
-export { defineFn, defineCondFn, compileFnCall, compileFnCallCond, makeExpr, makeCond } from "./define-fn"
+export {
+	compileFnCall,
+	compileFnCallCond,
+	compileTypedFnCall,
+	defineCondFn,
+	defineFn,
+	elementSchema,
+	makeCond,
+	makeExpr,
+	schemaOf,
+	schemaOfAny,
+} from "./define-fn"
 
 // ClickHouse functions (from category modules)
 export {
@@ -98,6 +116,7 @@ export {
 	length_ as length,
 	lower_,
 	domain_,
+	hex,
 	path_,
 	cutQueryString,
 	replaceOne,
@@ -137,7 +156,12 @@ export {
 	arrayOf,
 	arrayStringConcat,
 	arrayFilter,
+	arrayDistinct,
+	arrayElement,
 	arrayJoin,
+	arrayPushFront,
+	arrayReverseSort,
+	arraySort,
 	has,
 	// Map
 	mapContains,

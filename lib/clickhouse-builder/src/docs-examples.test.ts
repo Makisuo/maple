@@ -565,7 +565,7 @@ describe("docs/decoding-results.md", () => {
 		Effect.gen(function* () {
 			const noSchema = CH.compile(
 				CH.from(Events)
-					.select(($) => ({ name: $.Name, odd: CH.rawExpr("anyLast(Whatever)") }))
+					.select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") }))
 					.where(($) => [$.OrgId.eq("org_123")]),
 				{},
 			)
@@ -709,7 +709,7 @@ describe("docs/extending.md", () => {
 
 	it("rawExpr and rawCond are the last resort", () => {
 		const query = CH.from(Events)
-			.select(($) => ({ odd: CH.rawExpr<number>("DurationMs % 2") }))
+			.select(($) => ({ odd: CH.rawExpr("DurationMs % 2", T.float64) }))
 			.where(($) => [$.OrgId.eq("org_123"), CH.rawCond("Name GLOBAL IN (SELECT 1)")])
 
 		const sql = oneLine(compileCH(query, {}).sql)

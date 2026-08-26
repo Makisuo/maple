@@ -51,12 +51,14 @@ const makeTraceTimeseriesRow = (
 		satisfiedCount: number
 		toleratingCount: number
 		apdexScore: number
+		spanCount: number
 		estimatedSpanCount: number
 	}> = {},
 ) => ({
 	bucket: "2026-01-01 00:00:00",
 	groupName: "checkout",
 	count: 0,
+	spanCount: 0,
 	avgDuration: 0,
 	p50Duration: 0,
 	p95Duration: 0,
@@ -125,9 +127,7 @@ describe("makeQueryEngineExecute", () => {
 						receivedSql = compiled.sql
 						context = options?.context
 						profile = options?.profile
-						return compiled
-							.decodeRows([{ bucket: "2026-01-01 00:00:00", groupName: "checkout", count: 7 }])
-							.pipe(Effect.orDie)
+						return compiled.decodeRows([makeTraceTimeseriesRow({ count: 7 })]).pipe(Effect.orDie)
 					},
 				}),
 			)
@@ -621,6 +621,7 @@ describe("makeQueryEngineExecute", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "api",
+								groupName: "api",
 								attributeValue: "",
 								avgValue: 10,
 								minValue: 5,
@@ -631,6 +632,7 @@ describe("makeQueryEngineExecute", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "worker",
+								groupName: "worker",
 								attributeValue: "",
 								avgValue: 20,
 								minValue: 10,
@@ -686,6 +688,7 @@ describe("makeQueryEngineExecute", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "api",
+								groupName: "api",
 								attributeValue: "",
 								avgValue: 10,
 								minValue: 10,
@@ -696,6 +699,7 @@ describe("makeQueryEngineExecute", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "worker",
+								groupName: "worker",
 								attributeValue: "",
 								avgValue: 20,
 								minValue: 20,
@@ -988,6 +992,7 @@ describe("makeQueryEngineEvaluate", () => {
 								bucket: "2026-01-01 00:00:00",
 								groupName: "all",
 								count: 200,
+								spanCount: 200,
 								avgDuration: 12,
 								p50Duration: 10,
 								p95Duration: 120,
@@ -1038,6 +1043,7 @@ describe("makeQueryEngineEvaluate", () => {
 								bucket: "2026-01-01 00:00:00",
 								groupName: "all",
 								count: 40,
+								spanCount: 40,
 								avgDuration: 0,
 								p50Duration: 0,
 								p95Duration: 0,
@@ -1084,6 +1090,7 @@ describe("makeQueryEngineEvaluate", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "api",
+								groupName: "api",
 								attributeValue: "",
 								avgValue: 18,
 								minValue: 5,

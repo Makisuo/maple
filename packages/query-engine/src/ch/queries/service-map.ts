@@ -38,6 +38,7 @@ import {
 } from "../tables"
 import { unionAll } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 // Local CH function declarations used by the live topology-join branch's
 // sample-weighting math. Kept here (not promoted to ch/functions/) because
@@ -89,12 +90,13 @@ const sampleWeightExpr = (traceState: CH.Expr<string>) =>
 		[
 			[
 				_matchRegex(traceState, SAMPLED_TRACE_STATE_RE),
-				CH.rawExpr<number>(
+				CH.rawExpr(
 					"1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001)",
+					T.float64,
 				),
 			],
 		],
-		CH.rawExpr<number>("1.0"),
+		CH.rawExpr("1.0", T.float64),
 	)
 
 /**
@@ -745,9 +747,15 @@ const serviceDbRawFilters = (
 // type exactly.
 const UNIQ_SERVICE_STATE_EXPR = "uniqState(toString(ServiceName))"
 const TDIGEST_MERGE_STATE_EXPR = "quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles)"
+
+/** The two aggregate-state types the sealed and recent branches must agree on —
+ *  opaque values an outer `-Merge` reads, never rows anyone decodes. */
+const UNIQ_SERVICE_STATE = T.aggregateState("uniq", "String")
+const DB_DURATION_STATE = T.aggregateState("quantilesTDigestWeighted(0.5, 0.95)", "UInt64", "UInt32")
 const mergedQuantileExpr = (index: 1 | 2) =>
-	CH.rawExpr<number>(
+	CH.rawExpr(
 		`if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), ${index}) / 1000000, 0)`,
+		T.float64,
 	)
 
 export function serviceDbQuerySummarySQL(
@@ -762,8 +770,8 @@ export function serviceDbQuerySummarySQL(
 			bErr: CH.sum($.ErrorCount),
 			bEstErr: CH.sum($.EstimatedErrorCount),
 			bWDur: CH.sum($.WeightedDurationSumMs),
-			bSvc: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
-			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+			bSvc: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
+			bQ: CH.rawExpr(TDIGEST_MERGE_STATE_EXPR, DB_DURATION_STATE),
 		}))
 		.where(($) => signaturesHourlyFilters($, params))
 	const recent = from(Traces)
@@ -773,8 +781,8 @@ export function serviceDbQuerySummarySQL(
 			bErr: CH.countIf($.StatusCode.eq("Error")),
 			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
 			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
-			bSvc: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
-			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+			bSvc: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
+			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 		}))
 		.where(($) => serviceDbRawFilters($, params, "currentHour"))
 
@@ -788,7 +796,7 @@ export function serviceDbQuerySummarySQL(
 			avgDurationMs: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bWDur).div(CH.sum($.bEst)), CH.lit(0)),
 			p50DurationMs: mergedQuantileExpr(1),
 			p95DurationMs: mergedQuantileExpr(2),
-			activeServiceCount: CH.rawExpr<number>("uniqMerge(bSvc)"),
+			activeServiceCount: CH.rawExpr("uniqMerge(bSvc)", T.uint64),
 		}))
 		.format("JSON")
 
@@ -820,11 +828,13 @@ export function serviceDbQueryTimeseriesSQL(
 					CH.sum(_toFloat64($.Duration).mul($.SampleRate)).div(CH.sum($.SampleRate)).div(1000000),
 					CH.lit(0),
 				),
-				p50DurationMs: CH.rawExpr<number>(
+				p50DurationMs: CH.rawExpr(
 					`if(count() > 0, arrayElement(${DB_DURATION_QUANTILES_EXPR}, 1) / 1000000, 0)`,
+					T.float64,
 				),
-				p95DurationMs: CH.rawExpr<number>(
+				p95DurationMs: CH.rawExpr(
 					`if(count() > 0, arrayElement(${DB_DURATION_QUANTILES_EXPR}, 2) / 1000000, 0)`,
+					T.float64,
 				),
 			}))
 			.where(($) => serviceDbRawFilters($, params, "fullWindow"))
@@ -845,7 +855,7 @@ export function serviceDbQueryTimeseriesSQL(
 			bErr: CH.sum($.ErrorCount),
 			bEstErr: CH.sum($.EstimatedErrorCount),
 			bWDur: CH.sum($.WeightedDurationSumMs),
-			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+			bQ: CH.rawExpr(TDIGEST_MERGE_STATE_EXPR, DB_DURATION_STATE),
 		}))
 		.where(($) => signaturesHourlyFilters($, params))
 		.groupBy("bucket")
@@ -857,7 +867,7 @@ export function serviceDbQueryTimeseriesSQL(
 			bErr: CH.countIf($.StatusCode.eq("Error")),
 			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
 			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
-			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 		}))
 		.where(($) => serviceDbRawFilters($, params, "currentHour"))
 		.groupBy("bucket")
@@ -894,13 +904,13 @@ export function serviceDbTopQueriesSQL(
 			bLabel: CH.any_($.QueryLabel),
 			bStatement: CH.any_($.SampleStatement),
 			bSampleService: CH.any_(CH.toString_($.ServiceName)),
-			bServices: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bServices: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
 			bCount: CH.sum($.CallCount),
 			bEst: CH.sum($.EstimatedCount),
 			bErr: CH.sum($.ErrorCount),
 			bEstErr: CH.sum($.EstimatedErrorCount),
 			bWDur: CH.sum($.WeightedDurationSumMs),
-			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+			bQ: CH.rawExpr(TDIGEST_MERGE_STATE_EXPR, DB_DURATION_STATE),
 			bLastSeen: CH.max_($.Hour),
 		}))
 		.where(($) => signaturesHourlyFilters($, params))
@@ -910,17 +920,17 @@ export function serviceDbTopQueriesSQL(
 	// across the sealed/live boundary.
 	const recent = from(Traces)
 		.select(($) => ({
-			queryKey: CH.rawExpr<string>(DB_QUERY_KEY_SQL),
-			bLabel: CH.rawExpr<string>(`any(substring(${DB_QUERY_LABEL_SQL}, 1, 220))`),
-			bStatement: CH.rawExpr<string>(`any(substring(${DB_STATEMENT_SQL}, 1, 1000))`),
+			queryKey: CH.rawExpr(DB_QUERY_KEY_SQL, T.string),
+			bLabel: CH.rawExpr(`any(substring(${DB_QUERY_LABEL_SQL}, 1, 220))`, T.string),
+			bStatement: CH.rawExpr(`any(substring(${DB_STATEMENT_SQL}, 1, 1000))`, T.string),
 			bSampleService: CH.any_(CH.toString_($.ServiceName)),
-			bServices: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bServices: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
 			bCount: CH.count(),
 			bEst: CH.sum($.SampleRate),
 			bErr: CH.countIf($.StatusCode.eq("Error")),
 			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
 			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
-			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 			bLastSeen: CH.max_(CH.toDateTime($.Timestamp)),
 		}))
 		.where(($) => serviceDbRawFilters($, params, "currentHour"))
@@ -933,7 +943,7 @@ export function serviceDbTopQueriesSQL(
 			fallbackLabel: CH.any_($.bLabel),
 			sampleStatement: CH.anyIf($.bStatement, $.bStatement.neq("")),
 			sampleService: CH.any_($.bSampleService),
-			serviceCount: CH.rawExpr<number>("uniqMerge(bServices)"),
+			serviceCount: CH.rawExpr("uniqMerge(bServices)", T.uint64),
 			queryCount: CH.sum($.bCount),
 			estimatedQueryCount: CH.sum($.bEst),
 			errorCount: CH.sum($.bErr),
@@ -955,8 +965,9 @@ export function serviceDbTopQueriesSQL(
 	const query = fromQuery(merged, "shape")
 		.select(($) => ({
 			queryKey: $.queryKey,
-			queryLabel: CH.rawExpr<string>(
+			queryLabel: CH.rawExpr(
 				`if(sampleStatement != '', substring(${presentableStatementSql("sampleStatement")}, 1, 220), fallbackLabel)`,
+				T.string,
 			),
 			sampleStatement: $.sampleStatement,
 			sampleService: $.sampleService,

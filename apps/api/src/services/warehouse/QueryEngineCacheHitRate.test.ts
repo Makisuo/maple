@@ -88,6 +88,7 @@ const traceRow = (bucket: string, count: number) => ({
 	name: "all",
 	value: count,
 	count,
+	spanCount: count,
 	avgDuration: 0,
 	p50Duration: 0,
 	p95Duration: 0,
@@ -97,6 +98,8 @@ const traceRow = (bucket: string, count: number) => ({
 	// query's derived schema now, so the one fixture has to satisfy every shape
 	// it is fed to.
 	total: count,
+	satisfiedCount: 0,
+	toleratingCount: 0,
 	apdexScore: 0,
 	estimatedSpanCount: 0,
 })

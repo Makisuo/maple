@@ -141,7 +141,9 @@ describe("getSessionTraces", () => {
 					makeLayer(
 						makeExecutor(captured, {
 							detail: [sessionRow({ sessionId: "s1", traceIds: [] })],
-							activity: [{ sessionId: "s1", activeTimeMs: 21500, idleTimeMs: 8500 }],
+							activity: [
+								{ sessionId: "s1", activeTimeMs: 21500, idleTimeMs: 8500, eventCount: 12 },
+							],
 						}),
 					),
 				),

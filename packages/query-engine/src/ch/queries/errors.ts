@@ -9,6 +9,7 @@ import { exists, inSubquery } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
+import * as T from "@maple-dev/clickhouse-builder/types"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { SpanId, TraceId } from "@maple/domain"
 import { Schema } from "effect"
@@ -599,6 +600,12 @@ export interface TracesFacetsOpts {
 
 export type TracesFacetsOutput = FacetOutput
 
+/** The String-typed columns of a table — a facet name is one of those, and a
+ *  facet over a `UInt64` would be a number in a field the wire calls a string. */
+type StringColumn<Cols extends ColumnDefs> = {
+	[K in keyof Cols & string]: Cols[K] extends T.CHString ? K : never
+}[keyof Cols & string]
+
 export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFacetsOutput> {
 	const baseWhere = ($: ColumnAccessor<typeof TraceListMv.columns>): Array<CH.Condition | undefined> => {
 		const conditions: Array<CH.Condition | undefined> = [
@@ -689,15 +696,18 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 		return conditions
 	}
 
+	// `colName` is a real `TraceListMv` column, so the accessor already knows how
+	// it decodes — naming it as a `dynamicColumn` threw that away and cost every
+	// facet branch its row schema.
 	const makeFacetQuery = (
-		colName: string,
+		colName: StringColumn<typeof TraceListMv.columns>,
 		facetType: string,
 		extraWhere?: ($: ColumnAccessor<typeof TraceListMv.columns>) => CH.Condition,
 		limit = 50,
 	) =>
 		from(TraceListMv)
-			.select((_$) => ({
-				name: CH.dynamicColumn<string>(colName),
+			.select(($) => ({
+				name: $[colName],
 				count: CH.count(),
 				facetType: CH.lit(facetType),
 			}))

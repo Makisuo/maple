@@ -13,6 +13,7 @@ import {
 	traceTimeProbeQuery,
 } from "./queries/errors"
 import { unionAll } from "@maple-dev/clickhouse-builder"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 // Core DSL tests
 
@@ -130,7 +131,7 @@ describe("CH.from / select / where / compile", () => {
 
 	it("compiles toStartOfInterval", () => {
 		const q = CH.from(TestTable).select((_$) => ({
-			bucket: CH.toStartOfInterval(CH.rawExpr<string>("Timestamp"), 3600),
+			bucket: CH.toStartOfInterval(CH.rawExpr("Timestamp", T.dateTimeString), 3600),
 		}))
 
 		const { sql } = compileCH(q, {})

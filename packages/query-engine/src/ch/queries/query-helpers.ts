@@ -12,6 +12,7 @@ import { MetricsSum, MetricsGauge, MetricsHistogram, MetricsExpHistogram } from 
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition, httpDisplaySpanName } from "../../traces-shared"
 import type { AttributeIndexMode } from "../../capabilities"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 // APDEX expressions
 
@@ -465,10 +466,10 @@ export function tracesAggregatesWhereConditions(
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
 		hourBounds
-			? $.Hour.gte(CH.rawExpr<string>(hourBounds.gte))
+			? $.Hour.gte(CH.rawExpr(hourBounds.gte, T.dateTimeString))
 			: $.Hour.gte(param.dateTimeString("startTime")),
 		hourBounds
-			? $.Hour.lt(CH.rawExpr<string>(hourBounds.lt))
+			? $.Hour.lt(CH.rawExpr(hourBounds.lt, T.dateTimeString))
 			: $.Hour.lte(param.dateTimeString("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),

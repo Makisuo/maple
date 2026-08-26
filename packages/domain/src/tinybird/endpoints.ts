@@ -84,6 +84,8 @@ export interface ListLogsOutput {
 	readonly body: string
 	readonly traceId: string
 	readonly spanId: string
+	/** Stable per-row identity (`hex(MD5(tuple(…)))`), the list's pagination cursor. */
+	readonly recordIdentity: string
 	readonly logAttributes: string
 	readonly resourceAttributes: string
 }

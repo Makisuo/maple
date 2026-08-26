@@ -91,6 +91,15 @@ interface CompiledQueryBase<Output> {
 	 * nothing validates the rows.
 	 */
 	readonly rowSchemaSource: "declared" | "derived" | "none"
+	/**
+	 * The selected aliases that had no type to read, when `rowSchemaSource` is
+	 * `"none"`. Empty otherwise.
+	 *
+	 * Derivation is all-or-nothing — one untyped field means the builder cannot
+	 * describe the row — so "this query decodes nothing" is otherwise a dead end
+	 * for whoever has to fix it. This names the columns to type.
+	 */
+	readonly untypedColumns: ReadonlyArray<string>
 	/** Execution-routing metadata, set by `.routing(tag)` at the query
 	 *  definition. The tag is opaque to the builder — executors give it meaning. */
 	/** Runtime decode of raw query results. Queries built from handwritten SQL
@@ -129,6 +138,7 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 	 *  compile otherwise, and most compiled queries are never decoded. */
 	getRowSchema: (() => CompiledQueryRowSchema<Output> | undefined) | undefined,
 	routing?: Routing,
+	untypedColumns: ReadonlyArray<string> = [],
 ): CompiledQuery<Output, Routing> => {
 	let cachedDecodeRow: ((row: unknown) => Effect.Effect<Output, unknown, never>) | undefined
 	let decoderBuilt = false
@@ -168,6 +178,7 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 		tenantScope,
 		rowSchemaDeclared: rowSchemaSource !== "none",
 		rowSchemaSource,
+		untypedColumns: rowSchemaSource === "none" ? untypedColumns : [],
 		...(!(routing === undefined) ? { routing } : undefined),
 		decodeRows,
 		decodeFirstRow: (rows) => {
@@ -400,13 +411,15 @@ export function compileCH<
 				: "cross-tenant"
 
 	const derived = deriveRowSchema(selectExprs)
+	const derivedSchema = "schema" in derived ? derived.schema : undefined
 
 	return makeCompiledQuery<Decoded, Routing>(
 		sql,
 		tenantScope,
-		options?.rowSchema !== undefined ? "declared" : derived ? "derived" : "none",
-		() => options?.rowSchema ?? (derived as CompiledQueryRowSchema<Decoded> | undefined),
+		options?.rowSchema !== undefined ? "declared" : derivedSchema ? "derived" : "none",
+		() => options?.rowSchema ?? (derivedSchema as CompiledQueryRowSchema<Decoded> | undefined),
 		state.routingValue as Routing,
+		"untyped" in derived ? derived.untyped : [],
 	)
 }
 
@@ -493,14 +506,20 @@ function selectExprsOf(query: CHQuery<any, any, any>): Record<string, unknown> |
  * means the builder cannot describe the row, and inventing a permissive schema
  * for that field would hand back something that looks validated and is not.
  */
-const deriveRowSchema = (selectExprs: Record<string, unknown>): Schema.Codec<any, any> | undefined => {
+const deriveRowSchema = (
+	selectExprs: Record<string, unknown>,
+): { readonly schema: Schema.Codec<any, any> } | { readonly untyped: ReadonlyArray<string> } => {
 	const fields: Record<string, Schema.Codec<any, any>> = {}
+	const untyped: Array<string> = []
 	for (const [alias, expr] of Object.entries(selectExprs)) {
 		const schema = (expr as { readonly schema?: Schema.Codec<any, any> } | null)?.schema
-		if (schema === undefined) return undefined
-		fields[alias] = schema
+		if (schema === undefined) untyped.push(alias)
+		else fields[alias] = schema
 	}
-	return Schema.Struct(fields)
+	// Every alias is collected before returning, rather than bailing at the
+	// first: naming one column at a time turns a ten-column fix into ten
+	// compile-and-look cycles.
+	return untyped.length > 0 ? { untyped } : { schema: Schema.Struct(fields) }
 }
 
 // UNION ALL compilation
@@ -551,12 +570,15 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 	const firstBranch = state.queries[0]
 	const branchExprs = firstBranch ? selectExprsOf(firstBranch) : undefined
 	const derived = branchExprs ? deriveRowSchema(branchExprs) : undefined
+	const derivedSchema = derived && "schema" in derived ? derived.schema : undefined
 
 	return makeCompiledQuery<Output, undefined>(
 		sql,
 		tenantScope,
-		options?.rowSchema !== undefined ? "declared" : derived ? "derived" : "none",
-		() => options?.rowSchema ?? (derived as CompiledQueryRowSchema<Output> | undefined),
+		options?.rowSchema !== undefined ? "declared" : derivedSchema ? "derived" : "none",
+		() => options?.rowSchema ?? (derivedSchema as CompiledQueryRowSchema<Output> | undefined),
+		undefined,
+		derived && "untyped" in derived ? derived.untyped : [],
 	)
 }
 

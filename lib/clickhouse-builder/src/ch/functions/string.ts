@@ -24,6 +24,10 @@ export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left", T.st
 // query-parameter PII. `cutQueryString` is the variant that keeps scheme and
 // host, for when the full URL minus its query is wanted.
 
+/** `hex(x)` — the hex rendering of any value's bytes, as a String. The usual
+ *  reason to reach for it is making a hash printable. */
+export const hex = defineFn<[Expr<any>], string>("hex", T.string)
+
 export const domain_ = defineFn<[Expr<string>], string>("domain", T.string)
 export const path_ = defineFn<[Expr<string>], string>("path", T.string)
 export const cutQueryString = defineFn<[Expr<string>], string>("cutQueryString", T.string)

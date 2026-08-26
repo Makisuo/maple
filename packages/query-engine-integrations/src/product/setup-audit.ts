@@ -38,6 +38,7 @@ import {
 } from "@maple/query-engine/ch/tables"
 import { CHNumber } from "@maple/query-engine/ch/schema"
 import { hourFloor } from "@maple/query-engine/ch/query-helpers"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 /** Snaps a window bound to its hour floor so any overlapping hour of an hourly MV contributes. */
 
@@ -138,11 +139,13 @@ export function auditSpanProfileByServiceQuery(opts: { limit?: number } = {}) {
 			noEnvCount: CH.sumIf($.WeightedCount, $.DeploymentEnv.eq("")),
 			spanNameCount: CH.uniq($.SpanName),
 			// Bounded samples of the offending literals so the finding can name them.
-			badStatusCodes: CH.rawExpr<ReadonlyArray<string>>(
+			badStatusCodes: CH.rawExpr(
 				`groupUniqArrayIf(5)(StatusCode, StatusCode NOT IN (${quoteList(VALID_STATUS_CODES)}))`,
+				T.array(T.string),
 			),
-			badSpanKinds: CH.rawExpr<ReadonlyArray<string>>(
+			badSpanKinds: CH.rawExpr(
 				`groupUniqArrayIf(5)(SpanKind, SpanKind NOT IN (${quoteList(VALID_SPAN_KINDS)}))`,
+				T.array(T.string),
 			),
 		}))
 		.where(($) => [

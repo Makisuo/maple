@@ -38,6 +38,7 @@ export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { normalizedSpanNameExpr } from "@maple/domain/tinybird/span-display-name"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 // Semconv rename coalescing
 //
@@ -178,10 +179,10 @@ export function buildAttrFilterCondition(
 				ResourceAttributes: "ResourceAttributeItems",
 			} as const
 			const items = CH.dynamicColumn<ReadonlyArray<string>>(itemColumnByMap[mapName])
-			let candidate = CH.has(items, CH.concat(keys[0]!, CH.rawExpr<string>("char(31)"), value))
+			let candidate = CH.has(items, CH.concat(keys[0]!, CH.rawExpr("char(31)", T.string), value))
 			for (let i = 1; i < keys.length; i++) {
 				candidate = candidate.or(
-					CH.has(items, CH.concat(keys[i]!, CH.rawExpr<string>("char(31)"), value)),
+					CH.has(items, CH.concat(keys[i]!, CH.rawExpr("char(31)", T.string), value)),
 				)
 			}
 			return candidate.and(exact)

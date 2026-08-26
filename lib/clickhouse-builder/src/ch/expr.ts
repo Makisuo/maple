@@ -314,14 +314,36 @@ export function not(condition: Condition): Condition {
 // Raw expression (escape hatch)
 
 /**
- * SQL the builder cannot express, as an expression.
+ * SQL the builder cannot express, as an expression of a declared type.
  *
- * Pass the column type it produces where you can: without one the expression
- * has no schema, and one unschema'd field is enough to stop the whole query
- * deriving a row schema.
+ * The type is required. It used to be optional, and optional is how 90 raw
+ * expressions across Maple ended up carrying a TypeScript type nothing checked:
+ * `rawExpr<number>("sum(x)")` told the compiler the column was a number and told
+ * the runtime nothing, so a `UInt64` arriving quoted reached a `Schema.Number`
+ * several layers downstream. Declaring `T.float64` costs one argument and makes
+ * both directions agree.
+ *
+ * For SQL whose result genuinely has no type to declare — a sort tuple that is
+ * only ever an argument, never a selected value — use {@link untypedExpr}, which
+ * says so.
  */
-export function rawExpr<T = unknown>(sql: string, type?: CHType<string, T, any>): Expr<T> {
-	return makeExpr<T>(raw(sql), type?.schema)
+export function rawExpr<T>(sql: string, type: CHType<string, T, any>): Expr<T> {
+	return makeExpr<T>(raw(sql), type.schema)
+}
+
+/**
+ * SQL with no declared result type.
+ *
+ * Deliberately separate from {@link rawExpr} and deliberately awkward to reach
+ * for: selecting one costs the whole query its derived row schema, so the query
+ * decodes nothing. That is visible rather than silent — the SQL catalog asserts
+ * an exact list of queries that decode nothing, so a new one fails the build.
+ *
+ * The legitimate use is a value that never becomes a row: an `ORDER BY` key, an
+ * `argMin` tiebreaker, a tuple compared against another tuple.
+ */
+export function untypedExpr<T = unknown>(sql: string): Expr<T> {
+	return makeExpr<T>(raw(sql))
 }
 
 export function rawCond(sql: string): Condition {
