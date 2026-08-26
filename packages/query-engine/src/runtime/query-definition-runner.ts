@@ -1,5 +1,5 @@
-import type { CompiledQuery, QueryBuilderError } from "@maple-dev/clickhouse-builder"
-import { Effect, type Option } from "effect"
+import type { CompiledQuery, CompiledQueryInput, QueryBuilderError } from "@maple-dev/clickhouse-builder"
+import type { Effect, Option } from "effect"
 import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "../capabilities"
 import type { SqlQueryOptions } from "../profiles"
 import type { QueryDefinition } from "../registry/query-definition"
@@ -11,7 +11,7 @@ export interface QueryDefinitionTenant {
 export interface QueryDefinitionWarehouse<Tenant extends QueryDefinitionTenant, Error> {
 	readonly compiledQuery: <Row>(
 		tenant: Tenant,
-		compiled: CompiledQuery<Row>,
+		compiled: CompiledQueryInput<Row>,
 		options: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Row>, Error>
 	readonly compiledQueryWithCapabilities: <Row>(
@@ -27,7 +27,7 @@ export interface QueryDefinitionFirstWarehouse<Tenant extends QueryDefinitionTen
 	readonly compiledQueryFirst: <Row>(
 		tenant: Tenant,
 		compiled:
-			| CompiledQuery<Row>
+			| CompiledQueryInput<Row>
 			| ((capabilities: WarehouseCapabilities) => Effect.Effect<CompiledQuery<Row>, QueryBuilderError>),
 		options: SqlQueryOptions,
 	) => Effect.Effect<Option.Option<Row>, Error>
@@ -55,19 +55,20 @@ export const runQueryDefinition = <Payload, Row, Tenant extends QueryDefinitionT
 ): Effect.Effect<ReadonlyArray<Row>, Error> => {
 	const options = queryDefinitionOptions(definition, payload)
 
-	// The capability-aware branch hands the compile to the warehouse, which
-	// resolves capabilities first; the plain branch compiles here. Both treat a
-	// compile failure as a defect — a definition that cannot compile its own
-	// payload is a bug in the definition, not a condition a route reports.
+	// Both branches hand the warehouse an unrun compile: the capability-aware one
+	// so capabilities resolve first, the plain one against the baseline. Neither
+	// judges the failure here — a definition that cannot compile its own payload
+	// is a bug, which is exactly what the warehouse does with it.
 	return definition.capabilityAware
 		? warehouse.compiledQueryWithCapabilities(
 				tenant,
 				(capabilities) => definition.compile(payload, tenant.orgId, capabilities),
 				options,
 			)
-		: definition.compile(payload, tenant.orgId, baselineWarehouseCapabilities()).pipe(
-				Effect.orDie,
-				Effect.flatMap((compiled) => warehouse.compiledQuery(tenant, compiled, options)),
+		: warehouse.compiledQuery(
+				tenant,
+				definition.compile(payload, tenant.orgId, baselineWarehouseCapabilities()),
+				options,
 			)
 }
 
@@ -83,13 +84,8 @@ export const runQueryDefinitionFirst = <Payload, Row, Tenant extends QueryDefini
 				(capabilities) => definition.compile(payload, tenant.orgId, capabilities),
 				queryDefinitionOptions(definition, payload),
 			)
-		: definition.compile(payload, tenant.orgId, baselineWarehouseCapabilities()).pipe(
-				Effect.orDie,
-				Effect.flatMap((compiled) =>
-					warehouse.compiledQueryFirst(
-						tenant,
-						compiled,
-						queryDefinitionOptions(definition, payload),
-					),
-				),
+		: warehouse.compiledQueryFirst(
+				tenant,
+				definition.compile(payload, tenant.orgId, baselineWarehouseCapabilities()),
+				queryDefinitionOptions(definition, payload),
 			)
