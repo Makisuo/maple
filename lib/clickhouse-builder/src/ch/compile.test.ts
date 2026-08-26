@@ -606,3 +606,28 @@ describe("arithmetic decoding", () => {
 		}),
 	)
 })
+
+describe("handwritten SQL", () => {
+	// `reason` and `note` are required arguments, and used to be dropped — so the
+	// gate they describe existed only at the call site, where no sweep could see
+	// it. They are on the compiled query now.
+	it("carries its reason and note so a catalog can audit them", () => {
+		const compiled = CH.unsafeCompiledQuery<{ readonly n: string }>({
+			sql: "SELECT Name AS n FROM events WHERE OrgId = 'org'",
+			tenantScope: "tenant",
+			reason: "user-authored-sql",
+			note: "The SQL came from a user; there is no AST to build.",
+		})
+
+		expect(compiled.rawSql?.reason).toBe("user-authored-sql")
+		expect(compiled.rawSql?.note).toContain("no AST")
+		// Absent for a query the builder produced, so the two are distinguishable.
+		const built = compileCHUnsafe(
+			CH.from(CH.table("events", { OrgId: T.string, Name: T.string }, { tenantColumn: "OrgId" }))
+				.select(($) => ({ n: $.Name }))
+				.where(($) => [$.OrgId.eq("org")]),
+			{},
+		)
+		expect(built.rawSql).toBeUndefined()
+	})
+})

@@ -133,7 +133,8 @@ CH.compileUnsafe(query, params, options?)  // CompiledQuery, throws
 | `options.skipFormat`  | Omit a trailing `FORMAT` clause (used internally for subqueries)     |
 | `options.deferParams` | Leave placeholders unresolved, for SQL spliced into an outer compile |
 
-`compile` and `compileCH` are the same function. Unions use `compileUnion(union, params)`.
+`compileCH` is the internal name; the package exports it as `compile`. Unions use
+`compileUnion(union, params)`.
 
 ## The `CompiledQuery`
 
@@ -142,9 +143,13 @@ interface CompiledQuery<Output> {
 	readonly sql: string
 	readonly tenantScope: "tenant" | "cross-tenant"
 	readonly rowSchemaSource: "declared" | "derived" | "none"
+	readonly rowSchema: CompiledQueryRowSchema<Output> | undefined
+	readonly untypedColumns: ReadonlyArray<string>
+	readonly rawSql?: { readonly reason: string; readonly note: string }
 	readonly routing?: string
 	readonly decodeRows: (rows) => Effect<ReadonlyArray<Output>, CompiledQueryDecodeError>
 	readonly decodeFirstRow: (rows) => Effect<Option<Output>, CompiledQueryDecodeError>
+	readonly encodeRows: (rows) => Effect<ReadonlyArray<Record<string, unknown>>, CompiledQueryEncodeError>
 }
 ```
 
@@ -153,8 +158,12 @@ interface CompiledQuery<Output> {
 | `sql`                           | The statement to execute. The builder never runs it.                                         |
 | `tenantScope`                   | Whether the query pins a single tenant — see [Tenant scoping](./tenant-scoping.md)           |
 | `rowSchemaSource`               | Where the row schema came from, so a caller can tell real validation from a pass-through    |
+| `rowSchema`                     | The codec itself, for a caller that needs a `Schema` rather than a call                     |
+| `untypedColumns`                | When `rowSchemaSource` is `"none"`, the selected aliases responsible                        |
+| `rawSql`                        | Present only for `unsafeCompiledQuery`: the `reason` and `note` it was given                |
 | `routing`                       | Set by `.routing(tag)`; opaque metadata for your executor                                    |
 | `decodeRows` / `decodeFirstRow` | See [Decoding results](./decoding-results.md)                                                |
+| `encodeRows`                    | The same codec backwards — decoded rows to the wire shape                                   |
 
 There is deliberately **no `castRows`**. A bare cast looked type-safe while hiding wire-format
 drift, so it was removed in favour of schema-checked decoding.

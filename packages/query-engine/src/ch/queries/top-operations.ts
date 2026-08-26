@@ -11,7 +11,7 @@ import { compile } from "@maple-dev/clickhouse-builder/sql"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { avg, count, countIf, quantile } from "@maple-dev/clickhouse-builder"
 import { if_ } from "@maple-dev/clickhouse-builder"
-import { round_ } from "@maple-dev/clickhouse-builder"
+import { round } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from } from "@maple-dev/clickhouse-builder"
 import { Traces } from "../tables"
@@ -55,7 +55,7 @@ const metricExpr = (
 		Match.when("apdex", () =>
 			if_(
 				count().gt(0),
-				round_(
+				round(
 					// (satisfied + tolerating * 0.5) / total — the numerator must be
 					// grouped so the division binds after the sum.
 					paren(

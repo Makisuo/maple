@@ -51,7 +51,7 @@
 	"scripts": {
 		"build": "tsdown",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run && node scripts/check-doc-citations.mjs",
+		"test": "vitest run && node scripts/check-doc-citations.mjs && node scripts/check-exports-documented.mjs",
 		"prepublishOnly": "bun run build"
 	},
 	"devDependencies": {

@@ -175,7 +175,9 @@ const rawQuery = <Output>(args: {
 	tenantScope: CH.TenantScope
 	reason: RawSqlReason
 	note: string
-	rowSchema?: Schema.Schema<Output>
+	// Not `Schema.Schema<Output>`, which leaves `DecodingServices` open and so is
+	// a supertype of what a row codec may be. See docs/decoding-results.md.
+	rowSchema?: CH.CompiledQueryRowSchema<Output>
 }) => CH.unsafeCompiledQuery<Output>(args)
 ```
 

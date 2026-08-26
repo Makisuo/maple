@@ -116,8 +116,17 @@ interface CompiledQueryBase<Output> {
 	 * for whoever has to fix it. This names the columns to type.
 	 */
 	readonly untypedColumns: ReadonlyArray<string>
-	/** Execution-routing metadata, set by `.routing(tag)` at the query
-	 *  definition. The tag is opaque to the builder — executors give it meaning. */
+	/**
+	 * Why this query is handwritten SQL, when it is — set only by
+	 * {@link unsafeCompiledQuery}, absent for a query the builder produced.
+	 *
+	 * On the compiled query rather than only at the call site, because that is
+	 * what makes the reason auditable: a catalog sweep can count the handwritten
+	 * queries and group them by reason, and an executor can log which one it is
+	 * about to run. A required argument that nothing stores is a gate only a
+	 * human reviewer can see.
+	 */
+	readonly rawSql?: { readonly reason: string; readonly note: string }
 	/** Runtime decode of raw query results. Queries built from handwritten SQL
 	 *  should provide a row schema so schema drift is caught before consumers
 	 *  read fields from `Record<string, unknown>`. Without a schema this is an
@@ -197,6 +206,7 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 	getRowSchema: (() => CompiledQueryRowSchema<Output> | undefined) | undefined,
 	routing?: Routing,
 	untypedColumns: ReadonlyArray<string> = [],
+	rawSql?: { readonly reason: string; readonly note: string },
 ): CompiledQuery<Output, Routing> => {
 	let cachedDecodeRow: ((row: unknown) => Effect.Effect<Output, unknown, never>) | undefined
 	let decoderBuilt = false
@@ -266,6 +276,7 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 		},
 		rowSchemaSource,
 		untypedColumns: rowSchemaSource === "none" ? untypedColumns : [],
+		...(rawSql !== undefined ? { rawSql } : undefined),
 		...(!(routing === undefined) ? { routing } : undefined),
 		decodeRows,
 		encodeRows,
@@ -289,16 +300,6 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 		},
 	} as CompiledQuery<Output, Routing>
 }
-
-/**
- * Why a query is handwritten SQL rather than a builder query.
- *
- * The builder does not enumerate the legitimate reasons — that is a policy of
- * the codebase using it. Declare a string-literal union of your own and pass it
- * as `Reason` (or wrap `unsafeCompiledQuery` in a function that pins it) to make
- * adding a reason a reviewable one-line diff.
- */
-export type RawSqlReason = string
 
 /**
  * Explicit constructor for SQL that cannot be expressed through the typed DSL.
@@ -330,6 +331,8 @@ export const unsafeCompiledQuery = <
 		args.rowSchema === undefined ? "none" : "declared",
 		() => args.rowSchema,
 		args.routing,
+		[],
+		{ reason: args.reason, note: args.note },
 	)
 
 /**
@@ -389,6 +392,35 @@ export const compileUnion = <Output extends Record<string, any>, Params extends 
 	asEffect(() => compileUnionUnsafe(union, params, options))
 
 export function compileCHUnsafe<
+	Cols extends ColumnDefs,
+	Output extends Record<string, any>,
+	Joins extends Record<string, ColumnDefs>,
+	Routing extends string | undefined,
+	Params extends Record<string, any>,
+	Decoded extends Output = Output,
+>(
+	query: CHQuery<Cols, Output, Joins, Routing>,
+	params: Params,
+	options?: {
+		skipFormat?: boolean
+		rowSchema?: CompiledQueryRowSchema<Decoded>
+		/** Leave `__PARAM_…__` placeholders in the SQL instead of resolving them.
+		 *  For fragments spliced into a larger query — a subquery condition — whose
+		 *  params are resolved by the outer compilation pass. */
+		deferParams?: boolean
+	},
+): CompiledQuery<Decoded, Routing> {
+	return compileInner(query, params, options)
+}
+
+/**
+ * The recursion behind {@link compileCHUnsafe}.
+ *
+ * Separate only so `enclosingCtes` — which `compile` sets for itself as it walks
+ * a query's CTEs, and which no caller has any reason to pass — stays off the
+ * published signature, along with the `ResolvedCte` shape it names.
+ */
+function compileInner<
 	Cols extends ColumnDefs,
 	Output extends Record<string, any>,
 	Joins extends Record<string, ColumnDefs>,
@@ -465,7 +497,7 @@ export function compileCHUnsafe<
 	const resolvedCtes: Array<ResolvedCte> = []
 	for (const c of state.ctes) {
 		if (c.query) {
-			const compiled = compileCHUnsafe(c.query, params, {
+			const compiled = compileInner(c.query, params, {
 				skipFormat: true,
 				deferParams,
 				enclosingCtes: [...(options?.enclosingCtes ?? []), ...resolvedCtes],
@@ -484,7 +516,7 @@ export function compileCHUnsafe<
 	let fromSourceScope: TenantScope = "cross-tenant"
 	if (state.fromQuery) {
 		// Compile the inner query lazily
-		const innerCompiled = compileCHUnsafe(state.fromQuery, params, { skipFormat: true, deferParams })
+		const innerCompiled = compileInner(state.fromQuery, params, { skipFormat: true, deferParams })
 		fromSourceScope = innerCompiled.tenantScope
 		fromFragment = raw(`(${innerCompiled.sql}) AS ${state.fromQueryAlias}`)
 	} else if (state.fromUnion) {
@@ -527,7 +559,7 @@ export function compileCHUnsafe<
 			? state.typedJoins.map((j) => {
 					let tableSql: string
 					if (j.innerQuery) {
-						const compiled = compileCHUnsafe(j.innerQuery, params, {
+						const compiled = compileInner(j.innerQuery, params, {
 							skipFormat: true,
 							deferParams,
 						})
@@ -750,7 +782,7 @@ export function compileUnionUnsafe<Output extends Record<string, any>, Params ex
 	const deferParams = options?.deferParams === true
 
 	// Compile each sub-query without FORMAT
-	const subQueries = state.queries.map((q) => compileCHUnsafe(q, params, { skipFormat: true, deferParams }))
+	const subQueries = state.queries.map((q) => compileInner(q, params, { skipFormat: true, deferParams }))
 
 	// UNION ALL is a disjunction: one unscoped branch leaks every tenant into the
 	// result regardless of how tightly the others are filtered.

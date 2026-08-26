@@ -287,8 +287,9 @@ export const aggregateState = (
 /**
  * A column whose wire value is passed through unvalidated.
  *
- * The escape hatch for a type this package does not model yet. Prefer a real
- * type: an `unknown` column makes the whole query's derived row schema weaker.
+ * The escape hatch for a type this package does not model yet, named for the
+ * same reason `untypedExpr` and `defineUntypedFn` are: prefer a real type,
+ * because an untyped column makes the whole query's derived row schema weaker.
  */
-export const unknown = <const Tag extends string>(sql: Tag): CHType<Tag, unknown, unknown> =>
+export const untyped = <const Tag extends string>(sql: Tag): CHType<Tag, unknown, unknown> =>
 	chType(sql, sql, Schema.Unknown)

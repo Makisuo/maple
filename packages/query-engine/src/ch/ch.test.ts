@@ -1228,8 +1228,8 @@ describe("new expression functions", () => {
 		expect(sql).toContain("concat(Id, ' ', Name) AS full")
 	})
 
-	it("compiles round_()", () => {
-		const q = CH.from(TestTable).select(($) => ({ rounded: CH.round_($.Value.div(100), 2) }))
+	it("compiles round()", () => {
+		const q = CH.from(TestTable).select(($) => ({ rounded: CH.round($.Value.div(100), 2) }))
 		const { sql } = compileUnsafe(q, {})
 		expect(sql).toContain("round(Value / 100, 2) AS rounded")
 	})

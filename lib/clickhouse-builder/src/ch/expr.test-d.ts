@@ -43,7 +43,7 @@ expectTypeOf(CH.toStartOfInterval(CH.param.dateTime("ts"), 60)).toMatchTypeOf<Ex
 expectTypeOf(CH.if_(CH.lit(1).gt(0), CH.lit("yes"), CH.lit("no"))).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.coalesce(CH.lit("a"), CH.lit("b"))).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.concat(CH.lit("a"), CH.lit("b"))).toMatchTypeOf<Expr<string>>()
-expectTypeOf(CH.round_(CH.lit(1), 2)).toMatchTypeOf<Expr<number>>()
+expectTypeOf(CH.round(CH.lit(1), 2)).toMatchTypeOf<Expr<number>>()
 expectTypeOf(CH.intDiv(CH.lit(10), 3)).toMatchTypeOf<Expr<number>>()
 expectTypeOf(CH.toString(CH.lit(1))).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.toFloat64OrZero(CH.lit("3.14"))).toMatchTypeOf<Expr<number>>()
