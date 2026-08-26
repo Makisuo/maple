@@ -25,7 +25,8 @@ const defaultTraceFixtures = (): FixtureRule[] => [
  */
 export const installFakeWarehouse = (rules: FixtureRule[] = defaultTraceFixtures()): void => {
 	__testables.setClientFactory(() => ({
-		sql: async (sql: string) => {
+		sql: async (statement) => {
+			const sql = statement.text
 			const rule = rules.find((r) => r.match(sql))
 			if (!rule) {
 				throw new Error(`[eval fake warehouse] no fixture matched SQL:\n${sql.slice(0, 600)}`)

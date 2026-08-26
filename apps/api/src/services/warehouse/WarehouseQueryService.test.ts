@@ -17,6 +17,7 @@ import {
 	WarehouseUpstreamError,
 } from "@maple/domain/http"
 import { unsafeCompiledQuery } from "@maple/query-engine/ch"
+import { parseStatement, type ClickHouseStatement } from "@maple-dev/clickhouse-builder/sql"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { makeWarehouseExecutor, type ResolvedWarehouseConfig } from "@maple/query-engine/execution"
 import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
@@ -776,18 +777,19 @@ describe("createTinybirdSdkSqlClient.insert wire framing (the production insert 
 	})
 })
 
-describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
-	// DSL-compiled queries already end with `FORMAT JSON` (optionally followed by
-	// profile SETTINGS). Appending a second FORMAT clause is a ClickHouse syntax
-	// error ("Syntax error at (FORMAT) ... Expected: SETTINGS, end of query") that
-	// broke every alerting query against managed Tinybird — pin the normalization.
+describe("createTinybirdSdkSqlClient.sql wire format", () => {
+	// The FORMAT decision moved to the executor, which settles the statement's
+	// terminal clauses from the backend's dialect before any driver sees it. This
+	// driver's whole job is to render what it was handed — the double-FORMAT
+	// syntax error that broke every alerting query against managed Tinybird can no
+	// longer originate here, because nothing here inspects SQL text.
 	const tbConfig = {
 		kind: "tinybird" as const,
 		host: "https://api.tinybird.co",
 		token: "tok_123",
 	}
 
-	const captureSql = async (sql: string): Promise<string> => {
+	const captureSql = async (statement: ClickHouseStatement): Promise<string> => {
 		const sent: string[] = []
 		const requestFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = new URL(String(input))
@@ -803,61 +805,30 @@ describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
 		}) as typeof fetch
 
 		const client = __testables.createTinybirdSdkSqlClient(tbConfig, requestFetch)
-		await client.sql(sql, undefined)
+		await client.sql(statement, undefined)
 
 		assert.strictEqual(sent.length, 1)
 		return sent[0]!
 	}
 
-	const countFormats = (sql: string) => (sql.match(/FORMAT JSON/g) ?? []).length
-
-	it("does not double-append when the query already ends with FORMAT JSON", async () => {
-		const sent = await captureSql("SELECT 1\nFORMAT JSON")
-		assert.strictEqual(countFormats(sent), 1)
-		assert.match(sent, /FORMAT JSON$/)
-	})
-
-	it("does not double-append when profile SETTINGS precede FORMAT JSON", async () => {
-		// Canonical order emitted by appendSettings — Tinybird rejects the inverse.
-		const sent = await captureSql(
-			"SELECT 1 SETTINGS max_execution_time=15, max_memory_usage=1500000000\nFORMAT JSON",
-		)
-		assert.strictEqual(countFormats(sent), 1)
-		assert.match(sent, /SETTINGS max_execution_time=15, max_memory_usage=1500000000\nFORMAT JSON$/)
-	})
-
-	it("does not double-append when FORMAT JSON is followed by profile SETTINGS", async () => {
-		const sent = await captureSql(
-			"SELECT 1\nFORMAT JSON SETTINGS max_execution_time=15, max_memory_usage=1500000000",
-		)
-		assert.strictEqual(countFormats(sent), 1)
-		assert.match(sent, /FORMAT JSON SETTINGS max_execution_time=15, max_memory_usage=1500000000$/)
-	})
-
-	it("appends FORMAT JSON to raw SQL without a FORMAT clause", async () => {
-		const sent = await captureSql("SELECT 1")
+	it("sends the statement as the executor rendered it", async () => {
+		const sent = await captureSql(parseStatement("SELECT 1\nFORMAT JSON"))
 		assert.strictEqual(sent, "SELECT 1\nFORMAT JSON")
 	})
 
-	it("strips a trailing semicolon before appending", async () => {
-		const sent = await captureSql("SELECT 1;")
-		assert.strictEqual(sent, "SELECT 1\nFORMAT JSON")
+	it("keeps SETTINGS ahead of FORMAT", async () => {
+		const sent = await captureSql(parseStatement("SELECT 1 SETTINGS max_execution_time=15\nFORMAT JSON"))
+		assert.strictEqual(sent, "SELECT 1\nSETTINGS max_execution_time=15\nFORMAT JSON")
 	})
 
-	it("keeps the SETTINGS clause when appending FORMAT JSON", async () => {
-		const sent = await captureSql("SELECT 1\nSETTINGS max_threads=2")
-		assert.strictEqual(sent, "SELECT 1\nSETTINGS max_threads=2\nFORMAT JSON")
+	it("does not add a format the executor left off", async () => {
+		const sent = await captureSql(parseStatement("SELECT 1"))
+		assert.strictEqual(sent, "SELECT 1")
 	})
 
-	it("ignores a FORMAT that is only a column reference", async () => {
-		const sent = await captureSql("SELECT format FROM t")
-		assert.strictEqual(sent, "SELECT format FROM t\nFORMAT JSON")
-	})
-
-	it("ignores a FORMAT nested in a subquery", async () => {
-		const sent = await captureSql("SELECT * FROM (SELECT 1 FORMAT JSON) AS x")
-		assert.strictEqual(countFormats(sent), 2)
-		assert.match(sent, /FORMAT JSON$/)
+	it("leaves a nested FORMAT alone", async () => {
+		const sent = await captureSql(parseStatement("SELECT * FROM (SELECT 1 FORMAT JSON) AS x"))
+		assert.strictEqual(sent, "SELECT * FROM (SELECT 1 FORMAT JSON) AS x")
 	})
 })
 

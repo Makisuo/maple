@@ -90,10 +90,17 @@ export interface WarehouseBackendDialect {
 	 */
 	readonly stripTinybirdRestrictedSettings: boolean
 	/**
-	 * The official ClickHouse client rejects a trailing `FORMAT …`/`;` (it sets
-	 * the format itself); Tinybird's `/v0/sql` requires them.
+	 * Where the wire format is declared. The official ClickHouse client sets it
+	 * per request and rejects a statement that carries its own `FORMAT` clause;
+	 * Tinybird's `/v0/sql` has no such channel and reads it from the statement.
+	 * The executor applies this so no driver has to re-derive it from SQL text.
 	 */
-	readonly normalizeSqlForClient: boolean
+	readonly wireFormat: "in-statement" | "out-of-band"
+	/**
+	 * The format a driver reading `wireFormat: "in-statement"` expects, applied
+	 * by the executor when the statement does not already name one.
+	 */
+	readonly statementFormat: string | undefined
 	/**
 	 * OTel database-system identity. chDB implements the ClickHouse interface,
 	 * so its system remains `clickhouse` even though the logical peer is `chdb`.
@@ -130,7 +137,8 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		driver: "tinybird-sdk",
 		dbClient: "tinybird-sdk",
 		stripTinybirdRestrictedSettings: true,
-		normalizeSqlForClient: false,
+		wireFormat: "in-statement",
+		statementFormat: "FORMAT JSON",
 		dbSystemName: "tinybird",
 		peerService: "tinybird",
 		// The SDK's /v0/sql JSON already returns 64-bit ints as numbers.
@@ -141,7 +149,8 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		driver: "clickhouse-web",
 		dbClient: "clickhouse",
 		stripTinybirdRestrictedSettings: true,
-		normalizeSqlForClient: true,
+		wireFormat: "out-of-band",
+		statementFormat: undefined,
 		dbSystemName: "clickhouse",
 		peerService: "clickhouse",
 		unquote64BitIntegers: true,
@@ -151,7 +160,8 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		driver: "clickhouse-web",
 		dbClient: "clickhouse",
 		stripTinybirdRestrictedSettings: false,
-		normalizeSqlForClient: true,
+		wireFormat: "out-of-band",
+		statementFormat: undefined,
 		dbSystemName: "clickhouse",
 		peerService: "clickhouse",
 		unquote64BitIntegers: true,
@@ -161,7 +171,8 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		driver: "clickhouse-web",
 		dbClient: "clickhouse",
 		stripTinybirdRestrictedSettings: false,
-		normalizeSqlForClient: true,
+		wireFormat: "out-of-band",
+		statementFormat: undefined,
 		dbSystemName: "clickhouse",
 		peerService: "chdb",
 		unquote64BitIntegers: true,

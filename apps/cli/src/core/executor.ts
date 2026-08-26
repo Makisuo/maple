@@ -18,7 +18,8 @@ const LOCAL_TENANT = { orgId: LOCAL_ORG_ID, userId: LOCAL_USER_ID, authMode: "lo
 // stderr. The `finally` logs even on failure so a failing query still shows
 // its SQL.
 const localChdbClient = (baseUrl: string): WarehouseSqlClient => ({
-	sql: async (sql) => {
+	sql: async (statement) => {
+		const sql = statement.text
 		const started = performance.now()
 		try {
 			return { data: await executeLocalQuery<Record<string, unknown>>(sql, baseUrl) }
