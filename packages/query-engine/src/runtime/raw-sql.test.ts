@@ -185,6 +185,64 @@ const executeRows = (rows: ReadonlyArray<Record<string, unknown>>) =>
 		},
 	)
 
+// Regression: the row cap nests the query, so a terminal clause left in place
+// lands mid-statement and ClickHouse fails with "Syntax error at 'FORMAT'".
+it.effect("strips a trailing FORMAT clause instead of nesting it", () =>
+	Effect.gen(function* () {
+		for (const suffix of ["FORMAT JSONEachRow", "FORMAT JSON", "format CSV", "FORMAT JSONEachRow;"]) {
+			const prepared = yield* prepareOk(`SELECT count() FROM Logs WHERE $__orgFilter\n${suffix}`)
+			assert.notMatch(prepared.sql, /FORMAT/i, suffix)
+			assert.match(prepared.sql, /LIMIT 1001$/)
+		}
+	}),
+)
+
+it.effect("keeps a FORMAT that is only a column reference", () =>
+	Effect.gen(function* () {
+		const prepared = yield* prepareOk("SELECT format FROM Logs WHERE $__orgFilter")
+		assert.include(prepared.sql, "SELECT format FROM Logs")
+	}),
+)
+
+it.effect("rejects an author-supplied SETTINGS clause", () =>
+	Effect.gen(function* () {
+		const error = yield* prepareFail(
+			"SELECT count() FROM Logs WHERE $__orgFilter SETTINGS max_execution_time=3000",
+		)
+		assert.strictEqual(error.code, "DisallowedStatement")
+		assert.include(error.message, "SETTINGS is managed by Maple")
+	}),
+)
+
+it.effect("rejects INTO OUTFILE", () =>
+	Effect.gen(function* () {
+		const error = yield* prepareFail("SELECT count() FROM Logs WHERE $__orgFilter INTO OUTFILE '/tmp/x'")
+		assert.strictEqual(error.code, "DisallowedStatement")
+		assert.include(error.message, "INTO OUTFILE")
+	}),
+)
+
+it.effect("accepts a single trailing terminator", () =>
+	Effect.gen(function* () {
+		const prepared = yield* prepareOk("SELECT count() FROM Logs WHERE $__orgFilter;")
+		assert.notInclude(prepared.sql, ";")
+	}),
+)
+
+// `escapeClickHouseString` escapes quotes and backslashes, not `$` — with a
+// string replacement `$'` would splice the rest of the statement into the
+// literal, quotes and all.
+it.effect("does not expand replacement patterns in interpolated values", () =>
+	Effect.gen(function* () {
+		const prepared = yield* prepareRawSql({
+			...baseInput,
+			orgId: "org_$'_$&",
+			sql: "SELECT count() FROM Logs WHERE $__orgFilter AND Body = 'tail'",
+		})
+		assert.include(prepared.sql, "OrgId = 'org_$\\'_$&'")
+	}),
+)
+
 describe("makeExecuteRawSql", () => {
 	it.effect("accepts exactly 1,000 rows and returns metadata", () =>
 		Effect.gen(function* () {

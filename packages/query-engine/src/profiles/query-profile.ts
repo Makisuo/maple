@@ -1,3 +1,5 @@
+import { splitTerminalClauses } from "@maple-dev/clickhouse-builder/sql"
+
 /**
  * ClickHouse query settings forwarded via inline `SETTINGS` clause.
  *
@@ -135,19 +137,16 @@ export const stripTinybirdRestrictedSettings = (
 }
 
 /**
- * Matches a trailing `FORMAT <name>` clause (the DSL compiler terminates every
- * query with `FORMAT JSON`). `SETTINGS` must precede `FORMAT` — Tinybird's
- * ClickHouse rejects `FORMAT JSON SETTINGS …` with a syntax error.
- */
-const trailingFormatRe = /\s+FORMAT\s+\w+\s*$/i
-
-/**
  * Add a ClickHouse `SETTINGS` clause to a SQL string, inserting it before a
- * trailing `FORMAT <name>` clause when present. Returns the input unchanged
- * when no settings are provided.
+ * trailing `FORMAT <name>` clause when present (the DSL compiler terminates
+ * every query with `FORMAT JSON`, and Tinybird's ClickHouse rejects the
+ * `FORMAT JSON SETTINGS …` order with a syntax error). Returns the input
+ * unchanged when no settings are provided.
  *
- * Caller must guarantee the SQL doesn't already contain a SETTINGS
- * clause — none of maple's DSL queries do today.
+ * A statement that already carries its own `SETTINGS` is returned untouched —
+ * appending a second clause is a syntax error, and silently merging would hide
+ * whichever budget lost. Raw SQL rejects an author-supplied `SETTINGS` upstream
+ * in `prepareRawSql`; no DSL query emits one.
  */
 export const appendSettings = (sql: string, settings: WarehouseQuerySettings | undefined): string => {
 	if (!settings) return sql
@@ -159,14 +158,14 @@ export const appendSettings = (sql: string, settings: WarehouseQuerySettings | u
 		}
 	}
 	if (parts.length === 0) return sql
+	const terminal = splitTerminalClauses(sql)
+	if (terminal.settings !== undefined) return sql
 	const clause = `SETTINGS ${parts.join(", ")}`
-	const trimmed = sql.replace(/;\s*$/, "")
-	const formatMatch = trimmed.match(trailingFormatRe)
-	if (formatMatch) {
-		const body = trimmed.slice(0, formatMatch.index)
-		return `${body} ${clause}${formatMatch[0]}`
-	}
-	return `${trimmed} ${clause}`
+	// Newline-separated: a body ending in a `--` comment would swallow a
+	// space-joined clause and run the query with no budget at all.
+	return terminal.format === undefined
+		? `${terminal.body}\n${clause}`
+		: `${terminal.body}\n${clause}\n${terminal.format}`
 }
 
 /**

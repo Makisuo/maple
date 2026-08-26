@@ -7,7 +7,11 @@ import {
 	RawSqlValidationError,
 } from "@maple/domain/http"
 import type { QueryProfileName } from "../profiles"
-import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
+import {
+	escapeClickHouseString,
+	maskLiteralsAndComments,
+	splitTerminalClauses,
+} from "@maple-dev/clickhouse-builder/sql"
 
 // User-authored ClickHouse SQL: validation, macro expansion, and execution.
 //
@@ -38,6 +42,12 @@ const DENY_LIST = [
 ] as const
 
 const DENY_LIST_RE = new RegExp(`\\b(${DENY_LIST.join("|")})\\b`, "i")
+
+/**
+ * `INTO OUTFILE` is a SELECT terminal clause, so it slips past the deny list's
+ * statement-keyword check while asking the server to write a file.
+ */
+const INTO_OUTFILE_RE = /\bINTO\s+OUTFILE\b/i
 
 /** One extra row is the overflow sentinel for the public 1,000-row cap. */
 export const RAW_SQL_FETCH_ROW_LIMIT = MAX_RAW_SQL_RESULT_ROWS + 1
@@ -78,53 +88,6 @@ export interface RawSqlWarehouse<TTenant, E> {
 	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, E>
 }
 
-/**
- * Strip ClickHouse-style comments and string literals so keyword and semicolon
- * checks do not false-positive on their contents.
- */
-function maskLiteralsAndComments(sql: string): string {
-	let out = ""
-	let i = 0
-	while (i < sql.length) {
-		const ch = sql[i]
-		const next = sql[i + 1]
-
-		if (ch === "-" && next === "-") {
-			const nl = sql.indexOf("\n", i)
-			i = nl === -1 ? sql.length : nl
-			continue
-		}
-		if (ch === "/" && next === "*") {
-			const end = sql.indexOf("*/", i + 2)
-			i = end === -1 ? sql.length : end + 2
-			continue
-		}
-		if (ch === "'" || ch === "`" || ch === '"') {
-			const quote = ch
-			out += " "
-			i++
-			while (i < sql.length) {
-				const c = sql[i]
-				if (c === "\\") {
-					i += 2
-					continue
-				}
-				if (c === quote) {
-					i++
-					break
-				}
-				out += " "
-				i++
-			}
-			continue
-		}
-
-		out += ch
-		i++
-	}
-	return out
-}
-
 const fail = (code: RawSqlValidationError["code"], message: string) =>
 	Effect.fail(new RawSqlValidationError({ code, message }))
 
@@ -158,10 +121,15 @@ export const prepareRawSql = Effect.fn("RawSql.prepare")(function* (input: Prepa
 	const endLiteral = `toDateTime('${escapeClickHouseString(input.endTime)}')`
 	const granularity = Math.max(1, Math.round(input.granularitySeconds))
 
-	sql = sql.replaceAll("$__orgFilter", `OrgId = ${orgLiteral}`)
-	sql = sql.replaceAll("$__startTime", startLiteral)
-	sql = sql.replaceAll("$__endTime", endLiteral)
-	sql = sql.replaceAll("$__interval_s", String(granularity))
+	// Function-form replacements throughout: a `$&`, `` $` `` or `$'` in an
+	// interpolated value is a substitution pattern to `String.replace`, and
+	// `escapeClickHouseString` escapes quotes and backslashes but not `$`. With a
+	// string replacement, `$'` would splice the rest of the statement into the
+	// literal — quotes and all.
+	sql = sql.replaceAll("$__orgFilter", () => `OrgId = ${orgLiteral}`)
+	sql = sql.replaceAll("$__startTime", () => startLiteral)
+	sql = sql.replaceAll("$__endTime", () => endLiteral)
+	sql = sql.replaceAll("$__interval_s", () => String(granularity))
 
 	const timeFilterMatches = [...sql.matchAll(/\$__timeFilter\(([^)]*)\)/g)]
 	for (const match of timeFilterMatches) {
@@ -172,7 +140,7 @@ export const prepareRawSql = Effect.fn("RawSql.prepare")(function* (input: Prepa
 				`$__timeFilter argument '${column}' must be a column identifier (letters, digits, underscores, dots).`,
 			)
 		}
-		sql = sql.replace(match[0], `${column} >= ${startLiteral} AND ${column} <= ${endLiteral}`)
+		sql = sql.replace(match[0], () => `${column} >= ${startLiteral} AND ${column} <= ${endLiteral}`)
 	}
 
 	// Bucketing macro. An alert query that selects `$__timeGroup(Timestamp) AS bucket`
@@ -188,7 +156,7 @@ export const prepareRawSql = Effect.fn("RawSql.prepare")(function* (input: Prepa
 				`$__timeGroup argument '${column}' must be a column identifier (letters, digits, underscores, dots).`,
 			)
 		}
-		sql = sql.replace(match[0], `toStartOfInterval(${column}, INTERVAL ${granularity} SECOND)`)
+		sql = sql.replace(match[0], () => `toStartOfInterval(${column}, INTERVAL ${granularity} SECOND)`)
 	}
 
 	if (sql.includes("$__")) {
@@ -199,7 +167,14 @@ export const prepareRawSql = Effect.fn("RawSql.prepare")(function* (input: Prepa
 		)
 	}
 
-	const masked = maskLiteralsAndComments(sql)
+	// A single trailing terminator is one statement, not several — rejecting it as
+	// "multiple statements" is a false error on the most common way to end a query.
+	let masked = maskLiteralsAndComments(sql)
+	const terminatorMatch = masked.match(/;\s*$/)
+	if (terminatorMatch?.index !== undefined) {
+		sql = sql.slice(0, terminatorMatch.index)
+		masked = masked.slice(0, terminatorMatch.index)
+	}
 	if (masked.includes(";")) {
 		return yield* fail(
 			"MultipleStatements",
@@ -214,6 +189,12 @@ export const prepareRawSql = Effect.fn("RawSql.prepare")(function* (input: Prepa
 			`Statement keyword '${denyMatch[1].toUpperCase()}' is not allowed in raw SQL.`,
 		)
 	}
+	if (INTO_OUTFILE_RE.test(masked)) {
+		return yield* fail(
+			"DisallowedStatement",
+			"INTO OUTFILE is not allowed in raw SQL — results are returned over the API.",
+		)
+	}
 	if (!/^\s*(?:SELECT|WITH)\b/i.test(masked)) {
 		return yield* fail(
 			"DisallowedStatement",
@@ -221,8 +202,29 @@ export const prepareRawSql = Effect.fn("RawSql.prepare")(function* (input: Prepa
 		)
 	}
 
+	// The row cap nests the query, and `SETTINGS` / `FORMAT` are statement
+	// terminators — legal only at the very end of a top-level statement. Left in
+	// place they land mid-statement and ClickHouse fails with a syntax error at
+	// the clause keyword.
+	const terminal = splitTerminalClauses(sql)
+	if (terminal.settings !== undefined) {
+		return yield* fail(
+			"DisallowedStatement",
+			"SETTINGS is managed by Maple — raw queries run under a fixed time and memory budget. Remove the SETTINGS clause.",
+		)
+	}
+	// A trailing FORMAT is dropped rather than rejected: the wire format belongs
+	// to the driver (the ClickHouse client asks for JSONEachRow, the Tinybird SDK
+	// for JSON), so the author's choice was never going to be honoured. Erroring
+	// on the most idiomatic way to end a ClickHouse query buys nothing.
+
+	// The wrapper is what caps rows server-side — `max_result_rows` is Tinybird-
+	// restricted, so there is no settings-level equivalent. The cost is that
+	// modifiers attached to the inner result (`WITH TOTALS`, `LIMIT BY`,
+	// `WITH FILL`) are discarded by the outer SELECT.
+
 	return {
-		sql: `SELECT * FROM (\n${sql.trim()}\n) AS maple_raw_sql_limited\nLIMIT ${RAW_SQL_FETCH_ROW_LIMIT}`,
+		sql: `SELECT * FROM (\n${terminal.body.trim()}\n) AS maple_raw_sql_limited\nLIMIT ${RAW_SQL_FETCH_ROW_LIMIT}`,
 		granularitySeconds: granularity,
 	} satisfies PreparedRawSql
 })

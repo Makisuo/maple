@@ -19,7 +19,7 @@ describe("appendSettings", () => {
 
 	it("appends a single setting", () => {
 		expect(appendSettings("SELECT 1", { maxExecutionTime: 10 })).toBe(
-			"SELECT 1 SETTINGS max_execution_time=10",
+			"SELECT 1\nSETTINGS max_execution_time=10",
 		)
 	})
 
@@ -30,12 +30,12 @@ describe("appendSettings", () => {
 				maxMemoryUsage: 1_000_000,
 				maxThreads: 4,
 			}),
-		).toBe("SELECT 1 SETTINGS max_execution_time=10, max_memory_usage=1000000, max_threads=4")
+		).toBe("SELECT 1\nSETTINGS max_execution_time=10, max_memory_usage=1000000, max_threads=4")
 	})
 
 	it("strips trailing semicolon before appending", () => {
 		expect(appendSettings("SELECT 1;", { maxExecutionTime: 5 })).toBe(
-			"SELECT 1 SETTINGS max_execution_time=5",
+			"SELECT 1\nSETTINGS max_execution_time=5",
 		)
 	})
 
@@ -46,16 +46,18 @@ describe("appendSettings", () => {
 				maxMemoryUsage: NaN,
 				maxThreads: 2,
 			}),
-		).toBe("SELECT 1 SETTINGS max_threads=2")
+		).toBe("SELECT 1\nSETTINGS max_threads=2")
 	})
 
 	it("appends max_block_size", () => {
-		expect(appendSettings("SELECT 1", { maxBlockSize: 512 })).toBe("SELECT 1 SETTINGS max_block_size=512")
+		expect(appendSettings("SELECT 1", { maxBlockSize: 512 })).toBe(
+			"SELECT 1\nSETTINGS max_block_size=512",
+		)
 	})
 
 	it("appends the verified full-text feature setting", () => {
 		expect(appendSettings("SELECT 1", { enableFullTextIndex: 1 })).toBe(
-			"SELECT 1 SETTINGS enable_full_text_index=1",
+			"SELECT 1\nSETTINGS enable_full_text_index=1",
 		)
 	})
 
@@ -64,13 +66,13 @@ describe("appendSettings", () => {
 	// a trailing FORMAT clause.
 	it("inserts SETTINGS before a trailing FORMAT clause", () => {
 		expect(appendSettings("SELECT 1 FORMAT JSON", { maxExecutionTime: 15 })).toBe(
-			"SELECT 1 SETTINGS max_execution_time=15 FORMAT JSON",
+			"SELECT 1\nSETTINGS max_execution_time=15\nFORMAT JSON",
 		)
 	})
 
 	it("inserts SETTINGS before FORMAT with a trailing semicolon and newlines", () => {
 		expect(appendSettings("SELECT 1\nFORMAT JSONEachRow;", { maxThreads: 2 })).toBe(
-			"SELECT 1 SETTINGS max_threads=2\nFORMAT JSONEachRow",
+			"SELECT 1\nSETTINGS max_threads=2\nFORMAT JSONEachRow",
 		)
 	})
 
@@ -78,9 +80,33 @@ describe("appendSettings", () => {
 		expect(appendSettings("SELECT 1 FORMAT JSON", {})).toBe("SELECT 1 FORMAT JSON")
 	})
 
+	it("separates the clause with a newline so a trailing comment cannot swallow it", () => {
+		expect(appendSettings("SELECT 1 -- keep me", { maxThreads: 2 })).toBe(
+			"SELECT 1 -- keep me\nSETTINGS max_threads=2",
+		)
+	})
+
+	it("leaves a statement that already carries its own SETTINGS untouched", () => {
+		expect(appendSettings("SELECT 1 SETTINGS max_threads=8", { maxThreads: 2 })).toBe(
+			"SELECT 1 SETTINGS max_threads=8",
+		)
+	})
+
+	it("inserts SETTINGS before a non-JSON FORMAT clause", () => {
+		expect(appendSettings("SELECT 1 FORMAT CSV", { maxThreads: 2 })).toBe(
+			"SELECT 1\nSETTINGS max_threads=2\nFORMAT CSV",
+		)
+	})
+
+	it("ignores a FORMAT inside a subquery", () => {
+		expect(appendSettings("SELECT * FROM (SELECT 1 FORMAT JSON) AS x", { maxThreads: 2 })).toBe(
+			"SELECT * FROM (SELECT 1 FORMAT JSON) AS x\nSETTINGS max_threads=2",
+		)
+	})
+
 	it("only treats a FORMAT at the end of the query as the format clause", () => {
 		expect(appendSettings("SELECT formatDateTime(now(), '%F') AS format_col", { maxThreads: 2 })).toBe(
-			"SELECT formatDateTime(now(), '%F') AS format_col SETTINGS max_threads=2",
+			"SELECT formatDateTime(now(), '%F') AS format_col\nSETTINGS max_threads=2",
 		)
 	})
 })
