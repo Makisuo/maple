@@ -268,7 +268,7 @@ export const errorIncidents = pgTable(
 	},
 	(table) => [
 		index("error_incidents_org_issue_idx").on(table.orgId, table.issueId),
-		index("error_incidents_org_status_idx").on(table.orgId, table.status),
+		index("error_incidents_org_status_idx").on(table.orgId, table.status, table.lastTriggeredAt),
 	],
 )
 
