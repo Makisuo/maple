@@ -204,8 +204,8 @@ describe("trace-completeness joins", () => {
 		// Neither outer query carries an OrgId predicate — the scope comes from
 		// both join sides being scoped. Asserting it by hand is what these used to
 		// do, and an omitted filter would have sailed through the executor's gate.
-		expect(Effect.runSync(auditOrphanSpansSQL(window)).tenantScope).toBe("tenant")
-		expect(Effect.runSync(auditRootlessTracesSQL(window)).tenantScope).toBe("tenant")
+		expect(Effect.runSync(auditOrphanSpansSQL(window)).tenantScope).toBe("single-tenant")
+		expect(Effect.runSync(auditRootlessTracesSQL(window)).tenantScope).toBe("single-tenant")
 	})
 
 	it("escapes the org id so an embedded quote cannot terminate the literal", () => {

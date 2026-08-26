@@ -15,7 +15,7 @@
 import type { TracesMetric, AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import type { OrgId } from "@maple/domain"
 import { compile, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
-import { unsafeCompiledQuery } from "./raw-sql"
+import { rawCompiledQuery } from "./raw-sql"
 import { Array as A, Effect, Match, Result, Schema } from "effect"
 import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 import {
@@ -153,19 +153,20 @@ export function compilePipeQuery(
 				{ orgId, startTime: ranges.previousStart, endTime: ranges.previousEnd },
 				{ skipFormat: true },
 			)
-			return unsafeCompiledQuery({
+			return rawCompiledQuery({
 				sql:
 					`SELECT 'current' AS period, * FROM (\n${current.sql}\n)\n` +
 					`UNION ALL\n` +
 					`SELECT 'previous' AS period, * FROM (\n${previous.sql}\n)\n` +
 					`FORMAT JSON`,
 				reason: "param-varied-union",
-				note: "One builder over a current and a previous window; params are substituted once per compile, so a single CHQuery cannot carry both.",
+				justification:
+					"One builder over a current and a previous window; params are substituted once per compile, so a single CHQuery cannot carry both.",
 				// Both branches are the same builder over different windows, so the
 				// union is scoped exactly when the branch is.
 				tenantScope:
-					current.tenantScope === "tenant" && previous.tenantScope === "tenant"
-						? "tenant"
+					current.tenantScope === "single-tenant" && previous.tenantScope === "single-tenant"
+						? "single-tenant"
 						: "cross-tenant",
 				// `period` is typed as a plain String, not a `"current" | "previous"`
 				// literal union. The value is produced by our own SELECT so it is

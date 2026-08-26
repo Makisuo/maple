@@ -48,7 +48,7 @@ describe("aiSessionListQuery", () => {
 	})
 
 	it("is org-scoped", () => {
-		expect(compileUnsafe(aiSessionListQuery(), params).tenantScope).toBe("tenant")
+		expect(compileUnsafe(aiSessionListQuery(), params).tenantScope).toBe("single-tenant")
 	})
 
 	it("tests session-id presence with mapContains AND a non-empty value", () => {
@@ -186,7 +186,7 @@ describe("aiSessionFacetsQuery", () => {
 	})
 
 	it("is org-scoped", () => {
-		expect(compileUnionUnsafe(aiSessionFacetsQuery(), params).tenantScope).toBe("tenant")
+		expect(compileUnionUnsafe(aiSessionFacetsQuery(), params).tenantScope).toBe("single-tenant")
 	})
 
 	it("counts only session-bearing spans, and drops the blank option", () => {
@@ -243,7 +243,7 @@ describe("aiSessionSpansQuery", () => {
 	})
 
 	it("is org-scoped", () => {
-		expect(compileUnsafe(aiSessionSpansQuery(), spanParams).tenantScope).toBe("tenant")
+		expect(compileUnsafe(aiSessionSpansQuery(), spanParams).tenantScope).toBe("single-tenant")
 	})
 
 	it("substitutes and escapes the sessionId param", () => {
@@ -340,7 +340,7 @@ describe("aiSessionWindowQuery", () => {
 	})
 
 	it("is org-scoped", () => {
-		expect(compileUnsafe(aiSessionWindowQuery(), windowParams).tenantScope).toBe("tenant")
+		expect(compileUnsafe(aiSessionWindowQuery(), windowParams).tenantScope).toBe("single-tenant")
 	})
 
 	it("leaves no unresolved param placeholder", () => {

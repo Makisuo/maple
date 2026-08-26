@@ -6,7 +6,7 @@
 
 import {
 	type CompiledQuery,
-	unsafeCompiledQuery as unsafeCompiledQueryUntyped,
+	rawCompiledQuery as rawCompiledQueryUntyped,
 } from "@maple-dev/clickhouse-builder"
 import type { CompiledQueryRowSchema, TenantScope } from "@maple-dev/clickhouse-builder"
 
@@ -61,12 +61,12 @@ export type RawSqlReason =
  * DDL, migrations, and another engine's file formats don't reach this function
  * at all; they never produce a `CompiledQuery`.
  */
-export const unsafeCompiledQuery = <Output, Routing extends string | undefined = undefined>(args: {
+export const rawCompiledQuery = <Output, Route extends string | undefined = undefined>(args: {
 	readonly sql: string
 	readonly tenantScope: TenantScope
 	readonly reason: RawSqlReason
 	/** One sentence, at the call site, on why this instance qualifies. */
-	readonly note: string
+	readonly justification: string
 	readonly rowSchema?: CompiledQueryRowSchema<Output>
-	readonly routing?: Routing
-}): CompiledQuery<Output, Routing> => unsafeCompiledQueryUntyped<Output, Routing, RawSqlReason>(args)
+	readonly route?: Route
+}): CompiledQuery<Output, Route> => rawCompiledQueryUntyped<Output, Route, RawSqlReason>(args)

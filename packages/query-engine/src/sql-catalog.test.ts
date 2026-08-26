@@ -92,7 +92,7 @@ describe("sql catalog", () => {
 	it("scopes every query to an org", () => {
 		for (const entry of entries) {
 			if (entry.compiled === undefined) continue
-			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-tenant" : "tenant"
+			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-tenant" : "single-tenant"
 			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe(expected)
 		}
 	})

@@ -26,7 +26,7 @@
 
 import { Schema, Effect } from "effect"
 import { compile, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { unsafeCompiledQuery } from "../raw-sql"
+import { rawCompiledQuery } from "../raw-sql"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
@@ -78,11 +78,12 @@ export function serviceWorkloadsSQL(
 		// Reads no table at all (`WHERE 0`), so it cannot cross tenants; it stands
 		// in for a scoped call whose service list was empty.
 		return Effect.succeed(
-			unsafeCompiledQuery({
+			rawCompiledQuery({
 				sql: EMPTY_WORKLOADS_SQL,
 				reason: "empty-result-stub",
-				note: "SELECT of literals with WHERE 0 and no FROM; the builder always emits a FROM, and naming a table this reads no rows from would be worse.",
-				tenantScope: "tenant",
+				justification:
+					"SELECT of literals with WHERE 0 and no FROM; the builder always emits a FROM, and naming a table this reads no rows from would be worse.",
+				tenantScope: "single-tenant",
 				rowSchema: ServiceWorkloadsOutputSchema,
 			}),
 		)

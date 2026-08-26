@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, DateTime, Effect, Exit, Option, Result, Schema } from "effect"
-import { CompiledQueryDecodeError, compileCHUnsafe, unsafeCompiledQuery } from "./compile"
+import { CompiledQueryDecodeError, compileCHUnsafe, rawCompiledQuery } from "./compile"
 import * as CH from "./index"
 import * as T from "./types"
 
@@ -68,10 +68,10 @@ describe("CompiledQuery.decodeRows", () => {
 
 	it.effect("decodes rows with the declared schema for handwritten SQL", () =>
 		Effect.gen(function* () {
-			const compiled = unsafeCompiledQuery<{ readonly name: string; readonly count: number }>({
+			const compiled = rawCompiledQuery<{ readonly name: string; readonly count: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "tenant",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				tenantScope: "single-tenant",
 				sql: "SELECT name, count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ name: Schema.String, count: RowNumber }),
 			})
@@ -84,10 +84,10 @@ describe("CompiledQuery.decodeRows", () => {
 
 	it.effect("fails with CompiledQueryDecodeError when a row does not match its schema", () =>
 		Effect.gen(function* () {
-			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			const compiled = rawCompiledQuery<{ readonly count: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "tenant",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				tenantScope: "single-tenant",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
 			})
@@ -107,10 +107,10 @@ describe("CompiledQuery.decodeRows", () => {
 describe("CompiledQuery.decodeFirstRow", () => {
 	it.effect("returns Some with the first decoded row", () =>
 		Effect.gen(function* () {
-			const compiled = unsafeCompiledQuery<{ readonly name: string; readonly count: number }>({
+			const compiled = rawCompiledQuery<{ readonly name: string; readonly count: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "tenant",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				tenantScope: "single-tenant",
 				sql: "SELECT name, count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ name: Schema.String, count: RowNumber }),
 			})
@@ -129,10 +129,10 @@ describe("CompiledQuery.decodeFirstRow", () => {
 
 	it.effect("returns None when the result set is empty", () =>
 		Effect.gen(function* () {
-			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			const compiled = rawCompiledQuery<{ readonly count: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "tenant",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				tenantScope: "single-tenant",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
 			})
@@ -145,10 +145,10 @@ describe("CompiledQuery.decodeFirstRow", () => {
 
 	it.effect("fails when the first row does not match the declared schema", () =>
 		Effect.gen(function* () {
-			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			const compiled = rawCompiledQuery<{ readonly count: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "tenant",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				tenantScope: "single-tenant",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
 			})
@@ -166,10 +166,10 @@ describe("CompiledQuery.decodeFirstRow", () => {
 
 	it.effect("does not decode later rows when only the first row is requested", () =>
 		Effect.gen(function* () {
-			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			const compiled = rawCompiledQuery<{ readonly count: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "tenant",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				tenantScope: "single-tenant",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
 			})
@@ -203,7 +203,7 @@ describe("CompiledQuery.tenantScope", () => {
 					.select(($) => ({ count: $.Count }))
 					.where(($) => [$.OrgId.eq("org")]),
 			),
-		).toBe("tenant")
+		).toBe("single-tenant")
 	})
 
 	it("is 'tenant' for a top-level membership test", () => {
@@ -213,7 +213,7 @@ describe("CompiledQuery.tenantScope", () => {
 					.select(($) => ({ count: $.Count }))
 					.where(($) => [$.OrgId.in_("a", "b")]),
 			),
-		).toBe("tenant")
+		).toBe("single-tenant")
 	})
 
 	it("is 'cross-tenant' when the tenant predicate is disjoined away", () => {
@@ -264,7 +264,7 @@ describe("CompiledQuery.tenantScope", () => {
 					.where(($) => [$.count.gt(0)]),
 				{},
 			).tenantScope,
-		).toBe("tenant")
+		).toBe("single-tenant")
 	})
 
 	it("is 'cross-tenant' when the FROM source is unscoped", () => {
@@ -302,7 +302,7 @@ describe("CompiledQuery.tenantScope", () => {
 					.where(($) => [$.o.OrgId.eq("org")]),
 				{},
 			).tenantScope,
-		).toBe("tenant")
+		).toBe("single-tenant")
 	})
 
 	it("is 'cross-tenant' for a union with one unscoped branch", () => {
@@ -311,7 +311,7 @@ describe("CompiledQuery.tenantScope", () => {
 			.where(($) => [$.OrgId.eq("org")])
 		const unscoped = CH.from(other).select(($) => ({ count: $.Count }))
 
-		expect(CH.compileUnionUnsafe(CH.unionAll(scoped, scoped), {}).tenantScope).toBe("tenant")
+		expect(CH.compileUnionUnsafe(CH.unionAll(scoped, scoped), {}).tenantScope).toBe("single-tenant")
 		expect(CH.compileUnionUnsafe(CH.unionAll(scoped, unscoped), {}).tenantScope).toBe("cross-tenant")
 	})
 
@@ -328,9 +328,9 @@ describe("CompiledQuery.tenantScope", () => {
 
 	it("requires handwritten SQL to state its scope", () => {
 		expect(
-			unsafeCompiledQuery({
+			rawCompiledQuery({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				sql: "SELECT 1",
 				tenantScope: "cross-tenant",
 			}).tenantScope,
@@ -439,7 +439,7 @@ describe("compile puts failures in the error channel", () => {
 		Effect.gen(function* () {
 			const compiled = yield* CH.compile(query, { orgId: "org_1" })
 			expect(compiled.sql).toBe(CH.compileUnsafe(query, { orgId: "org_1" }).sql)
-			expect(compiled.tenantScope).toBe("tenant")
+			expect(compiled.tenantScope).toBe("single-tenant")
 		}),
 	)
 
@@ -612,15 +612,15 @@ describe("handwritten SQL", () => {
 	// gate they describe existed only at the call site, where no sweep could see
 	// it. They are on the compiled query now.
 	it("carries its reason and note so a catalog can audit them", () => {
-		const compiled = CH.unsafeCompiledQuery<{ readonly n: string }>({
+		const compiled = CH.rawCompiledQuery<{ readonly n: string }>({
 			sql: "SELECT Name AS n FROM events WHERE OrgId = 'org'",
-			tenantScope: "tenant",
+			tenantScope: "single-tenant",
 			reason: "user-authored-sql",
-			note: "The SQL came from a user; there is no AST to build.",
+			justification: "The SQL came from a user; there is no AST to build.",
 		})
 
 		expect(compiled.rawSql?.reason).toBe("user-authored-sql")
-		expect(compiled.rawSql?.note).toContain("no AST")
+		expect(compiled.rawSql?.justification).toContain("no AST")
 		// Absent for a query the builder produced, so the two are distinguishable.
 		const built = compileCHUnsafe(
 			CH.from(CH.table("events", { OrgId: T.string, Name: T.string }, { tenantColumn: "OrgId" }))

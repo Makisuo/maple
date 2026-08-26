@@ -12,7 +12,7 @@ A type-safe, immutable ClickHouse SQL query builder for TypeScript.
   and extend base queries without surprises.
 - **ClickHouse-native** — first-class helpers for the functions you actually use
   (`quantile`, `toStartOfInterval`, `mapGet`, window functions, …) plus escape
-  hatches (`rawExpr`, `unsafeCompiledQuery`) for anything not yet modeled.
+  hatches (`rawExpr`, `rawCompiledQuery`) for anything not yet modeled.
 - **Parameterised compilation** — compile to a SQL string with named params
   resolved and string literals escaped. A param with no value, or a value of the
   wrong kind, fails the compile instead of reaching the server.

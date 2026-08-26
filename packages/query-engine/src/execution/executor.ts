@@ -407,7 +407,7 @@ WHERE name = 'enable_full_text_index'`,
 		// in a per-org BYO ClickHouse, so their reads must route to the same ingest
 		// config to stay symmetric with the write — otherwise a BYO-CH org reads an
 		// empty table from its own ClickHouse. That routing is declared at the
-		// query definition (`.routing("ingest")` → `options.route`).
+		// query definition (`.route("ingest")` → `options.route`).
 		const purpose: RoutePurpose =
 			execution === "raw" ? "raw" : options?.route === "ingest" ? "ingest" : "read"
 		const resolved = yield* deps.resolveRoute(tenant, purpose, pipe)
@@ -417,7 +417,7 @@ WHERE name = 'enable_full_text_index'`,
 			const pinnedTable = findIngestPinnedTable(sql)
 			if (pinnedTable !== undefined) {
 				yield* Effect.logWarning(
-					'Query reads an ingest-pinned datasource from a BYO ClickHouse — declare .routing("ingest") at the query definition',
+					'Query reads an ingest-pinned datasource from a BYO ClickHouse — declare .route("ingest") at the query definition',
 					{ pipe, table: pinnedTable, orgId: tenant.orgId },
 				)
 			}
@@ -838,7 +838,7 @@ WHERE name = 'enable_full_text_index'`,
 				message: `org_id must not be empty (${context})`,
 			})
 		}
-		if (tenantScope !== "tenant") {
+		if (tenantScope !== "single-tenant") {
 			return yield* new WarehouseScopeError({
 				pipeName: context,
 				message:
@@ -885,14 +885,14 @@ WHERE name = 'enable_full_text_index'`,
 		return yield* executeSql(tenant, sql, "rawSqlQuery", options, "raw")
 	})
 
-	// A compiled query can carry `.routing("ingest")` from its definition — that
+	// A compiled query can carry `.route("ingest")` from its definition — that
 	// wins over the (absent) per-call option so the table→routing knowledge
 	// lives next to the query, not at every call site.
 	const withCompiledRouting = <T>(
 		compiled: CompiledQuery<T>,
 		options?: SqlQueryOptions,
 	): SqlQueryOptions | undefined =>
-		compiled.routing === "ingest" ? { ...options, route: "ingest" } : options
+		compiled.route === "ingest" ? { ...options, route: "ingest" } : options
 
 	// Every compiled query runs under a cost profile: an omitted `profile` used to
 	// mean "no SETTINGS clause at all" (no server-side memory/time budget, flat

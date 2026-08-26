@@ -68,7 +68,7 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 | `innerJoin` / `leftJoin` / `crossJoin`                | `(table, alias, on?)`                               |
 | `innerJoinQuery` / `leftJoinQuery` / `crossJoinQuery` | `(query, alias, on?)`                               |
 | `withCTE(name, sql, options?)`                        | `options.tenantScope`                               |
-| `routing("ingest")`                                   | Metadata only                                       |
+| `route("ingest")`                                   | Metadata only                                       |
 | `crossTenant()`                                       | Forces `tenantScope: "cross-tenant"`                |
 
 `CHUnionQuery` offers only `orderBy`, `limit`, `offset`, `format`.
@@ -81,7 +81,7 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 | `compileUnsafe`       | The same, returning `CompiledQuery<Output>` and throwing instead                |
 | `compileUnion`        | `(union, params, options?) => Effect<CompiledQuery<Output>, QueryBuilderError>` |
 | `compileUnionUnsafe`  | The same, throwing instead                                                      |
-| `unsafeCompiledQuery`   | `({ sql, tenantScope, reason, note, rowSchema?, routing? }) => CompiledQuery` |
+| `rawCompiledQuery`   | `({ sql, tenantScope, reason, note, rowSchema?, route? }) => CompiledQuery` |
 
 ### Params
 

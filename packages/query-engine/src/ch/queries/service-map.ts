@@ -106,7 +106,7 @@ const sampleWeightExpr = (traceState: CH.Expr<string>) =>
  *
  * Returns the joined query with `p` as the main source and `c` as the joined
  * alias, before any SELECT — callers pick the output shape. Both sides filter
- * `OrgId`, so anything built on this derives `tenantScope: "tenant"` without the
+ * `OrgId`, so anything built on this derives `tenantScope: "single-tenant"` without the
  * outer query having to repeat the predicate.
  *
  * `parentServiceName` is pushed into the parent subquery rather than the outer
@@ -182,7 +182,7 @@ function serviceMapEdgeJoinSource(opts: {
  *
  * This used to be a SQL-string builder taking an optional `orgId` that degraded
  * to an empty filter for a backfill script — i.e. a join across every tenant's
- * spans, wrapped by both callers in `unsafeCompiledQuery({ tenantScope: "tenant" })`
+ * spans, wrapped by both callers in `rawCompiledQuery({ tenantScope: "single-tenant" })`
  * so an omitted org id would have been positively ASSERTED as scoped and sailed
  * through the executor's gate. The org filter is now structural: it comes from
  * `param.string("orgId")` inside the join source, and the scope is derived. A

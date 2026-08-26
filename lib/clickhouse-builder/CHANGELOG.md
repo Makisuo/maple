@@ -12,8 +12,8 @@ First public release.
   an integer was, throws `QueryBuilderError` instead of becoming SQL text.
 - Optional per-table tenant scoping: declare `{ tenantColumn }` on a table and
   every compiled query reports whether it pinned a single tenant. Reported,
-  never enforced; tables that declare nothing always compile `"cross-tenant"`.
-- `routing(tag)` carries an opaque execution tag through to the compiled query
+  never enforced; tables that declare nothing compile `"untenanted"`.
+- `route(tag)` carries an opaque execution tag through to the compiled query
   as a type-level fact.
 - Schema-first column types: `T.uint64` and friends are Effect `Schema`s, not
   phantom tags, so `compile` derives each query's row schema from its SELECT and

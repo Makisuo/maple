@@ -20,7 +20,7 @@ describe("integration sql catalog", () => {
 	// @maple-dev/clickhouse-builder. No integration query reads across tenants.
 	it("scopes every query to an org", () => {
 		for (const entry of entries) {
-			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe("tenant")
+			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe("single-tenant")
 		}
 	})
 

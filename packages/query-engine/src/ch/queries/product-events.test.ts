@@ -30,7 +30,7 @@ describe("productEventsFunnelQuery", () => {
 			productEventsFunnelQuery({ steps: [REFERRAL, ...STEPS], keyBy: "person", windowSeconds: 86_400 }),
 			params,
 		)
-		expect(compiled.tenantScope).toBe("tenant")
+		expect(compiled.tenantScope).toBe("single-tenant")
 		// product_events, session_replays (session step) and identity_links (person key).
 		expect(compiled.sql).toContain("FROM product_events AS e")
 		expect(compiled.sql).toContain("FROM session_replays AS s")
@@ -208,7 +208,7 @@ describe("productEventsFunnelBreakdownQuery", () => {
 			}),
 			params,
 		)
-		expect(compiled.tenantScope).toBe("tenant")
+		expect(compiled.tenantScope).toBe("single-tenant")
 		const flat = oneLine(compiled.sql)
 		expect(flat).toContain("Attributes['plan'] AS dim")
 		expect(flat).toContain("argMinIf(dim, ts, dim != '') AS group")
@@ -284,7 +284,7 @@ describe("productEventsFunnelBreakdownQuery", () => {
 describe("productEventNamesQuery", () => {
 	it("lists names with counts, sessions and persons, most frequent first", () => {
 		const compiled = compileUnsafe(productEventNamesQuery({ limit: 25 }), params)
-		expect(compiled.tenantScope).toBe("tenant")
+		expect(compiled.tenantScope).toBe("single-tenant")
 		const flat = oneLine(compiled.sql)
 		expect(flat).toContain(
 			"SELECT EventName AS eventName, Kind AS kind, count() AS count, uniqIf(SessionId, SessionId != '') AS sessions, uniq(if(UserId != '', UserId, VisitorId)) AS persons FROM product_events",

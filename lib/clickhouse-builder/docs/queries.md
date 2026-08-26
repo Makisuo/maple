@@ -107,9 +107,9 @@ when you are sending raw SQL somewhere that does not.
 
 See [Unions and CTEs](./unions-and-ctes.md#ctes).
 
-## Routing and scope declarations
+## Route and scope declarations
 
-`.routing("ingest")` and `.crossTenant()` attach metadata to the compiled result rather than
+`.route("ingest")` and `.crossTenant()` attach metadata to the compiled result rather than
 changing the SQL. Both are covered in [Tenant scoping](./tenant-scoping.md).
 
 ## Compiling

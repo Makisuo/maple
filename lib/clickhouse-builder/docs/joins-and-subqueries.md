@@ -69,7 +69,7 @@ const outer = CH.fromQuery(inner, "sub")
 > accessor. Reaching for `$.sub.name` throws at runtime.
 
 The outer query inherits the inner query's tenant scope: a scoped subquery cannot leak other
-tenants' rows, so the outer stays `"tenant"` even with no WHERE of its own. See
+tenants' rows, so the outer stays `"single-tenant"` even with no WHERE of its own. See
 [Tenant scoping](./tenant-scoping.md).
 
 _(Backed by `docs/joins-and-subqueries.md > Subquery in FROM uses flat accessors` and

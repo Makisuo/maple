@@ -243,7 +243,7 @@ export {
 	compileCHUnsafe as compileUnsafe,
 	compileUnion,
 	compileUnionUnsafe,
-	unsafeCompiledQuery,
+	rawCompiledQuery,
 	type CompiledQuery,
 	type CompiledQueryRowSchema,
 	type TenantScope,

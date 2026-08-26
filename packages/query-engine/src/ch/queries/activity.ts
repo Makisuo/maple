@@ -9,7 +9,7 @@
 // single cheap scan of the small recent window / hourly MVs enumerates active
 // orgs at once. Each declares `.crossTenant()`, which is what lets them through
 // `WarehouseQueryService.crossOrgQuery` — the ordinary read path rejects a
-// query with no top-level tenant predicate. `.routing("ingest")` routes them to
+// query with no top-level tenant predicate. `.route("ingest")` routes them to
 // the managed Tinybird workspace (where all managed orgs' data lives);
 // BYO-ClickHouse orgs are invisible here and are gated separately by the caller
 // (always processed).
@@ -32,7 +32,7 @@ export function activeOrgsByErrorEventsQuery() {
 		.where(($) => [$.Timestamp.gte(param.dateTimeString("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
-		.routing("ingest")
+		.route("ingest")
 		.crossTenant()
 }
 
@@ -43,7 +43,7 @@ export function activeOrgsByTracesQuery() {
 		.where(($) => [$.Hour.gte(param.dateTimeString("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
-		.routing("ingest")
+		.route("ingest")
 		.crossTenant()
 }
 
@@ -54,6 +54,6 @@ export function activeOrgsByLogsQuery() {
 		.where(($) => [$.Hour.gte(param.dateTimeString("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
-		.routing("ingest")
+		.route("ingest")
 		.crossTenant()
 }

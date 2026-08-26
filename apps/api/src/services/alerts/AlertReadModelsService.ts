@@ -308,7 +308,7 @@ export class AlertReadModelsService extends Context.Service<
 				),
 			)
 
-			// listRuleChecksQuery declares .routing("ingest") — alert_checks only
+			// listRuleChecksQuery declares .route("ingest") — alert_checks only
 			// exists in the managed Tinybird pipeline.
 			const rows = yield* warehouse.compiledQuery(systemTenant(orgId), compiled, {
 				profile: "list",

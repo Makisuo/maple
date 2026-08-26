@@ -141,12 +141,12 @@ CH.compileUnsafe(query, params, options?)  // CompiledQuery, throws
 ```ts
 interface CompiledQuery<Output> {
 	readonly sql: string
-	readonly tenantScope: "tenant" | "cross-tenant"
+	readonly tenantScope: "single-tenant" | "cross-tenant"
 	readonly rowSchemaSource: "declared" | "derived" | "none"
 	readonly rowSchema: CompiledQueryRowSchema<Output> | undefined
 	readonly untypedColumns: ReadonlyArray<string>
-	readonly rawSql?: { readonly reason: string; readonly note: string }
-	readonly routing?: string
+	readonly rawSql?: { readonly reason: string; readonly justification: string }
+	readonly route?: string
 	readonly decodeRows: (rows) => Effect<ReadonlyArray<Output>, CompiledQueryDecodeError>
 	readonly decodeFirstRow: (rows) => Effect<Option<Output>, CompiledQueryDecodeError>
 	readonly encodeRows: (rows) => Effect<ReadonlyArray<Record<string, unknown>>, CompiledQueryEncodeError>
@@ -160,8 +160,8 @@ interface CompiledQuery<Output> {
 | `rowSchemaSource`               | Where the row schema came from, so a caller can tell real validation from a pass-through    |
 | `rowSchema`                     | The codec itself, for a caller that needs a `Schema` rather than a call                     |
 | `untypedColumns`                | When `rowSchemaSource` is `"none"`, the selected aliases responsible                        |
-| `rawSql`                        | Present only for `unsafeCompiledQuery`: the `reason` and `note` it was given                |
-| `routing`                       | Set by `.routing(tag)`; opaque metadata for your executor                                    |
+| `rawSql`                        | Present only for `rawCompiledQuery`: the `reason` and `note` it was given                |
+| `route`                       | Set by `.route(tag)`; opaque metadata for your executor                                    |
 | `decodeRows` / `decodeFirstRow` | See [Decoding results](./decoding-results.md)                                                |
 | `encodeRows`                    | The same codec backwards — decoded rows to the wire shape                                   |
 
@@ -170,7 +170,7 @@ drift, so it was removed in favour of schema-checked decoding.
 
 ## Handwritten SQL
 
-When you need SQL the builder cannot express, `unsafeCompiledQuery` wraps a string in the same
+When you need SQL the builder cannot express, `rawCompiledQuery` wraps a string in the same
 `CompiledQuery` interface so downstream code is uniform. `tenantScope` is required there,
 because it cannot be inferred from a string. See [Extending the DSL](./extending.md).
 

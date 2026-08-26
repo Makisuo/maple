@@ -87,7 +87,7 @@ export function listRuleChecksQuery(opts: ListRuleChecksOpts) {
 			// alert_checks is written via `ingest` (Tinybird-pinned) with no per-org
 			// MV, so reads must hit the same managed pipeline — otherwise a
 			// BYO-ClickHouse org reads an empty table from its own ClickHouse.
-			.routing("ingest")
+			.route("ingest")
 	)
 }
 
@@ -118,7 +118,7 @@ export function alertCheckGroupTotalsQuery(opts: AlertCheckGroupTotalsOpts) {
 		.orderBy(["totalCount", "desc"], ["groupKey", "asc"])
 		.limit(opts.limit ?? 20)
 		.format("JSON")
-		.routing("ingest")
+		.route("ingest")
 }
 
 export interface AlertChecksSummaryOpts {
@@ -165,5 +165,5 @@ export function alertChecksSummaryQuery(opts: AlertChecksSummaryOpts) {
 		.orderBy(["bucket", "asc"], ["groupKey", "asc"])
 		.limit(20_000)
 		.format("JSON")
-		.routing("ingest")
+		.route("ingest")
 }

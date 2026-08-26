@@ -74,7 +74,7 @@ describe("README.md", () => {
 				"FROM events WHERE OrgId = 'org_123' AND Timestamp >= '2026-01-01 00:00:00' " +
 				"AND Name LIKE 'checkout%' GROUP BY name ORDER BY count DESC LIMIT 50",
 		)
-		expect(compiled.tenantScope).toBe("tenant")
+		expect(compiled.tenantScope).toBe("single-tenant")
 	})
 
 	it.effect("Decoding results", () =>
@@ -139,7 +139,7 @@ describe("docs/getting-started.md", () => {
 				"FROM events WHERE OrgId = 'org_123' AND Timestamp >= '2026-01-01 00:00:00' " +
 				"GROUP BY name ORDER BY count DESC LIMIT 50",
 		)
-		expect(compiled.tenantScope).toBe("tenant")
+		expect(compiled.tenantScope).toBe("single-tenant")
 	})
 
 	it.effect("Decoding the results", () =>
@@ -464,7 +464,7 @@ describe("docs/joins-and-subqueries.md", () => {
 
 		const outer = CH.fromQuery(inner, "sub").select(($) => ({ name: $.name }))
 
-		expect(compileCHUnsafe(outer, {}).tenantScope).toBe("tenant")
+		expect(compileCHUnsafe(outer, {}).tenantScope).toBe("single-tenant")
 	})
 })
 
@@ -501,7 +501,7 @@ describe("docs/unions-and-ctes.md", () => {
 		const compiled = compileCHUnsafe(outer, {})
 		expect(oneLine(compiled.sql)).toContain(") AS branches GROUP BY name")
 		// A union of scoped branches keeps the outer query scoped.
-		expect(compiled.tenantScope).toBe("tenant")
+		expect(compiled.tenantScope).toBe("single-tenant")
 	})
 
 	it("Selecting from a CTE", () => {
@@ -522,7 +522,7 @@ describe("docs/unions-and-ctes.md", () => {
 				"SELECT Name AS name FROM recent",
 		)
 		// Derived off the CTE — the outer query has no OrgId predicate of its own.
-		expect(compiled.tenantScope).toBe("tenant")
+		expect(compiled.tenantScope).toBe("single-tenant")
 	})
 
 	it("A CTE needs its tenantScope declared", () => {
@@ -530,7 +530,7 @@ describe("docs/unions-and-ctes.md", () => {
 		const cteSql = "SELECT Name FROM events WHERE OrgId = 'org_123'"
 
 		const declared = CH.from(Recent)
-			.withCTE("recent", cteSql, { tenantScope: "tenant" })
+			.withCTE("recent", cteSql, { tenantScope: "single-tenant" })
 			.select(($) => ({ name: $.Name }))
 
 		const undeclared = CH.from(Recent)
@@ -540,7 +540,7 @@ describe("docs/unions-and-ctes.md", () => {
 		// The CTE body is an opaque string, so the declaration is the only thing
 		// that can carry its scope. Omit it and the query reads as cross-tenant even
 		// though the SQL filters OrgId.
-		expect(compileCHUnsafe(declared, {}).tenantScope).toBe("tenant")
+		expect(compileCHUnsafe(declared, {}).tenantScope).toBe("single-tenant")
 		expect(compileCHUnsafe(undeclared, {}).tenantScope).toBe("cross-tenant")
 	})
 })
@@ -683,7 +683,7 @@ describe("docs/tenant-scoping.md", () => {
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.OrgId.eq("org_123")])
 
-		expect(compileCHUnsafe(query, {}).tenantScope).toBe("tenant")
+		expect(compileCHUnsafe(query, {}).tenantScope).toBe("single-tenant")
 	})
 
 	it("in_ also scopes; neq does not", () => {
@@ -695,7 +695,7 @@ describe("docs/tenant-scoping.md", () => {
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.OrgId.neq("org_123")])
 
-		expect(compileCHUnsafe(scoped, {}).tenantScope).toBe("tenant")
+		expect(compileCHUnsafe(scoped, {}).tenantScope).toBe("single-tenant")
 		// `OrgId != 'x'` narrows nothing, so it must not read as scoped.
 		expect(compileCHUnsafe(unscoped, {}).tenantScope).toBe("cross-tenant")
 	})
@@ -709,15 +709,16 @@ describe("docs/tenant-scoping.md", () => {
 		expect(compileCHUnsafe(query, {}).tenantScope).toBe("cross-tenant")
 	})
 
-	it("A table without a declared tenant column never scopes", () => {
+	it("A table without a declared tenant column is untenanted", () => {
 		const Untenanted = CH.table("untenanted", { tenant_id: T.string, Name: T.string })
 
 		const query = CH.from(Untenanted)
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.tenant_id.eq("org_123")])
 
-		// Nothing declared row-level tenancy, so there is nothing to pin.
-		expect(compileCHUnsafe(query, {}).tenantScope).toBe("cross-tenant")
+		// Nothing declared row-level tenancy, so there is nothing to pin — and
+		// nothing to leak either, which is why this is not `"cross-tenant"`.
+		expect(compileCHUnsafe(query, {}).tenantScope).toBe("untenanted")
 	})
 
 	it("Declare the tenant column", () => {
@@ -731,7 +732,7 @@ describe("docs/tenant-scoping.md", () => {
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.tenant_id.eq("org_123")])
 
-		expect(compileCHUnsafe(query, {}).tenantScope).toBe("tenant")
+		expect(compileCHUnsafe(query, {}).tenantScope).toBe("single-tenant")
 	})
 
 	it("crossTenant() is the explicit opt-out", () => {
@@ -744,13 +745,13 @@ describe("docs/tenant-scoping.md", () => {
 		expect(compileCHUnsafe(query, {}).tenantScope).toBe("cross-tenant")
 	})
 
-	it("routing is carried onto the compiled query", () => {
+	it("route is carried onto the compiled query", () => {
 		const query = CH.from(Events)
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.OrgId.eq("org_123")])
-			.routing("archive")
+			.route("archive")
 
-		expect(compileCHUnsafe(query, {}).routing).toBe("archive")
+		expect(compileCHUnsafe(query, {}).route).toBe("archive")
 	})
 })
 
@@ -856,19 +857,19 @@ describe("docs/extending.md", () => {
 		expect(oneLine(compileCHUnsafe(query, {}).sql)).toContain("quantileExact(0.99)(DurationMs) AS p99")
 	})
 
-	it.effect("unsafeCompiledQuery wraps handwritten SQL", () =>
+	it.effect("rawCompiledQuery wraps handwritten SQL", () =>
 		Effect.gen(function* () {
-			const compiled = CH.unsafeCompiledQuery<{ readonly name: string }>({
+			const compiled = CH.rawCompiledQuery<{ readonly name: string }>({
 				sql: "SELECT Name AS name FROM events WHERE OrgId = 'org_123'",
 				reason: "user-authored-sql",
-				note: "The SQL came from a user; there is no AST to build.",
+				justification: "The SQL came from a user; there is no AST to build.",
 				// Cannot be inferred from a raw string — the caller must assert it.
-				tenantScope: "tenant",
+				tenantScope: "single-tenant",
 				rowSchema: Schema.Struct({ name: Schema.String }),
 			})
 
 			expect(yield* compiled.decodeRows([{ name: "checkout" }])).toEqual([{ name: "checkout" }])
-			expect(compiled.tenantScope).toBe("tenant")
+			expect(compiled.tenantScope).toBe("single-tenant")
 		}),
 	)
 })

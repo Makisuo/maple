@@ -107,7 +107,7 @@ describe("withCTE with a query", () => {
 
 		expect(compiled.sql.startsWith("WITH hot AS (")).toBe(true)
 		// No OrgId predicate on the outer query — the scope comes from the CTE.
-		expect(compiled.tenantScope).toBe("tenant")
+		expect(compiled.tenantScope).toBe("single-tenant")
 	})
 
 	it("reads as cross-tenant when the CTE query is itself unscoped", () => {
@@ -293,8 +293,9 @@ describe("CTE chains", () => {
 				.select(($) => ({ total: CH.sum($.Count) })),
 			{ orgId: "org_1" },
 		)
-		// The control: `scoped`'s body reads a bare table, so nothing is scoped.
-		expect(compiled.tenantScope).toBe("cross-tenant")
+		// The control: the CTE's body reads a table that declares no tenant column,
+		// so there is no tenancy anywhere in the query.
+		expect(compiled.tenantScope).toBe("untenanted")
 
 		const chained = compileCHUnsafe(
 			CH.from(derivedCte)
@@ -308,7 +309,7 @@ describe("CTE chains", () => {
 				.select(($) => ({ total: CH.sum($.Count) })),
 			{ orgId: "org_1" },
 		)
-		expect(chained.tenantScope).toBe("tenant")
+		expect(chained.tenantScope).toBe("single-tenant")
 	})
 })
 
@@ -319,7 +320,7 @@ describe("CTE shadowing", () => {
 	//  SELECT v FROM y` returns 2, not 1.
 	//
 	// Reading the scope off the enclosing CTE instead certified a query that
-	// scans every tenant as `"tenant"`, which is the one direction that matters.
+	// scans every tenant as `"single-tenant"`, the one direction that matters.
 	it("an inner CTE shadows an enclosing one of the same name", () => {
 		const scoped = CH.from(Events)
 			.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))

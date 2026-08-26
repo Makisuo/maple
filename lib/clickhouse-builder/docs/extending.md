@@ -140,17 +140,17 @@ known at runtime; pass the type where you know it.
 
 _(Backed by `docs/extending.md > rawExpr and rawCond are the last resort`.)_
 
-## Handwritten queries: `unsafeCompiledQuery`
+## Handwritten queries: `rawCompiledQuery`
 
 When a query cannot be expressed by the builder at all, wrap the SQL so downstream code still
 sees a uniform `CompiledQuery`:
 
 ```ts
-const compiled = CH.unsafeCompiledQuery<{ readonly name: string }>({
+const compiled = CH.rawCompiledQuery<{ readonly name: string }>({
 	sql: "SELECT Name AS name FROM events WHERE OrgId = 'org_123'",
-	tenantScope: "tenant",
+	tenantScope: "single-tenant",
 	reason: "user-authored-sql",
-	note: "The SQL came from a user; there is no AST to build.",
+	justification: "The SQL came from a user; there is no AST to build.",
 	rowSchema: Schema.Struct({ name: Schema.String }),
 })
 ```
@@ -160,7 +160,7 @@ taken at face value. That is the whole hazard: this is the one place tenant scop
 rather than derived, so a query that forgot its tenant predicate would be positively _claimed_
 as scoped and sail through an executor's gate.
 
-`reason` and `note` are therefore required too. What counts as a legitimate reason is a policy
+`reason` and `justification` are therefore required too. What counts as a legitimate reason is a policy
 of your codebase, not of this package, so `reason` is any string — pin it to a union of your own
 to turn it into a review gate:
 
@@ -174,11 +174,11 @@ const rawQuery = <Output>(args: {
 	sql: string
 	tenantScope: CH.TenantScope
 	reason: RawSqlReason
-	note: string
+	justification: string
 	// Not `Schema.Schema<Output>`, which leaves `DecodingServices` open and so is
 	// a supertype of what a row codec may be. See docs/decoding-results.md.
 	rowSchema?: CH.CompiledQueryRowSchema<Output>
-}) => CH.unsafeCompiledQuery<Output>(args)
+}) => CH.rawCompiledQuery<Output>(args)
 ```
 
 Adding a member to that union is then the review gate — a one-line diff in one file that a
@@ -189,7 +189,7 @@ If your query doesn't fit a member, the answer is almost always to express it in
 Supply a `rowSchema` too: handwritten SQL is exactly where schema drift goes unnoticed, and
 without one `decodeRows` validates nothing. See [Decoding results](./decoding-results.md).
 
-_(Backed by `docs/extending.md > unsafeCompiledQuery wraps handwritten SQL`.)_
+_(Backed by `docs/extending.md > rawCompiledQuery wraps handwritten SQL`.)_
 
 ## The fragment AST
 

@@ -179,9 +179,9 @@ describe("mapWarehouseError", () => {
 			// `maple query "SELECT … FROM spans"` used to come back as a config
 			// error, telling someone who mistyped a table name that their warehouse
 			// was misconfigured.
-			expect(
-				mapWarehouseError("p", { message: "x", type: "UNKNOWN_TABLE" }, "caller"),
-			).toBeInstanceOf(WarehouseMalformedQueryError)
+			expect(mapWarehouseError("p", { message: "x", type: "UNKNOWN_TABLE" }, "caller")).toBeInstanceOf(
+				WarehouseMalformedQueryError,
+			)
 			expect(
 				mapWarehouseError("p", "Code: 60. DB::Exception: Table default.spans does not exist."),
 			).toBeInstanceOf(WarehouseMalformedQueryError)
@@ -194,9 +194,9 @@ describe("mapWarehouseError", () => {
 				WarehouseConfigError,
 			)
 			expect(mapWarehouseError("p", "Invalid URL")).toBeInstanceOf(WarehouseConfigError)
-			expect(
-				mapWarehouseError("p", { message: "x", type: "UNKNOWN_SETTING" }),
-			).toBeInstanceOf(WarehouseConfigError)
+			expect(mapWarehouseError("p", { message: "x", type: "UNKNOWN_SETTING" })).toBeInstanceOf(
+				WarehouseConfigError,
+			)
 		})
 	})
 
