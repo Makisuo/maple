@@ -687,8 +687,9 @@ export class ServiceDetailOverviewRequest extends Schema.Class<ServiceDetailOver
 	// `queryEngine.execute` rather than reconstructing it server-side.
 	timeseries: QueryEngineExecuteRequest,
 	// Bucket size for the releases-timeline sub-query (client-computed alongside
-	// the timeseries bucket).
-	releasesBucketSeconds: Schema.optional(Schema.Number),
+	// the timeseries bucket). `BucketSeconds`, not a bare number, for the reason
+	// on that schema: it reaches `param.int`, which rejects a fraction.
+	releasesBucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
 export class ServiceDetailOverviewResponse extends Schema.Class<ServiceDetailOverviewResponse>(
@@ -948,11 +949,16 @@ export class ListLogsResponse extends Schema.Class<ListLogsResponse>("ListLogsRe
 }) {}
 
 // Exact-match lookup of one log by its composite key (logs have no primary id).
-// `timestamp` is the raw ClickHouse DateTime64 string. It remains a plain
-// string because older stored rows and upstream drivers can vary their
-// fractional-second rendering.
+//
+// `timestamp` is the raw ClickHouse DateTime64 string, and `TinybirdDateTime`
+// is what that shape is: it allows 1-9 fractional digits or none, which is the
+// rendering variance across stored rows and upstream drivers that kept this a
+// bare `Schema.String`. It cannot stay one, because the value reaches
+// `partitionWindowAround` (`Date.parse` → NaN → a thrown RangeError) and then
+// `param.dateTimeString`, both under the query runner's `orDie` — so an
+// unparseable timestamp was a 500 rather than a 400.
 export class GetLogRequest extends Schema.Class<GetLogRequest>("GetLogRequest")({
-	timestamp: Schema.String,
+	timestamp: TinybirdDateTime,
 	serviceName: ServiceName,
 	traceId: Schema.optional(Schema.String),
 	spanId: Schema.optional(Schema.String),
