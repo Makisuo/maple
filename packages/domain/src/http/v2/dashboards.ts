@@ -1,4 +1,5 @@
-import { RawSqlText } from "../../raw-sql"
+import { RAW_SQL_ENDPOINT } from "@maple/widgets/dashboard"
+import { rawSqlIssue, RawSqlText } from "../../raw-sql"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema, SchemaGetter } from "effect"
 import {
@@ -229,12 +230,26 @@ const V2RawSqlDataSource = Schema.Struct({
 	transform: optional(V2WidgetTransform),
 }).pipe(Schema.encodeKeys({ displayType: "display_type", granularitySeconds: "granularity_seconds" }))
 
+// The route arm is the second door into raw SQL: `/v2/dashboards` emits and
+// accepts the pre-v3 `{ endpoint: "raw_sql_chart", params: { sql } }` shape and
+// always will, and `dataSourceRawSql` reads the SQL back out of `params`.
+// Validating only the `kind: "raw_sql"` arm would leave this one unguarded.
 const V2RouteDataSource = Schema.Struct({
 	kind: Schema.Literal("route"),
 	endpoint: Schema.String,
 	params: optional(UnknownRecord),
 	transform: optional(V2WidgetTransform),
-})
+}).check(
+	Schema.makeFilter(
+		(value) => {
+			if (value.endpoint !== RAW_SQL_ENDPOINT) return true
+			const sql = value.params?.sql
+			if (typeof sql !== "string") return true
+			return rawSqlIssue(sql)?.message ?? true
+		},
+		{ description: "Maple raw ClickHouse SQL" },
+	),
+)
 
 const V2StaticDataSource = Schema.Struct({
 	kind: Schema.Literal("static"),

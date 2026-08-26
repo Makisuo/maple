@@ -257,6 +257,34 @@ describe("the v2 data source covers every stored kind", () => {
 		expect(() => decode(fixture)).not.toThrow()
 	})
 
+	// The route arm carries raw SQL in `params` under the pre-v3 endpoint name, so
+	// validating only the `kind: "raw_sql"` arm would leave a second unguarded door
+	// into the same execution path.
+	it("validates raw SQL reached through the legacy route endpoint", () => {
+		const good = {
+			kind: "route",
+			endpoint: "raw_sql_chart",
+			params: { sql: "SELECT count() FROM logs WHERE $__orgFilter" },
+		}
+		expect(() => decode(good)).not.toThrow()
+		expect(() =>
+			decode({ kind: "route", endpoint: "raw_sql_chart", params: { sql: "DROP TABLE logs" } }),
+		).toThrow()
+		expect(() =>
+			decode({
+				kind: "route",
+				endpoint: "raw_sql_chart",
+				params: { sql: "SELECT 1 WHERE $__orgFilter SETTINGS max_threads=8" },
+			}),
+		).toThrow(/SETTINGS is managed by Maple/)
+	})
+
+	it("leaves non-raw-SQL route endpoints alone", () => {
+		expect(() =>
+			decode({ kind: "route", endpoint: "list_traces", params: { sql: "not sql at all" } }),
+		).not.toThrow()
+	})
+
 	it("snake_cases the scalar fields the union added", () => {
 		const wire = Schema.encodeUnknownSync(V2WidgetDataSource)({
 			kind: "query",

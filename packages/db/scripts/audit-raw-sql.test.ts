@@ -36,9 +36,10 @@ describe("rawSqlWidgets", () => {
 		expect(rawSqlWidgets({ widgets: [{ id: "w", dataSource: { kind: "raw_sql" } }] })).toEqual([])
 	})
 
-	// Stored documents still carry the v2 shape. A walker that only knew the v3
-	// one would report "all clear" over every legacy raw-SQL widget.
-	it("finds the legacy v2 endpoint/params shape", () => {
+	// Live documents are v3, but the pre-v3 form is still what `/v2/dashboards`
+	// speaks and what any un-backfilled row would hold — the accessor reads both,
+	// and the audit must not quietly stop at the current one.
+	it("finds the pre-v3 endpoint/params shape", () => {
 		const payload = {
 			widgets: [{ id: "old", dataSource: { endpoint: "raw_sql_chart", params: { sql: "SELECT 3" } } }],
 		}

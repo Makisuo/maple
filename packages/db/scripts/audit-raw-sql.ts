@@ -27,10 +27,11 @@ export interface Finding {
 /**
  * Every raw-SQL data source in a stored dashboard document.
  *
- * Reads each candidate through `dataSourceRawSql` rather than matching a shape
- * here: stored documents carry BOTH the v3 `{ kind: "raw_sql", sql }` and the
- * legacy v2 `{ endpoint: "raw_sql_chart", params: { sql } }`, and a walker that
- * knows only the current one reports "all clear" over a pile of legacy widgets.
+ * Reads each candidate through `dataSourceRawSql` — the same accessor the render
+ * path uses — rather than matching a shape here, so the audit cannot drift from
+ * what actually gets executed. Stored documents are v3 (`{ kind: "raw_sql" }`);
+ * the accessor also reads the pre-v3 `{ endpoint: "raw_sql_chart", params }`
+ * form, which covers any row that predates the v3 backfill.
  */
 export const rawSqlWidgets = (payload: unknown): Array<{ widgetId: string; sql: string }> => {
 	const found: Array<{ widgetId: string; sql: string }> = []
