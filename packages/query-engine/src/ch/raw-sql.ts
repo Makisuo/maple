@@ -50,16 +50,16 @@ export type RawSqlReason =
 	| "test-fixture"
 
 /**
- * The reasons whose SQL has a shape known when it is written, and which
+ * The reasons whose columns are known when the SQL is written, and which
  * therefore have no excuse for handing back rows nothing validates.
  *
  * A stub SELECT of literals and a union of two compiled branches both know
  * every column they emit — the first because it wrote them, the second because
  * each branch carries its own derived row schema. `user-authored-sql` does not
- * (the shape arrives with the user's string) and `test-fixture` is often
+ * (the columns arrive with the user's string) and `test-fixture` is often
  * asserting the undecoded path itself, so both keep `rowSchema` optional.
  */
-type ShapeKnownReason = Exclude<RawSqlReason, "user-authored-sql" | "test-fixture">
+type SchemaRequiredReason = Exclude<RawSqlReason, "user-authored-sql" | "test-fixture">
 
 interface RawSqlArgs<Route extends string | undefined> {
 	readonly sql: string
@@ -78,8 +78,8 @@ interface RawSqlArgs<Route extends string | undefined> {
  * every use has to name a `reason` from the closed union above and justify
  * itself in a `justification`.
  *
- * `rowSchema` is required for every reason whose shape is known up front — see
- * {@link ShapeKnownReason}. There is no AST here for the builder to derive one
+ * `rowSchema` is required for every reason whose columns are known up front — see
+ * {@link SchemaRequiredReason}. There is no AST here for the builder to derive one
  * from, so a forgotten schema is a silent identity cast: `decodeRows` hands the
  * wire values straight through, and a 64-bit count arriving quoted reaches a
  * consumer as a string. The catalog gates only see queries a fixture compiles;
@@ -92,7 +92,7 @@ export const rawCompiledQuery = <Output, Route extends string | undefined = unde
 	args: RawSqlArgs<Route> &
 		(
 			| {
-					readonly reason: ShapeKnownReason
+					readonly reason: SchemaRequiredReason
 					readonly rowSchema: CompiledQueryRowSchema<Output>
 			  }
 			| {
