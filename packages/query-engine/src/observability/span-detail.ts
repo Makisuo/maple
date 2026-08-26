@@ -64,13 +64,11 @@ export const spanDetail = Effect.fn("Observability.spanDetail")(function* (input
 			})()
 		: undefined
 
-	const compiled = yield* Effect.orDie(
-		CH.compile(
-			CH.spanDetailQuery({ traceId: input.traceId, spanId: input.spanId, narrowByTime }),
-			range
-				? { orgId: executor.orgId, startTime: range.startTime, endTime: range.endTime }
-				: { orgId: executor.orgId },
-		),
+	const compiled = CH.compile(
+		CH.spanDetailQuery({ traceId: input.traceId, spanId: input.spanId, narrowByTime }),
+		range
+			? { orgId: executor.orgId, startTime: range.startTime, endTime: range.endTime }
+			: { orgId: executor.orgId },
 	)
 	const maybeRow = yield* executor.compiledQueryFirst(compiled, {
 		profile: "discovery",

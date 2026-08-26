@@ -40,6 +40,7 @@ import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "./cap
 import * as CH from "./ch"
 import { builderFixtures } from "./ch/builder-fixtures"
 import { compilePipeQuery } from "./ch/pipe-dispatch"
+import { compiledQueryOf } from "./execution/compiled-input"
 import { fingerprintSql } from "./execution/fingerprint"
 import { makeQueryEngineExecute, type QueryEngineWarehouse, type QueryTenant } from "./runtime"
 
@@ -825,7 +826,8 @@ function makeCapturingWarehouse(capabilities: WarehouseCapabilities): {
 			captured.push({ sql })
 			return empty
 		},
-		compiledQuery: (_tenant, compiled) => {
+		compiledQuery: (_tenant, input) => {
+			const compiled = compiledQueryOf(input)
 			captured.push({ sql: compiled.sql, compiled: compiled as CompiledQuery<unknown> })
 			return empty
 		},

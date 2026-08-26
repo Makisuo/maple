@@ -25,13 +25,13 @@ uniformly, which some codebases prefer for exactly this reason.
 
 The root barrel is curated. These are exported by the package but not from it:
 
-| Symbol                                                                                          | Subpath  |
-| ----------------------------------------------------------------------------------------------- | -------- |
-| `toFragment` — value → `SqlFragment`, for hand-rolled function wrappers                          | `/expr`  |
-| `raw`, `str`, `ident`, `int`, `join`, `as_`, `lazy`, `when`, `compile`, `escapeClickHouseString` | `/sql`   |
-| `SqlQuery`, `compileQuery`                                                                       | `/sql`   |
-| `ClickHouseStatement`, `parseStatement`, `renderStatement`, `withSettings`, `withFormat`         | `/sql`   |
-| `ClickHouseStatementFromString`, `splitTerminalClauses`, `maskLiteralsAndComments`               | `/sql`   |
+| Symbol                                                                                           | Subpath |
+| ------------------------------------------------------------------------------------------------ | ------- |
+| `toFragment` — value → `SqlFragment`, for hand-rolled function wrappers                          | `/expr` |
+| `raw`, `str`, `ident`, `int`, `join`, `as_`, `lazy`, `when`, `compile`, `escapeClickHouseString` | `/sql`  |
+| `SqlQuery`, `compileQuery`                                                                       | `/sql`  |
+| `ClickHouseStatement`, `parseStatement`, `renderStatement`, `withSettings`, `withFormat`         | `/sql`  |
+| `ClickHouseStatementFromString`, `splitTerminalClauses`, `maskLiteralsAndComments`               | `/sql`  |
 
 Every column-type constructor and every expression helper is on the root as well as on its
 subpath. See [Running a query](./running-queries.md) for what the `/sql` statement helpers are
@@ -68,20 +68,20 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 | `innerJoin` / `leftJoin` / `crossJoin`                | `(table, alias, on?)`                               |
 | `innerJoinQuery` / `leftJoinQuery` / `crossJoinQuery` | `(query, alias, on?)`                               |
 | `withCTE(name, sql, options?)`                        | `options.tenantScope`                               |
-| `route("ingest")`                                   | Metadata only                                       |
+| `route("ingest")`                                     | Metadata only                                       |
 | `crossTenant()`                                       | Forces `tenantScope: "cross-tenant"`                |
 
 `CHUnionQuery` offers only `orderBy`, `limit`, `offset`, `format`.
 
 ### Compilation
 
-| Export                  | Signature                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| `compile`             | `(query, params, options?) => Effect<CompiledQuery<Output>, QueryBuilderError>` |
-| `compileUnsafe`       | The same, returning `CompiledQuery<Output>` and throwing instead                |
-| `compileUnion`        | `(union, params, options?) => Effect<CompiledQuery<Output>, QueryBuilderError>` |
-| `compileUnionUnsafe`  | The same, throwing instead                                                      |
-| `rawCompiledQuery`   | `({ sql, tenantScope, reason, note, rowSchema?, route? }) => CompiledQuery` |
+| Export               | Signature                                                                       |
+| -------------------- | ------------------------------------------------------------------------------- |
+| `compile`            | `(query, params, options?) => Effect<CompiledQuery<Output>, QueryBuilderError>` |
+| `compileUnsafe`      | The same, returning `CompiledQuery<Output>` and throwing instead                |
+| `compileUnion`       | `(union, params, options?) => Effect<CompiledQuery<Output>, QueryBuilderError>` |
+| `compileUnionUnsafe` | The same, throwing instead                                                      |
+| `rawCompiledQuery`   | `({ sql, tenantScope, reason, note, rowSchema?, route? }) => CompiledQuery`     |
 
 ### Params
 
@@ -123,11 +123,11 @@ comparison. The inner query is compiled by the **outer** `compile`, so its param
 outer set and its failures land in the outer error channel. See
 [Joins and subqueries](./joins-and-subqueries.md#splicing-a-subquery-where-there-is-no-syntax-for-one).
 
-| Export                                    | Purpose                                          |
-| ----------------------------------------- | ------------------------------------------------ |
-| `subqueryExpr(q, type, wrap?)`            | Inner SQL as an `Expr` of a declared type        |
-| `untypedSubqueryExpr<T>(q, wrap?)`        | Same with no type — costs the row schema         |
-| `subqueryCond(q, wrap)`                   | Inner SQL as a `Condition`                       |
+| Export                             | Purpose                                   |
+| ---------------------------------- | ----------------------------------------- |
+| `subqueryExpr(q, type, wrap?)`     | Inner SQL as an `Expr` of a declared type |
+| `untypedSubqueryExpr<T>(q, wrap?)` | Same with no type — costs the row schema  |
+| `subqueryCond(q, wrap)`            | Inner SQL as a `Condition`                |
 
 `wrap` receives the inner SQL and returns the text to emit. It defaults to wrapping the SQL in
 parentheses, which is the plain "this value is a sub-SELECT" case.
@@ -258,7 +258,7 @@ Types: `WindowSpec`, `CompiledWindowSpec`, `WindowFrameBound`, `WindowRowsFrame`
 **Everything else** — `Table`, `TableOptions`, `Expr`, `ColumnRef`, `Condition`, `Comparable`
 (what a value of a type may be compared against), `MapValueOf`, `Subquery`, `ParamMarker`,
 `ParamKind`, `CHQuery`, `CHUnionQuery`, `ColumnAccessor`, `JoinedColumnAccessor`,
-`JoinOnCallback`, `CompiledQuery`, `CompiledQueryRowSchema`, `TenantScope`, `FnResult`,
+`JoinOnCallback`, `CompiledQuery`, `CompiledQueryInput`, `CompiledQueryRowSchema`, `TenantScope`, `FnResult`,
 `WindowFunnelMode`, `WindowSpec`, `WindowRowsFrame`, `WindowFrameBound`,
 `WindowOrderDirection`, `CompiledWindowSpec`.
 
@@ -271,21 +271,19 @@ Both are Effect `Schema.TaggedError`s, catchable by tag.
 Tag `"@maple-dev/clickhouse-builder/QueryBuilderError"`. Raised while compiling, and surfaced in
 `compile`'s error channel (thrown by `compileUnsafe`).
 
-| `code`               | Cause                                                                    |
-| -------------------- | ------------------------------------------------------------------------ |
-| `SelectRequired`     | Compiling a query with no `select()`                                     |
-| `UnresolvedParam`    | A param the params bag has no value for                                  |
-| `InvalidParamValue`  | A param value that is not what its kind accepts                          |
-| `InvalidLiteral`     | A comparison operand the column's codec rejects                          |
-| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple             |
-| `InvalidArguments`   | Arguments a function cannot use — an empty condition list, a bad pattern |
+| `code`             | Cause                                                                    |
+| ------------------ | ------------------------------------------------------------------------ |
+| `UnresolvedParam`  | A param the params bag has no value for                                  |
+| `InvalidLiteral`   | A param value, or a comparison operand, the column's codec rejects       |
+| `InvalidArguments` | Arguments a function cannot use — an empty condition list, a bad pattern |
 
 ### `QueryBuilderDefect`
 
 Tag `"@maple-dev/clickhouse-builder/QueryBuilderDefect"`. A DSL misuse no runtime value can cause
-— a bad param name, a comparison called on a param marker, two column types claiming one
-ClickHouse type name. Always a defect: `compile` maps only `QueryBuilderError` into the error
-channel. See [Failures and defects](./params-and-compilation.md#failures-and-defects).
+— a query with no `select()`, an `orderBy` entry that is not a tuple, a bad param name, a
+comparison called on a param marker, two column types claiming one ClickHouse type name. Always
+a defect: `compile` maps only `QueryBuilderError` into the error channel. See
+[Failures and defects](./params-and-compilation.md#failures-and-defects).
 
 ### `CompiledQueryEncodeError`
 

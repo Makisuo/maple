@@ -4,6 +4,7 @@ import { WarehouseUpstreamError } from "@maple/domain/http"
 import { getSessionTraces } from "./session-replays"
 import { WarehouseExecutor } from "./WarehouseExecutor"
 import type { WarehouseExecutorApi } from "./WarehouseExecutor"
+import { compiledQueryOf } from "../execution/compiled-input"
 
 interface Captured {
 	sqls: string[]
@@ -31,12 +32,16 @@ const makeExecutor = (captured: Captured, responses: MockResponses): WarehouseEx
 		orgId: "org_test",
 		query: () => Effect.succeed({ data: [] as ReadonlyArray<never> }),
 		compiledQuery: ((compiled) => {
-			captured.sqls.push(compiled.sql)
-			return compiled.decodeRows(rowsFor(compiled.sql)).pipe(Effect.orDie)
+			captured.sqls.push(compiledQueryOf(compiled).sql)
+			return compiledQueryOf(compiled)
+				.decodeRows(rowsFor(compiledQueryOf(compiled).sql))
+				.pipe(Effect.orDie)
 		}) as WarehouseExecutorApi["compiledQuery"],
 		compiledQueryFirst: ((compiled) => {
-			captured.sqls.push(compiled.sql)
-			return compiled.decodeFirstRow(rowsFor(compiled.sql)).pipe(Effect.orDie)
+			captured.sqls.push(compiledQueryOf(compiled).sql)
+			return compiledQueryOf(compiled)
+				.decodeFirstRow(rowsFor(compiledQueryOf(compiled).sql))
+				.pipe(Effect.orDie)
 		}) as WarehouseExecutorApi["compiledQueryFirst"],
 	}
 }

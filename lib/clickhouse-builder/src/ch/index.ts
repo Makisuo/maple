@@ -245,6 +245,7 @@ export {
 	compileUnionUnsafe,
 	rawCompiledQuery,
 	type CompiledQuery,
+	type CompiledQueryInput,
 	type CompiledQueryRowSchema,
 	type TenantScope,
 	CompiledQueryDecodeError,

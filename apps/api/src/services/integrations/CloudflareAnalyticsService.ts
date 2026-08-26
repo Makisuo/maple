@@ -2299,21 +2299,19 @@ export class CloudflareAnalyticsService extends Context.Service<
 				})
 			}
 
-			const compiled = yield* Effect.orDie(
-				CH.compile(
-					Integrations.cloudflareUsageQuery(),
-					{
-						orgId,
-						bucketSeconds: USAGE_BUCKET_SECONDS,
-						startTime: toWarehouseDateTime64(windowStart),
-						endTime: toWarehouseDateTime64(now),
-					},
-					// Decode rows through the schema: `requests`/`datapoints` arrive as JSON
-					// strings from a BYO-CH org's raw ClickHouse (`FORMAT JSON` quotes 64-bit
-					// ints), and `CHNumber` coerces them centrally in `decodeRows`. Without it
-					// the string trips a `ParseError` inside `CloudflareUsageBucket` → bare 500.
-					{ rowSchema: Integrations.cloudflareUsageRowSchema },
-				),
+			const compiled = CH.compile(
+				Integrations.cloudflareUsageQuery(),
+				{
+					orgId,
+					bucketSeconds: USAGE_BUCKET_SECONDS,
+					startTime: toWarehouseDateTime64(windowStart),
+					endTime: toWarehouseDateTime64(now),
+				},
+				// Decode rows through the schema: `requests`/`datapoints` arrive as JSON
+				// strings from a BYO-CH org's raw ClickHouse (`FORMAT JSON` quotes 64-bit
+				// ints), and `CHNumber` coerces them centrally in `decodeRows`. Without it
+				// the string trips a `ParseError` inside `CloudflareUsageBucket` → bare 500.
+				{ rowSchema: Integrations.cloudflareUsageRowSchema },
 			)
 			// Metrics flow through the ingest gateway, which routes each org to the SAME
 			// warehouse the gateway wrote to: a BYO-CH org's own ClickHouse when it is
@@ -2331,17 +2329,15 @@ export class CloudflareAnalyticsService extends Context.Service<
 			)
 			// Companion scalar stats (previous-24h total + firewall blocked count) share the
 			// readiness decision and run concurrently with the bucketed usage query.
-			const compiledStats = yield* Effect.orDie(
-				CH.compile(
-					Integrations.cloudflareUsageStatsQuery(),
-					{
-						orgId,
-						prevStartTime: toWarehouseDateTime64(windowStart - USAGE_WINDOW_MS),
-						currentStartTime: toWarehouseDateTime64(windowStart),
-						endTime: toWarehouseDateTime64(now),
-					},
-					{ rowSchema: Integrations.cloudflareUsageStatsRowSchema },
-				),
+			const compiledStats = CH.compile(
+				Integrations.cloudflareUsageStatsQuery(),
+				{
+					orgId,
+					prevStartTime: toWarehouseDateTime64(windowStart - USAGE_WINDOW_MS),
+					currentStartTime: toWarehouseDateTime64(windowStart),
+					endTime: toWarehouseDateTime64(now),
+				},
+				{ rowSchema: Integrations.cloudflareUsageStatsRowSchema },
 			)
 			const routeOptions = clickHouseReady ? {} : { route: "ingest" as const }
 			const [rows, statsRows] = yield* Effect.all(

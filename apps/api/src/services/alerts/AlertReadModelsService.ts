@@ -280,32 +280,30 @@ export class AlertReadModelsService extends Context.Service<
 				options.beforeTimestamp != null ? toTinybirdSqlDateTime64(options.beforeTimestamp) : null
 			const hasGroupKey = options.groupKey != null && options.groupKey !== ""
 
-			const compiled = yield* Effect.orDie(
-				CH.compile(
-					CH.listRuleChecksQuery({
-						limit,
-						groupKey: hasGroupKey ? options.groupKey : undefined,
-						status: options.status,
-						since: since ?? undefined,
-						until: until ?? undefined,
-						beforeTimestamp: beforeTimestamp ?? undefined,
-						beforeGroupKey: beforeTimestamp != null ? (options.beforeGroupKey ?? "") : undefined,
-					}),
-					{
-						orgId,
-						ruleId,
-						...(hasGroupKey ? { groupKey: options.groupKey } : undefined),
-						...(options.status != null ? { status: options.status } : undefined),
-						...(since != null ? { since } : undefined),
-						...(until != null ? { until } : undefined),
-						...(beforeTimestamp != null
-							? {
-									beforeTimestamp,
-									beforeGroupKey: options.beforeGroupKey ?? "",
-								}
-							: undefined),
-					},
-				),
+			const compiled = CH.compile(
+				CH.listRuleChecksQuery({
+					limit,
+					groupKey: hasGroupKey ? options.groupKey : undefined,
+					status: options.status,
+					since: since ?? undefined,
+					until: until ?? undefined,
+					beforeTimestamp: beforeTimestamp ?? undefined,
+					beforeGroupKey: beforeTimestamp != null ? (options.beforeGroupKey ?? "") : undefined,
+				}),
+				{
+					orgId,
+					ruleId,
+					...(hasGroupKey ? { groupKey: options.groupKey } : undefined),
+					...(options.status != null ? { status: options.status } : undefined),
+					...(since != null ? { since } : undefined),
+					...(until != null ? { until } : undefined),
+					...(beforeTimestamp != null
+						? {
+								beforeTimestamp,
+								beforeGroupKey: options.beforeGroupKey ?? "",
+							}
+						: undefined),
+				},
 			)
 
 			// listRuleChecksQuery declares .route("ingest") — alert_checks only
@@ -410,28 +408,24 @@ export class AlertReadModelsService extends Context.Service<
 			const tenant = systemTenant(orgId)
 			const groupRows = yield* warehouse.compiledQuery(
 				tenant,
-				yield* Effect.orDie(
-					CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
-						orgId,
-						ruleId,
-						since,
-						until,
-					}),
-				),
+				CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
+					orgId,
+					ruleId,
+					since,
+					until,
+				}),
 				{ profile: "aggregation", context: "alertCheckSummaryGroups" },
 			)
 			const topGroupKeys = groupRows.map((row) => String(row.groupKey ?? ""))
 			const rows = yield* warehouse.compiledQuery(
 				tenant,
-				yield* Effect.orDie(
-					CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
-						orgId,
-						ruleId,
-						since,
-						until,
-						bucketSeconds,
-					}),
-				),
+				CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
+					orgId,
+					ruleId,
+					since,
+					until,
+					bucketSeconds,
+				}),
 				{ profile: "aggregation", context: "alertCheckSummary" },
 			)
 

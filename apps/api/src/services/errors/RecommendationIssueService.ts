@@ -108,13 +108,11 @@ export class RecommendationIssueService extends Context.Service<
 			tenant: TenantContext,
 		) {
 			const now = yield* Clock.currentTimeMillis
-			const compiled = yield* Effect.orDie(
-				CH.compile(CH.attributeKeysQuery({ scope: "span" }), {
-					orgId: tenant.orgId,
-					startTime: formatWarehouseDateTime(now - 24 * 60 * 60 * 1000),
-					endTime: formatWarehouseDateTime(now),
-				}),
-			)
+			const compiled = CH.compile(CH.attributeKeysQuery({ scope: "span" }), {
+				orgId: tenant.orgId,
+				startTime: formatWarehouseDateTime(now - 24 * 60 * 60 * 1000),
+				endTime: formatWarehouseDateTime(now),
+			})
 			const rows = yield* warehouse
 				.compiledQuery(tenant, compiled, { profile: "discovery", context: "recommendationIssues" })
 				.pipe(

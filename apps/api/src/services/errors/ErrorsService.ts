@@ -302,12 +302,10 @@ const make: Effect.Effect<
 			return byo as ReadonlySet<OrgId>
 		}
 
-		const compiled = yield* Effect.orDie(
-			CH.compile(
-				CH.activeOrgsByErrorEventsQuery(),
-				{ startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS) },
-				{ rowSchema: CH.ActiveOrgsOutputSchema },
-			),
+		const compiled = CH.compile(
+			CH.activeOrgsByErrorEventsQuery(),
+			{ startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS) },
+			{ rowSchema: CH.ActiveOrgsOutputSchema },
 		)
 		return yield* warehouse
 			.crossOrgQuery(systemTenant(knownOrgs[0]!), compiled, {
@@ -1192,8 +1190,8 @@ const make: Effect.Effect<
 					endTime: formatWarehouseDateTime(endMs),
 				}
 				const issuesCompiled = tickWindow.isBootstrap
-					? yield* Effect.orDie(CH.compile(CH.errorTickBootstrapIssuesQuery(), tickParams))
-					: yield* Effect.orDie(CH.compile(CH.errorTickIssuesQuery(), tickParams))
+					? CH.compile(CH.errorTickBootstrapIssuesQuery(), tickParams)
+					: CH.compile(CH.errorTickIssuesQuery(), tickParams)
 				return yield* warehouse
 					.compiledQuery(tenant, issuesCompiled, {
 						profile: "aggregation",

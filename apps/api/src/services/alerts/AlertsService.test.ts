@@ -42,6 +42,7 @@ import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } 
 import { Database } from "@/platform/DatabaseLive"
 import { decryptAes256Gcm } from "@/platform/Crypto"
 import { InvestigationService } from "@/services/errors/InvestigationService"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const trackedDbs: TestDb[] = []
 
@@ -151,7 +152,9 @@ function makeWarehouseStub(state: {
 		sqlQuery: sqlQueryStub,
 		rawSqlQuery: sqlQueryStub,
 		compiledQuery: (_tenant, compiled) =>
-			sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
+			sqlQueryStub().pipe(
+				Effect.flatMap((rows) => compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie)),
+			),
 		compiledQueryWithCapabilities: (_tenant, compile) =>
 			sqlQueryStub().pipe(
 				Effect.flatMap((rows) =>
@@ -161,7 +164,9 @@ function makeWarehouseStub(state: {
 				),
 			),
 		compiledQueryFirst: (_tenant, compiled) =>
-			sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeFirstRow(rows).pipe(Effect.orDie))),
+			sqlQueryStub().pipe(
+				Effect.flatMap((rows) => compiledQueryOf(compiled).decodeFirstRow(rows).pipe(Effect.orDie)),
+			),
 		ingest: () => Effect.void,
 		asExecutor: () => {
 			throw new Error("asExecutor is not supported by this test stub")
@@ -3279,12 +3284,14 @@ describe("AlertsService", () => {
 		const stub: WarehouseQueryServiceApi = {
 			...makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }),
 			sqlQuery: () => Effect.succeed(alertRows),
-			compiledQuery: (_tenant, compiled) => compiled.decodeRows(alertRows).pipe(Effect.orDie),
+			compiledQuery: (_tenant, compiled) =>
+				compiledQueryOf(compiled).decodeRows(alertRows).pipe(Effect.orDie),
 			compiledQueryWithCapabilities: (_tenant, compile) =>
 				Effect.runSync(compile(baselineWarehouseCapabilities()))
 					.decodeRows(alertRows)
 					.pipe(Effect.orDie),
-			compiledQueryFirst: (_tenant, compiled) => compiled.decodeFirstRow(alertRows).pipe(Effect.orDie),
+			compiledQueryFirst: (_tenant, compiled) =>
+				compiledQueryOf(compiled).decodeFirstRow(alertRows).pipe(Effect.orDie),
 		}
 
 		return Effect.gen(function* () {
@@ -3347,7 +3354,9 @@ describe("AlertsService evaluation error persistence", () => {
 			sqlQuery: sqlQueryStub,
 			rawSqlQuery: sqlQueryStub,
 			compiledQuery: (_tenant, compiled) =>
-				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
+				sqlQueryStub().pipe(
+					Effect.flatMap((rows) => compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie)),
+				),
 			compiledQueryWithCapabilities: (_tenant, compile) =>
 				sqlQueryStub().pipe(
 					Effect.flatMap((rows) =>
@@ -3358,7 +3367,9 @@ describe("AlertsService evaluation error persistence", () => {
 				),
 			compiledQueryFirst: (_tenant, compiled) =>
 				sqlQueryStub().pipe(
-					Effect.flatMap((rows) => compiled.decodeFirstRow(rows).pipe(Effect.orDie)),
+					Effect.flatMap((rows) =>
+						compiledQueryOf(compiled).decodeFirstRow(rows).pipe(Effect.orDie),
+					),
 				),
 			ingest: (_tenant, _datasource, rows) =>
 				Effect.sync(() => {

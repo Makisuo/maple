@@ -53,8 +53,8 @@ CH.from(Events)
 	.select(($) => ({ n: CH.count() }))
 	.where(($) => [$.Level.eq(CH.param.of(Level, "level"))])
 
-yield* CH.compile(query, { level: "warn" })   // … WHERE Level = 'warn'
-yield* CH.compile(query, { level: "banana" }) // fails — the schema rejected it
+yield * CH.compile(query, { level: "warn" }) // … WHERE Level = 'warn'
+yield * CH.compile(query, { level: "banana" }) // fails — the schema rejected it
 ```
 
 Compilation returns an `Effect`, so a value the query cannot accept is a typed failure rather
@@ -63,13 +63,13 @@ as often as from your own code, and a route that can `catchTag` a bad one can an
 400 instead of crashing.
 
 ```ts
-yield* CH.compile(query, { startTime: new Date("2026-01-01T00:00:00Z") })
+yield * CH.compile(query, { startTime: new Date("2026-01-01T00:00:00Z") })
 // … WHERE Timestamp >= '2026-01-01 00:00:00'
 
-yield* CH.compile(query, { limit: 10.5 })
-// fails with QueryBuilderError { code: "InvalidParamValue" } — use param.float for fractions
+yield * CH.compile(query, { limit: 10.5 })
+// fails with QueryBuilderError { code: "InvalidLiteral" } — use param.float for fractions
 
-yield* CH.compile(query, {})
+yield * CH.compile(query, {})
 // fails with QueryBuilderError { code: "UnresolvedParam" }: no value given for param 'orgId'
 ```
 
@@ -153,17 +153,17 @@ interface CompiledQuery<Output> {
 }
 ```
 
-| Field                           | Purpose                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------------------- |
-| `sql`                           | The statement to execute. The builder never runs it.                                         |
-| `tenantScope`                   | Whether the query pins a single tenant — see [Tenant scoping](./tenant-scoping.md)           |
-| `rowSchemaSource`               | Where the row schema came from, so a caller can tell real validation from a pass-through    |
-| `rowSchema`                     | The codec itself, for a caller that needs a `Schema` rather than a call                     |
-| `untypedColumns`                | When `rowSchemaSource` is `"none"`, the selected aliases responsible                        |
+| Field                           | Purpose                                                                                  |
+| ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `sql`                           | The statement to execute. The builder never runs it.                                     |
+| `tenantScope`                   | Whether the query pins a single tenant — see [Tenant scoping](./tenant-scoping.md)       |
+| `rowSchemaSource`               | Where the row schema came from, so a caller can tell real validation from a pass-through |
+| `rowSchema`                     | The codec itself, for a caller that needs a `Schema` rather than a call                  |
+| `untypedColumns`                | When `rowSchemaSource` is `"none"`, the selected aliases responsible                     |
 | `rawSql`                        | Present only for `rawCompiledQuery`: the `reason` and `note` it was given                |
-| `route`                       | Set by `.route(tag)`; opaque metadata for your executor                                    |
-| `decodeRows` / `decodeFirstRow` | See [Decoding results](./decoding-results.md)                                                |
-| `encodeRows`                    | The same codec backwards — decoded rows to the wire shape                                   |
+| `route`                         | Set by `.route(tag)`; opaque metadata for your executor                                  |
+| `decodeRows` / `decodeFirstRow` | See [Decoding results](./decoding-results.md)                                            |
+| `encodeRows`                    | The same codec backwards — decoded rows to the wire shape                                |
 
 There is deliberately **no `castRows`**. A bare cast looked type-safe while hiding wire-format
 drift, so it was removed in favour of schema-checked decoding.
@@ -183,17 +183,16 @@ that assembles a query from a request body can hit every one of these with corre
 input, so `compile` puts them in the Effect error channel, catchable by the tag
 `"@maple-dev/clickhouse-builder/QueryBuilderError"`:
 
-| Code                 | Cause                                                                    |
-| -------------------- | ------------------------------------------------------------------------ |
-| `SelectRequired`     | Compiling a query with no `select()`                                     |
-| `UnresolvedParam`    | A param the params bag has no value for                                  |
-| `InvalidParamValue`  | A param value that is not what its kind accepts                          |
-| `InvalidLiteral`     | A comparison operand the column's codec rejects                          |
-| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple             |
-| `InvalidArguments`   | Arguments a function cannot use — an empty condition list, a bad pattern |
+| Code               | Cause                                                                    |
+| ------------------ | ------------------------------------------------------------------------ |
+| `UnresolvedParam`  | A param the params bag has no value for                                  |
+| `InvalidLiteral`   | A param value, or a comparison operand, the column's codec rejects       |
+| `InvalidArguments` | Arguments a function cannot use — an empty condition list, a bad pattern |
 
-`QueryBuilderDefect` describes a **call** that could not be right for any value: a param name
-that is not an identifier, a placeholder compared as if it were resolved, two column types
-claiming one ClickHouse type name. No input reaches these; only a rewrite does. `compile` maps
+`QueryBuilderDefect` describes a **call** that could not be right for any value: a query with no
+`select()`, an `orderBy` entry that is not a tuple, a param name that is not an identifier, a
+placeholder compared as if it were resolved, two column types claiming one ClickHouse type name.
+No input reaches these; only a rewrite does — a missing `select()` is written in the query
+definition, not steered by a request. `compile` maps
 only `QueryBuilderError` into the error channel and dies on everything else, so a defect arrives
 as a defect in the `Cause` — where a bug belongs, and where no `catchTag` can swallow it.

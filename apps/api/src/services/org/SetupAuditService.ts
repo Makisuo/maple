@@ -366,24 +366,16 @@ const make: Effect.Effect<SetupAuditServiceApi, never, Database | WarehouseQuery
 			yield* warehouse.warmRoute(tenant)
 			const joined = yield* Effect.all(
 				{
-					orphans: warehouse.compiledQuery(
-						tenant,
-						yield* Effect.orDie(Integrations.auditOrphanSpansSQL(window)),
-						{
-							profile: "aggregation",
-							settings: { maxThreads: 4 },
-							context: "setupAuditOrphanSpans",
-						},
-					),
-					rootless: warehouse.compiledQuery(
-						tenant,
-						yield* Effect.orDie(Integrations.auditRootlessTracesSQL(window)),
-						{
-							profile: "aggregation",
-							settings: { maxThreads: 4 },
-							context: "setupAuditRootlessTraces",
-						},
-					),
+					orphans: warehouse.compiledQuery(tenant, Integrations.auditOrphanSpansSQL(window), {
+						profile: "aggregation",
+						settings: { maxThreads: 4 },
+						context: "setupAuditOrphanSpans",
+					}),
+					rootless: warehouse.compiledQuery(tenant, Integrations.auditRootlessTracesSQL(window), {
+						profile: "aggregation",
+						settings: { maxThreads: 4 },
+						context: "setupAuditRootlessTraces",
+					}),
 				},
 				{ concurrency: 2 },
 			)
@@ -419,7 +411,7 @@ const make: Effect.Effect<SetupAuditServiceApi, never, Database | WarehouseQuery
 				endTime: formatWarehouseDateTime(now),
 			}
 
-			const run = <A>(compiled: CH.CompiledQuery<A>, profile: "discovery" | "list") =>
+			const run = <A>(compiled: CH.CompiledQueryInput<A>, profile: "discovery" | "list") =>
 				warehouse.compiledQuery(tenant, compiled, { profile, context: "setupAudit" })
 
 			// Same reason as `fetchTraceCompleteness`. Both are independent entry
@@ -429,69 +421,53 @@ const make: Effect.Effect<SetupAuditServiceApi, never, Database | WarehouseQuery
 			const results = yield* Effect.all(
 				{
 					usage: run(
-						yield* Effect.orDie(
-							CH.compile(CH.serviceUsageQuery({}), window, {
-								rowSchema: CH.serviceUsageRowSchema,
-							}),
-						),
+						CH.compile(CH.serviceUsageQuery({}), window, {
+							rowSchema: CH.serviceUsageRowSchema,
+						}),
 						"discovery",
 					),
 					attributeKeys: run(
-						yield* Effect.orDie(
-							CH.compile(Integrations.auditAttributeKeyInventoryQuery(), window, {
-								rowSchema: Integrations.auditAttributeKeyInventoryRowSchema,
-							}),
-						),
+						CH.compile(Integrations.auditAttributeKeyInventoryQuery(), window, {
+							rowSchema: Integrations.auditAttributeKeyInventoryRowSchema,
+						}),
 						"discovery",
 					),
 					// `list`, not `discovery`: an org whose span names carry IDs — the very thing NAME-02
 					// detects — inflates traces_aggregates_hourly past a 5s budget.
 					spanShape: run(
-						yield* Effect.orDie(
-							CH.compile(Integrations.auditSpanProfileByServiceQuery(), window, {
-								rowSchema: Integrations.auditSpanProfileRowSchema,
-							}),
-						),
+						CH.compile(Integrations.auditSpanProfileByServiceQuery(), window, {
+							rowSchema: Integrations.auditSpanProfileRowSchema,
+						}),
 						"list",
 					),
 					logSeverity: run(
-						yield* Effect.orDie(
-							CH.compile(Integrations.auditLogSeverityByServiceQuery(), window, {
-								rowSchema: Integrations.auditLogSeverityRowSchema,
-							}),
-						),
+						CH.compile(Integrations.auditLogSeverityByServiceQuery(), window, {
+							rowSchema: Integrations.auditLogSeverityRowSchema,
+						}),
 						"discovery",
 					),
 					metricLabels: run(
-						yield* Effect.orDie(
-							CH.compile(Integrations.auditMetricLabelCardinalityQuery(), window, {
-								rowSchema: Integrations.auditMetricLabelRowSchema,
-							}),
-						),
+						CH.compile(Integrations.auditMetricLabelCardinalityQuery(), window, {
+							rowSchema: Integrations.auditMetricLabelRowSchema,
+						}),
 						"discovery",
 					),
 					peerValues: run(
-						yield* Effect.orDie(
-							CH.compile(Integrations.auditPeerValueInventoryQuery(), window, {
-								rowSchema: Integrations.auditPeerValueRowSchema,
-							}),
-						),
+						CH.compile(Integrations.auditPeerValueInventoryQuery(), window, {
+							rowSchema: Integrations.auditPeerValueRowSchema,
+						}),
 						"discovery",
 					),
 					dbEdges: run(
-						yield* Effect.orDie(
-							CH.compile(Integrations.auditDbEdgeIdentityQuery(), window, {
-								rowSchema: Integrations.auditDbEdgeRowSchema,
-							}),
-						),
+						CH.compile(Integrations.auditDbEdgeIdentityQuery(), window, {
+							rowSchema: Integrations.auditDbEdgeRowSchema,
+						}),
 						"discovery",
 					),
 					logCorrelation: run(
-						yield* Effect.orDie(
-							CH.compile(Integrations.auditLogCorrelationQuery(), logWindow, {
-								rowSchema: Integrations.auditLogCorrelationRowSchema,
-							}),
-						),
+						CH.compile(Integrations.auditLogCorrelationQuery(), logWindow, {
+							rowSchema: Integrations.auditLogCorrelationRowSchema,
+						}),
 						"list",
 					),
 				},

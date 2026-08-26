@@ -119,17 +119,15 @@ const make: Effect.Effect<
 		nowMs: number,
 	) {
 		const mergedAtMs = dateToMs(row.mergedAt) ?? nowMs
-		const compiled = yield* Effect.orDie(
-			CH.compile(
-				CH.errorIssueVersionsSinceQuery(),
-				{
-					orgId: row.orgId,
-					fingerprintHash,
-					startTime: formatWarehouseDateTime(mergedAtMs),
-					endTime: formatWarehouseDateTime(nowMs),
-				},
-				{ rowSchema: CH.ErrorIssueVersionsSinceOutputSchema },
-			),
+		const compiled = CH.compile(
+			CH.errorIssueVersionsSinceQuery(),
+			{
+				orgId: row.orgId,
+				fingerprintHash,
+				startTime: formatWarehouseDateTime(mergedAtMs),
+				endTime: formatWarehouseDateTime(nowMs),
+			},
+			{ rowSchema: CH.ErrorIssueVersionsSinceOutputSchema },
 		)
 		const rows = yield* warehouse.compiledQuery(systemTenant(row.orgId), compiled, {
 			context: "errorIssueVersionsSince",

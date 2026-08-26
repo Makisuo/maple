@@ -14,6 +14,7 @@ import {
 	makeMemoryBackend,
 	type EdgeCacheServiceApi,
 } from "@maple/cache"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 /**
  * Which cache a dashboard request actually lands on, and what that costs.
@@ -119,7 +120,7 @@ const makeStub = (counter: { n: number }): WarehouseQueryServiceApi =>
 		},
 		compiledQuery: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1
-			return compiled.decodeRows(ROWS).pipe(Effect.orDie)
+			return compiledQueryOf(compiled).decodeRows(ROWS).pipe(Effect.orDie)
 		},
 		compiledQueryWithCapabilities: <Output>(
 			_tenant: unknown,
@@ -134,7 +135,7 @@ const makeStub = (counter: { n: number }): WarehouseQueryServiceApi =>
 		},
 		compiledQueryFirst: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1
-			return compiled.decodeFirstRow(ROWS).pipe(Effect.orDie)
+			return compiledQueryOf(compiled).decodeFirstRow(ROWS).pipe(Effect.orDie)
 		},
 		// Deliberately does not touch `counter`: warming resolves route config, it
 		// does not issue a warehouse query, and these tests assert query counts.

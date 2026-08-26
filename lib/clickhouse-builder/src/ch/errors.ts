@@ -22,22 +22,21 @@ import { Schema } from "effect"
  *   channel: `compile` turns a thrown one into a typed failure.
  *
  * - A {@link QueryBuilderDefect} describes a **call** that could not be right
- *   for any value — a param name that is not an identifier, a placeholder
- *   compared as if it were already resolved, two column types claiming one
- *   ClickHouse type name. No input reaches these; only a rewrite does. They
- *   stay defects, so nobody pattern-matches on a bug.
+ *   for any value — a query with no `select()`, an `orderBy` entry that is not
+ *   a tuple, a param name that is not an identifier, a placeholder compared as
+ *   if it were already resolved, two column types claiming one ClickHouse type
+ *   name. No input reaches these; only a rewrite does. They stay defects, so
+ *   nobody pattern-matches on a bug.
+ *
+ * Which class a case belongs to is not a matter of how bad it looks: it is
+ * whether a request body could produce it. `select()` and `orderBy` are written
+ * in the source of a query definition and cannot be steered by a value, so they
+ * are defects however loudly they fail.
  */
 export class QueryBuilderError extends Schema.TaggedError<QueryBuilderError>()(
 	"@maple-dev/clickhouse-builder/QueryBuilderError",
 	{
-		code: Schema.Literals([
-			"SelectRequired",
-			"UnresolvedParam",
-			"InvalidOrderBySpec",
-			"InvalidParamValue",
-			"InvalidLiteral",
-			"InvalidArguments",
-		]),
+		code: Schema.Literals(["UnresolvedParam", "InvalidLiteral", "InvalidArguments"]),
 		message: Schema.String,
 	},
 ) {}

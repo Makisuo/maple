@@ -200,18 +200,16 @@ const make: Effect.Effect<
 				const scanStartMs = Number.isFinite(startMs)
 					? startMs
 					: scanEndMs - ENV_FINGERPRINT_DEFAULT_WINDOW_MS
-				const compiled = yield* Effect.orDie(
-					CH.compile(
-						CH.errorFingerprintsQuery({
-							services: opts.service ? [opts.service] : undefined,
-							deploymentEnvs: [opts.deploymentEnv],
-						}),
-						{
-							orgId,
-							startTime: formatWarehouseDateTime(scanStartMs),
-							endTime: formatWarehouseDateTime(scanEndMs),
-						},
-					),
+				const compiled = CH.compile(
+					CH.errorFingerprintsQuery({
+						services: opts.service ? [opts.service] : undefined,
+						deploymentEnvs: [opts.deploymentEnv],
+					}),
+					{
+						orgId,
+						startTime: formatWarehouseDateTime(scanStartMs),
+						endTime: formatWarehouseDateTime(scanEndMs),
+					},
 				)
 				const fingerprintRows = yield* warehouse.compiledQuery(systemTenant(orgId), compiled, {
 					context: "errorIssueEnvFingerprints",
@@ -341,32 +339,28 @@ const make: Effect.Effect<
 			const tenant = systemTenant(orgId)
 			const isErrorKind = issueRow.kind === "error"
 
-			const timeseriesCompiled = yield* Effect.orDie(
-				CH.compile(CH.errorIssueTimeseriesQuery(), {
-					orgId,
-					fingerprintHash: issueRow.fingerprintHash,
-					startTime: formatWarehouseDateTime(startMs),
-					endTime: formatWarehouseDateTime(endMs),
-					bucketSeconds,
-				}),
-			)
+			const timeseriesCompiled = CH.compile(CH.errorIssueTimeseriesQuery(), {
+				orgId,
+				fingerprintHash: issueRow.fingerprintHash,
+				startTime: formatWarehouseDateTime(startMs),
+				endTime: formatWarehouseDateTime(endMs),
+				bucketSeconds,
+			})
 			const timeseriesEffect = isErrorKind
 				? warehouse.compiledQuery(tenant, timeseriesCompiled, {
 						context: "errorIssueTimeseries",
 					})
 				: Effect.succeed([])
 
-			const samplesCompiled = yield* Effect.orDie(
-				CH.compile(
-					CH.errorIssueSampleTracesQuery({ limit: sampleLimit }),
-					{
-						orgId,
-						fingerprintHash: issueRow.fingerprintHash,
-						startTime: formatWarehouseDateTime(startMs),
-						endTime: formatWarehouseDateTime(endMs),
-					},
-					{ rowSchema: CH.ErrorIssueSampleTracesOutputSchema },
-				),
+			const samplesCompiled = CH.compile(
+				CH.errorIssueSampleTracesQuery({ limit: sampleLimit }),
+				{
+					orgId,
+					fingerprintHash: issueRow.fingerprintHash,
+					startTime: formatWarehouseDateTime(startMs),
+					endTime: formatWarehouseDateTime(endMs),
+				},
+				{ rowSchema: CH.ErrorIssueSampleTracesOutputSchema },
 			)
 			const samplesEffect = isErrorKind
 				? warehouse.compiledQuery(tenant, samplesCompiled, {
@@ -374,17 +368,15 @@ const make: Effect.Effect<
 					})
 				: Effect.succeed([])
 
-			const environmentsCompiled = yield* Effect.orDie(
-				CH.compile(
-					CH.errorIssueEnvironmentsQuery(),
-					{
-						orgId,
-						fingerprintHash: issueRow.fingerprintHash,
-						startTime: formatWarehouseDateTime(startMs),
-						endTime: formatWarehouseDateTime(endMs),
-					},
-					{ rowSchema: CH.ErrorIssueEnvironmentsOutputSchema },
-				),
+			const environmentsCompiled = CH.compile(
+				CH.errorIssueEnvironmentsQuery(),
+				{
+					orgId,
+					fingerprintHash: issueRow.fingerprintHash,
+					startTime: formatWarehouseDateTime(startMs),
+					endTime: formatWarehouseDateTime(endMs),
+				},
+				{ rowSchema: CH.ErrorIssueEnvironmentsOutputSchema },
 			)
 			const environmentsEffect = isErrorKind
 				? warehouse.compiledQuery(tenant, environmentsCompiled, {

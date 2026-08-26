@@ -37,7 +37,8 @@ CH.from(Events).select(($) => ({
 ```
 
 The object keys become the SQL aliases _and_ the keys of the output row type. `select` is
-required: compiling without one throws `QueryBuilderError` with code `SelectRequired`.
+required: compiling without one raises `QueryBuilderDefect`, which stays a defect — no request
+value can remove a `select()`.
 
 Calling `select` again replaces the previous projection rather than adding to it.
 
@@ -80,8 +81,8 @@ Takes `[column, direction]` tuples, one per sort key:
 
 > **This is the API's sharpest edge.** `.orderBy("count", "desc")` — two bare strings — is a
 > type error, but if you reach it from untyped code it used to destructure each string into
-> its first two characters and emit `ORDER BY c O, d E`. It now throws `QueryBuilderError`
-> with code `InvalidOrderBySpec` instead.
+> its first two characters and emit `ORDER BY c O, d E`. It now raises `QueryBuilderDefect`
+> instead — a defect, because the specs are written at the definition.
 
 _(Backed by `docs/queries.md > orderBy takes tuples` and `> orderBy rejects a bare string`.)_
 

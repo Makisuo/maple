@@ -15,6 +15,7 @@ import { makeQueryEngineEvaluate, makeQueryEngineExecute } from "@maple/query-en
 import type { SqlQueryOptions } from "@maple/query-engine/profiles"
 import type { CompiledQuery } from "@maple/query-engine/ch"
 import type { TenantContext } from "@/services/auth/AuthService"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const assert: typeof nodeAssert & {
 	isTrue: (value: unknown) => void
@@ -84,15 +85,15 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
 		compiledQuery:
 			overrides.compiledQuery ??
 			((tenant, compiled, options) =>
-				sqlQuery(tenant, compiled.sql, options).pipe(
-					Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
+				sqlQuery(tenant, compiledQueryOf(compiled).sql, options).pipe(
+					Effect.flatMap((rows) => compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie)),
 				)),
 		compiledQueryWithCapabilities:
 			overrides.compiledQueryWithCapabilities ??
 			((tenant, compile, options) => {
 				const compiled = Effect.runSync(compile(baselineWarehouseCapabilities()))
-				return sqlQuery(tenant, compiled.sql, options).pipe(
-					Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
+				return sqlQuery(tenant, compiledQueryOf(compiled).sql, options).pipe(
+					Effect.flatMap((rows) => compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie)),
 				)
 			}),
 	} satisfies Parameters<typeof makeQueryEngineExecute>[0]
@@ -126,7 +127,7 @@ describe("makeQueryEngineExecute", () => {
 						compile(baselineWarehouseCapabilities()).pipe(
 							Effect.orDie,
 							Effect.flatMap((compiled) => {
-								receivedSql = compiled.sql
+								receivedSql = compiledQueryOf(compiled).sql
 								context = options?.context
 								profile = options?.profile
 								return compiled
@@ -183,7 +184,9 @@ describe("makeQueryEngineExecute", () => {
 								context = options?.context
 								profile = options?.profile
 								maxBlockSize = options?.settings?.maxBlockSize
-								return compiled.decodeRows([{ total: 42 }]).pipe(Effect.orDie)
+								return compiledQueryOf(compiled)
+									.decodeRows([{ total: 42 }])
+									.pipe(Effect.orDie)
 							}),
 						),
 				}),

@@ -51,33 +51,31 @@ export const searchSessions = Effect.fn("Observability.searchSessions")(function
 ) {
 	const executor = yield* WarehouseExecutor
 	yield* Effect.annotateCurrentSpan("orgId", executor.orgId)
-	const compiled = yield* Effect.orDie(
-		CH.compile(
-			CH.sessionReplaysListQuery({
-				userId: input.userId,
-				userSearch: input.userSearch,
-				groupName: input.groupName,
-				visitorId: input.visitorId,
-				serviceName: input.serviceName,
-				browser: input.browser,
-				country: input.country,
-				deviceType: input.deviceType,
-				hasErrors: input.hasErrors,
-				durationMinMs: input.durationMinMs,
-				durationMaxMs: input.durationMaxMs,
-				activeTimeMinMs: input.activeTimeMinMs,
-				activeTimeMaxMs: input.activeTimeMaxMs,
-				eventType: input.eventType,
-				eventLevel: input.eventLevel,
-				eventMinStatus: input.eventMinStatus,
-				eventUrlSearch: input.eventUrlSearch,
-				eventMessageSearch: input.eventMessageSearch,
-				eventTraceId: input.eventTraceId,
-				limit: input.limit,
-				offset: input.offset,
-			}),
-			{ orgId: executor.orgId, startTime: input.startTime, endTime: input.endTime },
-		),
+	const compiled = CH.compile(
+		CH.sessionReplaysListQuery({
+			userId: input.userId,
+			userSearch: input.userSearch,
+			groupName: input.groupName,
+			visitorId: input.visitorId,
+			serviceName: input.serviceName,
+			browser: input.browser,
+			country: input.country,
+			deviceType: input.deviceType,
+			hasErrors: input.hasErrors,
+			durationMinMs: input.durationMinMs,
+			durationMaxMs: input.durationMaxMs,
+			activeTimeMinMs: input.activeTimeMinMs,
+			activeTimeMaxMs: input.activeTimeMaxMs,
+			eventType: input.eventType,
+			eventLevel: input.eventLevel,
+			eventMinStatus: input.eventMinStatus,
+			eventUrlSearch: input.eventUrlSearch,
+			eventMessageSearch: input.eventMessageSearch,
+			eventTraceId: input.eventTraceId,
+			limit: input.limit,
+			offset: input.offset,
+		}),
+		{ orgId: executor.orgId, startTime: input.startTime, endTime: input.endTime },
 	)
 	return yield* executor.compiledQuery(compiled, { profile: "list", context: "searchSessions" })
 })
@@ -101,20 +99,18 @@ export const getSessionTranscript = Effect.fn("Observability.getSessionTranscrip
 ) {
 	const executor = yield* WarehouseExecutor
 	yield* Effect.annotateCurrentSpan({ orgId: executor.orgId, sessionId: input.sessionId })
-	const compiled = yield* Effect.orDie(
-		CH.compile(
-			CH.sessionTranscriptQuery({
-				types: input.types,
-				traceId: input.traceId,
-				errorsOnly: input.errorsOnly,
-				limit: input.limit,
-				offset: input.offset,
-			}),
-			{
-				orgId: executor.orgId,
-				sessionId: input.sessionId,
-			},
-		),
+	const compiled = CH.compile(
+		CH.sessionTranscriptQuery({
+			types: input.types,
+			traceId: input.traceId,
+			errorsOnly: input.errorsOnly,
+			limit: input.limit,
+			offset: input.offset,
+		}),
+		{
+			orgId: executor.orgId,
+			sessionId: input.sessionId,
+		},
 	)
 	return yield* executor.compiledQuery(compiled, { profile: "list", context: "sessionTranscript" })
 })

@@ -517,10 +517,11 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 			tenant: CurrentTenant.TenantSchema,
 			traceId: string,
 		) {
-			const compiled = yield* Effect.orDie(
-				CH.compile(CH.spanHierarchyQuery({ traceId, limit: CH.SPAN_HIERARCHY_MAX_SPANS + 1 }), {
+			const compiled = CH.compile(
+				CH.spanHierarchyQuery({ traceId, limit: CH.SPAN_HIERARCHY_MAX_SPANS + 1 }),
+				{
 					orgId: tenant.orgId,
-				}),
+				},
 			)
 			return yield* warehouse.compiledQuery(tenant, compiled, {
 				profile: "list",
@@ -541,30 +542,28 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 					const cursorParts = yield* decodeKeysetCursor(payload.cursor, "trc", 2)
 					const filters = payload.filters
 					const internalFilters = traceFilters(filters)
-					const compiled = yield* Effect.orDie(
-						CH.compile(
-							CH.traceSummariesQuery({
-								serviceName: filters?.service_name,
-								spanName: filters?.span_name,
-								statusCode: filters?.status_code,
-								hasError: filters?.has_error,
-								minDurationMs: filters?.min_duration_ms,
-								maxDurationMs: filters?.max_duration_ms,
-								httpMethod: filters?.http_method,
-								httpRoute: filters?.http_route,
-								httpStatusCode: filters?.http_status_code,
-								deploymentEnv: filters?.deployment_environment,
-								namespace: filters?.service_namespace,
-								spanScope: filters?.span_scope,
-								attributeFilters: internalFilters?.attributeFilters,
-								resourceAttributeFilters: internalFilters?.resourceAttributeFilters,
-								limit: limit + 1,
-								cursor: cursorParts
-									? { timestamp: cursorParts[0]!, traceId: cursorParts[1]! }
-									: undefined,
-							}),
-							{ orgId: tenant.orgId, ...window },
-						),
+					const compiled = CH.compile(
+						CH.traceSummariesQuery({
+							serviceName: filters?.service_name,
+							spanName: filters?.span_name,
+							statusCode: filters?.status_code,
+							hasError: filters?.has_error,
+							minDurationMs: filters?.min_duration_ms,
+							maxDurationMs: filters?.max_duration_ms,
+							httpMethod: filters?.http_method,
+							httpRoute: filters?.http_route,
+							httpStatusCode: filters?.http_status_code,
+							deploymentEnv: filters?.deployment_environment,
+							namespace: filters?.service_namespace,
+							spanScope: filters?.span_scope,
+							attributeFilters: internalFilters?.attributeFilters,
+							resourceAttributeFilters: internalFilters?.resourceAttributeFilters,
+							limit: limit + 1,
+							cursor: cursorParts
+								? { timestamp: cursorParts[0]!, traceId: cursorParts[1]! }
+								: undefined,
+						}),
+						{ orgId: tenant.orgId, ...window },
 					)
 					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 						profile: "list",
@@ -711,14 +710,12 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 					const detail = yield* warehouse
 						.compiledQueryFirst(
 							tenant,
-							yield* Effect.orDie(
-								CH.compile(
-									CH.spanDetailQuery({
-										traceId: params.trace_id,
-										spanId: params.span_id,
-									}),
-									{ orgId: tenant.orgId },
-								),
+							CH.compile(
+								CH.spanDetailQuery({
+									traceId: params.trace_id,
+									spanId: params.span_id,
+								}),
+								{ orgId: tenant.orgId },
 							),
 							{ profile: "discovery", context: "v2GetSpan" },
 						)
@@ -747,23 +744,21 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 					const cursorParts = yield* decodeKeysetCursor(payload.cursor, "log", 5)
 					const filters = payload.filters
 					const internalFilters = logFilters(filters)
-					const compiled = yield* Effect.orDie(
-						CH.compile(
-							CH.logsListQuery({
-								...internalFilters,
-								limit: limit + 1,
-								cursorIdentity: cursorParts
-									? {
-											timestamp: cursorParts[0]!,
-											serviceName: cursorParts[1]!,
-											traceId: cursorParts[2]!,
-											spanId: cursorParts[3]!,
-											recordIdentity: cursorParts[4]!,
-										}
-									: undefined,
-							}),
-							{ orgId: tenant.orgId, ...window },
-						),
+					const compiled = CH.compile(
+						CH.logsListQuery({
+							...internalFilters,
+							limit: limit + 1,
+							cursorIdentity: cursorParts
+								? {
+										timestamp: cursorParts[0]!,
+										serviceName: cursorParts[1]!,
+										traceId: cursorParts[2]!,
+										spanId: cursorParts[3]!,
+										recordIdentity: cursorParts[4]!,
+									}
+								: undefined,
+						}),
+						{ orgId: tenant.orgId, ...window },
 					)
 					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 						profile: "list",
@@ -883,17 +878,15 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const [logTimestamp, recordIdentity] = yield* parseLogKey(params.id)
-					const compiled = yield* Effect.orDie(
-						CH.compile(
-							CH.getLogByKeyQuery({
-								recordIdentity,
-							}),
-							{
-								orgId: tenant.orgId,
-								...partitionWindow(logTimestamp),
-								timestamp: logTimestamp,
-							},
-						),
+					const compiled = CH.compile(
+						CH.getLogByKeyQuery({
+							recordIdentity,
+						}),
+						{
+							orgId: tenant.orgId,
+							...partitionWindow(logTimestamp),
+							timestamp: logTimestamp,
+						},
 					)
 					const row = yield* warehouse
 						.compiledQueryFirst(tenant, compiled, {
@@ -923,18 +916,16 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 					})
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
 						Effect.gen(function* () {
-							const compiled = yield* Effect.orDie(
-								CH.compile(
-									CH.listMetricsQuery({
-										serviceName: query.service_name,
-										metricType: query.metric_type,
-										search: query.search,
-										limit,
-										offset,
-									}),
-									{ orgId: tenant.orgId, ...window },
-									{ rowSchema: metricCatalogRowSchema },
-								),
+							const compiled = CH.compile(
+								CH.listMetricsQuery({
+									serviceName: query.service_name,
+									metricType: query.metric_type,
+									search: query.search,
+									limit,
+									offset,
+								}),
+								{ orgId: tenant.orgId, ...window },
+								{ rowSchema: metricCatalogRowSchema },
 							)
 							return yield* warehouse
 								.compiledQuery(tenant, compiled, {
@@ -1164,17 +1155,15 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 					startTime: formatWarehouseDateTime(endMs - BASELINE_WINDOW_MS),
 					endTime: formatWarehouseDateTime(endMs),
 				}
-				const compiled = yield* Effect.orDie(
-					CH.compile(
-						CH.serviceHealthBaselineQuery({
-							environments: filters.deploymentEnvironment
-								? [filters.deploymentEnvironment]
-								: undefined,
-							namespaces: filters.serviceNamespace ? [filters.serviceNamespace] : undefined,
-						}),
-						{ orgId: tenant.orgId, ...window },
-						{ rowSchema: serviceHealthBaselineRowSchema },
-					),
+				const compiled = CH.compile(
+					CH.serviceHealthBaselineQuery({
+						environments: filters.deploymentEnvironment
+							? [filters.deploymentEnvironment]
+							: undefined,
+						namespaces: filters.serviceNamespace ? [filters.serviceNamespace] : undefined,
+					}),
+					{ orgId: tenant.orgId, ...window },
+					{ rowSchema: serviceHealthBaselineRowSchema },
 				)
 				const rows = yield* queryEngine.cachedDirect(
 					tenant,
@@ -1206,12 +1195,10 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 			opts: Parameters<typeof CH.serviceCatalogQuery>[0],
 		) =>
 			Effect.gen(function* () {
-				const compiled = yield* Effect.orDie(
-					CH.compile(
-						CH.serviceCatalogQuery(opts),
-						{ orgId: tenant.orgId, ...window },
-						{ rowSchema: serviceCatalogRowSchema },
-					),
+				const compiled = CH.compile(
+					CH.serviceCatalogQuery(opts),
+					{ orgId: tenant.orgId, ...window },
+					{ rowSchema: serviceCatalogRowSchema },
 				)
 				return yield* warehouse
 					.compiledQuery(tenant, compiled, {
@@ -1321,12 +1308,10 @@ export const HttpV2EnvironmentsLive = HttpApiBuilder.group(MapleApiV2, "environm
 					precision: "second",
 					rangeLabel: "Environment queries",
 				})
-				const compiled = yield* Effect.orDie(
-					CH.compile(
-						CH.serviceEnvironmentsQuery(),
-						{ orgId: tenant.orgId, ...window },
-						{ rowSchema: serviceEnvironmentsRowSchema },
-					),
+				const compiled = CH.compile(
+					CH.serviceEnvironmentsQuery(),
+					{ orgId: tenant.orgId, ...window },
+					{ rowSchema: serviceEnvironmentsRowSchema },
 				)
 				const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 					profile: "discovery",
@@ -1360,20 +1345,16 @@ export const HttpV2ServiceMapLive = HttpApiBuilder.group(MapleApiV2, "serviceMap
 					rangeLabel: "Service map queries",
 				})
 				const compiled = query.service_name
-					? yield* Effect.orDie(
-							CH.compile(
-								CH.serviceDependenciesForServiceQuery({
-									serviceName: query.service_name,
-									deploymentEnv: query.deployment_environment,
-								}),
-								{ orgId: tenant.orgId, ...window },
-							),
+					? CH.compile(
+							CH.serviceDependenciesForServiceQuery({
+								serviceName: query.service_name,
+								deploymentEnv: query.deployment_environment,
+							}),
+							{ orgId: tenant.orgId, ...window },
 						)
-					: yield* Effect.orDie(
-							CH.serviceDependenciesSQL(
-								{ deploymentEnv: query.deployment_environment },
-								{ orgId: tenant.orgId, ...window },
-							),
+					: CH.serviceDependenciesSQL(
+							{ deploymentEnv: query.deployment_environment },
+							{ orgId: tenant.orgId, ...window },
 						)
 				const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 					profile: "aggregation",

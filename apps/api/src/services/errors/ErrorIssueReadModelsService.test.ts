@@ -14,6 +14,7 @@ import {
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueReadModelsService } from "./ErrorIssueReadModelsService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 // Compile-time guard: cache, Env, notifications, WorkerEnvironment, and the
 // broad ErrorsService cannot enter this layer without making this fail.
@@ -42,7 +43,7 @@ const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceApi =>
 			typeof compile === "function" ? Effect.runSync(compile(baselineWarehouseCapabilities())) : compile
 		return Effect.sync(() => contexts.push(options?.context ?? "")).pipe(
 			Effect.andThen(
-				compiled
+				compiledQueryOf(compiled)
 					.decodeRows(
 						options?.context === "errorIssueEnvFingerprints"
 							? [{ fingerprintHash: "fp-checkout" }]

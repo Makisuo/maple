@@ -497,6 +497,15 @@ describe("CompiledQuery.rowSchema", () => {
 	)
 })
 
+/** Assert an exit died with a `QueryBuilderDefect` rather than failing. */
+const expectDefect = (exit: Exit.Exit<unknown, unknown>) => {
+	expect(Exit.isFailure(exit)).toBe(true)
+	const defect = Exit.isFailure(exit) ? Cause.findDefect(exit.cause) : undefined
+	expect(
+		defect && Result.isSuccess(defect) ? (defect.success as CH.QueryBuilderDefect)._tag : undefined,
+	).toBe("@maple-dev/clickhouse-builder/QueryBuilderDefect")
+}
+
 // Failures vs defects — the rule is on `QueryBuilderError` in ./errors.
 describe("what reports and what dies", () => {
 	const Events = CH.table(
@@ -540,12 +549,30 @@ describe("what reports and what dies", () => {
 
 			const exit = yield* Effect.exit(CH.compile(query, { orgId: "org" }))
 			expect(Exit.isFailure(exit)).toBe(true)
-			const defect = Exit.isFailure(exit) ? Cause.findDefect(exit.cause) : undefined
-			expect(
-				defect && Result.isSuccess(defect)
-					? (defect.success as CH.QueryBuilderDefect)._tag
-					: undefined,
-			).toBe("@maple-dev/clickhouse-builder/QueryBuilderDefect")
+			expectDefect(exit)
+		}),
+	)
+
+	// `select()` is written at the query definition. A params bag cannot remove
+	// one, so a compile with none is a bug in the definition and reports as such
+	// — the reason it moved out of the error channel.
+	it.effect("a query with no select dies rather than failing", () =>
+		Effect.gen(function* () {
+			const query = CH.from(Events).where(($) => [$.OrgId.eq("org")])
+
+			expectDefect(yield* Effect.exit(CH.compile(query as never, {})))
+		}),
+	)
+
+	// Same rule for the order-by specs: they are literals in the source, and a
+	// caller who bypasses the types has a bug, not a bad request.
+	it.effect("a bare-string orderBy dies rather than failing", () =>
+		Effect.gen(function* () {
+			const query = CH.from(Events)
+				.select(($) => ({ name: $.Name }))
+				.where(($) => [$.OrgId.eq("org")])
+
+			expectDefect(yield* Effect.exit(CH.compile((query as any).orderBy("name", "desc"), {})))
 		}),
 	)
 })

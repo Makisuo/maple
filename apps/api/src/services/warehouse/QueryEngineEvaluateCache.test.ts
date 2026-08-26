@@ -18,6 +18,7 @@ import {
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService, type EdgeCacheServiceApi } from "@maple/cache"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asUserId = Schema.decodeUnknownSync(UserId)
@@ -85,7 +86,7 @@ const evalStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 	({
 		sqlQuery: () => Effect.succeed(rows as never),
 		rawSqlQuery: () => Effect.die(new Error("rawSqlQuery is not used by evaluate cache tests")),
-		compiledQuery: (_tenant, compiled) => compiled.decodeRows(rows).pipe(Effect.orDie),
+		compiledQuery: (_tenant, compiled) => compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie),
 		compiledQueryWithCapabilities: (_tenant, compile) =>
 			Effect.runSync(compile(baselineWarehouseCapabilities())).decodeRows(rows).pipe(Effect.orDie),
 	}) satisfies Parameters<typeof makeQueryEngineEvaluate>[0]
@@ -270,7 +271,7 @@ const makeFullStub = (
 		},
 		compiledQuery: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1
-			return compiled.decodeRows(rows).pipe(Effect.orDie)
+			return compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie)
 		},
 		compiledQueryWithCapabilities: <Output>(
 			_tenant: unknown,
@@ -285,7 +286,7 @@ const makeFullStub = (
 		},
 		compiledQueryFirst: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1
-			return compiled.decodeFirstRow(rows).pipe(Effect.orDie)
+			return compiledQueryOf(compiled).decodeFirstRow(rows).pipe(Effect.orDie)
 		},
 		// Deliberately does not touch `counter`: warming resolves route config, it
 		// does not issue a warehouse query, and these tests assert query counts.

@@ -18,7 +18,7 @@ import { compileQuery, type SqlQuery } from "../sql/sql-query"
 import { PARAM_PLACEHOLDER_PATTERN, paramSchema, type ParamKind } from "./param"
 import { encodeLiteral } from "./literal"
 import { Effect, Option, Schema } from "effect"
-import { QueryBuilderError } from "./errors"
+import { QueryBuilderDefect, QueryBuilderError } from "./errors"
 
 // `QueryBuilderError` moved to ./errors so `expr.ts` can raise it too; still
 // exported from here, which is where every caller imports it from.
@@ -45,19 +45,19 @@ export class CompiledQueryEncodeError extends Schema.TaggedError<CompiledQueryEn
 /** `orderBy` takes `[column, direction]` tuples. A bare string is the natural
  *  mistake (`.orderBy("count", "desc")`), and it is invisible without types:
  *  destructuring a string yields its first two characters, so `"count"` used to
- *  compile to `count -> "c O"`. Fail loudly instead of emitting invalid SQL. */
+ *  compile to `count -> "c O"`. Fail loudly instead of emitting invalid SQL —
+ *  as a defect, because the specs are written at the query definition and no
+ *  runtime value can steer them. */
 const orderByClause = (specs: ReadonlyArray<[string, "asc" | "desc"]>): Array<string> =>
 	specs.map((spec) => {
 		if (!Array.isArray(spec) || spec.length !== 2) {
-			throw new QueryBuilderError({
-				code: "InvalidOrderBySpec",
+			throw new QueryBuilderDefect({
 				message: `CHQuery: orderBy() takes [column, direction] tuples, got ${JSON.stringify(spec)}`,
 			})
 		}
 		const [column, direction] = spec
 		if (direction !== "asc" && direction !== "desc") {
-			throw new QueryBuilderError({
-				code: "InvalidOrderBySpec",
+			throw new QueryBuilderDefect({
 				message: `CHQuery: orderBy() direction must be "asc" or "desc", got ${JSON.stringify(direction)}`,
 			})
 		}
@@ -202,6 +202,18 @@ export type CompiledQuery<
  * has to carry the same constraint on its own type parameter.
  */
 export type CompiledQueryRowSchema<Output> = Schema.Codec<Output, any, never, never>
+
+/**
+ * A compiled query, or the unrun compile that produces one.
+ *
+ * `compile` reports in the Effect channel, so an executor accepting this in
+ * place of a `CompiledQuery` becomes the single place that decides what a
+ * `QueryBuilderError` means — instead of every call site deciding again on the
+ * way in, which is how a codebase ends up with one `Effect.orDie` per query.
+ */
+export type CompiledQueryInput<Output, Routing extends string | undefined = string | undefined> =
+	| CompiledQuery<Output, Routing>
+	| Effect.Effect<CompiledQuery<Output, Routing>, QueryBuilderError>
 
 const makeCompiledQuery = <Output, Route extends string | undefined>(
 	sql: string,
@@ -478,7 +490,7 @@ function compileInner<
 	const selectFragments = Object.entries(selectExprs).map(([alias, expr]) => aliased(expr, alias))
 
 	if (selectFragments.length === 0) {
-		throw new QueryBuilderError({ code: "SelectRequired", message: "CHQuery: select() is required" })
+		throw new QueryBuilderDefect({ message: "CHQuery: select() is required" })
 	}
 
 	// WHERE — resolve params by injecting values into the accessor
@@ -586,10 +598,7 @@ function compileInner<
 						allJoinSourcesScoped = false
 						tableSql = j.tableName
 					} else {
-						throw new QueryBuilderError({
-							code: "SelectRequired",
-							message: "TypedJoin: missing table or query",
-						})
+						throw new QueryBuilderDefect({ message: "TypedJoin: missing table or query" })
 					}
 
 					return {
@@ -909,9 +918,9 @@ function resolveParam(kind: ParamKind, name: string, value: unknown): string {
 	const schema = paramSchema(kind)
 	if (schema === undefined) {
 		// Only reachable from a hand-written placeholder naming a kind nothing
-		// declared: `param.of` registers its type before it can reach any SQL.
-		throw new QueryBuilderError({
-			code: "InvalidParamValue",
+		// declared: `param.of` registers its type before it can reach any SQL —
+		// which is why it is a defect and not a failure a caller could report.
+		throw new QueryBuilderDefect({
 			message: `compile: param '${name}' has an unknown type '${kind}'`,
 		})
 	}

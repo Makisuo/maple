@@ -89,11 +89,12 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 			windowEnd: string | undefined,
 		) {
 			yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, sessionId })
-			const compiled = yield* Effect.orDie(
-				CH.compile(CH.getSessionReplayQuery({ startTime: windowStart, endTime: windowEnd }), {
+			const compiled = CH.compile(
+				CH.getSessionReplayQuery({ startTime: windowStart, endTime: windowEnd }),
+				{
 					orgId: tenant.orgId,
 					sessionId,
-				}),
+				},
 			)
 			const replay = yield* warehouse.compiledQueryFirst(tenant, compiled, {
 				profile: "discovery",
@@ -113,66 +114,64 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const endTime = yield* toTinybird(payload.end_time, "end_time")
 					const page = yield* paginateOffsetQuery(payload, ({ limit, offset }) =>
 						Effect.gen(function* () {
-							const compiled = yield* Effect.orDie(
-								CH.compile(
-									CH.sessionReplaysListQuery({
-										...(payload.service_name !== undefined
-											? {
-													serviceName: payload.service_name,
-												}
-											: undefined),
-										...(payload.browser !== undefined
-											? { browser: payload.browser }
-											: undefined),
-										...(payload.country !== undefined
-											? { country: payload.country }
-											: undefined),
-										...(payload.device_type !== undefined
-											? { deviceType: payload.device_type }
-											: undefined),
-										...(payload.user_id !== undefined
-											? { userId: payload.user_id }
-											: undefined),
-										...(payload.user_search !== undefined
-											? { userSearch: payload.user_search }
-											: undefined),
-										...(payload.group_name !== undefined
-											? { groupName: payload.group_name }
-											: undefined),
-										...(payload.visitor_id !== undefined
-											? { visitorId: payload.visitor_id }
-											: undefined),
-										...(payload.has_errors !== undefined
-											? { hasErrors: payload.has_errors }
-											: undefined),
-										...(payload.search !== undefined
-											? { search: payload.search }
-											: undefined),
-										...(payload.duration_min_ms !== undefined
-											? {
-													durationMinMs: payload.duration_min_ms,
-												}
-											: undefined),
-										...(payload.duration_max_ms !== undefined
-											? {
-													durationMaxMs: payload.duration_max_ms,
-												}
-											: undefined),
-										...(payload.active_time_min_ms !== undefined
-											? {
-													activeTimeMinMs: payload.active_time_min_ms,
-												}
-											: undefined),
-										...(payload.active_time_max_ms !== undefined
-											? {
-													activeTimeMaxMs: payload.active_time_max_ms,
-												}
-											: undefined),
-										limit,
-										offset,
-									}),
-									{ orgId: tenant.orgId, startTime, endTime },
-								),
+							const compiled = CH.compile(
+								CH.sessionReplaysListQuery({
+									...(payload.service_name !== undefined
+										? {
+												serviceName: payload.service_name,
+											}
+										: undefined),
+									...(payload.browser !== undefined
+										? { browser: payload.browser }
+										: undefined),
+									...(payload.country !== undefined
+										? { country: payload.country }
+										: undefined),
+									...(payload.device_type !== undefined
+										? { deviceType: payload.device_type }
+										: undefined),
+									...(payload.user_id !== undefined
+										? { userId: payload.user_id }
+										: undefined),
+									...(payload.user_search !== undefined
+										? { userSearch: payload.user_search }
+										: undefined),
+									...(payload.group_name !== undefined
+										? { groupName: payload.group_name }
+										: undefined),
+									...(payload.visitor_id !== undefined
+										? { visitorId: payload.visitor_id }
+										: undefined),
+									...(payload.has_errors !== undefined
+										? { hasErrors: payload.has_errors }
+										: undefined),
+									...(payload.search !== undefined
+										? { search: payload.search }
+										: undefined),
+									...(payload.duration_min_ms !== undefined
+										? {
+												durationMinMs: payload.duration_min_ms,
+											}
+										: undefined),
+									...(payload.duration_max_ms !== undefined
+										? {
+												durationMaxMs: payload.duration_max_ms,
+											}
+										: undefined),
+									...(payload.active_time_min_ms !== undefined
+										? {
+												activeTimeMinMs: payload.active_time_min_ms,
+											}
+										: undefined),
+									...(payload.active_time_max_ms !== undefined
+										? {
+												activeTimeMaxMs: payload.active_time_max_ms,
+											}
+										: undefined),
+									limit,
+									offset,
+								}),
+								{ orgId: tenant.orgId, startTime, endTime },
 							)
 							return yield* warehouse
 								.compiledQuery(tenant, compiled, {
@@ -221,17 +220,19 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const tenant = yield* CurrentTenant.Context
 					const windowStart = yield* optTinybird(query.window_start, "window_start")
 					const windowEnd = yield* optTinybird(query.window_end, "window_end")
-					const detailCompiled = yield* Effect.orDie(
-						CH.compile(CH.getSessionReplayQuery({ startTime: windowStart, endTime: windowEnd }), {
+					const detailCompiled = CH.compile(
+						CH.getSessionReplayQuery({ startTime: windowStart, endTime: windowEnd }),
+						{
 							orgId: tenant.orgId,
 							sessionId: params.id,
-						}),
+						},
 					)
-					const activityCompiled = yield* Effect.orDie(
-						CH.compile(CH.sessionActivityQuery({ startTime: windowStart, endTime: windowEnd }), {
+					const activityCompiled = CH.compile(
+						CH.sessionActivityQuery({ startTime: windowStart, endTime: windowEnd }),
+						{
 							orgId: tenant.orgId,
 							sessionId: params.id,
-						}),
+						},
 					)
 					// Warm the route before fanning out — see the v1 handler for why.
 					yield* warehouse.warmRoute(tenant)
@@ -290,11 +291,9 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const tenant = yield* CurrentTenant.Context
 					const windowStart = yield* optTinybird(query.window_start, "window_start")
 					const windowEnd = yield* optTinybird(query.window_end, "window_end")
-					const compiled = yield* Effect.orDie(
-						CH.compile(
-							CH.sessionReplayChunkIndexQuery({ startTime: windowStart, endTime: windowEnd }),
-							{ orgId: tenant.orgId, sessionId: params.id },
-						),
+					const compiled = CH.compile(
+						CH.sessionReplayChunkIndexQuery({ startTime: windowStart, endTime: windowEnd }),
+						{ orgId: tenant.orgId, sessionId: params.id },
 					)
 					// `discovery` is enough — this never reads the `Events` column, and
 					// with payloads in R2 there is nothing to hydrate here either: the
@@ -373,19 +372,17 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					}
 					const page = yield* paginateOffsetQuery(pageQuery, ({ limit, offset }) =>
 						Effect.gen(function* () {
-							const compiled = yield* Effect.orDie(
-								CH.compile(
-									CH.sessionReplayEventsQuery({
-										startTime: windowStart,
-										endTime: windowEnd,
-										fromChunkSeq,
-										toChunkSeq:
-											toChunkSeq === Number.POSITIVE_INFINITY ? undefined : toChunkSeq,
-										limit: Math.min(limit, MAX_REPLAY_CHUNKS_PER_REQUEST + 1),
-										offset,
-									}),
-									{ orgId: tenant.orgId, sessionId: params.id },
-								),
+							const compiled = CH.compile(
+								CH.sessionReplayEventsQuery({
+									startTime: windowStart,
+									endTime: windowEnd,
+									fromChunkSeq,
+									toChunkSeq:
+										toChunkSeq === Number.POSITIVE_INFINITY ? undefined : toChunkSeq,
+									limit: Math.min(limit, MAX_REPLAY_CHUNKS_PER_REQUEST + 1),
+									offset,
+								}),
+								{ orgId: tenant.orgId, sessionId: params.id },
 							)
 							// Two ceilings, because there are two places the payload can come
 							// from. `responseLimits` bounds what the warehouse hands back —
@@ -447,16 +444,14 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const windowEnd = yield* optTinybird(query.window_end, "window_end")
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
 						Effect.gen(function* () {
-							const compiled = yield* Effect.orDie(
-								CH.compile(
-									CH.sessionTranscriptQuery({
-										startTime: windowStart,
-										endTime: windowEnd,
-										limit,
-										offset,
-									}),
-									{ orgId: tenant.orgId, sessionId: params.id },
-								),
+							const compiled = CH.compile(
+								CH.sessionTranscriptQuery({
+									startTime: windowStart,
+									endTime: windowEnd,
+									limit,
+									offset,
+								}),
+								{ orgId: tenant.orgId, sessionId: params.id },
 							)
 							return yield* warehouse
 								.compiledQuery(tenant, compiled, {
@@ -513,11 +508,9 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const endTime = yield* toTinybird(payload.end_time, "end_time")
 					const page = yield* paginateOffsetQuery(payload, ({ limit, offset }) =>
 						Effect.gen(function* () {
-							const compiled = yield* Effect.orDie(
-								CH.compile(
-									CH.sessionsForTraceQuery({ traceId: payload.trace_id, limit, offset }),
-									{ orgId: tenant.orgId, startTime, endTime },
-								),
+							const compiled = CH.compile(
+								CH.sessionsForTraceQuery({ traceId: payload.trace_id, limit, offset }),
+								{ orgId: tenant.orgId, startTime, endTime },
 							)
 							return yield* warehouse
 								.compiledQuery(tenant, compiled, {
