@@ -169,3 +169,52 @@ export function collectIntegrationCatalog(): ReadonlyArray<IntegrationCatalogEnt
 		}
 	})
 }
+
+// Anti-rot assertion — the integration half of `UNDECODED_QUERIES`
+
+/**
+ * Catalog entries whose rows nothing validates.
+ *
+ * `rowSchemaSource: "none"` means at least one selected expression had no type
+ * to read — a `rawExpr`, a `dynamicColumn` without one, a function declared
+ * with `defineUntypedFn`/`compileFnCall` — so `decodeRows` degrades to an
+ * identity cast and a warehouse that changes a column's wire format is
+ * invisible until the value reaches a consumer several layers away.
+ *
+ * Asserted *exactly*, in both directions: a query that stops deriving fails,
+ * and so does one still listed here after it starts. It is empty, and that is
+ * the invariant worth keeping — `aiSessionFacetsQuery` selected an untyped
+ * local `uniqExact` and validated nothing for as long as this package had no
+ * gate of its own, while the core catalog's identical assertion could not see
+ * it (that catalog must not import this package).
+ *
+ * Adding an entry is how you say a query cannot derive, and it needs a sentence
+ * here saying why.
+ */
+export const UNDECODED_INTEGRATION_QUERIES: ReadonlySet<string> = new Set([])
+
+/** The id of every catalog entry that decodes nothing. */
+export function undecodedIntegrationQueries(
+	entries: ReadonlyArray<IntegrationCatalogEntry>,
+): ReadonlyArray<string> {
+	return entries
+		.filter((entry) => entry.compiled.rowSchemaSource === "none")
+		.map((entry) => entry.id)
+		.sort()
+}
+
+/**
+ * The same list with the columns responsible, for the assertion's failure
+ * message. Derivation is all-or-nothing, so "this query decodes nothing" is
+ * useless on its own — these are the aliases to give a type.
+ */
+export function undecodedIntegrationColumns(
+	entries: ReadonlyArray<IntegrationCatalogEntry>,
+): ReadonlyMap<string, ReadonlyArray<string>> {
+	const columns = new Map<string, ReadonlyArray<string>>()
+	for (const entry of entries) {
+		if (entry.compiled.rowSchemaSource !== "none") continue
+		columns.set(entry.id, entry.compiled.untypedColumns)
+	}
+	return columns
+}

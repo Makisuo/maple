@@ -244,12 +244,9 @@ export function serviceMapResolutionsRollupSQL(
 
 	// No top-level `OrgId` predicate here on purpose: the scope is derived from
 	// the sources, both of which filter `OrgId` themselves.
-	return compile(
-		query,
-		{
-			orgId: params.orgId,
-			hourStart: params.hourStart,
-			hourEnd: params.hourEnd,
-		},
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		hourStart: params.hourStart,
+		hourEnd: params.hourEnd,
+	})
 }

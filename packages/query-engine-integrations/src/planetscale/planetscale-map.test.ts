@@ -79,15 +79,15 @@ describe("planetscaleConnectionsSQL", () => {
 describe("PlanetScale map row schemas", () => {
 	it("decode ClickHouse numeric strings for database and branch outputs", () => {
 		const databaseStats = compileUnsafe(planetscaleGaugesSQL(), baseParams)
-		const branchStats = compileUnsafe(
-			planetscaleBranchGaugesSQL(),
-			{ ...baseParams, database: "main-db" },
-		)
+		const branchStats = compileUnsafe(planetscaleBranchGaugesSQL(), {
+			...baseParams,
+			database: "main-db",
+		})
 		const connections = compileUnsafe(planetscaleConnectionsSQL(), baseParams)
-		const branchConnections = compileUnsafe(
-			planetscaleBranchConnectionsSQL(),
-			{ ...baseParams, database: "main-db" },
-		)
+		const branchConnections = compileUnsafe(planetscaleBranchConnectionsSQL(), {
+			...baseParams,
+			database: "main-db",
+		})
 
 		expect(
 			Effect.runSync(

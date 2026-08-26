@@ -145,7 +145,7 @@ parentheses, which is the plain "this value is a sub-SELECT" case.
 | `defineCondFn<Args>(name)`             | Same, returning `Condition`                        |
 | `sameAs(i)`                            | Result rule: decodes as argument `i`               |
 | `firstTyped()`                         | Result rule: the first argument that has a type    |
-| `firstTypedNonNull()`                  | Same, minus `\| null` — `coalesce`, `ifNull`        |
+| `firstTypedNonNull()`                  | Same, minus `\| null` — `coalesce`, `ifNull`       |
 | `elementOf(i)`                         | Result rule: one element of argument `i`'s array   |
 | `arrayOfArg(i)`                        | Result rule: an array of argument `i`              |
 | `compileFnCall<R>(name, ...args)`      | Variadic/generic wrapper (untyped result)          |

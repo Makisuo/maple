@@ -58,14 +58,11 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const compiled = CH.compileUnion(
-							Integrations.aiSessionFacetsQuery(),
-							{
-								orgId: tenant.orgId,
-								startTime: payload.startTime,
-								endTime: payload.endTime,
-							},
-						)
+						const compiled = CH.compileUnion(Integrations.aiSessionFacetsQuery(), {
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+						})
 						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 							profile: "list",
 							context: "aiSessionsFacets",
