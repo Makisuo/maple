@@ -59,7 +59,11 @@ function FeatureCard({
 	// "you will be charged for this" and "we stopped accepting it".
 	const hardCapped = feature.overageAllowed === false && !feature.unlimited
 	const hasOverage = feature.overageUnits > 0 && !hardCapped
-	const nativeCapReached = overageCap !== null && feature.overageUnits >= overageCap
+	// A cap of 0 is "bill me nothing past the allotment", and it is only *reached*
+	// once there is overage to reject — `>= 0` alone flagged an org sitting at 10%
+	// of its included usage as CAP REACHED the moment it set the cap.
+	const nativeCapReached =
+		overageCap !== null && feature.overageUnits > 0 && feature.overageUnits >= overageCap
 
 	return (
 		// Fixed-height slots for the title and the headline, so the meter and the
@@ -92,7 +96,9 @@ function FeatureCard({
 					>
 						{nativeCapReached
 							? "CAP REACHED"
-							: `+${formatVolume(feature.featureId, overageCap)} CAP`}
+							: overageCap === 0
+								? "NO OVERAGE"
+								: `+${formatVolume(feature.featureId, overageCap)} CAP`}
 					</span>
 				)}
 			</div>
