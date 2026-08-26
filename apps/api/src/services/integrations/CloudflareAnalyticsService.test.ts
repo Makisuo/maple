@@ -29,6 +29,7 @@ import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettin
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import type { MetricGaugeRow, MetricSumRow } from "./cloudflare-analytics/mapping"
 import type { OtlpMetricsPayload } from "./cloudflare-analytics/otlp"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const trackedDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(trackedDbs))
@@ -355,13 +356,13 @@ const makeWarehouseStub = (
 			options?: CompiledQueryStub["calls"][number]["options"],
 		) =>
 			// Mirror the real executor: run the compiled query's `decodeRows` so a
-			// query's `rowSchema` (e.g. cloudflareUsageRowSchema's CHNumber coercion)
+			// query's row schema (the `CHNumber` coercion it derives from the SELECT)
 			// is actually exercised instead of passing raw stub rows straight through.
 			Effect.sync(() => {
-				queryStub?.calls.push({ sql: compiled.sql, orgId: tenant.orgId, options })
+				queryStub?.calls.push({ sql: compiledQueryOf(compiled).sql, orgId: tenant.orgId, options })
 			}).pipe(
 				Effect.flatMap(() =>
-					compiled.decodeRows(
+					compiledQueryOf(compiled).decodeRows(
 						(options?.context === "cloudflareUsageStats"
 							? queryStub?.statsRows
 							: queryStub?.rows) ?? [],

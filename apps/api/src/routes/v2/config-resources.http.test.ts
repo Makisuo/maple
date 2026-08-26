@@ -31,6 +31,7 @@ import {
 	SetupAuditServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 /**
  * End-to-end HTTP tests for the v2 config-resource bundle (attribute_mappings,
@@ -63,7 +64,7 @@ const die = () => Effect.die(new Error("not available in this test harness"))
 const warehouseStub = makeWarehouseServiceStub({
 	query: () => Effect.die(new Error("unexpected warehouse pipe query")),
 	rawSqlQuery: () => Effect.succeed([]),
-	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
+	compiledQuery: (_tenant, compiled) => compiledQueryOf(compiled).decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
 	ingest: () => Effect.void,
 })

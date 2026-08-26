@@ -12,13 +12,15 @@ export interface ListTracesOutput {
 	readonly endTime: string
 	readonly durationMicros: number
 	readonly spanCount: number
-	readonly services: string[]
+	readonly services: readonly string[]
 	readonly rootSpanName: string
 	readonly rootSpanKind: string
 	readonly rootSpanStatusCode: string
 	readonly rootHttpMethod: string
 	readonly rootHttpRoute: string
 	readonly rootHttpStatusCode: string
+	/** The root span's projected attribute map, JSON-encoded. */
+	readonly rootSpanAttributes: string
 	readonly hasError: number
 }
 
@@ -84,6 +86,8 @@ export interface ListLogsOutput {
 	readonly body: string
 	readonly traceId: string
 	readonly spanId: string
+	/** Stable per-row identity (`hex(MD5(tuple(…)))`), the list's pagination cursor. */
+	readonly recordIdentity: string
 	readonly logAttributes: string
 	readonly resourceAttributes: string
 }
@@ -123,6 +127,8 @@ export interface LogsCountParams {
 export interface LogsFacetsOutput {
 	readonly severityText: string
 	readonly serviceName: string
+	readonly deploymentEnv: string
+	readonly namespace: string
 	readonly count: number
 	readonly facetType: string
 }
@@ -374,6 +380,7 @@ export interface ServiceReleasesTimelineOutput {
 	readonly bucket: string
 	readonly commitSha: string
 	readonly count: number
+	readonly errorCount: number
 }
 
 export interface ServiceReleasesTimelineParams {
@@ -432,7 +439,7 @@ export interface ErrorDetailTracesOutput {
 	readonly startTime: string
 	readonly durationMicros: number
 	readonly spanCount: number
-	readonly services: string[]
+	readonly services: readonly string[]
 	readonly rootSpanName: string
 	readonly errorMessage: string
 }

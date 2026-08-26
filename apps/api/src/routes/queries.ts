@@ -51,9 +51,7 @@ const cloudflareInfraZoneCounters = defineQuery({
 		// concurrently, then merge by ServiceName — same shape as
 		// serviceCloudflareStats above.
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneCountersSQL(filters), params, {
-			rowSchema: Integrations.cloudflareZoneCountersRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareZoneCountersSQL(filters), params)
 	},
 })
 
@@ -71,9 +69,7 @@ const cloudflareInfraZoneLatency = defineQuery({
 		// concurrently, then merge by ServiceName — same shape as
 		// serviceCloudflareStats above.
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneLatencySQL(), params, {
-			rowSchema: Integrations.cloudflareZoneLatencyRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareZoneLatencySQL(), params)
 	},
 })
 
@@ -89,11 +85,10 @@ const cloudflareInfraZoneFirewallTimeseries = defineQuery({
 			endTime: payload.endTime,
 		}
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(
-			Integrations.cloudflareZoneFirewallTimeseriesSQL(filters),
-			{ ...params, bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: Integrations.cloudflareZoneFirewallTimeseriesRowSchema },
-		)
+		return CH.compile(Integrations.cloudflareZoneFirewallTimeseriesSQL(filters), {
+			...params,
+			bucketSeconds: payload.bucketSeconds,
+		})
 	},
 })
 
@@ -109,9 +104,7 @@ const cloudflareInfraZoneFirewallTop = defineQuery({
 			endTime: payload.endTime,
 		}
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneFirewallTopSQL(filters), params, {
-			rowSchema: Integrations.cloudflareZoneFirewallTopRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareZoneFirewallTopSQL(filters), params)
 	},
 })
 
@@ -127,11 +120,10 @@ const cloudflareInfraZoneDnsTimeseries = defineQuery({
 			endTime: payload.endTime,
 		}
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(
-			Integrations.cloudflareZoneDnsTimeseriesSQL(filters),
-			{ ...params, bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: Integrations.cloudflareZoneDnsTimeseriesRowSchema },
-		)
+		return CH.compile(Integrations.cloudflareZoneDnsTimeseriesSQL(filters), {
+			...params,
+			bucketSeconds: payload.bucketSeconds,
+		})
 	},
 })
 
@@ -147,9 +139,7 @@ const cloudflareInfraZoneDnsBreakdown = defineQuery({
 			endTime: payload.endTime,
 		}
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneDnsBreakdownSQL(filters), params, {
-			rowSchema: Integrations.cloudflareZoneDnsBreakdownRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareZoneDnsBreakdownSQL(filters), params)
 	},
 })
 
@@ -163,9 +153,7 @@ const cloudflareInfraWorkerCounters = defineQuery({
 			startTime: payload.startTime,
 			endTime: payload.endTime,
 		}
-		return CH.compile(Integrations.cloudflareWorkerCountersSQL(), params, {
-			rowSchema: Integrations.cloudflareWorkerCountersRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareWorkerCountersSQL(), params)
 	},
 })
 
@@ -179,9 +167,7 @@ const cloudflareInfraWorkerLatency = defineQuery({
 			startTime: payload.startTime,
 			endTime: payload.endTime,
 		}
-		return CH.compile(Integrations.cloudflareWorkerLatencySQL(), params, {
-			rowSchema: Integrations.cloudflareWorkerLatencyRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareWorkerLatencySQL(), params)
 	},
 })
 
@@ -195,9 +181,7 @@ const cloudflareInfraQueueGauges = defineQuery({
 			startTime: payload.startTime,
 			endTime: payload.endTime,
 		}
-		return CH.compile(Integrations.cloudflareQueueGaugesSQL(), params, {
-			rowSchema: Integrations.cloudflareQueueGaugesRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareQueueGaugesSQL(), params)
 	},
 })
 
@@ -211,9 +195,7 @@ const cloudflareInfraDurableObjects = defineQuery({
 			startTime: payload.startTime,
 			endTime: payload.endTime,
 		}
-		return CH.compile(Integrations.cloudflareDurableObjectCountersSQL(), params, {
-			rowSchema: Integrations.cloudflareDurableObjectCountersRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareDurableObjectCountersSQL(), params)
 	},
 })
 
@@ -231,9 +213,7 @@ const cloudflareServiceCounters = defineQuery({
 		// concurrently, then merge by ServiceName. Routed through the org's
 		// configured warehouse exactly like the metric explorer reads these
 		// same `cloudflare.*` metrics — no special ingest pin needed.
-		return CH.compile(Integrations.cloudflareServiceCountersSQL(), params, {
-			rowSchema: Integrations.cloudflareServiceCountersRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareServiceCountersSQL(), params)
 	},
 })
 
@@ -251,9 +231,7 @@ const cloudflareServiceLatency = defineQuery({
 		// concurrently, then merge by ServiceName. Routed through the org's
 		// configured warehouse exactly like the metric explorer reads these
 		// same `cloudflare.*` metrics — no special ingest pin needed.
-		return CH.compile(Integrations.cloudflareServiceLatencySQL(), params, {
-			rowSchema: Integrations.cloudflareServiceLatencyRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareServiceLatencySQL(), params)
 	},
 })
 
@@ -270,14 +248,11 @@ const planetscaleInfraTimeseries = defineQuery({
 			database: payload.database,
 		}
 		return payload.branch === undefined
-			? CH.compile(Integrations.planetscaleInfraTimeseriesSQL(), base, {
-					rowSchema: Integrations.planetscaleInfraTimeseriesRowSchema,
+			? CH.compile(Integrations.planetscaleInfraTimeseriesSQL(), base)
+			: CH.compile(Integrations.planetscaleBranchInfraTimeseriesSQL(), {
+					...base,
+					branch: payload.branch,
 				})
-			: CH.compile(
-					Integrations.planetscaleBranchInfraTimeseriesSQL(),
-					{ ...base, branch: payload.branch },
-					{ rowSchema: Integrations.planetscaleInfraTimeseriesRowSchema },
-				)
 	},
 })
 
@@ -297,7 +272,6 @@ const cloudflareInfraZoneDetailStatus = defineQuery({
 		CH.compile(
 			Integrations.cloudflareZoneStatusTimeseriesSQL(toCloudflareFilters(payload)),
 			zoneDetailParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneStatusTimeseriesRowSchema },
 		),
 })
 
@@ -309,7 +283,6 @@ const cloudflareInfraZoneDetailCache = defineQuery({
 		CH.compile(
 			Integrations.cloudflareZoneCacheTimeseriesSQL(toCloudflareFilters(payload)),
 			zoneDetailParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneCacheTimeseriesRowSchema },
 		),
 })
 
@@ -319,9 +292,7 @@ const cloudflareInfraZoneDetailLatency = defineQuery({
 	profile: "aggregation",
 	cache: 15,
 	compile: (payload: CloudflareInfraZoneDetailRequest, orgId: string) =>
-		CH.compile(Integrations.cloudflareZoneLatencyTimeseriesSQL(), zoneDetailParams(payload, orgId), {
-			rowSchema: Integrations.cloudflareZoneLatencyTimeseriesRowSchema,
-		}),
+		CH.compile(Integrations.cloudflareZoneLatencyTimeseriesSQL(), zoneDetailParams(payload, orgId)),
 })
 
 // Each reads either the database-level or the branch-level rollup depending on
@@ -342,12 +313,8 @@ const planetscaleServiceGauges = defineQuery({
 	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
 		const params = planetscaleStatsParams(payload, orgId)
 		return payload.database !== undefined
-			? CH.compile(Integrations.planetscaleBranchGaugesSQL(), params, {
-					rowSchema: Integrations.planetscaleBranchStatsRowSchema,
-				})
-			: CH.compile(Integrations.planetscaleGaugesSQL(), params, {
-					rowSchema: Integrations.planetscaleDatabaseStatsRowSchema,
-				})
+			? CH.compile(Integrations.planetscaleBranchGaugesSQL(), params)
+			: CH.compile(Integrations.planetscaleGaugesSQL(), params)
 	},
 })
 
@@ -358,12 +325,8 @@ const planetscaleServiceConnections = defineQuery({
 	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
 		const params = planetscaleStatsParams(payload, orgId)
 		return payload.database !== undefined
-			? CH.compile(Integrations.planetscaleBranchConnectionsSQL(), params, {
-					rowSchema: Integrations.planetscaleBranchConnectionsRowSchema,
-				})
-			: CH.compile(Integrations.planetscaleConnectionsSQL(), params, {
-					rowSchema: Integrations.planetscaleConnectionsRowSchema,
-				})
+			? CH.compile(Integrations.planetscaleBranchConnectionsSQL(), params)
+			: CH.compile(Integrations.planetscaleConnectionsSQL(), params)
 	},
 })
 
@@ -462,7 +425,6 @@ const cloudflareInfraZoneBreakdownTotals = defineQuery({
 				payload.limit ?? 100,
 			),
 			zoneBreakdownParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneBreakdownTotalsRowSchema },
 		)
 	},
 })
@@ -480,7 +442,6 @@ const cloudflareInfraZoneBreakdownCoverage = defineQuery({
 		CH.compile(
 			Integrations.cloudflareZoneBreakdownCoverageSQL(payload.dimension),
 			zoneBreakdownParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneBreakdownCoverageRowSchema },
 		),
 })
 
@@ -492,7 +453,6 @@ const cloudflareInfraZoneBreakdownZoneTotal = defineQuery({
 		CH.compile(
 			Integrations.cloudflareZoneCountersSQL(toCloudflareFilters(payload)),
 			zoneBreakdownParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneCountersRowSchema },
 		),
 })
 
@@ -522,7 +482,6 @@ const cloudflareInfraZoneBreakdownTimeseries = defineQuery({
 				payload.topKeys,
 			),
 			{ ...zoneBreakdownParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: Integrations.cloudflareZoneBreakdownTimeseriesRowSchema },
 		),
 })
 
@@ -654,16 +613,12 @@ export const Queries = {
 		profile: "aggregation",
 		cache: 15,
 		compile: (payload: CloudflareInfraZoneTimeseriesRequest, orgId: string) =>
-			CH.compile(
-				Integrations.cloudflareZoneTimeseriesSQL(toCloudflareFilters(payload)),
-				{
-					orgId,
-					startTime: payload.startTime,
-					endTime: payload.endTime,
-					bucketSeconds: payload.bucketSeconds,
-				},
-				{ rowSchema: Integrations.cloudflareZoneTimeseriesRowSchema },
-			),
+			CH.compile(Integrations.cloudflareZoneTimeseriesSQL(toCloudflareFilters(payload)), {
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds: payload.bucketSeconds,
+			}),
 	}),
 
 	// Integration queries, declared above.

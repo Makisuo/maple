@@ -39,8 +39,11 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 								vendorIds: payload.vendorIds,
 								serviceNames: payload.serviceNames,
 							}),
-							{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-							{ rowSchema: Integrations.aiSessionListRowSchema },
+							{
+								orgId: tenant.orgId,
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+							},
 						)
 						// The row schema already coerces the UInt64 aggregates and decodes
 						// exactly the response's fields, so rows pass through unmapped.
@@ -55,11 +58,11 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const compiled = CH.compileUnion(
-							Integrations.aiSessionFacetsQuery(),
-							{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-							{ rowSchema: Integrations.aiSessionFacetsRowSchema },
-						)
+						const compiled = CH.compileUnion(Integrations.aiSessionFacetsQuery(), {
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+						})
 						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 							profile: "list",
 							context: "aiSessionsFacets",
@@ -100,11 +103,10 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							hint === undefined
 								? yield* warehouse.compiledQuery(
 										tenant,
-										CH.compile(
-											Integrations.aiSessionWindowQuery(),
-											{ orgId: tenant.orgId, sessionId: payload.sessionId },
-											{ rowSchema: Integrations.aiSessionWindowRowSchema },
-										),
+										CH.compile(Integrations.aiSessionWindowQuery(), {
+											orgId: tenant.orgId,
+											sessionId: payload.sessionId,
+										}),
 										{ profile: "list", context: "aiSessionWindow" },
 									)
 								: undefined

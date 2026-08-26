@@ -12,7 +12,7 @@ import type {
 	WarehouseValidationError,
 } from "@maple/domain/http"
 import type { ResolvedWarehouseConfig } from "./backend"
-import type { CompiledQuery } from "../ch"
+import type { CompiledQuery, CompiledQueryInput, QueryBuilderError } from "../ch"
 import type { WarehouseCapabilities } from "../capabilities"
 import type { WarehouseExecutorApi } from "../observability"
 import type { SqlQueryOptions } from "../profiles"
@@ -34,7 +34,7 @@ export type { ResolvedWarehouseConfig } from "./backend"
  * An ingest-routed compiled query skips tenant route resolution entirely, so
  * its type excludes the configuration failures that only that lookup can emit.
  */
-export type CompiledQueryError<Routing extends "ingest" | undefined> = Routing extends "ingest"
+export type CompiledQueryError<Routing extends string | undefined> = Routing extends "ingest"
 	? ManagedWarehouseError
 	: WarehouseCompiledQueryError
 
@@ -146,6 +146,36 @@ export interface WarehouseExecutorDeps {
 	readonly invalidateRoute?: (tenant: ExecutionTenant) => Effect.Effect<boolean>
 }
 
+/**
+ * Compile a query once the tenant's live capabilities are known.
+ *
+ * Effect-returning because `CH.compile` is: a missing param or an unencodable
+ * value is a typed failure now rather than a thrown one. See
+ * {@link CompiledQueryInput} for what this port does with that failure.
+ */
+export type CapabilityCompile<T> = (
+	capabilities: WarehouseCapabilities,
+) => Effect.Effect<CompiledQuery<T>, QueryBuilderError>
+
+/**
+ * What the execution methods accept in place of a compiled query — re-exported
+ * from the builder because this port is where the choice is made.
+ *
+ * `CH.compile` returns an `Effect`, and this port takes it unrun: one place
+ * decides what a compile failure means, rather than every call site deciding
+ * again. The decision is `orDie`. A query reaching this port is built from
+ * Maple's own query definitions, so a `QueryBuilderError` here says a
+ * definition and its params disagree — a bug, not a condition a route can
+ * report its way out of.
+ *
+ * A caller whose params carry values off the wire is the exception, and owes
+ * that failure an answer *before* it gets here: constrain the value at the HTTP
+ * boundary so the compile cannot fail, or `Effect.mapError` it into a domain
+ * failure the route already returns. What it must not do is hand the raw
+ * `Effect` over and let this seam turn a bad request into a 500.
+ */
+export type { CompiledQueryInput } from "../ch"
+
 export interface WarehouseQueryServiceApi {
 	readonly query: (
 		tenant: ExecutionTenant,
@@ -154,7 +184,7 @@ export interface WarehouseQueryServiceApi {
 	) => Effect.Effect<WarehouseQueryResponse, WarehouseCompiledQueryError | WarehouseValidationError>
 	/**
 	 * Execute a query that deliberately spans every tenant. The compiled query
-	 * must declare `.crossOrg()`, and `justification` is recorded on the span so
+	 * must declare `.crossTenant()`, and `justification` is recorded on the span so
 	 * cross-tenant reads are auditable from the traces.
 	 *
 	 * There is deliberately no general `sqlQuery(tenant, sql)` on this shape:
@@ -163,7 +193,7 @@ export interface WarehouseQueryServiceApi {
 	 */
 	readonly crossOrgQuery: <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQueryInput<T>,
 		options: SqlQueryOptions & { readonly justification: string },
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseCompiledQueryError>
 	/** Execute validated user-authored SQL with tenant-scoped credentials and hard response limits. */
@@ -175,15 +205,16 @@ export interface WarehouseQueryServiceApi {
 		ReadonlyArray<Record<string, unknown>>,
 		WarehouseExecutionError | RawSqlValidationError
 	>
+
 	readonly compiledQuery: {
-		<T, Routing extends "ingest" | undefined>(
+		<T, Routing extends string | undefined>(
 			tenant: ExecutionTenant,
-			compiled: CompiledQuery<T, Routing>,
+			compiled: CompiledQueryInput<T, Routing>,
 			options?: SqlQueryOptions,
 		): Effect.Effect<ReadonlyArray<T>, CompiledQueryError<Routing>>
 		<T>(
 			tenant: ExecutionTenant,
-			compiled: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
+			compiled: CapabilityCompile<T>,
 			options?: SqlQueryOptions,
 		): Effect.Effect<ReadonlyArray<T>, WarehouseCompiledQueryError>
 	}
@@ -197,19 +228,19 @@ export interface WarehouseQueryServiceApi {
 	 */
 	readonly compiledQueryBounded: <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQueryInput<T>,
 		options: SqlQueryOptions & {
 			readonly responseLimits: WarehouseResponseLimits
 		},
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseCompiledQueryError | WarehouseResponseLimitError>
 	readonly compiledQueryWithCapabilities: <T>(
 		tenant: ExecutionTenant,
-		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
+		compile: CapabilityCompile<T>,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseCompiledQueryError>
 	readonly compiledQueryFirst: <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		compiled: CompiledQueryInput<T> | CapabilityCompile<T>,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<Option.Option<T>, WarehouseCompiledQueryError>
 	/**

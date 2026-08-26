@@ -12,6 +12,7 @@ export {
 	anyIf,
 	uniq,
 	uniqIf,
+	uniqExact,
 	sumIf,
 	avgIf,
 	maxIf,
@@ -35,6 +36,7 @@ export {
 	length_,
 	lower_,
 	domain_,
+	hex,
 	path_,
 	cutQueryString,
 	replaceOne,
@@ -72,9 +74,20 @@ export {
 	toDateTime,
 } from "./date-time"
 
-export { if_, multiIf, coalesce, nullIf } from "./conditional"
+export { if_, multiIf, coalesce, nullIf, ifNotFinite } from "./conditional"
 
-export { arrayOf, arrayStringConcat, arrayFilter, arrayJoin, has } from "./array"
+export {
+	arrayDistinct,
+	arrayElement,
+	arrayFilter,
+	arrayJoin,
+	arrayOf,
+	arrayPushFront,
+	arrayReverseSort,
+	arraySort,
+	arrayStringConcat,
+	has,
+} from "./array"
 
 export { mapContains, mapGet, mapKeys, mapValues, mapLiteral } from "./map"
 

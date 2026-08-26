@@ -7,6 +7,7 @@ import type { McpToolRegistrar, McpToolResult } from "@/mcp/tools/types"
 import { registerQueryFunnelTool } from "@/mcp/tools/query-funnel"
 import { registerListProductEventsTool } from "@/mcp/tools/list-product-events"
 import { mapleToolCatalog, toInputSchema } from "@/mcp/tools/registry"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 // Capture the handler the tool registers so its validation paths can be driven
 // directly. Those return before any service is read, so an empty context is
@@ -128,7 +129,7 @@ describe("productEventsFunnel (observability helper)", () => {
 		orgId: "org_test",
 		query: () => Effect.succeed({ data: [] }),
 		compiledQuery: <T>(compiled: { readonly sql: string }) => {
-			compiledSql.push(compiled.sql)
+			compiledSql.push(compiledQueryOf(compiled).sql)
 			// SAFETY: the stub answers every compiled query with funnel rows; the
 			// only query these tests compile is the funnel, whose row type is `T`.
 			return Effect.succeed(rows as ReadonlyArray<T>)

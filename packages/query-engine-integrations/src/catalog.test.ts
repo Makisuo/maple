@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { collectIntegrationCatalog } from "./catalog"
+import {
+	collectIntegrationCatalog,
+	UNDECODED_INTEGRATION_QUERIES,
+	undecodedIntegrationColumns,
+	undecodedIntegrationQueries,
+} from "./catalog"
 
 // The integration-side half of the SQL gate. `@maple/query-engine`'s catalog
 // cannot reach these builders — it must not depend on this package — so the
@@ -20,8 +25,23 @@ describe("integration sql catalog", () => {
 	// @maple-dev/clickhouse-builder. No integration query reads across tenants.
 	it("scopes every query to an org", () => {
 		for (const entry of entries) {
-			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe("org")
+			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe("single-tenant")
 		}
+	})
+
+	// Asserted exactly, not as a ceiling: a query that stops deriving a row
+	// schema fails here, and so does one still listed after it starts. The
+	// `decodeRows` identity cast is invisible at runtime, so this list is the
+	// only place this package can see which of its queries validate nothing.
+	it("decodes every query except the declared exceptions", () => {
+		const detail = [...undecodedIntegrationColumns(entries)]
+			.map(([id, cols]) => `  ${id} — untyped: ${cols.join(", ")}`)
+			.join("\n")
+
+		expect(
+			undecodedIntegrationQueries(entries),
+			`undecoded queries and the columns to type:\n${detail}`,
+		).toEqual([...UNDECODED_INTEGRATION_QUERIES].sort())
 	})
 
 	it("emits the same SQL as the recorded baseline", async () => {

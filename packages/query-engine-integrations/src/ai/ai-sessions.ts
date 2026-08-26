@@ -112,13 +112,6 @@ const hasSessionId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<strin
 const fromUnixTimestamp64Nano = (nanos: CH.Expr<number>): CH.Expr<string> =>
 	compileFnCall<string>("fromUnixTimestamp64Nano", nanos)
 
-/**
- * Exact distinct count. Not in the builder's function set, which only carries
- * the approximate `uniq`. A facet count sits next to the list it filters, so an
- * HLL estimate that disagrees with the visible row count reads as a bug.
- */
-const uniqExact = <T>(expr: CH.Expr<T>): CH.Expr<number> => compileFnCall<number>("uniqExact", expr)
-
 export interface AiSessionListOpts {
 	/** Sessions returned, most recently started first. */
 	readonly limit?: number
@@ -140,19 +133,6 @@ export interface AiSessionListOutput {
 	readonly endTime: string
 	readonly durationMs: number
 }
-
-export const aiSessionListRowSchema: CompiledQueryRowSchema<AiSessionListOutput> = Schema.Struct({
-	sessionId: Schema.String,
-	vendorId: Schema.String,
-	vendorVersion: Schema.String,
-	traceCount: CHNumber,
-	spanCount: CHNumber,
-	errorSpanCount: CHNumber,
-	serviceNames: Schema.Array(Schema.String),
-	startTime: Schema.String,
-	endTime: Schema.String,
-	durationMs: CHNumber,
-})
 
 /**
  * One row per AI agent session in the window.
@@ -194,8 +174,8 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			hasSessionId($.SpanAttributes, $.SpanAttributes.get(SESSION_ID_ATTR)),
 			opts.vendorIds?.length
 				? CH.inList($.SpanAttributes.get(VENDOR_ID_ATTR), opts.vendorIds)
@@ -234,7 +214,12 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 							.and(
 								$.SpanAttributes.get(ERROR_TYPE_ATTR)
 									.neq("")
-									.or(CH.inList($.SpanAttributes.get(RESPONSE_STATUS_ATTR), FAILED_RESPONSE_STATUSES)),
+									.or(
+										CH.inList(
+											$.SpanAttributes.get(RESPONSE_STATUS_ATTR),
+											FAILED_RESPONSE_STATUSES,
+										),
+									),
 							),
 					),
 				),
@@ -257,8 +242,8 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 		})
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(CH.intervalSub(param.dateTime("startTime"), FAN_OUT_PAD_SECONDS)),
-			$.Timestamp.lte(CH.intervalAdd(param.dateTime("endTime"), FAN_OUT_PAD_SECONDS)),
+			$.Timestamp.gte(CH.intervalSub(param.dateTimeString("startTime"), FAN_OUT_PAD_SECONDS)),
+			$.Timestamp.lte(CH.intervalAdd(param.dateTimeString("endTime"), FAN_OUT_PAD_SECONDS)),
 			inSubquery($.TraceId, sessionTraceIds),
 		])
 		.groupBy("traceId")
@@ -307,12 +292,6 @@ export interface AiSessionFacetsOutput {
 	readonly facetType: string
 }
 
-export const aiSessionFacetsRowSchema: CompiledQueryRowSchema<AiSessionFacetsOutput> = Schema.Struct({
-	name: Schema.String,
-	count: CHNumber,
-	facetType: Schema.String,
-})
-
 /**
  * Distinct sessions per vendor and per service, for the list's filter sidebar.
  *
@@ -335,15 +314,15 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 		from(Traces)
 			.select(($) => ({
 				name: name($),
-				count: uniqExact($.SpanAttributes.get(SESSION_ID_ATTR)),
+				count: CH.uniqExact($.SpanAttributes.get(SESSION_ID_ATTR)),
 				facetType: CH.lit(facetType),
 			}))
 			.where(($) => [
 				// Every UNION ALL branch reads a table, so every branch carries the org
 				// predicate itself — see this file's header.
 				$.OrgId.eq(param.string("orgId")),
-				$.Timestamp.gte(param.dateTime("startTime")),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.gte(param.dateTimeString("startTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 				hasSessionId($.SpanAttributes, $.SpanAttributes.get(SESSION_ID_ATTR)),
 				// A span can be session-bearing without a vendor stamp; a blank option
 				// filters nothing and is not offered.
@@ -368,12 +347,6 @@ export interface AiSessionWindowOutput {
 	/** Zero means no such session, which the bounds cannot say on their own. */
 	readonly spanCount: number
 }
-
-export const aiSessionWindowRowSchema: CompiledQueryRowSchema<AiSessionWindowOutput> = Schema.Struct({
-	startTime: Schema.String,
-	endTime: Schema.String,
-	spanCount: CHNumber,
-})
 
 /**
  * The bounds of one session, for a caller that holds its id and nothing else.
@@ -488,8 +461,8 @@ export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			// The presence guard is what stops an empty `sessionId` param from
 			// matching every span that simply LACKS the key — ClickHouse reads a
 			// missing Map key back as `''`, so equality alone would turn a blank
@@ -516,8 +489,8 @@ export function aiSessionSpansQuery(opts: AiSessionSpansOpts = {}) {
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.Timestamp.gte(param.dateTime("startTime")),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.gte(param.dateTimeString("startTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 				inSubquery($.TraceId, sessionTraceIds),
 			])
 			// `spanId` breaks ties: agent spans routinely share a millisecond, and

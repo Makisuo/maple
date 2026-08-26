@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { compile } from "../index"
+import { compileUnsafe } from "../index"
 import { compile as compileFragment } from "@maple-dev/clickhouse-builder/sql"
 import * as CH from "../index"
 import { edgeCondition, hourGrain, interiorBounds, interiorConditions, minuteGrain } from "./rollup-splice"
+import { paramPlaceholder } from "@maple-dev/clickhouse-builder"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 // These pin the tiling invariant: the raw edge and the aggregate interior must
 // cover the window exactly once. Getting it wrong does not raise — it inflates
@@ -20,7 +22,7 @@ const sqlOf = (cond: CH.Condition) => compileFragment(cond.toFragment())
 /** Compile a trivial query carrying `conds` so the WHERE text can be inspected. */
 const whereSql = (conds: ReadonlyArray<CH.Condition>) => {
 	const t = CH.table("t", { OrgId: CH.string, Hour: CH.dateTime, Minute: CH.dateTime })
-	return compile(
+	return compileUnsafe(
 		CH.from(t)
 			.select(($) => ({ c: $.OrgId }))
 			.where(($) => [$.OrgId.eq("org"), ...conds]),
@@ -33,7 +35,7 @@ describe("rollup splice boundaries", () => {
 		// A `<=` on the upper bound would include the trailing partial bucket that
 		// the raw edge also covers — the silent double-count.
 		it("bounds the interior with >= lower and strictly < upper", () => {
-			const [lower, upper] = interiorConditions(CH.rawExpr<string>("Hour"))
+			const [lower, upper] = interiorConditions(CH.rawExpr("Hour", T.dateTimeString))
 			expect(sqlOf(lower)).toContain(">=")
 			expect(sqlOf(upper)).toContain("<")
 			expect(sqlOf(upper)).not.toContain("<=")
@@ -68,7 +70,7 @@ describe("rollup splice boundaries", () => {
 			const edge = sqlOf(edgeCondition("Timestamp", grain))
 			expect(edge).toBe(`(Timestamp < ${grain.firstFullBucket} OR Timestamp >= ${grain.endFloor})`)
 
-			const [lower, upper] = interiorConditions(CH.rawExpr<string>("Hour"), grain)
+			const [lower, upper] = interiorConditions(CH.rawExpr("Hour", T.dateTimeString), grain)
 			// The edge excludes exactly what the interior includes.
 			expect(sqlOf(lower)).toContain(grain.firstFullBucket)
 			expect(sqlOf(upper)).toContain(grain.endFloor)
@@ -84,9 +86,9 @@ describe("rollup splice boundaries", () => {
 	})
 
 	it("emits placeholders that survive to compile time", () => {
-		// The fragments embed __PARAM_*__ rather than literals, so a compiled
-		// query resolves them once at the outer compile() call.
-		expect(hourGrain.startDt).toContain("__PARAM_startTime__")
+		// The fragments embed param placeholders rather than literals, so a
+		// compiled query resolves them once at the outer compile() call.
+		expect(hourGrain.startDt).toContain(paramPlaceholder("dateTime", "startTime"))
 		const sql = whereSql([edgeCondition("Hour")])
 		expect(sql).not.toContain("__PARAM_")
 		expect(sql).toContain("2026-01-01 10:30:00")

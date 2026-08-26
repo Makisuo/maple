@@ -2,21 +2,13 @@
 // firewall/WAF, DNS, and the breakdown dimensions behind /infra/cloudflare.
 
 export {
-	cloudflareZoneCountersRowSchema,
 	cloudflareZoneCountersSQL,
-	cloudflareZoneLatencyRowSchema,
 	cloudflareZoneLatencySQL,
-	cloudflareZoneTimeseriesRowSchema,
 	cloudflareZoneTimeseriesSQL,
-	cloudflareZoneStatusTimeseriesRowSchema,
 	cloudflareZoneStatusTimeseriesSQL,
-	cloudflareZoneCacheTimeseriesRowSchema,
 	cloudflareZoneCacheTimeseriesSQL,
-	cloudflareZoneLatencyTimeseriesRowSchema,
 	cloudflareZoneLatencyTimeseriesSQL,
-	cloudflareWorkerCountersRowSchema,
 	cloudflareWorkerCountersSQL,
-	cloudflareWorkerLatencyRowSchema,
 	cloudflareWorkerLatencySQL,
 	type CloudflareZoneCountersOutput,
 	type CloudflareZoneLatencyOutput,
@@ -29,17 +21,11 @@ export {
 } from "./cloudflare-infra"
 
 export {
-	cloudflareZoneFirewallTimeseriesRowSchema,
 	cloudflareZoneFirewallTimeseriesSQL,
-	cloudflareZoneFirewallTopRowSchema,
 	cloudflareZoneFirewallTopSQL,
-	cloudflareZoneDnsTimeseriesRowSchema,
 	cloudflareZoneDnsTimeseriesSQL,
-	cloudflareZoneDnsBreakdownRowSchema,
 	cloudflareZoneDnsBreakdownSQL,
-	cloudflareQueueGaugesRowSchema,
 	cloudflareQueueGaugesSQL,
-	cloudflareDurableObjectCountersRowSchema,
 	cloudflareDurableObjectCountersSQL,
 	type CloudflareZoneFirewallTimeseriesOutput,
 	type CloudflareZoneFirewallTopOutput,
@@ -66,11 +52,8 @@ export {
 	CLOUDFLARE_BREAKDOWN_OTHER_KEY,
 	CLOUDFLARE_BREAKDOWN_SERIES_LIMIT,
 	cloudflareBreakdownMetrics,
-	cloudflareZoneBreakdownCoverageRowSchema,
 	cloudflareZoneBreakdownCoverageSQL,
-	cloudflareZoneBreakdownTimeseriesRowSchema,
 	cloudflareZoneBreakdownTimeseriesSQL,
-	cloudflareZoneBreakdownTotalsRowSchema,
 	cloudflareZoneBreakdownTotalsSQL,
 	cloudflareZoneFacetsQuery,
 	type CloudflareBreakdownDimension,
@@ -81,9 +64,7 @@ export {
 } from "./cloudflare-infra-breakdowns"
 
 export {
-	cloudflareServiceCountersRowSchema,
 	cloudflareServiceCountersSQL,
-	cloudflareServiceLatencyRowSchema,
 	cloudflareServiceLatencySQL,
 	type CloudflareServiceCountersOutput,
 	type CloudflareServiceLatencyOutput,
@@ -93,9 +74,7 @@ export {
 	BLOCKED_FIREWALL_ACTIONS,
 	CLOUDFLARE_USAGE_METRIC_NAMES,
 	cloudflareUsageQuery,
-	cloudflareUsageRowSchema,
 	cloudflareUsageStatsQuery,
-	cloudflareUsageStatsRowSchema,
 	type CloudflareUsageOutput,
 	type CloudflareUsageStatsOutput,
 } from "./cloudflare-usage"

@@ -1,5 +1,6 @@
 // Type-level tests: Query builder, joins, subqueries, union, compilation
 
+import type { DateTime } from "effect"
 import { expectTypeOf } from "expect-type"
 import type { Effect } from "effect"
 import * as CH from "./index"
@@ -43,7 +44,7 @@ const q1 = CH.from(Users).select(($) => ({
 
 type Q1Output = InferQueryOutput<typeof q1>
 expectTypeOf<Q1Output>().toEqualTypeOf<{
-	readonly bucket: string
+	readonly bucket: DateTime.Utc
 	readonly count: number
 	readonly avgScore: number
 }>()
@@ -80,7 +81,7 @@ CH.from(Users).select(($) => {
 	expectTypeOf($.Score).toMatchTypeOf<Expr<number>>()
 	expectTypeOf($.Attrs).toMatchTypeOf<Expr<Record<string, string>>>()
 	expectTypeOf($.Tags).toMatchTypeOf<Expr<ReadonlyArray<string>>>()
-	expectTypeOf($.CreatedAt).toMatchTypeOf<Expr<string>>()
+	expectTypeOf($.CreatedAt).toMatchTypeOf<Expr<DateTime.Utc>>()
 	return { id: $.Id }
 })
 
@@ -288,7 +289,7 @@ const compileTarget = CH.from(Users).select(($) => ({
 	age: $.Age,
 }))
 
-const compiled = CH.compile(compileTarget, {})
+const compiled = CH.compileUnsafe(compileTarget, {})
 
 expectTypeOf(compiled).toMatchTypeOf<CompiledQuery<{ readonly id: string; readonly age: number }>>()
 

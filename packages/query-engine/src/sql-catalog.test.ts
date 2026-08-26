@@ -12,6 +12,9 @@ import {
 	querySpecFixtures,
 	routeCoverage,
 	uncoveredPipes,
+	UNDECODED_QUERIES,
+	undecodedColumns,
+	undecodedQueries,
 } from "./sql-catalog"
 import { builderFixtures } from "./ch/builder-fixtures"
 import * as activityQueries from "./ch/queries/activity"
@@ -58,8 +61,22 @@ describe("sql catalog", () => {
 		expect(uncoveredPipes(pipeEntries)).toEqual([])
 	})
 
+	// Asserted exactly, not as a ceiling: a query that stops deriving a row
+	// schema fails here, and so does one still listed after it starts. The
+	// `decodeRows` identity cast is invisible at runtime, so this list is the
+	// only place the product can see which of its queries validate nothing.
+	it("decodes every query except the declared exceptions", () => {
+		const columns = undecodedColumns(entries)
+		const detail = [...columns]
+			.map(([name, cols]) => `  ${name} — untyped: ${cols.join(", ")}`)
+			.join("\n")
+		expect(undecodedQueries(entries), `undecoded queries and the columns to type:\n${detail}`).toEqual(
+			[...UNDECODED_QUERIES].sort(),
+		)
+	})
+
 	// Builders that read across every tenant on purpose. Each must declare
-	// `.crossOrg()` and run through `WarehouseQueryService.crossOrgQuery`, which
+	// `.crossTenant()` and run through `WarehouseQueryService.crossOrgQuery`, which
 	// records a justification on the span. This list should stay tiny — it is the
 	// complete inventory of cross-tenant reads in the product.
 	const CROSS_ORG_BUILDERS: ReadonlySet<string> = new Set([
@@ -75,7 +92,7 @@ describe("sql catalog", () => {
 	it("scopes every query to an org", () => {
 		for (const entry of entries) {
 			if (entry.compiled === undefined) continue
-			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-org" : "org"
+			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-tenant" : "single-tenant"
 			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe(expected)
 		}
 	})

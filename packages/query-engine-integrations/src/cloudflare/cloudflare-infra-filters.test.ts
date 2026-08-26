@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import { cloudflareZoneCacheTimeseriesSQL } from "./cloudflare-infra"
 import { cloudflareZoneBreakdownTotalsSQL } from "./cloudflare-infra-breakdowns"
 import { cloudflareZoneFirewallTopSQL } from "./cloudflare-infra-extended"
@@ -14,7 +14,7 @@ const zoneParams = {
 
 describe("cloudflareFilterConditions", () => {
 	it("emits an IN predicate for a key the metric family carries", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			cloudflareZoneBreakdownTotalsSQL("path", { paths: ["/api/users", "/health"] }),
 			zoneParams,
 		)
@@ -25,7 +25,7 @@ describe("cloudflareFilterConditions", () => {
 		// The safety property: `cloudflare.http.requests` rows have no url.path, so a path filter
 		// must be dropped rather than compiled into a predicate that matches zero rows and silently
 		// blanks the cache chart.
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			cloudflareZoneCacheTimeseriesSQL({ paths: ["/api/users"], cacheStatuses: ["miss"] }),
 			{ ...zoneParams, bucketSeconds: 300 },
 		)
@@ -35,14 +35,14 @@ describe("cloudflareFilterConditions", () => {
 
 	it("routes the host filter through the same transitional coalesce as the grouping key", () => {
 		// A host read off a chart built on pre-rename rows must still filter to those rows.
-		const { sql } = compileCH(cloudflareZoneFirewallTopSQL({ hosts: ["a.example.com"] }), zoneParams)
+		const { sql } = compileUnsafe(cloudflareZoneFirewallTopSQL({ hosts: ["a.example.com"] }), zoneParams)
 		expect(sql).toContain("server.address']")
 		expect(sql).toContain("http.host']")
 		expect(sql).toContain("IN ('a.example.com')")
 	})
 
 	it("compiles pathContains to a case-insensitive substring match", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			cloudflareZoneBreakdownTotalsSQL("path", { pathContains: "/api" }),
 			zoneParams,
 		)
@@ -51,7 +51,7 @@ describe("cloudflareFilterConditions", () => {
 	})
 
 	it("escapes quotes in filter values so a value cannot terminate its literal", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			cloudflareZoneBreakdownTotalsSQL("path", { paths: ["/a'; DROP TABLE metrics_sum; --"] }),
 			zoneParams,
 		)
@@ -61,8 +61,8 @@ describe("cloudflareFilterConditions", () => {
 	})
 
 	it("produces no condition for empty or absent values", () => {
-		const bare = compileCH(cloudflareZoneBreakdownTotalsSQL("path"), zoneParams).sql
-		const empty = compileCH(
+		const bare = compileUnsafe(cloudflareZoneBreakdownTotalsSQL("path"), zoneParams).sql
+		const empty = compileUnsafe(
 			cloudflareZoneBreakdownTotalsSQL("path", { paths: [], pathContains: "" }),
 			zoneParams,
 		).sql

@@ -15,6 +15,17 @@
 
 import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
 import * as CH from "./index"
+import { Effect } from "effect"
+import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
+
+/**
+ * Run a compile that is now Effect-returning, throwing on failure.
+ *
+ * The catalog wants a throw: a fixture that will not compile must fail its test
+ * loudly rather than becoming an entry the sweep silently skips. Compilation is
+ * synchronous and effect-free, so `runSync` is exact here.
+ */
+const runCompile = <A>(compiled: Effect.Effect<A, QueryBuilderError>): A => Effect.runSync(compiled)
 
 export interface BuilderFixture {
 	/** Module basename under `src/ch/queries/`, e.g. `"session-replays"`. */
@@ -93,22 +104,28 @@ const webAnalyticsVariants = (
 
 const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
 	...webAnalyticsVariants("webAnalyticsSummaryQuery", "default", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsSummaryQuery({ useProductEvents }), window),
+		CH.compileUnsafe(CH.webAnalyticsSummaryQuery({ useProductEvents }), window),
 	),
 	...webAnalyticsVariants("webAnalyticsSummaryQuery", "filtered", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsSummaryQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }), window),
+		CH.compileUnsafe(
+			CH.webAnalyticsSummaryQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }),
+			window,
+		),
 	),
 	...webAnalyticsVariants("webAnalyticsLiveQuery", "default", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsLiveQuery({ useProductEvents }), window),
+		CH.compileUnsafe(CH.webAnalyticsLiveQuery({ useProductEvents }), window),
 	),
 	...webAnalyticsVariants("webAnalyticsLiveQuery", "filtered", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsLiveQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }), window),
+		CH.compileUnsafe(
+			CH.webAnalyticsLiveQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }),
+			window,
+		),
 	),
 	...webAnalyticsVariants("webAnalyticsTimeseriesQuery", "default", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }), window),
+		CH.compileUnsafe(CH.webAnalyticsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }), window),
 	),
 	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "default", (useProductEvents) =>
-		CH.compile(
+		CH.compileUnsafe(
 			CH.webAnalyticsPageviewsTimeseriesQuery({ bucketSeconds: 3600, useProductEvents }),
 			window,
 		),
@@ -116,7 +133,7 @@ const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
 	// Forces the semi-join: `referrerHost` is a session_replays-only dimension,
 	// so the page-view source has to narrow through a subquery to honour it.
 	...webAnalyticsVariants("webAnalyticsPageviewsTimeseriesQuery", "semi-joined", (useProductEvents) =>
-		CH.compile(
+		CH.compileUnsafe(
 			CH.webAnalyticsPageviewsTimeseriesQuery({
 				bucketSeconds: 3600,
 				referrerHost: "t.co",
@@ -127,26 +144,32 @@ const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
 		),
 	),
 	...webAnalyticsVariants("webAnalyticsPagesQuery", "default", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, useProductEvents }), window),
+		CH.compileUnsafe(CH.webAnalyticsPagesQuery({ limit: 100, useProductEvents }), window),
 	),
 	// host/pagePath filter directly off the page-view source — deliberately NOT
 	// through the semi-join, so the 82% of sessions with no analytics block still count.
 	...webAnalyticsVariants("webAnalyticsPagesQuery", "url-filtered", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, host: "maple.dev", useProductEvents }), window),
+		CH.compileUnsafe(
+			CH.webAnalyticsPagesQuery({ limit: 100, host: "maple.dev", useProductEvents }),
+			window,
+		),
 	),
 	...webAnalyticsVariants("webAnalyticsPagesQuery", "semi-joined", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsPagesQuery({ limit: 100, country: "DE", useProductEvents }), window),
+		CH.compileUnsafe(CH.webAnalyticsPagesQuery({ limit: 100, country: "DE", useProductEvents }), window),
 	),
 	...webAnalyticsVariants("webAnalyticsEventsQuery", "default", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsEventsQuery({ limit: 100, useProductEvents }), window),
+		CH.compileUnsafe(CH.webAnalyticsEventsQuery({ limit: 100, useProductEvents }), window),
 	),
 	...webAnalyticsVariants("webAnalyticsEventsQuery", "url-filtered", (useProductEvents) =>
-		CH.compile(CH.webAnalyticsEventsQuery({ limit: 100, host: "maple.dev", useProductEvents }), window),
+		CH.compileUnsafe(
+			CH.webAnalyticsEventsQuery({ limit: 100, host: "maple.dev", useProductEvents }),
+			window,
+		),
 	),
 	// `eventName` alongside a replays dimension: the replays semi-join must appear
 	// and the event's own filter must NOT — this is the breakdown it is picked from.
 	...webAnalyticsVariants("webAnalyticsEventsQuery", "semi-joined", (useProductEvents) =>
-		CH.compile(
+		CH.compileUnsafe(
 			CH.webAnalyticsEventsQuery({
 				limit: 100,
 				country: "DE",
@@ -157,14 +180,14 @@ const webAnalyticsFixtures: ReadonlyArray<BuilderFixture> = [
 		),
 	),
 	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "default", (useProductEvents) =>
-		CH.compileUnion(CH.webAnalyticsBreakdownsQuery({ useProductEvents }), window),
+		CH.compileUnionUnsafe(CH.webAnalyticsBreakdownsQuery({ useProductEvents }), window),
 	),
 	// Every dimension selected at once: each branch must exclude its own filter,
 	// so this is the fixture that would catch a branch that forgot to. On the
 	// rollup variant it is also the one that shows the navigation semi-join being
 	// inlined into all twelve branches — the shape the rollup exists to make cheap.
 	...webAnalyticsVariants("webAnalyticsBreakdownsQuery", "all-dimensions-filtered", (useProductEvents) =>
-		CH.compileUnion(
+		CH.compileUnionUnsafe(
 			CH.webAnalyticsBreakdownsQuery({ ...WEB_ANALYTICS_ALL_FILTERS, useProductEvents }),
 			window,
 		),
@@ -192,7 +215,7 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "productEventsFunnelQuery",
 		label: "person",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.productEventsFunnelQuery({
 					steps: FUNNEL_STEPS,
 					keyBy: "person",
@@ -206,7 +229,7 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "productEventsFunnelQuery",
 		label: "session-step-filtered",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.productEventsFunnelQuery({
 					steps: REFERRAL_STEPS,
 					keyBy: "person",
@@ -221,7 +244,7 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "productEventsFunnelQuery",
 		label: "visitor-session-step",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.productEventsFunnelQuery({
 					steps: REFERRAL_STEPS,
 					keyBy: "visitor",
@@ -235,7 +258,7 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "productEventsFunnelQuery",
 		label: "session-key",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.productEventsFunnelQuery({ steps: FUNNEL_STEPS, keyBy: "session", windowSeconds: 1_800 }),
 				window,
 			),
@@ -245,7 +268,7 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "productEventsFunnelBreakdownQuery",
 		label: "session-dimension",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.productEventsFunnelBreakdownQuery({
 					steps: FUNNEL_STEPS,
 					keyBy: "person",
@@ -261,7 +284,7 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "productEventsFunnelBreakdownQuery",
 		label: "attribute-session-step",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.productEventsFunnelBreakdownQuery({
 					steps: REFERRAL_STEPS,
 					keyBy: "user",
@@ -276,14 +299,17 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 		module: "product-events",
 		name: "productEventNamesQuery",
 		label: "default",
-		compile: () => CH.compile(CH.productEventNamesQuery({ limit: 100 }), window),
+		compile: () => CH.compileUnsafe(CH.productEventNamesQuery({ limit: 100 }), window),
 	},
 	{
 		module: "product-events",
 		name: "productEventNamesQuery",
 		label: "filtered",
 		compile: () =>
-			CH.compile(CH.productEventNamesQuery({ filters: WEB_ANALYTICS_ALL_FILTERS, limit: 100 }), window),
+			CH.compileUnsafe(
+				CH.productEventNamesQuery({ filters: WEB_ANALYTICS_ALL_FILTERS, limit: 100 }),
+				window,
+			),
 	},
 ]
 
@@ -294,7 +320,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		module: "session-replays",
 		name: "sessionReplaysListQuery",
 		label: "default",
-		compile: () => CH.compile(CH.sessionReplaysListQuery({}), window),
+		compile: () => CH.compileUnsafe(CH.sessionReplaysListQuery({}), window),
 	},
 	{
 		// Filters force the session_events semi-join + activity join branches.
@@ -302,7 +328,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "sessionReplaysListQuery",
 		label: "filtered",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.sessionReplaysListQuery({
 					serviceName: "web",
 					hasErrors: true,
@@ -320,7 +346,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		module: "session-replays",
 		name: "sessionReplaysFacetsQuery",
 		label: "default",
-		compile: () => CH.compileUnion(CH.sessionReplaysFacetsQuery({}), window),
+		compile: () => CH.compileUnionUnsafe(CH.sessionReplaysFacetsQuery({}), window),
 	},
 	{
 		// Covers the identity predicates, which are excluded from their own branch
@@ -329,7 +355,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "sessionReplaysFacetsQuery",
 		label: "identity-filtered",
 		compile: () =>
-			CH.compileUnion(
+			CH.compileUnionUnsafe(
 				CH.sessionReplaysFacetsQuery({ userSearch: "ada", groupName: "Acme Inc" }),
 				window,
 			),
@@ -339,7 +365,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "getSessionReplayQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.getSessionReplayQuery({ startTime: START_TIME, endTime: END_TIME }), {
+			CH.compileUnsafe(CH.getSessionReplayQuery({ startTime: START_TIME, endTime: END_TIME }), {
 				orgId: ORG_ID,
 				sessionId: SESSION_ID,
 			}),
@@ -349,7 +375,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "sessionReplayChunkIndexQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.sessionReplayChunkIndexQuery({ startTime: START_TIME, endTime: END_TIME }), {
+			CH.compileUnsafe(CH.sessionReplayChunkIndexQuery({ startTime: START_TIME, endTime: END_TIME }), {
 				orgId: ORG_ID,
 				sessionId: SESSION_ID,
 			}),
@@ -359,7 +385,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "sessionReplayEventsQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.sessionReplayEventsQuery({ startTime: START_TIME, endTime: END_TIME }), {
+			CH.compileUnsafe(CH.sessionReplayEventsQuery({ startTime: START_TIME, endTime: END_TIME }), {
 				orgId: ORG_ID,
 				sessionId: SESSION_ID,
 			}),
@@ -371,7 +397,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "sessionReplayEventsQuery",
 		label: "ranged",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.sessionReplayEventsQuery({
 					startTime: START_TIME,
 					endTime: END_TIME,
@@ -386,14 +412,14 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		module: "session-replays",
 		name: "sessionsForTraceQuery",
 		label: "default",
-		compile: () => CH.compile(CH.sessionsForTraceQuery({ traceId: TRACE_ID }), window),
+		compile: () => CH.compileUnsafe(CH.sessionsForTraceQuery({ traceId: TRACE_ID }), window),
 	},
 	{
 		module: "session-replays",
 		name: "sessionTraceSummariesQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.sessionTraceSummariesQuery({
 					traceIds: [TRACE_ID],
 					startTime: START_TIME,
@@ -409,7 +435,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "sessionTranscriptQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.sessionTranscriptQuery({ startTime: START_TIME, endTime: END_TIME }), {
+			CH.compileUnsafe(CH.sessionTranscriptQuery({ startTime: START_TIME, endTime: END_TIME }), {
 				orgId: ORG_ID,
 				sessionId: SESSION_ID,
 			}),
@@ -419,7 +445,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "sessionActivityQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.sessionActivityQuery({ startTime: START_TIME, endTime: END_TIME }), {
+			CH.compileUnsafe(CH.sessionActivityQuery({ startTime: START_TIME, endTime: END_TIME }), {
 				orgId: ORG_ID,
 				sessionId: SESSION_ID,
 			}),
@@ -434,14 +460,14 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "spanDetailQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.spanDetailQuery({ traceId: TRACE_ID, spanId: SPAN_ID }), { orgId: ORG_ID }),
+			CH.compileUnsafe(CH.spanDetailQuery({ traceId: TRACE_ID, spanId: SPAN_ID }), { orgId: ORG_ID }),
 	},
 	{
 		module: "errors",
 		name: "spanDetailQuery",
 		label: "narrowByTime",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.spanDetailQuery({ traceId: TRACE_ID, spanId: SPAN_ID, narrowByTime: true }),
 				window,
 			),
@@ -451,21 +477,21 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		module: "errors",
 		name: "errorIssuesQuery",
 		label: "scan",
-		compile: () => CH.compile(CH.errorIssuesQuery({ limit: 500 }), window),
+		compile: () => CH.compileUnsafe(CH.errorIssuesQuery({ limit: 500 }), window),
 	},
 	{
 		// ErrorsService steady-state cursor window over the compact minute rollup.
 		module: "errors",
 		name: "errorTickIssuesQuery",
 		label: "cursor-window",
-		compile: () => CH.compile(CH.errorTickIssuesQuery(), window),
+		compile: () => CH.compileUnsafe(CH.errorTickIssuesQuery(), window),
 	},
 	{
 		// ErrorsService one-time cursor bootstrap from retained canonical events.
 		module: "errors",
 		name: "errorTickBootstrapIssuesQuery",
 		label: "bootstrap-window",
-		compile: () => CH.compile(CH.errorTickBootstrapIssuesQuery(), window),
+		compile: () => CH.compileUnsafe(CH.errorTickBootstrapIssuesQuery(), window),
 	},
 	{
 		// ErrorsService errorIssueEnvFingerprints
@@ -473,7 +499,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "errorFingerprintsQuery",
 		label: "envFiltered",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.errorFingerprintsQuery({ services: ["api"], deploymentEnvs: ["production"] }),
 				window,
 			),
@@ -483,7 +509,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "errorIssueTimeseriesQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.errorIssueTimeseriesQuery(), {
+			CH.compileUnsafe(CH.errorIssueTimeseriesQuery(), {
 				...window,
 				fingerprintHash: FINGERPRINT,
 				bucketSeconds: 300,
@@ -494,7 +520,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "errorsSparkQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.errorsSparkQuery({ fingerprintHashes: [FINGERPRINT] }), {
+			CH.compileUnsafe(CH.errorsSparkQuery({ fingerprintHashes: [FINGERPRINT] }), {
 				...window,
 				bucketSeconds: 300,
 			}),
@@ -504,7 +530,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "errorIssueSampleTracesQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.errorIssueSampleTracesQuery({ limit: 5 }), {
+			CH.compileUnsafe(CH.errorIssueSampleTracesQuery({ limit: 5 }), {
 				...window,
 				fingerprintHash: FINGERPRINT,
 			}),
@@ -514,7 +540,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "errorIssueEnvironmentsQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.errorIssueEnvironmentsQuery(), {
+			CH.compileUnsafe(CH.errorIssueEnvironmentsQuery(), {
 				...window,
 				fingerprintHash: FINGERPRINT,
 			}),
@@ -526,7 +552,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "errorIssueVersionsSinceQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.errorIssueVersionsSinceQuery(), {
+			CH.compileUnsafe(CH.errorIssueVersionsSinceQuery(), {
 				...window,
 				fingerprintHash: FINGERPRINT,
 			}),
@@ -544,7 +570,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "serviceOperationsSummaryQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(CH.serviceOperationsSummaryQuery({ serviceName: "api", limit: 50 }), window),
+			CH.compileUnsafe(CH.serviceOperationsSummaryQuery({ serviceName: "api", limit: 50 }), window),
 	},
 	{
 		// Env filter exercises the extra predicate on every tier of the splice.
@@ -552,7 +578,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "serviceOperationsSummaryQuery",
 		label: "envFiltered",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.serviceOperationsSummaryQuery({
 					serviceName: "api",
 					environments: ["production"],
@@ -566,7 +592,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "serviceOperationsTimeseriesQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.serviceOperationsTimeseriesQuery({
 					serviceName: "api",
 					spanNames: ["GET /v2/services", "POST /v2/alerts"],
@@ -581,14 +607,14 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		module: "services",
 		name: "serviceCatalogQuery",
 		label: "default",
-		compile: () => CH.compile(CH.serviceCatalogQuery({ limit: 50 }), window),
+		compile: () => CH.compileUnsafe(CH.serviceCatalogQuery({ limit: 50 }), window),
 	},
 	{
 		module: "services",
 		name: "serviceCatalogQuery",
 		label: "filtered",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.serviceCatalogQuery({
 					serviceName: "api",
 					deploymentEnvironment: "production",
@@ -605,7 +631,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "hostGaugeTimeseriesQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.hostGaugeTimeseriesQuery({
 					hostName: "ip-10-0-1-42",
 					metricName: "system.cpu.utilization",
@@ -619,7 +645,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "hostGaugeTimeseriesQuery",
 		label: "grouped",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.hostGaugeTimeseriesQuery({
 					hostName: "ip-10-0-1-42",
 					metricName: "system.cpu.utilization",
@@ -633,7 +659,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "podGaugeTimeseriesQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.podGaugeTimeseriesQuery({
 					podName: "api-7d9f8b6c5-x2n4k",
 					namespace: "backend",
@@ -647,7 +673,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "nodeGaugeTimeseriesQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.nodeGaugeTimeseriesQuery({
 					nodeName: "ip-10-0-1-42.ec2.internal",
 					metricName: "k8s.node.cpu.utilization",
@@ -660,7 +686,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "workloadGaugeTimeseriesQuery",
 		label: "default",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.workloadGaugeTimeseriesQuery({
 					kind: "deployment",
 					workloadName: "api",
@@ -676,7 +702,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "workloadGaugeTimeseriesQuery",
 		label: "groupedByPod",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.workloadGaugeTimeseriesQuery({
 					kind: "statefulset",
 					workloadName: "clickhouse",
@@ -691,19 +717,19 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		module: "infra",
 		name: "podFacetsQuery",
 		label: "default",
-		compile: () => CH.compileUnion(CH.podFacetsQuery(), window),
+		compile: () => CH.compileUnionUnsafe(CH.podFacetsQuery(), window),
 	},
 	{
 		module: "infra",
 		name: "nodeFacetsQuery",
 		label: "default",
-		compile: () => CH.compileUnion(CH.nodeFacetsQuery(), window),
+		compile: () => CH.compileUnionUnsafe(CH.nodeFacetsQuery(), window),
 	},
 	{
 		module: "infra",
 		name: "workloadFacetsQuery",
 		label: "default",
-		compile: () => CH.compileUnion(CH.workloadFacetsQuery({ kind: "deployment" }), window),
+		compile: () => CH.compileUnionUnsafe(CH.workloadFacetsQuery({ kind: "deployment" }), window),
 	},
 
 	// ----- service-map: the parent⋈child span join and its two projections.
@@ -715,10 +741,10 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "serviceMapEdgeJoinQuery",
 		label: "rollup-hour",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.serviceMapEdgeJoinQuery({
-					rangeStart: CH.toDateTime(CH.param.dateTime("hourStart")),
-					rangeEnd: CH.toDateTime(CH.param.dateTime("hourEnd")),
+					rangeStart: CH.toDateTime(CH.param.dateTimeString("hourStart")),
+					rangeEnd: CH.toDateTime(CH.param.dateTimeString("hourEnd")),
 				}).format("JSON"),
 				{ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME },
 			),
@@ -729,10 +755,10 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "serviceMapEdgeJoinQuery",
 		label: "scoped-to-service",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.serviceMapEdgeJoinQuery({
-					rangeStart: CH.toDateTime(CH.param.dateTime("hourStart")),
-					rangeEnd: CH.toDateTime(CH.param.dateTime("hourEnd")),
+					rangeStart: CH.toDateTime(CH.param.dateTimeString("hourStart")),
+					rangeEnd: CH.toDateTime(CH.param.dateTimeString("hourEnd")),
 					deploymentEnv: "production",
 					parentServiceName: "web",
 				}).format("JSON"),
@@ -744,45 +770,48 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "serviceMapEdgesRollupSQL",
 		label: "default",
 		compile: () =>
-			CH.serviceMapEdgesRollupSQL({ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME }),
+			runCompile(
+				CH.serviceMapEdgesRollupSQL({ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME }),
+			),
 	},
 	{
 		module: "service-map-rollup",
 		name: "serviceMapEdgesExistingHoursSQL",
 		label: "default",
-		compile: () => CH.serviceMapEdgesExistingHoursSQL(window),
+		compile: () => runCompile(CH.serviceMapEdgesExistingHoursSQL(window)),
 	},
 	{
 		module: "service-map-rollup",
 		name: "serviceMapResolutionsExistingHoursSQL",
 		label: "default",
-		compile: () => CH.serviceMapResolutionsExistingHoursSQL(window),
+		compile: () => runCompile(CH.serviceMapResolutionsExistingHoursSQL(window)),
 	},
 	{
 		// Org-wide: hourly MV branch UNION ALL two partial-hour live joins.
 		module: "service-map",
 		name: "serviceDependenciesSQL",
 		label: "default",
-		compile: () => CH.serviceDependenciesSQL({}, window),
+		compile: () => runCompile(CH.serviceDependenciesSQL({}, window)),
 	},
 	{
 		module: "service-map",
 		name: "serviceDependenciesSQL",
 		label: "env-scoped",
-		compile: () => CH.serviceDependenciesSQL({ deploymentEnv: "production" }, window),
+		compile: () => runCompile(CH.serviceDependenciesSQL({ deploymentEnv: "production" }, window)),
 	},
 	{
 		module: "service-map",
 		name: "serviceDependenciesForServiceQuery",
 		label: "default",
-		compile: () => CH.compile(CH.serviceDependenciesForServiceQuery({ serviceName: "web" }), window),
+		compile: () =>
+			CH.compileUnsafe(CH.serviceDependenciesForServiceQuery({ serviceName: "web" }), window),
 	},
 	{
 		// Hourly MV UNION ALL raw traces, minus the internal-resolution anti-join.
 		module: "service-map",
 		name: "serviceExternalEdgesSQL",
 		label: "default",
-		compile: () => CH.serviceExternalEdgesSQL({ serviceName: "web" }, window),
+		compile: () => runCompile(CH.serviceExternalEdgesSQL({ serviceName: "web" }, window)),
 		// TargetType is a String column, but both branches of the UNION emit only
 		// http/messaging/rpc, and the row schema holds that line.
 		sampleValues: { targetType: "http" },
@@ -792,7 +821,9 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "serviceExternalEdgesSQL",
 		label: "env-scoped",
 		compile: () =>
-			CH.serviceExternalEdgesSQL({ serviceName: "web", deploymentEnv: "production" }, window),
+			runCompile(
+				CH.serviceExternalEdgesSQL({ serviceName: "web", deploymentEnv: "production" }, window),
+			),
 		sampleValues: { targetType: "http" },
 	},
 
@@ -802,7 +833,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "traceServicesByTraceIdsQuery",
 		label: "page-enrichment",
 		compile: () =>
-			CH.compile(
+			CH.compileUnsafe(
 				CH.traceServicesByTraceIdsQuery({
 					traceIds: [TRACE_ID, "4bf92f3577b34da6a3ce929d0e0e4736"],
 				}),
@@ -817,18 +848,18 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		module: "activity",
 		name: "activeOrgsByErrorEventsQuery",
 		label: "default",
-		compile: () => CH.compile(CH.activeOrgsByErrorEventsQuery(), { startTime: START_TIME }),
+		compile: () => CH.compileUnsafe(CH.activeOrgsByErrorEventsQuery(), { startTime: START_TIME }),
 	},
 	{
 		module: "activity",
 		name: "activeOrgsByTracesQuery",
 		label: "default",
-		compile: () => CH.compile(CH.activeOrgsByTracesQuery(), { startTime: START_TIME }),
+		compile: () => CH.compileUnsafe(CH.activeOrgsByTracesQuery(), { startTime: START_TIME }),
 	},
 	{
 		module: "activity",
 		name: "activeOrgsByLogsQuery",
 		label: "default",
-		compile: () => CH.compile(CH.activeOrgsByLogsQuery(), { startTime: START_TIME }),
+		compile: () => CH.compileUnsafe(CH.activeOrgsByLogsQuery(), { startTime: START_TIME }),
 	},
 ]

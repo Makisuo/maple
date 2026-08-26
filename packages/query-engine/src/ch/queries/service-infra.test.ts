@@ -11,7 +11,7 @@ const baseParams = {
 describe("serviceWorkloadsSQL", () => {
 	it.effect("decodes workload rows with numeric strings and nullable utilization", () =>
 		Effect.gen(function* () {
-			const compiled = serviceWorkloadsSQL({ services: ["checkout-api"] }, baseParams)
+			const compiled = yield* serviceWorkloadsSQL({ services: ["checkout-api"] }, baseParams)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -43,7 +43,7 @@ describe("serviceWorkloadsSQL", () => {
 
 	it.effect("fails decoding unknown workload kinds", () =>
 		Effect.gen(function* () {
-			const compiled = serviceWorkloadsSQL({ services: ["checkout-api"] }, baseParams)
+			const compiled = yield* serviceWorkloadsSQL({ services: ["checkout-api"] }, baseParams)
 
 			const exit = yield* Effect.exit(
 				compiled.decodeRows([
@@ -65,7 +65,7 @@ describe("serviceWorkloadsSQL", () => {
 	)
 
 	it("does not join workloads on clusterName and probes pods via cpu.usage", () => {
-		const { sql } = serviceWorkloadsSQL({ services: ["checkout-api"] }, baseParams)
+		const { sql } = Effect.runSync(serviceWorkloadsSQL({ services: ["checkout-api"] }, baseParams))
 
 		// Regression: spans never carry k8s.cluster.name, so joining on it dropped
 		// every row and pod counts always read 0. The identity side must not
@@ -83,7 +83,7 @@ describe("serviceWorkloadsSQL", () => {
 
 	it.effect("empty-service short circuit still carries the workload row schema", () =>
 		Effect.gen(function* () {
-			const compiled = serviceWorkloadsSQL({ services: [] }, baseParams)
+			const compiled = yield* serviceWorkloadsSQL({ services: [] }, baseParams)
 
 			const rows = yield* compiled.decodeRows([
 				{

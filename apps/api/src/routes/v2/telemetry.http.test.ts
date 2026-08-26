@@ -29,6 +29,7 @@ import {
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 } from "./v2-test-support"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const TRACE_ID = "7f3a4b5c6d7e8f901234567890abcdef"
 const SPAN_ID = "0123456789abcdef"
@@ -208,10 +209,11 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 
 const warehouseStub = makeWarehouseServiceStub({
 	query: () => Effect.die(new Error("unexpected named query")),
-	compiledQuery: (_tenant, compiled) => compiled.decodeRows(rowsForSql(compiled.sql)),
+	compiledQuery: (_tenant, compiled) =>
+		compiledQueryOf(compiled).decodeRows(rowsForSql(compiledQueryOf(compiled).sql)),
 	compiledQueryFirst: (_tenant, compiled) =>
-		compiled
-			.decodeRows(rowsForSql(compiled.sql))
+		compiledQueryOf(compiled)
+			.decodeRows(rowsForSql(compiledQueryOf(compiled).sql))
 			.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]))),
 	ingest: () => Effect.void,
 })
@@ -507,11 +509,11 @@ describe("v2 telemetry reads over HTTP", () => {
 		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
-				observedSql.push(compiled.sql)
+				observedSql.push(compiledQueryOf(compiled).sql)
 				return warehouseStub.compiledQuery(tenant, compiled, options)
 			},
 			compiledQueryFirst: (tenant, compiled, options) => {
-				observedSql.push(compiled.sql)
+				observedSql.push(compiledQueryOf(compiled).sql)
 				return warehouseStub.compiledQueryFirst(tenant, compiled, options)
 			},
 		}
@@ -549,11 +551,11 @@ describe("v2 telemetry reads over HTTP", () => {
 		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
-				observedSql.push(compiled.sql)
+				observedSql.push(compiledQueryOf(compiled).sql)
 				return warehouseStub.compiledQuery(tenant, compiled, options)
 			},
 			compiledQueryFirst: (tenant, compiled, options) => {
-				observedSql.push(compiled.sql)
+				observedSql.push(compiledQueryOf(compiled).sql)
 				return warehouseStub.compiledQueryFirst(tenant, compiled, options)
 			},
 		}
@@ -740,7 +742,7 @@ describe("v2 telemetry reads over HTTP", () => {
 		const observingWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (tenant, compiled, options) => {
-				observedSql.push(compiled.sql)
+				observedSql.push(compiledQueryOf(compiled).sql)
 				return warehouseStub.compiledQuery(tenant, compiled, options)
 			},
 		}

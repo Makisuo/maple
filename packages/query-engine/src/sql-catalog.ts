@@ -40,6 +40,7 @@ import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "./cap
 import * as CH from "./ch"
 import { builderFixtures } from "./ch/builder-fixtures"
 import { compilePipeQuery } from "./ch/pipe-dispatch"
+import { compiledQueryOf } from "./execution/compiled-input"
 import { fingerprintSql } from "./execution/fingerprint"
 import { makeQueryEngineExecute, type QueryEngineWarehouse, type QueryTenant } from "./runtime"
 
@@ -337,13 +338,16 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 				...fixture.params,
 			} as Record<string, unknown> & { org_id: string }
 
-			const compiled = compilePipeQuery(fixture.pipe, params as never, variant.capabilities)
-			if (compiled === undefined) {
+			const lowered = compilePipeQuery(fixture.pipe, params as never, variant.capabilities)
+			if (lowered === undefined) {
 				throw new Error(
 					`SQL catalog: compilePipeQuery returned undefined for "${fixture.pipe}" (${fixture.label}). ` +
 						`The pipe is in warehouseQueries but has no dispatch arm.`,
 				)
 			}
+			// The catalog wants a throw: a fixture that will not compile must fail
+			// its test rather than drop silently out of the sweep.
+			const compiled = Effect.runSync(lowered)
 			entries.push({
 				id: `pipe:${fixture.pipe}:${fixture.label}:${variant.label}`,
 				source: "pipe",
@@ -822,12 +826,13 @@ function makeCapturingWarehouse(capabilities: WarehouseCapabilities): {
 			captured.push({ sql })
 			return empty
 		},
-		compiledQuery: (_tenant, compiled) => {
+		compiledQuery: (_tenant, input) => {
+			const compiled = compiledQueryOf(input)
 			captured.push({ sql: compiled.sql, compiled: compiled as CompiledQuery<unknown> })
 			return empty
 		},
 		compiledQueryWithCapabilities: (_tenant, compile) => {
-			const compiled = compile(capabilities)
+			const compiled = Effect.runSync(compile(capabilities))
 			captured.push({ sql: compiled.sql, compiled: compiled as CompiledQuery<unknown> })
 			return empty
 		},
@@ -937,6 +942,50 @@ export function dedupeByFingerprint(entries: ReadonlyArray<CatalogEntry>): Reado
 }
 
 // Anti-rot assertions
+
+/**
+ * Catalog entries whose rows nothing validates.
+ *
+ * `rowSchemaSource: "none"` means at least one selected expression had no type
+ * to read — a `rawExpr` without a column type, a `dynamicColumn`, an
+ * un-annotated custom function — so `decodeRows` degrades to an identity cast
+ * and a warehouse that changes a column's wire format is invisible until the
+ * value reaches a `Schema.Class` constructor several layers away.
+ *
+ * The allowlist below is asserted *exactly*, in both directions: a query that
+ * stops deriving fails, and so does one still listed here after it starts.
+ *
+ * It is empty, and that is the invariant worth keeping: every SQL shape the
+ * product can emit validates the rows it gets back. Adding an entry is how you
+ * say a query cannot — and it needs a sentence here saying why.
+ */
+export const UNDECODED_QUERIES: ReadonlySet<string> = new Set([])
+
+/** `source:name` for every catalog entry that decodes nothing. */
+export function undecodedQueries(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<string> {
+	const undecoded = new Set<string>()
+	for (const entry of entries) {
+		if (entry.compiled?.rowSchemaSource === "none") undecoded.add(`${entry.source}:${entry.name}`)
+	}
+	return [...undecoded].sort()
+}
+
+/**
+ * The same list with the columns responsible, for the assertion's failure
+ * message. Derivation is all-or-nothing, so "this query decodes nothing" is
+ * useless on its own — these are the aliases to give a type.
+ */
+export function undecodedColumns(
+	entries: ReadonlyArray<CatalogEntry>,
+): ReadonlyMap<string, ReadonlyArray<string>> {
+	const columns = new Map<string, ReadonlyArray<string>>()
+	for (const entry of entries) {
+		if (entry.compiled?.rowSchemaSource !== "none") continue
+		const key = `${entry.source}:${entry.name}`
+		if (!columns.has(key)) columns.set(key, entry.compiled.untypedColumns)
+	}
+	return columns
+}
 
 /** Pipe names in `warehouseQueries` that no fixture covers. */
 export function uncoveredPipes(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<WarehouseQueryName> {

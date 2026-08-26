@@ -34,6 +34,7 @@ import {
 	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 } from "./v2-test-support"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -106,9 +107,13 @@ const serviceRow = {
 
 const warehouseStub = makeWarehouseServiceStub({
 	compiledQuery: (_tenant, compiled) =>
-		compiled.decodeRows(compiled.sql.includes("FROM service_overview_spans") ? [serviceRow] : []),
+		compiledQueryOf(compiled).decodeRows(
+			compiledQueryOf(compiled).sql.includes("FROM service_overview_spans") ? [serviceRow] : [],
+		),
 	compiledQueryFirst: (_tenant, compiled) =>
-		compiled.decodeRows([]).pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]))),
+		compiledQueryOf(compiled)
+			.decodeRows([])
+			.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]))),
 	ingest: () => Effect.void,
 })
 
@@ -326,13 +331,17 @@ describe("GET /v2/widget_summary", () => {
 			},
 			warehouse: makeWarehouseServiceStub({
 				compiledQuery: (_tenant, compiled) => {
-					catalogSql = compiled.sql
-					return compiled.decodeRows(
-						compiled.sql.includes("FROM service_overview_spans") ? [serviceRow] : [],
+					catalogSql = compiledQueryOf(compiled).sql
+					return compiledQueryOf(compiled).decodeRows(
+						compiledQueryOf(compiled).sql.includes("FROM service_overview_spans")
+							? [serviceRow]
+							: [],
 					)
 				},
 				compiledQueryFirst: (_tenant, compiled) =>
-					compiled.decodeRows([]).pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]))),
+					compiledQueryOf(compiled)
+						.decodeRows([])
+						.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]))),
 				ingest: () => Effect.void,
 			}) as WarehouseQueryService,
 			queryEngine: queryEngineStub((tenant, request) => {

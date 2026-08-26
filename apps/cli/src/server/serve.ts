@@ -310,7 +310,7 @@ async function ingest(
  * Strip a trailing `FORMAT <ident>` clause (optionally followed by `;`) and
  * re-append `FORMAT JSONEachRow`, so the server owns the output format. Port of
  * `force_json_each_row` from the former Rust server: callers POST `compiled.sql`
- * verbatim (`CH.compile(...)` appends `FORMAT JSON`).
+ * verbatim, and a compiled query carries its own `FORMAT JSON`.
  */
 function forceJsonEachRow(sql: string): string {
 	let s = sql.trimEnd()

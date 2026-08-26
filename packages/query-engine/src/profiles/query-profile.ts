@@ -81,7 +81,7 @@ export type SqlQueryOptions = WarehouseQueryOptions & {
 	/**
 	 * Route this query to the INGEST backend (managed Tinybird) instead of the
 	 * per-org read config. Prefer declaring this at the query definition via
-	 * `.routing("ingest")` (carried on `CompiledQuery.routing`); use this option
+	 * `.route("ingest")` (carried on `CompiledQuery.route`); use this option
 	 * only for hand-written SQL or when the pin depends on runtime state (e.g.
 	 * reads of gateway-written data gated on write-readiness).
 	 */

@@ -6,51 +6,106 @@ rows back:
 ```ts
 import { Effect } from "effect"
 
-const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))
+const result = await client.query({ query: compiled.sql, format: "JSONEachRow" })
+const rows = await Effect.runPromise(compiled.decodeRows(await result.json()))
 ```
 
-## Declare a `rowSchema`
+[Running a query](./running-queries.md) has the whole loop, including the two ClickHouse wire
+settings the column types assume.
 
-Pass an Effect `Schema` at compile time and `decodeRows` validates every row against it:
+## The row schema is derived from the SELECT
+
+Column types _are_ Effect schemas — `T.uint64` is "a 64-bit integer as ClickHouse actually sends
+it", not a phantom tag. So a query built from typed pieces already knows how its rows decode, and
+`compile` folds those schemas into one:
 
 ```ts
-import { Schema } from "effect"
+const compiled = CH.compileUnsafe(
+		CH.from(Events)
+			.select(($) => ({ name: $.Name, calls: CH.count() }))
+			.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
+			.groupBy("name"),
+		{ orgId: "org_123" },
+	)
 
-const compiled = CH.compile(query, params, {
-	rowSchema: Schema.Struct({
-		name: Schema.String,
-		count: Schema.Union([Schema.Finite, Schema.FiniteFromString]),
-	}),
-})
-
-await Effect.runPromise(compiled.decodeRows([{ name: "checkout", count: "42" }]))
-// [{ name: "checkout", count: 42 }]
+compiled.rowSchemaSource // "derived"
+await Effect.runPromise(compiled.decodeRows([{ name: "checkout", calls: "42" }]))
+// [{ name: "checkout", calls: 42 }]
 ```
 
-Note the `count` schema: some backends return 64-bit integers as JSON **strings** and others as
-numbers. Accepting both — and letting the schema coerce — is what stops that difference from
-becoming a runtime bug. This is the exact class of drift a plain cast used to hide, which is
-why there is no `castRows`.
+Note `calls`. ClickHouse's `FORMAT JSON` quotes 64-bit integers, a client that sets
+`output_format_json_quote_64bit_integers=0` gets them bare, and a gateway
+that refuses `output_format_json_quote_64bit_integers=0` quotes them whatever you asked for.
+`T.uint64` models that once, so nobody rediscovers it as a `ParseError` in production. This is the
+exact class of drift a plain cast used to hide, which is why there is no `castRows`.
 
-_(Backed by `docs/decoding-results.md > decodeRows validates every row`.)_
+## When there is nothing to derive from
 
-## Without a schema, nothing is checked
+Derivation is all-or-nothing per query. One selected expression the builder cannot type — an
+`untypedExpr`, an untyped `dynamicColumn`, a `defineUntypedFn` — and there is no row schema at
+all:
 
 ```ts
-const compiled = CH.compile(query, params) // no rowSchema
+const compiled = CH.compileUnsafe(
+		CH.from(Events).select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") })),
+		params,
+	)
 
-compiled.rowSchemaDeclared // false
-await Effect.runPromise(compiled.decodeRows([{ name: 42 }]))
-// [{ name: 42 }] — passes straight through, despite `name` being typed as string
+compiled.rowSchemaSource // "none"
+compiled.untypedColumns // ["odd"] — the aliases responsible
+await Effect.runPromise(compiled.decodeRows([{ name: 42, odd: 1 }]))
+// [{ name: 42, odd: 1 }] — passes straight through
 ```
 
-`decodeRows` degrades to an identity pass-through. The static type still claims `Output`, so
-the mismatch is invisible until something downstream trips over it. `rowSchemaDeclared` exists
-so a caller — or a lint over your query catalog — can tell the two apart.
+Inventing a permissive schema for that one field would hand back something that _looks_ validated
+and is not, so the query keeps its honest answer instead. `untypedColumns` names what to fix;
+close the gap by typing the escape hatch — `CH.rawExpr("anyLast(Whatever)", T.string)`,
+`CH.defineFn("myFn", T.uint64)` — or by declaring the whole schema yourself.
+
+## Going back to the wire
+
+`encodeRows` runs the row schema in the other direction, turning decoded rows into the shape
+ClickHouse sent them in:
+
+```ts
+const rows = await Effect.runPromise(compiled.decodeRows(wire))
+const backToWire = await Effect.runPromise(compiled.encodeRows(rows))
+// a `DateTime.Utc` becomes '2026-05-24 14:30:00' again — not ISO-8601
+```
+
+That matters for a service that forwards warehouse rows onto a wire of its own: it can decode to
+the value worth computing with and still emit the exact bytes its clients already parse, instead
+of choosing between them. A query with no row schema passes the rows through, the same contract
+`decodeRows` has. Failures are `CompiledQueryEncodeError`, carrying the offending `rowIndex`.
+
+## Declaring one anyway
+
+A declared `rowSchema` wins over the derived one, and it can do something derivation cannot:
+**narrow**.
+
+```ts
+const compiled = CH.compileUnsafe(query, params, {
+		rowSchema: Schema.Struct({
+			name: Schema.String,
+			status: Schema.Literals(["ok", "error"]), // narrower than the String column
+		}),
+	})
+
+compiled.rowSchemaSource // "declared"
+```
+
+The declared type must still be assignable to what the builder inferred, so a schema can sharpen
+the row but never contradict it.
+
+_(Backed by `docs/decoding-results.md > The row schema is derived from the SELECT`,
+`> An untyped expression leaves the query undecoded`.)_
+
+`rowSchemaSource !== "none"` is the cheap "does this decode anything at all" check for a lint
+over your query catalog.
 
 Declare a schema for anything whose shape you do not fully control.
 
-_(Backed by `docs/decoding-results.md > Without a rowSchema decoding is a pass-through`.)_
+_(Backed by `docs/decoding-results.md > An untyped expression leaves the query undecoded`.)_
 
 ## `decodeFirstRow`
 
@@ -85,9 +140,11 @@ _(Backed by `docs/decoding-results.md > A bad row fails with CompiledQueryDecode
 
 ## Choosing schema types
 
-- **64-bit integers** — accept both wire shapes, as above. A `UInt64` above `2^53` cannot
-  survive as a JavaScript number at all; have such columns emitted as strings
-  (`toString(...)`) in the SELECT and decode them as `Schema.String`.
-- **`DateTime` columns** — arrive as strings; decode as `Schema.String` unless you genuinely
-  want to parse them.
+Only relevant when you declare one by hand; the column types already handle these.
+
+- **64-bit integers** — accept both wire shapes. A `UInt64` above `2^53` cannot survive as a
+  JavaScript number at all; have such columns emitted as strings (`toString(...)`) in the SELECT
+  and declare them `T.string`.
+- **`DateTime` columns** — `T.dateTime` parses them as UTC; `T.dateTimeString` leaves them as
+  sent. See [Tables and column types](./tables-and-types.md#column-types).
 - **`leftJoin` columns** — nullable on the SQL side, so pair them with `Schema.NullOr`.

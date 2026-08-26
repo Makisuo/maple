@@ -3,6 +3,12 @@
  *
  * Wired up in `.oxlintrc.json` via `jsPlugins`.
  *
+ * `no-ordie-compiled-query` guards the seam this repo settled on for compiled
+ * queries: `CH.compile` reports in the Effect channel, and the executor is the
+ * one place that decides a compile failure is a defect. Killing it at the call
+ * site instead is both noise and, where a request value reaches a param, a 500
+ * where the route owed a 400.
+ *
  * `no-record-string-any` exists as its own rule (rather than leaning on
  * `typescript/no-explicit-any`, which flags the inner `any` anyway) so the worst
  * offender — an open key set whose values are also unchecked — can sit at `error`
@@ -116,9 +122,88 @@ const noReactUseEffect = {
 	},
 }
 
+const NO_ORDIE_COMPILED_QUERY_MESSAGE =
+	"Do not `Effect.orDie` a compile. Hand the unrun Effect to the warehouse — `warehouse.compiledQuery(tenant, CH.compile(q, params), …)` — and let `resolveCompiledQuery` make that call once, at the seam. If a request value can reach a param, constrain it at the HTTP boundary or `Effect.mapError` it into a failure the route returns."
+
+const COMPILE_NAMES = new Set(["compile", "compileUnion", "compileCH", "compileCHUnsafe"])
+
+/** Modules a bare `compile` can only have come from. */
+const COMPILE_MODULES = /(clickhouse-builder|query-engine\/ch)$/
+
+/**
+ * A call to a compile entry point.
+ *
+ * `x.compile(…)` matches on the property name — that covers `CH.compile` and a
+ * query definition's own `compile` field. A BARE `compile(…)` only matches when
+ * it was imported from the builder: `compile` is also the parameter name every
+ * `compiledQueryWithCapabilities` double gives its callback, and a double
+ * standing in for the seam is the one place running it here is right. (A file
+ * that both imports `compile` and shadows the name with a parameter would still
+ * be flagged; no such file exists, and the plugin API has no scope analysis.)
+ */
+const isCompileCall = (node, importedCompiles) => {
+	if (node?.type !== "CallExpression") return false
+	const callee = node.callee
+	if (callee.type === "Identifier") return importedCompiles.has(callee.name)
+	if (callee.type !== "MemberExpression" || callee.computed) return false
+	return callee.property.type === "Identifier" && COMPILE_NAMES.has(callee.property.name)
+}
+
+/** `Effect.orDie` as a value — the callee of `Effect.orDie(x)` and the argument of `.pipe(…)`. */
+const isEffectOrDie = (node) =>
+	node?.type === "MemberExpression" &&
+	!node.computed &&
+	node.object.type === "Identifier" &&
+	node.object.name === "Effect" &&
+	node.property.type === "Identifier" &&
+	node.property.name === "orDie"
+
+const noOrDieCompiledQuery = {
+	meta: {
+		type: "problem",
+		docs: {
+			description: "Disallow `Effect.orDie` around a ClickHouse-builder compile.",
+		},
+		messages: { noOrDieCompiledQuery: NO_ORDIE_COMPILED_QUERY_MESSAGE },
+	},
+	// Deliberately shape-matched rather than type-aware: it fires on the literal
+	// `Effect.orDie(CH.compile(…))` and `CH.compile(…).pipe(Effect.orDie)`, which
+	// is the form that reappeared 82 times. A wrapper returning a compile Effect
+	// under some other name is out of reach here and stays a review question.
+	create(context) {
+		const importedCompiles = new Set()
+		return {
+			ImportDeclaration(node) {
+				if (!COMPILE_MODULES.test(node.source.value)) return
+				for (const specifier of node.specifiers) {
+					if (specifier.type !== "ImportSpecifier") continue
+					if (COMPILE_NAMES.has(importedName(specifier))) importedCompiles.add(specifier.local.name)
+				}
+			},
+			CallExpression(node) {
+				if (isEffectOrDie(node.callee) && isCompileCall(node.arguments[0], importedCompiles)) {
+					context.report({ node, messageId: "noOrDieCompiledQuery" })
+					return
+				}
+				if (
+					node.callee.type === "MemberExpression" &&
+					!node.callee.computed &&
+					node.callee.property.type === "Identifier" &&
+					node.callee.property.name === "pipe" &&
+					isCompileCall(node.callee.object, importedCompiles) &&
+					node.arguments.some(isEffectOrDie)
+				) {
+					context.report({ node, messageId: "noOrDieCompiledQuery" })
+				}
+			},
+		}
+	},
+}
+
 export default {
 	meta: { name: "maple" },
 	rules: {
+		"no-ordie-compiled-query": noOrDieCompiledQuery,
 		"no-react-use-effect": noReactUseEffect,
 		"no-record-string-any": noRecordStringAny,
 	},

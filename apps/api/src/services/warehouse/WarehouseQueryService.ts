@@ -19,7 +19,7 @@ import {
 	type WarehouseSqlClient,
 	type WarehouseTrustedRouteError,
 } from "@maple/query-engine/execution"
-import type { CompiledQuery } from "@maple/query-engine/ch"
+import type { CompiledQueryInput } from "@maple/query-engine/ch"
 import { WarehouseExecutor } from "@maple/query-engine/observability"
 import { Env } from "@/platform/Env"
 import type { TenantContext } from "@/services/auth/AuthService"
@@ -464,7 +464,7 @@ export class WarehouseQueryService extends Context.Service<WarehouseQueryService
 
 	static readonly compiledQuery = <T>(
 		tenant: TenantContext,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQueryInput<T>,
 		options?: SqlQueryOptions,
 	) => this.use((service) => service.compiledQuery(tenant, compiled, options))
 
@@ -476,7 +476,7 @@ export class WarehouseQueryService extends Context.Service<WarehouseQueryService
 	 */
 	static readonly compiledQueryBounded = <T>(
 		tenant: TenantContext,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQueryInput<T>,
 		options: SqlQueryOptions & {
 			readonly responseLimits: { readonly maxRows: number; readonly maxBytes: number }
 		},
@@ -484,7 +484,7 @@ export class WarehouseQueryService extends Context.Service<WarehouseQueryService
 
 	static readonly compiledQueryFirst = <T>(
 		tenant: TenantContext,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQueryInput<T>,
 		options?: SqlQueryOptions,
 	) => this.use((service) => service.compiledQueryFirst(tenant, compiled, options))
 

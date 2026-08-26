@@ -28,6 +28,8 @@ import {
 	describeQuery,
 	isSixtyFourBitInt,
 	looksLikeIdentityColumn,
+	nullableColumns,
+	rowWithNull,
 	syntheticRow,
 	uniqueDatabase,
 	type DescribedColumn,
@@ -39,6 +41,20 @@ import {
  * the SELECT instead (see `looksLikeIdentityColumn`).
  */
 const IDENTITY_COLUMN_ALLOWLIST: ReadonlySet<string> = new Set([])
+
+/**
+ * Output columns the analyzer types `Nullable(...)` whose row schema narrows to
+ * non-null on purpose, because a predicate in the same query makes the null
+ * unreachable. Each entry needs the predicate named — that is the whole value
+ * of the list, since the dependency lives nowhere else.
+ */
+const NULLABLE_NARROWED_ALLOWLIST: ReadonlySet<string> = new Set([
+	// `bucketFloorMs` runs `greatestNonNull(DurationMs, 1000)` over a nullable
+	// column, so the analyzer keeps `Nullable` all the way through `toString`.
+	// The branch's own `WHERE DurationMs > 0` excludes the nulls.
+	"builder:session-replays:sessionReplaysFacetsQuery:default:name",
+	"builder:session-replays:sessionReplaysFacetsQuery:identity-filtered:name",
+])
 
 const database = uniqueDatabase("maple_sql_catalog_e2e")
 
@@ -124,12 +140,17 @@ describe.skipIf(!clickhouseE2eEnabled)("SQL catalog analyzer sweep", () => {
 					`Wrap them in toString(...) in the SELECT so the value survives JSON as a string.`,
 			)
 
-			// Second class, same round trip: if the query declares a row schema, it
-			// has to accept BOTH 64-bit wire shapes — unquoted is what the pinned
-			// production clients receive, quoted is what a gateway/readonly cluster
-			// that refuses the setting still sends. `CH.CHNumber` accepts both;
-			// `Schema.Number` rejects the quoted shape.
-			if (wideColumns.length > 0 && entry.compiled) {
+			// Second class, same round trip: a query's row schema has to accept the
+			// JSON its own SQL produces, for BOTH 64-bit wire shapes — unquoted is
+			// what the pinned production clients receive, quoted is what a
+			// gateway/readonly cluster that refuses the setting still sends.
+			// `CH.CHNumber` accepts both; `Schema.Number` rejects the quoted shape.
+			//
+			// Run for every query that has a schema at all, not just the ones with
+			// 64-bit columns: the schema is now usually DERIVED from the SELECT, so
+			// this is what checks the builder's own idea of a column's wire type
+			// against the type the analyzer resolved.
+			if (entry.compiled && entry.compiled.rowSchemaSource !== "none") {
 				for (const quote64Bit of [false, true]) {
 					// `sampleValues` covers columns whose schema narrows what the
 					// ClickHouse type allows — the synthetic row is built from column
@@ -145,6 +166,35 @@ describe.skipIf(!clickhouseE2eEnabled)("SQL catalog analyzer sweep", () => {
 									.map((column) => `${column.name} ${column.type}`)
 									.join(", ")}\n` +
 								`Decode those with CH.CHNumber, not Schema.Number.\n\n${String(decoded.cause)}\n`,
+						)
+					}
+				}
+
+				// Third wire shape, and the one the quoted/unquoted pair cannot see:
+				// a column ClickHouse resolved as `Nullable(...)` really arriving as
+				// null. `sampleValue` strips the wrapper, so a row schema that cannot
+				// decode a null passes both passes above and fails on the first real
+				// row. Narrowing a nullable column on purpose is legitimate — a WHERE
+				// that excludes the nulls is the usual reason — but it has to be said
+				// out loud here rather than being invisible.
+				const row = { ...syntheticRow(columns, { quote64Bit: true }), ...entry.sampleValues }
+				for (const column of nullableColumns(columns)) {
+					if (NULLABLE_NARROWED_ALLOWLIST.has(`${entry.id}:${column.name}`)) continue
+					const decoded = await Effect.runPromise(
+						Effect.exit(entry.compiled.decodeRows([rowWithNull(row, column.name)])),
+					)
+					if (decoded._tag === "Failure") {
+						assert.fail(
+							`${entry.id} declares a row schema that rejects a null in ${column.name} ` +
+								`(${column.type}).
+` +
+								`Either decode it with a nullable schema, or — if a predicate makes the ` +
+								`null unreachable — add "${entry.id}:${column.name}" to ` +
+								`NULLABLE_NARROWED_ALLOWLIST with the predicate that rules it out.
+
+` +
+								`${String(decoded.cause)}
+`,
 						)
 					}
 				}

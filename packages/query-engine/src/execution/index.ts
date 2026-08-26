@@ -1,6 +1,7 @@
 export * from "./backend"
 export * from "./datasource-routing"
 export * from "./ports"
+export * from "./compiled-input"
 export * from "./errors"
 export * from "./fingerprint"
 export * from "./executor"
