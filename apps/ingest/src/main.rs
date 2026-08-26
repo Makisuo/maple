@@ -3552,7 +3552,11 @@ async fn handle_replay_blob_inner(
                         "replay chunk blob upload failed"
                     );
                     metrics::replay_blob_put_failed(&org_id);
+                    // The store error is the only thing that says *why* the PUT
+                    // failed. Without it the span carries a bare 503 and the
+                    // failure is undiagnosable from the dashboard.
                     ApiError::service_unavailable("failed to store replay chunk")
+                        .with_detail(e.to_string())
                 })?;
             Span::current().record(
                 "maple.replay.blob_put_ms",

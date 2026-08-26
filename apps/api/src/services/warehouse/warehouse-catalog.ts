@@ -50,6 +50,18 @@ const TABLE_NOTES: Record<string, ReadonlyArray<string>> = {
 	metrics_histogram: [
 		"Pre-aggregated histograms (bucket counts + sum + count). Reconstruct percentiles with `quantilesExact`/`quantileBFloat16` if needed.",
 	],
+	attribute_keys_hourly: [
+		"The time column is `Hour` (a top-of-hour DateTime), NOT `Timestamp`. Use `$__timeFilter(Hour)` and snap range bounds with `toStartOfHour`.",
+		"The count column is `UsageCount` (SimpleAggregateFunction(sum, UInt64)) — aggregate with `sum(UsageCount)`. There is no `Count` column.",
+		"There is NO `ServiceName` column: this rollup is per (org, scope, hour, key) only, so attribute keys cannot be split by service here. Query `traces` / `logs` directly for a per-service breakdown.",
+		"`AttributeScope` values are lowercase: 'span', 'resource', 'log', 'metric'. Filter with `AttributeScope = 'span'` (NOT 'Span').",
+		"Sorting key: `(OrgId, AttributeScope, Hour, AttributeKey)` — filtering on `AttributeScope` first is what makes this table fast.",
+	],
+	attribute_values_hourly: [
+		"Same shape as `attribute_keys_hourly` one level deeper, adding `AttributeValue`. Time column is `Hour`, count column is `UsageCount`, and there is no `ServiceName`.",
+		"`AttributeScope` values are lowercase: 'span', 'resource', 'log', 'metric'.",
+		"Sorting key: `(OrgId, AttributeScope, AttributeKey, Hour, AttributeValue)` — pin `AttributeKey` to look up one key's values cheaply.",
+	],
 	service_usage: [
 		"Hourly per-service rollup of STORED rows, 365-day TTL — far longer than the 30-day `logs`/`traces` retention, so it is the right table for long-range volume trends.",
 		"`Hour` is a top-of-hour DateTime. Snap both range bounds to their hour floor (`toStartOfHour`) or sub-hour windows return no rows at all; this necessarily over-reports at the window edges.",

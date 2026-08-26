@@ -14,7 +14,7 @@ import { createDualContent } from "@/mcp/lib/structured-output"
 import { formatTable, truncate } from "@/mcp/lib/format"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { McpQueryError } from "./types"
-import { listWarehouseTables } from "@/services/warehouse/warehouse-catalog"
+import { describeWarehouseTable, listWarehouseTables } from "@/services/warehouse/warehouse-catalog"
 
 // Rows returned to the model are capped so a wide/long result doesn't blow the
 // context. The full count is always reported via meta.rowCount.
@@ -37,6 +37,56 @@ export const withTableListOnUnknownTable = (error: McpQueryError): McpQueryError
 		cause: error.cause,
 	})
 }
+
+/**
+ * Matches how each backend words a column that isn't on the referenced table.
+ * ClickHouse's analyzer says "Unknown expression or function identifier '<x>' in
+ * scope <query>"; the older paths say "Unknown identifier" / "Missing columns" /
+ * "There's no column".
+ */
+const UNKNOWN_COLUMN = /unknown (?:expression or function )?identifier|missing columns|there'?s no column/i
+
+/** Cap on how many tables one enrichment describes. */
+const MAX_DESCRIBED_TABLES = 3
+
+/** Catalog tables the submitted SQL actually names, in first-mention order. */
+const referencedTables = (sql: string): ReadonlyArray<string> =>
+	listWarehouseTables()
+		.map((t) => ({ name: t.name, at: sql.search(new RegExp(`\\b${t.name}\\b`)) }))
+		.filter((t) => t.at >= 0)
+		.sort((a, b) => a.at - b.at)
+		.map((t) => t.name)
+
+/**
+ * The column counterpart of `withTableListOnUnknownTable`, and it exists for the
+ * same reason: the warehouse names the column the agent invented but never the
+ * ones that exist, so a wrong guess on a rollup table (`Count`/`Timestamp`/
+ * `ServiceName` against `attribute_keys_hourly`, whose columns are `Hour` and
+ * `UsageCount` and which has no per-service dimension at all) fails every retry.
+ * Put the real columns in the error rather than pointing at a tool agents skip.
+ */
+export const withColumnListOnUnknownColumn =
+	(sql: string) =>
+	(error: McpQueryError): McpQueryError => {
+		if (!UNKNOWN_COLUMN.test(error.message)) return error
+
+		// Only the tables the query names; a schema dump of all 38 would bury the
+		// message it is attached to.
+		const described = referencedTables(sql)
+			.slice(0, MAX_DESCRIBED_TABLES)
+			.map((name) => describeWarehouseTable(name))
+			.filter((info) => info !== null)
+		if (described.length === 0) return error
+
+		const listing = described.map(
+			(info) => `\`${info.name}\`: ${info.columns.map((c) => c.name).join(", ")}`,
+		)
+		return new McpQueryError({
+			message: `${error.message}\n\nColumns available —\n${listing.join("\n")}`,
+			pipeName: error.pipeName,
+			cause: error.cause,
+		})
+	}
 
 const runSqlSchema = Schema.Struct({
 	sql: requiredStringParam(
@@ -111,6 +161,8 @@ export function registerRunSqlTool(server: McpToolRegistrar) {
 				// points at describe_warehouse_tables instead, which agents skip — 60
 				// calls against 1,008 run_sql calls. Put the answer in the error.
 				Effect.mapError(withTableListOnUnknownTable),
+				// Same gap one level down: the table exists but the column was invented.
+				Effect.mapError(withColumnListOnUnknownColumn(params.sql)),
 			)
 
 			if (!outcome.ok) return outcome.result
