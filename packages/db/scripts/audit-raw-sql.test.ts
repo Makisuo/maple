@@ -11,7 +11,7 @@ describe("rawSqlWidgets", () => {
 				{ id: "w1", dataSource: { kind: "raw_sql", sql: "SELECT 1" } },
 			],
 		}
-		expect(rawSqlWidgets(payload)).toEqual([{ widgetId: "w1", sql: "SELECT 1" }])
+		expect(rawSqlWidgets(payload)).toEqual([{ widgetId: "w1", sql: "SELECT 1", sourceForm: "kind" }])
 	})
 
 	it("attributes the sql to the nearest enclosing id", () => {
@@ -27,8 +27,8 @@ describe("rawSqlWidgets", () => {
 			],
 		}
 		expect(rawSqlWidgets(payload)).toEqual([
-			{ widgetId: "a", sql: "SELECT 1" },
-			{ widgetId: "b1", sql: "SELECT 2" },
+			{ widgetId: "a", sql: "SELECT 1", sourceForm: "kind" },
+			{ widgetId: "b1", sql: "SELECT 2", sourceForm: "kind" },
 		])
 	})
 
@@ -43,7 +43,7 @@ describe("rawSqlWidgets", () => {
 		const payload = {
 			widgets: [{ id: "old", dataSource: { endpoint: "raw_sql_chart", params: { sql: "SELECT 3" } } }],
 		}
-		expect(rawSqlWidgets(payload)).toEqual([{ widgetId: "old", sql: "SELECT 3" }])
+		expect(rawSqlWidgets(payload)).toEqual([{ widgetId: "old", sql: "SELECT 3", sourceForm: "route" }])
 	})
 
 	it("finds both shapes in one document", () => {
@@ -53,7 +53,10 @@ describe("rawSqlWidgets", () => {
 				{ id: "v2", dataSource: { endpoint: "raw_sql_chart", params: { sql: "SELECT 2" } } },
 			],
 		}
-		expect(rawSqlWidgets(payload).map((w) => w.widgetId)).toEqual(["v3", "v2"])
+		expect(rawSqlWidgets(payload).map((w) => [w.widgetId, w.sourceForm])).toEqual([
+			["v3", "kind"],
+			["v2", "route"],
+		])
 	})
 
 	it("survives nulls and non-objects", () => {

@@ -33,8 +33,22 @@ export interface Finding {
  * the accessor also reads the pre-v3 `{ endpoint: "raw_sql_chart", params }`
  * form, which covers any row that predates the v3 backfill.
  */
-export const rawSqlWidgets = (payload: unknown): Array<{ widgetId: string; sql: string }> => {
-	const found: Array<{ widgetId: string; sql: string }> = []
+export interface FoundRawSql {
+	readonly widgetId: string
+	readonly sql: string
+	/**
+	 * Which of the two accepted forms carries the SQL. `route` is the pre-v3
+	 * `{ endpoint: "raw_sql_chart", params: { sql } }`, still a valid v3 storage
+	 * shape and still accepted by `/v2/dashboards`. Reported for every raw-SQL
+	 * source, valid or not, because "does anything actually use it?" is what
+	 * decides whether that door can be closed — and closing it is only safe if
+	 * nothing has come through.
+	 */
+	readonly sourceForm: "kind" | "route"
+}
+
+export const rawSqlWidgets = (payload: unknown): Array<FoundRawSql> => {
+	const found: Array<FoundRawSql> = []
 	const walk = (node: unknown, widgetId: string): void => {
 		if (Array.isArray(node)) {
 			for (const child of node) walk(child, widgetId)
@@ -45,7 +59,11 @@ export const rawSqlWidgets = (payload: unknown): Array<{ widgetId: string; sql: 
 		const id = typeof record.id === "string" ? record.id : widgetId
 		const rawSql = dataSourceRawSql(record)
 		if (rawSql !== null && rawSql.sql !== "") {
-			found.push({ widgetId: id, sql: rawSql.sql })
+			found.push({
+				widgetId: id,
+				sql: rawSql.sql,
+				sourceForm: record.kind === "raw_sql" ? "kind" : "route",
+			})
 			return
 		}
 		for (const value of Object.values(record)) walk(value, id)
@@ -91,8 +109,10 @@ const main = async (): Promise<void> => {
 		>`
 			SELECT org_id, id, name, payload_json FROM dashboards
 		`
+		const sourceFormCounts = { kind: 0, route: 0 }
 		for (const dashboard of dashboards) {
 			for (const widget of rawSqlWidgets(dashboard.payload_json)) {
+				sourceFormCounts[widget.sourceForm] += 1
 				const issue = rawSqlIssue(widget.sql)
 				if (issue !== null) {
 					findings.push({
@@ -107,13 +127,22 @@ const main = async (): Promise<void> => {
 			}
 		}
 
+		// Printed whether or not anything failed, because it answers a second
+		// question: whether `/v2/dashboards` can stop accepting the route form.
+		// Closing that door is only safe if nothing has come through it.
+		const sourceFormLine = `raw-SQL widgets by source form: ${sourceFormCounts.kind} kind:"raw_sql", ${sourceFormCounts.route} route:"raw_sql_chart"`
+
 		if (asJson) {
-			console.log(JSON.stringify({ findings, total: findings.length }, null, 2))
+			console.log(
+				JSON.stringify({ findings, total: findings.length, sourceForms: sourceFormCounts }, null, 2),
+			)
 		} else if (findings.length === 0) {
 			console.log(
 				`No stored raw SQL would be rejected (${rules.length} alert rules, ${dashboards.length} dashboards scanned).`,
 			)
+			console.log(sourceFormLine)
 		} else {
+			console.log(`${sourceFormLine}\n`)
 			console.log(
 				`${findings.length} stored raw ${findings.length === 1 ? "query" : "queries"} would be rejected:\n`,
 			)
