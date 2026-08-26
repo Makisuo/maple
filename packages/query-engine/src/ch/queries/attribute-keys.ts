@@ -23,8 +23,8 @@ export function attributeKeysQuery(opts: AttributeKeysQueryOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.AttributeScope.eq(opts.scope),
 		])
 		.groupBy("attributeKey")
@@ -53,8 +53,8 @@ export function spanAttributeValuesQuery(opts: AttributeValuesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.AttributeScope.eq("span"),
 			$.AttributeKey.eq(opts.attributeKey),
 		])
@@ -72,8 +72,8 @@ export function resourceAttributeValuesQuery(opts: AttributeValuesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.AttributeScope.eq("resource"),
 			$.AttributeKey.eq(opts.attributeKey),
 		])
@@ -91,8 +91,8 @@ export function logAttributeValuesQuery(opts: AttributeValuesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.AttributeScope.eq("log"),
 			$.AttributeKey.eq(opts.attributeKey),
 		])
@@ -122,8 +122,8 @@ export function metricScopedAttributeKeysQuery(opts: MetricScopedAttributeKeysOp
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.eq(param.string("metricName")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("attributeKey")
 		.orderBy(["usageCount", "desc"])
@@ -147,8 +147,8 @@ export function metricScopedAttributeValuesQuery(opts: MetricScopedAttributeValu
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.eq(param.string("metricName")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			$.Attributes.get(opts.attributeKey).neq(""),
 		])
 		.groupBy("attributeValue")
@@ -165,8 +165,8 @@ export function metricAttributeValuesQuery(opts: AttributeValuesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.AttributeScope.eq("metric"),
 			$.AttributeKey.eq(opts.attributeKey),
 		])

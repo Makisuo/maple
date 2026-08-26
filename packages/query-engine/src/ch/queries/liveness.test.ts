@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCH, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
-import {
-	orgTelemetryPulseQuery,
-	serviceLivenessQuery,
-	serviceLivenessRowSchema,
-	telemetryPulseRowSchema,
-} from "./liveness"
+import { compileUnsafe, compileUnionUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { orgTelemetryPulseQuery, serviceLivenessQuery } from "./liveness"
 
 const pulseParams = {
 	orgId: "org_123",
@@ -26,7 +21,7 @@ const decodeRows = <T>(compiled: CompiledQuery<T>, rows: ReadonlyArray<Record<st
 
 describe("serviceLivenessQuery", () => {
 	it("scopes to one org and service over a bounded minute window", () => {
-		const { sql } = compileCH(serviceLivenessQuery(), livenessParams)
+		const { sql } = compileUnsafe(serviceLivenessQuery(), livenessParams)
 
 		expect(sql).toContain("FROM service_operations_minutely")
 		expect(sql).toContain("OrgId = 'org_123'")
@@ -36,7 +31,7 @@ describe("serviceLivenessQuery", () => {
 	})
 
 	it("selects exact and sampling-corrected counts side by side", () => {
-		const { sql } = compileCH(serviceLivenessQuery(), livenessParams)
+		const { sql } = compileUnsafe(serviceLivenessQuery(), livenessParams)
 
 		// The pair is the whole point: a raw collapse with a steady corrected
 		// count is a sampling change, not a traffic change.
@@ -49,16 +44,16 @@ describe("serviceLivenessQuery", () => {
 	})
 
 	it("is a group-less single-row aggregate", () => {
-		const { sql } = compileCH(serviceLivenessQuery(), livenessParams)
+		const { sql } = compileUnsafe(serviceLivenessQuery(), livenessParams)
 		expect(sql).not.toContain("GROUP BY")
 		expect(sql).toContain("FORMAT JSON")
 	})
 
 	it("omits the environment predicate unless asked to scope to one", () => {
-		const unscoped = compileCH(serviceLivenessQuery(), livenessParams).sql
+		const unscoped = compileUnsafe(serviceLivenessQuery(), livenessParams).sql
 		expect(unscoped).not.toContain("DeploymentEnv")
 
-		const scoped = compileCH(serviceLivenessQuery({ scopeToEnvironment: true }), {
+		const scoped = compileUnsafe(serviceLivenessQuery({ scopeToEnvironment: true }), {
 			...livenessParams,
 			deploymentEnv: "production",
 		}).sql
@@ -66,9 +61,7 @@ describe("serviceLivenessQuery", () => {
 	})
 
 	it("decodes BYO-ClickHouse string counts to numbers", () => {
-		const compiled = compileCH(serviceLivenessQuery(), livenessParams, {
-			rowSchema: serviceLivenessRowSchema,
-		})
+		const compiled = compileUnsafe(serviceLivenessQuery(), livenessParams)
 
 		// BYO ClickHouse quotes 64-bit ints; managed Tinybird returns numbers.
 		const [byo] = decodeRows(compiled, [
@@ -100,7 +93,7 @@ describe("serviceLivenessQuery", () => {
 
 describe("orgTelemetryPulseQuery", () => {
 	it("unions a span and a log probe", () => {
-		const { sql } = compileUnion(orgTelemetryPulseQuery(), pulseParams)
+		const { sql } = compileUnionUnsafe(orgTelemetryPulseQuery(), pulseParams)
 
 		// 2 branches → exactly 1 UNION ALL separator.
 		expect((sql.match(/UNION ALL/g) || []).length).toBe(1)
@@ -111,7 +104,7 @@ describe("orgTelemetryPulseQuery", () => {
 	})
 
 	it("selects count and a stringified max timestamp per branch", () => {
-		const { sql } = compileUnion(orgTelemetryPulseQuery(), pulseParams)
+		const { sql } = compileUnionUnsafe(orgTelemetryPulseQuery(), pulseParams)
 		expect(sql).toContain("count() AS count")
 		// Stringified so the DateTime (spans) / DateTime64 (logs) branches share a
 		// column type across the UNION.
@@ -120,7 +113,7 @@ describe("orgTelemetryPulseQuery", () => {
 	})
 
 	it("scopes every branch by OrgId and the bounded window", () => {
-		const { sql } = compileUnion(orgTelemetryPulseQuery(), pulseParams)
+		const { sql } = compileUnionUnsafe(orgTelemetryPulseQuery(), pulseParams)
 		expect((sql.match(/OrgId = 'org_123'/g) || []).length).toBe(2)
 		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
 		expect(sql).toContain("Timestamp <= '2024-01-01 00:10:00'")
@@ -130,9 +123,7 @@ describe("orgTelemetryPulseQuery", () => {
 	})
 
 	it("decodes BYO-ClickHouse string counts to numbers", () => {
-		const compiled = compileUnion(orgTelemetryPulseQuery(), pulseParams, {
-			rowSchema: telemetryPulseRowSchema,
-		})
+		const compiled = compileUnionUnsafe(orgTelemetryPulseQuery(), pulseParams)
 
 		// BYO ClickHouse quotes 64-bit ints; managed Tinybird returns numbers.
 		const rows = decodeRows(compiled, [
@@ -142,11 +133,12 @@ describe("orgTelemetryPulseQuery", () => {
 		expect(rows.map((row) => row.count)).toEqual([0, 42])
 	})
 
-	// The coercion is the row schema's doing, not the union's — compiling without
-	// one still hands back whatever the backend sent.
-	it("leaves rows untouched when compiled without a row schema", () => {
-		const compiled = compileUnion(orgTelemetryPulseQuery(), pulseParams)
+	// Decoding rests entirely on the schema the builder derives from the SELECT:
+	// `count()` is a `UInt64`, so a quoted count coerces with nothing declared.
+	it("derives the row schema from the union's branches", () => {
+		const compiled = compileUnionUnsafe(orgTelemetryPulseQuery(), pulseParams)
+		expect(compiled.rowSchemaSource).toBe("derived")
 		const [row] = decodeRows(compiled, [{ signal: "spans", count: "7", lastSeen: "2024-01-01 00:09:00" }])
-		expect(typeof row?.count).toBe("string")
+		expect(row?.count).toBe(7)
 	})
 })

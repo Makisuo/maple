@@ -1,43 +1,50 @@
-import { defineFn, compileFnCall } from "../define-fn"
+import { defineFn } from "../define-fn"
+import { QueryBuilderError } from "../errors"
 import { makeExpr } from "../expr"
 import { raw, compile } from "../../sql/sql-fragment"
 import type { Expr, Condition } from "../expr"
+import { Schema } from "effect"
+import * as T from "../types"
+
+import { arrayOfArg, sameAs, schemaOf } from "../define-fn"
+
+/** `groupUniqArrayIf(x, cond)` collects `x`s, so it decodes as an array of `x`. */
+const arraySchemaOf = <T>(expr: unknown) => {
+	const element = schemaOf<T>(expr)
+	return element ? Schema.Array(element) : undefined
+}
 
 // Standard aggregates (defineFn one-liners)
 
-export const count = defineFn<[], number>("count")
-export const avg = defineFn<[Expr<number>], number>("avg")
-export const sum = defineFn<[Expr<number>], number>("sum")
+export const count = defineFn<[], number>("count", T.uint64)
+export const avg = defineFn<[Expr<number>], number>("avg", T.float64)
+export const sum = defineFn<[Expr<number>], number>("sum", T.float64)
 
 // Condition-taking aggregates
 
-export const countIf = defineFn<[Condition], number>("countIf")
-export const sumIf = defineFn<[Expr<number>, Condition], number>("sumIf")
-export const avgIf = defineFn<[Expr<number>, Condition], number>("avgIf")
-export const maxIf = defineFn<[Expr<number>, Condition], number>("maxIf")
-export const minIf = defineFn<[Expr<number>, Condition], number>("minIf")
+export const countIf = defineFn<[Condition], number>("countIf", T.uint64)
+export const sumIf = defineFn<[Expr<number>, Condition], number>("sumIf", T.float64)
+export const avgIf = defineFn<[Expr<number>, Condition], number>("avgIf", T.float64)
+export const maxIf = defineFn<[Expr<number>, Condition], number>("maxIf", T.float64)
+export const minIf = defineFn<[Expr<number>, Condition], number>("minIf", T.float64)
 
 // Generic aggregates (compileFnCall for type preservation)
 
-export function min_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
-	return compileFnCall<NonNullable<T>>("min", expr)
-}
+// These hand back one of their arguments unchanged, so they decode as it does.
+// `sameAs(0)` is that rule by name — each of them used to carry its own copy.
 
-export function max_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
-	return compileFnCall<NonNullable<T>>("max", expr)
-}
+export const min_ = <T>(expr: Expr<T>): Expr<NonNullable<T>> =>
+	defineFn<[Expr<T>], NonNullable<T>>("min", sameAs(0))(expr)
 
-export function any_<T>(expr: Expr<T>): Expr<T> {
-	return compileFnCall<T>("any", expr)
-}
+export const max_ = <T>(expr: Expr<T>): Expr<NonNullable<T>> =>
+	defineFn<[Expr<T>], NonNullable<T>>("max", sameAs(0))(expr)
 
-export function anyIf<T>(expr: Expr<T>, cond: Condition): Expr<T> {
-	return compileFnCall<T>("anyIf", expr, cond)
-}
+export const any_ = <T>(expr: Expr<T>): Expr<T> => defineFn<[Expr<T>], T>("any", sameAs(0))(expr)
 
-export function uniq<T>(expr: Expr<T>): Expr<number> {
-	return compileFnCall<number>("uniq", expr)
-}
+export const anyIf = <T>(expr: Expr<T>, cond: Condition): Expr<T> =>
+	defineFn<[Expr<T>, Condition], T>("anyIf", sameAs(0))(expr, cond)
+
+export const uniq = <T>(expr: Expr<T>): Expr<number> => defineFn<[Expr<T>], number>("uniq", T.uint64)(expr)
 
 /**
  * `uniqIf(value, condition)` — distinct `value`s among the rows matching
@@ -47,13 +54,21 @@ export function uniq<T>(expr: Expr<T>): Expr<number> {
  * `countIf` on a `ReplacingMergeTree`: un-merged duplicate rows for the same
  * key would inflate a `countIf` but not a `uniqIf` on that key.
  */
-export function uniqIf<T>(expr: Expr<T>, cond: Condition): Expr<number> {
-	return compileFnCall<number>("uniqIf", expr, cond)
-}
+export const uniqIf = <T>(expr: Expr<T>, cond: Condition): Expr<number> =>
+	defineFn<[Expr<T>, Condition], number>("uniqIf", T.uint64)(expr, cond)
 
-export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
-	return compileFnCall<ReadonlyArray<T>>("groupUniqArray", expr)
-}
+/**
+ * `uniqExact(value)` — the exact distinct count, where {@link uniq} estimates.
+ *
+ * Costs more memory than the HLL `uniq` and is the right one wherever the
+ * number sits next to the rows it counts: a facet count that disagrees with the
+ * visible list reads as a bug, not as an approximation.
+ */
+export const uniqExact = <T>(expr: Expr<T>): Expr<number> =>
+	defineFn<[Expr<T>], number>("uniqExact", T.uint64)(expr)
+
+export const groupUniqArray = <T>(expr: Expr<T>): Expr<ReadonlyArray<T>> =>
+	defineFn<[Expr<T>], ReadonlyArray<T>>("groupUniqArray", arrayOfArg(0))(expr)
 
 /**
  * `groupUniqArrayArray(arrayColumn)` — flatten arrays across rows into one
@@ -64,29 +79,25 @@ export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
  * `SimpleAggregateFunction(groupUniqArrayArray, Array(T))` column is declared
  * with, so reading such a column back uses the same name.
  */
-export function groupUniqArrayArray<T>(expr: Expr<ReadonlyArray<T>>): Expr<ReadonlyArray<T>> {
-	return compileFnCall<ReadonlyArray<T>>("groupUniqArrayArray", expr)
-}
+export const groupUniqArrayArray = <T>(expr: Expr<ReadonlyArray<T>>): Expr<ReadonlyArray<T>> =>
+	defineFn<[Expr<ReadonlyArray<T>>], ReadonlyArray<T>>("groupUniqArrayArray", sameAs(0))(expr)
 
 /** `argMin(value, orderBy)` — the `value` from the row with the smallest `orderBy`. */
-export function argMin<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
-	return compileFnCall<T>("argMin", value, orderBy)
-}
+export const argMin = <T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> =>
+	defineFn<[Expr<T>, Expr<any>], T>("argMin", sameAs(0))(value, orderBy)
 
 /** `argMax(value, orderBy)` — the `value` from the row with the largest `orderBy`. */
-export function argMax<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
-	return compileFnCall<T>("argMax", value, orderBy)
-}
+export const argMax = <T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> =>
+	defineFn<[Expr<T>, Expr<any>], T>("argMax", sameAs(0))(value, orderBy)
 
-export function argMaxMerge<T>(expr: Expr<T>): Expr<T> {
-	return compileFnCall<T>("argMaxMerge", expr)
-}
+export const argMaxMerge = <T>(expr: Expr<T>): Expr<T> =>
+	defineFn<[Expr<T>], T>("argMaxMerge", sameAs(0))(expr)
 
 // Curried / parametric aggregates (handwritten — custom SQL syntax)
 
 export function quantile(q: number) {
 	return (expr: Expr<number>): Expr<number> =>
-		makeExpr<number>(raw(`quantile(${q})(${compile(expr.toFragment())})`))
+		makeExpr(raw(`quantile(${q})(${compile(expr.toFragment())})`), T.float64.schema)
 }
 
 /**
@@ -98,11 +109,12 @@ export function quantile(q: number) {
  */
 export function groupUniqArrayIf(maxSize: number) {
 	return <T>(expr: Expr<T>, cond: Condition): Expr<ReadonlyArray<T>> =>
-		makeExpr<ReadonlyArray<T>>(
+		makeExpr(
 			raw(
 				`groupUniqArrayIf(${Math.round(maxSize)})(` +
 					`${compile(expr.toFragment())}, ${compile(cond.toFragment())})`,
 			),
+			arraySchemaOf<T>(expr),
 		)
 }
 
@@ -131,13 +143,18 @@ export type WindowFunnelMode = "strict_order" | "strict_deduplication" | "strict
 export function windowFunnel(window: number, mode?: WindowFunnelMode) {
 	const params = mode === undefined ? `${Math.round(window)}` : `${Math.round(window)}, '${mode}'`
 	return (timestamp: Expr<any>, ...conditions: ReadonlyArray<Condition>): Expr<number> => {
+		// Reported, not thrown: the number of conditions is the number of steps a
+		// funnel has, and that count comes from data as often as from source.
 		if (conditions.length === 0) {
-			throw new Error("windowFunnel requires at least one condition")
+			throw new QueryBuilderError({
+				code: "InvalidArguments",
+				message: "windowFunnel requires at least one condition",
+			})
 		}
 		const args = [timestamp.toFragment(), ...conditions.map((c) => c.toFragment())]
 			.map(compile)
 			.join(", ")
-		return makeExpr<number>(raw(`windowFunnel(${params})(${args})`))
+		return makeExpr(raw(`windowFunnel(${params})(${args})`), T.uint8.schema)
 	}
 }
 
@@ -151,16 +168,29 @@ export function windowFunnel(window: number, mode?: WindowFunnelMode) {
  * user input, so only quote-free literals are accepted.
  */
 export function sequenceMatch(pattern: string) {
-	if (pattern.includes("'") || pattern.includes("\\")) {
-		throw new Error("sequenceMatch pattern must not contain quotes or backslashes")
-	}
 	return (timestamp: Expr<any>, ...conditions: ReadonlyArray<Condition>): Expr<number> => {
+		// An injection guard, so it reports rather than crashes: the pattern is
+		// embedded verbatim, and "not user input" is a claim about the caller that
+		// the caller is exactly who might get wrong.
+		//
+		// Checked here rather than when the factory is called, so that a hoisted
+		// `const matcher = sequenceMatch(pattern)` fails inside the compile that
+		// uses it rather than throwing at module scope, where nothing can catch it.
+		if (pattern.includes("'") || pattern.includes("\\")) {
+			throw new QueryBuilderError({
+				code: "InvalidArguments",
+				message: "sequenceMatch pattern must not contain quotes or backslashes",
+			})
+		}
 		if (conditions.length === 0) {
-			throw new Error("sequenceMatch requires at least one condition")
+			throw new QueryBuilderError({
+				code: "InvalidArguments",
+				message: "sequenceMatch requires at least one condition",
+			})
 		}
 		const args = [timestamp.toFragment(), ...conditions.map((c) => c.toFragment())]
 			.map(compile)
 			.join(", ")
-		return makeExpr<number>(raw(`sequenceMatch('${pattern}')(${args})`))
+		return makeExpr(raw(`sequenceMatch('${pattern}')(${args})`), T.uint8.schema)
 	}
 }

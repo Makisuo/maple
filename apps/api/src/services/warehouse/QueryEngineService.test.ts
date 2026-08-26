@@ -15,6 +15,7 @@ import { makeQueryEngineEvaluate, makeQueryEngineExecute } from "@maple/query-en
 import type { SqlQueryOptions } from "@maple/query-engine/profiles"
 import type { CompiledQuery } from "@maple/query-engine/ch"
 import type { TenantContext } from "@/services/auth/AuthService"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const assert: typeof nodeAssert & {
 	isTrue: (value: unknown) => void
@@ -51,12 +52,14 @@ const makeTraceTimeseriesRow = (
 		satisfiedCount: number
 		toleratingCount: number
 		apdexScore: number
+		spanCount: number
 		estimatedSpanCount: number
 	}> = {},
 ) => ({
 	bucket: "2026-01-01 00:00:00",
 	groupName: "checkout",
 	count: 0,
+	spanCount: 0,
 	avgDuration: 0,
 	p50Duration: 0,
 	p95Duration: 0,
@@ -82,15 +85,15 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
 		compiledQuery:
 			overrides.compiledQuery ??
 			((tenant, compiled, options) =>
-				sqlQuery(tenant, compiled.sql, options).pipe(
-					Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
+				sqlQuery(tenant, compiledQueryOf(compiled).sql, options).pipe(
+					Effect.flatMap((rows) => compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie)),
 				)),
 		compiledQueryWithCapabilities:
 			overrides.compiledQueryWithCapabilities ??
 			((tenant, compile, options) => {
-				const compiled = compile(baselineWarehouseCapabilities())
-				return sqlQuery(tenant, compiled.sql, options).pipe(
-					Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
+				const compiled = Effect.runSync(compile(baselineWarehouseCapabilities()))
+				return sqlQuery(tenant, compiledQueryOf(compiled).sql, options).pipe(
+					Effect.flatMap((rows) => compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie)),
 				)
 			}),
 	} satisfies Parameters<typeof makeQueryEngineExecute>[0]
@@ -118,17 +121,20 @@ describe("makeQueryEngineExecute", () => {
 						_tenant: unknown,
 						compile: (
 							capabilities: ReturnType<typeof baselineWarehouseCapabilities>,
-						) => CompiledQuery<Output>,
+						) => Effect.Effect<CompiledQuery<Output>, QueryBuilderError>,
 						options?: SqlQueryOptions,
-					) => {
-						const compiled = compile(baselineWarehouseCapabilities())
-						receivedSql = compiled.sql
-						context = options?.context
-						profile = options?.profile
-						return compiled
-							.decodeRows([{ bucket: "2026-01-01 00:00:00", groupName: "checkout", count: 7 }])
-							.pipe(Effect.orDie)
-					},
+					) =>
+						compile(baselineWarehouseCapabilities()).pipe(
+							Effect.orDie,
+							Effect.flatMap((compiled) => {
+								receivedSql = compiledQueryOf(compiled).sql
+								context = options?.context
+								profile = options?.profile
+								return compiled
+									.decodeRows([makeTraceTimeseriesRow({ count: 7 })])
+									.pipe(Effect.orDie)
+							}),
+						),
 				}),
 			)
 
@@ -169,15 +175,20 @@ describe("makeQueryEngineExecute", () => {
 						_tenant: unknown,
 						compile: (
 							capabilities: ReturnType<typeof baselineWarehouseCapabilities>,
-						) => CompiledQuery<Output>,
+						) => Effect.Effect<CompiledQuery<Output>, QueryBuilderError>,
 						options?: SqlQueryOptions,
-					) => {
-						const compiled = compile(baselineWarehouseCapabilities())
-						context = options?.context
-						profile = options?.profile
-						maxBlockSize = options?.settings?.maxBlockSize
-						return compiled.decodeRows([{ total: 42 }]).pipe(Effect.orDie)
-					},
+					) =>
+						compile(baselineWarehouseCapabilities()).pipe(
+							Effect.orDie,
+							Effect.flatMap((compiled) => {
+								context = options?.context
+								profile = options?.profile
+								maxBlockSize = options?.settings?.maxBlockSize
+								return compiledQueryOf(compiled)
+									.decodeRows([{ total: 42 }])
+									.pipe(Effect.orDie)
+							}),
+						),
 				}),
 			)
 
@@ -621,6 +632,7 @@ describe("makeQueryEngineExecute", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "api",
+								groupName: "api",
 								attributeValue: "",
 								avgValue: 10,
 								minValue: 5,
@@ -631,6 +643,7 @@ describe("makeQueryEngineExecute", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "worker",
+								groupName: "worker",
 								attributeValue: "",
 								avgValue: 20,
 								minValue: 10,
@@ -686,6 +699,7 @@ describe("makeQueryEngineExecute", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "api",
+								groupName: "api",
 								attributeValue: "",
 								avgValue: 10,
 								minValue: 10,
@@ -696,6 +710,7 @@ describe("makeQueryEngineExecute", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "worker",
+								groupName: "worker",
 								attributeValue: "",
 								avgValue: 20,
 								minValue: 20,
@@ -988,6 +1003,7 @@ describe("makeQueryEngineEvaluate", () => {
 								bucket: "2026-01-01 00:00:00",
 								groupName: "all",
 								count: 200,
+								spanCount: 200,
 								avgDuration: 12,
 								p50Duration: 10,
 								p95Duration: 120,
@@ -1038,6 +1054,7 @@ describe("makeQueryEngineEvaluate", () => {
 								bucket: "2026-01-01 00:00:00",
 								groupName: "all",
 								count: 40,
+								spanCount: 40,
 								avgDuration: 0,
 								p50Duration: 0,
 								p95Duration: 0,
@@ -1084,6 +1101,7 @@ describe("makeQueryEngineEvaluate", () => {
 							{
 								bucket: "2026-01-01 00:00:00",
 								serviceName: "api",
+								groupName: "api",
 								attributeValue: "",
 								avgValue: 18,
 								minValue: 5,

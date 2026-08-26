@@ -15,15 +15,8 @@
 // a BYO-ClickHouse org otherwise fails to decode.
 
 import * as CH from "@maple-dev/clickhouse-builder"
-import {
-	compileCH,
-	from,
-	fromQuery,
-	param,
-	type CompiledQuery,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
-import { Schema } from "effect"
+import { compile, from, fromQuery, param, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { Schema, Effect } from "effect"
 import {
 	AttributeKeysHourly,
 	AttributeValuesHourly,
@@ -38,6 +31,8 @@ import {
 } from "@maple/query-engine/ch/tables"
 import { CHNumber } from "@maple/query-engine/ch/schema"
 import { hourFloor } from "@maple/query-engine/ch/query-helpers"
+import * as T from "@maple-dev/clickhouse-builder/types"
+import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 
 /** Snaps a window bound to its hour floor so any overlapping hour of an hourly MV contributes. */
 
@@ -79,8 +74,8 @@ export function auditAttributeKeyInventoryQuery(opts: { limit?: number } = {}) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			CH.inList($.AttributeScope, ["span", "resource", "log", "metric"]),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("scope", "attributeKey")
 		.orderBy(["usageCount", "desc"])
@@ -138,11 +133,13 @@ export function auditSpanProfileByServiceQuery(opts: { limit?: number } = {}) {
 			noEnvCount: CH.sumIf($.WeightedCount, $.DeploymentEnv.eq("")),
 			spanNameCount: CH.uniq($.SpanName),
 			// Bounded samples of the offending literals so the finding can name them.
-			badStatusCodes: CH.rawExpr<ReadonlyArray<string>>(
+			badStatusCodes: CH.rawExpr(
 				`groupUniqArrayIf(5)(StatusCode, StatusCode NOT IN (${quoteList(VALID_STATUS_CODES)}))`,
+				T.array(T.string),
 			),
-			badSpanKinds: CH.rawExpr<ReadonlyArray<string>>(
+			badSpanKinds: CH.rawExpr(
 				`groupUniqArrayIf(5)(SpanKind, SpanKind NOT IN (${quoteList(VALID_SPAN_KINDS)}))`,
+				T.array(T.string),
 			),
 		}))
 		.where(($) => [
@@ -267,8 +264,8 @@ export function auditMetricLabelCardinalityQuery(opts: { limit?: number } = {}) 
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.AttributeScope.eq("metric"),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("attributeKey")
 		.orderBy(["valueCardinality", "desc"])
@@ -315,8 +312,8 @@ export function auditPeerValueInventoryQuery(opts: { limit?: number } = {}) {
 			$.OrgId.eq(param.string("orgId")),
 			$.AttributeScope.eq("span"),
 			CH.inList($.AttributeKey, [...AUDIT_PEER_KEYS]),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.AttributeValue.neq(""),
 		])
 		.groupBy("attributeKey", "attributeValue")
@@ -407,10 +404,10 @@ export function auditLogCorrelationQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimestampTime.gte(param.dateTime("startTime")),
-			$.TimestampTime.lte(param.dateTime("endTime")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.TimestampTime.gte(param.dateTimeString("startTime")),
+			$.TimestampTime.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.orderBy(["logCount", "desc"])
@@ -468,14 +465,6 @@ export interface AuditOrphanSpanRow {
 	readonly sampleTraceIds: ReadonlyArray<string>
 }
 
-export const auditOrphanSpanRowSchema: CompiledQueryRowSchema<AuditOrphanSpanRow> = Schema.Struct({
-	serviceName: Schema.String,
-	childCount: CHNumber,
-	orphanCount: CHNumber,
-	sampledOrphanCount: CHNumber,
-	sampleTraceIds: Schema.Array(Schema.String),
-})
-
 export interface AuditTraceWindowParams {
 	readonly orgId: string
 	/** Children considered, half-open: `[childStart, childEnd)`. */
@@ -501,7 +490,9 @@ export interface AuditTraceWindowParams {
  * `sampledOrphanCount` splits out orphans inside sampling-marked traces, where a dropped parent is
  * expected rather than a defect; the caller reports those as a sampling observation instead.
  */
-export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQuery<AuditOrphanSpanRow> {
+export function auditOrphanSpansSQL(
+	params: AuditTraceWindowParams,
+): Effect.Effect<CompiledQuery<AuditOrphanSpanRow>, QueryBuilderError> {
 	const modulus = normalizeModulus(params.traceSampleModulus)
 
 	const children = from(ServiceMapChildren)
@@ -513,8 +504,8 @@ export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQue
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("childStart")),
-			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.Timestamp.gte(param.dateTimeString("childStart")),
+			$.Timestamp.lt(param.dateTimeString("childEnd")),
 			$.ParentSpanId.neq(""),
 			modulusFilter($.TraceId, modulus),
 		])
@@ -523,8 +514,8 @@ export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQue
 		.select(($) => ({ TraceId: $.TraceId, SpanId: $.SpanId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("parentStart")),
-			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.Timestamp.gte(param.dateTimeString("parentStart")),
+			$.Timestamp.lt(param.dateTimeString("childEnd")),
 			modulusFilter($.TraceId, modulus),
 		])
 
@@ -551,16 +542,12 @@ export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQue
 		.limit(200)
 		.format("JSON")
 
-	return compileCH(
-		query,
-		{
-			orgId: params.orgId,
-			childStart: params.childStart,
-			childEnd: params.childEnd,
-			parentStart: params.parentStart,
-		},
-		{ rowSchema: auditOrphanSpanRowSchema },
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		childStart: params.childStart,
+		childEnd: params.childEnd,
+		parentStart: params.parentStart,
+	})
 }
 
 export interface AuditRootlessTraceRow {
@@ -569,13 +556,6 @@ export interface AuditRootlessTraceRow {
 	readonly rootlessCount: number
 	readonly sampledRootlessCount: number
 }
-
-export const auditRootlessTraceRowSchema: CompiledQueryRowSchema<AuditRootlessTraceRow> = Schema.Struct({
-	entryService: Schema.String,
-	traceCount: CHNumber,
-	rootlessCount: CHNumber,
-	sampledRootlessCount: CHNumber,
-})
 
 /**
  * Traces observed with no root span anywhere. `trace_list_mv` is populated strictly from
@@ -588,7 +568,9 @@ export const auditRootlessTraceRowSchema: CompiledQueryRowSchema<AuditRootlessTr
  * `traceparent` without exporting spans — shows up as a near-total, uniform rootless rate, and the
  * caller collapses it into one finding rather than one per service.
  */
-export function auditRootlessTracesSQL(params: AuditTraceWindowParams): CompiledQuery<AuditRootlessTraceRow> {
+export function auditRootlessTracesSQL(
+	params: AuditTraceWindowParams,
+): Effect.Effect<CompiledQuery<AuditRootlessTraceRow>, QueryBuilderError> {
 	const modulus = normalizeModulus(params.traceSampleModulus)
 
 	const traces = from(ServiceMapChildren)
@@ -601,8 +583,8 @@ export function auditRootlessTracesSQL(params: AuditTraceWindowParams): Compiled
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("childStart")),
-			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.Timestamp.gte(param.dateTimeString("childStart")),
+			$.Timestamp.lt(param.dateTimeString("childEnd")),
 			modulusFilter($.TraceId, modulus),
 		])
 		.groupBy("TraceId")
@@ -611,8 +593,8 @@ export function auditRootlessTracesSQL(params: AuditTraceWindowParams): Compiled
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("parentStart")),
-			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.Timestamp.gte(param.dateTimeString("parentStart")),
+			$.Timestamp.lt(param.dateTimeString("childEnd")),
 			modulusFilter($.TraceId, modulus),
 		])
 		.groupBy("TraceId")
@@ -634,14 +616,10 @@ export function auditRootlessTracesSQL(params: AuditTraceWindowParams): Compiled
 		.limit(200)
 		.format("JSON")
 
-	return compileCH(
-		query,
-		{
-			orgId: params.orgId,
-			childStart: params.childStart,
-			childEnd: params.childEnd,
-			parentStart: params.parentStart,
-		},
-		{ rowSchema: auditRootlessTraceRowSchema },
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		childStart: params.childStart,
+		childEnd: params.childEnd,
+		parentStart: params.parentStart,
+	})
 }

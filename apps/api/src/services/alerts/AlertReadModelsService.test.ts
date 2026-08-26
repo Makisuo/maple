@@ -8,6 +8,7 @@ import {
 	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { AlertReadModelsService } from "./AlertReadModelsService"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 // Compile-time guard: scheduler, delivery, Env, cache, and query-engine
 // capabilities cannot enter this layer without making the assignment fail.
@@ -37,7 +38,7 @@ const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceApi =>
 	rawSqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),
 	compiledQuery: (_tenant, compiled, options) =>
 		Effect.sync(() => contexts.push(options?.context ?? "")).pipe(
-			Effect.andThen(compiled.decodeRows([])),
+			Effect.andThen(compiledQueryOf(compiled).decodeRows([])),
 		),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected first-row query")),
 	ingest: () => Effect.void,

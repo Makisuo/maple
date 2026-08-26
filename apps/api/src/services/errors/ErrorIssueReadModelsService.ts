@@ -368,16 +368,12 @@ const make: Effect.Effect<
 					})
 				: Effect.succeed([])
 
-			const environmentsCompiled = CH.compile(
-				CH.errorIssueEnvironmentsQuery(),
-				{
-					orgId,
-					fingerprintHash: issueRow.fingerprintHash,
-					startTime: formatWarehouseDateTime(startMs),
-					endTime: formatWarehouseDateTime(endMs),
-				},
-				{ rowSchema: CH.ErrorIssueEnvironmentsOutputSchema },
-			)
+			const environmentsCompiled = CH.compile(CH.errorIssueEnvironmentsQuery(), {
+				orgId,
+				fingerprintHash: issueRow.fingerprintHash,
+				startTime: formatWarehouseDateTime(startMs),
+				endTime: formatWarehouseDateTime(endMs),
+			})
 			const environmentsEffect = isErrorKind
 				? warehouse.compiledQuery(tenant, environmentsCompiled, {
 						context: "errorIssueEnvironments",

@@ -22,6 +22,7 @@ import { CHNumber } from "../schema"
 import { ServiceOperationsHourly, ServiceOperationsMinutely, Traces } from "../tables"
 import { tracesBaseWhereConditions } from "./query-helpers"
 import { edgeCondition, hourGrain, interiorConditions, minuteGrain } from "./rollup-splice"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 export interface ServiceOperationsSummaryOpts {
 	serviceName: string
@@ -63,6 +64,10 @@ const displaySpanName = ($: ColumnAccessor<typeof Traces.columns>) =>
 const RAW_DURATION_STATE = "quantilesTDigestState(0.5, 0.95)(Duration)"
 const ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles)"
 
+/** The t-digest type both branches above produce — opaque, merged by the outer
+ *  level, never decoded as a row. */
+const DURATION_STATE = T.aggregateState("quantilesTDigest(0.5, 0.95)", "UInt64")
+
 function rollupEnvironmentCondition(
 	$: ColumnAccessor<typeof ServiceOperationsMinutely.columns>,
 	environments: readonly string[] | undefined,
@@ -78,8 +83,9 @@ function hourlyEnvironmentCondition(
 }
 
 const mergedDurationQuantile = (index: 1 | 2) =>
-	CH.rawExpr<number>(
+	CH.rawExpr(
 		`if(sum(bSpanCount) > 0, arrayElement(quantilesTDigestMerge(0.5, 0.95)(bDurationQuantiles), ${index}) / 1000000, 0)`,
+		T.float64,
 	)
 
 /**
@@ -123,8 +129,8 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 			bEstimatedSpanCount: CH.sum($.SampleRate),
 			bErrorCount: CH.countIf($.StatusCode.eq("Error")),
 			bEstimatedErrorCount: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
-			bDurationSum: CH.sum(CH.rawExpr<number>("toFloat64(Duration)")),
-			bDurationQuantiles: CH.rawExpr<string>(RAW_DURATION_STATE),
+			bDurationSum: CH.sum(CH.rawExpr("toFloat64(Duration)", T.float64)),
+			bDurationQuantiles: CH.rawExpr(RAW_DURATION_STATE, DURATION_STATE),
 		}))
 		.where(($) => [
 			...tracesBaseWhereConditions($, {
@@ -143,7 +149,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 			bErrorCount: CH.sum($.ErrorCount),
 			bEstimatedErrorCount: CH.sum($.EstimatedErrorCount),
 			bDurationSum: CH.sum($.DurationSum),
-			bDurationQuantiles: CH.rawExpr<string>(ROLLUP_DURATION_STATE),
+			bDurationQuantiles: CH.rawExpr(ROLLUP_DURATION_STATE, DURATION_STATE),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -162,7 +168,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 			bErrorCount: CH.sum($.ErrorCount),
 			bEstimatedErrorCount: CH.sum($.EstimatedErrorCount),
 			bDurationSum: CH.sum($.DurationSum),
-			bDurationQuantiles: CH.rawExpr<string>(ROLLUP_DURATION_STATE),
+			bDurationQuantiles: CH.rawExpr(ROLLUP_DURATION_STATE, DURATION_STATE),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

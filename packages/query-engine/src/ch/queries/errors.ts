@@ -9,6 +9,7 @@ import { exists, inSubquery } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
+import * as T from "@maple-dev/clickhouse-builder/types"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { SpanId, TraceId } from "@maple/domain"
 import { Schema } from "effect"
@@ -149,8 +150,8 @@ export function errorsByTypeQuery(opts: ErrorsByTypeOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
 			...sharedFilterConditions($, opts),
 			opts.fingerprintHashes?.length
@@ -184,8 +185,8 @@ export function errorsTimeseriesQuery(opts: ErrorsTimeseriesOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			fingerprintHashEq($.FingerprintHash, opts.fingerprintHash),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 		])
 		.groupBy("bucket")
@@ -227,8 +228,8 @@ export function errorsSparkQuery(opts: ErrorsSparkOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			fingerprintHashIn($.FingerprintHash, opts.fingerprintHashes),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			...sharedFilterConditions($, opts),
 		])
 		.groupBy("fingerprintHash", "bucket")
@@ -365,8 +366,8 @@ export function spanHierarchyQuery(opts: SpanHierarchyOpts) {
 			.where(($) => [
 				$.TraceId.eq(opts.traceId),
 				$.OrgId.eq(param.string("orgId")),
-				CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.gte(param.dateTime("startTime"))),
-				CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.lte(param.dateTime("endTime"))),
+				CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.gte(param.dateTimeString("startTime"))),
+				CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.lte(param.dateTimeString("endTime"))),
 			])
 			// ORDER BY + LIMIT bounds pathological traces — the earliest spans keep
 			// the root subtree connected. buildSpanTree (web) re-sorts children anyway.
@@ -434,8 +435,8 @@ export function spanDetailQuery(opts: SpanDetailOpts) {
 			$.TraceId.eq(opts.traceId),
 			$.SpanId.eq(opts.spanId),
 			$.OrgId.eq(param.string("orgId")),
-			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.gte(param.dateTime("startTime"))),
-			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.lte(param.dateTime("endTime"))),
+			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.gte(param.dateTimeString("startTime"))),
+			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.lte(param.dateTimeString("endTime"))),
 		])
 		.limit(1)
 		.format("JSON")
@@ -467,7 +468,7 @@ export function traceTimeProbeQuery(opts: { traceId: string; narrowByTime?: bool
 		.where(($) => [
 			$.TraceId.eq(opts.traceId),
 			$.OrgId.eq(param.string("orgId")),
-			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.gte(param.dateTime("startTime"))),
+			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.gte(param.dateTimeString("startTime"))),
 		])
 		.limit(1)
 		.format("JSON")
@@ -528,8 +529,8 @@ export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.when(services, (v: readonly string[]) =>
 				matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 			),
@@ -599,12 +600,18 @@ export interface TracesFacetsOpts {
 
 export type TracesFacetsOutput = FacetOutput
 
+/** The String-typed columns of a table — a facet name is one of those, and a
+ *  facet over a `UInt64` would be a number in a field the wire calls a string. */
+type StringColumn<Cols extends ColumnDefs> = {
+	[K in keyof Cols & string]: Cols[K] extends T.CHString ? K : never
+}[keyof Cols & string]
+
 export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFacetsOutput> {
 	const baseWhere = ($: ColumnAccessor<typeof TraceListMv.columns>): Array<CH.Condition | undefined> => {
 		const conditions: Array<CH.Condition | undefined> = [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		]
 
 		const services = inclusionValues(opts.serviceName, opts.serviceNames)
@@ -651,8 +658,10 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 						.where(() => [
 							CH.dynamicColumn("t_attr.TraceId").eq(CH.outerRef("TraceId")),
 							CH.dynamicColumn("t_attr.OrgId").eq(param.string("orgId")),
-							CH.dynamicColumn<string>("t_attr.Timestamp").gte(param.dateTime("startTime")),
-							CH.dynamicColumn<string>("t_attr.Timestamp").lte(param.dateTime("endTime")),
+							CH.dynamicColumn<string>("t_attr.Timestamp").gte(
+								param.dateTimeString("startTime"),
+							),
+							CH.dynamicColumn<string>("t_attr.Timestamp").lte(param.dateTimeString("endTime")),
 							matchCond,
 						]),
 				),
@@ -674,8 +683,10 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 						.where(() => [
 							CH.dynamicColumn("t_res.TraceId").eq(CH.outerRef("TraceId")),
 							CH.dynamicColumn("t_res.OrgId").eq(param.string("orgId")),
-							CH.dynamicColumn<string>("t_res.Timestamp").gte(param.dateTime("startTime")),
-							CH.dynamicColumn<string>("t_res.Timestamp").lte(param.dateTime("endTime")),
+							CH.dynamicColumn<string>("t_res.Timestamp").gte(
+								param.dateTimeString("startTime"),
+							),
+							CH.dynamicColumn<string>("t_res.Timestamp").lte(param.dateTimeString("endTime")),
 							matchCond,
 						]),
 				),
@@ -685,15 +696,18 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 		return conditions
 	}
 
+	// `colName` is a real `TraceListMv` column, so the accessor already knows how
+	// it decodes — naming it as a `dynamicColumn` threw that away and cost every
+	// facet branch its row schema.
 	const makeFacetQuery = (
-		colName: string,
+		colName: StringColumn<typeof TraceListMv.columns>,
 		facetType: string,
 		extraWhere?: ($: ColumnAccessor<typeof TraceListMv.columns>) => CH.Condition,
 		limit = 50,
 	) =>
 		from(TraceListMv)
-			.select((_$) => ({
-				name: CH.dynamicColumn<string>(colName),
+			.select(($) => ({
+				name: $[colName],
 				count: CH.count(),
 				facetType: CH.lit(facetType),
 			}))
@@ -749,8 +763,8 @@ export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFa
 		(except: ErrorsFilterDimension) =>
 		($: ColumnAccessor<typeof table.columns>): Array<CH.Condition | undefined> => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
 			...sharedFilterConditions($, opts, except),
 			opts.fingerprintHashes?.length
@@ -843,8 +857,8 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
 			...sharedFilterConditions($, opts),
 			opts.fingerprintHashes?.length
@@ -878,8 +892,8 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 				}))
 				.where(($) => [
 					$.OrgId.eq(param.string("orgId")),
-					$.Timestamp.gte(param.dateTime("startTime")),
-					$.Timestamp.lte(param.dateTime("endTime")),
+					$.Timestamp.gte(param.dateTimeString("startTime")),
+					$.Timestamp.lte(param.dateTimeString("endTime")),
 					opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 					opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
 				]),
@@ -895,8 +909,8 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 				}))
 				.where(($) => [
 					$.OrgId.eq(param.string("orgId")),
-					$.Timestamp.gte(param.dateTime("startTime")),
-					$.Timestamp.lte(param.dateTime("endTime")),
+					$.Timestamp.gte(param.dateTimeString("startTime")),
+					$.Timestamp.lte(param.dateTimeString("endTime")),
 					opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 					CH.inList(deploymentEnvExpr($.ResourceAttributes), deploymentEnvs),
 				]),
@@ -910,8 +924,8 @@ export function errorsSummaryQuery(opts: ErrorsSummaryOpts) {
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.Hour.gte(param.dateTime("startTime")),
-				$.Hour.lte(param.dateTime("endTime")),
+				$.Hour.gte(param.dateTimeString("startTime")),
+				$.Hour.lte(param.dateTimeString("endTime")),
 				opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 			]),
 	)
@@ -959,8 +973,8 @@ export function errorIssuesQuery(opts: ErrorIssuesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 			opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
 			opts.fingerprintHashes?.length
@@ -997,8 +1011,8 @@ export function errorTickIssuesQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Minute.gte(param.dateTime("startTime")),
-			$.Minute.lt(param.dateTime("endTime")),
+			$.Minute.gte(param.dateTimeString("startTime")),
+			$.Minute.lt(param.dateTimeString("endTime")),
 		])
 		.groupBy("fingerprintHash")
 		.format("JSON")
@@ -1027,8 +1041,8 @@ export function errorTickBootstrapIssuesQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lt(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lt(param.dateTimeString("endTime")),
 		])
 		.groupBy("fingerprintHash")
 		.format("JSON")
@@ -1060,8 +1074,8 @@ export function errorFingerprintsQuery(opts: ErrorFingerprintsOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 			opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
 		])
@@ -1086,8 +1100,8 @@ export function errorIssueTimeseriesQuery() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("bucket")
 		.orderBy(["bucket", "asc"])
@@ -1119,8 +1133,8 @@ export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.orderBy(["timestamp", "desc"])
 		.limit(opts.limit ?? 25)
@@ -1157,8 +1171,8 @@ export function errorIssueVersionsSinceQuery(opts: { limit?: number } = {}) {
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
 				$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
-				$.Timestamp.gte(param.dateTime("startTime")),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.gte(param.dateTimeString("startTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 			])
 			.groupBy("serviceVersion")
 			.orderBy(["count", "desc"])
@@ -1170,19 +1184,6 @@ export function errorIssueVersionsSinceQuery(opts: { limit?: number } = {}) {
 	)
 }
 
-// Error Issue environments — where one fingerprint was seen in the window.
-//
-// The Postgres `error_issues` row carries no environment: a fingerprint spans
-// environments, so "which environment is this in?" is a warehouse question
-// scoped to the window the detail page is looking at. Blank environments are
-// dropped for the same reason the facet drops them — a value you cannot act
-// on is noise.
-
-export const ErrorIssueEnvironmentsOutputSchema = Schema.Struct({
-	name: Schema.String,
-	count: CHNumber,
-})
-
 export function errorIssueEnvironmentsQuery(opts: { limit?: number } = {}) {
 	return from(ErrorEvents)
 		.select(($) => ({
@@ -1192,8 +1193,8 @@ export function errorIssueEnvironmentsQuery(opts: { limit?: number } = {}) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			$.DeploymentEnv.neq(""),
 		])
 		.groupBy("name")
@@ -1236,8 +1237,8 @@ export function errorDetailTracesQuery(opts: ErrorDetailTracesOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			fingerprintHashEq($.FingerprintHash, opts.fingerprintHash),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
 			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 		])
@@ -1265,8 +1266,8 @@ export function errorDetailTracesQuery(opts: ErrorDetailTracesOpts) {
 				$.TraceId,
 				fromQuery(errorSub, "matching_traces").select(($$) => ({ TraceId: $$.TraceId })),
 			),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("traceId")
 		.orderBy(["startTime", "desc"])

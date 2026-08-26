@@ -14,7 +14,7 @@
  *      re-run of the comparator.
  *
  * `alert_checks` is written through `warehouse.ingest` (pinned to managed
- * Tinybird for every org) and `listRuleChecksQuery` declares `.routing("ingest")`,
+ * Tinybird for every org) and `listRuleChecksQuery` declares `.route("ingest")`,
  * so both halves resolve the same pipeline — this works for BYO-ClickHouse
  * orgs too, and needs no second code path. See
  * `packages/query-engine/src/ch/queries/alert-checks.ts`.

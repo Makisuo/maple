@@ -150,7 +150,21 @@ const rawSqlResultLimitError = (rows: ReadonlyArray<Record<string, unknown>>): s
 	return null
 }
 
-/** Build the single prepare/execute workflow shared by HTTP, MCP, and alerts. */
+/**
+ * Build the single prepare/execute workflow shared by HTTP, MCP, and alerts.
+ *
+ * Rows come back as `Record<string, unknown>` and stay that way. Handwritten SQL
+ * has no SELECT the builder can read, so there is nothing to derive a row schema
+ * from — and three of the four callers (MCP `run_sql`, dashboard raw widgets,
+ * the share API) genuinely have no shape to validate against: whatever the user
+ * wrote is the shape. The fourth, alert rules, decodes through
+ * `RawSqlAlertRowSchema` at the point it knows what it asked for.
+ *
+ * An optional `rowSchema` here would give that one caller a parameter the other
+ * three have to skip, with no new guarantee — the same "silently validates
+ * nothing" default this DSL has spent the rest of its surface closing. Decode
+ * where the contract is instead.
+ */
 export const makeExecuteRawSql = <TTenant, E>(warehouse: RawSqlWarehouse<TTenant, E>) =>
 	Effect.fn("RawSql.execute")(function* (tenant: TTenant, input: ExecuteRawSqlInput) {
 		const prepared = yield* prepareRawSql(input)

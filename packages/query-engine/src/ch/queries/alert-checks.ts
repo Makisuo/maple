@@ -8,6 +8,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from } from "@maple-dev/clickhouse-builder"
 import { AlertChecks } from "../tables"
 import { ISO_Z_FORMAT } from "./format"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 export interface ListRuleChecksOpts {
 	readonly groupKey?: string
@@ -70,11 +71,11 @@ export function listRuleChecksQuery(opts: ListRuleChecksOpts) {
 					? $.GroupKey.eq(param.string("groupKey"))
 					: undefined,
 				opts.status != null ? $.Status.eq(param.string("status")) : undefined,
-				opts.since != null ? $.Timestamp.gte(param.dateTime("since")) : undefined,
-				opts.until != null ? $.Timestamp.lte(param.dateTime("until")) : undefined,
+				opts.since != null ? $.Timestamp.gte(param.dateTimeString("since")) : undefined,
+				opts.until != null ? $.Timestamp.lte(param.dateTimeString("until")) : undefined,
 				opts.beforeTimestamp != null
-					? $.Timestamp.lt(param.dateTime("beforeTimestamp")).or(
-							$.Timestamp.eq(param.dateTime("beforeTimestamp")).and(
+					? $.Timestamp.lt(param.dateTimeString("beforeTimestamp")).or(
+							$.Timestamp.eq(param.dateTimeString("beforeTimestamp")).and(
 								$.GroupKey.gt(param.string("beforeGroupKey")),
 							),
 						)
@@ -86,7 +87,7 @@ export function listRuleChecksQuery(opts: ListRuleChecksOpts) {
 			// alert_checks is written via `ingest` (Tinybird-pinned) with no per-org
 			// MV, so reads must hit the same managed pipeline — otherwise a
 			// BYO-ClickHouse org reads an empty table from its own ClickHouse.
-			.routing("ingest")
+			.route("ingest")
 	)
 }
 
@@ -110,14 +111,14 @@ export function alertCheckGroupTotalsQuery(opts: AlertCheckGroupTotalsOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.RuleId.eq(param.string("ruleId")),
-			$.Timestamp.gte(param.dateTime("since")),
-			$.Timestamp.lte(param.dateTime("until")),
+			$.Timestamp.gte(param.dateTimeString("since")),
+			$.Timestamp.lte(param.dateTimeString("until")),
 		])
 		.groupBy("groupKey")
 		.orderBy(["totalCount", "desc"], ["groupKey", "asc"])
 		.limit(opts.limit ?? 20)
 		.format("JSON")
-		.routing("ingest")
+		.route("ingest")
 }
 
 export interface AlertChecksSummaryOpts {
@@ -151,18 +152,18 @@ export function alertChecksSummaryQuery(opts: AlertChecksSummaryOpts) {
 			skippedCount: CH.countIf($.Status.eq("skipped")),
 			errorCount: CH.countIf($.Status.eq("error")),
 			transitionCount: CH.countIf($.IncidentTransition.neq("none")),
-			observedValue: CH.rawExpr<number | null>("avg(ObservedValue)"),
+			observedValue: CH.rawExpr("avg(ObservedValue)", T.nullable(T.float64)),
 			threshold: CH.avg($.Threshold),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.RuleId.eq(param.string("ruleId")),
-			$.Timestamp.gte(param.dateTime("since")),
-			$.Timestamp.lte(param.dateTime("until")),
+			$.Timestamp.gte(param.dateTimeString("since")),
+			$.Timestamp.lte(param.dateTimeString("until")),
 		])
 		.groupBy("bucket", "groupKey")
 		.orderBy(["bucket", "asc"], ["groupKey", "asc"])
 		.limit(20_000)
 		.format("JSON")
-		.routing("ingest")
+		.route("ingest")
 }

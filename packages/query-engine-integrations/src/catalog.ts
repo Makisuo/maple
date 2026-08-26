@@ -8,7 +8,7 @@
 // apps/api (`sql-catalog.clickhouse.e2e.test.ts`) analyzes these fixtures
 // against the real migrations alongside the core catalog.
 
-import { compile, compileUnion, type CompiledQuery } from "@maple/query-engine/ch"
+import { compileUnionUnsafe, compileUnsafe, type CompiledQuery } from "@maple/query-engine/ch"
 import * as CH from "./index"
 
 export interface IntegrationFixture {
@@ -32,10 +32,10 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		module: "ai-sessions",
 		name: "aiSessionListQuery",
 		label: "default",
-		// Row schemas are attached here, not just in the unit tests: the ClickHouse
-		// e2e sweep only runs its quoted/unquoted 64-bit decode assertion for
-		// fixtures whose compiled query carries one.
-		compile: () => compile(CH.aiSessionListQuery(), window, { rowSchema: CH.aiSessionListRowSchema }),
+		// The ClickHouse e2e sweep runs its quoted/unquoted 64-bit decode assertion
+		// for every fixture whose compiled query carries a row schema — which the
+		// builder derives from the SELECT, so nothing is declared here.
+		compile: () => compileUnsafe(CH.aiSessionListQuery(), window),
 	},
 	{
 		// The vendor/service filters the AI sessions list page sends.
@@ -43,29 +43,27 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		name: "aiSessionListQuery",
 		label: "filtered",
 		compile: () =>
-			compile(
+			compileUnsafe(
 				CH.aiSessionListQuery({
 					limit: 25,
 					vendorIds: ["eve"],
 					serviceNames: ["maple-slack-agent"],
 				}),
 				window,
-				{ rowSchema: CH.aiSessionListRowSchema },
 			),
 	},
 	{
 		module: "ai-sessions",
 		name: "aiSessionFacetsQuery",
 		label: "default",
-		compile: () =>
-			compileUnion(CH.aiSessionFacetsQuery(), window, { rowSchema: CH.aiSessionFacetsRowSchema }),
+		compile: () => compileUnionUnsafe(CH.aiSessionFacetsQuery(), window),
 	},
 	{
 		module: "ai-sessions",
 		name: "aiSessionSpansQuery",
 		label: "default",
 		compile: () =>
-			compile(
+			compileUnsafe(
 				CH.aiSessionSpansQuery(),
 				{ ...window, sessionId: "wrun_sql_catalog" },
 				{ rowSchema: CH.aiSessionSpansRowSchema },
@@ -80,23 +78,19 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		name: "aiSessionWindowQuery",
 		label: "default",
 		compile: () =>
-			compile(
-				CH.aiSessionWindowQuery(),
-				{ orgId: ORG_ID, sessionId: "wrun_sql_catalog" },
-				{ rowSchema: CH.aiSessionWindowRowSchema },
-			),
+			compileUnsafe(CH.aiSessionWindowQuery(), { orgId: ORG_ID, sessionId: "wrun_sql_catalog" }),
 	},
 	{
 		module: "cloudflare-infra",
 		name: "cloudflareZoneLatencySQL",
 		label: "default",
-		compile: () => compile(CH.cloudflareZoneLatencySQL(), window),
+		compile: () => compileUnsafe(CH.cloudflareZoneLatencySQL(), window),
 	},
 	{
 		module: "cloudflare-infra",
 		name: "cloudflareZoneTimeseriesSQL",
 		label: "default",
-		compile: () => compile(CH.cloudflareZoneTimeseriesSQL(), { ...window, bucketSeconds: 300 }),
+		compile: () => compileUnsafe(CH.cloudflareZoneTimeseriesSQL(), { ...window, bucketSeconds: 300 }),
 	},
 	{
 		// Filters exercise the zone-slice predicates the /infra/cloudflare page sends.
@@ -104,7 +98,7 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		name: "cloudflareZoneTimeseriesSQL",
 		label: "filtered",
 		compile: () =>
-			compile(
+			compileUnsafe(
 				CH.cloudflareZoneTimeseriesSQL({
 					hosts: ["example.com"],
 					statusClasses: ["5xx"],
@@ -117,14 +111,14 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		module: "cloudflare-infra-extended",
 		name: "cloudflareQueueGaugesSQL",
 		label: "default",
-		compile: () => compile(CH.cloudflareQueueGaugesSQL(), window),
+		compile: () => compileUnsafe(CH.cloudflareQueueGaugesSQL(), window),
 	},
 	{
 		module: "cloudflare-infra-breakdowns",
 		name: "cloudflareZoneBreakdownTimeseriesSQL",
 		label: "default",
 		compile: () =>
-			compile(CH.cloudflareZoneBreakdownTimeseriesSQL("path", {}, ["/api/v2/traces"]), {
+			compileUnsafe(CH.cloudflareZoneBreakdownTimeseriesSQL("path", {}, ["/api/v2/traces"]), {
 				...window,
 				serviceName: "cloudflare-zone-example-com",
 				bucketSeconds: 300,
@@ -134,19 +128,19 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		module: "cloudflare-usage",
 		name: "cloudflareUsageQuery",
 		label: "default",
-		compile: () => compile(CH.cloudflareUsageQuery(), { ...window, bucketSeconds: 3600 }),
+		compile: () => compileUnsafe(CH.cloudflareUsageQuery(), { ...window, bucketSeconds: 3600 }),
 	},
 	{
 		module: "cloudflare-map",
 		name: "cloudflareServiceLatencySQL",
 		label: "default",
-		compile: () => compile(CH.cloudflareServiceLatencySQL(), window),
+		compile: () => compileUnsafe(CH.cloudflareServiceLatencySQL(), window),
 	},
 	{
 		module: "planetscale-map",
 		name: "planetscaleGaugesSQL",
 		label: "default",
-		compile: () => compile(CH.planetscaleGaugesSQL(), window),
+		compile: () => compileUnsafe(CH.planetscaleGaugesSQL(), window),
 	},
 ]
 
@@ -174,4 +168,53 @@ export function collectIntegrationCatalog(): ReadonlyArray<IntegrationCatalogEnt
 			compiled,
 		}
 	})
+}
+
+// Anti-rot assertion — the integration half of `UNDECODED_QUERIES`
+
+/**
+ * Catalog entries whose rows nothing validates.
+ *
+ * `rowSchemaSource: "none"` means at least one selected expression had no type
+ * to read — a `rawExpr`, a `dynamicColumn` without one, a function declared
+ * with `defineUntypedFn`/`compileFnCall` — so `decodeRows` degrades to an
+ * identity cast and a warehouse that changes a column's wire format is
+ * invisible until the value reaches a consumer several layers away.
+ *
+ * Asserted *exactly*, in both directions: a query that stops deriving fails,
+ * and so does one still listed here after it starts. It is empty, and that is
+ * the invariant worth keeping — `aiSessionFacetsQuery` selected an untyped
+ * local `uniqExact` and validated nothing for as long as this package had no
+ * gate of its own, while the core catalog's identical assertion could not see
+ * it (that catalog must not import this package).
+ *
+ * Adding an entry is how you say a query cannot derive, and it needs a sentence
+ * here saying why.
+ */
+export const UNDECODED_INTEGRATION_QUERIES: ReadonlySet<string> = new Set([])
+
+/** The id of every catalog entry that decodes nothing. */
+export function undecodedIntegrationQueries(
+	entries: ReadonlyArray<IntegrationCatalogEntry>,
+): ReadonlyArray<string> {
+	return entries
+		.filter((entry) => entry.compiled.rowSchemaSource === "none")
+		.map((entry) => entry.id)
+		.sort()
+}
+
+/**
+ * The same list with the columns responsible, for the assertion's failure
+ * message. Derivation is all-or-nothing, so "this query decodes nothing" is
+ * useless on its own — these are the aliases to give a type.
+ */
+export function undecodedIntegrationColumns(
+	entries: ReadonlyArray<IntegrationCatalogEntry>,
+): ReadonlyMap<string, ReadonlyArray<string>> {
+	const columns = new Map<string, ReadonlyArray<string>>()
+	for (const entry of entries) {
+		if (entry.compiled.rowSchemaSource !== "none") continue
+		columns.set(entry.id, entry.compiled.untypedColumns)
+	}
+	return columns
 }

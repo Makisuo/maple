@@ -51,7 +51,7 @@
 	"scripts": {
 		"build": "tsdown",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
+		"test": "vitest run && node scripts/check-doc-citations.mjs && node scripts/check-exports-documented.mjs",
 		"prepublishOnly": "bun run build"
 	},
 	"devDependencies": {
@@ -64,6 +64,6 @@
 		"vitest": "catalog:"
 	},
 	"peerDependencies": {
-		"effect": ">=4.0.0-beta.33"
+		"effect": ">=4.0.0-rc.111 <5"
 	}
 }

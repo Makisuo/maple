@@ -30,8 +30,11 @@ import { WarehouseResponseLimitError, type WarehouseResponseLimits } from "./res
 import { SQL_LOG_MAX, SQL_TRACE_MAX, fingerprintSql, truncateSql } from "./fingerprint"
 import { BackendDialect, warehouseTargetAttributes } from "./backend"
 import { managedWarehouseCapabilities } from "./managed-capabilities"
+import { resolveCompiledQuery } from "./compiled-input"
 import { findIngestPinnedTable } from "./datasource-routing"
 import type {
+	CapabilityCompile,
+	CompiledQueryInput,
 	ExecutionTenant,
 	ResolvedWarehouseConfig,
 	RoutePurpose,
@@ -387,13 +390,16 @@ WHERE name = 'enable_full_text_index'`,
 		yield* Effect.annotateCurrentSpan("query.context", options?.context ?? pipe)
 		if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 
-		const leftoverParam = sql.match(/__PARAM_(\w+)__/)
+		// `compile()` now refuses to leave a placeholder behind, so this only fires
+		// for SQL that reached the executor without going through it — a raw
+		// template, or a splice compiled with `deferParams` that nothing resolved.
+		const leftoverParam = sql.match(/__PARAM_[A-Za-z]+_(\w+)__/)
 		if (leftoverParam) {
 			// An unresolved param is a compile-time bug in Maple's query construction,
 			// not a recoverable runtime failure — surface it as a defect.
 			return yield* Effect.die(
 				new Error(
-					`Compiled SQL contains unresolved param '${leftoverParam[1]}' — query was built with param.${leftoverParam[1]}() but '${leftoverParam[1]}' was not provided in the runtime params object`,
+					`Compiled SQL contains unresolved param '${leftoverParam[1]}' — the query declared it but the runtime params object did not provide it`,
 				),
 			)
 		}
@@ -403,7 +409,7 @@ WHERE name = 'enable_full_text_index'`,
 		// in a per-org BYO ClickHouse, so their reads must route to the same ingest
 		// config to stay symmetric with the write — otherwise a BYO-CH org reads an
 		// empty table from its own ClickHouse. That routing is declared at the
-		// query definition (`.routing("ingest")` → `options.route`).
+		// query definition (`.route("ingest")` → `options.route`).
 		const purpose: RoutePurpose =
 			execution === "raw" ? "raw" : options?.route === "ingest" ? "ingest" : "read"
 		const resolved = yield* deps.resolveRoute(tenant, purpose, pipe)
@@ -413,7 +419,7 @@ WHERE name = 'enable_full_text_index'`,
 			const pinnedTable = findIngestPinnedTable(sql)
 			if (pinnedTable !== undefined) {
 				yield* Effect.logWarning(
-					'Query reads an ingest-pinned datasource from a BYO ClickHouse — declare .routing("ingest") at the query definition',
+					'Query reads an ingest-pinned datasource from a BYO ClickHouse — declare .route("ingest") at the query definition',
 					{ pipe, table: pinnedTable, orgId: tenant.orgId },
 				)
 			}
@@ -759,7 +765,7 @@ WHERE name = 'enable_full_text_index'`,
 			? yield* resolveCapabilities(tenant, options)
 			: undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
-		const compiled = compilePipeQuery(
+		const lowered = compilePipeQuery(
 			payload.pipeName,
 			{
 				...payload.params,
@@ -768,12 +774,25 @@ WHERE name = 'enable_full_text_index'`,
 			capabilities ?? baselineWarehouseCapabilities(),
 		)
 
-		if (!compiled) {
+		if (!lowered) {
 			return yield* new WarehouseValidationError({
 				message: `Unsupported pipe: ${payload.pipeName}`,
 				pipeName: payload.pipeName,
 			})
 		}
+
+		// The pipe params come off the wire, so a value the query cannot encode is
+		// the caller's problem to hear about — the one compile path in the product
+		// where that is true, and the reason it reports rather than crashes.
+		const compiled = yield* lowered.pipe(
+			Effect.mapError(
+				(error) =>
+					new WarehouseValidationError({
+						message: `Could not compile pipe ${payload.pipeName}: ${error.message}`,
+						pipeName: payload.pipeName,
+					}),
+			),
+		)
 
 		// The pipe path used to call `executeTrustedSql` directly, with no scope
 		// assertion of any kind — it relied on `compilePipeQuery` always threading
@@ -821,12 +840,12 @@ WHERE name = 'enable_full_text_index'`,
 				message: `org_id must not be empty (${context})`,
 			})
 		}
-		if (tenantScope !== "org") {
+		if (tenantScope !== "single-tenant") {
 			return yield* new WarehouseScopeError({
 				pipeName: context,
 				message:
 					`compiled query is not tenant-scoped: no top-level OrgId predicate (${context}). ` +
-					`Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.`,
+					`Deliberate cross-tenant reads must declare .crossTenant() and run through crossOrgQuery.`,
 			})
 		}
 	})
@@ -868,14 +887,14 @@ WHERE name = 'enable_full_text_index'`,
 		return yield* executeSql(tenant, sql, "rawSqlQuery", options, "raw")
 	})
 
-	// A compiled query can carry `.routing("ingest")` from its definition — that
+	// A compiled query can carry `.route("ingest")` from its definition — that
 	// wins over the (absent) per-call option so the table→routing knowledge
 	// lives next to the query, not at every call site.
 	const withCompiledRouting = <T>(
 		compiled: CompiledQuery<T>,
 		options?: SqlQueryOptions,
 	): SqlQueryOptions | undefined =>
-		compiled.routing === "ingest" ? { ...options, route: "ingest" } : options
+		compiled.route === "ingest" ? { ...options, route: "ingest" } : options
 
 	// Every compiled query runs under a cost profile: an omitted `profile` used to
 	// mean "no SETTINGS clause at all" (no server-side memory/time budget, flat
@@ -887,16 +906,25 @@ WHERE name = 'enable_full_text_index'`,
 		profile: options?.profile ?? "aggregation",
 	})
 
+	/** `resolveCompiledQuery`, plus the capability-aware form only this port has. */
+	const resolveCompiled = <T>(
+		compiled: CompiledQueryInput<T> | CapabilityCompile<T>,
+		capabilities: WarehouseCapabilities | undefined,
+	): Effect.Effect<CompiledQuery<T>> =>
+		typeof compiled === "function"
+			? Effect.orDie(compiled(capabilities!))
+			: resolveCompiledQuery(compiled)
+
 	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		compiled: CompiledQueryInput<T> | CapabilityCompile<T>,
 		rawOptions?: SqlQueryOptions,
 	) {
 		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
-		const selected = typeof compiled === "function" ? compiled(capabilities!) : compiled
+		const selected = yield* resolveCompiled<T>(compiled, capabilities)
 		const executionOptions = withCapabilitySettings(capabilities, options)
 		yield* Effect.annotateCurrentSpan(
 			"query.optimization.capabilityAware",
@@ -923,7 +951,7 @@ WHERE name = 'enable_full_text_index'`,
 
 	const compiledQuery = (<T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		compiled: CompiledQueryInput<T> | CapabilityCompile<T>,
 		options?: SqlQueryOptions,
 	) => executeCompiledQuery(tenant, compiled, options)) as WarehouseQueryServiceApi["compiledQuery"]
 
@@ -937,7 +965,7 @@ WHERE name = 'enable_full_text_index'`,
 	 */
 	const compiledQueryBounded = Effect.fn("WarehouseQueryService.compiledQueryBounded")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		input: CompiledQueryInput<T>,
 		options: SqlQueryOptions & {
 			readonly responseLimits: WarehouseResponseLimits
 		},
@@ -945,6 +973,7 @@ WHERE name = 'enable_full_text_index'`,
 		const { responseLimits, ...queryOptions } = options
 		const normalizedOptions = withDefaultProfile(queryOptions)
 		const context = normalizedOptions.context ?? "compiledQueryBounded"
+		const compiled = yield* resolveCompiled<T>(input, undefined)
 		const rows = yield* executeScopedSqlBounded(
 			tenant,
 			compiled.sql,
@@ -967,7 +996,7 @@ WHERE name = 'enable_full_text_index'`,
 
 	const compiledQueryWithCapabilities = <T>(
 		tenant: ExecutionTenant,
-		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
+		compile: CapabilityCompile<T>,
 		options?: SqlQueryOptions,
 	) => executeCompiledQuery(tenant, compile, options)
 
@@ -976,18 +1005,19 @@ WHERE name = 'enable_full_text_index'`,
 	 *
 	 * A separate method rather than a flag on `compiledQuery`, so that grepping
 	 * for cross-tenant reads returns a finite, reviewable list. The compiled
-	 * query must have declared `.crossOrg()`; a scoped query arriving here is
+	 * query must have declared `.crossTenant()`; a scoped query arriving here is
 	 * just as much a bug as an unscoped one on the normal path, so both
 	 * directions are rejected.
 	 */
 	const crossOrgQuery = Effect.fn("WarehouseQueryService.crossOrgQuery")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		input: CompiledQueryInput<T>,
 		rawOptions: SqlQueryOptions & { readonly justification: string },
 	) {
 		const options = withDefaultProfile(rawOptions)
 		const context = options.context ?? "crossOrgQuery"
-		if (compiled.tenantScope !== "cross-org") {
+		const compiled = yield* resolveCompiled<T>(input, undefined)
+		if (compiled.tenantScope !== "cross-tenant") {
 			return yield* new WarehouseScopeError({
 				pipeName: context,
 				message:
@@ -1019,14 +1049,14 @@ WHERE name = 'enable_full_text_index'`,
 
 	const compiledQueryFirst = Effect.fn("WarehouseQueryService.compiledQueryFirst")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		compiled: CompiledQueryInput<T> | CapabilityCompile<T>,
 		rawOptions?: SqlQueryOptions,
 	) {
 		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
-		const selected = typeof compiled === "function" ? compiled(capabilities!) : compiled
+		const selected = yield* resolveCompiled<T>(compiled, capabilities)
 		const executionOptions = withCapabilitySettings(capabilities, options)
 		yield* Effect.annotateCurrentSpan(
 			"query.optimization.capabilityAware",
@@ -1150,9 +1180,9 @@ WHERE name = 'enable_full_text_index'`,
 			query(tenant, { pipeName: pipe, params }, { context: `pipe:${pipe}`, ...options }).pipe(
 				Effect.map((response) => ({ data: response.data as ReadonlyArray<T> })),
 			),
-		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
+		compiledQuery: <T>(compiled: CompiledQueryInput<T>, options?: SqlQueryOptions) =>
 			compiledQuery(tenant, compiled, { context: "warehouseExecutor.compiledQuery", ...options }),
-		compiledQueryFirst: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
+		compiledQueryFirst: <T>(compiled: CompiledQueryInput<T>, options?: SqlQueryOptions) =>
 			compiledQueryFirst(tenant, compiled, {
 				context: "warehouseExecutor.compiledQueryFirst",
 				...options,

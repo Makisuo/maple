@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import { tracesTimeseriesQuery } from "./traces"
 import { logsTimeseriesQuery } from "./logs"
 
@@ -19,7 +19,7 @@ describe("series cap (finalizeTimeseries)", () => {
 				groupBy: ["service"],
 				bucketSeconds: 3600,
 			})
-			const { sql } = compileCH(q, baseParams)
+			const { sql } = compileUnsafe(q, baseParams)
 			expect(sql).not.toContain("__series_base")
 			expect(sql).toContain("FORMAT JSON")
 		})
@@ -32,7 +32,7 @@ describe("series cap (finalizeTimeseries)", () => {
 				bucketSeconds: 3600,
 				seriesLimit: 5,
 			})
-			const { sql } = compileCH(q, baseParams)
+			const { sql } = compileUnsafe(q, baseParams)
 			expect(sql).not.toContain("__series_base")
 		})
 
@@ -44,7 +44,7 @@ describe("series cap (finalizeTimeseries)", () => {
 				bucketSeconds: 3600,
 				seriesLimit: 5,
 			})
-			const { sql } = compileCH(q, baseParams)
+			const { sql } = compileUnsafe(q, baseParams)
 			// CTE wrapper + ranking + restriction to top-N group names.
 			expect(sql).toContain("WITH __series_base AS")
 			expect(sql).toContain("FROM __series_base")
@@ -64,7 +64,7 @@ describe("series cap (finalizeTimeseries)", () => {
 				groupBy: ["service"],
 				bucketSeconds: 3600,
 			})
-			const { sql } = compileCH(q, baseParams)
+			const { sql } = compileUnsafe(q, baseParams)
 			expect(sql).not.toContain("__series_base")
 		})
 
@@ -74,7 +74,7 @@ describe("series cap (finalizeTimeseries)", () => {
 				bucketSeconds: 3600,
 				seriesLimit: 3,
 			})
-			const { sql } = compileCH(q, baseParams)
+			const { sql } = compileUnsafe(q, baseParams)
 			expect(sql).toContain("WITH __series_base AS")
 			expect(sql).toContain("max(count) AS rank")
 			expect(sql).toContain("LIMIT 3")

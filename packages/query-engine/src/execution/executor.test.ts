@@ -3,7 +3,7 @@ import { Duration, Effect, Exit, Fiber, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { OrgId, UserId } from "@maple/domain"
 import { RawSqlValidationError } from "@maple/domain/http"
-import { compile, listRuleChecksQuery, unsafeCompiledQuery } from "../ch"
+import { compileUnsafe, listRuleChecksQuery, rawCompiledQuery } from "../ch"
 import { logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeWarehouseExecutor } from "./executor"
 import { WarehouseResponseLimitError } from "./response-limits"
@@ -56,32 +56,32 @@ const chdbConfig: ResolvedWarehouseConfig = {
 	kind: "chdb",
 }
 
-// listRuleChecksQuery declares .routing("ingest") at its definition —
+// listRuleChecksQuery declares .route("ingest") at its definition —
 // alert_checks only exists in the managed ingest pipeline.
-const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
+const compiled = compileUnsafe(listRuleChecksQuery({ limit: 1 }), {
 	orgId: "org_test",
 	ruleId: "rule_test",
 })
-const _ingestRoutingIsPartOfTheCompiledType: "ingest" = compiled.routing
-void _ingestRoutingIsPartOfTheCompiledType
+const _ingestRouteIsPartOfTheCompiledType: "ingest" = compiled.route
+void _ingestRouteIsPartOfTheCompiledType
 
 // The old `sqlQuery(tenant, sql)` entry point took a raw string; scope now
 // travels on the compiled query, so these execution/span/retry tests wrap their
 // SQL in a compiled value that declares it.
 const scoped = (sql: string) =>
-	unsafeCompiledQuery<Record<string, unknown>>({
+	rawCompiledQuery<Record<string, unknown>>({
 		sql,
-		tenantScope: "org",
+		tenantScope: "single-tenant",
 		reason: "test-fixture",
-		note: "Synthetic SQL asserting executor behaviour, not a product query.",
+		justification: "Synthetic SQL asserting executor behaviour, not a product query.",
 	})
 
 // A plain query with no routing declaration follows the default read route.
-const untaggedCompiled = unsafeCompiledQuery<{ readonly c: number }>({
+const untaggedCompiled = rawCompiledQuery<{ readonly c: number }>({
 	reason: "test-fixture",
-	note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+	justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 	sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
-	tenantScope: "org",
+	tenantScope: "single-tenant",
 })
 
 // Records the backend each constructed client was wired to, so a test can assert
@@ -118,7 +118,7 @@ describe("makeWarehouseExecutor ingest routing", () => {
 		}),
 	)
 
-	it.effect("routes a .routing('ingest')-tagged compiled query to the ingest (Tinybird) route", () =>
+	it.effect("routes a .route('ingest')-tagged compiled query to the ingest (Tinybird) route", () =>
 		Effect.gen(function* () {
 			const created: Array<ResolvedWarehouseConfig["kind"]> = []
 			const executor = makeWarehouseExecutor(makeDeps(created))
@@ -219,12 +219,15 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 				.compiledQuery(
 					tenant,
 					() =>
-						unsafeCompiledQuery<{ readonly c: number }>({
-							reason: "test-fixture",
-							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
-							tenantScope: "org",
-						}),
+						Effect.succeed(
+							rawCompiledQuery<{ readonly c: number }>({
+								reason: "test-fixture",
+								justification:
+									"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+								sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+								tenantScope: "single-tenant",
+							}),
+						),
 					{ context: "capabilitySpan" },
 				)
 				.pipe(Effect.withTracer(tracer))
@@ -333,11 +336,11 @@ describe("makeWarehouseExecutor compiled-query defaults", () => {
 						clientCacheKey: "read:org_test",
 					}),
 			}
-			const withSchema = unsafeCompiledQuery<{ readonly c: number }>({
+			const withSchema = rawCompiledQuery<{ readonly c: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
-				tenantScope: "org",
+				tenantScope: "single-tenant",
 				rowSchema: Schema.Struct({ c: Schema.Number }),
 			})
 			const executor = makeWarehouseExecutor(badRowDeps)
@@ -554,12 +557,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			})
 
 			const factory = (capabilities: WarehouseCapabilities) =>
-				unsafeCompiledQuery<{ readonly c: number }>({
-					reason: "test-fixture",
-					note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-					sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
-					tenantScope: "org",
-				})
+				Effect.succeed(
+					rawCompiledQuery<{ readonly c: number }>({
+						reason: "test-fixture",
+						justification:
+							"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
+						tenantScope: "single-tenant",
+					}),
+				)
 
 			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
 			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
@@ -611,12 +617,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				executor.compiledQueryWithCapabilities(
 					tenant,
 					() =>
-						unsafeCompiledQuery<{ readonly c: number }>({
-							reason: "test-fixture",
-							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
-							tenantScope: "org",
-						}),
+						Effect.succeed(
+							rawCompiledQuery<{ readonly c: number }>({
+								reason: "test-fixture",
+								justification:
+									"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+								sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+								tenantScope: "single-tenant",
+							}),
+						),
 					{ context: "capability-request-local" },
 				)
 
@@ -678,12 +687,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			yield* executor.compiledQuery(
 				tenant,
 				(capabilities) =>
-					unsafeCompiledQuery<{ readonly c: number }>({
-						reason: "test-fixture",
-						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
-						tenantScope: "org",
-					}),
+					Effect.succeed(
+						rawCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							justification:
+								"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+							sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+							tenantScope: "single-tenant",
+						}),
+					),
 				{ context: "capability-fallback-test" },
 			)
 
@@ -719,12 +731,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			yield* executor.compiledQuery(
 				tenant,
 				(capabilities) =>
-					unsafeCompiledQuery<{ readonly c: number }>({
-						reason: "test-fixture",
-						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'tokenbf' FORMAT JSON`,
-						tenantScope: "org",
-					}),
+					Effect.succeed(
+						rawCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							justification:
+								"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+							sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'tokenbf' FORMAT JSON`,
+							tenantScope: "single-tenant",
+						}),
+					),
 				{ context: "tinybird-gateway-capabilities" },
 			)
 
@@ -768,12 +783,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 					.compiledQuery(
 						tenant,
 						(capabilities) =>
-							unsafeCompiledQuery<{ readonly c: number }>({
-								reason: "test-fixture",
-								note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-								sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
-								tenantScope: "org",
-							}),
+							Effect.succeed(
+								rawCompiledQuery<{ readonly c: number }>({
+									reason: "test-fixture",
+									justification:
+										"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+									sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+									tenantScope: "single-tenant",
+								}),
+							),
 						{ context: "hung-capability-probe" },
 					)
 					.pipe(

@@ -17,7 +17,8 @@
 // not exposed as SQL filters since the DSL has no HAVING clause.
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { compileFnCall, compileFnCallCond } from "@maple-dev/clickhouse-builder"
+import { compileFnCallCond } from "@maple-dev/clickhouse-builder"
+import * as T from "@maple-dev/clickhouse-builder/types"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type ColumnAccessor, type CHQuery } from "@maple-dev/clickhouse-builder"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
@@ -26,52 +27,56 @@ import { sessionActivityAggregateQuery, sessionEventMatchQuery } from "./session
 import type { FacetOutput } from "./query-helpers"
 
 // argMax(value, ordering) — finalize a ReplacingMergeTree column to its latest
-// version. Generic per call site, so declared here rather than via defineFn.
-function argMax<T>(value: CH.Expr<T>, ordering: CH.Expr<unknown>): CH.Expr<T> {
-	return compileFnCall<T>("argMax", value, ordering)
-}
+// version. The builder's own, which keeps the value's type: this file finalizes
+// twenty-three columns that way, and a local untyped copy meant the whole
+// session-replay list decoded nothing.
 
 // has(array, element) — array membership as a WHERE condition (CH returns
 // UInt8; non-zero is truthy).
+const argMax = CH.argMax
+
 function has<T>(array: CH.Expr<ReadonlyArray<T>>, element: CH.Expr<T>): CH.Condition {
 	return compileFnCallCond("has", array, element)
 }
 
 // length(array) — element count.
 function arrayLength<T>(array: CH.Expr<ReadonlyArray<T>>): CH.Expr<number> {
-	return compileFnCall<number>("length", array)
+	return CH.compileTypedFnCall<number>("length", T.uint64.schema, array)
 }
 
 // floor / log2 / pow — plain numeric functions the DSL doesn't export, needed
 // only by the duration histogram below. Declared here like argMax above.
 function floor_(value: CH.Expr<number>): CH.Expr<number> {
-	return compileFnCall<number>("floor", value)
+	return CH.compileTypedFnCall<number>("floor", T.float64.schema, value)
 }
 
 function log2(value: CH.Expr<number>): CH.Expr<number> {
-	return compileFnCall<number>("log2", value)
+	return CH.compileTypedFnCall<number>("log2", T.float64.schema, value)
 }
 
 function pow(base: number, exponent: CH.Expr<number>): CH.Expr<number> {
-	return compileFnCall<number>("pow", CH.lit(base), exponent)
+	return CH.compileTypedFnCall<number>("pow", T.float64.schema, CH.lit(base), exponent)
 }
 
 // greatest(value, floor) over a nullable numeric column — clamps and, since
 // callers pair it with a `> 0` predicate that already excludes NULLs, narrows.
 function greatestNonNull(value: CH.Expr<number | null>, floor: number): CH.Expr<number> {
-	return compileFnCall<number>("greatest", value, CH.lit(floor))
+	return CH.compileTypedFnCall<number>("greatest", T.float64.schema, value, CH.lit(floor))
 }
 
 // assumeNotNull(x) — drops the Nullable wrapper for callers whose WHERE has
 // already excluded NULLs.
 function assumeNotNull<T>(value: CH.Expr<T | null>): CH.Expr<T> {
-	return compileFnCall<T>("assumeNotNull", value)
+	// The `Nullable` wrapper goes away in SQL but the codec is left as-is: it
+	// already accepts every non-null the column can produce, and narrowing it
+	// would mean rebuilding a schema this function cannot see inside.
+	return CH.compileTypedFnCall<T>("assumeNotNull", CH.schemaOf<T>(value), value)
 }
 
 // ifNotFinite(x, fallback) — quantile() over an empty set yields nan, and
 // casting that to an integer is a hard error.
 function ifNotFinite(value: CH.Expr<number>, fallback: number): CH.Expr<number> {
-	return compileFnCall<number>("ifNotFinite", value, CH.lit(fallback))
+	return CH.compileTypedFnCall<number>("ifNotFinite", T.float64.schema, value, CH.lit(fallback))
 }
 
 // List query
@@ -177,7 +182,7 @@ export interface SessionReplaysListOutput {
 // Return type is annotated (not inferred) because the duration/active filters
 // branch into structurally-different sources (the base table vs a wrapping
 // subquery, optionally joined) — all three produce the same row shape, but TS
-// otherwise infers a union that won't unify at the compileCH call site. Mirrors
+// otherwise infers a union that won't unify at the compile call site. Mirrors
 // metricsTimeseriesRateQuery's annotation.
 export function sessionReplaysListQuery(
 	opts: SessionReplaysListOpts,
@@ -230,8 +235,8 @@ export function sessionReplaysListQuery(
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.StartTime.gte(param.dateTime("startTime")),
-			$.StartTime.lte(param.dateTime("endTime")),
+			$.StartTime.gte(param.dateTimeString("startTime")),
+			$.StartTime.lte(param.dateTimeString("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.browser, (v: string) => $.BrowserName.eq(v)),
 			CH.when(opts.country, (v: string) => $.Country.eq(v)),
@@ -474,8 +479,8 @@ export function sessionReplaysFacetsQuery(
 		exclude?: SessionFacetKey,
 	): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
-		$.StartTime.gte(param.dateTime("startTime")),
-		$.StartTime.lte(param.dateTime("endTime")),
+		$.StartTime.gte(param.dateTimeString("startTime")),
+		$.StartTime.lte(param.dateTimeString("endTime")),
 		exclude === "service" ? undefined : CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		exclude === "browser" ? undefined : CH.when(opts.browser, (v: string) => $.BrowserName.eq(v)),
 		exclude === "country" ? undefined : CH.when(opts.country, (v: string) => $.Country.eq(v)),
@@ -571,8 +576,8 @@ export function sessionReplaysFacetsQuery(
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.StartTime.gte(param.dateTime("startTime")),
-				$.StartTime.lte(param.dateTime("endTime")),
+				$.StartTime.gte(param.dateTimeString("startTime")),
+				$.StartTime.lte(param.dateTimeString("endTime")),
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.browser, (v: string) => $.BrowserName.eq(v)),
 				CH.when(opts.country, (v: string) => $.Country.eq(v)),
@@ -828,8 +833,8 @@ export function sessionsForTraceQuery(opts: SessionsForTraceOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.StartTime.gte(param.dateTime("startTime")),
-			$.StartTime.lte(param.dateTime("endTime")),
+			$.StartTime.gte(param.dateTimeString("startTime")),
+			$.StartTime.lte(param.dateTimeString("endTime")),
 			has($.TraceIds, CH.lit(opts.traceId)),
 		])
 		.groupBy("sessionId")

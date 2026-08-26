@@ -10,7 +10,6 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, type CHQuery } from "@maple-dev/clickhouse-builder"
 import { table } from "@maple-dev/clickhouse-builder"
 import { MetricsSum, MetricCatalog, SpanMetricsCallsHourly } from "../tables"
-import { compileCH } from "@maple-dev/clickhouse-builder"
 import { resolveMetricTable, metricsSelectExprs } from "./query-helpers"
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition } from "../../traces-shared"
@@ -60,7 +59,7 @@ export interface MetricsTimeseriesOutput {
 }
 
 const metricsTimeseriesColumns = {
-	bucket: T.dateTime,
+	bucket: T.dateTimeString,
 	serviceName: T.string,
 	attributeValue: T.string,
 	groupName: T.string,
@@ -99,8 +98,8 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 		.where(($) => [
 			$.MetricName.eq(param.string("metricName")),
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
 			opts.environments?.length
@@ -151,7 +150,7 @@ export interface MetricsRateTimeseriesOutput {
 }
 
 const metricsRateTimeseriesColumns = {
-	bucket: T.dateTime,
+	bucket: T.dateTimeString,
 	serviceName: T.string,
 	attributeValue: T.string,
 	groupName: T.string,
@@ -193,102 +192,94 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 	opts: MetricsRateTimeseriesOpts,
 ): CHQuery<any, MetricsRateTimeseriesOutput, {}> {
 	const bucket = CH.toStartOfInterval(
-		CH.toDateTime(param.dateTime("startTime")),
+		CH.toDateTime(param.dateTimeString("startTime")),
 		param.int("bucketSeconds"),
 	)
 	const previousBucket = CH.intervalSub(bucket, param.int("bucketSeconds"))
 	const endBucket = CH.toStartOfInterval(
-		CH.toDateTime(param.dateTime("endTime")),
+		CH.toDateTime(param.dateTimeString("endTime")),
 		param.int("bucketSeconds"),
 	)
 
-	const hourlyCompiled = compileCH(
-		from(SpanMetricsCallsHourly)
-			.select(($) => ({
-				Hour: $.Hour,
-				ServiceName: $.ServiceName,
-				MetricName: $.MetricName,
-				SpanKind: $.SpanKind,
-				AttrFingerprint: $.AttrFingerprint,
-				ResourceFingerprint: $.ResourceFingerprint,
-				StartTimeUnix: $.StartTimeUnix,
-				Value: CH.argMaxMerge($.LastValue),
-			}))
-			.where(($) => [
-				$.OrgId.eq(param.string("orgId")),
-				$.MetricName.eq(param.string("metricName")),
-				$.Hour.gte(previousBucket),
-				$.Hour.lte(endBucket),
-				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-				CH.when(opts.attributeKey === "span.kind" ? opts.attributeValue : undefined, (v: string) =>
-					$.SpanKind.eq(v),
-				),
-			])
-			.groupBy(
-				"Hour",
-				"ServiceName",
-				"MetricName",
-				"SpanKind",
-				"AttrFingerprint",
-				"ResourceFingerprint",
-				"StartTimeUnix",
+	const hourlyQuery = from(SpanMetricsCallsHourly)
+		.select(($) => ({
+			Hour: $.Hour,
+			ServiceName: $.ServiceName,
+			MetricName: $.MetricName,
+			SpanKind: $.SpanKind,
+			AttrFingerprint: $.AttrFingerprint,
+			ResourceFingerprint: $.ResourceFingerprint,
+			StartTimeUnix: $.StartTimeUnix,
+			Value: CH.argMaxMerge($.LastValue),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.MetricName.eq(param.string("metricName")),
+			$.Hour.gte(previousBucket),
+			$.Hour.lte(endBucket),
+			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+			CH.when(opts.attributeKey === "span.kind" ? opts.attributeValue : undefined, (v: string) =>
+				$.SpanKind.eq(v),
 			),
-		{},
-		{ skipFormat: true },
-	)
-	const hourlySql = hourlyCompiled.sql
+		])
+		.groupBy(
+			"Hour",
+			"ServiceName",
+			"MetricName",
+			"SpanKind",
+			"AttrFingerprint",
+			"ResourceFingerprint",
+			"StartTimeUnix",
+		)
 
 	const hourlyValues = table("hourly_values", {
-		Hour: T.dateTime,
+		Hour: T.dateTimeString,
 		ServiceName: T.string,
 		MetricName: T.string,
 		SpanKind: T.string,
 		AttrFingerprint: T.uint64,
 		ResourceFingerprint: T.uint64,
-		StartTimeUnix: T.dateTime64,
+		StartTimeUnix: T.dateTime64String,
 		Value: T.float64,
 	})
 
-	const deltasSql = compileCH(
-		from(hourlyValues)
-			.select(($) => {
-				const onePrecedingFrame = CH.windowSpec({
-					partitionBy: [
-						$.ServiceName,
-						$.MetricName,
-						$.SpanKind,
-						$.AttrFingerprint,
-						$.ResourceFingerprint,
-						$.StartTimeUnix,
-					],
-					orderBy: [[$.Hour, "asc"]],
-					frame: CH.rowsBetween(CH.preceding(1), CH.currentRow),
-				})
-
-				return {
-					Hour: $.Hour,
-					ServiceName: $.ServiceName,
-					SpanKind: $.SpanKind,
-					delta: $.Value.sub(CH.over(CH.lagInFrame($.Value, 1, $.Value), onePrecedingFrame)),
-				}
+	const deltasQuery = from(hourlyValues)
+		.select(($) => {
+			const onePrecedingFrame = CH.windowSpec({
+				partitionBy: [
+					$.ServiceName,
+					$.MetricName,
+					$.SpanKind,
+					$.AttrFingerprint,
+					$.ResourceFingerprint,
+					$.StartTimeUnix,
+				],
+				orderBy: [[$.Hour, "asc"]],
+				frame: CH.rowsBetween(CH.preceding(1), CH.currentRow),
 			})
-			.where(($) => [$.Hour.gte(bucket)]),
-		{},
-		{ skipFormat: true },
-	).sql
+
+			return {
+				Hour: $.Hour,
+				ServiceName: $.ServiceName,
+				SpanKind: $.SpanKind,
+				delta: $.Value.sub(CH.over(CH.lagInFrame($.Value, 1, $.Value), onePrecedingFrame)),
+			}
+		})
+		.where(($) => [$.Hour.gte(bucket)])
 
 	const deltas = table("with_deltas", {
-		Hour: T.dateTime,
+		Hour: T.dateTimeString,
 		ServiceName: T.string,
 		SpanKind: T.string,
 		delta: T.float64,
 	})
 
 	const q = from(deltas)
-		// Both CTEs descend from `hourlySql`, so the outer query is confined to
-		// whatever that was — the compiled CTE strings can't carry it themselves.
-		.withCTE("hourly_values", hourlySql, { tenantScope: hourlyCompiled.tenantScope })
-		.withCTE("with_deltas", deltasSql, { tenantScope: hourlyCompiled.tenantScope })
+		// Passed as queries, not compiled SQL: `compile` then derives each CTE's
+		// scope (and `with_deltas` inherits `hourly_values`'s, which is what
+		// confines the outer query) instead of taking a caller's word for it.
+		.withCTE("hourly_values", hourlyQuery)
+		.withCTE("with_deltas", deltasQuery)
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.Hour, param.int("bucketSeconds")),
 			serviceName: $.ServiceName,
@@ -332,62 +323,58 @@ export function metricsTimeseriesRateQuery(
 	// row dominates the query cost (raw `metrics_sum` scans of span.metrics.calls
 	// ran ~7s p95). Hashing keeps per-series identity — points of one series share
 	// one exporter, so map key order is stable — at a ~2^-64 collision risk.
-	const cteSql = compileCH(
-		from(MetricsSum)
-			.select(($) => {
-				const onePrecedingFrame = CH.windowSpec({
-					partitionBy: [
-						$.ServiceName,
-						$.MetricName,
-						CH.cityHash64(CH.mapKeys($.Attributes), CH.mapValues($.Attributes)),
-						CH.cityHash64(CH.mapKeys($.ResourceAttributes), CH.mapValues($.ResourceAttributes)),
-						$.StartTimeUnix,
-					],
-					orderBy: [[$.TimeUnix, "asc"]],
-					frame: CH.rowsBetween(CH.preceding(1), CH.currentRow),
-				})
-				const previousValue = CH.over(CH.lagInFrame($.Value, 1, $.Value), onePrecedingFrame)
-				const previousTimeUnix = CH.over(CH.lagInFrame($.TimeUnix, 1, $.TimeUnix), onePrecedingFrame)
-
-				return {
-					TimeUnix: $.TimeUnix,
-					ServiceName: $.ServiceName,
-					Attributes: $.Attributes,
-					// Project just the requested resource group value through the CTE —
-					// carrying the whole ResourceAttributes map per row would be pure
-					// overhead for the (common) non-resource-grouped case.
-					resourceAttributeValue: opts.groupByResourceAttributeKey
-						? $.ResourceAttributes.get(opts.groupByResourceAttributeKey)
-						: CH.lit(""),
-					Value: $.Value,
-					delta: $.Value.sub(previousValue),
-					time_delta: CH.toFloat64(
-						CH.toUnixTimestamp64Nano($.TimeUnix).sub(CH.toUnixTimestamp64Nano(previousTimeUnix)),
-					).div(1000000000),
-				}
+	const cteQuery = from(MetricsSum)
+		.select(($) => {
+			const onePrecedingFrame = CH.windowSpec({
+				partitionBy: [
+					$.ServiceName,
+					$.MetricName,
+					CH.cityHash64(CH.mapKeys($.Attributes), CH.mapValues($.Attributes)),
+					CH.cityHash64(CH.mapKeys($.ResourceAttributes), CH.mapValues($.ResourceAttributes)),
+					$.StartTimeUnix,
+				],
+				orderBy: [[$.TimeUnix, "asc"]],
+				frame: CH.rowsBetween(CH.preceding(1), CH.currentRow),
 			})
-			.where(($) => [
-				opts.metricNames && opts.metricNames.length > 0
-					? $.MetricName.in_(...opts.metricNames)
-					: $.MetricName.eq(param.string("metricName")),
-				$.OrgId.eq(param.string("orgId")),
-				CH.dynamicColumn<number>("IsMonotonic").eq(1),
-				$.TimeUnix.gte(CH.intervalSub(param.dateTime("startTime"), param.int("bucketSeconds"))),
-				$.TimeUnix.lte(param.dateTime("endTime")),
-				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-				CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
-				opts.environments?.length
-					? CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments)
-					: undefined,
-				...resourceFilterConditions(opts.resourceAttributeFilters),
-			]),
-		{},
-		{ skipFormat: true },
-	)
+			const previousValue = CH.over(CH.lagInFrame($.Value, 1, $.Value), onePrecedingFrame)
+			const previousTimeUnix = CH.over(CH.lagInFrame($.TimeUnix, 1, $.TimeUnix), onePrecedingFrame)
+
+			return {
+				TimeUnix: $.TimeUnix,
+				ServiceName: $.ServiceName,
+				Attributes: $.Attributes,
+				// Project just the requested resource group value through the CTE —
+				// carrying the whole ResourceAttributes map per row would be pure
+				// overhead for the (common) non-resource-grouped case.
+				resourceAttributeValue: opts.groupByResourceAttributeKey
+					? $.ResourceAttributes.get(opts.groupByResourceAttributeKey)
+					: CH.lit(""),
+				Value: $.Value,
+				delta: $.Value.sub(previousValue),
+				time_delta: CH.toFloat64(
+					CH.toUnixTimestamp64Nano($.TimeUnix).sub(CH.toUnixTimestamp64Nano(previousTimeUnix)),
+				).div(1000000000),
+			}
+		})
+		.where(($) => [
+			opts.metricNames && opts.metricNames.length > 0
+				? $.MetricName.in_(...opts.metricNames)
+				: $.MetricName.eq(param.string("metricName")),
+			$.OrgId.eq(param.string("orgId")),
+			CH.dynamicColumn<number>("IsMonotonic").eq(1),
+			$.TimeUnix.gte(CH.intervalSub(param.dateTimeString("startTime"), param.int("bucketSeconds"))),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
+			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+			CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
+			opts.environments?.length
+				? CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments)
+				: undefined,
+			...resourceFilterConditions(opts.resourceAttributeFilters),
+		])
 
 	// Outer query: aggregate deltas into rate/increase per bucket
 	const cteTable = table("with_deltas", {
-		TimeUnix: T.dateTime64,
+		TimeUnix: T.dateTime64String,
 		ServiceName: T.string,
 		Attributes: T.map(T.string, T.string),
 		resourceAttributeValue: T.string,
@@ -397,7 +384,7 @@ export function metricsTimeseriesRateQuery(
 	})
 
 	const q = from(cteTable)
-		.withCTE("with_deltas", cteSql.sql, { tenantScope: cteSql.tenantScope })
+		.withCTE("with_deltas", cteQuery)
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
 			serviceName: $.ServiceName,
@@ -416,7 +403,7 @@ export function metricsTimeseriesRateQuery(
 			increaseValue: CH.sumIf($.delta, $.delta.gte(0)),
 			dataPointCount: CH.count(),
 		}))
-		.where(($) => [$.TimeUnix.gte(param.dateTime("startTime"))])
+		.where(($) => [$.TimeUnix.gte(param.dateTimeString("startTime"))])
 
 	const inner = (
 		opts.groupByAttributeKey || opts.groupByResourceAttributeKey
@@ -460,8 +447,8 @@ export function metricsSparklinesQuery(opts: MetricsSparklinesOpts) {
 		.where(($) => [
 			$.MetricName.in_(...opts.metricNames),
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("bucket", "metricName")
 		.orderBy(["bucket", "asc"])
@@ -511,8 +498,8 @@ export function metricsBreakdownQuery(opts: MetricsBreakdownOpts) {
 		.where(($) => [
 			$.MetricName.eq(param.string("metricName")),
 			$.OrgId.eq(param.string("orgId")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 			// Drop datapoints missing the label so an empty bucket doesn't dominate.
 			CH.when(groupKey, (k: string) => $.Attributes.get(k).neq("")),
 			CH.when(resourceGroupKey, (k: string) => $.ResourceAttributes.get(k).neq("")),
@@ -563,8 +550,8 @@ export function listMetricsQuery(opts: ListMetricsOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			// Floor the start bound to the hour so the oldest catalog bucket
 			// (Hour is already hour-truncated) isn't dropped for mid-hour ranges.
-			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTime("startTime")), 3600)),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTimeString("startTime")), 3600)),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.metricType, (v: string) => $.MetricType.eq(v)),
 			CH.when(opts.search, (v: string) => $.MetricName.ilike(`%${v}%`)),
@@ -597,8 +584,8 @@ export function metricsSummaryQuery(opts?: MetricsSummaryOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTime("startTime")), 3600)),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTimeString("startTime")), 3600)),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			CH.when(opts?.serviceName, (v: string) => $.ServiceName.eq(v)),
 		])
 		.groupBy("metricType")

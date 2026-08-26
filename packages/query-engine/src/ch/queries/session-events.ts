@@ -8,14 +8,13 @@
 // Plain MergeTree, immutable append; no ReplacingMergeTree dedup needed.
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { compileFnCall } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import { SessionEvents } from "../tables"
 
-function count(): CH.Expr<number> {
-	return compileFnCall<number>("count")
-}
+// The builder's `count`, which knows the result is a `UInt64` — a local
+// `compileFnCall` copy shadowed it and decoded nothing.
+const count = CH.count
 
 // Transcript: every event for one session, in order
 //
@@ -133,8 +132,8 @@ export function sessionEventMatchQuery(opts: SessionEventMatchOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			CH.when(opts.type, (v: string) => $.Type.eq(v)),
 			CH.when(opts.level, (v: string) => $.Level.eq(v)),
 			CH.when(opts.minStatus, (v: number) => $.NetStatus.gte(v)),
@@ -229,8 +228,8 @@ function sessionActivityGaps(opts: { single: boolean } & SessionActivityOpts) {
 					]
 				: [
 						$.OrgId.eq(param.string("orgId")),
-						$.Timestamp.gte(param.dateTime("startTime")),
-						$.Timestamp.lte(param.dateTime("endTime")),
+						$.Timestamp.gte(param.dateTimeString("startTime")),
+						$.Timestamp.lte(param.dateTimeString("endTime")),
 					],
 		)
 }

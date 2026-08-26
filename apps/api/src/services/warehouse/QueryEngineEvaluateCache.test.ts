@@ -18,6 +18,7 @@ import {
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService, type EdgeCacheServiceApi } from "@maple/cache"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asUserId = Schema.decodeUnknownSync(UserId)
@@ -40,19 +41,25 @@ const traceRow = (
 		p99Duration: number
 		errorRate: number
 		apdexScore: number
+		spanCount: number
 		estimatedSpanCount: number
 	}> = {},
 ) => ({
 	bucket: "2026-01-01 00:00:00",
 	groupName: "all",
 	count: 0,
+	// The sample-count columns follow `count` unless overridden — the reducers
+	// read them, so leaving them at 0 makes every fixture "no data".
+	spanCount: overrides.count ?? 0,
+	estimatedSpanCount: overrides.count ?? 0,
 	avgDuration: 0,
 	p50Duration: 0,
 	p95Duration: 0,
 	p99Duration: 0,
 	errorRate: 0,
+	satisfiedCount: 0,
+	toleratingCount: 0,
 	apdexScore: 0,
-	estimatedSpanCount: 0,
 	...overrides,
 })
 
@@ -79,9 +86,9 @@ const evalStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 	({
 		sqlQuery: () => Effect.succeed(rows as never),
 		rawSqlQuery: () => Effect.die(new Error("rawSqlQuery is not used by evaluate cache tests")),
-		compiledQuery: (_tenant, compiled) => compiled.decodeRows(rows).pipe(Effect.orDie),
+		compiledQuery: (_tenant, compiled) => compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie),
 		compiledQueryWithCapabilities: (_tenant, compile) =>
-			compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie),
+			Effect.runSync(compile(baselineWarehouseCapabilities())).decodeRows(rows).pipe(Effect.orDie),
 	}) satisfies Parameters<typeof makeQueryEngineEvaluate>[0]
 
 describe("makeQueryEngineEvaluate (shared alert-lowering core)", () => {
@@ -264,7 +271,7 @@ const makeFullStub = (
 		},
 		compiledQuery: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1
-			return compiled.decodeRows(rows).pipe(Effect.orDie)
+			return compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie)
 		},
 		compiledQueryWithCapabilities: <Output>(
 			_tenant: unknown,
@@ -273,11 +280,13 @@ const makeFullStub = (
 			) => CompiledQuery<Output>,
 		) => {
 			counter.n += 1
-			return compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie)
+			return Effect.runSync(compile(baselineWarehouseCapabilities()))
+				.decodeRows(rows)
+				.pipe(Effect.orDie)
 		},
 		compiledQueryFirst: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1
-			return compiled.decodeFirstRow(rows).pipe(Effect.orDie)
+			return compiledQueryOf(compiled).decodeFirstRow(rows).pipe(Effect.orDie)
 		},
 		// Deliberately does not touch `counter`: warming resolves route config, it
 		// does not issue a warehouse query, and these tests assert query counts.

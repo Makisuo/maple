@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
-import { compileCH, param, toDateTime } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe, param, toDateTime } from "@maple-dev/clickhouse-builder"
 import {
 	serviceDbEdgesSQL,
 	serviceDbEdgesForServiceQuery,
@@ -37,7 +37,7 @@ const baseParams = {
 
 describe("serviceExternalEdgesSQL", () => {
 	it("scopes by org, service, and time window", () => {
-		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const { sql } = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("ServiceName = 'artifacts-api'")
 		expect(sql).toContain("toStartOfHour(toDateTime('2024-01-01 00:00:00'))")
@@ -45,15 +45,15 @@ describe("serviceExternalEdgesSQL", () => {
 	})
 
 	it("derives tenant scope from its union branches, not from the anti-join", () => {
-		const compiled = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const compiled = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		// The outer query carries no OrgId predicate of its own — both branches do.
 		// The `NOT IN (…)` subquery is scoped too, but a subquery never confines
 		// its outer scan, so it must not be what makes this pass.
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("single-tenant")
 	})
 
 	it("suppresses internal-service overlap only for http targets", () => {
-		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const { sql } = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		expect(sql).toContain("targetType = 'http'")
 		expect(sql).toContain("targetName IN (")
 		expect(sql).toContain("FROM service_address_resolutions_hourly")
@@ -61,13 +61,13 @@ describe("serviceExternalEdgesSQL", () => {
 	})
 
 	it("filters the computed targetName in HAVING, after the GROUP BY", () => {
-		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const { sql } = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		expect(sql).toContain("HAVING targetName != ''")
 		expect(sql.indexOf("HAVING")).toBeGreaterThan(sql.indexOf("GROUP BY"))
 	})
 
 	it("unions hourly MV branch with raw-traces fallback for the in-progress hour", () => {
-		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const { sql } = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		expect(sql).toContain("FROM service_external_edges_hourly")
 		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("UNION ALL")
@@ -76,12 +76,12 @@ describe("serviceExternalEdgesSQL", () => {
 	})
 
 	it("excludes db.system.name from the raw-traces branch (DB edges are a separate MV)", () => {
-		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const { sql } = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		expect(sql).toContain("SpanAttributes['db.system.name'] = ''")
 	})
 
 	it("applies messaging > rpc > http precedence in the multiIf", () => {
-		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const { sql } = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		// First branch of multiIf must be the messaging predicate.
 		const multiIfIdx = sql.indexOf("multiIf(")
 		expect(multiIfIdx).toBeGreaterThan(-1)
@@ -97,16 +97,18 @@ describe("serviceExternalEdgesSQL", () => {
 	})
 
 	it("anti-joins internal-service overlap from the resolutions table for HTTP only", () => {
-		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const { sql } = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		expect(sql).toContain("FROM service_address_resolutions_hourly")
 		expect(sql).toContain("targetType = 'http'")
 		expect(sql).toContain("targetName IN (")
 	})
 
 	it("threads deploymentEnv into both branches and the resolutions anti-join", () => {
-		const { sql } = serviceExternalEdgesSQL(
-			{ serviceName: "artifacts-api", deploymentEnv: "production" },
-			baseParams,
+		const { sql } = Effect.runSync(
+			serviceExternalEdgesSQL(
+				{ serviceName: "artifacts-api", deploymentEnv: "production" },
+				baseParams,
+			),
 		)
 		expect(sql).toContain("DeploymentEnv = 'production'")
 		expect(sql).toContain(
@@ -115,7 +117,7 @@ describe("serviceExternalEdgesSQL", () => {
 	})
 
 	it("groups by target identity and orders by callCount desc", () => {
-		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		const { sql } = Effect.runSync(serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams))
 		expect(sql).toContain("GROUP BY sourceService, targetType, targetSystem, targetName")
 		expect(sql).toContain("ORDER BY callCount DESC")
 		expect(sql).toContain("LIMIT 200")
@@ -123,9 +125,8 @@ describe("serviceExternalEdgesSQL", () => {
 	})
 
 	it("escapes single quotes in serviceName / orgId to prevent SQL injection", () => {
-		const { sql } = serviceExternalEdgesSQL(
-			{ serviceName: "weird'service" },
-			{ ...baseParams, orgId: "org'attack" },
+		const { sql } = Effect.runSync(
+			serviceExternalEdgesSQL({ serviceName: "weird'service" }, { ...baseParams, orgId: "org'attack" }),
 		)
 		expect(sql).toContain("ServiceName = 'weird\\'service'")
 		expect(sql).toContain("OrgId = 'org\\'attack'")
@@ -133,7 +134,7 @@ describe("serviceExternalEdgesSQL", () => {
 
 	it.effect("decodes external edge rows and validates targetType", () =>
 		Effect.gen(function* () {
-			const compiled = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+			const compiled = yield* serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -192,14 +193,14 @@ describe("serviceMapResolutionsRollupSQL", () => {
 	}
 
 	it("joins parent Client/Producer spans to child Server/Consumer spans", () => {
-		const { sql } = serviceMapResolutionsRollupSQL(hourParams)
+		const { sql } = Effect.runSync(serviceMapResolutionsRollupSQL(hourParams))
 		expect(sql).toContain("SpanKind IN ('Client', 'Producer')")
 		expect(sql).toContain("SpanKind IN ('Server', 'Consumer')")
 		expect(sql).toContain("ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)")
 	})
 
 	it("projects parent server.address as the resolution key", () => {
-		const { sql } = serviceMapResolutionsRollupSQL(hourParams)
+		const { sql } = Effect.runSync(serviceMapResolutionsRollupSQL(hourParams))
 		// Map lookup is pushed into the parent subquery as `ServerAddress`, so the
 		// outer SELECT reads a flat column instead of re-evaluating the map.
 		expect(sql).toContain("SpanAttributes['server.address'] AS ServerAddress")
@@ -208,19 +209,19 @@ describe("serviceMapResolutionsRollupSQL", () => {
 	})
 
 	it("hour-buckets via toStartOfHour, scopes by org", () => {
-		const { sql } = serviceMapResolutionsRollupSQL(hourParams)
+		const { sql } = Effect.runSync(serviceMapResolutionsRollupSQL(hourParams))
 		expect(sql).toContain("toStartOfHour(p.Timestamp) AS Hour")
 		expect(sql).toContain("OrgId = 'org_1'")
 	})
 
 	it("drops same-service edges and empty server.address", () => {
-		const { sql } = serviceMapResolutionsRollupSQL(hourParams)
+		const { sql } = Effect.runSync(serviceMapResolutionsRollupSQL(hourParams))
 		expect(sql).toContain("p.ServiceName != c.ServiceName")
 		expect(sql).toContain("SpanAttributes['server.address'] != ''")
 	})
 
 	it("bounds the join to a single hour on both sides", () => {
-		const { sql } = serviceMapResolutionsRollupSQL(hourParams)
+		const { sql } = Effect.runSync(serviceMapResolutionsRollupSQL(hourParams))
 		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
 		expect(sql).toContain("Timestamp < '2024-01-01 01:00:00'")
 		// Both branches must enforce the hour bound — count occurrences.
@@ -229,7 +230,7 @@ describe("serviceMapResolutionsRollupSQL", () => {
 	})
 
 	it("groups by the resolution key tuple and formats as JSON", () => {
-		const { sql } = serviceMapResolutionsRollupSQL(hourParams)
+		const { sql } = Effect.runSync(serviceMapResolutionsRollupSQL(hourParams))
 		expect(sql).toContain(
 			"GROUP BY OrgId, Hour, SourceService, ParentServerAddress, ResolvedTargetService, DeploymentEnv",
 		)
@@ -241,13 +242,15 @@ describe("serviceMapResolutionsRollupSQL", () => {
 
 describe("serviceDependenciesSQL", () => {
 	it("reads partial boundary hours from raw spans without widening the start", () => {
-		const { sql } = serviceDependenciesSQL(
-			{},
-			{
-				orgId: "org_1",
-				startTime: "2024-01-01 10:15:00",
-				endTime: "2024-01-01 12:30:00",
-			},
+		const { sql } = Effect.runSync(
+			serviceDependenciesSQL(
+				{},
+				{
+					orgId: "org_1",
+					startTime: "2024-01-01 10:15:00",
+					endTime: "2024-01-01 12:30:00",
+				},
+			),
 		)
 		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 10:15:00')")
 		expect(sql).toContain("addHours(toStartOfHour(toDateTime('2024-01-01 10:15:00')), 1)")
@@ -257,7 +260,7 @@ describe("serviceDependenciesSQL", () => {
 
 	it.effect("decodes service dependency rows with numeric strings from ClickHouse JSON", () =>
 		Effect.gen(function* () {
-			const compiled = serviceDependenciesSQL({ deploymentEnv: "production" }, baseParams)
+			const compiled = yield* serviceDependenciesSQL({ deploymentEnv: "production" }, baseParams)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -291,7 +294,7 @@ describe("serviceDependenciesSQL", () => {
 	// prefix on every inner aggregate is what keeps the two alias sets disjoint.
 	it("never nests an aggregate inside another aggregate", () => {
 		for (const opts of [{}, { deploymentEnv: "production" }]) {
-			const { sql } = serviceDependenciesSQL(opts, baseParams)
+			const { sql } = Effect.runSync(serviceDependenciesSQL(opts, baseParams))
 			expect(sql).not.toContain("sum(sum(")
 			expect(sql).not.toContain("max(max(")
 			expect(sql).not.toContain("count(count(")
@@ -299,7 +302,7 @@ describe("serviceDependenciesSQL", () => {
 	})
 
 	it("keeps the union branches' aliases disjoint from the outer aggregates", () => {
-		const { sql } = serviceDependenciesSQL({}, baseParams)
+		const { sql } = Effect.runSync(serviceDependenciesSQL({}, baseParams))
 		// Inner branches project `bucket*`; the outer projects the public names.
 		for (const outerAlias of ["callCount", "errorCount", "p95DurationMs", "estimatedSpanCount"]) {
 			expect(sql).toContain(`AS ${outerAlias}`)
@@ -318,17 +321,19 @@ describe("serviceDependenciesSQL", () => {
 
 	it("derives tenant scope from its branches rather than asserting it", () => {
 		// The outer query has no OrgId predicate — every union branch carries one.
-		expect(serviceDependenciesSQL({}, baseParams).tenantScope).toBe("org")
+		expect(Effect.runSync(serviceDependenciesSQL({}, baseParams)).tenantScope).toBe("single-tenant")
 	})
 })
 
 describe("serviceMapEdgeJoinQuery", () => {
 	const compiledRollup = () =>
-		serviceMapEdgesRollupSQL({
-			orgId: "org_1",
-			hourStart: "2024-01-01 10:00:00",
-			hourEnd: "2024-01-01 11:00:00",
-		})
+		Effect.runSync(
+			serviceMapEdgesRollupSQL({
+				orgId: "org_1",
+				hourStart: "2024-01-01 10:00:00",
+				hourEnd: "2024-01-01 11:00:00",
+			}),
+		)
 
 	// These rows are `ingest`ed into service_map_edges_hourly verbatim. A renamed
 	// or dropped output column corrupts the rollup table, and nothing downstream
@@ -344,14 +349,14 @@ describe("serviceMapEdgeJoinQuery", () => {
 	it("filters OrgId on both join sides, so the scope is derived", () => {
 		const compiled = compiledRollup()
 		expect(compiled.sql.match(/OrgId = 'org_1'/g)).toHaveLength(2)
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("single-tenant")
 	})
 
 	it("pushes a source-service filter into the parent subquery, not the outer WHERE", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			serviceMapEdgeJoinQuery({
-				rangeStart: toDateTime(param.dateTime("hourStart")),
-				rangeEnd: toDateTime(param.dateTime("hourEnd")),
+				rangeStart: toDateTime(param.dateTimeString("hourStart")),
+				rangeEnd: toDateTime(param.dateTimeString("hourEnd")),
 				parentServiceName: "web",
 			}),
 			{ orgId: "org_1", hourStart: "2024-01-01 10:00:00", hourEnd: "2024-01-01 11:00:00" },
@@ -364,7 +369,7 @@ describe("serviceMapEdgeJoinQuery", () => {
 
 describe("serviceDependenciesForServiceQuery", () => {
 	it("keeps partial start and end hours outside the hourly rollup", () => {
-		const { sql } = compileCH(serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }), {
+		const { sql } = compileUnsafe(serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }), {
 			orgId: "org_1",
 			startTime: "2024-01-01 10:15:00",
 			endTime: "2024-01-01 12:30:00",
@@ -375,7 +380,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("filters SourceService on the hourly branch", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -384,7 +389,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("pushes parent ServiceName into the live topology JOIN's left subquery", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -399,7 +404,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("unions hourly MV with the in-progress-hour topology JOIN", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -409,7 +414,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("threads deploymentEnv through both branches (hourly + parent + child)", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({
 				serviceName: "artifacts-api",
 				deploymentEnv: "production",
@@ -422,7 +427,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("orders by callCount desc, limits to 200, formats as JSON", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -432,7 +437,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("escapes single quotes in serviceName to prevent SQL injection", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "weird'service" }),
 			baseParams,
 		)
@@ -446,7 +451,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 describe("serviceDbEdgesForServiceQuery", () => {
 	it.effect("decodes org-wide database edge rows with numeric strings from ClickHouse JSON", () =>
 		Effect.gen(function* () {
-			const compiled = serviceDbEdgesSQL({ deploymentEnv: "production" }, baseParams)
+			const compiled = yield* serviceDbEdgesSQL({ deploymentEnv: "production" }, baseParams)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -477,7 +482,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	)
 
 	it("splits database nodes by namespace on both branches, collapsing Hyperdrive (org-wide SQL)", () => {
-		const { sql } = serviceDbEdgesSQL({}, baseParams)
+		const { sql } = Effect.runSync(serviceDbEdgesSQL({}, baseParams))
 		// hourly branch reads the rollup's stored dimension, re-collapsing pre-migration hex…
 		expect(sql).toContain(`${SEALED_NAMESPACE_COLLAPSE} AS dbNamespace`)
 		// …the raw branch derives the SAME identity via the shared write-side fragment
@@ -490,19 +495,25 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	it("guards the org-wide raw branch against unnamed spans (ServiceName != '')", () => {
 		// Org-wide (no serviceName) still needs the empty-service guard on the raw
 		// in-progress-hour branch — the hourly MV already applies it at write time.
-		const { sql } = serviceDbEdgesSQL({}, baseParams)
+		const { sql } = Effect.runSync(serviceDbEdgesSQL({}, baseParams))
 		expect(sql).toContain("ServiceName != ''")
 	})
 
 	it("filters ServiceName on both branches (hourly MV + raw traces)", () => {
-		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
+		const { sql } = compileUnsafe(
+			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
+			baseParams,
+		)
 		const matches = sql.match(/ServiceName = 'artifacts-api'/g)
 		// One in the hourly branch, one in the raw-traces fallback.
 		expect(matches && matches.length === 2).toBe(true)
 	})
 
 	it("unions service_map_db_edges_hourly with raw traces for the in-progress hour", () => {
-		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
+		const { sql } = compileUnsafe(
+			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
+			baseParams,
+		)
 		expect(sql).toContain("FROM service_map_db_edges_hourly")
 		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("UNION ALL")
@@ -510,7 +521,10 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("restricts the raw branch to Client/Producer spans with a db system set (stable + legacy)", () => {
-		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
+		const { sql } = compileUnsafe(
+			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
+			baseParams,
+		)
 		expect(sql).toContain("SpanKind IN ('Client', 'Producer')")
 		// Same stable→legacy coalesce as the MV write side (DB_SYSTEM_ATTR_SQL).
 		expect(sql).toContain(
@@ -519,7 +533,10 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("carries dbNamespace on both branches so distinct databases split", () => {
-		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
+		const { sql } = compileUnsafe(
+			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
+			baseParams,
+		)
 		// hourly branch reads the rollup's stored dimension
 		expect(sql).toContain("DbNamespace")
 		// raw branch derives the identity via the shared coalesce order
@@ -530,7 +547,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("threads deploymentEnv through both branches", () => {
-		const { sql } = compileCH(
+		const { sql } = compileUnsafe(
 			serviceDbEdgesForServiceQuery({
 				serviceName: "artifacts-api",
 				deploymentEnv: "production",
@@ -544,14 +561,20 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("orders by callCount desc, limits to 200, formats as JSON", () => {
-		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
+		const { sql } = compileUnsafe(
+			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
+			baseParams,
+		)
 		expect(sql).toContain("ORDER BY callCount DESC")
 		expect(sql).toContain("LIMIT 200")
 		expect(sql).toContain("FORMAT JSON")
 	})
 
 	it("escapes single quotes in serviceName to prevent SQL injection", () => {
-		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "weird'service" }), baseParams)
+		const { sql } = compileUnsafe(
+			serviceDbEdgesForServiceQuery({ serviceName: "weird'service" }),
+			baseParams,
+		)
 		expect(sql).toContain("ServiceName = 'weird\\'service'")
 	})
 })
@@ -569,7 +592,7 @@ describe("service-map database query summaries", () => {
 	}
 
 	it("reads the sealed rollup for complete hours and raw traces for the in-progress hour", () => {
-		const { sql } = serviceDbQuerySummarySQL(params)
+		const { sql } = Effect.runSync(serviceDbQuerySummarySQL(params))
 		expect(sql).toContain("UNION ALL")
 		// sealed rollup branch — complete hours only
 		expect(sql).toContain("FROM service_map_db_query_shapes_hourly")
@@ -592,7 +615,7 @@ describe("service-map database query summaries", () => {
 	})
 
 	it("merges sample-weighted TDigest states across the rollup + raw branches for P50/P95", () => {
-		const { sql } = serviceDbQuerySummarySQL(params)
+		const { sql } = Effect.runSync(serviceDbQuerySummarySQL(params))
 		// rollup stores a t-digest state; raw branch builds the matching state…
 		expect(sql).toContain("quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles)")
 		expect(sql).toContain(
@@ -605,7 +628,7 @@ describe("service-map database query summaries", () => {
 	})
 
 	it("buckets sub-hour query activity from raw traces (rollup can't serve <1h buckets)", () => {
-		const { sql } = serviceDbQueryTimeseriesSQL(params) // bucketSeconds: 300
+		const { sql } = Effect.runSync(serviceDbQueryTimeseriesSQL(params)) // bucketSeconds: 300
 		expect(sql).toContain("toStartOfInterval(toDateTime(Timestamp), INTERVAL 300 SECOND) AS bucket")
 		expect(sql).toContain("FROM traces")
 		expect(sql).not.toContain("service_map_db_query_shapes_hourly")
@@ -615,7 +638,7 @@ describe("service-map database query summaries", () => {
 	})
 
 	it("serves hour-aligned query activity from the rollup + raw union", () => {
-		const { sql } = serviceDbQueryTimeseriesSQL({ ...params, bucketSeconds: 3600 })
+		const { sql } = Effect.runSync(serviceDbQueryTimeseriesSQL({ ...params, bucketSeconds: 3600 }))
 		expect(sql).toContain("FROM service_map_db_query_shapes_hourly")
 		expect(sql).toContain("toStartOfInterval(Hour, INTERVAL 3600 SECOND) AS bucket")
 		expect(sql).toContain("UNION ALL")
@@ -623,7 +646,7 @@ describe("service-map database query summaries", () => {
 	})
 
 	it("groups top queries by the rollup key and the shared fingerprint fallback", () => {
-		const { sql } = serviceDbTopQueriesSQL(params)
+		const { sql } = Effect.runSync(serviceDbTopQueriesSQL(params))
 		// sealed branch reads the rollup's pre-computed key…
 		expect(sql).toContain("FROM service_map_db_query_shapes_hourly")
 		// …the raw branch derives the SAME key via the shared SQL fragments
@@ -636,7 +659,7 @@ describe("service-map database query summaries", () => {
 	})
 
 	it("normalizes literals into the shape key and prefers db.query.summary over the span name", () => {
-		const { sql } = serviceDbTopQueriesSQL(params)
+		const { sql } = Effect.runSync(serviceDbTopQueriesSQL(params))
 		// literal-normalized fingerprint fallback collapses per-literal variants
 		expect(sql).toContain("replaceRegexpAll")
 		expect(sql).toContain("in (?)")
@@ -645,7 +668,7 @@ describe("service-map database query summaries", () => {
 	})
 
 	it("labels top queries from the literal-stripped sample statement, falling back to the derived label", () => {
-		const { sql } = serviceDbTopQueriesSQL(params)
+		const { sql } = Effect.runSync(serviceDbTopQueriesSQL(params))
 		// distinct co-located shapes (same op/collection, different SQL) get their
 		// own statement-based label instead of one indistinct summary row…
 		expect(sql).toContain("if(sampleStatement != ''")
@@ -657,14 +680,14 @@ describe("service-map database query summaries", () => {
 	})
 
 	it("clamps untrusted bucket and limit values", () => {
-		const timeseries = serviceDbQueryTimeseriesSQL({ ...params, bucketSeconds: 1 }).sql
-		const topQueries = serviceDbTopQueriesSQL({ ...params, topN: 500 }).sql
+		const timeseries = Effect.runSync(serviceDbQueryTimeseriesSQL({ ...params, bucketSeconds: 1 })).sql
+		const topQueries = Effect.runSync(serviceDbTopQueriesSQL({ ...params, topN: 500 })).sql
 		expect(timeseries).toContain("INTERVAL 60 SECOND")
 		expect(topQueries).toContain("LIMIT 50")
 	})
 
 	it("scopes to one database identity when dbNamespace is set (rollup + raw branches)", () => {
-		const { sql } = serviceDbQuerySummarySQL({ ...params, dbNamespace: "orders" })
+		const { sql } = Effect.runSync(serviceDbQuerySummarySQL({ ...params, dbNamespace: "orders" }))
 		// sealed rollup branch filters the stored dimension (re-collapsed)…
 		expect(sql).toContain(`${SEALED_NAMESPACE_COLLAPSE} = 'orders'`)
 		// …the raw branch filters via the shared identity fragment
@@ -672,9 +695,9 @@ describe("service-map database query summaries", () => {
 	})
 
 	it("treats dbNamespace='' as the legacy/unknown node and undefined as unscoped", () => {
-		const scoped = serviceDbQuerySummarySQL({ ...params, dbNamespace: "" }).sql
+		const scoped = Effect.runSync(serviceDbQuerySummarySQL({ ...params, dbNamespace: "" })).sql
 		expect(scoped).toContain(`${SEALED_NAMESPACE_COLLAPSE} = ''`)
-		const unscoped = serviceDbQuerySummarySQL(params).sql
+		const unscoped = Effect.runSync(serviceDbQuerySummarySQL(params)).sql
 		expect(unscoped).not.toContain(`${SEALED_NAMESPACE_COLLAPSE} = `)
 	})
 
@@ -683,12 +706,14 @@ describe("service-map database query summaries", () => {
 		// regression here silently widens the panel to every database of the system.
 		// (Sub-hour timeseries is raw-only, covered separately below.)
 		const namespaceCoalesce = `${DB_NAMESPACE_ATTR_SQL} = 'orders'`
-		const timeseries = serviceDbQueryTimeseriesSQL({
-			...params,
-			dbNamespace: "orders",
-			bucketSeconds: 3600,
-		}).sql
-		const topQueries = serviceDbTopQueriesSQL({ ...params, dbNamespace: "orders" }).sql
+		const timeseries = Effect.runSync(
+			serviceDbQueryTimeseriesSQL({
+				...params,
+				dbNamespace: "orders",
+				bucketSeconds: 3600,
+			}),
+		).sql
+		const topQueries = Effect.runSync(serviceDbTopQueriesSQL({ ...params, dbNamespace: "orders" })).sql
 		for (const sql of [timeseries, topQueries]) {
 			expect(sql).toContain(`${SEALED_NAMESPACE_COLLAPSE} = 'orders'`) // sealed rollup branch
 			expect(sql).toContain(namespaceCoalesce) // raw in-progress-hour branch
@@ -698,18 +723,22 @@ describe("service-map database query summaries", () => {
 	it("scopes sub-hour timeseries to dbNamespace via the raw identity fragment", () => {
 		// The <1h path reads raw traces only (rollup can't serve sub-hour buckets),
 		// so it filters on the coalesced identity, not the stored DbNamespace column.
-		const { sql } = serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 300 })
+		const { sql } = Effect.runSync(
+			serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 300 }),
+		)
 		expect(sql).not.toContain("service_map_db_query_shapes_hourly")
 		expect(sql).toContain(`${DB_NAMESPACE_ATTR_SQL} = 'orders'`)
 	})
 
 	it("escapes raw params in summary SQL", () => {
-		const { sql } = serviceDbQuerySummarySQL({
-			...baseParams,
-			dbSystem: "post'gres",
-			sourceService: "svc'one",
-			deploymentEnv: "prod'west",
-		})
+		const { sql } = Effect.runSync(
+			serviceDbQuerySummarySQL({
+				...baseParams,
+				dbSystem: "post'gres",
+				sourceService: "svc'one",
+				deploymentEnv: "prod'west",
+			}),
+		)
 		expect(sql).toContain("= 'post\\'gres'")
 		expect(sql).toContain("ServiceName = 'svc\\'one'")
 		expect(sql).toContain(
@@ -719,7 +748,7 @@ describe("service-map database query summaries", () => {
 
 	it.effect("decodes summary rows with numeric strings from ClickHouse JSON", () =>
 		Effect.gen(function* () {
-			const compiled = serviceDbQuerySummarySQL(params)
+			const compiled = yield* serviceDbQuerySummarySQL(params)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -753,7 +782,7 @@ describe("service-map database query summaries", () => {
 
 	it.effect("decodes timeseries rows with numeric strings from ClickHouse JSON", () =>
 		Effect.gen(function* () {
-			const compiled = serviceDbQueryTimeseriesSQL(params)
+			const compiled = yield* serviceDbQueryTimeseriesSQL(params)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -785,7 +814,7 @@ describe("service-map database query summaries", () => {
 
 	it.effect("decodes top-query rows with numeric strings from ClickHouse JSON", () =>
 		Effect.gen(function* () {
-			const compiled = serviceDbTopQueriesSQL(params)
+			const compiled = yield* serviceDbTopQueriesSQL(params)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -819,7 +848,7 @@ describe("service-map database query summaries", () => {
 describe("servicePlatformsSQL", () => {
 	it.effect("decodes platform rows with the declared string columns", () =>
 		Effect.gen(function* () {
-			const compiled = servicePlatformsSQL({ deploymentEnv: "production" }, baseParams)
+			const compiled = yield* servicePlatformsSQL({ deploymentEnv: "production" }, baseParams)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -846,7 +875,7 @@ describe("servicePlatformsSQL", () => {
 
 	it.effect("fails decoding when a platform string column is missing", () =>
 		Effect.gen(function* () {
-			const compiled = servicePlatformsSQL({}, baseParams)
+			const compiled = yield* servicePlatformsSQL({}, baseParams)
 
 			const exit = yield* Effect.exit(
 				compiled.decodeRows([

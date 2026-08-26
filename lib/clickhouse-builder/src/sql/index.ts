@@ -8,6 +8,7 @@ export {
 	join,
 	as_,
 	when,
+	lazy,
 	compile,
 } from "./sql-fragment"
 

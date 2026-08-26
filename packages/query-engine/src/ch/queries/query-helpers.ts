@@ -12,6 +12,7 @@ import { MetricsSum, MetricsGauge, MetricsHistogram, MetricsExpHistogram } from 
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition, httpDisplaySpanName } from "../../traces-shared"
 import type { AttributeIndexMode } from "../../capabilities"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 // APDEX expressions
 
@@ -139,7 +140,7 @@ export function inclusionValues(
  * `Hour` column or the join silently misses.
  */
 export function hourFloor(name: string): CH.Expr<string> {
-	return CH.toStartOfHour(CH.toDateTime(param.dateTime(name)))
+	return CH.toStartOfHour(CH.toDateTime(param.dateTimeString(name)))
 }
 
 /**
@@ -219,8 +220,8 @@ export function tracesBaseWhereConditions(
 	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
@@ -364,8 +365,8 @@ export function serviceOverviewWhereConditions(
 	const services = inclusionValues(opts.serviceName, opts.serviceNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
@@ -464,8 +465,12 @@ export function tracesAggregatesWhereConditions(
 	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		hourBounds ? $.Hour.gte(CH.rawExpr<string>(hourBounds.gte)) : $.Hour.gte(param.dateTime("startTime")),
-		hourBounds ? $.Hour.lt(CH.rawExpr<string>(hourBounds.lt)) : $.Hour.lte(param.dateTime("endTime")),
+		hourBounds
+			? $.Hour.gte(CH.rawExpr(hourBounds.gte, T.dateTimeString))
+			: $.Hour.gte(param.dateTimeString("startTime")),
+		hourBounds
+			? $.Hour.lt(CH.rawExpr(hourBounds.lt, T.dateTimeString))
+			: $.Hour.lte(param.dateTimeString("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),

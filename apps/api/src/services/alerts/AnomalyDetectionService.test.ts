@@ -12,6 +12,7 @@ import {
 	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
 import { AnomalyDetectionService } from "./AnomalyDetectionService"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asIncidentId = Schema.decodeUnknownSync(AnomalyIncidentId)
@@ -44,7 +45,7 @@ const warehouseStub: WarehouseQueryServiceApi = {
 	query: () => Effect.die(new Error("unexpected pipe query")),
 	sqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),
 	rawSqlQuery: () => Effect.die(new Error("unexpected raw SQL query")),
-	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]),
+	compiledQuery: (_tenant, compiled) => compiledQueryOf(compiled).decodeRows([]),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected first-row query")),
 	ingest: () => Effect.void,
 	asExecutor: () => {

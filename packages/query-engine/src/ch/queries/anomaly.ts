@@ -15,6 +15,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
 import { ErrorEventsByTime, LogsAggregatesHourly, TracesAggregatesHourly } from "../tables"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 /** Hour-of-day values matching the current hour ±1, wrapping at midnight. */
 export function matchedHoursOfDay(currentHourOfDay: number): readonly number[] {
@@ -43,19 +44,20 @@ export function anomalyTraceSignalsQuery(opts: AnomalyTraceSignalsOpts) {
 			serviceName: $.ServiceName,
 			deploymentEnv: $.DeploymentEnv,
 			hour: $.Hour,
-			requestCount: CH.rawExpr<number>("sum(WeightedCount)"),
-			errorCount: CH.rawExpr<number>("sum(WeightedErrorCount)"),
+			requestCount: CH.rawExpr("sum(WeightedCount)", T.float64),
+			errorCount: CH.rawExpr("sum(WeightedErrorCount)", T.float64),
 			// Sample-weighted t-digest merge — the same expression
 			// tracesTimeseriesQuery uses; never average p95s across hours.
-			p95Ms: CH.rawExpr<number>(
+			p95Ms: CH.rawExpr(
 				"arrayElement(quantilesTDigestWeightedMerge(0.95)(DurationQuantiles), 1) / 1000000",
+				T.float64,
 			),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.IsEntryPoint.eq(1),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			CH.toHour($.Hour).in_(...opts.hoursOfDay),
 		])
 		.groupBy("serviceName", "deploymentEnv", "hour")
@@ -87,8 +89,8 @@ export function anomalyLogVolumeQuery(opts: AnomalyTraceSignalsOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			CH.toHour($.Hour).in_(...opts.hoursOfDay),
 		])
 		.groupBy("serviceName", "deploymentEnv", "hour")
@@ -119,8 +121,8 @@ export function anomalyErrorSpikeCurrentQuery(opts: { limit?: number }) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("fingerprintHash", "deploymentEnv")
 		.orderBy(["count", "desc"])
@@ -149,8 +151,8 @@ export function anomalyErrorSpikeBaselineQuery(opts: { limit?: number }) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lt(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lt(param.dateTimeString("endTime")),
 		])
 		.groupBy("fingerprintHash", "deploymentEnv", "h")
 
@@ -185,10 +187,11 @@ export function anomalyTraceSignalTimeseriesQuery() {
 	return from(TracesAggregatesHourly)
 		.select(($) => ({
 			hour: $.Hour,
-			requestCount: CH.rawExpr<number>("sum(WeightedCount)"),
-			errorCount: CH.rawExpr<number>("sum(WeightedErrorCount)"),
-			p95Ms: CH.rawExpr<number>(
+			requestCount: CH.rawExpr("sum(WeightedCount)", T.float64),
+			errorCount: CH.rawExpr("sum(WeightedErrorCount)", T.float64),
+			p95Ms: CH.rawExpr(
 				"arrayElement(quantilesTDigestWeightedMerge(0.95)(DurationQuantiles), 1) / 1000000",
+				T.float64,
 			),
 		}))
 		.where(($) => [
@@ -197,8 +200,8 @@ export function anomalyTraceSignalTimeseriesQuery() {
 			$.IsEntryPoint.eq(1),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.DeploymentEnv.eq(param.string("deploymentEnv")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("hour")
 		.orderBy(["hour", "asc"])
@@ -222,8 +225,8 @@ export function anomalyLogVolumeTimeseriesQuery() {
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.DeploymentEnv.eq(param.string("deploymentEnv")),
-			$.Hour.gte(param.dateTime("startTime")),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(param.dateTimeString("startTime")),
+			$.Hour.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("hour")
 		.orderBy(["hour", "asc"])
@@ -252,8 +255,8 @@ export function anomalyErrorSpikeTimeseriesQuery() {
 				$.OrgId.eq(param.string("orgId")),
 				$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
 				$.DeploymentEnv.eq(param.string("deploymentEnv")),
-				$.Timestamp.gte(param.dateTime("startTime")),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.gte(param.dateTimeString("startTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 			])
 			.groupBy("bucket")
 			.orderBy(["bucket", "asc"])
@@ -280,8 +283,8 @@ export function anomalyErrorSpikeServiceTimeseriesQuery() {
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.DeploymentEnv.eq(param.string("deploymentEnv")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("bucket")
 		.orderBy(["bucket", "asc"])

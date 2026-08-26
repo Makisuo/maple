@@ -15,8 +15,8 @@ import {
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
 import { deploymentEnvExpr, messagingDestinationExpr } from "@maple/domain/tinybird/semconv-renames"
-import { Schema } from "effect"
-import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
+import { Schema, Effect } from "effect"
+import { compile, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { defineCondFn, defineFn } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 // From the root, not `/expr`: this overload takes a `CHQuery`, so the subquery
@@ -33,19 +33,22 @@ import {
 	ServiceMapEdgesHourly,
 	ServiceMapSpans,
 	ServicePlatformsHourly,
+	type StringMap,
 	Traces,
 } from "../tables"
 import { unionAll } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "../schema"
+import { CHNumber, CHNumberOrZero } from "../schema"
+import * as T from "@maple-dev/clickhouse-builder/types"
+import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 
 // Local CH function declarations used by the live topology-join branch's
 // sample-weighting math. Kept here (not promoted to ch/functions/) because
 // they're niche and only this builder uses them; promote later if reused.
-const _toFloat64 = defineFn<[CH.Expr<unknown>], number>("toFloat64")
+const _toFloat64 = defineFn<[CH.Expr<unknown>], number>("toFloat64", T.float64)
 const _matchRegex = defineCondFn<[CH.Expr<string>, string]>("match")
-const _leastDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("least")
-const _greatestDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("greatest")
-const _addHours = defineFn<[CH.Expr<string>, CH.Expr<number>], string>("addHours")
+const _leastDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("least", T.dateTimeString)
+const _greatestDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("greatest", T.dateTimeString)
+const _addHours = defineFn<[CH.Expr<string>, CH.Expr<number>], string>("addHours", T.dateTimeString)
 
 // Service dependencies
 
@@ -68,7 +71,7 @@ const ServiceDependenciesOutputSchema: CompiledQueryRowSchema<ServiceDependencie
 	targetService: Schema.String,
 	callCount: CHNumber,
 	errorCount: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p95DurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
@@ -88,12 +91,13 @@ const sampleWeightExpr = (traceState: CH.Expr<string>) =>
 		[
 			[
 				_matchRegex(traceState, SAMPLED_TRACE_STATE_RE),
-				CH.rawExpr<number>(
+				CH.rawExpr(
 					"1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001)",
+					T.float64,
 				),
 			],
 		],
-		CH.rawExpr<number>("1.0"),
+		CH.rawExpr("1.0", T.float64),
 	)
 
 /**
@@ -102,7 +106,7 @@ const sampleWeightExpr = (traceState: CH.Expr<string>) =>
  *
  * Returns the joined query with `p` as the main source and `c` as the joined
  * alias, before any SELECT — callers pick the output shape. Both sides filter
- * `OrgId`, so anything built on this derives `tenantScope: "org"` without the
+ * `OrgId`, so anything built on this derives `tenantScope: "single-tenant"` without the
  * outer query having to repeat the predicate.
  *
  * `parentServiceName` is pushed into the parent subquery rather than the outer
@@ -178,7 +182,7 @@ function serviceMapEdgeJoinSource(opts: {
  *
  * This used to be a SQL-string builder taking an optional `orgId` that degraded
  * to an empty filter for a backfill script — i.e. a join across every tenant's
- * spans, wrapped by both callers in `unsafeCompiledQuery({ tenantScope: "org" })`
+ * spans, wrapped by both callers in `rawCompiledQuery({ tenantScope: "single-tenant" })`
  * so an omitted org id would have been positively ASSERTED as scoped and sailed
  * through the executor's gate. The org filter is now structural: it comes from
  * `param.string("orgId")` inside the join source, and the scope is derived. A
@@ -218,8 +222,8 @@ export function serviceMapEdgeJoinQuery(opts: {
 export function serviceDependenciesSQL(
 	opts: ServiceDependenciesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServiceDependenciesOutput> {
-	return compileCH(
+): Effect.Effect<CompiledQuery<ServiceDependenciesOutput>, QueryBuilderError> {
+	return compile(
 		serviceDependenciesQueryBase({ deploymentEnv: opts.deploymentEnv }),
 		{
 			orgId: params.orgId,
@@ -281,8 +285,8 @@ export function serviceDependenciesQueryBase(opts: { serviceName?: string; deplo
 	const envFilterMv = (deploymentEnv: CH.Expr<string>) =>
 		opts.deploymentEnv ? deploymentEnv.eq(opts.deploymentEnv) : undefined
 
-	const startDateTime = CH.toDateTime(param.dateTime("startTime"))
-	const endDateTime = CH.toDateTime(param.dateTime("endTime"))
+	const startDateTime = CH.toDateTime(param.dateTimeString("startTime"))
+	const endDateTime = CH.toDateTime(param.dateTimeString("endTime"))
 	const startHour = CH.toStartOfHour(startDateTime)
 	const endHour = CH.toStartOfHour(endDateTime)
 	const firstHourBoundary = CH.if_(
@@ -404,7 +408,7 @@ const ServiceDbEdgesOutputSchema: CompiledQueryRowSchema<ServiceDbEdgesOutput> =
 	dbNamespace: Schema.String,
 	callCount: CHNumber,
 	errorCount: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p95DurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
@@ -412,8 +416,8 @@ const ServiceDbEdgesOutputSchema: CompiledQueryRowSchema<ServiceDbEdgesOutput> =
 export function serviceDbEdgesSQL(
 	opts: ServiceDbEdgesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServiceDbEdgesOutput> {
-	return compileCH(serviceDbEdgesQueryBase(opts), params, {
+): Effect.Effect<CompiledQuery<ServiceDbEdgesOutput>, QueryBuilderError> {
+	return compile(serviceDbEdgesQueryBase(opts), params, {
 		rowSchema: ServiceDbEdgesOutputSchema,
 	})
 }
@@ -421,9 +425,9 @@ export function serviceDbEdgesSQL(
 // Shared DSL expressions for identifying the database a Client/Producer span
 // talks to, mirroring the write-side `DB_SYSTEM_ATTR_SQL` /
 // `DB_NAMESPACE_ATTR_SQL` fragments so raw-branch keys merge with the MV's.
-const dbSystemExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+const dbSystemExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", StringMap> }) =>
 	CH.coalesce(CH.nullIf($.SpanAttributes.get("db.system.name"), ""), $.SpanAttributes.get("db.system"))
-const dbNamespaceCoalesce = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+const dbNamespaceCoalesce = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", StringMap> }) =>
 	CH.coalesce(
 		CH.nullIf($.SpanAttributes.get("db.namespace"), ""),
 		CH.nullIf($.SpanAttributes.get("db.name"), ""),
@@ -440,7 +444,7 @@ const dbNamespaceCoalesce = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes",
 const collapseHyperdriveNs = (ns: CH.Expr<string>): CH.Expr<string> =>
 	CH.if_(_matchRegex(ns, OPAQUE_DB_NAMESPACE_RE), CH.lit(HYPERDRIVE_DB_NAMESPACE), ns)
 
-const dbNamespaceExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+const dbNamespaceExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", StringMap> }) =>
 	collapseHyperdriveNs(dbNamespaceCoalesce($))
 
 /**
@@ -476,8 +480,8 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
-			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-			$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
+			$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
 			$.DbSystem.neq(""),
 			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
 		])
@@ -505,8 +509,8 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 			// time, so this keeps the raw in-progress-hour branch consistent and
 			// avoids phantom edges from unnamed spans.
 			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : $.ServiceName.neq(""),
-			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 			$.SpanKind.in_("Client", "Producer"),
 			dbSystemExpr($).neq(""),
 			opts.deploymentEnv ? deploymentEnvExpr($.ResourceAttributes).eq(opts.deploymentEnv) : undefined,
@@ -597,7 +601,7 @@ const ServiceDbQuerySummaryOutputSchema: CompiledQueryRowSchema<ServiceDbQuerySu
 	errorCount: CHNumber,
 	estimatedErrorCount: CHNumber,
 	errorRate: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p50DurationMs: CHNumber,
 	p95DurationMs: CHNumber,
 	activeServiceCount: CHNumber,
@@ -621,7 +625,7 @@ const ServiceDbQueryTimeseriesOutputSchema: CompiledQueryRowSchema<ServiceDbQuer
 		estimatedQueryCount: CHNumber,
 		errorCount: CHNumber,
 		errorRate: CHNumber,
-		avgDurationMs: CHNumber,
+		avgDurationMs: CHNumberOrZero,
 		p50DurationMs: CHNumber,
 		p95DurationMs: CHNumber,
 	})
@@ -652,7 +656,7 @@ const ServiceDbTopQueryOutputSchema: CompiledQueryRowSchema<ServiceDbTopQueryOut
 	estimatedQueryCount: CHNumber,
 	errorCount: CHNumber,
 	errorRate: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p50DurationMs: CHNumber,
 	p95DurationMs: CHNumber,
 	lastSeen: Schema.String,
@@ -694,8 +698,8 @@ const signaturesHourlyFilters = (
 	params: ServiceDbQuerySummaryParams,
 ) => [
 	$.OrgId.eq(param.string("orgId")),
-	$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-	$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+	$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
+	$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
 	$.DbSystem.eq(params.dbSystem),
 	// `undefined` = unscoped; `''` is a real value (the legacy/unknown node).
 	// Collapse sealed hex → sentinel so a `dbNamespace: "hyperdrive"` filter also
@@ -718,17 +722,17 @@ const serviceDbRawFilters = (
 		Timestamp: CH.Expr<string>
 		SpanKind: CH.Expr<string>
 		ServiceName: CH.Expr<string>
-		SpanAttributes: CH.ColumnRef<"SpanAttributes", any>
-		ResourceAttributes: CH.ColumnRef<"ResourceAttributes", any>
+		SpanAttributes: CH.ColumnRef<"SpanAttributes", StringMap>
+		ResourceAttributes: CH.ColumnRef<"ResourceAttributes", StringMap>
 	},
 	params: ServiceDbQuerySummaryParams,
 	scope: "currentHour" | "fullWindow",
 ) => [
 	$.OrgId.eq(param.string("orgId")),
 	scope === "currentHour"
-		? $.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime"))))
-		: $.Timestamp.gte(CH.toDateTime(param.dateTime("startTime"))),
-	$.Timestamp.lte(CH.toDateTime(param.dateTime("endTime"))),
+		? $.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime"))))
+		: $.Timestamp.gte(CH.toDateTime(param.dateTimeString("startTime"))),
+	$.Timestamp.lte(CH.toDateTime(param.dateTimeString("endTime"))),
 	$.SpanKind.in_("Client", "Producer"),
 	$.ServiceName.neq(""),
 	dbSystemExpr($).eq(params.dbSystem),
@@ -744,14 +748,20 @@ const serviceDbRawFilters = (
 // type exactly.
 const UNIQ_SERVICE_STATE_EXPR = "uniqState(toString(ServiceName))"
 const TDIGEST_MERGE_STATE_EXPR = "quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles)"
+
+/** The two aggregate-state types the sealed and recent branches must agree on —
+ *  opaque values an outer `-Merge` reads, never rows anyone decodes. */
+const UNIQ_SERVICE_STATE = T.aggregateState("uniq", "String")
+const DB_DURATION_STATE = T.aggregateState("quantilesTDigestWeighted(0.5, 0.95)", "UInt64", "UInt32")
 const mergedQuantileExpr = (index: 1 | 2) =>
-	CH.rawExpr<number>(
+	CH.rawExpr(
 		`if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), ${index}) / 1000000, 0)`,
+		T.float64,
 	)
 
 export function serviceDbQuerySummarySQL(
 	params: ServiceDbQuerySummaryParams,
-): CompiledQuery<ServiceDbQuerySummaryOutput> {
+): Effect.Effect<CompiledQuery<ServiceDbQuerySummaryOutput>, QueryBuilderError> {
 	// Sealed hours from the rollup; ServiceName/DurationQuantiles re-aggregated at
 	// read time (the table is queried without FINAL).
 	const sealed = from(ServiceMapDbQuerySignaturesHourly)
@@ -761,8 +771,8 @@ export function serviceDbQuerySummarySQL(
 			bErr: CH.sum($.ErrorCount),
 			bEstErr: CH.sum($.EstimatedErrorCount),
 			bWDur: CH.sum($.WeightedDurationSumMs),
-			bSvc: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
-			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+			bSvc: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
+			bQ: CH.rawExpr(TDIGEST_MERGE_STATE_EXPR, DB_DURATION_STATE),
 		}))
 		.where(($) => signaturesHourlyFilters($, params))
 	const recent = from(Traces)
@@ -772,8 +782,8 @@ export function serviceDbQuerySummarySQL(
 			bErr: CH.countIf($.StatusCode.eq("Error")),
 			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
 			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
-			bSvc: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
-			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+			bSvc: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
+			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 		}))
 		.where(($) => serviceDbRawFilters($, params, "currentHour"))
 
@@ -787,16 +797,16 @@ export function serviceDbQuerySummarySQL(
 			avgDurationMs: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bWDur).div(CH.sum($.bEst)), CH.lit(0)),
 			p50DurationMs: mergedQuantileExpr(1),
 			p95DurationMs: mergedQuantileExpr(2),
-			activeServiceCount: CH.rawExpr<number>("uniqMerge(bSvc)"),
+			activeServiceCount: CH.rawExpr("uniqMerge(bSvc)", T.uint64),
 		}))
 		.format("JSON")
 
-	return compileCH(query, params, { rowSchema: ServiceDbQuerySummaryOutputSchema })
+	return compile(query, params, { rowSchema: ServiceDbQuerySummaryOutputSchema })
 }
 
 export function serviceDbQueryTimeseriesSQL(
 	params: ServiceDbQuerySummaryParams,
-): CompiledQuery<ServiceDbQueryTimeseriesOutput> {
+): Effect.Effect<CompiledQuery<ServiceDbQueryTimeseriesOutput>, QueryBuilderError> {
 	const bucketSeconds = clampBucketSeconds(params.bucketSeconds)
 
 	// Sub-hour buckets (short windows — pickDbSummaryBucketSeconds gives 5/15 min
@@ -819,11 +829,13 @@ export function serviceDbQueryTimeseriesSQL(
 					CH.sum(_toFloat64($.Duration).mul($.SampleRate)).div(CH.sum($.SampleRate)).div(1000000),
 					CH.lit(0),
 				),
-				p50DurationMs: CH.rawExpr<number>(
+				p50DurationMs: CH.rawExpr(
 					`if(count() > 0, arrayElement(${DB_DURATION_QUANTILES_EXPR}, 1) / 1000000, 0)`,
+					T.float64,
 				),
-				p95DurationMs: CH.rawExpr<number>(
+				p95DurationMs: CH.rawExpr(
 					`if(count() > 0, arrayElement(${DB_DURATION_QUANTILES_EXPR}, 2) / 1000000, 0)`,
+					T.float64,
 				),
 			}))
 			.where(($) => serviceDbRawFilters($, params, "fullWindow"))
@@ -831,7 +843,7 @@ export function serviceDbQueryTimeseriesSQL(
 			.orderBy(["bucket", "asc"])
 			.limit(2000)
 			.format("JSON")
-		return compileCH(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
+		return compile(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
 	}
 
 	// Hour-aligned buckets (≥1h — pickDbSummaryBucketSeconds gives 1h/6h for >24h):
@@ -844,7 +856,7 @@ export function serviceDbQueryTimeseriesSQL(
 			bErr: CH.sum($.ErrorCount),
 			bEstErr: CH.sum($.EstimatedErrorCount),
 			bWDur: CH.sum($.WeightedDurationSumMs),
-			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+			bQ: CH.rawExpr(TDIGEST_MERGE_STATE_EXPR, DB_DURATION_STATE),
 		}))
 		.where(($) => signaturesHourlyFilters($, params))
 		.groupBy("bucket")
@@ -856,7 +868,7 @@ export function serviceDbQueryTimeseriesSQL(
 			bErr: CH.countIf($.StatusCode.eq("Error")),
 			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
 			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
-			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 		}))
 		.where(($) => serviceDbRawFilters($, params, "currentHour"))
 		.groupBy("bucket")
@@ -877,12 +889,12 @@ export function serviceDbQueryTimeseriesSQL(
 		.limit(2000)
 		.format("JSON")
 
-	return compileCH(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
+	return compile(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
 }
 
 export function serviceDbTopQueriesSQL(
 	params: ServiceDbQuerySummaryParams,
-): CompiledQuery<ServiceDbTopQueryOutput> {
+): Effect.Effect<CompiledQuery<ServiceDbTopQueryOutput>, QueryBuilderError> {
 	const topN = clampTopN(params.topN)
 
 	// Sealed rollup shapes — pre-computed QueryKey/QueryLabel, so no per-row
@@ -893,13 +905,13 @@ export function serviceDbTopQueriesSQL(
 			bLabel: CH.any_($.QueryLabel),
 			bStatement: CH.any_($.SampleStatement),
 			bSampleService: CH.any_(CH.toString_($.ServiceName)),
-			bServices: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bServices: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
 			bCount: CH.sum($.CallCount),
 			bEst: CH.sum($.EstimatedCount),
 			bErr: CH.sum($.ErrorCount),
 			bEstErr: CH.sum($.EstimatedErrorCount),
 			bWDur: CH.sum($.WeightedDurationSumMs),
-			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+			bQ: CH.rawExpr(TDIGEST_MERGE_STATE_EXPR, DB_DURATION_STATE),
 			bLastSeen: CH.max_($.Hour),
 		}))
 		.where(($) => signaturesHourlyFilters($, params))
@@ -909,17 +921,17 @@ export function serviceDbTopQueriesSQL(
 	// across the sealed/live boundary.
 	const recent = from(Traces)
 		.select(($) => ({
-			queryKey: CH.rawExpr<string>(DB_QUERY_KEY_SQL),
-			bLabel: CH.rawExpr<string>(`any(substring(${DB_QUERY_LABEL_SQL}, 1, 220))`),
-			bStatement: CH.rawExpr<string>(`any(substring(${DB_STATEMENT_SQL}, 1, 1000))`),
+			queryKey: CH.rawExpr(DB_QUERY_KEY_SQL, T.string),
+			bLabel: CH.rawExpr(`any(substring(${DB_QUERY_LABEL_SQL}, 1, 220))`, T.string),
+			bStatement: CH.rawExpr(`any(substring(${DB_STATEMENT_SQL}, 1, 1000))`, T.string),
 			bSampleService: CH.any_(CH.toString_($.ServiceName)),
-			bServices: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bServices: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
 			bCount: CH.count(),
 			bEst: CH.sum($.SampleRate),
 			bErr: CH.countIf($.StatusCode.eq("Error")),
 			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
 			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
-			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 			bLastSeen: CH.max_(CH.toDateTime($.Timestamp)),
 		}))
 		.where(($) => serviceDbRawFilters($, params, "currentHour"))
@@ -932,7 +944,7 @@ export function serviceDbTopQueriesSQL(
 			fallbackLabel: CH.any_($.bLabel),
 			sampleStatement: CH.anyIf($.bStatement, $.bStatement.neq("")),
 			sampleService: CH.any_($.bSampleService),
-			serviceCount: CH.rawExpr<number>("uniqMerge(bServices)"),
+			serviceCount: CH.rawExpr("uniqMerge(bServices)", T.uint64),
 			queryCount: CH.sum($.bCount),
 			estimatedQueryCount: CH.sum($.bEst),
 			errorCount: CH.sum($.bErr),
@@ -954,8 +966,9 @@ export function serviceDbTopQueriesSQL(
 	const query = fromQuery(merged, "shape")
 		.select(($) => ({
 			queryKey: $.queryKey,
-			queryLabel: CH.rawExpr<string>(
+			queryLabel: CH.rawExpr(
 				`if(sampleStatement != '', substring(${presentableStatementSql("sampleStatement")}, 1, 220), fallbackLabel)`,
+				T.string,
 			),
 			sampleStatement: $.sampleStatement,
 			sampleService: $.sampleService,
@@ -973,7 +986,7 @@ export function serviceDbTopQueriesSQL(
 		.limit(topN)
 		.format("JSON")
 
-	return compileCH(query, params, { rowSchema: ServiceDbTopQueryOutputSchema })
+	return compile(query, params, { rowSchema: ServiceDbTopQueryOutputSchema })
 }
 
 // Service ↔ external target edges (http / messaging / rpc)
@@ -1010,7 +1023,7 @@ const ServiceExternalEdgesOutputSchema: CompiledQueryRowSchema<ServiceExternalEd
 	targetName: Schema.String,
 	callCount: CHNumber,
 	errorCount: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p95DurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
@@ -1018,9 +1031,9 @@ const ServiceExternalEdgesOutputSchema: CompiledQueryRowSchema<ServiceExternalEd
 export function serviceExternalEdgesSQL(
 	opts: ServiceExternalEdgesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServiceExternalEdgesOutput> {
-	const startHour = CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))
-	const endHour = CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))
+): Effect.Effect<CompiledQuery<ServiceExternalEdgesOutput>, QueryBuilderError> {
+	const startHour = CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))
+	const endHour = CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))
 
 	// Hourly branch: sealed buckets from the MV-fed table. Carries `bucket*`
 	// aliases so the outer aggregate can't collide with inner ones (same
@@ -1098,7 +1111,7 @@ export function serviceExternalEdgesSQL(
 				$.OrgId.eq(param.string("orgId")),
 				$.ServiceName.eq(opts.serviceName),
 				$.Timestamp.gte(endHour),
-				$.Timestamp.lte(param.dateTime("endTime")),
+				$.Timestamp.lte(param.dateTimeString("endTime")),
 				CH.inList($.SpanKind, ["Client", "Producer"]),
 				attr("db.system.name").eq(""),
 				attr("server.address")
@@ -1161,7 +1174,7 @@ export function serviceExternalEdgesSQL(
 		.limit(200)
 		.format("JSON")
 
-	return compileCH(query, params, { rowSchema: ServiceExternalEdgesOutputSchema })
+	return compile(query, params, { rowSchema: ServiceExternalEdgesOutputSchema })
 }
 
 // Service hosting platform
@@ -1194,22 +1207,10 @@ export interface ServicePlatformsOutput {
 	readonly processRuntimeName: string
 }
 
-const ServicePlatformsOutputSchema: CompiledQueryRowSchema<ServicePlatformsOutput> = Schema.Struct({
-	serviceName: Schema.String,
-	k8sCluster: Schema.String,
-	k8sPodName: Schema.String,
-	k8sDeploymentName: Schema.String,
-	cloudPlatform: Schema.String,
-	cloudProvider: Schema.String,
-	faasName: Schema.String,
-	mapleSdkType: Schema.String,
-	processRuntimeName: Schema.String,
-})
-
 export function servicePlatformsSQL(
 	opts: ServicePlatformsOpts,
 	params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ServicePlatformsOutput> {
+): Effect.Effect<CompiledQuery<ServicePlatformsOutput>, QueryBuilderError> {
 	const query = from(ServicePlatformsHourly)
 		.select(($) => ({
 			serviceName: $.ServiceName,
@@ -1228,8 +1229,8 @@ export function servicePlatformsSQL(
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-			$.Hour.lte(param.dateTime("endTime")),
+			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
+			$.Hour.lte(param.dateTimeString("endTime")),
 			$.ServiceName.neq(""),
 			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
 		])
@@ -1237,13 +1238,9 @@ export function servicePlatformsSQL(
 		.limit(500)
 		.format("JSON")
 
-	return compileCH(
-		query,
-		{
-			orgId: params.orgId,
-			startTime: params.startTime,
-			endTime: params.endTime,
-		},
-		{ rowSchema: ServicePlatformsOutputSchema },
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		startTime: params.startTime,
+		endTime: params.endTime,
+	})
 }

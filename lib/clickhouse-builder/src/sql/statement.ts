@@ -20,7 +20,9 @@ import { splitTerminalClauses } from "./terminal-clauses"
 // `Schema.optional`, not `optionalKey`: an absent terminal clause is a real
 // `undefined` in the parsed shape, and the codec encodes to SQL text rather than
 // to JSON, so key presence never reaches a wire format.
-export class ClickHouseStatement extends Schema.Class<ClickHouseStatement>("ClickHouseStatement")({
+export class ClickHouseStatement extends Schema.Class<ClickHouseStatement>(
+	"@maple-dev/clickhouse-builder/ClickHouseStatement",
+)({
 	body: Schema.String,
 	settings: Schema.optional(Schema.String),
 	format: Schema.optional(Schema.String),
@@ -38,8 +40,8 @@ export interface ClickHouseStatementFields {
 }
 
 /**
- * Render a statement back to SQL. `SETTINGS` precedes `FORMAT` — Tinybird's
- * ClickHouse rejects the inverse order with a syntax error — and clauses are
+ * Render a statement back to SQL. `SETTINGS` precedes `FORMAT` — some ClickHouse
+ * gateways reject the inverse order with a syntax error — and clauses are
  * newline-separated so a body ending in a `--` comment cannot swallow them.
  */
 export const renderStatement = (statement: ClickHouseStatementFields): string =>

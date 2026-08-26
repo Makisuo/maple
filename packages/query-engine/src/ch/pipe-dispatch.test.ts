@@ -1,7 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { OrgId } from "@maple/domain/http"
-import { compilePipeQuery } from "./pipe-dispatch"
+import { compilePipeQuery as lowerPipeQuery } from "./pipe-dispatch"
+
+/** Lower and compile in one step — the tests want a value, and a fixture that
+ *  will not compile should fail the test loudly. */
+const compilePipeQuery = (...args: Parameters<typeof lowerPipeQuery>) => {
+	const lowered = lowerPipeQuery(...args)
+	return lowered === undefined ? undefined : Effect.runSync(lowered)
+}
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 
@@ -174,11 +181,15 @@ describe("compilePipeQuery", () => {
 		expect(result!.sql).toContain("2024-01-02 00:00:00")
 	})
 
-	it.effect("decodeRows passes through rows for DSL-backed pipes without row schemas", () =>
+	// `list_traces` derives its row schema from the SELECT, so `decodeRows`
+	// validates rather than casting: a row missing a selected column is a decode
+	// failure here instead of an `undefined` read three layers downstream.
+	it.effect("decodeRows rejects a row missing a selected column", () =>
 		Effect.gen(function* () {
 			const result = compilePipeQuery("list_traces", baseParams())
-			const rows = [{ traceId: "abc" }]
-			expect(yield* result!.decodeRows(rows)).toEqual(rows)
+			expect(result!.rowSchemaSource).not.toBe("none")
+			const failure = yield* Effect.flip(result!.decodeRows([{ traceId: "abc" }]))
+			expect(failure.rowIndex).toBe(0)
 		}),
 	)
 

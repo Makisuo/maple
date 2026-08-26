@@ -14,10 +14,8 @@
 // the pre-computed percentiles live in `metrics_gauge` (one row per quantile).
 // The caller (the `serviceCloudflareStats` handler) merges both by ServiceName.
 
-import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "@maple/query-engine/ch/schema"
+import { from, param } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "@maple/query-engine/ch/tables"
 import { avgWhere } from "@maple/query-engine/ch/format"
 
@@ -43,32 +41,6 @@ export interface CloudflareServiceLatencyOutput {
 	readonly cpuP99Ms: number
 }
 
-/**
- * Row schema for {@link cloudflareServiceCountersSQL}. The `sumIf` aggregates
- * use {@link CHNumber} so a BYO-ClickHouse org's string-encoded numeric
- * aggregates decode identically to Tinybird's numbers — pass it as the
- * `rowSchema` to `CH.compile` so `decodeRows` coerces centrally instead of a
- * `ParseError` (or a string leaking over the wire) surfacing downstream. Mirror
- * of `cloudflareUsageRowSchema`.
- */
-export const cloudflareServiceCountersRowSchema: CompiledQueryRowSchema<CloudflareServiceCountersOutput> =
-	Schema.Struct({
-		serviceName: Schema.String,
-		requests: CHNumber,
-		errorCount: CHNumber,
-	})
-
-/**
- * Row schema for {@link cloudflareServiceLatencySQL}. Same {@link CHNumber}
- * coercion as the counters schema for the percentile columns.
- */
-export const cloudflareServiceLatencyRowSchema: CompiledQueryRowSchema<CloudflareServiceLatencyOutput> =
-	Schema.Struct({
-		serviceName: Schema.String,
-		latencyP99Ms: CHNumber,
-		cpuP99Ms: CHNumber,
-	})
-
 /** Counter rollup over `metrics_sum`, one row per Worker pseudo-service. */
 export function cloudflareServiceCountersSQL() {
 	return from(MetricsSum)
@@ -80,8 +52,8 @@ export function cloudflareServiceCountersSQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...COUNTER_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.orderBy(["requests", "desc"])
@@ -114,8 +86,8 @@ export function cloudflareServiceLatencySQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...GAUGE_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName")
 		.limit(500)

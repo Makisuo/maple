@@ -564,7 +564,7 @@ const fetchHandler = Effect.fn("bench.fetch")(function* (config: FetchConfig) {
 	})
 	const host = yield* tinybird.host
 
-	const compiled = CH.compile(
+	const compiled = yield* CH.compile(
 		Integrations.dbStatementSamplesQuery({
 			contextFilter: Option.getOrUndefined(config.context),
 			profileFilter: Option.getOrUndefined(config.profile),

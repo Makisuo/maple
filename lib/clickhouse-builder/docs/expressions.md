@@ -4,6 +4,33 @@ Two brands flow through the DSL. An **`Expr<T>`** is anything that evaluates to 
 column, a literal, a function call. A **`Condition`** is a boolean predicate, which is what
 `where` collects. Comparison methods turn an `Expr` into a `Condition`.
 
+## How a value becomes a literal
+
+Comparing a column against a plain value encodes that value through the column's own type, so
+the literal is whatever ClickHouse expects for _that_ column rather than whatever the JavaScript
+value looks like:
+
+```ts
+$.Attributes.eq({ "http.method": "GET" }) // Attributes = map('http.method', 'GET')
+$.Tags.eq(["a", "b"])                     // Tags = ['a', 'b']
+$.Live.eq(true)                           // Live = 1
+$.Note.eq(null)                           // Note = NULL
+$.Timestamp.gte(new Date(...))            // Timestamp >= '2026-01-01 00:00:00'
+```
+
+A value the column cannot hold fails while the SQL is being built:
+
+```ts
+$.Count.eq("lots")
+// QueryBuilderError { code: "InvalidLiteral" }: column Count: string "lots" is not a valid value
+```
+
+Expressions with no type to read — `untypedExpr`, an untyped `dynamicColumn` — fall back to
+guessing from the JavaScript value, which handles strings, numbers, booleans and dates but
+nothing structured.
+
+_(Backed by `src/ch/literal.test.ts`.)_
+
 ## Comparisons
 
 Every `Expr<T>` carries:
@@ -82,11 +109,43 @@ _(Backed by `docs/expressions.md > Optional predicates with when`.)_
 
 _(Backed by `docs/expressions.md > Arithmetic does not parenthesise`.)_
 
+### Division can produce a NULL
+
+`.div()` and `.mod()` decode nullably, whatever their operands are. ClickHouse renders `1 / 0` as
+`inf` and `0 / 0` as `nan`, and both come back as JSON `null` — so a division that meets a zero
+denominator returns a null the column type has to accept, or the row fails to decode.
+
+That costs nothing at the type level: the result is `Expr<number>` either way, exactly as it
+already was for a division with a nullable operand. What it buys is that an unguarded division
+which hits a zero in production is the `null` the wire actually carried, rather than a decode
+failure on a query that ran fine.
+
+When you want a number rather than a null, guard it in SQL:
+
+```ts
+.select(($) => ({
+	// ifNotFinite(sum(Errors) / sum(Total), 0) AS errorRate
+	errorRate: CH.ifNotFinite(CH.sum($.Errors).div(CH.sum($.Total)), 0),
+}))
+```
+
+`CH.ifNotFinite(expr, fallback)` is `expr` unless it is `nan`/`inf`, in which case it is
+`fallback` — and its result is non-nullable, because the guard is in the SQL. The other standard
+shape, `CH.sum(x).div(CH.nullIf(CH.sum(y), 0))`, deliberately keeps the null: "an average, or
+nothing when there is nothing to average over".
+
+The other four operators stay strict. `+`, `-`, `*` and unary use cannot manufacture a null out
+of two finite operands, so the looseness is bought only where it is paid for.
+
+_(Backed by `docs/expressions.md > division decodes nullably and ifNotFinite guards it`.)_
+
 ## Literals and raw escape hatches
 
 - `lit(value)` — an explicit `Expr` from a `string` or `number`. You rarely need it, since
   comparison methods accept raw values directly.
-- `rawExpr<T>(sql)` — an `Expr<T>` from a SQL string.
+- `rawExpr(sql, type)` — an `Expr` from a SQL string, with the column type it produces.
+- `untypedExpr<T>(sql)` — the same with no type declared; selecting one costs the query its
+  row schema, so it is a separate name rather than an omitted argument.
 - `rawCond(sql)` — a `Condition` from a SQL string.
 
 Raw helpers interpolate nothing and escape nothing. Never build one from user input. See

@@ -49,8 +49,7 @@ export const WarehouseExecutorFromMode = Layer.effect(
 				// otherwise holds a query name, so any query that happened to be
 				// called "mode" would have been silently recovered as an Ok outcome.
 				Effect.mapError(
-					(cause) =>
-						new WarehouseConfigError({ message: cause.message, pipeName: "mode", cause }),
+					(cause) => new WarehouseConfigError({ message: cause.message, pipeName: "mode", cause }),
 				),
 			),
 		)

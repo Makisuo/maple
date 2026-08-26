@@ -11,10 +11,11 @@ import { compile } from "@maple-dev/clickhouse-builder/sql"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { avg, count, countIf, quantile } from "@maple-dev/clickhouse-builder"
 import { if_ } from "@maple-dev/clickhouse-builder"
-import { round_ } from "@maple-dev/clickhouse-builder"
+import { round } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from } from "@maple-dev/clickhouse-builder"
 import { Traces } from "../tables"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 /**
  * Wrap an expression in parentheses. The DSL's arithmetic combinators
@@ -22,7 +23,7 @@ import { Traces } from "../tables"
  * grouping is required when a sum must bind before a division.
  */
 const paren = (expr: CH.Expr<number>): CH.Expr<number> =>
-	CH.rawExpr<number>(`(${compile(expr.toFragment())})`)
+	CH.rawExpr(`(${compile(expr.toFragment())})`, T.float64)
 
 export type TopOperationsMetric = TracesMetric
 
@@ -54,7 +55,7 @@ const metricExpr = (
 		Match.when("apdex", () =>
 			if_(
 				count().gt(0),
-				round_(
+				round(
 					// (satisfied + tolerating * 0.5) / total — the numerator must be
 					// grouped so the division binds after the sum.
 					paren(
@@ -83,8 +84,8 @@ export function topOperationsQuery(opts: TopOperationsOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("name")
 		.orderBy(["value", "desc"])

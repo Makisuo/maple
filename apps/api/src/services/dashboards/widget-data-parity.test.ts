@@ -35,6 +35,7 @@ import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { DashboardWidgetDataService, shareViewerTenant } from "./DashboardWidgetDataService"
 import { makeServerQuerySetExecutor } from "./server-query-set-executor"
+import { compiledQueryOf, type CompiledQueryInput } from "@maple/query-engine/execution"
 
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)
 const asIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
@@ -131,8 +132,10 @@ const makeHarness = () => {
 				{ t: "2026-01-01 00:05:00", requests: 5, errors: 0 },
 			])
 		},
-		compiledQuery: (_tenant: unknown, compiled: unknown) => {
-			captured.compiled.push(compiled)
+		// Resolved the way the real executor resolves it: the route hands over the
+		// unrun `CH.compile`, and what this test asserts on is the compiled query.
+		compiledQuery: (_tenant: unknown, compiled: CompiledQueryInput<unknown>) => {
+			captured.compiled.push(compiledQueryOf(compiled))
 			return Effect.succeed([SERVICE_OVERVIEW_ROW])
 		},
 		// oxlint-disable-next-line typescript/no-explicit-any

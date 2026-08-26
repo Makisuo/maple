@@ -1,7 +1,7 @@
 // SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
-import { unsafeCompiledQuery } from "@maple/query-engine/ch"
+import { rawCompiledQuery } from "@maple/query-engine/ch"
 import { makeLocalWarehouseExecutorApi } from "./executor"
 
 // The local executor is the REAL makeWarehouseExecutor wired to the `chdb`
@@ -37,10 +37,10 @@ describe("makeLocalWarehouseExecutorApi", () => {
 		Effect.gen(function* () {
 			const requests = stubLocalServer([{ c: 1 }])
 			const executor = makeLocalWarehouseExecutorApi("http://127.0.0.1:4318")
-			const compiled = unsafeCompiledQuery<{ readonly c: number }>({
+			const compiled = rawCompiledQuery<{ readonly c: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-				tenantScope: "org",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				tenantScope: "single-tenant",
 				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'local'\nFORMAT JSON",
 			})
 
@@ -65,11 +65,12 @@ describe("makeLocalWarehouseExecutorApi", () => {
 			// of the SQL string, so an unscoped one is rejected before execution.
 			const exit = yield* executor
 				.compiledQuery(
-					unsafeCompiledQuery({
+					rawCompiledQuery({
 						reason: "test-fixture",
-						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+						justification:
+							"Synthetic SQL asserting executor/compile behaviour, not a product query.",
 						sql: "SELECT 1",
-						tenantScope: "cross-org",
+						tenantScope: "cross-tenant",
 					}),
 				)
 				.pipe(Effect.exit)
@@ -89,11 +90,12 @@ describe("makeLocalWarehouseExecutorApi", () => {
 
 			const exit = yield* executor
 				.compiledQuery(
-					unsafeCompiledQuery({
+					rawCompiledQuery({
 						reason: "test-fixture",
-						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+						justification:
+							"Synthetic SQL asserting executor/compile behaviour, not a product query.",
 						sql: "SELECT nope FROM traces WHERE OrgId = 'local'",
-						tenantScope: "org",
+						tenantScope: "single-tenant",
 					}),
 				)
 				.pipe(Effect.exit)

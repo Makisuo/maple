@@ -107,6 +107,16 @@ export const makeSpanDetailRows = (): ReadonlyArray<Record<string, unknown>> => 
 	{
 		traceId: SPAN_DETAIL_TRACE_ID,
 		spanId: SPAN_DETAIL_SPAN_ID,
+		// Every column `spanDetailQuery` selects — the row is validated against
+		// the compiled query's schema now, so a partial one is a decode failure.
+		parentSpanId: "",
+		spanName: "POST /api/checkout",
+		serviceName: FIXTURES.service,
+		spanKind: "Server",
+		durationMs: 120,
+		startTime: "2026-06-02 10:00:00",
+		statusCode: "Ok",
+		statusMessage: "",
 		spanAttributes: JSON.stringify({ "http.method": "POST", "http.route": "/api/checkout" }),
 		resourceAttributes: JSON.stringify({ "service.name": FIXTURES.service }),
 	},
@@ -121,6 +131,9 @@ export const makeTraceLogs = (): ListLogsOutput[] => [
 		body: "checkout failed: downstream db error",
 		traceId: FIXTURES.traceId,
 		spanId: FIXTURES.spanId,
+		// The list-logs cursor identity — a real selected column, so a row without
+		// it no longer decodes.
+		recordIdentity: "0123456789ABCDEF0123456789ABCDEF",
 		logAttributes: "{}",
 		resourceAttributes: "{}",
 	},
