@@ -241,7 +241,7 @@ jobs:
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+            - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
             - uses: ./.github/actions/bun-install
               with:
@@ -410,7 +410,7 @@ jobs:
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+            - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
             # The action always installs the root `maple` workspace, so naming
             # it as the only filter installs the CI tools (oxlint and the JS
@@ -475,7 +475,7 @@ jobs:
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+            - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
             - uses: ./.github/actions/bun-install
 
@@ -531,7 +531,7 @@ jobs:
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+            - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
             - uses: ./.github/actions/bun-install
 
@@ -592,7 +592,7 @@ jobs:
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+            - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
             - uses: ./.github/actions/bun-install
 
@@ -649,7 +649,7 @@ jobs:
             # whose evidence matters most.
             - name: Upload checkpoint failure evidence
               if: ${{ failure() || cancelled() }}
-              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
                   name: native-checkpoint-failure-${{ github.run_id }}
                   # Both probes' roots: the migration probe used to fail without
@@ -728,7 +728,7 @@ jobs:
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+            - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
             - uses: ./.github/actions/bun-install
 
@@ -759,7 +759,7 @@ jobs:
             # otherwise collide on a single name, failing the upload.
             - name: Upload archive failure evidence
               if: ${{ failure() }}
-              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
                   name: native-archive-failure-${{ matrix.probe }}-${{ github.run_id }}
                   path: ${{ runner.temp }}/${{ matrix.tmp }}
@@ -810,7 +810,7 @@ jobs:
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+            - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
             - uses: ./.github/actions/bun-install
               with:

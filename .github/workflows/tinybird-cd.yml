@@ -46,7 +46,7 @@ jobs:
         environment: ${{ matrix.target.environment }}
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+            - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
             - name: Install dependencies
               # Run install before any secrets are scoped to the deploy step.
               run: bun install --frozen-lockfile
