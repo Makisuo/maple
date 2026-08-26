@@ -35,7 +35,7 @@ import {
 	orgClickHouseSettings,
 	orgIngestKeys,
 } from "@maple/db"
-import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/query-engine"
 import { EdgeCacheService } from "@maple/cache"
 import {
@@ -114,6 +114,8 @@ const MAX_OPENS_PER_TICK = 10
 /** Cap evaluated golden-signal/log series to the busiest N per org. */
 const MAX_SERIES_PER_ORG = 200
 const STATE_RETENTION_MS = 14 * 24 * HOUR_MS
+/** Keeps the per-tick state hydration a bounded IN list on a busy org. */
+const DETECTOR_STATE_FETCH_CHUNK = 500
 const RETENTION_PHASE_EVERY_N_TICKS = 36
 const TICK_CADENCE_MS = 5 * 60 * 1000
 const ERROR_SPIKE_BASELINE_CACHE_BUCKET = "anomaly-errbase"
@@ -1213,11 +1215,24 @@ const make = Effect.gen(function* () {
 		// Load state before evaluation: an opening floor suppresses noisy new
 		// fingerprints, but an already-open fingerprint falling below that floor
 		// is positive recovery evidence and must advance healthy hysteresis.
-		const stateRows = yield* dbExecute((db) =>
-			db.select().from(anomalyDetectorStates).where(eq(anomalyDetectorStates.orgId, orgId)),
+		// Only the open-incident slice is needed to *build* evaluations: the spike
+		// branch below and the zero-count sweep both ignore rows whose
+		// openIncidentId is null. Loading the whole org partition here read ~5.7k
+		// rows per tick to use one; the rest is fetched by key once the evaluated
+		// set is known.
+		const openStateRows = yield* dbExecute((db) =>
+			db
+				.select()
+				.from(anomalyDetectorStates)
+				.where(
+					and(
+						eq(anomalyDetectorStates.orgId, orgId),
+						isNotNull(anomalyDetectorStates.openIncidentId),
+					),
+				),
 		)
 		const stateByKey = new Map<string, AnomalyDetectorStateRow>(
-			stateRows.map((row) => [row.detectorKey, row]),
+			openStateRows.map((row) => [row.detectorKey, row]),
 		)
 
 		// firstSeenAt per fingerprint so young issues stay with first_seen handling.
@@ -1275,10 +1290,9 @@ const make = Effect.gen(function* () {
 		// A zero-count fingerprint is absent from the grouped warehouse result.
 		// Synthesize it from persisted state so an open incident resolves after
 		// three healthy ticks instead of freezing until the one-hour stale sweep.
-		for (const state of stateRows) {
+		for (const state of openStateRows) {
 			if (
 				state.signalType !== "error_spike" ||
-				state.openIncidentId === null ||
 				state.fingerprintHash === null ||
 				observedSpikeKeys.has(state.detectorKey)
 			) {
@@ -1300,6 +1314,33 @@ const make = Effect.gen(function* () {
 
 		const active = evaluations.filter((e) => !muted.has(e.signalType))
 		stats.seriesEvaluated = active.length
+
+		// Hydrate the states the decision loop below reads. The evaluated key set is
+		// only knowable here, but it is bounded by the series actually observed, so
+		// this is a primary-key lookup rather than an org-wide scan.
+		const missingKeys = Arr.dedupe(
+			active.flatMap((e) => (stateByKey.has(e.detectorKey) ? [] : [e.detectorKey])),
+		)
+		yield* Effect.forEach(
+			Arr.chunksOf(missingKeys, DETECTOR_STATE_FETCH_CHUNK),
+			(chunk) =>
+				dbExecute((db) =>
+					db
+						.select()
+						.from(anomalyDetectorStates)
+						.where(
+							and(
+								eq(anomalyDetectorStates.orgId, orgId),
+								inArray(anomalyDetectorStates.detectorKey, chunk),
+							),
+						),
+				).pipe(
+					Effect.map((rows) => {
+						for (const row of rows) stateByKey.set(row.detectorKey, row)
+					}),
+				),
+			{ discard: true },
+		)
 
 		// Open incidents are kept current in memory through the sequential loop
 		// so same-tick attaches and severity recomputes see each other.

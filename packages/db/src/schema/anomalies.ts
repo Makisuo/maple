@@ -9,6 +9,7 @@ import {
 	text,
 	timestamp,
 } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
 import type { AnomalyIncidentId, ErrorIssueId, OrgId, UserId } from "@maple/domain/primitives"
 import type {
 	AnomalyIncidentSeverity,
@@ -67,7 +68,11 @@ export const anomalyDetectorStates = pgTable(
 		primaryKey({ columns: [table.orgId, table.detectorKey] }),
 		// No standalone org_id index: the primary key already leads with org_id,
 		// so one was pure write amplification on ~130k upserts a day.
-		index("anomaly_detector_states_open_incident_idx").on(table.orgId, table.openIncidentId),
+		// Partial: every read of this index either equals a concrete incident id or
+		// asks for the open slice, and open rows are a small fraction of the table.
+		index("anomaly_detector_states_open_incident_idx")
+			.on(table.orgId, table.openIncidentId)
+			.where(sql`${table.openIncidentId} is not null`),
 		index("anomaly_detector_states_evaluated_idx").on(table.lastEvaluatedAt),
 	],
 )
