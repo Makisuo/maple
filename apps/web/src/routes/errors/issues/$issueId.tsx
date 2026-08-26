@@ -31,6 +31,7 @@ import { IssueOccurrencesTable } from "@/components/errors/issue-occurrences-tab
 import { IssueSidebar } from "@/components/errors/issue-sidebar"
 import { ISSUE_TABS, IssueTabs, type IssueTab } from "@/components/errors/issue-tabs"
 import { IssueTimeline } from "@/components/errors/issue-timeline"
+import { Button } from "@maple/ui/components/ui/button"
 import { IssuePullRequestsPanel } from "@/components/errors/issue-pull-requests-panel"
 import { IssueVerificationCard } from "@/components/errors/issue-verification-card"
 import { LinkedInvestigationPanel } from "@/components/errors/linked-investigation-panel"
@@ -60,6 +61,13 @@ import {
 } from "./-issue-mutation-payloads"
 
 const decodeIssueId = Schema.decodeSync(ErrorIssueId)
+
+/**
+ * States where somebody has taken the issue on, so a missing pull-request link
+ * is a gap worth pointing at. Deliberately not `triage`/`todo`: nothing is being
+ * fixed yet, and nagging there would just be noise on every open issue.
+ */
+const AWAITING_FIX_STATES = new Set<WorkflowState>(["in_progress", "in_review"])
 
 const ISSUE_LOADING_BREADCRUMBS = [{ label: "Errors", href: "/errors" }, { label: "…" }] as const
 
@@ -217,6 +225,7 @@ function IssueDetailContent() {
 		mode: "promiseExit",
 	})
 
+	const [attachDialogOpen, setAttachDialogOpen] = useState(false)
 	const [commentDraft, setCommentDraft] = useState("")
 	const [busy, setBusy] = useState<
 		| "state"
@@ -258,8 +267,18 @@ function IssueDetailContent() {
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
-		if (Exit.isSuccess(result)) toastManager.add({ title: `Moved to ${next}`, type: "success" })
-		else toastManager.add({ title: "State change failed", type: "error" })
+		if (!Exit.isSuccess(result)) {
+			toastManager.add({ title: "State change failed", type: "error" })
+			return
+		}
+		toastManager.add({ title: `Moved to ${next}`, type: "success" })
+		// "In review" with no pull request attached is the exact moment the link is
+		// worth asking for — it is what opens the verification window later. Offered
+		// after the transition has already committed, so dismissing it costs nothing.
+		const attached = Result.builder(pullRequestsResult)
+			.onSuccess((response) => response.pullRequests.length)
+			.orElse(() => 0)
+		if (next === "in_review" && attached === 0) setAttachDialogOpen(true)
 	}
 
 	const claim = async () => {
@@ -510,6 +529,9 @@ function IssueDetailContent() {
 			const pullRequests = Result.builder(pullRequestsResult)
 				.onSuccess((response) => response.pullRequests)
 				.orElse(() => [])
+			const suggestedRepository = Result.builder(pullRequestsResult)
+				.onSuccess((response) => response.suggestedRepository)
+				.orElse(() => null)
 			// Newest first from the API, so the head is the check that matters — an
 			// older settled verification is history the timeline already carries.
 			const latestVerification = Result.builder(verificationsResult)
@@ -710,12 +732,38 @@ function IssueDetailContent() {
 											verification={latestVerification}
 											workflowState={issue.workflowState}
 										/>
+									) : AWAITING_FIX_STATES.has(issue.workflowState) &&
+										pullRequests.length === 0 ? (
+										// Somebody is working this issue but nothing is attached, so
+										// there is nothing for verification to trigger on. Said here,
+										// in the slot the verification card will occupy, rather than
+										// only on the panel below where the payoff is easy to miss.
+										<section className="rounded-xl border bg-card px-4 py-3">
+											<p className="text-xs text-muted-foreground">
+												No pull request attached. Maple can only confirm this
+												error stopped if it knows which fix to watch.
+											</p>
+											<Button
+												size="sm"
+												variant="outline"
+												// The rail is ~255px wide; the label does not fit
+												// on one line at its natural width and overflowed
+												// the card until it was allowed to wrap.
+												className="mt-2 h-auto w-full whitespace-normal py-1.5 text-xs"
+												onClick={() => setAttachDialogOpen(true)}
+											>
+												Attach the PR that fixes this
+											</Button>
+										</section>
 									) : null}
 									<IssuePullRequestsPanel
 										pullRequests={pullRequests}
+										suggestedRepository={suggestedRepository}
 										onLink={attachPullRequest}
 										onUnlink={detachPullRequest}
 										busy={busy === "pull-request"}
+										open={attachDialogOpen}
+										onOpenChange={setAttachDialogOpen}
 									/>
 								</div>
 							</div>

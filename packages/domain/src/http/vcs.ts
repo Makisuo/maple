@@ -1,5 +1,6 @@
 import { Schema, SchemaGetter } from "effect"
 import { OrgId, UserId } from "../primitives"
+import { PullRequestLinkState } from "./fix-verification"
 
 // Vendor-agnostic VCS integration types.
 //
@@ -193,6 +194,32 @@ export class VcsBranch extends Schema.Class<VcsBranch>("VcsBranch")({
 	createdAt: Schema.Number,
 	updatedAt: Schema.Number,
 }) {}
+
+/**
+ * One pull request as a provider reports it, normalized.
+ *
+ * Read-only and never persisted: this is what the attach-a-PR picker lists and
+ * what hydrates a link at attach time. `state` collapses the provider's own
+ * split representation — GitHub answers `state: "open" | "closed"` alongside a
+ * separate `merged_at` — into the same three-way {@link PullRequestLinkState}
+ * the stored link and the webhook mapper already use, so a merged PR is never
+ * mistaken for a plain closed one.
+ */
+export const PullRequestSummary = Schema.Struct({
+	number: Schema.Number,
+	title: Schema.String,
+	url: Schema.String,
+	authorLogin: Schema.NullOr(Schema.String),
+	state: PullRequestLinkState,
+	/** The branch the PR merges *from* — what a person recognizes it by. */
+	headRef: Schema.String,
+	baseRef: Schema.String,
+	isDraft: Schema.Boolean,
+	updatedAtMs: Schema.Number,
+	mergedAtMs: Schema.NullOr(Schema.Number),
+	mergeCommitSha: Schema.NullOr(Schema.String),
+})
+export type PullRequestSummary = Schema.Schema.Type<typeof PullRequestSummary>
 
 /** Normalized repository, returned by a provider and persisted by the repo. */
 export const RepoUpsertInput = Schema.Struct({

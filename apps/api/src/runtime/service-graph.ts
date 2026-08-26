@@ -29,6 +29,7 @@ import { AiTriageService } from "@/services/errors/AiTriageService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { ErrorIssueWorkflowService } from "@/services/errors/ErrorIssueWorkflowService"
+import { PullRequestLookupLive } from "@/services/errors/pull-request-lookup-live"
 import { IssueFixVerificationService } from "@/services/errors/IssueFixVerificationService"
 import { ErrorPolicyService } from "@/services/errors/ErrorPolicyService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
@@ -189,10 +190,34 @@ const SlackIntegrationServiceLive = SlackIntegrationService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, OAuthStateRepository.layer)),
 )
 
+// VCS service wiring for the fetch-path worker. VcsSyncService (the sync
+// orchestrator) lives only in vcs-sync-runtime.ts — not here. Database /
+// WorkerEnvironment are provided at worker scope (like CoreServicesLive).
+const GithubAppClientLive = GithubAppClient.layer.pipe(Layer.provide(GithubHttp.layer))
+const GithubProviderLive = GithubProvider.layer.pipe(Layer.provide(GithubAppClientLive))
+
+const VcsDataLive = Layer.mergeAll(VcsRepository.layer, OAuthStateRepository.layer, VcsSyncQueue.layer)
+
+const VcsProviderRegistryLive = VcsProviderRegistry.layer.pipe(Layer.provide(GithubProviderLive))
+
+// Named rather than inlined into `VcsServicesLive` below: the errors side needs
+// the same instance to hydrate a pull-request link.
+const VcsSourceServiceLive = VcsSourceService.layer.pipe(
+	Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive)),
+)
+
+// Lets a pull-request link be attached with the PR's real title and state, and
+// lets one attached to an already-merged PR open its verification window — a
+// webhook for a merge that happened in the past is never coming.
+const PullRequestLookupServiceLive = PullRequestLookupLive.pipe(
+	Layer.provide(VcsSourceServiceLive.pipe(Layer.provideMerge(InfraLive))),
+)
+
 // Issue⇄pull-request links and post-merge fix verification. Depends only on the
 // issue kernel (workflow + actors), never on the VCS services: the webhook
 // reaches it through `PullRequestEventSink`, which points the other way.
 const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
+	Layer.provide(PullRequestLookupServiceLive),
 	Layer.provideMerge(
 		Layer.mergeAll(CoreServicesLive, ErrorActorsServiceLive, ErrorIssueWorkflowServiceLive),
 	),
@@ -238,16 +263,6 @@ const DigestServiceLive = DigestService.layer.pipe(
 	),
 )
 
-// VCS service wiring for the fetch-path worker. VcsSyncService (the sync
-// orchestrator) lives only in vcs-sync-runtime.ts — not here. Database /
-// WorkerEnvironment are provided at worker scope (like CoreServicesLive).
-const GithubAppClientLive = GithubAppClient.layer.pipe(Layer.provide(GithubHttp.layer))
-const GithubProviderLive = GithubProvider.layer.pipe(Layer.provide(GithubAppClientLive))
-
-const VcsDataLive = Layer.mergeAll(VcsRepository.layer, OAuthStateRepository.layer, VcsSyncQueue.layer)
-
-const VcsProviderRegistryLive = VcsProviderRegistry.layer.pipe(Layer.provide(GithubProviderLive))
-
 const VcsServicesLive = Layer.mergeAll(
 	VcsDataLive,
 	VcsProviderRegistryLive,
@@ -255,7 +270,7 @@ const VcsServicesLive = Layer.mergeAll(
 	GithubConnectService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, GithubAppClientLive))),
 	// Routed via VcsProviderRegistry so no provider module is imported directly.
 	VcsCommitService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
-	VcsSourceService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
+	VcsSourceServiceLive,
 ).pipe(Layer.provideMerge(InfraLive))
 
 // Warehouse-backed daily volume for the billing spend chart.

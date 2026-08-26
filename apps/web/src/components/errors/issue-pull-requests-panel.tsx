@@ -1,21 +1,10 @@
-import { useState } from "react"
-
 import type { ErrorIssuePullRequestDocument } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogPanel,
-	DialogTitle,
-} from "@maple/ui/components/ui/dialog"
-import { Input } from "@maple/ui/components/ui/input"
 import { cn } from "@maple/ui/lib/utils"
 
 import { GithubIcon, PlusIcon, TrashIcon } from "@/components/icons"
+import { AttachPullRequestDialog } from "./attach-pull-request-dialog"
 
 /**
  * Pull requests attached to this issue.
@@ -41,30 +30,22 @@ const SOURCE_HINT: Record<ErrorIssuePullRequestDocument["linkSource"], string | 
 
 export function IssuePullRequestsPanel({
 	pullRequests,
+	suggestedRepository,
 	onLink,
 	onUnlink,
 	busy = false,
+	open,
+	onOpenChange,
 }: {
 	pullRequests: ReadonlyArray<ErrorIssuePullRequestDocument>
+	suggestedRepository: string | null
 	onLink: (url: string) => Promise<boolean>
 	onUnlink: (id: ErrorIssuePullRequestDocument["id"]) => void
 	busy?: boolean
+	/** Controlled so the verification card and the `in_review` transition can open it too. */
+	open: boolean
+	onOpenChange: (open: boolean) => void
 }) {
-	const [open, setOpen] = useState(false)
-	const [url, setUrl] = useState("")
-
-	// Awaited before closing: clearing the field and dismissing the dialog up
-	// front means a failure toast arrives with the pasted URL already gone, and
-	// recovery is a trip back to GitHub to copy it again.
-	const submit = async () => {
-		const trimmed = url.trim()
-		if (trimmed.length === 0 || busy) return
-		const linked = await onLink(trimmed)
-		if (!linked) return
-		setUrl("")
-		setOpen(false)
-	}
-
 	return (
 		<section className="rounded-xl border bg-card">
 			<header className="flex items-center justify-between gap-2 border-b px-4 py-3">
@@ -73,7 +54,7 @@ export function IssuePullRequestsPanel({
 					size="sm"
 					variant="ghost"
 					className="h-7 gap-1 px-2 text-xs"
-					onClick={() => setOpen(true)}
+					onClick={() => onOpenChange(true)}
 					disabled={busy}
 				>
 					<PlusIcon className="size-3.5" />
@@ -135,36 +116,13 @@ export function IssuePullRequestsPanel({
 				</ul>
 			)}
 
-			<Dialog open={open} onOpenChange={setOpen}>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Attach a pull request</DialogTitle>
-						<DialogDescription>
-							Paste the pull request URL. Once it merges, Maple checks whether this error
-							actually stopped before closing the issue.
-						</DialogDescription>
-					</DialogHeader>
-					<DialogPanel>
-						<Input
-							value={url}
-							autoFocus
-							placeholder="https://github.com/owner/repo/pull/123"
-							onChange={(event) => setUrl(event.target.value)}
-							onKeyDown={(event) => {
-								if (event.key === "Enter") void submit()
-							}}
-						/>
-					</DialogPanel>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setOpen(false)}>
-							Cancel
-						</Button>
-						<Button onClick={() => void submit()} disabled={url.trim().length === 0 || busy}>
-							Attach
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+			<AttachPullRequestDialog
+				open={open}
+				onOpenChange={onOpenChange}
+				suggestedRepository={suggestedRepository}
+				onAttach={onLink}
+				busy={busy}
+			/>
 		</section>
 	)
 }

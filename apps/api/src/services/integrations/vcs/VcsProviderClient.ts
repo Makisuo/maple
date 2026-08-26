@@ -3,6 +3,7 @@ import type {
 	BranchUpsertInput,
 	CommitUpsertInput,
 	GitCommitSha,
+	PullRequestSummary,
 	RepoUpsertInput,
 	VcsCommitFetch,
 	VcsInstallation,
@@ -137,6 +138,41 @@ export interface VcsProviderClient {
 	) => Effect.Effect<
 		Option.Option<CommitUpsertInput>,
 		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRepositoryBlockedError
+	>
+
+	/**
+	 * The repository's most recently updated pull requests, newest first,
+	 * normalized. Bounded to `limit` and deliberately NOT paginated: this feeds a
+	 * picker, and the PR that fixes a live issue is recent by construction.
+	 */
+	readonly fetchPullRequests: (
+		installation: VcsInstallation,
+		repo: VcsRepositoryRef,
+		opts: { readonly limit: number },
+	) => Effect.Effect<
+		ReadonlyArray<PullRequestSummary>,
+		| VcsProviderError
+		| VcsInstallationGoneError
+		| VcsRepoUnavailableError
+		| VcsRepositoryBlockedError
+		| VcsRateLimitedError
+	>
+
+	/**
+	 * One pull request by number, normalized. `Option.none` means "no such PR in
+	 * this repo" (404 — expected, not a failure), matching `fetchCommit`.
+	 */
+	readonly fetchPullRequest: (
+		installation: VcsInstallation,
+		repo: VcsRepositoryRef,
+		number: number,
+	) => Effect.Effect<
+		Option.Option<PullRequestSummary>,
+		| VcsProviderError
+		| VcsInstallationGoneError
+		| VcsRepoUnavailableError
+		| VcsRepositoryBlockedError
+		| VcsRateLimitedError
 	>
 
 	/** Search source within one repository visible to this installation. */

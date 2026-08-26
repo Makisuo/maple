@@ -36,7 +36,9 @@ import {
 	UserId,
 	VCS_COMMIT_DETAILS_MAX_SHAS,
 	VcsCommitDetailResponse,
+	VCS_PULL_REQUESTS_DEFAULT_LIMIT,
 	VcsCommitDetailsResponse,
+	VcsPullRequestsResponse,
 } from "@maple/domain/http"
 import { cloudflareAnalyticsState } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
@@ -61,6 +63,7 @@ import { PlanetScaleService } from "@/services/integrations/PlanetScaleService"
 import { PLANETSCALE_CALLBACK_PATH, PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
 import { GithubConnectService } from "@/services/integrations/vcs/vendor/github/GithubConnectService"
 import { VcsCommitService } from "@/services/integrations/vcs/VcsCommitService"
+import { VcsSourceService } from "@/services/integrations/vcs/VcsSourceService"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
 import { requireAdmin as requireAdminRole } from "@/services/auth/auth"
 import { summarizeCause } from "@/platform/describe-cause"
@@ -140,6 +143,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 		const hazel = yield* HazelOAuthService
 		const github = yield* GithubConnectService
 		const vcsCommits = yield* VcsCommitService
+		const vcsSource = yield* VcsSourceService
 		const cloudflare = yield* CloudflareOAuthService
 		const cloudflareAnalytics = yield* CloudflareAnalyticsService
 		const planetscale = yield* PlanetScaleConnectionService
@@ -532,6 +536,35 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 							commits: details.map((detail) => new VcsCommitDetailResponse(detail)),
 						})
 					}),
+				)
+				.handle("vcsPullRequests", ({ query }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* Effect.annotateCurrentSpan({
+							orgId: tenant.orgId,
+							"vcs.repository.full_name": query.repository,
+						})
+						const pullRequests = yield* vcsSource
+							.listPullRequests(tenant.orgId, query.repository, {
+								limit: query.limit ?? VCS_PULL_REQUESTS_DEFAULT_LIMIT,
+							})
+							.pipe(
+								// A repository this org has not connected is a client mistake, not
+								// an upstream one — the picker only ever offers connected repos, so
+								// reaching here means a hand-built request or a repo disconnected
+								// mid-session.
+								Effect.catchTag(
+									"@maple/api/vcs/VcsSourceRepositoryNotFoundError",
+									(error) =>
+										new IntegrationsValidationError({ message: error.message }),
+								),
+							)
+						yield* Effect.annotateCurrentSpan({ "result.rowCount": pullRequests.length })
+						return new VcsPullRequestsResponse({
+							repository: query.repository,
+							pullRequests,
+						})
+					}).pipe(Effect.withSpan("HttpIntegrations.vcsPullRequests")),
 				)
 		)
 	}),

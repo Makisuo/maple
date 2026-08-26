@@ -44,6 +44,7 @@ import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
+import { PullRequestLookup } from "./PullRequestLookup"
 import { makeErrorDatabaseExecute } from "./error-persistence"
 
 const decodePullRequestIdSync = Schema.decodeUnknownSync(ErrorIssuePullRequestIdSchema)
@@ -197,15 +198,24 @@ export interface IssueFixVerificationServiceApi {
 	) => Effect.Effect<void, ErrorPersistenceError>
 }
 
+/**
+ * How far back the repository suggester scans this org's pull-request links
+ * looking for one in a connected repository. Bounded because it is the weakest
+ * of the four signals — an org whose last few dozen links are all in repos it
+ * has since disconnected does not get a suggestion, and that is the right answer.
+ */
+const RECENT_LINK_SCAN_LIMIT = 50
+
 const make: Effect.Effect<
 	IssueFixVerificationServiceApi,
 	never,
-	Database | Env | ErrorActorsService | ErrorIssueWorkflowService
+	Database | Env | ErrorActorsService | ErrorIssueWorkflowService | PullRequestLookup
 > = Effect.gen(function* () {
 	const database = yield* Database
 	const env = yield* Env
 	const actors = yield* ErrorActorsService
 	const workflow = yield* ErrorIssueWorkflowService
+	const lookup = yield* PullRequestLookup
 	const dbExecute = makeErrorDatabaseExecute(database, "IssueFixVerificationService")
 
 	const newPullRequestId = () => decodePullRequestIdSync(randomUUID())
@@ -267,6 +277,7 @@ const make: Effect.Effect<
 	const hydrateLinks = Effect.fn("IssueFixVerification.hydrateLinks")(function* (
 		orgId: OrgId,
 		rows: ReadonlyArray<ErrorIssuePullRequestRow>,
+		suggestedRepository: string | null = null,
 	) {
 		const actorIds = Array.from(
 			new Set(rows.flatMap((row) => (row.linkedByActorId == null ? [] : [row.linkedByActorId]))),
@@ -274,15 +285,74 @@ const make: Effect.Effect<
 		const actorMap = yield* actors.collectActorDocs(orgId, actorIds)
 		return new ErrorIssuePullRequestsResponse({
 			pullRequests: rows.map((row) => rowToDocument(row, actorMap)),
+			suggestedRepository,
 		})
+	})
+
+	/**
+	 * Which repository the attach-a-PR picker should open on.
+	 *
+	 * Four signals, strongest first, first hit wins — and every one of them is a
+	 * Postgres read, deliberately. The exact answer would be to resolve the
+	 * service's recent `deployment.commit_sha` values against `vcs_commits`, but
+	 * that puts a warehouse query on the issue page to compute a *default* the user
+	 * can override with one click. Not worth it.
+	 *
+	 * Signal 3 abstains when more than one repository matches the service name.
+	 * A wrong preselection is worse than none: it is silent, and it is the kind of
+	 * mistake somebody only notices after attaching the wrong PR.
+	 */
+	const suggestRepository = Effect.fn("IssueFixVerification.suggestRepository")(function* (
+		orgId: OrgId,
+		serviceName: string,
+		existingLinks: ReadonlyArray<ErrorIssuePullRequestRow>,
+	) {
+		// 1. A PR already attached to this issue. The follow-up fix almost always
+		// lands in the same repository as the first one.
+		const alreadyLinked = existingLinks[0]?.repoFullName
+		if (alreadyLinked !== undefined) return alreadyLinked
+
+		const connected = yield* lookup.listRepositories(orgId)
+		if (connected.length === 0) return null
+		// 2. Nothing to choose between.
+		if (connected.length === 1) return connected[0] ?? null
+
+		// 3. The service name against the repository name.
+		const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "")
+		const service = normalize(serviceName)
+		if (service.length > 0) {
+			const matches = connected.filter((fullName) => {
+				const name = normalize(fullName.split("/")[1] ?? fullName)
+				if (name.length === 0) return false
+				return name === service || name.includes(service) || service.includes(name)
+			})
+			if (matches.length === 1) return matches[0] ?? null
+		}
+
+		// 4. Wherever this org's fixes have most recently been landing.
+		const recent = yield* dbExecute((db) =>
+			db
+				.select({ repoFullName: errorIssuePullRequests.repoFullName })
+				.from(errorIssuePullRequests)
+				.where(eq(errorIssuePullRequests.orgId, orgId))
+				.orderBy(desc(errorIssuePullRequests.createdAt))
+				.limit(RECENT_LINK_SCAN_LIMIT),
+		)
+		const connectedSet = new Set(connected)
+		for (const row of recent) {
+			if (connectedSet.has(row.repoFullName)) return row.repoFullName
+		}
+
+		return null
 	})
 
 	const listPullRequests: IssueFixVerificationServiceApi["listPullRequests"] = Effect.fn(
 		"IssueFixVerification.listPullRequests",
 	)(function* (orgId, issueId) {
-		yield* workflow.requireIssue(orgId, issueId)
+		const issue = yield* workflow.requireIssue(orgId, issueId)
 		const rows = yield* selectLinks(orgId, issueId)
-		return yield* hydrateLinks(orgId, rows)
+		const suggested = yield* suggestRepository(orgId, issue.serviceName, rows)
+		return yield* hydrateLinks(orgId, rows, suggested)
 	})
 
 	const listVerifications: IssueFixVerificationServiceApi["listVerifications"] = Effect.fn(
@@ -324,6 +394,10 @@ const make: Effect.Effect<
 		readonly title?: string | null
 		readonly authorLogin?: string | null
 		readonly externalRepoId?: string | null
+		/** The PR's real state when the caller already knows it. Defaults to `open`. */
+		readonly state?: PullRequestLinkState
+		readonly mergedAtMs?: number | null
+		readonly mergeCommitSha?: string | null
 		readonly nowMs: number
 	}) {
 		const now = msToDate(input.nowMs)
@@ -341,7 +415,9 @@ const make: Effect.Effect<
 					url: input.url,
 					title: input.title ?? null,
 					authorLogin: input.authorLogin ?? null,
-					state: "open",
+					state: input.state ?? "open",
+					mergedAt: input.mergedAtMs == null ? null : msToDate(input.mergedAtMs),
+					mergeCommitSha: input.mergeCommitSha ?? null,
 					linkSource: input.source,
 					linkedByActorId: input.actorId,
 					createdAt: now,
@@ -357,6 +433,35 @@ const make: Effect.Effect<
 					],
 				}),
 		)
+
+		// A caller that resolved the PR's real state applies it to the existing row
+		// too, not just the one it may have just inserted. Re-attaching a PR is then
+		// a repair for a link whose `pull_request` webhook was missed or never sent:
+		// without this the conflict path would leave a merged PR recorded as `open`
+		// forever, since the insert wrote nothing.
+		if (input.state !== undefined) {
+			yield* dbExecute((db) =>
+				db
+					.update(errorIssuePullRequests)
+					.set({
+						title: input.title ?? null,
+						authorLogin: input.authorLogin ?? null,
+						state: input.state,
+						mergedAt: input.mergedAtMs == null ? null : msToDate(input.mergedAtMs),
+						mergeCommitSha: input.mergeCommitSha ?? null,
+						updatedAt: now,
+					})
+					.where(
+						and(
+							eq(errorIssuePullRequests.orgId, input.orgId),
+							eq(errorIssuePullRequests.issueId, input.issueId),
+							eq(errorIssuePullRequests.provider, input.provider),
+							eq(errorIssuePullRequests.repoFullName, input.repoFullName),
+							eq(errorIssuePullRequests.number, input.number),
+						),
+					),
+			)
+		}
 
 		// Read back rather than trusting a driver write-result shape (see the
 		// Postgres conventions in CLAUDE.md) — and because on a conflict the insert
@@ -393,6 +498,20 @@ const make: Effect.Effect<
 			)
 		}
 		const nowMs = yield* Clock.currentTimeMillis
+
+		// Ask the provider what this PR actually is, before storing it. Without
+		// this the row goes in as `title: null, state: "open"` and stays that way
+		// until a webhook happens to arrive — which for a PR that merged BEFORE it
+		// was attached is never, because GitHub does not redeliver a past `closed`
+		// event. Best-effort by construction: the port answers `Option.none` for an
+		// unconnected repo or an unreachable provider, and the link is stored
+		// unenriched exactly as it was before.
+		const summary = yield* lookup.fetch(orgId, parsed.repoFullName, parsed.number)
+		yield* Effect.annotateCurrentSpan({
+			"vcs.pull_request.hydrated": Option.isSome(summary),
+			...(Option.isSome(summary) ? { "vcs.pull_request.state": summary.value.state } : undefined),
+		})
+
 		const row = yield* upsertLink({
 			orgId,
 			issueId,
@@ -402,6 +521,15 @@ const make: Effect.Effect<
 			repoFullName: parsed.repoFullName,
 			number: parsed.number,
 			url: parsed.url,
+			...(Option.isSome(summary)
+				? {
+						title: summary.value.title,
+						authorLogin: summary.value.authorLogin,
+						state: summary.value.state,
+						mergedAtMs: summary.value.mergedAtMs,
+						mergeCommitSha: summary.value.mergeCommitSha,
+					}
+				: undefined),
 			nowMs,
 		})
 		if (row === null) {
@@ -427,6 +555,19 @@ const make: Effect.Effect<
 			},
 			timestamp: nowMs,
 		})
+
+		// The PR had already merged by the time somebody attached it — the normal
+		// human order of operations. GitHub will not redeliver the `closed` event
+		// that would have opened the verification window, so open it here or the
+		// issue waits in `in_review` for a webhook that is never coming.
+		if (row.state === "merged") {
+			yield* openMergedVerifications(orgId, [row], {
+				mergedAtMs: row.mergedAt === null ? nowMs : dateToMs(row.mergedAt),
+				mergeCommitSha: row.mergeCommitSha,
+				nowMs,
+			})
+		}
+
 		const response = yield* hydrateLinks(orgId, [row])
 		const document = response.pullRequests[0]
 		if (document === undefined) {
@@ -584,6 +725,114 @@ const make: Effect.Effect<
 		return verificationId
 	})
 
+	/**
+	 * Open a post-merge verification window for every issue linked to a PR that
+	 * has merged, and return how many were actually opened.
+	 *
+	 * Shared by the two ways Maple learns a fix merged: the `pull_request` webhook,
+	 * and a link attached to a PR that had *already* merged. The second is not an
+	 * edge case — attaching the PR after the fact is the normal human order of
+	 * operations — and GitHub never redelivers a past `closed` event, so without
+	 * this call from the link path the window would never open and the issue would
+	 * sit in `in_review` forever.
+	 */
+	const openMergedVerifications = Effect.fn("IssueFixVerification.openMergedVerifications")(
+		function* (
+			orgId: OrgId,
+			links: ReadonlyArray<typeof errorIssuePullRequests.$inferSelect>,
+			merge: {
+				readonly mergedAtMs: number
+				readonly mergeCommitSha: string | null
+				readonly nowMs: number
+			},
+		) {
+			const { mergedAtMs, mergeCommitSha, nowMs } = merge
+			const systemActor = yield* actors.ensureSystemActor(orgId)
+
+			// One issue's problem must not cost the others. The API doc on
+			// `onPullRequestEvent` and `openVerification`'s both promise a multi-issue
+			// delivery does not lose the rest when one issue fails, but only the
+			// transition/not-found cases were caught — every `dbExecute` in here fails
+			// outward as `ErrorPersistenceError` and aborted the remaining links, which
+			// the sink then swallowed, so those links were dropped with no retry and no
+			// trace of why.
+			const openForLink = Effect.fn("IssueFixVerification.openForLink")(function* (
+				link: (typeof links)[number],
+			) {
+				// One live verification per issue. A `synchronize` after a merge, a
+				// redelivered webhook, or a second PR attached to the same issue must
+				// not open a second window.
+				const open = yield* dbExecute((db) =>
+					db
+						.select()
+						.from(errorIssueVerifications)
+						.where(
+							and(
+								eq(errorIssueVerifications.orgId, orgId),
+								eq(errorIssueVerifications.issueId, link.issueId),
+								inArray(errorIssueVerifications.status, ["waiting", "running"]),
+							),
+						)
+						.limit(1),
+				)
+				if (open[0] !== undefined) return false
+
+				const issueRows = yield* dbExecute((db) =>
+					db
+						.select()
+						.from(errorIssues)
+						.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, link.issueId)))
+						.limit(1),
+				)
+				const issue = issueRows[0]
+				if (issue === undefined) return false
+
+				yield* workflow.recordEvent(orgId, link.issueId, systemActor.id, "pr_merged", {
+					payload: {
+						pullRequestId: link.id,
+						url: link.url,
+						repoFullName: link.repoFullName,
+						number: link.number,
+						mergeCommitSha,
+						mergedAt: new Date(mergedAtMs).toISOString(),
+					},
+					timestamp: nowMs,
+				})
+
+				yield* openVerification({
+					orgId,
+					issue,
+					link: { ...link, mergedAt: msToDate(mergedAtMs), mergeCommitSha },
+					mergedAtMs,
+					nowMs,
+					systemActor,
+				})
+				return true
+			})
+
+			let opened = 0
+			for (const link of links) {
+				const didOpen = yield* openForLink(link).pipe(
+					Effect.catchCause((cause) =>
+						Cause.hasInterruptsOnly(cause)
+							? Effect.interrupt
+							: Effect.logError("[IssueFixVerification] could not open a verification").pipe(
+									Effect.annotateLogs({
+										orgId,
+										issueId: link.issueId,
+										pullRequestId: link.id,
+										error: summarizeCause(cause),
+									}),
+									Effect.as(false),
+								),
+					),
+				)
+				if (didOpen) opened += 1
+			}
+			return opened
+		},
+	)
+
 	const onPullRequestEvent: IssueFixVerificationServiceApi["onPullRequestEvent"] = Effect.fn(
 		"IssueFixVerification.onPullRequestEvent",
 	)(function* (input) {
@@ -688,86 +937,12 @@ const make: Effect.Effect<
 			return { linksAutoCreated, verificationsOpened, linksUpdated: links.length }
 		}
 
-		const mergedAtMs = input.mergedAtMs ?? nowMs
-		const systemActor = yield* actors.ensureSystemActor(input.orgId)
-
-		// One issue's problem must not cost the others. The API doc above and
-		// `openVerification`'s both promise a multi-issue delivery does not lose the
-		// rest when one issue fails, but only the transition/not-found cases were
-		// caught — every `dbExecute` in here fails outward as `ErrorPersistenceError`
-		// and aborted the remaining links, which the sink then swallowed, so those
-		// links were dropped with no retry and no trace of why.
-		const openForLink = Effect.fn("IssueFixVerification.openForLink")(function* (
-			link: (typeof links)[number],
-		) {
-			// One live verification per issue. A `synchronize` after a merge, or a
-			// redelivered webhook, must not open a second window.
-			const open = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(errorIssueVerifications)
-					.where(
-						and(
-							eq(errorIssueVerifications.orgId, input.orgId),
-							eq(errorIssueVerifications.issueId, link.issueId),
-							inArray(errorIssueVerifications.status, ["waiting", "running"]),
-						),
-					)
-					.limit(1),
-			)
-			if (open[0] !== undefined) return false
-
-			const issueRows = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(errorIssues)
-					.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, link.issueId)))
-					.limit(1),
-			)
-			const issue = issueRows[0]
-			if (issue === undefined) return false
-
-			yield* workflow.recordEvent(input.orgId, link.issueId, systemActor.id, "pr_merged", {
-				payload: {
-					pullRequestId: link.id,
-					url: link.url,
-					repoFullName: link.repoFullName,
-					number: link.number,
-					mergeCommitSha: input.mergeCommitSha,
-					mergedAt: new Date(mergedAtMs).toISOString(),
-				},
-				timestamp: nowMs,
-			})
-
-			yield* openVerification({
-				orgId: input.orgId,
-				issue,
-				link: { ...link, mergedAt: msToDate(mergedAtMs), mergeCommitSha: input.mergeCommitSha },
-				mergedAtMs,
-				nowMs,
-				systemActor,
-			})
-			return true
+		const openedCount = yield* openMergedVerifications(input.orgId, links, {
+			mergedAtMs: input.mergedAtMs ?? nowMs,
+			mergeCommitSha: input.mergeCommitSha,
+			nowMs,
 		})
-
-		for (const link of links) {
-			const opened = yield* openForLink(link).pipe(
-				Effect.catchCause((cause) =>
-					Cause.hasInterruptsOnly(cause)
-						? Effect.interrupt
-						: Effect.logError("[IssueFixVerification] could not open a verification").pipe(
-								Effect.annotateLogs({
-									orgId: input.orgId,
-									issueId: link.issueId,
-									pullRequestId: link.id,
-									error: summarizeCause(cause),
-								}),
-								Effect.as(false),
-							),
-				),
-			)
-			if (opened) verificationsOpened += 1
-		}
+		verificationsOpened += openedCount
 
 		return { linksAutoCreated, verificationsOpened, linksUpdated: links.length }
 	})

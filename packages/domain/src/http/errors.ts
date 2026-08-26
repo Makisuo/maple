@@ -498,6 +498,13 @@ export class ErrorIssuePullRequestsResponse extends Schema.Class<ErrorIssuePullR
 	"ErrorIssuePullRequestsResponse",
 )({
 	pullRequests: Schema.Array(ErrorIssuePullRequestDocument),
+	/**
+	 * The repository (`owner/name`) the attach-a-PR picker should open on, or null
+	 * when nothing in the org's connected repos points at this issue clearly enough
+	 * to guess. A default, never a fact: the user can always pick another, and an
+	 * ambiguous signal deliberately yields null rather than a plausible wrong repo.
+	 */
+	suggestedRepository: Schema.NullOr(Schema.String),
 }) {}
 
 export class ErrorIssueLinkPullRequestRequest extends Schema.Class<ErrorIssueLinkPullRequestRequest>(

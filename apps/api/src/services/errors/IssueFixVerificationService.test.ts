@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { afterEach, assert, describe, expect, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
-import { OrgId, type WorkflowState } from "@maple/domain/http"
+import { OrgId, type PullRequestSummary, type WorkflowState } from "@maple/domain/http"
 import { ErrorIssueId } from "@maple/domain/primitives"
 import { errorIssues, errorIssueEvents, errorIssueVerifications } from "@maple/db"
 import { eq } from "drizzle-orm"
@@ -10,6 +10,7 @@ import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
+import { PullRequestLookup } from "./PullRequestLookup"
 import {
 	hasPostMergeVersion,
 	IssueFixVerificationService,
@@ -48,7 +49,16 @@ const testConfig = () =>
 		}),
 	)
 
-const makeLayer = () => {
+/**
+ * `lookup` stands in for the provider. Omitted, it answers "nothing known" and
+ * "no repositories connected" — exactly what a deployment with no VCS
+ * integration does — so every test written before hydration existed keeps
+ * exercising the unenriched path.
+ */
+const makeLayer = (lookup?: {
+	readonly pullRequest?: () => PullRequestSummary | undefined
+	readonly repositories?: ReadonlyArray<string>
+}) => {
 	const testDb = createTestDb(createdDbs)
 	const databaseLive = testDb.layer
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
@@ -57,8 +67,19 @@ const makeLayer = () => {
 		Layer.provide(databaseLive),
 		Layer.provide(actorsLive),
 	)
+	const lookupLive =
+		lookup === undefined
+			? PullRequestLookup.none
+			: Layer.succeed(PullRequestLookup, {
+					fetch: () =>
+						Effect.sync(() => {
+							const pr = lookup.pullRequest?.()
+							return pr === undefined ? Option.none() : Option.some(pr)
+						}),
+					listRepositories: () => Effect.succeed(lookup.repositories ?? []),
+				})
 	const verificationLive = IssueFixVerificationService.layer.pipe(
-		Layer.provide(Layer.mergeAll(databaseLive, envLive, actorsLive, workflowLive)),
+		Layer.provide(Layer.mergeAll(databaseLive, envLive, actorsLive, workflowLive, lookupLive)),
 	)
 	return Layer.mergeAll(verificationLive, workflowLive, actorsLive, databaseLive)
 }
@@ -277,6 +298,193 @@ describe("linkPullRequest", () => {
 				assert(Option.isSome(error))
 				expect(error.value._tag).toBe("@maple/http/errors/ErrorIssueNotFoundError")
 				expect(yield* readAllVerifications(issueId)).toHaveLength(0)
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+})
+
+const summary = (overrides: Partial<PullRequestSummary> = {}): PullRequestSummary => ({
+	number: 612,
+	title: "Guard the null customer id",
+	url: PR_URL,
+	authorLogin: "octocat",
+	state: "open",
+	headRef: "fix/null-customer",
+	baseRef: "main",
+	isDraft: false,
+	updatedAtMs: Date.now(),
+	mergedAtMs: null,
+	mergeCommitSha: null,
+	...overrides,
+})
+
+describe("linkPullRequest hydration", () => {
+	it.effect("fills in the title, author and state the provider reports", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer({ pullRequest: () => summary({ state: "closed" }) })
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				const doc = yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "user")
+				expect(doc.title).toBe("Guard the null customer id")
+				expect(doc.authorLogin).toBe("octocat")
+				expect(doc.state).toBe("closed")
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	it.effect("still stores the link when the provider knows nothing", () =>
+		// The repo was never connected, or GitHub had a bad minute. Neither is a
+		// reason to reject a well-formed link.
+		Effect.gen(function* () {
+			const layer = makeLayer({ repositories: [REPO] })
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				const doc = yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "user")
+				expect(doc.title).toBeNull()
+				expect(doc.state).toBe("open")
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	it.effect("opens a verification window for a pull request that already merged", () =>
+		// The regression this exists to prevent: GitHub never redelivers a past
+		// `closed` event, so without opening the window here the issue would wait
+		// in `in_review` for a webhook that is never coming.
+		Effect.gen(function* () {
+			const mergedAtMs = Date.now() - HOUR
+			const layer = makeLayer({
+				pullRequest: () =>
+					summary({ state: "merged", mergedAtMs, mergeCommitSha: "a".repeat(40) }),
+			})
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				const doc = yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "user")
+				expect(doc.state).toBe("merged")
+
+				const verification = yield* readVerification(issueId)
+				expect(verification).toBeDefined()
+				expect(verification?.status).toBe("waiting")
+				expect((yield* readIssueState(issueId))?.workflowState).toBe("verifying")
+				expect(yield* readEventTypes(issueId)).toContain("pr_merged")
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	it.effect("does not open a second window when the merged PR is attached twice", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer({
+				pullRequest: () => summary({ state: "merged", mergedAtMs: Date.now() - HOUR }),
+			})
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "user")
+				yield* service.linkPullRequest(ORG, null, issueId, `${PR_URL}/files`, "user")
+				expect(yield* readAllVerifications(issueId)).toHaveLength(1)
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	it.effect("repairs a stale open link when the PR has since merged", () =>
+		// Re-attaching is the user's only recourse when a `pull_request` webhook was
+		// missed. The conflict path must refresh the existing row, not ignore it —
+		// otherwise a merged PR stays recorded as `open` forever.
+		Effect.gen(function* () {
+			let state: PullRequestSummary = summary({ state: "open" })
+			const layer = makeLayer({ pullRequest: () => state })
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				const first = yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "user")
+				expect(first.state).toBe("open")
+
+				state = summary({ state: "merged", mergedAtMs: Date.now() - HOUR })
+				const second = yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "user")
+				expect(second.id).toBe(first.id)
+				expect(second.state).toBe("merged")
+				expect(yield* readVerification(issueId)).toBeDefined()
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+})
+
+describe("suggestRepository", () => {
+	const suggestionFor = (seed: SeedIssueOptions = {}) =>
+		Effect.gen(function* () {
+			const service = yield* IssueFixVerificationService
+			const issueId = yield* seedIssue(seed)
+			const listed = yield* service.listPullRequests(ORG, issueId)
+			return listed.suggestedRepository
+		})
+
+	it.effect("suggests nothing when no repositories are connected", () =>
+		suggestionFor().pipe(
+			Effect.map((suggested) => expect(suggested).toBeNull()),
+			Effect.provide(makeLayer({ repositories: [] })),
+		),
+	)
+
+	it.effect("suggests the only connected repository", () =>
+		suggestionFor().pipe(
+			Effect.map((suggested) => expect(suggested).toBe("octo/anything")),
+			Effect.provide(makeLayer({ repositories: ["octo/anything"] })),
+		),
+	)
+
+	it.effect("matches the service name against the repository name", () =>
+		// The seeded issue's service is `checkout`.
+		suggestionFor().pipe(
+			Effect.map((suggested) => expect(suggested).toBe("octo/checkout-service")),
+			Effect.provide(
+				makeLayer({ repositories: ["octo/billing", "octo/checkout-service", "octo/web"] }),
+			),
+		),
+	)
+
+	it.effect("abstains when the service name matches more than one repository", () =>
+		// A silent wrong preselection is worse than none: it is only noticed after
+		// somebody attaches the wrong PR.
+		suggestionFor().pipe(
+			Effect.map((suggested) => expect(suggested).toBeNull()),
+			Effect.provide(makeLayer({ repositories: ["octo/checkout-api", "octo/checkout-web"] })),
+		),
+	)
+
+	it.effect("prefers a repository already linked to this issue", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer({ repositories: ["octo/checkout-service"] })
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "user")
+				const listed = yield* service.listPullRequests(ORG, issueId)
+				// The name match would have said `octo/checkout-service`; an existing
+				// link on this very issue is the stronger signal.
+				expect(listed.suggestedRepository).toBe(REPO)
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	it.effect("falls back to where this org's fixes have most recently landed", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer({ repositories: ["octo/one", "octo/two"] })
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const earlier = yield* seedIssue()
+				yield* service.linkPullRequest(
+					ORG,
+					null,
+					earlier,
+					"https://github.com/octo/two/pull/7",
+					"user",
+				)
+				// A different issue, no link of its own, and a service name that matches
+				// neither repo — only the org-wide history is left to go on.
+				const listed = yield* service.listPullRequests(ORG, yield* seedIssue())
+				expect(listed.suggestedRepository).toBe("octo/two")
 			}).pipe(Effect.provide(layer))
 		}),
 	)
