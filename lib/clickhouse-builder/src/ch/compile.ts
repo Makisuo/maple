@@ -125,6 +125,16 @@ interface CompiledQueryBase<Output> {
 		rows: ReadonlyArray<Record<string, unknown>>,
 	) => Effect.Effect<Option.Option<Output>, CompiledQueryDecodeError>
 	/**
+	 * The row codec itself, when the query has one.
+	 *
+	 * `decodeRows` / `encodeRows` are the two directions as functions; this is
+	 * the thing they are built from, for the callers that need a `Schema` rather
+	 * than a call — a cache that round-trips values through JSON, a boundary that
+	 * composes it into a larger schema. Without it those callers have to
+	 * re-declare by hand the shape the builder already knows.
+	 */
+	readonly rowSchema: CompiledQueryRowSchema<Output> | undefined
+	/**
 	 * The other direction: decoded rows back to the wire shape ClickHouse sent.
 	 *
 	 * The row schema is a codec, so it runs backwards for free — and running it
@@ -160,6 +170,14 @@ export type CompiledQuery<
 > = CompiledQueryBase<Output> &
 	(Routing extends string ? { readonly routing: Routing } : { readonly routing?: undefined })
 
+/**
+ * A query's row codec.
+ *
+ * `Schema.Schema<Output>` leaves `DecodingServices` open, which is why decoding
+ * below still casts it to `never`. Pinning it here would be more honest, but
+ * a caller building one from generic `Schema.Struct.Fields` cannot prove the
+ * fields are service-free, so the constraint has to be pushed onto them first.
+ */
 export type CompiledQueryRowSchema<Output> = Schema.Schema<Output>
 
 const makeCompiledQuery = <Output, Routing extends string | undefined>(
@@ -241,6 +259,11 @@ const makeCompiledQuery = <Output, Routing extends string | undefined>(
 	return {
 		sql,
 		tenantScope,
+		// Resolved eagerly only here, where the getter is already memoised by
+		// `decodeRow`/`encodeRow` below; reading it does not build a second one.
+		get rowSchema() {
+			return getRowSchema?.()
+		},
 		rowSchemaDeclared: rowSchemaSource !== "none",
 		rowSchemaSource,
 		untypedColumns: rowSchemaSource === "none" ? untypedColumns : [],

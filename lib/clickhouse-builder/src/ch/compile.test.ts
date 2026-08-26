@@ -458,3 +458,41 @@ describe("compile puts failures in the error channel", () => {
 		}),
 	)
 })
+
+describe("CompiledQuery.rowSchema", () => {
+	const Events = CH.table("events", { OrgId: T.string, Name: T.string, Count: T.uint64 })
+
+	// The codec as a value, for callers that need a `Schema` rather than a call:
+	// a cache round-tripping through JSON, a boundary composing it into a larger
+	// schema. Without it they re-declare a shape the builder already knows.
+	it.effect("exposes the derived codec so it can be composed", () =>
+		Effect.gen(function* () {
+			const compiled = yield* CH.compile(
+				CH.from(Events)
+					.select(($) => ({ name: $.Name, count: $.Count }))
+					.where(($) => [$.OrgId.eq("org_1")]),
+				{},
+			)
+
+			const schema = compiled.rowSchema
+			expect(schema).toBeDefined()
+			// It is the codec `decodeRows` runs, not a lookalike: a quoted UInt64
+			// decodes the same through either door.
+			expect(yield* compiled.decodeRows([{ name: "a", count: "7" }])).toEqual([{ name: "a", count: 7 }])
+			// Stable across reads: composing it must not rebuild a new struct.
+			expect(compiled.rowSchema).toBe(schema)
+		}),
+	)
+
+	it.effect("is undefined when the query derives nothing", () =>
+		Effect.gen(function* () {
+			const compiled = yield* CH.compile(
+				CH.from(Events)
+					.select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") }))
+					.where(($) => [$.OrgId.eq("org_1")]),
+				{},
+			)
+			expect(compiled.rowSchema).toBeUndefined()
+		}),
+	)
+})
