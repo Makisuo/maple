@@ -2,7 +2,7 @@
 //
 // DSL-based query definitions for logs timeseries and breakdown.
 
-import { compileUnsafe, compileFnCall } from "@maple-dev/clickhouse-builder"
+import { compileFnCall, subqueryExpr } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromUnion, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
@@ -573,15 +573,16 @@ export function logsListQuery(opts: LogsListOpts) {
 		...logAttributeConditions(opts),
 	]
 
-	// Stage 1: cheap scan — only `Timestamp` is read. Compiled with placeholders
-	// intact ({} params) so the outer `CH.compile()` substitutes them once.
+	// Stage 1: cheap scan — only `Timestamp` is read. Spliced rather than
+	// compiled here, so the inner compile runs inside the outer one: its params
+	// resolve with the outer bag, and a bad cursor value fails the outer
+	// `CH.compile()` instead of throwing out of this builder.
 	const cutoffInner = from(Logs)
 		.select(($) => ({ ts: $.Timestamp }))
 		.where(baseWhere)
 		.orderBy(["ts", "desc"])
 		.limit(limit + offset)
-	const cutoffSql = compileUnsafe(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
-	const cutoff = CH.rawExpr(`(SELECT min(ts) FROM (${cutoffSql}))`, T.dateTimeString)
+	const cutoff = subqueryExpr(cutoffInner, T.dateTimeString, (sql) => `(SELECT min(ts) FROM (${sql}))`)
 
 	// Stage 2: heavy columns read only for rows at/after the cutoff timestamp.
 	let query = from(Logs)

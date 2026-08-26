@@ -269,3 +269,45 @@ describe("spliced sub-SELECTs", () => {
 		expect(sql).toContain("(SELECT any(ts) FROM (")
 	})
 })
+
+describe("CTE chains", () => {
+	// `WITH a AS (…), b AS (SELECT … FROM a)`: `b` names a table this compilation
+	// cannot see, so without the sibling's scope in hand it reads as
+	// cross-tenant — and so does the outer query that reads `b`.
+	it("a CTE that reads an earlier sibling inherits its scope", () => {
+		const scoped = CH.from(Events)
+			.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+			.where(($) => [$.OrgId.eq(param.string("orgId"))])
+
+		const scopedCte = CH.table("scoped", { TraceId: CH.string, Count: CH.uint64 })
+		const derivedCte = CH.table("derived", { TraceId: CH.string, Count: CH.uint64 })
+
+		const compiled = compileCHUnsafe(
+			CH.from(derivedCte)
+				.withCTE(
+					"scoped",
+					CH.from(scopedCte)
+						.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+						.where(() => []),
+				)
+				.select(($) => ({ total: CH.sum($.Count) })),
+			{ orgId: "org_1" },
+		)
+		// The control: `scoped`'s body reads a bare table, so nothing is scoped.
+		expect(compiled.tenantScope).toBe("cross-tenant")
+
+		const chained = compileCHUnsafe(
+			CH.from(derivedCte)
+				.withCTE("scoped", scoped)
+				.withCTE(
+					"derived",
+					CH.from(scopedCte)
+						.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+						.where(() => []),
+				)
+				.select(($) => ({ total: CH.sum($.Count) })),
+			{ orgId: "org_1" },
+		)
+		expect(chained.tenantScope).toBe("tenant")
+	})
+})

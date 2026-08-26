@@ -82,6 +82,13 @@ const orderByClause = (specs: ReadonlyArray<[string, "asc" | "desc"]>): Array<st
  */
 export type TenantScope = "tenant" | "cross-tenant"
 
+/** A CTE after its body is SQL and its scope is known. */
+interface ResolvedCte {
+	readonly name: string
+	readonly sql: string
+	readonly tenantScope: TenantScope | undefined
+}
+
 interface CompiledQueryBase<Output> {
 	readonly sql: string
 	readonly tenantScope: TenantScope
@@ -402,6 +409,16 @@ export function compileCHUnsafe<
 		 *  For fragments spliced into a larger query — a subquery condition — whose
 		 *  params are resolved by the outer compilation pass. */
 		deferParams?: boolean
+		/**
+		 * The tenant scopes of CTEs an enclosing query has already resolved.
+		 *
+		 * Set by `compile` itself as it walks a query's own CTEs, so a CTE that
+		 * reads an earlier sibling — the usual `WITH a AS (…), b AS (SELECT … FROM a)`
+		 * chain — inherits that sibling's scope instead of reading as
+		 * `"cross-tenant"` because it names a table this compilation cannot see.
+		 * There is no reason to pass it by hand.
+		 */
+		enclosingCtes?: ReadonlyArray<ResolvedCte>
 	},
 ): CompiledQuery<Decoded, Routing> {
 	const state = query._state
@@ -439,13 +456,22 @@ export function compileCHUnsafe<
 	// CTEs — resolved before the FROM below, which reads their scope. A CTE given
 	// as a query is compiled here and its scope derived; one given as a string
 	// carries whatever scope the caller declared.
-	const resolvedCtes = state.ctes.map((c) => {
+	// Sequential, not `map`: each CTE is compiled with the ones before it in
+	// scope, which is the only way `WITH a AS (…), b AS (SELECT … FROM a)` can
+	// see that `b` reads a tenant-confined source.
+	const resolvedCtes: Array<ResolvedCte> = []
+	for (const c of state.ctes) {
 		if (c.query) {
-			const compiled = compileCHUnsafe(c.query, params, { skipFormat: true, deferParams })
-			return { name: c.name, sql: compiled.sql, tenantScope: compiled.tenantScope }
+			const compiled = compileCHUnsafe(c.query, params, {
+				skipFormat: true,
+				deferParams,
+				enclosingCtes: [...(options?.enclosingCtes ?? []), ...resolvedCtes],
+			})
+			resolvedCtes.push({ name: c.name, sql: compiled.sql, tenantScope: compiled.tenantScope })
+		} else {
+			resolvedCtes.push({ name: c.name, sql: c.sql ?? "", tenantScope: c.tenantScope })
 		}
-		return { name: c.name, sql: c.sql ?? "", tenantScope: c.tenantScope }
-	})
+	}
 
 	// FROM clause
 	let fromFragment
@@ -474,7 +500,9 @@ export function compileCHUnsafe<
 	// A FROM that names a CTE inherits the CTE's scope — derived when the CTE was
 	// given as a query, declared by the caller when it arrived as a string.
 	if (!state.fromQuery && !state.fromUnion) {
-		const cte = resolvedCtes.find((c) => c.name === state.tableName)
+		const cte = [...(options?.enclosingCtes ?? []), ...resolvedCtes].find(
+			(c) => c.name === state.tableName,
+		)
 		if (cte?.tenantScope === "tenant") fromSourceScope = "tenant"
 	}
 

@@ -3,7 +3,7 @@
 // DSL-based query definitions for traces timeseries, breakdown, and list.
 
 import type { TracesMetric } from "@maple/domain/query-engine"
-import { compileUnsafe, compileFnCall } from "@maple-dev/clickhouse-builder"
+import { compileFnCall, subqueryCond, subqueryExpr, untypedSubqueryExpr } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromUnion, unionAll, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
@@ -987,11 +987,10 @@ export function tracesListQuery(opts: TracesListOpts) {
 				.where(baseWhere)
 				.orderBy(["d", sortDir], ["ts", sortDir])
 				.limit(limit + offset)
-			const cutoffSql = compileUnsafe(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
 			// Descending reads from the largest tuple down, so the cutoff is the
 			// smallest tuple in the slice — and vice versa.
 			const agg = sortDir === "desc" ? "min" : "max"
-			const cutoff = CH.untypedExpr(`(SELECT ${agg}((d, ts)) FROM (${cutoffSql}))`)
+			const cutoff = untypedSubqueryExpr(cutoffInner, (sql) => `(SELECT ${agg}((d, ts)) FROM (${sql}))`)
 			const sortKey = CH.untypedExpr("(Duration, Timestamp)")
 			return sortDir === "desc" ? sortKey.gte(cutoff) : sortKey.lte(cutoff)
 		}
@@ -1001,9 +1000,12 @@ export function tracesListQuery(opts: TracesListOpts) {
 			.where(baseWhere)
 			.orderBy(["ts", sortDir])
 			.limit(limit + offset)
-		const cutoffSql = compileUnsafe(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
 		const agg = sortDir === "desc" ? "min" : "max"
-		const cutoff = CH.rawExpr(`(SELECT ${agg}(ts) FROM (${cutoffSql}))`, T.dateTimeString)
+		const cutoff = subqueryExpr(
+			cutoffInner,
+			T.dateTimeString,
+			(sql) => `(SELECT ${agg}(ts) FROM (${sql}))`,
+		)
 		return sortDir === "desc" ? $.Timestamp.gte(cutoff) : $.Timestamp.lte(cutoff)
 	}
 
@@ -1189,8 +1191,7 @@ export function spanSearchQuery(opts: SpanSearchOpts) {
 		])
 		.orderBy(["ts", "desc"])
 		.limit(limit + offset)
-	const cutoffSql = compileUnsafe(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
-	const cutoff = CH.rawExpr(`(SELECT min(ts) FROM (${cutoffSql}))`, T.dateTimeString)
+	const cutoff = subqueryExpr(cutoffInner, T.dateTimeString, (sql) => `(SELECT min(ts) FROM (${sql}))`)
 
 	return spanSearchFrom(Traces, opts, limit, offset, cutoff)
 }
@@ -1304,9 +1305,6 @@ export function traceSummariesQuery(opts: TraceSummariesOpts) {
 				.where(($) => tracesBaseWhereConditions($, spanFilters))
 				.groupBy("traceId")
 		: undefined
-	const matchingTraceIdsSql = matchingTraceIds
-		? compileUnsafe(matchingTraceIds, {}, { skipFormat: true, deferParams: true }).sql
-		: undefined
 
 	return from(TraceListMv)
 		.select(($) => ({
@@ -1328,7 +1326,7 @@ export function traceSummariesQuery(opts: TraceSummariesOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			$.Timestamp.gte(param.dateTimeString("startTime")),
 			$.Timestamp.lte(param.dateTimeString("endTime")),
-			matchingTraceIdsSql ? CH.rawCond(`TraceId IN (${matchingTraceIdsSql})`) : undefined,
+			matchingTraceIds ? subqueryCond(matchingTraceIds, (sql) => `TraceId IN (${sql})`) : undefined,
 			opts.cursor
 				? $.Timestamp.lt(opts.cursor.timestamp).or(
 						$.Timestamp.eq(opts.cursor.timestamp).and($.TraceId.lt(opts.cursor.traceId)),
@@ -1394,8 +1392,7 @@ export function tracesRootListQuery(opts: TracesRootListOpts) {
 		.where(baseWhere)
 		.orderBy(["ts", "desc"])
 		.limit(limit + offset)
-	const cutoffSql = compileUnsafe(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
-	const cutoff = CH.rawExpr(`(SELECT min(ts) FROM (${cutoffSql}))`, T.dateTimeString)
+	const cutoff = subqueryExpr(cutoffInner, T.dateTimeString, (sql) => `(SELECT min(ts) FROM (${sql}))`)
 
 	// Stage 2: heavy SpanAttributes lookups read only for rows at/after the cutoff.
 	let q = from(Traces)
@@ -1629,7 +1626,7 @@ export function traceListQuery(opts: TraceListOpts) {
 	const sortBy = opts.sortBy ?? "timestamp"
 	const sortDir = opts.sortDir ?? "desc"
 
-	let pageSql: string
+	let pageQuery: CHQuery<any, any, any>
 	if (canUseTraceListMvStage1(opts)) {
 		// `trace_list_mv` is sorted `(OrgId, Timestamp, TraceId)`, so this pages
 		// read-in-order instead of scanning the window. Its Timestamp is
@@ -1657,7 +1654,7 @@ export function traceListQuery(opts: TraceListOpts) {
 		if (offset > 0) {
 			page = page.offset(offset)
 		}
-		pageSql = compileUnsafe(page, {}, { skipFormat: true, deferParams: true }).sql
+		pageQuery = page
 	} else {
 		const pageBase = from(Traces)
 			.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp, d: $.Duration }))
@@ -1678,7 +1675,7 @@ export function traceListQuery(opts: TraceListOpts) {
 		if (offset > 0) {
 			page = page.offset(offset)
 		}
-		pageSql = compileUnsafe(page, {}, { skipFormat: true, deferParams: true }).sql
+		pageQuery = page
 	}
 
 	// Lexicographic tuple ordering: true root first, earliest span as the
@@ -1728,7 +1725,7 @@ export function traceListQuery(opts: TraceListOpts) {
 			// (measured: 12h window, unbounded >10s; bounded <10s).
 			$.Timestamp.gte(subtractHours(CH.toDateTime(param.dateTimeString("startTime")), CH.lit(1))),
 			$.Timestamp.lte(addHours(CH.toDateTime(param.dateTimeString("endTime")), CH.lit(1))),
-			CH.rawCond(`TraceId IN (SELECT traceId FROM (${pageSql}))`),
+			subqueryCond(pageQuery, (sql) => `TraceId IN (SELECT traceId FROM (${sql}))`),
 		])
 		.groupBy("traceId")
 

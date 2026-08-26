@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { compileUnsafe, compileUnionUnsafe } from "@maple-dev/clickhouse-builder"
+import { Effect } from "effect"
+import { compile, compileUnsafe, compileUnionUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	canUseLogsAggregatesHourly,
 	logsTimeseriesQuery,
@@ -284,6 +285,30 @@ describe("logsBreakdownQuery", () => {
 		expect(sql).toContain(
 			"positionCaseInsensitive(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']), 'prod')",
 		)
+	})
+
+	// The list query splices a cheap stage-1 scan into its WHERE. Compiling that
+	// scan while BUILDING the query put the failure outside any Effect, so a
+	// cursor the Timestamp column cannot encode threw synchronously out of
+	// `logsListQuery` — before `compile` was ever entered.
+	it("reports an unencodable cursor as a typed failure, not a throw", () => {
+		const build = () =>
+			logsListQuery({
+				limit: 10,
+				cursorIdentity: {
+					timestamp: "not-a-date",
+					serviceName: "s",
+					traceId: "t",
+					spanId: "p",
+					recordIdentity: "r",
+				},
+			})
+
+		expect(build).not.toThrow()
+
+		const error = Effect.runSync(Effect.flip(compile(build(), baseParams)))
+		expect(error._tag).toBe("@maple-dev/clickhouse-builder/QueryBuilderError")
+		expect(error.message).toContain("Timestamp")
 	})
 
 	it("applies custom limit", () => {
