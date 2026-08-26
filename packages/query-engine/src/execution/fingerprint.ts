@@ -73,11 +73,13 @@ export const summarizeSql = (sql: string): SqlSummary => {
 }
 
 /**
- * The official ClickHouse client sets the wire format itself, so it rejects a
- * statement that carries its own `FORMAT` clause (any format, not just the
- * `FORMAT JSON` the DSL emits) and a trailing `;`. Strip both before handing the
- * SQL to the CH driver, keeping any `SETTINGS` clause. Tinybird's `/v0/sql`
- * keeps the SQL as-is.
+ * Drop a statement's `FORMAT` clause (any format, not just the `FORMAT JSON`
+ * the DSL emits) and trailing `;`, keeping any `SETTINGS`.
+ *
+ * The executor no longer needs this — it settles terminal clauses from the
+ * backend dialect before the driver sees the statement. This is for callers
+ * that hold compiled SQL as text and hand it straight to a ClickHouse client,
+ * which sets the wire format itself and rejects a statement carrying its own.
  */
 export const normalizeSqlForClickHouseClient = (sql: string): string => {
 	const terminal = splitTerminalClauses(sql)

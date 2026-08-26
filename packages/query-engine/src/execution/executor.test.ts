@@ -10,6 +10,7 @@ import { WarehouseResponseLimitError } from "./response-limits"
 import type {
 	ExecutionTenant,
 	ResolvedWarehouseConfig,
+	SqlQueryOptions,
 	WarehouseExecutorDeps,
 	WarehouseSqlClient,
 } from "./ports"
@@ -277,8 +278,8 @@ const makeRecordingDeps = (
 	sqls: Array<string>,
 ): WarehouseExecutorDeps => ({
 	createClient: () => ({
-		sql: async (sql: string) => {
-			sqls.push(sql)
+		sql: async (statement) => {
+			sqls.push(statement.text)
 			return { data: [] }
 		},
 		insert: async () => {},
@@ -351,6 +352,106 @@ describe("makeWarehouseExecutor compiled-query defaults", () => {
 	)
 })
 
+describe("makeWarehouseExecutor wire format", () => {
+	// The dialect decides where the wire format is declared, and the executor
+	// applies it — so a driver never has to re-derive from SQL text which terminal
+	// clauses the statement already carries.
+	const runOn = (config: ResolvedWarehouseConfig) =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config, clientCacheKey: "read:managed" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, compiled, { context: "test", profile: "list" })
+			assert.lengthOf(sqls, 1)
+			return sqls[0]!
+		})
+
+	it.effect("declares FORMAT in the statement for the Tinybird SDK backend", () =>
+		Effect.gen(function* () {
+			const sql = yield* runOn(tinybirdConfig)
+			assert.match(sql, /\nFORMAT JSON$/)
+			// SETTINGS must precede FORMAT — Tinybird rejects the inverse order.
+			assert.isTrue(sql.indexOf("SETTINGS") < sql.indexOf("FORMAT JSON"))
+		}),
+	)
+
+	for (const [label, config] of [
+		["the Tinybird CH-gateway", tinybirdGatewayConfig],
+		["BYO ClickHouse", clickhouseConfig],
+		["chDB", chdbConfig],
+	] as const) {
+		it.effect(`leaves FORMAT off the statement for ${label}`, () =>
+			Effect.gen(function* () {
+				const sql = yield* runOn(config)
+				assert.notMatch(sql, /\bFORMAT\s+\w+\s*$/)
+			}),
+		)
+	}
+})
+
+describe("makeWarehouseExecutor query fingerprint", () => {
+	// The fingerprint is the QueryKey of the db-query-shape rollup. Hashing the
+	// rendered statement forked one query into a shape per backend and per
+	// profile-shape, so it covers the body alone.
+	const fingerprintOn = (config: ResolvedWarehouseConfig, options: SqlQueryOptions) =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config, clientCacheKey: "read:managed" }, []),
+			)
+			yield* executor.compiledQuery(tenant, compiled, options).pipe(Effect.withTracer(tracer))
+			const span = spans.find((candidate) => candidate.name === "WarehouseQueryService.executeSql")
+			assert.isDefined(span)
+			return span.attributes.get("db.query.fingerprint") as string
+		})
+
+	it.effect("is identical across backends for the same query", () =>
+		Effect.gen(function* () {
+			const options = { context: "test", profile: "list" } as const
+			const tinybird = yield* fingerprintOn(tinybirdConfig, options)
+			const gateway = yield* fingerprintOn(tinybirdGatewayConfig, options)
+			const byo = yield* fingerprintOn(clickhouseConfig, options)
+			assert.match(tinybird, /^[0-9a-f]{8}$/)
+			assert.strictEqual(gateway, tinybird)
+			assert.strictEqual(byo, tinybird)
+		}),
+	)
+
+	it.effect("is identical across cost profiles for the same query", () =>
+		Effect.gen(function* () {
+			const list = yield* fingerprintOn(clickhouseConfig, { context: "test", profile: "list" })
+			const unbounded = yield* fingerprintOn(clickhouseConfig, {
+				context: "test",
+				profile: "unbounded",
+			})
+			assert.strictEqual(unbounded, list)
+		}),
+	)
+
+	it.effect("still separates different queries", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const executor = makeWarehouseExecutor(makeDeps([]))
+			// Different tables, not different literals: the fingerprint normalizes
+			// numbers and strings so the same shape groups across params.
+			for (const sql of [
+				"SELECT count() FROM traces WHERE OrgId = 'org_test'",
+				"SELECT count() FROM logs WHERE OrgId = 'org_test'",
+			]) {
+				yield* executor
+					.compiledQuery(tenant, scoped(sql), { context: "test", profile: "list" })
+					.pipe(Effect.withTracer(tracer))
+			}
+			const fingerprints = spans
+				.filter((candidate) => candidate.name === "WarehouseQueryService.executeSql")
+				.map((span) => span.attributes.get("db.query.fingerprint"))
+			assert.lengthOf(fingerprints, 2)
+			assert.notStrictEqual(fingerprints[0], fingerprints[1])
+		}),
+	)
+})
+
 describe("makeWarehouseExecutor restricted-settings strip", () => {
 	it.effect("strips max_block_size for the managed Tinybird CH-gateway", () =>
 		Effect.gen(function* () {
@@ -417,7 +518,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			let metadataQueries = 0
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						sqls.push(sql)
 						if (sql.includes("SELECT version()")) {
 							metadataQueries += 1
@@ -483,7 +585,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			})
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						if (sql.includes("SELECT version()")) {
 							versionQueries += 1
 							signalVersionQueryStarted?.()
@@ -554,7 +657,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const executed: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						if (sql.includes("system.") || sql.includes("SELECT version()")) {
 							throw new Error("ACCESS_DENIED")
 						}
@@ -594,7 +698,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const sqls: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						sqls.push(sql)
 						// A probe here would be a bug: Tinybird answers `403` for
 						// `system.columns` / `system.data_skipping_indices`, so any
@@ -639,7 +744,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const executed: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: (sql) => {
+					sql: (statement) => {
+						const sql = statement.text
 						if (sql.includes("SELECT version()") || sql.includes("system.")) {
 							return new Promise<{ data: never[] }>(() => {})
 						}
@@ -690,7 +796,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const sqls: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						sqls.push(sql)
 						if (sql.includes("SELECT version()")) return { data: [{ version: "26.2.1" }] }
 						if (sql.includes("system.data_skipping_indices")) {
@@ -864,7 +971,7 @@ describe("makeWarehouseExecutor raw response limits", () => {
 			const executor = makeWarehouseExecutor({
 				...makeDeps([]),
 				createClient: () => ({
-					sql: async (_sql: string, options?: unknown) => {
+					sql: async (_statement, options?: unknown) => {
 						seen = options
 						return { data: [] }
 					},

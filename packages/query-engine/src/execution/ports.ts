@@ -1,4 +1,5 @@
 import type { Effect, Option } from "effect"
+import type { ClickHouseStatement } from "@maple-dev/clickhouse-builder/sql"
 import type { OrgId, UserId } from "@maple/domain"
 import type {
 	RawSqlValidationError,
@@ -37,10 +38,19 @@ export type CompiledQueryError<Routing extends "ingest" | undefined> = Routing e
 	? ManagedWarehouseError
 	: WarehouseCompiledQueryError
 
-/** Minimal client interface — raw SQL execution plus row inserts. */
+/**
+ * Minimal client interface — statement execution plus row inserts.
+ *
+ * The executor hands over a parsed `ClickHouseStatement` with its terminal
+ * clauses already settled for this backend's dialect: `SETTINGS` applied, and
+ * `format` present exactly when the dialect declares the wire format in the
+ * statement. A driver renders it (`statement.text`) and sends it — deciding
+ * for itself which clauses to add or strip is what let the executor and the
+ * drivers disagree.
+ */
 export interface WarehouseSqlClient {
 	readonly sql: (
-		sql: string,
+		statement: ClickHouseStatement,
 		options?: {
 			readonly responseLimits?: WarehouseResponseLimits
 		},

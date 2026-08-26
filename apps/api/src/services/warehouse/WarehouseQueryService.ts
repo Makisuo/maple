@@ -1,6 +1,5 @@
 import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Tinybird } from "@tinybirdco/sdk"
-import { splitTerminalClauses } from "@maple-dev/clickhouse-builder/sql"
 import { Context, Effect, Layer, Option, Redacted } from "effect"
 import { WarehouseConfigError, type WarehouseQueryRequest } from "@maple/domain/http"
 import {
@@ -54,9 +53,12 @@ const createClickHouseSqlClient = (config: ClickHouseProtocolBackendConfig): War
 		? ({ output_format_json_quote_64bit_integers: 0 } as const)
 		: undefined
 	return {
-		sql: async (sql: string, options) => {
+		// `wireFormat: "out-of-band"` for every ClickHouse-protocol backend, so the
+		// executor has already stripped any FORMAT clause and the format travels as
+		// a request field instead.
+		sql: async (statement, options) => {
 			const resultSet = await client.query({
-				query: sql,
+				query: statement.text,
 				format: "JSONEachRow",
 				...(clickhouseSettings ? { clickhouse_settings: clickhouseSettings } : undefined),
 			})
@@ -173,22 +175,15 @@ const createTinybirdSdkSqlClient = (
 	const client = makeClient()
 	const boundedClients = new Map<number, typeof client>()
 	return {
-		sql: async (sql: string, options) => {
+		sql: async (statement, options) => {
 			try {
 				// Tinybird Cloud currently defaults /v0/sql to JSON, while Tinybird Local
-				// defaults to tab-separated output. The SDK always calls response.json(), so
-				// make the expected wire format explicit for both environments. DSL-compiled
-				// queries already end with `FORMAT JSON` (profile SETTINGS are inserted
-				// before it by appendSettings) — appending a second FORMAT clause is a
-				// ClickHouse syntax error, so only add one when the query doesn't carry
-				// its own.
-				const terminal = splitTerminalClauses(sql)
-				const jsonSql =
-					terminal.format !== undefined
-						? sql.trimEnd().replace(/;\s*$/, "")
-						: [terminal.body, terminal.settings, "FORMAT JSON"]
-								.filter((part) => part !== undefined)
-								.join("\n")
+				// defaults to tab-separated output, and the SDK always calls
+				// response.json() — so the format has to be explicit for both. This
+				// backend's dialect is `wireFormat: "in-statement"`, so the executor has
+				// already put a FORMAT clause on the statement; rendering it is all this
+				// driver has to do.
+				const jsonSql = statement.text
 				const limits = options?.responseLimits
 				// The SDK normally buffers through response.json(). Raw execution gets
 				// a fetch adapter that aborts before constructing an oversized Response.

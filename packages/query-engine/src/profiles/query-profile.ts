@@ -1,4 +1,4 @@
-import { splitTerminalClauses } from "@maple-dev/clickhouse-builder/sql"
+import { parseStatement, renderStatement, withSettings } from "@maple-dev/clickhouse-builder/sql"
 
 /**
  * ClickHouse query settings forwarded via inline `SETTINGS` clause.
@@ -137,19 +137,11 @@ export const stripTinybirdRestrictedSettings = (
 }
 
 /**
- * Add a ClickHouse `SETTINGS` clause to a SQL string, inserting it before a
- * trailing `FORMAT <name>` clause when present (the DSL compiler terminates
- * every query with `FORMAT JSON`, and Tinybird's ClickHouse rejects the
- * `FORMAT JSON SETTINGS …` order with a syntax error). Returns the input
- * unchanged when no settings are provided.
- *
- * A statement that already carries its own `SETTINGS` is returned untouched —
- * appending a second clause is a syntax error, and silently merging would hide
- * whichever budget lost. Raw SQL rejects an author-supplied `SETTINGS` upstream
- * in `prepareRawSql`; no DSL query emits one.
+ * The `SETTINGS …` clause for these settings, or undefined when there is
+ * nothing to set. Non-finite and undefined values are dropped.
  */
-export const appendSettings = (sql: string, settings: WarehouseQuerySettings | undefined): string => {
-	if (!settings) return sql
+export const settingsClause = (settings: WarehouseQuerySettings | undefined): string | undefined => {
+	if (!settings) return undefined
 	const parts: string[] = []
 	for (const key of Object.keys(settings) as Array<keyof WarehouseQuerySettings>) {
 		const value = settings[key]
@@ -157,15 +149,28 @@ export const appendSettings = (sql: string, settings: WarehouseQuerySettings | u
 			parts.push(`${settingToCh[key]}=${value}`)
 		}
 	}
-	if (parts.length === 0) return sql
-	const terminal = splitTerminalClauses(sql)
-	if (terminal.settings !== undefined) return sql
-	const clause = `SETTINGS ${parts.join(", ")}`
-	// Newline-separated: a body ending in a `--` comment would swallow a
-	// space-joined clause and run the query with no budget at all.
-	return terminal.format === undefined
-		? `${terminal.body}\n${clause}`
-		: `${terminal.body}\n${clause}\n${terminal.format}`
+	return parts.length === 0 ? undefined : `SETTINGS ${parts.join(", ")}`
+}
+
+/**
+ * Add a ClickHouse `SETTINGS` clause to SQL text, before a trailing `FORMAT`
+ * clause when there is one (Tinybird's ClickHouse rejects the inverse order).
+ * Returns the input unchanged when there is nothing to set.
+ *
+ * A statement that already carries its own `SETTINGS` is returned untouched —
+ * appending a second clause is a syntax error, and silently merging would hide
+ * whichever budget lost. Raw SQL rejects an author-supplied `SETTINGS` upstream
+ * in `prepareRawSql`; no DSL query emits one.
+ *
+ * The executor works on the parsed statement instead of round-tripping text;
+ * this is for call sites that hold SQL as a string.
+ */
+export const appendSettings = (sql: string, settings: WarehouseQuerySettings | undefined): string => {
+	const clause = settingsClause(settings)
+	if (clause === undefined) return sql
+	const statement = parseStatement(sql)
+	if (statement.settings !== undefined) return sql
+	return renderStatement(withSettings(statement, clause))
 }
 
 /**

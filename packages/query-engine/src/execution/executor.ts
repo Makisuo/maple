@@ -12,9 +12,10 @@ import {
 } from "@maple/domain/http"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
 import { compilePipeQuery, type CompiledQuery, type TenantScope } from "../ch"
+import { parseStatement, withFormat, withSettings } from "@maple-dev/clickhouse-builder/sql"
 import type { WarehouseExecutorApi } from "../observability"
 import {
-	appendSettings,
+	settingsClause,
 	type QueryProfileName,
 	resolveSettings,
 	stripTinybirdRestrictedSettings,
@@ -26,13 +27,7 @@ import {
 	type WarehouseReadExecutionError,
 } from "./errors"
 import { WarehouseResponseLimitError, type WarehouseResponseLimits } from "./response-limits"
-import {
-	SQL_LOG_MAX,
-	SQL_TRACE_MAX,
-	fingerprintSql,
-	normalizeSqlForClickHouseClient,
-	truncateSql,
-} from "./fingerprint"
+import { SQL_LOG_MAX, SQL_TRACE_MAX, fingerprintSql, truncateSql } from "./fingerprint"
 import { BackendDialect, warehouseTargetAttributes } from "./backend"
 import { managedWarehouseCapabilities } from "./managed-capabilities"
 import { findIngestPinnedTable } from "./datasource-routing"
@@ -182,7 +177,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			})
 		const queryRows = (target: WarehouseCapabilityMetadataTarget, sql: string) =>
 			Effect.tryPromise({
-				try: () => client.sql(sql),
+				try: () => client.sql(parseStatement(sql)),
 				catch: (cause) => probeError(target, cause),
 			}).pipe(Effect.map((result) => result.data))
 		const logProbeFailure = (error: WarehouseCapabilityProbeError) =>
@@ -441,14 +436,23 @@ WHERE name = 'enable_full_text_index'`,
 		const settings = dialect.stripTinybirdRestrictedSettings
 			? stripTinybirdRestrictedSettings(resolveSettings(options))
 			: resolveSettings(options)
-		const sqlForClient = dialect.normalizeSqlForClient ? normalizeSqlForClickHouseClient(sql) : sql
-		const finalSql = appendSettings(sqlForClient, settings)
+		// Parsed once here and passed to the driver as a statement, so no driver
+		// re-derives from SQL text which terminal clauses it already carries.
+		const parsed = parseStatement(sql)
+		const statement = withFormat(
+			withSettings(parsed, parsed.settings ?? settingsClause(settings)),
+			dialect.wireFormat === "in-statement" ? (parsed.format ?? dialect.statementFormat) : undefined,
+		)
+		const finalSql = statement.text
 		const sqlLength = finalSql.length
 		const sqlTruncated = sqlLength > SQL_TRACE_MAX
 		yield* Effect.annotateCurrentSpan("db.query.text", truncateSql(finalSql, SQL_TRACE_MAX))
 		yield* Effect.annotateCurrentSpan("db.query.length", sqlLength)
 		yield* Effect.annotateCurrentSpan("db.query.truncated", sqlTruncated)
-		yield* Effect.annotateCurrentSpan("db.query.fingerprint", fingerprintSql(finalSql))
+		// Fingerprint the body, not the rendered statement: SETTINGS and FORMAT
+		// vary with the backend and the cost profile, and hashing them forks one
+		// query into several shapes in the query-shape rollup, which keys on this.
+		yield* Effect.annotateCurrentSpan("db.query.fingerprint", fingerprintSql(statement.body))
 		if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
 
 		const client = getCachedOrCreateClient(
@@ -469,7 +473,7 @@ WHERE name = 'enable_full_text_index'`,
 		const queryAttempt = Effect.tryPromise({
 			try: () =>
 				client.sql(
-					finalSql,
+					statement,
 					effectiveResponseLimits === undefined
 						? undefined
 						: { responseLimits: effectiveResponseLimits },
