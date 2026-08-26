@@ -109,6 +109,36 @@ _(Backed by `docs/expressions.md > Optional predicates with when`.)_
 
 _(Backed by `docs/expressions.md > Arithmetic does not parenthesise`.)_
 
+### Division can produce a NULL
+
+`.div()` and `.mod()` decode nullably, whatever their operands are. ClickHouse renders `1 / 0` as
+`inf` and `0 / 0` as `nan`, and both come back as JSON `null` — so a division that meets a zero
+denominator returns a null the column type has to accept, or the row fails to decode.
+
+That costs nothing at the type level: the result is `Expr<number>` either way, exactly as it
+already was for a division with a nullable operand. What it buys is that an unguarded division
+which hits a zero in production is the `null` the wire actually carried, rather than a decode
+failure on a query that ran fine.
+
+When you want a number rather than a null, guard it in SQL:
+
+```ts
+.select(($) => ({
+	// ifNotFinite(sum(Errors) / sum(Total), 0) AS errorRate
+	errorRate: CH.ifNotFinite(CH.sum($.Errors).div(CH.sum($.Total)), 0),
+}))
+```
+
+`CH.ifNotFinite(expr, fallback)` is `expr` unless it is `nan`/`inf`, in which case it is
+`fallback` — and its result is non-nullable, because the guard is in the SQL. The other standard
+shape, `CH.sum(x).div(CH.nullIf(CH.sum(y), 0))`, deliberately keeps the null: "an average, or
+nothing when there is nothing to average over".
+
+The other four operators stay strict. `+`, `-`, `*` and unary use cannot manufacture a null out
+of two finite operands, so the looseness is bought only where it is paid for.
+
+_(Backed by `docs/expressions.md > division decodes nullably and ifNotFinite guards it`.)_
+
 ## Literals and raw escape hatches
 
 - `lit(value)` — an explicit `Expr` from a `string` or `number`. You rarely need it, since

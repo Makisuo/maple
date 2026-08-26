@@ -108,12 +108,30 @@ time; see [Params and compilation](./params-and-compilation.md#what-each-kind-ac
 | `whenTrue(flag, fn)`      | Boolean-gated variant                                      |
 | `inList(expr, values)`    | `expr IN ('a', 'b')`                                       |
 | `inExprList(expr, exprs)` | Same for expression lists                                  |
-| `exists(sql)`             | `EXISTS (…)` from pre-compiled SQL                         |
-| `inSubquery(expr, sql)`   | `expr IN (…)` from pre-compiled SQL                        |
+| `exists(q)`               | `EXISTS (…)` from a query or pre-compiled SQL              |
+| `inSubquery(expr, q)`     | `expr IN (…)` from a query or pre-compiled SQL             |
+| `notInSubquery(expr, q)`  | `expr NOT IN (…)`; note the NULL semantics                 |
 | `outerRef<T>(name)`       | Reference an outer column in a correlated subquery         |
 
 `Expr<T>` methods: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in_`, `notIn`, `like`, `notLike`,
-`ilike` (string-only), and `add`, `sub`, `mul`, `div` (number-only, **no parentheses**).
+`ilike` (string-only), and `add`, `sub`, `mul`, `div`, `mod` (number-only, **no parentheses**). `div` and `mod` decode
+nullably — ClickHouse sends `inf`/`nan` as JSON `null`; guard with `ifNotFinite`.
+
+### Spliced sub-SELECTs
+
+For SQL the builder has no syntax for — an inner query's text inside an aggregate or a tuple
+comparison. The inner query is compiled by the **outer** `compile`, so its params resolve from the
+outer set and its failures land in the outer error channel. See
+[Joins and subqueries](./joins-and-subqueries.md#splicing-a-subquery-where-there-is-no-syntax-for-one).
+
+| Export                                    | Purpose                                          |
+| ----------------------------------------- | ------------------------------------------------ |
+| `subqueryExpr(q, type, wrap?)`            | Inner SQL as an `Expr` of a declared type        |
+| `untypedSubqueryExpr<T>(q, wrap?)`        | Same with no type — costs the row schema         |
+| `subqueryCond(q, wrap)`                   | Inner SQL as a `Condition`                       |
+
+`wrap` receives the inner SQL and returns the text to emit. It defaults to wrapping the SQL in
+parentheses, which is the plain "this value is a sub-SELECT" case.
 
 `Condition` methods: `and`, `or` (both parenthesise; both drop the tenant marker).
 
@@ -133,7 +151,8 @@ time; see [Params and compilation](./params-and-compilation.md#what-each-kind-ac
 | `compileFnCall<R>(name, ...args)`      | Variadic/generic wrapper (untyped result)          |
 | `compileTypedFnCall<R>(name, schema,)` | Same, with the result codec                        |
 | `compileFnCallCond(name, ...args)`     | Same, returning `Condition`                        |
-| `makeExpr<T>(fragment, schema?)`       | Build an `Expr` from a fragment                    |
+| `makeExpr<T>(fragment, schema)`        | Build an `Expr` from a fragment and its codec      |
+| `makeUntypedExpr<T>(fragment)`         | Same with no codec — costs the row schema          |
 | `makeCond(fragment)`                   | Build a `Condition` from a fragment                |
 
 ---
@@ -172,7 +191,8 @@ time; see [Params and compilation](./params-and-compilation.md#what-each-kind-ac
 ### Conditional
 
 `if_(cond, then, else)`, `multiIf([[cond, value], …], fallback)`, `coalesce(...exprs)`,
-`nullIf(expr, value)`.
+`nullIf(expr, value)`, `ifNotFinite(expr, fallback)` (`expr` unless it is `nan`/`inf` — the SQL-side
+guard for division).
 
 ### Array
 

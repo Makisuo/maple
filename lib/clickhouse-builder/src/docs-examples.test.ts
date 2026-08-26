@@ -14,7 +14,7 @@
 
 import type { DateTime } from "effect"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Exit, Option, Schema } from "effect"
 import * as CH from "./ch/index"
 import * as T from "./ch/types"
 import { parseStatement, renderStatement, withSettings } from "./sql/statement"
@@ -246,6 +246,39 @@ describe("docs/queries.md", () => {
 // expressions.md
 
 describe("docs/expressions.md", () => {
+	// ClickHouse renders `1/0` and `0/0` as JSON null, and `CHNumber` is
+	// Schema.Finite-based — so a division has to decode the null it can produce.
+	it.effect("division decodes nullably and ifNotFinite guards it", () =>
+		Effect.gen(function* () {
+			const unguarded = compileCHUnsafe(
+				CH.from(Events)
+					.select(($) => ({ perMs: CH.count().div(CH.sum($.DurationMs)) }))
+					.where(($) => [$.OrgId.eq("org_123")]),
+				{},
+			)
+			expect(yield* unguarded.decodeRows([{ perMs: null }])).toEqual([{ perMs: null }])
+
+			const guarded = compileCHUnsafe(
+				CH.from(Events)
+					.select(($) => ({ perMs: CH.ifNotFinite(CH.count().div(CH.sum($.DurationMs)), 0) }))
+					.where(($) => [$.OrgId.eq("org_123")]),
+				{},
+			)
+			expect(oneLine(guarded.sql)).toContain("ifNotFinite(count() / sum(DurationMs), 0) AS perMs")
+			// The guard is in the SQL, so the column is a number again.
+			expect(Exit.isFailure(yield* Effect.exit(guarded.decodeRows([{ perMs: null }])))).toBe(true)
+
+			// The other operators cannot manufacture a null from finite operands.
+			const added = compileCHUnsafe(
+				CH.from(Events)
+					.select(($) => ({ total: CH.count().add(CH.sum($.DurationMs)) }))
+					.where(($) => [$.OrgId.eq("org_123")]),
+				{},
+			)
+			expect(Exit.isFailure(yield* Effect.exit(added.decodeRows([{ total: null }])))).toBe(true)
+		}),
+	)
+
 	it("Optional predicates with when", () => {
 		const build = (nameFilter?: string) =>
 			CH.from(Events)
@@ -295,6 +328,50 @@ describe("docs/expressions.md", () => {
 // joins-and-subqueries.md
 
 describe("docs/joins-and-subqueries.md", () => {
+	// The claim the guide makes for these three over `compileUnsafe(inner).sql`:
+	// the inner query is compiled by the OUTER compile, so its params resolve
+	// from the outer set and its failures land in the outer error channel.
+	it.effect("subqueryExpr splices an inner query, compiled by the outer compile", () =>
+		Effect.gen(function* () {
+			const cheapScan = CH.from(Events)
+				.select(($) => ({ ts: $.Timestamp }))
+				.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
+				.orderBy(["ts", "desc"])
+				.limit(100)
+
+			const cutoff = CH.subqueryExpr(cheapScan, T.dateTime, (sql) => `(SELECT min(ts) FROM (${sql}))`)
+			const compiled = yield* CH.compile(
+				CH.from(Events)
+					.select(($) => ({ name: $.Name }))
+					.where(($) => [$.OrgId.eq(CH.param.string("orgId")), $.Timestamp.gte(cutoff)]),
+				{ orgId: "org_123" },
+			)
+
+			expect(oneLine(compiled.sql)).toContain("Timestamp >= (SELECT min(ts) FROM (")
+			// One param, passed once, resolved in both halves by the outer pass.
+			expect(compiled.sql).not.toContain("__PARAM_")
+			expect(compiled.sql.match(/OrgId = 'org_123'/g)).toHaveLength(2)
+
+			// And the failure lands in the outer compile rather than throwing out
+			// of the function that built the expression.
+			const bad = CH.subqueryExpr(
+				CH.from(Events)
+					.select(($) => ({ ts: $.Timestamp }))
+					.where(($) => [$.DurationMs.eq("lots" as never)]),
+				T.dateTime,
+			)
+			const error = yield* Effect.flip(
+				CH.compile(
+					CH.from(Events)
+						.select(($) => ({ name: $.Name }))
+						.where(($) => [$.OrgId.eq("org_123"), $.Timestamp.gte(bad)]),
+					{},
+				),
+			)
+			expect(error.code).toBe("InvalidLiteral")
+		}),
+	)
+
 	it("Joining a table", () => {
 		const query = CH.from(Events, "e")
 			.innerJoin(Services, "s", (main, joined) => main.Name.eq(joined.Name))
