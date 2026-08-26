@@ -1,5 +1,5 @@
 import { RAW_SQL_ENDPOINT } from "@maple/widgets/dashboard"
-import { rawSqlIssue, RawSqlText } from "../../raw-sql"
+import { RawSqlText } from "../../raw-sql"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema, SchemaGetter } from "effect"
 import {
@@ -230,24 +230,30 @@ const V2RawSqlDataSource = Schema.Struct({
 	transform: optional(V2WidgetTransform),
 }).pipe(Schema.encodeKeys({ displayType: "display_type", granularitySeconds: "granularity_seconds" }))
 
-// The route arm is the second door into raw SQL: `/v2/dashboards` emits and
-// accepts the pre-v3 `{ endpoint: "raw_sql_chart", params: { sql } }` shape and
-// always will, and `dataSourceRawSql` reads the SQL back out of `params`.
-// Validating only the `kind: "raw_sql"` arm would leave this one unguarded.
+// Raw SQL has one door: the `raw_sql` arm. The route arm could carry it too —
+// `dataSourceRawSql` still reads `params.sql` under the pre-v3 `raw_sql_chart`
+// endpoint — which meant a second, unvalidated way to store a query. Refused
+// here rather than validated, because an audit of production found 193 raw-SQL
+// widgets and not one using this form: nothing has ever come through it, so
+// closing it breaks no client and no stored document.
+//
+// `endpoint` stays `Schema.String` otherwise. Closing it to a literal set would
+// make a document naming a route this build does not know fail to decode, and
+// `parsePayload` turns that into a hard error on the writable path — one stale
+// route name would lock a whole dashboard out of editing.
 const V2RouteDataSource = Schema.Struct({
 	kind: Schema.Literal("route"),
 	endpoint: Schema.String,
 	params: optional(UnknownRecord),
 	transform: optional(V2WidgetTransform),
 }).check(
+	// Returns the message rather than `false`: a filter's `description` is not
+	// what surfaces on failure, the returned string is.
 	Schema.makeFilter(
-		(value) => {
-			if (value.endpoint !== RAW_SQL_ENDPOINT) return true
-			const sql = value.params?.sql
-			if (typeof sql !== "string") return true
-			return rawSqlIssue(sql)?.message ?? true
-		},
-		{ description: "Maple raw ClickHouse SQL" },
+		(value) =>
+			value.endpoint !== RAW_SQL_ENDPOINT ||
+			`Raw SQL is not a route endpoint. Use { "kind": "raw_sql", "sql": … } instead of endpoint "${RAW_SQL_ENDPOINT}".`,
+		{ description: "a route endpoint that is not raw SQL" },
 	),
 )
 

@@ -257,32 +257,25 @@ describe("the v2 data source covers every stored kind", () => {
 		expect(() => decode(fixture)).not.toThrow()
 	})
 
-	// The route arm carries raw SQL in `params` under the pre-v3 endpoint name, so
-	// validating only the `kind: "raw_sql"` arm would leave a second unguarded door
-	// into the same execution path.
-	it("validates raw SQL reached through the legacy route endpoint", () => {
-		const good = {
-			kind: "route",
-			endpoint: "raw_sql_chart",
-			params: { sql: "SELECT count() FROM logs WHERE $__orgFilter" },
-		}
-		expect(() => decode(good)).not.toThrow()
-		expect(() =>
-			decode({ kind: "route", endpoint: "raw_sql_chart", params: { sql: "DROP TABLE logs" } }),
-		).toThrow()
+	// Raw SQL has one door. The route arm could carry it under the pre-v3
+	// endpoint name, which was a second unvalidated way in; production held 193
+	// raw-SQL widgets and none used this form, so it is refused rather than
+	// validated.
+	it("refuses raw SQL smuggled through the legacy route endpoint", () => {
 		expect(() =>
 			decode({
 				kind: "route",
 				endpoint: "raw_sql_chart",
-				params: { sql: "SELECT 1 WHERE $__orgFilter SETTINGS max_threads=8" },
+				params: { sql: "SELECT count() FROM logs WHERE $__orgFilter" },
 			}),
-		).toThrow(/SETTINGS is managed by Maple/)
+		).toThrow(/raw_sql/)
 	})
 
-	it("leaves non-raw-SQL route endpoints alone", () => {
-		expect(() =>
-			decode({ kind: "route", endpoint: "list_traces", params: { sql: "not sql at all" } }),
-		).not.toThrow()
+	it("leaves every other route endpoint open", () => {
+		expect(() => decode({ kind: "route", endpoint: "list_traces" })).not.toThrow()
+		// Unknown route names must keep decoding: closing the set would lock a
+		// dashboard naming a route this build does not know out of editing.
+		expect(() => decode({ kind: "route", endpoint: "some_future_route" })).not.toThrow()
 	})
 
 	it("snake_cases the scalar fields the union added", () => {

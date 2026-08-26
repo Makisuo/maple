@@ -6,14 +6,16 @@
  * and prints what would fail — so tightening raw-SQL validation is a decision
  * made against real data rather than a hope.
  *
+ *   bun run scripts/audit-raw-sql.ts [branch]     # mints an ephemeral PS credential
  *   DATABASE_URL=postgres://… bun run scripts/audit-raw-sql.ts
- *   DATABASE_URL=… bun run scripts/audit-raw-sql.ts --json
+ *   … --json                                      # machine-readable
  *
  * Exits non-zero when anything would be rejected, so CI can gate on it.
  */
 import postgres from "postgres"
 import { rawSqlIssue, type RawSqlIssue } from "@maple/domain/raw-sql"
 import { dataSourceRawSql } from "@maple/widgets/dashboard"
+import { withBranchConnection } from "./planetscale-connection"
 
 export interface Finding {
 	readonly source: "alert_rule" | "dashboard_widget"
@@ -72,14 +74,7 @@ export const rawSqlWidgets = (payload: unknown): Array<FoundRawSql> => {
 	return found
 }
 
-const main = async (): Promise<void> => {
-	const databaseUrl = process.env.DATABASE_URL
-	if (databaseUrl === undefined || databaseUrl === "") {
-		console.error("DATABASE_URL is required (a direct 5432 connection, not a pooler).")
-		process.exit(2)
-	}
-	const asJson = process.argv.includes("--json")
-
+const audit = async (databaseUrl: string, asJson: boolean): Promise<number> => {
 	const sql = postgres(databaseUrl, { max: 1, connect_timeout: 15, prepare: false })
 	const findings: Array<Finding> = []
 
@@ -166,7 +161,28 @@ const main = async (): Promise<void> => {
 		await sql.end()
 	}
 
-	process.exit(findings.length === 0 ? 0 : 1)
+	return findings.length
+}
+
+/**
+ * `DATABASE_URL` when one is supplied; otherwise the same ephemeral-credential
+ * broker the other PlanetScale scripts use, so running the audit needs no
+ * credential handling of its own — `pscale` mints one and revokes it after.
+ */
+const main = async (): Promise<void> => {
+	const asJson = process.argv.includes("--json")
+	const branch = process.argv.slice(2).find((arg) => !arg.startsWith("--")) ?? "main"
+	const databaseUrl = process.env.DATABASE_URL
+
+	let rejected = 0
+	if (databaseUrl !== undefined && databaseUrl !== "") {
+		rejected = await audit(databaseUrl, asJson)
+	} else {
+		await withBranchConnection(branch, async (connectionUrl) => {
+			rejected = await audit(connectionUrl, asJson)
+		})
+	}
+	process.exit(rejected === 0 ? 0 : 1)
 }
 
 // Importable for tests; only the direct invocation touches a database.
