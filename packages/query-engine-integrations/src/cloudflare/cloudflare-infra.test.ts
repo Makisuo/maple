@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	cloudflareWorkerCountersSQL,
 	cloudflareWorkerLatencySQL,
@@ -21,7 +21,7 @@ const timeseriesParams = { ...baseParams, bucketSeconds: 300 }
 
 describe("cloudflareZoneCountersSQL", () => {
 	it("rolls up HTTP counters per zone with 5xx and served-by-cache breakdowns", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneCountersSQL(), baseParams)
+		const { sql } = compileUnsafe(cloudflareZoneCountersSQL(), baseParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain(
@@ -38,14 +38,14 @@ describe("cloudflareZoneCountersSQL", () => {
 	})
 
 	it("escapes single quotes in orgId", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneCountersSQL(), { ...baseParams, orgId: "org'evil" })
+		const { sql } = compileUnsafe(cloudflareZoneCountersSQL(), { ...baseParams, orgId: "org'evil" })
 		expect(sql).toContain("OrgId = 'org\\'evil'")
 	})
 })
 
 describe("cloudflareZoneLatencySQL", () => {
 	it("guards each percentile against empty-set NaN and reads all three quantiles", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneLatencySQL(), baseParams)
+		const { sql } = compileUnsafe(cloudflareZoneLatencySQL(), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain(
 			"MetricName IN ('cloudflare.http.edge.ttfb', 'cloudflare.http.origin.duration')",
@@ -62,7 +62,7 @@ describe("cloudflareZoneLatencySQL", () => {
 
 describe("cloudflareZoneTimeseriesSQL", () => {
 	it("buckets zone counters by interval and orders for chart consumption", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneTimeseriesSQL(), timeseriesParams)
+		const { sql } = compileUnsafe(cloudflareZoneTimeseriesSQL(), timeseriesParams)
 		expect(sql).toContain("toStartOfInterval(TimeUnix, INTERVAL 300 SECOND)")
 		expect(sql).toContain("http.status_class'] = '5xx'")
 		expect(sql).toContain("GROUP BY serviceName, bucket")
@@ -75,7 +75,7 @@ const detailParams = { ...timeseriesParams, serviceName: "cloudflare/example.com
 
 describe("cloudflareZoneStatusTimeseriesSQL", () => {
 	it("groups one zone's requests by bucket and status class", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneStatusTimeseriesSQL(), detailParams)
+		const { sql } = compileUnsafe(cloudflareZoneStatusTimeseriesSQL(), detailParams)
 		expect(sql).toContain("ServiceName = 'cloudflare/example.com'")
 		expect(sql).toContain("MetricName = 'cloudflare.http.requests'")
 		expect(sql).toContain("http.status_class'] AS statusClass")
@@ -86,7 +86,7 @@ describe("cloudflareZoneStatusTimeseriesSQL", () => {
 
 describe("cloudflareZoneCacheTimeseriesSQL", () => {
 	it("groups one zone's requests by bucket and raw cache status", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneCacheTimeseriesSQL(), detailParams)
+		const { sql } = compileUnsafe(cloudflareZoneCacheTimeseriesSQL(), detailParams)
 		expect(sql).toContain("ServiceName = 'cloudflare/example.com'")
 		expect(sql).toContain("cache.status'] AS cacheStatus")
 		expect(sql).toContain("GROUP BY bucket, cacheStatus")
@@ -96,7 +96,7 @@ describe("cloudflareZoneCacheTimeseriesSQL", () => {
 
 describe("cloudflareZoneLatencyTimeseriesSQL", () => {
 	it("buckets NaN-guarded percentiles for one zone", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneLatencyTimeseriesSQL(), detailParams)
+		const { sql } = compileUnsafe(cloudflareZoneLatencyTimeseriesSQL(), detailParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain("ServiceName = 'cloudflare/example.com'")
 		expect(sql).toContain("quantile'] = '0.95'")
@@ -108,7 +108,7 @@ describe("cloudflareZoneLatencyTimeseriesSQL", () => {
 
 describe("cloudflareWorkerCountersSQL", () => {
 	it("rolls up Worker invocations / errors / subrequests per script", () => {
-		const { sql } = compileCHUnsafe(cloudflareWorkerCountersSQL(), baseParams)
+		const { sql } = compileUnsafe(cloudflareWorkerCountersSQL(), baseParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain(
 			"MetricName IN ('cloudflare.worker.requests', 'cloudflare.worker.errors', 'cloudflare.worker.subrequests')",
@@ -122,7 +122,7 @@ describe("cloudflareWorkerCountersSQL", () => {
 
 describe("cloudflareWorkerLatencySQL", () => {
 	it("reads only the quantiles the poller emits for Workers (0.5 / 0.99)", () => {
-		const { sql } = compileCHUnsafe(cloudflareWorkerLatencySQL(), baseParams)
+		const { sql } = compileUnsafe(cloudflareWorkerLatencySQL(), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain("MetricName IN ('cloudflare.worker.duration', 'cloudflare.worker.cpu_time')")
 		expect(sql).toContain("quantile'] = '0.5'")

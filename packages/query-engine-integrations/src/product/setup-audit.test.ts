@@ -1,7 +1,7 @@
 // BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, expect, it } from "vitest"
 import { Schema, Effect } from "effect"
-import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	auditAttributeKeyInventoryQuery,
 	auditAttributeKeyInventoryRowSchema,
@@ -32,14 +32,14 @@ const baseParams = {
 
 /** Compiled up front: the builders return differently-shaped queries, and only the SQL is compared. */
 const compiledQueries: ReadonlyArray<readonly [string, string]> = [
-	["auditAttributeKeyInventoryQuery", compileCHUnsafe(auditAttributeKeyInventoryQuery(), baseParams).sql],
-	["auditSpanShapeByServiceQuery", compileCHUnsafe(auditSpanProfileByServiceQuery(), baseParams).sql],
-	["auditSamplingByServiceQuery", compileCHUnsafe(auditSamplingByServiceQuery(), baseParams).sql],
-	["auditLogSeverityByServiceQuery", compileCHUnsafe(auditLogSeverityByServiceQuery(), baseParams).sql],
-	["auditMetricLabelCardinalityQuery", compileCHUnsafe(auditMetricLabelCardinalityQuery(), baseParams).sql],
-	["auditPeerValueInventoryQuery", compileCHUnsafe(auditPeerValueInventoryQuery(), baseParams).sql],
-	["auditDbEdgeIdentityQuery", compileCHUnsafe(auditDbEdgeIdentityQuery(), baseParams).sql],
-	["auditLogCorrelationQuery", compileCHUnsafe(auditLogCorrelationQuery(), baseParams).sql],
+	["auditAttributeKeyInventoryQuery", compileUnsafe(auditAttributeKeyInventoryQuery(), baseParams).sql],
+	["auditSpanShapeByServiceQuery", compileUnsafe(auditSpanProfileByServiceQuery(), baseParams).sql],
+	["auditSamplingByServiceQuery", compileUnsafe(auditSamplingByServiceQuery(), baseParams).sql],
+	["auditLogSeverityByServiceQuery", compileUnsafe(auditLogSeverityByServiceQuery(), baseParams).sql],
+	["auditMetricLabelCardinalityQuery", compileUnsafe(auditMetricLabelCardinalityQuery(), baseParams).sql],
+	["auditPeerValueInventoryQuery", compileUnsafe(auditPeerValueInventoryQuery(), baseParams).sql],
+	["auditDbEdgeIdentityQuery", compileUnsafe(auditDbEdgeIdentityQuery(), baseParams).sql],
+	["auditLogCorrelationQuery", compileUnsafe(auditLogCorrelationQuery(), baseParams).sql],
 ]
 
 describe("setup-audit query invariants", () => {
@@ -52,7 +52,7 @@ describe("setup-audit query invariants", () => {
 
 describe("auditAttributeKeyInventoryQuery", () => {
 	it("reads all four scopes in one grouped pass over the hourly rollup", () => {
-		const { sql } = compileCHUnsafe(auditAttributeKeyInventoryQuery(), baseParams)
+		const { sql } = compileUnsafe(auditAttributeKeyInventoryQuery(), baseParams)
 		expect(sql).toContain("FROM attribute_keys_hourly")
 		expect(sql).toContain("AttributeScope IN ('span', 'resource', 'log', 'metric')")
 		expect(sql).toContain("GROUP BY scope, attributeKey")
@@ -62,7 +62,7 @@ describe("auditAttributeKeyInventoryQuery", () => {
 
 describe("auditSpanShapeByServiceQuery", () => {
 	it("splits weighted counts by span kind and flags non-Title-Case literals", () => {
-		const { sql } = compileCHUnsafe(auditSpanProfileByServiceQuery(), baseParams)
+		const { sql } = compileUnsafe(auditSpanProfileByServiceQuery(), baseParams)
 		expect(sql).toContain("FROM traces_aggregates_hourly")
 		expect(sql).toContain("sumIf(WeightedCount, SpanKind = 'Server')")
 		expect(sql).toContain("sumIf(WeightedCount, DeploymentEnv = '')")
@@ -72,7 +72,7 @@ describe("auditSpanShapeByServiceQuery", () => {
 	})
 
 	it("snaps both window bounds to the hour so partial windows still match the rollup", () => {
-		const { sql } = compileCHUnsafe(auditSpanProfileByServiceQuery(), baseParams)
+		const { sql } = compileUnsafe(auditSpanProfileByServiceQuery(), baseParams)
 		expect(sql).toContain("Hour >= toStartOfHour(toDateTime('2024-01-01 00:00:00'))")
 		expect(sql).toContain("Hour <= toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
 	})
@@ -80,7 +80,7 @@ describe("auditSpanShapeByServiceQuery", () => {
 
 describe("auditSamplingByServiceQuery", () => {
 	it("returns raw and extrapolated counts separately rather than a ratio", () => {
-		const { sql } = compileCHUnsafe(auditSamplingByServiceQuery(), baseParams)
+		const { sql } = compileUnsafe(auditSamplingByServiceQuery(), baseParams)
 		expect(sql).toContain("FROM service_overview_hourly")
 		expect(sql).toContain("sum(SpanCount)")
 		expect(sql).toContain("sum(EstimatedSpanCount)")
@@ -92,7 +92,7 @@ describe("auditSamplingByServiceQuery", () => {
 
 describe("auditMetricLabelCardinalityQuery", () => {
 	it("uses approximate uniq so an exploded-label org cannot exhaust query memory", () => {
-		const { sql } = compileCHUnsafe(auditMetricLabelCardinalityQuery(), baseParams)
+		const { sql } = compileUnsafe(auditMetricLabelCardinalityQuery(), baseParams)
 		expect(sql).toContain("AttributeScope = 'metric'")
 		expect(sql).toContain("uniq(AttributeValue)")
 		expect(sql).not.toContain("uniqExact")
@@ -101,7 +101,7 @@ describe("auditMetricLabelCardinalityQuery", () => {
 
 describe("auditPeerValueInventoryQuery", () => {
 	it("restricts to the dependency-naming keys and drops empty values", () => {
-		const { sql } = compileCHUnsafe(auditPeerValueInventoryQuery(), baseParams)
+		const { sql } = compileUnsafe(auditPeerValueInventoryQuery(), baseParams)
 		expect(sql).toContain("AttributeScope = 'span'")
 		expect(sql).toContain(
 			"AttributeKey IN ('peer.service', 'db.system', 'db.system.name', 'messaging.system', 'rpc.system')",
@@ -113,7 +113,7 @@ describe("auditPeerValueInventoryQuery", () => {
 
 describe("auditDbEdgeIdentityQuery", () => {
 	it("counts calls whose database namespace is empty", () => {
-		const { sql } = compileCHUnsafe(auditDbEdgeIdentityQuery(), baseParams)
+		const { sql } = compileUnsafe(auditDbEdgeIdentityQuery(), baseParams)
 		expect(sql).toContain("FROM service_map_db_edges_hourly")
 		expect(sql).toContain("sumIf(CallCount, DbNamespace = '')")
 		expect(sql).toContain("DbSystem != ''")
@@ -122,7 +122,7 @@ describe("auditDbEdgeIdentityQuery", () => {
 
 describe("auditLogCorrelationQuery", () => {
 	it("reads narrow columns and prunes on both timestamp columns", () => {
-		const { sql } = compileCHUnsafe(auditLogCorrelationQuery(), baseParams)
+		const { sql } = compileUnsafe(auditLogCorrelationQuery(), baseParams)
 		expect(sql).toContain("FROM logs")
 		expect(sql).toContain("countIf(TraceId = '')")
 		expect(sql).toContain("countIf(upper(SeverityText) IN ('ERROR', 'FATAL'))")

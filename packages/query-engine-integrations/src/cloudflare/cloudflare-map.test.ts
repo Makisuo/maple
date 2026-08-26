@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import { cloudflareServiceCountersSQL, cloudflareServiceLatencySQL } from "./cloudflare-map"
 
 const baseParams = {
@@ -10,7 +10,7 @@ const baseParams = {
 
 describe("cloudflareServiceCountersSQL", () => {
 	it("aggregates Worker requests / errors per script over metrics_sum", () => {
-		const { sql } = compileCHUnsafe(cloudflareServiceCountersSQL(), baseParams)
+		const { sql } = compileUnsafe(cloudflareServiceCountersSQL(), baseParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("MetricName IN ('cloudflare.worker.requests', 'cloudflare.worker.errors')")
@@ -26,14 +26,14 @@ describe("cloudflareServiceCountersSQL", () => {
 	})
 
 	it("escapes single quotes in orgId", () => {
-		const { sql } = compileCHUnsafe(cloudflareServiceCountersSQL(), { ...baseParams, orgId: "org'evil" })
+		const { sql } = compileUnsafe(cloudflareServiceCountersSQL(), { ...baseParams, orgId: "org'evil" })
 		expect(sql).toContain("OrgId = 'org\\'evil'")
 	})
 })
 
 describe("cloudflareServiceLatencySQL", () => {
 	it("guards each percentile against empty-set NaN and reads metrics_gauge quantiles", () => {
-		const { sql } = compileCHUnsafe(cloudflareServiceLatencySQL(), baseParams)
+		const { sql } = compileUnsafe(cloudflareServiceLatencySQL(), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("MetricName IN ('cloudflare.worker.duration', 'cloudflare.worker.cpu_time')")

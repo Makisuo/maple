@@ -143,11 +143,10 @@ interface CompiledQueryBase<Output> {
 	 * decoded to a `DateTime.Utc` re-encodes to `'YYYY-MM-DD hh:mm:ss'`, not to
 	 * ISO-8601, because that is what the column's codec says the wire form is.
 	 *
-	 * Without this the only way to keep a wire stable was to never parse it,
-	 * which is why Maple's warehouse tables declare `T.dateTimeString`: the
-	 * strings survive only because nothing decodes them. A query whose row
-	 * schema is `"none"` has no codec to reverse, so this returns the rows
-	 * unchanged — the same contract `decodeRows` has.
+	 * Without this, keeping a wire byte-stable means never parsing it — which is
+	 * what `T.dateTimeString` is for, and why it exists. A query whose row schema
+	 * is `"none"` has no codec to reverse, so this returns the rows unchanged —
+	 * the same contract `decodeRows` has.
 	 */
 	// Method syntax, not a property with a function type, and deliberately:
 	// `Output` in a parameter position would make `CompiledQuery<Output>`
@@ -670,6 +669,44 @@ const deriveRowSchema = (
 	return untyped.length > 0 ? { untyped } : { schema: Schema.Struct(fields) }
 }
 
+/**
+ * Fold every branch's SELECT into one row schema, widening per column.
+ *
+ * All-or-nothing like the single-query case: one branch that cannot describe a
+ * column means the union cannot either. Identical schemas collapse rather than
+ * becoming a one-member union, so the common case — every branch selecting the
+ * same column type — costs nothing.
+ */
+const deriveUnionRowSchema = (
+	branches: ReadonlyArray<CHQuery<any, any, any>>,
+): { readonly schema: Schema.Codec<any, any> } | { readonly untyped: ReadonlyArray<string> } | undefined => {
+	if (branches.length === 0) return undefined
+
+	const perColumn = new Map<string, Array<Schema.Codec<any, any>>>()
+	const untyped = new Set<string>()
+	for (const branch of branches) {
+		const exprs = selectExprsOf(branch)
+		if (exprs === undefined) return undefined
+		for (const [alias, expr] of Object.entries(exprs)) {
+			const schema = (expr as { readonly schema?: Schema.Codec<any, any> } | null)?.schema
+			if (schema === undefined) {
+				untyped.add(alias)
+				continue
+			}
+			const seen = perColumn.get(alias) ?? []
+			if (!seen.includes(schema)) seen.push(schema)
+			perColumn.set(alias, seen)
+		}
+	}
+	if (untyped.size > 0) return { untyped: [...untyped] }
+
+	const fields: Record<string, Schema.Codec<any, any>> = {}
+	for (const [alias, schemas] of perColumn) {
+		fields[alias] = schemas.length === 1 ? schemas[0]! : Schema.Union(schemas)
+	}
+	return { schema: Schema.Struct(fields) }
+}
+
 // UNION ALL compilation
 
 export function compileUnionUnsafe<Output extends Record<string, any>, Params extends Record<string, any>>(
@@ -713,11 +750,13 @@ export function compileUnionUnsafe<Output extends Record<string, any>, Params ex
 		sql += `\nFORMAT ${state.formatValue}`
 	}
 
-	// A union decodes as its branches do — every branch shares one Output shape,
-	// so the first branch speaks for the rest.
-	const firstBranch = state.queries[0]
-	const branchExprs = firstBranch ? selectExprsOf(firstBranch) : undefined
-	const derived = branchExprs ? deriveRowSchema(branchExprs) : undefined
+	// A union decodes as its branches do — but not as its FIRST branch does.
+	// The branches share an Output *shape*, not a column type: ClickHouse widens
+	// across them, so a column that is `String` in one branch and nullable in
+	// another resolves to `Nullable(String)` for the whole union. Deriving from
+	// branch 0 alone produced a schema that rejected rows the query can really
+	// return.
+	const derived = deriveUnionRowSchema(state.queries)
 	const derivedSchema = derived && "schema" in derived ? derived.schema : undefined
 
 	return makeCompiledQuery<Output, undefined>(

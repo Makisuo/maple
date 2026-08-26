@@ -70,12 +70,15 @@ Compilation returns an `Effect` — a missing param or a value the column cannot
 `CH.compileUnsafe` where a throw is what you want.
 
 ```ts
-const compiled =
-	yield *
-	CH.compile(query, {
+const program = Effect.gen(function* () {
+	const compiled = yield* CH.compile(query, {
 		orgId: "org_123",
 		startTime: "2026-01-01 00:00:00",
 	})
+	return compiled
+})
+
+const compiled = await Effect.runPromise(program)
 
 compiled.sql
 // SELECT Name AS name, quantile(0.95)(DurationMs) AS p95, count() AS count
@@ -98,9 +101,7 @@ use, then hand the rows back for decoding:
 ```ts
 import { Effect, Schema } from "effect"
 
-const compiled =
-	yield *
-	CH.compile(query, params, {
+const compiled = CH.compileUnsafe(query, params, {
 		rowSchema: Schema.Struct({
 			name: Schema.String,
 			count: Schema.Number,

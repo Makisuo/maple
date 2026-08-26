@@ -39,7 +39,7 @@ export type RawSqlReason =
 	/**
 	 * A `UNION ALL` of one builder compiled over two different parameter sets
 	 * (a current and a previous window, say). Params are substituted once,
-	 * across the whole query, at the end of `compileCH` — so a single `CHQuery`
+	 * across the whole query, at the end of `compile` — so a single `CHQuery`
 	 * cannot carry two of them, and `unionAll` cannot express this.
 	 *
 	 * Scope must still be *derived* from the compiled branches rather than

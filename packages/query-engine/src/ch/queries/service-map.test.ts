@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
-import { compileCHUnsafe, param, toDateTime } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe, param, toDateTime } from "@maple-dev/clickhouse-builder"
 import {
 	serviceDbEdgesSQL,
 	serviceDbEdgesForServiceQuery,
@@ -353,7 +353,7 @@ describe("serviceMapEdgeJoinQuery", () => {
 	})
 
 	it("pushes a source-service filter into the parent subquery, not the outer WHERE", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceMapEdgeJoinQuery({
 				rangeStart: toDateTime(param.dateTimeString("hourStart")),
 				rangeEnd: toDateTime(param.dateTimeString("hourEnd")),
@@ -369,21 +369,18 @@ describe("serviceMapEdgeJoinQuery", () => {
 
 describe("serviceDependenciesForServiceQuery", () => {
 	it("keeps partial start and end hours outside the hourly rollup", () => {
-		const { sql } = compileCHUnsafe(
-			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
-			{
-				orgId: "org_1",
-				startTime: "2024-01-01 10:15:00",
-				endTime: "2024-01-01 12:30:00",
-			},
-		)
+		const { sql } = compileUnsafe(serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }), {
+			orgId: "org_1",
+			startTime: "2024-01-01 10:15:00",
+			endTime: "2024-01-01 12:30:00",
+		})
 		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 10:15:00')")
 		expect(sql).toContain("addHours(toStartOfHour(toDateTime('2024-01-01 10:15:00')), 1)")
 		expect(sql).toContain("greatest(least(")
 	})
 
 	it("filters SourceService on the hourly branch", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -392,7 +389,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("pushes parent ServiceName into the live topology JOIN's left subquery", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -407,7 +404,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("unions hourly MV with the in-progress-hour topology JOIN", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -417,7 +414,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("threads deploymentEnv through both branches (hourly + parent + child)", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({
 				serviceName: "artifacts-api",
 				deploymentEnv: "production",
@@ -430,7 +427,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("orders by callCount desc, limits to 200, formats as JSON", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -440,7 +437,7 @@ describe("serviceDependenciesForServiceQuery", () => {
 	})
 
 	it("escapes single quotes in serviceName to prevent SQL injection", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDependenciesForServiceQuery({ serviceName: "weird'service" }),
 			baseParams,
 		)
@@ -503,7 +500,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("filters ServiceName on both branches (hourly MV + raw traces)", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -513,7 +510,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("unions service_map_db_edges_hourly with raw traces for the in-progress hour", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -524,7 +521,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("restricts the raw branch to Client/Producer spans with a db system set (stable + legacy)", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -536,7 +533,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("carries dbNamespace on both branches so distinct databases split", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -550,7 +547,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("threads deploymentEnv through both branches", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDbEdgesForServiceQuery({
 				serviceName: "artifacts-api",
 				deploymentEnv: "production",
@@ -564,7 +561,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("orders by callCount desc, limits to 200, formats as JSON", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }),
 			baseParams,
 		)
@@ -574,7 +571,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 	})
 
 	it("escapes single quotes in serviceName to prevent SQL injection", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			serviceDbEdgesForServiceQuery({ serviceName: "weird'service" }),
 			baseParams,
 		)

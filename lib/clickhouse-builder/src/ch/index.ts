@@ -212,9 +212,9 @@ export {
 
 // Compilation
 export {
-	compileCH,
+	// `compileCH` / `compileCHUnsafe` are the internal names; the public API is
+	// four, not six — `compile`/`compileUnion` and their `Unsafe` counterparts.
 	compileCH as compile,
-	compileCHUnsafe,
 	compileCHUnsafe as compileUnsafe,
 	compileUnion,
 	compileUnionUnsafe,

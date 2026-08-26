@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	planetscaleBranchInfraTimeseriesSQL,
 	planetscaleInfraTimeseriesRowSchema,
@@ -9,7 +9,7 @@ import {
 
 describe("planetscaleInfraTimeseriesSQL", () => {
 	it("buckets per-timestamp totals for one database", () => {
-		const { sql } = compileCHUnsafe(planetscaleInfraTimeseriesSQL(), {
+		const { sql } = compileUnsafe(planetscaleInfraTimeseriesSQL(), {
 			orgId: "org_1",
 			startTime: "2026-07-02 00:00:00.000",
 			endTime: "2026-07-03 00:00:00.000",
@@ -31,7 +31,7 @@ describe("planetscaleInfraTimeseriesSQL", () => {
 	})
 
 	it("decodes ClickHouse numeric strings through the row schema", () => {
-		const compiled = compileCHUnsafe(
+		const compiled = compileUnsafe(
 			planetscaleInfraTimeseriesSQL(),
 			{
 				orgId: "org_1",
@@ -71,7 +71,7 @@ describe("planetscaleInfraTimeseriesSQL", () => {
 	})
 
 	it("aggregates volume gauges without counting unsampled buckets as full", () => {
-		const { sql } = compileCHUnsafe(planetscaleInfraTimeseriesSQL(), {
+		const { sql } = compileUnsafe(planetscaleInfraTimeseriesSQL(), {
 			orgId: "org_1",
 			startTime: "2026-07-02 00:00:00.000",
 			endTime: "2026-07-03 00:00:00.000",
@@ -90,7 +90,7 @@ describe("planetscaleInfraTimeseriesSQL", () => {
 
 describe("planetscaleBranchInfraTimeseriesSQL", () => {
 	it("scopes the same rollup to a single branch", () => {
-		const { sql } = compileCHUnsafe(planetscaleBranchInfraTimeseriesSQL(), {
+		const { sql } = compileUnsafe(planetscaleBranchInfraTimeseriesSQL(), {
 			orgId: "org_1",
 			startTime: "2026-07-02 00:00:00.000",
 			endTime: "2026-07-03 00:00:00.000",

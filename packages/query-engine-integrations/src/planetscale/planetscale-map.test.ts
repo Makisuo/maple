@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	planetscaleBranchConnectionsRowSchema,
 	planetscaleBranchConnectionsSQL,
@@ -20,7 +20,7 @@ const baseParams = {
 
 describe("planetscaleGaugesSQL", () => {
 	it("rolls up CPU/memory/replica-lag maxima per database over metrics_gauge", () => {
-		const { sql } = compileCHUnsafe(planetscaleGaugesSQL(), baseParams)
+		const { sql } = compileUnsafe(planetscaleGaugesSQL(), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("maxIf(Value, MetricName IN ('planetscale_pods_cpu_util_percentages'))")
@@ -38,7 +38,7 @@ describe("planetscaleGaugesSQL", () => {
 	})
 
 	it("adds the branch grouping (and database filter) for the detail panel", () => {
-		const { sql } = compileCHUnsafe(planetscaleBranchGaugesSQL(), {
+		const { sql } = compileUnsafe(planetscaleBranchGaugesSQL(), {
 			...baseParams,
 			database: "main-db",
 		})
@@ -52,14 +52,14 @@ describe("planetscaleGaugesSQL", () => {
 	})
 
 	it("escapes single quotes in orgId", () => {
-		const { sql } = compileCHUnsafe(planetscaleGaugesSQL(), { ...baseParams, orgId: "org'evil" })
+		const { sql } = compileUnsafe(planetscaleGaugesSQL(), { ...baseParams, orgId: "org'evil" })
 		expect(sql).toContain("OrgId = 'org\\'evil'")
 	})
 })
 
 describe("planetscaleConnectionsSQL", () => {
 	it("sums connection series per timestamp before averaging over the window", () => {
-		const { sql } = compileCHUnsafe(planetscaleConnectionsSQL(), baseParams)
+		const { sql } = compileUnsafe(planetscaleConnectionsSQL(), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain("planetscale_edge_active_connections")
 		expect(sql).toContain("planetscale_edge_postgres_active_connections")
@@ -71,7 +71,7 @@ describe("planetscaleConnectionsSQL", () => {
 	})
 
 	it("supports the per-branch breakdown", () => {
-		const { sql } = compileCHUnsafe(planetscaleBranchConnectionsSQL(), {
+		const { sql } = compileUnsafe(planetscaleBranchConnectionsSQL(), {
 			...baseParams,
 			database: "main-db",
 		})
@@ -82,18 +82,18 @@ describe("planetscaleConnectionsSQL", () => {
 
 describe("PlanetScale map row schemas", () => {
 	it("decode ClickHouse numeric strings for database and branch outputs", () => {
-		const databaseStats = compileCHUnsafe(planetscaleGaugesSQL(), baseParams, {
+		const databaseStats = compileUnsafe(planetscaleGaugesSQL(), baseParams, {
 			rowSchema: planetscaleDatabaseStatsRowSchema,
 		})
-		const branchStats = compileCHUnsafe(
+		const branchStats = compileUnsafe(
 			planetscaleBranchGaugesSQL(),
 			{ ...baseParams, database: "main-db" },
 			{ rowSchema: planetscaleBranchStatsRowSchema },
 		)
-		const connections = compileCHUnsafe(planetscaleConnectionsSQL(), baseParams, {
+		const connections = compileUnsafe(planetscaleConnectionsSQL(), baseParams, {
 			rowSchema: planetscaleConnectionsRowSchema,
 		})
-		const branchConnections = compileCHUnsafe(
+		const branchConnections = compileUnsafe(
 			planetscaleBranchConnectionsSQL(),
 			{ ...baseParams, database: "main-db" },
 			{ rowSchema: planetscaleBranchConnectionsRowSchema },

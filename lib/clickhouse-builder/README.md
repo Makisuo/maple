@@ -69,7 +69,7 @@ const query = CH.from(Events)
 	.limit(50)
 
 // 3. Compile to SQL (params resolved, literals escaped)
-const compiled = CH.compile(query, {
+const compiled = CH.compileUnsafe(query, {
 	orgId: "org_123",
 	startTime: "2026-01-01 00:00:00",
 })
@@ -86,7 +86,7 @@ a `Schema`, so the SELECT already describes its own rows:
 ```ts
 import { Effect } from "effect"
 
-const compiled = CH.compile(query, { orgId: "org_123", startTime: "2026-01-01 00:00:00" })
+const compiled = CH.compileUnsafe(query, { orgId: "org_123", startTime: "2026-01-01 00:00:00" })
 
 compiled.rowSchemaSource // "derived"
 const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))

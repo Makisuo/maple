@@ -81,8 +81,10 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 | Export                  | Signature                                                                     |
 | ----------------------- | ----------------------------------------------------------------------------- |
-| `compile` / `compileCH` | `(query, params, options?) => CompiledQuery<Output>`                          |
-| `compileUnion`          | `(union, params, options?) => CompiledQuery<Output>`                          |
+| `compile`             | `(query, params, options?) => Effect<CompiledQuery<Output>, QueryBuilderError>` |
+| `compileUnsafe`       | The same, returning `CompiledQuery<Output>` and throwing instead                |
+| `compileUnion`        | `(union, params, options?) => Effect<CompiledQuery<Output>, QueryBuilderError>` |
+| `compileUnionUnsafe`  | The same, throwing instead                                                      |
 | `unsafeCompiledQuery`   | `({ sql, tenantScope, reason, note, rowSchema?, routing? }) => CompiledQuery` |
 
 ### Params

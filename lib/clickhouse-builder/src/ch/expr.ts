@@ -6,7 +6,7 @@
 // Typed expressions that compile to SqlFragment. Every Expr<T> carries a
 // phantom TSType so TypeScript can infer output row types from SELECT clauses.
 
-import { DateTime, type Schema } from "effect"
+import { DateTime, Result, Schema } from "effect"
 import type { SqlFragment } from "../sql/sql-fragment"
 import { raw, str, compile, as_ as sqlAs } from "../sql/sql-fragment"
 import { chDateTimeLiteral, CHNumber, string as chString, type CHType, type InferTS } from "./types"
@@ -129,12 +129,33 @@ export function toFragment(value: unknown): SqlFragment {
 
 // Expr implementation
 
-/** `lhs <op> rhs` as a numeric expression — see the note on `div` below. */
-const arith = (lhs: SqlFragment, op: string, rhs: number | Expr<number>): Expr<number> =>
-	makeExpr<number>(
+/** Whether a codec accepts `null` — asked, not inferred from its AST, so it
+ *  stays right across Effect versions and across `T.custom` schemas. */
+const acceptsNull = (schema: Schema.Codec<any, any> | undefined): boolean =>
+	schema !== undefined && Result.isSuccess(Schema.decodeUnknownResult(schema)(null))
+
+/**
+ * `lhs <op> rhs` as a numeric expression — see the note on `div` below.
+ *
+ * A NULL operand makes the whole expression NULL in ClickHouse, so the result
+ * decodes nullably when either side does. `CH.sum(x).div(CH.nullIf(CH.sum(y), 0))`
+ * — the standard "average, or nothing when the denominator is zero" — is exactly
+ * this shape, and a flat `CHNumber` here rejected the NULL it was written to
+ * produce.
+ */
+const arith = (
+	lhs: SqlFragment,
+	op: string,
+	rhs: number | Expr<number>,
+	lhsSchema?: Schema.Codec<any, any>,
+): Expr<number> => {
+	const rhsSchema = typeof rhs === "number" ? undefined : rhs.schema
+	const nullable = acceptsNull(lhsSchema) || acceptsNull(rhsSchema)
+	return makeExpr<number>(
 		raw(`${compile(lhs)} ${op} ${compile(toFragment(rhs))}`),
-		CHNumber as Schema.Codec<number, any>,
+		(nullable ? Schema.NullOr(CHNumber) : CHNumber) as Schema.Codec<number, any>,
 	)
+}
 
 export function makeExpr<T>(
 	fragment: SqlFragment,
@@ -187,11 +208,11 @@ export function makeExpr<T>(
 		// ClickHouse promotes across the arithmetic operators (`UInt64 / UInt64`
 		// is a Float64), and `CHNumber` is the one codec that reads every numeric
 		// wire form either backend can send.
-		div: (n: number | Expr<number>) => arith(fragment, "/", n),
-		mul: (n: number | Expr<number>) => arith(fragment, "*", n),
-		add: (n: number | Expr<number>) => arith(fragment, "+", n),
-		sub: (n: number | Expr<number>) => arith(fragment, "-", n),
-		mod: (n: number | Expr<number>) => arith(fragment, "%", n),
+		div: (n: number | Expr<number>) => arith(fragment, "/", n, schema),
+		mul: (n: number | Expr<number>) => arith(fragment, "*", n, schema),
+		add: (n: number | Expr<number>) => arith(fragment, "+", n, schema),
+		sub: (n: number | Expr<number>) => arith(fragment, "-", n, schema),
+		mod: (n: number | Expr<number>) => arith(fragment, "%", n, schema),
 	}
 	return self
 }
@@ -271,8 +292,8 @@ export function lit(value: string): Expr<string>
 export function lit(value: number): Expr<number>
 export function lit(value: string | number): Expr<string> | Expr<number> {
 	// A literal knows its own type, so it carries the matching codec. Without one
-	// a single `CH.lit("all")` in a SELECT cost the whole query its row schema —
-	// which is what it did across 200 selected expressions in Maple.
+	// a single `CH.lit("all")` in a SELECT costs the whole query its row schema,
+	// since derivation is all-or-nothing.
 	if (typeof value === "string") return makeExpr<string>(str(value), chString.schema)
 	return makeExpr<number>(raw(String(value)), CHNumber as Schema.Codec<number, any>)
 }
@@ -316,12 +337,11 @@ export function not(condition: Condition): Condition {
 /**
  * SQL the builder cannot express, as an expression of a declared type.
  *
- * The type is required. It used to be optional, and optional is how 90 raw
- * expressions across Maple ended up carrying a TypeScript type nothing checked:
- * `rawExpr<number>("sum(x)")` told the compiler the column was a number and told
- * the runtime nothing, so a `UInt64` arriving quoted reached a `Schema.Number`
- * several layers downstream. Declaring `T.float64` costs one argument and makes
- * both directions agree.
+ * The type is required. Optional is how a raw expression ends up carrying a
+ * TypeScript type nothing checks: `rawExpr<number>("sum(x)")` tells the compiler
+ * the column is a number and tells the runtime nothing, so a `UInt64` arriving
+ * quoted reaches a `Schema.Number` several layers downstream. Declaring
+ * `T.float64` costs one argument and makes both directions agree.
  *
  * For SQL whose result genuinely has no type to declare — a sort tuple that is
  * only ever an argument, never a selected value — use {@link untypedExpr}, which
@@ -336,8 +356,9 @@ export function rawExpr<T>(sql: string, type: CHType<string, T, any>): Expr<T> {
  *
  * Deliberately separate from {@link rawExpr} and deliberately awkward to reach
  * for: selecting one costs the whole query its derived row schema, so the query
- * decodes nothing. That is visible rather than silent — the SQL catalog asserts
- * an exact list of queries that decode nothing, so a new one fails the build.
+ * decodes nothing. `CompiledQuery.rowSchemaSource` reports that as `"none"` and
+ * `untypedColumns` names the aliases responsible, so a codebase that cares can
+ * assert on it.
  *
  * The legitimate use is a value that never becomes a row: an `ORDER BY` key, an
  * `argMin` tiebreaker, a tuple compared against another tuple.

@@ -178,9 +178,10 @@ describe("docs/tables-and-types.md", () => {
 		)
 	})
 
-	it("Types outside the curated barrel come from /types", () => {
-		// `uint16`/`uint32`/`int32`/`bool` are not re-exported from the root
-		// entry point — the docs say to reach for `/types` for these.
+	it("Column types come from /types as a namespace", () => {
+		// The docs tell you to `import * as T from ".../types"`. Every constructor
+		// is on the root barrel too — this asserts the namespace form the docs
+		// actually show, which is the one that has to keep working.
 		const Counters = CH.table(
 			"counters",
 			{ OrgId: T.string, Hits: T.uint16, Live: T.bool },

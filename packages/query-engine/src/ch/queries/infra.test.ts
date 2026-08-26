@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import { compileUnionUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	listHostsQuery,
@@ -28,7 +28,7 @@ const baseParams = {
 
 describe("listHostsQuery (sanity)", () => {
 	it("compiles with required filters", () => {
-		const { sql } = compileCHUnsafe(listHostsQuery({}), baseParams)
+		const { sql } = compileUnsafe(listHostsQuery({}), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("ResourceAttributes['host.name']")
@@ -38,7 +38,7 @@ describe("listHostsQuery (sanity)", () => {
 
 describe("hostDetailSummaryQuery (sanity)", () => {
 	it("filters by hostName", () => {
-		const { sql } = compileCHUnsafe(hostDetailSummaryQuery({ hostName: "host-1" }), baseParams)
+		const { sql } = compileUnsafe(hostDetailSummaryQuery({ hostName: "host-1" }), baseParams)
 		expect(sql).toContain("ResourceAttributes['host.name']")
 		expect(sql).toContain("'host-1'")
 	})
@@ -46,7 +46,7 @@ describe("hostDetailSummaryQuery (sanity)", () => {
 
 describe("listPodsQuery", () => {
 	it("compiles with required filters and pod metric whitelist", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({}), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({}), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("ResourceAttributes['k8s.pod.name']")
@@ -61,7 +61,7 @@ describe("listPodsQuery", () => {
 	})
 
 	it("defaults to worst-first: peak saturation, then peak CPU for unlimited pods", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({}), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({}), baseParams)
 		expect(sql).toContain(
 			"greatest(maxIf(Value, MetricName = 'k8s.pod.cpu_limit_utilization'), maxIf(Value, MetricName = 'k8s.pod.memory_limit_utilization')) AS saturation",
 		)
@@ -70,25 +70,25 @@ describe("listPodsQuery", () => {
 	})
 
 	it("selects peaks alongside averages so a row can show avg → peak", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({}), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({}), baseParams)
 		expect(sql).toContain("avgIf(Value, MetricName = 'k8s.pod.cpu.usage') AS cpuUsage")
 		expect(sql).toContain("maxIf(Value, MetricName = 'k8s.pod.cpu.usage') AS cpuUsagePeak")
 	})
 
 	it("honours an explicit sort key and never drops the tiebreak", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({ sortBy: "cpuUsage", sortDir: "asc" }), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({ sortBy: "cpuUsage", sortDir: "asc" }), baseParams)
 		expect(sql).toContain("ORDER BY cpuUsage ASC, cpuUsagePeak DESC, podName ASC")
 	})
 
 	it("does not repeat the sort key in the tiebreak", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({ sortBy: "podName" }), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({ sortBy: "podName" }), baseParams)
 		// podName defaults to ascending and must appear exactly once.
 		expect(sql).toContain("ORDER BY podName ASC, cpuUsagePeak DESC")
 		expect(sql.match(/podName (ASC|DESC)/g)).toHaveLength(1)
 	})
 
 	it("applies search and single-node legacy filters", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			listPodsQuery({
 				search: "auth",
 				namespaces: ["prod"],
@@ -103,7 +103,7 @@ describe("listPodsQuery", () => {
 	})
 
 	it("applies multi-value array filters with IN clauses", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			listPodsQuery({
 				namespaces: ["prod", "stage"],
 				nodeNames: ["node-1", "node-2"],
@@ -126,7 +126,7 @@ describe("listPodsQuery", () => {
 	})
 
 	it("filters by pod, statefulset, daemonset, and job names when arrays present", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			listPodsQuery({
 				podNames: ["pod-a"],
 				statefulsets: ["sts-x"],
@@ -142,7 +142,7 @@ describe("listPodsQuery", () => {
 	})
 
 	it("applies workload filter when both kind+name supplied (legacy)", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			listPodsQuery({
 				workloadKind: "deployment",
 				workloadName: "checkout",
@@ -154,31 +154,31 @@ describe("listPodsQuery", () => {
 	})
 
 	it("respects custom limit/offset", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({ limit: 50, offset: 25 }), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({ limit: 50, offset: 25 }), baseParams)
 		expect(sql).toContain("LIMIT 50")
 		expect(sql).toContain("OFFSET 25")
 	})
 
 	// Scopes filter on aggregates, which a WHERE over raw rows cannot express.
 	it("filters the saturated scope outside the grouping", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({ scope: "saturated" }), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({ scope: "saturated" }), baseParams)
 		expect(sql).toContain("GROUP BY podName) AS pods")
 		expect(sql).toContain("WHERE saturation >= 0.9")
 	})
 
 	it("treats a pod with no limit metrics as unbounded, not as healthy", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({ scope: "unbounded" }), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({ scope: "unbounded" }), baseParams)
 		expect(sql).toContain("WHERE (saturation = 0 AND cpuUsagePeak > 0)")
 	})
 
 	it("scopes stale pods relative to the window end, not wall-clock now", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({ scope: "stale" }), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({ scope: "stale" }), baseParams)
 		expect(sql).toContain("WHERE lastSeen < '2024-01-02 00:00:00' - INTERVAL 300 SECOND")
 		expect(sql).not.toMatch(/__PARAM_\w+__/)
 	})
 
 	it("emits no scope predicate when none is asked for", () => {
-		const { sql } = compileCHUnsafe(listPodsQuery({}), baseParams)
+		const { sql } = compileUnsafe(listPodsQuery({}), baseParams)
 		expect(sql).not.toContain("saturation >= 0.9")
 		expect(sql).not.toContain("cpuUsagePeak > 0")
 	})
@@ -186,7 +186,7 @@ describe("listPodsQuery", () => {
 
 describe("listPodsSummaryQuery", () => {
 	it("aggregates per pod first so the band counts are exact, not HLL estimates", () => {
-		const { sql } = compileCHUnsafe(listPodsSummaryQuery({}), baseParams)
+		const { sql } = compileUnsafe(listPodsSummaryQuery({}), baseParams)
 		expect(sql).toContain("GROUP BY podName")
 		expect(sql).toContain("count() AS totalPods")
 		expect(sql).toContain("countIf(saturation >= 0.9) AS saturatedPods")
@@ -196,7 +196,7 @@ describe("listPodsSummaryQuery", () => {
 	})
 
 	it("counts unbounded pods as burning CPU with no limit samples at all", () => {
-		const { sql } = compileCHUnsafe(listPodsSummaryQuery({}), baseParams)
+		const { sql } = compileUnsafe(listPodsSummaryQuery({}), baseParams)
 		expect(sql).toContain("countIf((limitSamples = 0 AND cpuUsagePeak > 0)) AS unboundedPods")
 	})
 
@@ -204,7 +204,7 @@ describe("listPodsSummaryQuery", () => {
 	// show what the row filters excluded, but the query itself accepts the full
 	// filter set so callers that do want an exact match can ask for one.
 	it("accepts the same filter set as the list", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			listPodsSummaryQuery({ namespaces: ["payments"], search: "api" }),
 			baseParams,
 		)
@@ -249,7 +249,7 @@ describe("podFacetsQuery", () => {
 
 describe("podDetailSummaryQuery", () => {
 	it("filters by pod name and aggregates request+limit utilization", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			podDetailSummaryQuery({ podName: "pod-xyz", namespace: "prod" }),
 			baseParams,
 		)
@@ -262,7 +262,7 @@ describe("podDetailSummaryQuery", () => {
 
 describe("podGaugeTimeseriesQuery", () => {
 	it("buckets by toStartOfInterval and filters by metric name", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			podGaugeTimeseriesQuery({
 				podName: "pod-xyz",
 				metricName: "k8s.pod.cpu.usage",
@@ -277,7 +277,7 @@ describe("podGaugeTimeseriesQuery", () => {
 
 describe("listNodesQuery", () => {
 	it("filters out pod-scoped rows so node aggregates are clean", () => {
-		const { sql } = compileCHUnsafe(listNodesQuery({}), baseParams)
+		const { sql } = compileUnsafe(listNodesQuery({}), baseParams)
 		expect(sql).toContain("ResourceAttributes['k8s.node.name']")
 		expect(sql).toContain("ResourceAttributes['k8s.pod.name'] = ''")
 		expect(sql).toContain("k8s.node.cpu.usage")
@@ -286,7 +286,7 @@ describe("listNodesQuery", () => {
 	})
 
 	it("applies cluster/environment array filters", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			listNodesQuery({
 				clusters: ["c1", "c2"],
 				environments: ["production"],
@@ -320,7 +320,7 @@ describe("nodeFacetsQuery", () => {
 
 describe("nodeDetailSummaryQuery", () => {
 	it("filters by node name", () => {
-		const { sql } = compileCHUnsafe(nodeDetailSummaryQuery({ nodeName: "node-7" }), baseParams)
+		const { sql } = compileUnsafe(nodeDetailSummaryQuery({ nodeName: "node-7" }), baseParams)
 		expect(sql).toContain("'node-7'")
 		expect(sql).toContain("ResourceAttributes['k8s.pod.name'] = ''")
 	})
@@ -328,7 +328,7 @@ describe("nodeDetailSummaryQuery", () => {
 
 describe("nodeGaugeTimeseriesQuery", () => {
 	it("compiles bucketed node timeseries", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			nodeGaugeTimeseriesQuery({
 				nodeName: "node-7",
 				metricName: "k8s.node.cpu.usage",
@@ -345,20 +345,20 @@ describe("nodeGaugeTimeseriesQuery", () => {
 
 describe("listWorkloadsQuery", () => {
 	it("groups by k8s.deployment.name when kind = deployment", () => {
-		const { sql } = compileCHUnsafe(listWorkloadsQuery({ kind: "deployment" }), baseParams)
+		const { sql } = compileUnsafe(listWorkloadsQuery({ kind: "deployment" }), baseParams)
 		expect(sql).toContain("ResourceAttributes['k8s.deployment.name']")
 		expect(sql).toContain("uniq")
 	})
 
 	it("uses the right attribute for statefulset and daemonset", () => {
-		const sts = compileCHUnsafe(listWorkloadsQuery({ kind: "statefulset" }), baseParams).sql
+		const sts = compileUnsafe(listWorkloadsQuery({ kind: "statefulset" }), baseParams).sql
 		expect(sts).toContain("ResourceAttributes['k8s.statefulset.name']")
-		const ds = compileCHUnsafe(listWorkloadsQuery({ kind: "daemonset" }), baseParams).sql
+		const ds = compileUnsafe(listWorkloadsQuery({ kind: "daemonset" }), baseParams).sql
 		expect(ds).toContain("ResourceAttributes['k8s.daemonset.name']")
 	})
 
 	it("applies workloadNames + namespaces + clusters filters", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			listWorkloadsQuery({
 				kind: "deployment",
 				workloadNames: ["api"],
@@ -398,7 +398,7 @@ describe("workloadFacetsQuery", () => {
 
 describe("workloadDetailSummaryQuery", () => {
 	it("filters by workload name and namespace", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			workloadDetailSummaryQuery({
 				kind: "deployment",
 				workloadName: "checkout",
@@ -413,7 +413,7 @@ describe("workloadDetailSummaryQuery", () => {
 
 describe("workloadGaugeTimeseriesQuery", () => {
 	it("includes per-pod breakdown when groupByPod = true", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			workloadGaugeTimeseriesQuery({
 				kind: "deployment",
 				workloadName: "checkout",
@@ -427,7 +427,7 @@ describe("workloadGaugeTimeseriesQuery", () => {
 	})
 
 	it("aggregates across pods when groupByPod = false", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			workloadGaugeTimeseriesQuery({
 				kind: "deployment",
 				workloadName: "checkout",

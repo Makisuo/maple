@@ -63,11 +63,11 @@ correctly to a `DateTime.Utc`. Use `T.dateTimeString` when the row is being forw
 of its own and re-serializing the timestamp would change what your clients receive; the date
 functions preserve whichever flavour they are given.
 
-> **Not every constructor is on the root barrel.** `T.uint16`, `T.uint32`, `T.int32`, and
-> `T.unknown` are reachable only through `@maple-dev/clickhouse-builder/types`. Importing the
-> whole namespace as `T` — as above — is the simplest way to avoid the distinction entirely.
+> **Import the namespace.** Every constructor is on the root barrel too, but
+> `import * as T from "@maple-dev/clickhouse-builder/types"` — as above — reads better than
+> `CH.string` and keeps column types visually distinct from the query DSL.
 
-_(Backed by `docs/tables-and-types.md > Types outside the curated barrel come from /types`.)_
+_(Backed by `docs/tables-and-types.md > Column types come from /types as a namespace`.)_
 
 ## `InferTS`
 
@@ -98,7 +98,7 @@ const query = CH.from(Events)
 // SELECT Attributes['http.method'] AS method FROM events WHERE OrgId = 'org_123'
 ```
 
-`.get()` always yields `Expr<string>`. For the other map operations — `mapContains`,
+`.get()` yields the map's *value* type — `Expr<string>` for a `Map(String, String)`, `Expr<number>` for a `Map(String, UInt64)`. For the other map operations — `mapContains`,
 `mapKeys`, `mapValues`, `mapGet`, `mapLiteral` — see the
 [API reference](./reference.md#map).
 

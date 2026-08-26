@@ -45,6 +45,10 @@ const anyLast = CH.defineFn<[CH.Expr<string>], string>("anyLast", CH.sameAs(0))
 
 Any function of your own works: the rule is `(...args) => Schema.Codec | undefined`.
 
+A rule is an *assertion*, the same way `rawExpr`'s type is: nothing checks that `sameAs(0)` on a
+function you declared as returning a `number` actually yields one. Declare the rule that matches
+what ClickHouse does.
+
 ### `defineCondFn` — for predicates
 
 Same, but returning a `Condition` so it can go straight into `where`:
@@ -52,6 +56,8 @@ Same, but returning a `Condition` so it can go straight into `where`:
 ```ts
 const matchesRegex = CH.defineCondFn<[CH.Expr<string>, string]>("match")
 
+CH.from(Events)
+	.select(($) => ({ name: $.Name }))
 	.where(($) => [$.OrgId.eq("org_123"), matchesRegex($.Name, "^checkout")])
 // match(Name, '^checkout')
 ```
@@ -80,12 +86,15 @@ import { makeExpr } from "@maple-dev/clickhouse-builder"
 import { raw, compile } from "@maple-dev/clickhouse-builder/sql"
 
 const quantileExact = (q: number) => (expr: CH.Expr<number>) =>
-	makeExpr<number>(raw(`quantileExact(${q})(${compile(expr.toFragment())})`))
+	makeExpr<number>(raw(`quantileExact(${q})(${compile(expr.toFragment())})`), T.float64.schema)
 ```
 
-This is how the bundled `quantile` is built. You are now assembling SQL text: interpolate only
-values you control, and route anything user-supplied through `str()` from the `/sql` subpath so
-it gets escaped.
+This is how the bundled `quantile` is built. Note the second argument: `makeExpr`'s schema is
+optional for the rare expression that has no type, and leaving it off is the last remaining way
+to silently cost a query its row schema. Pass it.
+
+You are now assembling SQL text: interpolate only values you control, and route anything
+user-supplied through `str()` from the `/sql` subpath so it gets escaped.
 
 ## A column type of your own
 

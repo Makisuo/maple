@@ -127,7 +127,7 @@ _(Backed by `docs/tenant-scoping.md > crossTenant() is the explicit opt-out`.)_
 ## `routing(tag)`
 
 ```ts
-const compiled = CH.compile(CH.from(Events).select(…).routing("archive"), params)
+const compiled = CH.compileUnsafe(CH.from(Events).select(…).routing("archive"), params)
 compiled.routing // "archive"
 ```
 

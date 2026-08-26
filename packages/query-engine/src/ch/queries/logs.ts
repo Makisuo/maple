@@ -2,7 +2,7 @@
 //
 // DSL-based query definitions for logs timeseries and breakdown.
 
-import { compileCHUnsafe, compileFnCall } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe, compileFnCall } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromUnion, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
@@ -580,7 +580,7 @@ export function logsListQuery(opts: LogsListOpts) {
 		.where(baseWhere)
 		.orderBy(["ts", "desc"])
 		.limit(limit + offset)
-	const cutoffSql = compileCHUnsafe(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
+	const cutoffSql = compileUnsafe(cutoffInner, {}, { skipFormat: true, deferParams: true }).sql
 	const cutoff = CH.rawExpr(`(SELECT min(ts) FROM (${cutoffSql}))`, T.dateTimeString)
 
 	// Stage 2: heavy columns read only for rows at/after the cutoff timestamp.

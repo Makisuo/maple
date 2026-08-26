@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	productEventsFunnelQuery,
 	productEventsFunnelBreakdownQuery,
@@ -26,7 +26,7 @@ const oneLine = (sql: string): string => sql.replace(/\s+/g, " ")
 
 describe("productEventsFunnelQuery", () => {
 	it("scopes every table it reads to the org and derives an org-scoped result", () => {
-		const compiled = compileCHUnsafe(
+		const compiled = compileUnsafe(
 			productEventsFunnelQuery({ steps: [REFERRAL, ...STEPS], keyBy: "person", windowSeconds: 86_400 }),
 			params,
 		)
@@ -39,7 +39,7 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("emits one windowFunnel condition per step and one output row per step", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 3_600 }),
 			params,
 		)
@@ -54,7 +54,7 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("projects each step as a flag and only reads rows matching some step", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 3_600 }),
 			params,
 		)
@@ -71,7 +71,7 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("keys by the raw column for visitor / user / session and drops empty keys", () => {
-		const visitor = compileCHUnsafe(
+		const visitor = compileUnsafe(
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 60 }),
 			params,
 		).sql
@@ -79,14 +79,14 @@ describe("productEventsFunnelQuery", () => {
 		expect(visitor).toContain("AND VisitorId != ''")
 		expect(visitor).not.toContain("identity_links")
 
-		const user = compileCHUnsafe(
+		const user = compileUnsafe(
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "user", windowSeconds: 60 }),
 			params,
 		).sql
 		expect(user).toContain("UserId AS key")
 		expect(user).toContain("AND UserId != ''")
 
-		const session = compileCHUnsafe(
+		const session = compileUnsafe(
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "session", windowSeconds: 60 }),
 			params,
 		).sql
@@ -95,7 +95,7 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("stitches the person key through identity_links aggregated per visitor", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "person", windowSeconds: 60 }),
 			params,
 		)
@@ -112,7 +112,7 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("turns a session step 1 into a UNION ALL branch of session_replays entries", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelQuery({
 				steps: [REFERRAL, ...STEPS],
 				keyBy: "visitor",
@@ -134,7 +134,7 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("has no session_replays branch without a session step", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "visitor", windowSeconds: 60 }),
 			params,
 		)
@@ -143,7 +143,7 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("narrows the population by person, not by session, when filters are set", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelQuery({
 				steps: STEPS,
 				keyBy: "person",
@@ -167,7 +167,7 @@ describe("productEventsFunnelQuery", () => {
 	})
 
 	it("omits the population subquery when no filter is set", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelQuery({ steps: STEPS, keyBy: "person", windowSeconds: 60 }),
 			params,
 		)
@@ -198,7 +198,7 @@ describe("productEventsFunnelQuery", () => {
 
 describe("productEventsFunnelBreakdownQuery", () => {
 	it("groups persons by the first non-empty dimension value and keeps the top N by step-1 count", () => {
-		const compiled = compileCHUnsafe(
+		const compiled = compileUnsafe(
 			productEventsFunnelBreakdownQuery({
 				steps: STEPS,
 				keyBy: "visitor",
@@ -221,7 +221,7 @@ describe("productEventsFunnelBreakdownQuery", () => {
 	})
 
 	it("reads a session dimension through a per-session join on session_replays", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelBreakdownQuery({
 				steps: STEPS,
 				keyBy: "visitor",
@@ -240,7 +240,7 @@ describe("productEventsFunnelBreakdownQuery", () => {
 	})
 
 	it("reads the dimension straight off the session row on the session-step branch", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelBreakdownQuery({
 				steps: [REFERRAL, ...STEPS],
 				keyBy: "visitor",
@@ -253,7 +253,7 @@ describe("productEventsFunnelBreakdownQuery", () => {
 	})
 
 	it("uses the event Host without a join", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventsFunnelBreakdownQuery({
 				steps: STEPS,
 				keyBy: "visitor",
@@ -283,7 +283,7 @@ describe("productEventsFunnelBreakdownQuery", () => {
 
 describe("productEventNamesQuery", () => {
 	it("lists names with counts, sessions and persons, most frequent first", () => {
-		const compiled = compileCHUnsafe(productEventNamesQuery({ limit: 25 }), params)
+		const compiled = compileUnsafe(productEventNamesQuery({ limit: 25 }), params)
 		expect(compiled.tenantScope).toBe("tenant")
 		const flat = oneLine(compiled.sql)
 		expect(flat).toContain(
@@ -295,7 +295,7 @@ describe("productEventNamesQuery", () => {
 	})
 
 	it("applies host directly and other filters through the session semi-join", () => {
-		const { sql } = compileCHUnsafe(
+		const { sql } = compileUnsafe(
 			productEventNamesQuery({
 				filters: { host: "maple.dev", referrerHost: "t.co", pagePath: "/pricing" },
 			}),

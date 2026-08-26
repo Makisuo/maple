@@ -182,7 +182,7 @@ export interface SessionReplaysListOutput {
 // Return type is annotated (not inferred) because the duration/active filters
 // branch into structurally-different sources (the base table vs a wrapping
 // subquery, optionally joined) — all three produce the same row shape, but TS
-// otherwise infers a union that won't unify at the compileCH call site. Mirrors
+// otherwise infers a union that won't unify at the compile call site. Mirrors
 // metricsTimeseriesRateQuery's annotation.
 export function sessionReplaysListQuery(
 	opts: SessionReplaysListOpts,

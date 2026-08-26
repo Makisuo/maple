@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compileCHUnsafe, compileUnionUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe, compileUnionUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	errorsByTypeQuery,
 	errorsTimeseriesQuery,
@@ -28,7 +28,7 @@ describe("errorsSparkQuery synthetic fingerprints", () => {
 		const q = errorsSparkQuery({
 			fingerprintHashes: ["123", "alert:28dd3389-5046-4ed7-8a8e-1bf147c1ddd6:all", "456"],
 		})
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).not.toContain("alert:")
 		expect(sql).toContain("toUInt64('123')")
 		expect(sql).toContain("toUInt64('456')")
@@ -37,7 +37,7 @@ describe("errorsSparkQuery synthetic fingerprints", () => {
 	it("matches nothing when every fingerprint is synthetic", () => {
 		// Must not emit `IN ()`, which is a ClickHouse syntax error.
 		const q = errorsSparkQuery({ fingerprintHashes: ["alert:abc:all", "planetscale:maple:oom"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("1 = 0")
 		expect(sql).not.toContain("IN ()")
 	})
@@ -46,7 +46,7 @@ describe("errorsSparkQuery synthetic fingerprints", () => {
 describe("errorsSparkQuery", () => {
 	it("buckets many fingerprints in one fingerprint-keyed scan", () => {
 		const q = errorsSparkQuery({ fingerprintHashes: ["123", "456"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		// Fingerprint-filtered, so it prunes on (OrgId, FingerprintHash, Timestamp).
 		expect(sql).toContain("FROM error_events")
 		expect(sql).not.toContain("FROM error_events_by_time")
@@ -58,7 +58,7 @@ describe("errorsSparkQuery", () => {
 
 	it("applies the services filter", () => {
 		const q = errorsSparkQuery({ fingerprintHashes: ["123"], services: ["api"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ServiceName IN")
 	})
 })
@@ -68,7 +68,7 @@ describe("errorsSparkQuery", () => {
 describe("errorsByTypeQuery", () => {
 	it("compiles broad errors by type from the time-ordered error events table", () => {
 		const q = errorsByTypeQuery({})
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		// Broad recent-window scans prune on (OrgId, Timestamp, FingerprintHash).
 		expect(sql).toContain("FROM error_events_by_time")
 		expect(sql).toContain("toString(FingerprintHash) AS fingerprintHash")
@@ -85,25 +85,25 @@ describe("errorsByTypeQuery", () => {
 
 	it("applies rootOnly filter", () => {
 		const q = errorsByTypeQuery({ rootOnly: true })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ParentSpanId = ''")
 	})
 
 	it("applies services filter", () => {
 		const q = errorsByTypeQuery({ services: ["api", "web"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ServiceName IN ('api', 'web')")
 	})
 
 	it("applies deploymentEnvs filter", () => {
 		const q = errorsByTypeQuery({ deploymentEnvs: ["production"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("DeploymentEnv IN ('production')")
 	})
 
 	it("filters by fingerprint hash (stable identity round-trip)", () => {
 		const q = errorsByTypeQuery({ fingerprintHashes: ["12345678901234567890"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		// Fingerprint-constrained scans use the fingerprint-ordered table.
 		expect(sql).toContain("FROM error_events")
 		expect(sql).not.toContain("FROM error_events_by_time")
@@ -112,7 +112,7 @@ describe("errorsByTypeQuery", () => {
 
 	it("applies custom limit", () => {
 		const q = errorsByTypeQuery({ limit: 25 })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("LIMIT 25")
 	})
 })
@@ -122,7 +122,7 @@ describe("errorsByTypeQuery", () => {
 describe("errorsTimeseriesQuery", () => {
 	it("compiles error timeseries with bucket", () => {
 		const q = errorsTimeseriesQuery({ fingerprintHash: "98765432109876543210" })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("FROM error_events")
 		expect(sql).toContain("toStartOfInterval")
 		expect(sql).toContain("INTERVAL 3600 SECOND")
@@ -135,7 +135,7 @@ describe("errorsTimeseriesQuery", () => {
 
 	it("applies services filter", () => {
 		const q = errorsTimeseriesQuery({ fingerprintHash: "1", services: ["api"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ServiceName IN ('api')")
 	})
 })
@@ -145,7 +145,7 @@ describe("errorsTimeseriesQuery", () => {
 describe("errorsSummaryQuery", () => {
 	it("compiles CROSS JOIN between filtered totals", () => {
 		const q = errorsSummaryQuery({})
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("CROSS JOIN")
 		expect(sql).toContain("FROM (SELECT")
 		expect(sql).toContain("FROM error_events_by_time")
@@ -160,7 +160,7 @@ describe("errorsSummaryQuery", () => {
 
 	it("applies rootOnly and services filters", () => {
 		const q = errorsSummaryQuery({ rootOnly: true, services: ["api"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ParentSpanId = ''")
 		expect(sql).toContain("ServiceName IN ('api')")
 		expect(sql).toContain("FROM trace_list_mv")
@@ -168,7 +168,7 @@ describe("errorsSummaryQuery", () => {
 
 	it("applies deploymentEnvs filter", () => {
 		const q = errorsSummaryQuery({ deploymentEnvs: ["production"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain(
 			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')",
 		)
@@ -181,7 +181,7 @@ describe("errorsSummaryQuery", () => {
 describe("errorDetailTracesQuery", () => {
 	it("compiles trace-detail lookup with a small error TraceId subquery", () => {
 		const q = errorDetailTracesQuery({ fingerprintHash: "111" })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).not.toContain("INNER JOIN")
 		// The subquery projects a single column (an IN list needs exactly one) from
 		// the ranked error-trace query, now spliced as a typed CHQuery rather than a
@@ -201,19 +201,19 @@ describe("errorDetailTracesQuery", () => {
 
 	it("applies rootOnly filter", () => {
 		const q = errorDetailTracesQuery({ fingerprintHash: "1", rootOnly: true })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ParentSpanId = ''")
 	})
 
 	it("applies services filter", () => {
 		const q = errorDetailTracesQuery({ fingerprintHash: "1", services: ["api", "web"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ServiceName IN ('api', 'web')")
 	})
 
 	it("applies custom limit", () => {
 		const q = errorDetailTracesQuery({ fingerprintHash: "1", limit: 20 })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 		// The limit applies to the error subquery
 		expect(sql).toContain("LIMIT 20")
 	})
@@ -291,7 +291,7 @@ describe("errorsFacetsQuery", () => {
 describe("errorIssuesQuery", () => {
 	it("uses the time-ordered table for broad issue scans", () => {
 		const q = errorIssuesQuery({ services: ["api"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 
 		expect(sql).toContain("FROM error_events_by_time")
 		expect(sql).toContain("ServiceName IN ('api')")
@@ -299,7 +299,7 @@ describe("errorIssuesQuery", () => {
 
 	it("uses the fingerprint-ordered table for constrained issue scans", () => {
 		const q = errorIssuesQuery({ fingerprintHashes: ["123"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 
 		expect(sql).toContain("FROM error_events")
 		expect(sql).not.toContain("FROM error_events_by_time")
@@ -309,7 +309,7 @@ describe("errorIssuesQuery", () => {
 
 describe("errorTickIssuesQuery", () => {
 	it("scans the minute rollup with a half-open window and no truncating limit", () => {
-		const { sql } = compileCHUnsafe(errorTickIssuesQuery(), baseParams)
+		const { sql } = compileUnsafe(errorTickIssuesQuery(), baseParams)
 
 		expect(sql).toContain("FROM error_fingerprints_minutely")
 		expect(sql).toContain("OrgId = 'org_1'")
@@ -322,7 +322,7 @@ describe("errorTickIssuesQuery", () => {
 
 describe("errorTickBootstrapIssuesQuery", () => {
 	it("bootstraps once from raw events without a truncating limit", () => {
-		const { sql } = compileCHUnsafe(errorTickBootstrapIssuesQuery(), baseParams)
+		const { sql } = compileUnsafe(errorTickBootstrapIssuesQuery(), baseParams)
 
 		expect(sql).toContain("FROM error_events_by_time")
 		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
@@ -336,7 +336,7 @@ describe("errorTickBootstrapIssuesQuery", () => {
 describe("errorFingerprintsQuery", () => {
 	it("compiles a distinct-fingerprint scan scoped by service and environment", () => {
 		const q = errorFingerprintsQuery({ services: ["api"], deploymentEnvs: ["production"] })
-		const { sql } = compileCHUnsafe(q, baseParams)
+		const { sql } = compileUnsafe(q, baseParams)
 
 		expect(sql).toContain("FROM error_events_by_time")
 		expect(sql).toContain("toString(FingerprintHash) AS fingerprintHash")

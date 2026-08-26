@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCHUnsafe } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	cloudflareUsageQuery,
 	cloudflareUsageStatsQuery,
@@ -16,7 +16,7 @@ const baseParams = {
 
 describe("cloudflareUsageQuery", () => {
 	it("compiles the hourly usage aggregation over metrics_sum", () => {
-		const { sql } = compileCHUnsafe(cloudflareUsageQuery(), baseParams)
+		const { sql } = compileUnsafe(cloudflareUsageQuery(), baseParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("MetricName IN ('cloudflare.http.requests', 'cloudflare.worker.requests')")
@@ -32,7 +32,7 @@ describe("cloudflareUsageQuery", () => {
 	})
 
 	it("escapes single quotes in orgId", () => {
-		const { sql } = compileCHUnsafe(cloudflareUsageQuery(), { ...baseParams, orgId: "org'evil" })
+		const { sql } = compileUnsafe(cloudflareUsageQuery(), { ...baseParams, orgId: "org'evil" })
 		expect(sql).toContain("OrgId = 'org\\'evil'")
 	})
 })
@@ -46,7 +46,7 @@ const statsParams = {
 
 describe("cloudflareUsageStatsQuery", () => {
 	it("compiles the single-row previous-window + firewall aggregate", () => {
-		const { sql } = compileCHUnsafe(cloudflareUsageStatsQuery(), statsParams)
+		const { sql } = compileUnsafe(cloudflareUsageStatsQuery(), statsParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain("OrgId = 'org_1'")
 		// Outer scan covers both windows and every metric either sumIf needs.
@@ -70,12 +70,12 @@ describe("cloudflareUsageStatsQuery", () => {
 	})
 
 	it("escapes single quotes in orgId", () => {
-		const { sql } = compileCHUnsafe(cloudflareUsageStatsQuery(), { ...statsParams, orgId: "org'evil" })
+		const { sql } = compileUnsafe(cloudflareUsageStatsQuery(), { ...statsParams, orgId: "org'evil" })
 		expect(sql).toContain("OrgId = 'org\\'evil'")
 	})
 
 	it("row schema coerces BYO-CH string-encoded aggregates", () => {
-		const compiled = compileCHUnsafe(cloudflareUsageStatsQuery(), statsParams, {
+		const compiled = compileUnsafe(cloudflareUsageStatsQuery(), statsParams, {
 			rowSchema: cloudflareUsageStatsRowSchema,
 		})
 		const decoded = Effect.runSync(

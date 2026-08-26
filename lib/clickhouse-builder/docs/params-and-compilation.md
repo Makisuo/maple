@@ -51,8 +51,8 @@ CH.from(Events)
 	.select(($) => ({ n: CH.count() }))
 	.where(($) => [$.Level.eq(CH.param.of(Level, "level"))])
 
-CH.compile(query, { level: "warn" }) // … WHERE Level = 'warn'
-CH.compile(query, { level: "banana" }) // fails — the schema rejected it
+yield* CH.compile(query, { level: "warn" })   // … WHERE Level = 'warn'
+yield* CH.compile(query, { level: "banana" }) // fails — the schema rejected it
 ```
 
 Compilation returns an `Effect`, so a value the query cannot accept is a typed failure rather
@@ -61,13 +61,13 @@ as often as from your own code, and a route that can `catchTag` a bad one can an
 400 instead of crashing.
 
 ```ts
-yield * CH.compile(query, { startTime: new Date("2026-01-01T00:00:00Z") })
+yield* CH.compile(query, { startTime: new Date("2026-01-01T00:00:00Z") })
 // … WHERE Timestamp >= '2026-01-01 00:00:00'
 
-yield * CH.compile(query, { limit: 10.5 })
+yield* CH.compile(query, { limit: 10.5 })
 // fails with QueryBuilderError { code: "InvalidParamValue" } — use param.float for fractions
 
-yield * CH.compile(query, {})
+yield* CH.compile(query, {})
 // fails with QueryBuilderError { code: "UnresolvedParam" }: no value given for param 'orgId'
 ```
 
@@ -91,7 +91,7 @@ _(Backed by `src/ch/core-dsl.test.ts > param resolution`.)_
 > a placeholder.
 
 ```ts
-const compiled = CH.compile(query, { orgId: "org_123" })
+const compiled = CH.compileUnsafe(query, { orgId: "org_123" })
 compiled.sql // … WHERE OrgId = 'org_123'
 ```
 
@@ -103,7 +103,7 @@ Two consequences worth planning around:
   `escapeClickHouseString`, which escapes backslashes and single quotes:
 
     ```ts
-    CH.compile(query, { orgId: "a'b\\c" })
+    CH.compileUnsafe(query, { orgId: "a'b\\c" })
     // … WHERE OrgId = 'a\'b\\c'
     ```
 
@@ -119,7 +119,8 @@ _(Backed by `docs/params-and-compilation.md > Params are resolved at compile tim
 ## `compile`
 
 ```ts
-CH.compile(query, params, options?)
+CH.compile(query, params, options?)   // Effect<CompiledQuery, QueryBuilderError>
+CH.compileUnsafe(query, params, options?)  // CompiledQuery, throws
 ```
 
 | Argument              | Meaning                                                              |

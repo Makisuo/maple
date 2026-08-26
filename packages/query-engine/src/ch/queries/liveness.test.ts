@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCHUnsafe, compileUnionUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe, compileUnionUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
 	orgTelemetryPulseQuery,
 	serviceLivenessQuery,
@@ -26,7 +26,7 @@ const decodeRows = <T>(compiled: CompiledQuery<T>, rows: ReadonlyArray<Record<st
 
 describe("serviceLivenessQuery", () => {
 	it("scopes to one org and service over a bounded minute window", () => {
-		const { sql } = compileCHUnsafe(serviceLivenessQuery(), livenessParams)
+		const { sql } = compileUnsafe(serviceLivenessQuery(), livenessParams)
 
 		expect(sql).toContain("FROM service_operations_minutely")
 		expect(sql).toContain("OrgId = 'org_123'")
@@ -36,7 +36,7 @@ describe("serviceLivenessQuery", () => {
 	})
 
 	it("selects exact and sampling-corrected counts side by side", () => {
-		const { sql } = compileCHUnsafe(serviceLivenessQuery(), livenessParams)
+		const { sql } = compileUnsafe(serviceLivenessQuery(), livenessParams)
 
 		// The pair is the whole point: a raw collapse with a steady corrected
 		// count is a sampling change, not a traffic change.
@@ -49,16 +49,16 @@ describe("serviceLivenessQuery", () => {
 	})
 
 	it("is a group-less single-row aggregate", () => {
-		const { sql } = compileCHUnsafe(serviceLivenessQuery(), livenessParams)
+		const { sql } = compileUnsafe(serviceLivenessQuery(), livenessParams)
 		expect(sql).not.toContain("GROUP BY")
 		expect(sql).toContain("FORMAT JSON")
 	})
 
 	it("omits the environment predicate unless asked to scope to one", () => {
-		const unscoped = compileCHUnsafe(serviceLivenessQuery(), livenessParams).sql
+		const unscoped = compileUnsafe(serviceLivenessQuery(), livenessParams).sql
 		expect(unscoped).not.toContain("DeploymentEnv")
 
-		const scoped = compileCHUnsafe(serviceLivenessQuery({ scopeToEnvironment: true }), {
+		const scoped = compileUnsafe(serviceLivenessQuery({ scopeToEnvironment: true }), {
 			...livenessParams,
 			deploymentEnv: "production",
 		}).sql
@@ -66,7 +66,7 @@ describe("serviceLivenessQuery", () => {
 	})
 
 	it("decodes BYO-ClickHouse string counts to numbers", () => {
-		const compiled = compileCHUnsafe(serviceLivenessQuery(), livenessParams, {
+		const compiled = compileUnsafe(serviceLivenessQuery(), livenessParams, {
 			rowSchema: serviceLivenessRowSchema,
 		})
 

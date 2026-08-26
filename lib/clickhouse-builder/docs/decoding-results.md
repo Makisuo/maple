@@ -16,9 +16,7 @@ it", not a phantom tag. So a query built from typed pieces already knows how its
 `compile` folds those schemas into one:
 
 ```ts
-const compiled =
-	yield *
-	CH.compile(
+const compiled = CH.compileUnsafe(
 		CH.from(Events)
 			.select(($) => ({ name: $.Name, calls: CH.count() }))
 			.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
@@ -43,9 +41,7 @@ Derivation is all-or-nothing per query. One selected expression the builder cann
 all:
 
 ```ts
-const compiled =
-	yield *
-	CH.compile(
+const compiled = CH.compileUnsafe(
 		CH.from(Events).select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") })),
 		params,
 	)
@@ -83,9 +79,7 @@ A declared `rowSchema` wins over the derived one, and it can do something deriva
 **narrow**.
 
 ```ts
-const compiled =
-	yield *
-	CH.compile(query, params, {
+const compiled = CH.compileUnsafe(query, params, {
 		rowSchema: Schema.Struct({
 			name: Schema.String,
 			status: Schema.Literals(["ok", "error"]), // narrower than the String column
@@ -106,7 +100,7 @@ _(Backed by `docs/decoding-results.md > The row schema is derived from the SELEC
 
 Declare a schema for anything whose shape you do not fully control.
 
-_(Backed by `docs/decoding-results.md > Without a rowSchema decoding is a pass-through`.)_
+_(Backed by `docs/decoding-results.md > An untyped expression leaves the query undecoded`.)_
 
 ## `decodeFirstRow`
 

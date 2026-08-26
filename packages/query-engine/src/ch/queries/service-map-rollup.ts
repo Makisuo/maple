@@ -14,7 +14,7 @@
 
 import { Schema, Effect } from "effect"
 import type { CompiledQuery, CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compile } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
@@ -97,7 +97,7 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 		.groupBy("hourTs")
 		.format("JSON")
 
-	return compileCH(
+	return compile(
 		query,
 		{
 			orgId: params.orgId,
@@ -134,7 +134,7 @@ export function serviceMapResolutionsExistingHoursSQL(params: {
 		.groupBy("hourTs")
 		.format("JSON")
 
-	return compileCH(
+	return compile(
 		query,
 		{
 			orgId: params.orgId,
@@ -160,7 +160,7 @@ export function serviceMapEdgesRollupSQL(
 
 	// Scope is derived from both join sources filtering OrgId — see
 	// `serviceMapEdgeJoinQuery`, which used to hand it over as an assertion.
-	return compileCH(
+	return compile(
 		query,
 		{
 			orgId: params.orgId,
@@ -266,7 +266,7 @@ export function serviceMapResolutionsRollupSQL(
 
 	// No top-level `OrgId` predicate here on purpose: the scope is derived from
 	// the sources, both of which filter `OrgId` themselves.
-	return compileCH(
+	return compile(
 		query,
 		{
 			orgId: params.orgId,

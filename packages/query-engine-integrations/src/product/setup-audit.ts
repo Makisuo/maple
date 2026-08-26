@@ -16,7 +16,7 @@
 
 import * as CH from "@maple-dev/clickhouse-builder"
 import {
-	compileCH,
+	compile,
 	from,
 	fromQuery,
 	param,
@@ -557,7 +557,7 @@ export function auditOrphanSpansSQL(
 		.limit(200)
 		.format("JSON")
 
-	return compileCH(
+	return compile(
 		query,
 		{
 			orgId: params.orgId,
@@ -642,7 +642,7 @@ export function auditRootlessTracesSQL(
 		.limit(200)
 		.format("JSON")
 
-	return compileCH(
+	return compile(
 		query,
 		{
 			orgId: params.orgId,

@@ -115,7 +115,7 @@ changing the SQL. Both are covered in [Tenant scoping](./tenant-scoping.md).
 ## Compiling
 
 ```ts
-const compiled = yield* CH.compile(query, params, options?)
+const compiled = CH.compileUnsafe(query, params, options?)
 ```
 
 `compile` is an alias of `compileCH`; both are exported. Unions compile with `compileUnion`.

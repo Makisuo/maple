@@ -16,7 +16,7 @@ import {
 } from "@maple/domain/tinybird/db-query-shape-sql"
 import { deploymentEnvExpr, messagingDestinationExpr } from "@maple/domain/tinybird/semconv-renames"
 import { Schema, Effect } from "effect"
-import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
+import { compile, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { defineCondFn, defineFn } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 // From the root, not `/expr`: this overload takes a `CHQuery`, so the subquery
@@ -37,7 +37,7 @@ import {
 	Traces,
 } from "../tables"
 import { unionAll } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "../schema"
+import { CHNumber, CHNumberOrZero } from "../schema"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 
@@ -71,7 +71,7 @@ const ServiceDependenciesOutputSchema: CompiledQueryRowSchema<ServiceDependencie
 	targetService: Schema.String,
 	callCount: CHNumber,
 	errorCount: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p95DurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
@@ -223,7 +223,7 @@ export function serviceDependenciesSQL(
 	opts: ServiceDependenciesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
 ): Effect.Effect<CompiledQuery<ServiceDependenciesOutput>, QueryBuilderError> {
-	return compileCH(
+	return compile(
 		serviceDependenciesQueryBase({ deploymentEnv: opts.deploymentEnv }),
 		{
 			orgId: params.orgId,
@@ -408,7 +408,7 @@ const ServiceDbEdgesOutputSchema: CompiledQueryRowSchema<ServiceDbEdgesOutput> =
 	dbNamespace: Schema.String,
 	callCount: CHNumber,
 	errorCount: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p95DurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
@@ -417,7 +417,7 @@ export function serviceDbEdgesSQL(
 	opts: ServiceDbEdgesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
 ): Effect.Effect<CompiledQuery<ServiceDbEdgesOutput>, QueryBuilderError> {
-	return compileCH(serviceDbEdgesQueryBase(opts), params, {
+	return compile(serviceDbEdgesQueryBase(opts), params, {
 		rowSchema: ServiceDbEdgesOutputSchema,
 	})
 }
@@ -601,7 +601,7 @@ const ServiceDbQuerySummaryOutputSchema: CompiledQueryRowSchema<ServiceDbQuerySu
 	errorCount: CHNumber,
 	estimatedErrorCount: CHNumber,
 	errorRate: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p50DurationMs: CHNumber,
 	p95DurationMs: CHNumber,
 	activeServiceCount: CHNumber,
@@ -625,7 +625,7 @@ const ServiceDbQueryTimeseriesOutputSchema: CompiledQueryRowSchema<ServiceDbQuer
 		estimatedQueryCount: CHNumber,
 		errorCount: CHNumber,
 		errorRate: CHNumber,
-		avgDurationMs: CHNumber,
+		avgDurationMs: CHNumberOrZero,
 		p50DurationMs: CHNumber,
 		p95DurationMs: CHNumber,
 	})
@@ -656,7 +656,7 @@ const ServiceDbTopQueryOutputSchema: CompiledQueryRowSchema<ServiceDbTopQueryOut
 	estimatedQueryCount: CHNumber,
 	errorCount: CHNumber,
 	errorRate: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p50DurationMs: CHNumber,
 	p95DurationMs: CHNumber,
 	lastSeen: Schema.String,
@@ -801,7 +801,7 @@ export function serviceDbQuerySummarySQL(
 		}))
 		.format("JSON")
 
-	return compileCH(query, params, { rowSchema: ServiceDbQuerySummaryOutputSchema })
+	return compile(query, params, { rowSchema: ServiceDbQuerySummaryOutputSchema })
 }
 
 export function serviceDbQueryTimeseriesSQL(
@@ -843,7 +843,7 @@ export function serviceDbQueryTimeseriesSQL(
 			.orderBy(["bucket", "asc"])
 			.limit(2000)
 			.format("JSON")
-		return compileCH(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
+		return compile(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
 	}
 
 	// Hour-aligned buckets (≥1h — pickDbSummaryBucketSeconds gives 1h/6h for >24h):
@@ -889,7 +889,7 @@ export function serviceDbQueryTimeseriesSQL(
 		.limit(2000)
 		.format("JSON")
 
-	return compileCH(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
+	return compile(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
 }
 
 export function serviceDbTopQueriesSQL(
@@ -986,7 +986,7 @@ export function serviceDbTopQueriesSQL(
 		.limit(topN)
 		.format("JSON")
 
-	return compileCH(query, params, { rowSchema: ServiceDbTopQueryOutputSchema })
+	return compile(query, params, { rowSchema: ServiceDbTopQueryOutputSchema })
 }
 
 // Service ↔ external target edges (http / messaging / rpc)
@@ -1023,7 +1023,7 @@ const ServiceExternalEdgesOutputSchema: CompiledQueryRowSchema<ServiceExternalEd
 	targetName: Schema.String,
 	callCount: CHNumber,
 	errorCount: CHNumber,
-	avgDurationMs: CHNumber,
+	avgDurationMs: CHNumberOrZero,
 	p95DurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
@@ -1174,7 +1174,7 @@ export function serviceExternalEdgesSQL(
 		.limit(200)
 		.format("JSON")
 
-	return compileCH(query, params, { rowSchema: ServiceExternalEdgesOutputSchema })
+	return compile(query, params, { rowSchema: ServiceExternalEdgesOutputSchema })
 }
 
 // Service hosting platform
@@ -1250,7 +1250,7 @@ export function servicePlatformsSQL(
 		.limit(500)
 		.format("JSON")
 
-	return compileCH(
+	return compile(
 		query,
 		{
 			orgId: params.orgId,

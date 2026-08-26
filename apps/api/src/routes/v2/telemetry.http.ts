@@ -40,6 +40,7 @@ import {
 	QueryEngineExecuteRequest,
 	formatWarehouseDateTime,
 	formatWarehouseDateTimeMs,
+	WarehouseDateTime,
 } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import {
@@ -254,25 +255,38 @@ const parseLogKey = (value: string) => {
 const encodeKeysetCursor = (prefix: string, parts: ReadonlyArray<string>) =>
 	`${prefix}_${Encoding.encodeBase64Url(JSON.stringify(parts))}`
 
+/**
+ * Decode a keyset cursor into its parts.
+ *
+ * Element 0 is always the timestamp the keyset walks back from, and it is
+ * checked against `WarehouseDateTime` here rather than trusted. It reaches the
+ * query builder as a `DateTime` comparison, which encodes it through the
+ * column's codec while the query is still being *built* — before `CH.compile`,
+ * so outside the Effect that would have turned the failure into a value. A
+ * forged cursor was therefore a 500 rather than the 400 this function already
+ * knows how to return.
+ */
 const decodeKeysetCursor = (value: string | undefined, prefix: string, length: number) => {
+	const invalid = Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
 	if (value === undefined) return Effect.succeed<ReadonlyArray<string> | undefined>(undefined)
-	if (!value.startsWith(`${prefix}_`)) {
-		return Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
-	}
+	if (!value.startsWith(`${prefix}_`)) return invalid
 	const decoded = Encoding.decodeBase64UrlString(value.slice(prefix.length + 1))
-	if (Result.isFailure(decoded)) {
-		return Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
+	if (Result.isFailure(decoded)) return invalid
+	const parsed = Result.try({
+		try: () => JSON.parse(decoded.success) as unknown,
+		catch: () => undefined,
+	})
+	if (Result.isFailure(parsed)) return invalid
+	const parts = parsed.success
+	if (
+		!Array.isArray(parts) ||
+		parts.length !== length ||
+		!parts.every((part) => typeof part === "string")
+	) {
+		return invalid
 	}
-	try {
-		const parts = JSON.parse(decoded.success) as unknown
-		return Array.isArray(parts) &&
-			parts.length === length &&
-			parts.every((part) => typeof part === "string")
-			? Effect.succeed(parts as ReadonlyArray<string>)
-			: Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
-	} catch {
-		return Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
-	}
+	if (Result.isFailure(Schema.decodeUnknownResult(WarehouseDateTime)(parts[0]))) return invalid
+	return Effect.succeed(parts as ReadonlyArray<string>)
 }
 
 const toLog = (row: {

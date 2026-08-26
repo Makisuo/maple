@@ -16,7 +16,7 @@ const archived = CH.from(Events)
 
 const combined = CH.unionAll(recent, archived).orderBy(["name", "asc"]).limit(100)
 
-const compiled = CH.compileUnion(combined, {})
+const compiled = CH.compileUnionUnsafe(combined, {})
 // SELECT * FROM ( … UNION ALL … ) ORDER BY name ASC LIMIT 100
 ```
 
@@ -65,7 +65,7 @@ const query = CH.from(Recent)
 	.withCTE("recent", cte)
 	.select(($) => ({ name: $.Name }))
 
-const compiled = yield * CH.compile(query, {})
+const compiled = CH.compileUnsafe(query, {})
 // WITH recent AS ( SELECT Name AS Name FROM events WHERE OrgId = 'org_123' )
 // SELECT Name AS name FROM recent
 compiled.tenantScope // "tenant" — read off the CTE, not declared

@@ -25,7 +25,7 @@
 // over two grouped subqueries), then compiled to SQL — no hand-written SQL.
 
 import { Schema, Effect } from "effect"
-import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
+import { compile, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { unsafeCompiledQuery } from "../raw-sql"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
@@ -212,7 +212,7 @@ export function serviceWorkloadsSQL(
 
 	// No top-level `OrgId` predicate here on purpose: the scope is derived from
 	// the sources, both of which filter `OrgId` themselves.
-	return compileCH(
+	return compile(
 		query,
 		{
 			orgId: params.orgId,

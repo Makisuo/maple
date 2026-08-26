@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCHUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
+import { compileUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
 	cloudflareDurableObjectCountersRowSchema,
 	cloudflareDurableObjectCountersSQL,
@@ -27,7 +27,7 @@ const zoneTimeseriesParams = { ...zoneParams, bucketSeconds: 300 }
 
 describe("cloudflareZoneFirewallTimeseriesSQL", () => {
 	it("buckets firewall events by action", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneFirewallTimeseriesSQL(), zoneTimeseriesParams)
+		const { sql } = compileUnsafe(cloudflareZoneFirewallTimeseriesSQL(), zoneTimeseriesParams)
 		expect(sql).toContain("MetricName = 'cloudflare.firewall.events'")
 		expect(sql).toContain("firewall.action']")
 		expect(sql).toContain("GROUP BY bucket, action")
@@ -36,7 +36,7 @@ describe("cloudflareZoneFirewallTimeseriesSQL", () => {
 
 describe("cloudflareZoneFirewallTopSQL", () => {
 	it("ranks (source, action, rule, host) combinations by event count", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneFirewallTopSQL(), zoneParams)
+		const { sql } = compileUnsafe(cloudflareZoneFirewallTopSQL(), zoneParams)
 		expect(sql).toContain("firewall.source']")
 		expect(sql).toContain("firewall.rule_id']")
 		// Firewall rows carry the same coalesced host attribute as the HTTP breakdowns.
@@ -49,7 +49,7 @@ describe("cloudflareZoneFirewallTopSQL", () => {
 
 describe("cloudflareZoneDnsTimeseriesSQL", () => {
 	it("buckets DNS queries by response code", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneDnsTimeseriesSQL(), zoneTimeseriesParams)
+		const { sql } = compileUnsafe(cloudflareZoneDnsTimeseriesSQL(), zoneTimeseriesParams)
 		expect(sql).toContain("MetricName = 'cloudflare.dns.queries'")
 		expect(sql).toContain("dns.response_code']")
 		expect(sql).toContain("GROUP BY bucket, responseCode")
@@ -58,7 +58,7 @@ describe("cloudflareZoneDnsTimeseriesSQL", () => {
 
 describe("cloudflareZoneDnsBreakdownSQL", () => {
 	it("ranks query names with an NXDOMAIN share", () => {
-		const { sql } = compileCHUnsafe(cloudflareZoneDnsBreakdownSQL(), zoneParams)
+		const { sql } = compileUnsafe(cloudflareZoneDnsBreakdownSQL(), zoneParams)
 		expect(sql).toContain("dns.query_name']")
 		expect(sql).toContain("dns.response_code'] = 'NXDOMAIN'")
 		expect(sql).toContain("ORDER BY queries DESC")
@@ -68,7 +68,7 @@ describe("cloudflareZoneDnsBreakdownSQL", () => {
 
 describe("cloudflareQueueGaugesSQL", () => {
 	it("rolls up backlog/concurrency gauges per queue pseudo-service with NaN guards", () => {
-		const { sql } = compileCHUnsafe(cloudflareQueueGaugesSQL(), baseParams)
+		const { sql } = compileUnsafe(cloudflareQueueGaugesSQL(), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain(
 			"MetricName IN ('cloudflare.queue.backlog.messages', 'cloudflare.queue.backlog.bytes', 'cloudflare.queue.consumer.concurrency')",
@@ -82,7 +82,7 @@ describe("cloudflareQueueGaugesSQL", () => {
 
 describe("cloudflareDurableObjectCountersSQL", () => {
 	it("rolls up DO counters per implementing Worker service", () => {
-		const { sql } = compileCHUnsafe(cloudflareDurableObjectCountersSQL(), baseParams)
+		const { sql } = compileUnsafe(cloudflareDurableObjectCountersSQL(), baseParams)
 		expect(sql).toContain(
 			"MetricName IN ('cloudflare.durable_object.requests', 'cloudflare.durable_object.errors')",
 		)
@@ -97,7 +97,7 @@ describe("cloudflareDurableObjectCountersSQL", () => {
 // column here is `CHNumber` (Finite | FiniteFromString), so `decodeRows` must
 // coerce those strings back to numbers; without the row-schema a BYO-CH org gets
 // a bare 500. These tests drive each (SQL, rowSchema) pair through the exact
-// `compileCHUnsafe(...).decodeRows` path the query-engine handlers use, feeding
+// `compileUnsafe(...).decodeRows` path the query-engine handlers use, feeding
 // string-encoded rows (the BYO-CH shape).
 describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () => {
 	const decodeFirst = <O>(compiled: CompiledQuery<O>, row: Record<string, unknown>): O => {
@@ -107,7 +107,7 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 	}
 
 	it("cloudflareZoneFirewallTimeseriesRowSchema coerces string events", () => {
-		const compiled = compileCHUnsafe(cloudflareZoneFirewallTimeseriesSQL(), zoneTimeseriesParams, {
+		const compiled = compileUnsafe(cloudflareZoneFirewallTimeseriesSQL(), zoneTimeseriesParams, {
 			rowSchema: cloudflareZoneFirewallTimeseriesRowSchema,
 		})
 		expect(
@@ -120,7 +120,7 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 	})
 
 	it("cloudflareZoneFirewallTopRowSchema coerces string events", () => {
-		const compiled = compileCHUnsafe(cloudflareZoneFirewallTopSQL(), zoneParams, {
+		const compiled = compileUnsafe(cloudflareZoneFirewallTopSQL(), zoneParams, {
 			rowSchema: cloudflareZoneFirewallTopRowSchema,
 		})
 		expect(
@@ -141,7 +141,7 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 	})
 
 	it("cloudflareZoneDnsTimeseriesRowSchema coerces string queries", () => {
-		const compiled = compileCHUnsafe(cloudflareZoneDnsTimeseriesSQL(), zoneTimeseriesParams, {
+		const compiled = compileUnsafe(cloudflareZoneDnsTimeseriesSQL(), zoneTimeseriesParams, {
 			rowSchema: cloudflareZoneDnsTimeseriesRowSchema,
 		})
 		expect(
@@ -154,7 +154,7 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 	})
 
 	it("cloudflareZoneDnsBreakdownRowSchema coerces string queries and nxdomain", () => {
-		const compiled = compileCHUnsafe(cloudflareZoneDnsBreakdownSQL(), zoneParams, {
+		const compiled = compileUnsafe(cloudflareZoneDnsBreakdownSQL(), zoneParams, {
 			rowSchema: cloudflareZoneDnsBreakdownRowSchema,
 		})
 		expect(
@@ -167,7 +167,7 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 	})
 
 	it("cloudflareQueueGaugesRowSchema coerces string gauges", () => {
-		const compiled = compileCHUnsafe(cloudflareQueueGaugesSQL(), baseParams, {
+		const compiled = compileUnsafe(cloudflareQueueGaugesSQL(), baseParams, {
 			rowSchema: cloudflareQueueGaugesRowSchema,
 		})
 		expect(
@@ -188,7 +188,7 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 	})
 
 	it("cloudflareDurableObjectCountersRowSchema coerces string counters", () => {
-		const compiled = compileCHUnsafe(cloudflareDurableObjectCountersSQL(), baseParams, {
+		const compiled = compileUnsafe(cloudflareDurableObjectCountersSQL(), baseParams, {
 			rowSchema: cloudflareDurableObjectCountersRowSchema,
 		})
 		expect(
@@ -201,7 +201,7 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 	})
 
 	it("still accepts managed-Tinybird numeric aggregates (the union's other branch)", () => {
-		const compiled = compileCHUnsafe(cloudflareDurableObjectCountersSQL(), baseParams, {
+		const compiled = compileUnsafe(cloudflareDurableObjectCountersSQL(), baseParams, {
 			rowSchema: cloudflareDurableObjectCountersRowSchema,
 		})
 		expect(

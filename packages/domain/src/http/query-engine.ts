@@ -25,6 +25,23 @@ import { HttpTaggedError } from "./error-policy"
 import { warehouseHttpErrors } from "./warehouse"
 import { FunnelBreakdownBy, FunnelKeyBy, FunnelStep } from "@maple/query-model"
 
+/**
+ * A timeseries bucket width.
+ *
+ * Checked as a positive integer because that is what it has to be by the time
+ * it reaches the warehouse: `param.int` rejects a fraction, and the query
+ * builder raises that while the query is still being built. Declaring it as a
+ * bare `Schema.Number` made a request with `bucket_seconds: 1.5` a 500 instead
+ * of a 400. `packages/domain/src/query-engine.ts` already had this right; these
+ * declarations did not.
+ */
+const BucketSeconds = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)).pipe(
+	Schema.annotate({
+		identifier: "BucketSeconds",
+		description: "Timeseries bucket width in whole seconds, greater than zero.",
+	}),
+)
+
 // Dedicated endpoint schemas
 
 /** Shared primitives for filtered list/facet endpoints. */
@@ -121,7 +138,7 @@ export class ErrorsTimeseriesRequest extends Schema.Class<ErrorsTimeseriesReques
 		endTime: TinybirdDateTime,
 		fingerprintHash: FingerprintHash,
 		services: OptionalServiceNames,
-		bucketSeconds: Schema.optional(Schema.Number),
+		bucketSeconds: Schema.optional(BucketSeconds),
 	},
 ) {}
 
@@ -149,7 +166,7 @@ export class ErrorsSparkRequest extends Schema.Class<ErrorsSparkRequest>("Errors
 	deploymentEnvs: OptionalDeploymentEnvs,
 	errorLabels: OptionalErrorLabels,
 	serviceVersions: OptionalServiceVersions,
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
 export class ErrorsSparkResponse extends Schema.Class<ErrorsSparkResponse>("ErrorsSparkResponse")({
@@ -296,7 +313,7 @@ export class ServiceApdexRequest extends Schema.Class<ServiceApdexRequest>("Serv
 	endTime: TinybirdDateTime,
 	serviceName: ServiceName,
 	apdexThresholdMs: Schema.optional(Schema.Number),
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
 export class ServiceApdexResponse extends Schema.Class<ServiceApdexResponse>("ServiceApdexResponse")({
@@ -381,7 +398,7 @@ export class PlanetScaleInfraTimeseriesRequest extends Schema.Class<PlanetScaleI
 )({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.Number,
+	bucketSeconds: BucketSeconds,
 	database: Schema.String,
 	/**
 	 * Narrows the series to one branch. Worth doing: a PlanetScale database is
@@ -451,7 +468,7 @@ export class CloudflareInfraZoneTimeseriesRequest extends Schema.Class<Cloudflar
 )({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.Number,
+	bucketSeconds: BucketSeconds,
 	...CloudflareZoneFilterFields,
 }) {}
 
@@ -471,7 +488,7 @@ export class CloudflareInfraZoneDetailRequest extends Schema.Class<CloudflareInf
 	serviceName: Schema.String,
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.Number,
+	bucketSeconds: BucketSeconds,
 	...CloudflareZoneFilterFields,
 }) {}
 
@@ -511,7 +528,7 @@ export class CloudflareInfraZoneSecurityRequest extends Schema.Class<CloudflareI
 	serviceName: Schema.String,
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.Number,
+	bucketSeconds: BucketSeconds,
 	...CloudflareZoneFilterFields,
 }) {}
 
@@ -529,7 +546,7 @@ export class CloudflareInfraZoneDnsRequest extends Schema.Class<CloudflareInfraZ
 	serviceName: Schema.String,
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.Number,
+	bucketSeconds: BucketSeconds,
 	...CloudflareZoneFilterFields,
 }) {}
 
@@ -563,7 +580,7 @@ export class CloudflareInfraZoneBreakdownRequest extends Schema.Class<Cloudflare
 	dimension: CloudflareZoneDimension,
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.Number,
+	bucketSeconds: BucketSeconds,
 	limit: Schema.optionalKey(Schema.Number),
 	...CloudflareZoneFilterFields,
 }) {}
@@ -722,7 +739,7 @@ export class ServiceDbQuerySummaryRequest extends Schema.Class<ServiceDbQuerySum
 	endTime: TinybirdDateTime,
 	sourceService: Schema.optional(ServiceName),
 	deploymentEnv: Schema.optional(DeploymentEnvironment),
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 	topN: Schema.optional(Schema.Number),
 }) {}
 
@@ -870,7 +887,7 @@ export class ServiceOperationsRequest extends Schema.Class<ServiceOperationsRequ
 	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	// Bucket size for the per-operation sparkline sub-query (client-computed,
 	// like ServiceDetailOverviewRequest.releasesBucketSeconds).
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 	limit: Schema.optional(Schema.Number),
 }) {}
 
@@ -910,7 +927,14 @@ export class ListLogsRequest extends Schema.Class<ListLogsRequest>("ListLogsRequ
 	minSeverity: Schema.optional(Schema.Number),
 	traceId: Schema.optional(Schema.String),
 	spanId: Schema.optional(Schema.String),
-	cursor: Schema.optional(Schema.String),
+	/**
+	 * The `timestamp` of the last row of the previous page, so it is a warehouse
+	 * DateTime by contract. Checked as one, because the query builder compares it
+	 * against `Timestamp` while the query is still being *built* — before
+	 * `CH.compile`, and so outside the Effect that turns a bad literal into a
+	 * value. An arbitrary string here was a 500 rather than a 400.
+	 */
+	cursor: Schema.optional(TinybirdDateTime),
 	search: Schema.optional(Schema.String),
 	deploymentEnv: Schema.optional(DeploymentEnvironment),
 	deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
@@ -1030,7 +1054,7 @@ export class HostInfraTimeseriesRequest extends Schema.Class<HostInfraTimeseries
 	endTime: TinybirdDateTime,
 	hostName: Schema.String,
 	metric: Schema.Literals(["cpu", "memory", "filesystem", "network", "load15"]),
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
 export class HostInfraTimeseriesResponse extends Schema.Class<HostInfraTimeseriesResponse>(
@@ -1052,7 +1076,7 @@ export class FleetUtilizationTimeseriesRequest extends Schema.Class<FleetUtiliza
 )({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
 export class FleetUtilizationTimeseriesResponse extends Schema.Class<FleetUtilizationTimeseriesResponse>(
@@ -1239,7 +1263,7 @@ export class WebAnalyticsTimeseriesRequest extends Schema.Class<WebAnalyticsTime
 )({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 	...WebAnalyticsFilterFields,
 }) {}
 
@@ -1267,7 +1291,7 @@ export class WebAnalyticsPageviewsRequest extends Schema.Class<WebAnalyticsPagev
 )({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 	...WebAnalyticsFilterFields,
 }) {}
 
@@ -1511,7 +1535,7 @@ export class PodInfraTimeseriesRequest extends Schema.Class<PodInfraTimeseriesRe
 	podName: Schema.String,
 	namespace: Schema.optional(Schema.String),
 	metric: Schema.Literals(["cpu_usage", "cpu_limit", "cpu_request", "memory_limit", "memory_request"]),
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
 export class PodInfraTimeseriesResponse extends Schema.Class<PodInfraTimeseriesResponse>(
@@ -1602,7 +1626,7 @@ export class NodeInfraTimeseriesRequest extends Schema.Class<NodeInfraTimeseries
 	endTime: TinybirdDateTime,
 	nodeName: Schema.String,
 	metric: Schema.Literals(["cpu_usage", "uptime"]),
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
 export class NodeInfraTimeseriesResponse extends Schema.Class<NodeInfraTimeseriesResponse>(
@@ -1708,7 +1732,7 @@ export class WorkloadInfraTimeseriesRequest extends Schema.Class<WorkloadInfraTi
 	namespace: Schema.optional(Schema.String),
 	metric: Schema.Literals(["cpu_usage", "cpu_limit", "memory_limit"]),
 	groupByPod: Schema.optional(Schema.Boolean),
-	bucketSeconds: Schema.optional(Schema.Number),
+	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
 export class WorkloadInfraTimeseriesResponse extends Schema.Class<WorkloadInfraTimeseriesResponse>(
