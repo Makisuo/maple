@@ -2,13 +2,9 @@ import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
-	planetscaleBranchConnectionsRowSchema,
 	planetscaleBranchConnectionsSQL,
-	planetscaleBranchStatsRowSchema,
 	planetscaleBranchGaugesSQL,
-	planetscaleConnectionsRowSchema,
 	planetscaleConnectionsSQL,
-	planetscaleDatabaseStatsRowSchema,
 	planetscaleGaugesSQL,
 } from "./planetscale-map"
 
@@ -82,21 +78,15 @@ describe("planetscaleConnectionsSQL", () => {
 
 describe("PlanetScale map row schemas", () => {
 	it("decode ClickHouse numeric strings for database and branch outputs", () => {
-		const databaseStats = compileUnsafe(planetscaleGaugesSQL(), baseParams, {
-			rowSchema: planetscaleDatabaseStatsRowSchema,
-		})
+		const databaseStats = compileUnsafe(planetscaleGaugesSQL(), baseParams)
 		const branchStats = compileUnsafe(
 			planetscaleBranchGaugesSQL(),
 			{ ...baseParams, database: "main-db" },
-			{ rowSchema: planetscaleBranchStatsRowSchema },
 		)
-		const connections = compileUnsafe(planetscaleConnectionsSQL(), baseParams, {
-			rowSchema: planetscaleConnectionsRowSchema,
-		})
+		const connections = compileUnsafe(planetscaleConnectionsSQL(), baseParams)
 		const branchConnections = compileUnsafe(
 			planetscaleBranchConnectionsSQL(),
 			{ ...baseParams, database: "main-db" },
-			{ rowSchema: planetscaleBranchConnectionsRowSchema },
 		)
 
 		expect(

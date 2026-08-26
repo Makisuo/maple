@@ -181,16 +181,6 @@ export interface ServiceAddressResolutionsHourlyOutput {
 	readonly DeploymentEnv: string
 }
 
-const ServiceAddressResolutionsHourlyOutputSchema: CompiledQueryRowSchema<ServiceAddressResolutionsHourlyOutput> =
-	Schema.Struct({
-		OrgId: Schema.String,
-		Hour: Schema.String,
-		SourceService: Schema.String,
-		ParentServerAddress: Schema.String,
-		ResolvedTargetService: Schema.String,
-		DeploymentEnv: Schema.String,
-	})
-
 export function serviceMapResolutionsRollupSQL(
 	params: ServiceMapEdgesRollupParams,
 ): Effect.Effect<CompiledQuery<ServiceAddressResolutionsHourlyOutput>, QueryBuilderError> {
@@ -261,6 +251,5 @@ export function serviceMapResolutionsRollupSQL(
 			hourStart: params.hourStart,
 			hourEnd: params.hourEnd,
 		},
-		{ rowSchema: ServiceAddressResolutionsHourlyOutputSchema },
 	)
 }

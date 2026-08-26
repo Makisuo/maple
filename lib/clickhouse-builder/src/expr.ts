@@ -39,8 +39,10 @@ export {
 	elementOf,
 	elementSchema,
 	firstTyped,
+	firstTypedNonNull,
 	type FnResult,
 	sameAs,
 	schemaOf,
 	schemaOfAny,
+	withoutNull,
 } from "./ch/define-fn"

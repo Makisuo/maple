@@ -2,7 +2,14 @@ import { makeExpr, toFragment } from "../expr"
 import { raw, compile } from "../../sql/sql-fragment"
 import type { Expr, Condition } from "../expr"
 import { Schema } from "effect"
-import { compileTypedFnCall, defineFn, firstTyped, schemaOf, schemaOfAny } from "../define-fn"
+import {
+	compileTypedFnCall,
+	defineFn,
+	firstTyped,
+	firstTypedNonNull,
+	schemaOf,
+	schemaOfAny,
+} from "../define-fn"
 import { CHNumber } from "../types"
 
 // if / multiIf (handwritten — standard fn shape but special arg types)
@@ -23,8 +30,10 @@ export function multiIf<T>(cases: Array<[Condition, Expr<T>]>, else_: Expr<T>): 
 
 // Variadic conditional functions
 
+/** The first argument that is not NULL — non-nullable as soon as one argument
+ *  is, which is what {@link firstTypedNonNull} reads off the arguments. */
 export const coalesce = <T>(...exprs: Expr<T>[]): Expr<T> =>
-	defineFn<Expr<T>[], T>("coalesce", firstTyped())(...exprs)
+	defineFn<Expr<T>[], T>("coalesce", firstTypedNonNull())(...exprs)
 
 export function nullIf<T>(expr: Expr<T>, value: Expr<T> | string): Expr<T> {
 	// The result is `expr` or NULL, so it decodes as `expr` does — nullably.

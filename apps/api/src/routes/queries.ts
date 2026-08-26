@@ -329,12 +329,8 @@ const planetscaleServiceGauges = defineQuery({
 	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
 		const params = planetscaleStatsParams(payload, orgId)
 		return payload.database !== undefined
-			? CH.compile(Integrations.planetscaleBranchGaugesSQL(), params, {
-					rowSchema: Integrations.planetscaleBranchStatsRowSchema,
-				})
-			: CH.compile(Integrations.planetscaleGaugesSQL(), params, {
-					rowSchema: Integrations.planetscaleDatabaseStatsRowSchema,
-				})
+			? CH.compile(Integrations.planetscaleBranchGaugesSQL(), params)
+			: CH.compile(Integrations.planetscaleGaugesSQL(), params)
 	},
 })
 
@@ -345,12 +341,8 @@ const planetscaleServiceConnections = defineQuery({
 	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
 		const params = planetscaleStatsParams(payload, orgId)
 		return payload.database !== undefined
-			? CH.compile(Integrations.planetscaleBranchConnectionsSQL(), params, {
-					rowSchema: Integrations.planetscaleBranchConnectionsRowSchema,
-				})
-			: CH.compile(Integrations.planetscaleConnectionsSQL(), params, {
-					rowSchema: Integrations.planetscaleConnectionsRowSchema,
-				})
+			? CH.compile(Integrations.planetscaleBranchConnectionsSQL(), params)
+			: CH.compile(Integrations.planetscaleConnectionsSQL(), params)
 	},
 })
 

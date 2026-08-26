@@ -112,13 +112,6 @@ const hasSessionId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<strin
 const fromUnixTimestamp64Nano = (nanos: CH.Expr<number>): CH.Expr<string> =>
 	compileFnCall<string>("fromUnixTimestamp64Nano", nanos)
 
-/**
- * Exact distinct count. Not in the builder's function set, which only carries
- * the approximate `uniq`. A facet count sits next to the list it filters, so an
- * HLL estimate that disagrees with the visible row count reads as a bug.
- */
-const uniqExact = <T>(expr: CH.Expr<T>): CH.Expr<number> => compileFnCall<number>("uniqExact", expr)
-
 export interface AiSessionListOpts {
 	/** Sessions returned, most recently started first. */
 	readonly limit?: number
@@ -299,12 +292,6 @@ export interface AiSessionFacetsOutput {
 	readonly facetType: string
 }
 
-export const aiSessionFacetsRowSchema: CompiledQueryRowSchema<AiSessionFacetsOutput> = Schema.Struct({
-	name: Schema.String,
-	count: CHNumber,
-	facetType: Schema.String,
-})
-
 /**
  * Distinct sessions per vendor and per service, for the list's filter sidebar.
  *
@@ -327,7 +314,7 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 		from(Traces)
 			.select(($) => ({
 				name: name($),
-				count: uniqExact($.SpanAttributes.get(SESSION_ID_ATTR)),
+				count: CH.uniqExact($.SpanAttributes.get(SESSION_ID_ATTR)),
 				facetType: CH.lit(facetType),
 			}))
 			.where(($) => [

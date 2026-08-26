@@ -145,6 +145,7 @@ parentheses, which is the plain "this value is a sub-SELECT" case.
 | `defineCondFn<Args>(name)`             | Same, returning `Condition`                        |
 | `sameAs(i)`                            | Result rule: decodes as argument `i`               |
 | `firstTyped()`                         | Result rule: the first argument that has a type    |
+| `firstTypedNonNull()`                  | Same, minus `\| null` — `coalesce`, `ifNull`        |
 | `elementOf(i)`                         | Result rule: one element of argument `i`'s array   |
 | `arrayOfArg(i)`                        | Result rule: an array of argument `i`              |
 | `compileFnCall<R>(name, ...args)`      | Variadic/generic wrapper (untyped result)          |
@@ -156,6 +157,7 @@ parentheses, which is the plain "this value is a sub-SELECT" case.
 | `schemaOf(expr)`                       | An expression's codec, or `undefined`              |
 | `schemaOfAny(...exprs)`                | The first codec among several                      |
 | `elementSchema(expr)`                  | The element codec of an array expression           |
+| `withoutNull(schema)`                  | A codec minus its `null` arm, or `undefined`       |
 | `paramPlaceholder(kind, name)`         | The `__PARAM_…__` text, for handwritten fragments  |
 
 ---
@@ -166,7 +168,7 @@ parentheses, which is the plain "this value is a sub-SELECT" case.
 
 `count()`, `countIf(cond)`, `avg(e)`, `sum(e)`, `min(e)`, `max(e)`, `any(e)`, `uniq(e)`,
 `sumIf(e, cond)`, `avgIf(e, cond)`, `minIf(e, cond)`, `maxIf(e, cond)`, `anyIf(e, cond)`,
-`groupUniqArray(e)`, `groupUniqArrayIf(e, cond)`, `groupUniqArrayArray(e)`, `uniqIf(e, cond)`,
+`groupUniqArray(e)`, `groupUniqArrayIf(e, cond)`, `groupUniqArrayArray(e)`, `uniqIf(e, cond)`, `uniqExact(e)`,
 `argMin(value, order)`, `argMax(value, order)`, `argMaxMerge(e)`, `quantile(q)(e)` _(curried)_,
 `windowFunnel(window, mode?)(ts, ...conds)` and `sequenceMatch(pattern)(ts, ...conds)`
 _(both curried; `WindowFunnelMode` is the mode union)_.

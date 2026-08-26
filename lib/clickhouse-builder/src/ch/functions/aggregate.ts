@@ -57,6 +57,16 @@ export const uniq = <T>(expr: Expr<T>): Expr<number> => defineFn<[Expr<T>], numb
 export const uniqIf = <T>(expr: Expr<T>, cond: Condition): Expr<number> =>
 	defineFn<[Expr<T>, Condition], number>("uniqIf", T.uint64)(expr, cond)
 
+/**
+ * `uniqExact(value)` — the exact distinct count, where {@link uniq} estimates.
+ *
+ * Costs more memory than the HLL `uniq` and is the right one wherever the
+ * number sits next to the rows it counts: a facet count that disagrees with the
+ * visible list reads as a bug, not as an approximation.
+ */
+export const uniqExact = <T>(expr: Expr<T>): Expr<number> =>
+	defineFn<[Expr<T>], number>("uniqExact", T.uint64)(expr)
+
 export const groupUniqArray = <T>(expr: Expr<T>): Expr<ReadonlyArray<T>> =>
 	defineFn<[Expr<T>], ReadonlyArray<T>>("groupUniqArray", arrayOfArg(0))(expr)
 

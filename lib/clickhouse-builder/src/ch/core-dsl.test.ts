@@ -24,6 +24,28 @@ describe("expression functions", () => {
 		expect(sql).toContain("coalesce(nullIf(Name, ''), 'default') AS result")
 	})
 
+	// `coalesce(nullIf(x, ''), y)` is a `String` to ClickHouse, not a
+	// `Nullable(String)`: one non-nullable argument means the call can always
+	// supply a value. Deriving it as nullable is what forced the queries using
+	// this shape to hand-declare a row schema that narrowed it back.
+	it("derives coalesce as non-nullable when one argument is", () => {
+		const q = CH.from(TestTable).select(($) => ({
+			result: CH.coalesce(CH.nullIf($.Name, ""), $.Attrs.get("fallback")),
+		}))
+		const compiled = compileCHUnsafe(q, {})
+		expect(compiled.rowSchemaSource).toBe("derived")
+		expect(Effect.runSync(compiled.decodeRows([{ result: "kept" }]))).toEqual([{ result: "kept" }])
+		expect(Effect.runSync(Effect.exit(compiled.decodeRows([{ result: null }])))._tag).toBe("Failure")
+	})
+
+	it("derives coalesce as nullable when every argument is", () => {
+		const q = CH.from(TestTable).select(($) => ({
+			result: CH.coalesce(CH.nullIf($.Name, ""), CH.nullIf($.Name, "x")),
+		}))
+		const compiled = compileCHUnsafe(q, {})
+		expect(Effect.runSync(compiled.decodeRows([{ result: null }]))).toEqual([{ result: null }])
+	})
+
 	it("compiles nullIf", () => {
 		const q = CH.from(TestTable).select(($) => ({ result: CH.nullIf($.Name, "") }))
 		const { sql } = compileCHUnsafe(q, {})

@@ -101,6 +101,7 @@ export {
 	elementOf,
 	elementSchema,
 	firstTyped,
+	firstTypedNonNull,
 	type FnResult,
 	makeCond,
 	makeExpr,
@@ -108,6 +109,7 @@ export {
 	sameAs,
 	schemaOf,
 	schemaOfAny,
+	withoutNull,
 } from "./define-fn"
 
 // ClickHouse functions (from category modules)
@@ -124,6 +126,7 @@ export {
 	anyIf,
 	uniq,
 	uniqIf,
+	uniqExact,
 	sumIf,
 	avgIf,
 	maxIf,

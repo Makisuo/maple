@@ -65,7 +65,6 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 								startTime: payload.startTime,
 								endTime: payload.endTime,
 							},
-							{ rowSchema: Integrations.aiSessionFacetsRowSchema },
 						)
 						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 							profile: "list",

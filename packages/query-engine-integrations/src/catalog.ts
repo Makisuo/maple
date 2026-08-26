@@ -56,8 +56,7 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		module: "ai-sessions",
 		name: "aiSessionFacetsQuery",
 		label: "default",
-		compile: () =>
-			compileUnionUnsafe(CH.aiSessionFacetsQuery(), window, { rowSchema: CH.aiSessionFacetsRowSchema }),
+		compile: () => compileUnionUnsafe(CH.aiSessionFacetsQuery(), window),
 	},
 	{
 		module: "ai-sessions",

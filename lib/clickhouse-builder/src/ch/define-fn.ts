@@ -32,13 +32,30 @@ export const elementSchema = <T>(
 }
 
 /** The first argument that knows how it decodes — for functions that return one
- *  of their inputs unchanged (`min`, `argMax`, `coalesce`, `if`, a window). */
+ *  of their inputs unchanged (`min`, `argMax`, `if`, a window). */
 export const schemaOfAny = <T>(...exprs: ReadonlyArray<unknown>): Schema.Codec<T, any> | undefined => {
 	for (const expr of exprs) {
 		const schema = schemaOf<T>(expr)
 		if (schema !== undefined) return schema
 	}
 	return undefined
+}
+
+/**
+ * A schema with its `| null` arm removed, or `undefined` when it had none.
+ *
+ * Read off the AST, like {@link elementSchema}: `Schema.NullOr(x)` is a union
+ * of `x` and `Null`, and dropping the `Null` member is the only way back to `x`.
+ */
+export const withoutNull = <T>(
+	schema: Schema.Codec<T | null, any> | undefined,
+): Schema.Codec<T, any> | undefined => {
+	const ast = schema?.ast
+	if (ast?._tag !== "Union") return undefined
+	const rest = ast.types.filter((type) => type._tag !== "Null")
+	if (rest.length === ast.types.length || rest.length === 0) return undefined
+	const members = rest.map((type) => Schema.make(type))
+	return (members.length === 1 ? members[0]! : Schema.Union(members)) as Schema.Codec<T, any>
 }
 
 // Re-export for consumer convenience
@@ -133,6 +150,32 @@ export const firstTyped =
 	<Args extends unknown[], R>() =>
 	(...args: Args): Schema.Codec<R, any> | undefined =>
 		schemaOfAny<R>(...args)
+
+/**
+ * The result decodes as the first typed argument, minus its `| null` — the rule
+ * for `coalesce`/`ifNull`, which return the first argument that is not NULL.
+ *
+ * ClickHouse types that result non-`Nullable` as soon as one argument is
+ * non-`Nullable`, because that argument can always supply a value:
+ * `coalesce(nullIf(x, ''), y)` over two `String` columns is a `String`, not a
+ * `Nullable(String)`. Reading the first argument's schema alone made every such
+ * column derive as `string | null`, which is why the queries that use this
+ * shape had to hand-declare a row schema to narrow it back.
+ *
+ * An argument with no schema says nothing about nullability, so it does not
+ * license the narrowing.
+ */
+export const firstTypedNonNull =
+	<Args extends unknown[], R>() =>
+	(...args: Args): Schema.Codec<R, any> | undefined => {
+		const first = schemaOfAny<R>(...args)
+		if (first === undefined) return undefined
+		const nonNullArg = args.some((arg) => {
+			const schema = schemaOf(arg)
+			return schema !== undefined && withoutNull(schema) === undefined
+		})
+		return nonNullArg ? (withoutNull<R>(first as Schema.Codec<R | null, any>) ?? first) : first
+	}
 
 /** The result is one element of argument `index`'s array — `arrayJoin`,
  *  `arrayElement`. */

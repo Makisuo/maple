@@ -9,7 +9,6 @@
 
 export {
 	aiSessionFacetsQuery,
-	aiSessionFacetsRowSchema,
 	aiSessionListQuery,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,

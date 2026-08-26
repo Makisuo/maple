@@ -12,6 +12,7 @@ export {
 	anyIf,
 	uniq,
 	uniqIf,
+	uniqExact,
 	sumIf,
 	avgIf,
 	maxIf,

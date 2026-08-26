@@ -3,7 +3,6 @@ import { Effect } from "effect"
 import { compileUnsafe, compileUnionUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
 	aiSessionFacetsQuery,
-	aiSessionFacetsRowSchema,
 	aiSessionListQuery,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
@@ -204,9 +203,7 @@ describe("aiSessionFacetsQuery", () => {
 	})
 
 	it("decodes the quoted 64-bit uniqExact count", () => {
-		const compiled = compileUnionUnsafe(aiSessionFacetsQuery(), params, {
-			rowSchema: aiSessionFacetsRowSchema,
-		})
+		const compiled = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
 		expect(
 			decodeRows(compiled, [
