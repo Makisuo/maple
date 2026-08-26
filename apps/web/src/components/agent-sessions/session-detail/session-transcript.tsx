@@ -1064,7 +1064,6 @@ function LaneOpen({
 	showPayloads,
 	openRows,
 	onToggleRow,
-	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "lane-open" }> }) {
 	return (
 		<Row
@@ -1074,8 +1073,6 @@ function LaneOpen({
 			timePadding="pt-2"
 			className="pt-2.5"
 		>
-			{/* Wraps: the parallel chips are one per sibling lane, and a fan-out wide
-			    enough to overflow the line belongs on a second one, not off-page. */}
 			<div className="flex flex-wrap items-center gap-2.5 py-1.5">
 				<FaceRobotIcon size={14} className="shrink-0 text-chart-1" />
 				<span className={cn(LABEL, "text-chart-1")}>
@@ -1095,21 +1092,18 @@ function LaneOpen({
 						: `· trace ${row.span.traceId.slice(0, 8)}`}{" "}
 					· {row.spanCount} spans · {formatDuration(row.span.durationMs)}
 				</span>
-				{row.parallelWith.length === 0 ? (
-					<span aria-hidden className="h-px grow bg-border" />
-				) : (
-					<>
-						<span className="grow" />
-						{row.parallelWith.map((ref) => (
-							<ParallelJump
-								key={ref.key}
-								targetKey={ref.key}
-								label={ref.agentName}
-								onJump={onJump}
-							/>
-						))}
-					</>
+				{/* The fork banner above already lists every sibling lane; this is the
+				    glanceable trace of it that survives past that marker scrolling out. */}
+				{row.parallelWith.length > 0 && (
+					<span
+						className="flex shrink-0 items-center gap-1 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[10px] text-primary uppercase tracking-[0.08em]"
+						title={`ran in parallel with ${row.parallelWith.map((ref) => ref.agentName).join(", ")}`}
+					>
+						<BranchForkIcon size={10} className="shrink-0" />
+						parallel
+					</span>
 				)}
+				<span aria-hidden className="h-px grow bg-border" />
 			</div>
 			{/* The handoff's own payload: the `execute_tool task` span this block
 			    swallowed is where the task prompt lives, and losing it would leave
@@ -1128,30 +1122,6 @@ function LaneOpen({
 				</div>
 			)}
 		</Row>
-	)
-}
-
-/** The same chip on a lane header and on a turn header: one visual language for
- *  concurrency, whichever level announced it. */
-function ParallelJump({
-	targetKey,
-	label,
-	onJump,
-}: {
-	targetKey: string
-	/** What the reader is being sent to — an agent's name, or a turn's ordinal. */
-	label: string
-	onJump: (key: string) => void
-}) {
-	return (
-		<button
-			type="button"
-			onClick={() => onJump(targetKey)}
-			title={label}
-			className="max-w-72 shrink-0 cursor-pointer truncate rounded-sm bg-primary/12 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/20"
-		>
-			ran in parallel with {label}
-		</button>
 	)
 }
 
@@ -1273,8 +1243,8 @@ function ParallelMarker({
 			flush
 		>
 			<ParallelBanner
-				title={`Parallel — ${row.forkedBy === undefined ? "this turn" : row.forkedBy} forked ${row.lanes.length} lanes`}
-				description={`${overlapSentence(row, timeZone)}. Each lane is shown whole and in order below:`}
+				title={`${row.lanes.length} lanes in parallel`}
+				description={overlapSentence(row, timeZone)}
 				refs={row.lanes.map((lane) => ({ key: lane.key, label: lane.agentName }))}
 				onJump={onJump}
 			/>
@@ -1306,8 +1276,8 @@ function ParallelTurnsMarker({
 			flush
 		>
 			<ParallelBanner
-				title={`Parallel — ${row.turns.length} turns ran at the same time`}
-				description={`${overlapSentence(row, timeZone)}. Each turn is shown whole and in order, indented below:`}
+				title={`${row.turns.length} turns in parallel`}
+				description={overlapSentence(row, timeZone)}
 				refs={row.turns.map((ref) => ({
 					key: ref.key,
 					label: `${turnOrdinal(ref.turn).toUpperCase()}${ref.turn.agentName === undefined ? "" : ` ${ref.turn.agentName}`}`,
