@@ -125,12 +125,17 @@ export function RuleDiagnosisPanel({
 				<div className="border-t px-4 py-2.5">
 					{groupKeys.length > 0 && (
 						<div className="mb-3 flex items-center gap-2">
-							<span className="text-xs text-muted-foreground">Group</span>
-							<AlertSegmentedSelect
-								value={activeGroup ?? groupKeys[0]!}
-								onChange={(value) => setSelectedGroup(value)}
-								options={groupKeys.slice(0, 8).map((key) => ({ value: key, label: key }))}
-							/>
+							<span className="shrink-0 text-xs text-muted-foreground">Group</span>
+							{/* Group keys are opaque ids (often UUID-long), so the track
+							    overflows its row — scroll it instead of clipping. */}
+							<div className="-my-1 min-w-0 flex-1 overflow-x-auto py-1">
+								<AlertSegmentedSelect
+									className="w-max"
+									value={activeGroup ?? groupKeys[0]!}
+									onChange={(value) => setSelectedGroup(value)}
+									options={groupKeys.slice(0, 8).map((key) => ({ value: key, label: key }))}
+								/>
+							</div>
 						</div>
 					)}
 					<ol className="space-y-1">
