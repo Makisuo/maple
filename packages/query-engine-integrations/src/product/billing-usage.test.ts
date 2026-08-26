@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { compileUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
-import {
-	dailyProductEventCountQuery,
-	dailyProductEventCountRowSchema,
-	dailySessionCountQuery,
-	dailySessionCountRowSchema,
-	dailySignalVolumeQuery,
-	dailySignalVolumeRowSchema,
-} from "./billing-usage"
+import { dailyProductEventCountQuery, dailySessionCountQuery, dailySignalVolumeQuery } from "./billing-usage"
 
 const params = {
 	orgId: "org_123",
@@ -51,9 +44,7 @@ describe("dailySignalVolumeQuery", () => {
 	})
 
 	it("decodes UInt64 byte sums that arrive as strings on BYO-ClickHouse", () => {
-		const compiled = compileUnsafe(dailySignalVolumeQuery(), params, {
-			rowSchema: dailySignalVolumeRowSchema,
-		})
+		const compiled = compileUnsafe(dailySignalVolumeQuery(), params)
 
 		const [row] = decodeRows(compiled, [
 			{
@@ -92,9 +83,7 @@ describe("dailySessionCountQuery", () => {
 	})
 
 	it("decodes a string session count", () => {
-		const compiled = compileUnsafe(dailySessionCountQuery(), params, {
-			rowSchema: dailySessionCountRowSchema,
-		})
+		const compiled = compileUnsafe(dailySessionCountQuery(), params)
 
 		const [row] = decodeRows(compiled, [{ day: "2026-07-01 00:00:00", sessions: "1284" }])
 
@@ -116,9 +105,7 @@ describe("dailyProductEventCountQuery", () => {
 	})
 
 	it("decodes a string event count", () => {
-		const compiled = compileUnsafe(dailyProductEventCountQuery(), params, {
-			rowSchema: dailyProductEventCountRowSchema,
-		})
+		const compiled = compileUnsafe(dailyProductEventCountQuery(), params)
 
 		const [row] = decodeRows(compiled, [{ day: "2026-07-01 00:00:00", events: "40120" }])
 

@@ -61,42 +61,6 @@ const decodeSpanId = Schema.decodeSync(SpanId)
 const decodeServiceName = Schema.decodeSync(ServiceName)
 const decodeMetricName = Schema.decodeSync(MetricName)
 
-const metricCatalogRowSchema = Schema.Struct({
-	metricName: Schema.String,
-	metricType: Schema.String,
-	serviceName: Schema.String,
-	metricDescription: Schema.String,
-	metricUnit: Schema.String,
-	dataPointCount: CH.CHNumber,
-	firstSeen: Schema.String,
-	lastSeen: Schema.String,
-	// `metric_catalog.IsMonotonic` is `SimpleAggregateFunction(anyLast, UInt8)` —
-	// always 0/1 on the wire, never a JSON boolean. `CHNumber` covers both the
-	// numeric and the quoted-string encoding.
-	isMonotonic: CH.CHNumber,
-})
-
-export const serviceCatalogRowSchema = Schema.Struct({
-	serviceName: Schema.String,
-	serviceNamespaces: Schema.Array(Schema.String),
-	deploymentEnvironments: Schema.Array(Schema.String),
-	spanCount: CH.CHNumber,
-	errorCount: CH.CHNumber,
-	estimatedErrorCount: CH.CHNumber,
-	estimatedSpanCount: CH.CHNumber,
-	p50LatencyMs: CH.CHNumber,
-	p95LatencyMs: CH.CHNumber,
-	p99LatencyMs: CH.CHNumber,
-})
-
-const serviceHealthBaselineRowSchema = Schema.Struct({
-	serviceName: Schema.String,
-	serviceNamespace: Schema.String,
-	environment: Schema.String,
-	baselineP95LatencyMs: CH.CHNumber,
-	baselineSpanCount: CH.CHNumber,
-})
-
 const HOUR_MS = 60 * 60 * 1000
 const PARTITION_HINT_RADIUS_MS = 60 * 60 * 1000
 const PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT = 50
@@ -925,7 +889,6 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 									offset,
 								}),
 								{ orgId: tenant.orgId, ...window },
-								{ rowSchema: metricCatalogRowSchema },
 							)
 							return yield* warehouse
 								.compiledQuery(tenant, compiled, {
@@ -1163,7 +1126,6 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 						namespaces: filters.serviceNamespace ? [filters.serviceNamespace] : undefined,
 					}),
 					{ orgId: tenant.orgId, ...window },
-					{ rowSchema: serviceHealthBaselineRowSchema },
 				)
 				const rows = yield* queryEngine.cachedDirect(
 					tenant,
@@ -1195,11 +1157,7 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 			opts: Parameters<typeof CH.serviceCatalogQuery>[0],
 		) =>
 			Effect.gen(function* () {
-				const compiled = CH.compile(
-					CH.serviceCatalogQuery(opts),
-					{ orgId: tenant.orgId, ...window },
-					{ rowSchema: serviceCatalogRowSchema },
-				)
+				const compiled = CH.compile(CH.serviceCatalogQuery(opts), { orgId: tenant.orgId, ...window })
 				return yield* warehouse
 					.compiledQuery(tenant, compiled, {
 						profile: "aggregation",
@@ -1284,10 +1242,6 @@ const toMapEdge = (row: {
 	}
 }
 
-const serviceEnvironmentsRowSchema = Schema.Struct({
-	environment: Schema.String,
-})
-
 /**
  * The values every other endpoint's `deployment_environment` filter accepts.
  *
@@ -1308,11 +1262,7 @@ export const HttpV2EnvironmentsLive = HttpApiBuilder.group(MapleApiV2, "environm
 					precision: "second",
 					rangeLabel: "Environment queries",
 				})
-				const compiled = CH.compile(
-					CH.serviceEnvironmentsQuery(),
-					{ orgId: tenant.orgId, ...window },
-					{ rowSchema: serviceEnvironmentsRowSchema },
-				)
+				const compiled = CH.compile(CH.serviceEnvironmentsQuery(), { orgId: tenant.orgId, ...window })
 				const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 					profile: "discovery",
 					context: "v2Environments",

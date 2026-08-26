@@ -11,10 +11,8 @@
 // numeric output through CHNumber so BYO-ClickHouse string-encoded aggregates
 // decode identically to Tinybird numbers.
 
-import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { from, param, type ColumnAccessor, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "@maple/query-engine/ch/schema"
+import { from, param, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "@maple/query-engine/ch/tables"
 import { avgWhere, isoBucket } from "@maple/query-engine/ch/format"
 import {
@@ -43,22 +41,6 @@ export interface CloudflareZoneFirewallTopOutput {
 	readonly host: string
 	readonly events: number
 }
-
-export const cloudflareZoneFirewallTimeseriesRowSchema: CompiledQueryRowSchema<CloudflareZoneFirewallTimeseriesOutput> =
-	Schema.Struct({
-		bucket: Schema.String,
-		action: Schema.String,
-		events: CHNumber,
-	})
-
-export const cloudflareZoneFirewallTopRowSchema: CompiledQueryRowSchema<CloudflareZoneFirewallTopOutput> =
-	Schema.Struct({
-		source: Schema.String,
-		action: Schema.String,
-		ruleId: Schema.String,
-		host: Schema.String,
-		events: CHNumber,
-	})
 
 /** Bucketed security-event counts by action for one zone pseudo-service. */
 export function cloudflareZoneFirewallTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
@@ -120,20 +102,6 @@ export interface CloudflareZoneDnsBreakdownOutput {
 	readonly queries: number
 	readonly nxdomain: number
 }
-
-export const cloudflareZoneDnsTimeseriesRowSchema: CompiledQueryRowSchema<CloudflareZoneDnsTimeseriesOutput> =
-	Schema.Struct({
-		bucket: Schema.String,
-		responseCode: Schema.String,
-		queries: CHNumber,
-	})
-
-export const cloudflareZoneDnsBreakdownRowSchema: CompiledQueryRowSchema<CloudflareZoneDnsBreakdownOutput> =
-	Schema.Struct({
-		queryName: Schema.String,
-		queries: CHNumber,
-		nxdomain: CHNumber,
-	})
 
 /** Bucketed DNS query counts by response code for one zone pseudo-service. */
 export function cloudflareZoneDnsTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
@@ -199,22 +167,6 @@ export interface CloudflareDurableObjectCountersOutput {
 	readonly requests: number
 	readonly errors: number
 }
-
-export const cloudflareQueueGaugesRowSchema: CompiledQueryRowSchema<CloudflareQueueGaugesOutput> =
-	Schema.Struct({
-		serviceName: Schema.String,
-		backlogMessages: CHNumber,
-		backlogMessagesMax: CHNumber,
-		backlogBytes: CHNumber,
-		consumerConcurrency: CHNumber,
-	})
-
-export const cloudflareDurableObjectCountersRowSchema: CompiledQueryRowSchema<CloudflareDurableObjectCountersOutput> =
-	Schema.Struct({
-		serviceName: Schema.String,
-		requests: CHNumber,
-		errors: CHNumber,
-	})
 
 const QUEUE_GAUGE_METRIC_NAMES = [
 	"cloudflare.queue.backlog.messages",

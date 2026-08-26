@@ -51,11 +51,9 @@ import { listMetricsQuery, metricsSummaryQuery } from "./queries/metrics"
 import { serviceDependenciesSQL } from "./queries/service-map"
 import {
 	serviceApdexTimeseriesQuery,
-	serviceApdexTimeseriesRowSchema,
 	serviceOverviewQuery,
 	serviceOverviewRowSchema,
 	serviceReleasesTimelineQuery,
-	serviceReleasesTimelineRowSchema,
 	servicesFacetsQuery,
 	serviceUsageQuery,
 	serviceUsageRowSchema,
@@ -411,7 +409,6 @@ export function compilePipeQuery(
 							bucketSeconds,
 						}),
 						{ orgId, startTime, endTime, bucketSeconds },
-						{ rowSchema: serviceReleasesTimelineRowSchema },
 					),
 				)
 			}),
@@ -425,7 +422,6 @@ export function compilePipeQuery(
 							bucketSeconds,
 						}),
 						{ orgId, startTime, endTime, bucketSeconds },
-						{ rowSchema: serviceApdexTimeseriesRowSchema },
 					),
 				)
 			}),

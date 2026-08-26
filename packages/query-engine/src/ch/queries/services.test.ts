@@ -6,12 +6,10 @@ import {
 	serviceOverviewRowSchema,
 	serviceCatalogQuery,
 	serviceHealthSnapshotQuery,
-	serviceHealthSnapshotRowSchema,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
 	serviceEnvironmentsQuery,
 	serviceApdexTimeseriesQuery,
-	serviceApdexTimeseriesRowSchema,
 	serviceUsageQuery,
 	serviceUsageWithPreviousQuery,
 	servicesFacetsQuery,
@@ -56,9 +54,6 @@ describe("serviceHealthSnapshotQuery", () => {
 		const { sql } = compileUnsafe(
 			serviceHealthSnapshotQuery({ environments: ["production"] }),
 			baseParams,
-			{
-				rowSchema: serviceHealthSnapshotRowSchema,
-			},
 		)
 
 		expect(sql).toContain("FROM traces_aggregates_hourly")
@@ -73,9 +68,7 @@ describe("serviceHealthSnapshotQuery", () => {
 	})
 
 	it("coerces BYO ClickHouse string-encoded aggregates", () => {
-		const compiled = compileUnsafe(serviceHealthSnapshotQuery({}), baseParams, {
-			rowSchema: serviceHealthSnapshotRowSchema,
-		})
+		const compiled = compileUnsafe(serviceHealthSnapshotQuery({}), baseParams)
 		const rows = Effect.runSync(
 			compiled.decodeRows([
 				{
@@ -353,9 +346,6 @@ describe("serviceApdexTimeseriesQuery", () => {
 		const compiled = compileUnsafe(
 			serviceApdexTimeseriesQuery({ serviceName: "api", bucketSeconds: 3600 }),
 			baseParams,
-			{
-				rowSchema: serviceApdexTimeseriesRowSchema,
-			},
 		)
 		const [decoded] = Effect.runSync(
 			compiled.decodeRows([

@@ -9,16 +9,8 @@
 // metric emit literal 0 for those columns, so the response schema and the UI
 // table stay generic.
 
-import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import {
-	from,
-	param,
-	unionAll,
-	type CHUnionQuery,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "@maple/query-engine/ch/schema"
+import { from, param, unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsSum } from "@maple/query-engine/ch/tables"
 import { ISO_Z_FORMAT, isoBucket } from "@maple/query-engine/ch/format"
 import {
@@ -168,27 +160,6 @@ export interface CloudflareZoneBreakdownCoverageOutput {
 	/** Requests attributed to a returned key — compare against the zone total for coverage. */
 	readonly attributedRequests: number
 }
-
-export const cloudflareZoneBreakdownTotalsRowSchema: CompiledQueryRowSchema<CloudflareZoneBreakdownTotalsOutput> =
-	Schema.Struct({
-		key: Schema.String,
-		requests: CHNumber,
-		errors5xx: CHNumber,
-		bytes: CHNumber,
-	})
-
-export const cloudflareZoneBreakdownTimeseriesRowSchema: CompiledQueryRowSchema<CloudflareZoneBreakdownTimeseriesOutput> =
-	Schema.Struct({
-		bucket: Schema.String,
-		key: Schema.String,
-		requests: CHNumber,
-	})
-
-export const cloudflareZoneBreakdownCoverageRowSchema: CompiledQueryRowSchema<CloudflareZoneBreakdownCoverageOutput> =
-	Schema.Struct({
-		coverageStart: Schema.String,
-		attributedRequests: CHNumber,
-	})
 
 const breakdownConditions = (
 	$: CloudflareMetricsAccessor,

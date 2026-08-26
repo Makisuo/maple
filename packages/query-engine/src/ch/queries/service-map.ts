@@ -1207,18 +1207,6 @@ export interface ServicePlatformsOutput {
 	readonly processRuntimeName: string
 }
 
-const ServicePlatformsOutputSchema: CompiledQueryRowSchema<ServicePlatformsOutput> = Schema.Struct({
-	serviceName: Schema.String,
-	k8sCluster: Schema.String,
-	k8sPodName: Schema.String,
-	k8sDeploymentName: Schema.String,
-	cloudPlatform: Schema.String,
-	cloudProvider: Schema.String,
-	faasName: Schema.String,
-	mapleSdkType: Schema.String,
-	processRuntimeName: Schema.String,
-})
-
 export function servicePlatformsSQL(
 	opts: ServicePlatformsOpts,
 	params: { orgId: string; startTime: string; endTime: string },
@@ -1250,13 +1238,9 @@ export function servicePlatformsSQL(
 		.limit(500)
 		.format("JSON")
 
-	return compile(
-		query,
-		{
-			orgId: params.orgId,
-			startTime: params.startTime,
-			endTime: params.endTime,
-		},
-		{ rowSchema: ServicePlatformsOutputSchema },
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		startTime: params.startTime,
+		endTime: params.endTime,
+	})
 }

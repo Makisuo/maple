@@ -89,11 +89,10 @@ const cloudflareInfraZoneFirewallTimeseries = defineQuery({
 			endTime: payload.endTime,
 		}
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(
-			Integrations.cloudflareZoneFirewallTimeseriesSQL(filters),
-			{ ...params, bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: Integrations.cloudflareZoneFirewallTimeseriesRowSchema },
-		)
+		return CH.compile(Integrations.cloudflareZoneFirewallTimeseriesSQL(filters), {
+			...params,
+			bucketSeconds: payload.bucketSeconds,
+		})
 	},
 })
 
@@ -109,9 +108,7 @@ const cloudflareInfraZoneFirewallTop = defineQuery({
 			endTime: payload.endTime,
 		}
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneFirewallTopSQL(filters), params, {
-			rowSchema: Integrations.cloudflareZoneFirewallTopRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareZoneFirewallTopSQL(filters), params)
 	},
 })
 
@@ -127,11 +124,10 @@ const cloudflareInfraZoneDnsTimeseries = defineQuery({
 			endTime: payload.endTime,
 		}
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(
-			Integrations.cloudflareZoneDnsTimeseriesSQL(filters),
-			{ ...params, bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: Integrations.cloudflareZoneDnsTimeseriesRowSchema },
-		)
+		return CH.compile(Integrations.cloudflareZoneDnsTimeseriesSQL(filters), {
+			...params,
+			bucketSeconds: payload.bucketSeconds,
+		})
 	},
 })
 
@@ -147,9 +143,7 @@ const cloudflareInfraZoneDnsBreakdown = defineQuery({
 			endTime: payload.endTime,
 		}
 		const filters = toCloudflareFilters(payload)
-		return CH.compile(Integrations.cloudflareZoneDnsBreakdownSQL(filters), params, {
-			rowSchema: Integrations.cloudflareZoneDnsBreakdownRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareZoneDnsBreakdownSQL(filters), params)
 	},
 })
 
@@ -195,9 +189,7 @@ const cloudflareInfraQueueGauges = defineQuery({
 			startTime: payload.startTime,
 			endTime: payload.endTime,
 		}
-		return CH.compile(Integrations.cloudflareQueueGaugesSQL(), params, {
-			rowSchema: Integrations.cloudflareQueueGaugesRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareQueueGaugesSQL(), params)
 	},
 })
 
@@ -211,9 +203,7 @@ const cloudflareInfraDurableObjects = defineQuery({
 			startTime: payload.startTime,
 			endTime: payload.endTime,
 		}
-		return CH.compile(Integrations.cloudflareDurableObjectCountersSQL(), params, {
-			rowSchema: Integrations.cloudflareDurableObjectCountersRowSchema,
-		})
+		return CH.compile(Integrations.cloudflareDurableObjectCountersSQL(), params)
 	},
 })
 
@@ -270,14 +260,11 @@ const planetscaleInfraTimeseries = defineQuery({
 			database: payload.database,
 		}
 		return payload.branch === undefined
-			? CH.compile(Integrations.planetscaleInfraTimeseriesSQL(), base, {
-					rowSchema: Integrations.planetscaleInfraTimeseriesRowSchema,
+			? CH.compile(Integrations.planetscaleInfraTimeseriesSQL(), base)
+			: CH.compile(Integrations.planetscaleBranchInfraTimeseriesSQL(), {
+					...base,
+					branch: payload.branch,
 				})
-			: CH.compile(
-					Integrations.planetscaleBranchInfraTimeseriesSQL(),
-					{ ...base, branch: payload.branch },
-					{ rowSchema: Integrations.planetscaleInfraTimeseriesRowSchema },
-				)
 	},
 })
 
@@ -462,7 +449,6 @@ const cloudflareInfraZoneBreakdownTotals = defineQuery({
 				payload.limit ?? 100,
 			),
 			zoneBreakdownParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneBreakdownTotalsRowSchema },
 		)
 	},
 })
@@ -480,7 +466,6 @@ const cloudflareInfraZoneBreakdownCoverage = defineQuery({
 		CH.compile(
 			Integrations.cloudflareZoneBreakdownCoverageSQL(payload.dimension),
 			zoneBreakdownParams(payload, orgId),
-			{ rowSchema: Integrations.cloudflareZoneBreakdownCoverageRowSchema },
 		),
 })
 
@@ -522,7 +507,6 @@ const cloudflareInfraZoneBreakdownTimeseries = defineQuery({
 				payload.topKeys,
 			),
 			{ ...zoneBreakdownParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: Integrations.cloudflareZoneBreakdownTimeseriesRowSchema },
 		),
 })
 

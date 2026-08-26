@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { compileUnsafe } from "@maple-dev/clickhouse-builder"
-import {
-	cloudflareUsageQuery,
-	cloudflareUsageStatsQuery,
-	cloudflareUsageStatsRowSchema,
-} from "./cloudflare-usage"
+import { cloudflareUsageQuery, cloudflareUsageStatsQuery } from "./cloudflare-usage"
 
 const baseParams = {
 	orgId: "org_1",
@@ -75,9 +71,7 @@ describe("cloudflareUsageStatsQuery", () => {
 	})
 
 	it("row schema coerces BYO-CH string-encoded aggregates", () => {
-		const compiled = compileUnsafe(cloudflareUsageStatsQuery(), statsParams, {
-			rowSchema: cloudflareUsageStatsRowSchema,
-		})
+		const compiled = compileUnsafe(cloudflareUsageStatsQuery(), statsParams)
 		const decoded = Effect.runSync(
 			compiled.decodeRows([{ previousRequests: "12345", firewallBlockedEvents: "678" }]),
 		)

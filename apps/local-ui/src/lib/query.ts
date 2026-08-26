@@ -5,7 +5,7 @@
 // or remotely from `local.maple.dev`. Hooks import `executeLocalQuery` from here
 // instead of the shared package so they never have to thread the base URL.
 import { executeLocalQuery as run } from "@maple/query-engine/local"
-import type { CompiledQuery, QueryBuilderError } from "@maple/query-engine/ch"
+import type { CompiledQuery, CompiledQueryInput } from "@maple/query-engine/ch"
 import { Effect, type Option } from "effect"
 import { localApiBase } from "./constants"
 
@@ -14,18 +14,17 @@ function executeLocalQuery<T = Record<string, unknown>>(sql: string, signal?: Ab
 }
 
 /**
- * `CH.compile` is Effect-returning now, so hooks hand us the effect. Resolving
- * it here rather than at ~150 call sites keeps every hook a one-liner, and a
- * compile failure rejects the promise the same way a query failure does — which
- * is what a hook already handles.
+ * `CH.compile` is Effect-returning now, so hooks hand us the effect — the same
+ * `CompiledQueryInput` the API's executor takes. Resolving it here rather than
+ * at ~150 call sites keeps every hook a one-liner, and a compile failure
+ * rejects the promise the same way a query failure does, which is what a hook
+ * already handles.
  */
-type Compiled<T> = CompiledQuery<T> | Effect.Effect<CompiledQuery<T>, QueryBuilderError>
-
-const resolve = <T>(compiled: Compiled<T>): Promise<CompiledQuery<T>> =>
+const resolve = <T>(compiled: CompiledQueryInput<T>): Promise<CompiledQuery<T>> =>
 	Effect.isEffect(compiled) ? Effect.runPromise(compiled) : Promise.resolve(compiled)
 
 export async function executeLocalCompiledQuery<T>(
-	compiled: Compiled<T>,
+	compiled: CompiledQueryInput<T>,
 	signal?: AbortSignal,
 ): Promise<ReadonlyArray<T>> {
 	const query = await resolve(compiled)
@@ -34,7 +33,7 @@ export async function executeLocalCompiledQuery<T>(
 }
 
 export async function executeLocalCompiledFirstRow<T>(
-	compiled: Compiled<T>,
+	compiled: CompiledQueryInput<T>,
 	signal?: AbortSignal,
 ): Promise<Option.Option<T>> {
 	const query = await resolve(compiled)

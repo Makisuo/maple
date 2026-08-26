@@ -5,11 +5,8 @@ import {
 	CLOUDFLARE_BREAKDOWN_DIMENSIONS,
 	CLOUDFLARE_BREAKDOWN_OTHER_KEY,
 	cloudflareBreakdownMetrics,
-	cloudflareZoneBreakdownCoverageRowSchema,
 	cloudflareZoneBreakdownCoverageSQL,
-	cloudflareZoneBreakdownTimeseriesRowSchema,
 	cloudflareZoneBreakdownTimeseriesSQL,
-	cloudflareZoneBreakdownTotalsRowSchema,
 	cloudflareZoneBreakdownTotalsSQL,
 	cloudflareZoneFacetsQuery,
 } from "./cloudflare-infra-breakdowns"
@@ -178,9 +175,7 @@ describe("row schemas coerce ClickHouse string-encoded aggregates", () => {
 		Effect.runSync(compiled.decodeRows(rows))
 
 	it("totals", () => {
-		const compiled = compileUnsafe(cloudflareZoneBreakdownTotalsSQL("path"), zoneParams, {
-			rowSchema: cloudflareZoneBreakdownTotalsRowSchema,
-		})
+		const compiled = compileUnsafe(cloudflareZoneBreakdownTotalsSQL("path"), zoneParams)
 		const [row] = decode(compiled, [
 			{ key: "/api", requests: "1200", errors5xx: "3", bytes: "999999999999" },
 		])
@@ -188,17 +183,13 @@ describe("row schemas coerce ClickHouse string-encoded aggregates", () => {
 	})
 
 	it("timeseries", () => {
-		const compiled = compileUnsafe(cloudflareZoneBreakdownTimeseriesSQL("path"), timeseriesParams, {
-			rowSchema: cloudflareZoneBreakdownTimeseriesRowSchema,
-		})
+		const compiled = compileUnsafe(cloudflareZoneBreakdownTimeseriesSQL("path"), timeseriesParams)
 		const [row] = decode(compiled, [{ bucket: "2026-07-02T00:00:00.000Z", key: "/api", requests: "42" }])
 		expect(row?.requests).toBe(42)
 	})
 
 	it("coverage", () => {
-		const compiled = compileUnsafe(cloudflareZoneBreakdownCoverageSQL("path"), zoneParams, {
-			rowSchema: cloudflareZoneBreakdownCoverageRowSchema,
-		})
+		const compiled = compileUnsafe(cloudflareZoneBreakdownCoverageSQL("path"), zoneParams)
 		const [row] = decode(compiled, [
 			{ coverageStart: "2026-07-02T06:00:00.000Z", attributedRequests: "7" },
 		])

@@ -2,17 +2,11 @@ import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { compileUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
-	cloudflareDurableObjectCountersRowSchema,
 	cloudflareDurableObjectCountersSQL,
-	cloudflareQueueGaugesRowSchema,
 	cloudflareQueueGaugesSQL,
-	cloudflareZoneDnsBreakdownRowSchema,
 	cloudflareZoneDnsBreakdownSQL,
-	cloudflareZoneDnsTimeseriesRowSchema,
 	cloudflareZoneDnsTimeseriesSQL,
-	cloudflareZoneFirewallTimeseriesRowSchema,
 	cloudflareZoneFirewallTimeseriesSQL,
-	cloudflareZoneFirewallTopRowSchema,
 	cloudflareZoneFirewallTopSQL,
 } from "./cloudflare-infra-extended"
 
@@ -95,10 +89,11 @@ describe("cloudflareDurableObjectCountersSQL", () => {
 // `FORMAT JSON` serializes UInt64/Int64 aggregates (sum/count/max/…) as JSON
 // STRINGS, while managed Tinybird returns them as numbers. Every numeric output
 // column here is `CHNumber` (Finite | FiniteFromString), so `decodeRows` must
-// coerce those strings back to numbers; without the row-schema a BYO-CH org gets
-// a bare 500. These tests drive each (SQL, rowSchema) pair through the exact
-// `compileUnsafe(...).decodeRows` path the query-engine handlers use, feeding
-// string-encoded rows (the BYO-CH shape).
+// coerce those strings back to numbers; without that coercion a BYO-CH org gets
+// a bare 500. The row schema is derived from the SELECT's own column types, so
+// these tests drive each query through the exact `compileUnsafe(...).decodeRows`
+// path the query-engine handlers use, feeding string-encoded rows (the BYO-CH
+// shape).
 describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () => {
 	const decodeFirst = <O>(compiled: CompiledQuery<O>, row: Record<string, unknown>): O => {
 		const [decoded] = Effect.runSync(compiled.decodeRows([row]))
@@ -106,10 +101,8 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 		return decoded
 	}
 
-	it("cloudflareZoneFirewallTimeseriesRowSchema coerces string events", () => {
-		const compiled = compileUnsafe(cloudflareZoneFirewallTimeseriesSQL(), zoneTimeseriesParams, {
-			rowSchema: cloudflareZoneFirewallTimeseriesRowSchema,
-		})
+	it("cloudflareZoneFirewallTimeseriesSQL coerces string events", () => {
+		const compiled = compileUnsafe(cloudflareZoneFirewallTimeseriesSQL(), zoneTimeseriesParams)
 		expect(
 			decodeFirst(compiled, {
 				bucket: "2026-07-02T00:00:00.000Z",
@@ -119,10 +112,8 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 		).toEqual({ bucket: "2026-07-02T00:00:00.000Z", action: "block", events: 1234 })
 	})
 
-	it("cloudflareZoneFirewallTopRowSchema coerces string events", () => {
-		const compiled = compileUnsafe(cloudflareZoneFirewallTopSQL(), zoneParams, {
-			rowSchema: cloudflareZoneFirewallTopRowSchema,
-		})
+	it("cloudflareZoneFirewallTopSQL coerces string events", () => {
+		const compiled = compileUnsafe(cloudflareZoneFirewallTopSQL(), zoneParams)
 		expect(
 			decodeFirst(compiled, {
 				source: "waf",
@@ -140,10 +131,8 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 		})
 	})
 
-	it("cloudflareZoneDnsTimeseriesRowSchema coerces string queries", () => {
-		const compiled = compileUnsafe(cloudflareZoneDnsTimeseriesSQL(), zoneTimeseriesParams, {
-			rowSchema: cloudflareZoneDnsTimeseriesRowSchema,
-		})
+	it("cloudflareZoneDnsTimeseriesSQL coerces string queries", () => {
+		const compiled = compileUnsafe(cloudflareZoneDnsTimeseriesSQL(), zoneTimeseriesParams)
 		expect(
 			decodeFirst(compiled, {
 				bucket: "2026-07-02T00:00:00.000Z",
@@ -153,10 +142,8 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 		).toEqual({ bucket: "2026-07-02T00:00:00.000Z", responseCode: "NOERROR", queries: 654321 })
 	})
 
-	it("cloudflareZoneDnsBreakdownRowSchema coerces string queries and nxdomain", () => {
-		const compiled = compileUnsafe(cloudflareZoneDnsBreakdownSQL(), zoneParams, {
-			rowSchema: cloudflareZoneDnsBreakdownRowSchema,
-		})
+	it("cloudflareZoneDnsBreakdownSQL coerces string queries and nxdomain", () => {
+		const compiled = compileUnsafe(cloudflareZoneDnsBreakdownSQL(), zoneParams)
 		expect(
 			decodeFirst(compiled, {
 				queryName: "example.com",
@@ -166,10 +153,8 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 		).toEqual({ queryName: "example.com", queries: 1000, nxdomain: 3 })
 	})
 
-	it("cloudflareQueueGaugesRowSchema coerces string gauges", () => {
-		const compiled = compileUnsafe(cloudflareQueueGaugesSQL(), baseParams, {
-			rowSchema: cloudflareQueueGaugesRowSchema,
-		})
+	it("cloudflareQueueGaugesSQL coerces string gauges", () => {
+		const compiled = compileUnsafe(cloudflareQueueGaugesSQL(), baseParams)
 		expect(
 			decodeFirst(compiled, {
 				serviceName: "cloudflare-queue/q-1",
@@ -187,10 +172,8 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 		})
 	})
 
-	it("cloudflareDurableObjectCountersRowSchema coerces string counters", () => {
-		const compiled = compileUnsafe(cloudflareDurableObjectCountersSQL(), baseParams, {
-			rowSchema: cloudflareDurableObjectCountersRowSchema,
-		})
+	it("cloudflareDurableObjectCountersSQL coerces string counters", () => {
+		const compiled = compileUnsafe(cloudflareDurableObjectCountersSQL(), baseParams)
 		expect(
 			decodeFirst(compiled, {
 				serviceName: "cloudflare-worker/do-worker",
@@ -201,9 +184,7 @@ describe("CHNumber row-schema coercion (BYO-CH string-encoded aggregates)", () =
 	})
 
 	it("still accepts managed-Tinybird numeric aggregates (the union's other branch)", () => {
-		const compiled = compileUnsafe(cloudflareDurableObjectCountersSQL(), baseParams, {
-			rowSchema: cloudflareDurableObjectCountersRowSchema,
-		})
+		const compiled = compileUnsafe(cloudflareDurableObjectCountersSQL(), baseParams)
 		expect(
 			decodeFirst(compiled, {
 				serviceName: "cloudflare-worker/do-worker",

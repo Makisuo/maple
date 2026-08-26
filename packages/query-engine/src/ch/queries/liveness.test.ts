@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { compileUnsafe, compileUnionUnsafe, type CompiledQuery } from "@maple-dev/clickhouse-builder"
-import {
-	orgTelemetryPulseQuery,
-	serviceLivenessQuery,
-	serviceLivenessRowSchema,
-	telemetryPulseRowSchema,
-} from "./liveness"
+import { orgTelemetryPulseQuery, serviceLivenessQuery } from "./liveness"
 
 const pulseParams = {
 	orgId: "org_123",
@@ -66,9 +61,7 @@ describe("serviceLivenessQuery", () => {
 	})
 
 	it("decodes BYO-ClickHouse string counts to numbers", () => {
-		const compiled = compileUnsafe(serviceLivenessQuery(), livenessParams, {
-			rowSchema: serviceLivenessRowSchema,
-		})
+		const compiled = compileUnsafe(serviceLivenessQuery(), livenessParams)
 
 		// BYO ClickHouse quotes 64-bit ints; managed Tinybird returns numbers.
 		const [byo] = decodeRows(compiled, [
@@ -130,9 +123,7 @@ describe("orgTelemetryPulseQuery", () => {
 	})
 
 	it("decodes BYO-ClickHouse string counts to numbers", () => {
-		const compiled = compileUnionUnsafe(orgTelemetryPulseQuery(), pulseParams, {
-			rowSchema: telemetryPulseRowSchema,
-		})
+		const compiled = compileUnionUnsafe(orgTelemetryPulseQuery(), pulseParams)
 
 		// BYO ClickHouse quotes 64-bit ints; managed Tinybird returns numbers.
 		const rows = decodeRows(compiled, [
@@ -142,11 +133,9 @@ describe("orgTelemetryPulseQuery", () => {
 		expect(rows.map((row) => row.count)).toEqual([0, 42])
 	})
 
-	// The explicit `telemetryPulseRowSchema` above is now a *narrowing* of what
-	// the builder already derives from the SELECT, not the thing that makes
-	// decoding happen at all: `count()` is a `UInt64`, so a quoted count coerces
-	// with no row schema passed.
-	it("coerces a quoted count with no row schema passed", () => {
+	// Decoding rests entirely on the schema the builder derives from the SELECT:
+	// `count()` is a `UInt64`, so a quoted count coerces with nothing declared.
+	it("derives the row schema from the union's branches", () => {
 		const compiled = compileUnionUnsafe(orgTelemetryPulseQuery(), pulseParams)
 		expect(compiled.rowSchemaSource).toBe("derived")
 		const [row] = decodeRows(compiled, [{ signal: "spans", count: "7", lastSeen: "2024-01-01 00:09:00" }])

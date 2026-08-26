@@ -356,7 +356,7 @@ const makeWarehouseStub = (
 			options?: CompiledQueryStub["calls"][number]["options"],
 		) =>
 			// Mirror the real executor: run the compiled query's `decodeRows` so a
-			// query's `rowSchema` (e.g. cloudflareUsageRowSchema's CHNumber coercion)
+			// query's row schema (the `CHNumber` coercion it derives from the SELECT)
 			// is actually exercised instead of passing raw stub rows straight through.
 			Effect.sync(() => {
 				queryStub?.calls.push({ sql: compiledQueryOf(compiled).sql, orgId: tenant.orgId, options })

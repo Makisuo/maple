@@ -69,10 +69,6 @@ export interface ServiceMapEdgesExistingHour {
 	readonly hourTs: number
 }
 
-const ServiceMapEdgesExistingHourSchema: CompiledQueryRowSchema<ServiceMapEdgesExistingHour> = Schema.Struct({
-	hourTs: CHNumber,
-})
-
 /**
  * SQL listing the distinct hours already present in `service_map_edges_hourly`
  * for an org within `[startTime, endTime)`. The rollup uses this to skip hours
@@ -97,15 +93,11 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 		.groupBy("hourTs")
 		.format("JSON")
 
-	return compile(
-		query,
-		{
-			orgId: params.orgId,
-			startTime: params.startTime,
-			endTime: params.endTime,
-		},
-		{ rowSchema: ServiceMapEdgesExistingHourSchema },
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		startTime: params.startTime,
+		endTime: params.endTime,
+	})
 }
 
 /**
@@ -134,15 +126,11 @@ export function serviceMapResolutionsExistingHoursSQL(params: {
 		.groupBy("hourTs")
 		.format("JSON")
 
-	return compile(
-		query,
-		{
-			orgId: params.orgId,
-			startTime: params.startTime,
-			endTime: params.endTime,
-		},
-		{ rowSchema: ServiceMapEdgesExistingHourSchema },
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		startTime: params.startTime,
+		endTime: params.endTime,
+	})
 }
 
 /**

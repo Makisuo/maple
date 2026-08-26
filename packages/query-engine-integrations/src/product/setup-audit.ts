@@ -15,14 +15,7 @@
 // a BYO-ClickHouse org otherwise fails to decode.
 
 import * as CH from "@maple-dev/clickhouse-builder"
-import {
-	compile,
-	from,
-	fromQuery,
-	param,
-	type CompiledQuery,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
+import { compile, from, fromQuery, param, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import { Schema, Effect } from "effect"
 import {
 	AttributeKeysHourly,
@@ -472,14 +465,6 @@ export interface AuditOrphanSpanRow {
 	readonly sampleTraceIds: ReadonlyArray<string>
 }
 
-export const auditOrphanSpanRowSchema: CompiledQueryRowSchema<AuditOrphanSpanRow> = Schema.Struct({
-	serviceName: Schema.String,
-	childCount: CHNumber,
-	orphanCount: CHNumber,
-	sampledOrphanCount: CHNumber,
-	sampleTraceIds: Schema.Array(Schema.String),
-})
-
 export interface AuditTraceWindowParams {
 	readonly orgId: string
 	/** Children considered, half-open: `[childStart, childEnd)`. */
@@ -557,16 +542,12 @@ export function auditOrphanSpansSQL(
 		.limit(200)
 		.format("JSON")
 
-	return compile(
-		query,
-		{
-			orgId: params.orgId,
-			childStart: params.childStart,
-			childEnd: params.childEnd,
-			parentStart: params.parentStart,
-		},
-		{ rowSchema: auditOrphanSpanRowSchema },
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		childStart: params.childStart,
+		childEnd: params.childEnd,
+		parentStart: params.parentStart,
+	})
 }
 
 export interface AuditRootlessTraceRow {
@@ -575,13 +556,6 @@ export interface AuditRootlessTraceRow {
 	readonly rootlessCount: number
 	readonly sampledRootlessCount: number
 }
-
-export const auditRootlessTraceRowSchema: CompiledQueryRowSchema<AuditRootlessTraceRow> = Schema.Struct({
-	entryService: Schema.String,
-	traceCount: CHNumber,
-	rootlessCount: CHNumber,
-	sampledRootlessCount: CHNumber,
-})
 
 /**
  * Traces observed with no root span anywhere. `trace_list_mv` is populated strictly from
@@ -642,14 +616,10 @@ export function auditRootlessTracesSQL(
 		.limit(200)
 		.format("JSON")
 
-	return compile(
-		query,
-		{
-			orgId: params.orgId,
-			childStart: params.childStart,
-			childEnd: params.childEnd,
-			parentStart: params.parentStart,
-		},
-		{ rowSchema: auditRootlessTraceRowSchema },
-	)
+	return compile(query, {
+		orgId: params.orgId,
+		childStart: params.childStart,
+		childEnd: params.childEnd,
+		parentStart: params.parentStart,
+	})
 }

@@ -99,7 +99,7 @@ export interface CloudflareZoneTimeseriesOutput {
  * {@link CHNumber} so a BYO-ClickHouse org's string-encoded numeric aggregates
  * decode identically to Tinybird's numbers — pass it as the `rowSchema` to
  * `CH.compile` so `decodeRows` coerces centrally instead of a `ParseError`
- * surfacing downstream. Mirror of `cloudflareUsageRowSchema`.
+ * surfacing downstream.
  */
 export const cloudflareZoneCountersRowSchema: CompiledQueryRowSchema<CloudflareZoneCountersOutput> =
 	Schema.Struct({

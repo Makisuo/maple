@@ -22,7 +22,7 @@ import { Effect, Schema } from "effect"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
-import { serviceCatalogRowSchema, toService, type ServiceBaselines } from "./telemetry.http"
+import { toService, type ServiceBaselines } from "./telemetry.http"
 
 /**
  * The one read behind the iOS Home Screen widgets.
@@ -123,7 +123,6 @@ export const HttpV2WidgetSummaryLive = HttpApiBuilder.group(MapleApiV2, "widgetS
 						startTime: formatWarehouseDateTime(throughputStartMs),
 						endTime: formatWarehouseDateTime(nowMs),
 					},
-					{ rowSchema: serviceCatalogRowSchema },
 				)
 				const serviceRows = yield* warehouse.compiledQuery(tenant, compiled, {
 					profile: "aggregation",

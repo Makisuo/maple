@@ -496,16 +496,6 @@ export function serviceHealthSnapshotQuery(opts: ServiceHealthSnapshotOpts) {
 		.format("JSON")
 }
 
-/** BYO ClickHouse string-number coercion for the snapshot response. */
-export const serviceHealthSnapshotRowSchema: CompiledQueryRowSchema<ServiceHealthSnapshotOutput> =
-	Schema.Struct({
-		serviceName: Schema.String,
-		environment: Schema.String,
-		requestCount: CHNumber,
-		errorCount: CHNumber,
-		p95LatencyMs: CHNumber,
-	})
-
 // Service health baseline
 
 export interface ServiceHealthBaselineOpts {
@@ -564,14 +554,6 @@ export interface ServiceReleasesTimelineOutput {
 	readonly count: number
 	readonly errorCount: number
 }
-
-export const serviceReleasesTimelineRowSchema: CompiledQueryRowSchema<ServiceReleasesTimelineOutput> =
-	Schema.Struct({
-		bucket: Schema.String,
-		commitSha: Schema.String,
-		count: CHNumber,
-		errorCount: CHNumber,
-	})
 
 /**
  * Sub-minute buckets, which no rollup tier can place a row inside. Scans the
@@ -682,15 +664,6 @@ export interface ServiceApdexTimeseriesOutput {
 	readonly toleratingCount: number
 	readonly apdexScore: number
 }
-
-export const serviceApdexTimeseriesRowSchema: CompiledQueryRowSchema<ServiceApdexTimeseriesOutput> =
-	Schema.Struct({
-		bucket: Schema.String,
-		totalCount: CHNumber,
-		satisfiedCount: CHNumber,
-		toleratingCount: CHNumber,
-		apdexScore: CHNumber,
-	})
 
 export function serviceApdexTimeseriesQuery(
 	opts: ServiceApdexTimeseriesOpts,

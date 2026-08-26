@@ -5,11 +5,9 @@ import {
 	aiSessionFacetsQuery,
 	aiSessionFacetsRowSchema,
 	aiSessionListQuery,
-	aiSessionListRowSchema,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
 	aiSessionWindowQuery,
-	aiSessionWindowRowSchema,
 } from "./ai-sessions"
 
 const params = {
@@ -123,7 +121,7 @@ describe("aiSessionListQuery", () => {
 	})
 
 	it("decodes quoted 64-bit aggregates and the service-name array", () => {
-		const compiled = compileUnsafe(aiSessionListQuery(), params, { rowSchema: aiSessionListRowSchema })
+		const compiled = compileUnsafe(aiSessionListQuery(), params)
 
 		const [row] = decodeRows(compiled, [
 			{
@@ -348,9 +346,7 @@ describe("aiSessionWindowQuery", () => {
 	})
 
 	it("decodes the quoted 64-bit count", () => {
-		const compiled = compileUnsafe(aiSessionWindowQuery(), windowParams, {
-			rowSchema: aiSessionWindowRowSchema,
-		})
+		const compiled = compileUnsafe(aiSessionWindowQuery(), windowParams)
 
 		expect(
 			decodeRows(compiled, [

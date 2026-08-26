@@ -141,19 +141,6 @@ export interface AiSessionListOutput {
 	readonly durationMs: number
 }
 
-export const aiSessionListRowSchema: CompiledQueryRowSchema<AiSessionListOutput> = Schema.Struct({
-	sessionId: Schema.String,
-	vendorId: Schema.String,
-	vendorVersion: Schema.String,
-	traceCount: CHNumber,
-	spanCount: CHNumber,
-	errorSpanCount: CHNumber,
-	serviceNames: Schema.Array(Schema.String),
-	startTime: Schema.String,
-	endTime: Schema.String,
-	durationMs: CHNumber,
-})
-
 /**
  * One row per AI agent session in the window.
  *
@@ -373,12 +360,6 @@ export interface AiSessionWindowOutput {
 	/** Zero means no such session, which the bounds cannot say on their own. */
 	readonly spanCount: number
 }
-
-export const aiSessionWindowRowSchema: CompiledQueryRowSchema<AiSessionWindowOutput> = Schema.Struct({
-	startTime: Schema.String,
-	endTime: Schema.String,
-	spanCount: CHNumber,
-})
 
 /**
  * The bounds of one session, for a caller that holds its id and nothing else.

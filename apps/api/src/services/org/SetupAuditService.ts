@@ -420,54 +420,29 @@ const make: Effect.Effect<SetupAuditServiceApi, never, Database | WarehouseQuery
 			yield* warehouse.warmRoute(tenant)
 			const results = yield* Effect.all(
 				{
-					usage: run(
-						CH.compile(CH.serviceUsageQuery({}), window, {
-							rowSchema: CH.serviceUsageRowSchema,
-						}),
-						"discovery",
-					),
+					usage: run(CH.compile(CH.serviceUsageQuery({}), window), "discovery"),
 					attributeKeys: run(
-						CH.compile(Integrations.auditAttributeKeyInventoryQuery(), window, {
-							rowSchema: Integrations.auditAttributeKeyInventoryRowSchema,
-						}),
+						CH.compile(Integrations.auditAttributeKeyInventoryQuery(), window),
 						"discovery",
 					),
 					// `list`, not `discovery`: an org whose span names carry IDs — the very thing NAME-02
 					// detects — inflates traces_aggregates_hourly past a 5s budget.
-					spanShape: run(
-						CH.compile(Integrations.auditSpanProfileByServiceQuery(), window, {
-							rowSchema: Integrations.auditSpanProfileRowSchema,
-						}),
-						"list",
-					),
+					spanShape: run(CH.compile(Integrations.auditSpanProfileByServiceQuery(), window), "list"),
 					logSeverity: run(
-						CH.compile(Integrations.auditLogSeverityByServiceQuery(), window, {
-							rowSchema: Integrations.auditLogSeverityRowSchema,
-						}),
+						CH.compile(Integrations.auditLogSeverityByServiceQuery(), window),
 						"discovery",
 					),
 					metricLabels: run(
-						CH.compile(Integrations.auditMetricLabelCardinalityQuery(), window, {
-							rowSchema: Integrations.auditMetricLabelRowSchema,
-						}),
+						CH.compile(Integrations.auditMetricLabelCardinalityQuery(), window),
 						"discovery",
 					),
 					peerValues: run(
-						CH.compile(Integrations.auditPeerValueInventoryQuery(), window, {
-							rowSchema: Integrations.auditPeerValueRowSchema,
-						}),
+						CH.compile(Integrations.auditPeerValueInventoryQuery(), window),
 						"discovery",
 					),
-					dbEdges: run(
-						CH.compile(Integrations.auditDbEdgeIdentityQuery(), window, {
-							rowSchema: Integrations.auditDbEdgeRowSchema,
-						}),
-						"discovery",
-					),
+					dbEdges: run(CH.compile(Integrations.auditDbEdgeIdentityQuery(), window), "discovery"),
 					logCorrelation: run(
-						CH.compile(Integrations.auditLogCorrelationQuery(), logWindow, {
-							rowSchema: Integrations.auditLogCorrelationRowSchema,
-						}),
+						CH.compile(Integrations.auditLogCorrelationQuery(), logWindow),
 						"list",
 					),
 				},

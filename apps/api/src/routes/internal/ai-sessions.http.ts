@@ -44,7 +44,6 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 								startTime: payload.startTime,
 								endTime: payload.endTime,
 							},
-							{ rowSchema: Integrations.aiSessionListRowSchema },
 						)
 						// The row schema already coerces the UInt64 aggregates and decodes
 						// exactly the response's fields, so rows pass through unmapped.
@@ -108,11 +107,10 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							hint === undefined
 								? yield* warehouse.compiledQuery(
 										tenant,
-										CH.compile(
-											Integrations.aiSessionWindowQuery(),
-											{ orgId: tenant.orgId, sessionId: payload.sessionId },
-											{ rowSchema: Integrations.aiSessionWindowRowSchema },
-										),
+										CH.compile(Integrations.aiSessionWindowQuery(), {
+											orgId: tenant.orgId,
+											sessionId: payload.sessionId,
+										}),
 										{ profile: "list", context: "aiSessionWindow" },
 									)
 								: undefined

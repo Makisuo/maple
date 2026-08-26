@@ -24,7 +24,6 @@ export {
 
 export {
 	planetscaleBranchInfraTimeseriesSQL,
-	planetscaleInfraTimeseriesRowSchema,
 	planetscaleInfraTimeseriesSQL,
 	type PlanetScaleInfraTimeseriesOutput,
 } from "./planetscale-infra"

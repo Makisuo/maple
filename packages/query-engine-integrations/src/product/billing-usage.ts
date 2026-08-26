@@ -35,13 +35,6 @@ export interface DailySignalVolumeOutput {
 	readonly metricBytes: number
 }
 
-export const dailySignalVolumeRowSchema: CompiledQueryRowSchema<DailySignalVolumeOutput> = Schema.Struct({
-	day: Schema.String,
-	logBytes: CHNumber,
-	traceBytes: CHNumber,
-	metricBytes: CHNumber,
-})
-
 /**
  * Per-UTC-day log/trace/metric bytes for one org.
  *
@@ -78,11 +71,6 @@ export interface DailySessionCountOutput {
 	readonly day: string
 	readonly sessions: number
 }
-
-export const dailySessionCountRowSchema: CompiledQueryRowSchema<DailySessionCountOutput> = Schema.Struct({
-	day: Schema.String,
-	sessions: CHNumber,
-})
 
 /**
  * Per-UTC-day browser session count for one org.

@@ -48,8 +48,7 @@ export interface CloudflareServiceLatencyOutput {
  * use {@link CHNumber} so a BYO-ClickHouse org's string-encoded numeric
  * aggregates decode identically to Tinybird's numbers — pass it as the
  * `rowSchema` to `CH.compile` so `decodeRows` coerces centrally instead of a
- * `ParseError` (or a string leaking over the wire) surfacing downstream. Mirror
- * of `cloudflareUsageRowSchema`.
+ * `ParseError` (or a string leaking over the wire) surfacing downstream.
  */
 export const cloudflareServiceCountersRowSchema: CompiledQueryRowSchema<CloudflareServiceCountersOutput> =
 	Schema.Struct({

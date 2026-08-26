@@ -199,11 +199,11 @@ export const serviceHealthSnapshot = defineQuery({
 	profile: "aggregation",
 	cache: timeRangeCache,
 	compile: (payload: ServiceHealthSnapshotRequest, orgId: string) =>
-		CH.compile(
-			CH.serviceHealthSnapshotQuery({ environments: payload.environments }),
-			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
-			{ rowSchema: CH.serviceHealthSnapshotRowSchema },
-		),
+		CH.compile(CH.serviceHealthSnapshotQuery({ environments: payload.environments }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
 })
 
 export const serviceHealthBaseline = defineQuery({

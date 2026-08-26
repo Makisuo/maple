@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { compileUnsafe } from "@maple-dev/clickhouse-builder"
-import {
-	planetscaleBranchInfraTimeseriesSQL,
-	planetscaleInfraTimeseriesRowSchema,
-	planetscaleInfraTimeseriesSQL,
-} from "./planetscale-infra"
+import { planetscaleBranchInfraTimeseriesSQL, planetscaleInfraTimeseriesSQL } from "./planetscale-infra"
 
 describe("planetscaleInfraTimeseriesSQL", () => {
 	it("buckets per-timestamp totals for one database", () => {
@@ -31,17 +27,13 @@ describe("planetscaleInfraTimeseriesSQL", () => {
 	})
 
 	it("decodes ClickHouse numeric strings through the row schema", () => {
-		const compiled = compileUnsafe(
-			planetscaleInfraTimeseriesSQL(),
-			{
-				orgId: "org_1",
-				startTime: "2026-07-02 00:00:00.000",
-				endTime: "2026-07-03 00:00:00.000",
-				bucketSeconds: 300,
-				database: "main-db",
-			},
-			{ rowSchema: planetscaleInfraTimeseriesRowSchema },
-		)
+		const compiled = compileUnsafe(planetscaleInfraTimeseriesSQL(), {
+			orgId: "org_1",
+			startTime: "2026-07-02 00:00:00.000",
+			endTime: "2026-07-03 00:00:00.000",
+			bucketSeconds: 300,
+			database: "main-db",
+		})
 		expect(
 			Effect.runSync(
 				compiled.decodeRows([
