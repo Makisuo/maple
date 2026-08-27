@@ -3,7 +3,12 @@
 	"build": {
 		"builder": "DOCKERFILE",
 		"dockerfilePath": "apps/scraper/Dockerfile",
-		"watchPatterns": ["apps/scraper/**", "packages/domain/**", "packages/effect-sdk/**"]
+		"watchPatterns": [
+			"apps/scraper/**",
+			"packages/domain/**",
+			"packages/effect-sdk/**",
+			"lib/clickhouse-builder/**"
+		]
 	},
 	"deploy": {
 		"healthcheckPath": "/health",
