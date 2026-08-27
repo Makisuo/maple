@@ -18,6 +18,7 @@ import { compile } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
+import { OrgId } from "@maple/domain"
 import { ServiceAddressResolutionsHourly, ServiceMapEdgesHourly, Traces } from "../tables"
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { serviceMapEdgeJoinQuery } from "./service-map"
@@ -27,7 +28,7 @@ import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 /** One pre-aggregated service-to-service edge bucket — mirrors the columns of
  * the `service_map_edges_hourly` ClickHouse table. */
 export interface ServiceMapEdgesHourlyOutput {
-	readonly OrgId: string
+	readonly OrgId: OrgId
 	readonly Hour: string
 	readonly SourceService: string
 	readonly TargetService: string
@@ -42,7 +43,9 @@ export interface ServiceMapEdgesHourlyOutput {
 }
 
 const ServiceMapEdgesHourlyOutputSchema: CompiledQueryRowSchema<ServiceMapEdgesHourlyOutput> = Schema.Struct({
-	OrgId: Schema.String,
+	// The tables' OrgId column is branded, so the derived output is too — a
+	// declared schema may only narrow, so it has to say the brand as well.
+	OrgId,
 	Hour: Schema.String,
 	SourceService: Schema.String,
 	TargetService: Schema.String,
@@ -173,7 +176,7 @@ export function serviceMapEdgesRollupSQL(
 /** One resolved address-to-service mapping bucket — mirrors the columns of
  * `service_address_resolutions_hourly`. */
 export interface ServiceAddressResolutionsHourlyOutput {
-	readonly OrgId: string
+	readonly OrgId: OrgId
 	readonly Hour: string
 	readonly SourceService: string
 	readonly ParentServerAddress: string

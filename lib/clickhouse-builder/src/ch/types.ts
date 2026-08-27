@@ -159,6 +159,17 @@ export type CHDateTime64 = CHType<"DateTime64", DateTime.Utc, string>
 export type CHBool = CHType<"Bool", boolean, boolean | number>
 
 /**
+ * A `String` column whatever its decoded type — plain, branded, or narrowed.
+ *
+ * The constraint form of `CHString`, for "this table must carry this String
+ * column" (a tenant column, a join key) where how the value decodes is the
+ * table's own business. Spelling such a constraint as `CHString` would reject
+ * a branded column: `CHType` is invariant in its decoded type, so
+ * `custom("String", OrgId)` is not a `CHType<"String", string>`.
+ */
+export type CHStringLike = CHType<"String", any, any>
+
+/**
  * The same columns left as the strings ClickHouse sends.
  *
  * `DateTime` decodes to a `DateTime.Utc` by default, which is the right value

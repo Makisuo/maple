@@ -166,3 +166,18 @@ expectTypeOf(CH.inList(strExpr, ["a", "b"])).toMatchTypeOf<Condition>()
 
 expectTypeOf(CH.arrayOf(CH.lit("a"), CH.lit("b"))).toMatchTypeOf<Expr<ReadonlyArray<string>>>()
 expectTypeOf(CH.arrayOf(CH.lit(1), CH.lit(2))).toMatchTypeOf<Expr<ReadonlyArray<number>>>()
+
+// Branded column types — comparisons widen to the underlying primitive
+
+type BrandedId = string & { readonly __brand: "BrandedId" }
+declare const brandedRef: Expr<BrandedId>
+declare const plainStringExpr: Expr<string>
+
+// A branded column compares against a plain param/expr and a plain literal…
+expectTypeOf(brandedRef.eq(CH.param.string("orgId"))).toMatchTypeOf<Condition>()
+expectTypeOf(brandedRef.eq(plainStringExpr)).toMatchTypeOf<Condition>()
+expectTypeOf(brandedRef.eq("org_123")).toMatchTypeOf<Condition>()
+expectTypeOf(brandedRef.in_("a", "b")).toMatchTypeOf<Condition>()
+// …and against another ref of its own branded type.
+expectTypeOf(brandedRef.eq(brandedRef)).toMatchTypeOf<Condition>()
+expectTypeOf(CH.inList(brandedRef, ["a", "b"])).toMatchTypeOf<Condition>()

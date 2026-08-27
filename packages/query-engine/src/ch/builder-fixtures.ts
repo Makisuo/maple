@@ -534,6 +534,9 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				...window,
 				fingerprintHash: FINGERPRINT,
 			}),
+		// TraceId/SpanId decode through their branded schemas (minLength 1), which
+		// the synthetic row's "" would fail.
+		sampleValues: { traceId: "0af7651916cd43dd8448eb211c80319c", spanId: "b7ad6b7169203331" },
 	},
 	{
 		module: "errors",
@@ -748,6 +751,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				}).format("JSON"),
 				{ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME },
 			),
+		sampleValues: { OrgId: ORG_ID },
 	},
 	{
 		// The service-scoped variant pushes the filter into the parent subquery.
@@ -764,6 +768,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				}).format("JSON"),
 				{ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME },
 			),
+		sampleValues: { OrgId: ORG_ID },
 	},
 	{
 		module: "service-map-rollup",
@@ -849,17 +854,20 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "activeOrgsByErrorEventsQuery",
 		label: "default",
 		compile: () => CH.compileUnsafe(CH.activeOrgsByErrorEventsQuery(), { startTime: START_TIME }),
+		sampleValues: { orgId: ORG_ID },
 	},
 	{
 		module: "activity",
 		name: "activeOrgsByTracesQuery",
 		label: "default",
 		compile: () => CH.compileUnsafe(CH.activeOrgsByTracesQuery(), { startTime: START_TIME }),
+		sampleValues: { orgId: ORG_ID },
 	},
 	{
 		module: "activity",
 		name: "activeOrgsByLogsQuery",
 		label: "default",
 		compile: () => CH.compileUnsafe(CH.activeOrgsByLogsQuery(), { startTime: START_TIME }),
+		sampleValues: { orgId: ORG_ID },
 	},
 ]
