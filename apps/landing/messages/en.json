@@ -149,10 +149,10 @@
 	"bill_v_first_class": "First-class",
 	"bill_footnote": "Competitor cells summarize public list prices \u2014 check each vendor's pricing page for current numbers. Maple's rate is the published flat per-GB. Use the calculator to project your monthly cost.",
 	"bill_link_calculator": "Pricing calculator \u2192",
-	"bill_link_vs_dd": "Full vs Datadog",
-	"bill_link_vs_gf": "Full vs Grafana Cloud",
-	"bill_link_vs_nr": "Full vs New Relic",
-	"bill_link_vs_dash0": "Full vs Dash0",
+	"bill_link_vs_dd": "Maple vs Datadog",
+	"bill_link_vs_gf": "Maple vs Grafana Cloud",
+	"bill_link_vs_nr": "Maple vs New Relic",
+	"bill_link_vs_dash0": "Maple vs Dash0",
 
 	"start_endpoint_label": "Endpoint",
 
