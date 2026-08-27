@@ -31,6 +31,9 @@ const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 /** The window plus the bucket every timeseries builder resolves a param from. */
 const bucketed = { ...window, bucketSeconds: 300 }
 
+/** A `trace:` session's trace id, in the 32-hex shape the route validates. */
+const AI_TRACE_ID = "7f3a4b5c6d7e8f901234567890abcdef"
+
 /** One zone's spans, as the /infra/cloudflare pages scope them. */
 const cfZone = { ...window, serviceName: "cloudflare-zone-example-com" }
 const cfZoneBucketed = { ...cfZone, bucketSeconds: 300 }
@@ -105,6 +108,25 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		label: "default",
 		compile: () =>
 			compileUnsafe(CH.aiSessionWindowQuery(), { orgId: ORG_ID, sessionId: "wrun_sql_catalog" }),
+	},
+	{
+		// The same two reads for a `trace:` session — one whose vendor exposes no
+		// session key, so the id names the trace and the detection half is gone.
+		module: "ai-sessions",
+		name: "aiTraceWindowQuery",
+		label: "default",
+		compile: () => compileUnsafe(CH.aiTraceWindowQuery(), { orgId: ORG_ID, traceId: AI_TRACE_ID }),
+	},
+	{
+		module: "ai-sessions",
+		name: "aiTraceSpansQuery",
+		label: "default",
+		compile: () =>
+			compileUnsafe(
+				CH.aiTraceSpansQuery(),
+				{ ...window, traceId: AI_TRACE_ID },
+				{ rowSchema: CH.aiSessionSpansRowSchema },
+			),
 	},
 	{
 		module: "cloudflare-infra",

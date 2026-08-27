@@ -13,6 +13,8 @@ export {
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
 	aiSessionWindowQuery,
+	aiTraceSpansQuery,
+	aiTraceWindowQuery,
 	type AiSessionFacetsOutput,
 	type AiSessionListOpts,
 	type AiSessionListOutput,

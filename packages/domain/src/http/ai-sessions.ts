@@ -29,6 +29,8 @@ export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("
 }) {}
 
 export const AiSessionListItem = Schema.Struct({
+	/** The vendor's own session id, or `trace:<TraceId>` for an agent trace whose
+	 *  vendor exposes no session key — see `MAPLE_AI_TRACE_SESSION_PREFIX`. */
 	sessionId: Schema.String,
 	/** Vendor of the earliest session-bearing span, e.g. `eve`, `vercel_ai_sdk`. */
 	vendorId: Schema.String,
@@ -75,7 +77,13 @@ export class ListAiSessionsFacetsResponse extends Schema.Class<ListAiSessionsFac
 export class GetAiSessionSpansRequest extends Schema.Class<GetAiSessionSpansRequest>(
 	"GetAiSessionSpansRequest",
 )({
-	/** The framework's own session id, verbatim — `maple_ai.session.id`. */
+	/**
+	 * The framework's own session id, verbatim — `maple_ai.session.id` — or the
+	 * `trace:<TraceId>` id Maple synthesizes for a GenAI trace that carries none
+	 * (`MAPLE_AI_TRACE_SESSION_PREFIX`). The handler routes on the prefix and
+	 * validates the trace id behind it; a prefixed id that is not one reads as a
+	 * session nothing carries, which answers empty like any unknown id.
+	 */
 	sessionId: Schema.String.check(Schema.isMinLength(1)),
 	// Optional, and the two halves are read as a pair — supply both or neither.
 	//
