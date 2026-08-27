@@ -54,6 +54,9 @@ export interface Expr<TSType> {
 	// Comparison — returns Condition. `Expr<TSType>` is listed alongside the
 	// widened form because `Expr` is invariant: a branded column must accept
 	// both its own refs and plain-primitive exprs (params, other columns).
+	// The widened arms sit in contravariant positions, which TypeScript's
+	// `extends Expr<infer T>` inference would prefer — the reason `InferOutput`
+	// reads the `_phantom` property instead of structurally inferring T.
 	eq(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
 	neq(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
 	gt(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
