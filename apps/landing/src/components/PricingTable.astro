@@ -19,6 +19,7 @@
  * "call us" card given equal weight costs self-serve conversion.
  */
 import * as m from "../paraglide/messages.js";
+import { APP_SIGN_UP_URL } from "../lib/app-urls";
 import {
     getOffer,
     money,
@@ -144,7 +145,7 @@ const containerClass = variant === "home" ? "shell" : "mx-auto max-w-5xl px-6"
                     </div>
 
                     <a
-                        href="https://app.maple.dev"
+                        href={APP_SIGN_UP_URL}
                         data-track="pricing_plan_selected"
                         data-track-plan={offer.name}
                         class="mt-8 flex h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"

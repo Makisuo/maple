@@ -10,6 +10,7 @@
  * place the left axis should break.
  */
 import * as m from "../../paraglide/messages.js";
+import { APP_SIGN_UP_URL } from "../../lib/app-urls";
 ---
 
 <section class="relative overflow-hidden drenched-amber">
@@ -24,7 +25,7 @@ import * as m from "../../paraglide/messages.js";
 		</p>
 		<div class="mt-10 flex flex-wrap items-center justify-center gap-3">
 			<a
-				href="https://app.maple.dev"
+				href={APP_SIGN_UP_URL}
 				class="inline-flex h-11 items-center justify-center rounded-lg bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
 			>
 				{m.cta_bookend_primary()}
