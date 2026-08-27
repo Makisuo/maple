@@ -545,6 +545,12 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 				// task, which is the earlier and cheaper of the two.
 				MAPLE_INTERNAL_ORG_ID: yield* requiredPlain("MAPLE_INTERNAL_ORG_ID"),
 				...(yield* optionalPlain("AUTUMN_API_URL")),
+				// How long an entitlement decision is reused (defaults live in
+				// `AppConfig::from_env`: 60s for an allow, 5s for a denial). The
+				// allow TTL is how soft a hard cap is — an org that crosses one
+				// keeps ingesting until its cached decision expires.
+				...(yield* optionalPlain("AUTUMN_ENTITLEMENT_ALLOW_TTL_SECS")),
+				...(yield* optionalPlain("AUTUMN_ENTITLEMENT_DENY_TTL_SECS")),
 				...(yield* optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim())),
 				// `satisfies` rather than a bare literal: alchemy types `env` as
 				// `Record<string, any>`, which is what let a spread `Config` object

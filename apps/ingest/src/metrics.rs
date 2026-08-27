@@ -210,6 +210,13 @@ static METRICS_SUMMARY_DROPPED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| 
         .build()
 });
 
+static AUTUMN_ENTITLEMENT_DECISIONS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("autumn_entitlement_decisions_total")
+        .with_description("Autumn entitlement decisions, by cache outcome")
+        .build()
+});
+
 static AUTUMN_FLUSHES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("autumn_track_flushes_total")
@@ -736,6 +743,12 @@ pub fn metrics_summary_dropped() {
 pub fn autumn_flush(status: &'static str, duration_secs: f64) {
     AUTUMN_FLUSH_DURATION_SECONDS.record(duration_secs, &[]);
     AUTUMN_FLUSHES_TOTAL.add(1, &[KeyValue::new("status", status)]);
+}
+
+/// An entitlement decision was served (`source` is `hit` or `miss`). The miss
+/// rate is what says whether the decision cache is doing its job.
+pub fn autumn_entitlement_decision(source: &'static str) {
+    AUTUMN_ENTITLEMENT_DECISIONS_TOTAL.add(1, &[KeyValue::new("source", source)]);
 }
 
 /// Unflushed Autumn usage currently held in memory, in GB.
