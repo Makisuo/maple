@@ -1,0 +1,369 @@
+---
+/**
+ * TraceComparison — the same checkout request rendered twice: what
+ * auto-instrumentation gives you (2 spans) vs a deliberately instrumented
+ * trace (10 spans). CSS-only toggle: a radio pair + `:has()` show/hide, so it
+ * works with JavaScript disabled; browsers without `:has()` get both panels
+ * stacked with their own captions.
+ *
+ * Renders inside `.docs-content` prose, so every element carries a scoped
+ * class (the hand-rolled `.docs-content X` descendant rules in global.css
+ * beat Tailwind utilities — scoped classes win). Waterfall grammar borrowed
+ * from LiveTrace.astro but with fresh classes: the global `.waterfall-row`
+ * family is a private contract with live-waterfall.client.ts.
+ */
+
+interface SpanRow {
+	service: string;
+	op: string;
+	startMs: number;
+	durationMs: number;
+	depth: number;
+	slowest?: boolean;
+}
+
+const TOTAL_MS = 1240;
+const INDENT_PX = 14;
+
+const badRows: SpanRow[] = [
+	{ service: "checkout-api", op: "POST", startMs: 0, durationMs: 1240, depth: 0 },
+	{ service: "checkout-api", op: "pg.query", startMs: 240, durationMs: 890, depth: 1 },
+];
+
+const goodRows: SpanRow[] = [
+	{ service: "checkout-api", op: "POST /api/checkout", startMs: 0, durationMs: 1240, depth: 0 },
+	{ service: "auth", op: "verify_session", startMs: 8, durationMs: 38, depth: 1 },
+	{ service: "checkout-api", op: "CartService.load", startMs: 52, durationMs: 138, depth: 1 },
+	{ service: "postgres", op: "SELECT cart_items", startMs: 60, durationMs: 122, depth: 2 },
+	{ service: "checkout-api", op: "PricingService.quote", startMs: 196, durationMs: 216, depth: 1 },
+	{ service: "redis", op: "GET pricing:rules", startMs: 200, durationMs: 14, depth: 2 },
+	{ service: "postgres", op: "SELECT price_rules", startMs: 220, durationMs: 184, depth: 2 },
+	{ service: "payments", op: "PaymentService.charge", startMs: 420, durationMs: 758, depth: 1 },
+	{ service: "stripe-api", op: "POST", startMs: 432, durationMs: 736, depth: 2, slowest: true },
+	{ service: "checkout-api", op: "OrderService.persist", startMs: 1184, durationMs: 52, depth: 1 },
+];
+
+// Stable service → color mapping across both panels, LiveTrace's hashing idiom.
+const orderedServices = Array.from(new Set([...badRows, ...goodRows].map((r) => r.service)));
+function serviceColor(name: string): string {
+	const idx = (orderedServices.indexOf(name) % 16) + 1;
+	return `var(--service-${idx})`;
+}
+
+const panels = [
+	{
+		id: "bad",
+		label: "what auto-instrumentation gave you",
+		rows: badRows,
+		note: "890ms inside pg.query. Which of the 41 queries this endpoint runs? And 350ms of the request is in no span at all.",
+	},
+	{
+		id: "good",
+		label: "after deliberate spans",
+		rows: goodRows,
+		note: "The Stripe call is 60% of the request. You can see that now. So can your alerts.",
+	},
+] as const;
+---
+
+<figure class="tcmp">
+	<div class="tcmp__frame">
+		<div class="tcmp__head">
+			<span class="tcmp__title">POST /api/checkout · 1.24s · the same request, twice</span>
+		</div>
+
+		<div class="tcmp__rail" role="radiogroup" aria-label="Instrumentation level">
+			{
+				panels.map((p, i) => (
+					<label class="tcmp__opt">
+						<input
+							class="tcmp__radio"
+							type="radio"
+							name="tcmp-mode"
+							id={`tcmp-${p.id}`}
+							checked={i === 0}
+						/>
+						<span class="tcmp__optlabel">
+							{p.label}
+							<span class="tcmp__optcount">{p.rows.length} spans</span>
+						</span>
+					</label>
+				))
+			}
+		</div>
+
+		{
+			panels.map((p) => (
+				<div class:list={["tcmp__panel", `tcmp__panel--${p.id}`]}>
+					<p class="tcmp__panelcap">{p.label}</p>
+					<div class="tcmp__scroll">
+						<div class="tcmp__grid">
+							{p.rows.map((r, i) => {
+								const startPct = (r.startMs / TOTAL_MS) * 100;
+								const widthPct = (r.durationMs / TOTAL_MS) * 100;
+								return (
+									<div class="tcmp__row" style={`--i:${i}`}>
+										<span class="tcmp__svc" style={`padding-left:${r.depth * INDENT_PX + 4}px`}>
+											{Array.from({ length: r.depth }).map((_, d) => (
+												<span
+													class="tcmp__connector"
+													style={`left:${d * INDENT_PX + 4}px`}
+													aria-hidden="true"
+												/>
+											))}
+											{r.service}
+										</span>
+										<span class="tcmp__op">{r.op}</span>
+										<span class="tcmp__track">
+											<span
+												class="tcmp__bar"
+												style={`left:${startPct}%; width:${widthPct}%; --service-color:${serviceColor(r.service)};`}
+											/>
+											{r.slowest && <span class="tcmp__slowest">60% of the request</span>}
+										</span>
+										<span class="tcmp__dur">{r.durationMs}ms</span>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+					<p class="tcmp__note">{p.note}</p>
+				</div>
+			))
+		}
+	</div>
+	<figcaption class="tcmp__cap">
+		Same request, same library, same protocol. The difference is what you decided to record.
+	</figcaption>
+</figure>
+
+<style>
+	.tcmp {
+		margin: 40px 0;
+	}
+
+	.tcmp__frame {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		overflow: hidden;
+		background: color-mix(in oklab, var(--bg-elevated) 30%, transparent);
+	}
+
+	.tcmp__head {
+		display: flex;
+		align-items: center;
+		padding: 9px 14px;
+		background: var(--bg-elevated);
+		border-bottom: 1px solid var(--border);
+	}
+	.tcmp__title {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+
+	/* ── Toggle rail (hidden when :has() is unavailable) ─────── */
+	.tcmp__rail {
+		display: none;
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 12px 14px 0;
+	}
+	.tcmp__radio {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		opacity: 0;
+		pointer-events: none;
+	}
+	.tcmp__optlabel {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		background: color-mix(in oklab, var(--bg-elevated) 45%, transparent);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 6px 11px;
+		cursor: pointer;
+		transition:
+			color 140ms ease,
+			border-color 140ms ease,
+			background-color 140ms ease;
+	}
+	.tcmp__opt:hover .tcmp__optlabel {
+		color: var(--foreground);
+		border-color: color-mix(in oklab, var(--muted-foreground) 50%, var(--border));
+	}
+	.tcmp__radio:checked + .tcmp__optlabel {
+		color: var(--foreground);
+		border-color: var(--primary);
+		background: color-mix(in oklab, var(--primary) 12%, transparent);
+	}
+	.tcmp__radio:focus-visible + .tcmp__optlabel {
+		outline: 2px solid var(--primary);
+		outline-offset: 2px;
+	}
+	.tcmp__optcount {
+		font-size: 10px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+		background: color-mix(in oklab, var(--bg-deep) 70%, transparent);
+		border-radius: 4px;
+		padding: 2px 6px;
+	}
+	.tcmp__radio:checked + .tcmp__optlabel .tcmp__optcount {
+		color: var(--primary);
+	}
+
+	/* ── Panels ─────────────────────────────────────────────── */
+	.tcmp__panel {
+		padding: 10px 6px 0;
+	}
+	/* Fallback caption — only shown when both panels render stacked. */
+	.tcmp__panelcap {
+		display: block;
+		margin: 0 8px 4px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+
+	@supports selector(:has(*)) {
+		.tcmp__rail {
+			display: flex;
+		}
+		.tcmp__panelcap {
+			display: none;
+		}
+		.tcmp:has(#tcmp-bad:checked) .tcmp__panel--good {
+			display: none;
+		}
+		.tcmp:has(#tcmp-good:checked) .tcmp__panel--bad {
+			display: none;
+		}
+	}
+
+	.tcmp__scroll {
+		overflow-x: auto;
+	}
+	.tcmp__grid {
+		min-width: 560px;
+	}
+
+	/* ── Waterfall rows ─────────────────────────────────────── */
+	.tcmp__row {
+		display: grid;
+		grid-template-columns: 15ch minmax(12ch, 20ch) minmax(0, 1fr) 6.5ch;
+		align-items: center;
+		gap: 12px;
+		padding: 6px 10px;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+	}
+	.tcmp__row:last-child {
+		border-bottom: none;
+	}
+	.tcmp__svc {
+		position: relative;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--foreground);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.tcmp__connector {
+		position: absolute;
+		top: -7px;
+		bottom: -7px;
+		width: 1px;
+		background: color-mix(in oklab, var(--border) 70%, transparent);
+		pointer-events: none;
+	}
+	.tcmp__row:last-child .tcmp__connector {
+		bottom: 50%;
+	}
+	.tcmp__op {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.tcmp__track {
+		position: relative;
+		height: 8px;
+		background: color-mix(in oklab, var(--bg-elevated) 80%, transparent);
+		border-radius: 2px;
+	}
+	.tcmp__bar {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		background: var(--service-color, var(--primary));
+		border-radius: 2px;
+		transform-origin: left center;
+		animation: tcmp-grow 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+		animation-delay: calc(var(--i, 0) * 28ms);
+	}
+	.tcmp__slowest {
+		position: absolute;
+		right: 0;
+		top: 12px;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--primary);
+		white-space: nowrap;
+	}
+	.tcmp__row:has(.tcmp__slowest) {
+		padding-bottom: 22px;
+	}
+	.tcmp__dur {
+		font-family: var(--font-mono);
+		font-size: 11.5px;
+		color: var(--muted-foreground);
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.tcmp__note {
+		margin: 10px 8px 0;
+		padding: 8px 10px 12px;
+		font-size: 13px;
+		line-height: 1.6;
+		color: var(--muted-foreground);
+		border-top: 1px dashed color-mix(in oklab, var(--border) 80%, transparent);
+	}
+
+	.tcmp__cap {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin-top: 10px;
+	}
+
+	@keyframes tcmp-grow {
+		from {
+			transform: scaleX(0);
+		}
+		to {
+			transform: scaleX(1);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.tcmp__bar {
+			animation: none;
+		}
+	}
+</style>

@@ -1230,6 +1230,88 @@
 	@apply w-full h-auto aspect-[1280/660] object-cover bg-bg-deep border border-border rounded-xl my-8;
 }
 
+/* ──────────────────────────────────────────────────────────────
+   Blog long-form scale. Blog posts render with
+   class="docs-content blog-content": the docs rules above supply the
+   plumbing, this block regrows the type for essay-length reading.
+   Same specificity as the docs rules — SOURCE ORDER decides, so this
+   block must stay below the .docs-content block.
+   ────────────────────────────────────────────────────────────── */
+.blog-content p {
+	@apply text-[16px] leading-[1.75] mb-5 max-w-[70ch];
+}
+
+.blog-content ul,
+.blog-content ol {
+	@apply text-[16px] leading-[1.75] mb-5 space-y-1.5 max-w-[70ch];
+}
+
+.blog-content h2 {
+	@apply text-[26px] tracking-[-0.02em] mt-14 mb-5;
+}
+
+.blog-content h3 {
+	@apply text-[20px] tracking-[-0.01em] mt-10 mb-4;
+}
+
+.blog-content blockquote {
+	@apply text-[16px] my-6 max-w-[70ch];
+}
+
+.blog-content code:not(pre code) {
+	@apply text-[14px];
+}
+
+.blog-content pre {
+	@apply text-[13.5px] leading-[1.65] p-5 my-6 max-w-[86ch];
+}
+
+/* block + overflow keeps wide markdown tables scrollable instead of
+   stretching the page on small screens */
+.blog-content table {
+	@apply block overflow-x-auto text-[14px] my-6;
+}
+
+.blog-content td {
+	@apply p-2.5;
+}
+
+.blog-content figure {
+	@apply my-10;
+}
+
+.blog-content figcaption {
+	@apply font-mono text-xs text-fg-muted mt-3;
+}
+
+/* Essay illustrations keep their intrinsic ratio — undo the docs 1280/660 clamp. */
+.blog-content img {
+	aspect-ratio: auto;
+	height: auto;
+	object-fit: contain;
+}
+
+/* Shiki notation lines ("// [!code ++]" etc.) — classes come from the
+   transformers registered in astro.config.mjs markdown.shikiConfig. */
+.blog-content pre .line.diff,
+.blog-content pre .line.highlighted {
+	display: inline-block;
+	width: 100%;
+}
+
+.blog-content pre .line.diff.add {
+	background: color-mix(in oklab, var(--chart-3) 14%, transparent);
+}
+
+.blog-content pre .line.diff.remove {
+	background: color-mix(in oklab, var(--destructive) 12%, transparent);
+	opacity: 0.75;
+}
+
+.blog-content pre .line.highlighted {
+	background: color-mix(in oklab, var(--primary) 10%, transparent);
+}
+
 /* details/summary toggle arrow for mobile nav */
 details[open] > summary .details-open\:rotate-180 {
 	transform: rotate(180deg);

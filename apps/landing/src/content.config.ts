@@ -35,6 +35,8 @@ const blog = defineCollection({
 		description: z.string(),
 		date: z.coerce.date(),
 		author: z.string().default("Maple Team"),
+		// Byline subtitle (role/title). Omitted for the "Maple Team" default.
+		authorRole: z.string().optional(),
 		category: z.enum(["engineering", "product", "guides", "company"]).optional(),
 		// Optional real cover screenshot served from /public/blog; falls back to a
 		// generated on-brand motif when omitted.

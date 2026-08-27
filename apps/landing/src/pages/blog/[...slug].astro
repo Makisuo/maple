@@ -19,7 +19,7 @@ export async function getStaticPaths() {
 }
 
 const { post } = Astro.props;
-const { title, description, date, author, category, cover, coverAlt, featured } = post.data;
+const { title, description, date, author, authorRole, category, cover, coverAlt, featured } = post.data;
 const { Content, headings } = await render(post);
 
 const minutes = readingTime(post.body);
@@ -41,7 +41,7 @@ const jsonLd = {
     description,
     datePublished: isoDate(date),
     dateModified: isoDate(date),
-    author: { "@type": "Organization", name: author },
+    author: { "@type": "Person", name: author, ...(authorRole ? { jobTitle: authorRole } : undefined) },
     publisher: {
         "@type": "Organization",
         name: "Maple",
@@ -95,6 +95,7 @@ const hasToc = toc.length > 0;
                     <div class="mt-6 flex items-center gap-2.5 font-mono text-xs text-fg/80">
                         <MapleMark size={22} className="text-primary" aria-hidden="true" />
                         <span>{author}</span>
+                        {authorRole && <span class="text-fg-muted">{authorRole}</span>}
                     </div>
 
                     {/* Cover banner */}
@@ -110,7 +111,8 @@ const hasToc = toc.length > 0;
                     </div>
 
                     {/* Body */}
-                    <div class="docs-content mt-12 md:mt-14">
+                    {/* blog-content regrows the docs prose to essay scale (global.css) */}
+                    <div class="docs-content blog-content mt-12 md:mt-14">
                         <Content />
                     </div>
 
