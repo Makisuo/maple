@@ -43,6 +43,7 @@ export {
 	extract_,
 	match_,
 	matchCond,
+	multiSearchAnyCaseInsensitive,
 	concat,
 	hasToken,
 	hasAllTokens,

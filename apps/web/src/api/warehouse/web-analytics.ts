@@ -29,6 +29,7 @@ export const WebAnalyticsFilterFields = {
 	utmMedium: Schema.optional(Schema.String),
 	utmCampaign: Schema.optional(Schema.String),
 	visitorType: Schema.optional(Schema.Literals(["new", "returning"])),
+	traffic: Schema.optional(Schema.Literals(["all", "humans", "bots"])),
 	eventName: Schema.optional(Schema.String),
 } as const
 
@@ -89,6 +90,14 @@ export interface WebAnalyticsSummary {
 	bouncedSessions: number
 	identifiedSessions: number
 	avgDurationMs: number
+	/** Sessions from crawlers, headless browsers and other non-human agents. */
+	botSessions: number
+	/**
+	 * `botSessions / sessions`, 0–1, or `null` when the `traffic` filter has
+	 * already partitioned the window — under `humans` or `bots` the ratio is a
+	 * tautology (0 or 1), and reporting it as a share would read as a finding.
+	 */
+	botShare: number | null
 	/**
 	 * Share of sessions whose SDK build posts the analytics block, i.e. the share
 	 * of traffic every visitor-level number on the page actually describes. The
@@ -191,10 +200,12 @@ const getWebAnalyticsSummaryEffect = Effect.fn("QueryEngine.getWebAnalyticsSumma
 	)
 
 	const row = result.data
+	const partitioned = input.traffic === "humans" || input.traffic === "bots"
 	return {
 		...row,
 		coverage: ratio(row.identifiedSessions, row.sessions),
 		bounceRate: row.identifiedSessions > 0 ? row.bouncedSessions / row.identifiedSessions : null,
+		botShare: partitioned ? null : ratio(row.botSessions, row.sessions),
 	} satisfies WebAnalyticsSummary
 })
 

@@ -4138,13 +4138,14 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsSummaryQuery:default  [10d236a3]
+-- builder:web-analytics:webAnalyticsSummaryQuery:default  [74bf3d64]
 SELECT
           uniqIf(VisitorId, VisitorId != '') AS visitors,
           uniq(SessionId) AS sessions,
           uniqIf(SessionId, VisitorIsNew = 1) AS newSessions,
           uniqIf(SessionId, (PageViews <= 1 AND VisitorId != '')) AS bouncedSessions,
           uniqIf(SessionId, VisitorId != '') AS identifiedSessions,
+          uniqIf(SessionId, multiSearchAnyCaseInsensitive(UserAgent, ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-User', 'PerplexityBot', 'Google-Extended', 'Applebot-Extended', 'meta-externalagent', 'meta-webindexer', 'Bytespider', 'CCBot', 'Amazonbot', 'DuckAssistBot', 'Googlebot', 'GoogleOther', 'AdsBot-Google', 'Google-Read-Aloud', 'bingbot', 'YandexBot', 'Baiduspider', 'DuckDuckBot', 'Applebot', 'Sogou', 'SeznamBot', 'AhrefsSiteAudit', 'AhrefsBot', 'SemrushBot', 'DataForSeoBot', 'DotBot', 'MJ12bot', 'Barkrowler', 'Screaming Frog', 'facebookexternalhit', 'Twitterbot', 'LinkedInBot', 'Slackbot', 'Discordbot', 'TelegramBot', 'Pinterest', 'HubSpot Crawler', 'Stripebot', 'UptimeRobot', 'Pingdom', 'StatusCake', 'Headless', 'bot/', 'bot;', 'bot)', 'crawler', 'spider', '+http'])) AS botSessions,
           round(ifNotFinite(avgIf(assumeNotNull(DurationMs), DurationMs > 0), 0)) AS avgDurationMs
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
@@ -4152,13 +4153,14 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsSummaryQuery:default-rollup  [10d236a3]
+-- builder:web-analytics:webAnalyticsSummaryQuery:default-rollup  [74bf3d64]
 SELECT
           uniqIf(VisitorId, VisitorId != '') AS visitors,
           uniq(SessionId) AS sessions,
           uniqIf(SessionId, VisitorIsNew = 1) AS newSessions,
           uniqIf(SessionId, (PageViews <= 1 AND VisitorId != '')) AS bouncedSessions,
           uniqIf(SessionId, VisitorId != '') AS identifiedSessions,
+          uniqIf(SessionId, multiSearchAnyCaseInsensitive(UserAgent, ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-User', 'PerplexityBot', 'Google-Extended', 'Applebot-Extended', 'meta-externalagent', 'meta-webindexer', 'Bytespider', 'CCBot', 'Amazonbot', 'DuckAssistBot', 'Googlebot', 'GoogleOther', 'AdsBot-Google', 'Google-Read-Aloud', 'bingbot', 'YandexBot', 'Baiduspider', 'DuckDuckBot', 'Applebot', 'Sogou', 'SeznamBot', 'AhrefsSiteAudit', 'AhrefsBot', 'SemrushBot', 'DataForSeoBot', 'DotBot', 'MJ12bot', 'Barkrowler', 'Screaming Frog', 'facebookexternalhit', 'Twitterbot', 'LinkedInBot', 'Slackbot', 'Discordbot', 'TelegramBot', 'Pinterest', 'HubSpot Crawler', 'Stripebot', 'UptimeRobot', 'Pingdom', 'StatusCake', 'Headless', 'bot/', 'bot;', 'bot)', 'crawler', 'spider', '+http'])) AS botSessions,
           round(ifNotFinite(avgIf(assumeNotNull(DurationMs), DurationMs > 0), 0)) AS avgDurationMs
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
@@ -4166,13 +4168,14 @@ SELECT
           AND StartTime <= '2026-01-03 14:15:00'
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsSummaryQuery:filtered  [5a9fc283]
+-- builder:web-analytics:webAnalyticsSummaryQuery:filtered  [816bf9de]
 SELECT
           uniqIf(VisitorId, VisitorId != '') AS visitors,
           uniq(SessionId) AS sessions,
           uniqIf(SessionId, VisitorIsNew = 1) AS newSessions,
           uniqIf(SessionId, (PageViews <= 1 AND VisitorId != '')) AS bouncedSessions,
           uniqIf(SessionId, VisitorId != '') AS identifiedSessions,
+          uniqIf(SessionId, multiSearchAnyCaseInsensitive(UserAgent, ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-User', 'PerplexityBot', 'Google-Extended', 'Applebot-Extended', 'meta-externalagent', 'meta-webindexer', 'Bytespider', 'CCBot', 'Amazonbot', 'DuckAssistBot', 'Googlebot', 'GoogleOther', 'AdsBot-Google', 'Google-Read-Aloud', 'bingbot', 'YandexBot', 'Baiduspider', 'DuckDuckBot', 'Applebot', 'Sogou', 'SeznamBot', 'AhrefsSiteAudit', 'AhrefsBot', 'SemrushBot', 'DataForSeoBot', 'DotBot', 'MJ12bot', 'Barkrowler', 'Screaming Frog', 'facebookexternalhit', 'Twitterbot', 'LinkedInBot', 'Slackbot', 'Discordbot', 'TelegramBot', 'Pinterest', 'HubSpot Crawler', 'Stripebot', 'UptimeRobot', 'Pingdom', 'StatusCake', 'Headless', 'bot/', 'bot;', 'bot)', 'crawler', 'spider', '+http'])) AS botSessions,
           round(ifNotFinite(avgIf(assumeNotNull(DurationMs), DurationMs > 0), 0)) AS avgDurationMs
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
@@ -4209,13 +4212,14 @@ SELECT
         GROUP BY sessionId)
         FORMAT JSON
 
--- builder:web-analytics:webAnalyticsSummaryQuery:filtered-rollup  [83fa614e]
+-- builder:web-analytics:webAnalyticsSummaryQuery:filtered-rollup  [7dc77773]
 SELECT
           uniqIf(VisitorId, VisitorId != '') AS visitors,
           uniq(SessionId) AS sessions,
           uniqIf(SessionId, VisitorIsNew = 1) AS newSessions,
           uniqIf(SessionId, (PageViews <= 1 AND VisitorId != '')) AS bouncedSessions,
           uniqIf(SessionId, VisitorId != '') AS identifiedSessions,
+          uniqIf(SessionId, multiSearchAnyCaseInsensitive(UserAgent, ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-User', 'PerplexityBot', 'Google-Extended', 'Applebot-Extended', 'meta-externalagent', 'meta-webindexer', 'Bytespider', 'CCBot', 'Amazonbot', 'DuckAssistBot', 'Googlebot', 'GoogleOther', 'AdsBot-Google', 'Google-Read-Aloud', 'bingbot', 'YandexBot', 'Baiduspider', 'DuckDuckBot', 'Applebot', 'Sogou', 'SeznamBot', 'AhrefsSiteAudit', 'AhrefsBot', 'SemrushBot', 'DataForSeoBot', 'DotBot', 'MJ12bot', 'Barkrowler', 'Screaming Frog', 'facebookexternalhit', 'Twitterbot', 'LinkedInBot', 'Slackbot', 'Discordbot', 'TelegramBot', 'Pinterest', 'HubSpot Crawler', 'Stripebot', 'UptimeRobot', 'Pingdom', 'StatusCake', 'Headless', 'bot/', 'bot;', 'bot)', 'crawler', 'spider', '+http'])) AS botSessions,
           round(ifNotFinite(avgIf(assumeNotNull(DurationMs), DurationMs > 0), 0)) AS avgDurationMs
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'

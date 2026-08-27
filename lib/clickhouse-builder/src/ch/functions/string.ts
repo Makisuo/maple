@@ -69,6 +69,24 @@ export function concat(...exprs: Array<Expr<string> | string>): Expr<string> {
 	return compileTypedFnCall<string>("concat", T.string.schema, ...exprs)
 }
 
+/**
+ * `multiSearchAnyCaseInsensitive(haystack, [needles])` as a predicate — true
+ * when the haystack contains any needle, matched case-insensitively.
+ *
+ * One scan of the haystack against all needles at once, rather than the OR of N
+ * `positionCaseInsensitive(...) > 0` calls it replaces. The difference is the
+ * whole point of reaching for it: ClickHouse compiles a Volnitsky/Aho-Corasick
+ * automaton over the needle set, so cost grows with the haystack rather than
+ * with N, and the emitted SQL stays one function call instead of N nested ORs.
+ *
+ * Needles are literals by design — the multi-search family requires a constant
+ * array, so there is no expression-valued overload to offer.
+ */
+export function multiSearchAnyCaseInsensitive(haystack: Expr<string>, needles: readonly string[]): Condition {
+	const array = needles.map((needle) => compile(str(needle))).join(", ")
+	return makeCond(raw(`multiSearchAnyCaseInsensitive(${compile(haystack.toFragment())}, [${array}])`))
+}
+
 export function hasToken(haystack: Expr<string>, token: Expr<string> | string): Condition {
 	const call = compileFnCall<boolean>("hasToken", haystack, token)
 	return makeCond(raw(compile(call.toFragment())))

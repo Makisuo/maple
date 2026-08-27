@@ -670,6 +670,7 @@ const webAnalyticsFilters = (
 		readonly utmMedium?: string
 		readonly utmCampaign?: string
 		readonly visitorType?: "new" | "returning"
+		readonly traffic?: "all" | "humans" | "bots"
 		readonly eventName?: string
 	},
 	useProductEvents: boolean,
@@ -686,6 +687,7 @@ const webAnalyticsFilters = (
 	utmMedium: payload.utmMedium,
 	utmCampaign: payload.utmCampaign,
 	visitorType: payload.visitorType,
+	traffic: payload.traffic,
 	eventName: payload.eventName,
 	useProductEvents,
 })

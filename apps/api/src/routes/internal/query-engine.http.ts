@@ -1612,6 +1612,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								bouncedSessions: Number(row?.bouncedSessions) || 0,
 								identifiedSessions: Number(row?.identifiedSessions) || 0,
 								avgDurationMs: Number(row?.avgDurationMs) || 0,
+								botSessions: Number(row?.botSessions) || 0,
 							},
 						})
 					}),

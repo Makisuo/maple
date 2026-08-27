@@ -1249,6 +1249,9 @@ const WebAnalyticsFilterFields = {
 	utmMedium: Schema.optional(Schema.String),
 	utmCampaign: Schema.optional(Schema.String),
 	visitorType: Schema.optional(Schema.Literals(["new", "returning"])),
+	// Which agents count. Absent means `all` — the page splits humans from
+	// crawlers rather than silently restating every figure on it.
+	traffic: Schema.optional(Schema.Literals(["all", "humans", "bots"])),
 	// Sessions in which a `track(eventName)` call fired.
 	eventName: Schema.optional(Schema.String),
 } as const
@@ -1274,6 +1277,10 @@ export class WebAnalyticsSummaryResponse extends Schema.Class<WebAnalyticsSummar
 		// visitor count that covers a fraction of traffic never reads as the whole.
 		identifiedSessions: Schema.Number,
 		avgDurationMs: Schema.Number,
+		// Sessions from crawlers, headless browsers and other non-human agents,
+		// counted within the same filters as every field above — so it is only a
+		// share of traffic under the default `traffic: 'all'`.
+		botSessions: Schema.Number,
 	}),
 }) {}
 
