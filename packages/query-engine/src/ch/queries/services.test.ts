@@ -93,6 +93,31 @@ describe("serviceHealthSnapshotQuery", () => {
 
 // serviceOverviewQuery
 
+describe("serviceOverviewQuery exclusions", () => {
+	it("emits NOT IN for every excluded dimension", () => {
+		const { sql } = compileUnsafe(
+			serviceOverviewQuery({
+				excludedEnvironments: ["staging"],
+				excludedNamespaces: ["internal"],
+				excludedCommitShas: ["deadbeef"],
+			}),
+			baseParams,
+		)
+		expect(sql).toContain("DeploymentEnv NOT IN ('staging')")
+		expect(sql).toContain("ServiceNamespace NOT IN ('internal')")
+		expect(sql).toContain("CommitSha NOT IN ('deadbeef')")
+	})
+
+	it("applies the exclusion on every rollup tier, not just the raw edge", () => {
+		// The window is a splice of raw edges + minutely + hourly interiors. A predicate applied to
+		// only one tier would drop the excluded rows for part of the range and keep them for the
+		// rest, which reads as the filter half-working.
+		const { sql } = compileUnsafe(serviceOverviewQuery({ excludedEnvironments: ["staging"] }), baseParams)
+		const occurrences = (sql.match(/DeploymentEnv NOT IN \('staging'\)/g) ?? []).length
+		expect(occurrences).toBeGreaterThanOrEqual(2)
+	})
+})
+
 describe("serviceOverviewQuery", () => {
 	it("compiles basic overview with all columns", () => {
 		const q = serviceOverviewQuery({})

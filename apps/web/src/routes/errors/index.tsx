@@ -79,6 +79,16 @@ function ErrorsContent() {
 		onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
 	}))
 
+	const clearExclusions = () => {
+		const excluded = errorFilterChips(search).filter((chip) => chip.negated)
+		navigate({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(excluded.map((chip) => [chip.param, undefined])),
+			}),
+		})
+	}
+
 	const clearFacetFilters = () => {
 		navigate({
 			search: (prev) => ({
@@ -128,6 +138,7 @@ function ErrorsContent() {
 							excludedDeploymentEnvs={search.excludedDeploymentEnvs}
 							excludedErrorTypes={search.excludedErrorTypes}
 							excludedServiceVersions={search.excludedServiceVersions}
+							onClearExclusions={clearExclusions}
 							rootOnly={search.rootOnly}
 							showSpam={search.showSpam}
 						/>

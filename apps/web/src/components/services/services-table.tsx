@@ -619,6 +619,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 				environments: filters?.environments,
 				namespaces: filters?.namespaces,
 				commitShas: filters?.commitShas,
+				excludedEnvironments: filters?.excludedEnvironments,
+				excludedNamespaces: filters?.excludedNamespaces,
+				excludedCommitShas: filters?.excludedCommitShas,
 			},
 		}),
 	)
@@ -631,6 +634,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 				environments: filters?.environments,
 				namespaces: filters?.namespaces,
 				commitShas: filters?.commitShas,
+				excludedEnvironments: filters?.excludedEnvironments,
+				excludedNamespaces: filters?.excludedNamespaces,
+				excludedCommitShas: filters?.excludedCommitShas,
 			},
 		}),
 	)
@@ -647,6 +653,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 		environments: filters?.environments,
 		namespaces: filters?.namespaces,
 		commitShas: filters?.commitShas,
+		excludedEnvironments: filters?.excludedEnvironments,
+		excludedNamespaces: filters?.excludedNamespaces,
+		excludedCommitShas: filters?.excludedCommitShas,
 	})
 
 	// Progressive enrichment — does not block first paint. The baseline payload

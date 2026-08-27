@@ -612,6 +612,9 @@ function makeAllMetricsTimeseriesRequest(opts: {
 	environments?: ReadonlyArray<DeploymentEnvironment>
 	namespaces?: ReadonlyArray<ServiceNamespace>
 	commitShas?: ReadonlyArray<CommitSha>
+	excludedEnvironments?: ReadonlyArray<DeploymentEnvironment>
+	excludedNamespaces?: ReadonlyArray<ServiceNamespace>
+	excludedCommitShas?: ReadonlyArray<CommitSha>
 	groupBy?: string[]
 }) {
 	return new QueryEngineExecuteRequest({
@@ -629,6 +632,9 @@ function makeAllMetricsTimeseriesRequest(opts: {
 				environments: opts.environments,
 				namespaces: opts.namespaces,
 				commitShas: opts.commitShas,
+				excludedEnvironments: opts.excludedEnvironments,
+				excludedNamespaces: opts.excludedNamespaces,
+				excludedCommitShas: opts.excludedCommitShas,
 			},
 			bucketSeconds: opts.bucketSeconds,
 		},
@@ -971,6 +977,9 @@ const GetCustomChartServiceSparklinesInputSchema = Schema.Struct({
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
 	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 	commitShas: Schema.optional(Schema.mutable(Schema.Array(CommitSha))),
+	excludedEnvironments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	excludedNamespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
+	excludedCommitShas: Schema.optional(Schema.mutable(Schema.Array(CommitSha))),
 })
 
 type GetCustomChartServiceSparklinesInput = (typeof GetCustomChartServiceSparklinesInputSchema)["Encoded"]
@@ -1006,6 +1015,9 @@ const getCustomChartServiceSparklinesEffect = Effect.fn("QueryEngine.getCustomCh
 			environments: input.environments,
 			namespaces: input.namespaces,
 			commitShas: input.commitShas,
+			excludedEnvironments: input.excludedEnvironments,
+			excludedNamespaces: input.excludedNamespaces,
+			excludedCommitShas: input.excludedCommitShas,
 			groupBy: ["service"] as string[],
 		}
 

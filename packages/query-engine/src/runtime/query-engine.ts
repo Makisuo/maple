@@ -1103,6 +1103,7 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
 		excludedSpanNames: filters?.excludedSpanNames as readonly string[] | undefined,
 		excludedEnvironments: filters?.excludedEnvironments as readonly string[] | undefined,
 		excludedNamespaces: filters?.excludedNamespaces as readonly string[] | undefined,
+		excludedCommitShas: filters?.excludedCommitShas as readonly string[] | undefined,
 	}
 }
 

@@ -84,6 +84,7 @@ export const TracesFilters = Schema.Struct({
 	excludedSpanNames: Schema.optional(Schema.Array(SpanName)),
 	excludedEnvironments: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	excludedNamespaces: Schema.optional(Schema.Array(ServiceNamespace)),
+	excludedCommitShas: Schema.optional(Schema.Array(CommitSha)),
 })
 export type TracesFilters = Schema.Schema.Type<typeof TracesFilters>
 

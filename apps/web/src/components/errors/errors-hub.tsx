@@ -19,6 +19,7 @@ import {
 	getErrorsSparkResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
+import { ExcludedEmptyHint } from "@maple/ui/components/filters/excluded-empty-hint"
 import { errorIssueFromV2 } from "@/lib/services/error-issues"
 import {
 	buildErrorSignals,
@@ -179,6 +180,9 @@ export interface ErrorsHubProps {
 	excludedDeploymentEnvs?: ReadonlyArray<string>
 	excludedErrorTypes?: ReadonlyArray<string>
 	excludedServiceVersions?: ReadonlyArray<string>
+	/** Drops every excluded* param at once, for the empty state's hint. Owned by the route, which
+	 *  is where navigation lives. */
+	onClearExclusions: () => void
 	rootOnly?: boolean
 	showSpam?: boolean
 }
@@ -244,6 +248,14 @@ export function ErrorsHub(props: ErrorsHubProps) {
 	 * PAGE_LIMIT fingerprints by volume — which is also the URL budget, since
 	 * these hashes travel as a query param.
 	 */
+	// An empty list under an exclusion cannot explain itself — see `ExcludedEmptyHint`.
+	const excludedValues = [
+		...(props.excludedServices ?? []),
+		...(props.excludedDeploymentEnvs ?? []),
+		...(props.excludedErrorTypes ?? []),
+		...(props.excludedServiceVersions ?? []),
+	]
+
 	// Exclusions count here too. They are warehouse predicates like the rest, so a page left
 	// issue-first would order by Postgres and never apply them — the excluded rows would simply
 	// stay on screen.
@@ -472,7 +484,16 @@ export function ErrorsHub(props: ErrorsHubProps) {
 		)
 	}
 
-	return <HubList signals={signals} sparkWindow={sparkWindow} toolbar={toolbar} view={props.view} />
+	return (
+		<HubList
+			signals={signals}
+			sparkWindow={sparkWindow}
+			toolbar={toolbar}
+			view={props.view}
+			excludedValues={excludedValues}
+			onClearExclusions={props.onClearExclusions}
+		/>
+	)
 }
 
 function sortSignals(signals: ReadonlyArray<ErrorSignal>, sort: HubSort): ReadonlyArray<ErrorSignal> {
@@ -520,11 +541,16 @@ function HubList({
 	sparkWindow,
 	toolbar,
 	view,
+	excludedValues,
+	onClearExclusions,
 }: {
 	signals: ReadonlyArray<ErrorSignal>
 	sparkWindow: { startMs: number; endMs: number; bucketMs: number }
 	toolbar: React.ReactNode
 	view: HubView
+	/** Flattened active exclusions, for the empty state's hint. */
+	excludedValues: ReadonlyArray<string>
+	onClearExclusions: () => void
 }) {
 	const [selection, dispatchSelection] = useReducer(selectionReducer, initialIssueSelection)
 	const selectedIds = selection.selectedIds
@@ -577,6 +603,13 @@ function HubList({
 							<EmptyTitle>{empty.title}</EmptyTitle>
 							<EmptyDescription>{empty.description}</EmptyDescription>
 						</EmptyHeader>
+						{/* The copy above says "clear the service filters", which an exclusion is
+						    not — it is the filter you cannot see in the results. */}
+						<ExcludedEmptyHint
+							excluded={excludedValues}
+							onClear={onClearExclusions}
+							className="max-w-lg"
+						/>
 					</Empty>
 				</div>
 			) : (
