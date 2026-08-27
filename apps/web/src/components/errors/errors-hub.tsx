@@ -175,6 +175,10 @@ export interface ErrorsHubProps {
 	deploymentEnvs?: ReadonlyArray<string>
 	errorTypes?: ReadonlyArray<string>
 	serviceVersions?: ReadonlyArray<string>
+	excludedServices?: ReadonlyArray<string>
+	excludedDeploymentEnvs?: ReadonlyArray<string>
+	excludedErrorTypes?: ReadonlyArray<string>
+	excludedServiceVersions?: ReadonlyArray<string>
 	rootOnly?: boolean
 	showSpam?: boolean
 }
@@ -195,6 +199,14 @@ export function ErrorsHub(props: ErrorsHubProps) {
 			deploymentEnvs: props.deploymentEnvs ? [...props.deploymentEnvs] : undefined,
 			errorLabels: props.errorTypes ? [...props.errorTypes] : undefined,
 			serviceVersions: props.serviceVersions ? [...props.serviceVersions] : undefined,
+			excludedServices: props.excludedServices ? [...props.excludedServices] : undefined,
+			excludedDeploymentEnvs: props.excludedDeploymentEnvs
+				? [...props.excludedDeploymentEnvs]
+				: undefined,
+			excludedErrorLabels: props.excludedErrorTypes ? [...props.excludedErrorTypes] : undefined,
+			excludedServiceVersions: props.excludedServiceVersions
+				? [...props.excludedServiceVersions]
+				: undefined,
 			showSpam: props.showSpam,
 			rootOnly: props.rootOnly !== false,
 			limit: PAGE_LIMIT,
@@ -206,6 +218,10 @@ export function ErrorsHub(props: ErrorsHubProps) {
 			props.deploymentEnvs,
 			props.errorTypes,
 			props.serviceVersions,
+			props.excludedServices,
+			props.excludedDeploymentEnvs,
+			props.excludedErrorTypes,
+			props.excludedServiceVersions,
 			props.showSpam,
 			props.rootOnly,
 		],
@@ -228,11 +244,18 @@ export function ErrorsHub(props: ErrorsHubProps) {
 	 * PAGE_LIMIT fingerprints by volume — which is also the URL budget, since
 	 * these hashes travel as a query param.
 	 */
+	// Exclusions count here too. They are warehouse predicates like the rest, so a page left
+	// issue-first would order by Postgres and never apply them — the excluded rows would simply
+	// stay on screen.
 	const hasFacetFilter =
 		(props.services?.length ?? 0) > 0 ||
 		(props.deploymentEnvs?.length ?? 0) > 0 ||
 		(props.errorTypes?.length ?? 0) > 0 ||
-		(props.serviceVersions?.length ?? 0) > 0
+		(props.serviceVersions?.length ?? 0) > 0 ||
+		(props.excludedServices?.length ?? 0) > 0 ||
+		(props.excludedDeploymentEnvs?.length ?? 0) > 0 ||
+		(props.excludedErrorTypes?.length ?? 0) > 0 ||
+		(props.excludedServiceVersions?.length ?? 0) > 0
 	const warehouseFirst = isVolumeSort || hasFacetFilter
 	// Wait for the ranking before asking for issues, or the first render would
 	// request an unfiltered page and then immediately discard it.
@@ -301,6 +324,14 @@ export function ErrorsHub(props: ErrorsHubProps) {
 				deploymentEnvs: props.deploymentEnvs ? [...props.deploymentEnvs] : undefined,
 				errorLabels: props.errorTypes ? [...props.errorTypes] : undefined,
 				serviceVersions: props.serviceVersions ? [...props.serviceVersions] : undefined,
+				excludedServices: props.excludedServices ? [...props.excludedServices] : undefined,
+				excludedDeploymentEnvs: props.excludedDeploymentEnvs
+					? [...props.excludedDeploymentEnvs]
+					: undefined,
+				excludedErrorLabels: props.excludedErrorTypes ? [...props.excludedErrorTypes] : undefined,
+				excludedServiceVersions: props.excludedServiceVersions
+					? [...props.excludedServiceVersions]
+					: undefined,
 				bucketSeconds,
 			},
 		}),

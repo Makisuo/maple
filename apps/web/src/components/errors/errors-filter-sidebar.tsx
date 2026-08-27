@@ -42,6 +42,14 @@ export function ErrorsFilterSidebar() {
 			deploymentEnvs: search.deploymentEnvs ? [...search.deploymentEnvs] : undefined,
 			errorLabels: search.errorTypes ? [...search.errorTypes] : undefined,
 			serviceVersions: search.serviceVersions ? [...search.serviceVersions] : undefined,
+			excludedServices: search.excludedServices ? [...search.excludedServices] : undefined,
+			excludedDeploymentEnvs: search.excludedDeploymentEnvs
+				? [...search.excludedDeploymentEnvs]
+				: undefined,
+			excludedErrorLabels: search.excludedErrorTypes ? [...search.excludedErrorTypes] : undefined,
+			excludedServiceVersions: search.excludedServiceVersions
+				? [...search.excludedServiceVersions]
+				: undefined,
 		},
 	})
 	const facetsResult = useRefreshableAtomValue(facetsAtom)
@@ -71,7 +79,11 @@ export function ErrorsFilterSidebar() {
 		(search.services?.length ?? 0) > 0 ||
 		(search.deploymentEnvs?.length ?? 0) > 0 ||
 		(search.errorTypes?.length ?? 0) > 0 ||
-		(search.serviceVersions?.length ?? 0) > 0
+		(search.serviceVersions?.length ?? 0) > 0 ||
+		(search.excludedServices?.length ?? 0) > 0 ||
+		(search.excludedDeploymentEnvs?.length ?? 0) > 0 ||
+		(search.excludedErrorTypes?.length ?? 0) > 0 ||
+		(search.excludedServiceVersions?.length ?? 0) > 0
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
@@ -104,6 +116,8 @@ export function ErrorsFilterSidebar() {
 							options={facets.deploymentEnvs ?? []}
 							selected={search.deploymentEnvs ?? []}
 							onChange={(val) => updateFilter("deploymentEnvs", val)}
+							excluded={search.excludedDeploymentEnvs ?? []}
+							onExcludedChange={(val) => updateFilter("excludedDeploymentEnvs", val)}
 						/>
 
 						<FilterSection
@@ -111,6 +125,8 @@ export function ErrorsFilterSidebar() {
 							options={facets.services ?? []}
 							selected={search.services ?? []}
 							onChange={(val) => updateFilter("services", val)}
+							excluded={search.excludedServices ?? []}
+							onExcludedChange={(val) => updateFilter("excludedServices", val)}
 							colorMap={serviceColorMap(facets.services ?? [])}
 						/>
 
@@ -119,6 +135,8 @@ export function ErrorsFilterSidebar() {
 							options={facets.errorTypes ?? []}
 							selected={search.errorTypes ?? []}
 							onChange={(val) => updateFilter("errorTypes", val)}
+							excluded={search.excludedErrorTypes ?? []}
+							onExcludedChange={(val) => updateFilter("excludedErrorTypes", val)}
 						/>
 
 						{/* Which deploy the error was seen on — the fastest way to tell a
@@ -128,6 +146,8 @@ export function ErrorsFilterSidebar() {
 							options={facets.serviceVersions ?? []}
 							selected={search.serviceVersions ?? []}
 							onChange={(val) => updateFilter("serviceVersions", val)}
+							excluded={search.excludedServiceVersions ?? []}
+							onExcludedChange={(val) => updateFilter("excludedServiceVersions", val)}
 						/>
 
 						{!hasFacets && (

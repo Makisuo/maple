@@ -115,6 +115,10 @@ export class ErrorsByTypeRequest extends Schema.Class<ErrorsByTypeRequest>("Erro
 	fingerprintHashes: OptionalFingerprintHashes,
 	errorLabels: OptionalErrorLabels,
 	serviceVersions: OptionalServiceVersions,
+	excludedServices: OptionalServiceNames,
+	excludedDeploymentEnvs: OptionalDeploymentEnvs,
+	excludedErrorLabels: OptionalErrorLabels,
+	excludedServiceVersions: OptionalServiceVersions,
 	limit: Schema.optional(Schema.Number),
 }) {}
 
@@ -166,6 +170,10 @@ export class ErrorsSparkRequest extends Schema.Class<ErrorsSparkRequest>("Errors
 	deploymentEnvs: OptionalDeploymentEnvs,
 	errorLabels: OptionalErrorLabels,
 	serviceVersions: OptionalServiceVersions,
+	excludedServices: OptionalServiceNames,
+	excludedDeploymentEnvs: OptionalDeploymentEnvs,
+	excludedErrorLabels: OptionalErrorLabels,
+	excludedServiceVersions: OptionalServiceVersions,
 	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
