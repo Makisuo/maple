@@ -50,7 +50,7 @@ const spanId = T.custom("String", SpanId)
  */
 const table = <
 	const Name extends string,
-	const Columns extends ColumnDefs & { OrgId: T.CHType<"String", any, any> },
+	const Columns extends ColumnDefs & { OrgId: T.CHStringLike },
 >(
 	name: Name,
 	columns: Columns,
