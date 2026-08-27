@@ -32,7 +32,8 @@ import {
 	type AiSpanCategory,
 } from "@/lib/agent-sessions/session-turns"
 import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
-import { SpanDrawer, type SpanDetailTab } from "./span-expansion"
+import type { SpanDetailTab } from "./span-expansion"
+import { SpanPopover } from "./span-popover"
 import { CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
 // One lane per turn, positioned by hand and handed to `@xyflow/react` — the
@@ -53,8 +54,8 @@ const WRAP_GAP = 24
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 1.5
 /** How far past the graph the canvas can be panned. Roughly half a viewport:
- *  enough to pull any node clear of the floor's legend and drawer, while a
- *  fling can never strand the reader on empty canvas with no node in sight. */
+ *  enough to pull any node clear of the floor's legend, while a fling can never
+ *  strand the reader on empty canvas with no node in sight. */
 const PAN_MARGIN = 400
 
 /** Where the hidden ports sit on every card, mirrored by `Ports` below. */
@@ -95,16 +96,16 @@ interface SessionFlowProps {
 	agentSpansOnly: boolean
 	zoom: number
 	onZoomChange: (zoom: number) => void
-	/** The one span open in the docked drawer (`?span=`). */
+	/** The one span open in the popover (`?span=`). */
 	selectedSpanId: string | undefined
-	/** Raised with a span id to open the drawer, `undefined` to close it. */
+	/** Raised with a span id to open it, `undefined` to close. */
 	onSelectSpan: (spanId: string | undefined) => void
-	/** The drawer's tab, shared with the Traces view's inline expansion. */
+	/** The popover's tab, shared with the other views. */
 	spanTab: SpanDetailTab | undefined
 	onSpanTabChange: (tab: SpanDetailTab) => void
-	/** The session's captured tool results by call id, for the drawer. */
+	/** The session's captured tool results by call id, for the popover. */
 	toolResults?: ReadonlyMap<string, string>
-	/** The drawer's "Open in Traces view": same span, sibling view. */
+	/** The popover's "Open in Traces view": same span, sibling view. */
 	onOpenTraceView: () => void
 }
 
@@ -129,7 +130,7 @@ export function SessionFlow({
 	const paneRef = useRef<HTMLDivElement>(null)
 	const instanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
 
-	// Selection addresses spans the same way in both views, so a span expanded
+	// Selection addresses spans the same way in both views, so a span opened
 	// in the Trace view opens here even when the flow drew no node for it (a
 	// wrapper, or a span the filter hides).
 	const selectedSpan = useMemo(() => {
@@ -293,8 +294,8 @@ export function SessionFlow({
 		<ReactFlowProvider>
 			{/* The canvas takes whatever height the viewport leaves it (the page
 			    column fills the scroller), and xyflow owns panning inside it; the
-			    floor block below stays a sibling so the drawer can dock under the
-			    canvas rather than float over it. */}
+			    floor block below stays a sibling so the legend and zoom sit on the
+			    canvas rather than inside its transformed pane. */}
 			<div className="relative flex grow flex-col">
 				{lanes.length === 0 ? (
 					<p className="px-2.5 py-8 text-center text-muted-foreground text-sm">
@@ -337,11 +338,10 @@ export function SessionFlow({
 				)}
 
 				{/* The view's floor, pinned to the viewport's bottom edge: the legend
-				    and zoom on top, and under them the docked drawer when a span is
-				    open. Sticky rather than absolute so a page grown past the
-				    viewport (a tall drawer) still keeps them on screen. Guarded,
-				    because there is nothing to key, zoom or open when the filter
-				    emptied the canvas. */}
+				    and the zoom controls. Sticky rather than absolute so a page grown
+				    past the viewport still keeps them on screen. Guarded, because
+				    there is nothing to key or zoom when the filter emptied the
+				    canvas. */}
 				{lanes.length > 0 && (
 					<div className="sticky bottom-0 z-10 mt-auto flex flex-col">
 						<div className="pointer-events-none flex items-end justify-between gap-4 p-3">
@@ -365,20 +365,20 @@ export function SessionFlow({
 							</div>
 							<FlowControls zoom={zoom} />
 						</div>
-
-						{selectedSpan !== undefined && (
-							<SpanDrawer
-								span={selectedSpan.span}
-								turnOrdinal={turnOrdinal(selectedSpan.turn)}
-								tab={spanTab}
-								onTabChange={onSpanTabChange}
-								toolResults={toolResults}
-								onClose={() => onSelectSpan(undefined)}
-								onOpenTraceView={onOpenTraceView}
-							/>
-						)}
 					</div>
 				)}
+
+				{/* Whether or not the flow drew a node for it: a wrapper span, or one
+				    the filter hides, still opens where it was addressed. */}
+				<SpanPopover
+					span={selectedSpan?.span}
+					turnOrdinal={selectedSpan === undefined ? undefined : turnOrdinal(selectedSpan.turn)}
+					tab={spanTab}
+					onTabChange={onSpanTabChange}
+					toolResults={toolResults}
+					onClose={() => onSelectSpan(undefined)}
+					onOpenTraceView={onOpenTraceView}
+				/>
 			</div>
 		</ReactFlowProvider>
 	)
@@ -454,7 +454,7 @@ function Ports() {
 interface StepData extends Record<string, unknown> {
 	readonly node: FlowNode
 	readonly selected: boolean
-	/** Under the keyboard's span cursor — distinct from `selected`, the open drawer. */
+	/** Under the keyboard's span cursor — distinct from `selected`, the open panel. */
 	readonly focused: boolean
 	readonly onSelect: (spanId: string) => void
 }
@@ -473,6 +473,7 @@ const StepNode = memo(function StepNode({ data }: NodeProps & { data: StepData }
 				onClick={() => onSelect(node.span.spanId)}
 				data-span-id={node.span.spanId}
 				aria-current={selected || undefined}
+				aria-haspopup="dialog"
 				className={cn(
 					"flex size-full cursor-pointer flex-col justify-center gap-1 rounded-md border bg-card px-2.5 py-2 text-left hover:border-ring",
 					"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

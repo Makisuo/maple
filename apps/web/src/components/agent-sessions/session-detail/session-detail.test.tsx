@@ -4,6 +4,9 @@
 // two layout globals below are stubbed for that reason alone. Nothing here
 // navigates: span clicks raise `onSelectSpan` for the page to handle, and the
 // trace links render through a mocked `Link` so no router needs mounting.
+//
+// The span inspection overlay portals to `document.body`, so it is read through
+// `spanPopover()` below rather than the render's own container.
 
 import { useState, type ReactNode } from "react"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
@@ -270,6 +273,22 @@ const { turns: delegationTurns, summary: delegationSummary } = sessionOf([
 const EMPTY = new Set<string>()
 const noop = () => {}
 
+/** The one span-inspection overlay, wherever it was opened from. */
+function spanPopover(): HTMLElement {
+	const popup = document.querySelector<HTMLElement>('[data-slot="span-popover"]')
+	if (popup === null) throw new Error("no span popover is open")
+	return popup
+}
+
+/** The dimmed page behind the overlay — the scrim that gives it its depth. */
+function spanScrim(): HTMLElement | null {
+	return document.querySelector<HTMLElement>('[data-slot="dialog-backdrop"]')
+}
+
+function spanPopoverCount(): number {
+	return document.querySelectorAll('[data-slot="span-popover"]').length
+}
+
 /** The waterfall's expansion state lives in SessionViews, so the tests supply it. */
 function Waterfall(props: {
 	turns?: readonly SessionTurn[]
@@ -350,16 +369,28 @@ describe("SessionOverview", () => {
 		}),
 	])
 
+	/** `?span=` is a search param on the real page; here it is local state. */
 	function Overview(props: {
 		turns?: readonly SessionTurn[]
 		summary?: SessionSummary
-		onOpenSpan?: (spanId: string) => void
+		/** What a pasted `?span=` link lands with. */
+		initialSpanId?: string
+		onSelectSpan?: (spanId: string | undefined) => void
+		onOpenTraceView?: () => void
 	}) {
+		const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(props.initialSpanId)
 		return (
 			<SessionOverview
 				turns={props.turns ?? turns}
 				summary={props.summary ?? summary}
-				onOpenSpan={props.onOpenSpan ?? noop}
+				selectedSpanId={selectedSpanId}
+				onSelectSpan={(spanId) => {
+					setSelectedSpanId(spanId)
+					props.onSelectSpan?.(spanId)
+				}}
+				spanTab={undefined}
+				onSpanTabChange={noop}
+				onOpenTraceView={props.onOpenTraceView ?? noop}
 			/>
 		)
 	}
@@ -373,28 +404,69 @@ describe("SessionOverview", () => {
 	})
 
 	// The five-second answer: the verdict names what killed the final turn and
-	// links the span that is its evidence — the one link the v2 page lost.
+	// opens the span that is its evidence — the one link the v2 page lost.
 	it("says a failed session failed, names the cause, and opens the failing span", () => {
-		const onOpenSpan = vi.fn()
-		render(<Overview turns={failedTurns} summary={failedSummary} onOpenSpan={onOpenSpan} />)
+		const onSelectSpan = vi.fn()
+		render(<Overview turns={failedTurns} summary={failedSummary} onSelectSpan={onSelectSpan} />)
 
 		expect(screen.getByText("Failed")).toBeTruthy()
 		expect(screen.getAllByText("context_length_exceeded").length).toBeGreaterThan(0)
 
 		fireEvent.click(screen.getByRole("button", { name: /Open failing span/ }))
 		// The deepest span carrying the failure, not the wrapper that copied it.
-		expect(onOpenSpan).toHaveBeenCalledWith("f-llm")
+		expect(onSelectSpan).toHaveBeenCalledWith("f-llm")
+		// In place, against the button that named it — the Overview is still on
+		// screen behind the panel.
+		expect(within(spanPopover()).getByText("f-llm")).toBeTruthy()
 	})
 
 	// A mid-session failure the session recovered from is not a failed session —
 	// but it is exactly what the findings list exists to surface.
-	it("completes-with-findings when something failed mid-session, and links it", () => {
-		const onOpenSpan = vi.fn()
-		render(<Overview onOpenSpan={onOpenSpan} />)
+	it("completes-with-findings when something failed mid-session, and opens it", () => {
+		const onSelectSpan = vi.fn()
+		render(<Overview onSelectSpan={onSelectSpan} />)
 
 		expect(screen.getByText(/Completed, with 1 finding/)).toBeTruthy()
 		fireEvent.click(screen.getByText("error · run_tests"))
-		expect(onOpenSpan).toHaveBeenCalledWith("tool-3")
+		expect(onSelectSpan).toHaveBeenCalledWith("tool-3")
+	})
+
+	// The finding's evidence used to live one view away: clicking it swapped the
+	// page out from under the reader. It opens over this page instead, and the
+	// way across is inside the panel for the reader who wants the whole waterfall.
+	it("inspects a finding's span in place, and still offers the way across", () => {
+		const onOpenTraceView = vi.fn()
+		render(<Overview onOpenTraceView={onOpenTraceView} />)
+
+		fireEvent.click(screen.getByText("error · run_tests"))
+		const popover = within(spanPopover())
+		expect(popover.getByText("exit 1")).toBeTruthy()
+		// A scrim behind it, so the page reads as underneath rather than beside.
+		expect(spanScrim()).not.toBeNull()
+		expect(onOpenTraceView).not.toHaveBeenCalled()
+
+		fireEvent.click(popover.getByRole("button", { name: "Open in Traces view" }))
+		expect(onOpenTraceView).toHaveBeenCalled()
+	})
+
+	// The panel is no longer anchored to the element that named the span, so a
+	// selection this view never made — a pasted `?span=` link, or the reader
+	// arriving from another view — opens it here too.
+	it("opens a pasted span link without a click, and Escape clears it", () => {
+		const onSelectSpan = vi.fn()
+		render(
+			<Overview
+				turns={failedTurns}
+				summary={failedSummary}
+				initialSpanId="f-llm"
+				onSelectSpan={onSelectSpan}
+			/>,
+		)
+
+		expect(within(spanPopover()).getAllByText(/claude-opus-5/).length).toBeGreaterThan(0)
+
+		fireEvent.keyDown(spanPopover(), { key: "Escape" })
+		expect(onSelectSpan).toHaveBeenCalledWith(undefined)
 	})
 
 	it("says a clean session completed cleanly, and what that claim covers", () => {
@@ -406,14 +478,14 @@ describe("SessionOverview", () => {
 	})
 
 	// The shape strip replaces the turn digest: one cell per turn, colored by
-	// what the findings attribute to it, each a door into the Traces view.
+	// what the findings attribute to it, each opening the turn's anchor span.
 	it("draws one cell per turn and opens the turn's anchor from a click", () => {
-		const onOpenSpan = vi.fn()
-		render(<Overview onOpenSpan={onOpenSpan} />)
+		const onSelectSpan = vi.fn()
+		render(<Overview onSelectSpan={onSelectSpan} />)
 
 		const cellTwo = screen.getByRole("button", { name: "2" })
 		fireEvent.click(cellTwo)
-		expect(onOpenSpan).toHaveBeenCalledWith("agent-2")
+		expect(onSelectSpan).toHaveBeenCalledWith("agent-2")
 	})
 
 	it("says no cost was reported rather than pricing tokens itself", () => {
@@ -501,15 +573,15 @@ describe("SessionWaterfall", () => {
 		expect(screen.queryByText(/^idle \d/)).toBeNull()
 	})
 
-	it("selects a span for inline expansion from a click, and collapses on the second", () => {
+	it("opens a span's panel from a click, and closes it on the second", () => {
 		const onSelectSpan = vi.fn()
 		const view = render(<Waterfall onSelectSpan={onSelectSpan} />)
 
 		fireEvent.click(screen.getByText("grep_repo"))
 		expect(onSelectSpan).toHaveBeenCalledWith("tool-2")
 
-		// Clicking the already-expanded row collapses it. The expansion repeats
-		// the tool's name in its payload card, so the row is the first match.
+		// Clicking the open row closes it. The panel repeats the tool's name in
+		// its payload card, so the row is the first match.
 		view.rerender(<Waterfall selectedSpanId="tool-2" onSelectSpan={onSelectSpan} />)
 		fireEvent.click(screen.getAllByText("grep_repo")[0]!)
 		expect(onSelectSpan).toHaveBeenLastCalledWith(undefined)
@@ -522,25 +594,24 @@ describe("SessionWaterfall", () => {
 		expect(link.getAttribute("href")).toBe("/traces/trace-1")
 	})
 
-	it("expands the selected span inline, directly under its row", () => {
-		const view = render(<Waterfall selectedSpanId="llm-1" />)
+	it("opens the selected span over the list, leaving its row marked underneath", () => {
+		render(<Waterfall selectedSpanId="llm-1" />)
 
 		const row = screen.getAllByText(/^chat$/)[0]!.closest("button")!
 		expect(row.getAttribute("aria-current")).toBe("true")
 
-		// The expansion carries the captured messages at full width — the user's
+		// The panel carries the captured messages at full width — the user's
 		// prompt appears complete here, beyond the truncated turn label above it.
-		const detail = view.container.querySelector('[data-slot="span-inline-detail"]')!
-		expect(detail).toBeTruthy()
-		expect(within(detail as HTMLElement).getByText("fix the webhook retry backoff")).toBeTruthy()
-		expect(within(detail as HTMLElement).getByRole("button", { name: /Messages/ })).toBeTruthy()
-		expect(within(detail as HTMLElement).getByText("Open in Traces")).toBeTruthy()
+		const detail = within(spanPopover())
+		expect(detail.getByText("fix the webhook retry backoff")).toBeTruthy()
+		expect(detail.getByRole("button", { name: /Messages/ })).toBeTruthy()
+		expect(detail.getByText("Open in Traces")).toBeTruthy()
 	})
 
-	it("leads the expansion's tabs with Details; Attributes and Timing are folded into it", () => {
-		const view = render(<Waterfall selectedSpanId="llm-1" />)
+	it("leads the panel's tabs with Details; Attributes and Timing are folded into it", () => {
+		render(<Waterfall selectedSpanId="llm-1" />)
 
-		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
+		const detail = within(spanPopover())
 		const labels = detail
 			.getAllByRole("button")
 			.filter((button) => button.hasAttribute("aria-pressed"))
@@ -570,9 +641,9 @@ describe("SessionWaterfall", () => {
 				},
 			}),
 		])
-		const view = render(<Waterfall turns={failTurns} summary={failSummary} selectedSpanId="ft-tool" />)
+		render(<Waterfall turns={failTurns} summary={failSummary} selectedSpanId="ft-tool" />)
 
-		const detail = view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement
+		const detail = spanPopover()
 		// A failed span opens on Details by default.
 		expect(within(detail).getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe(
 			"true",
@@ -584,9 +655,9 @@ describe("SessionWaterfall", () => {
 	})
 
 	it("opens an errored span on Details, where the error and the ids are", () => {
-		const view = render(<Waterfall selectedSpanId="tool-3" />)
+		render(<Waterfall selectedSpanId="tool-3" />)
 
-		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
+		const detail = within(spanPopover())
 		expect(detail.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
 		// The error banner and the identity rows render ahead of the lazily
 		// loaded attribute maps (held at Initial by the atom mock above).
@@ -594,15 +665,17 @@ describe("SessionWaterfall", () => {
 		expect(detail.getByText("Trace ID")).toBeTruthy()
 	})
 
-	it("expands one span at a time — the selection, not a set", () => {
+	it("opens one span at a time — the selection, not a set", () => {
 		const view = render(<Waterfall selectedSpanId="tool-1" />)
-		expect(view.container.querySelectorAll('[data-slot="span-inline-detail"]')).toHaveLength(1)
+		expect(spanPopoverCount()).toBe(1)
 
 		view.rerender(<Waterfall selectedSpanId="tool-2" />)
-		expect(view.container.querySelectorAll('[data-slot="span-inline-detail"]')).toHaveLength(1)
+		expect(spanPopoverCount()).toBe(1)
+		// The one panel followed the selection rather than joining the first.
+		expect(within(spanPopover()).getAllByText("grep_repo").length).toBeGreaterThan(0)
 	})
 
-	// A call and its result are one event: the expansion shows them as one card
+	// A call and its result are one event: the panel shows them as one card
 	// whose selector flips between the halves, instead of two stacked cards the
 	// reader has to pair by eye.
 	it("groups a tool call and its result into one card behind a selector", () => {
@@ -621,12 +694,10 @@ describe("SessionWaterfall", () => {
 				},
 			}),
 		])
-		const view = render(
-			<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="tc-tool" spanTab="tools" />,
-		)
+		render(<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="tc-tool" spanTab="tools" />)
 
 		// Arguments first, pretty-printed; the result is a click away, not a scroll.
-		const detail = view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement
+		const detail = spanPopover()
 		expect(detail.textContent).toContain('"sql"')
 		expect(detail.textContent).not.toContain('"rows"')
 
@@ -635,18 +706,21 @@ describe("SessionWaterfall", () => {
 		expect(detail.textContent).not.toContain('"sql"')
 	})
 
-	it("moves the span cursor with the arrows, expands on Enter, collapses on Esc", () => {
+	// The panel is a dialog, so the page-level keys stand down while it is open:
+	// the arrows walk the list up to the point one opens, and the panel's own
+	// close (its button, or Escape inside it) is what puts the reader back.
+	it("moves the span cursor with the arrows, opens on Enter, closes from the panel", () => {
 		const onSelectSpan = vi.fn()
 		const view = render(<Waterfall onSelectSpan={onSelectSpan} />)
 
 		// First ↓ lands on the first span row — turn 1's root agent span; Enter
-		// expands it.
+		// opens it.
 		fireEvent.keyDown(document.body, { key: "ArrowDown" })
 		fireEvent.keyDown(document.body, { key: "Enter" })
 		expect(onSelectSpan).toHaveBeenCalledWith("agent-1")
 
 		view.rerender(<Waterfall selectedSpanId="agent-1" onSelectSpan={onSelectSpan} />)
-		fireEvent.keyDown(document.body, { key: "Escape" })
+		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Close span detail" }))
 		expect(onSelectSpan).toHaveBeenLastCalledWith(undefined)
 	})
 
@@ -798,7 +872,7 @@ describe("SessionFlow", () => {
 		expect(screen.getByText("grep_repo")).toBeTruthy()
 	})
 
-	it("selects a span for the docked drawer from a node click", () => {
+	it("opens a span's panel from a node click", () => {
 		const onSelectSpan = vi.fn()
 		render(<Flow onSelectSpan={onSelectSpan} />)
 
@@ -806,25 +880,23 @@ describe("SessionFlow", () => {
 		expect(onSelectSpan).toHaveBeenCalledWith("tool-2")
 	})
 
-	it("docks a full-width drawer under the canvas for the selected span", () => {
-		const view = render(<Flow selectedSpanId="tool-2" />)
+	it("opens the selected span's panel, naming the node's turn", () => {
+		render(<Flow selectedSpanId="tool-2" />)
 
-		const drawer = view.container.querySelector('[data-slot="span-drawer"]')!
-		expect(drawer).toBeTruthy()
-		// The drawer names the span and where it lives, and offers the way across.
-		expect(within(drawer as HTMLElement).getAllByText(/grep_repo/).length).toBeGreaterThan(0)
-		expect(within(drawer as HTMLElement).getByText(/Turn 1/)).toBeTruthy()
-		expect(within(drawer as HTMLElement).getByText("Open in Traces view")).toBeTruthy()
+		// The panel names the span and where it lives, and offers the way across.
+		const panel = within(spanPopover())
+		expect(panel.getAllByText(/grep_repo/).length).toBeGreaterThan(0)
+		expect(panel.getByText(/Turn 1/)).toBeTruthy()
+		expect(panel.getByText("Open in Traces view")).toBeTruthy()
 	})
 
-	it("opens the drawer even for a span the flow drew no node for", () => {
+	it("opens the panel even for a span the flow drew no node for", () => {
 		// The app's own HTTP span earns no node, but selection addresses spans the
-		// same way in both views, so a span expanded in Trace still opens here.
-		const view = render(<Flow selectedSpanId="http-1" agentSpansOnly={false} />)
+		// same way in both views, so a span opened in Trace still opens here — the
+		// panel is an overlay over the canvas, not a pointer at some node on it.
+		render(<Flow selectedSpanId="http-1" agentSpansOnly={false} />)
 
-		const drawer = view.container.querySelector('[data-slot="span-drawer"]')!
-		expect(drawer).toBeTruthy()
-		expect(within(drawer as HTMLElement).getByText("GET /repo/file")).toBeTruthy()
+		expect(within(spanPopover()).getByText("GET /repo/file")).toBeTruthy()
 	})
 
 	it("merges a run of identical calls into one counted node", () => {
@@ -992,38 +1064,38 @@ describe("SessionViews", () => {
 		expect(screen.getByRole("button", { name: /Turn 1/ }).getAttribute("aria-expanded")).toBe("false")
 	})
 
-	// The spec's shared rules: 1/2/3 switch views, and the selection survives a
-	// Trace ↔ Flow switch because both views address spans the same way.
-	it("switches views on 2/3 and carries the expanded span across", () => {
-		const view = render(<Views />)
+	// One panel for the whole page, and the page behind it is scrimmed, so the
+	// way to cross views with a span still open is the panel's own door — which
+	// keeps both the span and the reader's tab.
+	it("carries the open span and its tab through the panel's door into Traces", () => {
+		render(<Views view="flow" />)
 
 		fireEvent.click(screen.getByText("grep_repo"))
-		expect(view.container.querySelector('[data-slot="span-inline-detail"]')).toBeTruthy()
+		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Details" }))
 
-		fireEvent.keyDown(document.body, { key: "3" })
-		expect(view.container.querySelector('[data-slot="span-drawer"]')).toBeTruthy()
+		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Open in Traces view" }))
 
-		fireEvent.keyDown(document.body, { key: "2" })
-		expect(view.container.querySelector('[data-slot="span-inline-detail"]')).toBeTruthy()
+		// The waterfall's own column header: the Traces view is what is on screen.
+		expect(screen.getByText("Model / target")).toBeTruthy()
+		expect(spanPopoverCount()).toBe(1)
+		expect(
+			within(spanPopover()).getByRole("button", { name: "Details" }).getAttribute("aria-pressed"),
+		).toBe("true")
 	})
 
 	// The tab choice lives beside the other cross-view state in SessionViews:
-	// moving the expansion to another span must not reset the reader's tab.
-	it("keeps the chosen detail tab open when the expansion moves to another span", () => {
-		const view = render(<Views />)
+	// moving the panel to another span must not reset the reader's tab.
+	it("keeps the chosen detail tab open when the panel moves to another span", () => {
+		render(<Views />)
 
 		// The tool span opens on its own payload (Tool calls); choose Details.
 		fireEvent.click(screen.getByText("grep_repo"))
-		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Details" }))
 
-		// Move the expansion to a different span — the choice holds.
+		// Move the panel to a different span — the choice holds.
 		fireEvent.click(screen.getAllByText("read_file")[0]!)
-		const detail = within(view.container.querySelector('[data-slot="span-inline-detail"]') as HTMLElement)
-		expect(detail.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
-
-		// And it holds across the view switch into the Flow drawer too.
-		fireEvent.keyDown(document.body, { key: "3" })
-		const drawer = within(view.container.querySelector('[data-slot="span-drawer"]') as HTMLElement)
-		expect(drawer.getByRole("button", { name: "Details" }).getAttribute("aria-pressed")).toBe("true")
+		expect(
+			within(spanPopover()).getByRole("button", { name: "Details" }).getAttribute("aria-pressed"),
+		).toBe("true")
 	})
 })
