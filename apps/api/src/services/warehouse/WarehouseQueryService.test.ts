@@ -11,7 +11,7 @@ import {
 	TinybirdOrgTokenConfigError,
 	UserId,
 	WarehouseConfigError,
-	WarehouseQueryError,
+	WarehouseInvalidSqlError,
 	WarehouseResultDecodeError,
 	WarehouseScopeError,
 	WarehouseUpstreamError,
@@ -661,7 +661,10 @@ describe("WarehouseQueryService.ingest writes through the SQL client", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("maps a failed insert to WarehouseQueryError", () => {
+	// Inserts classify with the read path's default "caller" authorship (the
+	// rows, not Maple's SQL, are what usually earned the rejection), so a
+	// syntax-shaped complaint takes the caller-authored invalid-SQL tag.
+	it.effect("maps a failed insert through the classifier", () => {
 		__testables.setClientFactory(() => ({
 			sql: async () => ({ data: [] }),
 			insert: async () => {
@@ -679,7 +682,7 @@ describe("WarehouseQueryService.ingest writes through the SQL client", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseQueryError)
+			assert.instanceOf(failure, WarehouseInvalidSqlError)
 		}).pipe(Effect.provide(layer))
 	})
 })
