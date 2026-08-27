@@ -45,9 +45,10 @@ const SEVERITY_DOT = {
  *
  * The page leads with a verdict and a findings list rather than another way to
  * browse the turns — Traces, Flow and Transcript already do that three ways.
- * Every finding opens the span that is its evidence in place, against the row
- * that named it: reading a finding used to cost the reader this page. The facts
- * — time bar, cost, tokens, tools — stay, each figure appearing exactly once.
+ * Every finding opens the span that is its evidence in the inspection overlay,
+ * over this page rather than instead of it: reading a finding used to cost the
+ * reader the page. The facts — time bar, cost, tokens, tools — stay, each
+ * figure appearing exactly once.
  */
 export function SessionOverview({
 	turns,
@@ -79,17 +80,7 @@ export function SessionOverview({
 		[turns],
 	)
 
-	// A finding carries a span id; the row that named it is what the popover
-	// points at. Kept together so a selection made elsewhere — a pasted `?span=`,
-	// or the reader coming back from another view — cannot anchor the panel to
-	// the row of a different span.
-	const [anchor, setAnchor] = useState<{ spanId: string; element: HTMLElement } | undefined>(undefined)
-	const anchored = anchor !== undefined && anchor.spanId === selectedSpanId
-
-	const openSpan = (spanId: string, element: HTMLElement) => {
-		setAnchor({ spanId, element })
-		onSelectSpan(selectedSpanId === spanId ? undefined : spanId)
-	}
+	const openSpan = (spanId: string) => onSelectSpan(selectedSpanId === spanId ? undefined : spanId)
 
 	return (
 		<div className="@container flex grow flex-col pt-5 pb-10">
@@ -114,8 +105,7 @@ export function SessionOverview({
 			</div>
 
 			<SpanPopover
-				span={anchored && selectedSpanId !== undefined ? spansById.get(selectedSpanId) : undefined}
-				anchor={anchored ? anchor.element : null}
+				span={selectedSpanId === undefined ? undefined : spansById.get(selectedSpanId)}
 				tab={spanTab}
 				onTabChange={onSpanTabChange}
 				toolResults={toolResults}
@@ -130,8 +120,9 @@ export function SessionOverview({
 /* Verdict                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** Open a span's payload against the element that named it. */
-type OpenSpan = (spanId: string, anchor: HTMLElement) => void
+/** Open a span's payload in the inspection overlay; opening the one already
+ *  open closes it. */
+type OpenSpan = (spanId: string) => void
 
 function Verdict({
 	verdict,
@@ -195,7 +186,7 @@ function Verdict({
 					variant="outline"
 					size="sm"
 					aria-haspopup="dialog"
-					onClick={(event) => onOpenSpan(verdict.spanId!, event.currentTarget)}
+					onClick={() => onOpenSpan(verdict.spanId!)}
 				>
 					Open failing span
 					<ArrowRightIcon size={14} />
@@ -250,7 +241,7 @@ function FindingRow({ finding, onOpenSpan }: { finding: SessionFinding; onOpenSp
 		<button
 			type="button"
 			aria-haspopup="dialog"
-			onClick={(event) => onOpenSpan(finding.spanId, event.currentTarget)}
+			onClick={() => onOpenSpan(finding.spanId)}
 			className={cn(
 				"group flex w-full items-start gap-3 border-border border-t px-3 py-3.5 text-left hover:bg-accent/40",
 				finding.severity === "failure" &&
@@ -336,7 +327,7 @@ function TurnHealthStrip({
 						key={turn.id}
 						type="button"
 						aria-haspopup="dialog"
-						onClick={(event) => onOpenSpan(turn.anchor.spanId, event.currentTarget)}
+						onClick={() => onOpenSpan(turn.anchor.spanId)}
 						title={`${turnOrdinal(turn)}${turn.label === undefined ? "" : ` — ${turn.label}`}`}
 						className={cn(
 							"flex size-8 items-center justify-center rounded-sm border font-mono text-[11px] tabular-nums",

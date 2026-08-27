@@ -44,11 +44,15 @@ import { Pill } from "./pill"
 
 /**
  * The payload of one span. The chrome around it is the caller's — today that is
- * `SpanPopover`, which every view opens against whatever the reader clicked —
- * and it reaches this body through `header`.
+ * `SpanPopover`, the overlay every view opens a span into — and it reaches this
+ * body through `header`.
  */
 
 export type SpanDetailTab = "details" | "messages" | "tools" | "logs"
+
+/** The overlay is a reading surface, not a peek, so a payload gets twice the
+ *  transcript's twelve lines before it asks to be expanded. */
+const PANEL_CLAMP = "line-clamp-[24]"
 
 export function SpanExpansion({
 	span,
@@ -110,9 +114,12 @@ export function SpanExpansion({
 	)
 
 	return (
-		<div className="flex min-w-0 flex-col text-left">
+		// The header and the tab strip are the panel's fixed chrome; only the
+		// payload under them scrolls, so switching tabs never costs the reader the
+		// span's name or the way out.
+		<div className="flex min-h-0 min-w-0 grow flex-col text-left">
 			{header}
-			<div className="flex flex-wrap items-center gap-2 border-border border-b pb-1.5">
+			<div className="flex shrink-0 flex-wrap items-center gap-2 border-border border-b px-5 pb-2">
 				{tabs}
 				<div className="ml-auto flex items-center gap-2">
 					<CopySpanJsonButton span={span} />
@@ -120,12 +127,14 @@ export function SpanExpansion({
 				</div>
 			</div>
 
-			<MetaStrip span={span} />
+			<div className="min-h-0 grow overflow-y-auto overscroll-contain px-5 pb-6">
+				<MetaStrip span={span} />
 
-			{active === "details" && <DetailsSection span={span} toolCalls={toolCalls} />}
-			{active === "messages" && <MessagesSection messages={messages} span={span} />}
-			{active === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
-			{active === "logs" && <LogsSection span={span} />}
+				{active === "details" && <DetailsSection span={span} toolCalls={toolCalls} />}
+				{active === "messages" && <MessagesSection messages={messages} span={span} />}
+				{active === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
+				{active === "logs" && <LogsSection span={span} />}
+			</div>
 		</div>
 	)
 }
@@ -330,6 +339,7 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 					<div className="min-w-0 grow">
 						<ClampedText
 							text={text}
+							clampClass={PANEL_CLAMP}
 							body={raw ? undefined : <MessageResponse className="text-sm">{text}</MessageResponse>}
 						/>
 					</div>
@@ -383,6 +393,7 @@ function MessagePart({ part, raw }: { part: SpanMessagePart; raw: boolean }) {
 		return (
 			<ClampedText
 				text={part.text}
+				clampClass={PANEL_CLAMP}
 				body={raw ? undefined : <MessageResponse className="text-sm">{part.text}</MessageResponse>}
 			/>
 		)
@@ -409,7 +420,7 @@ function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reaso
 						: "No reasoning text was captured."}
 				</p>
 			) : (
-				<ClampedText text={part.text} />
+				<ClampedText text={part.text} clampClass={PANEL_CLAMP} />
 			)}
 		</div>
 	)
@@ -540,7 +551,12 @@ function PayloadBody({ text, copyLabel }: { text: string; copyLabel: string }) {
 	return (
 		<div className="flex items-start gap-1.5 border-border/60 border-t bg-background/50 px-2.5 py-2">
 			<div className="min-w-0 grow">
-				<ClampedText text={raw ? text : formatted} html={raw ? undefined : highlighted} mono />
+				<ClampedText
+					text={raw ? text : formatted}
+					html={raw ? undefined : highlighted}
+					clampClass={PANEL_CLAMP}
+					mono
+				/>
 			</div>
 			{highlighted !== undefined && (
 				<ViewSwitch rendered="json" raw={raw} onRawChange={setRaw} className="self-start" />

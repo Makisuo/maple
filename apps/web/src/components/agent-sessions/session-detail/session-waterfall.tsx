@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Ref } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
@@ -112,12 +112,6 @@ export function SessionWaterfall({
 		[turns],
 	)
 
-	// The popover points at the selected row itself, attached by the row's own
-	// ref: a row scrolled out of the virtualizer's window unmounts, which closes
-	// the popover instead of leaving it pointing at a detached box, and scrolling
-	// back re-attaches it — the selection never left the URL.
-	const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-
 	const collapsedGaps = collapseIdle ? summary.idleGaps : NO_GAPS
 	const axis = useMemo(
 		() => buildSessionAxis({ startMs: summary.startMs, endMs: summary.endMs, collapsedGaps }),
@@ -166,9 +160,9 @@ export function SessionWaterfall({
 	})
 
 	// A pasted `?span=` link lands on the exact span it names: the cursor starts
-	// there and the row is scrolled into view, which is also what puts the
-	// popover's anchor on screen. Once, on mount — after that the URL follows the
-	// reader rather than leading them.
+	// there and the row is scrolled into view, so the row is waiting underneath
+	// when the reader closes the overlay. Once, on mount — after that the URL
+	// follows the reader rather than leading them.
 	const didInitialScroll = useRef(false)
 	useEffect(() => {
 		if (didInitialScroll.current || selectedSpanId === undefined) return
@@ -260,7 +254,6 @@ export function SessionWaterfall({
 									)}
 									{row.kind === "span" && (
 										<SpanRow
-											ref={selected ? setAnchor : null}
 											row={row}
 											axis={axis}
 											spansById={spansById}
@@ -282,7 +275,6 @@ export function SessionWaterfall({
 
 			<SpanPopover
 				span={selectedSpanId === undefined ? undefined : spansById.get(selectedSpanId)}
-				anchor={anchor}
 				tab={spanTab}
 				onTabChange={onSpanTabChange}
 				toolResults={toolResults}
@@ -501,7 +493,6 @@ function TraceLink({ traceId, timestamp }: { traceId: string; timestamp: string 
 }
 
 function SpanRow({
-	ref,
 	row,
 	axis,
 	spansById,
@@ -509,8 +500,6 @@ function SpanRow({
 	focused,
 	onClick,
 }: {
-	/** Set on the selected row only: it is what the span popover points at. */
-	ref: Ref<HTMLButtonElement>
 	row: Extract<WaterfallRow, { kind: "span" }>
 	axis: SessionAxis
 	spansById: ReadonlyMap<string, AiSessionSpan>
@@ -532,7 +521,6 @@ function SpanRow({
 
 	return (
 		<button
-			ref={ref}
 			type="button"
 			onClick={onClick}
 			aria-current={selected || undefined}

@@ -210,8 +210,8 @@ export function SessionViews({
 			    scroller gave up (`pb-0`, so the Flow floor can pin flush — see the
 			    route); the Flow view stays unpadded for the same reason. Only the
 			    active view sees the span selection: an outgoing panel stays
-			    mounted until its exit transition completes, and two views must
-			    never hold the inspection popover open at once. */}
+			    mounted until its exit transition completes, and two views holding
+			    the inspection overlay open would stack two scrims. */}
 			<TabsContent value="overview" className="flex flex-[1_1_auto] flex-col pb-4">
 				<SessionOverview
 					turns={turns}

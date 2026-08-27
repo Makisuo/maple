@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState, type Ref } from "react"
+import { memo, useMemo, useRef } from "react"
 import {
 	Handle,
 	Position,
@@ -130,11 +130,6 @@ export function SessionFlow({
 	const paneRef = useRef<HTMLDivElement>(null)
 	const instanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
 
-	// The node the popover points at. Nothing here virtualizes, so it only ever
-	// goes null when the filter drops the node — the canvas itself is the
-	// fallback, which is what a span the flow drew no node for anchors to.
-	const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-
 	// Selection addresses spans the same way in both views, so a span opened
 	// in the Trace view opens here even when the flow drew no node for it (a
 	// wrapper, or a span the filter hides).
@@ -241,7 +236,6 @@ export function SessionFlow({
 							node,
 							selected: selectedSpanId === node.span.spanId,
 							focused: focusedId === node.span.spanId,
-							anchorRef: selectedSpanId === node.span.spanId ? setAnchor : null,
 							onSelect: (spanId: string) => {
 								setFocusedId(spanId)
 								onSelectSpan(selectedSpanId === spanId ? undefined : spanId)
@@ -259,7 +253,7 @@ export function SessionFlow({
 					}),
 				),
 			]),
-		[lanes, selectedSpanId, focusedId, setFocusedId, onSelectSpan, setAnchor],
+		[lanes, selectedSpanId, focusedId, setFocusedId, onSelectSpan],
 	)
 
 	// One neutral stroke for every connector: the line says "this ran inside
@@ -374,21 +368,17 @@ export function SessionFlow({
 					</div>
 				)}
 
-				{/* Against the node when the flow drew one, and against the canvas
-				    when it did not — a wrapper span, or one the filter hides, still
-				    has to open somewhere. */}
-				{lanes.length > 0 && (
-					<SpanPopover
-						span={selectedSpan?.span}
-						anchor={anchor ?? paneRef}
-						turnOrdinal={selectedSpan === undefined ? undefined : turnOrdinal(selectedSpan.turn)}
-						tab={spanTab}
-						onTabChange={onSpanTabChange}
-						toolResults={toolResults}
-						onClose={() => onSelectSpan(undefined)}
-						onOpenTraceView={onOpenTraceView}
-					/>
-				)}
+				{/* Whether or not the flow drew a node for it: a wrapper span, or one
+				    the filter hides, still opens where it was addressed. */}
+				<SpanPopover
+					span={selectedSpan?.span}
+					turnOrdinal={selectedSpan === undefined ? undefined : turnOrdinal(selectedSpan.turn)}
+					tab={spanTab}
+					onTabChange={onSpanTabChange}
+					toolResults={toolResults}
+					onClose={() => onSelectSpan(undefined)}
+					onOpenTraceView={onOpenTraceView}
+				/>
 			</div>
 		</ReactFlowProvider>
 	)
@@ -464,15 +454,13 @@ function Ports() {
 interface StepData extends Record<string, unknown> {
 	readonly node: FlowNode
 	readonly selected: boolean
-	/** Under the keyboard's span cursor — distinct from `selected`, the open popover. */
+	/** Under the keyboard's span cursor — distinct from `selected`, the open panel. */
 	readonly focused: boolean
-	/** Set on the selected node only: it is what the span popover points at. */
-	readonly anchorRef: Ref<HTMLButtonElement>
 	readonly onSelect: (spanId: string) => void
 }
 
 const StepNode = memo(function StepNode({ data }: NodeProps & { data: StepData }) {
-	const { node, selected, focused, anchorRef, onSelect } = data
+	const { node, selected, focused, onSelect } = data
 	// The glyph carries the kind of work; a failure takes it over outright — the
 	// outcome outranks the kind, exactly as the waterfall's dots read.
 	const Icon = node.errored ? CircleXmarkIcon : CATEGORY_ICON[node.category]
@@ -481,7 +469,6 @@ const StepNode = memo(function StepNode({ data }: NodeProps & { data: StepData }
 		<>
 			<Ports />
 			<button
-				ref={anchorRef}
 				type="button"
 				onClick={() => onSelect(node.span.spanId)}
 				data-span-id={node.span.spanId}

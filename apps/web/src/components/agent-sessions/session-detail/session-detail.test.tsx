@@ -5,7 +5,7 @@
 // navigates: span clicks raise `onSelectSpan` for the page to handle, and the
 // trace links render through a mocked `Link` so no router needs mounting.
 //
-// The span popover portals to `document.body`, so it is read through
+// The span inspection overlay portals to `document.body`, so it is read through
 // `spanPopover()` below rather than the render's own container.
 
 import { useState, type ReactNode } from "react"
@@ -273,11 +273,16 @@ const { turns: delegationTurns, summary: delegationSummary } = sessionOf([
 const EMPTY = new Set<string>()
 const noop = () => {}
 
-/** The one span-inspection panel, wherever it was opened from. */
+/** The one span-inspection overlay, wherever it was opened from. */
 function spanPopover(): HTMLElement {
 	const popup = document.querySelector<HTMLElement>('[data-slot="span-popover"]')
 	if (popup === null) throw new Error("no span popover is open")
 	return popup
+}
+
+/** The dimmed page behind the overlay — the scrim that gives it its depth. */
+function spanScrim(): HTMLElement | null {
+	return document.querySelector<HTMLElement>('[data-slot="dialog-backdrop"]')
 }
 
 function spanPopoverCount(): number {
@@ -368,10 +373,12 @@ describe("SessionOverview", () => {
 	function Overview(props: {
 		turns?: readonly SessionTurn[]
 		summary?: SessionSummary
+		/** What a pasted `?span=` link lands with. */
+		initialSpanId?: string
 		onSelectSpan?: (spanId: string | undefined) => void
 		onOpenTraceView?: () => void
 	}) {
-		const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(undefined)
+		const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(props.initialSpanId)
 		return (
 			<SessionOverview
 				turns={props.turns ?? turns}
@@ -425,8 +432,8 @@ describe("SessionOverview", () => {
 	})
 
 	// The finding's evidence used to live one view away: clicking it swapped the
-	// page out from under the reader. It opens here instead, and the way across
-	// is inside the panel for the reader who wants the whole waterfall.
+	// page out from under the reader. It opens over this page instead, and the
+	// way across is inside the panel for the reader who wants the whole waterfall.
 	it("inspects a finding's span in place, and still offers the way across", () => {
 		const onOpenTraceView = vi.fn()
 		render(<Overview onOpenTraceView={onOpenTraceView} />)
@@ -434,10 +441,32 @@ describe("SessionOverview", () => {
 		fireEvent.click(screen.getByText("error · run_tests"))
 		const popover = within(spanPopover())
 		expect(popover.getByText("exit 1")).toBeTruthy()
+		// A scrim behind it, so the page reads as underneath rather than beside.
+		expect(spanScrim()).not.toBeNull()
 		expect(onOpenTraceView).not.toHaveBeenCalled()
 
 		fireEvent.click(popover.getByRole("button", { name: "Open in Traces view" }))
 		expect(onOpenTraceView).toHaveBeenCalled()
+	})
+
+	// The panel is no longer anchored to the element that named the span, so a
+	// selection this view never made — a pasted `?span=` link, or the reader
+	// arriving from another view — opens it here too.
+	it("opens a pasted span link without a click, and Escape clears it", () => {
+		const onSelectSpan = vi.fn()
+		render(
+			<Overview
+				turns={failedTurns}
+				summary={failedSummary}
+				initialSpanId="f-llm"
+				onSelectSpan={onSelectSpan}
+			/>,
+		)
+
+		expect(within(spanPopover()).getAllByText(/claude-opus-5/).length).toBeGreaterThan(0)
+
+		fireEvent.keyDown(spanPopover(), { key: "Escape" })
+		expect(onSelectSpan).toHaveBeenCalledWith(undefined)
 	})
 
 	it("says a clean session completed cleanly, and what that claim covers", () => {
@@ -565,7 +594,7 @@ describe("SessionWaterfall", () => {
 		expect(link.getAttribute("href")).toBe("/traces/trace-1")
 	})
 
-	it("opens the selected span's panel against its row", () => {
+	it("opens the selected span over the list, leaving its row marked underneath", () => {
 		render(<Waterfall selectedSpanId="llm-1" />)
 
 		const row = screen.getAllByText(/^chat$/)[0]!.closest("button")!
@@ -851,7 +880,7 @@ describe("SessionFlow", () => {
 		expect(onSelectSpan).toHaveBeenCalledWith("tool-2")
 	})
 
-	it("opens the selected span's panel against its node", () => {
+	it("opens the selected span's panel, naming the node's turn", () => {
 		render(<Flow selectedSpanId="tool-2" />)
 
 		// The panel names the span and where it lives, and offers the way across.
@@ -864,7 +893,7 @@ describe("SessionFlow", () => {
 	it("opens the panel even for a span the flow drew no node for", () => {
 		// The app's own HTTP span earns no node, but selection addresses spans the
 		// same way in both views, so a span opened in Trace still opens here — the
-		// canvas is the anchor when there is no node to point at.
+		// panel is an overlay over the canvas, not a pointer at some node on it.
 		render(<Flow selectedSpanId="http-1" agentSpansOnly={false} />)
 
 		expect(within(spanPopover()).getByText("GET /repo/file")).toBeTruthy()
@@ -1035,9 +1064,9 @@ describe("SessionViews", () => {
 		expect(screen.getByRole("button", { name: /Turn 1/ }).getAttribute("aria-expanded")).toBe("false")
 	})
 
-	// One panel for the whole page. Clicking the page outside it closes it — that
-	// is what a popover does — so the way to cross views with a span still open
-	// is the panel's own door, and it keeps both the span and the reader's tab.
+	// One panel for the whole page, and the page behind it is scrimmed, so the
+	// way to cross views with a span still open is the panel's own door — which
+	// keeps both the span and the reader's tab.
 	it("carries the open span and its tab through the panel's door into Traces", () => {
 		render(<Views view="flow" />)
 
