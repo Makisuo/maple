@@ -1,12 +1,19 @@
 import { MapleMark } from "@maple/ui/components/icons"
 
 import {
-	AnthropicIcon,
 	ChatBubbleSparkleIcon,
+	ClaudeIcon,
+	CrewAiIcon,
+	EffectIcon,
 	GoogleIcon,
+	HaystackIcon,
+	HuggingFaceIcon,
 	type IconComponent,
+	LangchainIcon,
 	MicrosoftIcon,
 	OpenAiIcon,
+	PydanticIcon,
+	SpringIcon,
 	VercelIcon,
 } from "@/components/icons"
 
@@ -18,13 +25,20 @@ import {
  * either way.
  */
 const VENDOR_ICONS: Record<string, IconComponent> = {
-	claude_agent_sdk: AnthropicIcon,
+	claude_agent_sdk: ClaudeIcon,
+	crewai: CrewAiIcon,
+	effect_ai: EffectIcon,
 	google_adk: GoogleIcon,
+	haystack: HaystackIcon,
+	langchain: LangchainIcon,
 	maple: MapleMark,
 	microsoft_agent_framework: MicrosoftIcon,
 	openai_agents_sdk: OpenAiIcon,
 	"openinference-openai": OpenAiIcon,
+	pydantic_ai: PydanticIcon,
 	semantic_kernel: MicrosoftIcon,
+	smolagents: HuggingFaceIcon,
+	spring_ai: SpringIcon,
 	vercel_ai_sdk: VercelIcon,
 } satisfies Record<string, IconComponent>
 
