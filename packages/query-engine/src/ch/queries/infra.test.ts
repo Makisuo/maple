@@ -438,3 +438,48 @@ describe("workloadGaugeTimeseriesQuery", () => {
 		expect(sql).toContain("toStartOfInterval")
 	})
 })
+
+describe("pod facet exclusions", () => {
+	it("emits NOT IN for every excluded dimension", () => {
+		// Ten dimensions drive off one table, so this is the test that catches a facet added to the
+		// include list and forgotten in the exclude list.
+		const { sql } = compileUnsafe(
+			listPodsQuery({
+				excludedPodNames: ["noisy-pod"],
+				excludedNamespaces: ["kube-system"],
+				excludedNodeNames: ["node-1"],
+				excludedClusters: ["staging-cluster"],
+				excludedDeployments: ["canary"],
+				excludedStatefulsets: ["etcd"],
+				excludedDaemonsets: ["fluentd"],
+				excludedJobs: ["backfill"],
+				excludedEnvironments: ["staging"],
+				excludedComputeTypes: ["fargate"],
+			}),
+			baseParams,
+		)
+		for (const value of [
+			"noisy-pod",
+			"kube-system",
+			"node-1",
+			"staging-cluster",
+			"canary",
+			"etcd",
+			"fluentd",
+			"backfill",
+			"staging",
+			"fargate",
+		]) {
+			expect(sql).toContain(`NOT IN ('${value}')`)
+		}
+	})
+
+	it("combines with the inclusion on the same dimension", () => {
+		const { sql } = compileUnsafe(
+			listPodsQuery({ namespaces: ["default", "web"], excludedNamespaces: ["kube-system"] }),
+			baseParams,
+		)
+		expect(sql).toContain("IN ('default', 'web')")
+		expect(sql).toContain("NOT IN ('kube-system')")
+	})
+})

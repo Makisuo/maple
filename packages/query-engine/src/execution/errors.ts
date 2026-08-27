@@ -3,6 +3,7 @@ import {
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
+	WarehouseInvalidSqlError,
 	WarehouseMalformedQueryError,
 	WarehouseQueryError,
 	WarehouseQuotaExceededError,
@@ -150,7 +151,7 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 		authoredBy: "caller",
 		types: new Set(["UNKNOWN_DATABASE", "UNKNOWN_TABLE", "TABLE_IS_DROPPED"]),
 		pattern: /unknown table|table .* does not exist|database .* does not exist/i,
-		make: (base) => new WarehouseMalformedQueryError(base),
+		make: (base) => new WarehouseInvalidSqlError(base),
 	},
 	{
 		status: (s) => s === 404,
@@ -167,6 +168,28 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 			/Cannot decode .* as JSON|Unexpected token .* JSON|Stream has been already consumed|Failed to parse ClickHouse response/i,
 		extra: (error) => error instanceof SyntaxError,
 		make: (base) => new WarehouseClientError(base),
+	},
+	{
+		// The same analyzer complaints as the Maple-authored rule below, but about
+		// SQL the CALLER wrote. Without this twin a plain typo in a raw_sql widget
+		// or `run_sql` — a stray comma, a function called with two arguments — fell
+		// past every authorship-guarded rule to the default `WarehouseQueryError`:
+		// a 502 reading "Database query failed. Contact support" that hid the one
+		// thing the author needed, which was ClickHouse's own explanation.
+		authoredBy: "caller",
+		types: new Set([
+			"NO_COMMON_TYPE",
+			"ILLEGAL_TYPE_OF_ARGUMENT",
+			"ILLEGAL_AGGREGATION",
+			"NUMBER_OF_ARGUMENTS_DOESNT_MATCH",
+			"TYPE_MISMATCH",
+			"SYNTAX_ERROR",
+			"UNKNOWN_FUNCTION",
+			"AMBIGUOUS_COLUMN_NAME",
+		]),
+		pattern:
+			/There is no supertype|Illegal type .* of argument|Number of arguments doesn't match|Syntax error/i,
+		make: (base) => new WarehouseInvalidSqlError(base),
 	},
 	{
 		// The analyzer refused SQL that Maple itself generated: mismatched `if()`
@@ -217,7 +240,7 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 		]),
 		pattern:
 			/Unknown (?:expression or function )?identifier|Missing columns|There is no column|No such column/i,
-		make: (base) => new WarehouseMalformedQueryError(base),
+		make: (base) => new WarehouseInvalidSqlError(base),
 	},
 	{
 		// CH error types raised when a column or function reference doesn't exist in

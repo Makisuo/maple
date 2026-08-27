@@ -11,6 +11,8 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ServicesTable } from "@/components/services/services-table"
+import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
+import { serviceFilterChips } from "@/lib/services-list/service-filter-chips"
 import { ServicesFilterSidebar } from "@/components/services/services-filter-sidebar"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -24,6 +26,9 @@ const servicesSearchSchema = Schema.Struct({
 	environments: OptionalStringArrayParam,
 	namespaces: OptionalStringArrayParam,
 	commitShas: OptionalStringArrayParam,
+	excludedEnvironments: OptionalStringArrayParam,
+	excludedNamespaces: OptionalStringArrayParam,
+	excludedCommitShas: OptionalStringArrayParam,
 	health: Schema.optional(Schema.Literals(["healthy", "degraded", "unhealthy"])),
 	// Table grouping mode. Unset = auto: group by namespace when the displayed
 	// rows carry any `service.namespace`, else by environment. Render-only —
@@ -58,6 +63,9 @@ export function servicesRouteAtoms(search: ServicesSearchParams) {
 		environments: search.environments,
 		namespaces: search.namespaces,
 		commitShas: search.commitShas,
+		excludedEnvironments: search.excludedEnvironments,
+		excludedNamespaces: search.excludedNamespaces,
+		excludedCommitShas: search.excludedCommitShas,
 	}
 
 	return [
@@ -130,6 +138,18 @@ function ServicesPage() {
 							</DashboardLayout.Header>
 						</DashboardLayout.Sticky>
 						<DashboardLayout.Scroll>
+							<ActiveFilterChips
+								chips={serviceFilterChips(search).map((chip) => ({
+									id: chip.param,
+									label: chip.label,
+									values: chip.values,
+									negated: chip.negated,
+									onRemove: () =>
+										navigate({
+											search: (prev) => ({ ...prev, [chip.param]: undefined }),
+										}),
+								}))}
+							/>
 							<ServicesTable filters={search} />
 						</DashboardLayout.Scroll>
 					</DashboardLayout.Content>

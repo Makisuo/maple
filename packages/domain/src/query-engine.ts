@@ -84,6 +84,7 @@ export const TracesFilters = Schema.Struct({
 	excludedSpanNames: Schema.optional(Schema.Array(SpanName)),
 	excludedEnvironments: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	excludedNamespaces: Schema.optional(Schema.Array(ServiceNamespace)),
+	excludedCommitShas: Schema.optional(Schema.Array(CommitSha)),
 })
 export type TracesFilters = Schema.Schema.Type<typeof TracesFilters>
 
@@ -123,6 +124,10 @@ export const ErrorsFilters = Schema.Struct({
 	errorLabels: Schema.optional(Schema.Array(Schema.String)),
 	// The sidebar's "Version" facet, matched against ServiceVersion.
 	serviceVersions: Schema.optional(Schema.Array(Schema.String)),
+	excludedServices: Schema.optional(Schema.Array(ServiceName)),
+	excludedDeploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
+	excludedErrorLabels: Schema.optional(Schema.Array(Schema.String)),
+	excludedServiceVersions: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ErrorsFilters = Schema.Schema.Type<typeof ErrorsFilters>
 

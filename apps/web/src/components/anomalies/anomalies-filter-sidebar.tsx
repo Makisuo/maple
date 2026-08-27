@@ -8,13 +8,11 @@ import {
 	FilterSidebarHeader,
 } from "@/components/filters/filter-sidebar"
 import { SIGNAL_LABEL } from "./anomaly-format"
+import { hasAnomalyFilters, type AnomalyFilters } from "@/lib/anomalies/anomaly-filters"
 
-export interface AnomalyFilters {
-	severity?: ReadonlyArray<"warning" | "critical">
-	signals?: ReadonlyArray<AnomalySignalType>
-	services?: ReadonlyArray<string>
-	envs?: ReadonlyArray<string>
-}
+// The type lives beside the predicate that reads it; re-exported here so existing imports of
+// `AnomalyFilters` from the sidebar keep resolving.
+export type { AnomalyFilters }
 
 const SEVERITY_LABEL = { critical: "Critical", warning: "Warning" } as const
 
@@ -62,11 +60,7 @@ export function AnomaliesFilterSidebar({
 		}
 	}, [incidents])
 
-	const hasActiveFilters =
-		(filters.severity?.length ?? 0) > 0 ||
-		(filters.signals?.length ?? 0) > 0 ||
-		(filters.services?.length ?? 0) > 0 ||
-		(filters.envs?.length ?? 0) > 0
+	const hasActiveFilters = hasAnomalyFilters(filters)
 
 	return (
 		<FilterSidebarFrame>
@@ -86,6 +80,15 @@ export function AnomaliesFilterSidebar({
 								: facets.severityEntries.filter(([v]) => vals.includes(v)).map(([v]) => v),
 						)
 					}
+					excluded={filters.excludedSeverity ?? []}
+					onExcludedChange={(vals) =>
+						onChange(
+							"excludedSeverity",
+							vals.length === 0
+								? undefined
+								: facets.severityEntries.filter(([v]) => vals.includes(v)).map(([v]) => v),
+						)
+					}
 				/>
 				<FilterSection
 					title="Signal"
@@ -100,12 +103,25 @@ export function AnomaliesFilterSidebar({
 								: facets.signalEntries.filter(([v]) => vals.includes(v)).map(([v]) => v),
 						)
 					}
+					excluded={filters.excludedSignals ?? []}
+					onExcludedChange={(vals) =>
+						onChange(
+							"excludedSignals",
+							vals.length === 0
+								? undefined
+								: facets.signalEntries.filter(([v]) => vals.includes(v)).map(([v]) => v),
+						)
+					}
 				/>
 				<FilterSection
 					title="Service"
 					options={facets.services}
 					selected={filters.services ?? []}
 					onChange={(val) => onChange("services", val.length === 0 ? undefined : val)}
+					excluded={filters.excludedServices ?? []}
+					onExcludedChange={(val) =>
+						onChange("excludedServices", val.length === 0 ? undefined : val)
+					}
 					colorMap={serviceColorMap(facets.services)}
 				/>
 				<FilterSection
@@ -113,6 +129,8 @@ export function AnomaliesFilterSidebar({
 					options={facets.envs}
 					selected={filters.envs ?? []}
 					onChange={(val) => onChange("envs", val.length === 0 ? undefined : val)}
+					excluded={filters.excludedEnvs ?? []}
+					onExcludedChange={(val) => onChange("excludedEnvs", val.length === 0 ? undefined : val)}
 				/>
 				{incidents.length === 0 && (
 					<p className="text-sm text-muted-foreground py-4">No anomalies in this view</p>

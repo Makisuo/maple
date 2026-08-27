@@ -9,6 +9,7 @@ import {
 	tracesListQuery,
 	tracesRootListQuery,
 } from "./traces"
+import { canUseTracesAggregatesMv } from "./query-helpers"
 
 const baseParams = {
 	orgId: "org_1",
@@ -575,5 +576,18 @@ describe("spanSearchQuery", () => {
 		const { sql } = compileUnsafe(q, baseParams)
 
 		expect(sql).not.toContain("SELECT min(ts)")
+	})
+})
+
+describe("commit-sha exclusion", () => {
+	it("routes off the hourly MV, which carries no CommitSha", () => {
+		// The inclusion already bails here. The exclusion has to bail for the same reason: the MV
+		// cannot answer a question about a column it does not store, and silently serving it would
+		// return rows the filter was meant to drop.
+		expect(canUseTracesAggregatesMv({ rootOnly: true }, undefined, 3600)).toBe(true)
+		expect(canUseTracesAggregatesMv({ rootOnly: true, commitShas: ["abc"] }, undefined, 3600)).toBe(false)
+		expect(
+			canUseTracesAggregatesMv({ rootOnly: true, excludedCommitShas: ["abc"] }, undefined, 3600),
+		).toBe(false)
 	})
 })

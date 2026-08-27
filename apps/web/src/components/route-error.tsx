@@ -9,7 +9,22 @@ import { displayError, isAutomaticRetryError, isUnexpectedError } from "@/lib/er
 import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
 import { captureException } from "@/lib/services/common/otel-layer"
 
-function RouteError({ error, reset }: ErrorComponentProps) {
+/**
+ * Component stacks per caught error, recorded from the router's
+ * `defaultOnCatch`. The router's error boundary receives React's `errorInfo`
+ * but never forwards it to the error component (`ErrorComponentProps.info` is
+ * typed yet unwired), and the component stack is the only thing that locates a
+ * minified production render crash — the JS stack is mangled to one frame.
+ */
+const componentStacks = new WeakMap<object, string>()
+
+function recordRouteErrorInfo(error: unknown, errorInfo: { componentStack?: string | null }): void {
+	if (typeof error === "object" && error !== null && errorInfo.componentStack) {
+		componentStacks.set(error, errorInfo.componentStack)
+	}
+}
+
+function RouteError({ error, info, reset }: ErrorComponentProps) {
 	const router = useRouter()
 	const isStaleChunk = isChunkLoadError(error)
 
@@ -28,9 +43,21 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 	const shouldReport = isUnexpectedError(formatted) && !isStaleChunk
 	useMountEffect(() => {
 		if (!shouldReport) return
+		// The stack of a production render crash is minified to uselessness; the
+		// component stack and route id are what actually locate the crash.
+		const routeId = router.state.matches.at(-1)?.routeId
+		const componentStack =
+			info?.componentStack ??
+			(typeof error === "object" && error !== null ? componentStacks.get(error) : undefined)
 		captureException(error, {
 			name: "browser.route_error",
-			attributes: { "maple.exception.source": "route_error_boundary" },
+			attributes: {
+				"maple.exception.source": "route_error_boundary",
+				...(routeId !== undefined ? { "maple.route.id": routeId } : undefined),
+				...(componentStack
+					? { "maple.exception.component_stack": componentStack.slice(0, 4000) }
+					: undefined),
+			},
 		})
 	})
 
@@ -113,4 +140,4 @@ function NotFoundError() {
 	)
 }
 
-export { RouteError, NotFoundError }
+export { RouteError, NotFoundError, recordRouteErrorInfo }

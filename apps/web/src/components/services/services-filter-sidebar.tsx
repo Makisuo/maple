@@ -47,6 +47,9 @@ export function ServicesFilterSidebar() {
 		environments: search.environments,
 		namespaces: search.namespaces,
 		commitShas: search.commitShas,
+		excludedEnvironments: search.excludedEnvironments,
+		excludedNamespaces: search.excludedNamespaces,
+		excludedCommitShas: search.excludedCommitShas,
 	})
 
 	const updateFilter = <K extends keyof typeof search>(key: K, value: (typeof search)[K]) => {
@@ -73,6 +76,9 @@ export function ServicesFilterSidebar() {
 		(search.environments?.length ?? 0) > 0 ||
 		(search.namespaces?.length ?? 0) > 0 ||
 		(search.commitShas?.length ?? 0) > 0 ||
+		(search.excludedEnvironments?.length ?? 0) > 0 ||
+		(search.excludedNamespaces?.length ?? 0) > 0 ||
+		(search.excludedCommitShas?.length ?? 0) > 0 ||
 		search.health !== undefined
 
 	return Result.builder(facetsResult)
@@ -110,6 +116,8 @@ export function ServicesFilterSidebar() {
 							options={facets.environments}
 							selected={search.environments ?? []}
 							onChange={(val) => updateFilter("environments", val)}
+							excluded={search.excludedEnvironments ?? []}
+							onExcludedChange={(val) => updateFilter("excludedEnvironments", val)}
 						/>
 
 						{facets.namespaces.length > 0 && (
@@ -118,6 +126,8 @@ export function ServicesFilterSidebar() {
 								options={facets.namespaces}
 								selected={search.namespaces ?? []}
 								onChange={(val) => updateFilter("namespaces", val)}
+								excluded={search.excludedNamespaces ?? []}
+								onExcludedChange={(val) => updateFilter("excludedNamespaces", val)}
 							/>
 						)}
 
@@ -126,13 +136,17 @@ export function ServicesFilterSidebar() {
 							options={facets.commitShas}
 							selected={search.commitShas ?? []}
 							onChange={(val) => updateFilter("commitShas", val)}
+							excluded={search.excludedCommitShas ?? []}
+							onExcludedChange={(val) => updateFilter("excludedCommitShas", val)}
 						/>
 
 						{facets.environments.length === 0 &&
 							facets.namespaces.length === 0 &&
 							facets.commitShas.length === 0 && (
-							<p className="text-sm text-muted-foreground py-4">No filter options available</p>
-						)}
+								<p className="text-sm text-muted-foreground py-4">
+									No filter options available
+								</p>
+							)}
 					</FilterSidebarBody>
 				</FilterSidebarFrame>
 			)

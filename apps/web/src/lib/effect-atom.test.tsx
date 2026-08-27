@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { Atom, Registry, RegistryContext, Result, useAtomValue } from "@/lib/effect-atom"
+import { retainResult } from "@/lib/services/atoms/result-retention"
+import { withRetention } from "@/lib/services/atoms/retained-atom"
 import { setActiveOrgId } from "@/lib/services/common/auth-headers"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { type ReactNode, useState } from "react"
@@ -97,5 +99,41 @@ describe("useAtomValue", () => {
 
 		render(<CountHarness />, { wrapper: createWrapper() })
 		expect(screen.getByTestId("count").textContent).toBe("7")
+	})
+
+	// Regression for the production /errors crash (React #301, 2026-08-25):
+	// `retainedQuery`/`retainedQueryV2` call `withRetention` in the component
+	// body, so the wrapper atom is rebuilt every render. While the underlying
+	// query atom is Initial and a retained entry exists, every rebuilt wrapper
+	// served a fresh `waiting(success)` object — and the retention hook's
+	// setState-during-render saw a new identity each pass, looping until React
+	// threw "Too many re-renders".
+	it("survives a retention wrapper rebuilt on every render while serving a fallback", async () => {
+		retainResult("effect-atom-test:loop", { rows: ["retained"] }, Date.now())
+		const primary = Atom.make(Result.initial<Rows, never>())
+
+		function RebuiltWrapperHarness() {
+			const result = useAtomValue(withRetention(primary, "effect-atom-test:loop"))
+			const [, bump] = useState(0)
+
+			return (
+				<div>
+					<button onClick={() => bump((n) => n + 1)}>rerender</button>
+					<div data-testid="loop-row">
+						{Result.builder(result)
+							.onSuccess((value) => value.rows[0] ?? "none")
+							.orElse(() => "none")}
+					</div>
+				</div>
+			)
+		}
+
+		render(<RebuiltWrapperHarness />, { wrapper: createWrapper() })
+		expect(screen.getByTestId("loop-row").textContent).toBe("retained")
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "rerender" }))
+		})
+		expect(screen.getByTestId("loop-row").textContent).toBe("retained")
 	})
 })

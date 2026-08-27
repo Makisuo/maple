@@ -8,4 +8,4 @@ export {
 export type { AttributesTableProps } from "./attributes-table"
 export { CollapsibleJsonValue } from "./json-value"
 export { AttributesProvider, useAttributesConfig } from "./context"
-export type { AttributesConfig } from "./context"
+export type { AttributesConfig, AttributeFilterAction } from "./context"
