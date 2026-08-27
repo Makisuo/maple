@@ -7,6 +7,8 @@ import {
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
 	aiSessionWindowQuery,
+	aiTraceSpansQuery,
+	aiTraceWindowQuery,
 } from "./ai-sessions"
 
 const params = {
@@ -16,6 +18,17 @@ const params = {
 }
 
 const spanParams = { ...params, sessionId: "wrun_01M0CSAEW96BH2W9185XZPRPKH" }
+
+const TRACE_ID = "7f3a4b5c6d7e8f901234567890abcdef"
+const traceParams = { ...params, traceId: TRACE_ID }
+
+/** The detection predicate every read now keys on — a GenAI marker of any kind,
+ *  which is what admits a trace whose vendor exposes no session key. */
+const VENDOR_GUARD =
+	"(mapContains(SpanAttributes, 'maple_ai.vendor.id') AND SpanAttributes['maple_ai.vendor.id'] != '')"
+
+/** The trace's session id, or the synthesized one — the grouping key. */
+const SESSION_KEY = "if(rawSessionId = '', concat('trace:', traceId), rawSessionId)"
 
 const decodeRows = <T>(compiled: CompiledQuery<T>, rows: ReadonlyArray<Record<string, unknown>>) =>
 	Effect.runSync(compiled.decodeRows(rows))
@@ -48,11 +61,37 @@ describe("aiSessionListQuery", () => {
 		expect(compileUnsafe(aiSessionListQuery(), params).tenantScope).toBe("single-tenant")
 	})
 
+	it("detects on the vendor stamp, not the session id", () => {
+		const { sql } = compileUnsafe(aiSessionListQuery(), params)
+		const [, detection] = sql.split("TraceId IN (SELECT")
+
+		// The session id is sparse by vendor — several frameworks never emit one —
+		// so keying detection on it hid those traces entirely. The vendor stamp is
+		// on every span the gateway classified, and `mapContains` is what the
+		// mapKeys bloom index prunes on.
+		expect(detection).toContain(VENDOR_GUARD)
+		expect(detection).not.toContain("mapContains(SpanAttributes, 'maple_ai.session.id')")
+	})
+
+	it("keys a trace with no session id on the trace itself", () => {
+		const { sql } = compileUnsafe(aiSessionListQuery(), params)
+
+		// One session per sessionless trace, and the per-trace derived table is the
+		// only level that can say so: a span of a session-bearing trace carries no
+		// session id of its own either.
+		expect(sql).toContain(`${SESSION_KEY} AS sessionId`)
+		expect(sql).toContain("max(SpanAttributes['maple_ai.session.id']) AS rawSessionId")
+		expect(sql).toContain("GROUP BY sessionId")
+		// The guard that used to drop them. The key is never empty now, and a
+		// blank one would have swallowed every such trace into one session.
+		expect(sql).not.toContain("WHERE sessionId != ''")
+	})
+
 	it("tests session-id presence with mapContains AND a non-empty value", () => {
 		const { sql } = compileUnsafe(aiSessionListQuery(), params)
 
 		// ClickHouse yields '' for a missing Map key, so mapContains alone would
-		// admit spans carrying an empty session id.
+		// rank spans carrying an empty session id as session-bearing.
 		expect(sql).toContain(
 			"(mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')",
 		)
@@ -64,12 +103,24 @@ describe("aiSessionListQuery", () => {
 		// max(vendorId) picked `vercel_ai_sdk` alphabetically over the `eve` that
 		// actually ran the turn — see the builder's doc comment.
 		expect(sql).not.toContain("max(SpanAttributes['maple_ai.vendor.id'])")
-		expect(sql).toContain("argMin(SpanAttributes['maple_ai.vendor.id'], if(")
-		expect(sql).toContain("argMin(SpanAttributes['maple_ai.vendor.version'], if(")
+		expect(sql).toContain("argMin(SpanAttributes['maple_ai.vendor.id'], tuple(multiIf(")
+		expect(sql).toContain("argMin(SpanAttributes['maple_ai.vendor.version'], tuple(multiIf(")
 		expect(sql).toContain("argMin(vendorId, sessionStart) AS vendorId")
 		expect(sql).toContain("argMin(vendorVersion, sessionStart) AS vendorVersion")
 		// The sentinel must stay inside DateTime's range or toDateTime won't parse.
 		expect(sql).toContain("toDateTime('2106-01-01 00:00:00')")
+	})
+
+	it("ranks a sessionless trace's spans so a vendor-stamped one wins", () => {
+		const { sql } = compileUnsafe(aiSessionListQuery(), params)
+
+		// Every span of a sessionless trace ties at the sentinel under the session
+		// ordering alone, and argMin over ties is non-deterministic — it handed
+		// back whichever span was read first, blank vendor included. Rank first,
+		// then time, compared as a tuple.
+		expect(sql).toContain(
+			`tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)`,
+		)
 	})
 
 	it("escapes an org id carrying a quote", () => {
@@ -165,13 +216,25 @@ describe("aiSessionFacetsQuery", () => {
 	it("counts distinct sessions per vendor and per service", () => {
 		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
-		expect(sql).toContain("SpanAttributes['maple_ai.vendor.id'] AS name")
-		expect(sql).toContain("ServiceName AS name")
+		expect(sql).toContain("groupUniqArray(SpanAttributes['maple_ai.vendor.id']) AS names")
+		expect(sql).toContain("groupUniqArray(ServiceName) AS names")
+		expect(sql.split("arrayJoin(names) AS name").length - 1).toBe(2)
 		expect(sql).toContain("'vendor' AS facetType")
 		expect(sql).toContain("'service' AS facetType")
-		expect(sql.split("uniqExact(SpanAttributes['maple_ai.session.id']) AS count").length - 1).toBe(2)
 		expect(sql.split("GROUP BY name").length - 1).toBe(2)
 		expect(sql.split("ORDER BY count DESC").length - 1).toBe(2)
+	})
+
+	it("counts the trace's session key, resolved one level below the count", () => {
+		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
+
+		// Keyed per span, a facet would count every agent span of a session-bearing
+		// trace that lacks the id — most of them — as its own sessionless trace,
+		// and roughly double every number in the sidebar. So the key is resolved
+		// per trace and only then counted.
+		expect(sql.split(`uniqExact(${SESSION_KEY}) AS count`).length - 1).toBe(2)
+		expect(sql.split("GROUP BY traceId").length - 1).toBe(2)
+		expect(sql).not.toContain("uniqExact(SpanAttributes['maple_ai.session.id'])")
 	})
 
 	it("repeats the org and window predicates on every union branch", () => {
@@ -186,14 +249,13 @@ describe("aiSessionFacetsQuery", () => {
 		expect(compileUnionUnsafe(aiSessionFacetsQuery(), params).tenantScope).toBe("single-tenant")
 	})
 
-	it("counts only session-bearing spans, and drops the blank option", () => {
+	it("counts over the same population the list detects, and drops the blank option", () => {
 		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
-		expect(
-			sql.split(
-				"(mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')",
-			).length - 1,
-		).toBe(2)
+		// Same guard as `aiSessionListQuery`'s detection, so the population a facet
+		// describes is exactly the population its filter selects.
+		expect(sql.split(VENDOR_GUARD).length - 1).toBe(2)
+		expect(sql).not.toContain("mapContains(SpanAttributes, 'maple_ai.session.id')")
 		expect(sql).toContain("SpanAttributes['maple_ai.vendor.id'] != ''")
 		expect(sql).toContain("ServiceName != ''")
 	})
@@ -360,5 +422,144 @@ describe("aiSessionWindowQuery", () => {
 				spanCount: 17,
 			},
 		])
+	})
+})
+
+// The `trace:` half of the pair — a session whose vendor exposes no session key,
+// so its id names the trace and neither read touches `maple_ai.session.id`.
+
+describe("aiTraceWindowQuery", () => {
+	const traceWindowParams = { orgId: params.orgId, traceId: TRACE_ID }
+
+	it("resolves the bounds from the trace id, without a time predicate", () => {
+		const { sql } = compileUnsafe(aiTraceWindowQuery(), traceWindowParams)
+
+		// `idx_trace_id` on `traces` is what bounds this, exactly as the mapValues
+		// bloom index bounds the session-id form.
+		expect(sql).toContain("FROM traces")
+		expect(sql).toContain(`TraceId = '${TRACE_ID}'`)
+		expect(sql).not.toContain("SpanAttributes")
+		expect(sql).not.toContain("Timestamp >=")
+		expect(sql).not.toContain("Timestamp <=")
+	})
+
+	it("reports bounds padded exactly like the session form", () => {
+		const { sql } = compileUnsafe(aiTraceWindowQuery(), traceWindowParams)
+
+		expect(sql).toContain("toString(min(Timestamp) - INTERVAL 86400 SECOND) AS startTime")
+		expect(sql).toContain("toString(max(Timestamp) + INTERVAL 86400 SECOND) AS endTime")
+	})
+
+	it("is org-scoped, and escapes the trace id", () => {
+		const compiled = compileUnsafe(aiTraceWindowQuery(), traceWindowParams)
+		expect(compiled.tenantScope).toBe("single-tenant")
+		expect(orgPredicateCount(compiled.sql)).toBe(1)
+
+		// The route only ever passes 32 hex characters, but the compiled SQL is
+		// where that stops being the only thing between a forged id and the query.
+		const escaped = compileUnsafe(aiTraceWindowQuery(), {
+			...traceWindowParams,
+			traceId: "trace'evil",
+		})
+		expect(escaped.sql).toContain("TraceId = 'trace\\'evil'")
+	})
+
+	it("leaves no unresolved param placeholder", () => {
+		expect(compileUnsafe(aiTraceWindowQuery(), traceWindowParams).sql).not.toContain("__PARAM_")
+	})
+
+	it("decodes the quoted 64-bit count", () => {
+		const compiled = compileUnsafe(aiTraceWindowQuery(), traceWindowParams)
+
+		expect(
+			decodeRows(compiled, [
+				{
+					startTime: "2026-08-18 10:33:25.825000000",
+					endTime: "2026-08-20 10:33:36.242000000",
+					spanCount: "17",
+				},
+			]),
+		).toEqual([
+			{
+				startTime: "2026-08-18 10:33:25.825000000",
+				endTime: "2026-08-20 10:33:36.242000000",
+				spanCount: 17,
+			},
+		])
+	})
+})
+
+describe("aiTraceSpansQuery", () => {
+	it("reads one trace's spans directly, with no detection subquery", () => {
+		const { sql } = compileUnsafe(aiTraceSpansQuery(), traceParams)
+
+		// `TraceId` is a sort-key prefix of `trace_detail_spans`, so the id alone
+		// is a seek — there is nothing left for a detection level to resolve.
+		expect(sql).toContain("FROM trace_detail_spans")
+		expect(sql).toContain(`TraceId = '${TRACE_ID}'`)
+		expect(sql).not.toContain("TraceId IN (SELECT")
+		expect(sql).not.toContain("FROM traces")
+		expect(sql).not.toContain("maple_ai.session.id")
+	})
+
+	it("keeps the projection and the order of the session form", () => {
+		const { sql } = compileUnsafe(aiTraceSpansQuery(), traceParams)
+
+		// One shape whichever kind of session the detail page opened.
+		expect(sql).toContain("Duration / 1000000 AS durationMs")
+		expect(sql).toContain("SpanAttributes AS spanAttributes")
+		expect(sql).toContain("ResourceAttributes AS resourceAttributes")
+		expect(sql).toContain("ORDER BY timestamp ASC, spanId ASC")
+		expect(sql).toContain("LIMIT 2000")
+		expect(compileUnsafe(aiTraceSpansQuery({ limit: 100 }), traceParams).sql).toContain("LIMIT 100")
+	})
+
+	it("still bounds the read by the window", () => {
+		const { sql } = compileUnsafe(aiTraceSpansQuery(), traceParams)
+
+		// The sort key prunes granules; only the `Timestamp` predicate prunes
+		// partitions, and this table is PARTITION BY toDate(Timestamp).
+		expect(sql).toContain(`Timestamp >= '${params.startTime}'`)
+		expect(sql).toContain(`Timestamp <= '${params.endTime}'`)
+	})
+
+	it("is org-scoped on the one level it has, and escapes the trace id", () => {
+		const compiled = compileUnsafe(aiTraceSpansQuery(), traceParams)
+		expect(compiled.tenantScope).toBe("single-tenant")
+		expect(orgPredicateCount(compiled.sql)).toBe(1)
+
+		const escaped = compileUnsafe(aiTraceSpansQuery(), { ...traceParams, traceId: "trace'evil" })
+		expect(escaped.sql).toContain("TraceId = 'trace\\'evil'")
+	})
+
+	it("leaves no unresolved param placeholder", () => {
+		expect(compileUnsafe(aiTraceSpansQuery(), traceParams).sql).not.toContain("__PARAM_")
+	})
+
+	it("decodes through the same row schema as the session form", () => {
+		const compiled = compileUnsafe(aiTraceSpansQuery(), traceParams, {
+			rowSchema: aiSessionSpansRowSchema,
+		})
+
+		const [row] = decodeRows(compiled, [
+			{
+				traceId: TRACE_ID,
+				spanId: "aa11",
+				parentSpanId: "",
+				spanName: "chat",
+				spanKind: "Client",
+				serviceName: "rag-service",
+				durationMs: "250",
+				statusCode: "Ok",
+				statusMessage: "",
+				timestamp: "2026-08-19 10:33:25.825000000",
+				// A sessionless vendor: the stamp is there, the session key is not.
+				spanAttributes: { "maple_ai.vendor.id": "llamaindex" },
+				resourceAttributes: { "service.name": "rag-service" },
+			},
+		])
+
+		expect(row?.durationMs).toBe(250)
+		expect(row?.spanAttributes).toEqual({ "maple_ai.vendor.id": "llamaindex" })
 	})
 })

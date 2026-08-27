@@ -22,6 +22,39 @@ export const MAPLE_AI_VENDOR_VERSION_ATTR = "maple_ai.vendor.version"
 /** The vendor's own session id, verbatim. */
 export const MAPLE_AI_SESSION_ID_ATTR = "maple_ai.session.id"
 
+/**
+ * Prefix of the session id Maple synthesizes for a GenAI trace that carries no
+ * {@link MAPLE_AI_SESSION_ID_ATTR}.
+ *
+ * The gateway stamps the session id only where the vendor exposes a session key
+ * — haystack, litellm, llamaindex, semantic_kernel and effect_ai never do, and
+ * the `unknown:*` buckets never do — so those traces have no session to belong
+ * to. Each one IS its own session: `trace:<TraceId>`, with the single trace as
+ * the whole context. The prefix is what keeps the two id spaces apart, and it
+ * is a colon-bearing shape no framework's own key is: read the id back with
+ * {@link traceSessionTraceId} rather than testing the prefix by hand.
+ */
+export const MAPLE_AI_TRACE_SESSION_PREFIX = "trace:"
+
+/** A W3C trace id as the warehouse stores it — 32 lowercase hex characters. */
+const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/
+
+/**
+ * The trace id a synthesized session id names, or `undefined` when the id is a
+ * vendor's own.
+ *
+ * A prefixed id that is not shaped like a trace id is `undefined` too. This
+ * value reaches a warehouse `param.*`, so "looks like a trace id" is the
+ * boundary check that keeps a forged one out of the trace-keyed read — it falls
+ * through to the session-attribute read instead, where nothing carries it and
+ * the caller gets the empty-session answer.
+ */
+export const traceSessionTraceId = (sessionId: string): string | undefined => {
+	if (!sessionId.startsWith(MAPLE_AI_TRACE_SESSION_PREFIX)) return undefined
+	const traceId = sessionId.slice(MAPLE_AI_TRACE_SESSION_PREFIX.length)
+	return TRACE_ID_PATTERN.test(traceId) ? traceId : undefined
+}
+
 // Maple's native convention — the one dialect an app opts into deliberately
 // rather than inheriting from a framework. These are ordinary span attributes
 // an emitter writes itself, and Maple's own agents (`apps/api` chat +

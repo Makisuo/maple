@@ -1,4 +1,5 @@
 import { formatWarehouseDateTime } from "@maple/query-engine"
+import { MAPLE_AI_TRACE_SESSION_PREFIX, traceSessionTraceId } from "@maple/domain/gen-ai"
 import { toEpochMs } from "@maple/ui/lib/time-format"
 
 // Slack, not compensation: the list now reports each session's own bounds
@@ -64,4 +65,22 @@ const BREADCRUMB_ID_MAX_CHARS = 24
 export function breadcrumbSessionId(sessionId: string): string {
 	if (sessionId.length <= BREADCRUMB_ID_MAX_CHARS) return sessionId
 	return `${sessionId.slice(0, 9)}…${sessionId.slice(-4)}`
+}
+
+/** How much of a synthesized id's trace id a row shows — enough to match against
+ *  a trace id the reader has in hand, short enough not to read as noise. */
+const TRACE_SESSION_ID_CHARS = 12
+
+/**
+ * A session id as the list should show it.
+ *
+ * A vendor's own id is the reader's vocabulary and stays whole. A synthesized
+ * `trace:<32 hex>` id is Maple's, and the tail of it identifies nothing — the
+ * row shows the head, and the full id stays on the element's title and in the
+ * URL.
+ */
+export function sessionRowId(sessionId: string): string {
+	const traceId = traceSessionTraceId(sessionId)
+	if (traceId === undefined) return sessionId
+	return `${MAPLE_AI_TRACE_SESSION_PREFIX}${traceId.slice(0, TRACE_SESSION_ID_CHARS)}…`
 }

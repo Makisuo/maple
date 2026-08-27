@@ -4,6 +4,7 @@ import {
 	breadcrumbSessionId,
 	buildBackToSessionsHref,
 	resolveWindow,
+	sessionRowId,
 } from "@/lib/agent-sessions/session-window"
 
 describe("resolveWindow", () => {
@@ -45,6 +46,24 @@ describe("breadcrumbSessionId", () => {
 
 	it("elides a long id from the middle, keeping both ends", () => {
 		expect(breadcrumbSessionId("wrun_01KZTEBCDEFGHIJKLMNOPQRSTUV")).toBe("wrun_01KZ…STUV")
+	})
+})
+
+describe("sessionRowId", () => {
+	// A framework's own id is the reader's vocabulary — it says what the session
+	// is, whatever its length.
+	it("leaves a vendor's own id whole", () => {
+		expect(sessionRowId("wrun_01KZTEBCDEFGHIJKLMNOPQRSTUV")).toBe("wrun_01KZTEBCDEFGHIJKLMNOPQRSTUV")
+	})
+
+	it("cuts a synthesized id to the head of its trace id", () => {
+		expect(sessionRowId("trace:7f3a4b5c6d7e8f901234567890abcdef")).toBe("trace:7f3a4b5c6d7e…")
+	})
+
+	// The prefix alone does not make an id Maple's, and a row must not claim a
+	// trace that isn't one.
+	it("leaves a prefixed id that is not a trace id alone", () => {
+		expect(sessionRowId("trace:not-a-trace-id")).toBe("trace:not-a-trace-id")
 	})
 })
 
