@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef } from "react"
 import { trackLanding } from "../lib/telemetry"
+import { APP_SIGN_UP_URL } from "../lib/app-urls"
 
 export type Competitor = "datadog" | "grafana" | "new-relic" | "dash0"
 
@@ -469,7 +470,7 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 							</p>
 						</div>
 						<a
-							href="https://app.maple.dev"
+							href={APP_SIGN_UP_URL}
 							className="shrink-0 bg-[oklch(0.75_0.12_70)] text-[oklch(0.15_0.02_60)] px-6 py-2.5 text-sm font-medium hover:opacity-90 transition-opacity"
 						>
 							Start free trial

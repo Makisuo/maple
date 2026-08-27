@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import * as m from "../paraglide/messages.js"
+import { APP_SIGN_UP_URL, APP_URL } from "../lib/app-urls"
 import { SIGNED_IN_EVENT } from "./auth-signal"
 
 /**
@@ -17,7 +18,7 @@ export function HeroCta({ className }: { className?: string }) {
 	}, [])
 	return (
 		<a
-			href="https://app.maple.dev"
+			href={signedIn ? APP_URL : APP_SIGN_UP_URL}
 			data-hero-cta
 			data-track="cta_click"
 			data-track-location="hero"

@@ -15,6 +15,7 @@ import { cn } from "@maple/ui/lib/utils"
 import * as m from "../paraglide/messages.js"
 import { broadcastSignedIn } from "./auth-signal"
 import { ClerkProvider } from "./ClerkProvider"
+import { APP_SIGN_IN_URL, APP_SIGN_UP_URL, APP_URL } from "../lib/app-urls"
 import { formatStars } from "../lib/github-stars"
 import { features } from "../lib/features"
 import { featurePath, useCasePath } from "../lib/page-registry"
@@ -27,7 +28,31 @@ const PUBLISHABLE_KEY = import.meta.env.PUBLIC_CLERK_PUBLISHABLE_KEY
 
 type MenuLink = { href: string; label: () => string; desc: () => string }
 
-function AuthAwareCTA() {
+type CTAProps = {
+	className?: string
+	trackLocation: string
+	"aria-hidden"?: boolean
+	tabIndex?: number
+}
+
+/**
+ * The href flips with the label: signed out, "Get started" has to name
+ * `/sign-up`, because the app root sends a session-less visitor to `/sign-in`.
+ */
+function CTAAnchor({ signedIn, trackLocation, ...rest }: CTAProps & { signedIn: boolean }) {
+	return (
+		<a
+			href={signedIn ? APP_URL : APP_SIGN_UP_URL}
+			data-track="cta_click"
+			data-track-location={trackLocation}
+			{...rest}
+		>
+			{signedIn ? m.nav_dashboard() : m.nav_get_started()}
+		</a>
+	)
+}
+
+function AuthAwareCTA(props: CTAProps) {
 	const { isSignedIn, isLoaded, userId } = useAuth()
 	const signedIn = isLoaded && isSignedIn === true
 	useEffect(() => {
@@ -37,15 +62,15 @@ function AuthAwareCTA() {
 		// later app sessions through the cross-subdomain visitor cookie.
 		identifyLanding(signedIn ? userId : null)
 	}, [signedIn, userId])
-	return signedIn ? m.nav_dashboard() : m.nav_get_started()
+	return <CTAAnchor signedIn={signedIn} {...props} />
 }
 
-function CTAButton() {
+function CTAButton(props: CTAProps) {
 	// Only use Clerk auth hook when the provider is actually available
 	if (!PUBLISHABLE_KEY) {
-		return m.nav_get_started()
+		return <CTAAnchor signedIn={false} {...props} />
 	}
-	return <AuthAwareCTA />
+	return <AuthAwareCTA {...props} />
 }
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
@@ -258,7 +283,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 				<GithubStarButton stars={stars} className="hidden sm:inline-flex" />
 
 				<a
-					href="https://app.maple.dev"
+					href={APP_SIGN_IN_URL}
 					data-track="cta_click"
 					data-track-location="nav_login"
 					className="hidden text-[13px] font-medium text-fg-muted transition-colors hover:text-fg md:inline-flex"
@@ -266,10 +291,8 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 					{m.nav_login()}
 				</a>
 
-				<a
-					href="https://app.maple.dev"
-					data-track="cta_click"
-					data-track-location="nav"
+				<CTAButton
+					trackLocation="nav"
 					className={cn(
 						buttonVariants({ size: "sm" }),
 						"overflow-hidden transition-all duration-300",
@@ -279,9 +302,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 					)}
 					aria-hidden={ctaCollapsed}
 					tabIndex={ctaCollapsed ? -1 : undefined}
-				>
-					<CTAButton />
-				</a>
+				/>
 
 				{/* The centred nav list only fits from lg, so the sheet has to
 				    cover everything below it — not just below sm. */}
@@ -376,14 +397,10 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 								</span>
 								{stars != null && <span className="tabular-nums">{formatStars(stars)}</span>}
 							</a>
-							<a
-								href="https://app.maple.dev"
-								data-track="cta_click"
-								data-track-location="nav_mobile"
+							<CTAButton
+								trackLocation="nav_mobile"
 								className={buttonVariants({ size: "sm" })}
-							>
-								<CTAButton />
-							</a>
+							/>
 						</div>
 					</nav>
 				</SheetContent>
