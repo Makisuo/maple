@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from "react"
 import { trackLanding } from "../lib/telemetry"
 import { APP_SIGN_UP_URL } from "../lib/app-urls"
 
-export type Competitor = "datadog" | "grafana" | "new-relic" | "dash0"
+export type Competitor = "datadog" | "grafana" | "new-relic" | "dash0" | "openobserve"
 
 interface SliderConfig {
 	key: string
@@ -128,6 +128,38 @@ export const competitorConfigs: Record<Competitor, { name: string; sliders: Slid
 			},
 		],
 	},
+	openobserve: {
+		name: "OpenObserve",
+		sliders: [
+			{
+				key: "logVolume",
+				label: "Log volume",
+				min: 10,
+				max: 10000,
+				step: 50,
+				default: 100,
+				unit: "GB/mo",
+			},
+			{
+				key: "traceVolume",
+				label: "Trace volume",
+				min: 10,
+				max: 10000,
+				step: 50,
+				default: 100,
+				unit: "GB/mo",
+			},
+			{
+				key: "metricVolume",
+				label: "Metric volume",
+				min: 10,
+				max: 10000,
+				step: 50,
+				default: 100,
+				unit: "GB/mo",
+			},
+		],
+	},
 } satisfies Record<Competitor, { name: string; sliders: SliderConfig[] }>
 
 function calculateDatadog(values: Record<string, number>) {
@@ -220,6 +252,26 @@ function calculateDash0(values: Record<string, number>) {
 	}
 }
 
+function calculateOpenObserve(values: Record<string, number>) {
+	// OpenObserve Cloud published pricing: $0.50/GB ingested (their headline
+	// rate, which already includes the 30% annual-commitment discount — the
+	// cheapest published rate). Query volume ($0.01/GB scanned) and extended
+	// retention ($0.02/GB per extra 30 days) are not modeled, which biases the
+	// estimate in OpenObserve's favor.
+	const logCost = values.logVolume * 0.5
+	const traceCost = values.traceVolume * 0.5
+	const metricCost = values.metricVolume * 0.5
+
+	return {
+		total: logCost + traceCost + metricCost,
+		breakdown: [
+			{ label: "Logs", value: logCost, detail: `${values.logVolume} GB × $0.50` },
+			{ label: "Traces", value: traceCost, detail: `${values.traceVolume} GB × $0.50` },
+			{ label: "Metrics", value: metricCost, detail: `${values.metricVolume} GB × $0.50` },
+		].filter((item) => item.value > 0),
+	}
+}
+
 function calculateMaple(values: Record<string, number>, competitor: Competitor) {
 	// Maple Startup (autumn.config.ts): $39/mo with 100 GB included per signal
 	// (logs, traces, metrics) and $0.30/GB overage billed per signal — the
@@ -243,6 +295,11 @@ function calculateMaple(values: Record<string, number>, competitor: Competitor) 
 		logsGB = values.logVolume
 		tracesGB = values.traceVolume
 		metricsGB = values.metricSeries * 4.32
+	} else if (competitor === "openobserve") {
+		// Both bill per GB ingested, so volumes map across directly.
+		logsGB = values.logVolume
+		tracesGB = values.traceVolume
+		metricsGB = values.metricVolume
 	} else if (competitor === "dash0") {
 		// Dash0 bills per item; convert counts to decoded OTLP volume at
 		// ~1 KB per span and per log record, ~0.1 KB per metric data point.
@@ -345,6 +402,7 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 		if (competitor === "datadog") return calculateDatadog(values)
 		if (competitor === "grafana") return calculateGrafana(values)
 		if (competitor === "dash0") return calculateDash0(values)
+		if (competitor === "openobserve") return calculateOpenObserve(values)
 		return calculateNewRelic(values)
 	}, [competitor, values])
 
@@ -493,6 +551,8 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 					" New Relic modeled on Standard ($10 first user + $99/user, max 5) up to 5 full platform users and Pro ($349/user/mo, annual commitment) above, with the Original Data option ($0.40/GB beyond 100 GB free); data is assumed to split evenly across logs, traces, and metrics."}
 				{competitor === "dash0" &&
 					" Dash0 bills per data point (spans & logs $0.60/M, metrics $0.20/M); Maple bills per GB, so the Maple estimate converts at roughly 1 KB per span and log record and 0.1 KB per metric data point. Your real ratio depends on attribute and payload sizes."}
+				{competitor === "openobserve" &&
+					" OpenObserve modeled at its headline $0.50/GB ingestion rate, which already includes the 30% annual-commitment discount; query fees ($0.01/GB scanned) and extended retention beyond the included 30 days for logs and traces ($0.02/GB per additional 30 days) are not included, which favors OpenObserve."}
 			</p>
 		</div>
 	)
