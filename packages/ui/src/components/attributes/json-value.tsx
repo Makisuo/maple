@@ -44,17 +44,7 @@ export function CollapsibleJsonValue({ value, parsed }: CollapsibleJsonValueProp
 				{expanded && <span className="text-muted-foreground">JSON</span>}
 			</button>
 			{expanded && (
-				<div className="mt-1 rounded-md bg-muted/30 border overflow-hidden">
-					<div className="flex items-center justify-end px-2 py-1 border-b">
-						<CopyButton
-							value={value}
-							label="JSON"
-							idleLabel="Copy"
-							size="xs"
-							iconSize={10}
-							onClick={(e) => e.stopPropagation()}
-						/>
-					</div>
+				<div className="group/json relative mt-1 overflow-hidden rounded-md border bg-muted/30">
 					<div className="max-h-64 overflow-auto p-2">
 						<pre className="text-xs leading-relaxed">
 							{highlightJson ? (
@@ -64,6 +54,19 @@ export function CollapsibleJsonValue({ value, parsed }: CollapsibleJsonValueProp
 							)}
 						</pre>
 					</div>
+					{/* Anchored over the payload rather than given a bar of its own: a
+					    strip holding one button is most of the block's chrome and none
+					    of its content, and these blocks nest inside attribute rows that
+					    are already dense. It rides above the scroll, so a long line
+					    scrolling under it keeps a backdrop to stay legible against. */}
+					<CopyButton
+						value={value}
+						label="JSON"
+						tooltip
+						iconSize={10}
+						className="absolute top-1 right-1 border-border/60 bg-background/80 opacity-0 backdrop-blur-sm transition-opacity focus-visible:opacity-100 group-hover/json:opacity-100 pointer-coarse:opacity-100"
+						onClick={(e) => e.stopPropagation()}
+					/>
 				</div>
 			)}
 		</div>
