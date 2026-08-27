@@ -29,6 +29,21 @@ export function useJsonPayload(text: string): { formatted: string; highlighted: 
 }
 
 /**
+ * A message body's rendering, chosen from the capture: markdown for prose, the
+ * payload cards' pretty-printed JSON where the text parses as a JSON document —
+ * a JSON message laid out as markdown collapses its structure into one
+ * paragraph. `rendered` names the choice and is what the ViewSwitch shows.
+ */
+export function useMessageBody(text: string): {
+	rendered: "md" | "json"
+	formatted: string
+	highlighted: string | undefined
+} {
+	const payload = useJsonPayload(text)
+	return { rendered: payload.highlighted === undefined ? "md" : "json", ...payload }
+}
+
+/**
  * The rendered ↔ raw selector: two labelled segments where the selected one is
  * the view the reader is IN — a lone pressed icon named either the current view
  * or the one a click would bring, depending on who read it.
