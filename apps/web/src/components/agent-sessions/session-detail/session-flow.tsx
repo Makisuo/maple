@@ -255,9 +255,14 @@ export function SessionFlow({
 		[lanes, selectedSpanId, focusedId, setFocusedId, onSelectSpan],
 	)
 
-	// One neutral stroke for every connector: the curve says "this ran inside
+	// One neutral stroke for every connector: the line says "this ran inside
 	// that", which is not itself an outcome. Colouring it by either end read
 	// as a handoff that failed, and the node cards already carry the red.
+	//
+	// `step`, not the default bezier: the cards sit on a grid of rows and
+	// columns, and a curve leaving one row for the next crosses it diagonally —
+	// two right angles trace the same relation along the grid the cards are
+	// already on.
 	const flowEdges = useMemo<Edge[]>(
 		() =>
 			lanes.flatMap((lane) =>
@@ -266,8 +271,18 @@ export function SessionFlow({
 						id: `${from.key}->${to.key}`,
 						source: from.key,
 						target: to.key,
+						type: "step",
 						focusable: false,
-						style: { stroke: "var(--border)", strokeWidth: 1 },
+						// Dotted, not solid: a hairline in `--border` disappeared against
+						// the card borders it runs between. Round caps on a 2px stroke
+						// give round dots — legible at the zoom the canvas opens at,
+						// and still quiet enough to stay behind the cards.
+						style: {
+							stroke: "var(--muted-foreground)",
+							strokeWidth: 2,
+							strokeLinecap: "round",
+							strokeDasharray: "0.5 5",
+						},
 					}),
 				),
 			),
@@ -335,7 +350,10 @@ export function SessionFlow({
 									const Icon = CATEGORY_ICON[category]
 									return (
 										<span key={category} className="flex items-center gap-1.5">
-											<Icon size={12} className={cn("shrink-0", CATEGORY_TEXT[category])} />
+											<Icon
+												size={12}
+												className={cn("shrink-0", CATEGORY_TEXT[category])}
+											/>
 											{category}
 										</span>
 									)
@@ -507,9 +525,7 @@ interface LaneLabelData extends Record<string, unknown> {
 const LaneLabelNode = memo(function LaneLabelNode({ data }: NodeProps & { data: LaneLabelData }) {
 	return (
 		<div className="pointer-events-none w-[110px] text-xs">
-			<p className="font-medium text-[10px] text-primary uppercase tracking-wider">
-				Turn {data.index}
-			</p>
+			<p className="font-medium text-[10px] text-primary uppercase tracking-wider">Turn {data.index}</p>
 			<p className={cn("tabular-nums", data.failed ? "text-destructive" : "text-muted-foreground")}>
 				{formatDuration(data.durationMs)}
 			</p>

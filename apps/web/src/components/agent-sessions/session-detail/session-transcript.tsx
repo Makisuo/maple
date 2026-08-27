@@ -105,9 +105,9 @@ export function SessionTranscript({
 	/** The session's captured tool results by call id (`sessionToolResults`). */
 	toolResults: SessionToolResults
 	query: string
-	/** The toolbar's "Thinking" chip. */
+	/** The toolbar's "Show thinking" chip. */
 	showThinking: boolean
-	/** The toolbar's "Tool payloads" chip: arguments and results open by default. */
+	/** The toolbar's "Expand tool payloads" chip: arguments and results open by default. */
 	showPayloads: boolean
 	/** The response dropped the END of the session. */
 	truncated: boolean
@@ -244,7 +244,7 @@ interface BlockProps {
  * Is this disclosure open?
  *
  * The set holds the rows the reader has flipped AWAY from their default, so the
- * "Tool payloads" chip still moves every card they have not touched, and a card
+ * "Expand tool payloads" chip still moves every card they have not touched, and a card
  * they opened by hand stays open when the chip goes off.
  */
 function disclosed(openRows: ReadonlySet<string>, key: string, byDefault: boolean): boolean {

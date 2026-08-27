@@ -1,10 +1,17 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
 
-import { ChartBarHorizontalIcon, GridIcon, NetworkNodesIcon, TranscriptIcon } from "@/components/icons"
+import {
+	ChartBarHorizontalIcon,
+	GridIcon,
+	NetworkNodesIcon,
+	SlidersIcon,
+	TranscriptIcon,
+} from "@/components/icons"
+import { Label } from "@maple/ui/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
 import { SearchInput } from "@maple/ui/components/ui/search-input"
+import { Switch } from "@maple/ui/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
-import { Toggle } from "@maple/ui/components/ui/toggle"
-import { cn } from "@maple/ui/lib/utils"
 
 import { useAppHotkey } from "@/hooks/use-app-hotkey"
 import type { SessionSummary } from "@/lib/agent-sessions/session-summary"
@@ -150,43 +157,51 @@ export function SessionViews({
 							placeholder={view === "transcript" ? "Filter transcript" : "Filter spans"}
 							className="w-56"
 						/>
-						{DEBUG_VIEWS.includes(view) ? (
-							<>
-								<ViewChip
-									pressed={agentSpansOnly}
-									onPressedChange={setAgentSpansOnly}
-									title="Hides the app's own HTTP/DB spans"
-								>
-									Agent spans only
-								</ViewChip>
-								{view === "trace" ? (
-									<ViewChip pressed={collapseIdle} onPressedChange={setCollapseIdle}>
-										Collapse idle
-									</ViewChip>
-								) : (
-									<ViewChip pressed={mergeRepeats} onPressedChange={setMergeRepeats}>
-										Merge repeat tools
-									</ViewChip>
-								)}
-							</>
-						) : (
-							<>
-								<ViewChip
-									pressed={showThinking}
-									onPressedChange={setShowThinking}
-									title="Model reasoning blocks, collapsed by default"
-								>
-									Thinking
-								</ViewChip>
-								<ViewChip
-									pressed={showPayloads}
-									onPressedChange={setShowPayloads}
-									title="Tool arguments and results, open by default"
-								>
-									Tool payloads
-								</ViewChip>
-							</>
-						)}
+						<ViewOptions
+							options={
+								DEBUG_VIEWS.includes(view)
+									? [
+											{
+												id: "agent-spans-only",
+												label: "Agent spans only",
+												hint: "Hides the app's own HTTP and DB spans.",
+												enabled: agentSpansOnly,
+												onChange: setAgentSpansOnly,
+											},
+											view === "trace"
+												? {
+														id: "collapse-idle",
+														label: "Collapse idle",
+														hint: "Folds the gaps where nothing ran.",
+														enabled: collapseIdle,
+														onChange: setCollapseIdle,
+													}
+												: {
+														id: "merge-repeats",
+														label: "Merge repeat tools",
+														hint: "Draws one node for a tool called back to back.",
+														enabled: mergeRepeats,
+														onChange: setMergeRepeats,
+													},
+										]
+									: [
+											{
+												id: "show-thinking",
+												label: "Show thinking",
+												hint: "Keeps the model's reasoning blocks in the transcript.",
+												enabled: showThinking,
+												onChange: setShowThinking,
+											},
+											{
+												id: "expand-tool-payloads",
+												label: "Expand tool payloads",
+												hint: "Opens every tool call's arguments and result.",
+												enabled: showPayloads,
+												onChange: setShowPayloads,
+											},
+										]
+							}
+						/>
 					</div>
 				)}
 			</div>
@@ -265,31 +280,51 @@ function toggled(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
 	return next
 }
 
-function ViewChip({
-	pressed,
-	onPressedChange,
-	title,
-	children,
-}: {
-	pressed: boolean
-	onPressedChange: (pressed: boolean) => void
-	title?: string
-	children: string
-}) {
+interface ViewOption {
+	readonly id: string
+	readonly label: string
+	readonly hint: string
+	readonly enabled: boolean
+	readonly onChange: (enabled: boolean) => void
+}
+
+/**
+ * What this view shows, behind one trigger.
+ *
+ * These were a row of pressed-state pills, and a pill reads as a button: it
+ * looks like something that DOES a thing, not something that IS on or off — and
+ * two of them side by side looked like the same kind of control while one
+ * filtered rows out and the other only changed how cards open. Switches say
+ * state, the label and its line of prose say what the state does, and the
+ * toolbar gets the width back for the filter.
+ */
+function ViewOptions({ options }: { options: readonly ViewOption[] }) {
+	const on = options.filter((option) => option.enabled).length
 	return (
-		<Toggle
-			variant="outline"
-			size="sm"
-			pressed={pressed}
-			onPressedChange={onPressedChange}
-			title={title}
-			className="gap-1.5 rounded-full text-xs"
-		>
-			<span
-				aria-hidden
-				className={cn("size-1.5 rounded-full", pressed ? "bg-primary" : "bg-muted-foreground/40")}
-			/>
-			{children}
-		</Toggle>
+		<Popover>
+			<PopoverTrigger
+				className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-foreground text-xs transition-colors hover:bg-muted/64 data-[popup-open]:bg-muted/64"
+				aria-label="Display options"
+			>
+				<SlidersIcon size={13} className="text-muted-foreground" />
+				Display
+				<span className="text-muted-foreground tabular-nums">
+					{on}/{options.length}
+				</span>
+			</PopoverTrigger>
+			<PopoverContent align="end" className="w-72 space-y-3">
+				{options.map((option) => (
+					<div key={option.id} className="flex items-center justify-between gap-4">
+						<div className="space-y-0.5">
+							<Label htmlFor={option.id} className="cursor-pointer">
+								{option.label}
+							</Label>
+							<p className="text-muted-foreground text-xs">{option.hint}</p>
+						</div>
+						<Switch id={option.id} checked={option.enabled} onCheckedChange={option.onChange} />
+					</div>
+				))}
+			</PopoverContent>
+		</Popover>
 	)
 }
