@@ -114,8 +114,6 @@ export type TranscriptRow =
 			/** AI spans the turn actually renders — deduped, app spans excluded. */
 			readonly aiSpanCount: number
 			readonly toolNames: readonly string[]
-			/** Sibling turns this one genuinely overlapped — see `markParallelTurns`. */
-			readonly parallelWith: readonly TranscriptTurnRef[]
 	  })
 	/** A turn the transcript has nothing to say about, holding its ordinal open. */
 	| (RowBase & { readonly kind: "empty-turn"; readonly turn: SessionTurn })
@@ -168,7 +166,6 @@ export type TranscriptRow =
 			readonly spanCount: number
 			/** What the delegating tool call asked for, where a lane was delegated. */
 			readonly args: TranscriptPayload | undefined
-			readonly parallelWith: readonly TranscriptLaneRef[]
 	  })
 	| (RowBase & {
 			readonly kind: "lane-close"
@@ -183,7 +180,6 @@ export type TranscriptRow =
 	  })
 	| (RowBase & {
 			readonly kind: "parallel"
-			readonly forkedBy: string | undefined
 			/** The fork: from the first lane opening to the last one closing. */
 			readonly startMs: number
 			readonly endMs: number
@@ -272,7 +268,7 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 	const turnRows = input.turns.map((turn) => buildTurn(turn, input, categoryOf))
 	// Structural chrome, like the lane markers: a filtered view no longer has the
 	// ordering the marker describes, so it is not built at all.
-	const concurrent = filtering ? new Map<string, TurnMarking>() : markParallelTurns(turnRows)
+	const concurrent = filtering ? new Map<string, TranscriptRow | undefined>() : markParallelTurns(turnRows)
 
 	// Capture coverage is a fact about the session, so it is counted over every
 	// turn before the first row is emitted.
@@ -299,15 +295,14 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 		// a header over nothing is worse than no header. Collapse does not change
 		// that: the filter judges both states by the same rows.
 		if (filtering && entry.rows.length === 0) continue
-		const marking = concurrent.get(entry.turn.id)
 		// The marker opens the cluster, so it is carried by its first member.
-		if (marking?.marker !== undefined) body.push(marking.marker)
+		const marker = concurrent.get(entry.turn.id)
+		if (marker !== undefined) body.push(marker)
 		// A cluster member's whole chapter shifts one lane right, the same move a
 		// lane makes inside a turn: the indentation is what says "these chapters
 		// hang off the fork above" without the reader having to parse the marker.
-		const indent = marking === undefined ? 0 : 1
-		const header = marking?.header ?? entry.header
-		body.push(indent === 0 ? header : { ...header, depth: header.depth + indent })
+		const indent = concurrent.has(entry.turn.id) ? 1 : 0
+		body.push(indent === 0 ? entry.header : { ...entry.header, depth: entry.header.depth + indent })
 		// Per-turn only where the session-level banner is not already up.
 		if (
 			!bannerUp &&
@@ -400,9 +395,6 @@ function buildTurn(
 		toolNames: distinct(
 			toolSpans.map((span) => span.genAi.toolName).filter((name): name is string => name !== undefined),
 		),
-		// Filled in by `markParallelTurns`, which needs every turn to be built
-		// before it can tell which of them overlapped.
-		parallelWith: [],
 	}
 
 	// A collapsed turn renders its header and nothing else, so none of the work
@@ -731,7 +723,6 @@ function openedLane(
 				parentAgentName: scope.agentName,
 				spanCount: walk.counts.spans,
 				args: payload(delegating === undefined ? undefined : toolArgsText(delegating)),
-				parallelWith: [],
 			},
 			...walk.rows,
 			{
@@ -789,21 +780,8 @@ function markParallelLanes(
 	const out = [...rows]
 	const markers: { at: number; row: TranscriptRow }[] = []
 	for (const cluster of clusters) {
-		for (const lane of cluster.members) {
-			// `at` is where the lane's rows were pushed and its opening row is the
-			// first of them — a search by key would find the same row more slowly.
-			const row = out[lane.at]
-			if (row?.kind !== "lane-open") continue
-			// Only the lanes this one GENUINELY overlapped: a cluster can be a chain
-			// (A with B, B with C, A never with C), and linking A to C would be the
-			// same invention the marker exists to prevent.
-			out[lane.at] = {
-				...row,
-				parallelWith: cluster.members
-					.filter((other) => overlaps(lane, other))
-					.map((other) => other.ref),
-			}
-		}
+		// `at` is where the lane's rows were pushed and its opening row is the
+		// first of them — the marker opens the cluster right above it.
 		const first = cluster.members[0]!
 		markers.push({
 			at: first.at,
@@ -811,7 +789,6 @@ function markParallelLanes(
 				kind: "parallel",
 				key: `${first.ref.key}:parallel`,
 				depth: scope.depth,
-				forkedBy: scope.agentName,
 				startMs: cluster.startMs,
 				endMs: cluster.endMs,
 				overlapStartMs: cluster.overlapStartMs,
@@ -896,20 +873,6 @@ function clusterByOverlap<T extends Interval>(items: readonly T[]): readonly Ove
 		})
 }
 
-/** Two intervals open at the same moment. Identity, not keys: the members are
- *  the very objects handed to `clusterByOverlap`. */
-function overlaps<T extends Interval>(a: T, b: T): boolean {
-	return a !== b && a.startMs < b.endMs && b.startMs < a.endMs
-}
-
-/** What a cluster does to one of its member turns. */
-interface TurnMarking {
-	/** The header again, carrying the turns this one overlapped. */
-	readonly header: Extract<TranscriptRow, { kind: "turn" }>
-	/** The cluster's marker, on its first member only. */
-	readonly marker: TranscriptRow | undefined
-}
-
 /**
  * Chapter-level parallelism: turns that ran at the same time.
  *
@@ -924,7 +887,7 @@ interface TurnMarking {
  * a placeholder for HTTP/DB work with no agent activity in it, and pairing one
  * with a real turn would announce a concurrency the reader cannot see.
  */
-function markParallelTurns(entries: readonly TurnRows[]): ReadonlyMap<string, TurnMarking> {
+function markParallelTurns(entries: readonly TurnRows[]): ReadonlyMap<string, TranscriptRow | undefined> {
 	const items = entries
 		.filter((entry) => entry.aiSpanCount > 0)
 		.map((entry, order) => ({
@@ -938,34 +901,20 @@ function markParallelTurns(entries: readonly TurnRows[]): ReadonlyMap<string, Tu
 			ref: { key: entry.turn.id, turn: entry.turn } satisfies TranscriptTurnRef,
 		}))
 
-	const marked = new Map<string, TurnMarking>()
+	// Membership is the key; only the cluster's first member carries its marker.
+	const marked = new Map<string, TranscriptRow | undefined>()
 	for (const cluster of clusterByOverlap(items)) {
-		for (const item of cluster.members) {
-			marked.set(item.entry.turn.id, {
-				header: {
-					...item.entry.header,
-					// Only the turns this one GENUINELY overlapped: a cluster can be a
-					// chain (A with B, B with C, A never with C).
-					parallelWith: cluster.members
-						.filter((other) => overlaps(item, other))
-						.map((other) => other.ref),
-				},
-				marker: undefined,
-			})
-		}
+		for (const item of cluster.members) marked.set(item.entry.turn.id, undefined)
 		const first = cluster.members.reduce((a, b) => (a.order <= b.order ? a : b))
 		marked.set(first.entry.turn.id, {
-			...marked.get(first.entry.turn.id)!,
-			marker: {
-				kind: "parallel-turns",
-				key: `${first.ref.key}:parallel-turns`,
-				depth: 0,
-				startMs: cluster.startMs,
-				endMs: cluster.endMs,
-				overlapStartMs: cluster.overlapStartMs,
-				overlapEndMs: cluster.overlapEndMs,
-				turns: cluster.members.map((item) => item.ref),
-			},
+			kind: "parallel-turns",
+			key: `${first.ref.key}:parallel-turns`,
+			depth: 0,
+			startMs: cluster.startMs,
+			endMs: cluster.endMs,
+			overlapStartMs: cluster.overlapStartMs,
+			overlapEndMs: cluster.overlapEndMs,
+			turns: cluster.members.map((item) => item.ref),
 		})
 	}
 	return marked

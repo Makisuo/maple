@@ -237,18 +237,13 @@ describe("buildTranscript — lanes and parallel markers", () => {
 		])
 	})
 
-	it("marks overlapping lanes with reciprocal jump links", () => {
+	it("opens one marker over the lanes that overlapped", () => {
 		const rows = transcript(twoLanes)
 		const opens = rows.filter((row) => row.kind === "lane-open")
 		expect(opens.map((row) => row.agentName)).toEqual(["db-lane", "trace-lane"])
-		expect(opens[0]!.parallelWith.map((ref) => ref.agentName)).toEqual(["trace-lane"])
-		expect(opens[1]!.parallelWith.map((ref) => ref.agentName)).toEqual(["db-lane"])
-		// The links point at the other lane's own row key.
-		expect(opens[0]!.parallelWith[0]!.key).toBe(opens[1]!.key)
 
 		const marker = findRow(rows, "parallel")
-		expect(marker.forkedBy).toBe("planner-agent")
-		expect(marker.lanes).toHaveLength(2)
+		expect(marker.lanes.map((ref) => ref.agentName)).toEqual(["db-lane", "trace-lane"])
 		// The fork runs forwards, and both lanes really were open together.
 		expect(marker.startMs).toBeLessThan(marker.endMs)
 		expect(marker.overlapStartMs).toBe(T0 + 2 * SECOND)
@@ -1108,7 +1103,7 @@ describe("buildTranscript — parallel clustering", () => {
 		}),
 	]
 
-	it("keeps a staggered run in one cluster and links only the pairs that overlapped", () => {
+	it("keeps a staggered run in one cluster", () => {
 		const rows = transcript(chain)
 		const marker = findRow(rows, "parallel")
 		expect(marker.lanes.map((lane) => lane.agentName)).toEqual(["a-lane", "b-lane", "c-lane"])
@@ -1119,13 +1114,6 @@ describe("buildTranscript — parallel clustering", () => {
 		// than reporting one that runs backwards.
 		expect(marker.overlapStartMs).toBeUndefined()
 		expect(marker.overlapEndMs).toBeUndefined()
-
-		const opens = findRows(rows, "lane-open")
-		expect(opens.map((row) => row.parallelWith.map((ref) => ref.agentName))).toEqual([
-			["b-lane"],
-			["a-lane", "c-lane"],
-			["b-lane"],
-		])
 	})
 
 	// The lane that breaks the run under a "previous member" rule: it ends before
@@ -1159,15 +1147,8 @@ describe("buildTranscript — parallel clustering", () => {
 		const rows = transcript(nested)
 		expect(findRows(rows, "parallel")).toHaveLength(1)
 		const marker = findRow(rows, "parallel")
-		expect(marker.lanes).toHaveLength(3)
+		expect(marker.lanes.map((lane) => lane.agentName)).toEqual(["long-lane", "x-lane", "y-lane"])
 		expect(marker.startMs).toBeLessThan(marker.endMs)
-
-		const opens = findRows(rows, "lane-open")
-		expect(opens.map((row) => row.parallelWith.map((ref) => ref.agentName))).toEqual([
-			["x-lane", "y-lane"],
-			["long-lane"],
-			["long-lane"],
-		])
 	})
 })
 
@@ -1689,39 +1670,25 @@ describe("buildTranscript — parallel turns", () => {
 		for (const row of findRows(rows, "assistant")) expect(row.depth).toBe(0)
 	})
 
-	it("gives each member turn header reciprocal jump data", () => {
-		const rows = transcript(twoTurns)
-		const headers = findRows(rows, "turn")
-		expect(headers.map((row) => row.turn.agentName)).toEqual(["log-lane", "metric-lane"])
-		expect(headers[0]!.parallelWith.map((ref) => ref.turn.agentName)).toEqual(["metric-lane"])
-		expect(headers[1]!.parallelWith.map((ref) => ref.turn.agentName)).toEqual(["log-lane"])
-		// The links point at the other turn's own header row key.
-		expect(headers[0]!.parallelWith[0]!.key).toBe(headers[1]!.key)
-		expect(headers[1]!.parallelWith[0]!.key).toBe(headers[0]!.key)
-	})
-
-	// The marker's jump targets have to be row keys, not turn-shaped lookalikes:
-	// a key that resolves to nothing scrolls nowhere and reports no error.
-	it("resolves every jump key to a row that is on the page", () => {
+	// The marker counts its members, so a member it names has to be a turn that
+	// is really on the page — a phantom would be counted into the headline.
+	it("names every member turn with the key its header renders under", () => {
 		const rows = transcript(twoTurns)
 		const keys = new Set(rows.map((row) => row.key))
 		const marker = findRow(rows, "parallel-turns")
+		expect(marker.turns.map((ref) => ref.turn.agentName)).toEqual(["log-lane", "metric-lane"])
 		for (const ref of marker.turns) expect(keys.has(ref.key)).toBe(true)
-		for (const header of findRows(rows, "turn")) {
-			for (const ref of header.parallelWith) expect(keys.has(ref.key)).toBe(true)
-		}
 	})
 
-	it("keeps the marker and the chip data on a collapsed member", () => {
+	it("keeps the marker over a collapsed member", () => {
 		const rows = transcript(twoTurns, { collapsedTurns: new Set(["conversation:conv-a"]) })
 		// Collapse hides a turn's body, never its header — so the chapter-level
 		// concurrency survives it.
 		expect(kinds(rows)).toEqual(["parallel-turns", "turn", "turn", "assistant"])
-		const collapsed = findRows(rows, "turn")[0]!
-		expect(collapsed.parallelWith.map((ref) => ref.turn.agentName)).toEqual(["metric-lane"])
+		expect(findRows(rows, "turn")[0]!.depth).toBe(1)
 	})
 
-	it("keeps a staggered run in one cluster and links only the pairs that overlapped", () => {
+	it("keeps a staggered run in one cluster", () => {
 		const staggered = [
 			...conversationTurn({ id: "a", agentName: "a-lane", startMs: 0, durationMs: 10 * SECOND }),
 			...conversationTurn({
@@ -1748,10 +1715,8 @@ describe("buildTranscript — parallel turns", () => {
 		// than reporting one that runs backwards.
 		expect(marker.overlapStartMs).toBeUndefined()
 		expect(marker.overlapEndMs).toBeUndefined()
-
-		expect(
-			findRows(rows, "turn").map((row) => row.parallelWith.map((ref) => ref.turn.agentName)),
-		).toEqual([["b-lane"], ["a-lane", "c-lane"], ["b-lane"]])
+		// Every member of the chain hangs off the one marker.
+		for (const header of findRows(rows, "turn")) expect(header.depth).toBe(1)
 	})
 
 	// The turn that breaks the run under a "previous member" rule: it ends before
@@ -1781,10 +1746,7 @@ describe("buildTranscript — parallel turns", () => {
 		// The two short turns never met each other, so only the long one is shared.
 		expect(marker.overlapStartMs).toBeUndefined()
 		expect(marker.overlapEndMs).toBeUndefined()
-
-		expect(
-			findRows(rows, "turn").map((row) => row.parallelWith.map((ref) => ref.turn.agentName)),
-		).toEqual([["x-lane", "y-lane"], ["long-lane"], ["long-lane"]])
+		for (const header of findRows(rows, "turn")) expect(header.depth).toBe(1)
 	})
 
 	it("says nothing about turns that ran one after the other", () => {
@@ -1799,7 +1761,7 @@ describe("buildTranscript — parallel turns", () => {
 		]
 		const rows = transcript(sequential)
 		expect(kinds(rows)).not.toContain("parallel-turns")
-		for (const header of findRows(rows, "turn")) expect(header.parallelWith).toStrictEqual([])
+		for (const header of findRows(rows, "turn")) expect(header.depth).toBe(0)
 	})
 
 	// An `empty-turn` stub is HTTP/DB work with no agent activity in it. Pairing
@@ -1819,15 +1781,15 @@ describe("buildTranscript — parallel turns", () => {
 		]
 		const rows = transcript(spans)
 		expect(kinds(rows)).toEqual(["turn", "assistant", "empty-turn"])
-		expect(findRow(rows, "turn").parallelWith).toStrictEqual([])
+		expect(findRow(rows, "turn").depth).toBe(0)
 	})
 
 	// Structural chrome, like the lane markers: the filtered view no longer has
 	// the ordering the marker describes.
-	it("drops the marker and the chips while a query is active", () => {
+	it("drops the marker and its indentation while a query is active", () => {
 		const rows = transcript(twoTurns, { query: "metric-lane" })
 		expect(kinds(rows)).toEqual(["turn", "assistant"])
-		expect(findRow(rows, "turn").parallelWith).toStrictEqual([])
+		expect(findRow(rows, "turn").depth).toBe(0)
 	})
 
 	it("marks the lab fixture's dispatched fan-out", () => {

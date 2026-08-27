@@ -79,8 +79,8 @@ const ROW_ESTIMATE = {
 	tool: 180,
 	"lane-open": 44,
 	"lane-close": 34,
-	parallel: 46,
-	"parallel-turns": 46,
+	parallel: 34,
+	"parallel-turns": 34,
 	structure: 30,
 	note: 86,
 	divider: 60,
@@ -156,12 +156,6 @@ export function SessionTranscript({
 		useAnimationFrameWithResizeObserver: true,
 	})
 
-	const indexByKey = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows])
-	const jumpTo = (key: string) => {
-		const index = indexByKey.get(key)
-		if (index !== undefined) virtualizer.scrollToIndex(index, { align: "start" })
-	}
-
 	// A pasted `?span=` link lands on the block it names. Once, on mount — after
 	// that the URL follows the reader rather than leading them. Not before the
 	// scroller exists, though: the list element attaches in a layout effect, so
@@ -215,7 +209,6 @@ export function SessionTranscript({
 									selected={"span" in row && row.span.spanId === selectedSpanId}
 									onSelectSpan={onSelectSpan}
 									onOpenTraceView={onOpenTraceView}
-									onJump={jumpTo}
 								/>
 							</div>
 						)
@@ -237,7 +230,6 @@ interface BlockProps {
 	selected: boolean
 	onSelectSpan: (spanId: string | undefined) => void
 	onOpenTraceView: () => void
-	onJump: (key: string) => void
 }
 
 /**
@@ -387,19 +379,6 @@ function TurnChapter({
 				</span>
 				{turn.agentName !== undefined && <AgentPill name={turn.agentName} />}
 				{turn.failed && <Pill tone="error">Failed</Pill>}
-				{/* The cluster's banner and the indentation carry the explanation; the
-				    pill is the glanceable trace of it that survives collapse. Bounded,
-				    unlike the old per-turn jump chips, whose row of unshrinkable
-				    buttons was one of the things pushing the page sideways. */}
-				{row.parallelWith.length > 0 && (
-					<span
-						className="flex shrink-0 items-center gap-1 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[10px] text-primary uppercase tracking-[0.08em]"
-						title={`ran in parallel with ${row.parallelWith.map((ref) => turnOrdinal(ref.turn)).join(", ")}`}
-					>
-						<BranchForkIcon size={10} className="shrink-0" />
-						parallel
-					</span>
-				)}
 				{/* Shrinkable, unlike its neighbours: the summary joins every tool
 				    name in the turn, so it truncates rather than widening the page. */}
 				{collapsed && <span className={META}>{summariseTurn(row)}</span>}
@@ -595,7 +574,11 @@ function SystemBlock({
 					<div className="min-w-0 grow">
 						<ClampedText
 							text={row.text}
-							body={raw ? undefined : <MessageResponse className="text-sm">{row.text}</MessageResponse>}
+							body={
+								raw ? undefined : (
+									<MessageResponse className="text-sm">{row.text}</MessageResponse>
+								)
+							}
 							expanded={disclosed(openRows, textKey, false)}
 							onToggleExpanded={() => onToggleRow(textKey)}
 						/>
@@ -1073,7 +1056,7 @@ function LaneOpen({
 			timePadding="pt-2"
 			className="pt-2.5"
 		>
-			<div className="flex flex-wrap items-center gap-2.5 py-1.5">
+			<div className="flex items-center gap-2.5 py-1.5">
 				<FaceRobotIcon size={14} className="shrink-0 text-chart-1" />
 				<span className={cn(LABEL, "text-chart-1")}>
 					{row.laneKind === "subagent" ? "Subagent" : "Agent"}
@@ -1092,17 +1075,6 @@ function LaneOpen({
 						: `· trace ${row.span.traceId.slice(0, 8)}`}{" "}
 					· {row.spanCount} spans · {formatDuration(row.span.durationMs)}
 				</span>
-				{/* The fork banner above already lists every sibling lane; this is the
-				    glanceable trace of it that survives past that marker scrolling out. */}
-				{row.parallelWith.length > 0 && (
-					<span
-						className="flex shrink-0 items-center gap-1 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[10px] text-primary uppercase tracking-[0.08em]"
-						title={`ran in parallel with ${row.parallelWith.map((ref) => ref.agentName).join(", ")}`}
-					>
-						<BranchForkIcon size={10} className="shrink-0" />
-						parallel
-					</span>
-				)}
 				<span aria-hidden className="h-px grow bg-border" />
 			</div>
 			{/* The handoff's own payload: the `execute_tool task` span this block
@@ -1165,53 +1137,26 @@ function LaneClose({
 }
 
 /**
- * The fork banner both parallel markers share: a bordered, tinted block whose
- * every line WRAPS. The old markers were one flex line of unshrinkable text and
- * chips, which is exactly the shape that pushes a page into sideways clipping —
- * a marker about concurrency must never cost the reader the right edge.
+ * The fork marker both parallel kinds share: one rule across the column, in the
+ * same shape as the page's other structural lines. WHAT forked is already on
+ * the rows right below it — all the marker has to say is that they did not run
+ * in sequence, and when they were open together.
  */
-function ParallelBanner({
-	title,
-	description,
-	refs,
-	onJump,
-}: {
-	title: string
-	description: string
-	/** The forked threads, as jump chips. */
-	refs: readonly { key: string; label: string }[]
-	onJump: (key: string) => void
-}) {
+function ParallelRule({ label, range }: { label: string; range: string }) {
 	return (
-		<div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-primary/25 bg-primary/6 px-3 py-2.5">
-			<div className="flex items-center gap-2.5">
-				<BranchForkIcon size={14} className="shrink-0 text-primary" />
-				<span className={cn(LABEL, "text-primary")}>{title}</span>
-			</div>
-			<p className="min-w-0 break-words pl-6 text-muted-foreground text-xs leading-relaxed">
-				{description}
-			</p>
-			<div className="flex flex-wrap items-center gap-1.5 pl-6">
-				{refs.map((ref) => (
-					<button
-						key={ref.key}
-						type="button"
-						onClick={() => onJump(ref.key)}
-						title={ref.label}
-						className="max-w-72 cursor-pointer truncate rounded-sm bg-primary/12 px-2 py-0.5 font-mono text-[11px] text-primary hover:bg-primary/20"
-					>
-						{ref.label}
-					</button>
-				))}
-			</div>
+		<div className="flex items-center gap-2.5 py-1.5">
+			<BranchForkIcon size={13} className="shrink-0 text-primary" />
+			<span className={cn(LABEL, "text-primary")}>{label}</span>
+			<span className={cn(META, "shrink-0")}>{range}</span>
+			<span aria-hidden className="h-px grow bg-primary/25" />
 		</div>
 	)
 }
 
 /** Only a window every member shared is reported as an overlap. A chain of
- *  pairwise overlaps has none, and the sentence then reports the run's extent
+ *  pairwise overlaps has none, and the marker then reports the run's extent
  *  instead of inventing one. */
-function overlapSentence(
+function overlapWindow(
 	row: {
 		startMs: number
 		endMs: number
@@ -1221,8 +1166,8 @@ function overlapSentence(
 	timeZone: string,
 ): string {
 	return row.overlapStartMs !== undefined && row.overlapEndMs !== undefined
-		? `they overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
-		: `their runs interleave between ${clockOf(row.startMs, timeZone)} and ${clockOf(row.endMs, timeZone)}`
+		? `overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
+		: `interleaved ${clockOf(row.startMs, timeZone)} → ${clockOf(row.endMs, timeZone)}`
 }
 
 /**
@@ -1232,21 +1177,18 @@ function overlapSentence(
 function ParallelMarker({
 	row,
 	timeZone,
-	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "parallel" }> }) {
 	return (
 		<Row
 			time={clockOf(row.startMs, timeZone)}
 			depth={row.depth}
-			timePadding="pt-3"
-			className="pt-5"
+			timePadding="pt-2.5"
+			className="pt-4"
 			flush
 		>
-			<ParallelBanner
-				title={`${row.lanes.length} lanes in parallel`}
-				description={overlapSentence(row, timeZone)}
-				refs={row.lanes.map((lane) => ({ key: lane.key, label: lane.agentName }))}
-				onJump={onJump}
+			<ParallelRule
+				label={`${row.lanes.length} lanes in parallel`}
+				range={overlapWindow(row, timeZone)}
 			/>
 		</Row>
 	)
@@ -1265,24 +1207,18 @@ function ParallelMarker({
 function ParallelTurnsMarker({
 	row,
 	timeZone,
-	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "parallel-turns" }> }) {
 	return (
 		<Row
 			time={clockOf(row.startMs, timeZone)}
 			depth={row.depth}
-			timePadding="pt-3"
-			className="pt-5"
+			timePadding="pt-2.5"
+			className="pt-4"
 			flush
 		>
-			<ParallelBanner
-				title={`${row.turns.length} turns in parallel`}
-				description={overlapSentence(row, timeZone)}
-				refs={row.turns.map((ref) => ({
-					key: ref.key,
-					label: `${turnOrdinal(ref.turn).toUpperCase()}${ref.turn.agentName === undefined ? "" : ` ${ref.turn.agentName}`}`,
-				}))}
-				onJump={onJump}
+			<ParallelRule
+				label={`${row.turns.length} turns in parallel`}
+				range={overlapWindow(row, timeZone)}
 			/>
 		</Row>
 	)
