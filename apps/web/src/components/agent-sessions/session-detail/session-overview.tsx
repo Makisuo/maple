@@ -21,7 +21,10 @@ import {
 	type SessionToolUsage,
 } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
+import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { shortTarget } from "@/lib/agent-sessions/span-filters"
+import type { SpanDetailTab } from "./span-expansion"
+import { SpanPopover } from "./span-popover"
 import { OCCUPANCY_DOT_FILL, OCCUPANCY_FILL, OCCUPANCY_LABEL } from "./span-visuals"
 
 const TOKEN_BUCKETS = [
@@ -42,21 +45,51 @@ const SEVERITY_DOT = {
  *
  * The page leads with a verdict and a findings list rather than another way to
  * browse the turns — Traces, Flow and Transcript already do that three ways.
- * Every finding links the span that is its evidence, so the Overview is the
- * door into the debug views instead of a fourth sibling of them. The facts —
- * time bar, cost, tokens, tools — stay, each figure appearing exactly once.
+ * Every finding opens the span that is its evidence in place, against the row
+ * that named it: reading a finding used to cost the reader this page. The facts
+ * — time bar, cost, tokens, tools — stay, each figure appearing exactly once.
  */
 export function SessionOverview({
 	turns,
 	summary,
-	onOpenSpan,
+	selectedSpanId,
+	onSelectSpan,
+	spanTab,
+	onSpanTabChange,
+	toolResults,
+	onOpenTraceView,
 }: {
 	turns: readonly SessionTurn[]
 	summary: SessionSummary
-	/** Raised with a span id to open it in the Traces view. */
-	onOpenSpan: (spanId: string) => void
+	/** The one span open in the popover (`?span=`). */
+	selectedSpanId: string | undefined
+	/** Raised with a span id to open it, `undefined` to close. */
+	onSelectSpan: (spanId: string | undefined) => void
+	/** The popover's tab, shared with the other views. */
+	spanTab: SpanDetailTab | undefined
+	onSpanTabChange: (tab: SpanDetailTab) => void
+	/** The session's captured tool results by call id, for the popover. */
+	toolResults?: SessionToolResults
+	/** The popover's "Open in Traces view": same span, sibling view. */
+	onOpenTraceView: () => void
 }) {
 	const report = useMemo(() => buildSessionFindings(turns, summary), [turns, summary])
+	const spansById = useMemo(
+		() => new Map(turns.flatMap((turn) => turn.spans).map((span) => [span.spanId, span])),
+		[turns],
+	)
+
+	// A finding carries a span id; the row that named it is what the popover
+	// points at. Kept together so a selection made elsewhere — a pasted `?span=`,
+	// or the reader coming back from another view — cannot anchor the panel to
+	// the row of a different span.
+	const [anchor, setAnchor] = useState<{ spanId: string; element: HTMLElement } | undefined>(undefined)
+	const anchored = anchor !== undefined && anchor.spanId === selectedSpanId
+
+	const openSpan = (spanId: string, element: HTMLElement) => {
+		setAnchor({ spanId, element })
+		onSelectSpan(selectedSpanId === spanId ? undefined : spanId)
+	}
 
 	return (
 		<div className="@container flex grow flex-col pt-5 pb-10">
@@ -66,19 +99,29 @@ export function SessionOverview({
 						verdict={report.verdict}
 						findingCount={report.findings.length}
 						turns={turns}
-						onOpenSpan={onOpenSpan}
+						onOpenSpan={openSpan}
 					/>
-					<Findings findings={report.findings} onOpenSpan={onOpenSpan} />
+					<Findings findings={report.findings} onOpenSpan={openSpan} />
 					<TurnHealthStrip
 						turns={turns}
 						health={report.turnHealth}
 						summary={summary}
-						onOpenSpan={onOpenSpan}
+						onOpenSpan={openSpan}
 					/>
 					<TimeComposition summary={summary} turns={turns} />
 				</div>
 				<Rail summary={summary} />
 			</div>
+
+			<SpanPopover
+				span={anchored && selectedSpanId !== undefined ? spansById.get(selectedSpanId) : undefined}
+				anchor={anchored ? anchor.element : null}
+				tab={spanTab}
+				onTabChange={onSpanTabChange}
+				toolResults={toolResults}
+				onClose={() => onSelectSpan(undefined)}
+				onOpenTraceView={onOpenTraceView}
+			/>
 		</div>
 	)
 }
@@ -86,6 +129,9 @@ export function SessionOverview({
 /* -------------------------------------------------------------------------- */
 /* Verdict                                                                    */
 /* -------------------------------------------------------------------------- */
+
+/** Open a span's payload against the element that named it. */
+type OpenSpan = (spanId: string, anchor: HTMLElement) => void
 
 function Verdict({
 	verdict,
@@ -96,7 +142,7 @@ function Verdict({
 	verdict: SessionVerdict
 	findingCount: number
 	turns: readonly SessionTurn[]
-	onOpenSpan: (spanId: string) => void
+	onOpenSpan: OpenSpan
 }) {
 	const turnWord = turns[0]?.anchorKind === "trace" ? "segment" : "turn"
 	const turnsText = `${turns.length} ${turnWord}${turns.length === 1 ? "" : "s"}`
@@ -145,7 +191,12 @@ function Verdict({
 				)}
 			</div>
 			{verdict.spanId !== undefined && (
-				<Button variant="outline" size="sm" onClick={() => onOpenSpan(verdict.spanId!)}>
+				<Button
+					variant="outline"
+					size="sm"
+					aria-haspopup="dialog"
+					onClick={(event) => onOpenSpan(verdict.spanId!, event.currentTarget)}
+				>
 					Open failing span
 					<ArrowRightIcon size={14} />
 				</Button>
@@ -162,13 +213,7 @@ function VerdictDot({ className }: { className: string }) {
 /* Findings                                                                   */
 /* -------------------------------------------------------------------------- */
 
-function Findings({
-	findings,
-	onOpenSpan,
-}: {
-	findings: readonly SessionFinding[]
-	onOpenSpan: (spanId: string) => void
-}) {
+function Findings({ findings, onOpenSpan }: { findings: readonly SessionFinding[]; onOpenSpan: OpenSpan }) {
 	return (
 		<section>
 			<div className="flex items-baseline justify-between gap-2 pb-3.5">
@@ -200,17 +245,12 @@ function Findings({
 	)
 }
 
-function FindingRow({
-	finding,
-	onOpenSpan,
-}: {
-	finding: SessionFinding
-	onOpenSpan: (spanId: string) => void
-}) {
+function FindingRow({ finding, onOpenSpan }: { finding: SessionFinding; onOpenSpan: OpenSpan }) {
 	return (
 		<button
 			type="button"
-			onClick={() => onOpenSpan(finding.spanId)}
+			aria-haspopup="dialog"
+			onClick={(event) => onOpenSpan(finding.spanId, event.currentTarget)}
 			className={cn(
 				"group flex w-full items-start gap-3 border-border border-t px-3 py-3.5 text-left hover:bg-accent/40",
 				finding.severity === "failure" &&
@@ -239,7 +279,7 @@ function FindingRow({
 				)}
 			</span>
 			<span className="mt-0.5 flex shrink-0 items-center gap-1 text-muted-foreground text-xs opacity-0 transition-opacity group-hover:opacity-100">
-				trace
+				inspect
 				<ArrowRightIcon size={12} />
 			</span>
 		</button>
@@ -265,7 +305,7 @@ function TurnHealthStrip({
 	turns: readonly SessionTurn[]
 	health: readonly TurnHealth[]
 	summary: SessionSummary
-	onOpenSpan: (spanId: string) => void
+	onOpenSpan: OpenSpan
 }) {
 	// "with errors", not "failed": a red cell marks a turn something went wrong
 	// INSIDE — the turn itself may have closed cleanly, and calling it failed
@@ -295,7 +335,8 @@ function TurnHealthStrip({
 					<button
 						key={turn.id}
 						type="button"
-						onClick={() => onOpenSpan(turn.anchor.spanId)}
+						aria-haspopup="dialog"
+						onClick={(event) => onOpenSpan(turn.anchor.spanId, event.currentTarget)}
 						title={`${turnOrdinal(turn)}${turn.label === undefined ? "" : ` — ${turn.label}`}`}
 						className={cn(
 							"flex size-8 items-center justify-center rounded-sm border font-mono text-[11px] tabular-nums",

@@ -62,9 +62,9 @@ export function SessionViews({
 	summary: SessionSummary
 	/** The response dropped the END of the session — the transcript says so. */
 	truncated: boolean
-	/** The span expanded inline / open in the flow drawer (`?span=`). */
+	/** The span open in the inspection popover, in whichever view (`?span=`). */
 	selectedSpanId: string | undefined
-	/** Raised with a span id to expand it, `undefined` to collapse. */
+	/** Raised with a span id to open it, `undefined` to close. */
 	onSelectSpan: (spanId: string | undefined) => void
 }) {
 	const [query, setQuery] = useState("")
@@ -82,9 +82,9 @@ export function SessionViews({
 	// keyed by row, and holds the rows flipped AWAY from their default.
 	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
 	const [zoom, setZoom] = useState(1)
-	// One tab choice for every span expansion, in both debug views: switching
-	// spans — or Trace ↔ Flow — keeps the reader on the tab they chose.
-	// `undefined` means no choice yet, and the expansion picks by content.
+	// One tab choice for every span the popover opens, in every view: switching
+	// spans — or views — keeps the reader on the tab they chose. `undefined`
+	// means no choice yet, and the panel picks by content.
 	const [spanTab, setSpanTab] = useState<SpanDetailTab | undefined>(undefined)
 
 	// 1/2/3/4 switch views from anywhere on the page — the switcher stays
@@ -213,12 +213,12 @@ export function SessionViews({
 				<SessionOverview
 					turns={turns}
 					summary={summary}
-					// A finding's evidence lives in the Traces view: select the span and
-					// go — the waterfall scrolls to and expands the selection on mount.
-					onOpenSpan={(spanId) => {
-						onSelectSpan(spanId)
-						onViewChange("trace")
-					}}
+					selectedSpanId={selectedSpanId}
+					onSelectSpan={onSelectSpan}
+					spanTab={spanTab}
+					onSpanTabChange={setSpanTab}
+					toolResults={toolResults}
+					onOpenTraceView={() => onViewChange("trace")}
 				/>
 			</TabsContent>
 			<TabsContent value="trace" className="flex flex-[1_1_auto] flex-col pb-4">

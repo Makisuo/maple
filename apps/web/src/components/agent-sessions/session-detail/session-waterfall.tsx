@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState, type Ref } from "react"
 import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
@@ -30,18 +30,15 @@ import {
 } from "@/lib/agent-sessions/session-turns"
 import { filterSpans, isDelegation, shortTarget } from "@/lib/agent-sessions/span-filters"
 import { Pill } from "./pill"
-import { SpanInlineDetail, type SpanDetailTab } from "./span-expansion"
+import type { SpanDetailTab } from "./span-expansion"
+import { SpanPopover } from "./span-popover"
 import { CATEGORY_FILL, CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
-// Row heights are fixed and known, so the virtualizer never has to measure —
-// except the one inline detail row, whose height is its payload's and is
-// measured (`measureElement`) instead.
+// Every row height is fixed and known, so the virtualizer never measures.
 const TURN_ROW_HEIGHT = 30
 /** Two above the old 26: the category glyphs need a touch more air than the
  *  dots they replaced. */
 const ROW_HEIGHT = 28
-/** Starting guess for the detail row; the measurement replaces it on mount. */
-const DETAIL_ROW_ESTIMATE = 480
 /** Past this the indent eats the span name; deep agent trees are common. */
 const MAX_INDENT_DEPTH = 6
 const INDENT_PX = 14
@@ -69,7 +66,6 @@ type WaterfallRow =
 			readonly visibleCount: number
 	  }
 	| { readonly kind: "span"; readonly key: string; readonly span: AiSessionSpan; readonly depth: number }
-	| { readonly kind: "detail"; readonly key: string; readonly span: AiSessionSpan }
 	| { readonly kind: "gap"; readonly key: string; readonly gap: IdleGap }
 
 interface SessionWaterfallProps {
@@ -83,14 +79,14 @@ interface SessionWaterfallProps {
 	/** Expansion state lives in SessionViews so a Trace → Flow → Trace round-trip keeps it. */
 	collapsedTurns: ReadonlySet<string>
 	onToggleTurn: (turnId: string) => void
-	/** The one span expanded inline (`?span=`). */
+	/** The one span open in the popover (`?span=`). */
 	selectedSpanId: string | undefined
-	/** Raised with a span id to expand it, `undefined` to collapse. */
+	/** Raised with a span id to open it, `undefined` to close. */
 	onSelectSpan: (spanId: string | undefined) => void
-	/** The expansion's tab, shared with the Flow view's drawer. */
+	/** The popover's tab, shared with the other views. */
 	spanTab: SpanDetailTab | undefined
 	onSpanTabChange: (tab: SpanDetailTab) => void
-	/** The session's captured tool results by call id, for the expansion. */
+	/** The session's captured tool results by call id, for the popover. */
 	toolResults?: ReadonlyMap<string, string>
 }
 
@@ -116,6 +112,12 @@ export function SessionWaterfall({
 		[turns],
 	)
 
+	// The popover points at the selected row itself, attached by the row's own
+	// ref: a row scrolled out of the virtualizer's window unmounts, which closes
+	// the popover instead of leaving it pointing at a detached box, and scrolling
+	// back re-attaches it — the selection never left the URL.
+	const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+
 	const collapsedGaps = collapseIdle ? summary.idleGaps : NO_GAPS
 	const axis = useMemo(
 		() => buildSessionAxis({ startMs: summary.startMs, endMs: summary.endMs, collapsedGaps }),
@@ -124,27 +126,22 @@ export function SessionWaterfall({
 	const ticks = axis.ticks
 
 	const rows = useMemo(
-		() =>
-			buildRows({ turns, gaps: collapsedGaps, collapsedTurns, query, agentSpansOnly, selectedSpanId }),
-		[turns, collapsedGaps, collapsedTurns, query, agentSpansOnly, selectedSpanId],
+		() => buildRows({ turns, gaps: collapsedGaps, collapsedTurns, query, agentSpansOnly }),
+		[turns, collapsedGaps, collapsedTurns, query, agentSpansOnly],
 	)
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement,
-		estimateSize: (index) => {
-			const row = rows[index]!
-			if (row.kind === "turn") return TURN_ROW_HEIGHT
-			if (row.kind === "detail") return DETAIL_ROW_ESTIMATE
-			return ROW_HEIGHT
-		},
+		estimateSize: (index) => (rows[index]!.kind === "turn" ? TURN_ROW_HEIGHT : ROW_HEIGHT),
 		getItemKey: (index) => rows[index]!.key,
 		overscan: 16,
 		scrollMargin,
 	})
 
 	// The keyboard's span cursor: ↑/↓ walk the span rows the filter left
-	// visible, Enter expands the one under the cursor, Esc collapses.
+	// visible, Enter opens the one under the cursor. Escape is the popover's
+	// once one is open; this one covers the rest.
 	const spanRowIndexById = useMemo(() => {
 		const byId = new Map<string, number>()
 		rows.forEach((row, index) => {
@@ -169,8 +166,9 @@ export function SessionWaterfall({
 	})
 
 	// A pasted `?span=` link lands on the exact span it names: the cursor starts
-	// there and the row is scrolled into view. Once, on mount — after that the
-	// URL follows the reader rather than leading them.
+	// there and the row is scrolled into view, which is also what puts the
+	// popover's anchor on screen. Once, on mount — after that the URL follows the
+	// reader rather than leading them.
 	const didInitialScroll = useRef(false)
 	useEffect(() => {
 		if (didInitialScroll.current || selectedSpanId === undefined) return
@@ -238,25 +236,18 @@ export function SessionWaterfall({
 					<div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
 						{virtualizer.getVirtualItems().map((item) => {
 							const row = rows[item.index]!
+							const selected = row.kind === "span" && selectedSpanId === row.span.spanId
 							return (
 								<div
 									key={item.key}
-									// Only the detail row is measured: its height is its
-									// payload's, and the fixed rows stay estimate-only.
-									ref={row.kind === "detail" ? virtualizer.measureElement : undefined}
 									data-index={item.index}
 									className="absolute inset-x-0 top-0"
 									// `start` is in the page scroller's coordinates; the margin
-									// brings it back to this list's own. The detail row takes its
-									// height from its payload instead of the estimate.
-									style={
-										row.kind === "detail"
-											? { transform: `translateY(${item.start - scrollMargin}px)` }
-											: {
-													height: item.size,
-													transform: `translateY(${item.start - scrollMargin}px)`,
-												}
-									}
+									// brings it back to this list's own.
+									style={{
+										height: item.size,
+										transform: `translateY(${item.start - scrollMargin}px)`,
+									}}
 								>
 									{row.kind === "turn" && (
 										<TurnHeader
@@ -269,27 +260,16 @@ export function SessionWaterfall({
 									)}
 									{row.kind === "span" && (
 										<SpanRow
+											ref={selected ? setAnchor : null}
 											row={row}
 											axis={axis}
 											spansById={spansById}
-											selected={selectedSpanId === row.span.spanId}
+											selected={selected}
 											focused={focusedId === row.span.spanId}
 											onClick={() => {
 												setFocusedId(row.span.spanId)
-												onSelectSpan(
-													selectedSpanId === row.span.spanId
-														? undefined
-														: row.span.spanId,
-												)
+												onSelectSpan(selected ? undefined : row.span.spanId)
 											}}
-										/>
-									)}
-									{row.kind === "detail" && (
-										<SpanInlineDetail
-											span={row.span}
-											tab={spanTab}
-											onTabChange={onSpanTabChange}
-											toolResults={toolResults}
 										/>
 									)}
 									{row.kind === "gap" && <GapRow gap={row.gap} />}
@@ -299,6 +279,15 @@ export function SessionWaterfall({
 					</div>
 				)}
 			</div>
+
+			<SpanPopover
+				span={selectedSpanId === undefined ? undefined : spansById.get(selectedSpanId)}
+				anchor={anchor}
+				tab={spanTab}
+				onTabChange={onSpanTabChange}
+				toolResults={toolResults}
+				onClose={() => onSelectSpan(undefined)}
+			/>
 		</div>
 	)
 }
@@ -321,7 +310,6 @@ function buildRows(input: {
 	collapsedTurns: ReadonlySet<string>
 	query: string
 	agentSpansOnly: boolean
-	selectedSpanId: string | undefined
 }): readonly WaterfallRow[] {
 	const surviving = input.turns.flatMap((turn) => {
 		const spans = filterSpans(turn.spans, input.query, input.agentSpansOnly)
@@ -355,11 +343,6 @@ function buildRows(input: {
 			// turn's own rows split cleanly at the first span that starts after it.
 			flushGaps(spanStartMs(span))
 			rows.push({ kind: "span", key: `${turn.id}:${span.spanId}`, span, depth })
-			// The selected span's payload expands inline, directly under its row —
-			// one at a time, which is why this is the selection and not a set.
-			if (span.spanId === input.selectedSpanId) {
-				rows.push({ kind: "detail", key: `detail:${span.spanId}`, span })
-			}
 		}
 		flushGaps(turn.endMs)
 	}
@@ -518,6 +501,7 @@ function TraceLink({ traceId, timestamp }: { traceId: string; timestamp: string 
 }
 
 function SpanRow({
+	ref,
 	row,
 	axis,
 	spansById,
@@ -525,11 +509,13 @@ function SpanRow({
 	focused,
 	onClick,
 }: {
+	/** Set on the selected row only: it is what the span popover points at. */
+	ref: Ref<HTMLButtonElement>
 	row: Extract<WaterfallRow, { kind: "span" }>
 	axis: SessionAxis
 	spansById: ReadonlyMap<string, AiSessionSpan>
 	selected: boolean
-	/** Under the keyboard's span cursor — distinct from `selected`, which means expanded. */
+	/** Under the keyboard's span cursor — distinct from `selected`, which means open. */
 	focused: boolean
 	onClick: () => void
 }) {
@@ -546,9 +532,11 @@ function SpanRow({
 
 	return (
 		<button
+			ref={ref}
 			type="button"
 			onClick={onClick}
 			aria-current={selected || undefined}
+			aria-haspopup="dialog"
 			aria-expanded={selected}
 			className={cn(
 				"flex h-full w-full cursor-pointer items-center px-2.5 text-left text-xs hover:bg-accent/40",
