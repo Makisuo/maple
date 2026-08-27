@@ -28,6 +28,8 @@ const VENDOR_ICONS: Record<string, IconComponent> = {
 	claude_agent_sdk: ClaudeIcon,
 	crewai: CrewAiIcon,
 	effect_ai: EffectIcon,
+	// eve is Vercel's agent framework and has no mark of its own.
+	eve: VercelIcon,
 	google_adk: GoogleIcon,
 	haystack: HaystackIcon,
 	langchain: LangchainIcon,
