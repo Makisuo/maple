@@ -70,11 +70,17 @@ export function SpanPopover({
 					anchor={anchor}
 					side="bottom"
 					align="start"
-					className="max-h-[min(32rem,var(--available-height))] w-[min(40rem,calc(100vw-2rem))]"
+					className="w-[min(40rem,calc(100vw-2rem))]"
 				>
 					{/* The panel's own handle, for the page's tests and for anything
-					    that needs to find it inside the portal. */}
-					<div data-slot="span-popover" className="min-w-0">
+					    that needs to find it inside the portal. It is also the scroll
+					    viewport: the height cap must live on the element that scrolls —
+					    capping the popup instead leaves the ui viewport sized to
+					    `--available-height`, spilling past the popup's border. */}
+					<div
+						data-slot="span-popover"
+						className="-m-4 max-h-[min(32rem,calc(var(--available-height)-2rem))] min-w-0 overflow-y-auto overscroll-contain p-4"
+					>
 						<SpanExpansion
 							key={span.spanId}
 							span={span}
@@ -118,12 +124,14 @@ function TitleRow({
 		.join(" · ")
 
 	return (
-		// Negative margins against the viewport's own padding: the row pins flush
-		// to the popup's edges when the payload scrolls under it.
+		// Pins to the scroller's padding-box top, covering content that would
+		// otherwise show through the top padding. A negative top margin would
+		// shrink this row's margin box inside the flex column and paint it over
+		// the tab strip below — only the horizontal margins are safe to bleed.
 		<div
 			className={cn(
-				"-mx-4 -mt-4 sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1",
-				"bg-popover px-4 pt-4 pb-2",
+				"-mx-4 sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1",
+				"bg-popover px-4 pb-2",
 			)}
 		>
 			<Glyph
