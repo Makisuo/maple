@@ -4,6 +4,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@m
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
 import { sessionRowId } from "@/lib/agent-sessions/session-window"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 
@@ -59,6 +60,7 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 		<div className="@container">
 			{sessions.map((session) => {
 				const hasErrors = session.errorSpanCount > 0
+				const VendorIcon = vendorIcon(session.vendorId)
 				const vendor = vendorLabel(session.vendorId)
 				const secondary =
 					session.vendorVersion && session.vendorVersion !== "0"
@@ -99,7 +101,10 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 									{formatRelativeTimeOrDate(session.startTime)}
 								</span>
 							</div>
-							<div className="mt-0.5 truncate text-xs text-muted-foreground">{secondary}</div>
+							<div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+								<VendorIcon size={13} className="shrink-0" aria-hidden />
+								<span className="truncate">{secondary}</span>
+							</div>
 							{hasErrors && (
 								<div className="mt-1.5 flex items-center gap-1.5 @2xl:hidden">
 									<ErrorChip count={session.errorSpanCount} />

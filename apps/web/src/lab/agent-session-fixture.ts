@@ -256,12 +256,16 @@ function toolResult(tool: string): string | undefined {
 	}
 }
 
+/** The gateway stamps a vendor on every AI span, so the fixture carries one too
+ *  — it is what puts a framework mark beside the label in the header and rows. */
+const VENDOR_ID = "claude_agent_sdk"
+
 export function buildAgentSessionFixture(): readonly AiSessionSpan[] {
 	const base = buildBaseTurns()
 	const baseEndMs = Math.max(...base.map((span) => spanStartMs(span) + span.durationMs)) - T0
-	return [...base, ...buildTranscriptTurns(baseEndMs + 2 * MINUTE)].sort(
-		(a, b) => spanStartMs(a) - spanStartMs(b),
-	)
+	return [...base, ...buildTranscriptTurns(baseEndMs + 2 * MINUTE)]
+		.sort((a, b) => spanStartMs(a) - spanStartMs(b))
+		.map((span) => ({ ...span, vendorId: VENDOR_ID }))
 }
 
 /**

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use maple_ingest::metrics;
+use moka::future::Cache;
 use reqwest::Client;
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -12,7 +13,6 @@ use uuid::Uuid;
 const AUTUMN_API_VERSION: &str = "2.3.0";
 const AUTUMN_TRACK_PATH: &str = "/v1/balances.track";
 const AUTUMN_CHECK_PATH: &str = "/v1/balances.check";
-const AUTUMN_FINALIZE_PATH: &str = "/v1/balances.finalize";
 
 pub(crate) struct UsageEvent {
     pub org_id: String,
@@ -317,55 +317,71 @@ async fn flush_all(
     }
 }
 
-/// Autumn-native entitlement and atomic usage meter.
+/// Autumn-native entitlement gate, in front of a short-lived decision cache.
 ///
-/// Billable handlers reserve their exact quantity with `balances.check`, commit
-/// data to Maple's WAL, then confirm the lock. A rejected check never reaches
-/// storage; a failed storage write releases the lock. Plain `is_allowed` remains
-/// for replay payloads that belong to an already-metered browser session.
+/// Autumn is asked whether an org may ingest a feature at most once per
+/// `allow_ttl`; every other request for that `(org, feature)` is answered from
+/// memory. Usage itself is never sent from here — `AutumnTracker` accumulates it
+/// and flushes on its own interval, which is the only path that bills.
+///
+/// This deliberately trades exactness for latency. An org that crosses a hard
+/// cap keeps ingesting for up to one TTL, so caps are soft by that much; denials
+/// carry a much shorter TTL so a customer who has just paid is not held at 402.
+/// The alternative — a `balances.check` lock plus a `balances.finalize` on every
+/// request — put two blocking round trips to a third party in the ingest hot
+/// path, and failed open on any of them anyway.
 #[derive(Clone)]
 pub(crate) struct AutumnEntitlements {
     client: maple_ingest::telemetry::HttpClient,
     secret_key: String,
     api_url: String,
+    decisions: Cache<DecisionKey, Decision>,
+}
+
+/// `&'static str` because every feature id is a const or `Signal::path()`; it
+/// keeps the cache key allocation-free on the hot side.
+type DecisionKey = (String, &'static str);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Decision {
+    Allow,
+    Deny,
+    /// Autumn gave no usable answer. Ingest proceeds (the fail-open rule this
+    /// service has always had), but the entry expires on the short TTL so a
+    /// blip resolves quickly instead of pinning an org open for a full minute.
+    Unavailable,
+}
+
+impl Decision {
+    const fn allowed(self) -> bool {
+        !matches!(self, Self::Deny)
+    }
+}
+
+/// Allows are cached for the long TTL, denials and fail-opens for the short one.
+struct DecisionExpiry {
+    allow_ttl: Duration,
+    deny_ttl: Duration,
+}
+
+impl moka::Expiry<DecisionKey, Decision> for DecisionExpiry {
+    fn expire_after_create(
+        &self,
+        _key: &DecisionKey,
+        value: &Decision,
+        _created_at: std::time::Instant,
+    ) -> Option<Duration> {
+        Some(match value {
+            Decision::Allow => self.allow_ttl,
+            Decision::Deny | Decision::Unavailable => self.deny_ttl,
+        })
+    }
 }
 
 #[derive(Serialize)]
 struct CheckRequest<'a> {
     customer_id: &'a str,
     feature_id: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    required_balance: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    send_event: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    lock: Option<CheckLockRequest<'a>>,
-}
-
-#[derive(Serialize)]
-struct CheckLockRequest<'a> {
-    lock_id: &'a str,
-    enabled: bool,
-    expires_at: u64,
-}
-
-#[derive(Serialize)]
-struct FinalizeRequest<'a> {
-    lock_id: &'a str,
-    action: &'a str,
-}
-
-#[derive(Debug)]
-pub(crate) struct AutumnReservation {
-    lock_id: String,
-}
-
-pub(crate) enum AutumnReserveOutcome {
-    Reserved(AutumnReservation),
-    Denied,
-    /// Autumn could not give a confirmed answer. The ingest path fails open and
-    /// uses the retrying tracker after the WAL commit.
-    Unavailable,
 }
 
 impl AutumnEntitlements {
@@ -373,134 +389,65 @@ impl AutumnEntitlements {
         client: impl Into<maple_ingest::telemetry::HttpClient>,
         secret_key: String,
         api_url: &str,
+        allow_ttl_secs: u64,
+        deny_ttl_secs: u64,
     ) -> Self {
         let client = client.into();
         let api_url = api_url.trim_end_matches('/').to_owned();
-        info!("Autumn native billing enforcement enabled");
+        info!(
+            allow_ttl_secs,
+            deny_ttl_secs, "Autumn native billing enforcement enabled"
+        );
 
         Self {
             client,
             secret_key,
             api_url,
+            decisions: Cache::builder()
+                .expire_after(DecisionExpiry {
+                    allow_ttl: Duration::from_secs(allow_ttl_secs),
+                    deny_ttl: Duration::from_secs(deny_ttl_secs),
+                })
+                .max_capacity(10_000)
+                .build(),
         }
     }
 
-    /// Check without consuming usage. Decisions are intentionally not cached:
-    /// Autumn customer controls can change, or cross a limit, on any event.
-    pub(crate) async fn is_allowed(&self, org_id: &str, feature_id: &str) -> bool {
+    /// Whether `org_id` may ingest `feature_id`, from cache when it is warm.
+    ///
+    /// Concurrent misses for the same key collapse into one request: moka's
+    /// `get_with` runs the initializer once and hands the result to every
+    /// waiter, so a cold whale org does not open a connection per request.
+    pub(crate) async fn is_allowed(&self, org_id: &str, feature_id: &'static str) -> bool {
+        let key = (org_id.to_owned(), feature_id);
+        if let Some(cached) = self.decisions.get(&key).await {
+            tracing::Span::current().record("maple.ingest.cache_hit", true);
+            metrics::autumn_entitlement_decision("hit");
+            return cached.allowed();
+        }
+
         tracing::Span::current().record("maple.ingest.cache_hit", false);
-        self.post_check(org_id, feature_id, None, None)
+        metrics::autumn_entitlement_decision("miss");
+        self.decisions
+            .get_with(key, async {
+                match self.post_check(org_id, feature_id).await {
+                    Some(true) => Decision::Allow,
+                    Some(false) => Decision::Deny,
+                    None => Decision::Unavailable,
+                }
+            })
             .await
-            .and_then(|value| decide_allowed(&value, None))
-            .unwrap_or(true)
-    }
-
-    /// Atomically check and reserve an exact usage quantity.
-    pub(crate) async fn reserve(
-        &self,
-        org_id: &str,
-        feature_id: &str,
-        value: f64,
-    ) -> AutumnReserveOutcome {
-        let lock_id = Uuid::new_v4().to_string();
-        let expires_at = u64::try_from(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis(),
-        )
-        .unwrap_or(u64::MAX)
-        .saturating_add(120_000);
-        let lock = CheckLockRequest {
-            lock_id: &lock_id,
-            enabled: true,
-            expires_at,
-        };
-        match self
-            .post_check(org_id, feature_id, Some(value), Some(lock))
-            .await
-            .and_then(|response| decide_allowed(&response, Some(value)))
-        {
-            Some(true) => AutumnReserveOutcome::Reserved(AutumnReservation { lock_id }),
-            Some(false) => AutumnReserveOutcome::Denied,
-            None => AutumnReserveOutcome::Unavailable,
-        }
-    }
-
-    /// Confirm a committed WAL write or release a failed one. A short retry
-    /// handles transient downstream errors while the two-minute lock is valid.
-    #[expect(
-        clippy::cognitive_complexity,
-        reason = "one HTTP round trip plus the response classification it exists to do"
-    )]
-    pub(crate) async fn finalize(&self, reservation: &AutumnReservation, confirm: bool) -> bool {
-        let action = if confirm { "confirm" } else { "release" };
-        let body = FinalizeRequest {
-            lock_id: &reservation.lock_id,
-            action,
-        };
-        for attempt in 1..=3 {
-            let span = tracing::info_span!(
-                "autumn.finalize",
-                otel.kind = "client",
-                "http.request.method" = "POST",
-                "server.address" = "api.useautumn.com",
-                "peer.service" = "autumn",
-            );
-            let result = self
-                .client
-                .post(format!("{}{}", self.api_url, AUTUMN_FINALIZE_PATH))
-                .header("Authorization", format!("Bearer {}", self.secret_key))
-                .header("x-api-version", AUTUMN_API_VERSION)
-                .timeout(Duration::from_secs(5))
-                .json(&body)
-                .send()
-                .instrument(span)
-                .await;
-            match result {
-                Ok(response) if response.status().is_success() => return true,
-                Ok(response) => warn!(
-                    lock_id = %reservation.lock_id,
-                    action,
-                    attempt,
-                    status = %response.status(),
-                    "Autumn finalize returned non-success"
-                ),
-                Err(error) => warn!(
-                    lock_id = %reservation.lock_id,
-                    action,
-                    attempt,
-                    error = %error,
-                    "Autumn finalize request failed"
-                ),
-            }
-            tokio::time::sleep(Duration::from_millis(100 * attempt)).await;
-        }
-        error!(
-            lock_id = %reservation.lock_id,
-            action,
-            "CRITICAL: Autumn reservation could not be finalized before lock expiry"
-        );
-        false
+            .allowed()
     }
 
     #[expect(
         clippy::cognitive_complexity,
         reason = "one HTTP round trip plus the response classification it exists to do"
     )]
-    async fn post_check(
-        &self,
-        org_id: &str,
-        feature_id: &str,
-        required_balance: Option<f64>,
-        lock: Option<CheckLockRequest<'_>>,
-    ) -> Option<serde_json::Value> {
+    async fn post_check(&self, org_id: &str, feature_id: &str) -> Option<bool> {
         let body = CheckRequest {
             customer_id: org_id,
             feature_id,
-            required_balance,
-            send_event: required_balance.map(|_| true),
-            lock,
         };
 
         let span = tracing::info_span!(
@@ -576,7 +523,8 @@ impl AutumnEntitlements {
             }
         };
 
-        match decide_allowed(&value, required_balance) {
+        let decision = decide_allowed(&value);
+        match decision {
             None => {
                 // Valid JSON we didn't recognize. Fail open, but log the body so
                 // the real shape is visible and we can adapt decide_allowed.
@@ -588,21 +536,20 @@ impl AutumnEntitlements {
                 );
             }
             Some(false) => {
-                // A denial turns into a customer-visible 402, so record what
-                // Autumn actually said. `allowed:false` alone cannot distinguish
-                // "no subscription" from "in overage" from "spend limit hit" —
-                // and those want opposite handling.
+                // A denial turns into a customer-visible 402 for up to one deny
+                // TTL, so record what Autumn actually said. `allowed:false`
+                // alone cannot distinguish "no subscription" from "in overage"
+                // from "spend limit hit" — and those want opposite handling.
                 warn!(
                     org_id,
                     feature_id,
-                    ?required_balance,
                     body = %truncate_for_log(&text),
                     "Autumn denied ingestion; recording response body for the denial reason"
                 );
             }
             Some(true) => {}
         }
-        Some(value)
+        decision
     }
 }
 
@@ -632,7 +579,7 @@ fn truncate_for_log(body: &str) -> String {
 /// customer spend limits: a plan can allow overage generally while a customer
 /// control denies the next event. Older response shapes without `allowed` fall
 /// back to unlimited/overage/remaining for compatibility.
-fn decide_allowed(value: &serde_json::Value, required_balance: Option<f64>) -> Option<bool> {
+fn decide_allowed(value: &serde_json::Value) -> Option<bool> {
     let as_bool =
         |v: &serde_json::Value, key: &str| v.get(key).and_then(serde_json::Value::as_bool);
 
@@ -679,10 +626,7 @@ fn decide_allowed(value: &serde_json::Value, required_balance: Option<f64>) -> O
         return Some(true);
     }
     if let Some(remaining) = remaining {
-        return Some(match required_balance {
-            Some(required) => remaining >= required,
-            None => remaining > 0.0,
-        });
+        return Some(remaining > 0.0);
     }
     None
 }
@@ -694,17 +638,12 @@ mod tests {
     use axum::http::StatusCode;
     use axum::routing::post;
     use axum::Router;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
     fn decide(json: &str) -> Option<bool> {
         let value = serde_json::from_str::<serde_json::Value>(json).expect("valid json");
-        decide_allowed(&value, None)
-    }
-
-    fn decide_for(json: &str, required_balance: f64) -> Option<bool> {
-        let value = serde_json::from_str::<serde_json::Value>(json).expect("valid json");
-        decide_allowed(&value, Some(required_balance))
+        decide_allowed(&value)
     }
 
     // --- Flat hosted REST shape: `balance` is a number; unlimited /
@@ -717,17 +656,6 @@ mod tests {
                 r#"{"allowed": true, "balance": 12.5, "unlimited": false, "overage_allowed": false}"#
             ),
             Some(true)
-        );
-    }
-
-    #[test]
-    fn legacy_shape_requires_the_full_reserved_quantity() {
-        assert_eq!(
-            decide_for(
-                r#"{"balance": 0.5, "unlimited": false, "overage_allowed": false}"#,
-                0.75,
-            ),
-            Some(false)
         );
     }
 
@@ -835,8 +763,13 @@ mod tests {
     async fn fails_open_on_transport_error() {
         // Port 1 is closed => connection refused => we must fail open (allow),
         // never dropping customer data on a billing-provider outage.
-        let entitlements =
-            AutumnEntitlements::new(Client::new(), "sk_test".to_owned(), "http://127.0.0.1:1");
+        let entitlements = AutumnEntitlements::new(
+            Client::new(),
+            "sk_test".to_owned(),
+            "http://127.0.0.1:1",
+            60,
+            5,
+        );
         assert!(entitlements.is_allowed("org_123", "logs").await);
     }
 
@@ -878,6 +811,8 @@ mod tests {
             Client::new(),
             "sk_test".to_owned(),
             &format!("http://{addr}"),
+            60,
+            5,
         );
         assert!(entitlements.is_allowed("org_123", "logs").await);
 
@@ -887,58 +822,137 @@ mod tests {
         assert_eq!(api_version.as_deref(), Some(AUTUMN_API_VERSION));
     }
 
-    async fn record_atomic_check(
-        State(tx): State<mpsc::UnboundedSender<(String, serde_json::Value)>>,
-        body: String,
-    ) -> axum::Json<serde_json::Value> {
-        drop(tx.send(("check".to_owned(), serde_json::from_str(&body).unwrap())));
-        axum::Json(serde_json::json!({ "allowed": true, "balance": 10 }))
+    /// A `/v1/balances.check` stub that counts calls and answers `allowed` from
+    /// a flag the test can flip, so a test can prove both that a decision was
+    /// reused and that it was eventually re-fetched.
+    #[derive(Clone)]
+    struct CheckStub {
+        calls: Arc<AtomicUsize>,
+        allow: Arc<AtomicBool>,
+        delay: Duration,
     }
 
-    async fn record_finalize(
-        State(tx): State<mpsc::UnboundedSender<(String, serde_json::Value)>>,
-        body: String,
-    ) -> axum::Json<serde_json::Value> {
-        drop(tx.send(("finalize".to_owned(), serde_json::from_str(&body).unwrap())));
-        axum::Json(serde_json::json!({ "success": true }))
+    async fn record_counted_check(State(stub): State<CheckStub>) -> axum::Json<serde_json::Value> {
+        stub.calls.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(stub.delay).await;
+        axum::Json(serde_json::json!({
+            "allowed": stub.allow.load(Ordering::SeqCst),
+            "balance": { "remaining": 12.5, "unlimited": false, "overage_allowed": false }
+        }))
     }
 
-    #[tokio::test]
-    async fn reserve_tracks_exact_usage_under_a_lock_then_confirms() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+    async fn spawn_check_stub(allow: bool, delay: Duration) -> (String, CheckStub) {
+        let stub = CheckStub {
+            calls: Arc::new(AtomicUsize::new(0)),
+            allow: Arc::new(AtomicBool::new(allow)),
+            delay,
+        };
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .unwrap();
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
-            .route(AUTUMN_CHECK_PATH, post(record_atomic_check))
-            .route(AUTUMN_FINALIZE_PATH, post(record_finalize))
-            .with_state(tx);
+            .route(AUTUMN_CHECK_PATH, post(record_counted_check))
+            .with_state(stub.clone());
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
+        (format!("http://{addr}"), stub)
+    }
 
+    #[tokio::test]
+    async fn repeated_checks_hit_autumn_once_per_ttl() {
+        // The whole point of the change: ingest requests after the first are
+        // answered from memory, not from a blocking call to a third party.
+        let (api_url, stub) = spawn_check_stub(true, Duration::ZERO).await;
+        let entitlements =
+            AutumnEntitlements::new(Client::new(), "sk_test".to_owned(), &api_url, 60, 5);
+
+        for _ in 0..25 {
+            assert!(entitlements.is_allowed("org_cached", "logs").await);
+        }
+
+        assert_eq!(stub.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn decisions_are_scoped_to_the_org_and_feature() {
+        let (api_url, stub) = spawn_check_stub(true, Duration::ZERO).await;
+        let entitlements =
+            AutumnEntitlements::new(Client::new(), "sk_test".to_owned(), &api_url, 60, 5);
+
+        assert!(entitlements.is_allowed("org_a", "logs").await);
+        assert!(entitlements.is_allowed("org_a", "traces").await);
+        assert!(entitlements.is_allowed("org_b", "logs").await);
+        assert!(entitlements.is_allowed("org_a", "logs").await);
+
+        assert_eq!(stub.calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn concurrent_misses_collapse_into_one_check() {
+        // Without single-flight, a cold whale org opens one connection per
+        // in-flight request the moment its entry expires.
+        let (api_url, stub) = spawn_check_stub(true, Duration::from_millis(50)).await;
+        let entitlements =
+            AutumnEntitlements::new(Client::new(), "sk_test".to_owned(), &api_url, 60, 5);
+
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let entitlements = entitlements.clone();
+            handles.push(tokio::spawn(async move {
+                entitlements.is_allowed("org_stampede", "traces").await
+            }));
+        }
+        for handle in handles {
+            assert!(handle.await.unwrap());
+        }
+
+        assert_eq!(stub.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_denial_expires_on_the_short_ttl_so_a_paying_org_recovers() {
+        // The asymmetry that makes the cache safe to ship: an org that has just
+        // paid is held at 402 for the deny TTL, not the allow TTL.
+        let (api_url, stub) = spawn_check_stub(false, Duration::ZERO).await;
+        let entitlements =
+            AutumnEntitlements::new(Client::new(), "sk_test".to_owned(), &api_url, 3_600, 1);
+
+        assert!(!entitlements.is_allowed("org_lapsed", "logs").await);
+        assert!(!entitlements.is_allowed("org_lapsed", "logs").await);
+        assert_eq!(stub.calls.load(Ordering::SeqCst), 1, "denial is cached too");
+
+        stub.allow.store(true, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(1_200)).await;
+
+        assert!(entitlements.is_allowed("org_lapsed", "logs").await);
+        assert_eq!(stub.calls.load(Ordering::SeqCst), 2);
+
+        // ...and the allow it just learned rides the hour-long TTL.
+        assert!(entitlements.is_allowed("org_lapsed", "logs").await);
+        assert_eq!(stub.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_autumn_fails_open_without_pinning_the_org_open() {
+        // Port 1 is closed => connection refused => allow, but on the SHORT TTL:
+        // a fail-open must not hold an org open for a full allow window.
         let entitlements = AutumnEntitlements::new(
             Client::new(),
             "sk_test".to_owned(),
-            &format!("http://{addr}"),
+            "http://127.0.0.1:1",
+            3_600,
+            1,
         );
-        let AutumnReserveOutcome::Reserved(reservation) =
-            entitlements.reserve("org_123", "logs", 0.125).await
-        else {
-            panic!("usage should be reserved")
-        };
-        assert!(entitlements.finalize(&reservation, true).await);
-
-        let (_, check) = rx.recv().await.expect("check request");
-        let (_, finalize) = rx.recv().await.expect("finalize request");
-        assert_eq!(check["customer_id"], "org_123");
-        assert_eq!(check["feature_id"], "logs");
-        assert_eq!(check["required_balance"], 0.125);
-        assert_eq!(check["send_event"], true);
-        assert_eq!(check["lock"]["enabled"], true);
-        assert_eq!(finalize["lock_id"], check["lock"]["lock_id"]);
-        assert_eq!(finalize["action"], "confirm");
+        assert!(entitlements.is_allowed("org_outage", "logs").await);
+        assert_eq!(
+            entitlements
+                .decisions
+                .get(&("org_outage".to_owned(), "logs"))
+                .await,
+            Some(Decision::Unavailable)
+        );
     }
 
     /// Every fake Autumn handler reports what it received down the same channel:

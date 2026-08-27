@@ -7,7 +7,7 @@ import { highlightCode } from "@/lib/sugar-high"
 
 /**
  * The rendered ↔ raw affordances every captured body shares, wherever it is
- * opened — a transcript block, the Traces expansion, the Flow drawer. Markdown
+ * opened — a transcript block, the span popover. Markdown
  * layout and pretty-printed JSON are readings of the capture, and a reading can
  * hide things — whitespace, key order, a literal `**` — so every rendered body
  * keeps a way back to the captured bytes.

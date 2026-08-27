@@ -62,9 +62,9 @@ export function SessionViews({
 	summary: SessionSummary
 	/** The response dropped the END of the session — the transcript says so. */
 	truncated: boolean
-	/** The span expanded inline / open in the flow drawer (`?span=`). */
+	/** The span open in the inspection popover, in whichever view (`?span=`). */
 	selectedSpanId: string | undefined
-	/** Raised with a span id to expand it, `undefined` to collapse. */
+	/** Raised with a span id to open it, `undefined` to close. */
 	onSelectSpan: (spanId: string | undefined) => void
 }) {
 	const [query, setQuery] = useState("")
@@ -82,9 +82,9 @@ export function SessionViews({
 	// keyed by row, and holds the rows flipped AWAY from their default.
 	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
 	const [zoom, setZoom] = useState(1)
-	// One tab choice for every span expansion, in both debug views: switching
-	// spans — or Trace ↔ Flow — keeps the reader on the tab they chose.
-	// `undefined` means no choice yet, and the expansion picks by content.
+	// One tab choice for every span the popover opens, in every view: switching
+	// spans — or views — keeps the reader on the tab they chose. `undefined`
+	// means no choice yet, and the panel picks by content.
 	const [spanTab, setSpanTab] = useState<SpanDetailTab | undefined>(undefined)
 
 	// 1/2/3/4 switch views from anywhere on the page — the switcher stays
@@ -208,17 +208,20 @@ export function SessionViews({
 
 			{/* Overview, Trace and Transcript carry the bottom padding the page
 			    scroller gave up (`pb-0`, so the Flow floor can pin flush — see the
-			    route); the Flow view stays unpadded for the same reason. */}
+			    route); the Flow view stays unpadded for the same reason. Only the
+			    active view sees the span selection: an outgoing panel stays
+			    mounted until its exit transition completes, and two views holding
+			    the inspection overlay open would stack two scrims. */}
 			<TabsContent value="overview" className="flex flex-[1_1_auto] flex-col pb-4">
 				<SessionOverview
 					turns={turns}
 					summary={summary}
-					// A finding's evidence lives in the Traces view: select the span and
-					// go — the waterfall scrolls to and expands the selection on mount.
-					onOpenSpan={(spanId) => {
-						onSelectSpan(spanId)
-						onViewChange("trace")
-					}}
+					selectedSpanId={view === "overview" ? selectedSpanId : undefined}
+					onSelectSpan={onSelectSpan}
+					spanTab={spanTab}
+					onSpanTabChange={setSpanTab}
+					toolResults={toolResults}
+					onOpenTraceView={() => onViewChange("trace")}
 				/>
 			</TabsContent>
 			<TabsContent value="trace" className="flex flex-[1_1_auto] flex-col pb-4">
@@ -230,7 +233,7 @@ export function SessionViews({
 					collapseIdle={collapseIdle}
 					collapsedTurns={collapsedTurns}
 					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
-					selectedSpanId={selectedSpanId}
+					selectedSpanId={view === "trace" ? selectedSpanId : undefined}
 					onSelectSpan={onSelectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
@@ -245,7 +248,7 @@ export function SessionViews({
 					agentSpansOnly={agentSpansOnly}
 					zoom={zoom}
 					onZoomChange={setZoom}
-					selectedSpanId={selectedSpanId}
+					selectedSpanId={view === "flow" ? selectedSpanId : undefined}
 					onSelectSpan={onSelectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}

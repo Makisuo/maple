@@ -29,6 +29,7 @@ import {
 } from "@/lib/agent-sessions/session-window"
 import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns } from "@/lib/agent-sessions/session-turns"
+import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { displayError } from "@/lib/error-messages"
@@ -46,9 +47,9 @@ const agentSessionSearchSchema = Schema.Struct({
 	// segment on purpose: Back from the detail page returns to the list the
 	// reader came from, not to the view they looked at before this one.
 	view: Schema.optional(Schema.String),
-	// The span expanded inline (Trace) or open in the docked drawer (Flow). In
-	// the URL rather than component state so a pasted link reopens the exact
-	// span someone was looking at, in either debug view.
+	// The span open in the inspection popover, in whichever view it was opened
+	// from. In the URL rather than component state so a pasted link reopens the
+	// exact span someone was looking at.
 	span: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())),
 })
 
@@ -214,8 +215,8 @@ function SessionDetailBody({
 		(spanId: string | undefined) => {
 			navigate({
 				search: (prev: Record<string, unknown>) => ({ ...prev, span: spanId }),
-				// Expanding a span is a step the reader may want Back to undo;
-				// moving the expansion, or collapsing it, is not.
+				// Opening a span is a step the reader may want Back to undo;
+				// moving the panel to another span, or closing it, is not.
 				replace: search.span !== undefined,
 			})
 		},
@@ -225,6 +226,8 @@ function SessionDetailBody({
 	// Message content is opt-in and off by default, so most sessions have no
 	// opening user message to title the page with.
 	const title = summary.title ?? breadcrumbSessionId(sessionId)
+	// The framework that emitted the session, as its mark — the subtitle names it.
+	const VendorIcon = vendorIcon(summary.vendorIds[0] ?? "")
 
 	return (
 		<SessionShell sessionId={sessionId}>
@@ -233,6 +236,7 @@ function SessionDetailBody({
 					<DashboardLayout.Header
 						titleContent={
 							<div className="flex min-w-0 items-center gap-2">
+								<VendorIcon size={16} className="shrink-0 text-muted-foreground" aria-hidden />
 								<DashboardLayout.Title title={title}>
 									{summary.title === undefined ? (
 										// The id fallback title copies the full session id.
@@ -261,9 +265,9 @@ function SessionDetailBody({
 				{/* `py-0` (the content blocks carry the padding instead) so the views'
 				    sticky elements pin flush to the scroller's edges — sticky offsets
 				    resolve against the padding edge. The top edge is the control bar;
-				    the bottom is the Flow view's floor, whose docked span drawer
-				    otherwise floats a padding's height short of the viewport with the
-				    canvas scrolling visibly beneath it. `pr-6` keeps the overlay
+				    the bottom is the Flow view's floor, whose legend and zoom otherwise
+				    float a padding's height short of the viewport with the canvas
+				    scrolling visibly beneath them. `pr-6` keeps the overlay
 				    scrollbar off the right-aligned duration/cost columns, and
 				    `overflow-x-hidden` means a span that escapes its truncation can
 				    never make the whole page scroll sideways. */}
@@ -297,8 +301,8 @@ function SessionDetailBody({
 					</div>
 				</DashboardLayout.Scroll>
 			</DashboardLayout.Content>
-			{/* No side panel at any width: span detail expands inline under its
-			    waterfall row, or in the Flow view's docked drawer. */}
+			{/* No side panel at any width: span detail opens as a popover against
+			    the row, node or finding the reader clicked. */}
 		</SessionShell>
 	)
 }
