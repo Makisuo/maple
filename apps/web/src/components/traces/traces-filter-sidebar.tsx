@@ -8,6 +8,8 @@ import {
 	serviceColorMap,
 } from "./filter-section"
 import { DurationRangeFilter } from "./duration-range-filter"
+import { PinnedNamespaceNotice } from "@/components/filters/pinned-namespace-notice"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import type { TracesFacetsResponse } from "@/api/warehouse/traces"
 import {
 	FilterSidebarBody,
@@ -39,6 +41,7 @@ function TracesFilterSidebarView({
 	onDurationRangeChange,
 	onClearFilters,
 }: TracesFilterSidebarViewProps) {
+	const pinnedNamespace = useGlobalNamespace()
 	const hasActiveFilters =
 		(filters.services?.length ?? 0) > 0 ||
 		(filters.spanNames?.length ?? 0) > 0 ||
@@ -102,14 +105,18 @@ function TracesFilterSidebarView({
 							onExcludedChange={(val) => onFilterChange("excludedDeploymentEnvs", val)}
 						/>
 
-						<SearchableFilterSection
-							title="Namespace"
-							options={facets.namespaces ?? []}
-							selected={filters.namespaces ?? []}
-							onChange={(val) => onFilterChange("namespaces", val)}
-							excluded={filters.excludedNamespaces ?? []}
-							onExcludedChange={(val) => onFilterChange("excludedNamespaces", val)}
-						/>
+						{pinnedNamespace !== null ? (
+							<PinnedNamespaceNotice namespace={pinnedNamespace} />
+						) : (
+							<SearchableFilterSection
+								title="Namespace"
+								options={facets.namespaces ?? []}
+								selected={filters.namespaces ?? []}
+								onChange={(val) => onFilterChange("namespaces", val)}
+								excluded={filters.excludedNamespaces ?? []}
+								onExcludedChange={(val) => onFilterChange("excludedNamespaces", val)}
+							/>
+						)}
 
 						<SearchableFilterSection
 							title="Service"

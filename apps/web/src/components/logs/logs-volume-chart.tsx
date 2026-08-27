@@ -20,6 +20,7 @@ import {
 import { useTheme } from "@maple/ui/hooks/use-theme"
 import { ChartLoading } from "@maple/ui/components/charts"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { computeBucketSeconds } from "@/api/warehouse/timeseries-utils"
 import { formatBucketLabel, formatNumber, inferBucketSeconds, inferRangeMs } from "@maple/ui/lib/format"
@@ -230,6 +231,9 @@ interface LogsVolumeChartProps {
 }
 
 export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartProps) {
+	// Injected here (not via the atom option) — the custom-chart family is
+	// shared with dashboard widgets, which stay unscoped for now.
+	const pinnedNamespace = useGlobalNamespace()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		filters?.startTime,
 		filters?.endTime,
@@ -254,7 +258,12 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 					serviceNames: filters?.services ? [...filters.services] : undefined,
 					severities: filters?.severities ? [...filters.severities] : undefined,
 					environments: filters?.deploymentEnvs ? [...filters.deploymentEnvs] : undefined,
-					namespaces: filters?.namespaces ? [...filters.namespaces] : undefined,
+					namespaces:
+						pinnedNamespace !== null
+							? [pinnedNamespace]
+							: filters?.namespaces
+								? [...filters.namespaces]
+								: undefined,
 					excludedServiceNames: filters?.excludedServices
 						? [...filters.excludedServices]
 						: undefined,
@@ -264,9 +273,10 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 					excludedEnvironments: filters?.excludedDeploymentEnvs
 						? [...filters.excludedDeploymentEnvs]
 						: undefined,
-					excludedNamespaces: filters?.excludedNamespaces
-						? [...filters.excludedNamespaces]
-						: undefined,
+					excludedNamespaces:
+						pinnedNamespace === null && filters?.excludedNamespaces
+							? [...filters.excludedNamespaces]
+							: undefined,
 				},
 			},
 		}),
