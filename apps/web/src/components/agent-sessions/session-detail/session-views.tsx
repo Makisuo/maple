@@ -208,12 +208,15 @@ export function SessionViews({
 
 			{/* Overview, Trace and Transcript carry the bottom padding the page
 			    scroller gave up (`pb-0`, so the Flow floor can pin flush — see the
-			    route); the Flow view stays unpadded for the same reason. */}
+			    route); the Flow view stays unpadded for the same reason. Only the
+			    active view sees the span selection: an outgoing panel stays
+			    mounted until its exit transition completes, and two views must
+			    never hold the inspection popover open at once. */}
 			<TabsContent value="overview" className="flex flex-[1_1_auto] flex-col pb-4">
 				<SessionOverview
 					turns={turns}
 					summary={summary}
-					selectedSpanId={selectedSpanId}
+					selectedSpanId={view === "overview" ? selectedSpanId : undefined}
 					onSelectSpan={onSelectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
@@ -230,7 +233,7 @@ export function SessionViews({
 					collapseIdle={collapseIdle}
 					collapsedTurns={collapsedTurns}
 					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
-					selectedSpanId={selectedSpanId}
+					selectedSpanId={view === "trace" ? selectedSpanId : undefined}
 					onSelectSpan={onSelectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
@@ -245,7 +248,7 @@ export function SessionViews({
 					agentSpansOnly={agentSpansOnly}
 					zoom={zoom}
 					onZoomChange={setZoom}
-					selectedSpanId={selectedSpanId}
+					selectedSpanId={view === "flow" ? selectedSpanId : undefined}
 					onSelectSpan={onSelectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
