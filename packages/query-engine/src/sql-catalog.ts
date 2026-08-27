@@ -95,6 +95,9 @@ export interface PipeFixture {
 	readonly params: Record<string, unknown>
 	/** Run under every capability variant, not just the baseline. */
 	readonly allCapabilities?: boolean
+	/** Overrides for the synthetic zero-value row where the row schema demands
+	 *  more than the ClickHouse type — see `BuilderFixture.sampleValues`. */
+	readonly sampleValues?: Readonly<Record<string, unknown>>
 }
 
 const TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
@@ -259,7 +262,14 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "error_detail_traces", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "error_issues", label: "default", params: {} },
 	{ pipe: "error_issue_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
-	{ pipe: "error_issue_sample_traces", label: "default", params: { fingerprint_hash: FINGERPRINT } },
+	{
+		pipe: "error_issue_sample_traces",
+		label: "default",
+		params: { fingerprint_hash: FINGERPRINT },
+		// TraceId/SpanId decode through their branded schemas (minLength 1), which
+		// the synthetic row's "" would fail.
+		sampleValues: { traceId: TRACE_ID, spanId: "b7ad6b7169203331" },
+	},
 	{ pipe: "error_issue_environments", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 
 	{ pipe: "list_metrics", label: "default", params: {} },
@@ -358,6 +368,7 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 				sql: compiled.sql,
 				fingerprint: fingerprintSql(compiled.sql),
 				compiled,
+				...(fixture.sampleValues ? { sampleValues: fixture.sampleValues } : undefined),
 			})
 		}
 	}

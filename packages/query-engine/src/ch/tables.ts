@@ -4,8 +4,8 @@
 // These define the ClickHouse table schemas used by the query DSL.
 
 import { type ColumnDefs, type Table, table as chTable } from "@maple-dev/clickhouse-builder"
-import type { CHString } from "@maple-dev/clickhouse-builder/types"
 import * as T from "@maple-dev/clickhouse-builder/types"
+import { OrgId, SpanId, TraceId } from "@maple/domain"
 
 /**
  * Maple's warehouse timestamps stay the strings ClickHouse sends.
@@ -32,18 +32,32 @@ const dateTime64 = T.dateTime64String
 export type StringMap = T.CHMap<T.CHString, T.CHString>
 
 /**
+ * Identity columns carry their branded domain schemas, so a query that SELECTs
+ * one derives a row schema whose decoded type is the brand — no declared
+ * `rowSchema` needed just to keep `OrgId`/`TraceId`/`SpanId` in the output
+ * type. Comparisons still take plain strings/params: the builder widens a
+ * branded column's comparison type to its primitive.
+ */
+const orgId = T.custom("String", OrgId)
+const traceId = T.custom("String", TraceId)
+const spanId = T.custom("String", SpanId)
+
+/**
  * Every Maple warehouse table is keyed by `OrgId`, so tenancy is declared once
  * here rather than at 37 call sites. Requiring the column in the signature is
  * the point: a new table without one is a type error, not a table that silently
  * compiles every query as `cross-tenant`.
  */
-const table = <const Name extends string, const Columns extends ColumnDefs & { OrgId: CHString }>(
+const table = <
+	const Name extends string,
+	const Columns extends ColumnDefs & { OrgId: T.CHStringLike },
+>(
 	name: Name,
 	columns: Columns,
 ): Table<Name, Columns> => chTable(name, columns, { tenantColumn: "OrgId" })
 
 export const Traces = table("traces", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime64,
 	TraceId: T.string,
 	SpanId: T.string,
@@ -77,7 +91,7 @@ export const Traces = table("traces", {
 })
 
 export const TraceDetailSpans = table("trace_detail_spans", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime64,
 	TraceId: T.string,
 	SpanId: T.string,
@@ -93,7 +107,7 @@ export const TraceDetailSpans = table("trace_detail_spans", {
 })
 
 export const TraceListMv = table("trace_list_mv", {
-	OrgId: T.string,
+	OrgId: orgId,
 	TraceId: T.string,
 	Timestamp: dateTime,
 	ServiceName: T.string,
@@ -111,7 +125,7 @@ export const TraceListMv = table("trace_list_mv", {
 })
 
 export const Logs = table("logs", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime64,
 	TimestampTime: dateTime,
 	TraceId: T.string,
@@ -134,7 +148,7 @@ export const Logs = table("logs", {
 })
 
 export const ServiceOverviewSpans = table("service_overview_spans", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime,
 	ServiceName: T.string,
 	Duration: T.uint64,
@@ -147,7 +161,7 @@ export const ServiceOverviewSpans = table("service_overview_spans", {
 })
 
 export const ServiceOverviewHourly = table("service_overview_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
@@ -170,7 +184,7 @@ export const ServiceOverviewHourly = table("service_overview_hourly", {
  * bucket column, so the two can share a UNION ALL branch shape.
  */
 export const ServiceOverviewMinutely = table("service_overview_minutely", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Minute: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
@@ -188,10 +202,10 @@ export const ServiceOverviewMinutely = table("service_overview_minutely", {
 })
 
 export const ErrorEvents = table("error_events", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime,
-	TraceId: T.string,
-	SpanId: T.string,
+	TraceId: traceId,
+	SpanId: spanId,
 	ParentSpanId: T.string,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
@@ -214,10 +228,10 @@ export const ErrorEvents = table("error_events", {
  * `packages/domain/src/tinybird/datasources.ts`.
  */
 export const ErrorEventsByTime = table("error_events_by_time", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime,
-	TraceId: T.string,
-	SpanId: T.string,
+	TraceId: traceId,
+	SpanId: spanId,
 	ParentSpanId: T.string,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
@@ -234,7 +248,7 @@ export const ErrorEventsByTime = table("error_events_by_time", {
 
 /** Minute-grain per-fingerprint rollup consumed by the error issue tick. */
 export const ErrorFingerprintsMinutely = table("error_fingerprints_minutely", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Minute: dateTime,
 	FingerprintHash: T.uint64,
 	ServiceName: T.string,
@@ -249,7 +263,7 @@ export const ErrorFingerprintsMinutely = table("error_fingerprints_minutely", {
 })
 
 export const MetricsSum = table("metrics_sum", {
-	OrgId: T.string,
+	OrgId: orgId,
 	ResourceAttributes: T.map(T.string, T.string),
 	ServiceName: T.string,
 	MetricName: T.string,
@@ -265,7 +279,7 @@ export const MetricsSum = table("metrics_sum", {
 })
 
 export const MetricsGauge = table("metrics_gauge", {
-	OrgId: T.string,
+	OrgId: orgId,
 	ResourceAttributes: T.map(T.string, T.string),
 	ServiceName: T.string,
 	MetricName: T.string,
@@ -279,7 +293,7 @@ export const MetricsGauge = table("metrics_gauge", {
 })
 
 export const MetricsHistogram = table("metrics_histogram", {
-	OrgId: T.string,
+	OrgId: orgId,
 	ResourceAttributes: T.map(T.string, T.string),
 	ServiceName: T.string,
 	MetricName: T.string,
@@ -299,7 +313,7 @@ export const MetricsHistogram = table("metrics_histogram", {
 })
 
 export const MetricCatalog = table("metric_catalog", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	MetricType: T.string,
 	ServiceName: T.string,
@@ -313,7 +327,7 @@ export const MetricCatalog = table("metric_catalog", {
 })
 
 export const SpanMetricsCallsHourly = table("span_metrics_calls_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	MetricName: T.string,
@@ -326,7 +340,7 @@ export const SpanMetricsCallsHourly = table("span_metrics_calls_hourly", {
 })
 
 export const AttributeKeysHourly = table("attribute_keys_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	AttributeKey: T.string,
 	AttributeScope: T.string,
@@ -334,7 +348,7 @@ export const AttributeKeysHourly = table("attribute_keys_hourly", {
 })
 
 export const AttributeValuesHourly = table("attribute_values_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	AttributeKey: T.string,
 	AttributeValue: T.string,
@@ -343,7 +357,7 @@ export const AttributeValuesHourly = table("attribute_values_hourly", {
 })
 
 export const ServiceUsage = table("service_usage", {
-	OrgId: T.string,
+	OrgId: orgId,
 	ServiceName: T.string,
 	Hour: dateTime,
 	LogCount: T.uint64,
@@ -361,7 +375,7 @@ export const ServiceUsage = table("service_usage", {
 })
 
 export const ServiceMapSpans = table("service_map_spans", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime,
 	TraceId: T.string,
 	SpanId: T.string,
@@ -375,7 +389,7 @@ export const ServiceMapSpans = table("service_map_spans", {
 })
 
 export const ServiceMapChildren = table("service_map_children", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime,
 	TraceId: T.string,
 	ParentSpanId: T.string,
@@ -388,7 +402,7 @@ export const ServiceMapChildren = table("service_map_children", {
 })
 
 export const TracesAggregatesHourly = table("traces_aggregates_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	SpanName: T.string,
@@ -407,7 +421,7 @@ export const TracesAggregatesHourly = table("traces_aggregates_hourly", {
 })
 
 export const ServiceOperationsMinutely = table("service_operations_minutely", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Minute: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
@@ -422,7 +436,7 @@ export const ServiceOperationsMinutely = table("service_operations_minutely", {
 })
 
 export const LogsAggregatesHourly = table("logs_aggregates_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	SeverityText: T.string,
@@ -433,7 +447,7 @@ export const LogsAggregatesHourly = table("logs_aggregates_hourly", {
 })
 
 export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	SourceService: T.string,
 	TargetService: T.string,
@@ -452,7 +466,7 @@ export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
 // they emit are what the DSL can't express. Declared here anyway so
 // tables.test.ts drift-checks the columns those builders read.
 export const ServiceExternalEdgesHourly = table("service_external_edges_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	TargetType: T.string,
@@ -467,7 +481,7 @@ export const ServiceExternalEdgesHourly = table("service_external_edges_hourly",
 })
 
 export const ServiceAddressResolutionsHourly = table("service_address_resolutions_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	SourceService: T.string,
 	ParentServerAddress: T.string,
@@ -476,7 +490,7 @@ export const ServiceAddressResolutionsHourly = table("service_address_resolution
 })
 
 export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	DbSystem: T.string,
@@ -492,7 +506,7 @@ export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 })
 
 export const ServiceMapDbQuerySignaturesHourly = table("service_map_db_query_shapes_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	DbSystem: T.string,
@@ -512,7 +526,7 @@ export const ServiceMapDbQuerySignaturesHourly = table("service_map_db_query_sha
 })
 
 export const ServicePlatformsHourly = table("service_platforms_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
@@ -531,7 +545,7 @@ export const ServicePlatformsHourly = table("service_platforms_hourly", {
 })
 
 export const ServiceOperationsHourly = table("service_operations_hourly", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Hour: dateTime,
 	ServiceName: T.string,
 	DeploymentEnv: T.string,
@@ -545,7 +559,7 @@ export const ServiceOperationsHourly = table("service_operations_hourly", {
 })
 
 export const AlertChecks = table("alert_checks", {
-	OrgId: T.string,
+	OrgId: orgId,
 	RuleId: T.string,
 	GroupKey: T.string,
 	Timestamp: dateTime64,
@@ -568,7 +582,7 @@ export const AlertChecks = table("alert_checks", {
 })
 
 export const SessionReplays = table("session_replays", {
-	OrgId: T.string,
+	OrgId: orgId,
 	SessionId: T.string,
 	StartTime: dateTime64,
 	EndTime: T.nullable(dateTime64),
@@ -627,7 +641,7 @@ export const SessionReplays = table("session_replays", {
 })
 
 export const SessionReplayEvents = table("session_replay_events", {
-	OrgId: T.string,
+	OrgId: orgId,
 	SessionId: T.string,
 	ChunkSeq: T.uint32,
 	// Gateway receipt time — partitioning, TTL, and the anchor the chunk index
@@ -649,7 +663,7 @@ export const SessionReplayEvents = table("session_replay_events", {
 // panels, and the agent transcript. Sparse: only the fields relevant to a row's
 // Type are populated; the rest default empty.
 export const SessionEvents = table("session_events", {
-	OrgId: T.string,
+	OrgId: orgId,
 	SessionId: T.string,
 	Timestamp: dateTime64,
 	// Monotonic per-session ordering tiebreaker (events can share a ms timestamp).
@@ -698,7 +712,7 @@ export const SessionEvents = table("session_events", {
 // through `identity_links`. VisitorId is third in the sorting key so one
 // person's rows are contiguous inside a time range.
 export const ProductEvents = table("product_events", {
-	OrgId: T.string,
+	OrgId: orgId,
 	Timestamp: dateTime64,
 	// "browser" | "server" | "mobile".
 	Source: T.string,
@@ -736,13 +750,13 @@ export const ProductEvents = table("product_events", {
 // still hold several rows per pair, so always aggregate (`min(FirstSeen)` per
 // pair) or semi-join; never assume one row per pair on read.
 export const IdentityLinks = table("identity_links", {
-	OrgId: T.string,
+	OrgId: orgId,
 	VisitorId: T.string,
 	UserId: T.string,
 	FirstSeen: dateTime64,
 })
 export const MetricsExpHistogram = table("metrics_exponential_histogram", {
-	OrgId: T.string,
+	OrgId: orgId,
 	ResourceAttributes: T.map(T.string, T.string),
 	ServiceName: T.string,
 	MetricName: T.string,

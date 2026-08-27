@@ -360,7 +360,6 @@ const make: Effect.Effect<
 					startTime: formatWarehouseDateTime(startMs),
 					endTime: formatWarehouseDateTime(endMs),
 				},
-				{ rowSchema: CH.ErrorIssueSampleTracesOutputSchema },
 			)
 			const samplesEffect = isErrorKind
 				? warehouse.compiledQuery(tenant, samplesCompiled, {

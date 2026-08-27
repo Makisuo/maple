@@ -308,6 +308,9 @@ export interface InvokeHypothesisInput {
 	readonly deadlineAtMs: number
 	/** True on the collapsed path: answer with a full diagnosis, not a candidate. */
 	readonly solo: boolean
+	/** True when this lane's row shows a prior execution — the step re-ran after
+	 *  its result was lost to a retry boundary. */
+	readonly rerun: boolean
 	readonly runtime: SharedRuntime
 }
 
@@ -363,6 +366,7 @@ const invokeHypothesis = async (input: InvokeHypothesisInput): Promise<InvokeHyp
 		}),
 		tenant: tenantFor(input.orgId),
 		deadlineAtMs: input.deadlineAtMs,
+		rerun: input.rerun,
 	}
 
 	if (input.solo) {
@@ -850,6 +854,23 @@ async function runWithDb(
 				step
 					.do(`hypothesis-${ordinal}`, HYPOTHESIS_STEP, async (): Promise<HypothesisStepResult> => {
 						const startedAt = clock()
+						// A lane row past "queued" means this callback already ran and its step
+						// result was lost to a retry boundary (an engine reschedule can land
+						// minutes later, with no failure recorded anywhere). Stamped on the
+						// lane's span so a session view can tell a re-run from new work.
+						const prior = await dbStep((db) =>
+							db
+								.select({ status: investigationLensRuns.status })
+								.from(investigationLensRuns)
+								.where(
+									and(
+										eq(investigationLensRuns.investigationId, idTyped),
+										eq(investigationLensRuns.attempt, attempt),
+										eq(investigationLensRuns.lensId, hypothesis.id),
+									),
+								),
+						)
+						const rerun = prior[0] !== undefined && prior[0].status !== "queued"
 						await dbStep((db) =>
 							db
 								.update(investigationLensRuns)
@@ -879,6 +900,7 @@ async function runWithDb(
 								snapshot,
 								deadlineAtMs: hypothesisDeadlineAtMs,
 								solo: planned.collapsed,
+								rerun,
 								runtime,
 							})
 							const finishedAt = clock()

@@ -223,7 +223,10 @@ describe("runChatTurn", () => {
 		}),
 	)
 
-	it.live("keeps text ahead of the tool calls it precedes", () =>
+	// The test clock, not `it.live`: same 16ms `groupedWithin` window as the coalescing test above,
+	// so the two deltas can straddle a batch boundary on a loaded runner. Virtual time keeps them
+	// in one batch deterministically.
+	it.effect("keeps text ahead of the tool calls it precedes", () =>
 		Effect.gen(function* () {
 			const events = yield* collectEvents([
 				[textDelta("Looking"), textDelta(" it up"), toolCall("c1", "create_alert_rule"), finish()],

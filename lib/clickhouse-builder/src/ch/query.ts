@@ -46,8 +46,17 @@ export type JoinedColumnAccessor<
 
 type SelectRecord = Record<string, Expr<any>>
 
+/**
+ * Read each selected expression's output type off its `_phantom` property
+ * rather than `S[K] extends Expr<infer T>`. Structural inference prefers the
+ * contravariant candidates in the comparison methods, and those are widened
+ * (`Widen<TSType>`) so branded columns accept plain params — inferring through
+ * them resolved a branded column's output to the bare primitive. The indexed
+ * read is exact; `Exclude` only strips the `undefined` that `_phantom`'s
+ * optionality adds, so a `Nullable(...)` column's `| null` survives.
+ */
 export type InferOutput<S extends SelectRecord> = {
-	readonly [K in keyof S]: S[K] extends Expr<infer T> ? T : never
+	readonly [K in keyof S]: S[K] extends Expr<any> ? Exclude<S[K]["_phantom"], undefined> : never
 }
 
 type OrderBySpec<Output> = [keyof Output & string, "asc" | "desc"]

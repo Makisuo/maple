@@ -11,7 +11,7 @@ import { from, fromQuery, type CHQuery, type ColumnAccessor } from "@maple-dev/c
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
-import { SpanId, TraceId } from "@maple/domain"
+import type { SpanId, TraceId } from "@maple/domain"
 import { Schema } from "effect"
 import {
 	ErrorEvents,
@@ -1131,15 +1131,16 @@ export function errorIssueTimeseriesQuery() {
 
 // Error Issue sample traces — most recent occurrences for one issue
 
-export const ErrorIssueSampleTracesOutputSchema = Schema.Struct({
-	traceId: TraceId,
-	spanId: SpanId,
-	serviceName: Schema.String,
-	timestamp: Schema.String,
-	exceptionMessage: Schema.String,
-	durationMicros: CHNumber,
-})
-export type ErrorIssueSampleTracesOutput = Schema.Schema.Type<typeof ErrorIssueSampleTracesOutputSchema>
+/** `TraceId`/`SpanId` brands come off `ErrorEvents`' branded columns — the
+ *  derived row schema carries them, so no declared schema is needed. */
+export interface ErrorIssueSampleTracesOutput {
+	readonly traceId: TraceId
+	readonly spanId: SpanId
+	readonly serviceName: string
+	readonly timestamp: string
+	readonly exceptionMessage: string
+	readonly durationMicros: number
+}
 
 export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
 	return from(ErrorEvents)

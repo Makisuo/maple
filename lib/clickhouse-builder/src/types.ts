@@ -17,6 +17,7 @@ export {
 	type CHMap,
 	type CHNullable,
 	type CHString,
+	type CHStringLike,
 	type CHType,
 	type CHUInt8,
 	type CHUInt16,
