@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use autumn::{AutumnEntitlements, AutumnReservation, AutumnReserveOutcome, AutumnTracker};
+use autumn::{AutumnEntitlements, AutumnTracker};
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
@@ -141,6 +141,8 @@ struct AppConfig {
     autumn_secret_key: Option<String>,
     autumn_api_url: String,
     autumn_flush_interval_secs: u64,
+    autumn_allow_ttl_secs: u64,
+    autumn_deny_ttl_secs: u64,
     ingest_key_cache_ttl_secs: u64,
     org_routing_cache_ttl_secs: u64,
     /// Ceiling on the total decompressed rrweb payload a single replay session
@@ -470,6 +472,20 @@ impl AppConfig {
             1,
         )?;
 
+        // How long an entitlement decision is reused. Allows are cached long
+        // enough to take Autumn off the hot path; denials briefly, so an org
+        // that has just paid is not held at 402 for a full allow window.
+        let autumn_allow_ttl_secs = parse_u64(
+            "AUTUMN_ENTITLEMENT_ALLOW_TTL_SECS",
+            std::env::var("AUTUMN_ENTITLEMENT_ALLOW_TTL_SECS").ok(),
+            60,
+        )?;
+        let autumn_deny_ttl_secs = parse_u64(
+            "AUTUMN_ENTITLEMENT_DENY_TTL_SECS",
+            std::env::var("AUTUMN_ENTITLEMENT_DENY_TTL_SECS").ok(),
+            5,
+        )?;
+
         let ingest_key_cache_ttl_secs = parse_u64(
             "INGEST_KEY_CACHE_TTL_SECS",
             std::env::var("INGEST_KEY_CACHE_TTL_SECS").ok(),
@@ -569,6 +585,8 @@ impl AppConfig {
             autumn_secret_key,
             autumn_api_url,
             autumn_flush_interval_secs,
+            autumn_allow_ttl_secs,
+            autumn_deny_ttl_secs,
             ingest_key_cache_ttl_secs,
             org_routing_cache_ttl_secs,
             replay_max_session_bytes,
@@ -835,7 +853,7 @@ const BROWSER_SESSIONS_FEATURE_ID: &str = "browser_sessions";
 /// server-side one; only the transport differs).
 const PRODUCT_EVENTS_FEATURE_ID: &str = "product_events";
 
-/// What a DENIED Autumn reservation means for the batch in flight.
+/// What a DENIED Autumn entitlement means for the batch in flight.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OnDenied {
     /// 402 the request: the metered feature IS the payload, so an exhausted
@@ -851,17 +869,16 @@ enum OnDenied {
     MeterAnyway,
 }
 
-/// Meter `value` units of `feature_id` around a WAL enqueue: reserve through
-/// Autumn's atomic check+event lock, run `enqueue`, then confirm or release the
-/// lock. When Autumn could not reserve (disabled, unavailable, or denied under
-/// `OnDenied::MeterAnyway`) the quantity is recorded fail-open through the
-/// retrying tracker after the enqueue succeeds, so provider outages never drop
-/// data or usage. `value <= 0` meters nothing.
+/// Meter `value` units of `feature_id` around a WAL enqueue: gate on the cached
+/// entitlement decision, run `enqueue`, then record the quantity through the
+/// retrying tracker. Usage is only ever recorded after the enqueue succeeds, so
+/// a rejected payload is never billed and a provider outage never drops usage.
+/// `value <= 0` gates and meters nothing.
 ///
 /// This is the one shape every count-metered handler uses (session starts on
 /// the metadata endpoint, product events on both event endpoints); keeping it in
-/// one place is what stops the reserve → enqueue → finalize ordering drifting
-/// between them.
+/// one place is what stops the gate → enqueue → track ordering drifting between
+/// them.
 async fn metered_enqueue<T, F, Fut>(
     state: &AppState,
     org_id: &str,
@@ -874,35 +891,27 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, ApiError>>,
 {
-    // `reserve_autumn_usage` fails only on a denial (every other outcome is an
-    // `Ok(None)` fail-open), so swallowing the error here is exactly "denied".
-    let reservation = match reserve_autumn_usage(state, org_id, feature_id, value).await {
-        Ok(reservation) => reservation,
-        Err(error) => {
+    // A request that bills nothing is not gated: a session-event batch carrying
+    // no new session starts rides on the gate its metadata request already
+    // passed. Callers that must gate regardless check `entitlement_rejection`
+    // themselves.
+    if value > 0.0 && org_id != SENTINEL_ORG_ID {
+        if let Some(error) = entitlement_rejection(state, org_id, feature_id).await {
             if on_denied == OnDenied::Reject {
                 return Err(error);
             }
             warn!(
                 org_id,
-                feature_id, value, "Autumn denied the reservation; metering fail-open"
+                feature_id, value, "Autumn denied the feature; metering fail-open"
             );
-            None
         }
-    };
-    let enqueue_result = enqueue().await;
-
-    if let (Some(entitlements), Some(reservation)) =
-        (&state.autumn_entitlements, reservation.as_ref())
-    {
-        let _ = entitlements
-            .finalize(reservation, enqueue_result.is_ok())
-            .await;
     }
-    let accepted = enqueue_result?;
 
-    // Fail-open fallback: if Autumn could not reserve, record after the WAL
-    // commit through the retrying tracker.
-    if reservation.is_none() && org_id != SENTINEL_ORG_ID && value > 0.0 {
+    let accepted = enqueue().await?;
+
+    // Usage is recorded only after the WAL commit, through the retrying tracker
+    // that batches it. Nothing bills from the request path.
+    if org_id != SENTINEL_ORG_ID && value > 0.0 {
         if let Some(tracker) = &state.autumn_tracker {
             tracker.track(org_id, feature_id, value);
         }
@@ -944,37 +953,6 @@ async fn entitlement_rejection(
         StatusCode::PAYMENT_REQUIRED,
         "Plan limit reached or no active subscription",
     ))
-}
-
-/// Reserve exact usage through Autumn's atomic check+event lock. `None` means
-/// billing is disabled or temporarily unavailable; callers then use the
-/// retrying tracker after the WAL commit so provider outages do not drop data.
-async fn reserve_autumn_usage(
-    state: &AppState,
-    org_id: &str,
-    feature_id: &'static str,
-    value: f64,
-) -> Result<Option<AutumnReservation>, ApiError> {
-    if org_id == SENTINEL_ORG_ID || value <= 0.0 {
-        return Ok(None);
-    }
-    let Some(entitlements) = &state.autumn_entitlements else {
-        return Ok(None);
-    };
-    match entitlements.reserve(org_id, feature_id, value).await {
-        AutumnReserveOutcome::Reserved(reservation) => Ok(Some(reservation)),
-        AutumnReserveOutcome::Unavailable => Ok(None),
-        AutumnReserveOutcome::Denied => {
-            warn!(
-                org_id,
-                feature_id, value, "Ingestion blocked by Autumn billing controls"
-            );
-            Err(ApiError::new(
-                StatusCode::PAYMENT_REQUIRED,
-                "Billing limit reached for this feature",
-            ))
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -2068,7 +2046,13 @@ async fn main() {
     // A configured Autumn account is the billing authority. Native balance
     // checks and customer controls must not be bypassable by a second flag.
     let autumn_entitlements = config.autumn_secret_key.as_ref().map(|key| {
-        AutumnEntitlements::new(http_client.clone(), key.clone(), &config.autumn_api_url)
+        AutumnEntitlements::new(
+            http_client.clone(),
+            key.clone(),
+            &config.autumn_api_url,
+            config.autumn_allow_ttl_secs,
+            config.autumn_deny_ttl_secs,
+        )
     });
 
     let ingest_key_cache = Cache::builder()
@@ -2457,14 +2441,11 @@ async fn accept_grpc_decoded(
         .try_acquire(&resolved.org_id)
         .ok_or_else(|| tonic::Status::resource_exhausted("Per-org ingest limit exceeded"))?;
     let item_count = decoded.item_count();
-    let reservation = reserve_autumn_usage(
-        state,
-        &resolved.org_id,
-        signal.path(),
-        billable_gb(decoded_bytes as u64),
-    )
-    .await
-    .map_err(|error| tonic::Status::resource_exhausted(error.message))?;
+    if resolved.org_id != SENTINEL_ORG_ID {
+        if let Some(error) = entitlement_rejection(state, &resolved.org_id, signal.path()).await {
+            return Err(tonic::Status::resource_exhausted(error.message));
+        }
+    }
 
     let result = process_decoded_payload(
         state,
@@ -2478,11 +2459,6 @@ async fn accept_grpc_decoded(
 
     match result {
         Ok(_) => {
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, true).await;
-            }
             if resolved.org_id != SENTINEL_ORG_ID {
                 if let Some(usage) = &state.usage_metrics {
                     usage.record(
@@ -2492,24 +2468,17 @@ async fn accept_grpc_decoded(
                         item_count as u64,
                     );
                 }
-                if reservation.is_none() {
-                    if let Some(tracker) = &state.autumn_tracker {
-                        tracker.track(
-                            &resolved.org_id,
-                            signal.path(),
-                            billable_gb(decoded_bytes as u64),
-                        );
-                    }
+                if let Some(tracker) = &state.autumn_tracker {
+                    tracker.track(
+                        &resolved.org_id,
+                        signal.path(),
+                        billable_gb(decoded_bytes as u64),
+                    );
                 }
             }
             Ok(())
         }
         Err(error) => {
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, false).await;
-            }
             if error.status == StatusCode::TOO_MANY_REQUESTS {
                 Err(tonic::Status::resource_exhausted(error.message))
             } else {
@@ -3687,7 +3656,7 @@ async fn handle_signal(
     let duration = start.elapsed();
 
     match result {
-        Ok((response, item_count, org_id, decoded_bytes, metered_atomically)) => {
+        Ok((response, item_count, org_id, decoded_bytes)) => {
             let status_code = response.status().as_u16();
             span_handle.record("http.response.status_code", status_code);
             span_handle.record("otel.status_code", "Ok");
@@ -3700,10 +3669,8 @@ async fn handle_signal(
                 if let Some(usage) = &state.usage_metrics {
                     usage.record(&org_id, feature_id, decoded_bytes as u64, item_count as u64);
                 }
-                if !metered_atomically {
-                    if let Some(tracker) = &state.autumn_tracker {
-                        tracker.track(&org_id, feature_id, billable_gb(decoded_bytes as u64));
-                    }
+                if let Some(tracker) = &state.autumn_tracker {
+                    tracker.track(&org_id, feature_id, billable_gb(decoded_bytes as u64));
                 }
             }
             response
@@ -3799,8 +3766,8 @@ async fn handle_cloudflare_logpush(
     }
 }
 
-/// Returns Ok((response, item_count, org_id, decoded_bytes, metered_atomically))
-/// or Err((ApiError, error_kind_label)).
+/// Returns Ok((response, item_count, org_id, decoded_bytes)) or
+/// Err((ApiError, error_kind_label)).
 #[expect(
     clippy::cognitive_complexity,
     clippy::too_many_lines,
@@ -3812,7 +3779,7 @@ async fn handle_signal_inner(
     headers: &HeaderMap,
     body: Bytes,
     signal: Signal,
-) -> Result<(Response, usize, String, usize, bool), (ApiError, &'static str)> {
+) -> Result<(Response, usize, String, usize), (ApiError, &'static str)> {
     let ingest_key = extract_ingest_key(headers).ok_or_else(|| {
         warn!("Missing ingest key");
         (ApiError::unauthorized("Missing ingest key"), "auth")
@@ -3830,7 +3797,6 @@ async fn handle_signal_inner(
             0,
             SENTINEL_ORG_ID.to_owned(),
             0,
-            false,
         ));
     }
 
@@ -3988,14 +3954,12 @@ async fn handle_signal_inner(
 
     let decoded_bytes = decoded_payload.len();
 
-    let reservation = reserve_autumn_usage(
-        state,
-        &resolved_key.org_id,
-        signal.path(),
-        billable_gb(decoded_bytes as u64),
-    )
-    .await
-    .map_err(|error| (error, "billing_limit"))?;
+    if resolved_key.org_id != SENTINEL_ORG_ID {
+        if let Some(error) = entitlement_rejection(state, &resolved_key.org_id, signal.path()).await
+        {
+            return Err((error, "billing_limit"));
+        }
+    }
 
     let response_result = process_decoded_payload(
         state,
@@ -4007,31 +3971,13 @@ async fn handle_signal_inner(
     )
     .await;
 
-    let response = match response_result {
-        Ok(response) => {
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, true).await;
-            }
-            response
-        }
-        Err(error) => {
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, false).await;
-            }
-            return Err((error, "forward"));
-        }
-    };
+    let response = response_result.map_err(|error| (error, "forward"))?;
 
     Ok((
         response,
         item_count,
         resolved_key.org_id.clone(),
         decoded_bytes,
-        reservation.is_some(),
     ))
 }
 
@@ -4190,14 +4136,13 @@ async fn handle_cloudflare_logpush_inner(
                 clickhouse_ready: resolved.clickhouse_ready,
             };
             let decoded = DecodedPayload::Logs(request);
-            let reservation = reserve_autumn_usage(
-                state,
-                &resolved.org_id,
-                Signal::Logs.path(),
-                billable_gb(decoded_payload.len() as u64),
-            )
-            .await
-            .map_err(|error| (error, "billing_limit"))?;
+            if resolved.org_id != SENTINEL_ORG_ID {
+                if let Some(error) =
+                    entitlement_rejection(state, &resolved.org_id, Signal::Logs.path()).await
+                {
+                    return Err((error, "billing_limit"));
+                }
+            }
             let response = match process_decoded_payload(
                 state,
                 Signal::Logs,
@@ -4210,11 +4155,6 @@ async fn handle_cloudflare_logpush_inner(
             {
                 Ok(response) => response,
                 Err(error) => {
-                    if let (Some(entitlements), Some(reservation)) =
-                        (&state.autumn_entitlements, reservation.as_ref())
-                    {
-                        let _ = entitlements.finalize(reservation, false).await;
-                    }
                     state
                         .cloudflare_resolver
                         .record_failure(&resolved.connector_id, &error.message)
@@ -4222,12 +4162,6 @@ async fn handle_cloudflare_logpush_inner(
                     return Err((error, "forward"));
                 }
             };
-
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, true).await;
-            }
 
             state
                 .cloudflare_resolver
@@ -4243,14 +4177,12 @@ async fn handle_cloudflare_logpush_inner(
                         item_count as u64,
                     );
                 }
-                if reservation.is_none() {
-                    if let Some(tracker) = &state.autumn_tracker {
-                        tracker.track(
-                            &resolved.org_id,
-                            Signal::Logs.path(),
-                            billable_gb(decoded_payload.len() as u64),
-                        );
-                    }
+                if let Some(tracker) = &state.autumn_tracker {
+                    tracker.track(
+                        &resolved.org_id,
+                        Signal::Logs.path(),
+                        billable_gb(decoded_payload.len() as u64),
+                    );
                 }
             }
 
@@ -7198,6 +7130,8 @@ mod tests {
                 autumn_secret_key: None,
                 autumn_api_url: "https://api.useautumn.com".to_owned(),
                 autumn_flush_interval_secs: 1,
+                autumn_allow_ttl_secs: 60,
+                autumn_deny_ttl_secs: 5,
                 ingest_key_cache_ttl_secs: 60,
                 org_routing_cache_ttl_secs: 5,
                 replay_max_session_bytes: 1024 * 1024 * 1024,
@@ -7522,10 +7456,8 @@ mod tests {
         fn feature_id(&self) -> &str {
             self.body["feature_id"].as_str().unwrap_or_default()
         }
-        /// `required_balance` is only sent by `reserve`; a plain `is_allowed`
-        /// gate omits it. That is how the tests tell the two apart.
-        fn reserved_value(&self) -> Option<f64> {
-            self.body.get("required_balance").and_then(|v| v.as_f64())
+        fn tracked_value(&self) -> Option<f64> {
+            self.body.get("value").and_then(serde_json::Value::as_f64)
         }
     }
 
@@ -7557,25 +7489,53 @@ mod tests {
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
+        let api_url = format!("http://{addr}");
         state.autumn_entitlements = Some(AutumnEntitlements::new(
             state.http_client.clone(),
             "am_sk_test".to_string(),
-            &format!("http://{addr}"),
+            &api_url,
+            // A one-second allow TTL, so a test that wants a second gate can
+            // have one without a long sleep; the decision cache itself is
+            // tested in `autumn.rs`.
+            1,
+            1,
+        ));
+        state.autumn_tracker = Some(AutumnTracker::spawn(
+            "am_sk_test".to_string(),
+            &api_url,
+            1,
         ));
         (state, rx)
     }
 
-    /// Drain everything the fake Autumn has seen so far. Reserve → enqueue →
-    /// finalize all complete before the handler returns, so no waiting is
-    /// needed once the handler future has resolved.
-    fn drain_autumn_calls(
+    /// Everything the fake Autumn has seen. The entitlement gate resolves before
+    /// the handler returns, but usage is tracked out of band by the flush loop,
+    /// so this waits out one flush interval before draining.
+    async fn drain_autumn_calls(
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<AutumnCall>,
     ) -> Vec<AutumnCall> {
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
         let mut calls = Vec::new();
         while let Ok(call) = rx.try_recv() {
             calls.push(call);
         }
         calls
+    }
+
+    fn checks(calls: &[AutumnCall]) -> Vec<&AutumnCall> {
+        calls
+            .iter()
+            .filter(|c| c.path == "balances.check")
+            .collect()
+    }
+
+    /// Usage as Autumn was told it: `(feature_id, value)` per track call.
+    fn tracked(calls: &[AutumnCall]) -> Vec<(&str, f64)> {
+        calls
+            .iter()
+            .filter(|c| c.path == "balances.track")
+            .filter_map(|c| c.tracked_value().map(|v| (c.feature_id(), v)))
+            .collect()
     }
 
     fn bearer_headers(raw_key: &str) -> HeaderMap {
@@ -7616,41 +7576,20 @@ mod tests {
         .expect("product events should be accepted");
         assert_eq!(accepted, 3);
 
-        let calls = drain_autumn_calls(&mut rx);
-        let checks: Vec<&AutumnCall> = calls
-            .iter()
-            .filter(|c| c.path == "balances.check")
-            .collect();
+        let calls = drain_autumn_calls(&mut rx).await;
         // Every check on this endpoint is against `product_events`, never
-        // `browser_sessions`.
+        // `browser_sessions`. The check cannot reject here (`MeterAnyway`): a
+        // gate would 402 every org whose Autumn customer has no
+        // `product_events` balance yet, which is every org until the plan item
+        // is pushed and granted — Autumn answers that with a real
+        // `allowed: false`, not an error, so the fail-open does not cover it.
+        let checks = checks(&calls);
         assert!(!checks.is_empty(), "expected Autumn checks, saw {calls:?}");
         for check in &checks {
             assert_eq!(check.feature_id(), "product_events", "{check:?}");
         }
-        // ...and there is NO entitlement gate (a check with no
-        // `required_balance`), only the reservation. A gate would 402 every org
-        // whose Autumn customer has no `product_events` balance yet, which is
-        // every org until the plan item is pushed and granted — Autumn answers
-        // that with a real `allowed: false`, not an error, so the fail-open in
-        // `is_allowed` does not cover it.
-        let gates: Vec<&str> = checks
-            .iter()
-            .filter(|c| c.reserved_value().is_none())
-            .map(|c| c.feature_id())
-            .collect();
-        assert!(gates.is_empty(), "expected no entitlement gate, saw {gates:?}");
-        let reservations: Vec<f64> = checks.iter().filter_map(|c| c.reserved_value()).collect();
-        assert_eq!(
-            reservations,
-            vec![3.0],
-            "exactly one reservation for the enqueued row count"
-        );
-        let finalizes: Vec<&AutumnCall> = calls
-            .iter()
-            .filter(|c| c.path == "balances.finalize")
-            .collect();
-        assert_eq!(finalizes.len(), 1, "{calls:?}");
-        assert_eq!(finalizes[0].body["action"], "confirm");
+        // Usage is billed once, for the enqueued row count, through the tracker.
+        assert_eq!(tracked(&calls), vec![("product_events", 3.0)], "{calls:?}");
 
         let _ = std::fs::remove_dir_all(&queue_dir);
     }
@@ -7686,40 +7625,25 @@ mod tests {
             "custom + click rows are stored, unknown is dropped"
         );
 
-        let calls = drain_autumn_calls(&mut rx);
-        let checks: Vec<&AutumnCall> = calls
-            .iter()
-            .filter(|c| c.path == "balances.check")
-            .collect();
+        let calls = drain_autumn_calls(&mut rx).await;
 
-        // The entitlement gate (no `required_balance`) stays on browser_sessions:
-        // an exhausted product-events allowance must not 402 a whole transcript.
-        let gates: Vec<&str> = checks
-            .iter()
-            .filter(|c| c.reserved_value().is_none())
-            .map(|c| c.feature_id())
-            .collect();
-        assert_eq!(gates, vec!["browser_sessions"], "{calls:?}");
+        // The REJECTING gate stays on browser_sessions: an exhausted
+        // product-events allowance must not 402 a whole transcript. The
+        // product_events check beside it is `MeterAnyway` and cannot reject.
+        let gated: Vec<&str> = checks(&calls).iter().map(|c| c.feature_id()).collect();
+        assert!(
+            gated.contains(&"browser_sessions"),
+            "the transcript must be gated on browser_sessions, saw {calls:?}"
+        );
 
-        // The reservation is for the two custom rows only, as product_events.
-        let reservations: Vec<(&str, f64)> = checks
-            .iter()
-            .filter_map(|c| c.reserved_value().map(|v| (c.feature_id(), v)))
-            .collect();
-        assert_eq!(reservations, vec![("product_events", 2.0)], "{calls:?}");
-
-        let finalizes: Vec<&AutumnCall> = calls
-            .iter()
-            .filter(|c| c.path == "balances.finalize")
-            .collect();
-        assert_eq!(finalizes.len(), 1, "{calls:?}");
-        assert_eq!(finalizes[0].body["action"], "confirm");
+        // Only the two custom rows are billed, and as product_events.
+        assert_eq!(tracked(&calls), vec![("product_events", 2.0)], "{calls:?}");
 
         let _ = std::fs::remove_dir_all(&queue_dir);
     }
 
     #[tokio::test]
-    async fn session_events_without_custom_rows_reserve_nothing() {
+    async fn session_events_without_custom_rows_bill_nothing() {
         let queue_dir = unique_main_test_dir("session-events-no-custom");
         let state =
             replay_blob_test_state("maple_sk_test_se_auto", "org_se_auto", queue_dir.clone()).await;
@@ -7740,16 +7664,12 @@ mod tests {
         .expect("session events should be accepted");
         assert_eq!(accepted, 2);
 
-        let calls = drain_autumn_calls(&mut rx);
-        // Automatic events ride on the session's browser_sessions unit: only
-        // the gate fires, no reservation and no finalize.
-        assert!(
-            calls
-                .iter()
-                .all(|c| c.path == "balances.check" && c.reserved_value().is_none()),
-            "{calls:?}"
-        );
+        let calls = drain_autumn_calls(&mut rx).await;
+        // Automatic events ride on the session's browser_sessions unit: the
+        // gate fires and nothing is billed.
+        assert!(tracked(&calls).is_empty(), "{calls:?}");
         assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(calls[0].path, "balances.check");
         assert_eq!(calls[0].feature_id(), "browser_sessions");
 
         let _ = std::fs::remove_dir_all(&queue_dir);
@@ -8301,7 +8221,7 @@ mod tests {
 
         // Stands in for the `ingest` server span that handle_signal creates.
         let server_span = tracing::info_span!("ingest");
-        let (response, item_count, _, _, _) = handle_signal_inner(
+        let (response, item_count, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(test_log_request("span tree").encode_to_vec()),
@@ -8384,7 +8304,7 @@ mod tests {
         .await;
 
         let first_payload = test_log_request("before setup").encode_to_vec();
-        let (first_response, first_count, _, _, _) = handle_signal_inner(
+        let (first_response, first_count, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(first_payload),
@@ -8430,7 +8350,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let second_payload = test_log_request("after setup").encode_to_vec();
-        let (second_response, second_count, _, _, _) = handle_signal_inner(
+        let (second_response, second_count, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(second_payload),
