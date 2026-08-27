@@ -23,6 +23,19 @@ import { encodeColumnLiteral } from "./literal"
  */
 export type Comparable<TSType> = TSType extends DateTime.Utc ? DateTime.Utc | Date | string : TSType
 
+/**
+ * A branded primitive compares as the primitive it brands.
+ *
+ * A column may decode to a branded type (`T.custom("String", OrgId)`), but the
+ * wire value it is compared against is the plain primitive — a param, another
+ * column, a literal. Without widening, `$.OrgId.eq(param.string("orgId"))`
+ * stops compiling the moment the column's schema brands its decoded type,
+ * which would make branding a breaking change instead of an annotation. The
+ * type-level mirror of `literalSchema`: comparisons may accept more than the
+ * column decodes to.
+ */
+export type Widen<TSType> = TSType extends string ? string : TSType extends number ? number : TSType
+
 export interface Expr<TSType> {
 	readonly _brand: "Expr"
 	readonly _phantom?: TSType
@@ -38,13 +51,15 @@ export interface Expr<TSType> {
 	readonly schema?: Schema.Codec<TSType, any>
 	toFragment(): SqlFragment
 
-	// Comparison — returns Condition
-	eq(other: Comparable<TSType> | Expr<TSType>): Condition
-	neq(other: Comparable<TSType> | Expr<TSType>): Condition
-	gt(other: Comparable<TSType> | Expr<TSType>): Condition
-	gte(other: Comparable<TSType> | Expr<TSType>): Condition
-	lt(other: Comparable<TSType> | Expr<TSType>): Condition
-	lte(other: Comparable<TSType> | Expr<TSType>): Condition
+	// Comparison — returns Condition. `Expr<TSType>` is listed alongside the
+	// widened form because `Expr` is invariant: a branded column must accept
+	// both its own refs and plain-primitive exprs (params, other columns).
+	eq(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
+	neq(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
+	gt(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
+	gte(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
+	lt(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
+	lte(other: Comparable<Widen<TSType>> | Expr<TSType> | Expr<Widen<TSType>>): Condition
 
 	// String operations
 	like(this: Expr<string>, pattern: string): Condition
@@ -52,8 +67,8 @@ export interface Expr<TSType> {
 	ilike(this: Expr<string>, pattern: string): Condition
 
 	// IN / NOT IN
-	in_(...values: Array<Comparable<TSType>>): Condition
-	notIn(...values: Array<Comparable<TSType>>): Condition
+	in_(...values: Array<Comparable<Widen<TSType>>>): Condition
+	notIn(...values: Array<Comparable<Widen<TSType>>>): Condition
 
 	// Arithmetic — only valid for number expressions
 	div(this: Expr<number>, n: number | Expr<number>): Expr<number>
@@ -348,7 +363,7 @@ export function outerRef<T = string>(name: string): Expr<T> {
 	return makeUntypedExpr<T>(raw(name))
 }
 
-export function inList(expr: Expr<string>, values: readonly string[]): Condition {
+export function inList<T extends string>(expr: Expr<T>, values: readonly string[]): Condition {
 	const escaped = values.map((v) => compile(str(v))).join(", ")
 	return makeCond(raw(`${compile(expr.toFragment())} IN (${escaped})`))
 }

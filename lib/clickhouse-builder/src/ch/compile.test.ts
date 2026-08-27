@@ -35,6 +35,32 @@ describe("CompiledQuery.decodeRows", () => {
 		}),
 	)
 
+	// `T.custom("String", branded)` is how a caller brands an id column. The
+	// brand must survive derivation — it is the whole reason to declare it — and
+	// the column must still compare against a plain-string param.
+	it.effect("a branded custom column derives a branded row schema", () =>
+		Effect.gen(function* () {
+			const OrgId = Schema.String.check(Schema.isMinLength(1)).pipe(Schema.brand("OrgId"))
+			const table = CH.table(
+				"events",
+				{ OrgId: T.custom("String", OrgId), Count: CH.uint64 },
+				{ tenantColumn: "OrgId" },
+			)
+			const compiled = compileCHUnsafe(
+				CH.from(table)
+					.select(($) => ({ orgId: $.OrgId }))
+					.where(($) => [$.OrgId.eq(CH.param.string("orgId"))]),
+				{ orgId: "org_1" },
+			)
+
+			expect(compiled.rowSchemaSource).toBe("derived")
+			expect(yield* compiled.decodeRows([{ orgId: "org_1" }])).toEqual([{ orgId: "org_1" }])
+			// The brand's checks validate: an empty id is a decode failure.
+			const exit = yield* Effect.exit(compiled.decodeRows([{ orgId: "" }]))
+			expect(Exit.isFailure(exit)).toBe(true)
+		}),
+	)
+
 	it.effect("has no schema when a selected expression has no type to read", () =>
 		Effect.gen(function* () {
 			const table = CH.table("events", { OrgId: CH.string, Count: CH.uint64 })

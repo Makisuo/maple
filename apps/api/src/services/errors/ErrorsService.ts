@@ -302,11 +302,9 @@ const make: Effect.Effect<
 			return byo as ReadonlySet<OrgId>
 		}
 
-		const compiled = CH.compile(
-			CH.activeOrgsByErrorEventsQuery(),
-			{ startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS) },
-			{ rowSchema: CH.ActiveOrgsOutputSchema },
-		)
+		const compiled = CH.compile(CH.activeOrgsByErrorEventsQuery(), {
+			startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS),
+		})
 		return yield* warehouse
 			.crossOrgQuery(systemTenant(knownOrgs[0]!), compiled, {
 				// Bound the one cross-org scan (no OrgId predicate ⇒ can't prune the
