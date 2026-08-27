@@ -31,6 +31,8 @@ export interface HypothesisAgentInput {
 	readonly tenant: TenantContext
 	/** Wall-clock budget; the turn spends one last step submitting past it. */
 	readonly deadlineAtMs: number
+	/** The workflow step re-ran after its result was lost to a retry boundary. */
+	readonly rerun: boolean
 }
 
 export interface HypothesisAgentOutput {
@@ -54,6 +56,7 @@ export const runHypothesisAgent = Effect.fn("investigation.hypothesis")(function
 	yield* Effect.annotateCurrentSpan({
 		"maple.investigation.id": input.investigationId,
 		"maple.hypothesis.id": input.hypothesis.id,
+		...(input.rerun ? { "maple.hypothesis.rerun": true } : undefined),
 	})
 
 	const pass = yield* runAgentPass({
@@ -125,6 +128,7 @@ export const runSoloHypothesisAgent = Effect.fn("investigation.solo")(function* 
 		"maple.investigation.id": input.investigationId,
 		"maple.hypothesis.id": input.hypothesis.id,
 		"maple.investigation.collapsed": true,
+		...(input.rerun ? { "maple.hypothesis.rerun": true } : undefined),
 	})
 
 	const pass = yield* runAgentPass({

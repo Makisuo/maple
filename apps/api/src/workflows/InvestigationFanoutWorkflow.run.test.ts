@@ -235,6 +235,37 @@ describe("runInvestigationFanout", () => {
 	})
 
 	/**
+	 * The engine can re-run a lane step whose result was lost to a retry boundary,
+	 * minutes later and with no failure recorded anywhere. The second execution
+	 * must know it is one, so its span does not read as new work after a silent
+	 * gap in the session view.
+	 */
+	it("flags a re-executed lane step as a rerun", async () => {
+		const seen: Array<{ id: string; rerun: boolean }> = []
+		const doubleStep: WorkflowStepLike = {
+			do: (async (name: string, configOrCb: unknown, cb?: () => Promise<unknown>) => {
+				const callback = cb ?? (configOrCb as () => Promise<unknown>)
+				const first = await callback()
+				return name.startsWith("hypothesis-") ? callback() : first
+			}) as WorkflowStepLike["do"],
+		}
+		await runInvestigationFanout(
+			env,
+			{ payload: harness.payload },
+			doubleStep,
+			baseDeps({
+				invokeHypothesis: async ({ hypothesis, rerun }) => {
+					seen.push({ id: hypothesis.id, rerun })
+					return hypothesisOutput(hypothesis.id)
+				},
+			}),
+		)
+		for (const id of HYPOTHESIS_IDS) {
+			expect(seen.filter((entry) => entry.id === id).map((entry) => entry.rerun)).toEqual([false, true])
+		}
+	})
+
+	/**
 	 * The reservation is made before the planner runs, so it is deliberately high.
 	 * Left unreconciled, an org's daily pass budget drains at the ceiling rather
 	 * than at what its investigations actually cost.
