@@ -241,6 +241,9 @@ const GetLogsFacetsInputSchema = Schema.Struct({
 	deploymentEnv: Schema.optional(DeploymentEnvironment),
 	deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
 	namespace: Schema.optional(ServiceNamespace),
+	// Multi-value spelling, wins over the scalar (matches `listLogs`). Carries
+	// the org-global namespace pin.
+	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
 	namespaceMatchMode: Schema.optional(Schema.Literal("contains")),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
@@ -273,7 +276,11 @@ const getLogsFacetsEffect = Effect.fn("QueryEngine.getLogsFacets")(function* ({
 					severity: input.severity,
 					environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
 					deploymentEnvMatchMode: input.deploymentEnvMatchMode,
-					namespaces: input.namespace ? [input.namespace] : undefined,
+					namespaces: input.namespaces?.length
+						? input.namespaces
+						: input.namespace
+							? [input.namespace]
+							: undefined,
 					namespaceMatchMode: input.namespaceMatchMode,
 				},
 			},

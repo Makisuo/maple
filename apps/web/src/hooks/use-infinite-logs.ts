@@ -3,6 +3,7 @@ import { Result } from "@/lib/effect-atom"
 
 import { listLogs, type Log, type LogsResponse } from "@/api/warehouse/logs"
 import { listLogsResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import { mapleRuntime } from "@/lib/registry"
@@ -24,7 +25,12 @@ export interface UseInfiniteLogsReturn {
 function buildQueryParams(
 	filters: LogsSearchParams | undefined,
 	range: { startTime: string; endTime: string },
+	globalNamespace: string | null,
 ) {
+	// The org-global pin overrides URL namespace filters (they stay in the URL
+	// untouched; unpinning restores them). Applied here so the atom page and the
+	// direct pagination fetches below stay byte-for-byte identical.
+	const pinned = globalNamespace !== null
 	return {
 		startTime: range.startTime,
 		endTime: range.endTime,
@@ -34,12 +40,12 @@ function buildQueryParams(
 		severities: filters?.severities,
 		deploymentEnvs: filters?.deploymentEnvs,
 		deploymentEnvMatchMode: filters?.deploymentEnvMatchMode,
-		namespaces: filters?.namespaces,
-		namespaceMatchMode: filters?.namespaceMatchMode,
+		namespaces: pinned ? [globalNamespace] : filters?.namespaces,
+		namespaceMatchMode: pinned ? undefined : filters?.namespaceMatchMode,
 		excludedServices: filters?.excludedServices,
 		excludedSeverities: filters?.excludedSeverities,
 		excludedDeploymentEnvs: filters?.excludedDeploymentEnvs,
-		excludedNamespaces: filters?.excludedNamespaces,
+		excludedNamespaces: pinned ? undefined : filters?.excludedNamespaces,
 		search: filters?.search,
 	}
 }
@@ -52,9 +58,11 @@ export function useInfiniteLogs(filters: LogsSearchParams | undefined): UseInfin
 		defaultRange: "12h",
 	})
 
+	const globalNamespace = useGlobalNamespace()
+
 	const queryParams = React.useMemo(
-		() => buildQueryParams(filters, { startTime, endTime }),
-		[filters, startTime, endTime],
+		() => buildQueryParams(filters, { startTime, endTime }, globalNamespace),
+		[filters, startTime, endTime, globalNamespace],
 	)
 
 	const filterKey = React.useMemo(() => JSON.stringify(queryParams), [queryParams])

@@ -19,6 +19,7 @@ import {
 } from "@maple/ui/components/ui/dialog"
 import { Input } from "@maple/ui/components/ui/input"
 import { Button } from "@maple/ui/components/ui/button"
+import { NamespaceScopeSubmenu } from "./namespace-scope-menu"
 
 export function OrgAvatar({
 	name,
@@ -54,10 +55,14 @@ export function ClerkOrgSwitcherMenu({
 	trigger,
 	contentSide = "bottom",
 	contentAlign = "start",
+	namespaceScope = false,
 }: {
 	trigger: ReactElement
 	contentSide?: "top" | "right" | "bottom" | "left"
 	contentAlign?: "start" | "center" | "end"
+	/** Show the org-global namespace switch. Off by default — this menu is also
+	 * reused by auth flows (CLI login, MCP authorize, onboarding). */
+	namespaceScope?: boolean
 }) {
 	const { organization } = useOrganization()
 	const { userMemberships, setActive, createOrganization } = useOrganizationList({
@@ -127,6 +132,7 @@ export function ClerkOrgSwitcherMenu({
 							Create Organization
 						</DropdownMenuItem>
 					</DropdownMenuGroup>
+					{namespaceScope && <NamespaceScopeSubmenu />}
 				</DropdownMenuContent>
 			</DropdownMenu>
 

@@ -23,6 +23,8 @@ import {
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 import { SEVERITY_COLORS } from "@maple/ui/lib/severity"
+import { PinnedNamespaceNotice } from "@/components/filters/pinned-namespace-notice"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 
 const routeApi = getRouteApi("/logs/")
 
@@ -33,6 +35,7 @@ function LoadingState() {
 export function LogsFilterSidebar() {
 	const navigate = routeApi.useNavigate()
 	const search = routeApi.useSearch()
+	const pinnedNamespace = useGlobalNamespace()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
@@ -162,14 +165,18 @@ export function LogsFilterSidebar() {
 							onExcludedChange={(val) => updateFilter("excludedDeploymentEnvs", val)}
 						/>
 
-						<SearchableFilterSection
-							title="Namespace"
-							options={facets.namespaces ?? []}
-							selected={search.namespaces ?? []}
-							onChange={(val) => updateFilter("namespaces", val)}
-							excluded={search.excludedNamespaces ?? []}
-							onExcludedChange={(val) => updateFilter("excludedNamespaces", val)}
-						/>
+						{pinnedNamespace !== null ? (
+							<PinnedNamespaceNotice namespace={pinnedNamespace} />
+						) : (
+							<SearchableFilterSection
+								title="Namespace"
+								options={facets.namespaces ?? []}
+								selected={search.namespaces ?? []}
+								onChange={(val) => updateFilter("namespaces", val)}
+								excluded={search.excludedNamespaces ?? []}
+								onExcludedChange={(val) => updateFilter("excludedNamespaces", val)}
+							/>
+						)}
 
 						<SearchableFilterSection
 							title="Service"

@@ -14,8 +14,10 @@ import {
 	ErrorsSparkRequest,
 	FingerprintHash,
 	ServiceName,
+	ServiceNamespace,
 } from "@maple/domain/http"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
+import { scopeServicesToNamespaces } from "@/api/warehouse/namespace-scope"
 import {
 	WarehouseDateTimeString,
 	decodeInput,
@@ -27,6 +29,9 @@ import {
 const OptionalServiceArray = Schema.optional(Schema.mutable(Schema.Array(ServiceName)))
 const OptionalDeploymentEnvArray = Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment)))
 const OptionalFingerprintHashArray = Schema.optional(Schema.mutable(Schema.Array(FingerprintHash)))
+// The error-events tables carry no ServiceNamespace column, so a namespaces
+// filter is lowered to service membership via `scopeServicesToNamespaces`.
+const OptionalNamespaceArray = Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace)))
 /** "Error Type" / "Version" sidebar facets — plain strings, not branded. */
 const OptionalStringArray = Schema.optional(Schema.mutable(Schema.Array(Schema.String)))
 
@@ -45,6 +50,7 @@ const GetErrorsByTypeInputSchema = Schema.Struct({
 	endTime: Schema.optional(WarehouseDateTimeString),
 	services: OptionalServiceArray,
 	deploymentEnvs: OptionalDeploymentEnvArray,
+	namespaces: OptionalNamespaceArray,
 	fingerprintHashes: OptionalFingerprintHashArray,
 	errorLabels: OptionalStringArray,
 	serviceVersions: OptionalStringArray,
@@ -70,16 +76,26 @@ const getErrorsByTypeEffect = Effect.fn("QueryEngine.getErrorsByType")(function*
 }) {
 	const input = yield* decodeInput(GetErrorsByTypeInputSchema, data ?? {}, "getErrorsByType")
 	const fallback = defaultErrorsTimeRange(yield* Clock.currentTimeMillis)
+	const startTime = input.startTime ?? fallback.startTime
+	const endTime = input.endTime ?? fallback.endTime
+
+	const scope = yield* scopeServicesToNamespaces({
+		namespaces: input.namespaces,
+		services: input.services,
+		startTime,
+		endTime,
+	})
+	if (scope.empty) return { data: coerceErrorsByTypeRows([]) }
 
 	const result = yield* runWarehouseQuery("errorsByType", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.errorsByType({
 				payload: new ErrorsByTypeRequest({
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
+					startTime,
+					endTime,
 					rootOnly: input.rootOnly,
-					services: input.services,
+					services: scope.services,
 					deploymentEnvs: input.deploymentEnvs,
 					fingerprintHashes: input.fingerprintHashes,
 					errorLabels: input.errorLabels,
@@ -108,6 +124,7 @@ const GetErrorsFacetsInputSchema = Schema.Struct({
 	endTime: Schema.optional(WarehouseDateTimeString),
 	services: OptionalServiceArray,
 	deploymentEnvs: OptionalDeploymentEnvArray,
+	namespaces: OptionalNamespaceArray,
 	fingerprintHashes: OptionalFingerprintHashArray,
 	errorLabels: OptionalStringArray,
 	serviceVersions: OptionalStringArray,
@@ -139,18 +156,30 @@ const getErrorsFacetsEffect = Effect.fn("QueryEngine.getErrorsFacets")(function*
 }) {
 	const input = yield* decodeInput(GetErrorsFacetsInputSchema, data ?? {}, "getErrorsFacets")
 	const fallback = defaultErrorsTimeRange(yield* Clock.currentTimeMillis)
+	const startTime = input.startTime ?? fallback.startTime
+	const endTime = input.endTime ?? fallback.endTime
+
+	const scope = yield* scopeServicesToNamespaces({
+		namespaces: input.namespaces,
+		services: input.services,
+		startTime,
+		endTime,
+	})
+	if (scope.empty) {
+		return { data: { services: [], deploymentEnvs: [], errorTypes: [], serviceVersions: [] } }
+	}
 
 	const response = yield* executeQueryEngine(
 		"queryEngine.getErrorsFacets",
 		new QueryEngineExecuteRequest({
-			startTime: input.startTime ?? fallback.startTime,
-			endTime: input.endTime ?? fallback.endTime,
+			startTime,
+			endTime,
 			query: {
 				kind: "facets" as const,
 				source: "errors" as const,
 				filters: {
 					rootOnly: input.rootOnly,
-					services: input.services,
+					services: scope.services,
 					deploymentEnvs: input.deploymentEnvs,
 					fingerprintHashes: input.fingerprintHashes,
 					errorLabels: input.errorLabels,
@@ -165,12 +194,18 @@ const getErrorsFacetsEffect = Effect.fn("QueryEngine.getErrorsFacets")(function*
 	)
 
 	const facetsData = extractFacets(response)
+	// The services facet branch deliberately ignores the services filter (see
+	// `except` in `errorsFacetsQuery`), which would resurface out-of-namespace
+	// service names while namespace-scoped — drop them here.
+	const inScope = (row: { facetType: string; name: string }) =>
+		scope.memberServices === null || row.facetType !== "service" || scope.memberServices.has(row.name)
 	const services: FacetItem[] = []
 	const deploymentEnvs: FacetItem[] = []
 	const errorTypes: FacetItem[] = []
 	const serviceVersions: FacetItem[] = []
 
 	for (const row of facetsData) {
+		if (!inScope(row)) continue
 		const item = { name: row.name, count: Number(row.count) }
 		// These strings must match the `facetType` literals in `errorsFacetsQuery`.
 		// They did not: the query emits "environment"/"error_type" and this read
@@ -202,6 +237,7 @@ const GetErrorsSummaryInputSchema = Schema.Struct({
 	endTime: Schema.optional(WarehouseDateTimeString),
 	services: OptionalServiceArray,
 	deploymentEnvs: OptionalDeploymentEnvArray,
+	namespaces: OptionalNamespaceArray,
 	fingerprintHashes: OptionalFingerprintHashArray,
 	errorLabels: OptionalStringArray,
 	serviceVersions: OptionalStringArray,
@@ -222,16 +258,26 @@ const getErrorsSummaryEffect = Effect.fn("QueryEngine.getErrorsSummary")(functio
 }) {
 	const input = yield* decodeInput(GetErrorsSummaryInputSchema, data ?? {}, "getErrorsSummary")
 	const fallback = defaultErrorsTimeRange(yield* Clock.currentTimeMillis)
+	const startTime = input.startTime ?? fallback.startTime
+	const endTime = input.endTime ?? fallback.endTime
+
+	const scope = yield* scopeServicesToNamespaces({
+		namespaces: input.namespaces,
+		services: input.services,
+		startTime,
+		endTime,
+	})
+	if (scope.empty) return { data: coerceErrorsSummary(null) }
 
 	const result = yield* runWarehouseQuery("errorsSummary", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.errorsSummary({
 				payload: new ErrorsSummaryRequest({
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
+					startTime,
+					endTime,
 					rootOnly: input.rootOnly,
-					services: input.services,
+					services: scope.services,
 					deploymentEnvs: input.deploymentEnvs,
 					fingerprintHashes: input.fingerprintHashes,
 					errorLabels: input.errorLabels,
@@ -322,6 +368,7 @@ const GetErrorsSparkInputSchema = Schema.Struct({
 	endTime: Schema.optional(WarehouseDateTimeString),
 	services: OptionalServiceArray,
 	deploymentEnvs: OptionalDeploymentEnvArray,
+	namespaces: OptionalNamespaceArray,
 	errorLabels: OptionalStringArray,
 	serviceVersions: OptionalStringArray,
 	excludedServices: OptionalServiceArray,
@@ -349,15 +396,26 @@ const getErrorsSparkEffect = Effect.fn("QueryEngine.getErrorsSpark")(function* (
 	// here because the list renders before its issues have loaded.
 	if (input.fingerprintHashes.length === 0) return { data: [] as ErrorsSparkSeries[] }
 
+	const startTime = input.startTime ?? fallback.startTime
+	const endTime = input.endTime ?? fallback.endTime
+
+	const scope = yield* scopeServicesToNamespaces({
+		namespaces: input.namespaces,
+		services: input.services,
+		startTime,
+		endTime,
+	})
+	if (scope.empty) return { data: [] as ErrorsSparkSeries[] }
+
 	const result = yield* runWarehouseQuery("errorsSpark", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleInternalAtomClient
 			return yield* client.queryEngine.errorsSpark({
 				payload: new ErrorsSparkRequest({
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
+					startTime,
+					endTime,
 					fingerprintHashes: input.fingerprintHashes,
-					services: input.services,
+					services: scope.services,
 					deploymentEnvs: input.deploymentEnvs,
 					errorLabels: input.errorLabels,
 					serviceVersions: input.serviceVersions,

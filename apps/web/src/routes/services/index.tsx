@@ -13,6 +13,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ServicesTable } from "@/components/services/services-table"
 import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
 import { serviceFilterChips } from "@/lib/services-list/service-filter-chips"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { ServicesFilterSidebar } from "@/components/services/services-filter-sidebar"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -93,6 +94,7 @@ export const Route = createFileRoute("/services/")({
 function ServicesPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+	const pinnedNamespace = useGlobalNamespace()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
@@ -139,16 +141,25 @@ function ServicesPage() {
 						</DashboardLayout.Sticky>
 						<DashboardLayout.Scroll>
 							<ActiveFilterChips
-								chips={serviceFilterChips(search).map((chip) => ({
-									id: chip.param,
-									label: chip.label,
-									values: chip.values,
-									negated: chip.negated,
-									onRemove: () =>
-										navigate({
-											search: (prev) => ({ ...prev, [chip.param]: undefined }),
-										}),
-								}))}
+								chips={serviceFilterChips(search)
+									// URL namespace filters are ignored while the org-global
+									// pin is on — chips for them would suggest they still apply.
+									.filter(
+										(chip) =>
+											pinnedNamespace === null ||
+											(chip.param !== "namespaces" &&
+												chip.param !== "excludedNamespaces"),
+									)
+									.map((chip) => ({
+										id: chip.param,
+										label: chip.label,
+										values: chip.values,
+										negated: chip.negated,
+										onRemove: () =>
+											navigate({
+												search: (prev) => ({ ...prev, [chip.param]: undefined }),
+											}),
+									}))}
 							/>
 							<ServicesTable filters={search} />
 						</DashboardLayout.Scroll>
