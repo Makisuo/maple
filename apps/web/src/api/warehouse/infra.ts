@@ -161,6 +161,16 @@ export interface ListPodsInput {
 	jobs?: ReadonlyArray<string>
 	environments?: ReadonlyArray<string>
 	computeTypes?: ReadonlyArray<string>
+	excludedPodNames?: ReadonlyArray<string>
+	excludedNamespaces?: ReadonlyArray<string>
+	excludedNodeNames?: ReadonlyArray<string>
+	excludedClusters?: ReadonlyArray<string>
+	excludedDeployments?: ReadonlyArray<string>
+	excludedStatefulsets?: ReadonlyArray<string>
+	excludedDaemonsets?: ReadonlyArray<string>
+	excludedJobs?: ReadonlyArray<string>
+	excludedEnvironments?: ReadonlyArray<string>
+	excludedComputeTypes?: ReadonlyArray<string>
 	workloadKind?: WorkloadKind
 	workloadName?: string
 	scope?: PodScope
@@ -189,6 +199,16 @@ export function listPods({ data }: { data: ListPodsInput }) {
 					jobs: data.jobs,
 					environments: data.environments,
 					computeTypes: data.computeTypes,
+					excludedPodNames: data.excludedPodNames,
+					excludedNamespaces: data.excludedNamespaces,
+					excludedNodeNames: data.excludedNodeNames,
+					excludedClusters: data.excludedClusters,
+					excludedDeployments: data.excludedDeployments,
+					excludedStatefulsets: data.excludedStatefulsets,
+					excludedDaemonsets: data.excludedDaemonsets,
+					excludedJobs: data.excludedJobs,
+					excludedEnvironments: data.excludedEnvironments,
+					excludedComputeTypes: data.excludedComputeTypes,
 					workloadKind: data.workloadKind,
 					workloadName: data.workloadName,
 					scope: data.scope,
@@ -248,6 +268,16 @@ export interface PodFacetsInput {
 	jobs?: ReadonlyArray<string>
 	environments?: ReadonlyArray<string>
 	computeTypes?: ReadonlyArray<string>
+	excludedPodNames?: ReadonlyArray<string>
+	excludedNamespaces?: ReadonlyArray<string>
+	excludedNodeNames?: ReadonlyArray<string>
+	excludedClusters?: ReadonlyArray<string>
+	excludedDeployments?: ReadonlyArray<string>
+	excludedStatefulsets?: ReadonlyArray<string>
+	excludedDaemonsets?: ReadonlyArray<string>
+	excludedJobs?: ReadonlyArray<string>
+	excludedEnvironments?: ReadonlyArray<string>
+	excludedComputeTypes?: ReadonlyArray<string>
 }
 
 export function getPodFacets({ data }: { data: PodFacetsInput }) {
@@ -269,6 +299,16 @@ export function getPodFacets({ data }: { data: PodFacetsInput }) {
 					jobs: data.jobs,
 					environments: data.environments,
 					computeTypes: data.computeTypes,
+					excludedPodNames: data.excludedPodNames,
+					excludedNamespaces: data.excludedNamespaces,
+					excludedNodeNames: data.excludedNodeNames,
+					excludedClusters: data.excludedClusters,
+					excludedDeployments: data.excludedDeployments,
+					excludedStatefulsets: data.excludedStatefulsets,
+					excludedDaemonsets: data.excludedDaemonsets,
+					excludedJobs: data.excludedJobs,
+					excludedEnvironments: data.excludedEnvironments,
+					excludedComputeTypes: data.excludedComputeTypes,
 				}),
 			})
 			return response

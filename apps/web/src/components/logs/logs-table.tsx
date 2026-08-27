@@ -1,5 +1,8 @@
 import * as React from "react"
+import { useNavigate } from "@tanstack/react-router"
 import { Result } from "@/lib/effect-atom"
+import { ExcludedEmptyHint } from "@maple/ui/components/filters/excluded-empty-hint"
+import { logFilterChips } from "@/lib/logs/log-filter-chips"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "@tanstack/react-hotkeys"
 
@@ -43,6 +46,10 @@ interface LogsTableViewProps {
 	pinnedColumns: string[]
 	onLogClick?: (log: Log) => void
 	embedded?: boolean
+	/** Flattened active exclusions, for the empty state's hint. Optional: embedded log lists
+	 *  (a trace's spans, a session) carry no facet filters. */
+	excludedValues?: ReadonlyArray<string>
+	clearExclusions?: () => void
 }
 
 interface LogsTableProps {
@@ -298,6 +305,8 @@ export function LogsTableView({
 	pinnedColumns,
 	onLogClick,
 	embedded,
+	excludedValues = EMPTY_EXCLUDED,
+	clearExclusions,
 }: LogsTableViewProps) {
 	const [selectedLog, setSelectedLog] = React.useState<Log | null>(null)
 	const [sheetOpen, setSheetOpen] = React.useState(false)
@@ -493,8 +502,15 @@ export function LogsTableView({
 		return (
 			<div className="flex-1 min-h-0 flex flex-col gap-4">
 				{!onLogClick && !embedded && <LogsTableToolbar />}
-				<div className="rounded-md border flex items-center justify-center h-48">
+				<div className="flex h-48 flex-col items-center justify-center rounded-md border">
 					<span className="text-sm text-muted-foreground">No logs found</span>
+					{clearExclusions && (
+						<ExcludedEmptyHint
+							excluded={excludedValues}
+							onClear={clearExclusions}
+							className="max-w-lg"
+						/>
+					)}
 				</div>
 			</div>
 		)
@@ -561,9 +577,25 @@ export function LogsTableView({
 	)
 }
 
+/** Stable identity for the default, so the view never sees a new array each render. */
+const EMPTY_EXCLUDED: ReadonlyArray<string> = []
+
 export function LogsTable({ filters, embedded }: LogsTableProps) {
 	const { firstPageResult, allData, isFetchingNextPage, hasNextPage, isCapped, fetchNextPage } =
 		useInfiniteLogs(filters)
+	// Bound to the logs route so clearing exclusions keeps the rest of the search params typed.
+	const navigateLogs = useNavigate({ from: "/logs/" })
+
+	// An empty list under an exclusion cannot explain itself — see `ExcludedEmptyHint`.
+	const excludedChips = logFilterChips(filters ?? {}).filter((chip) => chip.negated)
+	const excludedValues = excludedChips.flatMap((chip) => chip.values)
+	const clearExclusions = () =>
+		navigateLogs({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(excludedChips.map((chip) => [chip.param, undefined])),
+			}),
+		})
 	const { wrap, density } = useLogsViewPreferences()
 
 	const columnsKey = (filters?.columns ?? EMPTY_COLUMNS).join("\x00")
@@ -588,6 +620,8 @@ export function LogsTable({ filters, embedded }: LogsTableProps) {
 				density={density}
 				pinnedColumns={pinnedColumns}
 				embedded={embedded}
+				excludedValues={excludedValues}
+				clearExclusions={clearExclusions}
 			/>
 		))
 		.render()

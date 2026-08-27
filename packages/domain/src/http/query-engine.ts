@@ -115,6 +115,10 @@ export class ErrorsByTypeRequest extends Schema.Class<ErrorsByTypeRequest>("Erro
 	fingerprintHashes: OptionalFingerprintHashes,
 	errorLabels: OptionalErrorLabels,
 	serviceVersions: OptionalServiceVersions,
+	excludedServices: OptionalServiceNames,
+	excludedDeploymentEnvs: OptionalDeploymentEnvs,
+	excludedErrorLabels: OptionalErrorLabels,
+	excludedServiceVersions: OptionalServiceVersions,
 	limit: Schema.optional(Schema.Number),
 }) {}
 
@@ -166,6 +170,10 @@ export class ErrorsSparkRequest extends Schema.Class<ErrorsSparkRequest>("Errors
 	deploymentEnvs: OptionalDeploymentEnvs,
 	errorLabels: OptionalErrorLabels,
 	serviceVersions: OptionalServiceVersions,
+	excludedServices: OptionalServiceNames,
+	excludedDeploymentEnvs: OptionalDeploymentEnvs,
+	excludedErrorLabels: OptionalErrorLabels,
+	excludedServiceVersions: OptionalServiceVersions,
 	bucketSeconds: Schema.optional(BucketSeconds),
 }) {}
 
@@ -255,6 +263,9 @@ export class ServiceOverviewRequest extends Schema.Class<ServiceOverviewRequest>
 	environments: OptionalDeploymentEnvs,
 	namespaces: OptionalServiceNamespaces,
 	commitShas: OptionalCommitShas,
+	excludedEnvironments: OptionalDeploymentEnvs,
+	excludedNamespaces: OptionalServiceNamespaces,
+	excludedCommitShas: OptionalCommitShas,
 }) {}
 
 export class ServiceOverviewResponse extends Schema.Class<ServiceOverviewResponse>("ServiceOverviewResponse")(
@@ -1148,6 +1159,16 @@ export class ListPodsRequest extends Schema.Class<ListPodsRequest>("ListPodsRequ
 	jobs: Schema.optional(StringArray),
 	environments: Schema.optional(StringArray),
 	computeTypes: Schema.optional(StringArray),
+	excludedPodNames: Schema.optional(StringArray),
+	excludedNamespaces: Schema.optional(StringArray),
+	excludedNodeNames: Schema.optional(StringArray),
+	excludedClusters: Schema.optional(StringArray),
+	excludedDeployments: Schema.optional(StringArray),
+	excludedStatefulsets: Schema.optional(StringArray),
+	excludedDaemonsets: Schema.optional(StringArray),
+	excludedJobs: Schema.optional(StringArray),
+	excludedEnvironments: Schema.optional(StringArray),
+	excludedComputeTypes: Schema.optional(StringArray),
 	workloadKind: Schema.optional(WorkloadKindLiteral),
 	workloadName: Schema.optional(Schema.String),
 	scope: Schema.optional(PodScopeLiteral),
@@ -1496,6 +1517,16 @@ export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsR
 	jobs: Schema.optional(StringArray),
 	environments: Schema.optional(StringArray),
 	computeTypes: Schema.optional(StringArray),
+	excludedPodNames: Schema.optional(StringArray),
+	excludedNamespaces: Schema.optional(StringArray),
+	excludedNodeNames: Schema.optional(StringArray),
+	excludedClusters: Schema.optional(StringArray),
+	excludedDeployments: Schema.optional(StringArray),
+	excludedStatefulsets: Schema.optional(StringArray),
+	excludedDaemonsets: Schema.optional(StringArray),
+	excludedJobs: Schema.optional(StringArray),
+	excludedEnvironments: Schema.optional(StringArray),
+	excludedComputeTypes: Schema.optional(StringArray),
 }) {}
 
 export class PodFacetsResponse extends Schema.Class<PodFacetsResponse>("PodFacetsResponse")({

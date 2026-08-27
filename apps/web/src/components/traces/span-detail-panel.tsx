@@ -22,6 +22,7 @@ import type { SpanNode, SpanDetailResult } from "@/api/warehouse/traces"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { getSpanDetailResultAtom, listLogsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { CopyableValue, AttributesSection, ResourceAttributesSection } from "@/components/attributes"
+import { TraceAttributeFilterProvider } from "./trace-attribute-filter-provider"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
@@ -453,10 +454,12 @@ export function SpanDetailPanel({
 							{/* Span + Resource Attributes — loaded lazily for the
 							    selected span (see detailResult above) */}
 							{span.isMissing ? (
-								<AttributesSection
-									attributes={span.spanAttributes ?? {}}
-									title="Span Attributes"
-								/>
+								<TraceAttributeFilterProvider scope="span">
+									<AttributesSection
+										attributes={span.spanAttributes ?? {}}
+										title="Span Attributes"
+									/>
+								</TraceAttributeFilterProvider>
 							) : (
 								Result.builder(detailResult)
 									.onInitial(() => (
@@ -469,24 +472,32 @@ export function SpanDetailPanel({
 									))
 									.onError(() => (
 										<>
-											<AttributesSection
-												attributes={span.spanAttributes ?? {}}
-												title="Span Attributes"
-											/>
-											<ResourceAttributesSection
-												attributes={span.resourceAttributes ?? {}}
-											/>
+											<TraceAttributeFilterProvider scope="span">
+												<AttributesSection
+													attributes={span.spanAttributes ?? {}}
+													title="Span Attributes"
+												/>
+											</TraceAttributeFilterProvider>
+											<TraceAttributeFilterProvider scope="resource">
+												<ResourceAttributesSection
+													attributes={span.resourceAttributes ?? {}}
+												/>
+											</TraceAttributeFilterProvider>
 										</>
 									))
 									.onSuccess((detail) => (
 										<>
-											<AttributesSection
-												attributes={detail.spanAttributes}
-												title="Span Attributes"
-											/>
-											<ResourceAttributesSection
-												attributes={detail.resourceAttributes}
-											/>
+											<TraceAttributeFilterProvider scope="span">
+												<AttributesSection
+													attributes={detail.spanAttributes}
+													title="Span Attributes"
+												/>
+											</TraceAttributeFilterProvider>
+											<TraceAttributeFilterProvider scope="resource">
+												<ResourceAttributesSection
+													attributes={detail.resourceAttributes}
+												/>
+											</TraceAttributeFilterProvider>
 										</>
 									))
 									.render()

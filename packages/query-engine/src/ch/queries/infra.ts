@@ -306,6 +306,16 @@ export interface ListPodsOpts {
 	jobs?: ReadonlyArray<string>
 	environments?: ReadonlyArray<string>
 	computeTypes?: ReadonlyArray<string>
+	excludedPodNames?: ReadonlyArray<string>
+	excludedNamespaces?: ReadonlyArray<string>
+	excludedNodeNames?: ReadonlyArray<string>
+	excludedClusters?: ReadonlyArray<string>
+	excludedDeployments?: ReadonlyArray<string>
+	excludedStatefulsets?: ReadonlyArray<string>
+	excludedDaemonsets?: ReadonlyArray<string>
+	excludedJobs?: ReadonlyArray<string>
+	excludedEnvironments?: ReadonlyArray<string>
+	excludedComputeTypes?: ReadonlyArray<string>
 	// Single-value filters retained for backward compat with the workload detail
 	// page, which still narrows by a single workload owner.
 	workloadKind?: "deployment" | "statefulset" | "daemonset"
@@ -378,6 +388,35 @@ const podBaseConditions = (
 	$.MetricName.in_(...metricNames),
 ]
 
+/**
+ * Every pod facet, paired with the resource-attribute key it filters on.
+ *
+ * Driven from one table rather than open-coded per dimension: ten facets written out twice — once
+ * to include, once to exclude — is exactly where a missed polarity hides. `attr: null` means the
+ * dimension needs a real expression (environment coalesces both semconv spellings) rather than a
+ * plain map read. Order here is the emitted clause order, so it stays as it was.
+ */
+const POD_FACETS = [
+	{ include: "podNames", exclude: "excludedPodNames", attr: "k8s.pod.name" },
+	{ include: "namespaces", exclude: "excludedNamespaces", attr: "k8s.namespace.name" },
+	{ include: "nodeNames", exclude: "excludedNodeNames", attr: "k8s.node.name" },
+	{ include: "clusters", exclude: "excludedClusters", attr: "k8s.cluster.name" },
+	{ include: "deployments", exclude: "excludedDeployments", attr: "k8s.deployment.name" },
+	{ include: "statefulsets", exclude: "excludedStatefulsets", attr: "k8s.statefulset.name" },
+	{ include: "daemonsets", exclude: "excludedDaemonsets", attr: "k8s.daemonset.name" },
+	{ include: "jobs", exclude: "excludedJobs", attr: "k8s.job.name" },
+	{ include: "environments", exclude: "excludedEnvironments", attr: null },
+	{
+		include: "computeTypes",
+		exclude: "excludedComputeTypes",
+		attr: "eks.amazonaws.com/compute-type",
+	},
+] as const satisfies ReadonlyArray<{
+	include: keyof ListPodsOpts
+	exclude: keyof ListPodsOpts
+	attr: string | null
+}>
+
 const podFilterConditions = (
 	$: ColumnAccessor<typeof MetricsGauge.columns>,
 	opts: ListPodsOpts,
@@ -385,30 +424,15 @@ const podFilterConditions = (
 	CH.when(opts.search, (v: string) =>
 		CH.positionCaseInsensitive($.ResourceAttributes.get("k8s.pod.name"), CH.lit(v)).gt(0),
 	),
-	opts.podNames?.length ? CH.inList($.ResourceAttributes.get("k8s.pod.name"), opts.podNames) : undefined,
-	opts.namespaces?.length
-		? CH.inList($.ResourceAttributes.get("k8s.namespace.name"), opts.namespaces)
-		: undefined,
-	opts.nodeNames?.length ? CH.inList($.ResourceAttributes.get("k8s.node.name"), opts.nodeNames) : undefined,
-	opts.clusters?.length
-		? CH.inList($.ResourceAttributes.get("k8s.cluster.name"), opts.clusters)
-		: undefined,
-	opts.deployments?.length
-		? CH.inList($.ResourceAttributes.get("k8s.deployment.name"), opts.deployments)
-		: undefined,
-	opts.statefulsets?.length
-		? CH.inList($.ResourceAttributes.get("k8s.statefulset.name"), opts.statefulsets)
-		: undefined,
-	opts.daemonsets?.length
-		? CH.inList($.ResourceAttributes.get("k8s.daemonset.name"), opts.daemonsets)
-		: undefined,
-	opts.jobs?.length ? CH.inList($.ResourceAttributes.get("k8s.job.name"), opts.jobs) : undefined,
-	opts.environments?.length
-		? CH.inList(deploymentEnvExpr($.ResourceAttributes), opts.environments)
-		: undefined,
-	opts.computeTypes?.length
-		? CH.inList($.ResourceAttributes.get("eks.amazonaws.com/compute-type"), opts.computeTypes)
-		: undefined,
+	...POD_FACETS.flatMap(({ include, exclude, attr }) => {
+		const expr = attr === null ? deploymentEnvExpr($.ResourceAttributes) : $.ResourceAttributes.get(attr)
+		const included = opts[include] as ReadonlyArray<string> | undefined
+		const excluded = opts[exclude] as ReadonlyArray<string> | undefined
+		return [
+			included?.length ? CH.inList(expr, included) : undefined,
+			excluded?.length ? CH.notInList(expr, excluded) : undefined,
+		]
+	}),
 	CH.when(opts.workloadKind && opts.workloadName, () =>
 		$.ResourceAttributes.get(workloadAttrKey(opts.workloadKind!)).eq(opts.workloadName!),
 	),

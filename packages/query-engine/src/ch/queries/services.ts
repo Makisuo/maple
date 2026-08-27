@@ -55,6 +55,9 @@ interface ServiceWindowFilters {
 	readonly environments?: readonly string[]
 	readonly namespaces?: readonly string[]
 	readonly commitShas?: readonly string[]
+	readonly excludedEnvironments?: readonly string[]
+	readonly excludedNamespaces?: readonly string[]
+	readonly excludedCommitShas?: readonly string[]
 }
 
 /**
@@ -137,6 +140,17 @@ function serviceOverviewWindows(filters: ServiceWindowFilters, tiers: ServiceWin
 		filters.environments?.length ? CH.inList($.DeploymentEnv, filters.environments) : undefined,
 		filters.namespaces?.length ? CH.inList($.ServiceNamespace, filters.namespaces) : undefined,
 		filters.commitShas?.length ? CH.inList($.CommitSha, filters.commitShas) : undefined,
+		// All three are top-level columns on both the raw table and the rollup, so an exclusion
+		// keeps whichever tier the splice picked.
+		filters.excludedEnvironments?.length
+			? CH.notInList($.DeploymentEnv, filters.excludedEnvironments)
+			: undefined,
+		filters.excludedNamespaces?.length
+			? CH.notInList($.ServiceNamespace, filters.excludedNamespaces)
+			: undefined,
+		filters.excludedCommitShas?.length
+			? CH.notInList($.CommitSha, filters.excludedCommitShas)
+			: undefined,
 	]
 
 	const rawEdges = from(ServiceOverviewSpans)
@@ -230,6 +244,9 @@ export interface ServiceOverviewOpts {
 	environments?: readonly string[]
 	namespaces?: readonly string[]
 	commitShas?: readonly string[]
+	excludedEnvironments?: readonly string[]
+	excludedNamespaces?: readonly string[]
+	excludedCommitShas?: readonly string[]
 	serviceName?: string
 	limit?: number
 }
@@ -501,6 +518,8 @@ export function serviceHealthSnapshotQuery(opts: ServiceHealthSnapshotOpts) {
 export interface ServiceHealthBaselineOpts {
 	environments?: readonly string[]
 	namespaces?: readonly string[]
+	excludedEnvironments?: readonly string[]
+	excludedNamespaces?: readonly string[]
 }
 
 export interface ServiceHealthBaselineOutput {

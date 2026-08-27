@@ -1103,6 +1103,7 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
 		excludedSpanNames: filters?.excludedSpanNames as readonly string[] | undefined,
 		excludedEnvironments: filters?.excludedEnvironments as readonly string[] | undefined,
 		excludedNamespaces: filters?.excludedNamespaces as readonly string[] | undefined,
+		excludedCommitShas: filters?.excludedCommitShas as readonly string[] | undefined,
 	}
 }
 
@@ -1917,6 +1918,10 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						fingerprintHashes: filters?.fingerprintHashes as string[] | undefined,
 						errorLabels: filters?.errorLabels as string[] | undefined,
 						serviceVersions: filters?.serviceVersions as string[] | undefined,
+						excludedServices: filters?.excludedServices as string[] | undefined,
+						excludedDeploymentEnvs: filters?.excludedDeploymentEnvs as string[] | undefined,
+						excludedErrorLabels: filters?.excludedErrorLabels as string[] | undefined,
+						excludedServiceVersions: filters?.excludedServiceVersions as string[] | undefined,
 					}),
 					baseParams,
 					"errorsFacets",

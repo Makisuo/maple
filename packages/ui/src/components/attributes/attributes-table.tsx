@@ -91,12 +91,15 @@ export function AttributeRow({
 	/** The key column holds a label rather than a key: drop the mono face. */
 	plainKey?: boolean
 }) {
-	const { renderValue } = useAttributesConfig()
+	const { renderValue, onFilterByAttribute, canFilterAttribute } = useAttributesConfig()
 	const parsed = displayValue !== undefined && displayValue !== value ? null : tryParseJson(value)
 	// Only non-JSON values are overridable; JSON keeps its collapsible renderer.
 	const override = parsed === null ? renderValue?.(attrKey, value) : null
+	// A JSON blob is not a facet value — filtering on a serialized object would never match.
+	const filterable =
+		onFilterByAttribute !== undefined && parsed === null && (canFilterAttribute?.(attrKey) ?? true)
 	return (
-		<div className="grid grid-cols-[minmax(7rem,38%)_1fr] items-start gap-x-3 px-2 py-1 transition-colors hover:bg-muted/40">
+		<div className="group/attr grid grid-cols-[minmax(7rem,38%)_1fr] items-start gap-x-3 px-2 py-1 transition-colors hover:bg-muted/40">
 			<CopyableValue
 				value={attrKey}
 				label="attribute key"
@@ -117,8 +120,50 @@ export function AttributeRow({
 						{displayValue ?? value}
 					</CopyableValue>
 				)}
+				{filterable && (
+					<span className="ml-2 inline-flex items-center gap-1 align-middle opacity-0 transition-opacity group-hover/attr:opacity-100 group-focus-within/attr:opacity-100">
+						<AttributeFilterAction
+							label={`Filter by ${attrKey} = ${value}`}
+							onClick={() => onFilterByAttribute({ attrKey, value, action: "include" })}
+						>
+							Filter
+						</AttributeFilterAction>
+						<AttributeFilterAction
+							label={`Exclude ${attrKey} = ${value}`}
+							onClick={() => onFilterByAttribute({ attrKey, value, action: "exclude" })}
+						>
+							Exclude
+						</AttributeFilterAction>
+					</span>
+				)}
 			</div>
 		</div>
+	)
+}
+
+/**
+ * The per-row hover verb, matching the facet sidebar's wording so the same two actions read the
+ * same wherever they appear.
+ */
+function AttributeFilterAction({
+	label,
+	onClick,
+	children,
+}: {
+	label: string
+	onClick: () => void
+	children: React.ReactNode
+}) {
+	return (
+		<button
+			type="button"
+			aria-label={label}
+			title={label}
+			onClick={onClick}
+			className="rounded-sm px-1 py-0.5 font-sans text-[10px] uppercase tracking-[0.06em] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+		>
+			{children}
+		</button>
 	)
 }
 

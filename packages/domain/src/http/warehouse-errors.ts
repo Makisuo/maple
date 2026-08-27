@@ -228,6 +228,30 @@ export class WarehouseMalformedQueryError extends HttpTaggedError<WarehouseMalfo
 	},
 ) {}
 
+/**
+ * The database rejected SQL the CALLER wrote — the raw_sql widget, the `run_sql`
+ * MCP tool, `maple query`. A table that does not exist, a column they invented,
+ * a syntax slip: their mistake to fix, and the database's own explanation is the
+ * only useful thing we can say about it, so `exposure` is `public_message`.
+ *
+ * The caller-authored twin of `WarehouseMalformedQueryError`. Splitting them is
+ * what keeps a stale `FROM web_events` in someone's saved widget from being
+ * reported as a 500 that blames Maple and pages on-call, and from landing in the
+ * API's 5xx error budget alongside real outages.
+ */
+export class WarehouseInvalidSqlError extends HttpTaggedError<WarehouseInvalidSqlError>()(
+	"@maple/http/errors/WarehouseInvalidSqlError",
+	warehouseErrorBaseFields,
+	{
+		status: 400,
+		code: "warehouse_invalid_sql",
+		title: "The database rejected this query",
+		retry: "never",
+		recovery: "fix_request",
+		exposure: "public_message",
+	},
+) {}
+
 /** A query exceeded a ClickHouse resource quota. Mapped to 429. */
 export class WarehouseQuotaExceededError extends HttpTaggedError<WarehouseQuotaExceededError>()(
 	"@maple/http/errors/WarehouseQuotaExceededError",
@@ -286,6 +310,7 @@ export const classifiedWarehouseHttpErrors = [
 	WarehouseClientError,
 	WarehouseSchemaDriftError,
 	WarehouseMalformedQueryError,
+	WarehouseInvalidSqlError,
 	WarehouseQuotaExceededError,
 ] as const
 

@@ -19,6 +19,8 @@ import { PageHero } from "@/components/infra/primitives/page-hero"
 import { PodTable, PodTableLoading } from "@/components/infra/pod-table"
 import { PodSummaryBand, PodSummaryBandLoading, type PodScope } from "@/components/infra/pod-summary-band"
 import { PodsFilterSidebarView, type PodFilters } from "@/components/infra/k8s-filter-sidebar"
+import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
+import { podFilterChips } from "@/lib/infra/pod-filter-chips"
 import {
 	listPodsResultAtom,
 	podFacetsResultAtom,
@@ -54,6 +56,16 @@ const podsSearchSchema = Schema.Struct({
 	jobs: OptionalStringArrayParam,
 	environments: OptionalStringArrayParam,
 	computeTypes: OptionalStringArrayParam,
+	excludedPodNames: OptionalStringArrayParam,
+	excludedNamespaces: OptionalStringArrayParam,
+	excludedNodeNames: OptionalStringArrayParam,
+	excludedClusters: OptionalStringArrayParam,
+	excludedDeployments: OptionalStringArrayParam,
+	excludedStatefulsets: OptionalStringArrayParam,
+	excludedDaemonsets: OptionalStringArrayParam,
+	excludedJobs: OptionalStringArrayParam,
+	excludedEnvironments: OptionalStringArrayParam,
+	excludedComputeTypes: OptionalStringArrayParam,
 	...TimeRangeSearchFields,
 })
 
@@ -92,6 +104,16 @@ function PodsPage() {
 		jobs: search.jobs,
 		environments: search.environments,
 		computeTypes: search.computeTypes,
+		excludedPodNames: search.excludedPodNames,
+		excludedNamespaces: search.excludedNamespaces,
+		excludedNodeNames: search.excludedNodeNames,
+		excludedClusters: search.excludedClusters,
+		excludedDeployments: search.excludedDeployments,
+		excludedStatefulsets: search.excludedStatefulsets,
+		excludedDaemonsets: search.excludedDaemonsets,
+		excludedJobs: search.excludedJobs,
+		excludedEnvironments: search.excludedEnvironments,
+		excludedComputeTypes: search.excludedComputeTypes,
 	}
 
 	const sortBy: PodSortKey = search.sortBy ?? "saturation"
@@ -221,6 +243,19 @@ function PodsPage() {
 								<PageHero
 									title="Pods"
 									description="Sorted worst-first by peak utilization against the pod's own limits."
+								/>
+
+								<ActiveFilterChips
+									chips={podFilterChips(search).map((chip) => ({
+										id: chip.param,
+										label: chip.label,
+										values: chip.values,
+										negated: chip.negated,
+										onRemove: () =>
+											navigate({
+												search: (prev) => ({ ...prev, [chip.param]: undefined }),
+											}),
+									}))}
 								/>
 
 								{Result.builder(summaryResult)

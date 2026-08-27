@@ -7,7 +7,15 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { useListNavigation } from "@/hooks/use-list-navigation"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-import { AnomaliesFilterSidebar, type AnomalyFilters } from "@/components/anomalies/anomalies-filter-sidebar"
+import { AnomaliesFilterSidebar } from "@/components/anomalies/anomalies-filter-sidebar"
+import {
+	anomalyFilterChips,
+	hasAnomalyFilters,
+	matchesAnomalyFilters,
+	type AnomalyFilters,
+} from "@/lib/anomalies/anomaly-filters"
+import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
+import { ExcludedEmptyHint } from "@maple/ui/components/filters/excluded-empty-hint"
 import {
 	ANOMALY_GROUP_ORDER,
 	AnomalyGroup,
@@ -54,6 +62,14 @@ const searchSchema = Schema.Struct({
 	),
 	services: Schema.optional(Schema.Array(Schema.String)),
 	envs: Schema.optional(Schema.Array(Schema.String)),
+	excludedSeverity: Schema.optional(Schema.Array(Schema.Literals(["warning", "critical"]))),
+	excludedSignals: Schema.optional(
+		Schema.Array(
+			Schema.Literals(["error_rate", "latency_p95", "throughput", "error_spike", "log_volume"]),
+		),
+	),
+	excludedServices: Schema.optional(Schema.Array(Schema.String)),
+	excludedEnvs: Schema.optional(Schema.Array(Schema.String)),
 	live: Schema.optional(Schema.Boolean),
 })
 
@@ -114,8 +130,21 @@ function AnomaliesPage() {
 			signals: search.signals,
 			services: search.services,
 			envs: search.envs,
+			excludedSeverity: search.excludedSeverity,
+			excludedSignals: search.excludedSignals,
+			excludedServices: search.excludedServices,
+			excludedEnvs: search.excludedEnvs,
 		}),
-		[search.severity, search.signals, search.services, search.envs],
+		[
+			search.severity,
+			search.signals,
+			search.services,
+			search.envs,
+			search.excludedSeverity,
+			search.excludedSignals,
+			search.excludedServices,
+			search.excludedEnvs,
+		],
 	)
 
 	const updateFilter = useCallback(
@@ -166,39 +195,55 @@ function AnomaliesPage() {
 	}, [listQuery, loadingMore, nextCursor, status])
 
 	const filtered = useMemo(
-		() =>
-			allIncidents.filter(
-				(incident) =>
-					(filters.severity === undefined || filters.severity.includes(incident.severity)) &&
-					(filters.signals === undefined || filters.signals.includes(incident.signalType)) &&
-					(filters.services === undefined || filters.services.includes(incident.serviceName)) &&
-					(filters.envs === undefined || filters.envs.includes(incident.deploymentEnv)),
-			),
+		() => allIncidents.filter((incident) => matchesAnomalyFilters(incident, filters)),
 		[allIncidents, filters],
 	)
 
-	const hasActiveFilters =
-		filters.severity !== undefined ||
-		filters.signals !== undefined ||
-		filters.services !== undefined ||
-		filters.envs !== undefined
+	const hasActiveFilters = hasAnomalyFilters(filters)
 
+	const excludedChips = anomalyFilterChips(filters).filter((chip) => chip.negated)
+	const excludedValues = excludedChips.flatMap((chip) => chip.values)
+	const clearExclusions = () =>
+		navigate({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(excludedChips.map((chip) => [chip.param, undefined])),
+			}),
+		})
+
+	const activeFilterChips = anomalyFilterChips(filters).map((chip) => ({
+		id: chip.param,
+		label: chip.label,
+		values: chip.values,
+		negated: chip.negated,
+		onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
+	}))
+
+	// Folded into the toolbar node rather than placed per-branch: the three Result branches each
+	// render `toolbar`, and a chip bar that appeared only on success would vanish on every refresh.
 	const toolbar = (
-		<ListToolbar
-			tabs={TOOLBAR_TABS}
-			active={status}
-			label="Filter anomalies"
-			countNoun={["anomaly", "anomalies"]}
-			totalCount={Result.isSuccess(incidentsResult) ? filtered.length : undefined}
-			onChange={(value) =>
-				navigate({
-					search: (prev) => ({
-						...prev,
-						status: value === "open" ? undefined : value,
-					}),
-				})
-			}
-		/>
+		<>
+			<ListToolbar
+				tabs={TOOLBAR_TABS}
+				active={status}
+				label="Filter anomalies"
+				countNoun={["anomaly", "anomalies"]}
+				totalCount={Result.isSuccess(incidentsResult) ? filtered.length : undefined}
+				onChange={(value) =>
+					navigate({
+						search: (prev) => ({
+							...prev,
+							status: value === "open" ? undefined : value,
+						}),
+					})
+				}
+			/>
+			<ActiveFilterChips
+				chips={activeFilterChips}
+				onClearAll={clearFilters}
+				className="mb-0 px-2 pb-2"
+			/>
+		</>
 	)
 
 	// The three Result branches share one shell. With the compound layout that's a
@@ -270,6 +315,8 @@ function AnomaliesPage() {
 				status={status}
 				hasActiveFilters={hasActiveFilters}
 				onClearFilters={clearFilters}
+				excludedValues={excludedValues}
+				onClearExclusions={clearExclusions}
 				toolbar={toolbar}
 				Shell={AnomaliesShell}
 				hasMore={nextCursor !== null}
@@ -285,6 +332,8 @@ function AnomaliesPageBody({
 	status,
 	hasActiveFilters,
 	onClearFilters,
+	excludedValues,
+	onClearExclusions,
 	toolbar,
 	Shell,
 	hasMore,
@@ -296,6 +345,9 @@ function AnomaliesPageBody({
 	hasActiveFilters: boolean
 	onClearFilters: () => void
 	toolbar: React.ReactNode
+	/** Flattened active exclusions, for the empty state's hint. */
+	excludedValues: ReadonlyArray<string>
+	onClearExclusions: () => void
 	Shell: (props: { children: React.ReactNode }) => React.ReactElement
 	hasMore: boolean
 	loadingMore: boolean
@@ -386,6 +438,13 @@ function AnomaliesPageBody({
 									Clear filters
 								</Button>
 							) : null}
+							{/* Named separately from "Clear filters": an inclusion is visible in what
+							    came back, an exclusion only in what did not. */}
+							<ExcludedEmptyHint
+								excluded={excludedValues}
+								onClear={onClearExclusions}
+								className="max-w-lg"
+							/>
 						</Empty>
 					</div>
 				) : (

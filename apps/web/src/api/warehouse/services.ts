@@ -50,6 +50,9 @@ const GetServiceOverviewInput = Schema.Struct({
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
 	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 	commitShas: Schema.optional(Schema.mutable(Schema.Array(CommitSha))),
+	excludedEnvironments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	excludedNamespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
+	excludedCommitShas: Schema.optional(Schema.mutable(Schema.Array(CommitSha))),
 })
 
 export type GetServiceOverviewInput = (typeof GetServiceOverviewInput)["Encoded"]
@@ -85,6 +88,9 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 					environments: input.environments,
 					namespaces: input.namespaces,
 					commitShas: input.commitShas,
+					excludedEnvironments: input.excludedEnvironments,
+					excludedNamespaces: input.excludedNamespaces,
+					excludedCommitShas: input.excludedCommitShas,
 				}),
 			})
 		}),

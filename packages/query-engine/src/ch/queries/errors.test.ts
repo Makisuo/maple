@@ -219,6 +219,33 @@ describe("errorDetailTracesQuery", () => {
 	})
 })
 
+// Exclusions on the fingerprint-resolving query. The errors list is issue-first until a facet is
+// active, at which point it asks the warehouse which fingerprints survive — so an exclusion has to
+// narrow that set or it never reaches the rows at all.
+
+describe("errorsByTypeQuery exclusions", () => {
+	it("emits NOT IN for every excluded dimension", () => {
+		const q = errorsByTypeQuery({
+			excludedServices: ["noisy"],
+			excludedDeploymentEnvs: ["staging"],
+			excludedErrorLabels: ["TimeoutError"],
+			excludedServiceVersions: ["1.4.2"],
+		})
+		const { sql } = compileUnsafe(q, baseParams)
+		expect(sql).toContain("ServiceName NOT IN ('noisy')")
+		expect(sql).toContain("DeploymentEnv NOT IN ('staging')")
+		expect(sql).toContain("ErrorLabel NOT IN ('TimeoutError')")
+		expect(sql).toContain("ServiceVersion NOT IN ('1.4.2')")
+	})
+
+	it("combines with the inclusion on the same dimension", () => {
+		const q = errorsByTypeQuery({ services: ["api", "web"], excludedServices: ["noisy"] })
+		const { sql } = compileUnsafe(q, baseParams)
+		expect(sql).toContain("ServiceName IN ('api', 'web')")
+		expect(sql).toContain("ServiceName NOT IN ('noisy')")
+	})
+})
+
 // errorsFacetsQuery
 
 describe("errorsFacetsQuery", () => {
@@ -283,6 +310,36 @@ describe("errorsFacetsQuery", () => {
 		expect(serviceBranch).toContain("DeploymentEnv IN ('prod')")
 		expect(envBranch).toContain("ServiceName IN ('api')")
 		expect(envBranch).not.toContain("DeploymentEnv IN ('prod')")
+	})
+
+	it("leaves a section's own EXCLUSIONS unfiltered too", () => {
+		// The half that is easy to miss. If the Service section applied
+		// `excludedServices`, the service you just excluded would count zero in the
+		// very section you excluded it from — and there would be no row to untick.
+		const q = errorsFacetsQuery({ excludedServices: ["noisy"], excludedDeploymentEnvs: ["staging"] })
+		const { sql } = compileUnionUnsafe(q, baseParams)
+		const branches = sql.split("UNION ALL")
+		const serviceBranch = branches.find((b) => b.includes("'service' AS facetType"))
+		const envBranch = branches.find((b) => b.includes("'environment' AS facetType"))
+
+		expect(serviceBranch).not.toContain("ServiceName NOT IN ('noisy')")
+		expect(serviceBranch).toContain("DeploymentEnv NOT IN ('staging')")
+		expect(envBranch).toContain("ServiceName NOT IN ('noisy')")
+		expect(envBranch).not.toContain("DeploymentEnv NOT IN ('staging')")
+	})
+
+	it("emits NOT IN for every excluded dimension", () => {
+		const q = errorsFacetsQuery({
+			excludedServices: ["noisy"],
+			excludedDeploymentEnvs: ["staging"],
+			excludedErrorLabels: ["TimeoutError"],
+			excludedServiceVersions: ["1.4.2"],
+		})
+		const { sql } = compileUnionUnsafe(q, baseParams)
+		expect(sql).toContain("ServiceName NOT IN ('noisy')")
+		expect(sql).toContain("DeploymentEnv NOT IN ('staging')")
+		expect(sql).toContain("ErrorLabel NOT IN ('TimeoutError')")
+		expect(sql).toContain("ServiceVersion NOT IN ('1.4.2')")
 	})
 })
 

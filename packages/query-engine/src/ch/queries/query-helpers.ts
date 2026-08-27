@@ -106,6 +106,7 @@ export interface TracesBaseWhereOpts {
 	excludedSpanNames?: readonly string[]
 	excludedEnvironments?: readonly string[]
 	excludedNamespaces?: readonly string[]
+	excludedCommitShas?: readonly string[]
 	attributeIndexMode?: AttributeIndexMode
 }
 
@@ -311,6 +312,11 @@ export function tracesBaseWhereConditions(
 	if (opts.excludedNamespaces?.length) {
 		conditions.push(CH.notInList($.ResourceAttributes.get("service.namespace"), opts.excludedNamespaces))
 	}
+	if (opts.excludedCommitShas?.length) {
+		conditions.push(
+			CH.notInList($.ResourceAttributes.get("deployment.commit_sha"), opts.excludedCommitShas),
+		)
+	}
 
 	return conditions
 }
@@ -406,6 +412,9 @@ export function serviceOverviewWhereConditions(
 	if (opts.excludedNamespaces?.length) {
 		conditions.push(CH.notInList($.ServiceNamespace, opts.excludedNamespaces))
 	}
+	if (opts.excludedCommitShas?.length) {
+		conditions.push(CH.notInList($.CommitSha, opts.excludedCommitShas))
+	}
 
 	return conditions
 }
@@ -437,6 +446,7 @@ export function canUseTracesAggregatesMv(
 	if (opts.attributeFilters?.length) return false
 	if (opts.resourceAttributeFilters?.length) return false
 	if (opts.commitShas?.length) return false // MV doesn't carry CommitSha
+	if (opts.excludedCommitShas?.length) return false // ...so it cannot exclude on one either
 	if (opts.namespaces?.length || opts.excludedNamespaces?.length) return false // MV doesn't carry ServiceNamespace
 	if (opts.minDurationMs != null || opts.maxDurationMs != null) return false
 	if (groupBy) {
