@@ -20,7 +20,12 @@ import {
 	ExternalLinkIcon,
 } from "@/components/icons"
 import { MessageResponse } from "@/components/ai-elements/message-response"
-import { AttributesSection, CopyableValue, ResourceAttributesSection } from "@/components/attributes"
+import {
+	AttributesSection,
+	CopyableValue,
+	ResourceAttributesSection,
+	tryParseJson,
+} from "@/components/attributes"
 import { SpanLogs } from "@/components/traces/span-detail-panel"
 import type { SpanDetailResult } from "@/api/warehouse/traces"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
@@ -39,7 +44,7 @@ import {
 import { classifyAiSpan, spanFailed, spanTtftMs } from "@/lib/agent-sessions/session-turns"
 import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
 import { ClampedText, firstLine } from "./clamped-text"
-import { useJsonPayload, ViewSegment, ViewSwitch } from "./payload-view"
+import { useJsonPayload, useMessageBody, ViewSegment, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
 
 /**
@@ -313,6 +318,7 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 	const [open, setOpen] = useState(false)
 	const [raw, setRaw] = useState(false)
 	const text = collapsedText(message.parts)
+	const body = useMessageBody(text)
 
 	return (
 		<div className="rounded-md border border-border/60 bg-muted/30">
@@ -338,12 +344,18 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 				<div className="flex items-start gap-1.5 px-2.5 pb-2.5 pl-8">
 					<div className="min-w-0 grow">
 						<ClampedText
-							text={text}
+							text={raw ? text : body.formatted}
+							html={raw ? undefined : body.highlighted}
+							mono={!raw && body.rendered === "json"}
 							clampClass={PANEL_CLAMP}
-							body={raw ? undefined : <MessageResponse className="text-sm">{text}</MessageResponse>}
+							body={
+								raw || body.rendered === "json" ? undefined : (
+									<MessageResponse className="text-sm">{text}</MessageResponse>
+								)
+							}
 						/>
 					</div>
-					<ViewSwitch rendered="md" raw={raw} onRawChange={setRaw} />
+					<ViewSwitch rendered={body.rendered} raw={raw} onRawChange={setRaw} />
 					{/* Copies the instructions as captured, not their rendering. */}
 					<CopyButton value={text} label="system message" className="-my-1 shrink-0" />
 				</div>
@@ -357,6 +369,15 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 	// reader flips together, while the payload cards keep their own json switch.
 	const [raw, setRaw] = useState(false)
 	const hasText = message.parts.some((part) => part.kind === "text")
+	// The switch names what the rendering IS, and each text part chooses its own
+	// (JSON where it parses as a document) — "json" only when they all agree.
+	const rendered = useMemo(
+		() =>
+			message.parts.some((part) => part.kind === "text" && tryParseJson(part.text) === null)
+				? "md"
+				: "json",
+		[message.parts],
+	)
 
 	return (
 		<div className="flex min-w-0 flex-col gap-1.5">
@@ -377,7 +398,7 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 					</span>
 				)}
 				<span aria-hidden className="h-px min-w-4 flex-1 bg-border/60" />
-				{hasText && <ViewSwitch rendered="md" raw={raw} onRawChange={setRaw} />}
+				{hasText && <ViewSwitch rendered={rendered} raw={raw} onRawChange={setRaw} />}
 			</div>
 			<div className="flex min-w-0 flex-col gap-2">
 				{message.parts.map((part, index) => (
@@ -389,20 +410,31 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 }
 
 function MessagePart({ part, raw }: { part: SpanMessagePart; raw: boolean }) {
-	if (part.kind === "text") {
-		return (
-			<ClampedText
-				text={part.text}
-				clampClass={PANEL_CLAMP}
-				body={raw ? undefined : <MessageResponse className="text-sm">{part.text}</MessageResponse>}
-			/>
-		)
-	}
+	if (part.kind === "text") return <TextPart text={part.text} raw={raw} />
 	if (part.kind === "reasoning") return <ReasoningPart part={part} />
 	if (part.kind === "tool_call") {
 		return <PayloadCard label="tool_call" name={part.name} meta={part.id} body={part.argumentsText} />
 	}
 	return <PayloadCard label="tool_result" meta={part.id} body={part.resultText} />
+}
+
+/** A text part in the message's chosen view — markdown prose, or the payload
+ *  cards' pretty-printed JSON where the captured text is a JSON document. */
+function TextPart({ text, raw }: { text: string; raw: boolean }) {
+	const body = useMessageBody(text)
+	return (
+		<ClampedText
+			text={raw ? text : body.formatted}
+			html={raw ? undefined : body.highlighted}
+			mono={!raw && body.rendered === "json"}
+			clampClass={PANEL_CLAMP}
+			body={
+				raw || body.rendered === "json" ? undefined : (
+					<MessageResponse className="text-sm">{text}</MessageResponse>
+				)
+			}
+		/>
+	)
 }
 
 /** Reasoning is the model thinking, not the model answering, so it is set apart

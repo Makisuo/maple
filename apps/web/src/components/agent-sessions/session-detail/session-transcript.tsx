@@ -40,7 +40,7 @@ import {
 import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { formatClockInTimezone } from "@/lib/timezone-format"
 import { ClampedText, firstLine } from "./clamped-text"
-import { useJsonPayload, ViewSwitch } from "./payload-view"
+import { useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
 
 /**
@@ -451,6 +451,7 @@ function UserBlock({
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 	const textKey = `${row.key}:text`
+	const body = useMessageBody(row.text)
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-foreground" className="pt-5">
@@ -475,7 +476,7 @@ function UserBlock({
 						</button>
 					)}
 					<ViewSwitch
-						rendered="md"
+						rendered={body.rendered}
 						raw={raw}
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
@@ -483,9 +484,11 @@ function UserBlock({
 				{/* Clamped like every other long body: a pasted 400-line prompt is one
 				    block of a conversation, not the page. "Show full" opens it. */}
 				<ClampedText
-					text={row.text}
+					text={raw ? row.text : body.formatted}
+					html={raw ? undefined : body.highlighted}
+					mono={!raw && body.rendered === "json"}
 					body={
-						raw ? undefined : (
+						raw || body.rendered === "json" ? undefined : (
 							<MessageResponse className="text-foreground text-sm leading-relaxed">
 								{row.text}
 							</MessageResponse>
@@ -538,6 +541,7 @@ function SystemBlock({
 	const textKey = `${row.key}:text`
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
+	const body = useMessageBody(row.text)
 
 	return (
 		<Row depth={row.depth} rail="bg-muted-foreground/40" className="pt-3.5">
@@ -573,9 +577,11 @@ function SystemBlock({
 				<div className="flex items-start gap-1.5 pb-2 pl-6">
 					<div className="min-w-0 grow">
 						<ClampedText
-							text={row.text}
+							text={raw ? row.text : body.formatted}
+							html={raw ? undefined : body.highlighted}
+							mono={!raw && body.rendered === "json"}
 							body={
-								raw ? undefined : (
+								raw || body.rendered === "json" ? undefined : (
 									<MessageResponse className="text-sm">{row.text}</MessageResponse>
 								)
 							}
@@ -584,7 +590,7 @@ function SystemBlock({
 						/>
 					</div>
 					<ViewSwitch
-						rendered="md"
+						rendered={body.rendered}
 						raw={raw}
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
@@ -611,6 +617,7 @@ function AssistantBlock({
 	// whole JSON error envelope, so it gets the same JSON treatment as a tool
 	// payload. Empty where the call succeeded, and the hook is cheap on "".
 	const error = useJsonPayload(row.failed ? row.span.statusMessage : "")
+	const body = useMessageBody(row.text ?? "")
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 	const errorRawKey = `${row.key}:error-raw`
@@ -645,7 +652,7 @@ function AssistantBlock({
 				)}
 				{row.text !== undefined && (
 					<ViewSwitch
-						rendered="md"
+						rendered={body.rendered}
 						raw={raw}
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
@@ -657,6 +664,11 @@ function AssistantBlock({
 					<p className="whitespace-pre-wrap break-words pt-2.5 text-foreground text-sm leading-relaxed">
 						{row.text}
 					</p>
+				) : body.highlighted !== undefined ? (
+					<div
+						className="min-w-0 whitespace-pre-wrap break-words pt-2.5 font-mono text-muted-foreground text-xs leading-relaxed"
+						dangerouslySetInnerHTML={{ __html: body.highlighted }}
+					/>
 				) : (
 					<MessageResponse className="pt-2.5 text-foreground text-sm leading-relaxed">
 						{row.text}
@@ -717,6 +729,7 @@ function PromptBlock({
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "prompt" }> }) {
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
+	const body = useMessageBody(row.text)
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-chart-2" className="pt-3">
@@ -728,7 +741,7 @@ function PromptBlock({
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{row.span.serviceName}</span>
 					<ViewSwitch
-						rendered="md"
+						rendered={body.rendered}
 						raw={raw}
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
@@ -737,6 +750,11 @@ function PromptBlock({
 					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
 						{row.text}
 					</p>
+				) : body.highlighted !== undefined ? (
+					<div
+						className="min-w-0 whitespace-pre-wrap break-words font-mono text-muted-foreground text-xs leading-relaxed"
+						dangerouslySetInnerHTML={{ __html: body.highlighted }}
+					/>
 				) : (
 					<MessageResponse className="text-foreground text-sm leading-relaxed">
 						{row.text}
