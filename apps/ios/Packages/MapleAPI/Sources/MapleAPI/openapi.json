@@ -4278,7 +4278,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/ParameterInvalidError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/v2/ParameterInvalidError failure. HTTP 400. | The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -4767,7 +4767,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -4919,7 +4919,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -5160,7 +5160,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/CursorInvalidError failure. HTTP 400. | The @maple/http/v2/CursorSortMismatchError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/v2/CursorInvalidError failure. HTTP 400. | The @maple/http/v2/CursorSortMismatchError failure. HTTP 400. | The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -5441,7 +5441,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -6331,7 +6331,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/ParameterInvalidError failure. HTTP 400. | The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/v2/ParameterInvalidError failure. HTTP 400. | The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -6481,7 +6481,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -6626,7 +6626,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/TelemetryBreakdownFilterRequiredError failure. HTTP 400. | The @maple/http/v2/TraceQueryInvalidError failure. HTTP 400. | The @maple/http/errors/QueryEngineValidationError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/TelemetryBreakdownFilterRequiredError failure. HTTP 400. | The @maple/http/v2/TraceQueryInvalidError failure. HTTP 400. | The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/errors/QueryEngineValidationError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -6761,7 +6761,7 @@
                 }
               }
             },
-            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/TelemetryBucketCountTooLargeError failure. HTTP 400. | The @maple/http/v2/TraceQueryInvalidError failure. HTTP 400. | The @maple/http/errors/QueryEngineValidationError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/v2/TimeRangeInvalidError failure. HTTP 400. | The @maple/http/v2/TelemetryRangeTooLargeError failure. HTTP 400. | The @maple/http/v2/TelemetryBucketCountTooLargeError failure. HTTP 400. | The @maple/http/v2/TraceQueryInvalidError failure. HTTP 400. | The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/errors/QueryEngineValidationError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
@@ -7157,7 +7157,7 @@
                 }
               }
             },
-            "description": "The @maple/http/errors/QueryEngineValidationError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
+            "description": "The @maple/http/errors/WarehouseInvalidSqlError failure. HTTP 400. | The @maple/http/errors/QueryEngineValidationError failure. HTTP 400. | The @maple/http/v2/InvalidRequestError failure. HTTP 400."
           },
           "401": {
             "content": {
