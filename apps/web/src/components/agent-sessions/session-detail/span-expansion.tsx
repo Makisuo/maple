@@ -697,7 +697,8 @@ function FailureBanner({ span }: { span: AiSessionSpan }) {
 					)}
 			</div>
 			<p className="text-muted-foreground text-xs leading-relaxed">
-				The span reports the failure through the attributes above; it carries no status message.
+				The pills here are the attributes the failure was read from; the span carries no status
+				message.
 			</p>
 		</div>
 	)
