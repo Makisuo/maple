@@ -944,12 +944,13 @@ describe("SessionViews", () => {
 		render(<Views />)
 
 		fireEvent.click(screen.getByRole("tab", { name: /Flow/ }))
+		fireEvent.click(screen.getByRole("button", { name: "Display options" }))
 
 		expect(screen.getByPlaceholderText("Filter spans")).toBeTruthy()
-		expect(screen.getByRole("button", { name: "Agent spans only" })).toBeTruthy()
+		expect(screen.getByRole("switch", { name: "Agent spans only" })).toBeTruthy()
 		// The genuinely view-specific toggles still swap.
-		expect(screen.getByRole("button", { name: "Merge repeat tools" })).toBeTruthy()
-		expect(screen.queryByRole("button", { name: "Collapse idle" })).toBeNull()
+		expect(screen.getByRole("switch", { name: "Merge repeat tools" })).toBeTruthy()
+		expect(screen.queryByRole("switch", { name: "Collapse idle" })).toBeNull()
 	})
 
 	// None of the span controls shape the Overview, and a row of controls that do
@@ -958,7 +959,7 @@ describe("SessionViews", () => {
 		render(<Views view="overview" />)
 
 		expect(screen.queryByPlaceholderText("Filter spans")).toBeNull()
-		expect(screen.queryByRole("button", { name: "Agent spans only" })).toBeNull()
+		expect(screen.queryByRole("button", { name: "Display options" })).toBeNull()
 		expect(screen.getByRole("tab", { name: /Overview/ })).toBeTruthy()
 	})
 
@@ -969,7 +970,8 @@ describe("SessionViews", () => {
 
 		expect(screen.getByText(/of idle removed across 1 gap/)).toBeTruthy()
 
-		fireEvent.click(screen.getByRole("button", { name: "Collapse idle" }))
+		fireEvent.click(screen.getByRole("button", { name: "Display options" }))
+		fireEvent.click(screen.getByRole("switch", { name: "Collapse idle" }))
 
 		expect(screen.queryByText(/of idle removed/)).toBeNull()
 	})
