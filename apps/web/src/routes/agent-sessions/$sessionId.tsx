@@ -29,6 +29,7 @@ import {
 } from "@/lib/agent-sessions/session-window"
 import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns } from "@/lib/agent-sessions/session-turns"
+import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { displayError } from "@/lib/error-messages"
@@ -225,6 +226,8 @@ function SessionDetailBody({
 	// Message content is opt-in and off by default, so most sessions have no
 	// opening user message to title the page with.
 	const title = summary.title ?? breadcrumbSessionId(sessionId)
+	// The framework that emitted the session, as its mark — the subtitle names it.
+	const VendorIcon = vendorIcon(summary.vendorIds[0] ?? "")
 
 	return (
 		<SessionShell sessionId={sessionId}>
@@ -233,6 +236,7 @@ function SessionDetailBody({
 					<DashboardLayout.Header
 						titleContent={
 							<div className="flex min-w-0 items-center gap-2">
+								<VendorIcon size={16} className="shrink-0 text-muted-foreground" aria-hidden />
 								<DashboardLayout.Title title={title}>
 									{summary.title === undefined ? (
 										// The id fallback title copies the full session id.
