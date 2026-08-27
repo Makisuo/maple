@@ -377,7 +377,6 @@ export function compilePipeQuery(
 							commitShas: str("commit_shas")?.split(",").filter(Boolean),
 						}),
 						{ orgId, startTime, endTime },
-						{ rowSchema: serviceOverviewRowSchema },
 					),
 				),
 			),
