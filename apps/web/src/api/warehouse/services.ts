@@ -17,6 +17,7 @@ import {
 	ServiceOverviewRequest,
 } from "@maple/domain/http"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
+import { scopeServicesToNamespaces } from "@/api/warehouse/namespace-scope"
 import {
 	buildBucketTimeline,
 	computeBucketSeconds,
@@ -117,6 +118,9 @@ const GetServiceHealthSnapshotInput = Schema.Struct({
 	startTime: Schema.optional(dateTimeString),
 	endTime: Schema.optional(dateTimeString),
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	// traces_aggregates_hourly has no ServiceNamespace column — lowered to
+	// service membership (see `scopeServicesToNamespaces`) after the query.
+	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 })
 
 export type GetServiceHealthSnapshotInput = (typeof GetServiceHealthSnapshotInput)["Encoded"]
@@ -139,6 +143,14 @@ const getServiceHealthSnapshotEffect = Effect.fn("QueryEngine.getServiceHealthSn
 		1,
 	)
 
+	const scope = yield* scopeServicesToNamespaces({
+		namespaces: input.namespaces,
+		services: undefined,
+		startTime,
+		endTime,
+	})
+	if (scope.empty) return { data: [] as ServiceHealthSnapshot[] }
+
 	const response = yield* runWarehouseQuery("serviceHealthSnapshot", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleInternalAtomClient
@@ -153,17 +165,19 @@ const getServiceHealthSnapshotEffect = Effect.fn("QueryEngine.getServiceHealthSn
 	)
 
 	return {
-		data: response.data.map(
-			(row): ServiceHealthSnapshot => ({
-				serviceName: String(row.serviceName),
-				environment: row.environment || "unknown",
-				requestCount: row.requestCount,
-				errorCount: row.errorCount,
-				errorRate: row.requestCount > 0 ? row.errorCount / row.requestCount : 0,
-				p95LatencyMs: row.p95LatencyMs,
-				throughput: row.requestCount / durationSeconds,
-			}),
-		),
+		data: response.data
+			.filter((row) => scope.memberServices === null || scope.memberServices.has(String(row.serviceName)))
+			.map(
+				(row): ServiceHealthSnapshot => ({
+					serviceName: String(row.serviceName),
+					environment: row.environment || "unknown",
+					requestCount: row.requestCount,
+					errorCount: row.errorCount,
+					errorRate: row.requestCount > 0 ? row.errorCount / row.requestCount : 0,
+					p95LatencyMs: row.p95LatencyMs,
+					throughput: row.requestCount / durationSeconds,
+				}),
+			),
 	}
 })
 

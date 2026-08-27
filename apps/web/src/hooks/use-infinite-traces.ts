@@ -3,6 +3,7 @@ import { Result } from "@/lib/effect-atom"
 
 import { listTraces, type Trace, type TracesResponse } from "@/api/warehouse/traces"
 import { listTracesResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import type { TracesSearchParams } from "@/routes/traces"
@@ -27,7 +28,12 @@ export interface UseInfiniteTracesReturn {
 function buildQueryParams(
 	filters: TracesSearchParams | undefined,
 	refreshedRange: { startTime: string; endTime: string },
+	globalNamespace: string | null,
 ) {
+	// The org-global pin overrides URL namespace filters (they stay in the URL
+	// untouched; unpinning restores them). Applied here so the atom page and the
+	// direct pagination fetches below stay byte-for-byte identical.
+	const pinned = globalNamespace !== null
 	return {
 		services: filters?.services,
 		spanNames: filters?.spanNames,
@@ -37,7 +43,7 @@ function buildQueryParams(
 		httpMethods: filters?.httpMethods,
 		httpStatusCodes: filters?.httpStatusCodes,
 		deploymentEnvs: filters?.deploymentEnvs,
-		namespaces: filters?.namespaces,
+		namespaces: pinned ? [globalNamespace] : filters?.namespaces,
 		attributeFilters: filters?.attributeFilters,
 		resourceAttributeFilters: filters?.resourceAttributeFilters,
 		startTime: refreshedRange.startTime,
@@ -46,11 +52,11 @@ function buildQueryParams(
 		serviceMatchMode: filters?.serviceMatchMode,
 		spanNameMatchMode: filters?.spanNameMatchMode,
 		deploymentEnvMatchMode: filters?.deploymentEnvMatchMode,
-		namespaceMatchMode: filters?.namespaceMatchMode,
+		namespaceMatchMode: pinned ? undefined : filters?.namespaceMatchMode,
 		excludedServices: filters?.excludedServices,
 		excludedSpanNames: filters?.excludedSpanNames,
 		excludedDeploymentEnvs: filters?.excludedDeploymentEnvs,
-		excludedNamespaces: filters?.excludedNamespaces,
+		excludedNamespaces: pinned ? undefined : filters?.excludedNamespaces,
 		excludedHttpMethods: filters?.excludedHttpMethods,
 		excludedHttpStatusCodes: filters?.excludedHttpStatusCodes,
 		hideNoise: filters?.hideNoise,
@@ -68,9 +74,11 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 		defaultRange: "12h",
 	})
 
+	const globalNamespace = useGlobalNamespace()
+
 	const queryParams = React.useMemo(
-		() => buildQueryParams(filters, refreshedRange),
-		[filters, refreshedRange],
+		() => buildQueryParams(filters, refreshedRange, globalNamespace),
+		[filters, refreshedRange, globalNamespace],
 	)
 
 	const filterKey = React.useMemo(() => JSON.stringify(queryParams), [queryParams])

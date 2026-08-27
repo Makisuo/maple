@@ -11,6 +11,7 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
 import { logFilterChips } from "@/lib/logs/log-filter-chips"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 
 const logsSearchSchema = Schema.Struct({
 	services: OptionalStringArrayParam,
@@ -39,6 +40,7 @@ export const Route = createFileRoute("/logs/")({
 function LogsPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+	const pinnedNamespace = useGlobalNamespace()
 
 	const handleTimeChange = (
 		range: {
@@ -54,13 +56,21 @@ function LogsPage() {
 		})
 	}
 
-	const activeFilterChips = logFilterChips(search).map((chip) => ({
-		id: chip.param,
-		label: chip.label,
-		values: chip.values,
-		negated: chip.negated,
-		onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
-	}))
+	const activeFilterChips = logFilterChips(search)
+		// URL namespace filters are ignored while the org-global pin is on —
+		// chips for them would suggest they still apply.
+		.filter(
+			(chip) =>
+				pinnedNamespace === null ||
+				(chip.param !== "namespaces" && chip.param !== "excludedNamespaces"),
+		)
+		.map((chip) => ({
+			id: chip.param,
+			label: chip.label,
+			values: chip.values,
+			negated: chip.negated,
+			onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
+		}))
 
 	const clearFacetFilters = () => {
 		navigate({

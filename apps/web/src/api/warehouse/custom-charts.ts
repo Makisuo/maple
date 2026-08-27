@@ -906,6 +906,7 @@ const GetOverviewTimeSeriesInputSchema = Schema.Struct({
 	startTime: Schema.optional(dateTimeString),
 	endTime: Schema.optional(dateTimeString),
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 })
 
 type GetOverviewTimeSeriesInput = (typeof GetOverviewTimeSeriesInputSchema)["Encoded"]
@@ -928,6 +929,7 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
 		bucketSeconds,
 		rootSpansOnly: true,
 		environments: input.environments,
+		namespaces: input.namespaces,
 	}
 
 	// Throughput renders from the sampling-aware `estimatedSpanCount`; exact
@@ -1117,6 +1119,9 @@ const ThroughputRefinementShared = {
 	startTime: Schema.optional(dateTimeString),
 	endTime: Schema.optional(dateTimeString),
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	// The SpanMetrics calls MV can't be namespace-filtered, so a namespace scope
+	// skips the exact refinement the same way an environment scope does.
+	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 	// The caller's sampling verdict, derived from the already-loaded primary
 	// chart. When false (or absent) the exact query is skipped — the estimate is
 	// already correct. Including it in the input makes it part of the atom key, so
@@ -1150,7 +1155,8 @@ const getServiceDetailThroughputRefinementEffect = Effect.fn(
 	)
 
 	const envScoped = (input.environments?.length ?? 0) > 0
-	if (!input.samplingActive || envScoped) {
+	const nsScoped = (input.namespaces?.length ?? 0) > 0
+	if (!input.samplingActive || envScoped || nsScoped) {
 		return { data: [] as ThroughputRefinementPoint[] }
 	}
 
@@ -1183,7 +1189,8 @@ const getOverviewThroughputRefinementEffect = Effect.fn("QueryEngine.getOverview
 		)
 
 		const envScoped = (input.environments?.length ?? 0) > 0
-		if (!input.samplingActive || envScoped) {
+		const nsScoped = (input.namespaces?.length ?? 0) > 0
+		if (!input.samplingActive || envScoped || nsScoped) {
 			return { data: [] as ThroughputRefinementPoint[] }
 		}
 

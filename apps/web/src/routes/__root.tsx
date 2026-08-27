@@ -21,6 +21,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import type { RouterAuthContext } from "@/router"
 import type { EffectRouterContext } from "@effect-router/core"
 import { captureChatReferrer } from "@/components/chat/auto-contexts"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { GlobalChatSheet } from "@/components/chat/global-chat-sheet"
 import { GlobalShortcuts } from "@/components/command-palette/global-shortcuts"
 import { IdleRoutePrefetch } from "@/components/performance/idle-route-prefetch"
@@ -86,6 +87,10 @@ export const Route = createRootRouteWithContext<{ auth: RouterAuthContext } & Ef
 // the entire route tree on every commit.
 const AppFrame = memo(function AppFrame() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname })
+	// Remount the page tree when the org-global namespace pin changes: every
+	// component rebuilds its query inputs under the new scope, so no memoized
+	// atom key can keep serving the previous scope's rows.
+	const globalNamespace = useGlobalNamespace()
 	useEffect(() => {
 		captureChatReferrer(pathname)
 	}, [pathname])
@@ -93,7 +98,7 @@ const AppFrame = memo(function AppFrame() {
 		<AttributesProvider highlightJson={highlightCode} renderValue={renderAttributeValue}>
 			<ToastProvider position="bottom-right">
 				<AnchoredToastProvider>
-					<Outlet />
+					<Outlet key={globalNamespace ?? "__all__"} />
 					{!isPublicPath(pathname) && <IdleRoutePrefetch />}
 					{!isPublicPath(pathname) && (
 						<>

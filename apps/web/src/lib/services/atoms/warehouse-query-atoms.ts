@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import { encodeOrgScopedKey, identityFromKey, orgScopedKeyPayload } from "@/lib/cache-key"
 import { nextRetentionNamespace, withRetention } from "@/lib/services/atoms/retained-atom"
 import { getActiveOrgId } from "@/lib/services/common/auth-headers"
+import { getGlobalNamespace } from "@/lib/services/common/global-namespace"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { BackendError, WarehouseApiError } from "@/api/warehouse/effect-utils"
 import {
@@ -136,6 +137,46 @@ interface QueryAtomOptions {
 	 * user's round trip away from the page tends to be.
 	 */
 	staleTime?: number
+	/**
+	 * Pin the org-global namespace (see `global-namespace.ts`) into this query's
+	 * input before key encoding, so the pin lands in both the request payload and
+	 * the cache key. `"top"` writes `data.namespaces`, `"filters"` writes
+	 * `data.filters.namespaces`. Only for families whose input schema accepts
+	 * `namespaces` — decode drops unknown keys, which would silently un-scope
+	 * the query while still fragmenting its cache.
+	 */
+	globalNamespace?: GlobalNamespaceScope
+}
+
+type GlobalNamespaceScope = "top" | "filters"
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const pinIntoData = (data: Record<string, unknown>, scope: GlobalNamespaceScope, ns: string): Record<string, unknown> => {
+	if (scope === "filters") {
+		const prevFilters = isRecord(data.filters) ? data.filters : {}
+		return { ...data, filters: { ...prevFilters, namespaces: [ns], excludedNamespaces: undefined } }
+	}
+	// URL-borne namespace filters are ignored (overridden), never rewritten —
+	// unpinning restores them untouched. `encodeKey` strips `undefined` entries.
+	return {
+		...data,
+		namespaces: [ns],
+		namespace: undefined,
+		namespaceMatchMode: undefined,
+		excludedNamespaces: undefined,
+	}
+}
+
+/** Merge the pinned global namespace into a `{ data }` query input, if any.
+ * Exported for its unit tests — production callers go through the families. */
+export const applyGlobalNamespace = (input: unknown, scope: GlobalNamespaceScope): Record<string, unknown> => {
+	const base = isRecord(input) ? input : {}
+	const ns = getGlobalNamespace()
+	if (ns === null) return base
+	const data = isRecord(base.data) ? base.data : {}
+	return { ...base, data: pinIntoData(data, scope, ns) }
 }
 
 class QueryAtomError extends Schema.TaggedError<QueryAtomError>()("@maple/web/services/QueryAtomError", {
@@ -191,7 +232,13 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 		return withRetention(resultAtom, identity)
 	})
 
-	return (input: Input) => family(encodeOrgScopedKey(getActiveOrgId(), input))
+	// Pinning happens before key encoding so loader `warmAtoms` and component
+	// reads stay byte-for-byte identical, and the pin re-keys the cache entry.
+	const scope = options?.globalNamespace
+	return (input: Input) =>
+		family(
+			encodeOrgScopedKey(getActiveOrgId(), scope === undefined ? input : applyGlobalNamespace(input, scope)),
+		)
 }
 
 export const getServiceUsageResultAtom = makeQueryAtomFamily(getServiceUsage, {
@@ -211,31 +258,37 @@ export const getServicesFacetsResultAtom = makeQueryAtomFamily(getServicesFacets
 
 export const getServiceOverviewResultAtom = makeQueryAtomFamily(getServiceOverview, {
 	staleTime: 30_000,
+	globalNamespace: "top",
 })
 
 export const getServiceHealthSnapshotResultAtom = makeQueryAtomFamily(getServiceHealthSnapshot, {
 	staleTime: 30_000,
+	globalNamespace: "top",
 })
 
 export const getServiceHealthBaselineResultAtom = makeQueryAtomFamily(getServiceHealthBaseline, {
 	// The trailing-7d latency baseline moves slowly and the request payload is
 	// hour-snapped, so keep it warm far longer than the live overview.
 	staleTime: 30 * 60_000,
+	globalNamespace: "top",
 })
 
 export const getCustomChartServiceSparklinesResultAtom = makeQueryAtomFamily(
 	getCustomChartServiceSparklines,
 	{
 		staleTime: 30_000,
+		globalNamespace: "top",
 	},
 )
 
 export const listTracesResultAtom = makeQueryAtomFamily(listTraces, {
 	staleTime: 30_000,
+	globalNamespace: "top",
 })
 
 export const getTracesFacetsResultAtom = makeQueryAtomFamily(getTracesFacets, {
 	staleTime: 30_000,
+	globalNamespace: "top",
 })
 
 // Single-dimension facet list for dashboard variables — server compiles only
@@ -349,6 +402,7 @@ export const getSpanDetailResultAtom = makeQueryAtomFamily(getSpanDetail, {
 
 export const listLogsResultAtom = makeQueryAtomFamily(listLogs, {
 	staleTime: 30_000,
+	globalNamespace: "top",
 })
 
 export const getLogResultAtom = makeQueryAtomFamily(getLog, {
@@ -357,6 +411,7 @@ export const getLogResultAtom = makeQueryAtomFamily(getLog, {
 
 export const getLogsFacetsResultAtom = makeQueryAtomFamily(getLogsFacets, {
 	staleTime: 30_000,
+	globalNamespace: "top",
 })
 
 export const getLogsFacetValuesResultAtom = makeQueryAtomFamily(getLogsFacetValues, {
@@ -365,18 +420,22 @@ export const getLogsFacetValuesResultAtom = makeQueryAtomFamily(getLogsFacetValu
 
 export const getErrorsByTypeResultAtom = makeQueryAtomFamily(getErrorsByType, {
 	staleTime: 60_000,
+	globalNamespace: "top",
 })
 
 export const getErrorsSparkResultAtom = makeQueryAtomFamily(getErrorsSpark, {
 	staleTime: 60_000,
+	globalNamespace: "top",
 })
 
 export const getErrorsFacetsResultAtom = makeQueryAtomFamily(getErrorsFacets, {
 	staleTime: 60_000,
+	globalNamespace: "top",
 })
 
 export const getErrorsSummaryResultAtom = makeQueryAtomFamily(getErrorsSummary, {
 	staleTime: 60_000,
+	globalNamespace: "top",
 })
 
 export const listMetricsResultAtom = makeQueryAtomFamily(listMetrics, {
@@ -519,6 +578,7 @@ export const getServiceDetailOverviewResultAtom = makeQueryAtomFamily(getService
 
 export const getOverviewTimeSeriesResultAtom = makeQueryAtomFamily(getOverviewTimeSeries, {
 	staleTime: 30_000,
+	globalNamespace: "top",
 })
 
 // Non-blocking exact pre-sampling throughput overlays. Keyed (via the encoded
@@ -531,7 +591,7 @@ export const getServiceDetailThroughputRefinementResultAtom = makeQueryAtomFamil
 
 export const getOverviewThroughputRefinementResultAtom = makeQueryAtomFamily(
 	getOverviewThroughputRefinement,
-	{ staleTime: 30_000 },
+	{ staleTime: 30_000, globalNamespace: "top" },
 )
 
 export const getCustomChartTimeSeriesResultAtom = makeQueryAtomFamily(getCustomChartTimeSeries, {

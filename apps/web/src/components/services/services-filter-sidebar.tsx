@@ -6,6 +6,8 @@ import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { FilterSection, SearchableFilterSection } from "@/components/traces/filter-section"
 import { getServicesFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { isServiceHealth, useServiceHealthSummary } from "@/components/services/use-service-health-summary"
+import { PinnedNamespaceNotice } from "@/components/filters/pinned-namespace-notice"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import {
 	FilterSidebarBody,
 	FilterSidebarError,
@@ -23,6 +25,7 @@ function LoadingState() {
 export function ServicesFilterSidebar() {
 	const navigate = routeApi.useNavigate()
 	const search = routeApi.useSearch()
+	const pinnedNamespace = useGlobalNamespace()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
@@ -120,15 +123,19 @@ export function ServicesFilterSidebar() {
 							onExcludedChange={(val) => updateFilter("excludedEnvironments", val)}
 						/>
 
-						{facets.namespaces.length > 0 && (
-							<SearchableFilterSection
-								title="Namespace"
-								options={facets.namespaces}
-								selected={search.namespaces ?? []}
-								onChange={(val) => updateFilter("namespaces", val)}
-								excluded={search.excludedNamespaces ?? []}
-								onExcludedChange={(val) => updateFilter("excludedNamespaces", val)}
-							/>
+						{pinnedNamespace !== null ? (
+							<PinnedNamespaceNotice namespace={pinnedNamespace} />
+						) : (
+							facets.namespaces.length > 0 && (
+								<SearchableFilterSection
+									title="Namespace"
+									options={facets.namespaces}
+									selected={search.namespaces ?? []}
+									onChange={(val) => updateFilter("namespaces", val)}
+									excluded={search.excludedNamespaces ?? []}
+									onExcludedChange={(val) => updateFilter("excludedNamespaces", val)}
+								/>
+							)
 						)}
 
 						<FilterSection

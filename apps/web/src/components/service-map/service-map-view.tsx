@@ -24,6 +24,7 @@ import {
 import "@xyflow/react/dist/style.css"
 
 import { Result, useAtom, useAtomValue } from "@/lib/effect-atom"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { retainedQuery } from "@/lib/services/common/atom-client"
 import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 import { serviceMapLayoutAtomFamily, upsertSnapshot } from "@/atoms/service-map-layout-atoms"
@@ -2559,8 +2560,40 @@ export function ServiceMapView({
 	// Node DATA that streams in after the canvas mounts and refines nodes in place
 	// (colors, icons, pod badges, detail-panel overlays) without moving them —
 	// topology-determining results (edges, db edges, overviews) are gated below.
-	const overviews = Result.isSuccess(bundleResult) ? bundleResult.value.overview : []
-	const dbEdges = Result.isSuccess(bundleResult) ? bundleResult.value.dbEdges : []
+	const allOverviews = Result.isSuccess(bundleResult) ? bundleResult.value.overview : []
+
+	// Client-side scoping for the org-global namespace pin: the bundle still
+	// fetches every namespace (a server-side service.namespace filter is a
+	// follow-up), so drop out-of-namespace services and everything that only
+	// they touch. serviceNamespace is blanked because a map where every node
+	// shares one namespace has nothing left to group.
+	const pinnedNamespace = useGlobalNamespace()
+	const memberServices = useMemo(() => {
+		if (pinnedNamespace === null) return null
+		return new Set(
+			allOverviews
+				.filter((o) => o.serviceNamespace === pinnedNamespace)
+				.map((o) => o.serviceName),
+		)
+	}, [pinnedNamespace, allOverviews])
+	const overviews = useMemo(
+		() =>
+			memberServices === null
+				? allOverviews
+				: allOverviews
+						.filter((o) => memberServices.has(o.serviceName))
+						.map((o) => ({ ...o, serviceNamespace: "" })),
+		[allOverviews, memberServices],
+	)
+
+	const allDbEdges = Result.isSuccess(bundleResult) ? bundleResult.value.dbEdges : []
+	const dbEdges = useMemo(
+		() =>
+			memberServices === null
+				? allDbEdges
+				: allDbEdges.filter((edge) => memberServices.has(edge.sourceService)),
+		[allDbEdges, memberServices],
+	)
 	const cloudflareServices = Result.isSuccess(cloudflareResult) ? cloudflareResult.value.services : []
 	const planetscaleStats = Result.isSuccess(planetscaleStatsResult)
 		? planetscaleStatsResult.value.databases
@@ -2636,7 +2669,14 @@ export function ServiceMapView({
 		return map
 	}, [bundleResult])
 
-	const workloads = Result.isSuccess(bundleResult) ? bundleResult.value.workloads : []
+	const allWorkloads = Result.isSuccess(bundleResult) ? bundleResult.value.workloads : []
+	const workloads = useMemo(
+		() =>
+			memberServices === null
+				? allWorkloads
+				: allWorkloads.filter((workload) => memberServices.has(workload.serviceName)),
+		[allWorkloads, memberServices],
+	)
 
 	return Result.builder(bundleResult)
 		.onInitial(() => <ServiceMapLoading />)
@@ -2653,7 +2693,15 @@ export function ServiceMapView({
 		})
 		.onSuccess((mapResponse) => (
 			<ServiceMapCanvas
-				edges={mapResponse.edges}
+				edges={
+					memberServices === null
+						? mapResponse.edges
+						: mapResponse.edges.filter(
+								(edge) =>
+									memberServices.has(edge.sourceService) &&
+									memberServices.has(edge.targetService),
+							)
+				}
 				dbEdges={dbEdges}
 				cloudflareServices={cloudflareServices}
 				faasNames={faasNames}
