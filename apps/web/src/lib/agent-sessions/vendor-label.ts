@@ -17,6 +17,7 @@ const VENDOR_LABELS: Record<string, string> = {
 	llamaindex: "LlamaIndex",
 	openai_agents_sdk: "OpenAI Agents SDK",
 	"openinference-openai": "OpenInference · OpenAI",
+	openrouter: "OpenRouter",
 	pydantic_ai: "Pydantic AI",
 	smolagents: "smolagents",
 	spring_ai: "Spring AI",

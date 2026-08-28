@@ -198,6 +198,7 @@ describe("legacy aliases", () => {
 		// The registry spelling, not a deprecation: semconv says `cache_write`
 		// where the catalog's primary keeps the Anthropic-era `cache_creation`.
 		["gen_ai.usage.cache_write.input_tokens", "512", "usageCacheCreationInputTokens", 512],
+		["gen_ai.usage.total_cost", "0.00130795", "usageCost", 0.00130795],
 	]
 
 	for (const [key, value, field, expected] of cases) {

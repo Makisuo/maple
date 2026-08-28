@@ -243,6 +243,7 @@ struct ScopeFacts {
     agent_framework: bool,
     openai_agents: bool,
     openinference_openai: bool,
+    openrouter: bool,
     crewai: bool,
     openinference_foreign: bool,
     pydantic: bool,
@@ -272,6 +273,7 @@ const SCOPE_NAMES: &[&str] = &[
     "@mastra/otel-exporter",
     "agent_framework",
     "agent_runtime ",
+    "openrouter",
     "crewai.telemetry",
     "pydantic-ai",
     "strands.telemetry.tracer",
@@ -315,6 +317,7 @@ fn scope_facts(scope_name: &str, resource: &ResourceFacts) -> ScopeFacts {
         // openai" is a string prefix of the agents scope.
         "openinference.instrumentation.openai_agents" => facts.openai_agents = true,
         "openinference.instrumentation.openai" => facts.openinference_openai = true,
+        "openrouter" => facts.openrouter = true,
         "openinference.instrumentation.crewai" | "crewai.telemetry" => facts.crewai = true,
         "openinference.instrumentation.smolagents" => facts.smolagents = true,
         "pydantic-ai" => facts.pydantic = true,
@@ -348,6 +351,7 @@ fn scope_facts(scope_name: &str, resource: &ResourceFacts) -> ScopeFacts {
         || facts.agent_framework
         || facts.openai_agents
         || facts.openinference_openai
+        || facts.openrouter
         || facts.crewai
         || facts.pydantic
         || facts.semantic_kernel
@@ -856,6 +860,11 @@ static VENDORS: &[Vendor] = &[
         session_keys: &[],
     },
     Vendor {
+        id: "openrouter",
+        detect: detect_openrouter,
+        session_keys: &["session.id"],
+    },
+    Vendor {
         id: "llamaindex",
         detect: detect_llamaindex,
         session_keys: &[],
@@ -1055,6 +1064,14 @@ fn detect_litellm(c: &Ctx) -> bool {
     // No `litellm.` attr-prefix clause: that would steal the host framework's
     // spans (litellm.call_id rides along inside other frameworks' spans).
     c.scope.litellm
+}
+
+fn detect_openrouter(c: &Ctx) -> bool {
+    // OpenRouter's own OTLP export (scope and service.name are both
+    // "openrouter"). Its `session.id` span attribute echoes the caller-supplied
+    // session tag, so calls tagged by a framework the gateway also stamps join
+    // that framework's session.
+    c.scope.openrouter
 }
 
 fn detect_llamaindex(c: &Ctx) -> bool {
@@ -1301,6 +1318,13 @@ mod tests {
                 &[("session.id", "oo-1")],
                 "openinference-openai",
                 "oo-1",
+            ),
+            (
+                "openrouter",
+                "LLM Generation",
+                &[("session.id", "or-1"), ("gen_ai.operation.name", "chat")],
+                "openrouter",
+                "or-1",
             ),
             (
                 "crewai.telemetry",
