@@ -69,7 +69,7 @@ export function startLandingTelemetry(): void {
 		ingestKey: INGEST_KEY,
 		endpoint: ENDPOINT,
 		serviceName: "maple-landing",
-		serviceNamespace: "client",
+		serviceNamespace: "core",
 		environment: import.meta.env.MODE,
 		replay: { enabled: true },
 		privacy: {

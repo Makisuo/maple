@@ -1687,7 +1687,7 @@ fn init_tracing(
 
     let resource = build_resource(ResourceConfig {
         service_name: "ingest",
-        service_namespace: "ingest",
+        service_namespace: "core",
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
@@ -1809,7 +1809,7 @@ fn init_metrics(
 
     let resource = build_resource(ResourceConfig {
         service_name: "ingest",
-        service_namespace: "ingest",
+        service_namespace: "core",
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
@@ -1871,7 +1871,7 @@ fn init_usage_metrics(
 
     let resource = build_resource(ResourceConfig {
         service_name: "ingest",
-        service_namespace: "ingest",
+        service_namespace: "core",
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,

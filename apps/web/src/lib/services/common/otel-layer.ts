@@ -19,7 +19,7 @@ const telemetry = MapleFlush.make({
 	environment: import.meta.env.MODE,
 	serviceVersion: import.meta.env.VITE_COMMIT_SHA,
 	attributes: {
-		"service.namespace": "client",
+		"service.namespace": "core",
 		"vcs.repository.url.full": "https://github.com/MapleTechLabs/maple",
 		...(import.meta.env.VITE_COMMIT_SHA
 			? { "vcs.ref.head.revision": import.meta.env.VITE_COMMIT_SHA }

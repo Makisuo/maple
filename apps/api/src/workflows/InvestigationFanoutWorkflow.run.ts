@@ -170,7 +170,7 @@ const PERSIST_STEP = { retries: { limit: 5, delay: "2 seconds", backoff: "expone
 // it was a bug.
 const fanoutTelemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
-	serviceNamespace: "backend",
+	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS, ...MCP_ANTICIPATED_ERROR_IDENTIFIERS],
 })

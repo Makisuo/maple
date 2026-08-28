@@ -43,7 +43,7 @@ const resolveEnvironment = (): string => {
  */
 export const TelemetryLayer = Maple.layer({
 	serviceName: "maple-cli",
-	serviceNamespace: "backend",
+	serviceNamespace: "core",
 	serviceVersion: MAPLE_VERSION,
 	environment: resolveEnvironment(),
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",

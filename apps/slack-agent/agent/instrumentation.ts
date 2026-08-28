@@ -54,7 +54,7 @@ export interface ResourceAttributeInput {
 export function buildResourceAttributes(input: ResourceAttributeInput = {}): Record<string, string> {
 	const attributes: Record<string, string> = {
 		[ATTR_SERVICE_NAME]: SLACK_AGENT_SERVICE_NAME,
-		"service.namespace": "backend",
+		"service.namespace": "core",
 		"service.instance.id": randomUUID(),
 		"service.version": input.serviceVersion?.trim() || "development",
 		"maple.sdk.type": "eve",
