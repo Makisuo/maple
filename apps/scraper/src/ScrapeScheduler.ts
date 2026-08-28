@@ -14,7 +14,7 @@ import {
 	Schema,
 	Semaphore,
 } from "effect"
-import { ScrapeResultReport, type InternalScrapeTarget } from "@maple/domain/http"
+import { ScrapeResultReport, ScrapeTargetId, type InternalScrapeTarget } from "@maple/domain/http"
 import { ApiClient } from "./ApiClient"
 import { convertFamiliesToOtlp } from "./prometheus/otlp"
 import { parsePrometheusText } from "./prometheus/parser"
@@ -148,7 +148,7 @@ class ScrapeAttemptFailed extends Schema.TaggedError<ScrapeAttemptFailed>()(
 		// attributes: the error event/issue built from this failure is what a
 		// triage sees first, and "target returned HTTP 500" with no identity
 		// forced a trace-attribute hunt that came up empty.
-		targetId: Schema.String,
+		targetId: ScrapeTargetId,
 		targetName: Schema.String,
 		targetHost: Schema.String,
 	},
