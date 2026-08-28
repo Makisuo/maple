@@ -11,3 +11,4 @@
 
 export * from "./cache-backend"
 export * from "./edge-cache"
+export * from "./outbound-slots"
