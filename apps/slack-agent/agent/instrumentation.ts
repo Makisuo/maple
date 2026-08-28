@@ -117,7 +117,9 @@ function setupTelemetry(): void {
 		// never leaves the container. NodeSDK builds the LoggerProvider from these
 		// processors with the same resource and registers it globally.
 		logRecordProcessors: [
-			new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${endpoint}/v1/logs`, headers })),
+			new BatchLogRecordProcessor({
+				exporter: new OTLPLogExporter({ url: `${endpoint}/v1/logs`, headers }),
+			}),
 		],
 	})
 	sdk.start()
