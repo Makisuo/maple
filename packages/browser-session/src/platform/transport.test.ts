@@ -128,6 +128,10 @@ describe("transport", () => {
 })
 
 describe("gzip", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals()
+	})
+
 	it("produces a complete gzip stream", async () => {
 		const out = await gzip(new TextEncoder().encode('[{"type":2,"timestamp":1}]'))
 		expect([out[0], out[1], out[2]]).toEqual([0x1f, 0x8b, 0x08])
@@ -148,7 +152,9 @@ describe("gzip", () => {
 	// with only the bytes already flushed, and the caller posted the stub as if
 	// it were a chunk. Compression that cannot complete must throw, not truncate.
 	it("rejects a truncated stream instead of returning it", async () => {
-		const realCompressionStream = globalThis.CompressionStream
+		// `stubGlobal` rather than assigning `globalThis.CompressionStream`: the
+		// stub only has to emit bytes, and reaching the real constructor's type
+		// would take a cast that discards exactly the evidence being tested.
 		class TruncatingStream {
 			readonly readable = new ReadableStream<Uint8Array>({
 				start(controller) {
@@ -158,8 +164,7 @@ describe("gzip", () => {
 			})
 			readonly writable = new WritableStream()
 		}
-		globalThis.CompressionStream = TruncatingStream as unknown as typeof CompressionStream
+		vi.stubGlobal("CompressionStream", TruncatingStream)
 		await expect(gzip(new TextEncoder().encode("[]"))).rejects.toThrow(/not a complete gzip stream/)
-		globalThis.CompressionStream = realCompressionStream
 	})
 })
