@@ -19,6 +19,17 @@ import { MetricsGauge, MetricsSum } from "../tables"
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import type { FacetOutput } from "./query-helpers"
 
+// A conditional aggregate over a metric family the entity never emitted returns
+// `nan`, which ClickHouse serializes as JSON `null` — and one null against a
+// numeric row schema fails the decode for the whole page, not just that row.
+// Absent samples mean "none of this resource in use", which is what the callers
+// already assume: `podScopeCondition("unbounded")` tests `saturation = 0`.
+const avgIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
+	CH.ifNotFinite(CH.avgIf(value, condition), 0)
+
+const maxIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
+	CH.ifNotFinite(CH.maxIf(value, condition), 0)
+
 const HOSTMETRIC_NAMES = [
 	"system.cpu.utilization",
 	"system.memory.utilization",
@@ -54,19 +65,19 @@ export function listHostsQuery(opts: ListHostsOpts = {}) {
 			hostArch: CH.any_($.ResourceAttributes.get("host.arch")),
 			cloudProvider: CH.any_($.ResourceAttributes.get("cloud.provider")),
 			lastSeen: CH.max_($.TimeUnix),
-			cpuPct: CH.avgIf(
+			cpuPct: avgIfOrZero(
 				$.Value,
 				$.MetricName.eq("system.cpu.utilization").and($.Attributes.get("state").neq("idle")),
 			),
-			memoryPct: CH.avgIf(
+			memoryPct: avgIfOrZero(
 				$.Value,
 				$.MetricName.eq("system.memory.utilization").and($.Attributes.get("state").eq("used")),
 			),
-			diskPct: CH.maxIf(
+			diskPct: maxIfOrZero(
 				$.Value,
 				$.MetricName.eq("system.filesystem.utilization").and($.Attributes.get("state").eq("used")),
 			),
-			load15: CH.avgIf($.Value, $.MetricName.eq("system.cpu.load_average.15m")),
+			load15: avgIfOrZero($.Value, $.MetricName.eq("system.cpu.load_average.15m")),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -115,19 +126,19 @@ export function hostDetailSummaryQuery(opts: HostDetailSummaryOpts) {
 			cloudRegion: CH.any_($.ResourceAttributes.get("cloud.region")),
 			firstSeen: CH.min_($.TimeUnix),
 			lastSeen: CH.max_($.TimeUnix),
-			cpuPct: CH.avgIf(
+			cpuPct: avgIfOrZero(
 				$.Value,
 				$.MetricName.eq("system.cpu.utilization").and($.Attributes.get("state").neq("idle")),
 			),
-			memoryPct: CH.avgIf(
+			memoryPct: avgIfOrZero(
 				$.Value,
 				$.MetricName.eq("system.memory.utilization").and($.Attributes.get("state").eq("used")),
 			),
-			diskPct: CH.maxIf(
+			diskPct: maxIfOrZero(
 				$.Value,
 				$.MetricName.eq("system.filesystem.utilization").and($.Attributes.get("state").eq("used")),
 			),
-			load15: CH.avgIf($.Value, $.MetricName.eq("system.cpu.load_average.15m")),
+			load15: avgIfOrZero($.Value, $.MetricName.eq("system.cpu.load_average.15m")),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -208,11 +219,11 @@ export function fleetUtilizationTimeseriesQuery() {
 	return from(MetricsGauge)
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-			avgCpu: CH.avgIf(
+			avgCpu: avgIfOrZero(
 				$.Value,
 				$.MetricName.eq("system.cpu.utilization").and($.Attributes.get("state").neq("idle")),
 			),
-			avgMemory: CH.avgIf(
+			avgMemory: avgIfOrZero(
 				$.Value,
 				$.MetricName.eq("system.memory.utilization").and($.Attributes.get("state").eq("used")),
 			),
@@ -464,18 +475,18 @@ export function listPodsQuery(opts: ListPodsOpts = {}) {
 			podUid: CH.any_($.ResourceAttributes.get("k8s.pod.uid")),
 			computeType: CH.any_($.ResourceAttributes.get("eks.amazonaws.com/compute-type")),
 			lastSeen: CH.max_($.TimeUnix),
-			cpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
-			cpuLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
-			memoryLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
-			cpuRequestPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu_request_utilization")),
-			memoryRequestPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.memory_request_utilization")),
+			cpuUsage: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+			cpuLimitPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+			memoryLimitPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+			cpuRequestPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_request_utilization")),
+			memoryRequestPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_request_utilization")),
 			// Peaks ride along on the same scan the averages already pay for.
-			cpuUsagePeak: CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
-			cpuLimitPctPeak: CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
-			memoryLimitPctPeak: CH.maxIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+			cpuUsagePeak: maxIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+			cpuLimitPctPeak: maxIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+			memoryLimitPctPeak: maxIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
 			saturation: CH.greatest_(
-				CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
-				CH.maxIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+				maxIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+				maxIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
 			),
 		}))
 		.where(($) => [...podBaseConditions($), ...podFilterConditions($, opts)])
@@ -572,10 +583,10 @@ export function listPodsSummaryQuery(opts: ListPodsOpts = {}) {
 		.select(($) => ({
 			podName: $.ResourceAttributes.get("k8s.pod.name"),
 			lastSeen: CH.max_($.TimeUnix),
-			cpuUsagePeak: CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+			cpuUsagePeak: maxIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
 			saturation: CH.greatest_(
-				CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
-				CH.maxIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+				maxIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+				maxIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
 			),
 			limitSamples: CH.countIf(
 				$.MetricName.in_("k8s.pod.cpu_limit_utilization", "k8s.pod.memory_limit_utilization"),
@@ -637,11 +648,11 @@ export function podDetailSummaryQuery(opts: PodDetailSummaryOpts) {
 			podStartTime: CH.any_($.ResourceAttributes.get("k8s.pod.start_time")),
 			firstSeen: CH.min_($.TimeUnix),
 			lastSeen: CH.max_($.TimeUnix),
-			cpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
-			cpuLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
-			memoryLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
-			cpuRequestPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu_request_utilization")),
-			memoryRequestPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.memory_request_utilization")),
+			cpuUsage: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+			cpuLimitPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+			memoryLimitPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+			cpuRequestPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_request_utilization")),
+			memoryRequestPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_request_utilization")),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -755,8 +766,8 @@ export function listNodesQuery(opts: ListNodesOpts = {}) {
 			environment: CH.any_(deploymentEnvExpr($.ResourceAttributes)),
 			kubeletVersion: CH.any_($.ResourceAttributes.get("k8s.kubelet.version")),
 			lastSeen: CH.max_($.TimeUnix),
-			cpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.node.cpu.usage")),
-			uptime: CH.maxIf($.Value, $.MetricName.eq("k8s.node.uptime")),
+			cpuUsage: avgIfOrZero($.Value, $.MetricName.eq("k8s.node.cpu.usage")),
+			uptime: maxIfOrZero($.Value, $.MetricName.eq("k8s.node.uptime")),
 		}))
 		.where(($) => [...nodeBaseConditions($), ...nodeFilterConditions($, opts)])
 		.groupBy("nodeName")
@@ -790,8 +801,8 @@ export function nodeDetailSummaryQuery(opts: NodeDetailSummaryOpts) {
 			containerRuntime: CH.any_($.ResourceAttributes.get("container.runtime")),
 			firstSeen: CH.min_($.TimeUnix),
 			lastSeen: CH.max_($.TimeUnix),
-			cpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.node.cpu.usage")),
-			uptime: CH.maxIf($.Value, $.MetricName.eq("k8s.node.uptime")),
+			cpuUsage: avgIfOrZero($.Value, $.MetricName.eq("k8s.node.cpu.usage")),
+			uptime: maxIfOrZero($.Value, $.MetricName.eq("k8s.node.uptime")),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -892,9 +903,9 @@ export function listWorkloadsQuery(opts: ListWorkloadsOpts) {
 			environment: CH.any_(deploymentEnvExpr($.ResourceAttributes)),
 			podCount: CH.uniq($.ResourceAttributes.get("k8s.pod.uid")),
 			lastSeen: CH.max_($.TimeUnix),
-			avgCpuLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
-			avgMemoryLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
-			avgCpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+			avgCpuLimitPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+			avgMemoryLimitPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+			avgCpuUsage: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -938,9 +949,9 @@ export function workloadDetailSummaryQuery(opts: WorkloadDetailSummaryOpts) {
 			podCount: CH.uniq($.ResourceAttributes.get("k8s.pod.uid")),
 			firstSeen: CH.min_($.TimeUnix),
 			lastSeen: CH.max_($.TimeUnix),
-			avgCpuLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
-			avgMemoryLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
-			avgCpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+			avgCpuLimitPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+			avgMemoryLimitPct: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+			avgCpuUsage: avgIfOrZero($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

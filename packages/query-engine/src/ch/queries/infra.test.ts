@@ -4,6 +4,7 @@ import { compileUnionUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	listHostsQuery,
 	hostDetailSummaryQuery,
+	fleetUtilizationTimeseriesQuery,
 	listPodsQuery,
 	listPodsSummaryQuery,
 	podDetailSummaryQuery,
@@ -63,7 +64,7 @@ describe("listPodsQuery", () => {
 	it("defaults to worst-first: peak saturation, then peak CPU for unlimited pods", () => {
 		const { sql } = compileUnsafe(listPodsQuery({}), baseParams)
 		expect(sql).toContain(
-			"greatest(maxIf(Value, MetricName = 'k8s.pod.cpu_limit_utilization'), maxIf(Value, MetricName = 'k8s.pod.memory_limit_utilization')) AS saturation",
+			"greatest(ifNotFinite(maxIf(Value, MetricName = 'k8s.pod.cpu_limit_utilization'), 0), ifNotFinite(maxIf(Value, MetricName = 'k8s.pod.memory_limit_utilization'), 0)) AS saturation",
 		)
 		expect(sql).toContain("ORDER BY saturation DESC, cpuUsagePeak DESC, podName ASC")
 		expect(sql).not.toContain("ORDER BY lastSeen")
@@ -71,8 +72,10 @@ describe("listPodsQuery", () => {
 
 	it("selects peaks alongside averages so a row can show avg → peak", () => {
 		const { sql } = compileUnsafe(listPodsQuery({}), baseParams)
-		expect(sql).toContain("avgIf(Value, MetricName = 'k8s.pod.cpu.usage') AS cpuUsage")
-		expect(sql).toContain("maxIf(Value, MetricName = 'k8s.pod.cpu.usage') AS cpuUsagePeak")
+		expect(sql).toContain("ifNotFinite(avgIf(Value, MetricName = 'k8s.pod.cpu.usage'), 0) AS cpuUsage")
+		expect(sql).toContain(
+			"ifNotFinite(maxIf(Value, MetricName = 'k8s.pod.cpu.usage'), 0) AS cpuUsagePeak",
+		)
 	})
 
 	it("honours an explicit sort key and never drops the tiebreak", () => {
@@ -482,4 +485,36 @@ describe("pod facet exclusions", () => {
 		expect(sql).toContain("IN ('default', 'web')")
 		expect(sql).toContain("NOT IN ('kube-system')")
 	})
+})
+
+// A pod with no CPU limit set emits no `cpu_limit_utilization` samples at all,
+// so `avgIf`/`maxIf` over that family returns `nan` — which ClickHouse
+// serializes as JSON `null`, failing the numeric row schema and 502-ing the
+// whole page rather than the one row. Every conditional aggregate here has to
+// carry its `ifNotFinite` guard, so this sweeps them rather than spot-checking.
+describe("conditional aggregates are NaN-guarded", () => {
+	const queries: ReadonlyArray<[string, string]> = [
+		["listHostsQuery", compileUnsafe(listHostsQuery({}), baseParams).sql],
+		["hostDetailSummaryQuery", compileUnsafe(hostDetailSummaryQuery({ hostName: "h1" }), baseParams).sql],
+		["fleetUtilizationTimeseriesQuery", compileUnsafe(fleetUtilizationTimeseriesQuery(), baseParams).sql],
+		["listPodsQuery", compileUnsafe(listPodsQuery({}), baseParams).sql],
+		["listPodsSummaryQuery", compileUnsafe(listPodsSummaryQuery({}), baseParams).sql],
+		["podDetailSummaryQuery", compileUnsafe(podDetailSummaryQuery({ podName: "p1" }), baseParams).sql],
+		["listNodesQuery", compileUnsafe(listNodesQuery({}), baseParams).sql],
+		["nodeDetailSummaryQuery", compileUnsafe(nodeDetailSummaryQuery({ nodeName: "n1" }), baseParams).sql],
+		["listWorkloadsQuery", compileUnsafe(listWorkloadsQuery({ kind: "deployment" }), baseParams).sql],
+		[
+			"workloadDetailSummaryQuery",
+			compileUnsafe(workloadDetailSummaryQuery({ kind: "deployment", workloadName: "w1" }), baseParams)
+				.sql,
+		],
+	]
+
+	for (const [name, sql] of queries) {
+		it(`${name} wraps every avgIf/maxIf in ifNotFinite`, () => {
+			const unguarded = [...sql.matchAll(/(?:^|[^(])\b(avgIf|maxIf)\(/g)]
+			expect(unguarded, `unguarded conditional aggregate in ${name}`).toEqual([])
+			expect(sql).toMatch(/ifNotFinite\((?:avgIf|maxIf)\(/)
+		})
+	}
 })
