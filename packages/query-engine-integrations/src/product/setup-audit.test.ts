@@ -213,7 +213,7 @@ describe("trace-completeness joins", () => {
 			auditOrphanSpansSQL({ ...window, orgId: "org_'; DROP TABLE traces; --" }),
 		)
 		// The injected quote is escaped, so the whole payload stays inside one string literal.
-		expect(sql).toContain("OrgId = 'org_\\'; DROP TABLE traces; --'")
+		expect(sql).toContain("OrgId = 'org_\\'\\x3B DROP TABLE traces\\x3B --'")
 		expect(sql).not.toContain("OrgId = 'org_'")
 	})
 })
