@@ -291,6 +291,9 @@ final class SessionController {
 		// The Home Screen outlives the session: without this, the previous
 		// account's failures stay readable on a locked phone.
 		WidgetPublisher.shared.clear()
+		// Same for the seeded screens: the next account must not open onto the
+		// previous one's board.
+		SnapshotCache.clear()
 	}
 
 	func signOut() async {

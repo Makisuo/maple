@@ -20,14 +20,36 @@ final class ServicesListModel {
 	let scope: SessionController.DataScope
 
 	private let api: any MapleAPI
+	/// The cache key's stable half — `scope.generation` moves every sign-in.
+	private let organizationId: String?
 
 	init(api: any MapleAPI, session: SessionController, scope: SessionController.DataScope) {
 		self.api = api
 		self.scope = scope
+		self.organizationId = session.currentOrganizationId
 		self.loader = ScreenLoader(session: session, screen: Screen.services, isEmpty: { $0.isEmpty }) { [unowned self] in try await self.fetch() }
 	}
 
 	var state: LoadState<[Service]> { loader.state }
+
+	/// First appearance for this scope: paint the persisted list if there is
+	/// one and revalidate, otherwise load cold. Only the default window seeds —
+	/// a cached list answers "now", not a picked historical window.
+	func start() async {
+		if !loader.state.hasContent, !loader.isLoading, window == .default, let organizationId,
+			let cached = SnapshotCache.load(
+				[Service].self,
+				screen: Screen.services,
+				organizationId: organizationId,
+				environment: scope.environment
+			)
+		{
+			loader.seed(cached)
+			await loader.load(.refresh)
+			return
+		}
+		await loader.loadIfNeeded()
+	}
 
 	private func fetch() async throws -> [Service] {
 		let resolved = window.resolve()
@@ -39,7 +61,17 @@ final class ServicesListModel {
 		openIssueCounts = Dictionary(
 			uniqueKeysWithValues: ((try? await countsTask) ?? []).map { ($0.serviceName, Int($0.openCount)) }
 		)
-		return sorted(services)
+		let rows = sorted(services)
+		// Persist only the window the next launch will seed with.
+		if window == .default, let organizationId {
+			SnapshotCache.save(
+				rows,
+				screen: Screen.services,
+				organizationId: organizationId,
+				environment: scope.environment
+			)
+		}
+		return rows
 	}
 
 	/// Unhealthy first, then by error rate, then by volume — so the rows that
@@ -107,7 +139,7 @@ struct ServicesListView: View {
 					scope: scope
 				)
 			self.model = model
-			await model.loader.loadIfNeeded()
+			await model.start()
 		}
 	}
 

@@ -140,7 +140,16 @@ export const errorIssues = pgTable(
 		uniqueIndex("error_issues_org_fp_idx").on(table.orgId, table.fingerprintHash),
 		index("error_issues_org_workflow_idx").on(table.orgId, table.workflowState),
 		index("error_issues_org_severity_idx").on(table.orgId, table.severity),
-		index("error_issues_org_last_seen_idx").on(table.orgId, table.lastSeenAt),
+		// The list hot path: org + archived_at IS NULL, ORDER BY last_seen_at
+		// DESC, id DESC, LIMIT n — a backward walk over this index streams the
+		// page in order instead of collecting the org's rows and sorting
+		// (SELECT error_issues was ~630ms p95 on the mobile Home fan-out).
+		// Partial and with the id tiebreak, replacing the old
+		// error_issues_org_last_seen_idx: only the rare includeArchived list
+		// read that one without the archived filter, and it can afford a sort.
+		index("error_issues_org_live_seen_idx")
+			.on(table.orgId, table.lastSeenAt, table.id)
+			.where(sql`${table.archivedAt} is null`),
 		// Retention sweeps for issues left behind by a fingerprint-algorithm bump.
 		// Once a sweep drains them the scan returns nothing, and it stays an index
 		// lookup rather than the heap check that `error_issues_org_archived_idx`
