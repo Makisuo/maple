@@ -98,7 +98,9 @@ const LANE = {
 	spark: "hidden w-[56px] shrink-0 @lg/page:block",
 	count: "hidden w-[52px] shrink-0 @xl/page:block",
 	service: "hidden w-[92px] shrink-0 @md/page:block",
-	state: "hidden w-[92px] shrink-0 @2xl/page:block",
+	// Sized to the longest label: "Open incident"/"Investigating" run ~98px in
+	// 11px Geist Mono plus the dot — 92px forced them onto two lines.
+	state: "hidden w-[104px] shrink-0 @2xl/page:block",
 	activity: "hidden w-[64px] shrink-0 @xl/page:block",
 	actor: "w-5 shrink-0",
 	lastSeen: "w-[64px] shrink-0",
@@ -268,7 +270,7 @@ export function ErrorSignalRow({
 				</span>
 
 				<span className={LANE.state}>
-					<SignalStateChip state={signal.state} />
+					<SignalStateChip state={signal.state} withConfidence={false} />
 				</span>
 
 				<span className={cn(LANE.activity, "items-center gap-2 @xl/page:flex")}>
