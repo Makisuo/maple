@@ -7,7 +7,8 @@ import SwiftUI
 /// `apps/api/src/services/alerts/alert-signal-display.ts`: the unit travels
 /// with the label because the same facts decide both — deriving them
 /// separately is how a value and its threshold drift apart.
-enum SignalUnit {
+// Codable: rides inside `IncidentCard`, which `SnapshotCache` persists.
+enum SignalUnit: Codable {
 	case ratio
 	case milliseconds
 	case perMinute
@@ -27,7 +28,7 @@ enum SignalUnit {
 	}
 }
 
-struct SignalDisplay {
+struct SignalDisplay: Codable {
 	let label: String
 	let unit: SignalUnit
 

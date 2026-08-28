@@ -39,6 +39,9 @@ enum Telemetry {
 		static let apiClientInit = "api.client_init"
 		/// One screen's data load, and the parent of every request it makes.
 		static let screenLoad = "screen.load"
+		/// The second pass of a load: decoration fetched after the first paint,
+		/// so `screen.load` measures time-to-content and this measures the rest.
+		static let screenDecorate = "screen.decorate"
 		/// A Clerk session token, cached or freshly minted.
 		static let authToken = "auth.token"
 		static let authMemberships = "auth.memberships"
@@ -490,6 +493,26 @@ extension Telemetry {
 		// data — which is the moment the tap was actually answered.
 		PushOpen.settled(screen)
 		return state
+	}
+
+	/// Wrap a screen's post-paint decoration fetches — Home's issue counts and
+	/// sparklines — in their own span.
+	///
+	/// `screen.load` ends at the first paint now, so these requests need a
+	/// parent of their own: hanging them under a span that already ended draws
+	/// as bars outside the box above them. Parented to the visit span like a
+	/// load is, so the trace still reads as one screen's story.
+	@MainActor
+	static func screenDecorations<T: Sendable>(
+		screen: String,
+		organizationId: String?,
+		_ body: @MainActor @Sendable @escaping () async -> T
+	) async -> T {
+		var attributes: [String: AttributeValue] = [Key.screenName: .string(screen)]
+		if let organizationId { attributes[Key.organizationId] = .string(organizationId) }
+		return await withParent(Visit.parent(for: screen)) {
+			await Telemetry.span(Name.screenDecorate, attributes: attributes) { _ in await body() }
+		}
 	}
 
 	/// Run `body` with `parent` ambient, so spans started inside it hang under
