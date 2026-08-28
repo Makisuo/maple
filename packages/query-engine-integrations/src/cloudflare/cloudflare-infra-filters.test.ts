@@ -55,7 +55,7 @@ describe("cloudflareFilterConditions", () => {
 			cloudflareZoneBreakdownTotalsSQL("path", { paths: ["/a'; DROP TABLE metrics_sum; --"] }),
 			zoneParams,
 		)
-		expect(sql).toContain("IN ('/a\\'; DROP TABLE metrics_sum; --')")
+		expect(sql).toContain("IN ('/a\\'\\x3B DROP TABLE metrics_sum\\x3B --')")
 		// The raw (unescaped) quote never reaches the SQL.
 		expect(sql).not.toContain("('/a';")
 	})
