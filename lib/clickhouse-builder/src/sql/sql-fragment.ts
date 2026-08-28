@@ -2,8 +2,12 @@ import { Data } from "effect"
 
 // ClickHouse string escaping
 
+// `;` is emitted as its hex escape: some ClickHouse-compatible HTTP gateways
+// split statements on the raw byte even inside string literals, truncating the
+// query mid-literal. The server unescapes `\x3B` back to `;`, so results are
+// byte-identical.
 export function escapeClickHouseString(value: string): string {
-	return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+	return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/;/g, "\\x3B")
 }
 
 // SQL Fragment AST
