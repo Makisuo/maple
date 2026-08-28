@@ -1345,6 +1345,9 @@
           "claimed_at": {
             "type": "string"
           },
+          "comment_count": {
+            "type": "number"
+          },
           "error_label": {
             "type": "string"
           },
@@ -1384,6 +1387,9 @@
           "lease_holder": {
             "$ref": "#/components/schemas/ErrorIssueActor"
           },
+          "merged_pull_request_count": {
+            "type": "number"
+          },
           "notes": {
             "type": "string"
           },
@@ -1394,6 +1400,9 @@
             "type": "string"
           },
           "occurrence_count": {
+            "type": "number"
+          },
+          "open_pull_request_count": {
             "type": "number"
           },
           "priority": {
@@ -1450,7 +1459,10 @@
           "occurrence_count",
           "regression_count",
           "resolved_versions",
-          "has_open_incident"
+          "has_open_incident",
+          "comment_count",
+          "open_pull_request_count",
+          "merged_pull_request_count"
         ],
         "title": "Error issue",
         "type": "object"
@@ -1505,6 +1517,9 @@
           "claimed_at": {
             "type": "string"
           },
+          "comment_count": {
+            "type": "number"
+          },
           "environments": {
             "items": {
               "$ref": "#/components/schemas/ErrorIssueEnvironment"
@@ -1556,6 +1571,9 @@
           "lease_holder": {
             "$ref": "#/components/schemas/ErrorIssueActor"
           },
+          "merged_pull_request_count": {
+            "type": "number"
+          },
           "notes": {
             "type": "string"
           },
@@ -1566,6 +1584,9 @@
             "type": "string"
           },
           "occurrence_count": {
+            "type": "number"
+          },
+          "open_pull_request_count": {
             "type": "number"
           },
           "priority": {
@@ -1635,6 +1656,9 @@
           "regression_count",
           "resolved_versions",
           "has_open_incident",
+          "comment_count",
+          "open_pull_request_count",
+          "merged_pull_request_count",
           "timeseries",
           "sample_traces",
           "incidents",
