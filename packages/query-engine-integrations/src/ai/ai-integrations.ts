@@ -132,11 +132,13 @@ const decodeAttribute = (type: AiFieldDef["type"], raw: string): unknown => {
  * choice, not a spec-blessed rename: in practice they carried exactly that
  * content, and OpenRouter instrumentation in production still emits them.
  *
- * `gen_ai.usage.output_tokens.reasoning` and `gen_ai.usage.input_tokens.cached`
- * are likewise absent from the deprecation table — they are the sub-key spelling
- * OpenRouter emits in production for what the convention calls
- * `gen_ai.usage.reasoning.output_tokens` and `gen_ai.usage.cache_read.input_tokens`.
- * Both were confirmed against the warehouse; the plausible-looking
+ * `gen_ai.usage.output_tokens.reasoning`, `gen_ai.usage.input_tokens.cached`
+ * and `gen_ai.usage.total_cost` are likewise absent from the deprecation table —
+ * they are the spelling OpenRouter emits in production for what the convention
+ * calls `gen_ai.usage.reasoning.output_tokens`,
+ * `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cost` (total_cost is
+ * USD, the sum of the input_cost/output_cost keys beside it). All three were
+ * confirmed against the warehouse; the plausible-looking
  * `gen_ai.usage.reasoning_tokens` was NOT, so it is deliberately not listed.
  */
 const GENAI_LEGACY_ALIASES = {
@@ -149,6 +151,7 @@ const GENAI_LEGACY_ALIASES = {
 	// spelling Anthropic-era emitters (and Maple's own rows before this alias)
 	// used. Both must decode; Maple's agents emit the semconv form.
 	usageCacheCreationInputTokens: ["gen_ai.usage.cache_write.input_tokens"],
+	usageCost: ["gen_ai.usage.total_cost"],
 	inputMessages: ["gen_ai.prompt"],
 	outputMessages: ["gen_ai.completion"],
 	providerName: ["gen_ai.system"],
