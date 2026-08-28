@@ -410,8 +410,8 @@ extension Telemetry {
 // MARK: - Screen loads
 
 extension Telemetry {
-	/// The `screen.load` spans currently in flight, so backgrounding can end
-	/// them the moment the app suspends.
+	/// The `screen.load` / `screen.decorate` spans currently in flight, so
+	/// backgrounding can end them the moment the app suspends.
 	///
 	/// A load in flight when the phone locks does not fail — its task freezes
 	/// with the process and finishes on resume — so its span used to cover the
@@ -511,7 +511,11 @@ extension Telemetry {
 		var attributes: [String: AttributeValue] = [Key.screenName: .string(screen)]
 		if let organizationId { attributes[Key.organizationId] = .string(organizationId) }
 		return await withParent(Visit.parent(for: screen)) {
-			await Telemetry.span(Name.screenDecorate, attributes: attributes) { _ in await body() }
+			await Telemetry.span(Name.screenDecorate, attributes: attributes) { span in
+				ActiveLoads.began(span)
+				defer { ActiveLoads.ended(span) }
+				return await body()
+			}
 		}
 	}
 
