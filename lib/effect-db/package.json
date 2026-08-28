@@ -13,9 +13,9 @@
 	"dependencies": {
 		"@electric-sql/client": "1.5.22",
 		"@standard-schema/spec": "^1.1.0",
-		"@tanstack/db": "0.6.13",
-		"@tanstack/electric-db-collection": "0.3.11",
-		"@tanstack/react-db": "0.1.91",
+		"@tanstack/db": "0.8.5",
+		"@tanstack/electric-db-collection": "0.4.5",
+		"@tanstack/react-db": "0.3.5",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {
