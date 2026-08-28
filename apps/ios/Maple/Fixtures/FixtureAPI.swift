@@ -118,7 +118,7 @@ struct FixtureAPI: MapleAPI {
 				id: "iss_search_es", service: "search", type: "ElasticsearchException",
 				message: "circuit_breaking_exception: [parent] Data too large", frame: "search/query.ts:211",
 				severity: .medium, state: .inProgress, count: 41, firstSeen: -3 * 86_400, lastSeen: -900,
-				incident: false, regressions: 2
+				incident: false, regressions: 2, comments: 3, openPRs: 1
 			),
 			issue(
 				id: "iss_payments_decline", service: "payments", type: "CardDeclined",
@@ -131,9 +131,10 @@ struct FixtureAPI: MapleAPI {
 	private func issue(
 		id: String, service: String, type: String, message: String, frame: String, severity: IssueSeverity,
 		state: WorkflowState, count: Double, firstSeen: TimeInterval, lastSeen: TimeInterval, incident: Bool,
-		regressions: Double = 0
+		regressions: Double = 0, comments: Double = 0, openPRs: Double = 0, mergedPRs: Double = 0
 	) -> ErrorIssue {
 		ErrorIssue(
+			commentCount: comments,
 			errorLabel: type,
 			exceptionMessage: message,
 			exceptionType: type,
@@ -143,8 +144,10 @@ struct FixtureAPI: MapleAPI {
 			id: id,
 			kind: .error,
 			lastSeenAt: stamp(lastSeen),
+			mergedPullRequestCount: mergedPRs,
 			object: .errorIssue,
 			occurrenceCount: count,
+			openPullRequestCount: openPRs,
 			priority: 1,
 			// Fixed, then seen again — the state the issue list and the widget
 			// both mark. Fixtures carry one so the mark is visible without a
@@ -187,6 +190,7 @@ struct FixtureAPI: MapleAPI {
 			return ErrorIssueTimeseriesPoint(bucket: stamp(-hoursAgo), count: count)
 		}
 		return ErrorIssueDetail(
+			commentCount: issue.commentCount,
 			environments: [ErrorIssueEnvironment(count: issue.occurrenceCount, name: "production")],
 			errorLabel: issue.errorLabel,
 			exceptionMessage: issue.exceptionMessage,
@@ -198,8 +202,10 @@ struct FixtureAPI: MapleAPI {
 			incidents: [],
 			kind: issue.kind,
 			lastSeenAt: issue.lastSeenAt,
+			mergedPullRequestCount: issue.mergedPullRequestCount,
 			object: .errorIssue,
 			occurrenceCount: issue.occurrenceCount,
+			openPullRequestCount: issue.openPullRequestCount,
 			priority: issue.priority,
 			regressionCount: issue.regressionCount,
 			resolvedVersions: issue.resolvedVersions,

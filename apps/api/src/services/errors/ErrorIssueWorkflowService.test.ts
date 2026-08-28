@@ -1,8 +1,20 @@
 import { randomUUID } from "node:crypto"
 import { afterEach, assert, describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Layer, Schema } from "effect"
-import { ErrorIncidentId, ErrorIssueId, OrgId, UserId } from "@maple/domain/primitives"
-import { errorIncidents, errorIssues, errorIssueEvents, errorIssueStates } from "@maple/db"
+import {
+	ErrorIncidentId,
+	ErrorIssueId,
+	ErrorIssuePullRequestId,
+	OrgId,
+	UserId,
+} from "@maple/domain/primitives"
+import {
+	errorIncidents,
+	errorIssues,
+	errorIssueEvents,
+	errorIssuePullRequests,
+	errorIssueStates,
+} from "@maple/db"
 import { and, eq } from "drizzle-orm"
 import { Database } from "@/platform/DatabaseLive"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
@@ -15,6 +27,7 @@ const databaseAndActorsOnly: Layer.Layer<ErrorIssueWorkflowService, never, Datab
 	ErrorIssueWorkflowService.layer
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
+const asPullRequestId = Schema.decodeUnknownSync(ErrorIssuePullRequestId)
 const asUserId = Schema.decodeUnknownSync(UserId)
 const asIssueId = Schema.decodeUnknownSync(ErrorIssueId)
 const asIncidentId = Schema.decodeUnknownSync(ErrorIncidentId)
@@ -160,6 +173,55 @@ describe("ErrorIssueWorkflowService", () => {
 			assert.strictEqual(stateChange?.actor?.id, actor.id)
 			assert.strictEqual(stateChange?.fromState, "in_review")
 			assert.strictEqual(stateChange?.toState, "done")
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("hydrates activity rollups: comments, agent notes, and non-abandoned PR links", () =>
+		Effect.gen(function* () {
+			const workflow = yield* ErrorIssueWorkflowService
+			const actors = yield* ErrorActorsService
+			const database = yield* Database
+			const actor = yield* actors.ensureUserActor(ORG, USER)
+			const busyId = asIssueId(randomUUID())
+			const quietId = asIssueId(randomUUID())
+			const now = yield* Clock.currentTimeMillis
+			yield* seedIssue(busyId)
+			yield* seedIssue(quietId)
+
+			yield* workflow.commentOnIssue(ORG, actor.id, busyId, "looking into this")
+			yield* workflow.commentOnIssue(ORG, actor.id, busyId, "root cause found", {
+				kind: "agent_note",
+			})
+			const seedPullRequest = (number: number, state: "open" | "merged" | "closed") =>
+				database.execute((db) =>
+					db.insert(errorIssuePullRequests).values({
+						id: asPullRequestId(randomUUID()),
+						orgId: ORG,
+						issueId: busyId,
+						provider: "github",
+						repoFullName: "maple/maple",
+						number,
+						url: `https://github.com/maple/maple/pull/${number}`,
+						state,
+						linkSource: "user",
+						createdAt: new Date(now),
+						updatedAt: new Date(now),
+					}),
+				)
+			yield* seedPullRequest(1, "open")
+			yield* seedPullRequest(2, "merged")
+			yield* seedPullRequest(3, "closed")
+
+			const busyRow = yield* workflow.requireIssue(ORG, busyId)
+			const quietRow = yield* workflow.requireIssue(ORG, quietId)
+			const [busy, quiet] = yield* workflow.hydrateIssueRows(ORG, [busyRow, quietRow])
+
+			assert.strictEqual(busy?.commentCount, 2)
+			assert.strictEqual(busy?.openPullRequestCount, 1)
+			assert.strictEqual(busy?.mergedPullRequestCount, 1)
+			assert.strictEqual(quiet?.commentCount, 0)
+			assert.strictEqual(quiet?.openPullRequestCount, 0)
+			assert.strictEqual(quiet?.mergedPullRequestCount, 0)
 		}).pipe(Effect.provide(makeLayer())),
 	)
 

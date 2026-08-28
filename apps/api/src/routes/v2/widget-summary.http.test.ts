@@ -89,6 +89,9 @@ const issueDocument = (overrides: Partial<ErrorIssueDocument> = {}): ErrorIssueD
 		snoozeUntil: null,
 		archivedAt: null,
 		hasOpenIncident: true,
+		commentCount: 0,
+		openPullRequestCount: 0,
+		mergedPullRequestCount: 0,
 		...overrides,
 	})
 

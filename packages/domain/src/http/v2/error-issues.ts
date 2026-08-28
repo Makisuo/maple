@@ -65,6 +65,11 @@ export const V2ErrorIssue = Schema.Struct({
 	snooze_until: Schema.NullOr(Timestamp),
 	archived_at: Schema.NullOr(Timestamp),
 	has_open_incident: Schema.Boolean,
+	// Activity rollups: comments include agent notes; closed-unmerged PRs are
+	// counted by neither PR field.
+	comment_count: Schema.Number,
+	open_pull_request_count: Schema.Number,
+	merged_pull_request_count: Schema.Number,
 }).annotate({
 	identifier: "ErrorIssue",
 	title: "Error issue",

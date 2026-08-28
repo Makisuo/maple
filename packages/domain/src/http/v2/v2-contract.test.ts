@@ -204,6 +204,9 @@ describe("V2ErrorIssue wire format", () => {
 		snooze_until: null,
 		archived_at: null,
 		has_open_incident: true,
+		comment_count: 3,
+		open_pull_request_count: 1,
+		merged_pull_request_count: 0,
 	}
 
 	it("encodes the resource with snake_case fields and an iss_ public ID", () => {

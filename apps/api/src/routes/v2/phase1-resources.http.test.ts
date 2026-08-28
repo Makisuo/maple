@@ -302,6 +302,9 @@ const errorIssueFixture = new ErrorIssueDocument({
 	snoozeUntil: null,
 	archivedAt: null,
 	hasOpenIncident: true,
+	commentCount: 0,
+	openPullRequestCount: 0,
+	mergedPullRequestCount: 0,
 })
 
 const errorIssueDetailFixture = new ErrorIssueDetailResponse({

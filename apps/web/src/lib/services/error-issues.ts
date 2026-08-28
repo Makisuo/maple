@@ -126,6 +126,9 @@ export const errorIssueFromV2 = (issue: V2ErrorIssue): ErrorIssueDocument =>
 		snoozeUntil: asIsoOrNull(issue.snooze_until),
 		archivedAt: asIsoOrNull(issue.archived_at),
 		hasOpenIncident: issue.has_open_incident,
+		commentCount: issue.comment_count,
+		openPullRequestCount: issue.open_pull_request_count,
+		mergedPullRequestCount: issue.merged_pull_request_count,
 	})
 
 export const errorIssueDetailFromV2 = (detail: V2ErrorIssueDetail): ErrorIssueDetailResponse =>
