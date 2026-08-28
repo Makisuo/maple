@@ -1,6 +1,7 @@
 // BOUNDARY: This module owns unparsed external values and narrows them before domain use.
 import { Clock, Config, Context, Effect, Layer, Option, Schema } from "effect"
 import { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
+import { isolateOutboundSlots, trackOutboundSlot, type OutboundSlotsCell } from "./outbound-slots"
 
 export { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 
@@ -46,6 +47,23 @@ export interface EdgeCacheGetOrComputeOptions<A = unknown, I = unknown> {
 	 * `DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS`.
 	 */
 	readonly readTimeoutMs?: number
+	/**
+	 * Skip the backend read whenever outbound I/O is already holding one of the
+	 * runtime's connection slots (see `OutboundSlotsCell`), and go straight to
+	 * `compute`.
+	 *
+	 * Opt in when `compute` is cheap relative to the read gamble. A read issued
+	 * while a slot is held is the read most likely to queue past its deadline —
+	 * and an abandoned read is worse than no read, because `cache.match()` is
+	 * not cancellable and keeps its slot until it settles. For a bucket whose
+	 * `compute` is a ~20ms indexed row lookup, betting a 40ms deadline plus a
+	 * possible held slot to save that lookup never pays.
+	 *
+	 * This is the deterministic sibling of the timeout-rate breaker below, and
+	 * the only protection available to buckets whose reads land one-per-isolate
+	 * — the breaker needs samples those buckets can never accumulate.
+	 */
+	readonly skipReadWhenSlotsHeld?: boolean
 }
 
 export interface EdgeCacheResult<A> {
@@ -202,6 +220,7 @@ const READ_BREAKER_MIN_SAMPLES = 2
 export const makeEdgeCacheService = (
 	backend: EdgeCacheBackend,
 	readTimeoutMs = DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS,
+	slots: OutboundSlotsCell = isolateOutboundSlots,
 ): EdgeCacheServiceApi => {
 	const boundedReadTimeoutMs = Number.isFinite(readTimeoutMs)
 		? Math.max(1, Math.floor(readTimeoutMs))
@@ -242,9 +261,18 @@ export const makeEdgeCacheService = (
 		const deadline = new Promise<{ readonly value: undefined; readonly timedOut: true }>((resolve) => {
 			timer = setTimeout(() => resolve({ value: undefined, timedOut: true }), timeoutMs)
 		})
-		const read = Promise.resolve()
-			.then(() => backend.get(bucket, key, nowMs))
-			.then((value) => ({ value, timedOut: false as const }))
+		// The slot is held until the UNDERLYING read settles, not until the race
+		// does: an abandoned `cache.match()` cannot be cancelled and keeps its
+		// connection slot long after the deadline gave up on it. Tying release to
+		// the backend promise makes `slots.held()` reflect that zombie for exactly
+		// as long as it is real.
+		slots.acquire()
+		const backendRead = Promise.resolve().then(() => backend.get(bucket, key, nowMs))
+		backendRead.then(
+			() => slots.release(),
+			() => slots.release(),
+		)
+		const read = backendRead.then((value) => ({ value, timedOut: false as const }))
 		return Promise.race([read, deadline]).finally(() => {
 			if (timer !== undefined) clearTimeout(timer)
 		})
@@ -282,16 +310,19 @@ export const makeEdgeCacheService = (
 			const ttlSeconds =
 				typeof options.ttlSeconds === "function" ? options.ttlSeconds(value) : options.ttlSeconds
 			const writeNowMs = yield* Clock.currentTimeMillis
-			yield* Effect.tryPromise({
-				try: () => backend.put(options.bucket, hash, stored, ttlSeconds, writeNowMs),
-				catch: (cause) =>
-					new EdgeCacheIOError({
-						op: "put",
-						bucket: options.bucket,
-						key: options.key,
-						cause: cause instanceof Error ? cause.message : String(cause),
-					}),
-			}).pipe(
+			yield* trackOutboundSlot(
+				Effect.tryPromise({
+					try: () => backend.put(options.bucket, hash, stored, ttlSeconds, writeNowMs),
+					catch: (cause) =>
+						new EdgeCacheIOError({
+							op: "put",
+							bucket: options.bucket,
+							key: options.key,
+							cause: cause instanceof Error ? cause.message : String(cause),
+						}),
+				}),
+				slots,
+			).pipe(
 				Effect.tapError((error) =>
 					Effect.logWarning("Edge cache put failed; continuing without cache").pipe(
 						Effect.annotateLogs({
@@ -311,10 +342,20 @@ export const makeEdgeCacheService = (
 			const nowMs = readStartedAt
 			const timeoutMs = resolveReadTimeoutMs(options.readTimeoutMs)
 			yield* Effect.annotateCurrentSpan("cache.read_timeout_ms", timeoutMs)
-			// The breaker is checked before the read, not after: the point is to NOT
+			// Both gates are checked before the read, not after: the point is to NOT
 			// occupy a connection slot on a bucket that is currently failing to
 			// return one.
-			const skipRead = shouldSkipRead(options.bucket, nowMs)
+			const slotsHeld = slots.held()
+			const skipForSlots = options.skipReadWhenSlotsHeld === true && slotsHeld > 0
+			const skipForBreaker = shouldSkipRead(options.bucket, nowMs)
+			const skipRead = skipForBreaker || skipForSlots
+			yield* Effect.annotateCurrentSpan("cache.slots_held", slotsHeld)
+			if (skipRead) {
+				yield* Effect.annotateCurrentSpan(
+					"cache.skip_reason",
+					skipForBreaker ? "breaker" : "slots_held",
+				)
+			}
 			const read = skipRead
 				? { value: undefined, timedOut: false as const }
 				: yield* Effect.tryPromise({
@@ -470,16 +511,19 @@ export const makeEdgeCacheService = (
 		ttlSeconds: number,
 	) {
 		const nowMs = yield* Clock.currentTimeMillis
-		return yield* Effect.tryPromise({
-			try: () => backend.put(bucket, key, value, ttlSeconds, nowMs),
-			catch: (cause) =>
-				new EdgeCacheIOError({
-					op: "put",
-					bucket,
-					key,
-					cause: cause instanceof Error ? cause.message : String(cause),
-				}),
-		})
+		return yield* trackOutboundSlot(
+			Effect.tryPromise({
+				try: () => backend.put(bucket, key, value, ttlSeconds, nowMs),
+				catch: (cause) =>
+					new EdgeCacheIOError({
+						op: "put",
+						bucket,
+						key,
+						cause: cause instanceof Error ? cause.message : String(cause),
+					}),
+			}),
+			slots,
+		)
 	})
 
 	return {

@@ -1,4 +1,5 @@
 import { Cause, Clock, Duration, Effect, HashMap, Option, Ref, Schedule, Schema } from "effect"
+import { trackOutboundSlot } from "@maple/cache"
 import {
 	MAX_RAW_SQL_RESULT_BYTES,
 	MAX_RAW_SQL_RESULT_ROWS,
@@ -179,10 +180,12 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 				cause,
 			})
 		const queryRows = (target: WarehouseCapabilityMetadataTarget, sql: string) =>
-			Effect.tryPromise({
-				try: () => client.sql(parseStatement(sql)),
-				catch: (cause) => probeError(target, cause),
-			}).pipe(Effect.map((result) => result.data))
+			trackOutboundSlot(
+				Effect.tryPromise({
+					try: () => client.sql(parseStatement(sql)),
+					catch: (cause) => probeError(target, cause),
+				}),
+			).pipe(Effect.map((result) => result.data))
 		const logProbeFailure = (error: WarehouseCapabilityProbeError) =>
 			Effect.logWarning("Warehouse capability metadata probe failed").pipe(
 				Effect.annotateLogs({
@@ -476,30 +479,34 @@ WHERE name = 'enable_full_text_index'`,
 			(execution === "raw"
 				? { maxRows: MAX_RAW_SQL_RESULT_ROWS, maxBytes: MAX_RAW_SQL_RESULT_BYTES }
 				: undefined)
-		const queryAttempt = Effect.tryPromise({
-			try: () =>
-				client.sql(
-					statement,
-					effectiveResponseLimits === undefined
-						? undefined
-						: { responseLimits: effectiveResponseLimits },
-				),
-			catch: (error) =>
-				error instanceof WarehouseResponseLimitError
-					? // Only raw SQL restates this as a validation error — there the
-						// oversized result IS the caller's query problem. For a trusted
-						// query the limit is ours, so it propagates unchanged and the
-						// caller maps it to a domain error. Either way it never becomes a
-						// WarehouseUpstreamError, so the transient retry loop skips it
-						// instead of re-running a read that already exhausted the heap.
-						execution === "raw"
-						? new RawSqlValidationError({ code: "ResourceLimit", message: error.message })
-						: error
-					: // `execution` decides authorship: raw SQL comes from the caller (the
-						// raw_sql widget, the `run_sql` MCP tool), so an analyzer complaint
-						// about it is their typo and must keep the database's own message.
-						mapWarehouseError(pipe, error, execution === "raw" ? "caller" : "maple"),
-		})
+		// `trackOutboundSlot` covers each attempt (retries re-enter it), so the
+		// slot count reflects the connection, not the retry schedule's sleeps.
+		const queryAttempt = trackOutboundSlot(
+			Effect.tryPromise({
+				try: () =>
+					client.sql(
+						statement,
+						effectiveResponseLimits === undefined
+							? undefined
+							: { responseLimits: effectiveResponseLimits },
+					),
+				catch: (error) =>
+					error instanceof WarehouseResponseLimitError
+						? // Only raw SQL restates this as a validation error — there the
+							// oversized result IS the caller's query problem. For a trusted
+							// query the limit is ours, so it propagates unchanged and the
+							// caller maps it to a domain error. Either way it never becomes a
+							// WarehouseUpstreamError, so the transient retry loop skips it
+							// instead of re-running a read that already exhausted the heap.
+							execution === "raw"
+							? new RawSqlValidationError({ code: "ResourceLimit", message: error.message })
+							: error
+						: // `execution` decides authorship: raw SQL comes from the caller (the
+							// raw_sql widget, the `run_sql` MCP tool), so an analyzer complaint
+							// about it is their typo and must keep the database's own message.
+							mapWarehouseError(pipe, error, execution === "raw" ? "caller" : "maple"),
+			}),
+		)
 		// `db.duration_ms` measures warehouse execution only — captured here, after
 		// config resolution + settings/client-cache preamble, immediately before the
 		// query runs. `startedAtMs` (captured at span entry) feeds the separate
