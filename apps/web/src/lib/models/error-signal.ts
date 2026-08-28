@@ -63,6 +63,12 @@ export interface ErrorSignal {
 	readonly lastSeenAt: string
 	readonly firstSeenAt: string
 	readonly assignee: ErrorIssueDocument["assignedActor"]
+	/** Comments + agent notes on the issue's timeline. */
+	readonly commentCount: number
+	/** Linked PRs that still mean something: open ones and merged ones.
+	 *  Closed-unmerged links are abandoned and counted by neither. */
+	readonly openPullRequestCount: number
+	readonly mergedPullRequestCount: number
 	readonly issue: ErrorIssueDocument
 }
 
@@ -182,6 +188,9 @@ export function buildErrorSignals(input: {
 			lastSeenAt: issue.lastSeenAt,
 			firstSeenAt: issue.firstSeenAt,
 			assignee: issue.leaseHolder ?? issue.assignedActor,
+			commentCount: issue.commentCount,
+			openPullRequestCount: issue.openPullRequestCount,
+			mergedPullRequestCount: issue.mergedPullRequestCount,
 			issue,
 		}
 	})

@@ -335,6 +335,13 @@ export class ErrorIssueDocument extends Schema.Class<ErrorIssueDocument>("ErrorI
 	snoozeUntil: Schema.NullOr(IsoDateTimeString),
 	archivedAt: Schema.NullOr(IsoDateTimeString),
 	hasOpenIncident: Schema.Boolean,
+	// Activity rollups for list surfaces: is anyone talking about this issue,
+	// and where do its linked PRs stand — without a per-issue events fetch.
+	// Comment count includes agent notes; abandoned (closed-unmerged) PRs are
+	// deliberately not counted anywhere.
+	commentCount: Schema.Number,
+	openPullRequestCount: Schema.Number,
+	mergedPullRequestCount: Schema.Number,
 	// Postgres txid of the write, present only on mutation responses so the web's
 	// ElectricSQL error_issues collection can resolve optimistic state on the exact
 	// synced transaction. Absent on list/read responses.

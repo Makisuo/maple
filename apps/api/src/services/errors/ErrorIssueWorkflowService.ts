@@ -27,13 +27,14 @@ import {
 	errorIncidents,
 	errorIssues,
 	errorIssueEvents,
+	errorIssuePullRequests,
 	errorIssueStates,
 	type ErrorIssueEventInsert,
 	type ErrorIssueEventRow,
 	type ErrorIssueRow,
 	issueEscalations,
 } from "@maple/db"
-import { and, desc, eq, inArray } from "drizzle-orm"
+import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
@@ -107,12 +108,20 @@ export interface ErrorIssueWorkflowPublicApi {
 	) => Effect.Effect<ErrorIssueEventsResponse, ErrorPersistenceError | ErrorIssueNotFoundError>
 }
 
+/** Per-issue activity rollup carried onto the document for list surfaces. */
+export interface IssueActivityRollup {
+	readonly commentCount: number
+	readonly openPullRequestCount: number
+	readonly mergedPullRequestCount: number
+}
+
 /** Internal workflow kernel shared with the compatibility facade's broad operations and tick. */
 export interface ErrorIssueWorkflowServiceApi extends ErrorIssueWorkflowPublicApi {
 	readonly rowToIssue: (
 		row: ErrorIssueRow,
 		hasOpenIncident: boolean,
 		actorMap: Map<ActorId, ActorDocument>,
+		activity: IssueActivityRollup,
 	) => ErrorIssueDocument
 	readonly requireIssue: (
 		orgId: OrgId,
@@ -178,7 +187,12 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			})
 		}
 
-		const rowToIssue: ErrorIssueWorkflowServiceApi["rowToIssue"] = (row, hasOpenIncident, actorMap) =>
+		const rowToIssue: ErrorIssueWorkflowServiceApi["rowToIssue"] = (
+			row,
+			hasOpenIncident,
+			actorMap,
+			activity,
+		) =>
 			new ErrorIssueDocument({
 				id: row.id,
 				kind: row.kind,
@@ -211,6 +225,9 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				snoozeUntil: row.snoozeUntil == null ? null : isoFromDate(row.snoozeUntil),
 				archivedAt: row.archivedAt == null ? null : isoFromDate(row.archivedAt),
 				hasOpenIncident,
+				commentCount: activity.commentCount,
+				openPullRequestCount: activity.openPullRequestCount,
+				mergedPullRequestCount: activity.mergedPullRequestCount,
 			})
 
 		const rowToEvent = (
@@ -296,18 +313,76 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			)
 		}
 
+		const EMPTY_ACTIVITY: IssueActivityRollup = {
+			commentCount: 0,
+			openPullRequestCount: 0,
+			mergedPullRequestCount: 0,
+		}
+
+		const issueActivityRollups = (
+			orgId: OrgId,
+			issueIds: ReadonlyArray<ErrorIssueId>,
+		): Effect.Effect<Map<ErrorIssueId, IssueActivityRollup>, ErrorPersistenceError> =>
+			Effect.gen(function* () {
+				const rollups = new Map<ErrorIssueId, IssueActivityRollup>()
+				if (issueIds.length === 0) return rollups
+				const upsert = (issueId: ErrorIssueId, patch: Partial<IssueActivityRollup>) =>
+					rollups.set(issueId, { ...(rollups.get(issueId) ?? EMPTY_ACTIVITY), ...patch })
+				const [commentRows, prRows] = yield* Effect.all([
+					dbExecute((db) =>
+						db
+							.select({
+								issueId: errorIssueEvents.issueId,
+								count: sql<number>`count(*)::int`,
+							})
+							.from(errorIssueEvents)
+							.where(
+								and(
+									eq(errorIssueEvents.orgId, orgId),
+									inArray(errorIssueEvents.issueId, issueIds),
+									inArray(errorIssueEvents.type, ["comment", "agent_note"]),
+								),
+							)
+							.groupBy(errorIssueEvents.issueId),
+					),
+					dbExecute((db) =>
+						db
+							.select({
+								issueId: errorIssuePullRequests.issueId,
+								state: errorIssuePullRequests.state,
+								count: sql<number>`count(*)::int`,
+							})
+							.from(errorIssuePullRequests)
+							.where(
+								and(
+									eq(errorIssuePullRequests.orgId, orgId),
+									inArray(errorIssuePullRequests.issueId, issueIds),
+								),
+							)
+							.groupBy(errorIssuePullRequests.issueId, errorIssuePullRequests.state),
+					),
+				])
+				for (const row of commentRows) upsert(row.issueId, { commentCount: row.count })
+				for (const row of prRows) {
+					if (row.state === "open") upsert(row.issueId, { openPullRequestCount: row.count })
+					if (row.state === "merged") upsert(row.issueId, { mergedPullRequestCount: row.count })
+				}
+				return rollups
+			})
+
 		const hydrateIssueRows: ErrorIssueWorkflowServiceApi["hydrateIssueRows"] = (orgId, rows) =>
 			Effect.gen(function* () {
 				if (rows.length === 0) return []
-				const openSet = yield* issuesWithOpenIncidents(
-					orgId,
-					rows.map((row) => row.id),
-				)
+				const issueIds = rows.map((row) => row.id)
+				const openSet = yield* issuesWithOpenIncidents(orgId, issueIds)
+				const activityMap = yield* issueActivityRollups(orgId, issueIds)
 				const actorMap = yield* actors.collectActorDocs(
 					orgId,
 					rows.flatMap((row) => [row.assignedActorId ?? null, row.leaseHolderActorId ?? null]),
 				)
-				return rows.map((row) => rowToIssue(row, openSet.has(row.id), actorMap))
+				return rows.map((row) =>
+					rowToIssue(row, openSet.has(row.id), actorMap, activityMap.get(row.id) ?? EMPTY_ACTIVITY),
+				)
 			})
 
 		const hydrateIssue: ErrorIssueWorkflowServiceApi["hydrateIssue"] = Effect.fn(
