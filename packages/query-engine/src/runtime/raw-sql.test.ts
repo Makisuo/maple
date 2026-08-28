@@ -168,7 +168,7 @@ describe("prepareRawSql", () => {
 				orgId: "org'); DROP TABLE Logs --",
 				sql: "SELECT 1 FROM Logs WHERE $__orgFilter",
 			})
-			assert.include(result.sql, "OrgId = 'org\\'); DROP TABLE Logs --'")
+			assert.include(result.sql, "OrgId = 'org\\')\\x3B DROP TABLE Logs --'")
 		}),
 	)
 })
