@@ -1,7 +1,7 @@
 import { record } from "rrweb"
 import { markActivity, nextChunkSeq } from "../session/session"
 import type { IngestConfig } from "../platform/transport"
-import { gzip, postSessionBlob, type ChunkMeta } from "../platform/transport"
+import { gzip, postSessionBlob, warnDropped, type ChunkMeta } from "../platform/transport"
 
 // rrweb event shape — typed loosely to avoid coupling to @rrweb/types across
 // alpha releases. We only read `type`, `timestamp`, and incremental `data`.
@@ -94,7 +94,17 @@ export function startRecording(config: IngestConfig, sessionId: string): Recorde
 		const seq = nextChunkSeq()
 		resetBuffer()
 
-		const gzipped = await gzip(new TextEncoder().encode(body))
+		// `gzip` now rejects rather than returning a truncated stream, and `flush`
+		// is called as a floating promise — an escaping rejection would surface in
+		// the host app's console as ours. Dropping the chunk is the same outcome
+		// ingest produced by refusing it, minus the wasted POST.
+		let gzipped: Uint8Array
+		try {
+			gzipped = await gzip(new TextEncoder().encode(body))
+		} catch (error) {
+			warnDropped("chunk compression", error)
+			return
+		}
 		const meta: ChunkMeta = {
 			sessionId,
 			chunkSeq: seq,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+	gzip,
 	keepaliveFor,
 	postSessionBlob,
 	postSessionEvents,
@@ -123,5 +124,42 @@ describe("transport", () => {
 
 		await expect(postSessionMeta(CONFIG, { session_id: "s1" })).resolves.toBeUndefined()
 		await expect(postSessionEvents(CONFIG, [{ seq: 0 }])).resolves.toBeUndefined()
+	})
+})
+
+describe("gzip", () => {
+	it("produces a complete gzip stream", async () => {
+		const out = await gzip(new TextEncoder().encode('[{"type":2,"timestamp":1}]'))
+		expect([out[0], out[1], out[2]]).toEqual([0x1f, 0x8b, 0x08])
+		expect(out.length).toBeGreaterThanOrEqual(18)
+	})
+
+	it("round-trips through DecompressionStream", async () => {
+		const body = `[${Array.from({ length: 200 }, (_, i) => `{"type":3,"timestamp":${i}}`).join(",")}]`
+		const out = await gzip(new TextEncoder().encode(body))
+		const stream = new DecompressionStream("gzip")
+		const writer = stream.writable.getWriter()
+		const written = writer.write(out as BufferSource).then(() => writer.close())
+		const [buffer] = await Promise.all([new Response(stream.readable).arrayBuffer(), written])
+		expect(new TextDecoder().decode(buffer)).toBe(body)
+	})
+
+	// The production failure: a torn-down page left `arrayBuffer()` resolving
+	// with only the bytes already flushed, and the caller posted the stub as if
+	// it were a chunk. Compression that cannot complete must throw, not truncate.
+	it("rejects a truncated stream instead of returning it", async () => {
+		const realCompressionStream = globalThis.CompressionStream
+		class TruncatingStream {
+			readonly readable = new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.enqueue(new Uint8Array([0x1f, 0x8b, 0x08]))
+					controller.close()
+				},
+			})
+			readonly writable = new WritableStream()
+		}
+		globalThis.CompressionStream = TruncatingStream as unknown as typeof CompressionStream
+		await expect(gzip(new TextEncoder().encode("[]"))).rejects.toThrow(/not a complete gzip stream/)
+		globalThis.CompressionStream = realCompressionStream
 	})
 })
