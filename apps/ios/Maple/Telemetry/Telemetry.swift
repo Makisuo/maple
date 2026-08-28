@@ -1,6 +1,7 @@
 import Maple
 import MapleAPI
 import SwiftUI
+import UIKit
 
 /// This app's own instrumentation, in one place.
 ///
@@ -406,6 +407,51 @@ extension Telemetry {
 // MARK: - Screen loads
 
 extension Telemetry {
+	/// The `screen.load` spans currently in flight, so backgrounding can end
+	/// them the moment the app suspends.
+	///
+	/// A load in flight when the phone locks does not fail — its task freezes
+	/// with the process and finishes on resume — so its span used to cover the
+	/// whole suspension, and Home's `screen.load` p95 read as minutes of locked
+	/// phone. The SDK already ends `ui.screen` spans on `didEnterBackground`;
+	/// this mirrors that for the load spans it cannot see, ending them with
+	/// `load.outcome = "suspended"` and status left `Unset` — like a superseded
+	/// load, a suspended one neither succeeded nor failed. `Span` ignores
+	/// attribute writes and `end()` after it has ended, so the recording the
+	/// resumed load still does needs no guard.
+	@MainActor
+	enum ActiveLoads {
+		private static var spans: [ObjectIdentifier: Span] = [:]
+		private static var observer: (any NSObjectProtocol)?
+
+		static func began(_ span: Span?) {
+			guard let span else { return }
+			if observer == nil {
+				observer = NotificationCenter.default.addObserver(
+					forName: UIApplication.didEnterBackgroundNotification,
+					object: nil,
+					queue: .main
+				) { _ in
+					MainActor.assumeIsolated { suspendAll() }
+				}
+			}
+			spans[ObjectIdentifier(span)] = span
+		}
+
+		static func ended(_ span: Span?) {
+			guard let span else { return }
+			spans.removeValue(forKey: ObjectIdentifier(span))
+		}
+
+		private static func suspendAll() {
+			for span in spans.values where !span.hasEnded {
+				span.setAttribute(Key.loadOutcome, "suspended")
+				span.end()
+			}
+			spans.removeAll()
+		}
+	}
+
 	/// Wrap a screen's data load in the span every request it makes hangs under.
 	///
 	/// This is the whole reason the app traces at all. `HomeModel.fetch` fans
@@ -433,6 +479,8 @@ extension Telemetry {
 		let parent = PushOpen.parent(for: screen) ?? Visit.parent(for: screen)
 		let state = await withParent(parent) {
 			await Telemetry.span(Name.screenLoad, attributes: attributes) { span in
+				ActiveLoads.began(span)
+				defer { ActiveLoads.ended(span) }
 				let state = await body()
 				record(state, on: span)
 				return state
