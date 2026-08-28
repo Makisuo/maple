@@ -3351,6 +3351,11 @@ async fn handle_replay_blob(
         "maple.replay.storage" = tracing::field::Empty,
         "maple.replay.object_key" = tracing::field::Empty,
         "maple.replay.blob_put_ms" = tracing::field::Empty,
+        "maple.replay.blob_attempts" = tracing::field::Empty,
+        "maple.replay.blob_status" = tracing::field::Empty,
+        "maple.replay.blob_error_kind" = tracing::field::Empty,
+        "maple.replay.blob_request_id" = tracing::field::Empty,
+        "maple.replay.blob_cf_ray" = tracing::field::Empty,
         "maple.replay.body_prefix" = tracing::field::Empty,
         "http.request.header.content-type" = tracing::field::Empty,
         "maple.sdk" = tracing::field::Empty,
@@ -3509,14 +3514,34 @@ async fn handle_replay_blob_inner(
             // Verbatim gzip: ~10x smaller at rest than the JSON text, no
             // recompression, and the Content-Encoding lets a reader hand the
             // bytes to a browser to inflate.
-            store
+            let outcome = store
                 .put_object(&key, body.to_vec(), "application/json", Some("gzip"))
                 .await
                 .map_err(|e| {
+                    // Everything Cloudflare support asks for, on the span rather
+                    // than only in the message: the request id and ray are
+                    // unrecoverable once the response is gone, and the error kind
+                    // separates "R2 is overloaded" from "our request is wrong"
+                    // without parsing an XML body out of a log line.
+                    let span = Span::current();
+                    span.record("maple.replay.blob_error_kind", e.error_kind());
+                    span.record("maple.replay.blob_attempts", e.attempts);
+                    if let Some(status) = e.status() {
+                        span.record("maple.replay.blob_status", status);
+                    }
+                    if let Some(request_id) = e.request_id() {
+                        span.record("maple.replay.blob_request_id", request_id);
+                    }
+                    if let Some(cf_ray) = e.cf_ray() {
+                        span.record("maple.replay.blob_cf_ray", cf_ray);
+                    }
                     warn!(
                         org_id = %org_id,
                         session_id = %session_id,
                         chunk_seq,
+                        error_kind = e.error_kind(),
+                        request_id = e.request_id().unwrap_or_default(),
+                        cf_ray = e.cf_ray().unwrap_or_default(),
                         error = %e,
                         "replay chunk blob upload failed"
                     );
@@ -3527,10 +3552,16 @@ async fn handle_replay_blob_inner(
                     ApiError::service_unavailable("failed to store replay chunk")
                         .with_detail(e.to_string())
                 })?;
-            Span::current().record(
+            let span = Span::current();
+            span.record(
                 "maple.replay.blob_put_ms",
                 i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
             );
+            // Recorded on success too: an attempt count above 1 is a transient
+            // R2 failure this absorbed, and the only warning that the bucket is
+            // degrading before it starts losing chunks outright.
+            span.record("maple.replay.blob_attempts", outcome.attempts);
+            span.record("maple.replay.blob_status", 200u16);
             // The index row carries the chunk's metadata; the payload lives in
             // R2 under a key derived from (OrgId, SessionId, ChunkSeq). An empty
             // `events` is what marks the row as blob-backed on read — the SDK
