@@ -22,7 +22,7 @@ export function useAlertRuleStates(ruleId?: AlertRuleId): ReadonlyArray<AlertRul
 		[orgKey, generation],
 	)
 
-	const { data: rows } = useLiveQuery((q) => q.from({ s: collection }), [collection])
+	const { data: rows } = useLiveQuery({ query: (q) => q.from({ s: collection }) })
 
 	return useMemo(() => {
 		const all = rows ?? []

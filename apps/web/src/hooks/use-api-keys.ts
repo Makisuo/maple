@@ -42,10 +42,9 @@ export function useApiKeysList(): {
 		data: rows,
 		isLoading,
 		isError,
-	} = useLiveQuery(
-		(q) => q.from({ key: collection }).orderBy(({ key }) => key.created_at, "desc"),
-		[collection],
-	)
+	} = useLiveQuery({
+		query: (q) => q.from({ key: collection }).orderBy(({ key }) => key.created_at, "desc"),
+	})
 	const keys = useMemo(() => (rows ?? []).map(rowToV2ApiKey), [rows])
 	const pending = isLoading && keys.length === 0
 	// A live query never times out on its own; without this a dead sync endpoint

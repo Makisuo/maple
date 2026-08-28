@@ -34,14 +34,12 @@ export function useInvestigation(investigationId: string): InvestigationSync {
 		[orgKey, generation, investigationId],
 	)
 
-	const { data: rows, isLoading: rowLoading } = useLiveQuery(
-		(q) => q.from({ i: collections.investigation }),
-		[collections],
-	)
-	const { data: lenses, isLoading: lensLoading } = useLiveQuery(
-		(q) => q.from({ l: collections.lensRuns }),
-		[collections],
-	)
+	const { data: rows, isLoading: rowLoading } = useLiveQuery({
+		query: (q) => q.from({ i: collections.investigation }),
+	})
+	const { data: lenses, isLoading: lensLoading } = useLiveQuery({
+		query: (q) => q.from({ l: collections.lensRuns }),
+	})
 
 	const isLoading = rowLoading || lensLoading
 	const rowFailed = useCollectionLoadFailed(collections.investigation.id, rowLoading)
