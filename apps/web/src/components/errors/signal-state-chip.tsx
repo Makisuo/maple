@@ -29,20 +29,30 @@ const INVESTIGATION_LABEL = {
 	resolved: "Resolved",
 } satisfies Record<V2Investigation["status"], string>
 
-export function SignalStateChip({ state, className }: { state: SignalState; className?: string }) {
+export function SignalStateChip({
+	state,
+	withConfidence = true,
+	className,
+}: {
+	state: SignalState
+	/** Inline `· medium` after "Diagnosed". The list row turns it off — its fixed
+	 *  lane cannot fit the suffix on one line, and the tooltip still carries it. */
+	withConfidence?: boolean
+	className?: string
+}) {
 	const navigate = useNavigate()
 
 	if (state.kind === "incident") {
 		return (
 			<span
 				className={cn(
-					"inline-flex items-center gap-1.5 text-[11px] font-medium text-destructive",
+					"inline-flex max-w-full items-center gap-1.5 text-[11px] font-medium whitespace-nowrap text-destructive",
 					className,
 				)}
 				title="An incident is open for this error"
 			>
 				<span className="size-1.5 shrink-0 rounded-full bg-destructive" />
-				Open incident
+				<span className="truncate">Open incident</span>
 			</span>
 		)
 	}
@@ -63,7 +73,7 @@ export function SignalStateChip({ state, className }: { state: SignalState; clas
 					navigate({ to: "/investigations/$id", params: { id: state.investigationId } })
 				}}
 				className={cn(
-					"inline-flex items-center gap-1.5 text-[11px] font-medium",
+					"inline-flex max-w-full items-center gap-1.5 text-[11px] font-medium whitespace-nowrap",
 					"text-muted-foreground hover:text-foreground hover:underline",
 					"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm",
 					className,
@@ -80,8 +90,8 @@ export function SignalStateChip({ state, className }: { state: SignalState; clas
 						isLive && "motion-safe:animate-pulse",
 					)}
 				/>
-				{label}
-				{state.confidence && state.status === "diagnosed" ? (
+				<span className="truncate">{label}</span>
+				{withConfidence && state.confidence && state.status === "diagnosed" ? (
 					<span className="text-muted-foreground/60">· {state.confidence}</span>
 				) : null}
 			</button>
@@ -90,11 +100,14 @@ export function SignalStateChip({ state, className }: { state: SignalState; clas
 
 	return (
 		<span
-			className={cn("inline-flex items-center gap-1.5 text-[11px] text-muted-foreground", className)}
+			className={cn(
+				"inline-flex max-w-full items-center gap-1.5 text-[11px] whitespace-nowrap text-muted-foreground",
+				className,
+			)}
 			title={`Workflow state: ${WORKFLOW_LABEL[state.state]}`}
 		>
 			<WorkflowRingIcon state={state.state} size={12} />
-			{WORKFLOW_LABEL[state.state]}
+			<span className="truncate">{WORKFLOW_LABEL[state.state]}</span>
 		</span>
 	)
 }
