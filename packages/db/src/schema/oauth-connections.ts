@@ -28,7 +28,14 @@ export const oauthConnections = pgTable(
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 	},
 	(table) => [
-		uniqueIndex("oauth_connections_org_provider_idx").on(table.orgId, table.provider),
+		// One row per (org, provider, external principal). Cloudflare connects multiple
+		// accounts as multiple rows; single-connection providers (Hazel, PlanetScale)
+		// enforce their one-row-per-org semantics in the OAuth helpers' upsert.
+		uniqueIndex("oauth_connections_org_provider_account_idx").on(
+			table.orgId,
+			table.provider,
+			table.externalUserId,
+		),
 		index("oauth_connections_org_idx").on(table.orgId),
 	],
 )

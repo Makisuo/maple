@@ -15,7 +15,7 @@ import {
 	type OrgId,
 } from "@maple/domain/http"
 import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthConnectionRow } from "@maple/db"
-import { and, eq, isNull, lt } from "drizzle-orm"
+import { and, asc, eq, isNull, lt, ne } from "drizzle-orm"
 import { Clock, Effect, Redacted, Schema, Semaphore } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
@@ -85,6 +85,18 @@ export interface MakeOAuthConnectionHelpersOptions {
 	readonly providerLabel: string
 	readonly database: DatabaseApi
 	readonly env: EnvConfig
+	/**
+	 * How many connections an org may hold for this provider.
+	 *
+	 * - `"single"` (default) — one row per org: `upsertConnection` replaces whatever
+	 *   principal was connected before, matching the original one-connection semantics.
+	 * - `"per-account"` — one row per external principal (`externalUserId`): connecting
+	 *   a second account adds a row, reconnecting an existing one refreshes it. Callers
+	 *   then address a specific connection by passing `externalUserId` to the row-scoped
+	 *   helpers; omitting it keeps the legacy behavior of "the org's connection" only
+	 *   while at most one exists.
+	 */
+	readonly connectionScope?: "single" | "per-account"
 }
 
 /**
@@ -94,6 +106,7 @@ export interface MakeOAuthConnectionHelpersOptions {
 export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOptions) =>
 	Effect.gen(function* () {
 		const { provider, providerLabel, database, env } = options
+		const connectionScope = options.connectionScope ?? "single"
 		const httpClient = yield* HttpClient.HttpClient
 
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
@@ -181,29 +194,58 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		 */
 		const connectionMemo = new Map<string, { row: OAuthConnectionRow; expiresAt: number }>()
 
+		/** Memo/selector key for one connection — the org alone in single scope. */
+		const memoKey = (orgId: OrgId, externalUserId?: string) =>
+			externalUserId === undefined ? orgId : `${orgId}${externalUserId}`
+
 		/**
-		 * Drop the memoized row for an org. Must be called from every path that
-		 * writes or removes the connection — a stale entry here serves a token for
-		 * a grant that was just revoked or reconnected.
+		 * Drop the memoized row(s) for an org. Must be called from every path that
+		 * writes or removes a connection — a stale entry here serves a token for
+		 * a grant that was just revoked or reconnected. Without `externalUserId`
+		 * every entry for the org goes (disconnect-all, and the selector-less key).
 		 */
-		const invalidateConnectionMemo = (orgId: OrgId) =>
+		const invalidateConnectionMemo = (orgId: OrgId, externalUserId?: string) =>
 			Effect.sync(() => {
+				if (externalUserId !== undefined) {
+					connectionMemo.delete(memoKey(orgId, externalUserId))
+				}
 				connectionMemo.delete(orgId)
+				if (externalUserId === undefined) {
+					for (const key of connectionMemo.keys()) {
+						if (key.startsWith(`${orgId}`)) connectionMemo.delete(key)
+					}
+				}
 			})
 
-		const loadConnection = (orgId: OrgId) =>
+		const connectionWhere = (orgId: OrgId, externalUserId?: string) =>
+			and(
+				eq(oauthConnections.orgId, orgId),
+				eq(oauthConnections.provider, provider),
+				...(externalUserId === undefined
+					? []
+					: [eq(oauthConnections.externalUserId, externalUserId)]),
+			)
+
+		const loadConnection = (orgId: OrgId, externalUserId?: string) =>
+			dbExecute((db) =>
+				db.select().from(oauthConnections).where(connectionWhere(orgId, externalUserId)).limit(1),
+			).pipe(Effect.map((rows) => rows[0] ?? null))
+
+		/** Every connection the org holds for this provider, oldest first. */
+		const listConnections = (orgId: OrgId) =>
 			dbExecute((db) =>
 				db
 					.select()
 					.from(oauthConnections)
-					.where(and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, provider)))
-					.limit(1),
-			).pipe(Effect.map((rows) => rows[0] ?? null))
+					.where(connectionWhere(orgId))
+					.orderBy(asc(oauthConnections.createdAt), asc(oauthConnections.id)),
+			)
 
 		const requireConnection = Effect.fn("OAuthConnectionHelpers.requireConnection")(function* (
 			orgId: OrgId,
+			externalUserId?: string,
 		) {
-			const row = yield* loadConnection(orgId)
+			const row = yield* loadConnection(orgId, externalUserId)
 			if (!row) {
 				return yield* Effect.fail(
 					new IntegrationsNotConnectedError({
@@ -215,8 +257,12 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		})
 
 		/**
-		 * Write (or overwrite) the org's connection in one statement — the unique
-		 * index on (orgId, provider) makes select-then-branch unnecessary.
+		 * Write (or overwrite) a connection — the unique index on
+		 * (orgId, provider, externalUserId) is the conflict target, so reconnecting
+		 * the same principal refreshes its row in one statement. In `"single"` scope
+		 * a preceding delete drops any row for a DIFFERENT principal, preserving the
+		 * original one-connection-per-org semantics when the user reconnects as
+		 * someone else; `"per-account"` scope keeps sibling rows.
 		 */
 		const upsertConnection = (
 			orgId: OrgId,
@@ -226,24 +272,45 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				"id" | "orgId" | "provider" | "createdAt" | "updatedAt"
 			>,
 		) =>
-			dbExecute((db) =>
-				db
-					.insert(oauthConnections)
-					.values({
-						id: randomUUID(),
-						orgId,
-						provider,
-						createdAt: new Date(currentTime),
-						updatedAt: new Date(currentTime),
-						...values,
-					})
-					.onConflictDoUpdate({
-						target: [oauthConnections.orgId, oauthConnections.provider],
-						// Reconnecting with fresh tokens clears any prior revocation so
-						// pollers resume automatically.
-						set: { ...values, revokedAt: null, updatedAt: new Date(currentTime) },
-					}),
-			).pipe(Effect.ensuring(invalidateConnectionMemo(orgId)))
+			(connectionScope === "single"
+				? dbExecute((db) =>
+						db
+							.delete(oauthConnections)
+							.where(
+								and(
+									connectionWhere(orgId),
+									ne(oauthConnections.externalUserId, values.externalUserId),
+								),
+							),
+					)
+				: Effect.void
+			).pipe(
+				Effect.andThen(
+					dbExecute((db) =>
+						db
+							.insert(oauthConnections)
+							.values({
+								id: randomUUID(),
+								orgId,
+								provider,
+								createdAt: new Date(currentTime),
+								updatedAt: new Date(currentTime),
+								...values,
+							})
+							.onConflictDoUpdate({
+								target: [
+									oauthConnections.orgId,
+									oauthConnections.provider,
+									oauthConnections.externalUserId,
+								],
+								// Reconnecting with fresh tokens clears any prior revocation so
+								// pollers resume automatically.
+								set: { ...values, revokedAt: null, updatedAt: new Date(currentTime) },
+							}),
+					),
+				),
+				Effect.ensuring(invalidateConnectionMemo(orgId)),
+			)
 
 		/**
 		 * Stamp the connection as revoked (idempotent — only the first stamp writes).
@@ -253,35 +320,33 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		 */
 		const markConnectionRevoked = Effect.fn("OAuthConnectionHelpers.markConnectionRevoked")(function* (
 			orgId: OrgId,
+			externalUserId?: string,
 		) {
 			const currentTime = yield* Clock.currentTimeMillis
 			// Before the write, not after: the memo must not outlive the decision to
 			// revoke even if the stamp itself fails (it is best-effort/ignored below).
-			yield* invalidateConnectionMemo(orgId)
+			yield* invalidateConnectionMemo(orgId, externalUserId)
 			yield* dbExecute((db) =>
 				db
 					.update(oauthConnections)
 					.set({ revokedAt: new Date(currentTime) })
-					.where(
-						and(
-							eq(oauthConnections.orgId, orgId),
-							eq(oauthConnections.provider, provider),
-							isNull(oauthConnections.revokedAt),
-						),
-					),
+					.where(and(connectionWhere(orgId, externalUserId), isNull(oauthConnections.revokedAt))),
 			).pipe(Effect.ignore)
 		})
 
-		/** Drop the org's connection row; reports whether anything was removed. */
-		const deleteConnection = (orgId: OrgId) =>
+		/**
+		 * Drop the org's connection row(s) — all of them, or just one principal's;
+		 * reports whether anything was removed.
+		 */
+		const deleteConnection = (orgId: OrgId, externalUserId?: string) =>
 			dbExecute((db) =>
 				db
 					.delete(oauthConnections)
-					.where(and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, provider)))
+					.where(connectionWhere(orgId, externalUserId))
 					.returning({ id: oauthConnections.id }),
 			).pipe(
 				Effect.map((result) => ({ disconnected: result.length > 0 })),
-				Effect.ensuring(invalidateConnectionMemo(orgId)),
+				Effect.ensuring(invalidateConnectionMemo(orgId, externalUserId)),
 			)
 
 		/** POST an `application/x-www-form-urlencoded` body and return the raw status + text. */
@@ -418,17 +483,21 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		// row after acquiring: a fiber that waited usually finds the winner's fresh tokens.
 		const refreshSemaphore = Semaphore.makeUnsafe(1)
 
-		const refreshWithSingleFlight = (config: OAuthTokenEndpointConfig, orgId: OrgId) =>
+		const refreshWithSingleFlight = (
+			config: OAuthTokenEndpointConfig,
+			orgId: OrgId,
+			externalUserId?: string,
+		) =>
 			refreshSemaphore.withPermits(1)(
 				Effect.gen(function* () {
 					// Double-checked: another local fiber may have refreshed while we waited.
-					const row = yield* requireConnection(orgId)
+					const row = yield* requireConnection(orgId, externalUserId)
 					if (rowIsValid(row, yield* Clock.currentTimeMillis)) {
 						return yield* accessTokenFromRow(row)
 					}
 
 					if (!row.refreshTokenCiphertext || !row.refreshTokenIv || !row.refreshTokenTag) {
-						yield* markConnectionRevoked(orgId)
+						yield* markConnectionRevoked(orgId, externalUserId)
 						return yield* Effect.fail(
 							new IntegrationsRevokedError({
 								message: `${providerLabel} access token expired and no refresh token is stored — reconnect required`,
@@ -453,12 +522,12 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 						// landed, use it.
 						Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
 							Effect.gen(function* () {
-								const latest = yield* requireConnection(orgId)
+								const latest = yield* requireConnection(orgId, externalUserId)
 								const advanced = latest.updatedAt.getTime() > row.updatedAt.getTime()
 								if (advanced && rowIsValid(latest, yield* Clock.currentTimeMillis)) {
 									return yield* accessTokenFromRow(latest)
 								}
-								yield* markConnectionRevoked(orgId)
+								yield* markConnectionRevoked(orgId, externalUserId)
 								return yield* Effect.fail(error)
 							}),
 						),
@@ -467,23 +536,26 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 			)
 
 		/**
-		 * Decrypted access token for the org's connection, refreshing (single-flight)
+		 * Decrypted access token for one connection, refreshing (single-flight)
 		 * when it is within the expiry leeway. Returns the row alongside so callers
-		 * can project provider-specific fields (account id, scope, ...).
+		 * can project provider-specific fields (account id, scope, ...). Without
+		 * `externalUserId` this addresses "the org's connection" — only meaningful
+		 * while the org holds at most one.
 		 */
 		const getValidConnectionToken = Effect.fn("OAuthConnectionHelpers.getValidConnectionToken")(
-			function* (config: OAuthTokenEndpointConfig, orgId: OrgId) {
+			function* (config: OAuthTokenEndpointConfig, orgId: OrgId, externalUserId?: string) {
 				const nowMs = yield* Clock.currentTimeMillis
-				const memoized = connectionMemo.get(orgId)
+				const key = memoKey(orgId, externalUserId)
+				const memoized = connectionMemo.get(key)
 				if (memoized !== undefined && memoized.expiresAt > nowMs && rowIsValid(memoized.row, nowMs)) {
 					yield* Effect.annotateCurrentSpan("oauth.connection.memoHit", true)
 					return yield* accessTokenFromRow(memoized.row)
 				}
 				yield* Effect.annotateCurrentSpan("oauth.connection.memoHit", false)
 
-				const row = yield* requireConnection(orgId)
+				const row = yield* requireConnection(orgId, externalUserId)
 				if (rowIsValid(row, nowMs)) {
-					connectionMemo.set(orgId, { row, expiresAt: nowMs + CONNECTION_MEMO_TTL_MS })
+					connectionMemo.set(key, { row, expiresAt: nowMs + CONNECTION_MEMO_TTL_MS })
 					return yield* accessTokenFromRow(row)
 				}
 				// Deliberately not memoized. `refreshWithSingleFlight` resolves to the
@@ -491,7 +563,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				// superseded token — caching it would serve a stale credential for the
 				// whole TTL. Refreshes are rare; the next call re-reads and memoizes
 				// the persisted row.
-				return yield* refreshWithSingleFlight(config, orgId)
+				return yield* refreshWithSingleFlight(config, orgId, externalUserId)
 			},
 		)
 
@@ -504,6 +576,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 			deleteAuthState,
 			requireStateRow,
 			loadConnection,
+			listConnections,
 			requireConnection,
 			upsertConnection,
 			deleteConnection,

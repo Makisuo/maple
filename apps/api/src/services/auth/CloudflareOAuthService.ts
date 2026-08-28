@@ -73,6 +73,16 @@ interface CloudflareAccessToken {
 	readonly scope: string
 }
 
+/** One connected Cloudflare account (one `oauth_connections` row). */
+export interface CloudflareConnectedAccount {
+	readonly accountId: string
+	readonly accountName: string | null
+	readonly connectedByUserId: string
+	readonly scope: string
+	/** True when Cloudflare rejected the stored grant — pollers skip it until reconnect. */
+	readonly revoked: boolean
+}
+
 export interface CloudflareOAuthServiceApi {
 	readonly startConnect: (
 		orgId: OrgId,
@@ -86,25 +96,28 @@ export interface CloudflareOAuthServiceApi {
 		code: string,
 		state: string,
 	) => Effect.Effect<
-		{ readonly orgId: OrgId; readonly returnTo: string | null },
+		{ readonly orgId: OrgId; readonly accountId: string; readonly returnTo: string | null },
 		| IntegrationsValidationError
 		| IntegrationsUpstreamError
 		| IntegrationsRevokedError
 		| IntegrationsPersistenceError
 	>
+	/** Every connected account for the org, oldest connection first. */
 	readonly getStatus: (orgId: OrgId) => Effect.Effect<
-		| { readonly connected: false }
-		| {
-				readonly connected: true
-				readonly accountId: string
-				readonly accountName: string | null
-				readonly connectedByUserId: string
-				readonly scope: string
-		  },
+		{
+			readonly connected: boolean
+			readonly accounts: ReadonlyArray<CloudflareConnectedAccount>
+		},
 		IntegrationsPersistenceError
 	>
+	/**
+	 * Fresh access token for one connected account. Without `accountId` the org
+	 * must hold exactly one connection — ambiguous lookups fail rather than
+	 * silently picking an account.
+	 */
 	readonly getValidAccessToken: (
 		orgId: OrgId,
+		accountId?: string,
 	) => Effect.Effect<
 		CloudflareAccessToken,
 		| IntegrationsNotConnectedError
@@ -113,14 +126,17 @@ export interface CloudflareOAuthServiceApi {
 		| IntegrationsPersistenceError
 		| IntegrationsValidationError
 	>
+	/** Disconnect one account, or every connected account when `accountId` is omitted. */
 	readonly disconnect: (
 		orgId: OrgId,
+		accountId?: string,
 	) => Effect.Effect<{ readonly disconnected: boolean }, IntegrationsPersistenceError>
 	/**
-	 * Stamp the org's connection as revoked so pollers stop retrying it every
-	 * tick; cleared automatically when the org reconnects. Best-effort.
+	 * Stamp a connection as revoked so pollers stop retrying it every tick;
+	 * cleared automatically when the account reconnects. Best-effort. Without
+	 * `accountId` every connection of the org is stamped.
 	 */
-	readonly markConnectionRevoked: (orgId: OrgId) => Effect.Effect<void>
+	readonly markConnectionRevoked: (orgId: OrgId, accountId?: string) => Effect.Effect<void>
 }
 
 export class CloudflareOAuthService extends Context.Service<
@@ -135,6 +151,9 @@ export class CloudflareOAuthService extends Context.Service<
 			providerLabel: "Cloudflare",
 			database,
 			env,
+			// One row per Cloudflare account: orgs connect several accounts, each
+			// through its own single-account OAuth grant (see completeConnect).
+			connectionScope: "per-account",
 		})
 
 		/** Best-effort token revocation on disconnect — failures are logged, never surfaced. */
@@ -212,10 +231,12 @@ export class CloudflareOAuthService extends Context.Service<
 				code_verifier: stateRow.codeVerifier,
 			})
 
-			// Resolve — and require exactly one — Cloudflare account. A token that spans multiple
-			// accounts is ambiguous for org→account scoping, so we refuse it (Superlog's rule).
-			// On refusal, best-effort revoke the just-issued tokens: they are never persisted, so
-			// this is the only moment we can invalidate them upstream.
+			// Resolve — and require exactly one — Cloudflare account per grant. A token that spans
+			// multiple accounts is ambiguous for token-refresh scoping (one refresh token cannot be
+			// shared by several connection rows without rotation races), so we refuse it; additional
+			// accounts connect through their own OAuth round-trips, each becoming its own connection
+			// row. On refusal, best-effort revoke the just-issued tokens: they are never persisted,
+			// so this is the only moment we can invalidate them upstream.
 			const accounts = yield* listAccounts(
 				tokenResponse.access_token,
 				env.MAPLE_CLOUDFLARE_API_BASE_URL,
@@ -233,7 +254,7 @@ export class CloudflareOAuthService extends Context.Service<
 				return yield* Effect.fail(
 					new IntegrationsValidationError({
 						message:
-							"The Cloudflare authorization spans multiple accounts — reconnect and grant access to a single account",
+							"The Cloudflare authorization spans multiple accounts — grant access to a single account and connect additional accounts one at a time",
 					}),
 				)
 			}
@@ -284,15 +305,31 @@ export class CloudflareOAuthService extends Context.Service<
 				expiresAt: msToDate(expiresAt),
 			})
 
-			return { orgId, returnTo: stateRow.returnTo ?? null }
+			return { orgId, accountId: account.id, returnTo: stateRow.returnTo ?? null }
 		})
 
 		const getValidAccessToken = Effect.fn("CloudflareOAuthService.getValidAccessToken")(function* (
 			orgId: OrgId,
+			accountId?: string,
 		) {
 			yield* Effect.annotateCurrentSpan({ orgId })
 			const config = yield* resolveConfig(env)
-			const { accessToken, row } = yield* oauth.getValidConnectionToken(config, orgId)
+			// No account given: legacy single-connection lookup. Refuse the ambiguous case
+			// instead of silently picking whichever row the query returns first.
+			if (accountId === undefined) {
+				const connections = yield* oauth.listConnections(orgId)
+				if (connections.length > 1) {
+					return yield* Effect.fail(
+						new IntegrationsValidationError({
+							message:
+								"Multiple Cloudflare accounts are connected — specify which account to use",
+						}),
+					)
+				}
+			} else {
+				yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+			}
+			const { accessToken, row } = yield* oauth.getValidConnectionToken(config, orgId, accountId)
 			return {
 				accessToken,
 				accountId: row.externalUserId,
@@ -301,38 +338,53 @@ export class CloudflareOAuthService extends Context.Service<
 		})
 
 		const getStatus = Effect.fn("CloudflareOAuthService.getStatus")(function* (orgId: OrgId) {
-			const row = yield* oauth.loadConnection(orgId)
-			if (!row) {
-				return { connected: false } as const
-			}
+			const rows = yield* oauth.listConnections(orgId)
 			return {
-				connected: true,
-				accountId: row.externalUserId,
-				accountName: row.externalAccountName,
-				connectedByUserId: row.connectedByUserId,
-				scope: row.scope,
-			} as const
+				connected: rows.length > 0,
+				accounts: rows.map(
+					(row): CloudflareConnectedAccount => ({
+						accountId: row.externalUserId,
+						accountName: row.externalAccountName,
+						connectedByUserId: row.connectedByUserId,
+						scope: row.scope,
+						revoked: row.revokedAt != null,
+					}),
+				),
+			}
 		})
 
-		const disconnect = Effect.fn("CloudflareOAuthService.disconnect")(function* (orgId: OrgId) {
+		const disconnect = Effect.fn("CloudflareOAuthService.disconnect")(function* (
+			orgId: OrgId,
+			accountId?: string,
+		) {
 			yield* Effect.annotateCurrentSpan({ orgId })
-			// Best-effort upstream token revocation before we drop the row. Never let a revoke
-			// failure block the disconnect — the deleted row is the real backstop.
-			const row = yield* oauth.loadConnection(orgId)
-			if (row) {
-				const config = yield* resolveConfig(env).pipe(Effect.option)
-				const accessToken = yield* oauth
-					.decryptValue({
-						ciphertext: row.accessTokenCiphertext,
-						iv: row.accessTokenIv,
-						tag: row.accessTokenTag,
-					})
-					.pipe(Effect.option)
-				if (Option.isSome(config) && Option.isSome(accessToken)) {
-					yield* revokeToken(config.value, accessToken.value)
-				}
+			if (accountId !== undefined) {
+				yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
 			}
-			return yield* oauth.deleteConnection(orgId)
+			// Best-effort upstream token revocation before we drop the row(s). Never let a revoke
+			// failure block the disconnect — the deleted row is the real backstop.
+			const rows = yield* oauth.listConnections(orgId)
+			const targets =
+				accountId === undefined ? rows : rows.filter((r) => r.externalUserId === accountId)
+			const config = yield* resolveConfig(env).pipe(Effect.option)
+			if (Option.isSome(config)) {
+				yield* Effect.forEach(
+					targets,
+					(row) =>
+						oauth
+							.decryptValue({
+								ciphertext: row.accessTokenCiphertext,
+								iv: row.accessTokenIv,
+								tag: row.accessTokenTag,
+							})
+							.pipe(
+								Effect.flatMap((accessToken) => revokeToken(config.value, accessToken)),
+								Effect.ignore,
+							),
+					{ discard: true },
+				)
+			}
+			return yield* oauth.deleteConnection(orgId, accountId)
 		})
 
 		return {

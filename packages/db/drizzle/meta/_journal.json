@@ -1,342 +1,349 @@
 {
-  "version": "7",
-  "dialect": "postgresql",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "7",
-      "when": 1781306960498,
-      "tag": "0000_windy_raza",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1782245542758,
-      "tag": "0001_naive_scalphunter",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1782656894999,
-      "tag": "0002_bizarre_triathlon",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1782992101248,
-      "tag": "0003_backfill_github_commit_avatars",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1783200000000,
-      "tag": "0004_premium_korg",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1783200001000,
-      "tag": "0005_loud_pyro",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1783200002000,
-      "tag": "0006_natural_marvel_apes",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1783200003000,
-      "tag": "0007_slippery_winter_soldier",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1783200004000,
-      "tag": "0008_elite_butterfly",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1783200005000,
-      "tag": "0009_electric_publication",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1783377967610,
-      "tag": "0010_huge_dexter_bennett",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1783377967700,
-      "tag": "0011_electric_publication_wave1",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1783775467529,
-      "tag": "0012_cute_veda",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1784112584278,
-      "tag": "0013_sour_dagger",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1784159565663,
-      "tag": "0014_electric_publication_api_keys",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1784225447696,
-      "tag": "0015_funny_gabe_jones",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1784586724571,
-      "tag": "0016_lowly_famine",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "7",
-      "when": 1784632119830,
-      "tag": "0017_powerful_robin_chapel",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "7",
-      "when": 1784641149214,
-      "tag": "0018_brown_brood",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "7",
-      "when": 1785017683385,
-      "tag": "0019_chemical_synch",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "7",
-      "when": 1785080420839,
-      "tag": "0020_material_hannibal_king",
-      "breakpoints": true
-    },
-    {
-      "idx": 21,
-      "version": "7",
-      "when": 1785080599817,
-      "tag": "0021_brave_jackpot",
-      "breakpoints": true
-    },
-    {
-      "idx": 22,
-      "version": "7",
-      "when": 1785149950000,
-      "tag": "0022_electric_publication_prune",
-      "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "7",
-      "when": 1785275382874,
-      "tag": "0023_charming_bulldozer",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "7",
-      "when": 1785280474376,
-      "tag": "0024_burly_grim_reaper",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "7",
-      "when": 1785360784276,
-      "tag": "0025_majestic_randall_flagg",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "7",
-      "when": 1785489583849,
-      "tag": "0026_windy_bromley",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "7",
-      "when": 1785514557097,
-      "tag": "0027_pretty_chat",
-      "breakpoints": true
-    },
-    {
-      "idx": 28,
-      "version": "7",
-      "when": 1785514557099,
-      "tag": "0029_purge_orphan_metric_incidents",
-      "breakpoints": true
-    },
-    {
-      "idx": 29,
-      "version": "7",
-      "when": 1785800580058,
-      "tag": "0030_planetscale_events",
-      "breakpoints": true
-    },
-    {
-      "idx": 30,
-      "version": "7",
-      "when": 1785975725201,
-      "tag": "0031_investigation_lens_runs",
-      "breakpoints": true
-    },
-    {
-      "idx": 31,
-      "version": "7",
-      "when": 1786007865396,
-      "tag": "0032_fanout_settings",
-      "breakpoints": true
-    },
-    {
-      "idx": 32,
-      "version": "7",
-      "when": 1786016554101,
-      "tag": "0033_lens_run_attempt",
-      "breakpoints": true
-    },
-    {
-      "idx": 33,
-      "version": "7",
-      "when": 1786016873783,
-      "tag": "0034_lens_mechanism",
-      "breakpoints": true
-    },
-    {
-      "idx": 34,
-      "version": "7",
-      "when": 1786059358436,
-      "tag": "0035_planned_investigations",
-      "breakpoints": true
-    },
-    {
-      "idx": 35,
-      "version": "7",
-      "when": 1786231852176,
-      "tag": "0036_remove_org_spend_limits",
-      "breakpoints": true
-    },
-    {
-      "idx": 36,
-      "version": "7",
-      "when": 1786269900000,
-      "tag": "0037_electric_publication_investigations",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1786292037508,
-      "tag": "0038_error_tick_cursor_outbox",
-      "breakpoints": true
-    },
-    {
-      "idx": 38,
-      "version": "7",
-      "when": 1786300000000,
-      "tag": "0039_investigation_inconclusive_backfill",
-      "breakpoints": true
-    },
-    {
-      "idx": 39,
-      "version": "7",
-      "when": 1786793464889,
-      "tag": "0040_dashboard_shares",
-      "breakpoints": true
-    },
-    {
-      "idx": 40,
-      "version": "7",
-      "when": 1786832731147,
-      "tag": "0041_dashboard_share_id_index",
-      "breakpoints": true
-    },
-    {
-      "idx": 41,
-      "version": "7",
-      "when": 1786963071458,
-      "tag": "0042_mobile_devices",
-      "breakpoints": true
-    },
-    {
-      "idx": 42,
-      "version": "7",
-      "when": 1787089609659,
-      "tag": "0043_alert_destination_auto_disable",
-      "breakpoints": true
-    },
-    {
-      "idx": 43,
-      "version": "7",
-      "when": 1787093253575,
-      "tag": "0044_error_fingerprint_v2",
-      "breakpoints": true
-    },
-    {
-      "idx": 44,
-      "version": "7",
-      "when": 1787131754667,
-      "tag": "0045_error_regression_tracking",
-      "breakpoints": true
-    },
-    {
-      "idx": 45,
-      "version": "7",
-      "when": 1787136812507,
-      "tag": "0046_live_activities",
-      "breakpoints": true
-    },
-    {
-      "idx": 46,
-      "version": "7",
-      "when": 1787524332738,
-      "tag": "0047_issue_pull_requests_verification",
-      "breakpoints": true
-    },
-    {
-      "idx": 47,
-      "version": "7",
-      "when": 1787744924452,
-      "tag": "0048_anomaly_index_tightening",
-      "breakpoints": true
-    }
-  ]
+ "version": "7",
+ "dialect": "postgresql",
+ "entries": [
+  {
+   "idx": 0,
+   "version": "7",
+   "when": 1781306960498,
+   "tag": "0000_windy_raza",
+   "breakpoints": true
+  },
+  {
+   "idx": 1,
+   "version": "7",
+   "when": 1782245542758,
+   "tag": "0001_naive_scalphunter",
+   "breakpoints": true
+  },
+  {
+   "idx": 2,
+   "version": "7",
+   "when": 1782656894999,
+   "tag": "0002_bizarre_triathlon",
+   "breakpoints": true
+  },
+  {
+   "idx": 3,
+   "version": "7",
+   "when": 1782992101248,
+   "tag": "0003_backfill_github_commit_avatars",
+   "breakpoints": true
+  },
+  {
+   "idx": 4,
+   "version": "7",
+   "when": 1783200000000,
+   "tag": "0004_premium_korg",
+   "breakpoints": true
+  },
+  {
+   "idx": 5,
+   "version": "7",
+   "when": 1783200001000,
+   "tag": "0005_loud_pyro",
+   "breakpoints": true
+  },
+  {
+   "idx": 6,
+   "version": "7",
+   "when": 1783200002000,
+   "tag": "0006_natural_marvel_apes",
+   "breakpoints": true
+  },
+  {
+   "idx": 7,
+   "version": "7",
+   "when": 1783200003000,
+   "tag": "0007_slippery_winter_soldier",
+   "breakpoints": true
+  },
+  {
+   "idx": 8,
+   "version": "7",
+   "when": 1783200004000,
+   "tag": "0008_elite_butterfly",
+   "breakpoints": true
+  },
+  {
+   "idx": 9,
+   "version": "7",
+   "when": 1783200005000,
+   "tag": "0009_electric_publication",
+   "breakpoints": true
+  },
+  {
+   "idx": 10,
+   "version": "7",
+   "when": 1783377967610,
+   "tag": "0010_huge_dexter_bennett",
+   "breakpoints": true
+  },
+  {
+   "idx": 11,
+   "version": "7",
+   "when": 1783377967700,
+   "tag": "0011_electric_publication_wave1",
+   "breakpoints": true
+  },
+  {
+   "idx": 12,
+   "version": "7",
+   "when": 1783775467529,
+   "tag": "0012_cute_veda",
+   "breakpoints": true
+  },
+  {
+   "idx": 13,
+   "version": "7",
+   "when": 1784112584278,
+   "tag": "0013_sour_dagger",
+   "breakpoints": true
+  },
+  {
+   "idx": 14,
+   "version": "7",
+   "when": 1784159565663,
+   "tag": "0014_electric_publication_api_keys",
+   "breakpoints": true
+  },
+  {
+   "idx": 15,
+   "version": "7",
+   "when": 1784225447696,
+   "tag": "0015_funny_gabe_jones",
+   "breakpoints": true
+  },
+  {
+   "idx": 16,
+   "version": "7",
+   "when": 1784586724571,
+   "tag": "0016_lowly_famine",
+   "breakpoints": true
+  },
+  {
+   "idx": 17,
+   "version": "7",
+   "when": 1784632119830,
+   "tag": "0017_powerful_robin_chapel",
+   "breakpoints": true
+  },
+  {
+   "idx": 18,
+   "version": "7",
+   "when": 1784641149214,
+   "tag": "0018_brown_brood",
+   "breakpoints": true
+  },
+  {
+   "idx": 19,
+   "version": "7",
+   "when": 1785017683385,
+   "tag": "0019_chemical_synch",
+   "breakpoints": true
+  },
+  {
+   "idx": 20,
+   "version": "7",
+   "when": 1785080420839,
+   "tag": "0020_material_hannibal_king",
+   "breakpoints": true
+  },
+  {
+   "idx": 21,
+   "version": "7",
+   "when": 1785080599817,
+   "tag": "0021_brave_jackpot",
+   "breakpoints": true
+  },
+  {
+   "idx": 22,
+   "version": "7",
+   "when": 1785149950000,
+   "tag": "0022_electric_publication_prune",
+   "breakpoints": true
+  },
+  {
+   "idx": 23,
+   "version": "7",
+   "when": 1785275382874,
+   "tag": "0023_charming_bulldozer",
+   "breakpoints": true
+  },
+  {
+   "idx": 24,
+   "version": "7",
+   "when": 1785280474376,
+   "tag": "0024_burly_grim_reaper",
+   "breakpoints": true
+  },
+  {
+   "idx": 25,
+   "version": "7",
+   "when": 1785360784276,
+   "tag": "0025_majestic_randall_flagg",
+   "breakpoints": true
+  },
+  {
+   "idx": 26,
+   "version": "7",
+   "when": 1785489583849,
+   "tag": "0026_windy_bromley",
+   "breakpoints": true
+  },
+  {
+   "idx": 27,
+   "version": "7",
+   "when": 1785514557097,
+   "tag": "0027_pretty_chat",
+   "breakpoints": true
+  },
+  {
+   "idx": 28,
+   "version": "7",
+   "when": 1785514557099,
+   "tag": "0029_purge_orphan_metric_incidents",
+   "breakpoints": true
+  },
+  {
+   "idx": 29,
+   "version": "7",
+   "when": 1785800580058,
+   "tag": "0030_planetscale_events",
+   "breakpoints": true
+  },
+  {
+   "idx": 30,
+   "version": "7",
+   "when": 1785975725201,
+   "tag": "0031_investigation_lens_runs",
+   "breakpoints": true
+  },
+  {
+   "idx": 31,
+   "version": "7",
+   "when": 1786007865396,
+   "tag": "0032_fanout_settings",
+   "breakpoints": true
+  },
+  {
+   "idx": 32,
+   "version": "7",
+   "when": 1786016554101,
+   "tag": "0033_lens_run_attempt",
+   "breakpoints": true
+  },
+  {
+   "idx": 33,
+   "version": "7",
+   "when": 1786016873783,
+   "tag": "0034_lens_mechanism",
+   "breakpoints": true
+  },
+  {
+   "idx": 34,
+   "version": "7",
+   "when": 1786059358436,
+   "tag": "0035_planned_investigations",
+   "breakpoints": true
+  },
+  {
+   "idx": 35,
+   "version": "7",
+   "when": 1786231852176,
+   "tag": "0036_remove_org_spend_limits",
+   "breakpoints": true
+  },
+  {
+   "idx": 36,
+   "version": "7",
+   "when": 1786269900000,
+   "tag": "0037_electric_publication_investigations",
+   "breakpoints": true
+  },
+  {
+   "idx": 37,
+   "version": "7",
+   "when": 1786292037508,
+   "tag": "0038_error_tick_cursor_outbox",
+   "breakpoints": true
+  },
+  {
+   "idx": 38,
+   "version": "7",
+   "when": 1786300000000,
+   "tag": "0039_investigation_inconclusive_backfill",
+   "breakpoints": true
+  },
+  {
+   "idx": 39,
+   "version": "7",
+   "when": 1786793464889,
+   "tag": "0040_dashboard_shares",
+   "breakpoints": true
+  },
+  {
+   "idx": 40,
+   "version": "7",
+   "when": 1786832731147,
+   "tag": "0041_dashboard_share_id_index",
+   "breakpoints": true
+  },
+  {
+   "idx": 41,
+   "version": "7",
+   "when": 1786963071458,
+   "tag": "0042_mobile_devices",
+   "breakpoints": true
+  },
+  {
+   "idx": 42,
+   "version": "7",
+   "when": 1787089609659,
+   "tag": "0043_alert_destination_auto_disable",
+   "breakpoints": true
+  },
+  {
+   "idx": 43,
+   "version": "7",
+   "when": 1787093253575,
+   "tag": "0044_error_fingerprint_v2",
+   "breakpoints": true
+  },
+  {
+   "idx": 44,
+   "version": "7",
+   "when": 1787131754667,
+   "tag": "0045_error_regression_tracking",
+   "breakpoints": true
+  },
+  {
+   "idx": 45,
+   "version": "7",
+   "when": 1787136812507,
+   "tag": "0046_live_activities",
+   "breakpoints": true
+  },
+  {
+   "idx": 46,
+   "version": "7",
+   "when": 1787524332738,
+   "tag": "0047_issue_pull_requests_verification",
+   "breakpoints": true
+  },
+  {
+   "idx": 47,
+   "version": "7",
+   "when": 1787744924452,
+   "tag": "0048_anomaly_index_tightening",
+   "breakpoints": true
+  },
+  {
+   "idx": 48,
+   "version": "7",
+   "when": 1787924395973,
+   "tag": "0049_cloudflare_multi_account",
+   "breakpoints": true
+  }
+ ]
 }

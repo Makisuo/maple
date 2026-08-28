@@ -3,7 +3,7 @@ import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
-import { CloudflareOAuthService } from "./CloudflareOAuthService"
+import { CloudflareOAuthService, type CloudflareOAuthServiceApi } from "./CloudflareOAuthService"
 import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 
 const trackedDbs: TestDb[] = []
@@ -180,13 +180,14 @@ describe("CloudflareOAuthService", () => {
 			})
 			const result = yield* service.completeConnect("auth-code", state)
 			assert.strictEqual(result.orgId, "org_a")
+			assert.strictEqual(result.accountId, "acc_1")
 
 			const status = yield* service.getStatus(asOrgId("org_a"))
 			assert.strictEqual(status.connected, true)
-			if (status.connected) {
-				assert.strictEqual(status.accountId, "acc_1")
-				assert.strictEqual(status.accountName, "Acme Inc")
-			}
+			assert.strictEqual(status.accounts.length, 1)
+			assert.strictEqual(status.accounts[0]?.accountId, "acc_1")
+			assert.strictEqual(status.accounts[0]?.accountName, "Acme Inc")
+			assert.strictEqual(status.accounts[0]?.revoked, false)
 
 			const row = yield* Effect.promise(() =>
 				queryFirstRow<{
@@ -500,5 +501,103 @@ describe("CloudflareOAuthService", () => {
 			const result = yield* service.disconnect(asOrgId("org_a"))
 			assert.strictEqual(result.disconnected, false)
 		}).pipe(Effect.provide(makeLayer(testDb, withOAuthApp)))
+	})
+
+	it.effect("a second account connects alongside the first, and disconnects independently", () => {
+		const testDb = createTestDb(trackedDbs)
+		// Mutable fixture: each OAuth round-trip "grants" whatever account the test sets next,
+		// mirroring the user picking a different account in Cloudflare's authorize screen.
+		const granted = { current: [{ id: "acc_1", name: "Acme Inc", type: "standard" }] }
+		const fetchImpl: typeof globalThis.fetch = (input) => {
+			const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+			if (url.includes("/oauth2/revoke")) {
+				return Promise.resolve(new Response(null, { status: 200 }))
+			}
+			if (url.includes("/oauth2/token")) {
+				return Promise.resolve(
+					jsonResponse({
+						access_token: `cf-access-token-${granted.current[0]?.id}`,
+						refresh_token: `cf-refresh-token-${granted.current[0]?.id}`,
+						token_type: "bearer",
+						expires_in: 3600,
+						scope: "account.settings:read",
+					}),
+				)
+			}
+			if (url.includes("/accounts")) {
+				return Promise.resolve(
+					jsonResponse({
+						success: true,
+						errors: [],
+						messages: [],
+						result: granted.current,
+						result_info: {
+							count: granted.current.length,
+							page: 1,
+							per_page: 50,
+							total_count: granted.current.length,
+						},
+					}),
+				)
+			}
+			return Promise.resolve(
+				jsonResponse({ success: false, errors: [], messages: [], result: null }, 404),
+			)
+		}
+		const connect = (service: CloudflareOAuthServiceApi) =>
+			Effect.gen(function* () {
+				const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+					callbackUrl: "https://api.example.com/api/integrations/cloudflare/callback",
+				})
+				return yield* service.completeConnect("auth-code", state)
+			})
+
+		return Effect.gen(function* () {
+			const service = yield* CloudflareOAuthService
+			yield* connect(service)
+			granted.current = [{ id: "acc_2", name: "Beta LLC", type: "standard" }]
+			const second = yield* connect(service)
+			assert.strictEqual(second.accountId, "acc_2")
+
+			// Both connections exist. (Ordering is oldest-first by createdAt, but the two
+			// test connects land in the same millisecond — compare as a set.)
+			const status = yield* service.getStatus(asOrgId("org_a"))
+			assert.strictEqual(status.connected, true)
+			assert.deepStrictEqual(
+				status.accounts.map((account) => account.accountId).sort(),
+				["acc_1", "acc_2"],
+			)
+
+			// Account-addressed tokens resolve their own row; the account-less legacy
+			// lookup is ambiguous with two connections and must refuse.
+			const token = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_2")
+			assert.strictEqual(token.accessToken, "cf-access-token-acc_2")
+			const ambiguous = yield* service.getValidAccessToken(asOrgId("org_a")).pipe(Effect.flip)
+			assert.strictEqual(ambiguous._tag, "@maple/http/errors/IntegrationsValidationError")
+
+			// Reconnecting an already-connected account refreshes its row instead of adding one.
+			yield* connect(service)
+			const afterReconnect = yield* service.getStatus(asOrgId("org_a"))
+			assert.strictEqual(afterReconnect.accounts.length, 2)
+
+			// Per-account disconnect removes only the addressed connection.
+			const removed = yield* service.disconnect(asOrgId("org_a"), "acc_1")
+			assert.strictEqual(removed.disconnected, true)
+			const remaining = yield* service.getStatus(asOrgId("org_a"))
+			assert.deepStrictEqual(
+				remaining.accounts.map((account) => account.accountId),
+				["acc_2"],
+			)
+			// With one connection left, the account-less lookup works again.
+			const single = yield* service.getValidAccessToken(asOrgId("org_a"))
+			assert.strictEqual(single.accountId, "acc_2")
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					makeLayer(testDb, withOAuthApp),
+					Layer.succeed(FetchHttpClient.Fetch, fetchImpl),
+				),
+			),
+		)
 	})
 })
