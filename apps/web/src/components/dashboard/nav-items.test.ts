@@ -110,12 +110,14 @@ describe("navGroups", () => {
 		)
 	})
 
-	it("keeps Infrastructure's preview to four marks once repeats collapse", () => {
-		// Six glyphs beside "Infrastructure" overflow the 16rem sidebar and
-		// truncate the label to "Infrastruct…". The three k8s pages sharing one
-		// mark is what buys the room back — `NavRow` dedupes by icon identity.
+	it("collapses the three k8s pages to one mark, leaving five unique glyphs", () => {
+		// The three k8s pages sharing one mark is deliberate — `NavRow` dedupes by
+		// icon identity. Five unique glyphs is past NavRow's all-or-nothing preview
+		// cap (four), so the closed row currently shows no miniatures; if this
+		// count ever drops back to four, the preview returns on its own.
 		const infra = findItem("Infrastructure")
-		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(4)
+		expect(infra.subItems?.length).toBe(7)
+		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(5)
 	})
 })
 
@@ -128,6 +130,7 @@ describe("paletteNavItems", () => {
 			"Metrics",
 			"Replays",
 			"Hosts",
+			"Containers",
 			"K8s Pods",
 			"K8s Nodes",
 			"K8s Workloads",
