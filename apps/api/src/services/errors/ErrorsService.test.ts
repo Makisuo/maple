@@ -38,6 +38,7 @@ import { Database, DatabaseError } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { isRetryablePostgresContention } from "@/platform/postgres-errors"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import type { SqlQueryOptions, WarehouseQueryServiceApi } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { ErrorActorsService } from "./ErrorActorsService"
@@ -209,6 +210,7 @@ const makeErrorsLayer = (
 	const databaseLive = testDb.layer
 	const errorActorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
+		Layer.provide(AuditLogService.layer),
 		Layer.provide(databaseLive),
 		Layer.provide(errorActorsLive),
 	)
@@ -299,6 +301,7 @@ const makeGatingLayer = (opts: {
 	const databaseLive = testDb.layer
 	const errorActorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
+		Layer.provide(AuditLogService.layer),
 		Layer.provide(databaseLive),
 		Layer.provide(errorActorsLive),
 	)

@@ -53,6 +53,7 @@ import { GithubConnectService } from "@/services/integrations/vcs/vendor/github/
 import { GithubHttp } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { GithubProvider } from "@/services/integrations/vcs/vendor/github/GithubProvider"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { DemoService } from "@/services/org/DemoService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { OnboardingService } from "@/services/org/OnboardingService"
@@ -84,6 +85,7 @@ const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBack
 const CoreServicesLive = Layer.mergeAll(
 	AuthService.layer,
 	ApiKeysService.layer,
+	AuditLogService.layer,
 	CliDeviceAuthService.layer,
 	McpOAuthService.layer,
 	CloudflareOAuthService.layer,
@@ -176,6 +178,7 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 
 const ErrorActorsServiceLive = ErrorActorsService.layer
 const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
+	Layer.provide(AuditLogService.layer),
 	Layer.provideMerge(ErrorActorsServiceLive),
 )
 const ErrorPolicyServiceLive = ErrorPolicyService.layer

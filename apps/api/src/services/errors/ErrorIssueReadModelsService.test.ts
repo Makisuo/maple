@@ -7,6 +7,7 @@ import { Clock, Effect, Layer, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { msToDate } from "@/platform/time"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import {
 	WarehouseQueryService,
 	type WarehouseQueryServiceApi,
@@ -66,7 +67,11 @@ const makeWarehouseStub = (contexts: Array<string>): WarehouseQueryServiceApi =>
 const makeLayer = (contexts: Array<string>) => {
 	const database = createTestDb(createdDbs).layer
 	const actors = ErrorActorsService.layer.pipe(Layer.provide(database))
-	const workflow = ErrorIssueWorkflowService.layer.pipe(Layer.provide(database), Layer.provide(actors))
+	const workflow = ErrorIssueWorkflowService.layer.pipe(
+		Layer.provide(AuditLogService.layer),
+		Layer.provide(database),
+		Layer.provide(actors),
+	)
 	const warehouse = Layer.succeed(WarehouseQueryService, makeWarehouseStub(contexts))
 	const readModels = readRequirements.pipe(
 		Layer.provide(database),

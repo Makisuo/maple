@@ -178,6 +178,8 @@ const apiConfiguredEnv = (stage: MapleStage) =>
 		// Agent LLM path. `MAPLE_LLM_PROVIDER` flips between OpenRouter (default) and
 		// Workers AI; both stay wired, so a switch is this one var plus a redeploy.
 		// See `@/platform/Llm` for the provider-scoped model overrides.
+		// Audit log retention horizon in days; the sweep defaults to 400 when unset.
+		optionalPlain("AUDIT_LOG_RETENTION_DAYS"),
 		optionalPlain("MAPLE_LLM_PROVIDER"),
 		optionalPlain("MAPLE_TRIAGE_MODEL_OPENROUTER"),
 		optionalPlain("MAPLE_TRIAGE_MODEL_WORKERS_AI"),
@@ -318,6 +320,10 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 		const planetScaleWebhookQueue = yield* Cloudflare.Queues.Queue("planetscale-webhooks", {
 			name: planetScaleWebhookQueueName,
 		})
+		const auditEventsQueueName = resolveWorkerName("audit-events", stage)
+		const auditEventsQueue = yield* Cloudflare.Queues.Queue("audit-events", {
+			name: auditEventsQueueName,
+		})
 
 		const worker = (yield* Cloudflare.Worker("api", {
 			name: resolveWorkerName("api", stage),
@@ -369,6 +375,8 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 				VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,
 				PLANETSCALE_WEBHOOK_QUEUE: planetScaleWebhookQueue,
 				PLANETSCALE_WEBHOOK_QUEUE_NAME: planetScaleWebhookQueueName,
+				AUDIT_EVENTS_QUEUE: auditEventsQueue,
+				AUDIT_EVENTS_QUEUE_NAME: auditEventsQueueName,
 				CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
 				INVESTIGATION_FANOUT_WORKFLOW: investigationFanoutWorkflow,
 				API_V2_RATE_LIMITER: Cloudflare.RateLimit("API_V2_RATE_LIMITER", {
@@ -425,6 +433,18 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 				batchSize: 10,
 				maxConcurrency: 2,
 				maxRetries: 3,
+				maxWaitTimeMs: 5000,
+			},
+		})
+		// Audit entries tolerate a few seconds of delivery latency; batch wider and
+		// wait longer so one insert round-trip covers many entries.
+		yield* Cloudflare.Queues.Consumer("audit-events-consumer", {
+			queueId: auditEventsQueue.queueId,
+			scriptName: worker.workerName,
+			settings: {
+				batchSize: 25,
+				maxConcurrency: 2,
+				maxRetries: 5,
 				maxWaitTimeMs: 5000,
 			},
 		})

@@ -16,9 +16,19 @@ import type {
 	V2AlertRulePreviewResult,
 	V2AlertRuleUpdateParams,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, paginateArray, scopeAllows, timestamp, V2ParameterInvalid } from "@maple/domain/http/v2"
+import {
+	encodePublicId,
+	MapleApiV2,
+	paginateArray,
+	PublicIdPrefixes,
+	scopeAllows,
+	timestamp,
+	V2ParameterInvalid,
+} from "@maple/domain/http/v2"
 import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
+import { compactAuditChanges, diffAuditChanges, pickPresentFields } from "@/routes/v2/audit-changes"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
@@ -93,6 +103,37 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 	created_by: doc.createdBy,
 	updated_by: doc.updatedBy,
 })
+
+/** Update-payload fields diffable through the wire shape (drafts get summarized). */
+const ruleAuditKeys: ReadonlyArray<keyof V2AlertRuleUpdateParams & keyof V2AlertRule> = [
+	"name",
+	"notes",
+	"notification_template",
+	"enabled",
+	"severity",
+	"service_names",
+	"exclude_service_names",
+	"environments",
+	"tags",
+	"group_by",
+	"signal_type",
+	"comparator",
+	"threshold",
+	"threshold_upper",
+	"window_minutes",
+	"minimum_sample_count",
+	"consecutive_breaches_required",
+	"consecutive_healthy_required",
+	"renotify_interval_minutes",
+	"apdex_threshold_ms",
+	"query_builder_draft",
+	"raw_query_sql",
+	"raw_query_reducer",
+	"destination_ids",
+]
+
+/** Query drafts and raw SQL are config blobs — audit that they changed, not their bodies. */
+const summarizeRuleBlob = (value: unknown) => (value === null ? null : "<updated>")
 
 const toV2RuleMutationResponse = (doc: AlertRuleDocument): V2AlertRuleMutationResponse => ({
 	...toV2Rule(doc),
@@ -345,6 +386,12 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						request,
 					)
 
+					yield* recordHttpAudit("alert_rule.created", {
+						resourceType: "alert_rule",
+						resourceId: encodePublicId(PublicIdPrefixes.alertRule, created.id),
+						metadata: { name: created.name },
+					})
+
 					return toV2RuleMutationResponse(created)
 				}),
 			)
@@ -361,6 +408,20 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						request,
 					)
 
+					const changes = compactAuditChanges(
+						diffAuditChanges(
+							pickPresentFields(ruleAuditKeys, payload, toV2Rule(current)),
+							pickPresentFields(ruleAuditKeys, payload, toV2Rule(updated)),
+						),
+						{ query_builder_draft: summarizeRuleBlob, raw_query_sql: summarizeRuleBlob },
+					)
+					yield* recordHttpAudit("alert_rule.updated", {
+						resourceType: "alert_rule",
+						resourceId: encodePublicId(PublicIdPrefixes.alertRule, updated.id),
+						...(changes !== undefined ? { changes } : undefined),
+						metadata: { name: updated.name },
+					})
+
 					return toV2RuleMutationResponse(updated)
 				}),
 			)
@@ -368,6 +429,10 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* rules.deleteRule(tenant.orgId, tenant.roles, params.id)
+					yield* recordHttpAudit("alert_rule.deleted", {
+						resourceType: "alert_rule",
+						resourceId: encodePublicId(PublicIdPrefixes.alertRule, deleted.id),
+					})
 
 					return {
 						id: deleted.id,

@@ -41,6 +41,8 @@ import { HttpV2InvestigationsLive } from "./investigations.http"
 import { HttpV2MobileDevicesLive } from "./mobile-devices.http"
 import { HttpV2OrganizationLive } from "./organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http"
+import { HttpV2AuditLogLive } from "./audit-log.http"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./session-replays.http"
 import { HttpV2InstrumentationAuditLive } from "./setup-audit.http"
@@ -76,6 +78,8 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2IngestKeysLive,
 	HttpV2ErrorIssuesLive,
 	HttpV2AttributeMappingsLive,
+	// Real service, no stub: it needs only the Database every harness already provides.
+	HttpV2AuditLogLive.pipe(Layer.provide(AuditLogService.layer)),
 	HttpV2ScrapeTargetsLive,
 	HttpV2InstrumentationRecommendationsLive,
 	HttpV2InstrumentationAuditLive,
@@ -118,6 +122,10 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 			}),
 		),
 	),
+).pipe(
+	// Mutation handlers across the groups record audit entries; the real service
+	// needs only the Database every harness already provides.
+	Layer.provide(AuditLogService.layer),
 )
 
 export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {

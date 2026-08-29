@@ -16,6 +16,7 @@
 		"API_V2_RATE_LIMIT_PARTITION": "local",
 		"PLANETSCALE_WEBHOOK_QUEUE_NAME": "maple-planetscale-webhooks-local",
 		"VCS_SYNC_QUEUE_NAME": "maple-vcs-sync-local",
+		"AUDIT_EVENTS_QUEUE_NAME": "maple-audit-events-local",
 	},
 	"ratelimits": [
 		{
@@ -99,6 +100,7 @@
 				"binding": "PLANETSCALE_WEBHOOK_QUEUE",
 				"queue": "maple-planetscale-webhooks-local",
 			},
+			{ "binding": "AUDIT_EVENTS_QUEUE", "queue": "maple-audit-events-local" },
 		],
 		"consumers": [
 			{
@@ -112,6 +114,12 @@
 				"max_batch_size": 10,
 				"max_batch_timeout": 5,
 				"max_retries": 3,
+			},
+			{
+				"queue": "maple-audit-events-local",
+				"max_batch_size": 25,
+				"max_batch_timeout": 5,
+				"max_retries": 5,
 			},
 		],
 	},

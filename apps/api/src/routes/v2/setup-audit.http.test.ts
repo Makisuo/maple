@@ -10,6 +10,7 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
@@ -142,6 +143,7 @@ const makeHarness = (warehouse: WarehouseQueryServiceApi = warehouseStub()) => {
 		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provide(warehouseLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
+		Layer.provideMerge(AuditLogService.layer),
 		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)

@@ -71,6 +71,8 @@ describe("API runtime graph boundaries", () => {
 			"AlertReadModelsServiceLive",
 			"AlertRulesServiceLive",
 			"AlertsServiceLive",
+			// Lets `register_agent` (and issue-workflow mutations) write org audit entries.
+			"AuditLogService.layer",
 			"DashboardPersistenceService.layer",
 			"ErrorActorsServiceLive",
 			"ErrorIssueReadModelsServiceLive",

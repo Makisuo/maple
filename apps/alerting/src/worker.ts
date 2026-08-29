@@ -6,6 +6,7 @@ import {
 	AlertRulesService,
 	AlertsService,
 	AnomalyDetectionService,
+	AuditLogService,
 	BucketCacheService,
 	CacheBackendLive,
 	CloudflareAnalyticsService,
@@ -144,7 +145,9 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 
 	const ErrorActorsServiceLive = ErrorActorsService.layer.pipe(Layer.provide(BaseLive))
 	const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, ErrorActorsServiceLive)),
+		Layer.provide(
+			Layer.mergeAll(BaseLive, ErrorActorsServiceLive, AuditLogService.layer.pipe(Layer.provide(BaseLive))),
+		),
 	)
 	const ErrorPolicyServiceLive = ErrorPolicyService.layer.pipe(Layer.provide(BaseLive))
 	const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(

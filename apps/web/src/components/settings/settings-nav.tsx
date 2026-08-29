@@ -14,6 +14,7 @@ import {
 	DatabaseIcon,
 	GearIcon,
 	GridIcon,
+	HistoryIcon,
 	KeyIcon,
 	ServerIcon,
 	ShieldIcon,
@@ -26,6 +27,7 @@ import { SettingsNavShell } from "@/components/settings/settings-nav-shell"
 export const settingsTabValues = [
 	"organization",
 	"members",
+	"audit-log",
 	"setup-audit",
 	"ingestion",
 	"api-keys",
@@ -41,6 +43,7 @@ export type SettingsTab = (typeof settingsTabValues)[number]
 export const settingsTabLabels: Record<SettingsTab, string> = {
 	organization: "Organization",
 	members: "Members",
+	"audit-log": "Audit Log",
 	"setup-audit": "Setup Audit",
 	ingestion: "Ingestion",
 	"api-keys": "API Keys",
@@ -108,6 +111,7 @@ const navSections: SettingsNavSection[] = [
 		items: [
 			{ id: "organization", label: "Organization", icon: GearIcon },
 			{ id: "members", label: "Members", icon: UserIcon },
+			{ id: "audit-log", label: "Audit Log", icon: HistoryIcon },
 			// Spans alerting, ingestion and integrations, so it sits at workspace level rather than
 			// under any one of them.
 			{ id: "setup-audit", label: "Setup Audit", icon: CircleCheckIcon },

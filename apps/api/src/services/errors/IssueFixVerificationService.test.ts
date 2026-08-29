@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
 import { PullRequestLookup } from "./PullRequestLookup"
@@ -64,6 +65,7 @@ const makeLayer = (lookup?: {
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const actorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const workflowLive = ErrorIssueWorkflowService.layer.pipe(
+		Layer.provide(AuditLogService.layer),
 		Layer.provide(databaseLive),
 		Layer.provide(actorsLive),
 	)

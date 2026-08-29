@@ -7,6 +7,7 @@ import { MapleApiV2, encodePublicId } from "@maple/domain/http/v2"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { Env } from "@/platform/Env"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
@@ -79,6 +80,7 @@ const makeHarness = () => {
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
+		Layer.provideMerge(AuditLogService.layer),
 		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)

@@ -4,6 +4,7 @@ import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer, Option } from "effect"
 import { layerPg } from "@/platform/DatabasePgLive"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { Env } from "@/platform/Env"
 import { GithubAppClient } from "./services/integrations/vcs/vendor/github/GithubAppClient"
 import { GithubHttp } from "./services/integrations/vcs/vendor/github/GithubHttp"
@@ -56,7 +57,9 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 	// rather than in `Base`, keeping the cron layer as light as it was.
 	const ErrorActorsServiceLive = ErrorActorsService.layer.pipe(Layer.provide(Base))
 	const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(Layer.mergeAll(Base, ErrorActorsServiceLive)),
+		Layer.provide(
+			Layer.mergeAll(Base, ErrorActorsServiceLive, AuditLogService.layer.pipe(Layer.provide(Base))),
+		),
 	)
 	const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
 		Layer.provide(

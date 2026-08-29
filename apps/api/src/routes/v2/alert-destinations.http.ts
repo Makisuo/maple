@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import type { AlertDestinationDocument, AlertDestinationUpdateRequest } from "@maple/domain/http"
+import type { AlertDestinationDocument, AlertDestinationUpdateRequest, AuditChanges } from "@maple/domain/http"
 import {
 	CurrentTenant,
 	DiscordAlertDestinationConfig,
@@ -18,8 +18,9 @@ import type {
 	V2AlertDestinationUpdateParams,
 	V2TelegramChatList,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
+import { encodePublicId, MapleApiV2, paginateArray, PublicIdPrefixes } from "@maple/domain/http/v2"
 import { Effect } from "effect"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
 
 const toV2Destination = (doc: AlertDestinationDocument): V2AlertDestination => ({
@@ -191,6 +192,61 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 	}
 }
 
+/** Credential-bearing config keys; their values must never reach the audit row. */
+const destinationSecretKeys = new Set(["integrationKey", "signingSecret", "url", "webhookUrl", "botToken"])
+
+/** Fields of an update that are readable back off the destination document. */
+const destinationObservableValue = (doc: AlertDestinationDocument, key: string): unknown => {
+	switch (key) {
+		case "name":
+			return doc.name
+		case "enabled":
+			return doc.enabled
+		case "memberUserIds":
+			return doc.memberUserIds
+		default:
+			return undefined
+	}
+}
+
+/**
+ * Diff an update against the pre/post documents. Secrets are recorded as
+ * `<redacted>`; config knobs the wire doc doesn't echo (channel ids, chat ids)
+ * are recorded as touched with `<updated>` placeholders.
+ */
+const buildDestinationChanges = (
+	request: AlertDestinationUpdateRequest,
+	before: AlertDestinationDocument | undefined,
+	after: AlertDestinationDocument,
+): AuditChanges | undefined => {
+	const fields: string[] = []
+	const beforeOut: Record<string, unknown> = {}
+	const afterOut: Record<string, unknown> = {}
+	for (const key of Object.keys(request)) {
+		if (key === "type") continue
+		const wireName = key.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`)
+		if (destinationSecretKeys.has(key)) {
+			fields.push(wireName)
+			beforeOut[wireName] = "<redacted>"
+			afterOut[wireName] = "<redacted>"
+			continue
+		}
+		const prev = before === undefined ? undefined : destinationObservableValue(before, key)
+		const next = destinationObservableValue(after, key)
+		if (prev === undefined && next === undefined) {
+			fields.push(wireName)
+			beforeOut[wireName] = "<updated>"
+			afterOut[wireName] = "<updated>"
+			continue
+		}
+		if (JSON.stringify(prev) === JSON.stringify(next)) continue
+		fields.push(wireName)
+		beforeOut[wireName] = prev
+		afterOut[wireName] = next
+	}
+	return fields.length === 0 ? undefined : { fields, before: beforeOut, after: afterOut }
+}
+
 export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "alertDestinations", (handlers) =>
 	Effect.gen(function* () {
 		const destinations = yield* AlertDestinationsService
@@ -241,19 +297,36 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 						toCreateRequest(payload),
 					)
 
+					yield* recordHttpAudit("alert_destination.created", {
+						resourceType: "alert_destination",
+						resourceId: encodePublicId(PublicIdPrefixes.alertDestination, created.id),
+						metadata: { name: created.name, type: created.type },
+					})
+
 					return toV2DestinationMutation(created)
 				}),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const request = toUpdateRequest(payload)
+					const existing = yield* destinations.listDestinations(tenant.orgId)
+					const current = existing.destinations.find((doc) => doc.id === params.id)
 					const updated = yield* destinations.updateDestination(
 						tenant.orgId,
 						tenant.userId,
 						tenant.roles,
 						params.id,
-						toUpdateRequest(payload),
+						request,
 					)
+
+					const changes = buildDestinationChanges(request, current, updated)
+					yield* recordHttpAudit("alert_destination.updated", {
+						resourceType: "alert_destination",
+						resourceId: encodePublicId(PublicIdPrefixes.alertDestination, updated.id),
+						...(changes !== undefined ? { changes } : undefined),
+						metadata: { name: updated.name, type: updated.type },
+					})
 
 					return toV2DestinationMutation(updated)
 				}),
@@ -266,6 +339,10 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 						tenant.roles,
 						params.id,
 					)
+					yield* recordHttpAudit("alert_destination.deleted", {
+						resourceType: "alert_destination",
+						resourceId: encodePublicId(PublicIdPrefixes.alertDestination, deleted.id),
+					})
 
 					return {
 						id: deleted.id,

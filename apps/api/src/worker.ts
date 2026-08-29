@@ -439,6 +439,17 @@ const handleQueue = async (
 		}
 		return
 	}
+	if (queueKind === "audit-events") {
+		const { buildAuditEventsLayer, processAuditEventsBatch, flushAuditEventsTelemetry } = await import(
+			"./audit-events-runtime"
+		)
+		try {
+			await runScheduledEffect(buildAuditEventsLayer(env), await scoped(processAuditEventsBatch(batch)), ctx)
+		} finally {
+			ctx.waitUntil(flushAuditEventsTelemetry(env))
+		}
+		return
+	}
 	if (queueKind === "unknown") {
 		throw new Error(`No queue consumer configured for "${batch.queue}"`)
 	}
@@ -475,14 +486,20 @@ const handleScheduled = async (
 		const { runScrapeCheckRetention } = await import("@/services/integrations/scrape-check-retention")
 		const { runPlanetScaleEventRetention } =
 			await import("@/services/integrations/planetscale-event-retention")
+		const { runAuditLogRetention } = await import("@/services/audit/audit-log-retention")
 		try {
-			// Both sweeps ride this one cron: each new cron string costs an entry in
-			// wrangler.jsonc and alchemy.run.ts, and neither needs its own beat.
+			// All three sweeps ride this one cron: each new cron string costs an entry
+			// in wrangler.jsonc and alchemy.run.ts, and none needs its own beat.
 			// Sequential, not concurrent — they share one Postgres socket for the
 			// whole tick, so running them concurrently would only queue on it.
 			await runScheduledEffect(
 				buildScrapeRetentionLayer(env),
-				await scoped(Effect.andThen(runScrapeCheckRetention, runPlanetScaleEventRetention)),
+				await scoped(
+					Effect.andThen(
+						runScrapeCheckRetention,
+						Effect.andThen(runPlanetScaleEventRetention, runAuditLogRetention),
+					),
+				),
 				ctx,
 				{ onInterrupt: "graceful" },
 			)

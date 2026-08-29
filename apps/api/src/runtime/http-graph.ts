@@ -49,6 +49,8 @@ import { HttpV2InvestigationsLive } from "@/routes/v2/investigations.http"
 import { HttpV2MobileDevicesLive } from "@/routes/v2/mobile-devices.http"
 import { HttpV2OrganizationLive } from "@/routes/v2/organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "@/routes/v2/recommendations.http"
+import { HttpV2AuditLogLive } from "@/routes/v2/audit-log.http"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { HttpV2ScrapeTargetsLive } from "@/routes/v2/scrape-targets.http"
 import { HttpV2InstrumentationAuditLive } from "@/routes/v2/setup-audit.http"
 import { HttpV2SessionReplaysLive } from "@/routes/v2/session-replays.http"
@@ -130,6 +132,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2PlanetScaleIntegrationsLive,
 			HttpV2ErrorIssuesLive,
 			HttpV2AttributeMappingsLive,
+			HttpV2AuditLogLive,
 			HttpV2ScrapeTargetsLive,
 			HttpV2InstrumentationRecommendationsLive,
 			HttpV2InstrumentationAuditLive,
@@ -184,6 +187,8 @@ export const ApiAuthLive = Layer.mergeAll(
 ).pipe(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
+	// Denied attempts are audited from inside the auth layers themselves.
+	Layer.provideMerge(AuditLogService.layer),
 	// Membership verification for `x-maple-org-id`. Only the v2 layer asks for
 	// it; without it that layer cannot build, which is deliberate — the header
 	// must never end up silently ignored in a runtime that forgot to wire this.

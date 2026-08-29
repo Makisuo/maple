@@ -22,7 +22,9 @@ import {
 	CLOSED_WORKFLOW_STATES,
 	MACHINE_OWNED_WORKFLOW_STATES,
 } from "@maple/domain/http"
+import { encodePublicId, PublicIdPrefixes } from "@maple/domain/http/v2"
 import {
+	actors,
 	alertIncidents,
 	errorIncidents,
 	errorIssues,
@@ -37,6 +39,7 @@ import {
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { dateToMs, msToDate } from "@/platform/time"
 import { ErrorActorsService } from "./ErrorActorsService"
@@ -169,10 +172,15 @@ export interface ErrorIssueWorkflowServiceApi extends ErrorIssueWorkflowPublicAp
 	>
 }
 
-const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorActorsService> = Effect.gen(
+const make: Effect.Effect<
+	ErrorIssueWorkflowServiceApi,
+	never,
+	Database | ErrorActorsService | AuditLogService
+> = Effect.gen(
 	function* () {
 		const database = yield* Database
-		const actors = yield* ErrorActorsService
+		const actorsService = yield* ErrorActorsService
+		const audit = yield* AuditLogService
 		const dbExecute = makeErrorDatabaseExecute(database, "ErrorIssueWorkflowService")
 
 		const newEventId = () => decodeEventIdSync(randomUUID())
@@ -376,7 +384,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				const issueIds = rows.map((row) => row.id)
 				const openSet = yield* issuesWithOpenIncidents(orgId, issueIds)
 				const activityMap = yield* issueActivityRollups(orgId, issueIds)
-				const actorMap = yield* actors.collectActorDocs(
+				const actorMap = yield* actorsService.collectActorDocs(
 					orgId,
 					rows.flatMap((row) => [row.assignedActorId ?? null, row.leaseHolderActorId ?? null]),
 				)
@@ -391,6 +399,62 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			const hydrated = yield* hydrateIssueRows(orgId, [row])
 			return hydrated[0]!
 		})
+
+		/**
+		 * Mirror an actor-attributed issue event into the org audit log. Never
+		 * fails: the issue event is already committed, and `audit.record` swallows
+		 * its own errors — only the actor lookup can fail, so it is caught here.
+		 */
+		const recordEventAudit = (
+			orgId: OrgId,
+			issueId: ErrorIssueId,
+			actorId: ActorId,
+			type: ErrorIssueEventType,
+			opts: { readonly fromState?: WorkflowState | null; readonly toState?: WorkflowState | null },
+		) =>
+			Effect.gen(function* () {
+				const rows = yield* dbExecute((db) =>
+					db
+						.select()
+						.from(actors)
+						.where(and(eq(actors.orgId, orgId), eq(actors.id, actorId)))
+						.limit(1),
+				)
+				const actor = rows[0]
+				if (actor === undefined || (actor.type !== "agent" && actor.type !== "user")) return
+				yield* audit.record({
+					orgId,
+					// A human actor at this layer may have acted from the dashboard or
+					// over MCP — the issue event does not say which.
+					actor:
+						actor.type === "agent"
+							? {
+									type: "agent",
+									actorId,
+									...(actor.agentName === null ? undefined : { label: actor.agentName }),
+									// On-behalf-of: the human who registered the agent, the
+									// closest authority the actor registry records.
+									...(actor.createdBy === null ? undefined : { userId: actor.createdBy }),
+								}
+							: {
+									type: "user",
+									...(actor.userId === null ? undefined : { userId: actor.userId }),
+									actorId,
+								},
+					source: actor.type === "agent" ? "mcp" : "dashboard",
+					action: `error_issue.${type}`,
+					resourceType: "error_issue",
+					resourceId: encodePublicId(PublicIdPrefixes.errorIssue, issueId),
+					metadata: {
+						...(opts.fromState != null ? { from_state: opts.fromState } : undefined),
+						...(opts.toState != null ? { to_state: opts.toState } : undefined),
+					},
+				})
+			}).pipe(
+				Effect.catchCause((cause) =>
+					Effect.logWarning("Issue event audit write failed", { issueId, cause }),
+				),
+			)
 
 		const recordEvent: ErrorIssueWorkflowServiceApi["recordEvent"] = Effect.fn(
 			"ErrorsService.recordEvent",
@@ -407,7 +471,12 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				payloadJson: opts.payload ?? {},
 				createdAt: msToDate(timestamp),
 			}
-			return yield* dbExecute((db) => db.insert(errorIssueEvents).values(insert))
+			const inserted = yield* dbExecute((db) => db.insert(errorIssueEvents).values(insert))
+			// System/sweep events carry no actor and stay out of the audit log.
+			if (actorId !== null) {
+				yield* recordEventAudit(orgId, issueId, actorId, type, opts)
+			}
+			return inserted
 		})
 
 		/**
@@ -525,7 +594,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				payload: notePayload,
 				timestamp,
 			})
-			if (actorId) yield* actors.touchActor(orgId, actorId, timestamp)
+			if (actorId) yield* actorsService.touchActor(orgId, actorId, timestamp)
 			return yield* requireIssue(orgId, row.id)
 		})
 
@@ -567,7 +636,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 					)
 					.returning(txidColumn),
 			)
-			yield* actors.touchActor(orgId, actorId, timestamp)
+			yield* actorsService.touchActor(orgId, actorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
 			const doc = yield* hydrateIssue(orgId, next)
 			const txid = readTxid(heartbeatRows)
@@ -648,7 +717,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 					timestamp,
 				})
 			}
-			yield* actors.touchActor(orgId, actorId, timestamp)
+			yield* actorsService.touchActor(orgId, actorId, timestamp)
 			return yield* hydrateIssue(orgId, next)
 		})
 
@@ -657,7 +726,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 		)(function* (orgId, byActorId, issueId, toActorId) {
 			const timestamp = yield* Clock.currentTimeMillis
 			const current = yield* requireIssue(orgId, issueId)
-			if (toActorId !== null && !(yield* actors.actorExists(orgId, toActorId))) {
+			if (toActorId !== null && !(yield* actorsService.actorExists(orgId, toActorId))) {
 				return yield* Effect.fail(
 					new ActorNotFoundError({
 						message: `Actor '${toActorId}' not found`,
@@ -676,7 +745,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				payload: { fromActorId: current.assignedActorId, toActorId },
 				timestamp,
 			})
-			yield* actors.touchActor(orgId, byActorId, timestamp)
+			yield* actorsService.touchActor(orgId, byActorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
 			const doc = yield* hydrateIssue(orgId, next)
 			const txid = readTxid(assignedRows)
@@ -761,7 +830,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			if (severity !== null) {
 				yield* enqueueSeverityEscalation(orgId, issueId, current.severity, severity, source)
 			}
-			yield* actors.touchActor(orgId, actorId, timestamp)
+			yield* actorsService.touchActor(orgId, actorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
 			const doc = yield* hydrateIssue(orgId, next)
 			const txid = readTxid(severityRows)
@@ -792,8 +861,8 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				createdAt: msToDate(timestamp),
 			}
 			yield* dbExecute((db) => db.insert(errorIssueEvents).values(row))
-			yield* actors.touchActor(orgId, actorId, timestamp)
-			const actorMap = yield* actors.collectActorDocs(orgId, [actorId])
+			yield* actorsService.touchActor(orgId, actorId, timestamp)
+			const actorMap = yield* actorsService.collectActorDocs(orgId, [actorId])
 			return rowToEvent(row, actorMap)
 		})
 
@@ -811,7 +880,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 					.orderBy(desc(errorIssueEvents.createdAt))
 					.limit(limit),
 			)
-			const actorMap = yield* actors.collectActorDocs(
+			const actorMap = yield* actorsService.collectActorDocs(
 				orgId,
 				rows.map((row) => row.actorId ?? null),
 			)

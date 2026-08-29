@@ -1,9 +1,18 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { ScrapeTargetResponse } from "@maple/domain/http"
 import { CreateScrapeTargetRequest, CurrentTenant, UpdateScrapeTargetRequest } from "@maple/domain/http"
-import { MapleApiV2, paginateArray, paginateOffsetQuery, timestamp } from "@maple/domain/http/v2"
+import {
+	encodePublicId,
+	MapleApiV2,
+	paginateArray,
+	paginateOffsetQuery,
+	PublicIdPrefixes,
+	timestamp,
+} from "@maple/domain/http/v2"
 import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
 import { Effect } from "effect"
+import { diffAuditChanges, pickPresentFields } from "@/routes/v2/audit-changes"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 
 const toV2ScrapeTarget = (target: ScrapeTargetResponse): V2ScrapeTarget => ({
@@ -27,6 +36,31 @@ const toV2ScrapeTarget = (target: ScrapeTargetResponse): V2ScrapeTarget => ({
 	created_at: target.createdAt,
 	updated_at: target.updatedAt,
 })
+
+/** Update-payload fields diffable through the wire shape; credentials never appear. */
+const targetAuditKeys: ReadonlyArray<
+	| "name"
+	| "url"
+	| "organization"
+	| "include_branches"
+	| "exclude_branches"
+	| "scrape_interval_seconds"
+	| "labels_json"
+	| "auth_type"
+	| "service_name"
+	| "enabled"
+> = [
+	"name",
+	"url",
+	"organization",
+	"include_branches",
+	"exclude_branches",
+	"scrape_interval_seconds",
+	"labels_json",
+	"auth_type",
+	"service_name",
+	"enabled",
+]
 
 export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeTargets", (handlers) =>
 	Effect.gen(function* () {
@@ -96,12 +130,19 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 						}),
 					)
 
+					yield* recordHttpAudit("scrape_target.created", {
+						resourceType: "scrape_target",
+						resourceId: encodePublicId(PublicIdPrefixes.scrapeTarget, created.id),
+						metadata: { name: created.name },
+					})
+
 					return toV2ScrapeTarget(created)
 				}),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const current = yield* service.get(tenant.orgId, params.id)
 					const updated = yield* service.update(
 						tenant.orgId,
 						params.id,
@@ -144,6 +185,26 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 						}),
 					)
 
+					const observable = diffAuditChanges(
+						pickPresentFields(targetAuditKeys, payload, toV2ScrapeTarget(current)),
+						pickPresentFields(targetAuditKeys, payload, toV2ScrapeTarget(updated)),
+					)
+					// Credentials are write-only: audit that they rotated, never their value.
+					const changes =
+						payload.auth_credentials !== undefined
+							? {
+									fields: [...(observable?.fields ?? []), "auth_credentials"],
+									before: { ...observable?.before, auth_credentials: "<redacted>" },
+									after: { ...observable?.after, auth_credentials: "<redacted>" },
+								}
+							: observable
+					yield* recordHttpAudit("scrape_target.updated", {
+						resourceType: "scrape_target",
+						resourceId: encodePublicId(PublicIdPrefixes.scrapeTarget, updated.id),
+						...(changes !== undefined ? { changes } : undefined),
+						metadata: { name: updated.name },
+					})
+
 					return toV2ScrapeTarget(updated)
 				}),
 			)
@@ -151,6 +212,10 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* service.delete(tenant.orgId, params.id)
+					yield* recordHttpAudit("scrape_target.deleted", {
+						resourceType: "scrape_target",
+						resourceId: encodePublicId(PublicIdPrefixes.scrapeTarget, deleted.id),
+					})
 
 					return { id: deleted.id, object: "scrape_target" as const, deleted: true as const }
 				}),

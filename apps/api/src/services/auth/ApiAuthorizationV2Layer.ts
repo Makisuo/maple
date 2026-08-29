@@ -15,6 +15,8 @@ import { ORG_SELECTION_HEADER } from "@maple/auth"
 import { makeResolveTenant } from "./AuthService"
 import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
 import { annotateAuthSpan } from "@/services/auth/auth-span"
+import { CurrentAuditActor } from "@/services/auth/audit-actor"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { Env } from "@/platform/Env"
 import {
 	API_V2_RATE_LIMIT_PERIOD_SECONDS,
@@ -57,6 +59,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 		const env = yield* Env
 		const apiKeys = yield* ApiKeysService
 		const rateLimiter = yield* ApiV2RateLimiter
+		const audit = yield* AuditLogService
 		// The one resolver wired for organization selection: `x-maple-org-id` is
 		// a v2-client affordance (the iOS app publishing a widget snapshot per
 		// organization), and every other resolver rejects the header instead.
@@ -128,13 +131,38 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							)
 						}
 
+						// A refused attempt is the highest-signal audit row there is —
+						// denials are recorded with the same actor attribution as
+						// successes, tagged `outcome: "denied"`.
+						const recordDenied = (denialReason: string) =>
+							audit.record({
+								orgId: resolved.orgId,
+								actor: {
+									type: "api_key",
+									userId: resolved.userId,
+									apiKeyId: resolved.keyId,
+								},
+								source: "api",
+								action: "api.request",
+								outcome: "denied",
+								denialReason,
+								metadata: { method: request.method, path: requestPath(request.url) },
+								...(request.headers["cf-ray"] !== undefined
+									? { requestId: request.headers["cf-ray"] }
+									: undefined),
+								...(request.headers["cf-connecting-ip"] !== undefined
+									? { originIp: request.headers["cf-connecting-ip"] }
+									: undefined),
+								...(request.headers["cf-ipcountry"] !== undefined
+									? { originCountry: request.headers["cf-ipcountry"] }
+									: undefined),
+							})
+
 						const required = requiredScopeForRequest(request.method, requestPath(request.url))
 						if (required !== null && !scopeAllows(resolved.scopes, required)) {
-							return yield* Effect.fail(
-								V2InsufficientScope.make(
-									`This API key does not have the "${required.family}:${required.access}" scope required for this request.`,
-								),
-							)
+							const message = `This API key does not have the "${required.family}:${required.access}" scope required for this request.`
+							yield* recordDenied(message)
+							return yield* Effect.fail(V2InsufficientScope.make(message))
 						}
 
 						// An API key is already organization-bound, so a selection could
@@ -143,11 +171,9 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						// check has to be here too.
 						const requestedOrg = getOrgSelectionHeader(request.headers)
 						if (requestedOrg !== undefined && requestedOrg !== resolved.orgId) {
-							return yield* Effect.fail(
-								V2OrganizationAccessDenied.make(
-									"An API key cannot select a different organization.",
-								),
-							)
+							const message = "An API key cannot select a different organization."
+							yield* recordDenied(message)
+							return yield* Effect.fail(V2OrganizationAccessDenied.make(message))
 						}
 
 						const tenant = new CurrentTenant.TenantSchema({
@@ -157,7 +183,13 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							authMode: "self_hosted",
 							...(resolved.scopes !== null ? { scopes: resolved.scopes } : undefined),
 						})
-						return yield* Effect.provideService(httpEffect, CurrentTenant.Context, tenant)
+						return yield* httpEffect.pipe(
+							Effect.provideService(CurrentTenant.Context, tenant),
+							Effect.provideService(CurrentAuditActor, {
+								type: "api_key",
+								apiKeyId: resolved.keyId,
+							}),
+						)
 					}
 
 					const tenant = yield* resolveTenant(request.headers).pipe(
@@ -166,10 +198,9 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						),
 					)
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })
-					return yield* Effect.provideService(
-						httpEffect,
-						CurrentTenant.Context,
-						new CurrentTenant.TenantSchema(tenant),
+					return yield* httpEffect.pipe(
+						Effect.provideService(CurrentTenant.Context, new CurrentTenant.TenantSchema(tenant)),
+						Effect.provideService(CurrentAuditActor, { type: "user" }),
 					)
 				}),
 		})

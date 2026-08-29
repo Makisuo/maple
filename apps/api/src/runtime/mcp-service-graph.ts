@@ -2,6 +2,7 @@ import { EdgeCacheService } from "@maple/cache"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { Layer } from "effect"
 import { McpToolExecutor } from "@/mcp/dispatcher"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
@@ -104,7 +105,7 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 
 const ErrorActorsServiceLive = ErrorActorsService.layer
 const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
-	Layer.provide(ErrorActorsServiceLive),
+	Layer.provide(Layer.mergeAll(ErrorActorsServiceLive, AuditLogService.layer)),
 )
 const ErrorPolicyServiceLive = ErrorPolicyService.layer
 const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
@@ -165,6 +166,7 @@ const McpRuntimeServicesLive = Layer.mergeAll(
 	AlertReadModelsServiceLive,
 	AlertRulesServiceLive,
 	AlertsServiceLive,
+	AuditLogService.layer,
 	DashboardPersistenceService.layer,
 	ErrorActorsServiceLive,
 	ErrorIssueReadModelsServiceLive,

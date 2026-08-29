@@ -128,6 +128,9 @@ export type ActorId = Schema.Schema.Type<typeof ActorId>
 export const ErrorIssueEventId = MapleUuidId("@maple/ErrorIssueEventId", "Error Issue Event ID")
 export type ErrorIssueEventId = Schema.Schema.Type<typeof ErrorIssueEventId>
 
+export const AuditLogEntryId = MapleUuidId("@maple/AuditLogEntryId", "Audit Log Entry ID")
+export type AuditLogEntryId = Schema.Schema.Type<typeof AuditLogEntryId>
+
 export const ErrorIssuePullRequestId = MapleUuidId(
 	"@maple/ErrorIssuePullRequestId",
 	"Error Issue Pull Request ID",
