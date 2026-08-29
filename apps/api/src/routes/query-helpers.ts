@@ -2,6 +2,7 @@ import * as Integrations from "@maple/query-engine-integrations"
 import { CH, formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
 import {
 	QueryEngineValidationError,
+	type ContainerInfraTimeseriesRequest,
 	type HostInfraTimeseriesRequest,
 	type NodeInfraTimeseriesRequest,
 	type PodInfraTimeseriesRequest,
@@ -158,6 +159,73 @@ export const hostMetricSpec = (metric: HostInfraTimeseriesRequest["metric"]) => 
 				groupByAttributeKey: "direction",
 				unit: "bytes_per_second" as const,
 				isNetwork: true,
+			}
+	}
+}
+
+/**
+ * Metric name(s), grouping/labeling, unit and query-family flag for a container
+ * infra metric. `isSum` routes to the metrics_sum query; docker percent gauges
+ * carry `divideBy: 100` so chart scales match the pod pages (0..1).
+ */
+export const containerMetricSpec = (metric: ContainerInfraTimeseriesRequest["metric"]) => {
+	switch (metric) {
+		case "cpu":
+			return {
+				metricNames: ["container.cpu.utilization"],
+				unit: "percent" as const,
+				isSum: false,
+				divideBy: 100,
+				metricLabels: undefined,
+				groupByAttributeKey: undefined,
+			}
+		case "memory_percent":
+			return {
+				metricNames: ["container.memory.percent"],
+				unit: "percent" as const,
+				isSum: false,
+				divideBy: 100,
+				metricLabels: undefined,
+				groupByAttributeKey: undefined,
+			}
+		case "uptime":
+			return {
+				metricNames: ["container.uptime"],
+				unit: "seconds" as const,
+				isSum: false,
+				divideBy: undefined,
+				metricLabels: undefined,
+				groupByAttributeKey: undefined,
+			}
+		case "memory_bytes":
+			return {
+				metricNames: ["container.memory.usage.total"],
+				unit: "bytes" as const,
+				isSum: true,
+				divideBy: undefined,
+				metricLabels: undefined,
+				groupByAttributeKey: undefined,
+			}
+		case "network":
+			return {
+				metricNames: ["container.network.io.usage.rx_bytes", "container.network.io.usage.tx_bytes"],
+				unit: "bytes" as const,
+				isSum: true,
+				divideBy: undefined,
+				metricLabels: [
+					["container.network.io.usage.rx_bytes", "receive"],
+					["container.network.io.usage.tx_bytes", "transmit"],
+				] as ReadonlyArray<readonly [string, string]>,
+				groupByAttributeKey: undefined,
+			}
+		case "disk_io":
+			return {
+				metricNames: ["container.blockio.io_service_bytes_recursive"],
+				unit: "bytes" as const,
+				isSum: true,
+				divideBy: undefined,
+				metricLabels: undefined,
+				groupByAttributeKey: "operation",
 			}
 	}
 }

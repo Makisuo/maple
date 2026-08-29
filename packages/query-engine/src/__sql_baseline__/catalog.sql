@@ -22,6 +22,382 @@ SELECT
         GROUP BY orgId
         FORMAT JSON
 
+-- builder:containers:containerCountersSummaryQuery:default  [13063370]
+SELECT
+          ifNotFinite(avgIf(Value, MetricName = 'container.memory.usage.total'), 0) AS memoryBytesAvg,
+          ifNotFinite(maxIf(Value, MetricName = 'container.memory.usage.limit'), 0) AS memoryLimitBytes,
+          ifNotFinite(maxIf(Value, MetricName = 'container.restarts') - minIf(Value, MetricName = 'container.restarts'), 0) AS restartsDelta,
+          ifNotFinite(avgIf(Value, MetricName = 'container.pids.count'), 0) AS pidsAvg
+        FROM metrics_sum
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] = 'api'
+          AND ResourceAttributes['host.name'] = 'ip-10-0-1-42'
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.memory.usage.total', 'container.memory.usage.limit', 'container.restarts', 'container.pids.count')
+        FORMAT JSON
+
+-- builder:containers:containerDetailSummaryQuery:default  [6063da9a]
+SELECT
+          ResourceAttributes['container.name'] AS containerName,
+          any(ResourceAttributes['host.name']) AS hostName,
+          any(ResourceAttributes['container.id']) AS containerId,
+          any(ResourceAttributes['container.image.name']) AS imageName,
+          any(ResourceAttributes['compose.project']) AS composeProject,
+          any(ResourceAttributes['compose.service']) AS composeService,
+          any(ResourceAttributes['container.runtime']) AS runtime,
+          min(TimeUnix) AS firstSeen,
+          max(TimeUnix) AS lastSeen,
+          ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
+          ifNotFinite(avgIf(Value, MetricName = 'container.memory.percent'), 0) / 100 AS memoryPct,
+          ifNotFinite(avgIf(Value, MetricName = 'container.cpu.limit'), 0) AS cpuLimitCores,
+          ifNotFinite(maxIf(Value, MetricName = 'container.uptime'), 0) AS uptimeSeconds
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] = 'api'
+          AND ResourceAttributes['host.name'] = 'ip-10-0-1-42'
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization', 'container.memory.percent', 'container.uptime', 'container.cpu.limit')
+        GROUP BY containerName
+        FORMAT JSON
+
+-- builder:containers:containerFacetsQuery:default  [4d105ebe]
+SELECT
+          ResourceAttributes['container.name'] AS name,
+          uniq(ResourceAttributes['container.id']) AS count,
+          'container' AS facetType
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization')
+          AND ResourceAttributes['container.name'] != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 200
+UNION ALL
+SELECT
+          ResourceAttributes['host.name'] AS name,
+          uniq(ResourceAttributes['container.id']) AS count,
+          'host' AS facetType
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization')
+          AND ResourceAttributes['host.name'] != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 100
+UNION ALL
+SELECT
+          ResourceAttributes['container.image.name'] AS name,
+          uniq(ResourceAttributes['container.id']) AS count,
+          'image' AS facetType
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization')
+          AND ResourceAttributes['container.image.name'] != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 100
+UNION ALL
+SELECT
+          ResourceAttributes['compose.project'] AS name,
+          uniq(ResourceAttributes['container.id']) AS count,
+          'composeProject' AS facetType
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization')
+          AND ResourceAttributes['compose.project'] != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 100
+UNION ALL
+SELECT
+          ResourceAttributes['compose.service'] AS name,
+          uniq(ResourceAttributes['container.id']) AS count,
+          'composeService' AS facetType
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization')
+          AND ResourceAttributes['compose.service'] != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 100
+UNION ALL
+SELECT
+          coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS name,
+          uniq(ResourceAttributes['container.id']) AS count,
+          'environment' AS facetType
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization')
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+FORMAT JSON
+
+-- builder:containers:containerGaugeTimeseriesQuery:percent  [092a5f0c]
+SELECT
+          toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
+          '' AS attributeValue,
+          avg(Value) / 100 AS avgValue
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] = 'api'
+          AND ResourceAttributes['host.name'] = 'ip-10-0-1-42'
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName = 'container.cpu.utilization'
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        FORMAT JSON
+
+-- builder:containers:containerGaugeTimeseriesQuery:unscaled  [6a0ebdb5]
+SELECT
+          toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
+          '' AS attributeValue,
+          avg(Value) AS avgValue
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] = 'api'
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName = 'container.uptime'
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        FORMAT JSON
+
+-- builder:containers:containerSumTimeseriesQuery:blockio  [88784134]
+SELECT
+          toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
+          Attributes['operation'] AS attributeValue,
+          sum(Value) AS sumValue
+        FROM metrics_sum
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] = 'api'
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.blockio.io_service_bytes_recursive')
+        GROUP BY bucket, attributeValue
+        ORDER BY bucket ASC
+        FORMAT JSON
+
+-- builder:containers:containerSumTimeseriesQuery:network  [6010f053]
+SELECT
+          toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
+          multiIf(MetricName = 'container.network.io.usage.rx_bytes', 'receive', MetricName = 'container.network.io.usage.tx_bytes', 'transmit', '') AS attributeValue,
+          sum(Value) AS sumValue
+        FROM metrics_sum
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] = 'api'
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.network.io.usage.rx_bytes', 'container.network.io.usage.tx_bytes')
+        GROUP BY bucket, attributeValue
+        ORDER BY bucket ASC
+        FORMAT JSON
+
+-- builder:containers:listContainersQuery:default  [fe84ad79]
+SELECT
+          containerName AS containerName,
+          hostName AS hostName,
+          containerId AS containerId,
+          imageName AS imageName,
+          composeProject AS composeProject,
+          composeService AS composeService,
+          runtime AS runtime,
+          environment AS environment,
+          lastSeen AS lastSeen,
+          cpuPct AS cpuPct,
+          memoryPct AS memoryPct,
+          cpuPctPeak AS cpuPctPeak,
+          memoryPctPeak AS memoryPctPeak,
+          cpuLimitCores AS cpuLimitCores,
+          uptimeSeconds AS uptimeSeconds,
+          saturation AS saturation
+        FROM (SELECT
+          ResourceAttributes['container.name'] AS containerName,
+          ResourceAttributes['host.name'] AS hostName,
+          any(ResourceAttributes['container.id']) AS containerId,
+          any(ResourceAttributes['container.image.name']) AS imageName,
+          any(ResourceAttributes['compose.project']) AS composeProject,
+          any(ResourceAttributes['compose.service']) AS composeService,
+          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
+          max(TimeUnix) AS lastSeen,
+          ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
+          ifNotFinite(avgIf(Value, MetricName = 'container.memory.percent'), 0) / 100 AS memoryPct,
+          ifNotFinite(maxIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPctPeak,
+          ifNotFinite(maxIf(Value, MetricName = 'container.memory.percent'), 0) / 100 AS memoryPctPeak,
+          ifNotFinite(avgIf(Value, MetricName = 'container.cpu.limit'), 0) AS cpuLimitCores,
+          ifNotFinite(maxIf(Value, MetricName = 'container.uptime'), 0) AS uptimeSeconds,
+          greatest(ifNotFinite(maxIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100, ifNotFinite(maxIf(Value, MetricName = 'container.memory.percent'), 0) / 100) AS saturation
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization', 'container.memory.percent', 'container.uptime', 'container.cpu.limit')
+        GROUP BY containerName, hostName) AS containers
+        ORDER BY saturation DESC, cpuPctPeak DESC, containerName ASC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
+-- builder:containers:listContainersQuery:filtered  [75408df7]
+SELECT
+          containerName AS containerName,
+          hostName AS hostName,
+          containerId AS containerId,
+          imageName AS imageName,
+          composeProject AS composeProject,
+          composeService AS composeService,
+          runtime AS runtime,
+          environment AS environment,
+          lastSeen AS lastSeen,
+          cpuPct AS cpuPct,
+          memoryPct AS memoryPct,
+          cpuPctPeak AS cpuPctPeak,
+          memoryPctPeak AS memoryPctPeak,
+          cpuLimitCores AS cpuLimitCores,
+          uptimeSeconds AS uptimeSeconds,
+          saturation AS saturation
+        FROM (SELECT
+          ResourceAttributes['container.name'] AS containerName,
+          ResourceAttributes['host.name'] AS hostName,
+          any(ResourceAttributes['container.id']) AS containerId,
+          any(ResourceAttributes['container.image.name']) AS imageName,
+          any(ResourceAttributes['compose.project']) AS composeProject,
+          any(ResourceAttributes['compose.service']) AS composeService,
+          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
+          max(TimeUnix) AS lastSeen,
+          ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
+          ifNotFinite(avgIf(Value, MetricName = 'container.memory.percent'), 0) / 100 AS memoryPct,
+          ifNotFinite(maxIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPctPeak,
+          ifNotFinite(maxIf(Value, MetricName = 'container.memory.percent'), 0) / 100 AS memoryPctPeak,
+          ifNotFinite(avgIf(Value, MetricName = 'container.cpu.limit'), 0) AS cpuLimitCores,
+          ifNotFinite(maxIf(Value, MetricName = 'container.uptime'), 0) AS uptimeSeconds,
+          greatest(ifNotFinite(maxIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100, ifNotFinite(maxIf(Value, MetricName = 'container.memory.percent'), 0) / 100) AS saturation
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization', 'container.memory.percent', 'container.uptime', 'container.cpu.limit')
+          AND positionCaseInsensitive(ResourceAttributes['container.name'], 'api') > 0
+          AND ResourceAttributes['container.name'] NOT IN ('buildkitd')
+          AND ResourceAttributes['host.name'] IN ('ip-10-0-1-42')
+          AND ResourceAttributes['container.image.name'] IN ('ghcr.io/acme/api:1.4.2')
+          AND ResourceAttributes['compose.project'] IN ('shop')
+        GROUP BY containerName, hostName) AS containers
+        ORDER BY cpuPct DESC, cpuPctPeak DESC, containerName ASC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
+-- builder:containers:listContainersQuery:scoped  [41805227]
+SELECT
+          containerName AS containerName,
+          hostName AS hostName,
+          containerId AS containerId,
+          imageName AS imageName,
+          composeProject AS composeProject,
+          composeService AS composeService,
+          runtime AS runtime,
+          environment AS environment,
+          lastSeen AS lastSeen,
+          cpuPct AS cpuPct,
+          memoryPct AS memoryPct,
+          cpuPctPeak AS cpuPctPeak,
+          memoryPctPeak AS memoryPctPeak,
+          cpuLimitCores AS cpuLimitCores,
+          uptimeSeconds AS uptimeSeconds,
+          saturation AS saturation
+        FROM (SELECT
+          ResourceAttributes['container.name'] AS containerName,
+          ResourceAttributes['host.name'] AS hostName,
+          any(ResourceAttributes['container.id']) AS containerId,
+          any(ResourceAttributes['container.image.name']) AS imageName,
+          any(ResourceAttributes['compose.project']) AS composeProject,
+          any(ResourceAttributes['compose.service']) AS composeService,
+          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
+          max(TimeUnix) AS lastSeen,
+          ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
+          ifNotFinite(avgIf(Value, MetricName = 'container.memory.percent'), 0) / 100 AS memoryPct,
+          ifNotFinite(maxIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPctPeak,
+          ifNotFinite(maxIf(Value, MetricName = 'container.memory.percent'), 0) / 100 AS memoryPctPeak,
+          ifNotFinite(avgIf(Value, MetricName = 'container.cpu.limit'), 0) AS cpuLimitCores,
+          ifNotFinite(maxIf(Value, MetricName = 'container.uptime'), 0) AS uptimeSeconds,
+          greatest(ifNotFinite(maxIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100, ifNotFinite(maxIf(Value, MetricName = 'container.memory.percent'), 0) / 100) AS saturation
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization', 'container.memory.percent', 'container.uptime', 'container.cpu.limit')
+        GROUP BY containerName, hostName) AS containers
+        WHERE saturation >= 0.9
+        ORDER BY saturation DESC, cpuPctPeak DESC, containerName ASC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
+-- builder:containers:listContainersSummaryQuery:default  [68400edc]
+SELECT
+          count() AS totalContainers,
+          countIf(saturation >= 0.9) AS saturatedContainers,
+          countIf((saturation >= 0.6 AND saturation < 0.9)) AS elevatedContainers,
+          countIf(lastSeen < '2026-01-03 14:15:00' - INTERVAL 300 SECOND) AS staleContainers
+        FROM (SELECT
+          ResourceAttributes['container.name'] AS containerName,
+          ResourceAttributes['host.name'] AS hostName,
+          max(TimeUnix) AS lastSeen,
+          greatest(ifNotFinite(maxIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100, ifNotFinite(maxIf(Value, MetricName = 'container.memory.percent'), 0) / 100) AS saturation
+        FROM metrics_gauge
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] != ''
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.cpu.utilization', 'container.memory.percent', 'container.uptime', 'container.cpu.limit')
+        GROUP BY containerName, hostName) AS containers
+        FORMAT JSON
+
 -- builder:errors:errorFingerprintsQuery:envFiltered  [f1269c9f]
 SELECT
           toString(FingerprintHash) AS fingerprintHash

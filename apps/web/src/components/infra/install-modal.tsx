@@ -18,6 +18,7 @@ import {
 	InputGroupTextarea,
 } from "@maple/ui/components/ui/input-group"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 
 import { EyeIcon } from "@/components/icons"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
@@ -25,11 +26,19 @@ import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
 
 const HOSTED_INGEST_URL = "https://ingest.maple.dev"
-const DOCS_URL = "https://maple.dev/docs/guides/kubernetes-infrastructure"
+
+const DOCS_URLS = {
+	kubernetes: "https://maple.dev/docs/guides/kubernetes-infrastructure",
+	docker: "https://maple.dev/docs/guides/docker-infrastructure",
+} as const
+
+export type InstallTab = keyof typeof DOCS_URLS
 
 interface InstallModalProps {
 	open: boolean
 	onOpenChange: (open: boolean) => void
+	/** Which collector tab opens first — the containers page opens on Docker. */
+	defaultTab?: InstallTab
 }
 
 // Mask the secret so it isn't sitting in plaintext (screenshots, shoulder
@@ -57,8 +66,77 @@ function helmCommand(token: string) {
 	return lines.join("\n")
 }
 
-export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
+// The agent must run as root: the docker socket and the json-file log
+// directory are not readable by the image's nonroot user.
+function dockerCommand(token: string) {
+	const lines = [
+		"docker run -d --name maple-agent \\",
+		"  --restart unless-stopped --user 0:0 \\",
+		"  -v /var/run/docker.sock:/var/run/docker.sock:ro \\",
+		"  -v /var/lib/docker/containers:/var/lib/docker/containers:ro \\",
+		"  -v maple-agent-state:/var/lib/otelcol \\",
+		"  -p 4317:4317 -p 4318:4318 \\",
+		`  -e MAPLE_INGEST_KEY=${token} \\`,
+	]
+	if (ingestUrl !== HOSTED_INGEST_URL) {
+		lines.push(`  -e MAPLE_ENDPOINT=${ingestUrl} \\`)
+	}
+	lines.push("  ghcr.io/makisuo/maple/otel-collector-maple:0.2.0 \\")
+	lines.push("  --config /etc/otel/docker-config.yaml")
+	return lines.join("\n")
+}
+
+interface SnippetPanelProps {
+	loading: boolean
+	snippet: string
+	displaySnippet: string
+	rows: number
+	revealed: boolean
+	onToggleReveal: () => void
+}
+
+function SnippetPanel({
+	loading,
+	snippet,
+	displaySnippet,
+	rows,
+	revealed,
+	onToggleReveal,
+}: SnippetPanelProps) {
+	if (loading) return <Skeleton className="h-36 w-full" />
+	return (
+		<InputGroup>
+			<InputGroupTextarea
+				readOnly
+				wrap="off"
+				value={displaySnippet}
+				rows={rows}
+				className="font-mono text-xs tracking-wide select-all leading-relaxed"
+			/>
+			<InputGroupAddon align="block-end">
+				<InputGroupButton
+					onClick={onToggleReveal}
+					aria-label={revealed ? "Hide key" : "Reveal key"}
+					title={revealed ? "Hide key" : "Reveal key"}
+				>
+					<EyeIcon size={14} />
+					{revealed ? "Hide key" : "Reveal key"}
+				</InputGroupButton>
+				<CopyButton
+					value={snippet}
+					label="Install command"
+					idleLabel="Copy"
+					render={<InputGroupButton />}
+					className="ml-auto"
+				/>
+			</InputGroupAddon>
+		</InputGroup>
+	)
+}
+
+export function InstallHostModal({ open, onOpenChange, defaultTab = "kubernetes" }: InstallModalProps) {
 	const [revealed, setRevealed] = useState(false)
+	const [tab, setTab] = useState<InstallTab>(defaultTab)
 
 	const keysResult = useAtomValue(retainedQueryV2("ingestKeys", "retrieve", {}))
 
@@ -70,12 +148,20 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 		[keysResult],
 	)
 
+	const loading = Result.isInitial(keysResult)
+	const selfHosted = ingestUrl !== HOSTED_INGEST_URL
+
 	// `snippet` is the real command (used for copy); `displaySnippet` masks the
 	// key unless the user explicitly reveals it.
-	const snippet = useMemo(() => (token ? helmCommand(token) : ""), [token])
-	const displaySnippet = useMemo(
-		() => (revealed || !token ? snippet : helmCommand(maskToken(token))),
-		[revealed, snippet, token],
+	const helmSnippet = useMemo(() => (token ? helmCommand(token) : ""), [token])
+	const helmDisplay = useMemo(
+		() => (revealed || !token ? helmSnippet : helmCommand(maskToken(token))),
+		[revealed, helmSnippet, token],
+	)
+	const dockerSnippet = useMemo(() => (token ? dockerCommand(token) : ""), [token])
+	const dockerDisplay = useMemo(
+		() => (revealed || !token ? dockerSnippet : dockerCommand(maskToken(token))),
+		[revealed, dockerSnippet, token],
 	)
 
 	return (
@@ -90,45 +176,51 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 		>
 			<DialogContent className="max-w-2xl overflow-hidden">
 				<DialogHeader>
-					<DialogTitle>Install the Kubernetes collector</DialogTitle>
+					<DialogTitle>Install a collector</DialogTitle>
 					<DialogDescription>
-						The Maple Helm chart deploys a DaemonSet for per-node host + kubelet metrics and a
-						single-replica deployment for cluster-wide signals. Run the command below against your
-						cluster — nodes and pods appear here within about a minute.
+						Pick where your workloads run. Both paths embed your org's ingest key and start
+						reporting within about a minute.
 					</DialogDescription>
 				</DialogHeader>
 
 				<DialogPanel className="space-y-4 min-w-0">
-					{Result.isInitial(keysResult) ? (
-						<Skeleton className="h-36 w-full" />
-					) : (
-						<InputGroup>
-							<InputGroupTextarea
-								readOnly
-								wrap="off"
-								value={displaySnippet}
-								rows={ingestUrl !== HOSTED_INGEST_URL ? 6 : 5}
-								className="font-mono text-xs tracking-wide select-all leading-relaxed"
+					<Tabs value={tab} onValueChange={(v) => setTab(v as InstallTab)}>
+						<TabsList>
+							<TabsTrigger value="kubernetes">Kubernetes</TabsTrigger>
+							<TabsTrigger value="docker">Docker</TabsTrigger>
+						</TabsList>
+						<TabsContent value="kubernetes" className="space-y-4 pt-3">
+							<p className="text-muted-foreground text-xs">
+								The Maple Helm chart deploys a DaemonSet for per-node host + kubelet metrics
+								and a single-replica deployment for cluster-wide signals. Run the command
+								against your cluster.
+							</p>
+							<SnippetPanel
+								loading={loading}
+								snippet={helmSnippet}
+								displaySnippet={helmDisplay}
+								rows={selfHosted ? 6 : 5}
+								revealed={revealed}
+								onToggleReveal={() => setRevealed((v) => !v)}
 							/>
-							<InputGroupAddon align="block-end">
-								<InputGroupButton
-									onClick={() => setRevealed((v) => !v)}
-									aria-label={revealed ? "Hide key" : "Reveal key"}
-									title={revealed ? "Hide key" : "Reveal key"}
-								>
-									<EyeIcon size={14} />
-									{revealed ? "Hide key" : "Reveal key"}
-								</InputGroupButton>
-								<CopyButton
-									value={snippet}
-									label="Install command"
-									idleLabel="Copy"
-									render={<InputGroupButton />}
-									className="ml-auto"
-								/>
-							</InputGroupAddon>
-						</InputGroup>
-					)}
+						</TabsContent>
+						<TabsContent value="docker" className="space-y-4 pt-3">
+							<p className="text-muted-foreground text-xs">
+								The Maple Docker agent runs as a single container with read-only access to the
+								Docker socket and streams per-container CPU, memory, network, and block I/O —
+								plus container logs via the mounted log directory (drop that mount to skip
+								logs). It also accepts app OTLP on 4317/4318.
+							</p>
+							<SnippetPanel
+								loading={loading}
+								snippet={dockerSnippet}
+								displaySnippet={dockerDisplay}
+								rows={selfHosted ? 10 : 9}
+								revealed={revealed}
+								onToggleReveal={() => setRevealed((v) => !v)}
+							/>
+						</TabsContent>
+					</Tabs>
 
 					<p className="text-muted-foreground text-xs">
 						The command embeds your org's{" "}
@@ -146,7 +238,7 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 						variant="outline"
 						render={
 							<a
-								href={DOCS_URL}
+								href={DOCS_URLS[tab]}
 								target="_blank"
 								rel="noopener noreferrer"
 								aria-label="View docs"

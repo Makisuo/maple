@@ -257,7 +257,9 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 			seen.add(sub.icon)
 			unique.push(sub)
 		}
-		return unique
+		// Beyond four the miniatures start eating the section label itself
+		// (~14px per glyph) — Infrastructure hit five when Containers landed.
+		return unique.slice(0, 4)
 	}, [isOpen, subItems])
 
 	// The sub-list can't render at 48px, so the rail turns the row into a menu.

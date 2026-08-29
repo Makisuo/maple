@@ -16,7 +16,11 @@ import type {
 	ErrorsSummaryRequest,
 	ErrorsTimeseriesRequest,
 	ErrorsSparkRequest,
+	ContainerDetailSummaryRequest,
+	ContainerFacetsRequest,
+	ContainersSummaryRequest,
 	HostDetailSummaryRequest,
+	ListContainersRequest,
 	ListHostsRequest,
 	ListLogsRequest,
 	ListMetricsRequest,
@@ -962,6 +966,109 @@ export const listPodsCount = defineQuery({
 	cache: timeRangeCache,
 	compile: (payload: ListPodsRequest, orgId: string) =>
 		CH.compile(CH.listPodsSummaryQuery(listPodsFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+// Containers (Docker) — keep page and denominator filters identical.
+const listContainersFilters = (payload: ListContainersRequest | ContainerFacetsRequest) => ({
+	search: payload.search,
+	containerNames: payload.containerNames,
+	hostNames: payload.hostNames,
+	images: payload.images,
+	composeProjects: payload.composeProjects,
+	composeServices: payload.composeServices,
+	environments: payload.environments,
+	excludedContainerNames: payload.excludedContainerNames,
+	excludedHostNames: payload.excludedHostNames,
+	excludedImages: payload.excludedImages,
+	excludedComposeProjects: payload.excludedComposeProjects,
+	excludedComposeServices: payload.excludedComposeServices,
+	excludedEnvironments: payload.excludedEnvironments,
+})
+
+export const listContainers = defineQuery({
+	id: "listContainers",
+	profile: "list",
+	cache: timeRangeCache,
+	compile: (payload: ListContainersRequest, orgId: string) =>
+		CH.compile(
+			CH.listContainersQuery({
+				...listContainersFilters(payload),
+				scope: payload.scope,
+				sortBy: payload.sortBy,
+				sortDir: payload.sortDir,
+				limit: payload.limit,
+				offset: payload.offset,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const listContainersCount = defineQuery({
+	id: "listContainersCount",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ListContainersRequest, orgId: string) =>
+		CH.compile(CH.listContainersSummaryQuery(listContainersFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const containersSummary = defineQuery({
+	id: "containersSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainersSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.listContainersSummaryQuery({
+				hostNames: payload.hostNames,
+				environments: payload.environments,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerDetailSummary = defineQuery({
+	id: "containerDetailSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainerDetailSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.containerDetailSummaryQuery({
+				containerName: payload.containerName,
+				hostName: payload.hostName,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerCountersSummary = defineQuery({
+	id: "containerCountersSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainerDetailSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.containerCountersSummaryQuery({
+				containerName: payload.containerName,
+				hostName: payload.hostName,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerFacets = defineQuery({
+	id: "containerFacets",
+	profile: "discovery",
+	// Bound Map-column decompression memory across the UNION fan-out.
+	settings: { maxThreads: 4 },
+	cache: 60,
+	compile: (payload: ContainerFacetsRequest, orgId: string) =>
+		CH.compileUnion(CH.containerFacetsQuery(listContainersFilters(payload)), {
 			orgId,
 			startTime: payload.startTime,
 			endTime: payload.endTime,

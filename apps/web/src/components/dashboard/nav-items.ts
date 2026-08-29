@@ -9,6 +9,7 @@ import {
 	FileIcon,
 	GridSquareCirclePlusIcon,
 	HouseIcon,
+	DockerIcon,
 	KubernetesIcon,
 	LayersIcon,
 	MagnifierCheckIcon,
@@ -79,6 +80,7 @@ const infrastructureItem: NavItem = {
 	icon: ComputerIcon,
 	subItems: [
 		{ title: "Hosts", href: "/infra", icon: ServerIcon },
+		{ title: "Containers", href: "/infra/containers", icon: DockerIcon },
 		{ title: "K8s Pods", href: "/infra/kubernetes/pods", icon: KubernetesIcon },
 		{ title: "K8s Nodes", href: "/infra/kubernetes/nodes", icon: KubernetesIcon },
 		{ title: "K8s Workloads", href: "/infra/kubernetes/workloads", icon: KubernetesIcon },

@@ -252,6 +252,26 @@ Always shown in the chip strip when present.
 | `k8s.kubelet.version` | Display in node metadata panel.                                               |
 | `container.runtime`   | Display in K8s node metadata (containerd, cri-o, etc.).                       |
 
+### Containers (Docker)
+
+The Maple Docker agent's `docker_stats` receiver stamps these on container metrics; `/infra/containers`
+groups on `(container.name, host.name)` — Docker names are only unique per host. Rows carrying a
+`k8s.pod.name` are treated as Kubernetes, not Docker.
+
+| Attribute              | What Maple does with it                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `container.name`       | Container identity: list/detail views and the span/log Infrastructure tab detect key.    |
+| `container.id`         | Facet cardinality (recreated containers keep their name, not their id) and correlation.  |
+| `container.image.name` | Image facet + display chip.                                                              |
+| `compose.project`      | Mapped from the `com.docker.compose.project` label by the agent; project facet.          |
+| `compose.service`      | Mapped from the `com.docker.compose.service` label by the agent; service facet.          |
+
+To correlate **app telemetry** with containers, the app's spans must also carry `container.id`
+(or at least `container.name`). `@maple/effect-sdk` auto-detects Docker identity best-effort
+(mountinfo/cgroup/hostname); the reliable path is explicit:
+`OTEL_RESOURCE_ATTRIBUTES=container.id=$(hostname),container.name=myservice` in the compose file
+(Docker's default hostname is the short container id).
+
 ## Cloud & platform badges
 
 These set the platform badge and runtime icon next to a service on the service map. SDKs running on common platforms auto-detect most of them — document the keys so self-instrumenters can match.

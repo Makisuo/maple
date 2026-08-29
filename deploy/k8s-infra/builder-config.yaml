@@ -18,7 +18,7 @@ dist:
   name: otel-collector-maple
   description: "OpenTelemetry Collector with Maple ClickHouse exporter"
   output_path: ./bin
-  version: 0.1.5
+  version: 0.2.0
 
 extensions:
   - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.151.0
@@ -33,6 +33,7 @@ receivers:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.151.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sobjectsreceiver v0.151.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver v0.151.0
 
 processors:
   - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.151.0

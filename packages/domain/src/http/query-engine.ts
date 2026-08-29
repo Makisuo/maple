@@ -1229,6 +1229,174 @@ export class PodsSummaryResponse extends Schema.Class<PodsSummaryResponse>("Pods
 	stalePods: Schema.Number,
 }) {}
 
+// Containers (Docker) — docker_stats receiver rows, identity (container.name,
+// host.name). All percentages are on the 0..1 scale (the queries normalize
+// docker's 0..100 gauges) so the web severity toning matches the pod pages.
+
+const ContainerSortKeyLiteral = Schema.Literals([
+	"saturation",
+	"cpuPct",
+	"memoryPct",
+	"containerName",
+	"lastSeen",
+])
+
+/**
+ * No `unbounded` scope: running without limits is the norm in plain Docker,
+ * so the pod "burning CPU with nothing capping it" bucket doesn't transfer.
+ */
+const ContainerScopeLiteral = Schema.Literals(["saturated", "elevated", "stale"])
+
+const ContainerFilterFields = {
+	search: Schema.optional(Schema.String),
+	containerNames: Schema.optional(StringArray),
+	hostNames: Schema.optional(StringArray),
+	images: Schema.optional(StringArray),
+	composeProjects: Schema.optional(StringArray),
+	composeServices: Schema.optional(StringArray),
+	environments: Schema.optional(StringArray),
+	excludedContainerNames: Schema.optional(StringArray),
+	excludedHostNames: Schema.optional(StringArray),
+	excludedImages: Schema.optional(StringArray),
+	excludedComposeProjects: Schema.optional(StringArray),
+	excludedComposeServices: Schema.optional(StringArray),
+	excludedEnvironments: Schema.optional(StringArray),
+} as const
+
+export class ListContainersRequest extends Schema.Class<ListContainersRequest>("ListContainersRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	...ContainerFilterFields,
+	scope: Schema.optional(ContainerScopeLiteral),
+	sortBy: Schema.optional(ContainerSortKeyLiteral),
+	sortDir: Schema.optional(SortDirectionLiteral),
+	limit: Schema.optional(Schema.Number),
+	offset: Schema.optional(Schema.Number),
+}) {}
+
+const ContainerRow = Schema.Struct({
+	containerName: Schema.String,
+	hostName: Schema.String,
+	containerId: Schema.String,
+	imageName: Schema.String,
+	composeProject: Schema.String,
+	composeService: Schema.String,
+	runtime: Schema.String,
+	environment: Schema.String,
+	lastSeen: Schema.String,
+	cpuPct: Schema.Number,
+	memoryPct: Schema.Number,
+	cpuPctPeak: Schema.Number,
+	memoryPctPeak: Schema.Number,
+	cpuLimitCores: Schema.Number,
+	uptimeSeconds: Schema.Number,
+	saturation: Schema.Number,
+})
+
+export class ListContainersResponse extends Schema.Class<ListContainersResponse>("ListContainersResponse")({
+	data: Schema.Array(ContainerRow),
+	/** Total containers matching the filters, before limit/offset (see ListPodsResponse). */
+	totalCount: Schema.Number,
+}) {}
+
+export class ContainersSummaryRequest extends Schema.Class<ContainersSummaryRequest>(
+	"ContainersSummaryRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	hostNames: Schema.optional(StringArray),
+	environments: Schema.optional(StringArray),
+}) {}
+
+export class ContainersSummaryResponse extends Schema.Class<ContainersSummaryResponse>(
+	"ContainersSummaryResponse",
+)({
+	totalContainers: Schema.Number,
+	saturatedContainers: Schema.Number,
+	elevatedContainers: Schema.Number,
+	staleContainers: Schema.Number,
+}) {}
+
+export class ContainerFacetsRequest extends Schema.Class<ContainerFacetsRequest>("ContainerFacetsRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	...ContainerFilterFields,
+}) {}
+
+export class ContainerFacetsResponse extends Schema.Class<ContainerFacetsResponse>("ContainerFacetsResponse")(
+	{
+		data: Schema.Struct({
+			containers: Schema.Array(FacetRow),
+			hosts: Schema.Array(FacetRow),
+			images: Schema.Array(FacetRow),
+			composeProjects: Schema.Array(FacetRow),
+			composeServices: Schema.Array(FacetRow),
+			environments: Schema.Array(FacetRow),
+		}),
+	},
+) {}
+
+export class ContainerDetailSummaryRequest extends Schema.Class<ContainerDetailSummaryRequest>(
+	"ContainerDetailSummaryRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	containerName: Schema.String,
+	/** Optional narrowing — container names collide across hosts. */
+	hostName: Schema.optional(Schema.String),
+}) {}
+
+export class ContainerDetailSummaryResponse extends Schema.Class<ContainerDetailSummaryResponse>(
+	"ContainerDetailSummaryResponse",
+)({
+	data: Schema.NullOr(
+		Schema.Struct({
+			containerName: Schema.String,
+			hostName: Schema.String,
+			containerId: Schema.String,
+			imageName: Schema.String,
+			composeProject: Schema.String,
+			composeService: Schema.String,
+			runtime: Schema.String,
+			firstSeen: Schema.String,
+			lastSeen: Schema.String,
+			cpuPct: Schema.Number,
+			memoryPct: Schema.Number,
+			cpuLimitCores: Schema.Number,
+			uptimeSeconds: Schema.Number,
+			// Counter-side complements from metrics_sum.
+			memoryBytesAvg: Schema.Number,
+			memoryLimitBytes: Schema.Number,
+			restartsDelta: Schema.Number,
+			pidsAvg: Schema.Number,
+		}),
+	),
+}) {}
+
+export class ContainerInfraTimeseriesRequest extends Schema.Class<ContainerInfraTimeseriesRequest>(
+	"ContainerInfraTimeseriesRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	containerName: Schema.String,
+	hostName: Schema.optional(Schema.String),
+	metric: Schema.Literals(["cpu", "memory_percent", "memory_bytes", "network", "disk_io", "uptime"]),
+	bucketSeconds: Schema.optional(BucketSeconds),
+}) {}
+
+export class ContainerInfraTimeseriesResponse extends Schema.Class<ContainerInfraTimeseriesResponse>(
+	"ContainerInfraTimeseriesResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			bucket: Schema.String,
+			attributeValue: Schema.String,
+			value: Schema.Number,
+		}),
+	),
+	unit: Schema.Literals(["percent", "bytes", "seconds"]),
+}) {}
+
 // Web Analytics
 //
 // Product analytics over the browser SDK's session data. Every request shares
@@ -2321,6 +2489,41 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("workloadInfraTimeseries", "/workload-infra-timeseries", {
 			payload: WorkloadInfraTimeseriesRequest,
 			success: WorkloadInfraTimeseriesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("listContainers", "/list-containers", {
+			payload: ListContainersRequest,
+			success: ListContainersResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("containersSummary", "/containers-summary", {
+			payload: ContainersSummaryRequest,
+			success: ContainersSummaryResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("containerDetailSummary", "/container-detail-summary", {
+			payload: ContainerDetailSummaryRequest,
+			success: ContainerDetailSummaryResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("containerInfraTimeseries", "/container-infra-timeseries", {
+			payload: ContainerInfraTimeseriesRequest,
+			success: ContainerInfraTimeseriesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("containerFacets", "/container-facets", {
+			payload: ContainerFacetsRequest,
+			success: ContainerFacetsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

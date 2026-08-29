@@ -489,3 +489,27 @@ export {
 	type WorkloadFacetsOutput,
 	type WorkloadKind,
 } from "./queries/infra"
+
+// Queries — Containers (Docker, docker_stats receiver)
+export {
+	listContainersQuery,
+	listContainersSummaryQuery,
+	containerDetailSummaryQuery,
+	containerCountersSummaryQuery,
+	containerGaugeTimeseriesQuery,
+	containerSumTimeseriesQuery,
+	containerFacetsQuery,
+	type ListContainersOpts,
+	type ListContainersOutput,
+	type ListContainersSummaryOutput,
+	type ContainerSortKey,
+	type ContainerScope,
+	type ContainerDetailSummaryOpts,
+	type ContainerDetailSummaryOutput,
+	type ContainerCountersSummaryOpts,
+	type ContainerCountersSummaryOutput,
+	type ContainerGaugeTimeseriesOpts,
+	type ContainerSumTimeseriesOpts,
+	type ContainerTimeseriesOutput,
+	type ContainerFacetsOutput,
+} from "./queries/containers"

@@ -207,7 +207,7 @@ Apps then point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://maple-otel.maple.svc.cl
       -e MAPLE_CLICKHOUSE_PASSWORD=$CH_PASSWORD \
       -v ./collector.yaml:/etc/otel/config.yaml \
       -p 4317:4317 -p 4318:4318 \
-      ghcr.io/makisuo/maple/otel-collector-maple:0.1.5
+      ghcr.io/makisuo/maple/otel-collector-maple:0.2.0
     ```
 
 The rendered YAML carries your `org_id`, ClickHouse URL/user/database, and the standard memory_limiter → k8sattributes → batch → maple pipeline. The password is referenced via `${env:MAPLE_CLICKHOUSE_PASSWORD}` so the file is safe to share.

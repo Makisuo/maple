@@ -54,6 +54,10 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 COPY --from=builder /src/bin/otel-collector-maple /otel-collector-maple
 
+# Ready-to-run Docker host agent config — selected via
+# `--config /etc/otel/docker-config.yaml` by the Docker onboarding one-liner.
+COPY deploy/docker-agent/collector-config.yaml /etc/otel/docker-config.yaml
+
 # 4317 = OTLP gRPC, 4318 = OTLP HTTP, 13133 = health_check.
 EXPOSE 4317 4318 13133
 

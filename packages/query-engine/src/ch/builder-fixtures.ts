@@ -735,6 +735,134 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		compile: () => CH.compileUnionUnsafe(CH.workloadFacetsQuery({ kind: "deployment" }), window),
 	},
 
+	// Containers (Docker) — list/summary/detail/timeseries/facets, mirrors the
+	// /list-containers route family (routes/internal/query-engine.http.ts).
+	{
+		module: "containers",
+		name: "listContainersQuery",
+		label: "default",
+		compile: () => CH.compileUnsafe(CH.listContainersQuery({}), window),
+	},
+	{
+		module: "containers",
+		name: "listContainersQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.listContainersQuery({
+					search: "api",
+					hostNames: ["ip-10-0-1-42"],
+					images: ["ghcr.io/acme/api:1.4.2"],
+					composeProjects: ["shop"],
+					excludedContainerNames: ["buildkitd"],
+					sortBy: "cpuPct",
+					sortDir: "desc",
+				}),
+				window,
+			),
+	},
+	{
+		// `scope` switches on the wrapped-query WHERE over aggregates.
+		module: "containers",
+		name: "listContainersQuery",
+		label: "scoped",
+		compile: () => CH.compileUnsafe(CH.listContainersQuery({ scope: "saturated" }), window),
+	},
+	{
+		module: "containers",
+		name: "listContainersSummaryQuery",
+		label: "default",
+		compile: () => CH.compileUnsafe(CH.listContainersSummaryQuery({}), window),
+	},
+	{
+		module: "containers",
+		name: "containerDetailSummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerDetailSummaryQuery({ containerName: "api", hostName: "ip-10-0-1-42" }),
+				window,
+			),
+	},
+	{
+		module: "containers",
+		name: "containerCountersSummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerCountersSummaryQuery({ containerName: "api", hostName: "ip-10-0-1-42" }),
+				window,
+			),
+	},
+	{
+		// Percent gauges divide by 100 so chart scales match the pod pages.
+		module: "containers",
+		name: "containerGaugeTimeseriesQuery",
+		label: "percent",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerGaugeTimeseriesQuery({
+					containerName: "api",
+					hostName: "ip-10-0-1-42",
+					metricName: "container.cpu.utilization",
+					divideBy: 100,
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		module: "containers",
+		name: "containerGaugeTimeseriesQuery",
+		label: "unscaled",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerGaugeTimeseriesQuery({ containerName: "api", metricName: "container.uptime" }),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		// Network splits direction into metric names → multiIf series labels.
+		module: "containers",
+		name: "containerSumTimeseriesQuery",
+		label: "network",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerSumTimeseriesQuery({
+					containerName: "api",
+					metricNames: [
+						"container.network.io.usage.rx_bytes",
+						"container.network.io.usage.tx_bytes",
+					],
+					metricLabels: [
+						["container.network.io.usage.rx_bytes", "receive"],
+						["container.network.io.usage.tx_bytes", "transmit"],
+					],
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		// Block IO groups by the `operation` datapoint attribute instead.
+		module: "containers",
+		name: "containerSumTimeseriesQuery",
+		label: "blockio",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerSumTimeseriesQuery({
+					containerName: "api",
+					metricNames: ["container.blockio.io_service_bytes_recursive"],
+					groupByAttributeKey: "operation",
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		module: "containers",
+		name: "containerFacetsQuery",
+		label: "default",
+		compile: () => CH.compileUnionUnsafe(CH.containerFacetsQuery(), window),
+	},
+
 	// ----- service-map: the parent⋈child span join and its two projections.
 	// ----- The rollup's rows are `ingest`ed into service_map_edges_hourly
 	// ----- verbatim, so these must reach the ClickHouse DESCRIBE sweep.

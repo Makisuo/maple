@@ -33,7 +33,12 @@ import {
 	fleetUtilizationTimeseries,
 	getNodeFacets,
 	getPodFacets,
+	getContainerFacets,
 	getWorkloadFacets,
+	containersSummary,
+	containerDetailSummary,
+	containerInfraTimeseries,
+	listContainers,
 	hostDetailSummary,
 	hostInfraTimeseries,
 	listHosts,
@@ -153,7 +158,11 @@ type GlobalNamespaceScope = "top" | "filters"
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
-const pinIntoData = (data: Record<string, unknown>, scope: GlobalNamespaceScope, ns: string): Record<string, unknown> => {
+const pinIntoData = (
+	data: Record<string, unknown>,
+	scope: GlobalNamespaceScope,
+	ns: string,
+): Record<string, unknown> => {
 	if (scope === "filters") {
 		const prevFilters = isRecord(data.filters) ? data.filters : {}
 		return { ...data, filters: { ...prevFilters, namespaces: [ns], excludedNamespaces: undefined } }
@@ -171,7 +180,10 @@ const pinIntoData = (data: Record<string, unknown>, scope: GlobalNamespaceScope,
 
 /** Merge the pinned global namespace into a `{ data }` query input, if any.
  * Exported for its unit tests — production callers go through the families. */
-export const applyGlobalNamespace = (input: unknown, scope: GlobalNamespaceScope): Record<string, unknown> => {
+export const applyGlobalNamespace = (
+	input: unknown,
+	scope: GlobalNamespaceScope,
+): Record<string, unknown> => {
 	const base = isRecord(input) ? input : {}
 	const ns = getGlobalNamespace()
 	if (ns === null) return base
@@ -237,7 +249,10 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 	const scope = options?.globalNamespace
 	return (input: Input) =>
 		family(
-			encodeOrgScopedKey(getActiveOrgId(), scope === undefined ? input : applyGlobalNamespace(input, scope)),
+			encodeOrgScopedKey(
+				getActiveOrgId(),
+				scope === undefined ? input : applyGlobalNamespace(input, scope),
+			),
 		)
 }
 
@@ -523,6 +538,26 @@ export const nodeFacetsResultAtom = makeQueryAtomFamily(getNodeFacets, {
 })
 
 export const workloadFacetsResultAtom = makeQueryAtomFamily(getWorkloadFacets, {
+	staleTime: 30_000,
+})
+
+export const listContainersResultAtom = makeQueryAtomFamily(listContainers, {
+	staleTime: 30_000,
+})
+
+export const containersSummaryResultAtom = makeQueryAtomFamily(containersSummary, {
+	staleTime: 30_000,
+})
+
+export const containerDetailSummaryResultAtom = makeQueryAtomFamily(containerDetailSummary, {
+	staleTime: 30_000,
+})
+
+export const containerInfraTimeseriesResultAtom = makeQueryAtomFamily(containerInfraTimeseries, {
+	staleTime: 30_000,
+})
+
+export const containerFacetsResultAtom = makeQueryAtomFamily(getContainerFacets, {
 	staleTime: 30_000,
 })
 
