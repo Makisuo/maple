@@ -350,6 +350,11 @@ impl AppConfig {
                 std::env::var("INGEST_WAL_SHARDS").ok(),
                 (num_cpus::get().max(1) * 2).max(2),
             )?,
+            wal_segment_max_bytes: parse_u64(
+                "INGEST_WAL_SEGMENT_MAX_BYTES",
+                std::env::var("INGEST_WAL_SEGMENT_MAX_BYTES").ok(),
+                maple_ingest::telemetry::WAL_SEGMENT_MAX_BYTES,
+            )?,
             batch_max_rows: parse_usize(
                 "INGEST_BATCH_MAX_ROWS",
                 std::env::var("INGEST_BATCH_MAX_ROWS").ok(),
@@ -7138,6 +7143,7 @@ mod tests {
             org_queue_max_bytes: 1024 * 1024,
             queue_channel_capacity: 10,
             wal_shards: 1,
+            wal_segment_max_bytes: maple_ingest::telemetry::WAL_SEGMENT_MAX_BYTES,
             batch_max_rows: 100,
             batch_max_bytes: 1024 * 1024,
             batch_max_wait: Duration::from_millis(1),

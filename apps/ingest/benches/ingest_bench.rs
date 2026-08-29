@@ -118,6 +118,7 @@ impl BenchFixture {
                 org_queue_max_bytes: u64::MAX,
                 queue_channel_capacity: 100_000,
                 wal_shards: 4,
+                wal_segment_max_bytes: maple_ingest::telemetry::WAL_SEGMENT_MAX_BYTES,
                 batch_max_rows: 5_000,
                 batch_max_bytes: 4 * 1024 * 1024,
                 batch_max_wait: Duration::from_millis(10),

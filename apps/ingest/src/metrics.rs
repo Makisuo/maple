@@ -126,10 +126,17 @@ static WAL_SHARD_FULL_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
-static WAL_COMPACTED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+static WAL_SEGMENTS_SEALED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
-        .u64_counter("ingest_wal_compacted_bytes_total")
-        .with_description("Exported WAL bytes reclaimed by rewriting a lane file from its cursor")
+        .u64_counter("ingest_wal_segments_sealed_total")
+        .with_description("WAL segments closed at the size threshold and replaced by a new one")
+        .build()
+});
+
+static WAL_RECLAIMED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_reclaimed_bytes_total")
+        .with_description("WAL bytes freed by deleting fully exported segments")
         .build()
 });
 
@@ -252,7 +259,7 @@ static WAL_SHARD_BYTES: LazyLock<Gauge<u64>> = LazyLock::new(|| {
     METER
         .u64_gauge("ingest_wal_shard_bytes")
         .with_unit("By")
-        .with_description("Current WAL shard file size")
+        .with_description("Bytes held by a WAL lane's segments on disk")
         .build()
 });
 
@@ -539,7 +546,7 @@ pub fn wal_commit_bytes(shard: usize, destination: &str, bytes: u64) {
     );
 }
 
-/// Current WAL lane file size.
+/// Bytes a WAL lane currently holds on disk, exported prefix included.
 pub fn wal_shard_bytes(shard: usize, destination: &str, bytes: u64) {
     WAL_SHARD_BYTES.record(
         bytes,
@@ -550,9 +557,20 @@ pub fn wal_shard_bytes(shard: usize, destination: &str, bytes: u64) {
     );
 }
 
-/// Exported bytes reclaimed by compacting a WAL lane file.
-pub fn wal_lane_compacted(shard: usize, destination: &str, reclaimed_bytes: u64) {
-    WAL_COMPACTED_BYTES_TOTAL.add(
+/// A lane sealed its active segment and opened the next one.
+pub fn wal_segment_sealed(shard: usize, destination: &str) {
+    WAL_SEGMENTS_SEALED_TOTAL.add(
+        1,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+        ],
+    );
+}
+
+/// Bytes freed by deleting segments the export cursor has moved past.
+pub fn wal_segments_reclaimed(shard: usize, destination: &str, reclaimed_bytes: u64) {
+    WAL_RECLAIMED_BYTES_TOTAL.add(
         reclaimed_bytes,
         &[
             KeyValue::new("shard", shard.to_string()),

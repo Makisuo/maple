@@ -40,13 +40,13 @@ use tokio::time::sleep;
 use tracing::{error, info, warn, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-/// Most a lane compaction will copy while holding the append mutex. Compaction
-/// rewrites the *unexported tail*, so this bounds the append stall rather than
-/// the reclaim: a healthy lane keeps a tail of near zero (the symptom being
-/// fixed is a huge exported prefix in front of a tiny backlog), and a lane whose
-/// backlog genuinely exceeds this is not holding dead weight — it is full for
-/// real, and rejecting writes is the correct backpressure.
-const WAL_COMPACT_MAX_TAIL_BYTES: u64 = 64 * 1024 * 1024;
+/// Size at which the active segment is sealed and a new one opened.
+///
+/// Small enough that a sealed segment is a cheap object to ship and to delete,
+/// and that a corrupt one costs little; large enough that sealing (an `open` and
+/// a directory fsync) stays far off the per-append path. A production lane is a
+/// gibibyte, so this is ~128 segments per full lane.
+pub const WAL_SEGMENT_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 const WAL_MAGIC: &[u8; 4] = b"MTW1";
 const WAL_V1_HEADER_LEN: usize = 20;
@@ -466,6 +466,10 @@ pub struct TinybirdConfig {
     pub org_queue_max_bytes: u64,
     pub queue_channel_capacity: usize,
     pub wal_shards: usize,
+    /// Size at which a lane seals its active segment. Defaults to
+    /// `WAL_SEGMENT_MAX_BYTES`; exposed so the object size the S3 tier ships can
+    /// be tuned without a rebuild.
+    pub wal_segment_max_bytes: u64,
     pub batch_max_rows: usize,
     pub batch_max_bytes: usize,
     pub batch_max_wait: Duration,
@@ -558,6 +562,9 @@ impl TinybirdConfig {
         }
         if self.wal_shards == 0 {
             return Err("INGEST_WAL_SHARDS must be greater than 0".to_owned());
+        }
+        if self.wal_segment_max_bytes == 0 {
+            return Err("INGEST_WAL_SEGMENT_MAX_BYTES must be greater than 0".to_owned());
         }
         if self.batch_max_rows == 0 || self.batch_max_bytes == 0 {
             return Err(
@@ -749,6 +756,9 @@ struct QueuedFrame {
     /// WAL shard the frame routed to (for metric labelling). The lane it belongs
     /// to is implied by the worker draining it (one worker per lane).
     shard: usize,
+    /// Segment this frame was appended to, and its byte range inside that
+    /// segment. `(segment, end)` is what the lane's export cursor advances to.
+    segment: u64,
     start: u64,
     end: u64,
     org_id: String,
@@ -806,7 +816,9 @@ impl TelemetryPipeline {
         let wal = Arc::new(ShardedWal::open(&cfg)?);
         // Relocate any single-file-per-shard WAL left by a pre-lanes binary into
         // the new per-destination lanes before workers start draining them.
-        wal.migrate_legacy_shards(&cfg).await;
+        wal.migrate_legacy_files(&cfg).await;
+        // Relocated frames land in the active segment, which replay skips.
+        wal.seal_all();
         let org_queue_bytes = Arc::new(DashMap::new());
         let mirror_org_queue_bytes = Arc::new(DashMap::new());
         let clickhouse_breakers = Arc::new(ClickHouseBreakerRegistry::new(cfg.clickhouse_breaker));
@@ -856,8 +868,8 @@ impl TelemetryPipeline {
     }
 
     /// Bytes committed to the primary WAL lanes and not yet exported.
-    pub async fn wal_backlog_bytes(&self) -> u64 {
-        self.inner.wal.backlog_bytes().await
+    pub fn wal_backlog_bytes(&self) -> u64 {
+        self.inner.wal.backlog_bytes()
     }
 
     /// Wait for the primary lanes to export everything they hold, up to
@@ -867,7 +879,7 @@ impl TelemetryPipeline {
     pub async fn drain_wal(&self, deadline: Duration) -> u64 {
         let started = Instant::now();
         loop {
-            let backlog = self.wal_backlog_bytes().await;
+            let backlog = self.wal_backlog_bytes();
             if backlog == 0 || started.elapsed() >= deadline {
                 return backlog;
             }
@@ -1115,7 +1127,7 @@ impl TelemetryPipeline {
                     metrics::tinybird_mirror_dropped(&frame.datasource, "org_quota", frame.row_count as u64);
                     continue;
                 }
-                let (start, end) = match self.inner.wal.append(lane, &frame).await {
+                let (segment, start, end) = match self.inner.wal.append(lane, &frame).await {
                     Ok(offsets) => offsets,
                     Err(error) => {
                         release_org_queue_bytes(
@@ -1132,6 +1144,7 @@ impl TelemetryPipeline {
                 frames_committed += 1;
                 permit.send(QueuedFrame {
                     shard,
+                    segment,
                     start,
                     end,
                     org_id: frame.org_id,
@@ -1205,7 +1218,7 @@ impl TelemetryPipeline {
                 let queued_bytes = frame.payload.len() as u64;
                 self.reserve_org_queue_bytes(&frame.org_id, queued_bytes)
                     .inspect_err(|_| record_failing_frame(shard, lane, &frame.datasource))?;
-                let (start, end) = self.inner.wal.append(lane, &frame).await.map_err(|error| {
+                let (segment, start, end) = self.inner.wal.append(lane, &frame).await.map_err(|error| {
                     self.release_org_queue_bytes(&frame.org_id, queued_bytes);
                     record_failing_frame(shard, lane, &frame.datasource);
                     PipelineError::QueueUnavailable(error)
@@ -1214,6 +1227,7 @@ impl TelemetryPipeline {
                 frames_committed += 1;
                 permit.send(QueuedFrame {
                     shard,
+                    segment,
                     start,
                     end,
                     org_id: frame.org_id,
@@ -1339,26 +1353,331 @@ impl TelemetryPipeline {
 }
 
 struct ShardedWal {
-    /// One WAL file per lane (`shard × destination`), indexed by `lane_index`.
-    lanes: Vec<Arc<WalShard>>,
+    /// One segment directory per lane (`shard × destination`), indexed by
+    /// `lane_index`.
+    lanes: Vec<Arc<WalLane>>,
 }
 
-struct WalShard {
-    /// Real shard this lane belongs to, and its destination — carried so WAL
-    /// metrics stay labelled by `(shard, destination)` rather than leaking the
-    /// flat lane index as a `shard`.
+/// One lane's log: a directory of sealed segments plus the single segment
+/// appends currently land in.
+///
+/// Appends and exports touch disjoint segments, so they take different locks
+/// and an export can never stall a commit. That is the point of the layout: the
+/// file-per-lane WAL it replaces reclaimed space by rewriting the lane's tail
+/// *while holding the append mutex*, which is what made `wal_commit` p95 swing
+/// between 145ms and 998ms against a flat 3ms p50.
+struct WalLane {
     shard: usize,
     destination: ExportDestination,
-    path: PathBuf,
+    dir: PathBuf,
     cursor_path: PathBuf,
     max_bytes: u64,
-    /// Bytes reclaimed from the front of this lane file since process start, by
-    /// truncation or compaction. Frames carry *virtual* offsets
-    /// (`base_offset + file position`), so a frame already in flight keeps a
-    /// meaningful offset after the bytes underneath it are rewritten. Only read
-    /// or written while holding `file`, which is what makes `Relaxed` sound.
-    base_offset: AtomicU64,
-    file: Mutex<File>,
+    /// Size at which the active segment is sealed.
+    segment_max_bytes: u64,
+    /// Segment the appender is writing to. Stored with `Release` under
+    /// `append`, so a thread that reads a newer sequence with `Acquire` also
+    /// sees the sealed segment at its final length.
+    active_seq: AtomicU64,
+    /// Bytes held by every segment on disk, the exported prefix included. Drives
+    /// the lane cap and the `wal_shard_bytes` gauge.
+    live_bytes: AtomicU64,
+    /// Cumulative bytes appended and marked exported since this lane was opened.
+    /// Their difference is the backlog, and it stays exact across rotation and
+    /// deletion — which nothing derived from file sizes does.
+    committed_bytes: AtomicU64,
+    exported_bytes: AtomicU64,
+    append: Mutex<LaneAppend>,
+    export: Mutex<LaneExport>,
+}
+
+struct LaneAppend {
+    seq: u64,
+    file: File,
+    /// Bytes written to `file`. The handle is append-only and nothing else
+    /// writes it, so this is the offset every frame in it is addressed by.
+    len: u64,
+}
+
+struct LaneExport {
+    /// Oldest segment still on disk. Sequences are contiguous, so this and the
+    /// cursor are the whole delete list.
+    next_delete: u64,
+    cursor: SegmentCursor,
+}
+
+/// How far the exporter has drained a lane: a byte offset inside one segment.
+/// Ordered by `(seq, offset)`, which is the order frames leave the lane in.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+struct SegmentCursor {
+    seq: u64,
+    offset: u64,
+}
+
+fn segment_path(dir: &Path, seq: u64) -> PathBuf {
+    dir.join(format!("{seq:012}.seg"))
+}
+
+/// Sequence numbers of the segments in `dir`, ascending. Anything that is not a
+/// segment file is ignored — the lane's cursor lives in the same directory.
+fn list_segments(dir: &Path) -> Result<Vec<u64>, String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|error| format!("read WAL lane {}: {error}", dir.display()))?;
+    let mut seqs = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|error| format!("read WAL lane entry: {error}"))?
+            .path();
+        let seq = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".seg"))
+            .and_then(|seq| seq.parse::<u64>().ok());
+        if let Some(seq) = seq {
+            seqs.push(seq);
+        }
+    }
+    seqs.sort_unstable();
+    Ok(seqs)
+}
+
+fn file_len(path: &Path) -> u64 {
+    std::fs::metadata(path).map_or(0, |meta| meta.len())
+}
+
+fn open_segment(dir: &Path, seq: u64) -> Result<File, String> {
+    let path = segment_path(dir, seq);
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| format!("open WAL segment {}: {error}", path.display()))?;
+    // Without this the directory entry can be lost across a power failure while
+    // the frames inside it are durable, which reads back as a truncated lane.
+    if let Err(error) = File::open(dir).and_then(|handle| handle.sync_all()) {
+        warn!(dir = %dir.display(), %error, "Failed to fsync WAL lane directory after opening a segment");
+    }
+    Ok(file)
+}
+
+impl WalLane {
+    fn open(
+        shard: usize,
+        destination: ExportDestination,
+        cfg: &TinybirdConfig,
+        max_bytes: u64,
+    ) -> Result<Self, String> {
+        let dir = cfg
+            .queue_dir
+            .join(format!("shard-{shard:03}-{}", destination.as_str()));
+        std::fs::create_dir_all(&dir)
+            .map_err(|error| format!("create ingest WAL lane {}: {error}", dir.display()))?;
+        let cursor_path = dir.join("lane.cursor");
+        let mut cursor = read_cursor(&cursor_path);
+
+        let mut live = Vec::new();
+        for seq in list_segments(&dir)? {
+            let path = segment_path(&dir, seq);
+            // Segments below the cursor are fully exported, and an empty one is
+            // the segment a previous boot opened and never wrote to. Both are
+            // removed here rather than left to accumulate: a crash between the
+            // cursor write and the delete is expected, not exceptional.
+            if seq < cursor.seq || file_len(&path) == 0 {
+                drop(std::fs::remove_file(&path));
+                continue;
+            }
+            live.push(seq);
+        }
+        // A cursor that names a segment which is no longer on disk (its file was
+        // lost, or the cursor file was) resumes at the oldest segment that
+        // survived: replaying an exported frame is at-least-once, which the
+        // export path already tolerates, while skipping one is silent loss.
+        if live.first() != Some(&cursor.seq) {
+            cursor = SegmentCursor {
+                seq: live.first().copied().unwrap_or(cursor.seq),
+                offset: 0,
+            };
+        }
+
+        // Always start a fresh segment rather than re-opening the newest one:
+        // it keeps "sealed" meaning "will never grow again", which is what lets
+        // a sealed segment be shipped or deleted without coordinating with the
+        // appender.
+        let next_seq = live.last().map_or(cursor.seq, |last| last + 1);
+        let file = open_segment(&dir, next_seq)?;
+        let on_disk: u64 = live
+            .iter()
+            .map(|seq| file_len(&segment_path(&dir, *seq)))
+            .sum();
+
+        Ok(Self {
+            shard,
+            destination,
+            dir,
+            cursor_path,
+            max_bytes,
+            segment_max_bytes: cfg.wal_segment_max_bytes,
+            active_seq: AtomicU64::new(next_seq),
+            live_bytes: AtomicU64::new(on_disk),
+            // Whatever survived the last boot is backlog this lane still owes.
+            committed_bytes: AtomicU64::new(on_disk.saturating_sub(cursor.offset)),
+            exported_bytes: AtomicU64::new(0),
+            append: Mutex::new(LaneAppend {
+                seq: next_seq,
+                file,
+                len: 0,
+            }),
+            export: Mutex::new(LaneExport {
+                next_delete: cursor.seq,
+                cursor,
+            }),
+        })
+    }
+
+    /// Append one encoded frame and return where it landed. `enforce_cap` is
+    /// false only for frames being relocated from an older WAL layout, which
+    /// were already accepted and must not be rejected now.
+    fn append_blocking(
+        &self,
+        encoded: &[u8],
+        enforce_cap: bool,
+    ) -> Result<(u64, u64, u64), String> {
+        let added = encoded.len() as u64;
+        let mut state = self
+            .append
+            .lock()
+            .map_err(|_| "WAL lane mutex poisoned".to_owned())?;
+        if enforce_cap
+            && self
+                .live_bytes
+                .load(Ordering::Relaxed)
+                .saturating_add(added)
+                > self.max_bytes
+        {
+            metrics::wal_shard_full(self.shard, self.destination.as_str());
+            return Err("Telemetry WAL lane is full".to_owned());
+        }
+        state
+            .file
+            .write_all(encoded)
+            .map_err(|error| format!("write WAL: {error}"))?;
+        state
+            .file
+            .sync_data()
+            .map_err(|error| format!("sync WAL: {error}"))?;
+        let seq = state.seq;
+        let start = state.len;
+        let end = start + added;
+        state.len = end;
+        let live = self.live_bytes.fetch_add(added, Ordering::Relaxed) + added;
+        self.committed_bytes.fetch_add(added, Ordering::Relaxed);
+        // Sealing is an open() and a directory fsync, paid once per segment —
+        // versus the tail rewrite the previous layout paid here under this lock.
+        if end >= self.segment_max_bytes {
+            self.seal(&mut state)?;
+        }
+        drop(state);
+
+        metrics::wal_commit_bytes(self.shard, self.destination.as_str(), added);
+        metrics::wal_shard_bytes(self.shard, self.destination.as_str(), live);
+        Ok((seq, start, end))
+    }
+
+    /// Close the active segment and open the next one. The caller holds
+    /// `append`; every frame in the outgoing segment is already `sync_data`d.
+    fn seal(&self, state: &mut LaneAppend) -> Result<(), String> {
+        let next = state.seq + 1;
+        let file = open_segment(&self.dir, next)?;
+        // Published before the handle is swapped, so a reader that sees `next`
+        // is looking at a segment whose length can no longer change.
+        self.active_seq.store(next, Ordering::Release);
+        state.seq = next;
+        state.file = file;
+        state.len = 0;
+        metrics::wal_segment_sealed(self.shard, self.destination.as_str());
+        Ok(())
+    }
+
+    /// Advance the export cursor and drop every segment fully behind it.
+    /// `bytes` is what the batch actually drained, which is what the backlog is
+    /// computed from — a cursor jump across a segment boundary is not a byte
+    /// count.
+    fn mark_exported_blocking(&self, cursor: SegmentCursor, bytes: u64) -> Result<(), String> {
+        let mut state = self
+            .export
+            .lock()
+            .map_err(|_| "WAL lane mutex poisoned".to_owned())?;
+        // One worker drains a lane, so batches complete in order; the max is
+        // defensive, and cheaper than reasoning about the alternative.
+        let mut cursor = cursor.max(state.cursor);
+        // A sealed segment the batch finished: step past it so its file (and, in
+        // the S3 tier, its object) is reclaimed now rather than whenever the
+        // lane next exports.
+        if cursor.seq < self.active_seq.load(Ordering::Acquire)
+            && cursor.offset >= file_len(&segment_path(&self.dir, cursor.seq))
+        {
+            cursor = SegmentCursor {
+                seq: cursor.seq + 1,
+                offset: 0,
+            };
+        }
+        write_cursor(&self.cursor_path, cursor)?;
+        state.cursor = cursor;
+
+        // Cursor first, delete second. A crash in between costs a re-delete on
+        // the next boot; the other order strands a cursor pointing at bytes that
+        // no longer exist.
+        let mut reclaimed = 0u64;
+        while state.next_delete < cursor.seq {
+            let path = segment_path(&self.dir, state.next_delete);
+            reclaimed += file_len(&path);
+            if let Err(error) = std::fs::remove_file(&path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    warn!(
+                        shard = self.shard,
+                        destination = self.destination.as_str(),
+                        segment = state.next_delete,
+                        %error,
+                        "Failed to delete an exported WAL segment"
+                    );
+                }
+            }
+            state.next_delete += 1;
+        }
+        drop(state);
+
+        self.exported_bytes.fetch_add(bytes, Ordering::Relaxed);
+        if reclaimed > 0 {
+            let live = self
+                .live_bytes
+                .fetch_sub(reclaimed, Ordering::Relaxed)
+                .saturating_sub(reclaimed);
+            metrics::wal_segments_reclaimed(self.shard, self.destination.as_str(), reclaimed);
+            metrics::wal_shard_bytes(self.shard, self.destination.as_str(), live);
+        }
+        Ok(())
+    }
+
+    /// Seal the active segment if anything has been written to it. Used at the
+    /// end of boot recovery, so frames relocated from an older layout live in a
+    /// sealed segment that replay (and the S3 tier) can see.
+    fn seal_if_dirty(&self) -> Result<(), String> {
+        let mut state = self
+            .append
+            .lock()
+            .map_err(|_| "WAL lane mutex poisoned".to_owned())?;
+        if state.len == 0 {
+            return Ok(());
+        }
+        self.seal(&mut state)
+    }
+
+    /// Bytes committed to this lane that no export has acknowledged.
+    fn backlog_bytes(&self) -> u64 {
+        self.committed_bytes
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.exported_bytes.load(Ordering::Relaxed))
+    }
 }
 
 impl ShardedWal {
@@ -1368,63 +1687,68 @@ impl ShardedWal {
         let max_bytes_per_lane = (cfg.queue_max_bytes / num_lanes as u64).max(1);
         for shard in 0..cfg.wal_shards {
             for destination in ExportDestination::ALL {
-                let dest = destination.as_str();
-                let path = cfg.queue_dir.join(format!("shard-{shard:03}-{dest}.wal"));
-                let cursor_path = cfg
-                    .queue_dir
-                    .join(format!("shard-{shard:03}-{dest}.cursor"));
-                let file = OpenOptions::new()
-                    .create(true)
-                    .read(true)
-                    .append(true)
-                    .open(&path)
-                    .map_err(|error| format!("open ingest WAL {}: {error}", path.display()))?;
                 debug_assert_eq!(lanes.len(), lane_index(shard, destination));
-                lanes.push(Arc::new(WalShard {
+                lanes.push(Arc::new(WalLane::open(
                     shard,
                     destination,
-                    path,
-                    cursor_path,
-                    max_bytes: max_bytes_per_lane,
-                    base_offset: AtomicU64::new(0),
-                    file: Mutex::new(file),
-                }));
+                    cfg,
+                    max_bytes_per_lane,
+                )?));
             }
         }
         Ok(Self { lanes })
     }
 
-    /// Migrate any pre-lanes WAL (a single `shard-NNN.wal` per shard, mixing both
-    /// destinations) into the per-destination lane files. Each surviving frame is
-    /// durably re-appended to its destination's lane, then the legacy file + cursor
-    /// are removed. Best-effort: a failed shard is logged and left in place so the
-    /// next boot retries it — startup never wedges and no frame is dropped.
+    /// Relocate any pre-segment WAL file into the lane's segment directory.
+    ///
+    /// Two shapes exist: `shard-NNN.wal` (before per-destination lanes, mixing
+    /// both destinations in one file) and `shard-NNN-<dest>.wal` (one file per
+    /// lane). Surviving frames are durably re-appended, then the file and its
+    /// cursor are removed. Best-effort per file: a failure is logged and the
+    /// file left in place for the next boot, so startup never wedges and no
+    /// frame is dropped.
     #[expect(
         clippy::cognitive_complexity,
         reason = "WAL recovery: the branches are the recovery cases, and each needs the others' \
                   context to be readable"
     )]
-    async fn migrate_legacy_shards(&self, cfg: &TinybirdConfig) {
+    async fn migrate_legacy_files(&self, cfg: &TinybirdConfig) {
+        let mut legacy: Vec<(usize, PathBuf, PathBuf)> = Vec::new();
         for shard in 0..cfg.wal_shards {
-            let legacy_path = cfg.queue_dir.join(format!("shard-{shard:03}.wal"));
-            let legacy_cursor = cfg.queue_dir.join(format!("shard-{shard:03}.cursor"));
-            if !legacy_path.exists() {
+            legacy.push((
+                shard,
+                cfg.queue_dir.join(format!("shard-{shard:03}.wal")),
+                cfg.queue_dir.join(format!("shard-{shard:03}.cursor")),
+            ));
+            for destination in ExportDestination::ALL {
+                let dest = destination.as_str();
+                legacy.push((
+                    shard,
+                    cfg.queue_dir.join(format!("shard-{shard:03}-{dest}.wal")),
+                    cfg.queue_dir
+                        .join(format!("shard-{shard:03}-{dest}.cursor")),
+                ));
+            }
+        }
+
+        for (shard, path, cursor_path) in legacy {
+            if !path.exists() {
                 continue;
             }
-            let read_path = legacy_path.clone();
-            let read_cursor = legacy_cursor.clone();
+            let read_path = path.clone();
+            let read_cursor_path = cursor_path.clone();
             let frames = match tokio::task::spawn_blocking(move || {
-                read_legacy_frames(&read_path, &read_cursor)
+                read_legacy_frames(&read_path, &read_cursor_path)
             })
             .await
             {
                 Ok(Ok(frames)) => frames,
                 Ok(Err(error)) => {
-                    warn!(shard, error = %error, "Skipping unreadable legacy ingest WAL shard");
+                    warn!(shard, error = %error, "Skipping unreadable legacy ingest WAL file");
                     continue;
                 }
                 Err(error) => {
-                    warn!(shard, error = %error, "Failed to read legacy ingest WAL shard");
+                    warn!(shard, error = %error, "Failed to read legacy ingest WAL file");
                     continue;
                 }
             };
@@ -1450,20 +1774,44 @@ impl ShardedWal {
                 }
             }
             if migrated {
-                drop(std::fs::remove_file(&legacy_path));
-                drop(std::fs::remove_file(&legacy_cursor));
+                drop(std::fs::remove_file(&path));
+                drop(std::fs::remove_file(&cursor_path));
                 if count > 0 {
                     info!(
                         shard,
                         frames = count,
-                        "Migrated legacy ingest WAL shard into per-destination lanes"
+                        file = %path.display(),
+                        "Migrated legacy ingest WAL file into lane segments"
                     );
                 }
             }
         }
     }
 
-    async fn append(&self, lane: usize, frame: &EncodedFrame) -> Result<(u64, u64), String> {
+    /// Seal every lane's active segment. Boot-time only: replay deliberately
+    /// ignores the segment appends are landing in, so anything written during
+    /// recovery has to be sealed before it counts as recoverable.
+    fn seal_all(&self) {
+        for lane in &self.lanes {
+            if let Err(error) = lane.seal_if_dirty() {
+                warn!(
+                    shard = lane.shard,
+                    destination = lane.destination.as_str(),
+                    %error,
+                    "Failed to seal a WAL lane segment after recovery"
+                );
+            }
+        }
+    }
+
+    fn lane(&self, lane: usize) -> Result<Arc<WalLane>, String> {
+        self.lanes
+            .get(lane)
+            .map(Arc::clone)
+            .ok_or_else(|| format!("invalid WAL lane {lane}"))
+    }
+
+    async fn append(&self, lane: usize, frame: &EncodedFrame) -> Result<(u64, u64, u64), String> {
         self.append_inner(lane, frame, true).await
     }
 
@@ -1473,153 +1821,47 @@ impl ShardedWal {
         lane: usize,
         frame: &EncodedFrame,
         enforce_cap: bool,
-    ) -> Result<(u64, u64), String> {
-        let lane_ref = Arc::clone(
-            self.lanes
-                .get(lane)
-                .ok_or_else(|| format!("invalid WAL lane {lane}"))?,
-        );
+    ) -> Result<(u64, u64, u64), String> {
+        let lane_ref = self.lane(lane)?;
         let encoded = encode_wal_frame(frame)?;
-        tokio::task::spawn_blocking(move || {
-            let mut file = lane_ref
-                .file
-                .lock()
-                .map_err(|_| "WAL lane mutex poisoned".to_owned())?;
-            let position = file
-                .seek(SeekFrom::End(0))
-                .map_err(|error| format!("seek WAL: {error}"))?;
-            if enforce_cap && position.saturating_add(encoded.len() as u64) > lane_ref.max_bytes {
-                metrics::wal_shard_full(lane_ref.shard, lane_ref.destination.as_str());
-                return Err("Telemetry WAL lane is full".to_owned());
-            }
-            file.write_all(&encoded)
-                .map_err(|error| format!("write WAL: {error}"))?;
-            file.sync_data()
-                .map_err(|error| format!("sync WAL: {error}"))?;
-            let file_end = position + encoded.len() as u64;
-            let base = lane_ref.base_offset.load(Ordering::Relaxed);
-            metrics::wal_commit_bytes(
-                lane_ref.shard,
-                lane_ref.destination.as_str(),
-                encoded.len() as u64,
-            );
-            metrics::wal_shard_bytes(lane_ref.shard, lane_ref.destination.as_str(), file_end);
-            Ok((base + position, base + file_end))
-        })
-        .await
-        .map_err(|error| format!("join WAL append: {error}"))?
+        tokio::task::spawn_blocking(move || lane_ref.append_blocking(&encoded, enforce_cap))
+            .await
+            .map_err(|error| format!("join WAL append: {error}"))?
     }
 
-    /// Unexported bytes across the primary lanes. Mirror lanes are excluded on
-    /// purpose: the mirror is best-effort, so a stalled mirror target must not
-    /// hold shutdown open or pin a task against scale-in.
-    async fn backlog_bytes(&self) -> u64 {
-        let lanes: Vec<Arc<WalShard>> = self
-            .lanes
+    /// Bytes committed but not yet exported across the primary lanes. Mirror
+    /// lanes are best-effort and excluded, so a stalled mirror cannot hold a
+    /// shutdown drain open.
+    fn backlog_bytes(&self) -> u64 {
+        self.lanes
             .iter()
             .filter(|lane| lane.destination != ExportDestination::TinybirdMirror)
-            .map(Arc::clone)
-            .collect();
-        tokio::task::spawn_blocking(move || {
-            lanes
-                .iter()
-                .map(|lane| {
-                    let Ok(file) = lane.file.lock() else { return 0 };
-                    let size = file.metadata().map_or(0, |meta| meta.len());
-                    // The persisted cursor is a plain file offset. Reading it
-                    // under the append mutex keeps it consistent with `size`
-                    // across a concurrent truncate or compaction.
-                    let cursor = read_cursor(&lane.cursor_path);
-                    drop(file);
-                    size.saturating_sub(cursor)
-                })
-                .sum()
-        })
-        .await
-        .unwrap_or(0)
+            .map(|lane| lane.backlog_bytes())
+            .sum()
     }
 
     async fn replay(&self, lane: usize) -> Result<Vec<QueuedFrame>, String> {
-        let lane_ref = Arc::clone(
-            self.lanes
-                .get(lane)
-                .ok_or_else(|| format!("invalid WAL lane {lane}"))?,
-        );
-        tokio::task::spawn_blocking(move || replay_shard(lane, &lane_ref))
+        let lane_ref = self.lane(lane)?;
+        tokio::task::spawn_blocking(move || replay_lane(lane, &lane_ref))
             .await
             .map_err(|error| format!("join WAL replay: {error}"))?
     }
 
     #[hotpath::measure]
-    async fn mark_exported(&self, lane: usize, offset: u64) -> Result<(), String> {
-        let shard_ref = Arc::clone(
-            self.lanes
-                .get(lane)
-                .ok_or_else(|| format!("invalid WAL lane {lane}"))?,
-        );
-        tokio::task::spawn_blocking(move || {
-            // Holding the append-side mutex serialises us against concurrent
-            // appenders, so nothing can commit bytes into a region we reclaim.
-            let mut file = shard_ref
-                .file
-                .lock()
-                .map_err(|_| "WAL shard mutex poisoned".to_owned())?;
-            let size = file
-                .seek(SeekFrom::End(0))
-                .map_err(|error| format!("seek WAL: {error}"))?;
-            // Frames carry virtual offsets; the file only knows about the bytes
-            // that survived the last reclaim.
-            let base = shard_ref.base_offset.load(Ordering::Relaxed);
-            let file_offset = offset.saturating_sub(base);
-            if file_offset >= size {
-                // The cursor caught up to EOF, so the whole file is dead weight.
-                file.set_len(0)
-                    .map_err(|error| format!("truncate WAL: {error}"))?;
-                file.sync_all()
-                    .map_err(|error| format!("sync WAL truncate: {error}"))?;
-                write_cursor(&shard_ref.cursor_path, 0)?;
-                shard_ref
-                    .base_offset
-                    .store(base.saturating_add(size), Ordering::Relaxed);
-                metrics::wal_shard_bytes(shard_ref.shard, shard_ref.destination.as_str(), 0);
-            } else if file_offset >= shard_ref.max_bytes / 2
-                && size - file_offset <= WAL_COMPACT_MAX_TAIL_BYTES
-            {
-                // A continuously busy lane almost never has a moment where the
-                // cursor sits exactly at EOF, so waiting for the full drain above
-                // means the file grows until it trips `max_bytes` and the lane
-                // starts rejecting writes — while the bytes it is holding are
-                // already exported. Rewrite the file from the cursor instead,
-                // which reclaims that prefix without needing a quiet moment.
-                // Gated on half the lane budget so the rewrite cost is amortised
-                // over a large reclaim rather than paid on every batch, and on
-                // `WAL_COMPACT_MAX_TAIL_BYTES` so the copy cannot hold the append
-                // mutex for long — production lanes are a gibibyte each.
-                compact_lane(&shard_ref, &mut file, file_offset, size)?;
-                shard_ref
-                    .base_offset
-                    .store(base.saturating_add(file_offset), Ordering::Relaxed);
-                metrics::wal_lane_compacted(
-                    shard_ref.shard,
-                    shard_ref.destination.as_str(),
-                    file_offset,
-                );
-                metrics::wal_shard_bytes(
-                    shard_ref.shard,
-                    shard_ref.destination.as_str(),
-                    size - file_offset,
-                );
-            } else {
-                write_cursor(&shard_ref.cursor_path, file_offset)?;
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|error| format!("join WAL cursor: {error}"))?
+    async fn mark_exported(
+        &self,
+        lane: usize,
+        cursor: SegmentCursor,
+        bytes: u64,
+    ) -> Result<(), String> {
+        let lane_ref = self.lane(lane)?;
+        tokio::task::spawn_blocking(move || lane_ref.mark_exported_blocking(cursor, bytes))
+            .await
+            .map_err(|error| format!("join WAL cursor: {error}"))?
     }
 }
 
-fn write_cursor(path: &Path, value: u64) -> Result<(), String> {
+fn write_cursor(path: &Path, cursor: SegmentCursor) -> Result<(), String> {
     let mut cursor_file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -1627,127 +1869,109 @@ fn write_cursor(path: &Path, value: u64) -> Result<(), String> {
         .open(path)
         .map_err(|error| format!("open WAL cursor: {error}"))?;
     cursor_file
-        .write_all(value.to_string().as_bytes())
+        .write_all(format!("{} {}", cursor.seq, cursor.offset).as_bytes())
         .map_err(|error| format!("write WAL cursor: {error}"))?;
     cursor_file
         .sync_data()
         .map_err(|error| format!("sync WAL cursor: {error}"))
 }
 
-/// Rewrite `lane_ref`'s file so it begins at `from`, dropping the exported prefix
-/// in front of it. The caller holds the append mutex, so no writer can race us,
-/// and swaps `base_offset` afterwards so in-flight frames keep resolving.
+/// Read a lane cursor. A missing, empty or unparseable cursor reads as the
+/// origin, which replays the lane from its oldest surviving segment.
+fn read_cursor(path: &Path) -> SegmentCursor {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return SegmentCursor::default();
+    };
+    let mut parts = raw.split_whitespace();
+    let (Some(seq), Some(offset)) = (parts.next(), parts.next()) else {
+        return SegmentCursor::default();
+    };
+    let (Ok(seq), Ok(offset)) = (seq.parse::<u64>(), offset.parse::<u64>()) else {
+        return SegmentCursor::default();
+    };
+    SegmentCursor { seq, offset }
+}
+
+/// Every frame this lane still owes, oldest segment first.
 ///
-/// The cursor is reset to 0 *before* the rename publishes the shorter file. A
-/// crash in that window therefore leaves the original file paired with a zeroed
-/// cursor, which replays already-exported frames — at-least-once, the same
-/// guarantee an export retry already carries. The opposite order would pair a
-/// short file with a large cursor and skip frames that were never exported.
-fn compact_lane(lane_ref: &WalShard, file: &mut File, from: u64, size: u64) -> Result<(), String> {
-    let mut tail = Vec::with_capacity(usize::try_from(size - from).unwrap_or(0));
-    file.seek(SeekFrom::Start(from))
-        .map_err(|error| format!("seek WAL compaction: {error}"))?;
-    file.read_to_end(&mut tail)
-        .map_err(|error| format!("read WAL compaction: {error}"))?;
-
-    let temp_path = lane_ref.path.with_extension("wal.compacting");
-    {
-        let mut temp = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&temp_path)
-            .map_err(|error| format!("open WAL compaction temp: {error}"))?;
-        temp.write_all(&tail)
-            .map_err(|error| format!("write WAL compaction temp: {error}"))?;
-        temp.sync_all()
-            .map_err(|error| format!("sync WAL compaction temp: {error}"))?;
-    }
-    // Opened before the rename so that every fallible step still leaves the lane
-    // exactly as it was; after the swap only the directory fsync remains, and
-    // that one is advisory.
-    let replacement = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .append(true)
-        .open(&temp_path)
-        .map_err(|error| format!("reopen WAL compaction temp: {error}"))?;
-
-    write_cursor(&lane_ref.cursor_path, 0)?;
-    std::fs::rename(&temp_path, &lane_ref.path)
-        .map_err(|error| format!("rename WAL compaction temp: {error}"))?;
-    *file = replacement;
-
-    // Without this a power failure can lose the rename while keeping the zeroed
-    // cursor, which costs a replay of the reclaimed prefix.
-    if let Some(dir) = lane_ref.path.parent() {
-        if let Err(error) = File::open(dir).and_then(|handle| handle.sync_all()) {
-            warn!(
-                shard = lane_ref.shard,
-                destination = lane_ref.destination.as_str(),
-                %error,
-                "Failed to fsync WAL directory after lane compaction"
-            );
-        }
-    }
-    Ok(())
-}
-
-fn read_cursor(path: &Path) -> u64 {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .unwrap_or(0)
-}
-
-fn replay_shard(lane: usize, lane_ref: &WalShard) -> Result<Vec<QueuedFrame>, String> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .open(&lane_ref.path)
-        .map_err(|error| format!("open WAL replay: {error}"))?;
-    let mut offset = read_cursor(&lane_ref.cursor_path);
-    file.seek(SeekFrom::Start(offset))
-        .map_err(|error| format!("seek WAL replay: {error}"))?;
-
+/// A segment that fails to decode gives up its tail and the next segment is
+/// still replayed: corruption in one 8 MiB file must not cost the whole lane.
+fn replay_lane(lane: usize, lane_ref: &WalLane) -> Result<Vec<QueuedFrame>, String> {
     let shard = lane / LANES_PER_SHARD;
-    // Replay is a startup path, where nothing has been reclaimed yet, but reading
-    // the base keeps replayed frames on the same virtual axis as appended ones.
-    let base = lane_ref.base_offset.load(Ordering::Relaxed);
+    let cursor = lane_ref
+        .export
+        .lock()
+        .map_err(|_| "WAL lane mutex poisoned".to_owned())?
+        .cursor;
+    // The active segment was opened empty by `WalLane::open` and is the one
+    // appends are landing in; nothing in it predates this process.
+    let active = lane_ref.active_seq.load(Ordering::Acquire);
+
     let mut frames = Vec::new();
-    loop {
-        let start = offset;
-        let Some(frame) = read_wal_frame(&mut file, start)? else {
-            break;
-        };
-        frames.push(QueuedFrame {
-            shard,
-            start: base + start,
-            end: base + frame.end,
-            org_id: frame.org_id,
-            queued_bytes: frame.payload.len() as u64,
-            signal: frame.signal,
-            destination: frame.destination,
-            datasource: frame.datasource,
-            row_count: frame.row_count,
-            payload: frame.payload,
-            // Replayed from disk after a restart: the originating trace is gone.
-            source_span: None,
-        });
-        offset = frame.end;
+    for seq in list_segments(&lane_ref.dir)? {
+        if seq < cursor.seq || seq >= active {
+            continue;
+        }
+        let path = segment_path(&lane_ref.dir, seq);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(&path)
+            .map_err(|error| format!("open WAL replay {}: {error}", path.display()))?;
+        let mut offset = if seq == cursor.seq { cursor.offset } else { 0 };
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|error| format!("seek WAL replay: {error}"))?;
+        loop {
+            let start = offset;
+            let frame = match read_wal_frame(&mut file, start) {
+                Ok(Some(frame)) => frame,
+                Ok(None) => break,
+                Err(error) => {
+                    warn!(
+                        shard,
+                        destination = lane_ref.destination.as_str(),
+                        segment = seq,
+                        offset = start,
+                        %error,
+                        "Dropping the tail of a corrupt ingest WAL segment"
+                    );
+                    break;
+                }
+            };
+            offset = frame.end;
+            frames.push(QueuedFrame {
+                shard,
+                segment: seq,
+                start,
+                end: frame.end,
+                org_id: frame.org_id,
+                queued_bytes: frame.payload.len() as u64,
+                signal: frame.signal,
+                destination: frame.destination,
+                datasource: frame.datasource,
+                row_count: frame.row_count,
+                payload: frame.payload,
+                // Replayed from disk after a restart: the originating trace is gone.
+                source_span: None,
+            });
+        }
     }
     Ok(frames)
 }
 
-/// Read every surviving frame from a legacy single-file-per-shard WAL, starting
-/// at its persisted cursor. Returns an empty vec if the file is absent. Used by
-/// `migrate_legacy_shards` to relocate frames into the per-destination lanes.
+/// Read every surviving frame from a pre-segment WAL file, starting at its
+/// persisted cursor. Returns an empty vec if the file is absent. Used by
+/// `migrate_legacy_files` to relocate frames into lane segments.
 fn read_legacy_frames(path: &Path, cursor_path: &Path) -> Result<Vec<DecodedWalFrame>, String> {
     let mut file = match OpenOptions::new().read(true).open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(format!("open legacy WAL: {error}")),
     };
-    let mut offset = read_cursor(cursor_path);
+    // Pre-segment cursors were a bare byte offset.
+    let mut offset = std::fs::read_to_string(cursor_path)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(0);
     file.seek(SeekFrom::Start(offset))
         .map_err(|error| format!("seek legacy WAL: {error}"))?;
     let mut frames = Vec::new();
@@ -2126,7 +2350,6 @@ impl ExportWorker {
 
         let start = Instant::now();
         let first_signal = frames[0].signal;
-        let first_offset = frames[0].start;
         for (datasource, frames) in by_tinybird {
             let (body, rows) = combine_frames(frames);
             self.post_tinybird(&datasource, body, rows).await?;
@@ -2147,8 +2370,24 @@ impl ExportWorker {
             }
         }
 
-        let end = frames.iter().map(|frame| frame.end).max().unwrap_or(0);
-        self.wal.mark_exported(self.lane, end).await?;
+        // The batch drained a contiguous run of this lane, so the furthest
+        // `(segment, end)` is where the cursor belongs; the bytes are summed per
+        // frame because a jump across a segment boundary is not a byte count.
+        let cursor = frames
+            .iter()
+            .map(|frame| SegmentCursor {
+                seq: frame.segment,
+                offset: frame.end,
+            })
+            .max()
+            .unwrap_or_default();
+        let exported_bytes: u64 = frames
+            .iter()
+            .map(|frame| frame.end.saturating_sub(frame.start))
+            .sum();
+        self.wal
+            .mark_exported(self.lane, cursor, exported_bytes)
+            .await?;
         for frame in &frames {
             release_org_queue_bytes(&self.org_queue_bytes, &frame.org_id, frame.queued_bytes);
         }
@@ -2157,7 +2396,7 @@ impl ExportWorker {
             self.destination.as_str(),
             &format!("{first_signal:?}"),
             start.elapsed().as_secs_f64(),
-            end.saturating_sub(first_offset),
+            exported_bytes,
         );
         Ok(())
     }
@@ -3531,6 +3770,7 @@ mod tests {
     fn queued_frame_with_source(source_span: Option<SpanContext>) -> QueuedFrame {
         QueuedFrame {
             shard: 0,
+            segment: 0,
             start: 0,
             end: 0,
             org_id: "org_test".to_owned(),
@@ -3618,6 +3858,7 @@ mod tests {
             org_queue_max_bytes: 1024 * 1024,
             queue_channel_capacity: 10,
             wal_shards: 2,
+            wal_segment_max_bytes: WAL_SEGMENT_MAX_BYTES,
             batch_max_rows: 100,
             batch_max_bytes: 1024 * 1024,
             batch_max_wait: Duration::from_millis(10),
@@ -3756,27 +3997,21 @@ mod tests {
         destination: ExportDestination,
     ) {
         let dest = destination.as_str();
-        let cursor_path = queue_dir.join(format!("shard-{shard:03}-{dest}.cursor"));
-        let shard_path = queue_dir.join(format!("shard-{shard:03}-{dest}.wal"));
+        let dir = queue_dir.join(format!("shard-{shard:03}-{dest}"));
+        let cursor_path = dir.join("lane.cursor");
         tokio::time::timeout(Duration::from_secs(2), async move {
             loop {
-                // Success is either (a) cursor ahead of zero while writer is
-                // still ahead of reader, or (b) shard file truncated to zero
-                // because mark_exported() caught up to EOF and reclaimed disk.
-                let cursor_offset = std::fs::read_to_string(&cursor_path)
-                    .ok()
-                    .and_then(|raw| raw.trim().parse::<u64>().ok())
-                    .unwrap_or(0);
-                let shard_size = std::fs::metadata(&shard_path)
-                    .map_or(u64::MAX, |meta| meta.len());
-                if cursor_offset > 0 || shard_size == 0 {
+                // The lane has drained once its cursor has moved off the origin:
+                // either forward inside the first segment, or onto a later one
+                // whose predecessors have been unlinked.
+                if read_cursor(&cursor_path) != SegmentCursor::default() {
                     return;
                 }
                 sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("export worker should drain the shard (cursor advance or truncation) after Tinybird success");
+        .expect("export worker should advance the lane cursor after Tinybird success");
     }
 
     fn string_kv(key: &str, value: &str) -> KeyValue {
@@ -4913,7 +5148,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            pipeline.wal_backlog_bytes().await > 0,
+            pipeline.wal_backlog_bytes() > 0,
             "a committed, unexported frame must count as backlog"
         );
         let remaining = pipeline.drain_wal(Duration::from_millis(300)).await;
@@ -5161,9 +5396,11 @@ mod tests {
 
     #[tokio::test]
     async fn migrate_legacy_shard_relocates_frames_into_lanes() {
-        // A pre-lanes binary wrote a single `shard-NNN.wal` mixing destinations.
-        // On startup we must relocate each surviving frame into its destination
-        // lane and remove the legacy file — without dropping anything.
+        // Two pre-segment shapes have to survive a rollout: `shard-NNN.wal`
+        // (before per-destination lanes, mixing both destinations in one file)
+        // and `shard-NNN-<dest>.wal` (one file per lane). Each surviving frame
+        // is relocated into its lane's segments and the legacy file removed —
+        // without dropping anything.
         let queue_dir = unique_test_dir("legacy-migration");
         std::fs::create_dir_all(&queue_dir).unwrap();
         let mut cfg = test_cfg();
@@ -5192,9 +5429,25 @@ mod tests {
         legacy.extend(encode_wal_frame(&tb_frame).unwrap());
         legacy.extend(encode_wal_frame(&ch_frame).unwrap());
         std::fs::write(queue_dir.join("shard-000.wal"), &legacy).unwrap();
+        // The Phase 1 shape: a per-lane file, already destination-scoped.
+        std::fs::write(
+            queue_dir.join("shard-000-tinybird.wal"),
+            encode_wal_frame(&EncodedFrame {
+                routing_key: 0,
+                org_id: "org_c".to_owned(),
+                signal: TelemetrySignal::Traces,
+                destination: ExportDestination::Tinybird,
+                datasource: "traces".to_owned(),
+                row_count: 1,
+                payload: br#"{"c":3}"#.to_vec(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
 
         let wal = ShardedWal::open(&cfg).expect("open WAL");
-        wal.migrate_legacy_shards(&cfg).await;
+        wal.migrate_legacy_files(&cfg).await;
+        wal.seal_all();
 
         assert!(
             !queue_dir.join("shard-000.wal").exists(),
@@ -5209,10 +5462,16 @@ mod tests {
             .replay(lane_index(0, ExportDestination::ClickHouse))
             .await
             .unwrap();
-        assert_eq!(tb_frames.len(), 1);
+        assert!(
+            !queue_dir.join("shard-000-tinybird.wal").exists(),
+            "the per-lane legacy file should be removed too"
+        );
+        assert_eq!(tb_frames.len(), 2);
         assert_eq!(tb_frames[0].org_id, "org_a");
         assert_eq!(tb_frames[0].destination, ExportDestination::Tinybird);
         assert_eq!(tb_frames[0].payload, br#"{"a":1}"#);
+        assert_eq!(tb_frames[1].org_id, "org_c");
+        assert_eq!(tb_frames[1].payload, br#"{"c":3}"#);
         assert_eq!(ch_frames.len(), 1);
         assert_eq!(ch_frames[0].org_id, "org_b");
         assert_eq!(ch_frames[0].destination, ExportDestination::ClickHouse);
@@ -6135,270 +6394,265 @@ mod tests {
         drop(std::fs::remove_dir_all(queue_dir));
     }
 
-    #[tokio::test]
-    async fn wal_truncates_after_full_drain_allowing_further_appends() {
-        // Regression: pre-fix, ShardedWal::append() only checked file-size-vs-max
-        // and the file was never truncated. After max_bytes was hit, the shard
-        // refused all further appends — even with every prior frame successfully
-        // exported. Now mark_exported() truncates the data file when the cursor
-        // catches up to EOF, so a steady-state pipeline never wedges.
-        let queue_dir = unique_test_dir("wal-truncates-on-drain");
-        std::fs::create_dir_all(&queue_dir).unwrap();
+    /// A lane whose segments seal every ~2 frames, so segment rotation,
+    /// deletion and replay are all reachable from a handful of appends.
+    fn segmented_cfg(queue_dir: PathBuf, lane_bytes: u64, segment_bytes: u64) -> TinybirdConfig {
         let mut cfg = test_cfg();
-        cfg.queue_dir = queue_dir.clone();
+        cfg.queue_dir = queue_dir;
         cfg.wal_shards = 1;
-        // Per-lane budget is queue_max_bytes / LANES_PER_SHARD, so size the total
-        // to leave each lane the ~512-byte budget this test exercises.
-        cfg.queue_max_bytes = 512 * LANES_PER_SHARD as u64;
+        cfg.queue_max_bytes = lane_bytes * LANES_PER_SHARD as u64;
+        cfg.wal_segment_max_bytes = segment_bytes;
+        cfg
+    }
 
-        let wal = ShardedWal::open(&cfg).expect("open WAL");
-
-        let frame = EncodedFrame {
+    fn wal_test_frame(payload_bytes: usize) -> EncodedFrame {
+        EncodedFrame {
             routing_key: 0,
             org_id: "org_contract".to_owned(),
             signal: TelemetrySignal::Traces,
             destination: ExportDestination::Tinybird,
             datasource: "traces".to_owned(),
             row_count: 1,
-            payload: vec![0u8; 200],
-        };
+            payload: vec![0u8; payload_bytes],
+        }
+    }
 
-        // First two appends fit (each ~240 bytes encoded, ≤512 budget).
-        let (start_a, end_a) = wal.append(0, &frame).await.expect("first append");
+    fn lane_dir(queue_dir: &Path) -> PathBuf {
+        queue_dir.join("shard-000-tinybird")
+    }
+
+    #[tokio::test]
+    async fn wal_reclaims_segments_once_the_cursor_passes_them() {
+        // The lane cap counts bytes on disk, so a lane only keeps accepting
+        // writes if exported segments are actually deleted. Before segments this
+        // needed either a moment where the cursor sat exactly at EOF, or a tail
+        // rewrite under the append lock; now it is an unlink.
+        let queue_dir = unique_test_dir("wal-reclaims-segments");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let cfg = segmented_cfg(queue_dir.clone(), 800, 240);
+
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+        let frame = wal_test_frame(200);
+
+        // ~240 bytes encoded, so every frame fills a segment and seals it.
+        let (seg_a, start_a, end_a) = wal.append(0, &frame).await.expect("append a");
+        let (seg_b, _, end_b) = wal.append(0, &frame).await.expect("append b");
+        let (seg_c, _, _) = wal.append(0, &frame).await.expect("append c");
         assert_eq!(start_a, 0);
-        let (start_b, end_b) = wal.append(0, &frame).await.expect("second append");
-        assert_eq!(start_b, end_a);
+        assert_eq!(
+            (seg_a, seg_b, seg_c),
+            (0, 1, 2),
+            "each frame seals a segment"
+        );
 
-        // Third append would overflow before the fix would let us truncate.
         wal.append(0, &frame)
             .await
-            .expect_err("third append exceeds shard budget");
+            .expect_err("a fourth frame exceeds the lane budget");
 
-        // Drain the cursor to EOF — this should truncate the lane file.
-        wal.mark_exported(0, end_b).await.expect("mark_exported");
+        // Retire the first two segments. The third is still the active one, so
+        // its bytes stay.
+        wal.mark_exported(
+            0,
+            SegmentCursor {
+                seq: seg_b,
+                offset: end_b,
+            },
+            end_a + end_b,
+        )
+        .await
+        .expect("mark_exported");
 
-        let shard_path = queue_dir.join("shard-000-tinybird.wal");
-        let size_after_drain = std::fs::metadata(&shard_path).unwrap().len();
+        let dir = lane_dir(&queue_dir);
         assert_eq!(
-            size_after_drain, 0,
-            "lane file should be truncated to 0 after full drain"
-        );
-
-        let cursor_after_drain =
-            std::fs::read_to_string(queue_dir.join("shard-000-tinybird.cursor")).unwrap();
-        assert_eq!(
-            cursor_after_drain.trim(),
-            "0",
-            "cursor should reset to 0 after truncate"
-        );
-
-        // The shard accepts new writes again — previously this would still fail
-        // because the file size, not cursor delta, was the gating signal.
-        let (start_c, _end_c) = wal
-            .append(0, &frame)
-            .await
-            .expect("append after drain should succeed");
-        assert_eq!(
-            start_c, end_b,
-            "offsets stay monotonic across a reclaim so an in-flight frame's \
-             offset is never reused by a fresh file"
+            list_segments(&dir).unwrap(),
+            vec![seg_c, seg_c + 1],
+            "exported segments are unlinked; the active one and its successor remain"
         );
         assert_eq!(
-            std::fs::metadata(&shard_path).unwrap().len(),
-            end_a,
-            "the append lands in a fresh file, one frame long"
-        );
-
-        drop(std::fs::remove_dir_all(queue_dir));
-    }
-
-    #[tokio::test]
-    async fn wal_partial_drain_advances_cursor_without_truncating() {
-        // When mark_exported() lands while writers are still ahead of the cursor,
-        // we must NOT truncate — that would erase frames that haven't been
-        // exported yet. We only persist the offset.
-        let queue_dir = unique_test_dir("wal-partial-drain");
-        std::fs::create_dir_all(&queue_dir).unwrap();
-        let mut cfg = test_cfg();
-        cfg.queue_dir = queue_dir.clone();
-        cfg.wal_shards = 1;
-        cfg.queue_max_bytes = 4096;
-
-        let wal = ShardedWal::open(&cfg).expect("open WAL");
-        let frame = EncodedFrame {
-            routing_key: 0,
-            org_id: "org_contract".to_owned(),
-            signal: TelemetrySignal::Traces,
-            destination: ExportDestination::Tinybird,
-            datasource: "traces".to_owned(),
-            row_count: 1,
-            payload: vec![0u8; 100],
-        };
-
-        let (_, end_a) = wal.append(0, &frame).await.unwrap();
-        let (_, end_b) = wal.append(0, &frame).await.unwrap();
-        assert!(end_b > end_a);
-
-        // Cursor advances to the first frame's end while frame B is still
-        // unexported (writer is ahead of reader).
-        wal.mark_exported(0, end_a).await.unwrap();
-
-        let shard_path = queue_dir.join("shard-000-tinybird.wal");
-        let size_after_partial = std::fs::metadata(&shard_path).unwrap().len();
-        assert_eq!(
-            size_after_partial, end_b,
-            "lane file must keep unexported bytes when cursor is behind EOF"
-        );
-        let cursor_after_partial =
-            std::fs::read_to_string(queue_dir.join("shard-000-tinybird.cursor")).unwrap();
-        assert_eq!(cursor_after_partial.trim(), end_a.to_string());
-
-        drop(std::fs::remove_dir_all(queue_dir));
-    }
-
-    #[tokio::test]
-    async fn wal_compacts_exported_prefix_without_a_full_drain() {
-        // Regression: mark_exported() only reclaimed disk when the cursor landed
-        // exactly at EOF. A continuously busy lane never has that moment, so its
-        // file grew until it tripped max_bytes and started rejecting writes —
-        // "Telemetry WAL lane is full" while export was healthy and the bytes it
-        // held were already exported. The prefix is now reclaimed in place.
-        let queue_dir = unique_test_dir("wal-compacts-prefix");
-        std::fs::create_dir_all(&queue_dir).unwrap();
-        let mut cfg = test_cfg();
-        cfg.queue_dir = queue_dir.clone();
-        cfg.wal_shards = 1;
-        // ~1024 bytes per lane, so compaction arms once 512 bytes are exported.
-        cfg.queue_max_bytes = 1024 * LANES_PER_SHARD as u64;
-
-        let wal = ShardedWal::open(&cfg).expect("open WAL");
-        let frame = EncodedFrame {
-            routing_key: 0,
-            org_id: "org_contract".to_owned(),
-            signal: TelemetrySignal::Traces,
-            destination: ExportDestination::Tinybird,
-            datasource: "traces".to_owned(),
-            row_count: 1,
-            payload: vec![0u8; 200],
-        };
-
-        // Fill the lane, never letting the cursor reach EOF.
-        let (_, _end_a) = wal.append(0, &frame).await.expect("append a");
-        let (_, _end_b) = wal.append(0, &frame).await.expect("append b");
-        let (_, end_c) = wal.append(0, &frame).await.expect("append c");
-        let (_, end_d) = wal.append(0, &frame).await.expect("append d");
-        wal.append(0, &frame)
-            .await
-            .expect_err("lane is full before compaction");
-
-        // Writer is still ahead of the reader — the old code would only persist
-        // the offset here and leave the file at its full size forever.
-        wal.mark_exported(0, end_c).await.expect("mark_exported");
-
-        let shard_path = queue_dir.join("shard-000-tinybird.wal");
-        let unexported = end_d - end_c;
-        assert_eq!(
-            std::fs::metadata(&shard_path).unwrap().len(),
-            unexported,
-            "compaction keeps exactly the unexported tail"
-        );
-        assert_eq!(
-            std::fs::read_to_string(queue_dir.join("shard-000-tinybird.cursor"))
+            std::fs::read_to_string(dir.join("lane.cursor"))
                 .unwrap()
                 .trim(),
-            "0",
-            "the surviving tail starts at the front of the compacted file"
+            format!("{seg_c} 0"),
+            "a fully drained sealed segment leaves the cursor at the next segment's origin"
         );
-        assert!(
-            !queue_dir.join("shard-000-tinybird.wal.compacting").exists(),
-            "the compaction temp file is renamed away, not left behind"
-        );
+        assert_eq!(wal.backlog_bytes(), end_a, "one frame is still unexported");
 
-        // The lane accepts writes again, and offsets stay on one monotonic axis
-        // so the frames still in flight resolve against the rewritten file.
-        let (start_e, _end_e) = wal
-            .append(0, &frame)
+        // The reclaim freed budget, so the lane accepts writes again.
+        wal.append(0, &frame)
             .await
-            .expect("append after compaction should succeed");
-        assert_eq!(start_e, end_d, "virtual offsets survive the rewrite");
+            .expect("append after reclaim should succeed");
 
-        // Exactly the unexported frames replay — no loss, no duplicates.
-        let replayed = wal.replay(0).await.expect("replay");
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn wal_partial_drain_keeps_the_unexported_tail() {
+        // A cursor landing mid-segment must persist the offset and nothing else:
+        // deleting or rewriting the file here would drop frames that were never
+        // exported.
+        let queue_dir = unique_test_dir("wal-partial-drain");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let cfg = segmented_cfg(queue_dir.clone(), 4096, WAL_SEGMENT_MAX_BYTES);
+
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+        let frame = wal_test_frame(100);
+
+        let (seg_a, _, end_a) = wal.append(0, &frame).await.unwrap();
+        let (seg_b, _, end_b) = wal.append(0, &frame).await.unwrap();
+        assert_eq!(seg_a, seg_b, "both frames fit one segment");
+        assert!(end_b > end_a);
+
+        wal.mark_exported(
+            0,
+            SegmentCursor {
+                seq: seg_a,
+                offset: end_a,
+            },
+            end_a,
+        )
+        .await
+        .unwrap();
+
+        let dir = lane_dir(&queue_dir);
         assert_eq!(
-            replayed.len(),
-            2,
-            "only frame d and frame e survive the compaction"
+            file_len(&segment_path(&dir, seg_a)),
+            end_b,
+            "the segment keeps its unexported bytes"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("lane.cursor"))
+                .unwrap()
+                .trim(),
+            format!("{seg_a} {end_a}")
+        );
+        assert_eq!(wal.backlog_bytes(), end_b - end_a);
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::await_holding_lock,
+        reason = "holding the export lock across the append IS the assertion: the two sides must \
+                  not share a mutex"
+    )]
+    async fn wal_appends_do_not_wait_on_an_export() {
+        // The regression this layout exists for: reclaiming space used to run
+        // under the append mutex, so a commit could sit behind a multi-megabyte
+        // copy — a flat 3ms p50 with a p95 swinging between 145ms and 998ms.
+        // Holding the export side must not stall a commit.
+        let queue_dir = unique_test_dir("wal-append-during-export");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let cfg = segmented_cfg(queue_dir.clone(), 64 * 1024, 240);
+
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+        let frame = wal_test_frame(200);
+        wal.append(0, &frame).await.expect("seed append");
+
+        let held = Arc::clone(&wal.lanes[0]);
+        let guard = held.export.lock().expect("export lock");
+        let appended = tokio::time::timeout(Duration::from_secs(2), wal.append(0, &frame)).await;
+        drop(guard);
+
+        appended
+            .expect("an append must not block on the export lock")
+            .expect("append while the export side is held");
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn wal_replays_exactly_the_unexported_frames_after_a_restart() {
+        // What survives a task replacement: everything the export cursor has not
+        // passed, across segment boundaries, and nothing it has.
+        let queue_dir = unique_test_dir("wal-replay-across-segments");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let cfg = segmented_cfg(queue_dir.clone(), 64 * 1024, 240);
+
+        let frame = wal_test_frame(200);
+        let (mid_seq, mid_end) = {
+            let wal = ShardedWal::open(&cfg).expect("open WAL");
+            wal.append(0, &frame).await.expect("append a");
+            let (seq, _, end) = wal.append(0, &frame).await.expect("append b");
+            wal.append(0, &frame).await.expect("append c");
+            wal.append(0, &frame).await.expect("append d");
+            (seq, end)
+        };
+
+        // Frames a and b are exported; c and d are not.
+        {
+            let wal = ShardedWal::open(&cfg).expect("reopen WAL");
+            wal.mark_exported(
+                0,
+                SegmentCursor {
+                    seq: mid_seq,
+                    offset: mid_end,
+                },
+                mid_end,
+            )
+            .await
+            .expect("mark_exported");
+        }
+
+        let wal = ShardedWal::open(&cfg).expect("reopen WAL after export");
+        let replayed = wal.replay(0).await.expect("replay");
+        assert_eq!(replayed.len(), 2, "only the unexported frames come back");
+        assert!(
+            replayed.iter().all(|frame| frame.segment > mid_seq),
+            "replayed frames sit past the cursor's segment"
+        );
+        assert_eq!(
+            wal.backlog_bytes(),
+            replayed.iter().map(|f| f.end - f.start).sum::<u64>(),
+            "the recovered backlog is what a shutdown drain would wait for"
+        );
+
+        // Retiring them drains the lane for real.
+        let last = replayed.last().unwrap();
+        wal.mark_exported(
+            0,
+            SegmentCursor {
+                seq: last.segment,
+                offset: last.end,
+            },
+            wal.backlog_bytes(),
+        )
+        .await
+        .expect("final drain");
+        assert_eq!(wal.backlog_bytes(), 0);
+        assert!(
+            wal.replay(0).await.expect("replay after drain").is_empty(),
+            "a drained lane replays nothing"
         );
 
         drop(std::fs::remove_dir_all(queue_dir));
     }
 
     #[tokio::test]
-    async fn wal_compaction_does_not_strand_frames_already_in_flight() {
-        // The hazard compaction introduces: a frame is appended, its offsets are
-        // handed to the export worker, and only *then* is the file rewritten
-        // underneath it. If those offsets were file-relative, the worker's later
-        // mark_exported() would carry a number far past the rewritten file's end,
-        // read as a full drain, and truncate away frames that were never
-        // exported. Frames therefore carry virtual offsets; this test fails with
-        // silent data loss if that translation is dropped.
-        let queue_dir = unique_test_dir("wal-compaction-in-flight");
+    async fn wal_recovers_when_the_cursor_file_is_lost() {
+        // Losing the cursor must replay the lane, not skip it: a duplicate
+        // export is at-least-once, which every destination already tolerates,
+        // and a skipped frame is silent loss.
+        let queue_dir = unique_test_dir("wal-lost-cursor");
         std::fs::create_dir_all(&queue_dir).unwrap();
-        let mut cfg = test_cfg();
-        cfg.queue_dir = queue_dir.clone();
-        cfg.wal_shards = 1;
-        cfg.queue_max_bytes = 1024 * LANES_PER_SHARD as u64;
+        let cfg = segmented_cfg(queue_dir.clone(), 64 * 1024, 240);
 
-        let wal = ShardedWal::open(&cfg).expect("open WAL");
-        let frame = EncodedFrame {
-            routing_key: 0,
-            org_id: "org_contract".to_owned(),
-            signal: TelemetrySignal::Traces,
-            destination: ExportDestination::Tinybird,
-            datasource: "traces".to_owned(),
-            row_count: 1,
-            payload: vec![0u8; 200],
-        };
+        let frame = wal_test_frame(200);
+        {
+            let wal = ShardedWal::open(&cfg).expect("open WAL");
+            let (seq, _, end) = wal.append(0, &frame).await.expect("append a");
+            wal.append(0, &frame).await.expect("append b");
+            wal.mark_exported(0, SegmentCursor { seq, offset: end }, end)
+                .await
+                .expect("mark_exported");
+        }
+        std::fs::remove_file(lane_dir(&queue_dir).join("lane.cursor")).expect("drop cursor");
 
-        let (_, _end_a) = wal.append(0, &frame).await.expect("append a");
-        let (_, _end_b) = wal.append(0, &frame).await.expect("append b");
-        let (_, end_c) = wal.append(0, &frame).await.expect("append c");
-        // Frame d is "in flight": appended, offsets handed out, not yet exported.
-        let (_, end_d) = wal.append(0, &frame).await.expect("append d");
-
-        wal.mark_exported(0, end_c).await.expect("compacting drain");
-
-        // A frame that arrives after the rewrite, which the stale-offset bug
-        // would destroy along with everything else in the file.
-        let (_, end_e) = wal.append(0, &frame).await.expect("append e");
-
-        // The worker now retires frame d using the offset it captured *before*
-        // compaction. Frame e must survive.
-        wal.mark_exported(0, end_d).await.expect("in-flight drain");
-
-        let shard_path = queue_dir.join("shard-000-tinybird.wal");
-        assert_ne!(
-            std::fs::metadata(&shard_path).unwrap().len(),
-            0,
-            "a stale in-flight offset must not read as a full drain"
-        );
-        let replayed = wal.replay(0).await.expect("replay");
+        let wal = ShardedWal::open(&cfg).expect("reopen WAL");
         assert_eq!(
-            replayed.len(),
+            wal.replay(0).await.expect("replay").len(),
             1,
-            "frame e is unexported and must still be replayable"
-        );
-        assert_eq!(
-            replayed[0].end, end_e,
-            "the surviving frame keeps its original virtual offset"
-        );
-
-        // Retiring frame e too now drains the lane for real.
-        wal.mark_exported(0, end_e).await.expect("final drain");
-        assert_eq!(
-            std::fs::metadata(&shard_path).unwrap().len(),
-            0,
-            "a genuine full drain still truncates"
+            "the surviving segment replays from its start"
         );
 
         drop(std::fs::remove_dir_all(queue_dir));
