@@ -9,7 +9,7 @@ import {
 	type UserId,
 } from "@maple/domain/http"
 import { oauthAuthStates } from "@maple/db"
-import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Array as Arr, Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { listAccounts } from "@/services/integrations/CloudflareApi"
 import { Database } from "@/platform/DatabaseLive"
@@ -30,17 +30,28 @@ const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 const GrantedAccounts = Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.NullOr(Schema.String) }))
 const decodeGrantedAccounts = Schema.decodeUnknownOption(Schema.fromJsonString(GrantedAccounts))
 
-/** Stored grant list, falling back to the row's own principal for pre-list rows. */
+interface GrantedAccount {
+	readonly id: string
+	readonly name: string | null
+}
+
+/**
+ * Stored grant list, falling back to the row's own principal for pre-list rows (and for a list
+ * that decodes to nothing). A connection row therefore always names at least one account, and
+ * saying so in the type is what lets callers take the primary without a null assertion.
+ */
 const grantedAccountsOfRow = (row: {
 	readonly grantedAccountsJson: string | null
 	readonly externalUserId: string
 	readonly externalAccountName: string | null
-}): ReadonlyArray<{ readonly id: string; readonly name: string | null }> => {
-	const fallback = [{ id: row.externalUserId, name: row.externalAccountName }]
+}): Arr.NonEmptyReadonlyArray<GrantedAccount> => {
+	const fallback: Arr.NonEmptyReadonlyArray<GrantedAccount> = [
+		{ id: row.externalUserId, name: row.externalAccountName },
+	]
 	if (row.grantedAccountsJson == null) return fallback
 	return Option.match(decodeGrantedAccounts(row.grantedAccountsJson), {
 		onNone: () => fallback,
-		onSome: (accounts) => (accounts.length === 0 ? fallback : accounts),
+		onSome: (accounts) => (Arr.isReadonlyArrayNonEmpty(accounts) ? accounts : fallback),
 	})
 }
 
@@ -109,6 +120,18 @@ export interface CloudflareConnectedAccount {
 	readonly revoked: boolean
 }
 
+/**
+ * The org's Cloudflare grant: either absent, or present covering at least one account. The
+ * connected branch carries a non-empty list so callers can take the primary account (the row's
+ * own principal, first in grant order) without asserting an index is there.
+ */
+export type CloudflareConnectionStatus =
+	| { readonly connected: false; readonly accounts: readonly [] }
+	| {
+			readonly connected: true
+			readonly accounts: Arr.NonEmptyReadonlyArray<CloudflareConnectedAccount>
+	  }
+
 export interface CloudflareOAuthServiceApi {
 	readonly startConnect: (
 		orgId: OrgId,
@@ -129,13 +152,9 @@ export interface CloudflareOAuthServiceApi {
 		| IntegrationsPersistenceError
 	>
 	/** Every account the org's grant covers, in the order the grant listed them. */
-	readonly getStatus: (orgId: OrgId) => Effect.Effect<
-		{
-			readonly connected: boolean
-			readonly accounts: ReadonlyArray<CloudflareConnectedAccount>
-		},
-		IntegrationsPersistenceError
-	>
+	readonly getStatus: (
+		orgId: OrgId,
+	) => Effect.Effect<CloudflareConnectionStatus, IntegrationsPersistenceError>
 	/**
 	 * Fresh access token addressed to one granted account. Without `accountId` the
 	 * grant must cover exactly one account — ambiguous lookups fail rather than
@@ -261,7 +280,7 @@ export class CloudflareOAuthService extends Context.Service<
 				tokenResponse.access_token,
 				env.MAPLE_CLOUDFLARE_API_BASE_URL,
 			)
-			if (accounts.length === 0) {
+			if (!Arr.isReadonlyArrayNonEmpty(accounts)) {
 				yield* revokeToken(config, tokenResponse.access_token)
 				return yield* Effect.fail(
 					new IntegrationsValidationError({
@@ -269,7 +288,7 @@ export class CloudflareOAuthService extends Context.Service<
 					}),
 				)
 			}
-			const primaryAccount = accounts[0]!
+			const primaryAccount = Arr.headNonEmpty(accounts)
 
 			const accessEnc = yield* oauth.encryptValue(tokenResponse.access_token)
 			const refreshEnc = tokenResponse.refresh_token
@@ -355,7 +374,7 @@ export class CloudflareOAuthService extends Context.Service<
 			}
 			return {
 				accessToken,
-				accountId: accountId ?? granted[0]!.id,
+				accountId: accountId ?? Arr.headNonEmpty(granted).id,
 				scope: row.scope,
 			} satisfies CloudflareAccessToken
 		})
@@ -363,11 +382,14 @@ export class CloudflareOAuthService extends Context.Service<
 		const getStatus = Effect.fn("CloudflareOAuthService.getStatus")(function* (orgId: OrgId) {
 			const row = yield* oauth.loadConnection(orgId)
 			if (!row) {
-				return { connected: false, accounts: [] }
+				return { connected: false, accounts: [] } satisfies CloudflareConnectionStatus
 			}
 			return {
 				connected: true,
-				accounts: grantedAccountsOfRow(row).map(
+				// `Arr.map` carries the non-emptiness through, so the connected branch keeps its
+				// at-least-one-account guarantee.
+				accounts: Arr.map(
+					grantedAccountsOfRow(row),
 					(account): CloudflareConnectedAccount => ({
 						accountId: account.id,
 						accountName: account.name,
@@ -376,7 +398,7 @@ export class CloudflareOAuthService extends Context.Service<
 						revoked: row.revokedAt != null,
 					}),
 				),
-			}
+			} satisfies CloudflareConnectionStatus
 		})
 
 		const disconnect = Effect.fn("CloudflareOAuthService.disconnect")(function* (orgId: OrgId) {

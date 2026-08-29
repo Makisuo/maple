@@ -2640,7 +2640,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			// Legacy top-level view: first (oldest) connection's identity + every CONNECTED
 			// account's zones. State rows of since-disconnected accounts stay in Postgres
 			// (they resume the watermark on reconnect) but must not render as live zones.
-			const primary = connection.accounts[0]!
+			const primary = Arr.headNonEmpty(connection.accounts)
 			const mergedZones = accounts
 				.flatMap((account) => account.zones)
 				.sort((a, b) => a.name.localeCompare(b.name))

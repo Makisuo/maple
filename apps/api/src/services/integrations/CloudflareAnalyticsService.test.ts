@@ -10,7 +10,7 @@ import {
 	oauthConnections,
 	orgClickHouseSettings,
 } from "@maple/db"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { Array as Arr, ConfigProvider, Effect, Layer, Schema } from "effect"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -416,7 +416,9 @@ const makeLayer = (
  */
 const seedConnection = (
 	scope: string = ANALYTICS_SCOPE,
-	accounts: ReadonlyArray<{ id: string; name: string }> = [{ id: ACCOUNT_ID, name: "Test Account" }],
+	accounts: Arr.NonEmptyReadonlyArray<{ id: string; name: string }> = [
+		{ id: ACCOUNT_ID, name: "Test Account" },
+	],
 ) =>
 	Effect.gen(function* () {
 		const database = yield* Database
@@ -427,8 +429,8 @@ const seedConnection = (
 				id: randomUUID(),
 				orgId: ORG,
 				provider: "cloudflare",
-				externalUserId: accounts[0]!.id,
-				externalAccountName: accounts[0]!.name,
+				externalUserId: Arr.headNonEmpty(accounts).id,
+				externalAccountName: Arr.headNonEmpty(accounts).name,
 				grantedAccountsJson:
 					accounts.length > 1
 						? JSON.stringify(accounts.map((account) => ({ id: account.id, name: account.name })))
