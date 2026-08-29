@@ -265,13 +265,11 @@ describe("CloudflareOAuthService", () => {
 			])
 
 			// Account-addressed tokens resolve for every granted account; an account outside
-			// the grant and the ambiguous account-less lookup both refuse.
+			// the grant refuses.
 			const token = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_2")
 			assert.strictEqual(token.accountId, "acc_2")
 			const outside = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_3").pipe(Effect.flip)
 			assert.strictEqual(outside._tag, "@maple/http/errors/IntegrationsValidationError")
-			const ambiguous = yield* service.getValidAccessToken(asOrgId("org_a")).pipe(Effect.flip)
-			assert.strictEqual(ambiguous._tag, "@maple/http/errors/IntegrationsValidationError")
 		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts))))
 	})
 
@@ -403,8 +401,8 @@ describe("CloudflareOAuthService", () => {
 			// rotated-token 400 falsely surfaces as IntegrationsRevokedError.
 			const [a, b] = yield* Effect.all(
 				[
-					service.getValidAccessToken(asOrgId("org_a")),
-					service.getValidAccessToken(asOrgId("org_a")),
+					service.getValidAccessToken(asOrgId("org_a"), "acc_1"),
+					service.getValidAccessToken(asOrgId("org_a"), "acc_1"),
 				],
 				{ concurrency: 2 },
 			)
@@ -465,7 +463,7 @@ describe("CloudflareOAuthService", () => {
 			})
 			yield* service.completeConnect("auth-code", state)
 
-			const error = yield* service.getValidAccessToken(asOrgId("org_a")).pipe(Effect.flip)
+			const error = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_1").pipe(Effect.flip)
 			// 400/401 on the refresh grant means the grant itself is gone — classified as
 			// revoked (reconnect required), not a transient upstream failure.
 			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsRevokedError")

@@ -78,7 +78,7 @@ import {
 import { Database } from "@/platform/DatabaseLive"
 import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"
-import { dateToMs } from "@/platform/time"
+import { dateToMs, msToDate } from "@/platform/time"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { CloudflareOAuthService } from "@/services/auth/CloudflareOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
@@ -1142,9 +1142,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 		) =>
 			updateRows(rowIds, {
 				lastError: message.slice(0, 500),
-				lastErrorAt: new Date(now),
+				lastErrorAt: msToDate(now),
 				...(options?.disable ? { enabled: false } : undefined),
-				updatedAt: new Date(now),
+				updatedAt: msToDate(now),
 			})
 
 		/** Stamp an error on every state row of one connection (org × account). */
@@ -1160,9 +1160,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 					.update(cloudflareAnalyticsState)
 					.set({
 						lastError: message.slice(0, 500),
-						lastErrorAt: new Date(now),
+						lastErrorAt: msToDate(now),
 						...(options?.disable ? { enabled: false } : undefined),
-						updatedAt: new Date(now),
+						updatedAt: msToDate(now),
 					})
 					.where(
 						and(
@@ -1184,11 +1184,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 			now: number,
 		) =>
 			updateRows(rowIds, {
-				watermarkAt: new Date(headEndMs),
-				lastSuccessAt: new Date(now),
+				watermarkAt: msToDate(headEndMs),
+				lastSuccessAt: msToDate(now),
 				lastError: null,
 				lastErrorAt: null,
-				updatedAt: new Date(now),
+				updatedAt: msToDate(now),
 			}).pipe(
 				Effect.andThen(
 					rowIds.length === 0
@@ -1196,7 +1196,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						: dbExecute((db) =>
 								db
 									.update(cloudflareAnalyticsState)
-									.set({ backfillAt: new Date(headStartMs), updatedAt: new Date(now) })
+									.set({ backfillAt: msToDate(headStartMs), updatedAt: msToDate(now) })
 									.where(
 										and(
 											inArray(cloudflareAnalyticsState.id, [...rowIds]),
@@ -1210,11 +1210,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 		/** Advance the BACKFILL frontier down after an older history window landed. */
 		const advanceBackfill = (rowIds: ReadonlyArray<string>, backfillStartMs: number, now: number) =>
 			updateRows(rowIds, {
-				backfillAt: new Date(backfillStartMs),
-				lastSuccessAt: new Date(now),
+				backfillAt: msToDate(backfillStartMs),
+				lastSuccessAt: msToDate(now),
 				lastError: null,
 				lastErrorAt: null,
-				updatedAt: new Date(now),
+				updatedAt: msToDate(now),
 			})
 
 		/**
@@ -1233,8 +1233,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 							accountId,
 							dataset: dataset.id,
 							zoneId: "",
-							createdAt: new Date(now),
-							updatedAt: new Date(now),
+							createdAt: msToDate(now),
+							updatedAt: msToDate(now),
 						})),
 					)
 					.onConflictDoNothing(),
@@ -1248,7 +1248,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			dbExecute((db) =>
 				db
 					.update(cloudflareAnalyticsState)
-					.set({ leaseUntil: new Date(now + LEASE_MS), updatedAt: new Date(now) })
+					.set({ leaseUntil: msToDate(now + LEASE_MS), updatedAt: msToDate(now) })
 					.where(
 						and(
 							eq(cloudflareAnalyticsState.orgId, orgId),
@@ -1257,12 +1257,12 @@ export class CloudflareAnalyticsService extends Context.Service<
 							eq(cloudflareAnalyticsState.zoneId, ""),
 							or(
 								isNull(cloudflareAnalyticsState.leaseUntil),
-								lt(cloudflareAnalyticsState.leaseUntil, new Date(now)),
+								lt(cloudflareAnalyticsState.leaseUntil, msToDate(now)),
 								// Corrupt-lease escape hatch: a live lease is always bounded by now+LEASE_MS,
 								// so anything beyond 2x that is impossible under normal operation (e.g. a
 								// clock jump or a crashed writer that left a bogus far-future value) and is
 								// safe to reclaim rather than let it wedge the org forever.
-								gt(cloudflareAnalyticsState.leaseUntil, new Date(now + 2 * LEASE_MS)),
+								gt(cloudflareAnalyticsState.leaseUntil, msToDate(now + 2 * LEASE_MS)),
 							),
 						),
 					)
@@ -1279,8 +1279,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 				db
 					.update(cloudflareAnalyticsState)
 					.set({
-						leaseUntil: holdUntilMs == null ? null : new Date(holdUntilMs),
-						updatedAt: new Date(now),
+						leaseUntil: holdUntilMs == null ? null : msToDate(holdUntilMs),
+						updatedAt: msToDate(now),
 					})
 					.where(
 						and(
@@ -1322,8 +1322,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 						dataset: dataset.id,
 						zoneId: zone.id,
 						zoneName: zone.name,
-						createdAt: new Date(now),
-						updatedAt: new Date(now),
+						createdAt: msToDate(now),
+						updatedAt: msToDate(now),
 					})),
 			)
 			const inserted =
@@ -1346,7 +1346,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					yield* updateRows([existing.id], {
 						zoneName: zone.name,
 						enabled: true,
-						updatedAt: new Date(now),
+						updatedAt: msToDate(now),
 					})
 					existing.zoneName = zone.name
 					existing.enabled = true
@@ -1365,13 +1365,13 @@ export class CloudflareAnalyticsService extends Context.Service<
 				{
 					enabled: false,
 					lastError: "Zone no longer present on the Cloudflare account",
-					lastErrorAt: new Date(now),
-					updatedAt: new Date(now),
+					lastErrorAt: msToDate(now),
+					updatedAt: msToDate(now),
 				},
 			)
 			for (const row of vanished) row.enabled = false
 
-			yield* updateRows([anchorId], { discoveredAt: new Date(now), updatedAt: new Date(now) })
+			yield* updateRows([anchorId], { discoveredAt: msToDate(now), updatedAt: msToDate(now) })
 
 			return [...rows, ...inserted]
 		})
@@ -1392,7 +1392,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				(row) =>
 					row.enabled &&
 					(row.settingsFetchedAt == null ||
-						now - row.settingsFetchedAt.getTime() > SETTINGS_TTL_MS),
+						now - dateToMs(row.settingsFetchedAt) > SETTINGS_TTL_MS),
 			)
 			if (stale.length === 0) return wrote
 
@@ -1477,13 +1477,13 @@ export class CloudflareAnalyticsService extends Context.Service<
 					if (settings === undefined) continue
 					const set: Partial<CloudflareAnalyticsStateInsert> = {
 						settingsJson: settings == null ? null : JSON.stringify(settings),
-						settingsFetchedAt: new Date(now),
+						settingsFetchedAt: msToDate(now),
 						quantilesAvailable: quantilesFromAvailableFields(
 							settings,
 							dataset.availableFieldsNeedle,
 						),
 						...(settings?.enabled === false ? { enabled: false } : undefined),
-						updatedAt: new Date(now),
+						updatedAt: msToDate(now),
 					}
 					const key = `${set.settingsJson}|${set.quantilesAvailable}|${set.enabled ?? ""}`
 					const group = updates.get(key)
@@ -1640,7 +1640,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					kind = "other"
 				}
 				if (kind === "quantiles-unavailable") {
-					yield* updateRows(rowIds, { quantilesAvailable: false, updatedAt: new Date(now) })
+					yield* updateRows(rowIds, { quantilesAvailable: false, updatedAt: msToDate(now) })
 					// The next round rebuilds the document without the quantile fields — retry.
 					results.push({ part, outcome: { kind: "quantiles-downgraded" } })
 				} else if (kind === "disabled") {
@@ -1809,7 +1809,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 							originDatabase: config.origin.database,
 							originUser: config.origin.user,
 							deletedAt: null,
-							updatedAt: new Date(now),
+							updatedAt: msToDate(now),
 						}
 						const existing = existingByConfigId.get(config.id)
 						return existing !== undefined
@@ -1824,7 +1824,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 										id: randomUUID(),
 										orgId,
 										configId: config.id,
-										createdAt: new Date(now),
+										createdAt: msToDate(now),
 										...values,
 									}),
 								)
@@ -1846,7 +1846,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						dbExecute((db) =>
 							db
 								.update(cloudflareHyperdriveConfigs)
-								.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
+								.set({ deletedAt: msToDate(now), updatedAt: msToDate(now) })
 								.where(eq(cloudflareHyperdriveConfigs.id, row.id)),
 						),
 					{ concurrency: 4, discard: true },
@@ -1958,7 +1958,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				// between reuse the reconciled state rows.
 				let rows: CloudflareAnalyticsStateRow[]
 				let liveScripts = parseLiveScripts(anchor.liveScriptsJson)
-				if (anchor.discoveredAt == null || now - anchor.discoveredAt.getTime() > DISCOVERY_TTL_MS) {
+				if (anchor.discoveredAt == null || now - dateToMs(anchor.discoveredAt) > DISCOVERY_TTL_MS) {
 					const zonesResult = yield* Effect.result(listZones(accessToken, accountId, apiBaseUrl))
 					if (Result.isFailure(zonesResult)) {
 						const error = zonesResult.failure
@@ -1992,7 +1992,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						liveScripts = new Set(scriptsResult.success)
 						yield* updateRows([anchor.id], {
 							liveScriptsJson: JSON.stringify(scriptsResult.success),
-							updatedAt: new Date(now),
+							updatedAt: msToDate(now),
 						})
 					}
 					// Hyperdrive config inventory rides the same discovery TTL. It only feeds the
@@ -2107,8 +2107,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 											Effect.map(() => {
 												progressed = true
 												if (item.phase === "head") {
-													const watermark = new Date(item.window.end)
-													const seed = new Date(item.window.start)
+													const watermark = msToDate(item.window.end)
+													const seed = msToDate(item.window.start)
 													for (const row of part.rows) {
 														row.watermarkAt = watermark
 														// Seed the backfill frontier once (mirrors advanceHead's
@@ -2116,7 +2116,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 														if (row.backfillAt == null) row.backfillAt = seed
 													}
 												} else {
-													const frontier = new Date(item.window.start)
+													const frontier = msToDate(item.window.start)
 													for (const row of part.rows) row.backfillAt = frontier
 												}
 											}),
@@ -2687,7 +2687,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						lastErrorAt: null,
 						discoveredAt: null,
 						leaseUntil: null,
-						updatedAt: new Date(now),
+						updatedAt: msToDate(now),
 					})
 					.where(and(eq(cloudflareAnalyticsState.orgId, orgId), ...accountFilter)),
 			)

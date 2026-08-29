@@ -156,13 +156,12 @@ export interface CloudflareOAuthServiceApi {
 		orgId: OrgId,
 	) => Effect.Effect<CloudflareConnectionStatus, IntegrationsPersistenceError>
 	/**
-	 * Fresh access token addressed to one granted account. Without `accountId` the
-	 * grant must cover exactly one account — ambiguous lookups fail rather than
-	 * silently picking an account.
+	 * Fresh access token addressed to one granted account. The account is always named: a grant
+	 * may cover several, so there is no unambiguous default to fall back to.
 	 */
 	readonly getValidAccessToken: (
 		orgId: OrgId,
-		accountId?: string,
+		accountId: string,
 	) => Effect.Effect<
 		CloudflareAccessToken,
 		| IntegrationsNotConnectedError
@@ -230,8 +229,8 @@ export class CloudflareOAuthService extends Context.Service<
 					redirectUri: options.callbackUrl,
 					returnTo: options.returnTo ?? null,
 					codeVerifier,
-					createdAt: new Date(currentTime),
-					expiresAt: new Date(currentTime + OAUTH_STATE_TTL_MS),
+					createdAt: msToDate(currentTime),
+					expiresAt: msToDate(currentTime + OAUTH_STATE_TTL_MS),
 				}),
 			)
 
@@ -345,38 +344,21 @@ export class CloudflareOAuthService extends Context.Service<
 
 		const getValidAccessToken = Effect.fn("CloudflareOAuthService.getValidAccessToken")(function* (
 			orgId: OrgId,
-			accountId?: string,
+			accountId: string,
 		) {
-			yield* Effect.annotateCurrentSpan({ orgId })
+			yield* Effect.annotateCurrentSpan({ orgId, "maple.cloudflare.account_id": accountId })
 			const config = yield* resolveConfig(env)
 			const { accessToken, row } = yield* oauth.getValidConnectionToken(config, orgId)
-			const granted = grantedAccountsOfRow(row)
-			// No account given: legacy single-account lookup. Refuse an ambiguous grant
-			// instead of silently picking an account.
-			if (accountId === undefined) {
-				if (granted.length > 1) {
-					return yield* Effect.fail(
-						new IntegrationsValidationError({
-							message:
-								"The Cloudflare grant covers multiple accounts — specify which account to use",
-						}),
-					)
-				}
-			} else {
-				yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
-				if (!granted.some((account) => account.id === accountId)) {
-					return yield* Effect.fail(
-						new IntegrationsValidationError({
-							message: "The Cloudflare grant does not cover the requested account",
-						}),
-					)
-				}
+			// A token is always addressed to one account of the grant. Callers name it — there is
+			// no "the org's account" to fall back to once a grant can cover several.
+			if (!Arr.some(grantedAccountsOfRow(row), (account) => account.id === accountId)) {
+				return yield* Effect.fail(
+					new IntegrationsValidationError({
+						message: "The Cloudflare grant does not cover the requested account",
+					}),
+				)
 			}
-			return {
-				accessToken,
-				accountId: accountId ?? Arr.headNonEmpty(granted).id,
-				scope: row.scope,
-			} satisfies CloudflareAccessToken
+			return { accessToken, accountId, scope: row.scope } satisfies CloudflareAccessToken
 		})
 
 		const getStatus = Effect.fn("CloudflareOAuthService.getStatus")(function* (orgId: OrgId) {

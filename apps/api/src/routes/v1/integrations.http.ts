@@ -42,7 +42,7 @@ import {
 } from "@maple/domain/http"
 import { cloudflareAnalyticsState } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, ne } from "drizzle-orm"
 import { Effect, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -317,6 +317,10 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 												// behind; picking it would address the token to an
 												// account outside the grant and hard-fail the request.
 												eq(cloudflareAnalyticsState.enabled, true),
+												// "" is a pre-multi-account orphan (its org had no
+												// connection when the backfill ran) and names no
+												// account to address the token to.
+												ne(cloudflareAnalyticsState.accountId, ""),
 											),
 										)
 										.orderBy(desc(cloudflareAnalyticsState.updatedAt))
@@ -344,9 +348,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 							const zoneId = zoneRow.zoneId
 							const { accessToken } = yield* cloudflare.getValidAccessToken(
 								tenant.orgId,
-								// "" only on orphaned pre-multi-account rows — fall back to the
-								// single-connection lookup for those.
-								zoneRow.accountId === "" ? undefined : zoneRow.accountId,
+								zoneRow.accountId,
 							)
 							const result = yield* graphqlQuery(
 								accessToken,
