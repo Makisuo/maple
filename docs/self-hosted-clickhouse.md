@@ -188,7 +188,7 @@ Or save credentials in the Maple UI under `Settings → BYO Backend → ClickHou
 **Kubernetes** — install the [`maple-otel`](../deploy/maple-otel/) Helm chart:
 
 ```bash
-helm install maple-otel oci://ghcr.io/makisuo/charts/maple-otel \
+helm install maple-otel oci://ghcr.io/mapletechlabs/charts/maple-otel \
   --namespace maple --create-namespace \
   --set maple.orgId=org_xxx \
   --set maple.clickhouse.endpoint=https://your-ch.example.com \

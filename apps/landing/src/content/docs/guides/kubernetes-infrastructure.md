@@ -37,7 +37,7 @@ Prefer Helm directly? Install the published OCI chart:
 
 ```bash
 helm upgrade --install maple-k8s-infra \
-  oci://ghcr.io/makisuo/charts/maple-k8s-infra \
+  oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra \
   --namespace maple --create-namespace \
   --set-string maple.ingestKey.value=YOUR_MAPLE_INGEST_KEY \
   --set-string global.clusterName=production
@@ -51,7 +51,7 @@ kubectl -n maple create secret generic maple-ingest-key \
   --from-literal=ingest-key=YOUR_MAPLE_INGEST_KEY
 
 helm upgrade --install maple-k8s-infra \
-  oci://ghcr.io/makisuo/charts/maple-k8s-infra \
+  oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra \
   --namespace maple \
   --set maple.ingestKey.existingSecret.name=maple-ingest-key \
   --set maple.ingestKey.existingSecret.key=ingest-key \

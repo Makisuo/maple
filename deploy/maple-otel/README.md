@@ -11,7 +11,7 @@ pod log scraping, auto-instrumentation operator), use `maple-k8s-infra`.
 ## Install
 
 ```bash
-helm install maple-otel oci://ghcr.io/makisuo/charts/maple-otel \
+helm install maple-otel oci://ghcr.io/mapletechlabs/charts/maple-otel \
   --version 0.1.0 \
   --namespace maple --create-namespace \
   --set maple.orgId=org_xxx \
@@ -25,7 +25,7 @@ For a more secret-hygienic install:
 kubectl -n maple create secret generic maple-clickhouse-password \
   --from-literal=password=$CH_PASSWORD
 
-helm install maple-otel oci://ghcr.io/makisuo/charts/maple-otel \
+helm install maple-otel oci://ghcr.io/mapletechlabs/charts/maple-otel \
   --version 0.1.0 \
   --namespace maple \
   --set maple.orgId=org_xxx \

@@ -52,7 +52,7 @@ function maskToken(token: string) {
 function helmCommand(token: string) {
 	const lines = [
 		"helm upgrade --install maple-k8s-infra \\",
-		"  oci://ghcr.io/makisuo/charts/maple-k8s-infra \\",
+		"  oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra \\",
 		"  --namespace maple --create-namespace \\",
 		`  --set-string maple.ingestKey.value=${token} \\`,
 		"  --set-string global.clusterName=production",

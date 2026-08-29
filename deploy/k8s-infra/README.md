@@ -28,7 +28,7 @@ Direct Helm install from the OCI chart:
 
 ```bash
 helm upgrade --install maple-k8s-infra \
-  oci://ghcr.io/makisuo/charts/maple-k8s-infra \
+  oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra \
   --namespace maple \
   --create-namespace \
   --set-string maple.ingestKey.value=YOUR_MAPLE_INGEST_KEY \
