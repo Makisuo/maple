@@ -133,6 +133,30 @@ static WAL_SEGMENTS_SEALED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static WAL_SHIPPED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_shipped_bytes_total")
+        .with_description("WAL segment bytes uploaded to the durability object store")
+        .build()
+});
+
+static WAL_SHIP_OUTCOMES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_ship_outcomes_total")
+        .with_description(
+            "WAL segments that were not uploaded, by outcome: exported before the upload ran, \
+             dropped because the shipper queue was full, or failed",
+        )
+        .build()
+});
+
+static WAL_FRAMES_RECOVERED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_frames_recovered_total")
+        .with_description("Frames re-committed from another task's orphaned WAL segments")
+        .build()
+});
+
 static WAL_RECLAIMED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_wal_reclaimed_bytes_total")
@@ -566,6 +590,51 @@ pub fn wal_segment_sealed(shard: usize, destination: &str) {
             KeyValue::new("destination", destination.to_owned()),
         ],
     );
+}
+
+/// A sealed WAL segment reached the durability object store.
+pub fn wal_segment_shipped(shard: usize, destination: &str, bytes: u64) {
+    WAL_SHIPPED_BYTES_TOTAL.add(
+        bytes,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+        ],
+    );
+}
+
+fn wal_ship_outcome(shard: usize, destination: &str, outcome: &'static str, detail: String) {
+    WAL_SHIP_OUTCOMES_TOTAL.add(
+        1,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+            KeyValue::new("outcome", outcome),
+            KeyValue::new("error.type", detail),
+        ],
+    );
+}
+
+/// The segment exported before its upload ran, so there was nothing to protect.
+/// The expected outcome for most segments in a healthy pipeline.
+pub fn wal_ship_skipped(shard: usize, destination: &str) {
+    wal_ship_outcome(shard, destination, "exported_first", String::new());
+}
+
+/// The shipper queue was full, so this segment stays local-only. Sustained
+/// non-zero means the object store cannot keep up with segment rotation.
+pub fn wal_ship_dropped(shard: usize, destination: &str) {
+    wal_ship_outcome(shard, destination, "queue_full", String::new());
+}
+
+/// An upload or delete against the object store failed.
+pub fn wal_ship_failed(shard: usize, destination: &str, error_kind: &str) {
+    wal_ship_outcome(shard, destination, "failed", error_kind.to_owned());
+}
+
+/// Frames re-committed from a dead task's orphaned segments.
+pub fn wal_frames_recovered(frames: u64) {
+    WAL_FRAMES_RECOVERED_TOTAL.add(frames, &[]);
 }
 
 /// Bytes freed by deleting segments the export cursor has moved past.

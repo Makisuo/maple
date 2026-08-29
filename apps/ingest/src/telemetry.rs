@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::clickhouse_insert_mappings::{self, InsertMapping};
@@ -12,6 +12,8 @@ use crate::metrics;
 use crate::otel::{
     encode_rows_internal_span, export_client_span, record_stage_error, wal_commit_internal_span,
 };
+use crate::wal_store::WalSegmentStore;
+use chrono::Utc;
 use crc32fast::Hasher as Crc32;
 use dashmap::DashMap;
 use flate2::write::GzEncoder;
@@ -470,6 +472,8 @@ pub struct TinybirdConfig {
     /// `WAL_SEGMENT_MAX_BYTES`; exposed so the object size the S3 tier ships can
     /// be tuned without a rebuild.
     pub wal_segment_max_bytes: u64,
+    /// How often this task refreshes its owner marker in the durability tier.
+    pub wal_store_heartbeat_interval: Duration,
     pub batch_max_rows: usize,
     pub batch_max_bytes: usize,
     pub batch_max_wait: Duration,
@@ -808,6 +812,26 @@ impl TelemetryPipeline {
         clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
         require_tinybird_credentials: bool,
     ) -> Result<Self, String> {
+        Self::new_with_object_store(
+            cfg,
+            http,
+            clickhouse_targets,
+            require_tinybird_credentials,
+            None,
+        )
+        .await
+    }
+
+    /// The full constructor. `segment_store` adds the durability tier: sealed
+    /// segments are shipped to it as they close, and on startup this task claims
+    /// and replays whatever a dead one left behind.
+    pub async fn new_with_object_store(
+        cfg: TinybirdConfig,
+        http: impl Into<HttpClient>,
+        clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
+        require_tinybird_credentials: bool,
+        segment_store: Option<Arc<WalSegmentStore>>,
+    ) -> Result<Self, String> {
         let http: HttpClient = http.into();
         cfg.validate_for_pipeline(require_tinybird_credentials)?;
         std::fs::create_dir_all(&cfg.queue_dir)
@@ -819,6 +843,17 @@ impl TelemetryPipeline {
         wal.migrate_legacy_files(&cfg).await;
         // Relocated frames land in the active segment, which replay skips.
         wal.seal_all();
+        if let Some(store) = &segment_store {
+            wal.recover_orphans(&cfg, store).await;
+            // Attached after recovery so the shipper starts from a settled set
+            // of segments, and before any request is accepted so no lane ever
+            // seals a segment the shipper cannot see.
+            wal.attach_object_store(store);
+            tokio::spawn(run_owner_heartbeat(
+                Arc::clone(store),
+                cfg.wal_store_heartbeat_interval,
+            ));
+        }
         let org_queue_bytes = Arc::new(DashMap::new());
         let mirror_org_queue_bytes = Arc::new(DashMap::new());
         let clickhouse_breakers = Arc::new(ClickHouseBreakerRegistry::new(cfg.clickhouse_breaker));
@@ -865,6 +900,23 @@ impl TelemetryPipeline {
         };
         pipeline.replay_committed_frames().await;
         Ok(pipeline)
+    }
+
+    /// Seal and ship every segment the lanes still owe, and stop advertising
+    /// this task as alive.
+    ///
+    /// Shutdown calls this once the drain has done what it can: whatever did not
+    /// export is now in the object store under an owner whose heartbeat is gone,
+    /// so the next task claims it immediately instead of waiting out the
+    /// staleness window. Returns the bytes shipped.
+    pub async fn flush_wal_to_object_store(&self) -> u64 {
+        let shipped = self.inner.wal.flush_to_object_store().await;
+        if let Some(store) = self.inner.wal.store.get() {
+            if let Err(error) = store.retire().await {
+                warn!(error = %error, "Failed to retire the WAL owner heartbeat");
+            }
+        }
+        shipped
     }
 
     /// Bytes committed to the primary WAL lanes and not yet exported.
@@ -1356,7 +1408,20 @@ struct ShardedWal {
     /// One segment directory per lane (`shard × destination`), indexed by
     /// `lane_index`.
     lanes: Vec<Arc<WalLane>>,
+    /// The durability tier, when one is configured. Set once during startup,
+    /// before any traffic is accepted.
+    store: OnceLock<Arc<WalSegmentStore>>,
 }
+
+/// Shipper tasks. Lanes are assigned `lane % SEGMENT_SHIPPER_WORKERS`, so one
+/// lane's events stay ordered — a segment can never be deleted from the bucket
+/// by an event that overtakes its own upload — while different lanes still ship
+/// concurrently.
+const SEGMENT_SHIPPER_WORKERS: usize = 4;
+
+/// Events one shipper task will hold before it starts dropping them. Generous:
+/// the alternative to a drop is stalling an append on S3.
+const SEGMENT_SHIPPER_QUEUE: usize = 1024;
 
 /// One lane's log: a directory of sealed segments plus the single segment
 /// appends currently land in.
@@ -1369,6 +1434,11 @@ struct ShardedWal {
 struct WalLane {
     shard: usize,
     destination: ExportDestination,
+    /// This lane's index, and the `shard-NNN-<destination>` name its segments
+    /// are stored under — the object key has to survive the task that wrote it,
+    /// so it cannot be a process-local index.
+    index: usize,
+    lane_key: String,
     dir: PathBuf,
     cursor_path: PathBuf,
     max_bytes: u64,
@@ -1388,6 +1458,21 @@ struct WalLane {
     exported_bytes: AtomicU64,
     append: Mutex<LaneAppend>,
     export: Mutex<LaneExport>,
+    /// Set once, if a durability tier is configured, before any traffic is
+    /// accepted. Segments are announced to it as they seal and as they are
+    /// unlinked.
+    shipper: OnceLock<mpsc::Sender<SegmentEvent>>,
+}
+
+/// A segment's lifecycle as the object-store shipper sees it. Events for one
+/// lane are processed in order, so a segment is never deleted from the bucket
+/// before the upload that put it there.
+#[derive(Clone, Copy, Debug)]
+enum SegmentEvent {
+    /// Sealed and final. Shipped unless the exporter gets there first.
+    Sealed { lane: usize, seq: u64 },
+    /// Exported and unlinked locally; the object is now dead weight.
+    Exported { lane: usize, seq: u64 },
 }
 
 struct LaneAppend {
@@ -1467,9 +1552,8 @@ impl WalLane {
         cfg: &TinybirdConfig,
         max_bytes: u64,
     ) -> Result<Self, String> {
-        let dir = cfg
-            .queue_dir
-            .join(format!("shard-{shard:03}-{}", destination.as_str()));
+        let lane_key = format!("shard-{shard:03}-{}", destination.as_str());
+        let dir = cfg.queue_dir.join(&lane_key);
         std::fs::create_dir_all(&dir)
             .map_err(|error| format!("create ingest WAL lane {}: {error}", dir.display()))?;
         let cursor_path = dir.join("lane.cursor");
@@ -1513,6 +1597,8 @@ impl WalLane {
         Ok(Self {
             shard,
             destination,
+            index: lane_index(shard, destination),
+            lane_key,
             dir,
             cursor_path,
             max_bytes,
@@ -1531,6 +1617,7 @@ impl WalLane {
                 next_delete: cursor.seq,
                 cursor,
             }),
+            shipper: OnceLock::new(),
         })
     }
 
@@ -1586,7 +1673,8 @@ impl WalLane {
     /// Close the active segment and open the next one. The caller holds
     /// `append`; every frame in the outgoing segment is already `sync_data`d.
     fn seal(&self, state: &mut LaneAppend) -> Result<(), String> {
-        let next = state.seq + 1;
+        let sealed = state.seq;
+        let next = sealed + 1;
         let file = open_segment(&self.dir, next)?;
         // Published before the handle is swapped, so a reader that sees `next`
         // is looking at a segment whose length can no longer change.
@@ -1595,7 +1683,49 @@ impl WalLane {
         state.file = file;
         state.len = 0;
         metrics::wal_segment_sealed(self.shard, self.destination.as_str());
+        self.notify(SegmentEvent::Sealed {
+            lane: self.index,
+            seq: sealed,
+        });
         Ok(())
+    }
+
+    /// Hand a segment event to the shipper, if one is attached.
+    ///
+    /// A full channel drops the event rather than blocking the caller — an
+    /// append must not wait on S3. A dropped `Sealed` leaves that segment local
+    /// only; a dropped `Exported` leaves an object behind that a later claim
+    /// replays, which is the at-least-once this whole tier is built on.
+    fn notify(&self, event: SegmentEvent) {
+        let Some(shipper) = self.shipper.get() else {
+            return;
+        };
+        if shipper.try_send(event).is_err() {
+            metrics::wal_ship_dropped(self.shard, self.destination.as_str());
+        }
+    }
+
+    /// Whether the exporter has already moved past this segment.
+    fn is_exported(&self, seq: u64) -> bool {
+        self.export.lock().is_ok_and(|state| seq < state.cursor.seq)
+    }
+
+    /// Sealed segments this lane still owes, oldest first.
+    fn unexported_segments(&self) -> Vec<u64> {
+        let cursor_seq = match self.export.lock() {
+            Ok(state) => state.cursor.seq,
+            Err(_) => return Vec::new(),
+        };
+        let active = self.active_seq.load(Ordering::Acquire);
+        list_segments(&self.dir)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|seq| *seq >= cursor_seq && *seq < active)
+            .collect()
+    }
+
+    fn read_segment(&self, seq: u64) -> Option<Vec<u8>> {
+        std::fs::read(segment_path(&self.dir, seq)).ok()
     }
 
     /// Advance the export cursor and drop every segment fully behind it.
@@ -1642,6 +1772,10 @@ impl WalLane {
                     );
                 }
             }
+            self.notify(SegmentEvent::Exported {
+                lane: self.index,
+                seq: state.next_delete,
+            });
             state.next_delete += 1;
         }
         drop(state);
@@ -1696,7 +1830,80 @@ impl ShardedWal {
                 )?));
             }
         }
-        Ok(Self { lanes })
+        Ok(Self {
+            lanes,
+            store: OnceLock::new(),
+        })
+    }
+
+    /// Attach the durability tier and start shipping sealed segments.
+    ///
+    /// Called during startup, after recovery and before the first request, so a
+    /// lane either has a shipper for its whole life or never has one.
+    fn attach_object_store(&self, store: &Arc<WalSegmentStore>) {
+        drop(self.store.set(Arc::clone(store)));
+        let mut senders = Vec::with_capacity(SEGMENT_SHIPPER_WORKERS);
+        for _ in 0..SEGMENT_SHIPPER_WORKERS {
+            let (sender, receiver) = mpsc::channel(SEGMENT_SHIPPER_QUEUE);
+            senders.push(sender);
+            tokio::spawn(run_segment_shipper(
+                self.lanes.clone(),
+                Arc::clone(store),
+                receiver,
+            ));
+        }
+        for (index, lane) in self.lanes.iter().enumerate() {
+            drop(
+                lane.shipper
+                    .set(senders[index % SEGMENT_SHIPPER_WORKERS].clone()),
+            );
+        }
+    }
+
+    /// Seal every lane and ship everything it still owes, synchronously.
+    ///
+    /// The shipper only ever sees *sealed* segments, so the segment appends are
+    /// landing in is local-only until this runs. That is the gap a SIGKILL after
+    /// an incomplete drain would otherwise fall into, so shutdown calls this
+    /// once the drain gives up. Returns the bytes shipped.
+    async fn flush_to_object_store(&self) -> u64 {
+        let Some(store) = self.store.get() else {
+            return 0;
+        };
+        self.flush_segments_to(store).await
+    }
+
+    /// The flush itself, against an explicit store — recovery runs it before the
+    /// store handle is attached, and re-shipping the frames it just recovered is
+    /// what lets it delete the objects it took them from.
+    async fn flush_segments_to(&self, store: &WalSegmentStore) -> u64 {
+        self.seal_all();
+        let mut shipped = 0;
+        for lane in &self.lanes {
+            for seq in lane.unexported_segments() {
+                let Some(bytes) = lane.read_segment(seq) else {
+                    continue;
+                };
+                let len = bytes.len() as u64;
+                match store.put_segment(&lane.lane_key, seq, bytes).await {
+                    Ok(()) => {
+                        shipped += len;
+                        metrics::wal_segment_shipped(lane.shard, lane.destination.as_str(), len);
+                    }
+                    Err(error) => {
+                        warn!(
+                            shard = lane.shard,
+                            destination = lane.destination.as_str(),
+                            segment = seq,
+                            error_kind = error.error_kind(),
+                            %error,
+                            "Failed to ship a WAL segment during shutdown flush"
+                        );
+                    }
+                }
+            }
+        }
+        shipped
     }
 
     /// Relocate any pre-segment WAL file into the lane's segment directory.
@@ -1804,6 +2011,122 @@ impl ShardedWal {
         }
     }
 
+    /// The local lane a recovered `shard-NNN-<destination>` key belongs to.
+    ///
+    /// The shard count can differ from the task that wrote the segment (it
+    /// follows the CPU count), so the shard is folded into the local range. The
+    /// destination is not: a frame must never change where it is exported to.
+    fn lane_for_key(lane_key: &str, cfg: &TinybirdConfig) -> Option<usize> {
+        let rest = lane_key.strip_prefix("shard-")?;
+        let (shard, destination) = rest.split_once('-')?;
+        let shard = shard.parse::<usize>().ok()? % cfg.wal_shards;
+        let destination = ExportDestination::ALL
+            .into_iter()
+            .find(|candidate| candidate.as_str() == destination)?;
+        Some(lane_index(shard, destination))
+    }
+
+    /// Claim and re-commit the segments a dead task left in the object store.
+    ///
+    /// Runs before the export workers start, so recovered frames are picked up
+    /// by the same replay path as anything this task's own disk was holding.
+    /// Every step is best-effort: a bucket that is unreachable must not stop the
+    /// gateway from booting and accepting traffic.
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "WAL recovery: the branches are the recovery cases, and each needs the others' \
+                  context to be readable"
+    )]
+    async fn recover_orphans(&self, cfg: &TinybirdConfig, store: &WalSegmentStore) {
+        let now = Utc::now();
+        let owners = match store.stale_owners(now).await {
+            Ok(owners) => owners,
+            Err(error) => {
+                warn!(error = %error, "Failed to list WAL owners; skipping orphan recovery");
+                return;
+            }
+        };
+        for owner in owners {
+            match store.claim(&owner, now).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    info!(owner, "Another task is already recovering this WAL owner");
+                    continue;
+                }
+                Err(error) => {
+                    warn!(owner, error = %error, "Failed to claim orphaned WAL segments");
+                    continue;
+                }
+            }
+            let segments = match store.take_segments(&owner).await {
+                Ok(segments) => segments,
+                Err(error) => {
+                    warn!(owner, error = %error, "Failed to read orphaned WAL segments");
+                    continue;
+                }
+            };
+            let mut recovered_frames = 0usize;
+            let mut keys = Vec::with_capacity(segments.len());
+            for segment in segments {
+                let Some(lane) = Self::lane_for_key(&segment.lane_key, cfg) else {
+                    warn!(
+                        owner,
+                        lane_key = segment.lane_key,
+                        "Skipping an orphaned WAL segment for an unknown lane"
+                    );
+                    continue;
+                };
+                let frames = decode_segment_frames(&segment.bytes);
+                let mut committed = true;
+                for frame in frames {
+                    let encoded = EncodedFrame {
+                        routing_key: 0, // the lane is already decided by the key
+                        org_id: frame.org_id,
+                        signal: frame.signal,
+                        destination: frame.destination,
+                        datasource: frame.datasource,
+                        row_count: frame.row_count,
+                        payload: frame.payload,
+                    };
+                    // Bypass the lane cap: these frames were accepted by the
+                    // task that died, and rejecting them here is the loss this
+                    // whole tier exists to prevent.
+                    if let Err(error) = self.append_inner(lane, &encoded, false).await {
+                        warn!(owner, error = %error, "Failed to re-commit an orphaned WAL frame");
+                        committed = false;
+                        break;
+                    }
+                    recovered_frames += 1;
+                }
+                if committed {
+                    keys.push(segment.key);
+                }
+            }
+            if recovered_frames == 0 && keys.is_empty() {
+                drop(store.release_owner(&owner).await);
+                continue;
+            }
+            // Sealed and re-shipped under our own owner id *before* the source
+            // objects are dropped, so the frames are never only on this task's
+            // disk.
+            self.flush_segments_to(store).await;
+            for key in keys {
+                if let Err(error) = store.release_key(&key).await {
+                    warn!(owner, key, error = %error, "Failed to delete a recovered WAL segment");
+                }
+            }
+            if let Err(error) = store.release_owner(&owner).await {
+                warn!(owner, error = %error, "Failed to retire a recovered WAL owner");
+            }
+            metrics::wal_frames_recovered(recovered_frames as u64);
+            info!(
+                owner,
+                frames = recovered_frames,
+                "Recovered orphaned WAL segments from the object store"
+            );
+        }
+    }
+
     fn lane(&self, lane: usize) -> Result<Arc<WalLane>, String> {
         self.lanes
             .get(lane)
@@ -1858,6 +2181,75 @@ impl ShardedWal {
         tokio::task::spawn_blocking(move || lane_ref.mark_exported_blocking(cursor, bytes))
             .await
             .map_err(|error| format!("join WAL cursor: {error}"))?
+    }
+}
+
+/// Keep this task's owner marker fresh, so a booting task can tell a live
+/// writer's segments from a dead one's.
+async fn run_owner_heartbeat(store: Arc<WalSegmentStore>, interval: Duration) {
+    loop {
+        if let Err(error) = store.heartbeat().await {
+            warn!(error = %error, "Failed to refresh the WAL owner heartbeat");
+        }
+        sleep(interval).await;
+    }
+}
+
+/// Ship and retire segments for one shipper's share of the lanes.
+///
+/// Events arrive in the order their lane produced them, so an `Exported` for a
+/// segment always follows the `Sealed` that uploaded it.
+async fn run_segment_shipper(
+    lanes: Vec<Arc<WalLane>>,
+    store: Arc<WalSegmentStore>,
+    mut receiver: mpsc::Receiver<SegmentEvent>,
+) {
+    while let Some(event) = receiver.recv().await {
+        let (SegmentEvent::Sealed { lane, seq } | SegmentEvent::Exported { lane, seq }) = event;
+        let Some(lane_ref) = lanes.get(lane) else {
+            continue;
+        };
+        let result = match event {
+            SegmentEvent::Sealed { .. } => {
+                // A healthy pipeline exports a segment well before its upload
+                // comes up, and a segment already in the warehouse needs no
+                // backup — which is why this tier costs almost nothing.
+                if lane_ref.is_exported(seq) {
+                    metrics::wal_ship_skipped(lane_ref.shard, lane_ref.destination.as_str());
+                    continue;
+                }
+                let Some(bytes) = lane_ref.read_segment(seq) else {
+                    continue;
+                };
+                let len = bytes.len() as u64;
+                store
+                    .put_segment(&lane_ref.lane_key, seq, bytes)
+                    .await
+                    .inspect(|()| {
+                        metrics::wal_segment_shipped(
+                            lane_ref.shard,
+                            lane_ref.destination.as_str(),
+                            len,
+                        );
+                    })
+            }
+            SegmentEvent::Exported { .. } => store.delete_segment(&lane_ref.lane_key, seq).await,
+        };
+        if let Err(error) = result {
+            metrics::wal_ship_failed(
+                lane_ref.shard,
+                lane_ref.destination.as_str(),
+                error.error_kind(),
+            );
+            warn!(
+                shard = lane_ref.shard,
+                destination = lane_ref.destination.as_str(),
+                segment = seq,
+                error_kind = error.error_kind(),
+                %error,
+                "WAL segment shipping failed"
+            );
+        }
     }
 }
 
@@ -1958,6 +2350,30 @@ fn replay_lane(lane: usize, lane_ref: &WalLane) -> Result<Vec<QueuedFrame>, Stri
     Ok(frames)
 }
 
+/// Every frame in a segment downloaded from the object store.
+///
+/// A segment is a plain frame stream, so this is the replay reader over bytes
+/// instead of a file. A truncated or corrupt tail ends the segment rather than
+/// failing it: the frames before it are still good.
+fn decode_segment_frames(bytes: &[u8]) -> Vec<DecodedWalFrame> {
+    let mut reader = std::io::Cursor::new(bytes);
+    let mut offset = 0u64;
+    let mut frames = Vec::new();
+    loop {
+        match read_wal_frame(&mut reader, offset) {
+            Ok(Some(frame)) => {
+                offset = frame.end;
+                frames.push(frame);
+            }
+            Ok(None) => return frames,
+            Err(error) => {
+                warn!(offset, %error, "Dropping the tail of a corrupt recovered WAL segment");
+                return frames;
+            }
+        }
+    }
+}
+
 /// Read every surviving frame from a pre-segment WAL file, starting at its
 /// persisted cursor. Returns an empty vec if the file is absent. Used by
 /// `migrate_legacy_files` to relocate frames into lane segments.
@@ -2038,7 +2454,7 @@ struct DecodedWalFrame {
     clippy::too_many_lines,
     reason = "a binary header parsed field by field, each with its own bounds check"
 )]
-fn read_wal_frame(file: &mut File, start: u64) -> Result<Option<DecodedWalFrame>, String> {
+fn read_wal_frame(file: &mut impl Read, start: u64) -> Result<Option<DecodedWalFrame>, String> {
     let mut prefix = [0u8; 6];
     let read = file
         .read(&mut prefix)
@@ -3859,6 +4275,7 @@ mod tests {
             queue_channel_capacity: 10,
             wal_shards: 2,
             wal_segment_max_bytes: WAL_SEGMENT_MAX_BYTES,
+            wal_store_heartbeat_interval: crate::wal_store::DEFAULT_HEARTBEAT_INTERVAL,
             batch_max_rows: 100,
             batch_max_bytes: 1024 * 1024,
             batch_max_wait: Duration::from_millis(10),
@@ -6656,6 +7073,289 @@ mod tests {
         );
 
         drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    /// An in-memory S3 good enough for the WAL segment protocol: PUT (with the
+    /// conditional `If-None-Match: *` that claiming depends on), GET, DELETE, and
+    /// a `list-type=2` listing.
+    ///
+    /// The point of testing against this rather than mocking the store is that the
+    /// protocol *is* the feature — a claim that does not actually exclude, or a
+    /// listing whose order is not the write order, is the whole bug class here.
+    mod fake_s3 {
+        use super::*;
+        use axum::body::Bytes as AxumBytes;
+        use axum::extract::{Path as AxumPath, Query, State};
+        use axum::http::{HeaderMap, StatusCode};
+        use axum::routing::get;
+        use chrono::DateTime;
+        use std::collections::BTreeMap;
+        use std::sync::Mutex as StdMutex;
+
+        /// Objects carry their write time: claim expiry is a real branch in the
+        /// protocol, and a fake that stamped everything old would make every
+        /// claim look abandoned.
+        type Objects = BTreeMap<String, (Vec<u8>, DateTime<Utc>)>;
+
+        #[derive(Clone, Default)]
+        pub(super) struct FakeS3 {
+            objects: Arc<StdMutex<Objects>>,
+        }
+
+        impl FakeS3 {
+            pub(super) fn keys(&self) -> Vec<String> {
+                self.objects.lock().unwrap().keys().cloned().collect()
+            }
+
+            pub(super) fn get(&self, key: &str) -> Option<Vec<u8>> {
+                self.objects
+                    .lock()
+                    .unwrap()
+                    .get(key)
+                    .map(|(body, _)| body.clone())
+            }
+
+            /// Write an object as it would look after `age` — how a test stages
+            /// a dead task's leftovers.
+            pub(super) fn put_aged(&self, key: &str, body: Vec<u8>, age: chrono::Duration) {
+                self.objects
+                    .lock()
+                    .unwrap()
+                    .insert(key.to_owned(), (body, Utc::now() - age));
+            }
+        }
+
+        async fn handle(
+            AxumPath(key): AxumPath<String>,
+            State(state): State<FakeS3>,
+            headers: HeaderMap,
+            method: axum::http::Method,
+            body: AxumBytes,
+        ) -> (StatusCode, Vec<u8>) {
+            let mut objects = state.objects.lock().unwrap();
+            match method {
+                axum::http::Method::PUT => {
+                    if headers.contains_key("if-none-match") && objects.contains_key(&key) {
+                        return (StatusCode::PRECONDITION_FAILED, Vec::new());
+                    }
+                    objects.insert(key, (body.to_vec(), Utc::now()));
+                    (StatusCode::OK, Vec::new())
+                }
+                axum::http::Method::DELETE => {
+                    objects.remove(&key);
+                    (StatusCode::NO_CONTENT, Vec::new())
+                }
+                _ => match objects.get(&key) {
+                    Some((body, _)) => (StatusCode::OK, body.clone()),
+                    None => (StatusCode::NOT_FOUND, Vec::new()),
+                },
+            }
+        }
+
+        async fn list(
+            State(state): State<FakeS3>,
+            Query(params): Query<BTreeMap<String, String>>,
+        ) -> (StatusCode, String) {
+            let prefix = params.get("prefix").cloned().unwrap_or_default();
+            let objects = state.objects.lock().unwrap();
+            let contents = objects
+                .iter()
+                .filter(|(key, _)| key.starts_with(&prefix))
+                .fold(String::new(), |mut out, (key, (body, written))| {
+                    use std::fmt::Write as _;
+                    let _unused: Result<(), std::fmt::Error> = write!(
+                        out,
+                        "<Contents><Key>{key}</Key><LastModified>{}</LastModified>\
+                         <Size>{}</Size></Contents>",
+                        written.to_rfc3339(),
+                        body.len()
+                    );
+                    out
+                });
+            (
+                StatusCode::OK,
+                format!(
+                    "<?xml version=\"1.0\"?><ListBucketResult><IsTruncated>false</IsTruncated>\
+                     {contents}</ListBucketResult>"
+                ),
+            )
+        }
+
+        /// Serve one bucket and return its endpoint.
+        pub(super) async fn spawn(bucket: &str) -> (String, FakeS3) {
+            let state = FakeS3::default();
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
+            let addr = listener.local_addr().unwrap();
+            let app = Router::new()
+                .route(&format!("/{bucket}"), get(list))
+                .route(
+                    &format!("/{bucket}/{{*key}}"),
+                    get(handle).put(handle).delete(handle),
+                )
+                .with_state(state.clone());
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            (format!("http://{addr}"), state)
+        }
+    }
+
+    fn test_wal_store(endpoint: &str) -> Arc<WalSegmentStore> {
+        Arc::new(WalSegmentStore::new(
+            Client::new(),
+            &crate::wal_store::WalStoreConfig {
+                endpoint: endpoint.to_owned(),
+                bucket: "maple-wal-test".to_owned(),
+                region: "us-east-1".to_owned(),
+                prefix: "wal".to_owned(),
+                timeout: Duration::from_secs(5),
+                orphan_after: Duration::from_secs(600),
+                heartbeat_interval: Duration::from_secs(60),
+            },
+            Arc::new(crate::aws::CredentialsProvider::from_static(
+                "test-key".to_owned(),
+                "test-secret".to_owned(),
+            )),
+        ))
+    }
+
+    /// Poll until `predicate` holds, so a test never races the shipper task.
+    async fn wait_for(label: &str, mut predicate: impl FnMut() -> bool) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !predicate() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {label}"));
+    }
+
+    #[tokio::test]
+    async fn sealed_segments_are_shipped_and_dropped_again_once_exported() {
+        // The durability contract in one pass: a segment that seals while it still
+        // owes frames reaches the bucket, and the object goes away as soon as those
+        // frames export — which is why the bucket holds the backlog rather than the
+        // traffic.
+        let queue_dir = unique_test_dir("wal-ship-and-retire");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let cfg = segmented_cfg(queue_dir.clone(), 64 * 1024, 240);
+        let (endpoint, bucket) = fake_s3::spawn("maple-wal-test").await;
+
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+        wal.attach_object_store(&test_wal_store(&endpoint));
+        let store_owner = wal.store.get().unwrap().owner().to_owned();
+        let frame = wal_test_frame(200);
+
+        // Two frames, so the first segment seals with the second still unexported.
+        let (seg_a, _, end_a) = wal.append(0, &frame).await.expect("append a");
+        wal.append(0, &frame).await.expect("append b");
+
+        let shipped_key =
+            format!("wal/v1/segments/{store_owner}/shard-000-tinybird/{seg_a:012}.seg");
+        wait_for("the sealed segment to ship", || {
+            bucket.get(&shipped_key).is_some()
+        })
+        .await;
+        assert_eq!(
+            bucket.get(&shipped_key).unwrap().len() as u64,
+            end_a,
+            "the object is the segment, byte for byte"
+        );
+
+        wal.mark_exported(
+            0,
+            SegmentCursor {
+                seq: seg_a,
+                offset: end_a,
+            },
+            end_a,
+        )
+        .await
+        .expect("mark_exported");
+        wait_for("the exported segment's object to be dropped", || {
+            bucket.get(&shipped_key).is_none()
+        })
+        .await;
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn a_dead_task_s_segments_are_claimed_and_re_committed() {
+        // What happens when a task dies without draining: its segments are still in
+        // the bucket, and the next task to boot claims them, re-commits the frames
+        // to its own lanes, and drops the objects.
+        let (endpoint, bucket) = fake_s3::spawn("maple-wal-test").await;
+        let dead_owner = "task-that-died";
+
+        // The dead task's segment: two frames, in the lane's own on-disk format.
+        let frame = wal_test_frame(64);
+        let mut segment = encode_wal_frame(&frame).unwrap();
+        segment.extend(encode_wal_frame(&frame).unwrap());
+        let long_dead = chrono::Duration::hours(1);
+        bucket.put_aged(
+            &format!("wal/v1/segments/{dead_owner}/shard-000-tinybird/000000000003.seg"),
+            segment,
+            long_dead,
+        );
+        bucket.put_aged(
+            &format!("wal/v1/owners/{dead_owner}"),
+            Vec::new(),
+            long_dead,
+        );
+
+        let queue_dir = unique_test_dir("wal-claim-orphans");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let cfg = segmented_cfg(queue_dir.clone(), 64 * 1024, WAL_SEGMENT_MAX_BYTES);
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+        let store = test_wal_store(&endpoint);
+        let survivor = store.owner().to_owned();
+        wal.recover_orphans(&cfg, &store).await;
+
+        let replayed = wal.replay(0).await.expect("replay");
+        assert_eq!(replayed.len(), 2, "both frames are recoverable locally");
+        assert_eq!(replayed[0].payload, frame.payload);
+
+        let keys = bucket.keys();
+        assert!(
+            keys.iter().all(|key| !key.contains(dead_owner)),
+            "the dead owner's segments, heartbeat and claim are all cleaned up: {keys:?}"
+        );
+        assert!(
+            keys.iter()
+                .any(|key| key.starts_with(&format!("wal/v1/segments/{survivor}/"))),
+            "the recovered frames are re-shipped under the survivor before the source is dropped: \
+             {keys:?}"
+        );
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn only_one_task_can_claim_an_owner() {
+        // Two tasks booting into the same bucket at once must not both replay the
+        // same segments. The conditional PUT is what makes that exclusive.
+        let (endpoint, bucket) = fake_s3::spawn("maple-wal-test").await;
+        bucket.put_aged(
+            "wal/v1/owners/task-that-died",
+            Vec::new(),
+            chrono::Duration::hours(1),
+        );
+
+        let first = test_wal_store(&endpoint);
+        let second = test_wal_store(&endpoint);
+        let now = Utc::now();
+
+        assert!(
+            first.claim("task-that-died", now).await.unwrap(),
+            "the first claimant wins"
+        );
+        assert!(
+            !second.claim("task-that-died", now).await.unwrap(),
+            "the second is told someone else has it"
+        );
     }
 
     /// Cross-language contract with the Prometheus scraper (apps/scraper).

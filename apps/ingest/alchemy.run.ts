@@ -394,6 +394,67 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		// PUTs to authorizes against the task role, which therefore needs this
 		// action on the cluster's tasks — the cluster ARN differs from a task ARN
 		// only in the resource prefix.
+		// Durability tier for the WAL (`apps/ingest/src/wal_store.rs`). The lanes
+		// live on ephemeral storage that dies with the task, so every sealed,
+		// unexported segment is also kept here and claimed by whichever task boots
+		// next. Objects are transient — deleted as soon as their frames export —
+		// so the bucket holds the current backlog, not the traffic.
+		// Named up front so the env var below is a plain string rather than an
+		// Output the container definition cannot take.
+		const walBucketName = name("ingest-wal")
+		const walSegments = yield* AWS.S3.Bucket("ingest-wal-segments", {
+			bucketName: walBucketName,
+			// Nothing here is worth keeping: a segment is either claimed within
+			// minutes or its frames are long gone. The rule is the backstop for
+			// segments whose delete was lost (a task killed between exporting and
+			// retiring the object), which would otherwise be billed forever.
+			lifecycleRules: [
+				{
+					ID: "expire-wal-segments",
+					Status: "Enabled",
+					Filter: { Prefix: "wal/" },
+					Expiration: { Days: 7 },
+					AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+				},
+			],
+			// The gateway is the only reader and writer, and a WAL segment is raw
+			// customer telemetry.
+			publicAccessBlock: {
+				blockPublicAcls: true,
+				blockPublicPolicy: true,
+				ignorePublicAcls: true,
+				restrictPublicBuckets: true,
+			},
+			encryption: { sseAlgorithm: "AES256" },
+			// Destroying the stack must not fail on leftover segments; anything
+			// still here at that point is backlog nobody is coming back for.
+			forceDestroy: true,
+			tags: { Service: "maple-ingest", Region: region },
+		})
+
+		// Scoped to the one prefix the gateway uses. ListBucket is on the bucket
+		// itself (the others are on objects), which is why it is a separate
+		// statement — orphan claiming lists owners and segments.
+		const walSegmentsPolicy = yield* AWS.IAM.Policy("ingest-wal-segments", {
+			policyName: name("ingest-wal-segments"),
+			policyDocument: {
+				Version: "2012-10-17",
+				Statement: [
+					{
+						Effect: "Allow",
+						Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+						Resource: [Output.map(walSegments.bucketArn, (arn) => `${arn}/wal/*`)],
+					},
+					{
+						Effect: "Allow",
+						Action: ["s3:ListBucket"],
+						Resource: [walSegments.bucketArn],
+						Condition: { StringLike: { "s3:prefix": ["wal/*"] } },
+					},
+				],
+			},
+		})
+
 		const taskProtectionPolicy = yield* AWS.IAM.Policy("ingest-task-protection", {
 			policyName: name("ingest-task-protection"),
 			policyDocument: {
@@ -416,7 +477,7 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		const service = yield* AWS.ECS.Service("ingest", {
 			cluster,
 			serviceName: name("ingest"),
-			taskRoleManagedPolicyArns: [taskProtectionPolicy.policyArn],
+			taskRoleManagedPolicyArns: [taskProtectionPolicy.policyArn, walSegmentsPolicy.policyArn],
 
 			// Alchemy creates a private ECR repository and pushes under a content-hash
 			// tag, rebuilding only when the context hash changes — so a deploy that
@@ -522,6 +583,13 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 
 				INGEST_QUEUE_MAX_BYTES: String(WAL_MAX_BYTES),
 				INGEST_WAL_SHARDS: String(WAL_SHARDS),
+				// No credentials: the task role signs these requests, and the VPC's
+				// S3 gateway endpoint keeps the traffic off the public path (there
+				// is no NAT to pay for it).
+				INGEST_WAL_S3_BUCKET: walBucketName,
+				INGEST_WAL_S3_REGION: resolveAwsRegion(region),
+				...(yield* optionalPlain("INGEST_WAL_SEGMENT_MAX_BYTES")),
+				...(yield* optionalPlain("INGEST_WAL_S3_ORPHAN_AFTER_SECS")),
 
 				// R2, not S3: within ~$0.0001/session of each other, and S3 would need
 				// a Worker SigV4 read path that does not exist. Per-object PUTs are
