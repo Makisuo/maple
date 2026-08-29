@@ -59,7 +59,7 @@ async fn run(pipeline: TelemetryPipeline, endpoint: String) {
     let mut clear_polls: u32 = 0;
     loop {
         tokio::time::sleep(POLL_INTERVAL).await;
-        let backlog = pipeline.wal_backlog_bytes().await;
+        let backlog = pipeline.wal_backlog_bytes();
         if backlog >= PROTECT_THRESHOLD_BYTES {
             clear_polls = 0;
             // Re-sent every poll while backlogged: the same call both acquires
