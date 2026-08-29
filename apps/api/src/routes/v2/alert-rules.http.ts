@@ -132,8 +132,6 @@ const ruleAuditKeys: ReadonlyArray<keyof V2AlertRuleUpdateParams & keyof V2Alert
 	"destination_ids",
 ]
 
-/** Query drafts and raw SQL are config blobs — audit that they changed, not their bodies. */
-const summarizeRuleBlob = (value: unknown) => (value === null ? null : "<updated>")
 
 const toV2RuleMutationResponse = (doc: AlertRuleDocument): V2AlertRuleMutationResponse => ({
 	...toV2Rule(doc),
@@ -413,7 +411,8 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 							pickPresentFields(ruleAuditKeys, payload, toV2Rule(current)),
 							pickPresentFields(ruleAuditKeys, payload, toV2Rule(updated)),
 						),
-						{ query_builder_draft: summarizeRuleBlob, raw_query_sql: summarizeRuleBlob },
+						// Query drafts and raw SQL are config blobs — audit that they changed, not their bodies.
+						{ query_builder_draft: "<updated>", raw_query_sql: "<updated>" },
 					)
 					yield* recordHttpAudit("alert_rule.updated", {
 						resourceType: "alert_rule",

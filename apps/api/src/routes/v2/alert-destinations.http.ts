@@ -196,7 +196,10 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 const destinationSecretKeys = new Set(["integrationKey", "signingSecret", "url", "webhookUrl", "botToken"])
 
 /** Fields of an update that are readable back off the destination document. */
-const destinationObservableValue = (doc: AlertDestinationDocument, key: string): unknown => {
+const destinationObservableValue = (
+	doc: AlertDestinationDocument,
+	key: string,
+): string | boolean | ReadonlyArray<string> | null | undefined => {
 	switch (key) {
 		case "name":
 			return doc.name

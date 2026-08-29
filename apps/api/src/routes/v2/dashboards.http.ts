@@ -190,9 +190,6 @@ const dashboardAuditKeys: ReadonlyArray<keyof V2DashboardUpdateParams & keyof V2
 	"refreshIntervalSeconds",
 ]
 
-/** Layout arrays are config blobs — audit their size, not their bodies. */
-const summarizeListBlob = (label: string) => (value: unknown) =>
-	Array.isArray(value) ? `<${value.length} ${label}>` : "<updated>"
 
 const encodeVersionCursor = (versionNumber: number): string => `ver_${versionNumber.toString(36)}`
 
@@ -410,10 +407,11 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 											pickPresentFields(dashboardAuditKeys, payload, toV2Dashboard(previous)),
 											pickPresentFields(dashboardAuditKeys, payload, toV2Dashboard(dashboard)),
 										),
+										// Layout arrays are config blobs — audit that they changed, not their bodies.
 										{
-											widgets: summarizeListBlob("widgets"),
-											sections: summarizeListBlob("sections"),
-											variables: summarizeListBlob("variables"),
+											widgets: "<updated>",
+											sections: "<updated>",
+											variables: "<updated>",
 										},
 									)
 						yield* recordHttpAudit("dashboard.updated", {

@@ -40,21 +40,22 @@ export const pickPresentFields = <K extends string>(
 }
 
 /**
- * Replace selected fields' before/after values with a compact summary so large
- * config blobs (dashboard widgets, query drafts) don't bloat the audit row.
+ * Replace selected fields' before/after values with a static placeholder so
+ * large config blobs (dashboard widgets, query drafts) and secrets don't reach
+ * the audit row. Null survives, so "cleared" still reads as cleared.
  */
 export const compactAuditChanges = (
 	changes: AuditChanges | undefined,
-	summarize: Record<string, (value: unknown) => unknown>,
+	placeholders: Record<string, string>,
 ): AuditChanges | undefined => {
 	if (changes === undefined) return undefined
-	const before: Record<string, unknown> = { ...changes.before }
-	const after: Record<string, unknown> = { ...changes.after }
+	const before = { ...changes.before }
+	const after = { ...changes.after }
 	for (const field of changes.fields) {
-		const summary = summarize[field]
-		if (summary === undefined) continue
-		if (field in before) before[field] = summary(before[field])
-		if (field in after) after[field] = summary(after[field])
+		const placeholder = placeholders[field]
+		if (placeholder === undefined) continue
+		if (field in before && before[field] !== null) before[field] = placeholder
+		if (field in after && after[field] !== null) after[field] = placeholder
 	}
 	return { fields: changes.fields, before, after }
 }

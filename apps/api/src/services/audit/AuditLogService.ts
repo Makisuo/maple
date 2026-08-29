@@ -16,6 +16,14 @@ import { AuditLogEvent, auditEventToInsert, encodeAuditLogEventSync } from "./au
 
 const decodeAuditLogEntryIdSync = Schema.decodeUnknownSync(AuditLogEntryIdSchema)
 
+class AuditQueueSendError extends Schema.TaggedError<AuditQueueSendError>()(
+	"@maple/api/services/audit/AuditQueueSendError",
+	{
+		message: Schema.String,
+		cause: Schema.optionalKey(Schema.Defect()),
+	},
+) {}
+
 /** Producer binding name; the paired `*_NAME` var drives consumer dispatch. */
 export const AUDIT_EVENTS_QUEUE_BINDING = "AUDIT_EVENTS_QUEUE"
 
@@ -118,7 +126,8 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 					? insertDirect(event)
 					: Effect.tryPromise({
 							try: () => queue.send(encodeAuditLogEventSync(event)),
-							catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+							catch: (cause) =>
+								new AuditQueueSendError({ message: "Audit queue send failed", cause }),
 						}).pipe(
 							// Queue unavailability must not lose the entry: degrade to a
 							// direct write before giving up.
