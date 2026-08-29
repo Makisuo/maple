@@ -12,6 +12,7 @@ import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 import { msToDate } from "@/platform/time"
 import { CurrentAuditActor } from "@/services/auth/audit-actor"
+import { type AuditAction, auditResourceFields, type AuditResourceIdOption } from "./audit-actions"
 import { AuditLogEvent, auditEventToInsert, encodeAuditLogEventSync } from "./audit-event"
 
 const decodeAuditLogEntryIdSync = Schema.decodeUnknownSync(AuditLogEntryIdSchema)
@@ -46,24 +47,22 @@ export interface AuditActorRef {
 	readonly label?: string
 }
 
-export interface AuditLogRecordInput {
+export type AuditLogRecordInput<A extends AuditAction = AuditAction> = {
 	readonly orgId: OrgId
 	readonly actor: AuditActorRef
 	readonly source: AuditLogSource
-	/** `<resource>.<verb>`, e.g. `alert_rule.created`. */
-	readonly action: string
+	/** Declared in `AuditResources`; the row's `resource_type` is derived from it. */
+	readonly action: A
 	/** Defaults to `"allowed"`; denied attempts pass `"denied"` + `denialReason`. */
 	readonly outcome?: AuditOutcome
 	readonly denialReason?: string
 	readonly affectedUserId?: UserId
-	readonly resourceType?: string
-	readonly resourceId?: string
-	readonly changes?: AuditChanges
+	readonly changes?: AuditChanges | undefined
 	readonly metadata?: Record<string, unknown>
 	readonly requestId?: string
 	readonly originIp?: string
 	readonly originCountry?: string
-}
+} & AuditResourceIdOption<A>
 
 export interface AuditLogListFilters {
 	readonly actorType?: AuditActorType
@@ -94,7 +93,7 @@ export interface AuditLogServiceApi {
 	 * Never fails: a mutation that succeeded must not 500 because its audit
 	 * write did not — terminal failures are logged and swallowed.
 	 */
-	readonly record: (input: AuditLogRecordInput) => Effect.Effect<void>
+	readonly record: <A extends AuditAction>(input: AuditLogRecordInput<A>) => Effect.Effect<void>
 	readonly list: (
 		orgId: OrgId,
 		filters: AuditLogListFilters,
@@ -158,6 +157,7 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 				input,
 			) {
 				const now = yield* Clock.currentTimeMillis
+				const resource = auditResourceFields(input.action, input.resourceId)
 				const event = new AuditLogEvent({
 					orgId: input.orgId,
 					id: decodeAuditLogEntryIdSync(randomUUID()),
@@ -173,8 +173,8 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 					action: input.action,
 					outcome: input.outcome ?? "allowed",
 					...(input.denialReason !== undefined ? { denialReason: input.denialReason } : undefined),
-					...(input.resourceType !== undefined ? { resourceType: input.resourceType } : undefined),
-					...(input.resourceId !== undefined ? { resourceId: input.resourceId } : undefined),
+					resourceType: resource.resourceType,
+					...(resource.resourceId !== undefined ? { resourceId: resource.resourceId } : undefined),
 					...(input.changes !== undefined ? { changes: input.changes } : undefined),
 					...(input.metadata !== undefined ? { metadata: input.metadata } : undefined),
 					...(input.requestId !== undefined ? { requestId: input.requestId } : undefined),
@@ -291,15 +291,13 @@ const requestContext = Effect.gen(function* () {
  * Session requests (and requests that bypassed the standard middlewares)
  * attribute to the user; API-key requests attribute to the key.
  */
-export const recordHttpAudit = (
-	action: string,
+export const recordHttpAudit = <A extends AuditAction>(
+	action: A,
 	opts?: {
-		readonly resourceType?: string
-		readonly resourceId?: string
-		readonly changes?: AuditChanges
+		readonly changes?: AuditChanges | undefined
 		readonly affectedUserId?: UserId
 		readonly metadata?: Record<string, unknown>
-	},
+	} & AuditResourceIdOption<A>,
 ) =>
 	Effect.gen(function* () {
 		const audit = yield* AuditLogService

@@ -32,7 +32,7 @@ import type { DashboardId } from "@maple/domain/primitives"
 import { Clock, Effect, Option, Schema } from "effect"
 import { getTemplateById, listTemplateMetadata } from "@/dashboard-templates"
 import type { TemplateParameterValues } from "@/dashboard-templates"
-import { compactAuditChanges, diffAuditChanges, pickPresentFields } from "@/routes/v2/audit-changes"
+import { auditDiff } from "@/routes/v2/audit-changes"
 import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
@@ -179,17 +179,20 @@ const applyUpdate = (
 }
 
 /** Update-payload fields diffable through the wire shape; layout blobs get summarized. */
-const dashboardAuditKeys: ReadonlyArray<keyof V2DashboardUpdateParams & keyof V2Dashboard> = [
-	"name",
-	"description",
-	"tags",
-	"timeRange",
-	"widgets",
-	"sections",
-	"variables",
-	"refreshIntervalSeconds",
-]
-
+const dashboardAuditDiff = auditDiff<keyof V2DashboardUpdateParams & keyof V2Dashboard>({
+	fields: [
+		"name",
+		"description",
+		"tags",
+		"timeRange",
+		"widgets",
+		"sections",
+		"variables",
+		"refreshIntervalSeconds",
+	],
+	// Layout arrays are config blobs — audit that they changed, not their bodies.
+	summarize: { widgets: "<updated>", sections: "<updated>", variables: "<updated>" },
+})
 
 const encodeVersionCursor = (versionNumber: number): string => `ver_${versionNumber.toString(36)}`
 
@@ -288,8 +291,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					mode: created.mode,
 				})
 				yield* recordHttpAudit("dashboard_share.created", {
-					resourceType: "dashboard_share",
-					resourceId: encodePublicId(PublicIdPrefixes.dashboardShare, created.id),
+					resourceId: created.id,
 					metadata: {
 						mode: created.mode,
 						dashboard_id: encodePublicId(PublicIdPrefixes.dashboard, context.scope.dashboardId),
@@ -314,8 +316,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				yield* logShare("dashboard share rotated", context, { "maple.share.id": rotated.id })
 				// Security event: rotation invalidates the previous public share token.
 				yield* recordHttpAudit("dashboard_share.rotated", {
-					resourceType: "dashboard_share",
-					resourceId: encodePublicId(PublicIdPrefixes.dashboardShare, rotated.id),
+					resourceId: rotated.id,
 					metadata: {
 						dashboard_id: encodePublicId(PublicIdPrefixes.dashboard, dashboardId),
 						...(widgetId === null ? undefined : { widget_id: widgetId }),
@@ -337,7 +338,6 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				yield* logShare("dashboard share revoked", context, { hadLiveShare: tombstone.revoked })
 				if (tombstone.revoked) {
 					yield* recordHttpAudit("dashboard_share.deleted", {
-						resourceType: "dashboard_share",
 						metadata: {
 							dashboard_id: encodePublicId(PublicIdPrefixes.dashboard, dashboardId),
 							...(widgetId === null ? undefined : { widget_id: widgetId }),
@@ -383,8 +383,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 							toPortable(payload),
 						)
 						yield* recordHttpAudit("dashboard.created", {
-							resourceType: "dashboard",
-							resourceId: encodePublicId(PublicIdPrefixes.dashboard, dashboard.id),
+							resourceId: dashboard.id,
 							metadata: { name: dashboard.name },
 						})
 
@@ -411,22 +410,10 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						const changes =
 							previous === undefined
 								? undefined
-								: compactAuditChanges(
-										diffAuditChanges(
-											pickPresentFields(dashboardAuditKeys, payload, toV2Dashboard(previous)),
-											pickPresentFields(dashboardAuditKeys, payload, toV2Dashboard(dashboard)),
-										),
-										// Layout arrays are config blobs — audit that they changed, not their bodies.
-										{
-											widgets: "<updated>",
-											sections: "<updated>",
-											variables: "<updated>",
-										} satisfies Partial<Record<(typeof dashboardAuditKeys)[number], string>>,
-									)
+								: dashboardAuditDiff(payload, toV2Dashboard(previous), toV2Dashboard(dashboard))
 						yield* recordHttpAudit("dashboard.updated", {
-							resourceType: "dashboard",
-							resourceId: encodePublicId(PublicIdPrefixes.dashboard, dashboard.id),
-							...(changes !== undefined ? { changes } : undefined),
+							resourceId: dashboard.id,
+							changes,
 							metadata: { name: dashboard.name },
 						})
 
@@ -438,8 +425,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						const tenant = yield* CurrentTenant.Context
 						const deleted = yield* persistence.delete(tenant.orgId, params.id)
 						yield* recordHttpAudit("dashboard.deleted", {
-							resourceType: "dashboard",
-							resourceId: encodePublicId(PublicIdPrefixes.dashboard, deleted.id),
+							resourceId: deleted.id,
 						})
 
 						return {
@@ -460,8 +446,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 							converted.dashboard,
 						)
 						yield* recordHttpAudit("dashboard.created", {
-							resourceType: "dashboard",
-							resourceId: encodePublicId(PublicIdPrefixes.dashboard, dashboard.id),
+							resourceId: dashboard.id,
 							metadata: { name: dashboard.name, source: "perses_import" },
 						})
 
@@ -523,8 +508,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 							params.version_id,
 						)
 						yield* recordHttpAudit("dashboard.version_restored", {
-							resourceType: "dashboard",
-							resourceId: encodePublicId(PublicIdPrefixes.dashboard, dashboard.id),
+							resourceId: dashboard.id,
 							metadata: {
 								name: dashboard.name,
 								version_id: encodePublicId(
@@ -626,8 +610,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						const tenant = yield* CurrentTenant.Context
 						const dashboard = yield* persistence.create(tenant.orgId, tenant.userId, portable)
 						yield* recordHttpAudit("dashboard.created", {
-							resourceType: "dashboard",
-							resourceId: encodePublicId(PublicIdPrefixes.dashboard, dashboard.id),
+							resourceId: dashboard.id,
 							metadata: {
 								name: dashboard.name,
 								source: "template",

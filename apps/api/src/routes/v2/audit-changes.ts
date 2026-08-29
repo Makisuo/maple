@@ -64,9 +64,9 @@ export const pickPresentFields = <K extends string>(
  */
 export const compactAuditChanges = (
 	changes: AuditChanges | undefined,
-	// Call sites `satisfies Partial<Record<(typeof xAuditKeys)[number], string>>`
-	// so a wire-key rename cannot silently disable a redaction placeholder.
-	placeholders: Record<string, string>,
+	// Keyed by the resource's declared field names (see `auditDiff`) so a wire-key
+	// rename cannot silently disable a placeholder.
+	placeholders: Record<string, string | undefined>,
 ): AuditChanges | undefined => {
 	if (changes === undefined) return undefined
 	const before = { ...changes.before }
@@ -88,4 +88,64 @@ export const redactAuditUrl = (raw: string): string => {
 	if (!URL.canParse(raw)) return "<invalid-url>"
 	const url = new URL(raw)
 	return `${url.protocol}//${url.host}${url.pathname}`
+}
+
+/**
+ * Build the `changes` diff for one resource's update handler.
+ *
+ * The spec is declared once next to the resource's wire shape and applied per
+ * request: `fields` are diffed through the wire view, `summarize` replaces a
+ * config blob's value with a static placeholder, `redact` rewrites a value
+ * (scrape URLs carry tokens), and `writeOnly` records credentials the response
+ * never echoes as having rotated. `summarize` and `redact` are keyed by
+ * `fields`, so a renamed wire key is a type error rather than a silently
+ * disabled redaction.
+ *
+ * Returns undefined when nothing observable changed, so the caller passes the
+ * result straight through as `changes`.
+ */
+export const auditDiff = <Field extends string>(spec: {
+	readonly fields: ReadonlyArray<Field>
+	readonly summarize?: Partial<Record<Field, string>>
+	readonly redact?: Partial<Record<Field, (value: string) => string>>
+	readonly writeOnly?: ReadonlyArray<string>
+}) => {
+	const redactors: Record<string, ((value: string) => string) | undefined> = spec.redact ?? {}
+
+	const redactChanges = (changes: AuditChanges): AuditChanges => {
+		const apply = (values: Record<string, unknown>): Record<string, unknown> => {
+			const out = { ...values }
+			for (const field of changes.fields) {
+				const redact = redactors[field]
+				const value = out[field]
+				if (redact !== undefined && typeof value === "string") out[field] = redact(value)
+			}
+			return out
+		}
+		return { fields: changes.fields, before: apply(changes.before), after: apply(changes.after) }
+	}
+
+	return (
+		payload: { readonly [P in Field]?: unknown },
+		before: { readonly [P in Field]: unknown },
+		after: { readonly [P in Field]: unknown },
+	): AuditChanges | undefined => {
+		const diffed = diffAuditChanges(
+			pickPresentFields(spec.fields, payload, before),
+			pickPresentFields(spec.fields, payload, after),
+		)
+		const compacted = diffed === undefined ? undefined : compactAuditChanges(diffed, spec.summarize ?? {})
+		const observable = compacted === undefined ? undefined : redactChanges(compacted)
+		// Write-only fields never appear in a response, so their rotation can only
+		// be inferred from the request carrying them.
+		const present: Record<string, unknown> = payload
+		const rotated = (spec.writeOnly ?? []).filter((field) => present[field] !== undefined)
+		if (rotated.length === 0) return observable
+		const placeholders = Object.fromEntries(rotated.map((field) => [field, "<redacted>"]))
+		return {
+			fields: [...(observable?.fields ?? []), ...rotated],
+			before: { ...observable?.before, ...placeholders },
+			after: { ...observable?.after, ...placeholders },
+		}
+	}
 }

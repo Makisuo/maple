@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { encodePublicId, PublicIdPrefixes } from "@maple/domain/http/v2"
 import { OrgId, UserId } from "@maple/domain/primitives"
 import { Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
@@ -15,6 +16,8 @@ const createdDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(createdDbs))
 
+const DASHBOARD_ID = "3f1b7c02-9a44-4d1e-8b2f-0c5d6e7a8b91"
+
 const makeLayer = () => AuditLogService.layer.pipe(Layer.provide(createTestDb(createdDbs).layer))
 
 /** Three entries with distinct timestamps: user, then api_key, then agent. */
@@ -25,8 +28,8 @@ const seedThree = Effect.gen(function* () {
 		actor: { type: "user", userId: USER },
 		source: "dashboard",
 		action: "dashboard.created",
-		resourceType: "dashboard",
-		resourceId: "dash_first",
+		// Internal ID in, public `dash_…` ID out — the service owns the encoding.
+		resourceId: DASHBOARD_ID,
 		metadata: { name: "First" },
 	})
 	yield* TestClock.adjust("1 second")
@@ -63,7 +66,7 @@ describe("AuditLogService", () => {
 			expect(oldest.userId).toBe(USER)
 			expect(oldest.source).toBe("dashboard")
 			expect(oldest.resourceType).toBe("dashboard")
-			expect(oldest.resourceId).toBe("dash_first")
+			expect(oldest.resourceId).toBe(encodePublicId(PublicIdPrefixes.dashboard, DASHBOARD_ID))
 			expect(oldest.metadataJson).toEqual({ name: "First" })
 
 			const newest = rows[0]!
@@ -109,13 +112,13 @@ describe("AuditLogService", () => {
 				orgId: ORG,
 				actor: { type: "user", userId: USER },
 				source: "dashboard",
-				action: "alert_rule.delete",
+				action: "alert_rule.deleted",
 				outcome: "denied",
 				denialReason: "missing role: admin",
 			})
 
 			const denied = yield* audit.list(ORG, { outcome: "denied", limit: 10, offset: 0 })
-			expect(denied.map((row) => row.action)).toEqual(["alert_rule.delete"])
+			expect(denied.map((row) => row.action)).toEqual(["alert_rule.deleted"])
 			expect(denied[0]!.outcome).toBe("denied")
 			expect(denied[0]!.denialReason).toBe("missing role: admin")
 

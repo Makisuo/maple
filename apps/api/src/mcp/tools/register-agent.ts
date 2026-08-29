@@ -5,7 +5,6 @@ import {
 	validationError,
 	type McpToolRegistrar,
 } from "./types"
-import { encodePublicId, PublicIdPrefixes } from "@maple/domain/http/v2"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
@@ -66,8 +65,7 @@ export function registerRegisterAgentTool(server: McpToolRegistrar) {
 				actor: { type: "user", userId: tenant.userId },
 				source: "mcp",
 				action: "agent.registered",
-				resourceType: "agent",
-				resourceId: encodePublicId(PublicIdPrefixes.actor, actor.id),
+				resourceId: actor.id,
 				metadata: { name: actor.agentName ?? name },
 			})
 

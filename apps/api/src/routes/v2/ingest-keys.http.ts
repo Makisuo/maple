@@ -39,7 +39,6 @@ export const HttpV2IngestKeysLive = HttpApiBuilder.group(MapleApiV2, "ingestKeys
 					yield* requireAdmin(tenant.roles, adminOnly("roll"))
 					const keys = yield* ingestKeys.rerollPublic(tenant.orgId, tenant.userId)
 					yield* recordHttpAudit("ingest_key.rolled", {
-						resourceType: "ingest_key",
 						metadata: { key_type: "public" },
 					})
 
@@ -52,7 +51,6 @@ export const HttpV2IngestKeysLive = HttpApiBuilder.group(MapleApiV2, "ingestKeys
 					yield* requireAdmin(tenant.roles, adminOnly("roll"))
 					const keys = yield* ingestKeys.rerollPrivate(tenant.orgId, tenant.userId)
 					yield* recordHttpAudit("ingest_key.rolled", {
-						resourceType: "ingest_key",
 						metadata: { key_type: "private" },
 					})
 

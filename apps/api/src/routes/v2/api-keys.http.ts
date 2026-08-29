@@ -2,12 +2,10 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { ApiKeyCreatedResponse, ApiKeyResponse } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import {
-	encodePublicId,
 	MapleApiV2,
 	isoTimestamp,
 	isoTimestampOrNull,
 	paginateArray,
-	PublicIdPrefixes,
 	V2InsufficientPermissions,
 } from "@maple/domain/http/v2"
 import type { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
@@ -110,8 +108,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 							: undefined),
 					})
 					yield* recordHttpAudit("api_key.created", {
-						resourceType: "api_key",
-						resourceId: encodePublicId(PublicIdPrefixes.apiKey, created.id),
+						resourceId: created.id,
 						metadata: { name: created.name, kind: created.kind, scopes: created.scopes },
 					})
 					return toV2ApiKeyWithSecret(created)
@@ -126,8 +123,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 						createdByEmail,
 					})
 					yield* recordHttpAudit("api_key.rolled", {
-						resourceType: "api_key",
-						resourceId: encodePublicId(PublicIdPrefixes.apiKey, rolled.id),
+						resourceId: rolled.id,
 						metadata: { name: rolled.name, scopes: rolled.scopes },
 					})
 					return toV2ApiKeyWithSecret(rolled)
@@ -146,8 +142,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					}
 					const revoked = yield* apiKeysService.revoke(tenant.orgId, params.id)
 					yield* recordHttpAudit("api_key.revoked", {
-						resourceType: "api_key",
-						resourceId: encodePublicId(PublicIdPrefixes.apiKey, revoked.id),
+						resourceId: revoked.id,
 						metadata: { name: revoked.name },
 					})
 					return toV2ApiKeyMutationResponse(revoked)

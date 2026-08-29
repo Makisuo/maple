@@ -22,7 +22,6 @@ import {
 	CLOSED_WORKFLOW_STATES,
 	MACHINE_OWNED_WORKFLOW_STATES,
 } from "@maple/domain/http"
-import { encodePublicId, PublicIdPrefixes } from "@maple/domain/http/v2"
 import {
 	actors,
 	alertIncidents,
@@ -443,8 +442,7 @@ const make: Effect.Effect<
 								},
 					source: actor.type === "agent" ? "mcp" : "dashboard",
 					action: `error_issue.${type}`,
-					resourceType: "error_issue",
-					resourceId: encodePublicId(PublicIdPrefixes.errorIssue, issueId),
+					resourceId: issueId,
 					metadata: {
 						...(opts.fromState != null ? { from_state: opts.fromState } : undefined),
 						...(opts.toState != null ? { to_state: opts.toState } : undefined),

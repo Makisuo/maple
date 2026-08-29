@@ -1,0 +1,95 @@
+import { encodePublicId, type PublicIdPrefix, PublicIdPrefixes } from "@maple/domain/http/v2"
+import { ErrorIssueEventType } from "@maple/domain/http"
+
+/**
+ * Every audited action in Maple, grouped by the resource it acts on.
+ *
+ * The key is both the `resource_type` stored on the row and the `<resource>`
+ * half of the `<resource>.<verb>` action string, so the two can never disagree.
+ * `prefix` is the public-ID prefix the resource's internal ID is encoded with;
+ * resources that are org-singletons (`ingest_key`, `anomaly_settings`) or carry
+ * no resource at all (`api`) omit it, and passing a `resourceId` for one of
+ * those is a type error.
+ *
+ * Adding an entry here is what makes `record({ action: "<resource>.<verb>" })`
+ * compile — a typo, or an action recorded before it is declared, fails the build.
+ */
+export const AuditResources = {
+	agent: { prefix: PublicIdPrefixes.actor, verbs: ["registered"] },
+	alert_destination: {
+		prefix: PublicIdPrefixes.alertDestination,
+		verbs: ["created", "updated", "deleted"],
+	},
+	alert_rule: { prefix: PublicIdPrefixes.alertRule, verbs: ["created", "updated", "deleted"] },
+	anomaly_incident: { prefix: PublicIdPrefixes.anomalyIncident, verbs: ["resolved"] },
+	/** Org-singleton settings — no resource id. */
+	anomaly_settings: { verbs: ["updated"] },
+	/** Refused requests, recorded by the auth layers; the route is in `metadata`. */
+	api: { verbs: ["request"] },
+	api_key: { prefix: PublicIdPrefixes.apiKey, verbs: ["created", "rolled", "revoked"] },
+	attribute_mapping: {
+		prefix: PublicIdPrefixes.attributeMapping,
+		verbs: ["created", "updated", "deleted"],
+	},
+	dashboard: {
+		prefix: PublicIdPrefixes.dashboard,
+		verbs: ["created", "updated", "deleted", "version_restored"],
+	},
+	dashboard_share: { prefix: PublicIdPrefixes.dashboardShare, verbs: ["created", "rotated", "deleted"] },
+	/** Verbs mirror the issue event types — `recordEvent` audits every one it attributes. */
+	error_issue: { prefix: PublicIdPrefixes.errorIssue, verbs: ErrorIssueEventType.literals },
+	/** Org-singleton public/private pair; which one rolled is in `metadata`. */
+	ingest_key: { verbs: ["rolled"] },
+	scrape_target: { prefix: PublicIdPrefixes.scrapeTarget, verbs: ["created", "updated", "deleted"] },
+} as const satisfies Record<string, AuditResourceDefinition>
+
+interface AuditResourceDefinition {
+	readonly prefix?: PublicIdPrefix
+	readonly verbs: ReadonlyArray<string>
+}
+
+export type AuditResourceType = keyof typeof AuditResources
+
+/** `<resource>.<verb>` for every declared pair — the closed set of audit actions. */
+export type AuditAction = {
+	[K in AuditResourceType]: `${K}.${(typeof AuditResources)[K]["verbs"][number]}`
+}[AuditResourceType]
+
+type ResourceOf<A extends AuditAction> = A extends `${infer R}.${string}`
+	? R extends AuditResourceType
+		? R
+		: never
+	: never
+
+/**
+ * The `resourceId` option for an action: the resource's *internal* ID, encoded
+ * to its public `<prefix>_…` form on the way to the row. Resources that declare
+ * no prefix (org-singletons) accept no `resourceId` at all.
+ */
+export type AuditResourceIdOption<A extends AuditAction> = (typeof AuditResources)[ResourceOf<A>] extends {
+	readonly prefix: PublicIdPrefix
+}
+	? { readonly resourceId?: string }
+	: { readonly resourceId?: never }
+
+/**
+ * Derive the row's `resource_type` from the action and encode the internal
+ * resource ID into its public form, so no call site restates either.
+ */
+export const auditResourceFields = (
+	action: AuditAction,
+	resourceId?: string,
+): { readonly resourceType: AuditResourceType; readonly resourceId?: string } => {
+	// SAFETY: every `AuditAction` is built as `${resource}.${verb}` from the keys
+	// of `AuditResources`, so the segment before the dot is always one of them.
+	const resourceType = action.slice(0, action.indexOf(".")) as AuditResourceType
+	const resource = AuditResources[resourceType]
+	// Narrow rather than widen: org-singleton resources declare no `prefix` at all.
+	const prefix = "prefix" in resource ? resource.prefix : undefined
+	return {
+		resourceType,
+		...(resourceId !== undefined && prefix !== undefined
+			? { resourceId: encodePublicId(prefix, resourceId) }
+			: undefined),
+	}
+}

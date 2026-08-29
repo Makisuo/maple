@@ -16,18 +16,10 @@ import type {
 	V2AlertRulePreviewResult,
 	V2AlertRuleUpdateParams,
 } from "@maple/domain/http/v2"
-import {
-	encodePublicId,
-	MapleApiV2,
-	paginateArray,
-	PublicIdPrefixes,
-	scopeAllows,
-	timestamp,
-	V2ParameterInvalid,
-} from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray, scopeAllows, timestamp, V2ParameterInvalid } from "@maple/domain/http/v2"
 import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
-import { compactAuditChanges, diffAuditChanges, pickPresentFields } from "@/routes/v2/audit-changes"
+import { auditDiff } from "@/routes/v2/audit-changes"
 import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
@@ -105,33 +97,36 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 })
 
 /** Update-payload fields diffable through the wire shape (drafts get summarized). */
-const ruleAuditKeys: ReadonlyArray<keyof V2AlertRuleUpdateParams & keyof V2AlertRule> = [
-	"name",
-	"notes",
-	"notification_template",
-	"enabled",
-	"severity",
-	"service_names",
-	"exclude_service_names",
-	"environments",
-	"tags",
-	"group_by",
-	"signal_type",
-	"comparator",
-	"threshold",
-	"threshold_upper",
-	"window_minutes",
-	"minimum_sample_count",
-	"consecutive_breaches_required",
-	"consecutive_healthy_required",
-	"renotify_interval_minutes",
-	"apdex_threshold_ms",
-	"query_builder_draft",
-	"raw_query_sql",
-	"raw_query_reducer",
-	"destination_ids",
-]
-
+const ruleAuditDiff = auditDiff<keyof V2AlertRuleUpdateParams & keyof V2AlertRule>({
+	fields: [
+		"name",
+		"notes",
+		"notification_template",
+		"enabled",
+		"severity",
+		"service_names",
+		"exclude_service_names",
+		"environments",
+		"tags",
+		"group_by",
+		"signal_type",
+		"comparator",
+		"threshold",
+		"threshold_upper",
+		"window_minutes",
+		"minimum_sample_count",
+		"consecutive_breaches_required",
+		"consecutive_healthy_required",
+		"renotify_interval_minutes",
+		"apdex_threshold_ms",
+		"query_builder_draft",
+		"raw_query_sql",
+		"raw_query_reducer",
+		"destination_ids",
+	],
+	// Query drafts and raw SQL are config blobs — audit that they changed, not their bodies.
+	summarize: { query_builder_draft: "<updated>", raw_query_sql: "<updated>" },
+})
 
 const toV2RuleMutationResponse = (doc: AlertRuleDocument): V2AlertRuleMutationResponse => ({
 	...toV2Rule(doc),
@@ -385,8 +380,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					)
 
 					yield* recordHttpAudit("alert_rule.created", {
-						resourceType: "alert_rule",
-						resourceId: encodePublicId(PublicIdPrefixes.alertRule, created.id),
+						resourceId: created.id,
 						metadata: { name: created.name },
 					})
 
@@ -406,20 +400,9 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						request,
 					)
 
-					const changes = compactAuditChanges(
-						diffAuditChanges(
-							pickPresentFields(ruleAuditKeys, payload, toV2Rule(current)),
-							pickPresentFields(ruleAuditKeys, payload, toV2Rule(updated)),
-						),
-						// Query drafts and raw SQL are config blobs — audit that they changed, not their bodies.
-						{ query_builder_draft: "<updated>", raw_query_sql: "<updated>" } satisfies Partial<
-							Record<(typeof ruleAuditKeys)[number], string>
-						>,
-					)
 					yield* recordHttpAudit("alert_rule.updated", {
-						resourceType: "alert_rule",
-						resourceId: encodePublicId(PublicIdPrefixes.alertRule, updated.id),
-						...(changes !== undefined ? { changes } : undefined),
+						resourceId: updated.id,
+						changes: ruleAuditDiff(payload, toV2Rule(current), toV2Rule(updated)),
 						metadata: { name: updated.name },
 					})
 
@@ -430,10 +413,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* rules.deleteRule(tenant.orgId, tenant.roles, params.id)
-					yield* recordHttpAudit("alert_rule.deleted", {
-						resourceType: "alert_rule",
-						resourceId: encodePublicId(PublicIdPrefixes.alertRule, deleted.id),
-					})
+					yield* recordHttpAudit("alert_rule.deleted", { resourceId: deleted.id })
 
 					return {
 						id: deleted.id,

@@ -6,7 +6,7 @@ import {
 	IngestAttributeMappingNotFoundError,
 	UpdateIngestAttributeMappingRequest,
 } from "@maple/domain/http"
-import { encodePublicId, MapleApiV2, paginateArray, PublicIdPrefixes } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import type { V2AttributeMapping } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
 import { diffAuditChanges, pickPresentFields } from "@/routes/v2/audit-changes"
@@ -88,8 +88,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 					)
 
 					yield* recordHttpAudit("attribute_mapping.created", {
-						resourceType: "attribute_mapping",
-						resourceId: encodePublicId(PublicIdPrefixes.attributeMapping, created.id),
+						resourceId: created.id,
 						metadata: { name: created.name },
 					})
 
@@ -128,9 +127,8 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 						pickPresentFields(mappingAuditKeys, payload, toV2AttributeMapping(updated)),
 					)
 					yield* recordHttpAudit("attribute_mapping.updated", {
-						resourceType: "attribute_mapping",
-						resourceId: encodePublicId(PublicIdPrefixes.attributeMapping, updated.id),
-						...(changes !== undefined ? { changes } : undefined),
+						resourceId: updated.id,
+						changes,
 						metadata: { name: updated.name },
 					})
 
@@ -142,8 +140,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* service.delete(tenant.orgId, params.id)
 					yield* recordHttpAudit("attribute_mapping.deleted", {
-						resourceType: "attribute_mapping",
-						resourceId: encodePublicId(PublicIdPrefixes.attributeMapping, deleted.id),
+						resourceId: deleted.id,
 					})
 
 					return { id: deleted.id, object: "attribute_mapping" as const, deleted: true as const }

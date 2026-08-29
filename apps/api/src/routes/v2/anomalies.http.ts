@@ -12,7 +12,7 @@ import {
 	AnomalyForbiddenError,
 	CurrentTenant,
 } from "@maple/domain/http"
-import { encodePublicId, MapleApiV2, paginateOffsetQuery, PublicIdPrefixes, timestamp } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery, timestamp } from "@maple/domain/http/v2"
 import type { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { recordHttpAudit } from "@/services/audit/AuditLogService"
@@ -188,8 +188,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 					const tenant = yield* CurrentTenant.Context
 					const incident = yield* anomalies.resolveIncidentManually(tenant.orgId, params.id)
 					yield* recordHttpAudit("anomaly_incident.resolved", {
-						resourceType: "anomaly_incident",
-						resourceId: encodePublicId(PublicIdPrefixes.anomalyIncident, incident.id),
+						resourceId: incident.id,
 						metadata: {
 							signal_type: incident.signalType,
 							service_name: incident.serviceName,
@@ -254,7 +253,6 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 					)
 
 					yield* recordHttpAudit("anomaly_settings.updated", {
-						resourceType: "anomaly_settings",
 						metadata: { enabled: settings.enabled, sensitivity: settings.sensitivity },
 					})
 

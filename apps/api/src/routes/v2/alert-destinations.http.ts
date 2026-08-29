@@ -18,7 +18,7 @@ import type {
 	V2AlertDestinationUpdateParams,
 	V2TelegramChatList,
 } from "@maple/domain/http/v2"
-import { encodePublicId, MapleApiV2, paginateArray, PublicIdPrefixes } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { AlertDestinationsService } from "@/services/alerts/AlertDestinationsService"
@@ -301,8 +301,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 					)
 
 					yield* recordHttpAudit("alert_destination.created", {
-						resourceType: "alert_destination",
-						resourceId: encodePublicId(PublicIdPrefixes.alertDestination, created.id),
+						resourceId: created.id,
 						metadata: { name: created.name, type: created.type },
 					})
 
@@ -325,9 +324,8 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 
 					const changes = buildDestinationChanges(request, current, updated)
 					yield* recordHttpAudit("alert_destination.updated", {
-						resourceType: "alert_destination",
-						resourceId: encodePublicId(PublicIdPrefixes.alertDestination, updated.id),
-						...(changes !== undefined ? { changes } : undefined),
+						resourceId: updated.id,
+						changes,
 						metadata: { name: updated.name, type: updated.type },
 					})
 
@@ -343,8 +341,7 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 						params.id,
 					)
 					yield* recordHttpAudit("alert_destination.deleted", {
-						resourceType: "alert_destination",
-						resourceId: encodePublicId(PublicIdPrefixes.alertDestination, deleted.id),
+						resourceId: deleted.id,
 					})
 
 					return {
